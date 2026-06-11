@@ -1297,41 +1297,396 @@ async function renderCompany() {
   const c = document.getElementById('page-content');
   const canAdd = isPresident();
   c.innerHTML = `
-    <div class="page-header"><h2>🏢 Company</h2>${canAdd?`<button class="btn-primary btn-sm" id="add-policy-btn">+ Add Policy</button>`:''}</div>
+    <div class="page-header">
+      <h2>🏢 Company</h2>
+    </div>
+    <div class="tab-bar" id="company-tabs">
+      <button class="tab-btn active" data-tab="overview">Overview</button>
+      <button class="tab-btn" data-tab="memos">Memos</button>
+      <button class="tab-btn" data-tab="policies">Policies</button>
+      <button class="tab-btn" data-tab="downloads">Downloads</button>
+      <button class="tab-btn" data-tab="handbook">Handbook</button>
+    </div>
+    <div id="company-tab-content"></div>
+  `;
+
+  function switchCompanyTab(tab) {
+    c.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+    const ct = document.getElementById('company-tab-content');
+    if (tab==='overview')   renderCompanyOverview(ct, canAdd);
+    else if (tab==='memos')     renderCompanyMemos(ct, canAdd);
+    else if (tab==='policies')  renderCompanyPolicies(ct, canAdd);
+    else if (tab==='downloads') renderCompanyDownloads(ct, canAdd);
+    else if (tab==='handbook')  renderCompanyHandbook(ct, canAdd);
+  }
+
+  c.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>switchCompanyTab(b.dataset.tab)));
+  switchCompanyTab('overview');
+}
+
+// ── Company: Overview ─────────────────────────────
+function renderCompanyOverview(ct, canAdd) {
+  const photoURL = userProfile?.photoUrl || currentUser?.photoURL || '';
+  const initials = (userProfile?.displayName||currentUser?.displayName||'NB').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+  const presidentName = userProfile?.displayName || currentUser?.displayName || 'Neil Barro';
+  ct.innerHTML = `
+    <!-- Hero Banner -->
+    <div class="co-hero">
+      <div class="co-hero-bg"></div>
+      <img src="icons/barro-industries.png" class="co-hero-logo" alt="Barro Industries" onerror="this.style.display='none'"/>
+      <div class="co-hero-text">
+        <h1 class="co-hero-title">BARRO INDUSTRIES</h1>
+        <p class="co-hero-tagline">Building the Future, Brick by Brick.</p>
+      </div>
+    </div>
+
+    <!-- About -->
+    <div class="co-section">
+      <h3 class="co-section-title">About the Company</h3>
+      <p class="co-body">
+        <strong>Barro Industries</strong> is a diversified holding company committed to excellence across multiple industries.
+        Founded on the principle of sustainable growth and innovation, Barro Industries invests in and operates businesses
+        that deliver real value to communities and clients alike. From construction and infrastructure to food and hospitality,
+        the group continues to expand its footprint with a focus on quality, integrity, and long-term impact.
+      </p>
+    </div>
+
+    <!-- Subsidiaries -->
+    <div class="co-section">
+      <h3 class="co-section-title">Our Businesses</h3>
+      <div class="co-biz-grid">
+        <div class="co-biz-card">
+          <img src="icons/barro-industries.png" class="co-biz-logo" alt="Barro Industries" onerror="this.style.display='none'"/>
+          <div class="co-biz-info">
+            <div class="co-biz-name">Barro Industries</div>
+            <div class="co-biz-desc">Parent holding company. Oversees strategy, operations, finance, and all subsidiary ventures. Driven by a vision of growth across sectors.</div>
+            <span class="badge badge-gold">Headquarters</span>
+          </div>
+        </div>
+        <div class="co-biz-card">
+          <img src="icons/barrokit.png" class="co-biz-logo" alt="Barro Kitchens" onerror="this.style.display='none'"/>
+          <div class="co-biz-info">
+            <div class="co-biz-name">Barro Kitchens</div>
+            <div class="co-biz-desc">A Barro Industries brand offering premium kitchen solutions — from custom builds to commercial fit-outs. Crafting spaces where meals and memories are made.</div>
+            <span class="badge badge-blue">Subsidiary</span>
+          </div>
+        </div>
+        <div class="co-biz-card">
+          <img src="icons/barrobuild.png" class="co-biz-logo" alt="Barro Build" onerror="this.style.display='none'"/>
+          <div class="co-biz-info">
+            <div class="co-biz-name">Barro Build</div>
+            <div class="co-biz-desc">Construction and infrastructure arm of Barro Industries. Specializing in quality builds and project management, delivering projects on time and on spec.</div>
+            <span class="badge badge-blue">Subsidiary</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- President's Message -->
+    <div class="co-section">
+      <h3 class="co-section-title">Message from the President</h3>
+      <div class="co-president-card">
+        <div class="co-president-left">
+          ${photoURL
+            ? `<img src="${photoURL}" class="co-president-photo" alt="President"/>`
+            : `<div class="co-president-initials">${initials}</div>`
+          }
+          <div class="co-president-name">${presidentName}</div>
+          <div class="co-president-title">President &amp; CEO<br>Barro Industries</div>
+        </div>
+        <div class="co-president-msg">
+          <div class="co-quote-mark">"</div>
+          <p>
+            Every business we build, every team we grow, and every decision we make is driven by one
+            conviction: that we are here to create something that lasts. Barro Industries was not built
+            overnight, and it will not stop growing anytime soon.
+          </p>
+          <p>
+            To every member of this team — your work matters. Each task you complete, each client you
+            serve, and each day you show up is a brick in the foundation of something bigger than any
+            one of us. I ask you to bring your best, stay accountable, and take ownership of your role
+            in this company's story.
+          </p>
+          <p>
+            To our partners — thank you for trusting us. Our relationship is built on quality and
+            reliability, and we intend to keep it that way.
+          </p>
+          <p style="margin-top:16px;font-style:normal;font-weight:600;color:var(--gold)">
+            — Building the Future, Brick by Brick.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Core Values -->
+    <div class="co-section">
+      <h3 class="co-section-title">Our Core Values</h3>
+      <div class="co-values-grid">
+        <div class="co-value-card">
+          <div class="co-value-icon" style="background:rgba(255,214,10,0.12)"><i data-lucide="star" style="width:20px;height:20px;stroke:var(--gold)"></i></div>
+          <div class="co-value-name">Excellence</div>
+          <div class="co-value-desc">We do not settle for good enough. Every output is a reflection of our brand.</div>
+        </div>
+        <div class="co-value-card">
+          <div class="co-value-icon" style="background:rgba(52,199,89,0.10)"><i data-lucide="shield-check" style="width:20px;height:20px;stroke:#34C759"></i></div>
+          <div class="co-value-name">Integrity</div>
+          <div class="co-value-desc">We operate with transparency and do what we say we will do.</div>
+        </div>
+        <div class="co-value-card">
+          <div class="co-value-icon" style="background:rgba(10,132,255,0.10)"><i data-lucide="users" style="width:20px;height:20px;stroke:#0A84FF"></i></div>
+          <div class="co-value-name">People First</div>
+          <div class="co-value-desc">Our team and our clients are at the center of every decision we make.</div>
+        </div>
+        <div class="co-value-card">
+          <div class="co-value-icon" style="background:rgba(255,149,0,0.10)"><i data-lucide="trending-up" style="width:20px;height:20px;stroke:#FF9500"></i></div>
+          <div class="co-value-name">Growth</div>
+          <div class="co-value-desc">We invest in continuous improvement — for the business and for each individual.</div>
+        </div>
+      </div>
+    </div>
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [ct] });
+}
+
+// ── Company: Memos ────────────────────────────────
+async function renderCompanyMemos(ct, canAdd) {
+  ct.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="font-size:13px;color:var(--text-muted)">Official memos from management</div>
+      ${canAdd?`<button class="btn-primary btn-sm" id="add-memo-btn">+ New Memo</button>`:''}
+    </div>
+    <div id="memos-list"><div class="loading-placeholder">Loading…</div></div>
+  `;
+  const snap = await db.collection('memos').orderBy('createdAt','desc').get();
+  const memos = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const list = document.getElementById('memos-list');
+  if (!memos.length) {
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><h4>No memos yet</h4><p>Management memos will appear here.</p></div>`;
+  } else {
+    list.innerHTML = memos.map(m=>{
+      const d = m.createdAt?.toDate ? m.createdAt.toDate() : new Date();
+      return `<div class="co-doc-card" data-id="${m.id}">
+        <div class="co-doc-icon" style="background:rgba(10,132,255,0.10)"><i data-lucide="file-text" style="width:18px;height:18px;stroke:#0A84FF"></i></div>
+        <div class="co-doc-body">
+          <div class="co-doc-title">${m.title}</div>
+          <div class="co-doc-meta">From: ${m.from||'Management'} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'})}</div>
+          <div class="co-doc-preview">${(m.content||'').slice(0,120)}${m.content?.length>120?'…':''}</div>
+        </div>
+        ${canAdd?`<button class="btn-icon co-del-btn" data-id="${m.id}" title="Delete"><i data-lucide="trash-2" style="width:14px;height:14px;stroke:var(--danger)"></i></button>`:''}
+      </div>`;
+    }).join('');
+    list.querySelectorAll('.co-doc-card').forEach(card=>{
+      card.addEventListener('click', e=>{
+        if(e.target.closest('.co-del-btn')) return;
+        const m=memos.find(x=>x.id===card.dataset.id);
+        const d=m.createdAt?.toDate?m.createdAt.toDate():new Date();
+        openModal(m.title,`
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">From: ${m.from||'Management'} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}</div>
+          <p style="font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text-2)">${m.content||''}</p>
+          ${m.fileUrl?`<a href="${m.fileUrl}" target="_blank" class="btn-secondary" style="display:inline-block;margin-top:14px">📎 Open Attachment</a>`:''}
+          ${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-memo-btn" data-id="${m.id}">Delete Memo</button>`:''}
+        `);
+        document.getElementById('del-memo-btn')?.addEventListener('click',async e2=>{if(confirm('Delete this memo?')){await db.collection('memos').doc(e2.currentTarget.dataset.id).delete();closeModal();renderCompanyMemos(ct,canAdd);}});
+      });
+    });
+    list.querySelectorAll('.co-del-btn').forEach(btn=>{
+      btn.addEventListener('click',async e=>{e.stopPropagation();if(confirm('Delete this memo?')){await db.collection('memos').doc(btn.dataset.id).delete();renderCompanyMemos(ct,canAdd);}});
+    });
+    if(window.lucide) lucide.createIcons({nodes:[list]});
+  }
+  document.getElementById('add-memo-btn')?.addEventListener('click',()=>{
+    openModal('New Memo',`
+      <div class="form-group"><label>Memo Title</label><input id="memo-title" placeholder="e.g. Updated Leave Policy"/></div>
+      <div class="form-group"><label>From</label><input id="memo-from" placeholder="Management / HR / Finance" value="${currentUser?.displayName||'Management'}"/></div>
+      <div class="form-group"><label>Content</label><textarea id="memo-content" rows="8" placeholder="Write the memo here…"></textarea></div>
+      <div id="memo-file-upload"></div>
+    `,`<button class="btn-primary" id="save-memo-btn">Publish Memo</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    let uploadedFile=null;
+    Drive.renderUploadArea('memo-file-upload',r=>{uploadedFile=r;},{label:'Attach document (optional)',dept:'Admin',subfolder:'Memos'});
+    document.getElementById('save-memo-btn').addEventListener('click',async()=>{
+      const title=document.getElementById('memo-title').value.trim();
+      if(!title) return;
+      await db.collection('memos').add({title,from:document.getElementById('memo-from').value.trim(),content:document.getElementById('memo-content').value,fileUrl:uploadedFile?.url||null,addedBy:currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+      closeModal(); renderCompanyMemos(ct,canAdd);
+    });
+  });
+  if(window.lucide) lucide.createIcons({nodes:[ct]});
+}
+
+// ── Company: Policies ─────────────────────────────
+async function renderCompanyPolicies(ct, canAdd) {
+  ct.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="font-size:13px;color:var(--text-muted)">Company rules, regulations, and official policies</div>
+      ${canAdd?`<button class="btn-primary btn-sm" id="add-policy-btn">+ Add Policy</button>`:''}
+    </div>
     <div class="policy-grid" id="policy-grid"><div class="loading-placeholder">Loading…</div></div>
   `;
   const snap = await db.collection('policies').orderBy('createdAt','desc').get();
   const policies = snap.docs.map(d=>({id:d.id,...d.data()}));
   const grid = document.getElementById('policy-grid');
-  if (!policies.length) { grid.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">📄</div><h4>No policies yet</h4></div>`; return; }
-  grid.innerHTML = policies.map(p=>`
-    <div class="policy-card" data-id="${p.id}">
-      <div class="policy-icon">${p.icon||'📄'}</div>
-      <div class="policy-title">${p.title}</div>
-      <div class="policy-desc">${p.description||''}</div>
-      ${p.fileUrl?`<a href="${p.fileUrl}" target="_blank" class="btn-link" style="font-size:12px;margin-top:6px;display:block">📎 View Document</a>`:''}
-    </div>`).join('');
-  grid.querySelectorAll('.policy-card').forEach(card=>{
-    card.addEventListener('click',e=>{
-      if(e.target.tagName==='A') return;
-      const p=policies.find(x=>x.id===card.dataset.id);
-      openModal(p.title,`<p style="font-size:14px;line-height:1.7;white-space:pre-wrap">${p.content||'No content.'}</p>${p.fileUrl?`<a href="${p.fileUrl}" target="_blank" class="btn-secondary" style="display:inline-block;margin-top:14px">📎 Open File</a>`:''}${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-policy-btn" data-id="${p.id}">Delete</button>`:''}`);
-      document.getElementById('del-policy-btn')?.addEventListener('click',async e2=>{if(confirm('Delete?')){await db.collection('policies').doc(e2.currentTarget.dataset.id).delete();closeModal();renderCompany();}});
+  if (!policies.length) {
+    grid.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">📄</div><h4>No policies yet</h4><p>Add company policies and they'll appear here.</p></div>`;
+  } else {
+    grid.innerHTML = policies.map(p=>`
+      <div class="policy-card" data-id="${p.id}">
+        <div class="policy-icon">${p.icon||'📄'}</div>
+        <div class="policy-title">${p.title}</div>
+        <div class="policy-desc">${p.description||''}</div>
+        ${p.fileUrl?`<a href="${p.fileUrl}" target="_blank" class="btn-link" style="font-size:12px;margin-top:6px;display:block">📎 View Document</a>`:''}
+      </div>`).join('');
+    grid.querySelectorAll('.policy-card').forEach(card=>{
+      card.addEventListener('click',e=>{
+        if(e.target.tagName==='A') return;
+        const p=policies.find(x=>x.id===card.dataset.id);
+        openModal(p.title,`<p style="font-size:14px;line-height:1.7;white-space:pre-wrap;color:var(--text-2)">${p.content||'No content.'}</p>${p.fileUrl?`<a href="${p.fileUrl}" target="_blank" class="btn-secondary" style="display:inline-block;margin-top:14px">📎 Open File</a>`:''}${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-policy-btn" data-id="${p.id}">Delete</button>`:''}`);
+        document.getElementById('del-policy-btn')?.addEventListener('click',async e2=>{if(confirm('Delete?')){await db.collection('policies').doc(e2.currentTarget.dataset.id).delete();closeModal();renderCompanyPolicies(ct,canAdd);}});
+      });
     });
-  });
+  }
   document.getElementById('add-policy-btn')?.addEventListener('click',()=>{
     openModal('Add Policy',`
       <div class="form-group"><label>Title</label><input id="pol-title"/></div>
       <div class="form-group"><label>Icon</label><input id="pol-icon" placeholder="📄" maxlength="4"/></div>
-      <div class="form-group"><label>Description</label><input id="pol-desc"/></div>
-      <div class="form-group"><label>Content</label><textarea id="pol-content" rows="6"></textarea></div>
+      <div class="form-group"><label>Short Description</label><input id="pol-desc"/></div>
+      <div class="form-group"><label>Full Content</label><textarea id="pol-content" rows="6"></textarea></div>
       <div id="pol-file-upload"></div>
-    `,`<button class="btn-primary" id="save-pol-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    `,`<button class="btn-primary" id="save-pol-btn">Save Policy</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     let uploadedFile=null;
     Drive.renderUploadArea('pol-file-upload',r=>{uploadedFile=r;},{label:'Attach document',dept:'Admin',subfolder:'Policies'});
     document.getElementById('save-pol-btn').addEventListener('click',async()=>{
-      await db.collection('policies').add({title:document.getElementById('pol-title').value.trim(),icon:document.getElementById('pol-icon').value.trim()||'📄',description:document.getElementById('pol-desc').value.trim(),content:document.getElementById('pol-content').value,fileUrl:uploadedFile?.url||null,addedBy:currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
-      closeModal();renderCompany();
+      const title=document.getElementById('pol-title').value.trim(); if(!title) return;
+      await db.collection('policies').add({title,icon:document.getElementById('pol-icon').value.trim()||'📄',description:document.getElementById('pol-desc').value.trim(),content:document.getElementById('pol-content').value,fileUrl:uploadedFile?.url||null,addedBy:currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+      closeModal(); renderCompanyPolicies(ct,canAdd);
+    });
+  });
+}
+
+// ── Company: Downloads ────────────────────────────
+async function renderCompanyDownloads(ct, canAdd) {
+  ct.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="font-size:13px;color:var(--text-muted)">Forms, templates, and official documents for download</div>
+      ${canAdd?`<button class="btn-primary btn-sm" id="add-dl-btn">+ Upload Resource</button>`:''}
+    </div>
+    <div id="downloads-list"><div class="loading-placeholder">Loading…</div></div>
+  `;
+  const snap = await db.collection('resources').orderBy('createdAt','desc').get();
+  const docs = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const list = document.getElementById('downloads-list');
+
+  const catIcons = { Forms:'file-plus', Templates:'layout-template', Reports:'bar-chart-2', Others:'folder' };
+  const catColors = { Forms:'#34C759', Templates:'#0A84FF', Reports:'#FF9500', Others:'#9e9e9e' };
+
+  if (!docs.length) {
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">📥</div><h4>No downloads yet</h4><p>Upload forms, templates, and documents for the team.</p></div>`;
+  } else {
+    // Group by category
+    const cats = [...new Set(docs.map(d=>d.category||'Others'))];
+    list.innerHTML = cats.map(cat=>{
+      const items = docs.filter(d=>(d.category||'Others')===cat);
+      const icon = catIcons[cat]||'folder';
+      const color = catColors[cat]||'#9e9e9e';
+      return `<div style="margin-bottom:20px">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin-bottom:10px">${cat}</div>
+        ${items.map(d=>`
+          <a href="${d.fileUrl||'#'}" target="_blank" rel="noopener" class="co-dl-row" data-id="${d.id}">
+            <div class="co-dl-icon" style="background:${color}18"><i data-lucide="${icon}" style="width:16px;height:16px;stroke:${color}"></i></div>
+            <div class="co-dl-info">
+              <div class="co-dl-name">${d.title}</div>
+              <div class="co-dl-desc">${d.description||''}</div>
+            </div>
+            <i data-lucide="download" style="width:16px;height:16px;stroke:var(--text-muted);flex-shrink:0"></i>
+            ${canAdd?`<button class="btn-icon co-del-btn" data-id="${d.id}" style="margin-left:4px" title="Delete"><i data-lucide="trash-2" style="width:13px;height:13px;stroke:var(--danger)"></i></button>`:''}
+          </a>`).join('')}
+      </div>`;
+    }).join('');
+    list.querySelectorAll('.co-del-btn').forEach(btn=>{
+      btn.addEventListener('click',async e=>{e.preventDefault();e.stopPropagation();if(confirm('Remove this resource?')){await db.collection('resources').doc(btn.dataset.id).delete();renderCompanyDownloads(ct,canAdd);}});
+    });
+  }
+  if(window.lucide) lucide.createIcons({nodes:[list]});
+
+  document.getElementById('add-dl-btn')?.addEventListener('click',()=>{
+    openModal('Upload Resource',`
+      <div class="form-group"><label>Title</label><input id="dl-title" placeholder="e.g. Daily Time Record Form"/></div>
+      <div class="form-group"><label>Category</label>
+        <select id="dl-cat"><option value="Forms">Forms</option><option value="Templates">Templates</option><option value="Reports">Reports</option><option value="Others">Others</option></select>
+      </div>
+      <div class="form-group"><label>Description (optional)</label><input id="dl-desc" placeholder="Short description"/></div>
+      <div id="dl-file-upload"></div>
+    `,`<button class="btn-primary" id="save-dl-btn">Upload</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    let uploadedFile=null;
+    Drive.renderUploadArea('dl-file-upload',r=>{uploadedFile=r;},{label:'Select file to upload',dept:'Admin',subfolder:'Resources'});
+    document.getElementById('save-dl-btn').addEventListener('click',async()=>{
+      const title=document.getElementById('dl-title').value.trim(); if(!title||!uploadedFile) return;
+      await db.collection('resources').add({title,category:document.getElementById('dl-cat').value,description:document.getElementById('dl-desc').value.trim(),fileUrl:uploadedFile.url,source:uploadedFile.source,addedBy:currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+      closeModal(); renderCompanyDownloads(ct,canAdd);
+    });
+  });
+}
+
+// ── Company: Handbook ─────────────────────────────
+async function renderCompanyHandbook(ct, canAdd) {
+  // Try to load a custom handbook from Firestore; fall back to built-in default
+  const snap = await db.collection('handbook').orderBy('order','asc').get().catch(()=>({docs:[]}));
+  const sections = snap.docs.map(d=>({id:d.id,...d.data()}));
+
+  const defaultSections = [
+    { title:'Welcome to Barro Industries', icon:'home', content:`You are now part of a team committed to building something great. At Barro Industries, we believe that people are our most important asset. This handbook is your guide to understanding how we work, what we expect, and how we take care of each other.\n\nRead it thoroughly. Keep it as a reference. And if you ever have questions, your manager is always the first point of contact.` },
+    { title:'Work Hours & Attendance', icon:'clock', content:`Office hours are Monday to Friday, 8:00 AM – 5:00 PM, unless otherwise stated by your department head.\n\n• Full Day: 8 hours of work, logged in the Operations System.\n• Half Day: 4 hours, also logged in the system.\n• Overtime must be pre-approved by your manager.\n• Attendance is logged daily through the Operations app — this affects your KPI score.\n• Three unexcused absences in a month will be reviewed by HR.` },
+    { title:'Code of Conduct', icon:'shield-check', content:`All employees are expected to:\n\n• Treat every colleague, client, and partner with respect.\n• Maintain confidentiality of company information.\n• Avoid conflicts of interest and disclose any that arise.\n• Use company resources responsibly and only for work purposes.\n• Report any unethical behavior to your manager immediately.\n\nViolations of this code may result in disciplinary action up to and including termination.` },
+    { title:'Performance & KPI', icon:'trending-up', content:`Your performance is evaluated monthly using the KPI system:\n\n• Task Score (70%) — based on tasks completed vs assigned.\n• Deliverable Score (30%) — quality assessment set by the president.\n\nKPI scores affect your monthly final pay. Employees with consistently high KPI scores are prioritized for salary increases and promotions.\n\nKPI results are visible in the Operations System under Personal Finance.` },
+    { title:'Salary & Benefits', icon:'credit-card', content:`Salary is processed monthly. Your payslip breakdown is available in the app under Personal Finance:\n\n• Base Salary — your fixed monthly rate.\n• Allowances — transportation, meal, or other allowances as applicable.\n• Deductions — SSS, PhilHealth, Pag-IBIG, withholding tax.\n• KPI Adjustment — bonus or adjustment based on your monthly KPI score.\n• Final Pay — your take-home amount.\n\nYear-to-Date (YTD) totals are visible in the app.` },
+    { title:'Leave Policy', icon:'calendar', content:`Employees are entitled to:\n\n• Vacation Leave: 15 days per year (prorated for new hires)\n• Sick Leave: 15 days per year\n• Special Leave as required by law (maternity, paternity, solo parent, etc.)\n\nLeave requests must be filed at least 2 business days in advance except for emergencies. Submit leave requests through your manager. Unused vacation leave may be converted to cash at year-end subject to company guidelines.` },
+    { title:'Cash Advance Policy', icon:'banknote', content:`Employees may request a cash advance through the Operations System.\n\n• Maximum CA is 50% of monthly net salary.\n• Must specify repayment date (typically deducted from next salary).\n• Requires management approval before disbursement.\n• Only one active CA per employee at a time.\n• Repeated CAs without full repayment may be declined.\n\nSubmit requests through Personal Finance → Cash Advance in the app.` },
+    { title:'Confidentiality', icon:'lock', content:`All company information — client data, financial records, pricing, strategies, and internal communications — is confidential.\n\n• Do not share internal information with unauthorized parties.\n• Do not discuss client projects on personal social media.\n• Confidentiality obligations continue even after employment ends.\n\nViolation of this policy is grounds for immediate termination and may result in legal action.` },
+  ];
+
+  const displaySections = sections.length ? sections : defaultSections;
+  ct.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="font-size:13px;color:var(--text-muted)">Employee Handbook — policies, conduct, and benefits</div>
+      ${canAdd?`<button class="btn-secondary btn-sm" id="add-handbook-btn">+ Add Section</button>`:''}
+    </div>
+    <div class="handbook-accordion" id="handbook-content">
+      ${displaySections.map((s,i)=>`
+        <div class="handbook-item" data-idx="${i}">
+          <button class="handbook-header">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div class="handbook-icon"><i data-lucide="${s.icon||'file-text'}" style="width:15px;height:15px;stroke:var(--gold)"></i></div>
+              <span>${s.title}</span>
+            </div>
+            <i data-lucide="chevron-down" class="handbook-chevron" style="width:16px;height:16px;stroke:var(--text-muted)"></i>
+          </button>
+          <div class="handbook-body hidden"><pre class="handbook-text">${s.content||''}</pre></div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  ct.querySelectorAll('.handbook-header').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const item=btn.closest('.handbook-item');
+      const body=item.querySelector('.handbook-body');
+      const chev=item.querySelector('.handbook-chevron');
+      const open=!body.classList.contains('hidden');
+      body.classList.toggle('hidden',open);
+      chev.style.transform=open?'':'rotate(180deg)';
+    });
+  });
+  if(window.lucide) lucide.createIcons({nodes:[ct]});
+
+  document.getElementById('add-handbook-btn')?.addEventListener('click',()=>{
+    openModal('Add Handbook Section',`
+      <div class="form-group"><label>Section Title</label><input id="hb-title"/></div>
+      <div class="form-group"><label>Icon (Lucide name)</label><input id="hb-icon" placeholder="e.g. file-text, clock, shield-check" value="file-text"/></div>
+      <div class="form-group"><label>Content</label><textarea id="hb-content" rows="8" placeholder="Write section content…"></textarea></div>
+    `,`<button class="btn-primary" id="save-hb-btn">Add Section</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    document.getElementById('save-hb-btn').addEventListener('click',async()=>{
+      const title=document.getElementById('hb-title').value.trim(); if(!title) return;
+      const order = sections.length + defaultSections.length;
+      await db.collection('handbook').add({title,icon:document.getElementById('hb-icon').value.trim()||'file-text',content:document.getElementById('hb-content').value,order,addedBy:currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+      closeModal(); renderCompanyHandbook(ct,canAdd);
     });
   });
 }
