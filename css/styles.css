@@ -199,7 +199,7 @@ html { scroll-behavior: smooth; -webkit-tap-highlight-color: transparent; }
 
 body {
   font-family: var(--font);
-  background: var(--black);
+  background: linear-gradient(150deg, #070710 0%, #0D0D2B 35%, #120820 65%, #070710 100%);
   color: var(--text);
   font-size: 14px; line-height: 1.5;
   min-height: 100dvh; overflow-x: hidden;
@@ -451,41 +451,36 @@ body::after {
 
 .login-logo-wrap {
   position: relative; overflow: hidden;
-  width: 86px; height: 86px; margin: 0 auto 18px;
-  border-radius: var(--r-lg);
-  background: linear-gradient(140deg, #0A0A1A 0%, #131330 45%, #1A0A2E 100%);
+  width: 88px; height: 88px; margin: 0 auto 18px;
+  border-radius: 22px;
+  background: linear-gradient(140deg, #0A0A1A 0%, #131330 60%, #1A0A2E 100%);
   border: 1px solid rgba(255,214,10,0.35);
-  box-shadow:
-    0 0 0 1px rgba(255,214,10,0.12),
-    0 8px 32px rgba(0,0,0,0.60),
-    0 0 20px rgba(255,214,10,0.14),
-    inset 0 1px 0 rgba(255,255,255,0.06);
+  box-shadow: 0 0 18px rgba(255,214,10,0.18), inset 0 1px 0 rgba(255,255,255,0.06);
   display: flex; align-items: center; justify-content: center;
-  padding: 10px;
+  padding: 6px;
 }
-/* top gold trim line — matches id-card::after */
+/* top gold trim line */
 .login-logo-wrap::after {
   content: '';
   position: absolute; top: 0; left: 12%; right: 12%; height: 1.5px;
   background: var(--grad-gold);
   border-radius: var(--pill); opacity: 0.80;
 }
-/* gold shine sweep — matches id-card::before */
+/* static inner sheen */
 .login-logo-wrap::before {
   content: '';
-  position: absolute; top: -2px; left: -120%; width: 70%; height: calc(100% + 4px);
-  background: linear-gradient(90deg, transparent, rgba(255,214,10,0.12), rgba(255,255,255,0.07), transparent);
-  transform: skewX(-15deg);
-  animation: goldShine 3.5s ease-in-out infinite;
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 60%);
+  border-radius: inherit; pointer-events: none;
 }
 .login-logo-img {
   width: 100%; height: 100%; object-fit: contain;
-  border-radius: 8px; position: relative; z-index: 1;
+  border-radius: 16px; position: relative; z-index: 1;
 }
 .login-logo-fallback {
   width: 100%; height: 100%;
   background: var(--grad-pk-bl);
-  color: #fff; border-radius: 8px;
+  color: #fff; border-radius: 16px;
   font-size: 28px; font-weight: 800;
   display: flex; align-items: center; justify-content: center; margin: 0 auto;
   position: relative; z-index: 1;
@@ -556,13 +551,19 @@ body::after {
   display: flex; align-items: center; justify-content: center;
   padding: 3px;
 }
-/* gold shine sweep */
+/* static top gold trim line */
 .topbar-logo-card::after {
   content: '';
-  position: absolute; top: -2px; left: -120%; width: 70%; height: calc(100% + 4px);
-  background: linear-gradient(90deg, transparent, rgba(255,214,10,0.15), transparent);
-  transform: skewX(-15deg);
-  animation: goldShine 4s ease-in-out infinite;
+  position: absolute; top: 0; left: 12%; right: 12%; height: 1.5px;
+  background: var(--grad-gold);
+  border-radius: var(--pill); opacity: 0.80;
+}
+/* static inner sheen */
+.topbar-logo-card::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 60%);
+  border-radius: inherit; pointer-events: none;
 }
 .topbar-logo-img { width: 100%; height: 100%; object-fit: contain; border-radius: 6px; }
 .topbar-logo-fallback {
@@ -1473,7 +1474,7 @@ html.light {
 }
 
 /* body */
-html.light body { background: #F2F2F7; }
+html.light body { background: linear-gradient(150deg, #F2F2F7 0%, #E8E8F5 35%, #EDE8F5 65%, #F2F2F7 100%); }
 
 /* mesh (very subtle in light) */
 html.light body::before {
