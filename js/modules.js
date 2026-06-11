@@ -805,7 +805,10 @@ function renderCAList(advances, container, isAdmin) {
         icon: '💳', type: 'cash_advance'
       });
       closeModal(); Notifs.showToast('Payment recorded!');
-      window.renderCashAdvancePage();
+      await window.renderCashAdvancePage();
+      // Stay on Active Loans/CA's tab after payment
+      const activeBtn = document.querySelector('#ca-tabs [data-sub="active"]');
+      if (activeBtn) activeBtn.click();
     });
   }));
 }

@@ -55,8 +55,8 @@ window.Notifs = (() => {
       <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${n.id}">
         <label class="notif-check-wrap" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;width:100%">
           <input type="checkbox" class="notif-checkbox" data-id="${n.id}"
-            ${n.read ? 'checked disabled' : ''}
-            style="margin-top:3px;width:16px;height:16px;accent-color:var(--primary-light);flex-shrink:0;cursor:${n.read?'default':'pointer'}"/>
+            ${n.read ? 'checked' : ''}
+            style="margin-top:3px;width:16px;height:16px;accent-color:var(--primary-light);flex-shrink:0;cursor:pointer"/>
           <div style="flex:1;min-width:0">
             <div class="notif-item-title">${n.icon || '🔔'} ${n.title}</div>
             <div class="notif-item-body">${n.body || ''}</div>
@@ -66,17 +66,21 @@ window.Notifs = (() => {
       </div>
     `).join('');
 
-    // Bind checkbox change
-    list.querySelectorAll('.notif-checkbox:not([disabled])').forEach(cb => {
+    // Bind checkbox — toggle read/unread
+    list.querySelectorAll('.notif-checkbox').forEach(cb => {
       cb.addEventListener('change', async () => {
-        if (!cb.checked) return;
-        cb.disabled = true;
         const item = cb.closest('.notif-item');
-        item?.classList.remove('unread');
-        item?.classList.add('read');
-        await markRead(uid, cb.dataset.id);
-        // After each check, see if all are now done → upgrade attendance
-        const remaining = list.querySelectorAll('.notif-checkbox:not([disabled])').length;
+        if (cb.checked) {
+          item?.classList.remove('unread');
+          item?.classList.add('read');
+          await markRead(uid, cb.dataset.id);
+        } else {
+          item?.classList.remove('read');
+          item?.classList.add('unread');
+          await markUnread(uid, cb.dataset.id);
+        }
+        // Re-count unchecked for attendance upgrade
+        const remaining = list.querySelectorAll('.notif-checkbox:not(:checked)').length;
         _updatePanelHint(remaining, items.length);
         if (remaining === 0 && typeof window.tryUpgradeAttendanceOnNotifRead === 'function') {
           window.tryUpgradeAttendanceOnNotifRead();
@@ -99,6 +103,10 @@ window.Notifs = (() => {
 
   async function markRead(uid, notifId) {
     await db.collection('notifications').doc(uid).collection('items').doc(notifId).update({ read: true });
+  }
+
+  async function markUnread(uid, notifId) {
+    await db.collection('notifications').doc(uid).collection('items').doc(notifId).update({ read: false });
   }
 
   // ── Send notification ─────────────────────────
