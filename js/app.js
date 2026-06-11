@@ -169,14 +169,11 @@ function getSidebarItems() {
   items.push({ icon:'🏠', label:'Dashboard', page:'dashboard' });
 
   if (pres) {
-    items.push({ icon:'✅', label:'Tasks',           page:'tasks'       });
-    items.push({ icon:'📋', label:'Submissions',     page:'submissions' });
-    items.push({ icon:'💸', label:'Cash & Expenses', page:'cash'        });
-    items.push({ icon:'💳', label:'Personal Finance',page:'personal-finance' });
+    items.push({ icon:'✅', label:'Tasks',            page:'tasks'       });
     items.push({ icon:'✔️', label:'Approvals (ROA)', page:'approvals',  section:true });
     items.push({ icon:'📈', label:'Progress Reports',page:'progress'    });
     items.push({ icon:'🗂️', label:'Departments',     page:'departments' });
-    items.push({ icon:'👥', label:'Team / Payroll',  page:'team'        });
+    items.push({ icon:'👥', label:'Team Payroll',    page:'team'        });
     items.push({ icon:'📊', label:'Analytics',       page:'analytics'   });
     items.push({ icon:'🏢', label:'Company',         page:'company'     });
   } else if (bsOnly) {
@@ -342,6 +339,8 @@ async function renderPresidentDashboard() {
       </div>
       <div id="live-clock" style="font-size:13px;color:var(--text-muted);margin:-12px 0 16px;font-weight:600"></div>
 
+      <div id="pres-id-card-wrap" style="margin-bottom:20px"></div>
+
       <div class="kpi-row">
         <div class="kpi-card"><div class="kpi-label">Team Members</div><div class="kpi-value">${users.length}</div></div>
         <div class="kpi-card accent"><div class="kpi-label">Open Tasks</div><div class="kpi-value">${openTasks}</div><div class="kpi-sub">${doneTasks} done</div></div>
@@ -371,6 +370,7 @@ async function renderPresidentDashboard() {
 
       ${pendingApprovals>0?`<div class="card"><div class="card-header" style="background:#fff3e0"><h3>⚠️ ${pendingApprovals} Pending Approval${pendingApprovals>1?'s':''}</h3><button class="btn-primary btn-sm" onclick="navigateTo('approvals')">Review</button></div></div>`:''}
     `;
+    renderIDCard('pres-id-card-wrap', userProfile);
     liveDateTime('live-clock');
     renderMiniCal();
   } catch(err) {
@@ -818,37 +818,105 @@ async function renderProgressReports() {
     });
     tasks.forEach(t => { if (t.department && deptMap[t.department]) deptMap[t.department].tasks.push(t); });
 
-    c.innerHTML = `<div class="page-header"><h2>📈 Progress Reports & KPIs</h2></div>`;
+    // Current month filter
+    const now = new Date();
+    const monthStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
+    const monthTasks = tasks.filter(t => {
+      const ts = t.createdAt?.seconds ? new Date(t.createdAt.seconds*1000) : null;
+      return ts && `${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}` === monthStr;
+    });
+
+    c.innerHTML = `
+      <div class="page-header"><h2>📈 Progress Reports & KPIs</h2><span class="badge badge-blue">${monthLabel}</span></div>
+      <div class="kpi-row">
+        <div class="kpi-card accent"><div class="kpi-label">All Tasks (Total)</div><div class="kpi-value">${tasks.length}</div><div class="kpi-sub">${tasks.filter(t=>t.status==='done').length} done</div></div>
+        <div class="kpi-card green"><div class="kpi-label">This Month Tasks</div><div class="kpi-value">${monthTasks.length}</div><div class="kpi-sub">${monthTasks.filter(t=>t.status==='done').length} done</div></div>
+        <div class="kpi-card"><div class="kpi-label">Overall KPI</div><div class="kpi-value">${tasks.length?Math.round(tasks.filter(t=>t.status==='done').length/tasks.length*100):0}%</div></div>
+      </div>
+    `;
     Object.entries(deptMap).forEach(([dept, data]) => {
       const cfg = DEPARTMENTS[dept]||{icon:'🗂️',color:'var(--primary-light)'};
       const total = data.tasks.length;
       const done  = data.tasks.filter(t=>t.status==='done').length;
       const pct   = total ? Math.round(done/total*100) : 0;
+      // month-only stats for this dept
+      const mTasks = data.tasks.filter(t => {
+        const ts = t.createdAt?.seconds ? new Date(t.createdAt.seconds*1000) : null;
+        return ts && `${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}` === monthStr;
+      });
+      const mDone = mTasks.filter(t=>t.status==='done').length;
+      const mPct  = mTasks.length ? Math.round(mDone/mTasks.length*100) : 0;
       c.innerHTML += `
         <div class="card" style="margin-bottom:12px">
           <div class="card-header" style="border-left:4px solid ${cfg.color}">
             <h3>${cfg.icon} ${dept}</h3>
-            <span class="badge ${pct>=80?'badge-green':pct>=50?'badge-orange':'badge-red'}">${pct}% KPI</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span class="badge ${mPct>=80?'badge-green':mPct>=50?'badge-orange':'badge-red'}" title="This month KPI">📅 ${mPct}%</span>
+              <span class="badge ${pct>=80?'badge-green':pct>=50?'badge-orange':'badge-red'}" title="All-time KPI">Overall ${pct}%</span>
+            </div>
           </div>
           <div class="card-body">
-            <div class="progress-bar-wrap" style="margin-bottom:12px"><div class="progress-bar-fill" style="width:${pct}%;background:${cfg.color}"></div></div>
+            <div class="progress-bar-wrap" style="margin-bottom:8px"><div class="progress-bar-fill" style="width:${pct}%;background:${cfg.color}"></div></div>
             <div style="display:flex;gap:20px;font-size:12px;color:var(--text-muted);margin-bottom:12px">
               <span>👥 ${data.members.length} members</span>
-              <span>✅ ${done}/${total} tasks done</span>
+              <span>✅ ${done}/${total} tasks done (all time)</span>
+              <span>📅 ${mDone}/${mTasks.length} done this month</span>
             </div>
-            <div class="table-wrap"><table class="data-table">
-              <thead><tr><th>Member</th><th>Tasks Done</th><th>KPI</th></tr></thead>
-              <tbody>
-                ${data.members.map(u=>{
-                  const uDone = tasks.filter(t=>t.assignedTo===u.id&&t.status==='done').length;
-                  const uTotal = tasks.filter(t=>t.assignedTo===u.id).length;
-                  const uPct = uTotal ? Math.round(uDone/uTotal*100) : 0;
-                  return `<tr><td>${u.displayName||u.email}</td><td>${uDone}/${uTotal}</td><td><span class="badge ${uPct>=80?'badge-green':uPct>=50?'badge-orange':'badge-red'}">${uPct}%</span></td></tr>`;
-                }).join('')}
-              </tbody>
-            </table></div>
+            <div class="subtab-bar" style="margin-bottom:8px">
+              <button class="subtab-btn active" data-dt="${dept}-tasks">All Tasks</button>
+              <button class="subtab-btn" data-dt="${dept}-members">By Member</button>
+            </div>
+            <div id="prog-${dept.replace(/\s+/g,'_')}-content">
+              <div class="table-wrap"><table class="data-table">
+                <thead><tr><th>Task</th><th>Assigned To</th><th>Status</th><th>Due</th></tr></thead>
+                <tbody>
+                  ${data.tasks.slice(0,10).map(t=>`<tr>
+                    <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.title}</td>
+                    <td style="font-size:12px">${t.assignedToName||'—'}</td>
+                    <td><span class="badge ${t.status==='done'?'badge-green':'badge-blue'}">${t.status||'open'}</span></td>
+                    <td style="font-size:11px;color:var(--text-muted)">${t.dueDate||'—'}</td>
+                  </tr>`).join('')}
+                  ${data.tasks.length>10?`<tr><td colspan="4" style="font-size:12px;color:var(--text-muted);text-align:center">+ ${data.tasks.length-10} more tasks</td></tr>`:''}
+                </tbody>
+              </table></div>
+            </div>
+            <div id="prog-${dept.replace(/\s+/g,'_')}-members" style="display:none">
+              <div class="table-wrap"><table class="data-table">
+                <thead><tr><th>Member</th><th>All Tasks Done</th><th>This Month</th><th>KPI</th></tr></thead>
+                <tbody>
+                  ${data.members.map(u=>{
+                    const uDone  = tasks.filter(t=>t.assignedTo===u.id&&t.status==='done').length;
+                    const uTotal = tasks.filter(t=>t.assignedTo===u.id).length;
+                    const uMDone = monthTasks.filter(t=>t.assignedTo===u.id&&t.status==='done').length;
+                    const uMTotal= monthTasks.filter(t=>t.assignedTo===u.id).length;
+                    const uPct   = uTotal ? Math.round(uDone/uTotal*100) : 0;
+                    return `<tr>
+                      <td>${u.displayName||u.email}</td>
+                      <td>${uDone}/${uTotal}</td>
+                      <td>${uMDone}/${uMTotal}</td>
+                      <td><span class="badge ${uPct>=80?'badge-green':uPct>=50?'badge-orange':'badge-red'}">${uPct}%</span></td>
+                    </tr>`;
+                  }).join('')}
+                </tbody>
+              </table></div>
+            </div>
           </div>
         </div>`;
+    });
+
+    // Wire up subtab toggles inside progress cards
+    c.querySelectorAll('[data-dt]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key  = btn.dataset.dt;
+        const dept = key.replace(/-tasks$|-members$/,'');
+        const deptId = dept.replace(/\s+/g,'_');
+        const isTask = key.endsWith('-tasks');
+        btn.closest('.card').querySelectorAll('.subtab-btn').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById(`prog-${deptId}-content`).style.display = isTask  ? '' : 'none';
+        document.getElementById(`prog-${deptId}-members`).style.display = isTask  ? 'none' : '';
+      });
     });
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>${err.message}</h4></div>`;

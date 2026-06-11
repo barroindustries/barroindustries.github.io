@@ -113,9 +113,9 @@ window.BOTTOM_NAV_ITEMS = [
 
 window.PRESIDENT_BOTTOM_NAV = [
   { icon: '🏠', label: 'Home',      page: 'dashboard'  },
+  { icon: '✅', label: 'Tasks',     page: 'tasks'      },
   { icon: '✔️', label: 'Approvals', page: 'approvals'  },
   { icon: '📈', label: 'Progress',  page: 'progress'   },
-  { icon: '💸', label: 'Cash',      page: 'cash'       },
   { icon: '👥', label: 'Team',      page: 'team'       }
 ];
 

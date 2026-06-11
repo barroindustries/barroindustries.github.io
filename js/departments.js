@@ -17,29 +17,155 @@ function statusBadge(s) { return {open:'badge-blue',done:'badge-green',pending:'
 // ══════════════════════════════════════════════════
 window.renderTasks = async function(currentUser, currentRole, currentDept) {
   const c = deptContainer();
-  const canManage = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+  const isPresMgr = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+
+  if (currentRole === 'president' || currentRole === 'owner') {
+    // President view: Departmental / My Tasks subtabs
+    c.innerHTML = `
+      <div class="page-header">
+        <h2>✅ Tasks</h2>
+        <button class="btn-primary btn-sm" id="add-task-btn">+ New Task</button>
+      </div>
+      <div class="subtab-bar">
+        <button class="subtab-btn active" data-sub="departmental">📂 Departmental</button>
+        <button class="subtab-btn" data-sub="mine">👤 My Tasks</button>
+      </div>
+      <div id="tasks-subtab-content"></div>
+    `;
+    loadPresidentTasks('departmental', currentUser, currentRole);
+    c.querySelectorAll('.subtab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        loadPresidentTasks(btn.dataset.sub, currentUser, currentRole);
+      });
+    });
+    document.getElementById('add-task-btn').onclick = () => openAddTaskModal(currentUser, currentRole);
+    return;
+  }
+
+  // Regular employee/manager view
   c.innerHTML = `
     <div class="page-header">
       <h2>✅ Tasks</h2>
       <div class="page-actions">
         <select id="task-filter" class="select-sm">
           <option value="mine">My Tasks</option>
-          <option value="all">All Tasks</option>
+          ${isPresMgr?'<option value="all">All Tasks</option>':''}
           <option value="open">Open</option>
           <option value="done">Done</option>
         </select>
-        ${canManage?`<button class="btn-secondary btn-sm" id="sync-clickup-btn" title="Import tasks from ClickUp">⚙️ Sync ClickUp</button>`:''}
         <button class="btn-primary btn-sm" id="add-task-btn">+ New Task</button>
       </div>
     </div>
-    <div id="sync-status" style="display:none;padding:10px 0;font-size:13px;color:var(--text-muted)"></div>
     <div id="tasks-list" class="item-list"><div class="loading-placeholder">Loading…</div></div>
   `;
   loadTasksList(currentUser, currentRole, currentDept);
   document.getElementById('task-filter').onchange = () => loadTasksList(currentUser, currentRole, currentDept);
   document.getElementById('add-task-btn').onclick  = () => openAddTaskModal(currentUser, currentRole);
-  document.getElementById('sync-clickup-btn')?.addEventListener('click', () => syncClickUpTasks(currentUser, currentRole, currentDept));
 };
+
+async function loadPresidentTasks(sub, currentUser, currentRole) {
+  const wrap = document.getElementById('tasks-subtab-content');
+  if (!wrap) return;
+
+  if (sub === 'mine') {
+    // My Tasks tab — tasks assigned to president
+    wrap.innerHTML = `
+      <div style="display:flex;justify-content:flex-end;padding:8px 0">
+        <select id="pres-mine-filter" class="select-sm">
+          <option value="all">All Statuses</option>
+          <option value="open">Open</option>
+          <option value="done">Done</option>
+        </select>
+      </div>
+      <div id="pres-mine-list" class="item-list"><div class="loading-placeholder">Loading…</div></div>
+    `;
+    const renderMine = async () => {
+      const list = document.getElementById('pres-mine-list');
+      const filter = document.getElementById('pres-mine-filter')?.value || 'all';
+      const snap = await db.collection('tasks').where('assignedTo','==',currentUser.uid).get();
+      let tasks = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+      if (filter === 'open') tasks = tasks.filter(t=>t.status!=='done');
+      if (filter === 'done') tasks = tasks.filter(t=>t.status==='done');
+      if (!tasks.length) { list.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks assigned to you</h4></div>'; return; }
+      list.innerHTML = tasks.map(t=>`
+        <div class="item-card priority-${t.priority||'medium'} ${t.status==='done'?'status-done':''}" data-id="${t.id}">
+          <div class="item-top">
+            <div class="item-title">${t.status==='done'?'✅ ':''}${t.title}</div>
+            <div class="item-badges">
+              <span class="badge ${priorityBadge(t.priority)}">${t.priority||'med'}</span>
+              <span class="badge ${statusBadge(t.status)}">${t.status||'open'}</span>
+            </div>
+          </div>
+          <div class="item-meta">
+            ${t.dueDate?`<span>📅 ${t.dueDate}</span>`:''}
+            ${t.department?`<span>🗂 ${t.department}</span>`:''}
+          </div>
+        </div>`).join('');
+      list.querySelectorAll('.item-card').forEach(card => {
+        card.addEventListener('click', () => openTaskDetail(card.dataset.id, currentUser, currentRole));
+      });
+    };
+    renderMine();
+    document.getElementById('pres-mine-filter')?.addEventListener('change', renderMine);
+    return;
+  }
+
+  // Departmental tab — all tasks grouped by department
+  wrap.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+  try {
+    const snap = await db.collection('tasks').get();
+    const tasks = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+
+    const deptGroups = {};
+    tasks.forEach(t => {
+      const dept = t.department || 'Unassigned';
+      if (!deptGroups[dept]) deptGroups[dept] = [];
+      deptGroups[dept].push(t);
+    });
+
+    if (!tasks.length) { wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks yet</h4></div>'; return; }
+
+    wrap.innerHTML = Object.entries(deptGroups).map(([dept, dTasks]) => {
+      const cfg = window.DEPARTMENTS?.[dept] || {icon:'🗂️', color:'var(--primary-light)'};
+      const open = dTasks.filter(t=>t.status!=='done').length;
+      const done = dTasks.filter(t=>t.status==='done').length;
+      return `
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-header" style="border-left:4px solid ${cfg.color||'var(--primary-light)'}">
+            <h3>${cfg.icon||'🗂️'} ${dept}</h3>
+            <div style="display:flex;gap:8px;align-items:center">
+              <span class="badge badge-blue">${open} open</span>
+              <span class="badge badge-green">${done} done</span>
+            </div>
+          </div>
+          <div class="item-list" style="padding:0 12px 12px">
+            ${dTasks.map(t=>`
+              <div class="item-card priority-${t.priority||'medium'} ${t.status==='done'?'status-done':''}" data-id="${t.id}" style="margin-top:8px;cursor:pointer">
+                <div class="item-top">
+                  <div class="item-title">${t.status==='done'?'✅ ':''}${t.title}</div>
+                  <div class="item-badges">
+                    <span class="badge ${priorityBadge(t.priority)}">${t.priority||'med'}</span>
+                    <span class="badge ${statusBadge(t.status)}">${t.status||'open'}</span>
+                  </div>
+                </div>
+                <div class="item-meta">
+                  ${t.assignedToName?`<span>👤 ${t.assignedToName}</span>`:''}
+                  ${t.dueDate?`<span>📅 ${t.dueDate}</span>`:''}
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>`;
+    }).join('');
+
+    wrap.querySelectorAll('.item-card').forEach(card => {
+      card.addEventListener('click', () => openTaskDetail(card.dataset.id, currentUser, currentRole));
+    });
+  } catch(err) {
+    wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>${err.message}</h4></div>`;
+  }
+}
 
 async function loadTasksList(currentUser, currentRole, currentDept) {
   const list   = document.getElementById('tasks-list');
