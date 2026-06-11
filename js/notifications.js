@@ -95,10 +95,14 @@ window.Notifs = (() => {
     await Promise.all(promises);
   }
 
-  // ── Send to owner ─────────────────────────────
+  // ── Send to president / owner ─────────────────
   async function sendToOwner(notifData) {
-    const snap = await db.collection('users').where('role', '==', 'owner').get();
-    const promises = snap.docs.map(d => send(d.id, notifData));
+    const [presSnap, ownerSnap] = await Promise.all([
+      db.collection('users').where('role','==','president').get(),
+      db.collection('users').where('role','==','owner').get()
+    ]);
+    const allDocs = [...presSnap.docs, ...ownerSnap.docs];
+    const promises = allDocs.map(d => send(d.id, notifData));
     await Promise.all(promises);
   }
 

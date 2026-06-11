@@ -45,8 +45,8 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
   let snap;
   if (filter === 'mine') {
     snap = await db.collection('tasks').where('assignedTo','==',currentUser.uid).get();
-  } else if (currentRole === 'owner' || currentRole === 'manager') {
-    snap = await db.collection('tasks').orderBy('createdAt','desc').get();
+  } else if (currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager') {
+    snap = await db.collection('tasks').get();
   } else {
     snap = await db.collection('tasks').where('department','==',currentDept).get();
   }
@@ -97,7 +97,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     <div id="task-comments-wrap"></div>
   `, `
     ${t.status!=='done'?`<button class="btn-success" id="mark-done-btn">✅ Mark Done</button>`:''}
-    ${(currentRole==='owner'||t.createdBy===currentUser.uid)?`<button class="btn-danger" id="del-task-btn">Delete</button>`:''}
+    ${(currentRole==='president'||currentRole==='owner'||currentRole==='manager'||t.createdBy===currentUser.uid)?`<button class="btn-danger" id="del-task-btn">Delete</button>`:''}
     <button class="btn-secondary" onclick="closeModal()">Close</button>
   `);
   renderComments('tasks', taskId, 'task-comments-wrap', currentUser);
@@ -177,9 +177,9 @@ window.renderSubmissions = async function(currentUser, currentRole, currentDept)
 
 async function loadSubsList(currentUser, currentRole, currentDept) {
   const list = document.getElementById('subs-list');
-  const isPrivileged = currentRole === 'owner' || currentRole === 'manager' || currentRole === 'finance';
+  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'finance';
   const snap = isPrivileged
-    ? await db.collection('submissions').orderBy('createdAt','desc').get()
+    ? await db.collection('submissions').get()
     : await db.collection('submissions').where('createdBy','==',currentUser.uid).get();
 
   const subs = snap.docs.map(d => ({id:d.id,...d.data()})).sort((a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
@@ -206,7 +206,7 @@ async function loadSubsList(currentUser, currentRole, currentDept) {
 async function openSubDetail(subId, currentUser, currentRole) {
   const snap = await db.collection('submissions').doc(subId).get();
   const s = {id:snap.id,...snap.data()};
-  const isPrivileged = currentRole === 'owner' || currentRole === 'manager' || currentRole === 'finance';
+  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'finance';
 
   openModal(s.title, `
     <div style="margin-bottom:10px">
@@ -280,7 +280,7 @@ function openAddSubModal(currentUser) {
 // ══════════════════════════════════════════════════
 window.renderCash = async function(currentUser, currentRole) {
   const c = deptContainer();
-  const isPrivileged = currentRole === 'owner' || currentRole === 'finance';
+  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'finance';
 
   c.innerHTML = `
     <div class="page-header"><h2>💸 Cash & Expenses</h2>
@@ -310,7 +310,7 @@ window.renderCash = async function(currentUser, currentRole) {
 
 async function loadCashContent(currentUser, currentRole, sub) {
   const content = document.getElementById('cash-content');
-  const isPrivileged = currentRole === 'owner' || currentRole === 'finance';
+  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'finance';
   content.innerHTML = '<div class="loading-placeholder">Loading…</div>';
 
   if (sub === 'my-expenses' || !isPrivileged) {
@@ -656,7 +656,7 @@ async function loadDesignContent(currentUser, currentRole, sub) {
 async function renderProjects(container, currentUser, currentRole) {
   const snap = await db.collection('projects').orderBy('createdAt','desc').get();
   const projects = snap.docs.map(d => ({id:d.id,...d.data()}));
-  const canAdd = currentRole === 'owner' || currentRole === 'manager';
+  const canAdd = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
 
   container.innerHTML = `
     <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
@@ -709,8 +709,13 @@ async function renderProjects(container, currentUser, currentRole) {
 // ══════════════════════════════════════════════════
 //  BRILLIANT STEEL
 // ══════════════════════════════════════════════════
-window.renderBrilliantSteel = async function(currentUser, currentRole, subtab = 'Quote Builder') {
+// ══════════════════════════════════════════════════
+//  BRILLIANT STEEL — Main Module (v3)
+// ══════════════════════════════════════════════════
+
+window.renderBrilliantSteel = async function(currentUser, currentRole, subtab = 'Dashboard') {
   const c = deptContainer();
+  const tabs = ['Dashboard','Quote Builder','Quotations Summary','Client Data'];
   c.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
       <span style="font-size:22px">⚙️</span>
@@ -720,117 +725,732 @@ window.renderBrilliantSteel = async function(currentUser, currentRole, subtab = 
       </div>
     </div>
     <div class="subtab-bar">
-      ${['Quote Builder','Quote History','Client Records','Request Approval'].map(s =>
-        `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
-      ).join('')}
+      ${tabs.map(s => `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`).join('')}
     </div>
     <div id="bs-content"><div class="loading-placeholder">Loading…</div></div>
   `;
   loadBSContent(currentUser, currentRole, subtab);
   c.querySelectorAll('.subtab-btn').forEach(btn => {
-    btn.addEventListener('click', () => { c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); loadBSContent(currentUser, currentRole, btn.dataset.sub); });
+    btn.addEventListener('click', () => {
+      c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadBSContent(currentUser, currentRole, btn.dataset.sub);
+    });
   });
 };
-
-let bsQuoteLines = [];
-let bsActiveQuoteId = null;
 
 async function loadBSContent(currentUser, currentRole, sub) {
   const content = document.getElementById('bs-content');
   switch(sub) {
-    case 'Quote Builder':
-      renderQuoteList(content, currentUser, currentRole, 'brilliant-steel');
-      break;
-    case 'Quote History':
-      await renderBSHistory(content, currentUser, currentRole);
-      break;
-    case 'Client Records':
-      await renderClientProfiles(content, currentUser, currentRole, 'brilliant-steel');
-      break;
-    case 'Request Approval':
-      await renderApprovalRequest(content, currentUser);
-      break;
+    case 'Dashboard':          await renderBSDashboard(content, currentUser, currentRole); break;
+    case 'Quote Builder':      renderBSQuoteBuilder(content, currentUser, currentRole); break;
+    case 'Quotations Summary': await renderBSQuotationsSummary(content, currentUser, currentRole); break;
+    case 'Client Data':        renderBSClientData(content); break;
   }
 }
 
-async function renderBSHistory(container, currentUser, currentRole) {
-  const isPrivileged = currentRole === 'owner' || currentRole === 'manager';
-  const snap = isPrivileged
-    ? await db.collection('bs_quotes').orderBy('createdAt','desc').get()
-    : await db.collection('bs_quotes').where('createdBy','==',currentUser.uid).get();
-  const quotes = snap.docs.map(d => ({id:d.id,...d.data()})).sort((a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-
+async function renderBSDashboard(container, currentUser, currentRole) {
+  const snap = await db.collection('bs_quotes').get();
+  const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const total   = quotes.reduce((s,q)=>s+(q.total||0),0);
+  const pending = quotes.filter(q=>q.approvalStatus==='pending_review').length;
+  const approved= quotes.filter(q=>q.approvalStatus==='approved').length;
   container.innerHTML = `
-    <div class="item-list">
-      ${!quotes.length
-        ? `<div class="empty-state"><div class="empty-icon">📜</div><h4>No quote history</h4></div>`
-        : quotes.map(q => `
-          <div class="item-card">
-            <div class="item-top">
-              <div class="item-title">BS-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${q.clientName||'Client'}</div>
-              <span class="badge ${statusBadge(q.status)}">${q.status||'draft'}</span>
-            </div>
-            <div class="item-meta">
-              <span>💰 ₱${fmt(q.total)}</span>
-              <span>👤 ${q.agentName||'—'}</span>
-              ${q.approvalStatus?`<span class="badge ${q.approvalStatus==='approved'?'badge-green':'badge-orange'}">${q.approvalStatus}</span>`:''}
-            </div>
-          </div>`).join('')}
+    <div class="kpi-row">
+      <div class="kpi-card"><div class="kpi-label">Total Quotes</div><div class="kpi-value">${quotes.length}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Pipeline Value</div><div class="kpi-value">₱${fmt(total)}</div></div>
+      <div class="kpi-card warn"><div class="kpi-label">Pending Approval</div><div class="kpi-value">${pending}</div></div>
+      <div class="kpi-card accent"><div class="kpi-label">Approved</div><div class="kpi-value">${approved}</div></div>
     </div>
-  `;
-}
-
-async function renderApprovalRequest(container, currentUser) {
-  const snap = await db.collection('bs_quotes').where('createdBy','==',currentUser.uid).get();
-  const quotes = snap.docs.map(d => ({id:d.id,...d.data()})).filter(q => q.status === 'sent');
-
-  container.innerHTML = `
     <div class="card">
-      <div class="card-header"><h3>🔍 Request Owner Review</h3></div>
+      <div class="card-header"><h3>Recent Quotes</h3><button class="btn-primary btn-sm" onclick="loadBSContent(window.__bsUser,window.__bsRole,'Quote Builder')">+ New Quote</button></div>
       <div class="card-body">
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Select a quote to send for owner approval. The owner will receive a notification and can approve or reject it.</p>
-        ${!quotes.length
-          ? `<p style="color:var(--text-muted)">No sent quotes available for approval request.</p>`
-          : quotes.map(q => `
-            <div style="display:flex;align-items:center;justify-content:space-between;padding:12px;background:var(--surface2);border-radius:8px;margin-bottom:8px">
-              <div>
-                <strong>BS-${q.quoteNumber||q.id.slice(-6)} — ${q.clientName}</strong>
-                <div class="text-muted">₱${fmt(q.total)}</div>
-              </div>
-              <button class="btn-primary btn-sm request-approval-btn" data-id="${q.id}" data-name="${q.clientName}" data-total="${q.total}">Request Review</button>
-            </div>`).join('')}
+        ${!quotes.length?'<div class="empty-state"><p>No quotes yet</p></div>':
+          `<div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Quote #</th><th>Client</th><th>Total</th><th>Status</th><th>Agent</th></tr></thead>
+            <tbody>${quotes.slice(0,8).map(q=>`<tr>
+              <td><code>${q.quoteNumber||q.id.slice(-8)}</code></td>
+              <td>${q.clientName||'—'}</td>
+              <td>₱${fmt(q.total)}</td>
+              <td><span class="badge ${statusBadge(q.approvalStatus||q.status)}">${q.approvalStatus||q.status||'draft'}</span></td>
+              <td>${q.agentName||'—'}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>`}
       </div>
     </div>
   `;
+  window.__bsUser = currentUser;
+  window.__bsRole = currentRole;
+}
 
-  container.querySelectorAll('.request-approval-btn').forEach(btn => {
-    btn.addEventListener('click', async e => {
-      const id    = e.currentTarget.dataset.id;
-      const name  = e.currentTarget.dataset.name;
-      const total = e.currentTarget.dataset.total;
-      const s = await db.collection('users').doc(currentUser.uid).get();
-      const agentName = s.exists ? s.data().displayName : currentUser.email;
+// ── Brilliant Steel Quote Builder ─────────────────
+function renderBSQuoteBuilder(container, currentUser, currentRole) {
+  container.innerHTML = `
+  <style>
+  .bs-qb{font-family:var(--font-family,'Segoe UI',system-ui,sans-serif);color:var(--text);}
+  .bs-section{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin-bottom:12px;}
+  .bs-sec-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#37474f;margin-bottom:12px;border-bottom:2px solid #cfd8dc;padding-bottom:7px;}
+  .bs-fg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;}
+  .bs-fg{display:flex;flex-direction:column;gap:3px;}
+  .bs-fg.full{grid-column:1/-1;}
+  .bs-fg label{font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;}
+  .bs-fg input,.bs-fg select,.bs-fg textarea{border:1.5px solid var(--border);border-radius:6px;padding:7px 9px;font-size:13px;width:100%;background:var(--surface);color:var(--text);}
+  .bs-qno-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;}
+  .bs-qno-box{background:#cfd8dc;border-radius:7px;padding:8px 14px;font-size:15px;font-weight:800;color:#1a237e;letter-spacing:.8px;white-space:nowrap;align-self:flex-end;}
+  .bs-add-panel{display:grid;grid-template-columns:2fr 70px 70px 70px 80px 120px auto;gap:8px;align-items:end;background:#eceff1;border-radius:9px;padding:12px 14px;margin-bottom:10px;}
+  .bs-search-wrap{position:relative;}
+  .bs-search-dropdown{position:absolute;top:calc(100% + 2px);left:0;right:0;background:var(--surface);border:1.5px solid #37474f;border-radius:7px;z-index:400;max-height:260px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.15);display:none;}
+  .bs-search-dropdown.open{display:block;}
+  .bs-sd-group{font-size:10px;font-weight:700;color:#37474f;text-transform:uppercase;letter-spacing:.6px;padding:6px 10px 3px;background:#eceff1;}
+  .bs-sd-item{padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border);}
+  .bs-sd-item:hover{background:#eceff1;}
+  .bs-sd-price{float:right;color:#37474f;font-weight:700;font-size:12px;}
+  .bs-items-table{width:100%;border-collapse:collapse;}
+  .bs-items-table th{background:#37474f;color:white;text-align:left;padding:7px 8px;font-size:11px;font-weight:700;text-transform:uppercase;}
+  .bs-items-table td{padding:8px 8px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle;}
+  .bs-cat-row td{background:#cfd8dc;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#37474f;padding:5px 8px;}
+  .bs-subtotal-row td{background:#e8eaf6;font-weight:700;font-size:12px;color:#1a237e;text-align:right;padding:5px 8px;border-bottom:2px solid #37474f;}
+  .bs-totals-box{display:flex;justify-content:flex-end;margin-top:10px;}
+  .bs-totals-tbl{min-width:290px;}
+  .bs-totals-tbl td{padding:5px 11px;font-size:13px;}
+  .bs-totals-tbl td:last-child{text-align:right;}
+  .bs-totals-tbl tr.grand td{font-weight:700;font-size:16px;border-top:2px solid #37474f;padding-top:9px;}
+  .bs-terms-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .bs-terms-block{background:var(--surface2);border-radius:7px;padding:10px 13px;}
+  .bs-terms-block h4{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#37474f;margin-bottom:5px;}
+  .bs-terms-block p{font-size:12px;color:var(--text);line-height:1.5;}
+  .bs-sig-row{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:14px;}
+  .bs-sig-box{border-top:1.5px solid var(--border);padding-top:10px;text-align:center;}
+  .bs-sig-name{font-weight:700;font-size:14px;}
+  .bs-req-approval{background:#e65100;color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:15px;font-weight:700;cursor:pointer;width:100%;margin-top:10px;}
+  .bs-req-approval:hover{background:#bf360c;}
+  @media print{
+    .bs-qb .no-print{display:none!important;}
+    .bs-section{box-shadow:none;border:none;border-bottom:1px solid #ddd;margin-bottom:6px;padding:8px 0;border-radius:0;}
+    .bs-qb{padding:0;}
+    .bs-print-header{display:flex!important;justify-content:space-between;align-items:flex-start;margin-bottom:12px;padding-bottom:10px;border-bottom:2.5px solid #37474f;}
+    @page{margin:13mm 11mm 8mm;}
+  }
+  .bs-print-header{display:none;}
+  </style>
 
-      await db.collection('bs_quotes').doc(id).update({ approvalStatus: 'pending_review', reviewRequestedAt: firebase.firestore.FieldValue.serverTimestamp() });
-      await db.collection('approval_requests').add({
-        type:       'bs_quote',
-        quoteId:    id,
-        clientName: name,
-        total:      parseFloat(total),
-        agentName,
-        agentId:    currentUser.uid,
-        status:     'pending',
-        createdAt:  firebase.firestore.FieldValue.serverTimestamp()
+  <div class="bs-qb" id="bs-qb-root">
+    <!-- Print Header -->
+    <div class="bs-print-header" id="bs-ph">
+      <div style="display:flex;align-items:flex-start;gap:12px">
+        <img src="icons/barro-logo.png" style="height:50px;flex-shrink:0" onerror="this.style.display='none'"/>
+        <div>
+          <div style="font-size:16pt;font-weight:900;color:#37474f;letter-spacing:.4px">BRILLIANT STEEL</div>
+          <div style="font-size:9pt;color:#555;margin-top:2px">Steel Fabrication &amp; Design</div>
+        </div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:14pt;font-weight:900;color:#37474f;letter-spacing:1px">PRICE QUOTATION</div>
+        <div id="bs-ph-qno" style="font-size:11pt;font-weight:700;color:#333;margin-top:4px"></div>
+        <div id="bs-ph-date" style="font-size:10pt;color:#555;margin-top:2px"></div>
+        <div id="bs-ph-agent" style="font-size:10pt;color:#555;margin-top:1px"></div>
+      </div>
+    </div>
+
+    <!-- Quote Number -->
+    <div class="bs-section no-print">
+      <div class="bs-sec-title">Quote Number</div>
+      <div class="bs-qno-row" id="bs-qno-row">
+        <div class="bs-fg"><label>Co.</label><input value="BS" style="width:55px;font-weight:700;text-align:center;background:#eceff1" readonly/></div>
+        <span style="padding-bottom:9px;font-size:16px;font-weight:700;color:var(--text-muted)">-</span>
+        <div class="bs-fg"><label>Location</label>
+          <select id="bs-qno-loc">
+            <option value="LU">LU — La Union</option><option value="BG">BG — Baguio</option>
+            <option value="ML">ML — Manila</option><option value="SB">SB — Subic</option>
+            <option value="CL">CL — Clark</option><option value="DA">DA — Davao</option>
+            <option value="CB">CB — Cebu</option><option value="IG">IG — Ilocos</option>
+            <option value="OT">OT — Other</option>
+          </select>
+        </div>
+        <span style="padding-bottom:9px;font-size:16px;font-weight:700;color:var(--text-muted)">-</span>
+        <div class="bs-fg"><label>Lead Source</label>
+          <select id="bs-qno-method">
+            <option value="FB">FB — Facebook</option><option value="VB">VB — Viber</option>
+            <option value="OF">OF — In Office</option><option value="RF">RF — Referral</option>
+            <option value="IG">IG — Instagram</option><option value="WB">WB — Website</option>
+            <option value="EM">EM — Email</option><option value="TK">TK — TikTok</option>
+            <option value="EX">EX — Exhibition</option>
+          </select>
+        </div>
+        <span style="padding-bottom:9px;font-size:16px;font-weight:700;color:var(--text-muted)">-</span>
+        <div class="bs-fg"><label>Date</label><input type="date" id="bs-qno-date" style="max-width:165px"/></div>
+        <span style="padding-bottom:9px;font-size:16px;font-weight:700;color:var(--text-muted)">-</span>
+        <div class="bs-fg"><label>Client #</label><input type="number" id="bs-qno-seq" value="1" min="1" max="999" style="max-width:70px;text-align:center"/></div>
+        <span style="padding-bottom:9px;font-size:16px;font-weight:700;color:var(--text-muted)">→</span>
+        <div class="bs-qno-box" id="bs-qno-preview">BS-LU-FB-YYMMDD-001</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-end;margin-top:10px;flex-wrap:wrap">
+        <div class="bs-fg" style="flex:1;max-width:320px"><label>Quote Number</label>
+          <input type="text" id="bs-quote-no" placeholder="Auto-generated" readonly style="background:var(--surface2)"/>
+        </div>
+        <div class="bs-fg"><label>Salesperson</label><input type="text" id="bs-salesperson" placeholder="Name"/></div>
+        <div class="bs-fg"><label>Project Type</label>
+          <select id="bs-purpose">
+            <option>Fabrication</option><option>Installation</option><option>Repair / Maintenance</option>
+            <option>Custom Design</option><option>Government / Bidding</option><option>Other</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Client Info -->
+    <div class="bs-section">
+      <div class="bs-sec-title">Client Information</div>
+      <div class="bs-fg-grid">
+        <div class="bs-fg full"><label>Client Name</label><input id="bs-client-name" placeholder="Full name"/></div>
+        <div class="bs-fg full"><label>Company / Business Name</label><input id="bs-client-company" placeholder="Company name (if applicable)"/></div>
+        <div class="bs-fg full"><label>Project Address / Site</label><input id="bs-client-address" placeholder="Full address"/></div>
+        <div class="bs-fg"><label>Phone / Email</label><input id="bs-client-contact" placeholder="Contact details"/></div>
+        <div class="bs-fg"><label>TIN (optional)</label><input id="bs-client-tin" placeholder="Tax identification number"/></div>
+      </div>
+    </div>
+
+    <!-- Add Item -->
+    <div class="bs-section no-print">
+      <div class="bs-sec-title">Add Item</div>
+      <div class="bs-add-panel">
+        <div class="bs-fg">
+          <label>Search Product</label>
+          <div class="bs-search-wrap">
+            <input type="text" id="bs-product-search" placeholder="Type to search…" autocomplete="off"/>
+            <div class="bs-search-dropdown" id="bs-search-dd"></div>
+          </div>
+          <input type="hidden" id="bs-selected-code"/>
+        </div>
+        <div class="bs-fg"><label>W (mm)</label><input type="number" id="bs-dim-w" placeholder="—"/></div>
+        <div class="bs-fg"><label>D (mm)</label><input type="number" id="bs-dim-d" placeholder="—"/></div>
+        <div class="bs-fg"><label>H (mm)</label><input type="number" id="bs-dim-h" placeholder="—"/></div>
+        <div class="bs-fg"><label>Qty</label><input type="number" id="bs-dim-qty" value="1" min="1"/></div>
+        <div class="bs-fg"><label>Unit Price (₱)</label>
+          <input type="number" id="bs-unit-price" placeholder="Auto" style="background:#fffbf0;border-color:#f0d080"/>
+          <div id="bs-price-preview" style="font-size:10px;color:#37474f;font-weight:600;margin-top:2px"></div>
+        </div>
+        <div class="bs-fg"><label>&nbsp;</label><button class="btn-primary" id="bs-add-item-btn">+ Add</button></div>
+      </div>
+      <p style="font-size:11px;color:var(--text-muted)">💡 Leave Unit Price blank for auto-calc from dimensions × base rate, or enter to override.</p>
+    </div>
+
+    <!-- Items Table -->
+    <div class="bs-section">
+      <div class="bs-sec-title" style="display:flex;justify-content:space-between">
+        <span>Quotation Items</span>
+        <span id="bs-item-count" style="font-size:11px;background:#cfd8dc;color:#37474f;padding:2px 8px;border-radius:10px;font-weight:700">0 items</span>
+      </div>
+      <div id="bs-empty-state" style="text-align:center;padding:28px;color:var(--text-muted)">No items added yet.</div>
+      <div id="bs-table-wrap" style="display:none;overflow-x:auto">
+        <table class="bs-items-table">
+          <thead><tr>
+            <th style="width:4%">#</th>
+            <th style="width:42%">Description</th>
+            <th style="width:13%">Dimensions</th>
+            <th style="width:5%;text-align:center">Qty</th>
+            <th style="width:8%;text-align:center">Unit</th>
+            <th style="width:13%;text-align:right">Unit Price</th>
+            <th style="width:13%;text-align:right">Amount</th>
+            <th style="width:4%" class="no-print"></th>
+          </tr></thead>
+          <tbody id="bs-items-body"></tbody>
+        </table>
+      </div>
+      <!-- Totals -->
+      <div id="bs-totals-wrap" style="display:none">
+        <div class="bs-totals-box">
+          <table class="bs-totals-tbl">
+            <tr><td>Subtotal</td><td id="bs-subtotal-display">₱0</td></tr>
+            <tr id="bs-disc-row" style="display:none"><td style="color:#e65100;font-weight:600">Discount (<span id="bs-disc-pct-lbl">0</span>%)</td><td id="bs-disc-display" style="color:#e65100;font-weight:600">–₱0</td></tr>
+            <tr id="bs-vat-row" style="display:none"><td>VAT (12%)</td><td id="bs-vat-display">₱0</td></tr>
+            <tr class="grand"><td>GRAND TOTAL</td><td id="bs-grand-display">₱0</td></tr>
+            <tr><td style="color:#2e7d32;font-weight:600">Downpayment (<span id="bs-dp-pct">65</span>%)</td><td id="bs-dp-display" style="color:#2e7d32;font-weight:600">₱0</td></tr>
+            <tr><td style="color:var(--text-muted)">Balance on Delivery</td><td id="bs-bal-display" style="color:var(--text-muted)">₱0</td></tr>
+          </table>
+        </div>
+        <div class="no-print" style="display:flex;gap:14px;align-items:center;margin-top:7px;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+            <input type="checkbox" id="bs-vat-check"/> Apply VAT (12%)
+          </label>
+          <div style="display:flex;align-items:center;gap:5px;font-size:12px">
+            Discount:
+            <select id="bs-disc-sel" style="width:75px;padding:3px;font-size:12px">
+              <option value="0">None</option><option value="5">5%</option>
+              <option value="10">10%</option><option value="15">15%</option>
+              <option value="20">20%</option>
+            </select>
+          </div>
+          <div style="display:flex;align-items:center;gap:5px;font-size:12px">
+            DP %: <input type="number" id="bs-dp-pct-input" value="65" min="0" max="100" style="width:55px;padding:3px;font-size:12px"/>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Terms -->
+    <div class="bs-section">
+      <div class="bs-sec-title">Terms &amp; Conditions</div>
+      <div class="bs-terms-grid">
+        <div class="bs-terms-block">
+          <h4>Payment Terms</h4>
+          <p contenteditable="true" id="bs-term-payment">65% downpayment required before production. Balance due upon delivery.</p>
+        </div>
+        <div class="bs-terms-block">
+          <h4>Delivery</h4>
+          <p contenteditable="true" id="bs-term-delivery">Delivery schedule to be confirmed after downpayment. Estimated 3–6 weeks from production start.</p>
+        </div>
+        <div class="bs-terms-block">
+          <h4>Validity</h4>
+          <p contenteditable="true" id="bs-term-validity">This quotation is valid for 30 days from date of issuance.</p>
+        </div>
+        <div class="bs-terms-block">
+          <h4>Warranty</h4>
+          <p contenteditable="true" id="bs-term-warranty">One (1) year warranty on fabrication workmanship. Excludes normal wear and misuse.</p>
+        </div>
+        <div class="bs-terms-block" style="grid-column:1/-1">
+          <h4>Notes</h4>
+          <p contenteditable="true" id="bs-term-notes">All prices are VAT-exclusive unless stated. Prices are subject to change without prior notice.</p>
+        </div>
+      </div>
+      <!-- Signature -->
+      <div class="bs-sig-row">
+        <div class="bs-sig-box">
+          <div class="bs-sig-name" contenteditable="true">AGENT NAME</div>
+          <small>Sales Representative<br/>Brilliant Steel</small>
+        </div>
+        <div class="bs-sig-box">
+          <div class="bs-sig-name" contenteditable="true">CLIENT NAME</div>
+          <small>Conforme — Signature over Printed Name<br/>Date: _______________</small>
+        </div>
+      </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="bs-section no-print" style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn-secondary" onclick="window.print()">🖨️ Print / Save PDF</button>
+      <button class="btn-primary" id="bs-save-btn">💾 Save Draft</button>
+      <button class="bs-req-approval" id="bs-request-approval-btn">📤 Request for Approval</button>
+    </div>
+  </div>
+  `;
+
+  // ── Quote Builder Logic ──────────────────────────
+  const BS_PRODUCTS = {
+    'Steel Fabrication': [
+      { code:'SF-001', name:'Custom Steel Counter', unit:'unit', baseRate:4500 },
+      { code:'SF-002', name:'Steel Work Table',     unit:'unit', baseRate:3800 },
+      { code:'SF-003', name:'Steel Shelving Unit',  unit:'unit', baseRate:2200 },
+      { code:'SF-004', name:'Steel Cabinet',        unit:'unit', baseRate:5500 },
+      { code:'SF-005', name:'Steel Frame Structure',unit:'set',  baseRate:8000 },
+    ],
+    'Stainless Products': [
+      { code:'SS-001', name:'Stainless Steel Sink',      unit:'unit', baseRate:6000 },
+      { code:'SS-002', name:'Stainless Hood / Exhaust',  unit:'unit', baseRate:7500 },
+      { code:'SS-003', name:'Stainless Wall Panel',      unit:'sqm',  baseRate:1200 },
+      { code:'SS-004', name:'Stainless Prep Table',      unit:'unit', baseRate:4200 },
+      { code:'SS-005', name:'Stainless Grease Trap',     unit:'unit', baseRate:3000 },
+    ],
+    'Aluminum Works': [
+      { code:'AL-001', name:'Aluminum Partition',  unit:'sqm',  baseRate:950  },
+      { code:'AL-002', name:'Aluminum Door Frame', unit:'unit', baseRate:4800 },
+      { code:'AL-003', name:'Aluminum Window',     unit:'unit', baseRate:3500 },
+    ],
+    'Installation': [
+      { code:'IN-001', name:'Installation — Standard',  unit:'lot', baseRate:5000  },
+      { code:'IN-002', name:'Installation — Heavy',     unit:'lot', baseRate:12000 },
+      { code:'IN-003', name:'Site Survey / Inspection', unit:'trip',baseRate:1500  },
+    ],
+  };
+
+  let bsLines = [];
+  let bsRowCount = 0;
+
+  // Quote number builder
+  const buildQno = () => {
+    const loc    = document.getElementById('bs-qno-loc')?.value || 'LU';
+    const method = document.getElementById('bs-qno-method')?.value || 'FB';
+    const dateEl = document.getElementById('bs-qno-date');
+    const seq    = String(document.getElementById('bs-qno-seq')?.value || '1').padStart(3,'0');
+    let datePart = 'YYMMDD';
+    if (dateEl?.value) {
+      const [y,m,d] = dateEl.value.split('-');
+      datePart = `${y.slice(2)}${m}${d}`;
+    }
+    const qno = `BS-${loc}-${method}-${datePart}-${seq}`;
+    const preview = document.getElementById('bs-qno-preview');
+    const qnoField= document.getElementById('bs-quote-no');
+    if (preview) preview.textContent = qno;
+    if (qnoField) qnoField.value = qno;
+    // update print header
+    const phQno = document.getElementById('bs-ph-qno');
+    if (phQno) phQno.textContent = qno;
+    const phDate = document.getElementById('bs-ph-date');
+    if (phDate) phDate.textContent = dateEl?.value ? new Date(dateEl.value+'T00:00:00').toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'}) : '';
+    const phAgent = document.getElementById('bs-ph-agent');
+    if (phAgent) phAgent.textContent = document.getElementById('bs-salesperson')?.value || '';
+    return qno;
+  };
+
+  // Set today's date
+  document.getElementById('bs-qno-date').value = today();
+  buildQno();
+
+  ['bs-qno-loc','bs-qno-method','bs-qno-date','bs-qno-seq'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', buildQno);
+    document.getElementById(id)?.addEventListener('change', buildQno);
+  });
+  document.getElementById('bs-salesperson')?.addEventListener('input', buildQno);
+
+  // Product search
+  const searchEl = document.getElementById('bs-product-search');
+  const dd       = document.getElementById('bs-search-dd');
+  const allProds = Object.entries(BS_PRODUCTS).flatMap(([cat,prods]) => prods.map(p=>({...p,cat})));
+
+  const filterProds = (q) => {
+    const term = q.toLowerCase();
+    const matches = !term ? allProds : allProds.filter(p => p.name.toLowerCase().includes(term) || p.code.toLowerCase().includes(term));
+    if (!matches.length) { dd.innerHTML='<div style="padding:10px;color:var(--text-muted);font-size:12px">No products found</div>'; dd.classList.add('open'); return; }
+    const byCat = {};
+    matches.forEach(p => { if(!byCat[p.cat]) byCat[p.cat]=[]; byCat[p.cat].push(p); });
+    dd.innerHTML = Object.entries(byCat).map(([cat,prods])=>
+      `<div class="bs-sd-group">${cat}</div>` +
+      prods.map(p=>`<div class="bs-sd-item" data-code="${p.code}" data-name="${p.name}" data-unit="${p.unit}" data-rate="${p.baseRate}">
+        ${p.name} <span class="bs-sd-price">₱${p.baseRate.toLocaleString()}/${p.unit}</span></div>`).join('')
+    ).join('');
+    dd.classList.add('open');
+    dd.querySelectorAll('.bs-sd-item').forEach(item => {
+      item.addEventListener('click', () => {
+        document.getElementById('bs-product-search').value = item.dataset.name;
+        document.getElementById('bs-selected-code').value  = item.dataset.code;
+        document.getElementById('bs-unit-price').placeholder = `Auto (₱${Number(item.dataset.rate).toLocaleString()}/${item.dataset.unit})`;
+        document.getElementById('bs-unit-price').dataset.rate = item.dataset.rate;
+        document.getElementById('bs-unit-price').dataset.unit = item.dataset.unit;
+        dd.classList.remove('open');
+        calcPreviewBS();
       });
-      await Notifs.sendToOwner({
-        title: '⚙️ Brilliant Steel Quote Review Requested',
-        body:  `${agentName} requests review of quote for ${name} — ₱${fmt(total)}`,
-        icon:  '⚙️', type: 'quote_review_request'
+    });
+  };
+
+  searchEl?.addEventListener('input', e => filterProds(e.target.value));
+  searchEl?.addEventListener('focus', e => filterProds(e.target.value));
+  document.addEventListener('click', e => { if(!e.target.closest('.bs-search-wrap')) dd.classList.remove('open'); });
+
+  const calcPreviewBS = () => {
+    const w = parseFloat(document.getElementById('bs-dim-w')?.value)||0;
+    const d = parseFloat(document.getElementById('bs-dim-d')?.value)||0;
+    const h = parseFloat(document.getElementById('bs-dim-h')?.value)||0;
+    const qty = parseFloat(document.getElementById('bs-dim-qty')?.value)||1;
+    const override = parseFloat(document.getElementById('bs-unit-price')?.value)||0;
+    const rate     = parseFloat(document.getElementById('bs-unit-price')?.dataset?.rate)||0;
+    let unitPrice = override || (rate && (w||d||h) ? (w*d*h/1e9)*rate + rate : rate);
+    const preview = document.getElementById('bs-price-preview');
+    if (preview) preview.textContent = unitPrice ? `≈ ₱${(unitPrice*qty).toLocaleString(undefined,{maximumFractionDigits:2})}` : '';
+  };
+
+  ['bs-dim-w','bs-dim-d','bs-dim-h','bs-dim-qty','bs-unit-price'].forEach(id =>
+    document.getElementById(id)?.addEventListener('input', calcPreviewBS)
+  );
+
+  const recalcBS = () => {
+    // Group lines by category
+    const catGroups = {};
+    bsLines.forEach(line => {
+      if (!catGroups[line.cat]) catGroups[line.cat] = [];
+      catGroups[line.cat].push(line);
+    });
+    const tbody = document.getElementById('bs-items-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    let grand = 0;
+    Object.entries(catGroups).forEach(([cat, lines]) => {
+      // category header row
+      const catTr = document.createElement('tr'); catTr.className='bs-cat-row';
+      catTr.innerHTML=`<td colspan="8">${cat}</td>`;
+      tbody.appendChild(catTr);
+      let catSubtotal = 0;
+      lines.forEach(line => {
+        catSubtotal += line.amount;
+        grand += line.amount;
+        const tr = document.createElement('tr');
+        tr.dataset.id = line.id;
+        const dimStr = [line.w?`W${line.w}`:null, line.d?`D${line.d}`:null, line.h?`H${line.h}`:null].filter(Boolean).join(' × ');
+        tr.innerHTML = `
+          <td>${bsRowCount}</td>
+          <td><div contenteditable="true" class="bs-desc-edit" data-id="${line.id}">${line.name}</div>${line.notes?`<div style="font-size:11px;color:var(--text-muted);margin-top:1px" contenteditable="true">${line.notes}</div>`:''}</td>
+          <td style="font-size:11px">${dimStr||'—'}</td>
+          <td style="text-align:center"><input type="number" class="bs-qty-inp" value="${line.qty}" min="1" data-id="${line.id}" style="width:50px;text-align:center;border:1.5px solid var(--border);border-radius:4px;padding:3px;font-size:12px"/></td>
+          <td style="text-align:center">${line.unit}</td>
+          <td style="text-align:right">₱${fmt(line.unitPrice)}</td>
+          <td style="text-align:right">₱${fmt(line.amount)}</td>
+          <td class="no-print"><button class="btn-icon" style="color:#c62828;font-size:15px" data-del="${line.id}">✕</button></td>
+        `;
+        tbody.appendChild(tr);
+        // qty change
+        tr.querySelector('.bs-qty-inp').addEventListener('change', e => {
+          const l = bsLines.find(x=>x.id===line.id);
+          if (l) { l.qty=parseFloat(e.target.value)||1; l.amount=l.qty*l.unitPrice; recalcBS(); }
+        });
+        tr.querySelector('[data-del]').addEventListener('click', e => {
+          bsLines = bsLines.filter(x=>x.id!==e.currentTarget.dataset.del); recalcBS();
+        });
       });
-      Notifs.showToast('Review request sent to owner!');
-      renderBrilliantSteel(currentUser, '', 'Request Approval');
+      // subtotal row
+      const stTr = document.createElement('tr'); stTr.className='bs-subtotal-row';
+      stTr.innerHTML=`<td colspan="6">Subtotal — ${cat}</td><td>₱${fmt(catSubtotal)}</td><td class="no-print"></td>`;
+      tbody.appendChild(stTr);
+    });
+
+    // update count
+    document.getElementById('bs-item-count').textContent = `${bsLines.length} item${bsLines.length!==1?'s':''}`;
+    const empty = document.getElementById('bs-empty-state');
+    const tableWrap = document.getElementById('bs-table-wrap');
+    const totalsWrap= document.getElementById('bs-totals-wrap');
+    if (bsLines.length) { empty.style.display='none'; tableWrap.style.display=''; totalsWrap.style.display=''; }
+    else { empty.style.display=''; tableWrap.style.display='none'; totalsWrap.style.display='none'; return; }
+
+    // totals
+    const discPct = parseFloat(document.getElementById('bs-disc-sel')?.value)||0;
+    const vatCheck= document.getElementById('bs-vat-check')?.checked||false;
+    const dpPct   = parseFloat(document.getElementById('bs-dp-pct-input')?.value)||65;
+    const discount = grand * (discPct/100);
+    const afterDisc = grand - discount;
+    const vat = vatCheck ? afterDisc * 0.12 : 0;
+    const grandTotal = afterDisc + vat;
+    const dp  = grandTotal * (dpPct/100);
+    const bal = grandTotal - dp;
+
+    document.getElementById('bs-subtotal-display').textContent = `₱${fmt(grand)}`;
+    document.getElementById('bs-disc-pct-lbl').textContent = discPct;
+    document.getElementById('bs-disc-display').textContent  = `–₱${fmt(discount)}`;
+    document.getElementById('bs-disc-row').style.display    = discPct>0?'':'none';
+    document.getElementById('bs-vat-display').textContent   = `₱${fmt(vat)}`;
+    document.getElementById('bs-vat-row').style.display     = vatCheck?'':'none';
+    document.getElementById('bs-grand-display').textContent = `₱${fmt(grandTotal)}`;
+    document.getElementById('bs-dp-pct').textContent        = dpPct;
+    document.getElementById('bs-dp-display').textContent    = `₱${fmt(dp)}`;
+    document.getElementById('bs-bal-display').textContent   = `₱${fmt(bal)}`;
+
+    return grandTotal;
+  };
+
+  document.getElementById('bs-add-item-btn')?.addEventListener('click', () => {
+    const name = document.getElementById('bs-product-search')?.value?.trim();
+    const code = document.getElementById('bs-selected-code')?.value || '';
+    const unitPrice = parseFloat(document.getElementById('bs-unit-price')?.value)
+      || parseFloat(document.getElementById('bs-unit-price')?.dataset?.rate) || 0;
+    const qty  = parseFloat(document.getElementById('bs-dim-qty')?.value)||1;
+    const w    = document.getElementById('bs-dim-w')?.value || '';
+    const d    = document.getElementById('bs-dim-d')?.value || '';
+    const h    = document.getElementById('bs-dim-h')?.value || '';
+    const unit = document.getElementById('bs-unit-price')?.dataset?.unit || 'unit';
+    if (!name) { Notifs.showToast('Enter a product name','error'); return; }
+    // find category
+    const prod = allProds.find(p=>p.code===code);
+    const cat  = prod?.cat || 'Custom';
+    bsRowCount++;
+    bsLines.push({ id: Date.now().toString(), name, code, cat, w, d, h, qty, unit, unitPrice, amount: qty*unitPrice, notes:'' });
+    recalcBS();
+    // clear
+    document.getElementById('bs-product-search').value = '';
+    document.getElementById('bs-selected-code').value  = '';
+    document.getElementById('bs-unit-price').value     = '';
+    document.getElementById('bs-unit-price').dataset.rate = '';
+    document.getElementById('bs-unit-price').placeholder = 'Auto';
+    document.getElementById('bs-dim-w').value='';
+    document.getElementById('bs-dim-d').value='';
+    document.getElementById('bs-dim-h').value='';
+    document.getElementById('bs-dim-qty').value='1';
+    document.getElementById('bs-price-preview').textContent='';
+  });
+
+  ['bs-vat-check','bs-disc-sel','bs-dp-pct-input'].forEach(id =>
+    document.getElementById(id)?.addEventListener('change', recalcBS)
+  );
+
+  // Save Draft
+  document.getElementById('bs-save-btn')?.addEventListener('click', async () => {
+    const qno = document.getElementById('bs-quote-no')?.value || buildQno();
+    const clientName = document.getElementById('bs-client-name')?.value?.trim() || 'Client';
+    const total = recalcBS() || 0;
+    const s = await db.collection('users').doc(currentUser.uid).get();
+    const agentName = s.exists ? s.data().displayName : currentUser.email;
+    await db.collection('bs_quotes').add({
+      quoteNumber: qno,
+      clientName,
+      clientCompany: document.getElementById('bs-client-company')?.value?.trim()||'',
+      clientAddress: document.getElementById('bs-client-address')?.value?.trim()||'',
+      clientContact: document.getElementById('bs-client-contact')?.value?.trim()||'',
+      clientTin: document.getElementById('bs-client-tin')?.value?.trim()||'',
+      salesperson: document.getElementById('bs-salesperson')?.value?.trim()||'',
+      purpose: document.getElementById('bs-purpose')?.value||'',
+      lines: bsLines,
+      total,
+      status: 'draft',
+      approvalStatus: '',
+      agentName,
+      createdBy: currentUser.uid,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    Notifs.showToast('Quote saved as draft!');
+  });
+
+  // Request for Approval button
+  document.getElementById('bs-request-approval-btn')?.addEventListener('click', async () => {
+    const qno = document.getElementById('bs-quote-no')?.value || buildQno();
+    const clientName = document.getElementById('bs-client-name')?.value?.trim();
+    if (!clientName) { Notifs.showToast('Enter client name before requesting approval','error'); return; }
+    if (!bsLines.length) { Notifs.showToast('Add at least one item','error'); return; }
+    const total = recalcBS() || 0;
+    const filename = `quotation_${clientName.replace(/\s+/g,'_')}_${qno}`;
+    const s = await db.collection('users').doc(currentUser.uid).get();
+    const agentName = s.exists ? s.data().displayName : currentUser.email;
+    // Save quote with pending approval status
+    const docRef = await db.collection('bs_quotes').add({
+      quoteNumber: qno,
+      clientName,
+      clientCompany: document.getElementById('bs-client-company')?.value?.trim()||'',
+      clientAddress: document.getElementById('bs-client-address')?.value?.trim()||'',
+      clientContact: document.getElementById('bs-client-contact')?.value?.trim()||'',
+      salesperson: document.getElementById('bs-salesperson')?.value?.trim()||'',
+      purpose: document.getElementById('bs-purpose')?.value||'',
+      lines: bsLines, total,
+      status: 'sent',
+      approvalStatus: 'pending_review',
+      filename,
+      agentName,
+      createdBy: currentUser.uid,
+      reviewRequestedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    // Create approval request record
+    await db.collection('approval_requests').add({
+      type: 'bs_quote',
+      quoteId: docRef.id,
+      quoteNumber: qno,
+      clientName,
+      total,
+      filename,
+      agentName,
+      agentId: currentUser.uid,
+      status: 'pending',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    // Notify president
+    await Notifs.sendToOwner({
+      title: '⚙️ Brilliant Steel Quote — Approval Needed',
+      body: `${agentName} submitted "${qno}" for ${clientName} — ₱${fmt(total)}`,
+      icon: '⚙️', type: 'quote_review_request'
+    });
+    Notifs.showToast(`Approval request sent! File: ${filename}`);
+    // Switch to Quotations Summary
+    loadBSContent(currentUser, currentRole, 'Quotations Summary');
+    const activeBtns = document.querySelectorAll('.subtab-btn');
+    activeBtns.forEach(b => b.classList.toggle('active', b.dataset.sub === 'Quotations Summary'));
+  });
+}
+
+// ── Brilliant Steel Quotations Summary ────────────
+async function renderBSQuotationsSummary(container, currentUser, currentRole) {
+  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
+  const snap = isPrivileged
+    ? await db.collection('bs_quotes').get()
+    : await db.collection('bs_quotes').where('createdBy','==',currentUser.uid).get();
+  const all = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+  const forApproval = all.filter(q=>q.approvalStatus==='pending_review'||q.status==='sent');
+  const approved    = all.filter(q=>q.approvalStatus==='approved');
+  const rejected    = all.filter(q=>q.approvalStatus==='rejected');
+
+  const renderList = (quotes) => !quotes.length
+    ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">📋</div><h4>No quotations here</h4></div>'
+    : `<div class="card"><div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Quote #</th><th>Client</th><th>Total</th><th>Agent</th><th>Status</th>${isPrivileged?'<th>Action</th>':''}</tr></thead>
+        <tbody>${quotes.map(q=>`<tr>
+          <td><code>${q.quoteNumber||q.id.slice(-8)}</code></td>
+          <td><strong>${q.clientName||'—'}</strong><div style="font-size:11px;color:var(--text-muted)">${q.clientCompany||''}</div></td>
+          <td>₱${fmt(q.total)}</td>
+          <td>${q.agentName||'—'}</td>
+          <td><span class="badge ${q.approvalStatus==='approved'?'badge-green':q.approvalStatus==='rejected'?'badge-red':'badge-orange'}">${q.approvalStatus||q.status||'draft'}</span></td>
+          ${isPrivileged?`<td style="display:flex;gap:6px">
+            ${q.approvalStatus==='pending_review'?`
+              <button class="btn-primary btn-sm bs-approve-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${q.clientName}" data-qno="${q.quoteNumber}">✅ Approve</button>
+              <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${q.clientName}" data-qno="${q.quoteNumber}">❌ Reject</button>
+            `:q.approvalStatus==='approved'?'<span style="color:var(--success);font-size:12px">Approved</span>':'<span style="color:var(--danger);font-size:12px">Rejected</span>'}
+          </td>`:''}
+        </tr>`).join('')}</tbody>
+      </table></div></div>`;
+
+  container.innerHTML = `
+    <div class="subtab-bar" style="margin-top:0">
+      <button class="subtab-btn active" data-qsub="for-approval">For Approval (${forApproval.length})</button>
+      <button class="subtab-btn" data-qsub="approved">Approved (${approved.length})</button>
+      <button class="subtab-btn" data-qsub="rejected">Rejected (${rejected.length})</button>
+    </div>
+    <div id="qs-content">${renderList(forApproval)}</div>
+  `;
+
+  const qsContent = container.querySelector('#qs-content');
+  container.querySelectorAll('[data-qsub]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      container.querySelectorAll('[data-qsub]').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      const which = btn.dataset.qsub;
+      qsContent.innerHTML = renderList(which==='for-approval'?forApproval:which==='approved'?approved:rejected);
+      bindQuoteActions(qsContent, currentUser, currentRole, container);
     });
   });
+  bindQuoteActions(qsContent, currentUser, currentRole, container);
+}
+
+function bindQuoteActions(el, currentUser, currentRole, container) {
+  el.querySelectorAll('.bs-approve-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      const b = e.currentTarget;
+      await db.collection('bs_quotes').doc(b.dataset.id).update({ approvalStatus: 'approved', approvedAt: firebase.firestore.FieldValue.serverTimestamp(), approvedBy: currentUser.uid });
+      await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'approved'})));
+      if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'✅ Quote Approved!', body:`Quotation "${b.dataset.qno}" for ${b.dataset.name} was approved.`, icon:'✅', type:'quote_approved' });
+      Notifs.showToast('Quote approved!');
+      renderBSQuotationsSummary(container, currentUser, currentRole);
+    });
+  });
+  el.querySelectorAll('.bs-reject-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      const b = e.currentTarget;
+      await db.collection('bs_quotes').doc(b.dataset.id).update({ approvalStatus: 'rejected', rejectedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'rejected'})));
+      if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'❌ Quote Not Approved', body:`Quotation "${b.dataset.qno}" for ${b.dataset.name} was not approved.`, icon:'❌', type:'quote_rejected' });
+      Notifs.showToast('Quote rejected.');
+      renderBSQuotationsSummary(container, currentUser, currentRole);
+    });
+  });
+}
+
+// ── Brilliant Steel Client Data ────────────────────
+function renderBSClientData(container) {
+  const sheetId = window.SHEETS_CONFIG?.SPREADSHEET_ID;
+  const sheetUrl = sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit?usp=sharing` : '';
+  container.innerHTML = `
+    <div class="page-header"><h2>👤 Client Data</h2>
+      ${sheetUrl?`<a href="${sheetUrl}" target="_blank" class="btn-primary btn-sm">↗ Open in Google Sheets</a>`:''}
+    </div>
+    ${sheetUrl?`
+      <div class="card" style="margin-bottom:14px">
+        <div class="card-body" style="padding:0;border-radius:10px;overflow:hidden;position:relative">
+          <iframe src="${sheetUrl.replace('/edit','/htmlview')}&rm=minimal"
+            style="width:100%;height:480px;border:none"
+            title="Brilliant Steel Clients"></iframe>
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);text-align:center">Data from Google Sheets · <a href="${sheetUrl}" target="_blank">Edit directly in Sheets ↗</a></p>
+    `:`
+      <div class="card"><div class="card-body">
+        <div class="empty-state"><div class="empty-icon">📊</div>
+          <h4>Google Sheets Not Configured</h4>
+          <p>Set <code>SPREADSHEET_ID</code> in js/config.js and enable <code>SHEETS_CONFIG.ENABLED = true</code>.</p>
+        </div>
+      </div></div>
+    `}
+  `;
 }
 
 // ══════════════════════════════════════════════════
@@ -838,7 +1458,7 @@ async function renderApprovalRequest(container, currentUser) {
 // ══════════════════════════════════════════════════
 function renderQuoteList(container, currentUser, currentRole, brand) {
   const collection = brand === 'brilliant-steel' ? 'bs_quotes' : 'quotes';
-  const isPrivileged = currentRole === 'owner' || currentRole === 'manager';
+  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
 
   container.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
@@ -1053,7 +1673,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
   const collection = brand === 'brilliant-steel' ? 'bs_clients' : (brand === 'design' ? 'design_clients' : 'sales_clients');
   const snap = await db.collection(collection).orderBy('createdAt','desc').get();
   const clients = snap.docs.map(d => ({id:d.id,...d.data()}));
-  const canAdd = currentRole==='owner'||currentRole==='manager'||currentRole==='agent';
+  const canAdd = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='agent';
 
   container.innerHTML = `
     ${canAdd?`<div style="text-align:right;margin-bottom:12px"><button class="btn-primary btn-sm" id="add-client-btn">+ Add Client</button></div>`:''}
@@ -1151,7 +1771,7 @@ async function renderDocCollection(container, collection, title, currentUser, cu
 //  SHARED: File Collection (upload/view)
 // ══════════════════════════════════════════════════
 function renderFileCollection(title, id, currentRole) {
-  const canUpload = currentRole==='owner'||currentRole==='manager'||currentRole==='employee'||currentRole==='agent';
+  const canUpload = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='employee'||currentRole==='agent';
   return `
     <div class="card">
       <div class="card-header"><h3>${title}</h3></div>
@@ -1255,3 +1875,127 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
     });
   });
 }
+
+// ══════════════════════════════════════════════════
+//  FILES MODULE — shared helper
+// ══════════════════════════════════════════════════
+window.renderFileCollection = function(title, containerId, currentRole) {
+  return `
+    <div class="card">
+      <div class="card-header">
+        <h3>📁 ${title}</h3>
+        <button class="btn-primary btn-sm" id="upload-btn-${containerId}">+ Upload File</button>
+      </div>
+      <div class="card-body" id="files-list-${containerId}">
+        <div class="loading-placeholder">Loading files…</div>
+      </div>
+    </div>
+  `;
+};
+
+window.bindFileCollection = function(containerId, currentUser, dept, scope, filterUid) {
+  const listEl = document.getElementById(`files-list-${containerId}`);
+  const uploadBtn = document.getElementById(`upload-btn-${containerId}`);
+  const collection = `files_${scope.toLowerCase().replace(/\s+/g,'_')}`;
+
+  const loadFiles = async () => {
+    listEl.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+    let snap;
+    if (filterUid) {
+      snap = await db.collection(collection).where('uploadedBy','==',filterUid).get();
+    } else {
+      snap = await db.collection(collection).where('department','==',dept).get();
+    }
+    const files = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    if (!files.length) { listEl.innerHTML='<div class="empty-state" style="padding:20px"><div class="empty-icon">📁</div><h4>No files yet</h4></div>'; return; }
+    listEl.innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Name</th><th>Type</th><th>Uploaded By</th><th>Date</th><th></th></tr></thead>
+      <tbody>${files.map(f=>`<tr>
+        <td><a href="${f.url}" target="_blank" style="color:var(--primary);font-weight:600">${f.name||'File'}</a></td>
+        <td>${f.fileType||'—'}</td>
+        <td>${f.uploaderName||'—'}</td>
+        <td style="font-size:11px;color:var(--text-muted)">${f.createdAt?new Date(f.createdAt.toDate()).toLocaleDateString('en-PH'):''}</td>
+        <td><a href="${f.url}" target="_blank" class="btn-secondary btn-sm">⬇ Download</a></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  };
+
+  loadFiles();
+
+  uploadBtn?.addEventListener('click', () => {
+    openModal('Upload File', `
+      <div class="form-group"><label>File Name / Title</label><input id="fn-title" placeholder="Descriptive name"/></div>
+      <div class="form-group"><label>File Type</label>
+        <select id="fn-type"><option>Document</option><option>Image</option><option>Spreadsheet</option><option>PDF</option><option>Other</option></select>
+      </div>
+      <div id="fn-upload-area"></div>
+    `, `<button class="btn-primary" id="save-fn-btn">Upload</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    let uploadedFile = null;
+    Drive.renderUploadArea('fn-upload-area', r => { uploadedFile = r; }, { label: 'Choose file', dept, subfolder: 'Files' });
+    document.getElementById('save-fn-btn').addEventListener('click', async () => {
+      const s = await db.collection('users').doc(currentUser.uid).get();
+      const uploaderName = s.exists ? s.data().displayName : currentUser.email;
+      await db.collection(collection).add({
+        name: document.getElementById('fn-title').value.trim() || (uploadedFile?.name||'File'),
+        fileType: document.getElementById('fn-type').value,
+        url: uploadedFile?.url || '',
+        department: dept,
+        scope,
+        uploadedBy: currentUser.uid,
+        uploaderName,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      closeModal(); loadFiles();
+    });
+  });
+};
+
+// ── Shared doc collection helper ──────────────────
+window.renderDocCollection = function(container, collection, title, currentUser, currentRole, cfg) {
+  const canAdd = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+  container.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div></div>
+      ${canAdd?`<button class="btn-primary btn-sm" id="add-doc-btn-${collection}">+ Add</button>`:''}
+    </div>
+    <div id="doc-list-${collection}"><div class="loading-placeholder">Loading…</div></div>
+  `;
+  const loadDocs = async () => {
+    const snap = await db.collection(collection).get();
+    const docs = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    const list = document.getElementById(`doc-list-${collection}`);
+    if (!docs.length) { list.innerHTML=`<div class="empty-state" style="padding:20px"><div class="empty-icon">${cfg?.icon||'📄'}</div><h4>No ${title} yet</h4></div>`; return; }
+    list.innerHTML = `<div class="item-list">${docs.map(d=>`
+      <div class="item-card">
+        <div class="item-top"><div class="item-title">${d.title||d.name||'Untitled'}</div>
+          <span class="badge ${statusBadge(d.status)}">${d.status||'active'}</span>
+        </div>
+        <div class="item-meta">
+          ${d.description?`<span>${d.description}</span>`:''}
+          ${d.fileUrl?`<a href="${d.fileUrl}" target="_blank" class="btn-link" style="font-size:11px">📎 View File</a>`:''}
+          ${d.createdAt?`<span style="font-size:11px;color:var(--text-muted)">${new Date(d.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
+        </div>
+      </div>`).join('')}</div>`;
+  };
+  loadDocs();
+  document.getElementById(`add-doc-btn-${collection}`)?.addEventListener('click', () => {
+    openModal(`Add ${title}`, `
+      <div class="form-group"><label>Title</label><input id="gd-title"/></div>
+      <div class="form-group"><label>Description</label><textarea id="gd-desc" rows="3"></textarea></div>
+      <div id="gd-file-area"></div>
+    `, `<button class="btn-primary" id="save-gd-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    let uploadedFile = null;
+    Drive.renderUploadArea('gd-file-area', r => { uploadedFile = r; }, { label: 'Attach file', dept: title, subfolder: collection });
+    document.getElementById('save-gd-btn').addEventListener('click', async () => {
+      await db.collection(collection).add({
+        title: document.getElementById('gd-title').value.trim(),
+        description: document.getElementById('gd-desc').value.trim(),
+        fileUrl: uploadedFile?.url || null,
+        status: 'active',
+        addedBy: currentUser.uid,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      closeModal(); loadDocs();
+    });
+  });
+};
