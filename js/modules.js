@@ -565,19 +565,112 @@ window.renderCashAdvancePage = async function() {
 async function renderCashAdvanceEmployee(c) {
   const snap = await db.collection('cash_advances').where('userId','==',currentUser.uid).orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
   const advances = snap.docs.map(d=>({id:d.id,...d.data()}));
-  const totalBalance = advances.filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
+  const active   = advances.filter(a=>a.status==='approved'&&(a.balance||0)>0);
+  const pending  = advances.filter(a=>a.status==='pending');
+  const totalBalance = active.reduce((s,a)=>s+(a.balance||0),0);
+  const totalMonthly = active.reduce((s,a)=>s+(a.monthlyPayment||0),0);
 
   c.innerHTML = `
     <div class="page-header">
       <h2>💸 Cash Advance</h2>
       <button class="btn-primary btn-sm" id="new-ca-btn">+ Request</button>
     </div>
-    ${totalBalance>0?`<div class="alert-banner alert-warn"><span>Outstanding Balance: <strong>₱${fmtN(totalBalance)}</strong></span></div>`:''}
+    ${totalBalance>0?`
+    <div class="kpi-row" style="margin-bottom:14px">
+      <div class="kpi-card red"><div class="kpi-label">Outstanding Balance</div><div class="kpi-value" style="font-size:15px">&#8369;${fmtN(totalBalance)}</div></div>
+      <div class="kpi-card warn"><div class="kpi-label">Monthly Due</div><div class="kpi-value" style="font-size:15px">&#8369;${fmtN(totalMonthly)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Active Loans</div><div class="kpi-value">${active.length}</div></div>
+    </div>`:''}
+    ${pending.length?`<div class="alert-banner alert-warn" style="margin-bottom:12px"><span>&#x23F3; You have <strong>${pending.length}</strong> pending request${pending.length>1?'s':''} awaiting approval.</span></div>`:''}
+    <div class="subtab-bar" id="ca-tabs" style="margin-bottom:14px">
+      <button class="subtab-btn active" data-sub="active">Active Loans</button>
+      <button class="subtab-btn" data-sub="all">All Records</button>
+    </div>
     <div id="ca-list"></div>
   `;
 
-  renderCAList(advances, document.getElementById('ca-list'), false);
+  const renderTab = (sub) => {
+    const list = sub === 'active'
+      ? advances.filter(a => a.status === 'approved' && (a.balance||0) > 0)
+      : advances;
+    renderCAEmployeeCards(list, document.getElementById('ca-list'));
+  };
+
+  renderTab('active');
   document.getElementById('new-ca-btn').addEventListener('click', () => openCashAdvanceModal());
+  c.querySelectorAll('#ca-tabs .subtab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      c.querySelectorAll('#ca-tabs .subtab-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      renderTab(btn.dataset.sub);
+    });
+  });
+}
+
+function renderCAEmployeeCards(advances, container) {
+  if (!advances.length) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">&#x1F4B8;</div><h4>No records here</h4><p style="color:var(--text-muted);font-size:13px">Active loans will appear here once approved.</p></div>';
+    return;
+  }
+  container.innerHTML = advances.map(a => {
+    const balance  = typeof a.balance !== 'undefined' ? a.balance : a.amount;
+    const totalPay = a.totalPayable || a.amount || 0;
+    const paidAmt  = Math.max(0, totalPay - (balance||0));
+    const pct      = totalPay ? Math.min(100, Math.round((paidAmt/totalPay)*100)) : 0;
+    const statusColor = a.status==='approved'?'var(--success)':a.status==='paid'?'var(--primary-light)':a.status==='rejected'?'var(--danger)':'var(--warning)';
+    const statusLabel = a.status==='approved'&&(balance||0)>0?'Active':a.status==='paid'?'Paid Off':a.status==='pending'?'Pending Approval':'Rejected';
+    const payments = a.payments || [];
+    const payRows = payments.map((p,i)=>`
+      <tr>
+        <td style="padding:6px 8px;font-size:12px;color:var(--text-muted)">#${i+1}</td>
+        <td style="padding:6px 8px;font-size:12px">${p.date||'&#x2014;'}</td>
+        <td style="padding:6px 8px;font-size:13px;font-weight:700;color:var(--success)">&#8369;${fmtN(p.amount)}</td>
+      </tr>`).join('');
+    return `
+    <div class="ca-card" style="margin-bottom:14px">
+      <div class="ca-card-header">
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <div style="font-size:18px;font-weight:800;color:var(--text)">&#8369;${fmtN(a.amount)}</div>
+          <div style="font-size:11px;color:var(--text-muted)">${a.date||''} &middot; ${a.terms||1}-month plan</div>
+        </div>
+        <span style="background:${statusColor}1a;color:${statusColor};border:1px solid ${statusColor}44;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap">${statusLabel}</span>
+      </div>
+      <div class="ca-card-body">
+        <div class="ca-detail"><span>Reason</span><span>${a.reason||'&#x2014;'}</span></div>
+        <div class="ca-detail"><span>Terms</span><span>${a.terms||1} month${(a.terms||1)>1?'s':''} &middot; ${a.interest||0}% interest/mo</span></div>
+        <div class="ca-detail"><span>Monthly Payment</span><strong style="color:var(--primary-light)">&#8369;${fmtN(a.monthlyPayment)}</strong></div>
+        <div class="ca-detail"><span>Total Payable</span><span>&#8369;${fmtN(totalPay)}</span></div>
+        ${a.status==='approved'||a.status==='paid'?`
+        <div style="margin-top:12px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px;color:var(--text-muted)">
+            <span>Paid: <strong style="color:var(--success)">&#8369;${fmtN(paidAmt)}</strong></span>
+            <span>Balance: <strong style="color:${(balance||0)>0?'var(--danger)':'var(--success)'}">&#8369;${fmtN(balance||0)}</strong></span>
+          </div>
+          <div class="kpi-bar-track" style="height:8px;border-radius:4px">
+            <div class="kpi-bar-fill" style="width:${pct}%;background:${pct>=100?'var(--success)':'var(--primary-light)'};border-radius:4px;transition:width 0.4s"></div>
+          </div>
+          <div style="text-align:right;font-size:11px;color:var(--text-muted);margin-top:3px">${pct}% paid</div>
+        </div>`:''}
+        ${payments.length?`
+        <div style="margin-top:14px">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:8px">Payment History</div>
+          <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse">
+              <thead><tr style="background:var(--s2)">
+                <th style="padding:6px 8px;font-size:11px;color:var(--text-muted);text-align:left;font-weight:600">#</th>
+                <th style="padding:6px 8px;font-size:11px;color:var(--text-muted);text-align:left;font-weight:600">Date</th>
+                <th style="padding:6px 8px;font-size:11px;color:var(--text-muted);text-align:left;font-weight:600">Amount Paid</th>
+              </tr></thead>
+              <tbody>${payRows}</tbody>
+            </table>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);text-align:right;margin-top:4px">${payments.length} payment${payments.length>1?'s':''} recorded</div>
+        </div>`:''}
+        ${a.status==='pending'?`<div style="margin-top:10px;font-size:12px;color:var(--text-muted);text-align:center;padding:8px;background:var(--s2);border-radius:6px">&#x23F3; Waiting for president approval</div>`:''}
+        ${a.status==='rejected'?`<div style="margin-top:10px;font-size:12px;color:var(--danger);text-align:center;padding:8px;background:rgba(255,69,58,0.06);border-radius:6px">&#x2715; This request was not approved</div>`:''}
+      </div>
+    </div>`;
+  }).join('');
 }
 
 async function renderCashAdvanceAdmin(c) {
