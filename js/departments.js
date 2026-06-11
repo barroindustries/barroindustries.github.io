@@ -279,10 +279,24 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
       ${t.department?`<span class="badge badge-gray">🗂 ${t.department}</span>`:''}
     </div>
     <p style="font-size:14px;line-height:1.6;margin-bottom:12px;white-space:pre-wrap">${t.description||'No description.'}</p>
-    <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;display:flex;gap:12px;flex-wrap:wrap">
+    <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap">
       ${t.assignedToNames?.length?`<span>👥 <strong>${t.assignedToNames.join(', ')}</strong></span>`:''}
       ${t.dueDate?`<span>📅 Due: <strong>${t.dueDate}</strong></span>`:''}
       ${t.createdByName?`<span>🖊 By: ${t.createdByName}</span>`:''}
+    </div>
+
+    <!-- ── Current Standing ── -->
+    <div style="background:rgba(255,159,10,0.08);border:1.5px solid rgba(255,159,10,0.28);border-radius:10px;padding:12px 14px;margin-bottom:14px">
+      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,159,10,0.9);margin-bottom:6px">📍 Current Standing</div>
+      ${t.currentStanding
+        ? `<p style="font-size:13px;line-height:1.5;margin:0 0 ${canEdit?'10px':'0'};color:var(--text)">${t.currentStanding}</p>`
+        : `<p style="font-size:12px;color:var(--text-muted);margin:0 0 ${canEdit?'10px':'0'}">No standing set yet.</p>`}
+      ${canEdit?`<div style="display:flex;gap:6px">
+        <input id="cs-input" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"
+          placeholder="e.g. Awaiting materials from supplier…"
+          value="${(t.currentStanding||'').replace(/"/g,'&quot;')}"/>
+        <button class="btn-primary btn-sm" id="cs-save-btn">Set</button>
+      </div>`:''}
     </div>
 
     ${canEdit?`<div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:14px">
@@ -326,6 +340,25 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   `);
 
   renderComments('tasks',taskId,'task-comments-wrap',currentUser);
+
+  // Current Standing save
+  document.getElementById('cs-save-btn')?.addEventListener('click', async () => {
+    const val = document.getElementById('cs-input').value.trim();
+    const uSnap = await db.collection('users').doc(currentUser.uid).get();
+    const actorName = uSnap.exists ? uSnap.data().displayName : currentUser.email;
+    await db.collection('tasks').doc(taskId).update({
+      currentStanding: val,
+      lastModifiedBy: currentUser.uid, lastModifiedByName: actorName,
+      lastModifiedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await notifyTaskInvolved(t, {
+      title: '📍 Task Standing Updated',
+      body: `"${t.title}" — ${val||'(cleared)'}`,
+      icon: '📍', type: 'task_standing'
+    }, currentUser.uid);
+    Notifs.showToast('Standing updated!');
+    closeModal(); renderTasks(currentUser, currentRole, t.department);
+  });
 
   // Load employees for designate
   if (isAdmin) {
@@ -826,44 +859,82 @@ window.renderComments = async function(collection, docId, containerId, currentUs
   const snap = await db.collection(collection).doc(docId).collection('comments').orderBy('createdAt').get();
   const comments = snap.docs.map(d => ({id:d.id,...d.data()}));
 
+  const isImage = url => url && /\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(url);
+
   container.innerHTML = `
     <div class="comments-section">
-      <h4>💬 Comments (${comments.length})</h4>
+      <h4>💬 Messages (${comments.length})</h4>
       <div class="comment-list" id="clist-${docId}">
         ${comments.length===0
-          ? '<div style="font-size:13px;color:var(--text-muted);padding:8px">No comments yet.</div>'
+          ? '<div style="font-size:13px;color:var(--text-muted);padding:8px">No messages yet.</div>'
           : comments.map(c => `
             <div class="comment-item">
               <div class="comment-header">
                 <span class="comment-author">${c.authorName||'User'}</span>
-                <span class="comment-time">${c.createdAt?new Date(c.createdAt.toDate()).toLocaleString():''}</span>
+                <span class="comment-time">${c.createdAt?new Date(c.createdAt.toDate()).toLocaleString('en-PH'):''}</span>
               </div>
-              <div class="comment-text">${c.text}</div>
+              ${c.text?`<div class="comment-text">${c.text}</div>`:''}
+              ${c.fileUrl ? (isImage(c.fileUrl)
+                ? `<div style="margin-top:6px"><img src="${c.fileUrl}" alt="${c.fileName||'image'}" style="max-width:220px;max-height:160px;border-radius:8px;cursor:pointer" onclick="window.open('${c.fileUrl}','_blank')"/></div>`
+                : `<div style="margin-top:6px"><a href="${c.fileUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--primary-light);text-decoration:none;background:var(--surface2);border-radius:8px;padding:5px 10px">📎 ${c.fileName||'Attachment'}</a></div>`
+              ) : ''}
             </div>`).join('')}
       </div>
-      <div class="comment-input-row">
-        <input id="comment-in-${docId}" placeholder="Write a comment…"/>
+      <div id="comment-file-preview-${docId}" style="font-size:11px;color:var(--primary-light);margin-bottom:4px;min-height:16px"></div>
+      <div class="comment-input-row" style="display:flex;gap:6px;align-items:center">
+        <input id="comment-in-${docId}" placeholder="Write a message…" style="flex:1"/>
+        <label for="comment-file-${docId}" class="btn-secondary btn-sm" style="cursor:pointer;padding:7px 10px;margin:0" title="Attach file">📎</label>
+        <input type="file" id="comment-file-${docId}" style="display:none"
+          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"/>
         <button class="btn-primary btn-sm" id="comment-send-${docId}">Send</button>
       </div>
     </div>
   `;
 
+  document.getElementById(`comment-file-${docId}`)?.addEventListener('change', e => {
+    const f = e.target.files?.[0];
+    const prev = document.getElementById(`comment-file-preview-${docId}`);
+    if (prev) prev.textContent = f ? `📎 ${f.name}` : '';
+  });
+
   const sendComment = async () => {
-    const input = document.getElementById(`comment-in-${docId}`);
-    const text = input.value.trim();
-    if (!text) return;
+    const input    = document.getElementById(`comment-in-${docId}`);
+    const fileInp  = document.getElementById(`comment-file-${docId}`);
+    const text     = input.value.trim();
+    const file     = fileInp?.files?.[0];
+    if (!text && !file) return;
+
+    const sendBtn = document.getElementById(`comment-send-${docId}`);
+    if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '…'; }
+
     const s = await db.collection('users').doc(currentUser.uid).get();
     const name = s.exists ? s.data().displayName : currentUser.email;
+
+    let fileUrl = null, fileName = null;
+    if (file) {
+      try {
+        const path = `task-comments/${docId}/${Date.now()}_${file.name}`;
+        const ref  = storage.ref(path);
+        await ref.put(file);
+        fileUrl  = await ref.getDownloadURL();
+        fileName = file.name;
+      } catch(err) { Notifs.showToast('File upload failed','error'); if(sendBtn){sendBtn.disabled=false;sendBtn.textContent='Send';} return; }
+    }
+
     await db.collection(collection).doc(docId).collection('comments').add({
-      text, authorId: currentUser.uid, authorName: name,
+      text: text || '', authorId: currentUser.uid, authorName: name,
+      fileUrl: fileUrl || null, fileName: fileName || null,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     input.value = '';
+    if (fileInp) fileInp.value = '';
+    const prev = document.getElementById(`comment-file-preview-${docId}`);
+    if (prev) prev.textContent = '';
     renderComments(collection, docId, containerId, currentUser);
   };
 
   document.getElementById(`comment-send-${docId}`)?.addEventListener('click', sendComment);
-  document.getElementById(`comment-in-${docId}`)?.addEventListener('keydown', e => { if(e.key==='Enter') sendComment(); });
+  document.getElementById(`comment-in-${docId}`)?.addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey) sendComment(); });
 };
 
 // ══════════════════════════════════════════════════
@@ -1012,15 +1083,28 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               <td style="color:var(--danger)">-₱${fmt(h.deductions)}</td>
               <td>₱${fmt(h.netPay)}</td>
               <td><strong>₱${fmt(h.finalPay)}</strong></td>
-              ${isRealPresident(currentUser)?`<td><button class="btn-secondary btn-sm hist-edit-btn" data-id="${h.id}" title="Edit">✎</button></td>`:''}
+              ${isRealPresident(currentUser)?`<td style="white-space:nowrap">
+                <button class="btn-secondary btn-sm hist-edit-btn" data-id="${h.id}" title="Edit">✎</button>
+                <button class="btn-danger btn-sm hist-del-btn" data-id="${h.id}" title="Delete" style="margin-left:4px">✕</button>
+              </td>`:''}
             </tr>`).join('')}</tbody>
           </table></div>`}
       </div>
     </div>
   `;
 
-  // ── History edit (president only) ───────────────
+  // ── History edit + delete (president only) ──────
   if (isRealPresident(currentUser)) {
+    container.querySelectorAll('.hist-del-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const rec = history.find(h => h.id === btn.dataset.id);
+        if (!confirm(`Delete payroll record for ${rec?.userName||'?'} (${rec?.month||'?'})? This cannot be undone.`)) return;
+        await db.collection('salary_history').doc(btn.dataset.id).delete();
+        Notifs.showToast('Record deleted');
+        loadFinanceContent(currentUser, currentRole, 'Payroll');
+      });
+    });
+
     container.querySelectorAll('.hist-edit-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const hid = btn.dataset.id;

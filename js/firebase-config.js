@@ -16,6 +16,9 @@ const firebaseConfig = {
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
 
+// Expose config for secondary app (HR worker account creation)
+window.firebaseConfig = firebaseConfig;
+
 // Global references
 const auth = firebase.auth();
 const db   = firebase.firestore();

@@ -110,8 +110,8 @@
       </div>
       <form id="login-form" class="login-form" autocomplete="on">
         <div class="form-group">
-          <label>Email Address</label>
-          <input type="email" id="email" placeholder="yourname@barroindustries.com" required autocomplete="email"/>
+          <label>Email or Username</label>
+          <input type="text" id="email" placeholder="username  or  email@barroindustries.com" required autocomplete="username email"/>
         </div>
         <div class="form-group">
           <label>Password</label>
@@ -188,7 +188,10 @@
       <div class="sidebar-user" id="sidebar-user">
         <div class="sidebar-avatar" id="sidebar-avatar">?</div>
         <div class="sidebar-user-info">
-          <div class="sidebar-user-name" id="sidebar-user-name">Loading…</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div class="sidebar-user-name" id="sidebar-user-name">Loading…</div>
+            <button class="btn-logout-inline" id="logout-btn" title="Sign Out"><i data-lucide="log-out"></i></button>
+          </div>
           <div class="sidebar-user-role" id="sidebar-user-role">—</div>
           <div class="sidebar-user-dept" id="sidebar-user-dept"></div>
         </div>
@@ -198,11 +201,6 @@
     <nav class="sidebar-nav" id="sidebar-nav">
       <!-- Populated by JS based on role/department -->
     </nav>
-
-    <div class="sidebar-footer">
-      <button class="sidebar-profile-btn" id="sidebar-profile-btn"><i data-lucide="settings-2"></i> My Profile</button>
-      <button class="btn-logout" id="logout-btn"><i data-lucide="log-out"></i> Sign Out</button>
-    </div>
   </aside>
 
   <!-- Sidebar overlay (mobile) -->

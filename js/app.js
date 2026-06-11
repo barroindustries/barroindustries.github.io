@@ -256,11 +256,29 @@ function initLogin() {
     e.preventDefault();
     setLoginLoading(true); clearLoginError();
     try {
-      const email = document.getElementById('email').value.trim();
-      await auth.signInWithEmailAndPassword(email, document.getElementById('password').value);
-      // Save email if remember me checked
+      let input = document.getElementById('email').value.trim();
+      let emailToUse = input;
+
+      // Username login: no @ means it's a username, look up their auth email
+      if (!input.includes('@')) {
+        const snap = await db.collection('users')
+          .where('username', '==', input.toLowerCase())
+          .limit(1).get();
+        if (snap.empty) {
+          showLoginError('No account found with that username. Contact HR.');
+          setLoginLoading(false); return;
+        }
+        const uData = snap.docs[0].data();
+        emailToUse = uData.authEmail || uData.email;
+        if (!emailToUse) {
+          showLoginError('Account not configured. Contact HR.');
+          setLoginLoading(false); return;
+        }
+      }
+
+      await auth.signInWithEmailAndPassword(emailToUse, document.getElementById('password').value);
       if (document.getElementById('remember-me').checked) {
-        localStorage.setItem('bi-saved-email', email);
+        localStorage.setItem('bi-saved-email', input);
       } else {
         localStorage.removeItem('bi-saved-email');
       }
@@ -285,7 +303,6 @@ function initLogin() {
   document.getElementById('logout-btn')?.addEventListener('click', () => {
     Notifs.stopListener(); auth.signOut();
   });
-  document.getElementById('sidebar-profile-btn')?.addEventListener('click', openProfileDrawer);
   if (window.lucide) lucide.createIcons({ nodes: [document.getElementById('login-screen')] });
 }
 
@@ -306,7 +323,13 @@ function setLoginLoading(on) {
 function showLoginError(msg) { const el=document.getElementById('login-error'); el.textContent=msg; el.classList.remove('hidden'); }
 function clearLoginError() { document.getElementById('login-error').classList.add('hidden'); document.getElementById('reset-sent')?.classList.add('hidden'); }
 function friendlyError(code) {
-  return {'auth/user-not-found':'No account with that email.','auth/wrong-password':'Incorrect password.','auth/invalid-email':'Invalid email.','auth/too-many-requests':'Too many attempts. Try later.','auth/invalid-credential':'Invalid email or password.'}[code]||'Sign-in failed.';
+  return {
+    'auth/user-not-found':    'No account found. Contact HR.',
+    'auth/wrong-password':    'Incorrect password.',
+    'auth/invalid-email':     'Invalid email or username.',
+    'auth/too-many-requests': 'Too many attempts. Try later.',
+    'auth/invalid-credential':'Incorrect username or password.'
+  }[code] || 'Sign-in failed.';
 }
 
 // ── Theme ─────────────────────────────────────────
@@ -350,11 +373,9 @@ function getSidebarItems() {
     items.push({ icon:'megaphone',     label:'Posts',            page:'posts'                          });
     items.push({ icon:'shield-check',  label:'Approvals',        page:'approvals',       section:true  });
     items.push({ icon:'trending-up',   label:'Progress Reports', page:'progress'                       });
-    items.push({ icon:'users',         label:'Team & Payroll',   page:'team',            section:true  });
-    items.push({ icon:'users',         label:'Team Directory',   page:'team-directory'                 });
+    items.push({ icon:'users',         label:'Team Directory',   page:'team-directory',  section:true  });
     items.push({ icon:'calendar',      label:'Attendance',       page:'attendance'                     });
     items.push({ icon:'banknote',      label:'Cash Advances',    page:'cash-advances'                  });
-    items.push({ icon:'credit-card',   label:'Finance View',     page:'personal-finance'               });
     items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'                    });
     items.push({ icon:'bar-chart-2',   label:'Analytics',        page:'analytics',       section:true  });
     items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
@@ -674,9 +695,6 @@ async function renderPresidentDashboard() {
                 <i data-lucide="shield-check"></i> Review Approvals
                 ${pendingApprovals>0?`<span class="badge badge-red" style="margin-left:auto">${pendingApprovals}</span>`:''}
               </button>
-              <button class="quick-action-btn" onclick="navigateTo('team')">
-                <i data-lucide="users"></i> Team & Payroll
-              </button>
               <button class="quick-action-btn" onclick="navigateTo('progress')">
                 <i data-lucide="trending-up"></i> Progress Reports
               </button>
@@ -698,12 +716,14 @@ async function renderEmployeeDashboard() {
   const c = document.getElementById('page-content');
   c.innerHTML = '<div class="loading-placeholder">Loading…</div>';
   try {
-    const todayStr = new Date().toISOString().slice(0,10);
-    const [myTasksSnap, attSnap, caSnap] = await Promise.all([
+    const now      = new Date();
+    const todayStr = now.toISOString().slice(0,10);
+    const [myTasksSnap, attSnap, caSnap, extSnap] = await Promise.all([
       db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
         .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get()),
       db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).get(),
-      db.collection('cash_advances').where('employeeId','==',currentUser.uid).orderBy('createdAt','desc').limit(3).get().catch(()=>({docs:[]}))
+      db.collection('cash_advances').where('employeeId','==',currentUser.uid).orderBy('createdAt','desc').limit(3).get().catch(()=>({docs:[]})),
+      db.collection('attendance_extensions').doc(`${currentUser.uid}_${todayStr}`).get().catch(()=>({exists:false,data:()=>({})}))
     ]);
 
     const DONE_TASK_STATUSES = ['approved','archived','done'];
@@ -721,6 +741,23 @@ async function renderEmployeeDashboard() {
                           ? attData.attendanceScore
                           : (attData.fullTime ? 1.0 : hasLogin ? 0.5 : 0);
     const hasFull     = attScore >= 1.0;
+
+    // Attendance window: 7:00–8:00 AM (or approved extension)
+    const nowHour      = now.getHours();
+    const inWindow     = nowHour >= 7 && nowHour < 8;   // normal 1-hr window
+    const beforeWindow = nowHour < 7;
+    const afterWindow  = nowHour >= 8;
+    const extData      = extSnap.exists ? extSnap.data() : null;
+    const extApproved  = extData?.status === 'approved' && extData?.expiresAt
+                           && now < extData.expiresAt.toDate();
+    const extPending   = extData?.status === 'pending';
+    const extDenied    = extData?.status === 'denied';
+    const extExpired   = extData?.status === 'approved'
+                           && (!extData?.expiresAt || now >= extData.expiresAt.toDate());
+    const canTimeIn    = !hasLogin && (inWindow || extApproved);
+    const extExpiresStr = extApproved
+      ? extData.expiresAt.toDate().toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})
+      : '';
 
     // KPI computation
     const taskScore = myTasks.length > 0 ? Math.round((doneTasks.length / myTasks.length) * 100) : 0;
@@ -789,34 +826,77 @@ async function renderEmployeeDashboard() {
       <!-- Attendance Card -->
       <div class="card" style="margin-bottom:16px">
         <div class="card-header">
-          <h3>Today's Attendance</h3>
+          <h3>Today's Attendance <span style="font-size:12px;font-weight:400;color:var(--text-muted)">${now.toLocaleDateString('en-PH',{weekday:'short',month:'short',day:'numeric'})}</span></h3>
           <span class="badge ${attBadgeClass}">${attLabel}</span>
         </div>
         <div class="card-body">
-          ${!hasLogin ? `
-            <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
-              <strong>Step 1:</strong> Time in = 50%.<br>
-              <strong>Step 2:</strong> Check off every notification before 8am = 100%.
-            </p>
-            <button class="btn-primary" id="check-in-btn" style="width:100%">
-              <i data-lucide="log-in" style="width:14px;margin-right:6px"></i>Time In (Step 1)
-            </button>` : hasFull ? `
+          ${hasFull ? `
             <div style="display:flex;align-items:center;gap:10px">
               <div style="width:40px;height:40px;border-radius:50%;background:rgba(48,209,88,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">✅</div>
               <div>
                 <div style="font-size:13px;font-weight:600;color:var(--success)">Full attendance — 100%</div>
-                <div style="font-size:11px;color:var(--text-muted)">Checked in + all notifications checked before 8am</div>
+                <div style="font-size:11px;color:var(--text-muted)">Timed in + all notifications checked ✓</div>
               </div>
-            </div>` : `
+            </div>`
+          : hasLogin ? `
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
               <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,159,10,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">🟡</div>
               <div>
-                <div style="font-size:13px;font-weight:600;color:var(--warning)">50% — Checked in</div>
-                <div style="font-size:11px;color:var(--text-muted)">Check off every notification before 8am → 100%</div>
+                <div style="font-size:13px;font-weight:600;color:var(--warning)">50% — Timed In</div>
+                <div style="font-size:11px;color:var(--text-muted)">${inWindow||extApproved?'Check notifications before '+(extApproved?extExpiresStr:'8:00 AM')+' → 100%':'Window closed — 50% recorded for today'}</div>
               </div>
             </div>
-            <div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--text-muted);line-height:1.6">
-              <strong style="color:var(--text)">Step 2:</strong> Tap the 🔔 bell → check the checkbox on <em>each</em> notification. Once all are checked before 8am, your attendance upgrades to 100% automatically.
+            ${(inWindow||extApproved)?`<div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--text-muted)">
+              Tap the 🔔 bell → check <em>every</em> notification individually before <strong>${extApproved?extExpiresStr:'8:00 AM'}</strong>.
+            </div>`:''}
+          ` : canTimeIn ? `
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+              ${extApproved?`<span style="color:var(--warning)">⏰ Extension approved — expires ${extExpiresStr}</span><br>`:''}
+              <strong>Step 1:</strong> Time in = 50%.<br>
+              <strong>Step 2:</strong> Check every notification before <strong>${extApproved?extExpiresStr:'8:00 AM'}</strong> = 100%.
+            </p>
+            <button class="btn-primary" id="check-in-btn" style="width:100%">
+              <i data-lucide="log-in" style="width:14px;margin-right:6px"></i>Time In (Step 1)
+            </button>`
+          : beforeWindow ? `
+            <div style="text-align:center;padding:10px 0;color:var(--text-muted);font-size:13px">
+              <div style="font-size:24px;margin-bottom:6px">⏳</div>
+              Time In window opens at <strong>7:00 AM</strong>
+            </div>`
+          : extPending ? `
+            <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
+              <div style="font-size:24px">⏳</div>
+              <div>
+                <div style="font-size:13px;font-weight:600">Extension requested</div>
+                <div style="font-size:11px;color:var(--text-muted)">Waiting for president to approve. Refresh to check status.</div>
+              </div>
+            </div>`
+          : extDenied ? `
+            <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
+              <div style="font-size:24px">❌</div>
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--danger)">Extension denied</div>
+                <div style="font-size:11px;color:var(--text-muted)">Attendance marked absent for today.</div>
+              </div>
+            </div>`
+          : extExpired ? `
+            <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
+              <div style="font-size:24px">⌛</div>
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--text-muted)">Extension expired</div>
+                <div style="font-size:11px;color:var(--text-muted)">The 6-hour window has closed.</div>
+              </div>
+            </div>`
+          : `
+            <div style="padding:4px 0">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                <div style="font-size:24px">⚠️</div>
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:var(--warning)">Time window missed</div>
+                  <div style="font-size:11px;color:var(--text-muted)">Time In window was 7:00–8:00 AM. You can request an extension.</div>
+                </div>
+              </div>
+              <button class="btn-secondary" id="req-ext-btn" style="width:100%">⏰ Request Time Extension</button>
             </div>`}
         </div>
       </div>
@@ -898,8 +978,35 @@ async function renderEmployeeDashboard() {
       }, { merge: true });
       Notifs.showToast(autoFull
         ? '✅ Full attendance (100%) — no unchecked notifications!'
-        : '🟡 Timed in (50%). Open 🔔 and check off each notification before 8am for 100%.');
+        : `🟡 Timed in (50%). Open 🔔 and check off each notification before ${extApproved?extExpiresStr:'8am'} for 100%.`);
       renderEmployeeDashboard();
+    });
+
+    // Request extension button
+    document.getElementById('req-ext-btn')?.addEventListener('click', async () => {
+      const btn = document.getElementById('req-ext-btn');
+      btn.disabled = true; btn.textContent = 'Requesting…';
+      try {
+        await db.collection('attendance_extensions').doc(`${currentUser.uid}_${todayStr}`).set({
+          uid:         currentUser.uid,
+          userName:    userProfile.displayName || currentUser.email,
+          date:        todayStr,
+          status:      'pending',
+          requestedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        // Notify president
+        await Notifs.sendToOwner({
+          title: '⏰ Attendance Extension Requested',
+          body:  `${userProfile.displayName||currentUser.email} missed the 7–8am window on ${todayStr} and is requesting an extension.`,
+          icon:  '⏰', type: 'att_extension',
+          link:  'attendance'
+        });
+        Notifs.showToast('Extension requested — waiting for president approval.');
+        renderEmployeeDashboard();
+      } catch(err) {
+        btn.disabled = false; btn.textContent = '⏰ Request Time Extension';
+        Notifs.showToast('Failed to submit request','error');
+      }
     });
 
   } catch(err) {
@@ -907,22 +1014,39 @@ async function renderEmployeeDashboard() {
   }
 }
 
-// Called by notifications.js markAllRead — upgrades attendance to 100% if before 8am
+// Called by notifications.js when all notifications checked — upgrades attendance to 100%
+// Valid within the 7–8am window OR within an approved 6-hr extension window
 window.tryUpgradeAttendanceOnNotifRead = async function() {
   if (!currentUser) return;
-  const now = new Date();
-  const limit8am = new Date(); limit8am.setHours(8,0,0,0);
-  if (now > limit8am) return; // only counts before 8am
+  const now      = new Date();
   const todayStr = now.toISOString().slice(0,10);
+
+  // Check normal window (7–8am)
+  const limit7am = new Date(); limit7am.setHours(7,0,0,0);
+  const limit8am = new Date(); limit8am.setHours(8,0,0,0);
+  let withinWindow = now >= limit7am && now < limit8am;
+
+  // Check approved extension
+  if (!withinWindow) {
+    const extSnap = await db.collection('attendance_extensions').doc(`${currentUser.uid}_${todayStr}`).get().catch(()=>null);
+    if (extSnap?.exists) {
+      const ext = extSnap.data();
+      if (ext.status === 'approved' && ext.expiresAt && now < ext.expiresAt.toDate()) {
+        withinWindow = true;
+      }
+    }
+  }
+  if (!withinWindow) return;
+
   const todaySnap = await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).get();
-  if (!todaySnap.exists || !todaySnap.data().loginTime) return; // must have checked in
+  if (!todaySnap.exists || !todaySnap.data().loginTime) return; // must have timed in first
   const current = todaySnap.data();
   if ((current.attendanceScore||0) >= 1.0) return; // already full
   await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
     attendanceScore: 1.0, fullTime: true,
     fullTimeAt: firebase.firestore.FieldValue.serverTimestamp(), notifReadBy8am: true
   }, { merge: true });
-  Notifs.showToast('✅ Full attendance (100%) — all notifications read before 8am!');
+  Notifs.showToast('✅ Full attendance (100%) — all notifications checked!');
 };
 
 // ── Employee ID Card ──────────────────────────────
@@ -1258,7 +1382,9 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   const evalData       = evalSnap?.exists ? evalSnap.data() : {};
   const selfGrade      = evalData.selfGrade ?? null;
   // presidentGrade: manual override first, then auto-averaged from task scores
-  const presGrade      = evalData.presidentGrade ?? evalData.presidentGradeFromTasks ?? null;
+  // Employees see only the averaged grade (presidentGradeFromTasks), and only on the 1st of the month
+  const isFirstOfMonth = now.getDate() === 1;
+  const presGrade      = isFirstOfMonth ? (evalData.presidentGradeFromTasks ?? null) : null;
   const selfNotes      = evalData.selfNotes || '';
   const presidentImprovements = evalData.presidentImprovements || '';
   const currentMonth   = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
@@ -1363,11 +1489,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
             ${selfNotes?`<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic">"${selfNotes}"</div>`:''}
           </div>
           <div style="background:var(--s2);border-radius:10px;padding:12px;border:1.5px solid var(--border)">
-            <div style="font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:6px">President's Grade</div>
-            <div style="font-size:28px;font-weight:800;color:${presGrade?'var(--success)':'var(--text-muted)'}">
+            <div style="font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:6px">Performance Grade</div>
+            <div style="font-size:28px;font-weight:800;color:${presGrade!=null?'var(--success)':'var(--text-muted)'}">
               ${presGrade!=null?presGrade:'—'}<span style="font-size:14px;font-weight:400">/10</span>
             </div>
-            ${evalData.presidentNotes?`<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic">"${evalData.presidentNotes}"</div>`:'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Pending president review</div>'}
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${presGrade!=null?'Avg. from completed tasks':'Available on the 1st of each month'}</div>
           </div>
         </div>
       </div>
@@ -2251,23 +2377,41 @@ async function renderAnalytics() {
 async function renderTeam() {
   if(!isPresident()&&currentRole!=='manager'){document.getElementById('page-content').innerHTML=renderAccessDenied('Team');return;}
   const c=document.getElementById('page-content');
-  c.innerHTML=`<div class="page-header"><h2>👥 Team & Payroll</h2><button class="btn-primary btn-sm" id="add-emp-btn">+ Add Employee</button></div><div id="team-table"><div class="loading-placeholder">Loading…</div></div>`;
+  c.innerHTML=`
+    <div class="page-header">
+      <h2>👥 Team & Payroll</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-secondary btn-sm" id="add-worker-btn">👷 Create Worker Account</button>
+        <button class="btn-primary btn-sm" id="add-emp-btn">+ Add Employee Profile</button>
+      </div>
+    </div>
+    <div id="team-table"><div class="loading-placeholder">Loading…</div></div>`;
   const snap=await dbCachedGet('users', () => db.collection('users').get(), 60000);
   const users=snap.docs.map(d=>({id:d.id,...d.data()}));
   document.getElementById('team-table').innerHTML=`<div class="card"><div class="table-wrap"><table class="data-table">
-    <thead><tr><th>Employee</th><th>ID</th><th>Role</th><th>Departments</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net</th><th></th></tr></thead>
-    <tbody>${users.map(u=>{const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);const depts=(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';return `<tr><td>${u.displayName||u.email}</td><td><code style="font-size:11px">${u.employeeId||'—'}</code></td><td><span class="badge badge-blue">${ROLES[u.role]?.label||u.role}</span></td><td>${depts}</td><td>₱${formatNum(u.salary)}</td><td>₱${formatNum(u.allowance)}</td><td>₱${formatNum(u.deductions)}</td><td><strong>₱${formatNum(net)}</strong></td><td><button class="btn-icon edit-emp-btn" data-uid="${u.id}"><i data-lucide="pencil" style="width:14px;height:14px;stroke:currentColor"></i></button></td></tr>`;}).join('')}</tbody>
+    <thead><tr><th>Employee</th><th>Username</th><th>ID</th><th>Role</th><th>Departments</th><th>Base</th><th>Net</th><th></th></tr></thead>
+    <tbody>${users.map(u=>{const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);const depts=(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';return `<tr>
+      <td>${u.displayName||u.email}</td>
+      <td>${u.username?`<code style="font-size:11px">${u.username}</code>`:'<span style="color:var(--text-muted);font-size:11px">email login</span>'}</td>
+      <td><code style="font-size:11px">${u.employeeId||'—'}</code></td>
+      <td><span class="badge badge-blue">${ROLES[u.role]?.label||u.role}</span></td>
+      <td>${depts}</td>
+      <td>₱${formatNum(u.salary)}</td>
+      <td><strong>₱${formatNum(net)}</strong></td>
+      <td><button class="btn-icon edit-emp-btn" data-uid="${u.id}"><i data-lucide="pencil" style="width:14px;height:14px;stroke:currentColor"></i></button></td>
+    </tr>`;}).join('')}</tbody>
   </table></div></div>`;
   document.querySelectorAll('.edit-emp-btn').forEach(btn=>btn.addEventListener('click',()=>{const u=users.find(x=>x.id===btn.dataset.uid);if(u)openEditEmployeeModal(u);}));
-  document.getElementById('add-emp-btn').addEventListener('click',openAddEmployeeModal);
+  document.getElementById('add-emp-btn').addEventListener('click', openAddEmployeeModal);
+  document.getElementById('add-worker-btn').addEventListener('click', openCreateWorkerModal);
   if (window.lucide) lucide.createIcons({ nodes: [document.getElementById('team-table')] });
 }
 
 function openAddEmployeeModal() {
-  openModal('Add Employee',`
-    <p style="font-size:12px;color:var(--text-muted);background:var(--surface2);padding:10px;border-radius:8px;margin-bottom:14px">⚠️ Create their login in Firebase Console → Authentication first, then add profile here.</p>
+  openModal('Add Employee Profile',`
+    <p style="font-size:12px;color:var(--text-muted);background:var(--surface2);padding:10px;border-radius:8px;margin-bottom:14px">Adds a profile record only. Use <strong>👷 Create Worker Account</strong> to also create a username login.</p>
     <div class="form-group"><label>Display Name</label><input id="emp-name"/></div>
-    <div class="form-group"><label>Email</label><input id="emp-email" type="email"/></div>
+    <div class="form-group"><label>Email (if they have one)</label><input id="emp-email" type="email"/></div>
     <div class="form-group"><label>Employee ID</label><input id="emp-eid" placeholder="e.g. BI-2026-001"/></div>
     <div class="form-row">
       <div class="form-group"><label>Role</label><select id="emp-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}</select></div>
@@ -2303,9 +2447,155 @@ function openAddEmployeeModal() {
   });
 }
 
+// ── Secondary Firebase app — used only for creating/updating worker accounts
+//    so HR's own session is never interrupted
+function _getWorkerAuth() {
+  try { return firebase.app('worker-admin').auth(); }
+  catch { return firebase.initializeApp(window.firebaseConfig, 'worker-admin').auth(); }
+}
+
+// ── Create Worker Account (username + password, no email required) ────────
+function openCreateWorkerModal() {
+  const suggestUsername = () => {
+    const name = document.getElementById('cw-name')?.value.trim() || '';
+    const parts = name.toLowerCase().replace(/[^a-z0-9 ]/g,'').split(/\s+/).filter(Boolean);
+    let uname = '';
+    if (parts.length >= 2) uname = parts[0][0] + parts[parts.length-1]; // e.g. jdelacruz
+    else if (parts.length === 1) uname = parts[0];
+    const el = document.getElementById('cw-username');
+    if (el && !el._edited) el.value = uname;
+  };
+
+  const initialPw = generatePassword('worker');
+
+  openModal('👷 Create Worker Account', `
+    <p style="font-size:12px;color:var(--text-muted);background:var(--surface2);padding:10px;border-radius:8px;margin-bottom:14px">
+      Creates a username + password login. The worker does <strong>not</strong> need an email address.
+      HR manages all credentials.
+    </p>
+    <div class="form-row">
+      <div class="form-group"><label>Full Name <span style="color:var(--danger)">*</span></label><input id="cw-name" placeholder="e.g. Juan dela Cruz"/></div>
+      <div class="form-group"><label>Employee ID</label><input id="cw-eid" placeholder="BI-2026-001"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Username <span style="color:var(--danger)">*</span></label>
+        <input id="cw-username" placeholder="e.g. jdelacruz" autocomplete="off" style="text-transform:lowercase"/>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Letters and numbers only. Auto-suggested from name.</div>
+      </div>
+      <div class="form-group">
+        <label>Initial Password <span style="color:var(--danger)">*</span></label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input id="cw-password" value="${initialPw}" autocomplete="off" style="flex:1"/>
+          <button type="button" class="btn-secondary btn-sm" id="cw-regen-pw" title="Generate new password">🔄</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Role</label><select id="cw-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}" ${k==='employee'?'selected':''}>${v.label}</option>`).join('')}</select></div>
+      <div class="form-group"><label>Primary Department</label><select id="cw-dept"><option value="">None</option>${Object.keys(DEPARTMENTS).map(k=>`<option value="${k}">${k}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label>Job Title</label><input id="cw-title" placeholder="e.g. Machine Operator"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Base Salary (₱)</label><input id="cw-salary" type="number" value="0"/></div>
+      <div class="form-group"><label>Allowance (₱)</label><input id="cw-allow" type="number" value="0"/></div>
+    </div>
+    <div class="form-group"><label>Start Date</label><input id="cw-start" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
+    <div id="cw-error" class="error-msg hidden" style="margin-top:8px"></div>
+  `, `<button class="btn-primary" id="cw-save-btn">Create Account</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  // Auto-suggest username from name
+  document.getElementById('cw-name').addEventListener('input', suggestUsername);
+  document.getElementById('cw-username').addEventListener('input', () => {
+    document.getElementById('cw-username')._edited = true;
+  });
+  document.getElementById('cw-username').addEventListener('input', e => {
+    e.target.value = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g,'');
+  });
+  document.getElementById('cw-regen-pw').addEventListener('click', () => {
+    document.getElementById('cw-password').value = generatePassword('worker' + Date.now());
+  });
+
+  document.getElementById('cw-save-btn').addEventListener('click', async () => {
+    const btn  = document.getElementById('cw-save-btn');
+    const errEl= document.getElementById('cw-error');
+    errEl.classList.add('hidden');
+
+    const name     = document.getElementById('cw-name').value.trim();
+    const username = document.getElementById('cw-username').value.trim().toLowerCase();
+    const password = document.getElementById('cw-password').value.trim();
+    const role     = document.getElementById('cw-role').value;
+    const dept     = document.getElementById('cw-dept').value;
+    const title    = document.getElementById('cw-title').value.trim();
+    const salary   = parseFloat(document.getElementById('cw-salary').value)||0;
+    const allow    = parseFloat(document.getElementById('cw-allow').value)||0;
+    const eid      = document.getElementById('cw-eid').value.trim();
+    const start    = document.getElementById('cw-start').value;
+
+    if (!name)     { errEl.textContent='Full name is required.'; errEl.classList.remove('hidden'); return; }
+    if (!username) { errEl.textContent='Username is required.'; errEl.classList.remove('hidden'); return; }
+    if (!password) { errEl.textContent='Password is required.'; errEl.classList.remove('hidden'); return; }
+
+    // Check username uniqueness
+    const existing = await db.collection('users').where('username','==',username).limit(1).get();
+    if (!existing.empty) { errEl.textContent='Username already taken. Choose another.'; errEl.classList.remove('hidden'); return; }
+
+    btn.disabled = true; btn.textContent = 'Creating…';
+
+    // Auth email is synthetic — worker never needs to see or use this
+    const authEmail = `${username}@bi.barroindustries`;
+    try {
+      // Create Firebase Auth account via secondary app (doesn't affect HR's session)
+      const workerAuth = _getWorkerAuth();
+      const cred = await workerAuth.createUserWithEmailAndPassword(authEmail, password);
+      const uid  = cred.user.uid;
+      await workerAuth.signOut();
+
+      // Write Firestore profile using the Auth UID as the doc ID
+      await db.collection('users').doc(uid).set({
+        displayName: name,
+        username:    username,
+        authEmail:   authEmail,
+        email:       authEmail,        // fallback for any email display
+        employeeId:  eid,
+        role, department: dept, departments: dept ? [dept] : [],
+        title, salary, allowance: allow, deductions: 0,
+        startDate:   start,
+        hrManagedAccount: true,
+        hrPwToken:   btoa(password),   // HR recovery token (base64, for reset only)
+        createdBy:   currentUser.uid,
+        createdAt:   firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+      dbCacheInvalidate('users');
+
+      // Show credentials to HR — only time the password is displayed in full
+      openModal('✅ Worker Account Created', `
+        <p style="margin-bottom:12px">Hand these credentials to <strong>${name}</strong>:</p>
+        <div style="background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:16px;font-family:monospace;font-size:15px;line-height:2">
+          <div>Username: <strong style="color:var(--primary-light)">${username}</strong></div>
+          <div>Password: <strong style="color:var(--primary-light)">${password}</strong></div>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin-top:10px">⚠️ Write this down now. The password won't be shown again in plain text.</p>
+      `, `<button class="btn-primary" onclick="closeModal();renderTeam()">Done</button>`);
+    } catch(err) {
+      btn.disabled = false; btn.textContent = 'Create Account';
+      errEl.textContent = err.code === 'auth/email-already-in-use'
+        ? 'Username already registered. Choose another.'
+        : (err.message || 'Account creation failed.');
+      errEl.classList.remove('hidden');
+    }
+  });
+}
+
 function openEditEmployeeModal(u) {
   const curDepts = Array.isArray(u.departments)&&u.departments.length ? u.departments : u.department ? [u.department] : [];
   openModal(`Edit: ${u.displayName||u.email}`,`
+    ${u.username ? `
+    <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="font-size:13px">👷 Worker account — login: <strong style="color:var(--primary-light)">${u.username}</strong></span>
+      <button class="btn-secondary btn-sm" id="eu-reset-pw-btn" style="margin-left:auto">🔑 Reset Password</button>
+    </div>` : ''}
     <div class="form-group"><label>Display Name</label><input id="eu-name" value="${u.displayName||''}"/></div>
     <div class="form-group"><label>Employee ID</label><input id="eu-eid" value="${u.employeeId||''}"/></div>
     <div class="form-group"><label>Job Title</label><input id="eu-title" value="${u.title||''}"/></div>
@@ -2320,6 +2610,7 @@ function openEditEmployeeModal(u) {
     </div>
     <div class="form-group"><label>Deductions (₱)</label><input id="eu-deduct" type="number" value="${u.deductions||0}"/></div>
   `,`<button class="btn-primary" id="save-eu-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
   document.getElementById('save-eu-btn').addEventListener('click',async()=>{
     const dept1=document.getElementById('eu-dept').value;
     const dept2=document.getElementById('eu-dept2').value;
@@ -2335,6 +2626,66 @@ function openEditEmployeeModal(u) {
       deductions:parseFloat(document.getElementById('eu-deduct').value)||0,
     });
     dbCacheInvalidate('users'); closeModal(); renderTeam();
+  });
+
+  // Reset Password (worker accounts only)
+  document.getElementById('eu-reset-pw-btn')?.addEventListener('click', () => {
+    const newPw = generatePassword(u.displayName||'worker');
+    openModal('🔑 Reset Password', `
+      <p style="margin-bottom:10px">Set a new password for <strong>${u.displayName}</strong> (username: <code>${u.username}</code>).</p>
+      <div class="form-group">
+        <label>New Password</label>
+        <div style="display:flex;gap:6px">
+          <input id="rp-newpw" value="${newPw}" style="flex:1" autocomplete="off"/>
+          <button type="button" class="btn-secondary btn-sm" id="rp-regen">🔄</button>
+        </div>
+      </div>
+      <div id="rp-error" class="error-msg hidden" style="margin-top:8px"></div>
+    `, `<button class="btn-primary" id="rp-save-btn">Set Password</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+    document.getElementById('rp-regen').addEventListener('click', () => {
+      document.getElementById('rp-newpw').value = generatePassword(u.displayName||'worker'+Date.now());
+    });
+
+    document.getElementById('rp-save-btn').addEventListener('click', async () => {
+      const errEl  = document.getElementById('rp-error');
+      const saveBtn= document.getElementById('rp-save-btn');
+      errEl.classList.add('hidden');
+      const newPassword = document.getElementById('rp-newpw').value.trim();
+      if (!newPassword || newPassword.length < 6) {
+        errEl.textContent = 'Password must be at least 6 characters.'; errEl.classList.remove('hidden'); return;
+      }
+      if (!u.hrPwToken) {
+        errEl.textContent = 'No stored recovery token. Password must be reset via Firebase Console.'; errEl.classList.remove('hidden'); return;
+      }
+
+      saveBtn.disabled = true; saveBtn.textContent = 'Resetting…';
+      try {
+        const currentPw  = atob(u.hrPwToken);
+        const workerAuth = _getWorkerAuth();
+        const cred = await workerAuth.signInWithEmailAndPassword(u.authEmail, currentPw);
+        await cred.user.updatePassword(newPassword);
+        await workerAuth.signOut();
+        await db.collection('users').doc(u.id).update({ hrPwToken: btoa(newPassword) });
+
+        openModal('✅ Password Reset', `
+          <p style="margin-bottom:12px">New credentials for <strong>${u.displayName}</strong>:</p>
+          <div style="background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:16px;font-family:monospace;font-size:15px;line-height:2">
+            <div>Username: <strong style="color:var(--primary-light)">${u.username}</strong></div>
+            <div>Password: <strong style="color:var(--primary-light)">${newPassword}</strong></div>
+          </div>
+          <p style="font-size:12px;color:var(--text-muted);margin-top:10px">⚠️ Write this down and hand it to the employee.</p>
+        `, `<button class="btn-primary" onclick="closeModal()">Done</button>`);
+      } catch(err) {
+        saveBtn.disabled = false; saveBtn.textContent = 'Set Password';
+        if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+          errEl.textContent = 'Stored credentials have changed (worker may have updated their password). Use Firebase Console to reset.';
+        } else {
+          errEl.textContent = err.message || 'Reset failed.';
+        }
+        errEl.classList.remove('hidden');
+      }
+    });
   });
 }
 
@@ -2433,6 +2784,88 @@ function renderAccessDenied(section) {
 }
 function formatNum(n) { return Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
+// ── Suggestion Box ────────────────────────────────
+async function renderSuggestionBox(wrap) {
+  const pres = isRealPresident();
+  wrap.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header" style="display:flex;align-items:center;gap:10px">
+        <span style="font-size:20px">💡</span>
+        <div>
+          <h3 style="margin:0">Suggestion Box</h3>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Share ideas, feedback, or concerns — ${pres ? 'all submissions shown below' : 'submitted anonymously to the president'}</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="form-group" style="margin-bottom:10px">
+          <label style="font-size:12px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.4px">Category</label>
+          <select id="sug-category" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text);font-size:14px">
+            <option value="General">General</option>
+            <option value="Operations">Operations</option>
+            <option value="Payroll & Benefits">Payroll & Benefits</option>
+            <option value="Work Environment">Work Environment</option>
+            <option value="Tools & Systems">Tools & Systems</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:14px">
+          <label style="font-size:12px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.4px">Your Suggestion</label>
+          <textarea id="sug-text" rows="4" placeholder="Type your suggestion or feedback here…" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text);resize:vertical;box-sizing:border-box"></textarea>
+        </div>
+        <button class="btn-primary" id="sug-submit-btn" style="width:100%">Submit Anonymously</button>
+        <div id="sug-msg" style="margin-top:10px;font-size:13px;text-align:center;display:none"></div>
+      </div>
+    </div>
+    ${pres ? `<div class="card"><div class="card-header"><h3>All Submissions</h3></div><div class="card-body" id="sug-list"><div class="loading-placeholder">Loading…</div></div></div>` : ''}
+  `;
+
+  document.getElementById('sug-submit-btn').addEventListener('click', async () => {
+    const text = document.getElementById('sug-text').value.trim();
+    const category = document.getElementById('sug-category').value;
+    const msg = document.getElementById('sug-msg');
+    if (!text) { msg.style.display='block'; msg.style.color='var(--danger)'; msg.textContent='Please write something first.'; return; }
+    document.getElementById('sug-submit-btn').disabled = true;
+    await db.collection('suggestions').add({
+      text,
+      category,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await Notifs.sendToOwner({ title:'💡 New Suggestion', body:`New "${category}" suggestion submitted.`, icon:'💡', type:'suggestion' });
+    document.getElementById('sug-text').value = '';
+    msg.style.display = 'block'; msg.style.color = 'var(--success)';
+    msg.textContent = '✓ Submitted! Thank you for your feedback.';
+    document.getElementById('sug-submit-btn').disabled = false;
+    if (pres) loadSuggestions();
+  });
+
+  if (pres) loadSuggestions();
+}
+
+async function loadSuggestions() {
+  const list = document.getElementById('sug-list');
+  if (!list) return;
+  const snap = await db.collection('suggestions').orderBy('createdAt','desc').limit(50).get();
+  if (snap.empty) { list.innerHTML = '<div class="empty-state" style="padding:24px 0">No suggestions yet.</div>'; return; }
+  list.innerHTML = snap.docs.map(d => {
+    const s = d.data();
+    const ts = s.createdAt?.toDate ? s.createdAt.toDate().toLocaleString('en-PH',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    return `
+    <div style="padding:14px;background:var(--s2);border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--primary-light)">${s.category||'General'}</span>
+        <span style="font-size:11px;color:var(--text-muted)">${ts}</span>
+      </div>
+      <div style="font-size:14px;color:var(--text);line-height:1.55;white-space:pre-wrap">${s.text||''}</div>
+      <button class="btn-secondary btn-sm sug-delete-btn" data-id="${d.id}" style="margin-top:8px;color:var(--danger);font-size:11px">Delete</button>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('.sug-delete-btn').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('Delete this suggestion?')) return;
+    await db.collection('suggestions').doc(btn.dataset.id).delete();
+    loadSuggestions();
+  }));
+}
+
 // ── Help / Guide ──────────────────────────────────
 function renderHelp() {
   const c = document.getElementById('page-content');
@@ -2455,10 +2888,13 @@ function renderHelp() {
         ? `<button class="subtab-btn active" data-sub="admin">Admin Guide</button>
            <button class="subtab-btn" data-sub="employee">Employee Guide</button>
            <button class="subtab-btn" data-sub="partner">Partner Guide</button>
-           <button class="subtab-btn" data-sub="storage">Storage Setup</button>`
+           <button class="subtab-btn" data-sub="storage">Storage Setup</button>
+           <button class="subtab-btn" data-sub="suggestions">💡 Suggestion Box</button>`
         : bsOnly
-          ? `<button class="subtab-btn active" data-sub="partner">Partner Guide</button>`
-          : `<button class="subtab-btn active" data-sub="employee">Your Guide</button>`}
+          ? `<button class="subtab-btn active" data-sub="partner">Partner Guide</button>
+             <button class="subtab-btn" data-sub="suggestions">💡 Suggestion Box</button>`
+          : `<button class="subtab-btn active" data-sub="employee">Your Guide</button>
+             <button class="subtab-btn" data-sub="suggestions">💡 Suggestion Box</button>`}
     </div>
     <div id="help-content"></div>
   `;
@@ -2483,6 +2919,8 @@ function renderHelp() {
         </div>
       </div></div>`;
       Drive.renderStorageStatus('storage-status-wrap');
+    } else if (sub === 'suggestions') {
+      renderSuggestionBox(wrap);
     } else if (sections[sub]) {
       wrap.innerHTML = sections[sub]();
       if (window.lucide) lucide.createIcons({ nodes: [wrap] });
@@ -2626,14 +3064,16 @@ function renderHelpEmployee() {
 
     <div class="help-section">
       <h3><i data-lucide="calendar" class="help-h-icon"></i> Logging Attendance</h3>
-      <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Attendance is worth <strong>30%</strong> of your monthly pay. There are two steps every workday to get full attendance.</p>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Attendance is worth <strong>30%</strong> of your monthly pay. Both steps must be completed within the <strong>7:00–8:00 AM window</strong> each workday.</p>
       <ol class="help-steps">
-        <li><strong>Step 1 — Time In (50%):</strong> Every morning, open the app and tap <strong>Time In</strong> on your dashboard. Do this as soon as you start work.</li>
-        <li><strong>Step 2 — Check Notifications (100%):</strong> Before 8:00 AM, tap the 🔔 bell icon at the top of the screen. You will see a list of your notifications — each one has a checkbox. <strong>Check off every notification individually.</strong> Once all are checked before 8am, your attendance automatically upgrades from 50% to 100%.</li>
-        <li>Your attendance badge turns green with a ✅ when you've completed both steps.</li>
-        <li>If you miss the 8am deadline, you keep the 50% for that day — there is no way to recover the second half after 8am.</li>
+        <li><strong>Step 1 — Time In (50%) · 7:00–8:00 AM:</strong> Open the app between 7am and 8am and tap <strong>Time In</strong> on your dashboard. This records that you showed up for work.</li>
+        <li><strong>Step 2 — Check Notifications (100%) · before 8:00 AM:</strong> While still in the window, tap the 🔔 bell icon. Each notification has a checkbox — <strong>check every one individually.</strong> Once all are checked before 8am, your attendance automatically upgrades to 100%.</li>
+        <li>Your attendance badge turns green (✅) when both steps are done.</li>
+        <li><strong>Missed the window?</strong> If it is already past 8am and you have not yet timed in, tap <strong>⏰ Request Time Extension</strong> on your dashboard. This sends a request to the president.</li>
+        <li><strong>Extension approval:</strong> If the president approves, you will receive a notification and your dashboard will show a Time In button with an expiry time. You have <strong>6 hours from the time of approval</strong> to complete both steps.</li>
+        <li><strong>Extension denied or expired:</strong> The day is recorded as absent. Maintain the habit of opening the app before 8am to avoid this.</li>
       </ol>
-      <div class="help-tip">⚠️ <strong>Important:</strong> You must check <em>each</em> notification one by one — there is no "mark all" shortcut. This ensures you have actually read your notifications for the day. Do both steps every weekday to maintain a strong attendance score.</div>
+      <div class="help-tip">⚠️ <strong>Key rules:</strong> The Time In window is <em>7:00–8:00 AM only</em>. You cannot time in before 7am or after 8am without an approved extension. Always check each notification individually — there is no "mark all" shortcut.</div>
     </div>
 
     <div class="help-section">

@@ -69,6 +69,8 @@ async function loadPosts(dept) {
     container.innerHTML = posts.map(p => {
       const ts = p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
       const isOwn = p.authorId === currentUser.uid;
+      const hearts = p.hearts || [];
+      const hearted = hearts.includes(currentUser.uid);
       return `
       <div class="post-card" data-id="${p.id}">
         <div class="post-header">
@@ -85,6 +87,12 @@ async function loadPosts(dept) {
         ${p.imageUrl ? `<img src="${p.imageUrl}" class="post-image" onclick="window.open('${p.imageUrl}','_blank')"/>` : ''}
         ${p.fileUrl ? `<a href="${p.fileUrl}" target="_blank" class="post-attachment">📎 ${p.fileName||'Attachment'}</a>` : ''}
         <div class="post-actions">
+          ${p.status==='published' ? `
+            <button class="post-heart-btn${hearted?' hearted':''}" data-id="${p.id}" title="${hearted?'Unlike':'Like'}">
+              <svg viewBox="0 0 24 24" fill="${hearted?'#FF6B2B':'none'}" stroke="${hearted?'#FF6B2B':'currentColor'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+              <span class="heart-count">${hearts.length||''}</span>
+            </button>
+          ` : ''}
           ${canApprove && p.status==='pending' ? `
             <button class="btn-primary btn-sm post-approve-btn" data-id="${p.id}">✓ Approve</button>
             <button class="btn-secondary btn-sm post-reject-btn" data-id="${p.id}">✗ Reject</button>
@@ -121,6 +129,17 @@ async function loadPosts(dept) {
       const id = e.target.dataset.id;
       const snap = await db.collection('posts').doc(id).get();
       await db.collection('posts').doc(id).update({pinned: !snap.data().pinned});
+      loadPosts(dept);
+    }));
+    container.querySelectorAll('.post-heart-btn').forEach(btn => btn.addEventListener('click', async e => {
+      const id = btn.dataset.id;
+      const snap = await db.collection('posts').doc(id).get();
+      const hearts = snap.data().hearts || [];
+      const uid = currentUser.uid;
+      const newHearts = hearts.includes(uid)
+        ? firebase.firestore.FieldValue.arrayRemove(uid)
+        : firebase.firestore.FieldValue.arrayUnion(uid);
+      await db.collection('posts').doc(id).update({hearts: newHearts});
       loadPosts(dept);
     }));
   } catch(err) {
@@ -294,6 +313,7 @@ window.renderAttendancePage = async function() {
       <h2>📅 Attendance</h2>
       ${pres ? `<select id="att-emp-select" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px"><option value="">Loading…</option></select>` : ''}
     </div>
+    ${pres ? `<div id="att-ext-requests" style="margin-bottom:14px"></div>` : ''}
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
       <button class="btn-secondary btn-sm" id="att-prev-month">‹</button>
       <span id="att-month-label" style="font-weight:700;font-size:15px;min-width:140px;text-align:center"></span>
@@ -328,6 +348,76 @@ window.renderAttendancePage = async function() {
       renderAttMonth();
     });
   }
+
+  // ── Extension requests (president/manager only) ──
+  async function loadExtensionRequests() {
+    const extEl = document.getElementById('att-ext-requests');
+    if (!extEl) return;
+    const todayStr = new Date().toISOString().slice(0,10);
+    const snap = await db.collection('attendance_extensions')
+      .where('date','==',todayStr).where('status','==','pending').get().catch(()=>({docs:[]}));
+    if (snap.docs.length === 0) { extEl.innerHTML = ''; return; }
+    const requests = snap.docs.map(d=>({id:d.id,...d.data()}));
+    extEl.innerHTML = `
+      <div class="card" style="border:1.5px solid rgba(255,159,10,.35);background:rgba(255,159,10,.05)">
+        <div class="card-header"><h3 style="color:rgba(255,159,10,.9)">⏰ Pending Extension Requests (${requests.length})</h3></div>
+        <div class="card-body" style="padding:0">
+          <div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Employee</th><th>Date</th><th>Requested</th><th></th></tr></thead>
+            <tbody>${requests.map(r=>`<tr>
+              <td><strong>${r.userName||'—'}</strong></td>
+              <td>${r.date||'—'}</td>
+              <td>${r.requestedAt ? new Date(r.requestedAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'}) : '—'}</td>
+              <td style="white-space:nowrap">
+                <button class="btn-primary btn-sm ext-approve-btn" data-id="${r.id}" data-uid="${r.uid}" data-name="${r.userName||''}">✓ Approve</button>
+                <button class="btn-danger btn-sm ext-deny-btn" data-id="${r.id}" data-uid="${r.uid}" style="margin-left:4px">✕ Deny</button>
+              </td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+        </div>
+      </div>`;
+
+    extEl.querySelectorAll('.ext-approve-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true; btn.textContent = 'Approving…';
+        const approvedAt = new Date();
+        const expiresAt  = new Date(approvedAt.getTime() + 6 * 60 * 60 * 1000); // +6 hrs
+        await db.collection('attendance_extensions').doc(btn.dataset.id).update({
+          status:     'approved',
+          approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          expiresAt:  firebase.firestore.Timestamp.fromDate(expiresAt),
+          approvedBy: currentUser.uid
+        });
+        await Notifs.send(btn.dataset.uid, {
+          title: '✅ Attendance Extension Approved',
+          body:  `Your Time In extension is approved. You have until ${expiresAt.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})} to time in and complete notifications.`,
+          icon: '✅', type: 'att_extension_approved'
+        });
+        Notifs.showToast(`Extension approved for ${btn.dataset.name||'employee'}`);
+        loadExtensionRequests();
+      });
+    });
+
+    extEl.querySelectorAll('.ext-deny-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Deny this extension request?')) return;
+        btn.disabled = true;
+        await db.collection('attendance_extensions').doc(btn.dataset.id).update({
+          status: 'denied', deniedBy: currentUser.uid,
+          deniedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await Notifs.send(btn.dataset.uid, {
+          title: '❌ Attendance Extension Denied',
+          body:  `Your extension request for ${new Date().toLocaleDateString('en-PH',{month:'short',day:'numeric'})} was not approved.`,
+          icon: '❌', type: 'att_extension_denied'
+        });
+        Notifs.showToast('Extension denied');
+        loadExtensionRequests();
+      });
+    });
+  }
+
+  if (pres) loadExtensionRequests();
 
   async function renderAttMonth() {
     const calEl  = document.getElementById('att-calendar');
