@@ -950,7 +950,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   background-clip: text; margin-top: 1px;
 }
 
-.sidebar-nav { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; padding: 8px 0 8px 2px; scrollbar-width: none; }
+.sidebar-nav { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; padding: 8px 0 calc(env(safe-area-inset-bottom, 0px) + 20px) 2px; scrollbar-width: none; }
 .sidebar-nav::-webkit-scrollbar { display: none; }
 
 .nav-section-label {
@@ -1025,15 +1025,16 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 }
 
 .btn-logout-inline {
-  background: rgba(255,69,58,0.10); border: 1px solid rgba(255,69,58,0.20);
-  color: rgba(255,112,102,0.85); border-radius: 6px;
-  width: 26px; height: 26px; padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  cursor: pointer; flex-shrink: 0;
+  background: rgba(255,69,58,0.08); border: 1px solid rgba(255,69,58,0.18);
+  color: rgba(255,100,90,0.80); border-radius: 5px;
+  padding: 3px 9px; height: 22px;
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.2px;
+  cursor: pointer; flex-shrink: 0; white-space: nowrap;
   transition: background var(--t1), box-shadow var(--t1);
 }
-.btn-logout-inline:hover { background: rgba(255,69,58,0.22); box-shadow: 0 0 8px rgba(255,69,58,0.25); }
-.btn-logout-inline svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; }
+.btn-logout-inline:hover { background: rgba(255,69,58,0.18); box-shadow: 0 0 6px rgba(255,69,58,0.20); }
+.btn-logout-inline svg { width: 11px; height: 11px; stroke: currentColor; fill: none; stroke-width: 2.2; flex-shrink:0; }
 
 .sidebar-overlay {
   position: fixed; inset: 0;
@@ -2090,12 +2091,6 @@ html.light .help-section code { background: rgba(0,0,0,0.06); }
 /* Topbar icons */
 .notif-btn svg {
   width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2;
-}
-/* sidebar footer icon */
-.btn-logout-inline svg {
-  width: 13px; height: 13px;
-  vertical-align: -1px;
-  stroke: currentColor; fill: none; stroke-width: 2;
 }
 
 /* Prevent double-scale for Lucide bn-icons on active */

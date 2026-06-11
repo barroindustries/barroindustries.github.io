@@ -1,14 +1,16 @@
-name: Daily File Sync — Firebase Storage → Google Drive
+name: Monthly Firestore → Google Drive Backup
 
 on:
   schedule:
-    - cron: '0 16 * * *'   # 12:00 AM Philippine Time (UTC+8) = 16:00 UTC every day
-  workflow_dispatch:         # Manual trigger from GitHub Actions tab
+    # 12:01 AM Philippine Time on the 1st of every month
+    # PH Time = UTC+8, so 12:01 AM PH = 16:01 UTC previous day
+    - cron: '1 16 1 * *'
+  workflow_dispatch:   # Manual trigger from GitHub Actions tab
 
 jobs:
-  sync:
+  backup:
     runs-on: ubuntu-latest
-    name: Sync files to Google Drive
+    name: Export Firestore data to Google Drive
 
     steps:
       - name: Checkout repo
@@ -23,8 +25,8 @@ jobs:
         run: npm install
         working-directory: scripts
 
-      - name: Run sync
-        run: node sync-to-drive.js
+      - name: Run monthly backup
+        run: node monthly-backup.js
         working-directory: scripts
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

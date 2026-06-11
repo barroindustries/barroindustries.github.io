@@ -579,11 +579,11 @@ async function renderCashAdvanceEmployee(c) {
     <div class="kpi-row" style="margin-bottom:14px">
       <div class="kpi-card red"><div class="kpi-label">Outstanding Balance</div><div class="kpi-value" style="font-size:15px">&#8369;${fmtN(totalBalance)}</div></div>
       <div class="kpi-card warn"><div class="kpi-label">Monthly Due</div><div class="kpi-value" style="font-size:15px">&#8369;${fmtN(totalMonthly)}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Active Loans</div><div class="kpi-value">${active.length}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Active CA's</div><div class="kpi-value">${active.length}</div></div>
     </div>`:''}
     ${pending.length?`<div class="alert-banner alert-warn" style="margin-bottom:12px"><span>&#x23F3; You have <strong>${pending.length}</strong> pending request${pending.length>1?'s':''} awaiting approval.</span></div>`:''}
     <div class="subtab-bar" id="ca-tabs" style="margin-bottom:14px">
-      <button class="subtab-btn active" data-sub="active">Active Loans</button>
+      <button class="subtab-btn active" data-sub="active">Active Loans / CA's</button>
       <button class="subtab-btn" data-sub="all">All Records</button>
     </div>
     <div id="ca-list"></div>
@@ -591,7 +591,7 @@ async function renderCashAdvanceEmployee(c) {
 
   const renderTab = (sub) => {
     const list = sub === 'active'
-      ? advances.filter(a => a.status === 'approved' && (a.balance||0) > 0)
+      ? advances.filter(a => (a.status === 'approved' && (a.balance||0) > 0) || a.status === 'pending')
       : advances;
     renderCAEmployeeCards(list, document.getElementById('ca-list'));
   };

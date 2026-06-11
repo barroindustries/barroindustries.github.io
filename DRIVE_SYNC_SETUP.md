@@ -1,87 +1,99 @@
-# Google Drive Sync Setup
-## One-time setup — takes about 15 minutes
+# Google Drive Sync Setup — Barro Industries
+
+Two automated jobs keep Google Drive in sync with Firebase:
 
 ---
 
-## How It Works
+## 1. Daily File Sync (12:00 AM every night)
 
-1. Employees upload files → instantly saved to Firebase Cloud Storage
-2. Every night at **12:00 AM (Philippine Time)**, a GitHub Action runs automatically
-3. It downloads all unsynced files from Firebase and uploads them to your Google Drive
-4. Links in the app update to Google Drive links
+**Workflow:** `.github/workflows/sync-to-drive.yml`
+**Script:** `scripts/sync-to-drive.js`
 
----
+Scans all Firestore collections for Firebase Storage file URLs and uploads any
+new files to Google Drive. Already-synced files are skipped (no duplicates).
 
-## Step 1 — Create a Firebase Service Account
-
-1. Go to [console.firebase.google.com](https://console.firebase.google.com) → your `barro-industries` project
-2. Click the gear icon ⚙️ → **Project Settings** → **Service Accounts** tab
-3. Click **Generate new private key** → **Generate Key**
-4. A JSON file downloads — keep it safe, don't share it
-
----
-
-## Step 2 — Create a Google Drive Service Account
-
-1. Go to [console.cloud.google.com](https://console.cloud.google.com)
-2. Select the same project (`barro-industries`) or create a new one
-3. Go to **APIs & Services** → **Library** → search **Google Drive API** → Enable it
-4. Go to **APIs & Services** → **Credentials** → **Create Credentials** → **Service Account**
-   - Name: `bi-drive-sync`
-   - Click **Create and Continue** → **Done**
-5. Click on the new service account → **Keys** tab → **Add Key** → **Create new key** → JSON
-6. A JSON file downloads
+### Drive folder structure created:
+```
+BI-Operations/
+└── Files/
+    ├── Tasks/             ← task attachments
+    ├── Task Messages/     ← file attachments in task comment threads
+    ├── Posts/             ← post images and file attachments
+    ├── Submissions/       ← submission attachments
+    ├── Resources/         ← resource files
+    ├── Memos/             ← memo attachments
+    └── Quotes/            ← quote attachments
+```
 
 ---
 
-## Step 3 — Share Your Google Drive Folder With the Service Account
+## 2. Monthly Data Backup (12:01 AM on the 1st of each month)
 
-1. Create a folder in your Google Drive called **BI-Operations**
-2. Right-click the folder → **Share**
-3. Paste the service account email (looks like `bi-drive-sync@your-project.iam.gserviceaccount.com`)
-4. Set permission to **Editor** → Share
-5. Copy the folder ID from the URL:
-   `https://drive.google.com/drive/folders/`**`THIS_PART_IS_THE_FOLDER_ID`**
+**Workflow:** `.github/workflows/monthly-backup.yml`
+**Script:** `scripts/monthly-backup.js`
+
+Exports ALL Firestore data from the previous month as JSON + CSV files
+to Google Drive. This is your permanent record of all operations data.
+
+### Drive folder structure created:
+```
+BI-Operations/
+└── Monthly Backups/
+    └── YYYY-MM/           ← e.g. 2026-05
+        ├── _summary.txt           ← record counts + run info
+        ├── attendance.json/.csv
+        ├── tasks.json/.csv
+        ├── task_messages.json     ← all task thread messages
+        ├── cash_advances.json/.csv
+        ├── salary_history.json/.csv
+        ├── kpi_evaluations.json/.csv
+        ├── users.json/.csv
+        ├── posts.json/.csv
+        ├── payroll_overrides.json
+        ├── attendance_extensions.json
+        └── suggestions.json
+```
 
 ---
 
-## Step 4 — Add GitHub Secrets
+## Required GitHub Secrets
 
-1. Go to [github.com/barroindustries/barroindustries.github.io](https://github.com/barroindustries/barroindustries.github.io)
-2. Click **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+All 5 secrets must be set at: **GitHub repo → Settings → Secrets → Actions**
 
-Add these 5 secrets:
-
-| Secret Name | Value |
-|---|---|
-| `FIREBASE_SERVICE_ACCOUNT` | Paste the entire contents of the Firebase JSON key file |
-| `GOOGLE_SERVICE_ACCOUNT` | Paste the entire contents of the Google Drive JSON key file |
-| `DRIVE_FOLDER_ID` | The folder ID from Step 3 |
+| Secret | What it is |
+|--------|------------|
+| `FIREBASE_SERVICE_ACCOUNT` | Firebase Admin SDK JSON key (stringified, from Firebase Console → Project Settings → Service accounts) |
+| `GOOGLE_SERVICE_ACCOUNT` | Google Drive service account JSON key (stringified, from Google Cloud Console) |
+| `DRIVE_FOLDER_ID` | The ID of your `BI-Operations` folder in Google Drive (from the URL: `drive.google.com/drive/folders/THIS_PART`) |
 | `FIREBASE_PROJECT_ID` | `barro-industries` |
-| `FIREBASE_STORAGE_BUCKET` | `barro-industries.appspot.com` |
+| `FIREBASE_STORAGE_BUCKET` | `barro-industries.firebasestorage.app` |
 
 ---
 
-## Step 5 — Test It
+## Why files aren't showing in Drive yet
 
-1. Go to [github.com/barroindustries/barroindustries.github.io/actions](https://github.com/barroindustries/barroindustries.github.io/actions)
-2. Click **Nightly Firebase → Google Drive Sync**
-3. Click **Run workflow** → **Run workflow**
-4. Watch the logs — it should show files being synced
+The GitHub Actions workflows run on schedule, but they won't work until all 5 secrets above are added to the repo. Once secrets are set:
 
-After it runs, check your Google Drive **BI-Operations** folder — files should appear there organized by department.
+1. Go to **GitHub repo → Actions → "Daily File Sync"** → click **Run workflow** to test immediately
+2. Go to **Actions → "Monthly Firestore → Google Drive Backup"** → click **Run workflow** to run the first backup immediately
 
----
-
-## Schedule
-
-The sync runs automatically every night at **12:00 AM Philippine Time**.
-You can also trigger it manually anytime from the GitHub Actions tab.
+Both workflows can always be triggered manually — you don't have to wait for the schedule.
 
 ---
 
-## What Happens to Links
+## Manual test (local)
 
-- **Before sync**: File link points to Firebase Cloud Storage (cloud icon ☁️)
-- **After sync**: File link updates to Google Drive (drive icon 📁)
-- Employees always see the correct link — it updates automatically in the app
+```bash
+cd scripts
+npm install
+
+# File sync
+FIREBASE_SERVICE_ACCOUNT='...' GOOGLE_SERVICE_ACCOUNT='...' DRIVE_FOLDER_ID='...' \
+FIREBASE_PROJECT_ID='barro-industries' FIREBASE_STORAGE_BUCKET='barro-industries.firebasestorage.app' \
+npm run sync
+
+# Monthly backup
+FIREBASE_SERVICE_ACCOUNT='...' GOOGLE_SERVICE_ACCOUNT='...' DRIVE_FOLDER_ID='...' \
+FIREBASE_PROJECT_ID='barro-industries' FIREBASE_STORAGE_BUCKET='barro-industries.firebasestorage.app' \
+npm run backup
+```
