@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <title>Barro Industries — Operations</title>
+  <meta name="description" content="Barro Industries Internal Operations System"/>
+  <meta name="theme-color" content="#1a237e"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="BI Ops"/>
+  <link rel="manifest" href="manifest.json"/>
+  <link rel="apple-touch-icon" href="icons/icon-192.png"/>
+  <link rel="stylesheet" href="css/styles.css"/>
+
+  <!-- Firebase v10 compat -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- Google API for Drive -->
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+<!-- ══════════════════════════════════
+     LOGIN SCREEN
+══════════════════════════════════ -->
+<div id="login-screen" class="screen active">
+  <div class="login-bg"></div>
+  <div class="login-container">
+    <div class="login-logo-wrap">
+      <img src="icons/barro-logo.png" alt="Barro Industries" class="login-logo-img" onerror="this.style.display='none';document.getElementById('login-logo-fallback').style.display='flex'"/>
+      <div id="login-logo-fallback" class="login-logo-fallback" style="display:none">BI</div>
+    </div>
+    <h1 class="login-title">Barro Industries</h1>
+    <p class="login-sub">Operations System</p>
+    <form id="login-form" class="login-form" autocomplete="on">
+      <div class="form-group">
+        <label>Email Address</label>
+        <input type="email" id="email" placeholder="yourname@barroindustries.com" required autocomplete="email"/>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <div class="pw-wrap">
+          <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password"/>
+          <button type="button" class="pw-toggle" id="pw-toggle">👁</button>
+        </div>
+      </div>
+      <div id="login-error" class="error-msg hidden"></div>
+      <button type="submit" class="btn-primary btn-full" id="login-btn">
+        <span id="login-btn-text">Sign In</span>
+        <span id="login-spinner" class="spinner hidden"></span>
+      </button>
+      <button type="button" class="btn-link" id="forgot-btn">Forgot password?</button>
+    </form>
+    <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
+    <div class="login-version">v2.0 · Barro Industries</div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     APP SHELL
+══════════════════════════════════ -->
+<div id="app-shell" class="screen hidden">
+
+  <!-- Topbar -->
+  <header class="topbar" id="topbar">
+    <button class="menu-toggle" id="menu-toggle">☰</button>
+    <div class="topbar-logo">
+      <img src="icons/barro-logo.png" alt="BI" class="topbar-logo-img" onerror="this.style.display='none'"/>
+      <span class="topbar-brand">Barro Industries</span>
+    </div>
+    <div class="topbar-right">
+      <button class="notif-btn" id="notif-btn">
+        🔔
+        <span class="notif-badge hidden" id="notif-badge">0</span>
+      </button>
+      <div class="topbar-avatar" id="topbar-avatar">?</div>
+    </div>
+  </header>
+
+  <!-- Notification Panel -->
+  <div id="notif-panel" class="notif-panel hidden">
+    <div class="notif-panel-header">
+      <span>Notifications</span>
+      <button id="mark-all-read" class="btn-link">Mark all read</button>
+    </div>
+    <div id="notif-list" class="notif-list">
+      <div class="empty-state">No notifications</div>
+    </div>
+  </div>
+  <div id="notif-backdrop" class="notif-backdrop hidden"></div>
+
+  <!-- Sidebar (desktop) -->
+  <aside id="sidebar">
+    <div class="sidebar-top">
+      <div class="sidebar-user" id="sidebar-user">
+        <div class="sidebar-avatar" id="sidebar-avatar">?</div>
+        <div class="sidebar-user-info">
+          <div class="sidebar-user-name" id="sidebar-user-name">Loading…</div>
+          <div class="sidebar-user-role" id="sidebar-user-role">—</div>
+          <div class="sidebar-user-dept" id="sidebar-user-dept"></div>
+        </div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav" id="sidebar-nav">
+      <!-- Populated by JS based on role/department -->
+    </nav>
+
+    <div class="sidebar-footer">
+      <button class="sidebar-profile-btn" id="sidebar-profile-btn">⚙️ My Profile</button>
+      <button class="btn-logout" id="logout-btn">🚪 Sign Out</button>
+    </div>
+  </aside>
+
+  <!-- Sidebar overlay (mobile) -->
+  <div class="sidebar-overlay hidden" id="sidebar-overlay"></div>
+
+  <!-- Main content -->
+  <main class="main-content" id="main-content">
+    <!-- Dynamically rendered by JS -->
+    <div id="page-content"></div>
+  </main>
+
+  <!-- Bottom nav (mobile) -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <!-- Populated by JS -->
+  </nav>
+
+</div>
+
+<!-- ══════════════════════════════════
+     MODAL
+══════════════════════════════════ -->
+<div id="modal-overlay" class="modal-overlay hidden">
+  <div id="modal-box" class="modal-box">
+    <div class="modal-header">
+      <h3 id="modal-title">Modal</h3>
+      <button class="modal-close" id="modal-close">✕</button>
+    </div>
+    <div id="modal-body" class="modal-body"></div>
+    <div id="modal-footer" class="modal-footer hidden"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
+     PROFILE DRAWER
+══════════════════════════════════ -->
+<div id="profile-drawer" class="drawer hidden">
+  <div class="drawer-header">
+    <h3>My Profile</h3>
+    <button class="modal-close" id="profile-close">✕</button>
+  </div>
+  <div id="profile-body" class="drawer-body"></div>
+</div>
+<div id="drawer-overlay" class="modal-overlay hidden" style="z-index:190"></div>
+
+<!-- Scripts in order -->
+<script src="js/firebase-config.js"></script>
+<script src="js/config.js"></script>
+<script src="js/drive.js"></script>
+<script src="js/notifications.js"></script>
+<script src="js/departments.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
