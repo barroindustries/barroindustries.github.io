@@ -9,18 +9,133 @@
 function deptContainer() { return document.getElementById('page-content'); }
 function fmt(n) { return Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function today() { return new Date().toISOString().slice(0,10); }
-function priorityBadge(p) { return {high:'badge-red',medium:'badge-orange',low:'badge-green'}[p]||'badge-gray'; }
-function statusBadge(s) { return {open:'badge-blue',done:'badge-green',pending:'badge-orange',approved:'badge-green',rejected:'badge-red',draft:'badge-gray',sent:'badge-blue',accepted:'badge-green',reviewing:'badge-purple'}[s]||'badge-gray'; }
+function priorityBadge(p) { return {high:'badge-red',medium:'badge-orange',low:'badge-green',urgent:'badge-red'}[p]||'badge-gray'; }
+
+// ── Task Status System ─────────────────────────────
+const TASK_STATUSES = [
+  { value:'backlog',      label:'Backlog',               badge:'badge-gray'   },
+  { value:'brainstorm',   label:'Brainstorming',         badge:'badge-purple' },
+  { value:'in-progress',  label:'In Progress',           badge:'badge-blue'   },
+  { value:'submitted',    label:'Submitted for Review',  badge:'badge-orange' },
+  { value:'returned',     label:'Returned for Revision', badge:'badge-red'    },
+  { value:'approved',     label:'Approved',              badge:'badge-green'  },
+  { value:'on-hold',      label:'On Hold',               badge:'badge-orange' },
+  { value:'archived',     label:'Archived',              badge:'badge-gray'   },
+];
+const EMP_STATUSES   = ['backlog','brainstorm','in-progress','submitted'];
+const DONE_STATUSES  = ['approved','archived'];
+const SCORE_STATUSES = ['approved','on-hold','archived'];
+
+function statusBadge(s) {
+  const ts = TASK_STATUSES.find(x=>x.value===s);
+  if (ts) return ts.badge;
+  return {open:'badge-blue',done:'badge-green',pending:'badge-orange',draft:'badge-gray',sent:'badge-blue',accepted:'badge-green',reviewing:'badge-purple',rejected:'badge-red',approved:'badge-green'}[s]||'badge-gray';
+}
+function statusLabel(s) {
+  const ts = TASK_STATUSES.find(x=>x.value===s);
+  return ts?ts.label:({open:'Open',done:'Done',pending:'Pending'}[s]||s||'—');
+}
+function normTask(data,id) {
+  const t={id,...data};
+  if (!Array.isArray(t.assignedTo))      t.assignedTo      = t.assignedTo     ?[t.assignedTo]     :[];
+  if (!Array.isArray(t.assignedToNames)) t.assignedToNames = t.assignedToName ?[t.assignedToName] :[];
+  return t;
+}
+function assigneeChips(t) {
+  if (!t.assignedToNames?.length) return '';
+  const chips=t.assignedToNames.slice(0,3).map(n=>`<span style="font-size:11px;background:var(--primary-light);color:#fff;padding:2px 8px;border-radius:10px">${n}</span>`).join('');
+  return chips+(t.assignedToNames.length>3?`<span style="font-size:11px;color:var(--text-muted)">+${t.assignedToNames.length-3}</span>`:'');
+}
+function taskCard(t) {
+  const inactive=DONE_STATUSES.includes(t.status)||t.status==='archived';
+  return `<div class="item-card priority-${t.priority||'medium'}${inactive?' status-done':''}" data-id="${t.id}">
+    <div class="item-top">
+      <div class="item-title">${t.title}</div>
+      <div class="item-badges">
+        <span class="badge ${priorityBadge(t.priority)}">${t.priority||'med'}</span>
+        <span class="badge ${statusBadge(t.status)}">${statusLabel(t.status)}</span>
+      </div>
+    </div>
+    <div class="item-meta" style="gap:6px;flex-wrap:wrap">
+      ${assigneeChips(t)}
+      ${t.dueDate?`<span>📅 ${t.dueDate}</span>`:''}
+      ${t.department?`<span>🗂 ${t.department}</span>`:''}
+    </div>
+  </div>`;
+}
+async function notifyTaskInvolved(task,notifData,skipUid) {
+  const involved=new Set([...(task.assignedTo||[]),task.createdBy].filter(Boolean));
+  involved.delete(skipUid);
+  await Promise.all(Array.from(involved).map(uid=>Notifs.send(uid,notifData)));
+  await Notifs.sendToOwner(notifData);
+}
+
+// ── Dept Tasks subtab (shared) ────────────────────
+async function renderDeptTasks(container, deptName, currentUser, currentRole) {
+  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+  container.innerHTML = '<div class="loading-placeholder">Loading tasks…</div>';
+  try {
+    let snap = await db.collection('tasks').where('department','==',deptName).get()
+      .catch(()=>({docs:[]}));
+    let tasks = snap.docs.map(d=>normTask(d.data(),d.id));
+    // Non-admins only see tasks they're involved in
+    if (!isAdmin) {
+      tasks = tasks.filter(t=>(t.assignedTo||[]).includes(currentUser.uid)||t.createdBy===currentUser.uid);
+    }
+    tasks.sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+
+    if (!tasks.length) {
+      container.innerHTML = `<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks for ${deptName}</h4></div>`;
+      return;
+    }
+
+    // Group by status order
+    const groups = TASK_STATUSES.map(s=>({
+      ...s,
+      items: tasks.filter(t=>t.status===s.value)
+    })).filter(g=>g.items.length);
+    // Tasks with unknown/legacy status
+    const known = new Set(TASK_STATUSES.map(s=>s.value));
+    const other = tasks.filter(t=>!known.has(t.status));
+    if (other.length) groups.push({value:'other',label:'Other',badge:'badge-gray',items:other});
+
+    const canAdd = isAdmin;
+    container.innerHTML = `
+      ${canAdd?`<div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+        <button class="btn-primary btn-sm" id="dept-add-task-btn">+ New Task</button>
+      </div>`:''}
+      ${groups.map(g=>`
+        <div style="margin-bottom:20px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span class="badge ${g.badge}">${g.label}</span>
+            <span style="font-size:12px;color:var(--text-muted)">${g.items.length} task${g.items.length!==1?'s':''}</span>
+          </div>
+          <div class="item-list">
+            ${g.items.map(t=>taskCard(t)).join('')}
+          </div>
+        </div>
+      `).join('')}
+    `;
+    container.querySelectorAll('.item-card').forEach(card=>
+      card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole))
+    );
+    if (canAdd) {
+      container.querySelector('#dept-add-task-btn')?.addEventListener('click',()=>openAddTaskModal(currentUser,currentRole,deptName));
+    }
+  } catch(e) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Error loading tasks</h4></div>`;
+    console.error('renderDeptTasks error',e);
+  }
+}
 
 // ══════════════════════════════════════════════════
 //  TASKS (shared across all departments)
 // ══════════════════════════════════════════════════
 window.renderTasks = async function(currentUser, currentRole, currentDept) {
   const c = deptContainer();
-  const isPresMgr = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
 
   if (currentRole === 'president' || currentRole === 'owner') {
-    // President view: Departmental / My Tasks subtabs
     c.innerHTML = `
       <div class="page-header">
         <h2>✅ Tasks</h2>
@@ -33,36 +148,34 @@ window.renderTasks = async function(currentUser, currentRole, currentDept) {
       <div id="tasks-subtab-content"></div>
     `;
     loadPresidentTasks('departmental', currentUser, currentRole);
-    c.querySelectorAll('.subtab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
+    c.querySelectorAll('.subtab-btn').forEach(btn=>{
+      btn.addEventListener('click',()=>{
+        c.querySelectorAll('.subtab-btn').forEach(b=>b.classList.remove('active'));
         btn.classList.add('active');
-        loadPresidentTasks(btn.dataset.sub, currentUser, currentRole);
+        loadPresidentTasks(btn.dataset.sub,currentUser,currentRole);
       });
     });
-    document.getElementById('add-task-btn').onclick = () => openAddTaskModal(currentUser, currentRole);
+    document.getElementById('add-task-btn').onclick = () => openAddTaskModal(currentUser,currentRole);
     return;
   }
 
-  // Regular employee/manager view
   c.innerHTML = `
     <div class="page-header">
       <h2>✅ Tasks</h2>
       <div class="page-actions">
         <select id="task-filter" class="select-sm">
           <option value="mine">My Tasks</option>
-          ${isPresMgr?'<option value="all">All Tasks</option>':''}
-          <option value="open">Open</option>
-          <option value="done">Done</option>
+          ${isAdmin?'<option value="all">All Tasks</option>':''}
+          ${TASK_STATUSES.map(s=>`<option value="${s.value}">${s.label}</option>`).join('')}
         </select>
         <button class="btn-primary btn-sm" id="add-task-btn">+ New Task</button>
       </div>
     </div>
     <div id="tasks-list" class="item-list"><div class="loading-placeholder">Loading…</div></div>
   `;
-  loadTasksList(currentUser, currentRole, currentDept);
-  document.getElementById('task-filter').onchange = () => loadTasksList(currentUser, currentRole, currentDept);
-  document.getElementById('add-task-btn').onclick  = () => openAddTaskModal(currentUser, currentRole);
+  loadTasksList(currentUser,currentRole,currentDept);
+  document.getElementById('task-filter').onchange = () => loadTasksList(currentUser,currentRole,currentDept);
+  document.getElementById('add-task-btn').onclick  = () => openAddTaskModal(currentUser,currentRole);
 };
 
 async function loadPresidentTasks(sub, currentUser, currentRole) {
@@ -70,255 +183,310 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
   if (!wrap) return;
 
   if (sub === 'mine') {
-    // My Tasks tab — tasks assigned to president
     wrap.innerHTML = `
       <div style="display:flex;justify-content:flex-end;padding:8px 0">
         <select id="pres-mine-filter" class="select-sm">
           <option value="all">All Statuses</option>
-          <option value="open">Open</option>
-          <option value="done">Done</option>
+          ${TASK_STATUSES.map(s=>`<option value="${s.value}">${s.label}</option>`).join('')}
         </select>
       </div>
       <div id="pres-mine-list" class="item-list"><div class="loading-placeholder">Loading…</div></div>
     `;
     const renderMine = async () => {
-      const list = document.getElementById('pres-mine-list');
-      const filter = document.getElementById('pres-mine-filter')?.value || 'all';
-      const snap = await db.collection('tasks').where('assignedTo','==',currentUser.uid).get();
-      let tasks = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-      if (filter === 'open') tasks = tasks.filter(t=>t.status!=='done');
-      if (filter === 'done') tasks = tasks.filter(t=>t.status==='done');
-      if (!tasks.length) { list.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks assigned to you</h4></div>'; return; }
-      list.innerHTML = tasks.map(t=>`
-        <div class="item-card priority-${t.priority||'medium'} ${t.status==='done'?'status-done':''}" data-id="${t.id}">
-          <div class="item-top">
-            <div class="item-title">${t.status==='done'?'✅ ':''}${t.title}</div>
-            <div class="item-badges">
-              <span class="badge ${priorityBadge(t.priority)}">${t.priority||'med'}</span>
-              <span class="badge ${statusBadge(t.status)}">${t.status||'open'}</span>
-            </div>
-          </div>
-          <div class="item-meta">
-            ${t.dueDate?`<span>📅 ${t.dueDate}</span>`:''}
-            ${t.department?`<span>🗂 ${t.department}</span>`:''}
-          </div>
-        </div>`).join('');
-      list.querySelectorAll('.item-card').forEach(card => {
-        card.addEventListener('click', () => openTaskDetail(card.dataset.id, currentUser, currentRole));
-      });
+      const list   = document.getElementById('pres-mine-list');
+      const filter = document.getElementById('pres-mine-filter')?.value||'all';
+      const snap   = await db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
+        .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get());
+      let tasks = snap.docs.map(d=>normTask(d.data(),d.id)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+      if (filter!=='all') tasks = tasks.filter(t=>t.status===filter);
+      if (!tasks.length) { list.innerHTML='<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks</h4></div>'; return; }
+      list.innerHTML = tasks.map(t=>taskCard(t)).join('');
+      list.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole)));
     };
     renderMine();
-    document.getElementById('pres-mine-filter')?.addEventListener('change', renderMine);
+    document.getElementById('pres-mine-filter')?.addEventListener('change',renderMine);
     return;
   }
 
-  // Departmental tab — all tasks grouped by department
   wrap.innerHTML = '<div class="loading-placeholder">Loading…</div>';
   try {
-    const snap = await db.collection('tasks').get();
-    const tasks = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    const snap  = await db.collection('tasks').get();
+    const tasks = snap.docs.map(d=>normTask(d.data(),d.id)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    if (!tasks.length) { wrap.innerHTML='<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks yet</h4></div>'; return; }
 
-    const deptGroups = {};
-    tasks.forEach(t => {
-      const dept = t.department || 'Unassigned';
-      if (!deptGroups[dept]) deptGroups[dept] = [];
-      deptGroups[dept].push(t);
-    });
+    const deptGroups={};
+    tasks.forEach(t=>{ const d=t.department||'Unassigned'; if(!deptGroups[d])deptGroups[d]=[]; deptGroups[d].push(t); });
 
-    if (!tasks.length) { wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks yet</h4></div>'; return; }
-
-    wrap.innerHTML = Object.entries(deptGroups).map(([dept, dTasks]) => {
-      const cfg = window.DEPARTMENTS?.[dept] || {icon:'🗂️', color:'var(--primary-light)'};
-      const open = dTasks.filter(t=>t.status!=='done').length;
-      const done = dTasks.filter(t=>t.status==='done').length;
-      return `
-        <div class="card" style="margin-bottom:12px">
-          <div class="card-header" style="border-left:4px solid ${cfg.color||'var(--primary-light)'}">
-            <h3>${cfg.icon||'🗂️'} ${dept}</h3>
-            <div style="display:flex;gap:8px;align-items:center">
-              <span class="badge badge-blue">${open} open</span>
-              <span class="badge badge-green">${done} done</span>
-            </div>
-          </div>
-          <div class="item-list" style="padding:0 12px 12px">
-            ${dTasks.map(t=>`
-              <div class="item-card priority-${t.priority||'medium'} ${t.status==='done'?'status-done':''}" data-id="${t.id}" style="margin-top:8px;cursor:pointer">
-                <div class="item-top">
-                  <div class="item-title">${t.status==='done'?'✅ ':''}${t.title}</div>
-                  <div class="item-badges">
-                    <span class="badge ${priorityBadge(t.priority)}">${t.priority||'med'}</span>
-                    <span class="badge ${statusBadge(t.status)}">${t.status||'open'}</span>
-                  </div>
-                </div>
-                <div class="item-meta">
-                  ${t.assignedToName?`<span>👤 ${t.assignedToName}</span>`:''}
-                  ${t.dueDate?`<span>📅 ${t.dueDate}</span>`:''}
-                </div>
-              </div>`).join('')}
-          </div>
-        </div>`;
+    wrap.innerHTML = Object.entries(deptGroups).map(([dept,dTasks])=>{
+      const cfg  = window.DEPARTMENTS?.[dept]||{icon:'🗂️',color:'var(--primary-light)'};
+      const open = dTasks.filter(t=>!DONE_STATUSES.includes(t.status)&&t.status!=='archived').length;
+      const done = dTasks.filter(t=>DONE_STATUSES.includes(t.status)).length;
+      return `<div class="card" style="margin-bottom:12px">
+        <div class="card-header" style="border-left:4px solid ${cfg.color||'var(--primary-light)'}">
+          <h3>${cfg.icon||'🗂️'} ${dept}</h3>
+          <div style="display:flex;gap:8px"><span class="badge badge-blue">${open} open</span><span class="badge badge-green">${done} done</span></div>
+        </div>
+        <div class="item-list" style="padding:0 12px 12px">
+          ${dTasks.map(t=>`<div style="margin-top:8px">${taskCard(t)}</div>`).join('')}
+        </div>
+      </div>`;
     }).join('');
-
-    wrap.querySelectorAll('.item-card').forEach(card => {
-      card.addEventListener('click', () => openTaskDetail(card.dataset.id, currentUser, currentRole));
-    });
+    wrap.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole)));
   } catch(err) {
-    wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>${err.message}</h4></div>`;
+    wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">⚠️</div><h4>${err.message}</h4></div>`;
   }
 }
 
 async function loadTasksList(currentUser, currentRole, currentDept) {
   const list   = document.getElementById('tasks-list');
-  const filter = document.getElementById('task-filter')?.value || 'mine';
+  const filter = document.getElementById('task-filter')?.value||'mine';
   list.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+  const isPriv = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
 
   let snap;
-  if (filter === 'mine') {
-    snap = await db.collection('tasks').where('assignedTo','==',currentUser.uid).get();
-  } else if (currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager') {
+  if (filter==='mine') {
+    snap = await db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
+      .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get());
+  } else if (isPriv||filter==='all') {
     snap = await db.collection('tasks').get();
   } else {
-    snap = await db.collection('tasks').where('department','==',currentDept).get();
+    snap = await db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
+      .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get());
   }
 
-  let tasks = snap.docs.map(d => ({id:d.id,...d.data()})).sort((a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-  if (filter === 'open') tasks = tasks.filter(t => t.status !== 'done');
-  if (filter === 'done') tasks = tasks.filter(t => t.status === 'done');
-
-  if (!tasks.length) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks found</h4></div>`;
-    return;
-  }
-  list.innerHTML = tasks.map(t => `
-    <div class="item-card priority-${t.priority||'medium'} ${t.status==='done'?'status-done':''}" data-id="${t.id}">
-      <div class="item-top">
-        <div class="item-title">${t.status==='done'?'✅ ':''}${t.title}</div>
-        <div class="item-badges">
-          <span class="badge ${priorityBadge(t.priority)}">${t.priority||'med'}</span>
-          <span class="badge ${statusBadge(t.status)}">${t.status||'open'}</span>
-        </div>
-      </div>
-      <div class="item-meta">
-        ${t.assignedToName?`<span>👤 ${t.assignedToName}</span>`:''}
-        ${t.dueDate?`<span>📅 ${t.dueDate}</span>`:''}
-        ${t.department?`<span>🗂 ${t.department}</span>`:''}
-      </div>
-    </div>
-  `).join('');
-  list.querySelectorAll('.item-card').forEach(card => {
-    card.addEventListener('click', () => openTaskDetail(card.dataset.id, currentUser, currentRole));
-  });
+  let tasks = snap.docs.map(d=>normTask(d.data(),d.id)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+  if (filter!=='mine'&&filter!=='all') tasks=tasks.filter(t=>t.status===filter);
+  if (!tasks.length) { list.innerHTML=`<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks found</h4></div>`; return; }
+  list.innerHTML = tasks.map(t=>taskCard(t)).join('');
+  list.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole)));
 }
 
 async function openTaskDetail(taskId, currentUser, currentRole) {
   const snap = await db.collection('tasks').doc(taskId).get();
-  const t = {id:snap.id,...snap.data()};
-  const canManage = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
-
-  // Load employees for reassignment dropdown
-  const empSnap = await db.collection('users').get();
-  const employees = empSnap.docs.map(d=>({id:d.id,...d.data()}))
-    .sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+  if (!snap.exists) { Notifs.showToast('Task not found','error'); return; }
+  const t       = normTask(snap.data(),snap.id);
+  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+  const isAssignee = t.assignedTo.includes(currentUser.uid);
+  const isCreator  = t.createdBy===currentUser.uid;
+  const canEdit    = isAdmin||isAssignee||isCreator;
+  const canSubmit  = isAssignee&&!['submitted','approved','on-hold','archived'].includes(t.status);
+  const allowedStatuses = isAdmin?TASK_STATUSES:TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value));
 
   openModal(t.title, `
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
       <span class="badge ${priorityBadge(t.priority)}">${t.priority||'medium'}</span>
-      <span class="badge ${statusBadge(t.status)}">${t.status||'open'}</span>
+      <span class="badge ${statusBadge(t.status)}">${statusLabel(t.status)}</span>
       ${t.department?`<span class="badge badge-gray">🗂 ${t.department}</span>`:''}
     </div>
     <p style="font-size:14px;line-height:1.6;margin-bottom:12px;white-space:pre-wrap">${t.description||'No description.'}</p>
-    <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;display:flex;gap:16px;flex-wrap:wrap">
-      ${t.assignedToName?`<span>👤 <strong>${t.assignedToName}</strong></span>`:''}
-      ${t.assignedEmail?`<span>✉️ ${t.assignedEmail}</span>`:''}
+    <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;display:flex;gap:12px;flex-wrap:wrap">
+      ${t.assignedToNames?.length?`<span>👥 <strong>${t.assignedToNames.join(', ')}</strong></span>`:''}
       ${t.dueDate?`<span>📅 Due: <strong>${t.dueDate}</strong></span>`:''}
-      ${t.createdByName?`<span>🖊 Created by: ${t.createdByName}</span>`:''}
+      ${t.createdByName?`<span>🖊 By: ${t.createdByName}</span>`:''}
     </div>
 
-    ${canManage ? `
-    <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:14px">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:10px">🎯 Designate / Reassign</div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <select id="reassign-sel" style="flex:1;min-width:180px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)">
-          <option value="">— Select employee —</option>
-          ${employees.map(e=>`<option value="${e.id}" data-name="${e.displayName||e.email}" data-email="${e.email||''}" ${e.id===t.assignedTo?'selected':''}>${e.displayName||e.email} (${e.email||'no email'})</option>`).join('')}
+    ${canEdit?`<div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:8px">Change Status</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <select id="status-sel" style="flex:1;min-width:160px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)">
+          ${allowedStatuses.map(s=>`<option value="${s.value}"${t.status===s.value?' selected':''}>${s.label}</option>`).join('')}
         </select>
-        <button class="btn-primary btn-sm" id="designate-btn">Designate ✓</button>
+        <button class="btn-primary btn-sm" id="update-status-btn">Update</button>
       </div>
-      <div style="margin-top:10px">
-        <input id="task-instruction" placeholder="Add instruction or note for assignee…" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)" value=""/>
+    </div>`:''}
+
+    ${isAdmin?`<div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:10px">👥 Add Assignee</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <select id="reassign-sel" style="flex:1;min-width:180px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)">
+          <option value="">— Loading… —</option>
+        </select>
+        <button class="btn-primary btn-sm" id="designate-btn">+ Add</button>
       </div>
-    </div>` : ''}
+      <input id="task-instruction" placeholder="Note for assignee (optional)…" style="width:100%;margin-top:8px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"/>
+    </div>`:''}
+
+    ${currentRole==='president'&&SCORE_STATUSES.includes(t.status)?`<div style="background:var(--surface2);border:1.5px solid var(--primary-light);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--primary-light);margin-bottom:8px">🔒 President Score (hidden from employees)</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input id="pres-score" type="number" min="1" max="10" step="0.5" value="${t.presidentScore||''}" placeholder="1–10" style="width:80px;padding:8px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text)"/>
+        <span style="font-size:12px;color:var(--text-muted)">/ 10 — averages into employee KPI president rating</span>
+        <button class="btn-primary btn-sm" id="save-score-btn">Save</button>
+      </div>
+      ${t.presidentScore?`<div style="margin-top:6px;font-size:12px;color:var(--text-muted)">Current: <strong>${t.presidentScore}/10</strong></div>`:''}
+    </div>`:''}
 
     <hr class="divider"/>
     <div id="task-comments-wrap"></div>
   `, `
-    ${t.status!=='done'?`<button class="btn-success" id="mark-done-btn">✅ Mark Done</button>`:'<span style="color:var(--success);font-size:13px;font-weight:600">✅ Completed</span>'}
-    ${canManage||t.createdBy===currentUser.uid?`<button class="btn-danger" id="del-task-btn">Delete</button>`:''}
+    ${canSubmit?`<button class="btn-success" id="submit-task-btn">📤 Submit for Review</button>`:''}
+    ${canEdit?`<button class="btn-secondary" id="edit-task-btn">✎ Edit</button>`:''}
+    ${isAdmin||isCreator?`<button class="btn-danger" id="del-task-btn">Delete</button>`:''}
     <button class="btn-secondary" onclick="closeModal()">Close</button>
   `);
 
-  renderComments('tasks', taskId, 'task-comments-wrap', currentUser);
+  renderComments('tasks',taskId,'task-comments-wrap',currentUser);
 
-  document.getElementById('mark-done-btn')?.addEventListener('click', async () => {
-    await db.collection('tasks').doc(taskId).update({ status:'done' });
-    closeModal(); renderTasks(currentUser, currentRole, t.department);
+  // Load employees for designate
+  if (isAdmin) {
+    db.collection('users').get().then(empSnap=>{
+      const sel=document.getElementById('reassign-sel'); if(!sel)return;
+      const emps=empSnap.docs.map(d=>({id:d.id,...d.data()})).filter(e=>!t.assignedTo.includes(e.id)).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+      sel.innerHTML=`<option value="">— Select employee —</option>`+emps.map(e=>`<option value="${e.id}" data-name="${e.displayName||e.email}">${e.displayName||e.email}</option>`).join('');
+    });
+  }
+
+  document.getElementById('update-status-btn')?.addEventListener('click', async()=>{
+    const newStatus=document.getElementById('status-sel').value;
+    if (newStatus===t.status) { Notifs.showToast('Status unchanged','error'); return; }
+    const uSnap=await db.collection('users').doc(currentUser.uid).get();
+    const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
+    await db.collection('tasks').doc(taskId).update({status:newStatus,lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()});
+    await notifyTaskInvolved(t,{title:'📋 Task Status Updated',body:`"${t.title}" → ${statusLabel(newStatus)} (${actorName})`,icon:'📋',type:'task_status'},currentUser.uid);
+    Notifs.showToast(`Status → ${statusLabel(newStatus)}`);
+    closeModal(); renderTasks(currentUser,currentRole,t.department);
   });
 
-  document.getElementById('del-task-btn')?.addEventListener('click', async () => {
+  document.getElementById('submit-task-btn')?.addEventListener('click', async()=>{
+    const uSnap=await db.collection('users').doc(currentUser.uid).get();
+    const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
+    await db.collection('tasks').doc(taskId).update({status:'submitted',submittedBy:currentUser.uid,submittedByName:actorName,submittedAt:firebase.firestore.FieldValue.serverTimestamp(),lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()});
+    await notifyTaskInvolved(t,{title:'📤 Task Submitted for Review',body:`"${t.title}" submitted by ${actorName}`,icon:'📤',type:'task_submitted'},currentUser.uid);
+    Notifs.showToast('Submitted for review!');
+    closeModal(); renderTasks(currentUser,currentRole,t.department);
+  });
+
+  document.getElementById('edit-task-btn')?.addEventListener('click',()=>{ closeModal(); openEditTaskModal(taskId,t,currentUser,currentRole); });
+
+  document.getElementById('del-task-btn')?.addEventListener('click', async()=>{
     if (!confirm('Delete this task?')) return;
     await db.collection('tasks').doc(taskId).delete();
-    closeModal(); renderTasks(currentUser, currentRole, t.department);
+    closeModal(); renderTasks(currentUser,currentRole,t.department);
   });
 
-  document.getElementById('designate-btn')?.addEventListener('click', async () => {
-    const sel          = document.getElementById('reassign-sel');
-    const newUid       = sel.value;
-    const newName      = sel.options[sel.selectedIndex]?.dataset.name || '';
-    const newEmail     = sel.options[sel.selectedIndex]?.dataset.email || '';
-    const instruction  = document.getElementById('task-instruction')?.value.trim();
-    if (!newUid) { Notifs.showToast('Select an employee first', 'error'); return; }
-
-    const creatorSnap  = await db.collection('users').doc(currentUser.uid).get();
-    const creatorName  = creatorSnap.exists ? creatorSnap.data().displayName : currentUser.email;
-
-    const update = {
-      assignedTo: newUid, assignedToName: newName, assignedEmail: newEmail,
-      lastModifiedBy: currentUser.uid, lastModifiedByName: creatorName,
-      lastModifiedAt: firebase.firestore.FieldValue.serverTimestamp()
-    };
-    if (instruction) update.description = (t.description||'') + `\n\n📝 ${creatorName}: ${instruction}`;
-
+  document.getElementById('designate-btn')?.addEventListener('click', async()=>{
+    const sel=document.getElementById('reassign-sel');
+    const newUid=sel.value; const newName=sel.options[sel.selectedIndex]?.dataset.name||'';
+    const note=document.getElementById('task-instruction')?.value.trim();
+    if (!newUid) { Notifs.showToast('Select an employee','error'); return; }
+    const uSnap=await db.collection('users').doc(currentUser.uid).get();
+    const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
+    const update={assignedTo:[...t.assignedTo,newUid],assignedToNames:[...t.assignedToNames,newName],lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()};
+    if (note) update.description=(t.description||'')+`\n\n📝 ${actorName}: ${note}`;
     await db.collection('tasks').doc(taskId).update(update);
+    await Notifs.send(newUid,{title:'🎯 Task Assigned to You',body:`"${t.title}" assigned by ${actorName}${note?' — '+note:''}`,icon:'🎯',type:'task_designated'});
+    await Notifs.sendToOwner({title:'👥 Task Assignee Added',body:`${actorName} added ${newName} to "${t.title}"`,icon:'👥',type:'task_modified'});
+    Notifs.showToast(`${newName} added`);
+    closeModal(); renderTasks(currentUser,currentRole,t.department);
+  });
 
-    // Notify new assignee
-    await Notifs.send(newUid, {
-      title: '🎯 Task Designated to You',
-      body:  `"${t.title}" was designated to you by ${creatorName}${instruction?' — '+instruction:''}`,
-      icon:  '🎯', type: 'task_designated'
-    });
-
-    // Notify previous assignee if different
-    if (t.assignedTo && t.assignedTo !== newUid) {
-      await Notifs.send(t.assignedTo, {
-        title: '🔄 Task Reassigned',
-        body:  `"${t.title}" was reassigned by ${creatorName}`,
-        icon:  '🔄', type: 'task_modified'
-      });
-    }
-
-    Notifs.showToast(`Designated to ${newName}`);
-    closeModal(); renderTasks(currentUser, currentRole, t.department);
+  document.getElementById('save-score-btn')?.addEventListener('click', async()=>{
+    const score=parseFloat(document.getElementById('pres-score').value);
+    if (!score||score<1||score>10) { Notifs.showToast('Enter 1–10','error'); return; }
+    await db.collection('tasks').doc(taskId).update({presidentScore:score});
+    for (const uid of t.assignedTo) await recomputePresidentTaskScore(uid);
+    Notifs.showToast('Score saved & KPI updated!');
+    closeModal(); renderTasks(currentUser,currentRole,t.department);
   });
 }
 
-async function openAddTaskModal(currentUser, currentRole) {
-  // Load employees for dropdown
-  const empSnap = await db.collection('users').get();
-  const employees = empSnap.docs.map(d => ({id: d.id, ...d.data()}))
-    .sort((a,b) => (a.displayName||'').localeCompare(b.displayName||''));
+async function recomputePresidentTaskScore(uid) {
+  try {
+    const snap = await db.collection('tasks').where('assignedTo','array-contains',uid).get()
+      .catch(()=>db.collection('tasks').where('assignedTo','==',uid).get());
+    const scored = snap.docs.map(d=>d.data()).filter(t=>typeof t.presidentScore==='number');
+    if (!scored.length) return;
+    const avg = Math.round(scored.reduce((s,t)=>s+t.presidentScore,0)/scored.length*10)/10;
+    await db.collection('kpi_evals').doc(uid).set({presidentGradeFromTasks:avg,presidentScoreTaskCount:scored.length},{merge:true});
+  } catch(e) { console.warn('[recomputePresidentTaskScore]',e); }
+}
 
-  const deptOptions = Object.keys(window.DEPARTMENTS||{})
-    .map(k => `<option value="${k}">${k}</option>`).join('');
+async function openEditTaskModal(taskId, t, currentUser, currentRole) {
+  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+  let employees=[];
+  if (isAdmin) {
+    const empSnap = await db.collection('users').get();
+    employees = empSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+  }
+  const deptOptions = Object.keys(window.DEPARTMENTS||{}).map(k=>`<option value="${k}"${t.department===k?' selected':''}>${k}</option>`).join('');
+  const allowedStatuses = isAdmin?TASK_STATUSES:TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value));
+
+  openModal('Edit Task', `
+    <div class="form-group"><label>Title</label><input id="et-title" value="${(t.title||'').replace(/"/g,'&quot;')}"/></div>
+    <div class="form-group"><label>Description</label><textarea id="et-desc" rows="3">${t.description||''}</textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label>Priority</label>
+        <select id="et-priority">
+          ${['low','medium','high','urgent'].map(p=>`<option value="${p}"${t.priority===p?' selected':''}>${p.charAt(0).toUpperCase()+p.slice(1)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Due Date</label><input id="et-due" type="date" value="${t.dueDate||today()}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Status</label>
+        <select id="et-status">
+          ${allowedStatuses.map(s=>`<option value="${s.value}"${t.status===s.value?' selected':''}>${s.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Department</label>
+        <select id="et-dept"><option value="">— None —</option>${deptOptions}</select>
+      </div>
+    </div>
+    ${isAdmin?`<div class="form-group">
+      <label>Assignees (remove: click chip; add: select below)</label>
+      <div id="assignee-chips" style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap">
+        ${t.assignedToNames.map((name,i)=>`<span class="badge badge-blue" style="cursor:pointer" data-uid="${t.assignedTo[i]}">${name} ✕</span>`).join('')}
+      </div>
+      <select id="et-add-assignee" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+        <option value="">— Add assignee —</option>
+        ${employees.filter(e=>!t.assignedTo.includes(e.id)).map(e=>`<option value="${e.id}" data-name="${e.displayName||e.email}">${e.displayName||e.email}</option>`).join('')}
+      </select>
+    </div>`:''}
+  `, `<button class="btn-primary" id="save-edit-btn">Save Changes</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  let curAssignees=t.assignedTo.map((uid,i)=>({uid,name:t.assignedToNames[i]||uid}));
+  document.getElementById('assignee-chips')?.querySelectorAll('.badge').forEach(chip=>{
+    chip.addEventListener('click',()=>{ curAssignees=curAssignees.filter(a=>a.uid!==chip.dataset.uid); chip.remove(); });
+  });
+  document.getElementById('et-add-assignee')?.addEventListener('change',e=>{
+    const uid=e.target.value; const name=e.target.options[e.target.selectedIndex]?.dataset.name||'';
+    if (!uid||curAssignees.some(a=>a.uid===uid)){e.target.value='';return;}
+    curAssignees.push({uid,name});
+    const chips=document.getElementById('assignee-chips');
+    const chip=document.createElement('span'); chip.className='badge badge-blue'; chip.style.cursor='pointer'; chip.dataset.uid=uid;
+    chip.textContent=`${name} ✕`;
+    chip.addEventListener('click',()=>{ curAssignees=curAssignees.filter(a=>a.uid!==uid); chip.remove(); });
+    chips?.appendChild(chip); e.target.value='';
+  });
+
+  document.getElementById('save-edit-btn').addEventListener('click', async()=>{
+    const title=document.getElementById('et-title').value.trim();
+    if (!title){Notifs.showToast('Title required','error');return;}
+    const uSnap=await db.collection('users').doc(currentUser.uid).get();
+    const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
+    const update={
+      title,
+      description:document.getElementById('et-desc').value.trim(),
+      priority:document.getElementById('et-priority').value,
+      dueDate:document.getElementById('et-due').value,
+      status:document.getElementById('et-status').value,
+      department:document.getElementById('et-dept').value,
+      lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,
+      lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()
+    };
+    if (isAdmin){update.assignedTo=curAssignees.map(a=>a.uid);update.assignedToNames=curAssignees.map(a=>a.name);}
+    await db.collection('tasks').doc(taskId).update(update);
+    const updatedTask={...t,assignedTo:update.assignedTo||t.assignedTo};
+    await notifyTaskInvolved(updatedTask,{title:'✏️ Task Updated',body:`"${title}" edited by ${actorName}`,icon:'✏️',type:'task_edited'},currentUser.uid);
+    Notifs.showToast('Task updated!');
+    closeModal(); renderTasks(currentUser,currentRole,update.department||t.department);
+  });
+}
+
+async function openAddTaskModal(currentUser, currentRole, defaultDept) {
+  const empSnap  = await db.collection('users').get();
+  const employees= empSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+  const deptOptions = Object.keys(window.DEPARTMENTS||{}).map(k=>`<option value="${k}"${k===defaultDept?' selected':''}>${k}</option>`).join('');
 
   openModal('New Task', `
     <div class="form-group"><label>Title</label><input id="t-title" placeholder="Task name"/></div>
@@ -326,82 +494,76 @@ async function openAddTaskModal(currentUser, currentRole) {
     <div class="form-row">
       <div class="form-group"><label>Priority</label>
         <select id="t-priority">
-          <option value="low">🟢 Low</option>
-          <option value="medium" selected>🟡 Medium</option>
-          <option value="high">🔴 High</option>
-          <option value="urgent">🚨 Urgent</option>
+          <option value="low">🟢 Low</option><option value="medium" selected>🟡 Medium</option>
+          <option value="high">🔴 High</option><option value="urgent">🚨 Urgent</option>
         </select>
       </div>
+      <div class="form-group"><label>Status</label>
+        <select id="t-status">
+          ${TASK_STATUSES.map(s=>`<option value="${s.value}"${s.value==='backlog'?' selected':''}>${s.label}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
       <div class="form-group"><label>Due Date</label><input id="t-due" type="date" value="${today()}"/></div>
+      <div class="form-group"><label>Department</label>
+        <select id="t-dept"><option value="">— Select —</option>${deptOptions}</select>
+      </div>
     </div>
     <div class="form-group">
-      <label>Assign To</label>
-      <select id="t-assignee-sel">
-        <option value="">— Select employee —</option>
-        ${employees.map(e => `<option value="${e.id}" data-name="${e.displayName||e.email}" data-email="${e.email||''}">${e.displayName||e.email} ${e.email?'('+e.email+')':''}</option>`).join('')}
+      <label>Assign To (can add multiple)</label>
+      <select id="t-assignee-sel" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+        <option value="">— Add assignee —</option>
+        ${employees.map(e=>`<option value="${e.id}" data-name="${e.displayName||e.email}">${e.displayName||e.email}${e.email?' ('+e.email+')':''}</option>`).join('')}
       </select>
-    </div>
-    <div class="form-group"><label>Department</label>
-      <select id="t-dept">
-        <option value="">— Select department —</option>
-        ${deptOptions}
-      </select>
+      <div id="new-assignee-chips" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"></div>
     </div>
     <div class="form-group"><label>Notes / Instructions</label>
-      <textarea id="t-notes" rows="2" placeholder="Additional notes for the assignee…"></textarea>
+      <textarea id="t-notes" rows="2" placeholder="Additional notes for assignees…"></textarea>
     </div>
     <div id="task-attach-area"></div>
   `, `<button class="btn-primary" id="create-task-btn">Create Task</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
-  let taskAttachment = null;
-  Drive.renderUploadArea('task-attach-area', r => { taskAttachment = r; }, {
-    label: '📎 Attach file to task',
-    dept: 'tasks',
-    subfolder: 'attachments'
+  let taskAttachment=null;
+  Drive.renderUploadArea('task-attach-area',r=>{taskAttachment=r;},{label:'📎 Attach file',dept:'tasks',subfolder:'attachments'});
+
+  let newAssignees=[];
+  document.getElementById('t-assignee-sel').addEventListener('change',e=>{
+    const uid=e.target.value; const name=e.target.options[e.target.selectedIndex]?.dataset.name||'';
+    if (!uid||newAssignees.some(a=>a.uid===uid)){e.target.value='';return;}
+    newAssignees.push({uid,name});
+    const chips=document.getElementById('new-assignee-chips');
+    const chip=document.createElement('span'); chip.className='badge badge-blue'; chip.style.cursor='pointer';
+    chip.textContent=`${name} ✕`;
+    chip.addEventListener('click',()=>{ newAssignees=newAssignees.filter(a=>a.uid!==uid); chip.remove(); });
+    chips.appendChild(chip); e.target.value='';
   });
 
-  document.getElementById('create-task-btn').addEventListener('click', async () => {
-    const title   = document.getElementById('t-title').value.trim();
-    const desc    = document.getElementById('t-desc').value.trim();
-    const notes   = document.getElementById('t-notes').value.trim();
-    const priority= document.getElementById('t-priority').value;
-    const dueDate = document.getElementById('t-due').value;
-    const dept    = document.getElementById('t-dept').value;
-
-    const sel     = document.getElementById('t-assignee-sel');
-    const assignedTo   = sel.value;
-    const assignedName = sel.options[sel.selectedIndex]?.dataset.name || '';
-    const assignedEmail= sel.options[sel.selectedIndex]?.dataset.email || '';
-
-    if (!title) { Notifs.showToast('Enter a task title', 'error'); return; }
-
-    const creatorSnap  = await db.collection('users').doc(currentUser.uid).get();
-    const creatorName  = creatorSnap.exists ? creatorSnap.data().displayName : currentUser.email;
-
-    const fullDesc = notes ? `${desc}\n\n📝 Instructions: ${notes}` : desc;
-
-    // 1. Save to Firestore
+  document.getElementById('create-task-btn').addEventListener('click', async()=>{
+    const title=document.getElementById('t-title').value.trim();
+    if (!title){Notifs.showToast('Enter a task title','error');return;}
+    const uSnap=await db.collection('users').doc(currentUser.uid).get();
+    const creatorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
+    const desc=document.getElementById('t-desc').value.trim();
+    const notes=document.getElementById('t-notes').value.trim();
     await db.collection('tasks').add({
-      title, description: fullDesc, priority, dueDate,
-      assignedTo, assignedToName: assignedName, assignedEmail,
-      department: dept, status: 'open',
-      attachments: taskAttachment ? [taskAttachment] : [],
-      createdBy: currentUser.uid, createdByName: creatorName,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      title, description:notes?`${desc}\n\n📝 Instructions: ${notes}`:desc,
+      priority:document.getElementById('t-priority').value,
+      status:document.getElementById('t-status').value,
+      dueDate:document.getElementById('t-due').value,
+      department:document.getElementById('t-dept').value,
+      assignedTo:newAssignees.map(a=>a.uid),
+      assignedToNames:newAssignees.map(a=>a.name),
+      attachments:taskAttachment?[taskAttachment]:[],
+      createdBy:currentUser.uid,createdByName:creatorName,
+      createdAt:firebase.firestore.FieldValue.serverTimestamp()
     });
-
-    // 2. Notify assigned employee
-    if (assignedTo) {
-      await Notifs.send(assignedTo, {
-        title: '📌 New Task Assigned',
-        body:  `"${title}" was assigned to you by ${creatorName}${dept?' ('+dept+')':''}`,
-        icon:  '📌', type: 'task_assigned'
-      });
+    for (const a of newAssignees) {
+      await Notifs.send(a.uid,{title:'📌 New Task Assigned',body:`"${title}" assigned by ${creatorName}`,icon:'📌',type:'task_assigned'});
     }
-
-    closeModal();
-    Notifs.showToast('Task created!');
-    renderTasks(currentUser, currentRole, dept);
+    await Notifs.sendToOwner({title:'📌 New Task Created',body:`${creatorName} created "${title}"`,icon:'📌',type:'task_created'});
+    closeModal(); Notifs.showToast('Task created!');
+    renderTasks(currentUser,currentRole,document.getElementById('t-dept')?.value||'');
   });
 }
 
@@ -712,7 +874,7 @@ window.renderMarketing = async function(currentUser, currentRole, subtab = 'Adve
   c.innerHTML = `
     <div class="page-header"><h2>📢 Marketing</h2></div>
     <div class="subtab-bar">
-      ${['Advertising','Marketing Designs','Plan','Budgeting','Proposals'].map(s =>
+      ${['Advertising','Marketing Designs','Plan','Budgeting','Proposals','Tasks'].map(s =>
         `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
       ).join('')}
     </div>
@@ -744,6 +906,9 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
     case 'Proposals':
       await renderDocCollection(content, 'marketing_proposals', 'Marketing Proposals', currentUser, currentRole, { icon:'📝', color:'#880e4f' });
       break;
+    case 'Tasks':
+      await renderDeptTasks(content, 'Marketing', currentUser, currentRole);
+      break;
   }
 }
 
@@ -752,7 +917,7 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
 // ══════════════════════════════════════════════════
 window.renderFinance = async function(currentUser, currentRole, subtab = 'Overview') {
   const c = deptContainer();
-  const tabs = ['Overview','Payroll','Taxes','Ledger','Records','Accounting','Purchasing','SSS / Gov'];
+  const tabs = ['Overview','Payroll','Taxes','Ledger','Records','Accounting','Purchasing','SSS / Gov','Tasks'];
   c.innerHTML = `
     <div class="page-header"><h2>💰 Finance</h2></div>
     <div class="subtab-bar" style="flex-wrap:wrap">
@@ -786,6 +951,9 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'SSS / Gov':
       content.innerHTML = renderFileCollection('SSS & Government Documents', 'fin-sss', currentRole);
       bindFileCollection('fin-sss', currentUser, 'Finance', 'SSS');
+      break;
+    case 'Tasks':
+      await renderDeptTasks(content, 'Finance', currentUser, currentRole);
       break;
   }
 }
@@ -1222,7 +1390,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
       </div>
     </div>
     <div class="subtab-bar">
-      ${['BK Quotes','Quotations','BK Packages','Clients','Work Plans','Proposals'].map(s =>
+      ${['BK Quotes','Quotations','BK Packages','Clients','Work Plans','Proposals','Tasks'].map(s =>
         `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
       ).join('')}
     </div>
@@ -1259,6 +1427,9 @@ async function loadSalesContent(currentUser, currentRole, sub) {
     case 'Proposals':
       content.innerHTML = renderFileCollection('Proposals', 'sales-props', currentRole);
       bindFileCollection('sales-props', currentUser, 'Sales', 'Proposals');
+      break;
+    case 'Tasks':
+      await renderDeptTasks(content, 'Sales', currentUser, currentRole);
       break;
   }
 }
@@ -1719,7 +1890,7 @@ window.renderDesign = async function(currentUser, currentRole, subtab = 'Project
   c.innerHTML = `
     <div class="page-header"><h2>🎨 Design</h2></div>
     <div class="subtab-bar">
-      ${['Projects','Clients','Product Designs','References'].map(s =>
+      ${['Projects','Clients','Product Designs','References','Tasks'].map(s =>
         `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
       ).join('')}
     </div>
@@ -1743,6 +1914,9 @@ async function loadDesignContent(currentUser, currentRole, sub) {
     case 'References':
       content.innerHTML = renderFileCollection('Reference Files', 'design-refs', currentRole);
       bindFileCollection('design-refs', currentUser, 'Design', 'References');
+      break;
+    case 'Tasks':
+      await renderDeptTasks(content, 'Design', currentUser, currentRole);
       break;
   }
 }

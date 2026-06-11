@@ -30,7 +30,8 @@ window.EMAIL_CONFIG = {
 window.FCM_CONFIG = { VAPID_KEY: 'YOUR_VAPID_KEY_HERE' };
 
 // ── Auto-Logout ───────────────────────────────────
-window.AUTO_LOGOUT_MS = 60 * 60 * 1000; // 1 hour inactivity
+// 10 days — keeps session alive so push notifications stay active in background
+window.AUTO_LOGOUT_MS = 10 * 24 * 60 * 60 * 1000;
 
 // ── Department Definitions ───────────────────────
 window.DEPARTMENTS = {

@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
       Notifs.startListener(user.uid);
       Notifs.initPush(user.uid);
       Notifs.checkDeadlines(user.uid);
+      checkPayrollDuties(user);
       buildNav();
       navigateTo('dashboard');
       startAutoLogout();
@@ -48,6 +49,36 @@ function resetLogoutTimer() {
     auth.signOut();
     Notifs.showToast('Signed out due to inactivity.');
   }, window.AUTO_LOGOUT_MS);
+}
+
+// ── Payroll Duties Check ─────────────────────────
+// Called on every login. If it's the 1st-3rd of the month and employee hasn't
+// done their self-assessment for this month, send them a reminder notification.
+async function checkPayrollDuties(user) {
+  try {
+    const uDoc = await db.collection('users').doc(user.uid).get();
+    if (!uDoc.exists) return;
+    const role = uDoc.data().role;
+    if (role === 'president' || role === 'owner' || role === 'partner') return;
+
+    const now = new Date();
+    const day = now.getDate();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+    // Remind on 1st–7th of the month (payroll window)
+    if (day > 7) return;
+
+    const evalDoc = await db.collection('kpi_evals').doc(user.uid).get().catch(()=>null);
+    const selfAssessMonth = evalDoc?.exists ? evalDoc.data().selfAssessMonth : null;
+    if (selfAssessMonth === currentMonth) return; // already done
+
+    const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
+    await Notifs.send(user.uid, {
+      title: '📋 Self-Assessment Required',
+      body: `Please complete your self-assessment for ${monthLabel}. Go to Personal Finance → Self Evaluate.`,
+      icon: '📋', type: 'payroll_reminder'
+    });
+  } catch(e) { console.warn('[checkPayrollDuties]', e); }
 }
 
 // ── Screens ───────────────────────────────────────
@@ -669,14 +700,16 @@ async function renderEmployeeDashboard() {
   try {
     const todayStr = new Date().toISOString().slice(0,10);
     const [myTasksSnap, attSnap, caSnap] = await Promise.all([
-      db.collection('tasks').where('assignedTo','==',currentUser.uid).get(),
+      db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
+        .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get()),
       db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).get(),
       db.collection('cash_advances').where('employeeId','==',currentUser.uid).orderBy('createdAt','desc').limit(3).get().catch(()=>({docs:[]}))
     ]);
 
+    const DONE_TASK_STATUSES = ['approved','archived','done'];
     const myTasks    = myTasksSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-    const openTasks  = myTasks.filter(t=>t.status!=='done');
-    const doneTasks  = myTasks.filter(t=>t.status==='done');
+    const openTasks  = myTasks.filter(t=>!DONE_TASK_STATUSES.includes(t.status));
+    const doneTasks  = myTasks.filter(t=>DONE_TASK_STATUSES.includes(t.status));
     const overdue    = openTasks.filter(t=>t.dueDate && t.dueDate < todayStr);
     const u = userProfile;
     const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
@@ -1081,6 +1114,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     const now2 = new Date();
     const daysElapsed2 = now2.getDate();
     const daysInMonth2 = new Date(now2.getFullYear(), now2.getMonth()+1, 0).getDate();
+    const defaultMonth2 = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
     const userRows = await Promise.all(users.map(async u => {
       const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
       const kpi = await getKpiScore(u.id);
@@ -1095,7 +1129,8 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       // Eval
       const evalDoc = await db.collection('kpi_evals').doc(u.id).get().catch(()=>null);
       const evalD = evalDoc?.exists ? evalDoc.data() : {};
-      return { uid:u.id, name:u.displayName||u.email, depts, net, kpi, att, computed, tasksDone, tasksTotal, evalD, row: `<tr>
+      const selfDone2 = evalD.selfAssessMonth === defaultMonth2;
+      return { uid:u.id, name:u.displayName||u.email, depts, net, kpi, att, computed, tasksDone, tasksTotal, evalD, selfDone: selfDone2, row: `<tr>
         <td>${u.displayName||u.email}</td>
         <td>${depts}</td>
         <td>₱${formatNum(net)}</td>
@@ -1103,13 +1138,16 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         <td>${Math.round(att*100)}%</td>
         <td><strong style="color:var(--primary-light)">₱${formatNum(computed)}</strong><br><span style="font-size:10px;color:var(--text-muted)">${daysElapsed2}/${daysInMonth2} days</span></td>
         <td style="text-align:center">
-          <span style="font-weight:700">${evalD.selfGrade!=null?evalD.selfGrade+'<small>/10</small>':'—'}</span>
-          ${evalD.selfNotes?`<div style="font-size:10px;color:var(--text-muted);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${evalD.selfNotes}</div>`:''}
+          ${selfDone2
+            ? `<span style="font-weight:700">${evalD.selfGrade!=null?evalD.selfGrade+'<small>/10</small>':'✅'}</span>
+               ${evalD.selfNotes?`<div style="font-size:10px;color:var(--text-muted);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${evalD.selfNotes}</div>`:''}`
+            : `<span style="color:var(--danger);font-size:11px;font-weight:700">⚠️ Pending</span>`
+          }
         </td>
         <td style="text-align:center">
-          <span style="font-weight:700;color:var(--success)">${evalD.presidentGrade!=null?evalD.presidentGrade+'<small>/10</small>':'—'}</span>
+          <span style="font-weight:700;color:var(--success)">${evalD.presidentGrade!=null?evalD.presidentGrade+'<small>/10</small>':evalD.presidentGradeFromTasks!=null?evalD.presidentGradeFromTasks+'<small>/10 🔒</small>':'—'}</span>
         </td>
-        <td><button class="btn-secondary btn-sm grade-emp-btn" data-uid="${u.id}" data-name="${u.displayName||u.email}" data-presgrade="${evalD.presidentGrade||''}" data-presnotes="${(evalD.presidentNotes||'').replace(/"/g,'&quot;')}">Grade</button></td>
+        <td><button class="btn-secondary btn-sm grade-emp-btn" data-uid="${u.id}" data-name="${u.displayName||u.email}" data-presgrade="${evalD.presidentGrade||''}" data-presnotes="${(evalD.presidentNotes||'').replace(/"/g,'&quot;')}" data-presimprove="${(evalD.presidentImprovements||'').replace(/"/g,'&quot;')}">Grade</button></td>
       </tr>` };
     }));
     const defaultMonth = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
@@ -1132,48 +1170,69 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     // Grade buttons
     document.querySelectorAll('.grade-emp-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const { uid, name, presgrade, presnotes } = btn.dataset;
+        const { uid, name, presgrade, presnotes, presimprove } = btn.dataset;
         openModal(`Grade: ${name}`, `
-          <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Assign a president's performance grade for ${name} this month (1 = poor, 10 = outstanding).</p>
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Assign a performance grade for ${name} (1 = poor, 10 = outstanding). Improvement areas are visible to the employee.</p>
           <div class="form-group"><label>President Grade (1–10)</label>
             <input id="pres-grade-input" type="number" min="1" max="10" step="1" value="${presgrade||''}" placeholder="e.g. 8"/>
           </div>
-          <div class="form-group"><label>Notes (optional)</label>
-            <textarea id="pres-grade-notes" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Feedback for the employee...">${decodeURIComponent(presnotes||'')}</textarea>
+          <div class="form-group"><label>General Notes (internal only)</label>
+            <textarea id="pres-grade-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Internal remarks…">${(presnotes||'')}</textarea>
+          </div>
+          <div class="form-group">
+            <label>📝 Development Areas <span style="font-size:11px;color:var(--primary-light)">(shown to employee)</span></label>
+            <textarea id="pres-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:2px solid var(--primary-light);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="What should this employee focus on improving? They will see this.">${(presimprove||'')}</textarea>
           </div>
         `, `<button class="btn-primary" id="save-pres-grade-btn">Save Grade</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
         document.getElementById('save-pres-grade-btn')?.addEventListener('click', async () => {
-          const grade = parseInt(document.getElementById('pres-grade-input').value);
-          const notes = document.getElementById('pres-grade-notes').value.trim();
+          const grade   = parseInt(document.getElementById('pres-grade-input').value);
+          const notes   = document.getElementById('pres-grade-notes').value.trim();
+          const improve = document.getElementById('pres-improve-input').value.trim();
           if (!grade || grade < 1 || grade > 10) { Notifs.showToast('Enter 1–10.','error'); return; }
           await db.collection('kpi_evals').doc(uid).set({
             presidentGrade: grade, presidentNotes: notes,
+            presidentImprovements: improve,
             presidentId: currentUser.uid,
             presidentUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
           // Notify employee
-          await Notifs.send(uid, { title:'KPI Grade Updated', body:`The president graded your performance: ${grade}/10.`, icon:'📊', type:'kpi_grade' });
+          const notifBody = improve
+            ? `The president graded your performance: ${grade}/10. Check your Personal Finance page for development areas.`
+            : `The president graded your performance: ${grade}/10.`;
+          await Notifs.send(uid, { title:'📊 KPI Grade Updated', body: notifBody, icon:'📊', type:'kpi_grade' });
           closeModal(); Notifs.showToast(`Grade ${grade}/10 saved for ${name}.`);
           window.renderPersonalFinance(currentUser, currentRole);
         });
       });
     });
     document.getElementById('record-payroll-btn')?.addEventListener('click', () => {
+      // Show self-assessment status in modal
+      const pendingSelf = userRows.filter(r => !r.selfDone).map(r => r.name);
+      const pendingHtml = pendingSelf.length
+        ? `<div style="background:#fff3e0;border:1px solid #ff8f00;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px">
+            <strong>⚠️ ${pendingSelf.length} employee${pendingSelf.length>1?'s have':'has'} not submitted self-assessment:</strong>
+            <div style="color:#e65100;margin-top:4px">${pendingSelf.join(', ')}</div>
+           </div>`
+        : `<div style="background:#e8f5e9;border:1px solid #2e7d32;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#2e7d32">✅ All employees have completed their self-assessment.</div>`;
       openModal('Record Monthly Payroll', `
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">This records current salary data as a payroll entry for all employees for the selected month.</p>
+        ${pendingHtml}
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Records salary computation for all employees. Employees will be notified when payroll is recorded.</p>
         <div class="form-group"><label>Month</label><input id="pr-month" type="month" value="${defaultMonth}"/></div>
       `, `<button class="btn-primary" id="save-pr-btn">Record for All Employees</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
       document.getElementById('save-pr-btn').addEventListener('click', async () => {
         const month = document.getElementById('pr-month').value;
         if (!month) { Notifs.showToast('Select a month.','error'); return; }
+        const btn2 = document.getElementById('save-pr-btn');
+        btn2.disabled = true; btn2.textContent = 'Recording…';
         const batch = db.batch();
         const usersSnap2 = await dbCachedGet('users', () => db.collection('users').get(), 60000);
-        for (const doc of usersSnap2.docs) {
+        const empDocs = usersSnap2.docs.filter(d => !['partner'].includes(d.data().role));
+        for (const doc of empDocs) {
           const u2 = doc.data();
           const net2 = (u2.salary||0)+(u2.allowance||0)-(u2.deductions||0);
           const kpi2 = await getKpiScore(doc.id);
           const att2 = await getAttendanceScore(doc.id);
-          const finalPay = net2 * (kpi2*0.5 + att2*0.5);
+          const finalPay = net2 * (kpi2*0.7 + att2*0.3);
           const ref = db.collection('salary_history').doc(`${doc.id}_${month}`);
           batch.set(ref, {
             userId: doc.id, userName: u2.displayName||u2.email,
@@ -1184,8 +1243,18 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
           });
         }
         await batch.commit();
+        // Notify all employees
+        const monthLabel2 = new Date(month+'-02').toLocaleString('en-PH',{month:'long',year:'numeric'});
+        for (const doc of empDocs) {
+          await Notifs.send(doc.id, {
+            title: '💰 Payroll Recorded',
+            body: `Your payroll for ${monthLabel2} has been recorded. Check Personal Finance for your breakdown.`,
+            icon: '💰', type: 'payroll'
+          });
+        }
         closeModal();
         Notifs.showToast(`Payroll recorded for ${month}!`);
+        window.renderPersonalFinance(currentUser, currentRole);
       });
     });
     return;
@@ -1204,7 +1273,8 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     db.collection('cash_advances').where('userId','==',currentUser.uid).orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
     db.collection('salary_history').where('userId','==',currentUser.uid).orderBy('month','desc').limit(12).get().catch(()=>({docs:[]})),
     db.collection('kpi_evals').doc(currentUser.uid).get().catch(()=>null),
-    db.collection('tasks').where('assignedTo','==',currentUser.uid).get().catch(()=>({docs:[]}))
+    db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
+      .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get()).catch(()=>({docs:[]}))
   ]);
 
   const cashAdvances  = cashAdvSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -1212,9 +1282,15 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   const totalAdvance  = cashAdvances.filter(a=>a.status==='approved').reduce((s,a)=>s+(a.amount||0),0);
 
   const evalData       = evalSnap?.exists ? evalSnap.data() : {};
-  const selfGrade      = evalData.selfGrade || null;
-  const presGrade      = evalData.presidentGrade || null;
+  const selfGrade      = evalData.selfGrade ?? null;
+  // presidentGrade: manual override first, then auto-averaged from task scores
+  const presGrade      = evalData.presidentGrade ?? evalData.presidentGradeFromTasks ?? null;
   const selfNotes      = evalData.selfNotes || '';
+  const presidentImprovements = evalData.presidentImprovements || '';
+  const currentMonth   = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const selfAssessMonth = evalData.selfAssessMonth || null;
+  const selfDoneThisMonth = selfAssessMonth === currentMonth;
+  const isPayrollWindow = now.getDate() <= 7;
 
   const myTasks  = myTasksSnap.docs.map(d=>d.data());
   const doneTasks= myTasks.filter(t=>t.status==='done');
@@ -1242,6 +1318,21 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       <h2>Personal Finance</h2>
       <button class="btn-primary btn-sm" id="req-advance-btn">+ Cash Advance</button>
     </div>
+
+    ${isPayrollWindow && !selfDoneThisMonth ? `
+    <div style="background:linear-gradient(135deg,#b71c1c,#c62828);color:#fff;border-radius:12px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+      <span style="font-size:24px">⚠️</span>
+      <div style="flex:1">
+        <div style="font-weight:800;font-size:14px;margin-bottom:2px">Self-Assessment Required for ${monthLabel}</div>
+        <div style="font-size:12px;opacity:0.9">Complete your self-evaluation before payroll is finalized. Click <strong>Self Evaluate</strong> in the KPI card below.</div>
+      </div>
+    </div>` : ''}
+
+    ${presidentImprovements ? `
+    <div style="background:linear-gradient(135deg,var(--surface2),var(--surface));border:2px solid var(--primary-light);border-radius:12px;padding:14px 18px;margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--primary-light);margin-bottom:6px">📝 Your Development Areas — from President</div>
+      <div style="font-size:13px;line-height:1.6;color:var(--text);white-space:pre-wrap">${presidentImprovements}</div>
+    </div>` : ''}
 
     <!-- Top KPI stats -->
     <div class="kpi-row">
@@ -1399,27 +1490,44 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
 
   // Self Evaluation button
   document.getElementById('self-eval-btn')?.addEventListener('click', () => {
-    openModal('Self Evaluation — KPI', `
-      <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Rate your own performance this month (1 = poor, 10 = excellent). Be honest — the president also grades you.</p>
+    openModal(`Self-Assessment — ${monthLabel}`, `
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
+        This is <strong>required for payroll</strong> every 1st of the month. Be honest — the president also grades you.
+      </p>
       <div class="form-group">
-        <label>Self Grade (1–10)</label>
-        <input id="self-grade-input" type="number" min="1" max="10" step="1" value="${selfGrade||''}" placeholder="e.g. 7"/>
+        <label>Self Grade (1–10) <span style="color:var(--danger)">*</span></label>
+        <input id="self-grade-input" type="number" min="1" max="10" step="1" value="${selfGrade!=null?selfGrade:''}" placeholder="e.g. 7"/>
       </div>
       <div class="form-group">
-        <label>Notes / Justification</label>
-        <textarea id="self-notes-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="What did you accomplish? What could be better?">${selfNotes}</textarea>
+        <label>What did you accomplish this month? <span style="color:var(--danger)">*</span></label>
+        <textarea id="self-notes-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="List your key accomplishments and contributions…">${selfNotes}</textarea>
       </div>
-    `, `<button class="btn-primary" id="save-self-eval-btn">Save Evaluation</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      <div class="form-group">
+        <label>What can you improve? <span style="color:var(--danger)">*</span></label>
+        <textarea id="self-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Be specific about areas you want to work on…">${evalData.selfImprovements||''}</textarea>
+      </div>
+    `, `<button class="btn-primary" id="save-self-eval-btn">Submit Assessment</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     document.getElementById('save-self-eval-btn')?.addEventListener('click', async () => {
-      const grade = parseInt(document.getElementById('self-grade-input').value);
-      const notes = document.getElementById('self-notes-input').value.trim();
+      const grade    = parseInt(document.getElementById('self-grade-input').value);
+      const notes    = document.getElementById('self-notes-input').value.trim();
+      const improve  = document.getElementById('self-improve-input').value.trim();
       if (!grade || grade < 1 || grade > 10) { Notifs.showToast('Enter a grade between 1 and 10.','error'); return; }
+      if (!notes)   { Notifs.showToast('Please describe your accomplishments.','error'); return; }
+      if (!improve) { Notifs.showToast('Please describe your improvement areas.','error'); return; }
       await db.collection('kpi_evals').doc(currentUser.uid).set({
-        selfGrade: grade, selfNotes: notes, selfUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        selfGrade: grade, selfNotes: notes, selfImprovements: improve,
+        selfAssessMonth: currentMonth,
+        selfUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         userId: currentUser.uid, userName: userProfile.displayName || currentUser.email
       }, { merge: true });
+      // Notify president
+      await Notifs.sendToOwner({
+        title: '📋 Self-Assessment Submitted',
+        body: `${userProfile.displayName||currentUser.email} submitted their self-assessment for ${monthLabel}.`,
+        icon: '📋', type: 'self_assessment'
+      });
       closeModal();
-      Notifs.showToast('Self evaluation saved!');
+      Notifs.showToast('Self-assessment submitted!');
       window.renderPersonalFinance(currentUser, currentRole);
     });
   });

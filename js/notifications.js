@@ -132,16 +132,61 @@ window.Notifs = (() => {
 
   // ── Push (FCM) — lazy-loads messaging SDK only when needed ──
   async function initPush(uid) {
-    // Skip if FCM isn't configured (placeholder VAPID key)
     const vapidKey = window.FCM_CONFIG?.VAPID_KEY;
     if (!vapidKey || vapidKey === 'YOUR_VAPID_KEY_HERE') return;
     try {
       if (!('Notification' in window)) return;
       if (Notification.permission === 'denied') return;
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') return;
 
-      // Lazy-load the Firebase messaging SDK (heavy — only load when actually needed)
+      // If not yet asked, show our own prompt button instead of the browser dialog
+      if (Notification.permission === 'default') {
+        _showPushPrompt(uid, vapidKey);
+        return;
+      }
+
+      // Already granted — register silently
+      await _registerPush(uid, vapidKey);
+    } catch (err) {
+      console.warn('Push notification init failed:', err);
+    }
+  }
+
+  // Show a soft prompt banner asking user to enable push notifications
+  function _showPushPrompt(uid, vapidKey) {
+    if (document.getElementById('push-prompt-bar')) return; // already showing
+    const bar = document.createElement('div');
+    bar.id = 'push-prompt-bar';
+    bar.style.cssText = `
+      position:fixed;bottom:70px;left:50%;transform:translateX(-50%);
+      background:var(--surface,#1e2a3a);border:1.5px solid var(--primary-light,#3d5afe);
+      border-radius:14px;padding:12px 18px;display:flex;align-items:center;gap:12px;
+      z-index:8888;box-shadow:0 6px 24px rgba(0,0,0,0.35);max-width:92vw;
+    `;
+    bar.innerHTML = `
+      <span style="font-size:22px">🔔</span>
+      <div style="flex:1;font-size:13px;color:var(--text,#e0e0e0)">
+        <strong>Enable push notifications</strong><br>
+        <span style="font-size:11px;opacity:.8">Get notified about tasks, payroll & more on this device</span>
+      </div>
+      <button id="push-allow-btn" style="background:var(--primary-light,#3d5afe);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer">Allow</button>
+      <button id="push-deny-btn" style="background:transparent;color:var(--text-muted,#90a4ae);border:none;font-size:18px;cursor:pointer;padding:0 4px">✕</button>
+    `;
+    document.body.appendChild(bar);
+
+    document.getElementById('push-allow-btn').onclick = async () => {
+      bar.remove();
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') await _registerPush(uid, vapidKey);
+    };
+    document.getElementById('push-deny-btn').onclick = () => bar.remove();
+
+    // Auto-dismiss after 30 seconds
+    setTimeout(() => bar.remove(), 30000);
+  }
+
+  async function _registerPush(uid, vapidKey) {
+    try {
+      // Lazy-load messaging SDK
       if (!window._fcmLoaded) {
         await new Promise((resolve, reject) => {
           const s = document.createElement('script');
@@ -152,17 +197,23 @@ window.Notifs = (() => {
         window._fcmLoaded = true;
       }
 
+      // Use the firebase-messaging-sw.js for background handling
+      const swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' })
+        .catch(() => navigator.serviceWorker.ready);
+
       const messaging = firebase.messaging();
-      const token = await messaging.getToken({ vapidKey });
+      const token = await messaging.getToken({ vapidKey, serviceWorkerRegistration: swReg });
       if (token) {
         await db.collection('users').doc(uid).update({ fcmToken: token });
+        console.log('[FCM] Push token registered for', uid);
       }
+      // Show in-app toast for foreground messages
       messaging.onMessage(payload => {
         const { title, body } = payload.notification || {};
-        if (title) showToast(`${title}: ${body}`);
+        if (title) showToast(`${title}${body ? ': '+body : ''}`);
       });
     } catch (err) {
-      console.warn('Push notification init failed:', err);
+      console.warn('[FCM] Push registration failed:', err);
     }
   }
 
@@ -237,7 +288,15 @@ window.Notifs = (() => {
     });
   }
 
-  return { startListener, stopListener, send, sendToDept, sendToOwner, showToast, initPush, checkDeadlines, initToggle };
+  return { startListener, stopListener, send, sendToDept, sendToOwner, showToast, initPush, checkDeadlines, initToggle,
+    requestPushPermission: (uid) => {
+      const vapidKey = window.FCM_CONFIG?.VAPID_KEY;
+      if (!vapidKey || vapidKey === 'YOUR_VAPID_KEY_HERE') { showToast('Push notifications not configured yet.','error'); return; }
+      if (Notification.permission === 'granted') { _registerPush(uid, vapidKey); }
+      else if (Notification.permission !== 'denied') { _showPushPrompt(uid, vapidKey); }
+      else { showToast('Notifications are blocked in your browser. Check site settings to re-enable.','error'); }
+    }
+  };
 })();
 
 // Toast animation

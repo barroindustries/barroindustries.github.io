@@ -21,5 +21,6 @@ const auth = firebase.auth();
 const db   = firebase.firestore();
 const storage = firebase.storage();
 
-// Sign out when app/tab is closed (session-only login)
-auth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
+// LOCAL persistence — session survives tab close/app restart for up to 10 days.
+// Background push notifications stay active without re-login.
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);

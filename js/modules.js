@@ -491,14 +491,27 @@ async function renderCashAdvanceEmployee(c) {
 }
 
 async function renderCashAdvanceAdmin(c) {
-  const snap = await db.collection('cash_advances').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
-  const advances = snap.docs.map(d=>({id:d.id,...d.data()}));
-  const pending = advances.filter(a=>a.status==='pending');
+  const [snap, usersSnap] = await Promise.all([
+    db.collection('cash_advances').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+    dbCachedGet('users', () => db.collection('users').get(), 60000)
+  ]);
+  const allAdvances = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
+
+  // Managers cannot see private records — only president and finance can
+  const canSeePrivate = currentRole === 'president' || currentRole === 'finance';
+  const advances = allAdvances.filter(a => {
+    if (!a.private) return true;
+    return canSeePrivate;
+  });
+
+  const pending  = advances.filter(a=>a.status==='pending');
   const totalOut = advances.filter(a=>a.status==='approved').reduce((s,a)=>s+(a.balance||a.amount||0),0);
 
   c.innerHTML = `
     <div class="page-header">
       <h2>💸 Cash Advances</h2>
+      ${currentRole==='president'?`<button class="btn-primary btn-sm" id="add-ca-for-btn">+ Add Record</button>`:''}
     </div>
     <div class="kpi-row">
       <div class="kpi-card warn"><div class="kpi-label">Pending</div><div class="kpi-value">${pending.length}</div></div>
@@ -508,6 +521,8 @@ async function renderCashAdvanceAdmin(c) {
     <div id="ca-list"></div>
   `;
   renderCAList(advances, document.getElementById('ca-list'), true);
+
+  document.getElementById('add-ca-for-btn')?.addEventListener('click', () => openPresidentCashAdvanceModal(users));
 }
 
 function renderCAList(advances, container, isAdmin) {
@@ -526,13 +541,13 @@ function renderCAList(advances, container, isAdmin) {
     return `
     <div class="ca-card">
       <div class="ca-card-header">
-        ${isAdmin?`<div class="ca-card-name">${a.userName||'Employee'} <span style="font-size:11px;color:var(--text-muted)">${a.employeeId||''}</span></div>`:''}
+        ${isAdmin?`<div class="ca-card-name">${a.userName||'Employee'} <span style="font-size:11px;color:var(--text-muted)">${a.employeeId||''}</span>${a.private?'<span class="badge badge-red" style="font-size:10px;margin-left:4px">🔒 Private</span>':''}</div>`:''}
         <div class="ca-amount">₱${fmtN(a.amount)}</div>
         <span class="badge ${statusBadgeClass}">${a.status||'pending'}</span>
       </div>
       <div class="ca-card-body">
         <div class="ca-detail"><span>Reason</span><span>${a.reason||'—'}</span></div>
-        <div class="ca-detail"><span>Terms</span><span>${terms} month${terms>1?'s':''} · ${interest}% interest/mo</span></div>
+        <div class="ca-detail"><span>Terms</span><span>${terms} month${terms>1?'s':''}${interest?` · ${interest}% interest/mo`:''}</span></div>
         <div class="ca-detail"><span>Monthly Payment</span><span style="font-weight:700">₱${fmtN(monthly)}</span></div>
         <div class="ca-detail"><span>Total Payable</span><span>₱${fmtN(monthly*terms)}</span></div>
         ${a.status==='approved'&&a.amount?`
@@ -598,6 +613,13 @@ function renderCAList(advances, container, isAdmin) {
       await db.collection('cash_advances').doc(id).update({
         balance: newBal, payments,
         status: newBal <= 0 ? 'paid' : 'approved'
+      });
+      // Notify the employee
+      const statusMsg = newBal <= 0 ? 'fully paid off 🎉' : `balance remaining: ₱${fmtN(newBal)}`;
+      await Notifs.send(a.userId, {
+        title: '💳 Cash Advance Payment Recorded',
+        body: `₱${fmtN(paid)} payment was recorded on your cash advance. ${statusMsg.charAt(0).toUpperCase()+statusMsg.slice(1)}.`,
+        icon: '💳', type: 'cash_advance'
       });
       closeModal(); Notifs.showToast('Payment recorded!');
       window.renderCashAdvancePage();
@@ -679,6 +701,85 @@ function openCashAdvanceModal() {
 
 function fmtN(n) {
   return Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+// President-only: record a cash advance for any employee (pre-approved)
+function openPresidentCashAdvanceModal(users) {
+  const employees = users.filter(u => u.role !== 'partner' && u.uid !== currentUser.uid);
+  const empOptions = employees.map(u =>
+    `<option value="${u.id}">${u.displayName||u.email} (${u.role||'employee'})</option>`
+  ).join('');
+
+  openModal('Record Cash Advance for Employee', `
+    <div class="form-group">
+      <label>Employee</label>
+      <select id="pca-uid" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+        <option value="">— Select employee —</option>
+        ${empOptions}
+      </select>
+    </div>
+    <div class="form-group"><label>Loan Amount (₱)</label>
+      <input id="pca-amount" type="number" min="1" step="0.01" placeholder="e.g. 65225"/>
+    </div>
+    <div class="form-group"><label>Monthly Payment (₱)</label>
+      <input id="pca-monthly" type="number" min="1" step="0.01" placeholder="e.g. 5025"/>
+    </div>
+    <div class="form-group"><label>Terms (months)</label>
+      <input id="pca-terms" type="number" min="1" max="60" value="9"/>
+    </div>
+    <div class="form-group"><label>Date</label>
+      <input id="pca-date" type="date" value="${new Date().toISOString().slice(0,10)}"/>
+    </div>
+    <div class="form-group"><label>Purpose / Notes</label>
+      <textarea id="pca-reason" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer">
+      <input type="checkbox" id="pca-private" checked/>
+      <span style="font-size:13px">🔒 Private — visible only to this employee, president &amp; finance</span>
+    </label>
+  `, `<button class="btn-primary" id="save-pca-btn">Save Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  document.getElementById('save-pca-btn').addEventListener('click', async () => {
+    const uid     = document.getElementById('pca-uid').value;
+    const amount  = parseFloat(document.getElementById('pca-amount').value)||0;
+    const monthly = parseFloat(document.getElementById('pca-monthly').value)||0;
+    const terms   = parseInt(document.getElementById('pca-terms').value)||1;
+    const date    = document.getElementById('pca-date').value;
+    const reason  = document.getElementById('pca-reason').value.trim();
+    const isPriv  = document.getElementById('pca-private').checked;
+
+    if (!uid)    { Notifs.showToast('Please select an employee.','error'); return; }
+    if (!amount) { Notifs.showToast('Enter a valid amount.','error'); return; }
+
+    const emp = employees.find(u => u.id === uid);
+    await db.collection('cash_advances').add({
+      userId:         uid,
+      userName:       emp?.displayName || emp?.email || uid,
+      employeeId:     emp?.employeeId  || uid,
+      amount,
+      terms,
+      interest:       0,
+      monthlyPayment: monthly,
+      totalPayable:   monthly * terms,
+      balance:        amount,
+      date,
+      reason,
+      status:         'approved',
+      private:        isPriv,
+      addedBy:        currentUser.uid,
+      payments:       [],
+      createdAt:      firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await Notifs.send(uid, {
+      title: 'Cash Advance Recorded',
+      body:  `A cash advance of ₱${fmtN(amount)} has been recorded for you (${terms}-month plan, ₱${fmtN(monthly)}/mo).`,
+      icon:  '💸',
+      type:  'cash_advance'
+    });
+    closeModal();
+    Notifs.showToast('Cash advance recorded!');
+    window.renderCashAdvancePage();
+  });
 }
 
 // ══════════════════════════════════════════════════
