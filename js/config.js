@@ -104,24 +104,24 @@ window.ROLES = {
 
 // ── Bottom Nav Items ─────────────────────────────
 window.BOTTOM_NAV_ITEMS = [
-  { icon: '🏠', label: 'Home',    page: 'dashboard'  },
-  { icon: '✅', label: 'Tasks',   page: 'tasks'      },
-  { icon: '📁', label: 'Files',   page: 'files'      },
-  { icon: '💸', label: 'Cash',    page: 'cash'       },
-  { icon: '🗂️', label: 'Dept',    page: 'my-dept'    }
+  { icon: 'home',        label: 'Home',  page: 'dashboard' },
+  { icon: 'check-square',label: 'Tasks', page: 'tasks'     },
+  { icon: 'folder',      label: 'Files', page: 'files'     },
+  { icon: 'banknote',    label: 'Cash',  page: 'cash'      },
+  { icon: 'layers',      label: 'Dept',  page: 'my-dept'   }
 ];
 
 window.PRESIDENT_BOTTOM_NAV = [
-  { icon: '🏠', label: 'Home',      page: 'dashboard'  },
-  { icon: '✅', label: 'Tasks',     page: 'tasks'      },
-  { icon: '✔️', label: 'Approvals', page: 'approvals'  },
-  { icon: '📈', label: 'Progress',  page: 'progress'   },
-  { icon: '👥', label: 'Team',      page: 'team'       }
+  { icon: 'home',         label: 'Home',      page: 'dashboard' },
+  { icon: 'check-square', label: 'Tasks',     page: 'tasks'     },
+  { icon: 'shield-check', label: 'Approvals', page: 'approvals' },
+  { icon: 'trending-up',  label: 'Progress',  page: 'progress'  },
+  { icon: 'users',        label: 'Team',      page: 'team'      }
 ];
 
 window.BRILLIANT_BOTTOM_NAV = [
-  { icon: '🏠', label: 'Home',    page: 'dashboard'       },
-  { icon: '💼', label: 'Quotes',  page: 'bs-quote-builder'},
-  { icon: '📋', label: 'Summary', page: 'bs-quotations'   },
-  { icon: '👤', label: 'Clients', page: 'bs-clients'      }
+  { icon: 'home',       label: 'Home',    page: 'dashboard'        },
+  { icon: 'calculator', label: 'Quotes',  page: 'bs-quote-builder' },
+  { icon: 'file-text',  label: 'Summary', page: 'bs-quotations'    },
+  { icon: 'book-open',  label: 'Clients', page: 'bs-clients'       }
 ];

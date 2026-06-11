@@ -107,6 +107,15 @@
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --t1: 120ms; --t2: 220ms; --t3: 340ms;
+
+  /* ── Component backgrounds (swap for light mode) ── */
+  --topbar-bg:     rgba(7,7,16,0.88);
+  --sidebar-bg:    rgba(7,7,16,0.94);
+  --notif-bg:      rgba(13,13,26,0.92);
+  --login-card-bg: rgba(13,13,26,0.88);
+  --bottom-nav-bg: rgba(7,7,16,0.90);
+  --modal-bg:      rgba(13,13,26,0.92);
+  --drawer-bg:     rgba(10,10,20,0.94);
 }
 
 /* ══════════════════════════════
@@ -418,7 +427,7 @@ body::after {
 
 .login-container {
   position: relative; z-index: 2;
-  background: rgba(13,13,26,0.88);
+  background: var(--login-card-bg);
   backdrop-filter: blur(32px); -webkit-backdrop-filter: blur(32px);
   border-radius: var(--r-xl);
   padding: 40px 32px 32px;
@@ -484,7 +493,7 @@ body::after {
 /* ── Topbar ── */
 .topbar {
   height: var(--topbar-h);
-  background: rgba(7,7,16,0.88);
+  background: var(--topbar-bg);
   backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
   display: flex; align-items: center;
   padding: 0 16px; gap: 12px;
@@ -547,7 +556,7 @@ body::after {
 .notif-panel {
   position: fixed; top: calc(var(--topbar-h) + 8px); right: 12px;
   width: 320px; max-height: 440px;
-  background: rgba(13,13,26,0.92);
+  background: var(--notif-bg);
   backdrop-filter: blur(32px); -webkit-backdrop-filter: blur(32px);
   border-radius: var(--r-lg);
   box-shadow: var(--sh-lg), 0 0 0 1px rgba(255,255,255,0.08);
@@ -586,7 +595,7 @@ body::after {
 ══════════════════════════════ */
 #sidebar {
   width: var(--sidebar-w);
-  background: rgba(7,7,16,0.94);
+  background: var(--sidebar-bg);
   backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
   border-right: 1px solid rgba(255,255,255,0.07);
   position: fixed; top: var(--topbar-h); bottom: 0; left: 0;
@@ -733,7 +742,7 @@ body::after {
   display: none;
   position: fixed; bottom: 0; left: 0; right: 0;
   height: var(--bottom-nav-h);
-  background: rgba(7,7,16,0.90);
+  background: var(--bottom-nav-bg);
   backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
   border-top: 1px solid rgba(255,255,255,0.07);
   z-index: 95; padding: 0 4px;
@@ -1178,7 +1187,7 @@ body::after {
 }
 .modal-overlay.active { display: flex; }
 .modal-box {
-  background: rgba(13,13,26,0.92);
+  background: var(--modal-bg);
   backdrop-filter: blur(32px); -webkit-backdrop-filter: blur(32px);
   border: 1px solid rgba(255,255,255,0.10);
   border-radius: var(--r-lg);
@@ -1218,7 +1227,7 @@ body::after {
 .drawer {
   position: fixed; top: 0; right: 0; bottom: 0;
   width: min(400px, 100vw);
-  background: rgba(10,10,20,0.94);
+  background: var(--drawer-bg);
   backdrop-filter: blur(32px); -webkit-backdrop-filter: blur(32px);
   border-left: 1px solid rgba(255,255,255,0.09);
   z-index: 195; display: flex; flex-direction: column;
@@ -1329,3 +1338,226 @@ body::after {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+
+/* ══════════════════════════════════════════════════
+   LIGHT MODE
+══════════════════════════════════════════════════ */
+html.light {
+  /* Core palette overrides */
+  --bg:         #F2F2F7;
+  --black:      #F2F2F7;
+  --black-2:    #FFFFFF;
+  --black-3:    #F0F0F5;
+
+  /* Surfaces */
+  --s0:      rgba(0,0,0,0.018);
+  --s1:      rgba(0,0,0,0.04);
+  --s2:      rgba(0,0,0,0.07);
+  --s3:      rgba(0,0,0,0.11);
+  --glass:   rgba(255,255,255,0.88);
+  --glass-lt:rgba(0,0,0,0.04);
+  --surface: rgba(255,255,255,0.90);
+  --surface2:rgba(0,0,0,0.04);
+  --grad-card: linear-gradient(160deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.00) 100%);
+
+  /* Borders */
+  --border:      rgba(0,0,0,0.09);
+  --border-glow: rgba(255,45,120,0.18);
+  --border-gold: rgba(180,120,0,0.22);
+
+  /* Text */
+  --text:       #1D1D1F;
+  --text-2:     rgba(29,29,31,0.80);
+  --text-muted: rgba(29,29,31,0.50);
+  --text-light: rgba(29,29,31,0.32);
+  --text-inv:   #F0F0FA;
+
+  /* Shadows */
+  --sh-xs: 0 1px 4px rgba(0,0,0,0.10);
+  --sh-sm: 0 2px 12px rgba(0,0,0,0.12);
+  --sh:    0 4px 20px rgba(0,0,0,0.14);
+  --sh-md: 0 8px 32px rgba(0,0,0,0.16);
+  --sh-lg: 0 16px 56px rgba(0,0,0,0.18);
+  --sh-pink: 0 4px 24px rgba(255,45,120,0.22);
+  --sh-blue: 0 4px 24px rgba(10,132,255,0.18);
+  --sh-gold: 0 4px 24px rgba(255,214,10,0.18);
+
+  /* Primary */
+  --primary:       #1a237e;
+  --primary-light: #3949ab;
+
+  /* Component backgrounds */
+  --topbar-bg:     rgba(248,248,252,0.88);
+  --sidebar-bg:    rgba(248,248,252,0.96);
+  --notif-bg:      rgba(255,255,255,0.96);
+  --login-card-bg: rgba(255,255,255,0.92);
+  --bottom-nav-bg: rgba(248,248,252,0.92);
+  --modal-bg:      rgba(255,255,255,0.96);
+  --drawer-bg:     rgba(248,248,252,0.96);
+}
+
+/* body */
+html.light body { background: #F2F2F7; }
+
+/* mesh (very subtle in light) */
+html.light body::before {
+  background:
+    radial-gradient(ellipse 70% 60% at 10% 20%,  rgba(255,45,120,0.05) 0%, transparent 65%),
+    radial-gradient(ellipse 60% 50% at 90% 80%,  rgba(10,132,255,0.05) 0%, transparent 65%),
+    radial-gradient(ellipse 50% 50% at 55% 45%,  rgba(255,214,10,0.03) 0%, transparent 60%),
+    radial-gradient(ellipse 80% 80% at 50% 100%, rgba(139,92,246,0.03) 0%, transparent 60%);
+}
+html.light body::after {
+  background: radial-gradient(circle, rgba(255,45,120,0.04) 0%, transparent 70%);
+}
+
+/* login orbs */
+html.light .login-bg::before { background: radial-gradient(circle, rgba(255,45,120,0.06) 0%, transparent 68%); }
+html.light .login-bg::after  { background: radial-gradient(circle, rgba(10,132,255,0.05) 0%, transparent 68%); }
+html.light #login-screen::before { background: radial-gradient(circle, rgba(255,214,10,0.04) 0%, transparent 70%); }
+
+/* login card */
+html.light .login-container {
+  border-color: rgba(0,0,0,0.08);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.05), 0 20px 60px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.90);
+}
+
+/* topbar */
+html.light .topbar { border-bottom-color: rgba(0,0,0,0.07); }
+html.light .topbar::after { opacity: 0.22; }
+html.light .topbar-brand {
+  background: linear-gradient(90deg, #1D1D1F 0%, #6B3F00 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+html.light .menu-toggle { color: rgba(29,29,31,0.55); }
+html.light .menu-toggle:hover { color: #1D1D1F; }
+
+/* sidebar */
+html.light #sidebar { border-right-color: rgba(0,0,0,0.08); }
+html.light #sidebar::before { opacity: 0.30; }
+html.light .sidebar-top { border-bottom-color: rgba(0,0,0,0.07); }
+html.light .sidebar-user-role { color: rgba(29,29,31,0.50); }
+html.light .sidebar-user-dept {
+  background: linear-gradient(90deg, #8B6000, #C47A00);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+html.light .nav-item { color: rgba(29,29,31,0.55); }
+html.light .nav-item:hover { background: rgba(0,0,0,0.04); color: #1D1D1F; }
+html.light .nav-item.active { background: rgba(0,0,0,0.06); color: #1D1D1F; }
+html.light .nav-section-label { color: rgba(29,29,31,0.35); }
+html.light .sidebar-footer { border-top-color: rgba(0,0,0,0.07); }
+html.light .sidebar-profile-btn { color: rgba(29,29,31,0.60); }
+html.light .sidebar-profile-btn:hover { background: rgba(0,0,0,0.06); color: #1D1D1F; }
+html.light .btn-logout {
+  color: #c9282d;
+  background: rgba(255,69,58,0.05);
+  border-color: rgba(255,69,58,0.14);
+}
+html.light .btn-logout:hover { background: rgba(255,69,58,0.10); }
+html.light .sidebar-overlay { background: rgba(0,0,0,0.30); }
+
+/* bottom nav */
+html.light .bottom-nav { border-top-color: rgba(0,0,0,0.07); }
+html.light .bottom-nav::before { opacity: 0.18; }
+html.light .bottom-nav-item { color: rgba(29,29,31,0.50); }
+html.light .bottom-nav-item.active { color: var(--pink); }
+
+/* notif panel */
+html.light .notif-panel {
+  border-color: rgba(0,0,0,0.08);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
+}
+html.light .notif-panel-header { background: rgba(0,0,0,0.02); }
+
+/* modal */
+html.light .modal-box {
+  border-color: rgba(0,0,0,0.09);
+  box-shadow: 0 20px 60px rgba(0,0,0,0.16);
+}
+html.light .modal-footer { background: rgba(0,0,0,0.015); }
+html.light .drawer {
+  border-left-color: rgba(0,0,0,0.08);
+  box-shadow: -8px 0 48px rgba(0,0,0,0.12);
+}
+
+/* tables */
+html.light .data-table th { background: rgba(0,0,0,0.025); }
+html.light .data-table td { border-bottom-color: rgba(0,0,0,0.05); }
+html.light .data-table tr:hover td { background: rgba(0,0,0,0.03); }
+
+/* badges */
+html.light .badge-gray { background: rgba(0,0,0,0.06); border-color: rgba(0,0,0,0.10); color: rgba(29,29,31,0.55); }
+html.light .badge-blue   { color: #0055CC; }
+html.light .badge-green  { color: #1B8C3A; }
+html.light .badge-orange { color: #C06000; }
+html.light .badge-red    { color: #C42B22; }
+html.light .badge-purple { color: #5C34B0; }
+
+/* scrollbar */
+html.light ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.14); }
+html.light ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.24); }
+
+/* ══════════════════════════════════════════════════
+   THEME TOGGLE BUTTON
+══════════════════════════════════════════════════ */
+.theme-toggle-btn {
+  background: var(--s1); border: 1px solid var(--border);
+  border-radius: var(--r-xs); color: var(--text-muted);
+  padding: 7px 8px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background var(--t1), color var(--t1), box-shadow var(--t2);
+}
+.theme-toggle-btn:hover {
+  background: var(--s2); color: var(--gold);
+  box-shadow: 0 0 12px var(--gold-glow);
+}
+.theme-toggle-btn svg {
+  width: 17px; height: 17px; stroke: currentColor; fill: none; stroke-width: 2;
+}
+
+/* ══════════════════════════════════════════════════
+   LUCIDE ICON SIZING
+══════════════════════════════════════════════════ */
+
+/* nav-icon: colored rounded container holds Lucide svg */
+.nav-icon svg {
+  width: 15px; height: 15px;
+  stroke: #fff; stroke-width: 2; fill: none;
+  display: block;
+}
+/* emoji fallback */
+.nav-icon.emoji-icon { font-size: 15px; }
+
+/* bottom nav icon */
+.bn-icon {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; line-height: 1;
+  transition: transform var(--t2);
+}
+.bn-icon svg {
+  width: 22px; height: 22px;
+  stroke: currentColor; stroke-width: 2; fill: none;
+  display: block;
+}
+.bn-icon.emoji-icon { font-size: 22px; display: block; }
+
+/* active bottom nav icon — lucide version */
+.bottom-nav-item.active .bn-icon svg {
+  transform: scale(1.10);
+  filter: drop-shadow(0 0 6px var(--pink-glow));
+}
+
+/* Topbar icons */
+.notif-btn svg {
+  width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2;
+}
+/* sidebar footer icon */
+.sidebar-profile-btn svg,
+.btn-logout svg {
+  width: 14px; height: 14px;
+  vertical-align: -2px;
+  stroke: currentColor; fill: none; stroke-width: 2;
+}
+
+/* Prevent double-scale for Lucide bn-icons on active */
+.bottom-nav-item.active .bn-icon:not(.emoji-icon) { transform: none; }

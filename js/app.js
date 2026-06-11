@@ -14,6 +14,7 @@ let logoutTimer  = null;
 
 // ── Boot ──────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
   initLogin();
   Notifs.initToggle();
   auth.onAuthStateChanged(async user => {
@@ -57,6 +58,10 @@ function showLogin() {
 function showApp() {
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-shell').classList.remove('hidden');
+  // Init Lucide icons for static topbar elements
+  if (window.lucide) lucide.createIcons();
+  // Apply correct theme toggle icon
+  _applyThemeIcon(localStorage.getItem('bi-theme') || 'dark');
 }
 
 // ── User Profile ──────────────────────────────────
@@ -155,6 +160,28 @@ function friendlyError(code) {
   return {'auth/user-not-found':'No account with that email.','auth/wrong-password':'Incorrect password.','auth/invalid-email':'Invalid email.','auth/too-many-requests':'Too many attempts. Try later.','auth/invalid-credential':'Invalid email or password.'}[code]||'Sign-in failed.';
 }
 
+// ── Theme ─────────────────────────────────────────
+function initTheme() {
+  const saved = localStorage.getItem('bi-theme') || 'dark';
+  document.documentElement.classList.toggle('light', saved === 'light');
+  _applyThemeIcon(saved);
+}
+
+function toggleTheme() {
+  const isLight = document.documentElement.classList.toggle('light');
+  const theme = isLight ? 'light' : 'dark';
+  localStorage.setItem('bi-theme', theme);
+  _applyThemeIcon(theme);
+}
+
+function _applyThemeIcon(theme) {
+  const btn = document.getElementById('theme-toggle-btn');
+  if (!btn) return;
+  const iconName = theme === 'light' ? 'moon' : 'sun';
+  btn.innerHTML = `<i data-lucide="${iconName}"></i>`;
+  if (window.lucide) lucide.createIcons({ nodes: [btn] });
+}
+
 // ── Navigation ────────────────────────────────────
 function buildNav() { buildSidebarNav(); buildBottomNav(); }
 
@@ -166,36 +193,50 @@ function getSidebarItems() {
   const bsOnly = isBrilliantOnly();
   const items = [];
 
-  items.push({ icon:'🏠', label:'Dashboard', page:'dashboard' });
+  items.push({ icon:'home', label:'Dashboard', page:'dashboard' });
 
   if (pres) {
-    items.push({ icon:'✅', label:'Tasks',            page:'tasks'       });
-    items.push({ icon:'✔️', label:'Approvals (ROA)', page:'approvals',  section:true });
-    items.push({ icon:'📈', label:'Progress Reports',page:'progress'    });
-    items.push({ icon:'🗂️', label:'Departments',     page:'departments' });
-    items.push({ icon:'👥', label:'Team Payroll',    page:'team'        });
-    items.push({ icon:'📊', label:'Analytics',       page:'analytics'   });
-    items.push({ icon:'🏢', label:'Company',         page:'company'     });
+    items.push({ icon:'check-square',  label:'Tasks',            page:'tasks'       });
+    items.push({ icon:'shield-check',  label:'Approvals (ROA)', page:'approvals',  section:true });
+    items.push({ icon:'trending-up',   label:'Progress Reports',page:'progress'    });
+    items.push({ icon:'layout-grid',   label:'Departments',     page:'departments' });
+    items.push({ icon:'users',         label:'Team Payroll',    page:'team'        });
+    items.push({ icon:'bar-chart-2',   label:'Analytics',       page:'analytics'   });
+    items.push({ icon:'building-2',    label:'Company',         page:'company'     });
   } else if (bsOnly) {
-    items.push({ icon:'💼', label:'Quote Builder',    page:'bs-quote-builder' });
-    items.push({ icon:'📋', label:'Quotations',       page:'bs-quotations'    });
-    items.push({ icon:'👤', label:'Client Data',      page:'bs-clients'       });
+    items.push({ icon:'calculator',  label:'Quote Builder', page:'bs-quote-builder' });
+    items.push({ icon:'file-text',   label:'Quotations',    page:'bs-quotations'    });
+    items.push({ icon:'book-open',   label:'Client Data',   page:'bs-clients'       });
   } else {
-    items.push({ icon:'🏢', label:'Company',          page:'company'     });
-    items.push({ icon:'✅', label:'Tasks',             page:'tasks'       });
-    items.push({ icon:'📁', label:'Files',             page:'files'       });
-    items.push({ icon:'💸', label:'Cash & Expenses',  page:'cash'        });
-    items.push({ icon:'💳', label:'Personal Finance', page:'personal-finance' });
+    items.push({ icon:'building-2',   label:'Company',          page:'company'          });
+    items.push({ icon:'check-square', label:'Tasks',             page:'tasks'            });
+    items.push({ icon:'folder',       label:'Files',             page:'files'            });
+    items.push({ icon:'banknote',     label:'Cash & Expenses',  page:'cash'             });
+    items.push({ icon:'credit-card',  label:'Personal Finance', page:'personal-finance' });
     currentDepts.forEach(dept => {
       const cfg = DEPARTMENTS[dept];
       if (cfg) items.push({ icon: cfg.icon, label: dept, page: `dept:${dept}`, section: true });
     });
     if (currentRole === 'manager') {
-      items.push({ icon:'📈', label:'Analytics',  page:'analytics',   section:true });
-      items.push({ icon:'🗂️', label:'Departments',page:'departments'              });
+      items.push({ icon:'bar-chart-2', label:'Analytics',   page:'analytics',   section:true });
+      items.push({ icon:'layout-grid', label:'Departments', page:'departments'              });
     }
   }
   return items;
+}
+
+function _navIcon(icon) {
+  // Lucide icon names are lowercase kebab-case; emoji/dept icons are not
+  if (icon && /^[a-z][a-z0-9-]*$/.test(icon)) {
+    return `<span class="nav-icon"><i data-lucide="${icon}"></i></span>`;
+  }
+  return `<span class="nav-icon emoji-icon">${icon}</span>`;
+}
+function _bnIcon(icon) {
+  if (icon && /^[a-z][a-z0-9-]*$/.test(icon)) {
+    return `<span class="bn-icon"><i data-lucide="${icon}"></i></span>`;
+  }
+  return `<span class="bn-icon emoji-icon">${icon}</span>`;
 }
 
 function buildSidebarNav() {
@@ -206,7 +247,7 @@ function buildSidebarNav() {
   nav.innerHTML = items.map(item => {
     const secLabel = item.section && !lastSection ? '<div class="nav-section-label">Management</div>' : '';
     if (item.section) lastSection = true;
-    return `${secLabel}<button class="nav-item" data-page="${item.page}"><span class="nav-icon">${item.icon}</span>${item.label}</button>`;
+    return `${secLabel}<button class="nav-item" data-page="${item.page}">${_navIcon(item.icon)}${item.label}</button>`;
   }).join('');
   nav.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -215,6 +256,7 @@ function buildSidebarNav() {
       document.getElementById('sidebar-overlay')?.classList.add('hidden');
     });
   });
+  if (window.lucide) lucide.createIcons({ nodes: [nav] });
 }
 
 function buildBottomNav() {
@@ -225,13 +267,14 @@ function buildBottomNav() {
     : window.BOTTOM_NAV_ITEMS;
   nav.innerHTML = items.map(item =>
     `<button class="bottom-nav-item" data-page="${item.page}">
-       <span class="bn-icon">${item.icon}</span>
+       ${_bnIcon(item.icon)}
        <span class="bn-label">${item.label}</span>
      </button>`
   ).join('');
   nav.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => navigateTo(btn.dataset.page));
   });
+  if (window.lucide) lucide.createIcons({ nodes: [nav] });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
