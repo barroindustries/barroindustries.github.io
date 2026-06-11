@@ -1258,7 +1258,7 @@ async function loadSalesContent(currentUser, currentRole, sub) {
       break;
     case 'Proposals':
       content.innerHTML = renderFileCollection('Proposals', 'sales-props', currentRole);
-      bindFileCollection('sales-props', currentUser, 'Sales and Client Relations', 'Proposals');
+      bindFileCollection('sales-props', currentUser, 'Sales', 'Proposals');
       break;
   }
 }

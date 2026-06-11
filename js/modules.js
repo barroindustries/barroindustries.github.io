@@ -373,7 +373,7 @@ window.renderAttendancePage = async function() {
       html += `<div class="att-cal-day ${cls} ${isToday?'att-today':''}" data-date="${dateStr}" data-status="${status}">
         <span class="att-day-num">${day}</span>
         ${status==='present'?'<span class="att-mark">✓</span>':status==='half'?'<span class="att-mark">½</span>':status==='absent'?'<span class="att-mark">✗</span>':''}
-        ${canEdit&&!isWeekend?`<div class="att-edit-btn" data-date="${dateStr}" title="Edit">✎</div>`:''}
+        ${canEdit&&!isWeekend?`<button class="att-edit-btn att-edit-visible" data-date="${dateStr}" title="Edit">✎</button>`:''}
       </div>`;
     }
     html += '</div>';
@@ -398,24 +398,44 @@ window.renderAttendancePage = async function() {
           e.stopPropagation();
           const date = btn.dataset.date;
           const cur  = records[date];
-          openModal(`Edit Attendance — ${date}`, `
+          const curStatus = cur?.fullTime ? 'present' : cur?.loginTime ? 'half' : 'absent';
+          openModal(`✎ Attendance — ${date}`, `
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Employee: <strong>${targetName}</strong></p>
             <div class="form-group"><label>Status</label>
-              <select id="att-status-sel" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-                <option value="present" ${cur?.fullTime?'selected':''}>Present (Full Day)</option>
-                <option value="half" ${cur?.loginTime&&!cur?.fullTime?'selected':''}>Half Day</option>
-                <option value="absent" ${!cur?'selected':''}>Absent</option>
-              </select>
+              <div style="display:flex;gap:8px;margin-top:4px">
+                <button class="att-status-opt ${curStatus==='present'?'att-opt-active':''}" data-val="present" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='present'?'#30d158':'var(--border)'};background:${curStatus==='present'?'rgba(48,209,88,.15)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">✓ Present</button>
+                <button class="att-status-opt ${curStatus==='half'?'att-opt-active':''}" data-val="half" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='half'?'#ffaa00':'var(--border)'};background:${curStatus==='half'?'rgba(255,170,0,.15)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">½ Half Day</button>
+                <button class="att-status-opt ${curStatus==='absent'?'att-opt-active':''}" data-val="absent" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='absent'?'#ff453a':'var(--border)'};background:${curStatus==='absent'?'rgba(255,69,58,.12)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">✗ Absent</button>
+              </div>
+              <input type="hidden" id="att-status-sel" value="${curStatus}"/>
             </div>
-            <div class="form-group"><label>Note (optional)</label><input id="att-note" value="${cur?.note||''}" placeholder="e.g. sick leave"/></div>
+            <div class="form-group" style="margin-top:12px"><label>Note (optional)</label><input id="att-note" value="${cur?.note||''}" placeholder="e.g. sick leave, official business"/></div>
+            ${cur?.editedBy?`<p style="font-size:11px;color:var(--text-muted);margin-top:8px">Last edited by admin</p>`:''}
           `, `<button class="btn-primary" id="save-att-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+          // Option button toggle
+          document.querySelectorAll('.att-status-opt').forEach(optBtn => {
+            optBtn.addEventListener('click', () => {
+              document.getElementById('att-status-sel').value = optBtn.dataset.val;
+              document.querySelectorAll('.att-status-opt').forEach(b => {
+                b.style.borderColor = 'var(--border)';
+                b.style.background = 'var(--surface)';
+              });
+              const colors = {present:'#30d158',half:'#ffaa00',absent:'#ff453a'};
+              const bgs    = {present:'rgba(48,209,88,.15)',half:'rgba(255,170,0,.15)',absent:'rgba(255,69,58,.12)'};
+              optBtn.style.borderColor = colors[optBtn.dataset.val];
+              optBtn.style.background  = bgs[optBtn.dataset.val];
+            });
+          });
+
           document.getElementById('save-att-btn').addEventListener('click', async () => {
             const status = document.getElementById('att-status-sel').value;
             const note   = document.getElementById('att-note').value.trim();
             const ref = db.collection('attendance').doc(targetUid).collection('records').doc(date);
             if (status==='present')
-              await ref.set({date,uid:targetUid,loginTime:new Date(),fullTime:true,note,editedBy:currentUser.uid},{merge:true});
+              await ref.set({date,uid:targetUid,loginTime:new Date(),fullTime:true,note,editedBy:currentUser.uid,editedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
             else if (status==='half')
-              await ref.set({date,uid:targetUid,loginTime:new Date(),fullTime:false,note,editedBy:currentUser.uid},{merge:true});
+              await ref.set({date,uid:targetUid,loginTime:new Date(),fullTime:false,note,editedBy:currentUser.uid,editedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
             else
               await ref.delete();
             closeModal();

@@ -1002,9 +1002,16 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .nav-item[data-page="cash"] .nav-icon       { background: linear-gradient(135deg,#30D158,#34C759); box-shadow: 0 2px 8px rgba(48,209,88,0.30); }
 .nav-item[data-page="personal-finance"] .nav-icon { background: linear-gradient(135deg,#FFD60A,#FF9F0A); box-shadow: 0 2px 8px rgba(255,214,10,0.30); }
 .nav-item[data-page="files"] .nav-icon      { background: linear-gradient(135deg,#32ADE6,#5856D6); box-shadow: 0 2px 8px rgba(50,173,230,0.25); }
-.nav-item[data-page="bs-quote-builder"] .nav-icon { background: linear-gradient(135deg,#37474f,#546e7a); }
-.nav-item[data-page="bs-quotations"] .nav-icon    { background: linear-gradient(135deg,#546e7a,#37474f); }
-.nav-item[data-page="bs-clients"] .nav-icon       { background: linear-gradient(135deg,#0A84FF,#37474f); }
+.nav-item[data-page="bs-quote-builder"] .nav-icon { background: linear-gradient(135deg,#0A84FF,#32ADE6); box-shadow: 0 2px 8px rgba(10,132,255,0.35); }
+.nav-item[data-page="bs-quotations"] .nav-icon    { background: linear-gradient(135deg,#32ADE6,#5856D6); box-shadow: 0 2px 8px rgba(88,86,214,0.30); }
+.nav-item[data-page="bs-clients"] .nav-icon       { background: linear-gradient(135deg,#30D158,#0A84FF); box-shadow: 0 2px 8px rgba(48,209,88,0.30); }
+.nav-item[data-page="bs-files"] .nav-icon         { background: linear-gradient(135deg,#5856D6,#8B5CF6); box-shadow: 0 2px 8px rgba(88,86,214,0.30); }
+/* New module pages */
+.nav-item[data-page="posts"] .nav-icon            { background: linear-gradient(135deg,#FF2D78,#FF6B6B); box-shadow: 0 2px 8px rgba(255,45,120,0.35); }
+.nav-item[data-page="team-directory"] .nav-icon   { background: linear-gradient(135deg,#0A84FF,#5856D6); box-shadow: 0 2px 8px rgba(10,132,255,0.30); }
+.nav-item[data-page="attendance"] .nav-icon       { background: linear-gradient(135deg,#30D158,#00D4AA); box-shadow: 0 2px 8px rgba(48,209,88,0.30); }
+.nav-item[data-page="cash-advances"] .nav-icon    { background: linear-gradient(135deg,#FFD60A,#30D158); box-shadow: 0 2px 8px rgba(255,214,10,0.35); }
+.nav-item[data-page="help"] .nav-icon             { background: linear-gradient(135deg,#8B5CF6,#5856D6); box-shadow: 0 2px 8px rgba(139,92,246,0.30); }
 
 .nav-badge {
   margin-left: auto; background: var(--grad-red); color: #fff;
@@ -2253,4 +2260,47 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
 }
 .stat-num  { font-size: 22px; font-weight: 800; color: var(--text); }
 .stat-label{ font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+
+
+/* ── Bottom nav individual icon colors ──────────── */
+.bottom-nav-item[data-page="dashboard"] .bn-icon svg  { stroke: #FF6B6B; }
+.bottom-nav-item[data-page="tasks"]     .bn-icon svg  { stroke: #40CFFF; }
+.bottom-nav-item[data-page="posts"]     .bn-icon svg  { stroke: #FF2D78; }
+.bottom-nav-item[data-page="cash-advances"] .bn-icon svg { stroke: #FFD60A; }
+.bottom-nav-item[data-page="personal-finance"] .bn-icon svg { stroke: #FF9F0A; }
+.bottom-nav-item[data-page="approvals"] .bn-icon svg  { stroke: #FFD60A; }
+.bottom-nav-item[data-page="team-directory"] .bn-icon svg { stroke: #40CFFF; }
+.bottom-nav-item[data-page="attendance"] .bn-icon svg { stroke: #30D158; }
+.bottom-nav-item[data-page="analytics"] .bn-icon svg  { stroke: #FF9F0A; }
+.bottom-nav-item[data-page="files"]     .bn-icon svg  { stroke: #5856D6; }
+.bottom-nav-item[data-page="bs-quote-builder"] .bn-icon svg { stroke: #40CFFF; }
+.bottom-nav-item[data-page="bs-quotations"]    .bn-icon svg { stroke: #5856D6; }
+.bottom-nav-item[data-page="bs-clients"]       .bn-icon svg { stroke: #30D158; }
+.bottom-nav-item[data-page="bs-files"]         .bn-icon svg { stroke: #8B5CF6; }
+/* Keep active state override */
+.bottom-nav-item.active .bn-icon svg { stroke: var(--pink) !important; }
+
+/* ── Attendance edit button — always visible for admin ── */
+.att-edit-btn.att-edit-visible {
+  display: block !important;
+  position: absolute; bottom: 2px; right: 2px;
+  font-size: 10px; cursor: pointer;
+  color: #fff; background: var(--primary-light);
+  border: none; border-radius: 4px;
+  padding: 1px 5px; line-height: 1.4;
+  opacity: 0.85;
+}
+.att-edit-btn.att-edit-visible:hover { opacity: 1; }
+
+
+/* ── Departments grid — clickable cards ─────────── */
+.dept-card-clickable { transition: transform var(--t1), box-shadow var(--t1); }
+.dept-card-clickable:hover { transform: translateY(-3px); box-shadow: 0 8px 28px rgba(0,0,0,.18); }
+.dept-subtabs-preview { display:flex; flex-wrap:wrap; gap:5px; margin:8px 0 6px; }
+.dept-subtab-chip {
+  font-size:10px; padding:2px 8px;
+  background:var(--s2); border:1px solid var(--border);
+  border-radius:6px; color:var(--text-muted);
+}
+.dept-open-hint { font-size:11px; color:var(--primary-light); margin-top:4px; font-weight:600; }
 

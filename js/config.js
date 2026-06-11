@@ -42,9 +42,9 @@ window.DEPARTMENTS = {
     key: 'Finance', icon: '💰', color: '#1b5e20',
     subtabs: ['Overview', 'Accounting', 'Purchasing', 'SSS / Gov'], navOrder: 2
   },
-  'Sales and Client Relations': {
-    key: 'Sales and Client Relations', icon: '🤝', color: '#e65100',
-    subtabs: ['Quote Builder', 'Client Profiles', 'Work Plans', 'Proposals'], navOrder: 3
+  'Sales': {
+    key: 'Sales', icon: '🤝', color: '#e65100',
+    subtabs: ['BK Quotes', 'Quotations', 'BK Packages', 'Clients', 'Work Plans', 'Proposals'], navOrder: 3
   },
   'Marketing': {
     key: 'Marketing', icon: '📢', color: '#880e4f',

@@ -835,7 +835,7 @@ function renderDeptModule(dept) {
   switch(dept) {
     case 'Marketing':                  renderMarketing(currentUser, currentRole); break;
     case 'Finance':                    renderFinance(currentUser, currentRole); break;
-    case 'Sales and Client Relations': renderSales(currentUser, currentRole); break;
+    case 'Sales': renderSales(currentUser, currentRole); break;
     case 'Design':                     renderDesign(currentUser, currentRole); break;
     case 'Brilliant Steel':            renderBrilliantSteel(currentUser, currentRole); break;
     case 'Government Biddings':        renderGovBiddings(); break;
@@ -1704,29 +1704,67 @@ async function renderCompanyHandbook(ct, canAdd) {
 
 // ── Departments ───────────────────────────────────
 async function renderDepartments() {
-  if (!isPresident()&&currentRole!=='manager') { document.getElementById('page-content').innerHTML=renderAccessDenied('Departments'); return; }
-  const c=document.getElementById('page-content');
-  c.innerHTML=`<div class="page-header"><h2>🗂️ Departments</h2><button class="btn-primary btn-sm" id="add-dept-btn">+ Add</button></div><div class="dept-grid" id="dept-grid"><div class="loading-placeholder">Loading…</div></div>`;
-  const snap=await db.collection('departments').get();
-  const depts=snap.docs.map(d=>({id:d.id,...d.data()}));
-  const grid=document.getElementById('dept-grid');
-  if(!depts.length){grid.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">🗂️</div><h4>No departments yet</h4></div>`;return;}
-  grid.innerHTML=depts.map(d=>{const cfg=DEPARTMENTS[d.name]||{};return `<div class="dept-card" style="border-top-color:${cfg.color||'var(--primary-light)'}"><div class="dept-name">${cfg.icon||'🗂️'} ${d.name}</div><div class="dept-head">Head: ${d.head||'Unassigned'}</div><div class="dept-members">${(d.members||[]).map(m=>`<div class="member-chip">👤 ${m}</div>`).join('')||'<span class="text-muted">No members</span>'}</div></div>`;}).join('');
-  document.getElementById('add-dept-btn')?.addEventListener('click',()=>{
-    openModal('Add Department',`
-      <div class="form-group"><label>Name</label><select id="dept-name-sel"><option value="">-- Select --</option>${Object.keys(DEPARTMENTS).map(k=>`<option value="${k}">${k}</option>`).join('')}<option value="custom">Custom…</option></select></div>
+  if (!isPresident() && currentRole !== 'manager') {
+    document.getElementById('page-content').innerHTML = renderAccessDenied('Departments');
+    return;
+  }
+  const c = document.getElementById('page-content');
+
+  // All known departments from config + Brilliant Steel
+  const allDepts = Object.keys(DEPARTMENTS).filter(k => k !== 'Brilliant Steel');
+
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>🗂️ Departments</h2>
+      <button class="btn-primary btn-sm" id="add-dept-btn">+ Add</button>
+    </div>
+    <div class="dept-grid" id="dept-grid">
+      ${allDepts.map(name => {
+        const cfg = DEPARTMENTS[name] || {};
+        const subtabs = (cfg.subtabs || []).slice(0, 4);
+        return `
+          <div class="dept-card dept-card-clickable" data-dept="${name}" style="border-top-color:${cfg.color||'var(--primary-light)'}; cursor:pointer">
+            <div class="dept-name">${cfg.icon||'🗂️'} ${name}</div>
+            <div class="dept-subtabs-preview">
+              ${subtabs.map(s => `<span class="dept-subtab-chip">${s}</span>`).join('')}
+            </div>
+            <div class="dept-open-hint">Tap to open all tabs →</div>
+          </div>`;
+      }).join('')}
+    </div>
+  `;
+
+  // Click → open full department module
+  c.querySelectorAll('.dept-card-clickable').forEach(card => {
+    card.addEventListener('click', () => renderDeptModule(card.dataset.dept));
+  });
+
+  document.getElementById('add-dept-btn')?.addEventListener('click', () => {
+    openModal('Add Department', `
+      <div class="form-group"><label>Name</label>
+        <select id="dept-name-sel">
+          <option value="">-- Select --</option>
+          ${Object.keys(DEPARTMENTS).map(k=>`<option value="${k}">${k}</option>`).join('')}
+          <option value="custom">Custom…</option>
+        </select>
+      </div>
       <div class="form-group hidden" id="dept-custom-wrap"><label>Custom Name</label><input id="dept-custom-name"/></div>
       <div class="form-group"><label>Department Head</label><input id="dept-head"/></div>
       <div class="form-group"><label>Members (comma-separated)</label><textarea id="dept-members" rows="3"></textarea></div>
-    `,`<button class="btn-primary" id="save-dept-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('dept-name-sel').onchange=function(){document.getElementById('dept-custom-wrap').classList.toggle('hidden',this.value!=='custom');};
-    document.getElementById('save-dept-btn').addEventListener('click',async()=>{
-      const sel=document.getElementById('dept-name-sel').value;
-      const name=sel==='custom'?document.getElementById('dept-custom-name').value.trim():sel;
-      if(!name) return;
-      const members=document.getElementById('dept-members').value.split(',').map(s=>s.trim()).filter(Boolean);
-      await db.collection('departments').add({name,head:document.getElementById('dept-head').value.trim(),members,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
-      closeModal();renderDepartments();
+    `, `<button class="btn-primary" id="save-dept-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    document.getElementById('dept-name-sel').onchange = function() {
+      document.getElementById('dept-custom-wrap').classList.toggle('hidden', this.value !== 'custom');
+    };
+    document.getElementById('save-dept-btn').addEventListener('click', async () => {
+      const sel  = document.getElementById('dept-name-sel').value;
+      const name = sel === 'custom' ? document.getElementById('dept-custom-name').value.trim() : sel;
+      if (!name) return;
+      const members = document.getElementById('dept-members').value.split(',').map(s=>s.trim()).filter(Boolean);
+      await db.collection('departments').add({
+        name, head: document.getElementById('dept-head').value.trim(),
+        members, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      closeModal(); renderDepartments();
     });
   });
 }
