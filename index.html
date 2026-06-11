@@ -15,22 +15,15 @@
   <link rel="apple-touch-icon" href="icons/icon-192.png"/>
   <link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png"/>
   <link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512.png"/>
+  <!-- Preconnect to external origins — reduces DNS+TLS latency -->
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin/>
+  <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin/>
+  <link rel="preconnect" href="https://storage.googleapis.com" crossorigin/>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin/>
+  <link rel="dns-prefetch" href="https://unpkg.com"/>
+
+  <!-- Stylesheet — browser downloads in parallel with scripts below -->
   <link rel="stylesheet" href="css/styles.css"/>
-
-  <!-- Firebase v10 compat -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
-
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
-  <!-- Google API for Drive -->
-  <script src="https://apis.google.com/js/api.js" async defer></script>
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
@@ -255,13 +248,20 @@
 </div>
 <div id="drawer-overlay" class="modal-overlay hidden" style="z-index:190"></div>
 
-<!-- Scripts in order -->
-<script src="js/firebase-config.js"></script>
-<script src="js/config.js"></script>
-<script src="js/drive.js"></script>
-<script src="js/notifications.js"></script>
-<script src="js/departments.js"></script>
-<script src="js/app.js"></script>
-<script src="js/modules.js"></script>
+<!-- All scripts deferred — download in parallel, execute in order after HTML parse.
+     Firebase messaging loaded lazily in notifications.js when FCM is configured. -->
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+<script defer src="js/firebase-config.js"></script>
+<script defer src="js/config.js"></script>
+<script defer src="js/drive.js"></script>
+<script defer src="js/notifications.js"></script>
+<script defer src="js/departments.js"></script>
+<script defer src="js/app.js"></script>
+<script defer src="js/modules.js"></script>
 </body>
 </html>

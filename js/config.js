@@ -100,3 +100,29 @@ window.BRILLIANT_BOTTOM_NAV = [
   { icon: 'book-open',  label: 'Clients', page: 'bs-clients'       },
   { icon: 'folder',     label: 'Files',   page: 'bs-files'         }
 ];
+
+// ── Firestore In-Memory Cache ─────────────────────
+// Prevents re-fetching the same collection on every navigation.
+// Usage: window.dbCachedGet('users', () => db.collection('users').get(), 30000)
+;(function() {
+  const _store = {};
+  window.dbCachedGet = async function(key, fetcher, ttlMs = 30000) {
+    const entry = _store[key];
+    if (entry && Date.now() - entry.ts < ttlMs) return entry.data;
+    // Deduplicate concurrent requests for the same key
+    if (entry && entry.pending) return entry.pending;
+    const promise = fetcher().then(data => {
+      _store[key] = { data, ts: Date.now(), pending: null };
+      return data;
+    }).catch(err => {
+      delete _store[key];
+      throw err;
+    });
+    _store[key] = { data: null, ts: 0, pending: promise };
+    return promise;
+  };
+  window.dbCacheInvalidate = function(key) {
+    if (key) delete _store[key];
+    else Object.keys(_store).forEach(k => delete _store[k]);
+  };
+})();

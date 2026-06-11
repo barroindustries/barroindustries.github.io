@@ -130,24 +130,33 @@ window.Notifs = (() => {
     }
   }
 
-  // ── Push (FCM) ────────────────────────────────
+  // ── Push (FCM) — lazy-loads messaging SDK only when needed ──
   async function initPush(uid) {
+    // Skip if FCM isn't configured (placeholder VAPID key)
+    const vapidKey = window.FCM_CONFIG?.VAPID_KEY;
+    if (!vapidKey || vapidKey === 'YOUR_VAPID_KEY_HERE') return;
     try {
       if (!('Notification' in window)) return;
       if (Notification.permission === 'denied') return;
-
       const permission = await Notification.requestPermission();
       if (permission !== 'granted') return;
 
-      // FCM needs to be initialized in the service worker
-      // Token saved to Firestore for server-side sending
-      // (requires Firebase Cloud Functions for full push — in-app works without it)
+      // Lazy-load the Firebase messaging SDK (heavy — only load when actually needed)
+      if (!window._fcmLoaded) {
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js';
+          s.onload = resolve; s.onerror = reject;
+          document.head.appendChild(s);
+        });
+        window._fcmLoaded = true;
+      }
+
       const messaging = firebase.messaging();
-      const token = await messaging.getToken({ vapidKey: window.FCM_CONFIG?.VAPID_KEY });
+      const token = await messaging.getToken({ vapidKey });
       if (token) {
         await db.collection('users').doc(uid).update({ fcmToken: token });
       }
-
       messaging.onMessage(payload => {
         const { title, body } = payload.notification || {};
         if (title) showToast(`${title}: ${body}`);

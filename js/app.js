@@ -81,7 +81,7 @@ async function loadUserProfile(user) {
   try {
     let snap = await db.collection('users').doc(user.uid).get();
     if (!snap.exists) {
-      const empCount = (await db.collection('users').get()).size;
+      const empCount = (await dbCachedGet('users', () => db.collection('users').get(), 60000)).size;
       const empId    = `BI-${new Date().getFullYear()}-${String(empCount+1).padStart(3,'0')}`;
       const profile  = {
         uid: user.uid, email: user.email,
@@ -1076,7 +1076,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       <div class="page-header"><h2>💳 Personal Finance — Team</h2></div>
       <div id="pf-content"><div class="loading-placeholder">Loading…</div></div>
     `;
-    const snap = await db.collection('users').get();
+    const snap = await dbCachedGet('users', () => db.collection('users').get(), 60000);
     const users = snap.docs.map(d=>({id:d.id,...d.data()}));
     const now2 = new Date();
     const daysElapsed2 = now2.getDate();
@@ -1167,7 +1167,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         const month = document.getElementById('pr-month').value;
         if (!month) { Notifs.showToast('Select a month.','error'); return; }
         const batch = db.batch();
-        const usersSnap2 = await db.collection('users').get();
+        const usersSnap2 = await dbCachedGet('users', () => db.collection('users').get(), 60000);
         for (const doc of usersSnap2.docs) {
           const u2 = doc.data();
           const net2 = (u2.salary||0)+(u2.allowance||0)-(u2.deductions||0);
@@ -2149,7 +2149,7 @@ async function renderTeam() {
   if(!isPresident()&&currentRole!=='manager'){document.getElementById('page-content').innerHTML=renderAccessDenied('Team');return;}
   const c=document.getElementById('page-content');
   c.innerHTML=`<div class="page-header"><h2>👥 Team & Payroll</h2><button class="btn-primary btn-sm" id="add-emp-btn">+ Add Employee</button></div><div id="team-table"><div class="loading-placeholder">Loading…</div></div>`;
-  const snap=await db.collection('users').get();
+  const snap=await dbCachedGet('users', () => db.collection('users').get(), 60000);
   const users=snap.docs.map(d=>({id:d.id,...d.data()}));
   document.getElementById('team-table').innerHTML=`<div class="card"><div class="table-wrap"><table class="data-table">
     <thead><tr><th>Employee</th><th>ID</th><th>Role</th><th>Departments</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net</th><th></th></tr></thead>
@@ -2196,7 +2196,7 @@ function openAddEmployeeModal() {
       startDate:document.getElementById('emp-start').value,
       createdAt:firebase.firestore.FieldValue.serverTimestamp()
     });
-    closeModal();renderTeam();
+    dbCacheInvalidate('users'); closeModal(); renderTeam();
   });
 }
 
@@ -2231,7 +2231,7 @@ function openEditEmployeeModal(u) {
       allowance:parseFloat(document.getElementById('eu-allow').value)||0,
       deductions:parseFloat(document.getElementById('eu-deduct').value)||0,
     });
-    closeModal();renderTeam();
+    dbCacheInvalidate('users'); closeModal(); renderTeam();
   });
 }
 

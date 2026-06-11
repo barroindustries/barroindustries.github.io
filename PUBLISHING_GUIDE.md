@@ -1,7 +1,39 @@
 # Barro Industries — Publishing Guide
-## Free Hosting via Firebase + GitHub
+## Hosting: Netlify (Recommended) or GitHub Pages
 
 ---
+
+## 🚀 Netlify Setup (Faster CDN + Auto-Optimized)
+
+Netlify is faster than GitHub Pages for this app due to its global CDN, Brotli compression, and proper cache headers. The `netlify.toml` file in this repo is already configured.
+
+### Connect to Netlify (one-time, 5 minutes)
+
+1. Go to **https://app.netlify.com** → Sign up / log in with GitHub
+2. Click **"Add new site"** → **"Import an existing project"**
+3. Choose **GitHub** → Authorize → Select `neilbarro/Operation-Systems-Development`
+4. Settings:
+   - **Branch**: `main`
+   - **Build command**: *(leave blank)*
+   - **Publish directory**: `.` *(dot = repo root)*
+5. Click **Deploy site**
+6. Netlify will give you a URL like `https://barro-ops.netlify.app`
+7. Go to **Domain settings** → add a custom domain if desired
+
+### Auto-deploy on push
+
+Every `git push` to `main` automatically deploys. No action needed.
+
+### Performance features enabled by `netlify.toml`:
+- JS & CSS automatically minified
+- Images compressed
+- 1-year cache on all static assets
+- Brotli compression on all text files
+- SPA routing (no broken URLs when refreshing)
+
+---
+
+## GitHub Pages (Legacy)
 
 ## Why Firebase?
 
