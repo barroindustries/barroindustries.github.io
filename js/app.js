@@ -795,28 +795,29 @@ async function renderEmployeeDashboard() {
         <div class="card-body">
           ${!hasLogin ? `
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
-              Check in = 50%. Mark all notifications read before 8am = 100%.
+              <strong>Step 1:</strong> Check in = 50%.<br>
+              <strong>Step 2:</strong> Check off every notification before 8am = 100%.
             </p>
             <button class="btn-primary" id="check-in-btn" style="width:100%">
-              <i data-lucide="log-in" style="width:14px;margin-right:6px"></i>Check In
+              <i data-lucide="log-in" style="width:14px;margin-right:6px"></i>Check In (Step 1)
             </button>` : hasFull ? `
             <div style="display:flex;align-items:center;gap:10px">
               <div style="width:40px;height:40px;border-radius:50%;background:rgba(48,209,88,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">✅</div>
               <div>
                 <div style="font-size:13px;font-weight:600;color:var(--success)">Full attendance — 100%</div>
-                <div style="font-size:11px;color:var(--text-muted)">Login + all notifications read by 8am</div>
+                <div style="font-size:11px;color:var(--text-muted)">Checked in + all notifications checked before 8am</div>
               </div>
             </div>` : `
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
               <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,159,10,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">🟡</div>
               <div>
                 <div style="font-size:13px;font-weight:600;color:var(--warning)">50% — Checked in</div>
-                <div style="font-size:11px;color:var(--text-muted)">Mark all notifications read before 8am → 100%</div>
+                <div style="font-size:11px;color:var(--text-muted)">Check off every notification before 8am → 100%</div>
               </div>
             </div>
-            <button class="btn-secondary btn-sm" id="mark-notifs-read-att-btn" style="width:100%">
-              <i data-lucide="check-circle" style="width:13px;margin-right:5px"></i>Mark All Notifications Read → Get 100%
-            </button>`}
+            <div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--text-muted);line-height:1.6">
+              <strong style="color:var(--text)">Step 2:</strong> Tap the 🔔 bell → check the checkbox on <em>each</em> notification. Once all are checked before 8am, your attendance upgrades to 100% automatically.
+            </div>`}
         </div>
       </div>
 
@@ -896,35 +897,8 @@ async function renderEmployeeDashboard() {
         autoFull
       }, { merge: true });
       Notifs.showToast(autoFull
-        ? '✅ Full attendance recorded (100%) — no pending notifications!'
-        : '🟡 Checked in (50%). Read all notifications by 8am for 100%.');
-      renderEmployeeDashboard();
-    });
-
-    // Mark all notifs read → upgrade to 100% if before 8am
-    document.getElementById('mark-notifs-read-att-btn')?.addEventListener('click', async () => {
-      const now = new Date();
-      const limit8am = new Date(); limit8am.setHours(8,0,0,0);
-      // Mark all notifs read
-      const todayStart = new Date(todayStr).getTime();
-      const notifSnap = await db.collection('notifications').doc(currentUser.uid).collection('items')
-        .where('createdAt', '>=', new firebase.firestore.Timestamp(Math.floor(todayStart/1000), 0))
-        .where('read', '==', false).get();
-      if (!notifSnap.empty) {
-        const batch = db.batch();
-        notifSnap.docs.forEach(d => batch.update(d.ref, { read: true }));
-        await batch.commit();
-      }
-      if (now <= limit8am) {
-        // Before 8am → upgrade to 100%
-        await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
-          attendanceScore: 1.0, fullTime: true,
-          fullTimeAt: firebase.firestore.FieldValue.serverTimestamp(), notifReadBy8am: true
-        }, { merge: true });
-        Notifs.showToast('✅ Full attendance (100%) — all notifications read before 8am!');
-      } else {
-        Notifs.showToast('Notifications marked as read. (Only counts for 100% if done before 8am.)');
-      }
+        ? '✅ Full attendance (100%) — no unchecked notifications!'
+        : '🟡 Checked in (50%). Open 🔔 and check off each notification before 8am for 100%.');
       renderEmployeeDashboard();
     });
 
@@ -1771,7 +1745,7 @@ async function renderCompany() {
   function switchCompanyTab(tab) {
     c.querySelectorAll('.subtab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
     const ct = document.getElementById('company-tab-content');
-    if (tab==='overview')        window.renderCompanyOverviewNew?.(ct, canAdd) || renderCompanyOverview(ct, canAdd);
+    if (tab==='overview')        renderCompanyOverview(ct, canAdd);
     else if (tab==='memos')      renderCompanyMemos(ct, canAdd);
     else if (tab==='policies')   renderCompanyPolicies(ct, canAdd);
     else if (tab==='downloads')  renderCompanyDownloads(ct, canAdd);
@@ -1782,10 +1756,18 @@ async function renderCompany() {
 }
 
 // ── Company: Overview ─────────────────────────────
-function renderCompanyOverview(ct, canAdd) {
-  const photoURL = userProfile?.photoUrl || currentUser?.photoURL || '';
-  const initials = (userProfile?.displayName||currentUser?.displayName||'NB').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
-  const presidentName = userProfile?.displayName || currentUser?.displayName || 'Neil Barro';
+async function renderCompanyOverview(ct, canAdd) {
+  // Always show Neil Barro as president — fetch his Firestore profile by email
+  let photoURL = '';
+  const presidentName = 'Neil Barro';
+  try {
+    const presSnap = await db.collection('users').where('email','==','neilbarro870@gmail.com').limit(1).get();
+    if (!presSnap.empty) {
+      const pd = presSnap.docs[0].data();
+      photoURL = pd.photoUrl || pd.photoURL || '';
+    }
+  } catch(e) { /* non-critical */ }
+  const initials = 'NB';
   ct.innerHTML = `
     <!-- Hero Banner -->
     <div class="co-hero">
@@ -1801,40 +1783,53 @@ function renderCompanyOverview(ct, canAdd) {
     <div class="co-section">
       <h3 class="co-section-title">About the Company</h3>
       <p class="co-body">
-        <strong>Barro Industries</strong> is a diversified holding company committed to excellence across multiple industries.
-        Founded on the principle of sustainable growth and innovation, Barro Industries invests in and operates businesses
-        that deliver real value to communities and clients alike. From construction and infrastructure to food and hospitality,
-        the group continues to expand its footprint with a focus on quality, integrity, and long-term impact.
+        <strong>Barro Industries OPC</strong> is a manufacturing company built on precision, quality, and a commitment to
+        long-term growth. We design and produce products that meet the demands of today's market while laying the groundwork
+        for tomorrow's innovations. Our ambition extends beyond current operations — with a clear direction toward research
+        and development as we continue to scale and evolve.
+      </p>
+      <p class="co-body" style="margin-top:10px">
+        Driven by a lean, capable team and a culture of accountability, Barro Industries OPC operates with the discipline
+        of a company that builds for the long run — not just the next quarter.
       </p>
     </div>
 
-    <!-- Subsidiaries -->
+    <!-- Trademark -->
     <div class="co-section">
-      <h3 class="co-section-title">Our Businesses</h3>
+      <h3 class="co-section-title">Our Brand</h3>
       <div class="co-biz-grid">
         <div class="co-biz-card">
-          <img src="icons/barro-industries.png" class="co-biz-logo" alt="Barro Industries" onerror="this.style.display='none'"/>
+          <img src="icons/barro-industries.png" class="co-biz-logo" alt="Barro Industries OPC" onerror="this.style.display='none'"/>
           <div class="co-biz-info">
-            <div class="co-biz-name">Barro Industries</div>
-            <div class="co-biz-desc">Parent holding company. Oversees strategy, operations, finance, and all subsidiary ventures. Driven by a vision of growth across sectors.</div>
-            <span class="badge badge-gold">Headquarters</span>
+            <div class="co-biz-name">Barro Industries OPC</div>
+            <div class="co-biz-desc">The company. A manufacturing business focused on building quality products and systems, with a long-term vision toward research and development.</div>
+            <span class="badge badge-gold">Company</span>
           </div>
         </div>
         <div class="co-biz-card">
           <img src="icons/barrokit.png" class="co-biz-logo" alt="Barro Kitchens" onerror="this.style.display='none'"/>
           <div class="co-biz-info">
-            <div class="co-biz-name">Barro Kitchens</div>
-            <div class="co-biz-desc">A Barro Industries brand offering premium kitchen solutions — from custom builds to commercial fit-outs. Crafting spaces where meals and memories are made.</div>
-            <span class="badge badge-blue">Subsidiary</span>
+            <div class="co-biz-name">Barro Kitchens™</div>
+            <div class="co-biz-desc">A registered trademark of Barro Industries OPC. One-stop shop for kitchen design and build — from concept to completion, residential and commercial.</div>
+            <span class="badge badge-blue">Trademark</span>
           </div>
         </div>
-        <div class="co-biz-card">
-          <img src="icons/barrobuild.png" class="co-biz-logo" alt="Barro Build" onerror="this.style.display='none'"/>
-          <div class="co-biz-info">
-            <div class="co-biz-name">Barro Build</div>
-            <div class="co-biz-desc">Construction and infrastructure arm of Barro Industries. Specializing in quality builds and project management, delivering projects on time and on spec.</div>
-            <span class="badge badge-blue">Subsidiary</span>
-          </div>
+      </div>
+    </div>
+
+    <!-- Vision -->
+    <div class="co-section">
+      <h3 class="co-section-title">Where We're Headed</h3>
+      <div class="co-biz-grid" style="grid-template-columns:1fr 1fr">
+        <div class="co-value-card">
+          <div class="co-value-icon" style="background:rgba(255,214,10,0.12)"><i data-lucide="factory" style="width:20px;height:20px;stroke:var(--gold)"></i></div>
+          <div class="co-value-name">Manufacturing</div>
+          <div class="co-value-desc">Our foundation. We build with precision and hold our products to the highest standard.</div>
+        </div>
+        <div class="co-value-card">
+          <div class="co-value-icon" style="background:rgba(10,132,255,0.10)"><i data-lucide="flask-conical" style="width:20px;height:20px;stroke:#0A84FF"></i></div>
+          <div class="co-value-name">R&amp;D (Future Direction)</div>
+          <div class="co-value-desc">We are building toward a research and development capability — innovating products and processes for sustainable, scalable growth.</div>
         </div>
       </div>
     </div>
@@ -1849,7 +1844,7 @@ function renderCompanyOverview(ct, canAdd) {
             : `<div class="co-president-initials">${initials}</div>`
           }
           <div class="co-president-name">${presidentName}</div>
-          <div class="co-president-title">President &amp; CEO<br>Barro Industries</div>
+          <div class="co-president-title">President<br>Barro Industries</div>
         </div>
         <div class="co-president-msg">
           <div class="co-quote-mark">"</div>
@@ -2631,14 +2626,14 @@ function renderHelpEmployee() {
 
     <div class="help-section">
       <h3><i data-lucide="calendar" class="help-h-icon"></i> Logging Attendance</h3>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Attendance is worth <strong>30%</strong> of your monthly pay. There are two steps every workday to get full attendance.</p>
       <ol class="help-steps">
-        <li>Every morning when you start work, open the app</li>
-        <li>On your dashboard, tap <strong>Log In (Half Day)</strong> to record your morning arrival</li>
-        <li>After completing a full work day, tap <strong>Mark Full Day</strong></li>
-        <li>Your attendance badge will turn green — "Full Day ✅"</li>
-        <li>Attendance affects your monthly pay — aim for full days!</li>
+        <li><strong>Step 1 — Check In (50%):</strong> Every morning, open the app and tap <strong>Check In</strong> on your dashboard. Do this as soon as you start work.</li>
+        <li><strong>Step 2 — Check Notifications (100%):</strong> Before 8:00 AM, tap the 🔔 bell icon at the top of the screen. You will see a list of your notifications — each one has a checkbox. <strong>Check off every notification individually.</strong> Once all are checked before 8am, your attendance automatically upgrades from 50% to 100%.</li>
+        <li>Your attendance badge turns green with a ✅ when you've completed both steps.</li>
+        <li>If you miss the 8am deadline, you keep the 50% for that day — there is no way to recover the second half after 8am.</li>
       </ol>
-      <div class="help-tip">⚠️ <strong>Important:</strong> Log your attendance every day. Missing days reduces your attendance score, which affects your computed pay.</div>
+      <div class="help-tip">⚠️ <strong>Important:</strong> You must check <em>each</em> notification one by one — there is no "mark all" shortcut. This ensures you have actually read your notifications for the day. Do both steps every weekday to maintain a strong attendance score.</div>
     </div>
 
     <div class="help-section">

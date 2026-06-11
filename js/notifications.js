@@ -44,37 +44,61 @@ window.Notifs = (() => {
     if (!list) return;
     if (items.length === 0) {
       list.innerHTML = '<div class="empty-state" style="padding:30px"><div class="empty-icon">🔔</div><p>No notifications</p></div>';
+      _updatePanelHint(0, 0);
       return;
     }
+
+    const unreadCount = items.filter(n => !n.read).length;
+    _updatePanelHint(unreadCount, items.length);
+
     list.innerHTML = items.map(n => `
-      <div class="notif-item ${n.read ? '' : 'unread'}" data-id="${n.id}">
-        <div class="notif-item-title">${n.icon || '🔔'} ${n.title}</div>
-        <div class="notif-item-body">${n.body || ''}</div>
-        <div class="notif-item-time">${timeAgo(n.createdAt)}</div>
+      <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${n.id}">
+        <label class="notif-check-wrap" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;width:100%">
+          <input type="checkbox" class="notif-checkbox" data-id="${n.id}"
+            ${n.read ? 'checked disabled' : ''}
+            style="margin-top:3px;width:16px;height:16px;accent-color:var(--primary-light);flex-shrink:0;cursor:${n.read?'default':'pointer'}"/>
+          <div style="flex:1;min-width:0">
+            <div class="notif-item-title">${n.icon || '🔔'} ${n.title}</div>
+            <div class="notif-item-body">${n.body || ''}</div>
+            <div class="notif-item-time">${timeAgo(n.createdAt)}</div>
+          </div>
+        </label>
       </div>
     `).join('');
 
-    list.querySelectorAll('.notif-item').forEach(item => {
-      item.addEventListener('click', () => markRead(uid, item.dataset.id));
+    // Bind checkbox change
+    list.querySelectorAll('.notif-checkbox:not([disabled])').forEach(cb => {
+      cb.addEventListener('change', async () => {
+        if (!cb.checked) return;
+        cb.disabled = true;
+        const item = cb.closest('.notif-item');
+        item?.classList.remove('unread');
+        item?.classList.add('read');
+        await markRead(uid, cb.dataset.id);
+        // After each check, see if all are now done → upgrade attendance
+        const remaining = list.querySelectorAll('.notif-checkbox:not([disabled])').length;
+        _updatePanelHint(remaining, items.length);
+        if (remaining === 0 && typeof window.tryUpgradeAttendanceOnNotifRead === 'function') {
+          window.tryUpgradeAttendanceOnNotifRead();
+        }
+      });
     });
+  }
 
-    document.getElementById('mark-all-read')?.addEventListener('click', () => markAllRead(uid, items));
+  function _updatePanelHint(unread, total) {
+    const hint = document.getElementById('notif-panel-hint');
+    if (!hint) return;
+    if (unread === 0) {
+      hint.textContent = total > 0 ? '✅ All checked' : '';
+      hint.style.color = 'var(--success, #30d158)';
+    } else {
+      hint.textContent = `${unread} unchecked`;
+      hint.style.color = 'var(--text-muted)';
+    }
   }
 
   async function markRead(uid, notifId) {
     await db.collection('notifications').doc(uid).collection('items').doc(notifId).update({ read: true });
-  }
-
-  async function markAllRead(uid, items) {
-    const batch = db.batch();
-    items.filter(n => !n.read).forEach(n => {
-      batch.update(db.collection('notifications').doc(uid).collection('items').doc(n.id), { read: true });
-    });
-    await batch.commit();
-    // If before 8am and employee has checked in, upgrade attendance to 100%
-    if (typeof window.tryUpgradeAttendanceOnNotifRead === 'function') {
-      window.tryUpgradeAttendanceOnNotifRead();
-    }
   }
 
   // ── Send notification ─────────────────────────
