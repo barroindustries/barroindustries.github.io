@@ -1176,9 +1176,9 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       const base     = u.salary||0;
       const allow    = u.allowance||0;
       const gross    = base + allow;
-      const sss      = u.sss || Math.min(1125, Math.round(gross*0.045));
-      const ph       = u.philhealth || Math.round(gross*0.05);
-      const pagibig  = u.pagibig || 100;
+      const sss      = u.sss || 0;
+      const ph       = u.philhealth || 0;
+      const pagibig  = u.pagibig || 0;
       const tax      = u.tax || 0;
       const caBalance= _caByUser[u.id]||0;
       const hasOverride = _caOverrideByUser[u.id] !== undefined;
@@ -1237,7 +1237,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           </div>
           <div class="form-row">
             <div class="form-group"><label>PhilHealth</label><input id="ep-ph" type="number" value="${emp.philhealth||0}" placeholder="Auto-computed if 0"/></div>
-            <div class="form-group"><label>Pag-IBIG</label><input id="ep-pi" type="number" value="${emp.pagibig||100}"/></div>
+            <div class="form-group"><label>Pag-IBIG</label><input id="ep-pi" type="number" value="${emp.pagibig||0}"/></div>
           </div>
           <div class="form-group"><label>Tax</label><input id="ep-tax" type="number" value="${emp.tax||0}"/></div>
           ${caBalance > 0 ? `
@@ -1258,7 +1258,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             deductions: parseFloat(document.getElementById('ep-deduct').value)||0,
             sss:        parseFloat(document.getElementById('ep-sss').value)||0,
             philhealth: parseFloat(document.getElementById('ep-ph').value)||0,
-            pagibig:    parseFloat(document.getElementById('ep-pi').value)||100,
+            pagibig:    parseFloat(document.getElementById('ep-pi').value)||0,
             tax:        parseFloat(document.getElementById('ep-tax').value)||0,
           });
 
@@ -1298,9 +1298,9 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       const hasOvr   = _caOverrideByUser[u.id] !== undefined;
       const caAdv    = hasOvr ? _caOverrideByUser[u.id].amount : caBalance;
       const gross    = base + allow;
-      const sss      = u.sss || Math.min(1125, Math.round(gross*0.045));
-      const ph       = u.philhealth || Math.round(gross*0.05);
-      const pagibig  = u.pagibig || 100;
+      const sss      = u.sss || 0;
+      const ph       = u.philhealth || 0;
+      const pagibig  = u.pagibig || 0;
       const tax      = u.tax || 0;
       const deduct   = (u.deductions||0) + sss + ph + pagibig + tax;
       const net      = gross - deduct - caAdv;

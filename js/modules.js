@@ -747,10 +747,16 @@ function renderCAList(advances, container, isAdmin) {
       <div class="ca-card-actions">
         <button class="btn-primary btn-sm ca-approve-btn" data-id="${a.id}">✓ Approve</button>
         <button class="btn-secondary btn-sm ca-reject-btn" data-id="${a.id}" style="color:var(--danger)">✗ Reject</button>
+        ${isRealPresident()?`<button class="btn-secondary btn-sm ca-delete-btn" data-id="${a.id}" style="color:var(--danger);margin-left:auto">🗑 Delete</button>`:''}
       </div>`:''}
       ${isAdmin&&a.status==='approved'&&(a.balance||0)>0?`
       <div class="ca-card-actions">
         <button class="btn-secondary btn-sm ca-payment-btn" data-id="${a.id}">Record Payment</button>
+        ${isRealPresident()?`<button class="btn-secondary btn-sm ca-delete-btn" data-id="${a.id}" style="color:var(--danger);margin-left:auto">🗑 Delete</button>`:''}
+      </div>`:''}
+      ${isAdmin&&(a.status==='rejected'||a.status==='paid')&&isRealPresident()?`
+      <div class="ca-card-actions" style="justify-content:flex-end">
+        <button class="btn-secondary btn-sm ca-delete-btn" data-id="${a.id}" style="color:var(--danger)">🗑 Delete</button>
       </div>`:''}
     </div>`;
   }).join('');
@@ -810,6 +816,14 @@ function renderCAList(advances, container, isAdmin) {
       const activeBtn = document.querySelector('#ca-tabs [data-sub="active"]');
       if (activeBtn) activeBtn.click();
     });
+  }));
+
+  container.querySelectorAll('.ca-delete-btn').forEach(btn => btn.addEventListener('click', async e => {
+    const id = e.currentTarget.dataset.id;
+    if (!confirm('Permanently delete this cash advance record? This cannot be undone.')) return;
+    await db.collection('cash_advances').doc(id).delete();
+    Notifs.showToast('Record deleted.');
+    window.renderCashAdvancePage();
   }));
 }
 
@@ -957,8 +971,8 @@ function openPresidentCashAdvanceModal(users) {
       createdAt:      firebase.firestore.FieldValue.serverTimestamp()
     });
     await Notifs.send(uid, {
-      title: 'Cash Advance Recorded',
-      body:  `A cash advance of ₱${fmtN(amount)} has been recorded for you (${terms}-month plan, ₱${fmtN(monthly)}/mo).`,
+      title: '💸 Cash Advance Recorded',
+      body:  `A cash advance of ₱${fmtN(amount)} has been recorded for you — ${terms}-month plan at ₱${fmtN(monthly)}/mo. Check your Cash Advance tab to view details.`,
       icon:  '💸',
       type:  'cash_advance'
     });
