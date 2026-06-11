@@ -225,7 +225,6 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
       <span class="badge ${priorityBadge(t.priority)}">${t.priority||'medium'}</span>
       <span class="badge ${statusBadge(t.status)}">${t.status||'open'}</span>
       ${t.department?`<span class="badge badge-gray">🗂 ${t.department}</span>`:''}
-      ${t.clickupTaskId?`<span class="badge badge-blue" title="Synced to ClickUp">⚙️ ClickUp</span>`:''}
     </div>
     <p style="font-size:14px;line-height:1.6;margin-bottom:12px;white-space:pre-wrap">${t.description||'No description.'}</p>
     <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;display:flex;gap:16px;flex-wrap:wrap">
@@ -262,7 +261,6 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
 
   document.getElementById('mark-done-btn')?.addEventListener('click', async () => {
     await db.collection('tasks').doc(taskId).update({ status:'done' });
-    if (t.clickupTaskId) ClickUp.updateTask(t.clickupTaskId, { status: 'complete' });
     closeModal(); renderTasks(currentUser, currentRole, t.department);
   });
 
@@ -292,12 +290,6 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
 
     await db.collection('tasks').doc(taskId).update(update);
 
-    // Sync reassignment to ClickUp
-    if (t.clickupTaskId) {
-      await ClickUp.reassignTask(t.clickupTaskId, t.assignedEmail, newEmail);
-      if (instruction) await ClickUp.updateTask(t.clickupTaskId, { description: update.description });
-    }
-
     // Notify new assignee
     await Notifs.send(newUid, {
       title: '🎯 Task Designated to You',
@@ -314,7 +306,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
       });
     }
 
-    Notifs.showToast(`Designated to ${newName}${t.clickupTaskId?' + ClickUp updated':''}`);
+    Notifs.showToast(`Designated to ${newName}`);
     closeModal(); renderTasks(currentUser, currentRole, t.department);
   });
 }
@@ -358,9 +350,6 @@ async function openAddTaskModal(currentUser, currentRole) {
     <div class="form-group"><label>Notes / Instructions</label>
       <textarea id="t-notes" rows="2" placeholder="Additional notes for the assignee…"></textarea>
     </div>
-    <div style="display:flex;align-items:center;gap:8px;background:var(--surface2);padding:10px;border-radius:8px;font-size:12px;color:var(--text-muted);margin-top:4px">
-      <span>⚙️</span><span>Task will also be created in ClickUp for the selected department</span>
-    </div>
   `, `<button class="btn-primary" id="create-task-btn">Create Task</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   document.getElementById('create-task-btn').addEventListener('click', async () => {
@@ -392,19 +381,7 @@ async function openAddTaskModal(currentUser, currentRole) {
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
 
-    // 2. Create in ClickUp
-    let clickupTaskId = null;
-    try {
-      clickupTaskId = await ClickUp.createTask({
-        title, description: fullDesc, priority, dueDate,
-        assignedEmail, department: dept
-      });
-      if (clickupTaskId) {
-        await db.collection('tasks').doc(docRef.id).update({ clickupTaskId });
-      }
-    } catch(e) { console.warn('ClickUp sync failed:', e.message); }
-
-    // 3. Notify assigned employee
+    // 2. Notify assigned employee
     if (assignedTo) {
       await Notifs.send(assignedTo, {
         title: '📌 New Task Assigned',
@@ -414,80 +391,11 @@ async function openAddTaskModal(currentUser, currentRole) {
     }
 
     closeModal();
-    Notifs.showToast(`Task created${clickupTaskId ? ' + synced to ClickUp ✓' : ''}!`);
+    Notifs.showToast('Task created!');
     renderTasks(currentUser, currentRole, dept);
   });
 }
 
-// ── ClickUp API Helper ────────────────────────────
-const ClickUp = {
-  BASE: 'https://api.clickup.com/api/v2',
-
-  headers() {
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': window.CLICKUP_API_KEY || ''
-    };
-  },
-
-  priorityMap: { urgent: 1, high: 2, medium: 3, low: 4 },
-
-  async createTask({ title, description, priority, dueDate, assignedEmail, department }) {
-    const listId = window.CLICKUP_LISTS?.[department];
-    if (!listId) { console.warn('No ClickUp list for dept:', department); return null; }
-    if (!window.CLICKUP_API_KEY || window.CLICKUP_API_KEY === 'YOUR_CLICKUP_API_KEY') {
-      console.warn('ClickUp API key not set'); return null;
-    }
-
-    const assignees = [];
-    if (assignedEmail && window.CLICKUP_MEMBERS?.[assignedEmail]) {
-      assignees.push(window.CLICKUP_MEMBERS[assignedEmail]);
-    }
-
-    const body = {
-      name: title,
-      description: description || '',
-      priority: ClickUp.priorityMap[priority] || 3,
-      assignees,
-      due_date: dueDate ? new Date(dueDate).getTime() : undefined,
-      due_date_time: !!dueDate
-    };
-
-    const res = await fetch(`${ClickUp.BASE}/list/${listId}/task`, {
-      method: 'POST',
-      headers: ClickUp.headers(),
-      body: JSON.stringify(body)
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.err || `ClickUp ${res.status}`);
-    }
-    const data = await res.json();
-    return data.id;
-  },
-
-  async updateTask(clickupTaskId, changes) {
-    if (!clickupTaskId || !window.CLICKUP_API_KEY || window.CLICKUP_API_KEY === 'YOUR_CLICKUP_API_KEY') return;
-    await fetch(`${ClickUp.BASE}/task/${clickupTaskId}`, {
-      method: 'PUT',
-      headers: ClickUp.headers(),
-      body: JSON.stringify(changes)
-    }).catch(e => console.warn('ClickUp update failed:', e));
-  },
-
-  async reassignTask(clickupTaskId, oldEmail, newEmail) {
-    if (!clickupTaskId) return;
-    const addAssignees   = window.CLICKUP_MEMBERS?.[newEmail] ? [window.CLICKUP_MEMBERS[newEmail]] : [];
-    const remAssignees   = window.CLICKUP_MEMBERS?.[oldEmail] ? [window.CLICKUP_MEMBERS[oldEmail]] : [];
-    if (!addAssignees.length && !remAssignees.length) return;
-    await fetch(`${ClickUp.BASE}/task/${clickupTaskId}`, {
-      method: 'PUT',
-      headers: ClickUp.headers(),
-      body: JSON.stringify({ assignees: { add: addAssignees, rem: remAssignees } })
-    }).catch(e => console.warn('ClickUp reassign failed:', e));
-  }
-};
 
 // ══════════════════════════════════════════════════
 //  SUBMISSIONS
@@ -2401,145 +2309,3 @@ window.renderDocCollection = function(container, collection, title, currentUser,
     });
   });
 };
-
-// ══════════════════════════════════════════════════
-//  CLICKUP SYNC — Import all ClickUp tasks to Firestore
-// ══════════════════════════════════════════════════
-
-// Reverse map: ClickUp user ID → email
-const CU_ID_TO_EMAIL = Object.fromEntries(
-  Object.entries(window.CLICKUP_MEMBERS||{}).map(([email, id]) => [id, email])
-);
-
-// Status mapping ClickUp → app
-function cuStatus(s) {
-  if (!s) return 'open';
-  s = s.toLowerCase();
-  if (s === 'complete' || s === 'completed') return 'done';
-  if (s === 'in progress') return 'in progress';
-  if (s === 'on hold') return 'on hold';
-  if (s === 'revising') return 'in progress';
-  return 'open';
-}
-
-// Priority mapping ClickUp → app
-function cuPriority(p) {
-  if (!p) return 'medium';
-  const n = typeof p === 'object' ? p.priority : p;
-  if (n === 1 || n === 'urgent') return 'urgent';
-  if (n === 2 || n === 'high') return 'high';
-  if (n === 3 || n === 'normal') return 'medium';
-  if (n === 4 || n === 'low') return 'low';
-  return 'medium';
-}
-
-// Department from ClickUp list name
-function cuDept(listName) {
-  if (!listName) return '';
-  if (listName.includes('Finance'))  return 'Finance';
-  if (listName.includes('Marketing'))return 'Marketing';
-  if (listName.includes('Design'))   return 'Design';
-  if (listName.includes('Admin'))    return 'Admin';
-  return listName.replace(' List','');
-}
-
-async function syncClickUpTasks(currentUser, currentRole, currentDept) {
-  const statusEl = document.getElementById('sync-status');
-  const btn      = document.getElementById('sync-clickup-btn');
-  if (!window.CLICKUP_API_KEY || window.CLICKUP_API_KEY === 'YOUR_CLICKUP_API_KEY') {
-    Notifs.showToast('Set CLICKUP_API_KEY in config.js first', 'error');
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = '⏳ Syncing…';
-  if (statusEl) { statusEl.style.display=''; statusEl.textContent = 'Fetching tasks from ClickUp…'; }
-
-  try {
-    const lists = Object.values(window.CLICKUP_LISTS||{});
-    let allTasks = [];
-
-    for (const listId of lists) {
-      const res = await fetch(
-        `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&subtasks=true`,
-        { headers: { Authorization: window.CLICKUP_API_KEY } }
-      );
-      if (!res.ok) continue;
-      const data = await res.json();
-      allTasks = allTasks.concat(data.tasks || []);
-    }
-
-    if (statusEl) statusEl.textContent = `Found ${allTasks.length} ClickUp tasks. Syncing to app…`;
-
-    // Check existing tasks in Firestore by clickupTaskId
-    const existingSnap = await db.collection('tasks').get();
-    const existingCuIds = new Set(
-      existingSnap.docs.map(d => d.data().clickupTaskId).filter(Boolean)
-    );
-
-    // Resolve Firestore UIDs by email
-    const usersSnap = await db.collection('users').get();
-    const emailToUid = {};
-    usersSnap.docs.forEach(d => {
-      const data = d.data();
-      if (data.email) emailToUid[data.email.toLowerCase()] = d.id;
-    });
-
-    let created = 0, skipped = 0;
-    const batch = db.batch();
-
-    for (const t of allTasks) {
-      if (existingCuIds.has(t.id)) { skipped++; continue; }
-
-      // Primary assignee (first one)
-      const primaryAssignee = t.assignees?.[0];
-      const assignedEmail   = primaryAssignee ? (CU_ID_TO_EMAIL[primaryAssignee.id] || '') : '';
-      const assignedTo      = assignedEmail ? (emailToUid[assignedEmail.toLowerCase()] || '') : '';
-      const assignedToName  = primaryAssignee?.username || '';
-
-      // All assignees
-      const allAssigneeEmails = (t.assignees||[]).map(a => CU_ID_TO_EMAIL[a.id] || '').filter(Boolean);
-      const allAssigneeNames  = (t.assignees||[]).map(a => a.username || '').filter(Boolean);
-
-      const dueDate = t.due_date ? new Date(parseInt(t.due_date)).toISOString().slice(0,10) : '';
-      const dept    = cuDept(t.list?.name);
-
-      const docRef = db.collection('tasks').doc();
-      batch.set(docRef, {
-        title:            t.name,
-        description:      t.description || '',
-        status:           cuStatus(t.status),
-        priority:         cuPriority(t.priority),
-        dueDate,
-        department:       dept,
-        assignedTo,
-        assignedToName,
-        assignedEmail,
-        allAssignees:     allAssigneeNames,
-        allAssigneeEmails,
-        clickupTaskId:    t.id,
-        clickupUrl:       t.url || '',
-        tags:             (t.tags||[]).map(tg=>tg.name),
-        source:           'clickup',
-        createdBy:        currentUser.uid,
-        createdByName:    'ClickUp Import',
-        createdAt:        firebase.firestore.FieldValue.serverTimestamp()
-      });
-      created++;
-    }
-
-    await batch.commit();
-
-    if (statusEl) statusEl.textContent = `✅ Synced! ${created} tasks imported, ${skipped} already existed.`;
-    btn.textContent = `✅ Synced (${created} new)`;
-    Notifs.showToast(`ClickUp sync complete — ${created} tasks imported!`);
-    loadTasksList(currentUser, currentRole, currentDept);
-
-  } catch(err) {
-    console.error('ClickUp sync error:', err);
-    if (statusEl) statusEl.textContent = `❌ Sync failed: ${err.message}`;
-    btn.textContent = '⚙️ Sync ClickUp';
-    btn.disabled = false;
-    Notifs.showToast('Sync failed: ' + err.message, 'error');
-  }
-}
