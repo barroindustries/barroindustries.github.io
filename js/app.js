@@ -136,8 +136,21 @@ function applyUserUI() {
 
 // ── Login ─────────────────────────────────────────
 function initLogin() {
-  // Role picker cards
-  document.querySelectorAll('.login-role-card').forEach(card => {
+  // Pre-fill saved email
+  const savedEmail = localStorage.getItem('bi-saved-email');
+  if (savedEmail) {
+    document.getElementById('email').value = savedEmail;
+    document.getElementById('remember-me').checked = true;
+  }
+  // Pre-fill saved guest name
+  const savedGuest = localStorage.getItem('bi-guest-name');
+  if (savedGuest) {
+    document.getElementById('guest-name').value = savedGuest;
+    document.getElementById('guest-save-name').checked = true;
+  }
+
+  // Role picker cards (admin / employee / partner)
+  document.querySelectorAll('.login-role-card[data-type]').forEach(card => {
     card.addEventListener('click', () => {
       const type = card.dataset.type;
       const labels = { admin:'Admin', employee:'Employee', partner:'Partner' };
@@ -151,12 +164,60 @@ function initLogin() {
     });
   });
 
-  // Back button
+  // Sign Up button
+  document.getElementById('signup-btn')?.addEventListener('click', () => {
+    document.getElementById('login-role-picker').classList.add('hidden');
+    const sfw = document.getElementById('signup-form-wrap');
+    sfw.classList.remove('hidden');
+    document.getElementById('signup-name').focus();
+    if (window.lucide) lucide.createIcons({ nodes: [sfw] });
+  });
+
+  // Sign Up back
+  document.getElementById('signup-back-btn')?.addEventListener('click', () => {
+    document.getElementById('signup-form-wrap').classList.add('hidden');
+    document.getElementById('login-role-picker').classList.remove('hidden');
+    document.getElementById('signup-error').classList.add('hidden');
+    document.getElementById('signup-success').classList.add('hidden');
+  });
+
+  // Sign Up submit
+  document.getElementById('signup-submit-btn')?.addEventListener('click', async () => {
+    const name  = document.getElementById('signup-name').value.trim();
+    const email = document.getElementById('signup-email').value.trim();
+    const phone = document.getElementById('signup-phone').value.trim();
+    const errEl = document.getElementById('signup-error');
+    errEl.classList.add('hidden');
+    if (!name)  { errEl.textContent = 'Full name is required.'; errEl.classList.remove('hidden'); return; }
+    if (!email) { errEl.textContent = 'Email address is required.'; errEl.classList.remove('hidden'); return; }
+    if (!phone) { errEl.textContent = 'Phone number is required.'; errEl.classList.remove('hidden'); return; }
+    document.getElementById('signup-btn-text').textContent = 'Submitting…';
+    document.getElementById('signup-spinner').classList.remove('hidden');
+    document.getElementById('signup-submit-btn').disabled = true;
+    try {
+      await db.collection('signup_requests').add({
+        fullName: name, email, phone,
+        status: 'pending',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      document.getElementById('signup-success').classList.remove('hidden');
+      document.getElementById('signup-name').value = '';
+      document.getElementById('signup-email').value = '';
+      document.getElementById('signup-phone').value = '';
+    } catch(e) {
+      errEl.textContent = 'Submission failed. Check your connection.';
+      errEl.classList.remove('hidden');
+    }
+    document.getElementById('signup-btn-text').textContent = 'Submit Application';
+    document.getElementById('signup-spinner').classList.add('hidden');
+    document.getElementById('signup-submit-btn').disabled = false;
+  });
+
+  // Back button (regular login)
   document.getElementById('login-back-btn')?.addEventListener('click', () => {
     document.getElementById('login-form-wrap').classList.add('hidden');
     document.getElementById('login-role-picker').classList.remove('hidden');
     clearLoginError();
-    document.getElementById('email').value = '';
     document.getElementById('password').value = '';
   });
 
@@ -164,12 +225,17 @@ function initLogin() {
     e.preventDefault();
     setLoginLoading(true); clearLoginError();
     try {
-      await auth.signInWithEmailAndPassword(
-        document.getElementById('email').value.trim(),
-        document.getElementById('password').value
-      );
+      const email = document.getElementById('email').value.trim();
+      await auth.signInWithEmailAndPassword(email, document.getElementById('password').value);
+      // Save email if remember me checked
+      if (document.getElementById('remember-me').checked) {
+        localStorage.setItem('bi-saved-email', email);
+      } else {
+        localStorage.removeItem('bi-saved-email');
+      }
     } catch(err) { showLoginError(friendlyError(err.code)); setLoginLoading(false); }
   });
+
   document.getElementById('forgot-btn')?.addEventListener('click', async () => {
     const email = document.getElementById('email').value.trim();
     if (!email) { showLoginError('Enter your email first.'); return; }
@@ -185,10 +251,21 @@ function initLogin() {
     document.getElementById('pw-toggle').innerHTML = `<i data-lucide="${icon}"></i>`;
     if (window.lucide) lucide.createIcons({ nodes: [document.getElementById('pw-toggle')] });
   });
-  document.getElementById('logout-btn')?.addEventListener('click', () => { Notifs.stopListener(); auth.signOut(); });
+  document.getElementById('logout-btn')?.addEventListener('click', () => {
+    Notifs.stopListener(); auth.signOut();
+  });
   document.getElementById('sidebar-profile-btn')?.addEventListener('click', openProfileDrawer);
-  // Render Lucide icons in login screen
   if (window.lucide) lucide.createIcons({ nodes: [document.getElementById('login-screen')] });
+}
+
+// ── Password Generator ────────────────────────────
+function generatePassword(fullName) {
+  const parts  = fullName.trim().split(/\s+/);
+  const base   = parts[parts.length - 1] || parts[0]; // last name preferred
+  const digits = String(Math.floor(Math.random() * 900) + 100); // 3 digits
+  const syms   = ['!', '@', '#', '$', '%', '&'];
+  const sym    = syms[Math.floor(Math.random() * syms.length)];
+  return base + digits + sym;
 }
 function setLoginLoading(on) {
   document.getElementById('login-btn-text').textContent = on ? 'Signing in…' : 'Sign In';
@@ -260,21 +337,23 @@ function getSidebarItems() {
     items.push({ icon:'help-circle', label:'Help / Guide',  page:'help'             });
   } else {
     // ── Employee / Agent / Finance ──
-    items.push({ icon:'check-square', label:'My Tasks',         page:'tasks',             section:false });
-    items.push({ icon:'megaphone',    label:'Posts',            page:'posts'                            });
-    items.push({ icon:'users',        label:'Team',             page:'team-directory',    section:true  });
-    items.push({ icon:'calendar',     label:'Attendance',       page:'attendance'                       });
-    items.push({ icon:'credit-card',  label:'Personal Finance', page:'personal-finance'                 });
-    items.push({ icon:'banknote',     label:'Cash Advance',     page:'cash-advances'                    });
-    items.push({ icon:'folder',       label:'Files',            page:'files'                            });
-    if (currentRole !== 'agent') {
-      items.push({ icon:'building-2', label:'Company', page:'company', section:true });
-    }
-    currentDepts.forEach(dept => {
+    items.push({ icon:'check-square', label:'My Tasks', page:'tasks' });
+    items.push({ icon:'megaphone',    label:'Posts',    page:'posts' });
+    // Departments — appear ABOVE management section
+    currentDepts.forEach((dept, i) => {
       const cfg = DEPARTMENTS[dept];
-      if (cfg) items.push({ icon: cfg.icon, label: dept, page: `dept:${dept}`, section: true });
+      if (cfg) items.push({ icon: cfg.icon, label: dept, page: `dept:${dept}`, section: i === 0, sectionLabel: 'My Departments' });
     });
-    items.push({ icon:'help-circle', label:'Help / Guide', page:'help', section:true });
+    // Management section below
+    items.push({ icon:'users',       label:'Team',             page:'team-directory',    section:true, sectionLabel:'Management' });
+    items.push({ icon:'calendar',    label:'Attendance',       page:'attendance'                       });
+    items.push({ icon:'credit-card', label:'Personal Finance', page:'personal-finance'                 });
+    items.push({ icon:'banknote',    label:'Cash Advance',     page:'cash-advances'                    });
+    items.push({ icon:'folder',      label:'Files',            page:'files'                            });
+    if (currentRole !== 'agent') {
+      items.push({ icon:'building-2', label:'Company', page:'company' });
+    }
+    items.push({ icon:'help-circle', label:'Help / Guide', page:'help', section:true, sectionLabel:'Support' });
   }
   return items;
 }
@@ -297,17 +376,22 @@ function buildSidebarNav() {
   const nav = document.getElementById('sidebar-nav');
   if (!nav) return;
   const items = getSidebarItems();
-  let lastSection = false;
+  let lastSectionLabel = null;
   nav.innerHTML = items.map(item => {
-    const secLabel = item.section && !lastSection ? '<div class="nav-section-label">Management</div>' : '';
-    if (item.section) lastSection = true;
+    let secLabel = '';
+    if (item.section) {
+      const label = item.sectionLabel || 'Management';
+      if (label !== lastSectionLabel) {
+        secLabel = `<div class="nav-section-label">${label}</div>`;
+        lastSectionLabel = label;
+      }
+    }
     return `${secLabel}<button class="nav-item" data-page="${item.page}">${_navIcon(item.icon)}${item.label}</button>`;
   }).join('');
   nav.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => {
       navigateTo(btn.dataset.page);
-      document.getElementById('sidebar').classList.remove('open');
-      document.getElementById('sidebar-overlay')?.classList.add('hidden');
+      closeSidebar();
     });
   });
   if (window.lucide) lucide.createIcons({ nodes: [nav] });
@@ -331,15 +415,19 @@ function buildBottomNav() {
   if (window.lucide) lucide.createIcons({ nodes: [nav] });
 }
 
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay')?.classList.add('hidden');
+  document.body.classList.remove('sidebar-open');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('menu-toggle')?.addEventListener('click', () => {
-    document.getElementById('sidebar').classList.toggle('open');
-    document.getElementById('sidebar-overlay')?.classList.toggle('hidden');
+    const isOpen = document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebar-overlay')?.classList.toggle('hidden', !isOpen);
+    document.body.classList.toggle('sidebar-open', isOpen);
   });
-  document.getElementById('sidebar-overlay')?.addEventListener('click', () => {
-    document.getElementById('sidebar').classList.remove('open');
-    document.getElementById('sidebar-overlay')?.classList.add('hidden');
-  });
+  document.getElementById('sidebar-overlay')?.addEventListener('click', closeSidebar);
 });
 
 // ── Navigate ──────────────────────────────────────
@@ -593,10 +681,13 @@ async function renderEmployeeDashboard() {
     const u = userProfile;
     const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
 
-    // Attendance
-    const attData  = attSnap.exists ? attSnap.data() : {};
-    const hasLogin = !!attData.loginTime;
-    const hasFull  = !!attData.fullTime;
+    // Attendance — new model: 0 / 0.5 / 1.0
+    const attData     = attSnap.exists ? attSnap.data() : {};
+    const hasLogin    = !!attData.loginTime;
+    const attScore    = typeof attData.attendanceScore === 'number'
+                          ? attData.attendanceScore
+                          : (attData.fullTime ? 1.0 : hasLogin ? 0.5 : 0);
+    const hasFull     = attScore >= 1.0;
 
     // KPI computation
     const taskScore = myTasks.length > 0 ? Math.round((doneTasks.length / myTasks.length) * 100) : 0;
@@ -608,52 +699,95 @@ async function renderEmployeeDashboard() {
     // Recent CA
     const recentCA = caSnap.docs.map(d=>({id:d.id,...d.data()}));
 
-    const attBadgeClass = hasFull?'badge-green':hasLogin?'badge-orange':'badge-gray';
-    const attLabel      = hasFull ? 'Full Day ✅' : hasLogin ? 'Half Day 🕐' : 'Not Logged In';
+    const attBadgeClass = hasFull ? 'badge-green' : hasLogin ? 'badge-orange' : 'badge-gray';
+    const attLabel      = hasFull ? '100% Full ✅' : hasLogin ? '50% Checked In 🟡' : 'Not Checked In';
+
+    // Dept quick tab buttons
+    const deptTabsHTML = currentDepts.length ? `
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h3>My Departments</h3></div>
+        <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;padding-top:6px">
+          ${currentDepts.map(dept => {
+            const cfg = DEPARTMENTS[dept] || {};
+            return `<button class="dept-quick-tab" onclick="renderDeptModule('${dept}')">
+              <span style="font-size:18px">${cfg.icon||'🗂️'}</span>
+              <span>${dept}</span>
+            </button>`;
+          }).join('')}
+        </div>
+      </div>` : '';
+
+    const taskOutcomeMet = myTasks.length > 0 && taskScore >= targetScore;
 
     c.innerHTML = `
       <div class="page-header"><h2>👋 Hi, ${(u.displayName||'').split(' ')[0]}!</h2></div>
       <div id="live-clock" class="live-clock-line"></div>
 
-      <div id="emp-id-card-wrap" style="margin-bottom:20px"></div>
+      <div id="emp-id-card-wrap" style="margin-bottom:16px"></div>
 
-      ${overdue.length>0?`<div class="alert-banner alert-danger"><span>⚠️ <strong>${overdue.length} overdue task${overdue.length>1?'s':''}</strong></span><span class="alert-chevron">›</span></div>`:''}
+      ${overdue.length>0?`<div class="alert-banner alert-danger" onclick="navigateTo('tasks')"><span>⚠️ <strong>${overdue.length} overdue task${overdue.length>1?'s':''}</strong></span><span class="alert-chevron">›</span></div>`:''}
 
-      <!-- Attendance Card -->
-      <div class="card" style="margin-bottom:16px">
-        <div class="card-header">
-          <h3>Attendance</h3>
-          <span class="badge ${attBadgeClass}">${attLabel}</span>
-        </div>
-        <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap">
-          ${!hasLogin?`<button class="btn-primary" id="login-att-btn"><i data-lucide="log-in" style="width:14px;margin-right:6px"></i>Log In (Half Day)</button>`:''}
-          ${hasLogin&&!hasFull?`<button class="btn-secondary" id="fullday-att-btn"><i data-lucide="check" style="width:14px;margin-right:6px"></i>Mark Full Day</button>`:''}
-          ${hasFull?`<p style="font-size:13px;color:var(--success);font-weight:600">Full attendance recorded today.</p>`:''}
-        </div>
-      </div>
+      <!-- Departmental Tabs -->
+      ${deptTabsHTML}
 
-      <div class="kpi-row">
-        <div class="kpi-card green">
-          <div class="kpi-label">Net Pay</div>
-          <div class="kpi-value" style="font-size:16px">₱${formatNum(net)}</div>
-          <div class="kpi-sub">Base ₱${formatNum(u.salary)}</div>
-        </div>
-        <div class="kpi-card accent">
+      <!-- KPI Stats Row -->
+      <div class="kpi-row" style="margin-bottom:16px">
+        <div class="kpi-card ${openTasks.length>0?'accent':''}">
           <div class="kpi-label">Open Tasks</div>
           <div class="kpi-value">${openTasks.length}</div>
-          <div class="kpi-sub">${doneTasks.length} done</div>
+          <div class="kpi-sub">${doneTasks.length} done · ${overdue.length} overdue</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Task KPI</div>
           <div class="kpi-value" style="color:${kpiColor}">${taskScore}%</div>
-          <div class="kpi-sub">Target: ${targetScore}%</div>
+          <div class="kpi-sub">${taskOutcomeMet?'✅ Target met':'❌ Below target'} (${targetScore}%)</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-label">Net Pay</div>
+          <div class="kpi-value" style="font-size:15px">₱${formatNum(net)}</div>
+          <div class="kpi-sub">Base ₱${formatNum(u.salary)}</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Department</div>
-          <div class="kpi-value" style="font-size:12px;line-height:1.3">${currentDepts.join(', ')||'Unassigned'}</div>
+          <div class="kpi-value" style="font-size:11px;line-height:1.4">${currentDepts.join(', ')||'Unassigned'}</div>
         </div>
       </div>
 
+      <!-- Attendance Card -->
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header">
+          <h3>Today's Attendance</h3>
+          <span class="badge ${attBadgeClass}">${attLabel}</span>
+        </div>
+        <div class="card-body">
+          ${!hasLogin ? `
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+              Check in = 50%. Mark all notifications read before 8am = 100%.
+            </p>
+            <button class="btn-primary" id="check-in-btn" style="width:100%">
+              <i data-lucide="log-in" style="width:14px;margin-right:6px"></i>Check In
+            </button>` : hasFull ? `
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="width:40px;height:40px;border-radius:50%;background:rgba(48,209,88,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">✅</div>
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--success)">Full attendance — 100%</div>
+                <div style="font-size:11px;color:var(--text-muted)">Login + all notifications read by 8am</div>
+              </div>
+            </div>` : `
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+              <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,159,10,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">🟡</div>
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--warning)">50% — Checked in</div>
+                <div style="font-size:11px;color:var(--text-muted)">Mark all notifications read before 8am → 100%</div>
+              </div>
+            </div>
+            <button class="btn-secondary btn-sm" id="mark-notifs-read-att-btn" style="width:100%">
+              <i data-lucide="check-circle" style="width:13px;margin-right:5px"></i>Mark All Notifications Read → Get 100%
+            </button>`}
+        </div>
+      </div>
+
+      <!-- Management row: Tasks + KPI -->
       <div class="dashboard-grid">
         <div class="card">
           <div class="card-header">
@@ -679,19 +813,20 @@ async function renderEmployeeDashboard() {
 
         <div>
           <div class="card" style="margin-bottom:16px">
-            <div class="card-header"><h3>KPI Breakdown</h3></div>
+            <div class="card-header"><h3>KPI Summary</h3></div>
             <div class="card-body">
-              <div style="margin-bottom:12px">
-                <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px">
-                  <span>Task Completion</span><strong style="color:${kpiColor}">${taskScore}%</strong>
+              <div style="margin-bottom:10px">
+                <div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px">
+                  <span>Task Completion</span><strong style="color:${kpiColor}">${doneTasks.length}/${myTasks.length} (${taskScore}%)</strong>
                 </div>
                 <div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:${taskScore}%;background:${kpiColor}"></div></div>
               </div>
-              <div style="font-size:12px;color:var(--text-muted);margin-top:10px">
-                ${doneTasks.length} of ${myTasks.length} tasks completed · Target: ${targetScore}%
+              <div style="display:flex;justify-content:space-between;font-size:12px;margin-top:8px">
+                <span style="color:var(--text-muted)">Expected Outcome</span>
+                <strong style="color:${taskOutcomeMet?'var(--success)':'var(--danger)'}">${taskOutcomeMet?'✅ Met':'❌ Not Met'}</strong>
               </div>
               <button class="btn-secondary btn-sm" style="margin-top:12px;width:100%" onclick="navigateTo('personal-finance')">
-                View Full Payslip →
+                Full Payslip & KPI →
               </button>
             </div>
           </div>
@@ -708,44 +843,80 @@ async function renderEmployeeDashboard() {
     renderMiniCal();
     if (window.lucide) lucide.createIcons({ nodes: [c] });
 
-    // Attendance buttons
-    document.getElementById('login-att-btn')?.addEventListener('click', async () => {
+    // Attendance buttons — new model
+    document.getElementById('check-in-btn')?.addEventListener('click', async () => {
+      // Check if no new notifs today (or all already read) → auto 100%
+      const todayStart = new Date(todayStr).getTime();
+      let autoFull = false;
+      try {
+        const now8am = new Date(); now8am.setHours(8,0,0,0);
+        const notifSnap = await db.collection('notifications').doc(currentUser.uid).collection('items')
+          .where('createdAt', '>=', new firebase.firestore.Timestamp(Math.floor(todayStart/1000), 0)).get();
+        const todayNotifs = notifSnap.docs.map(d => d.data());
+        autoFull = todayNotifs.length === 0 || todayNotifs.every(n => n.read);
+      } catch {}
       await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
-        loginTime: firebase.firestore.FieldValue.serverTimestamp(), uid: currentUser.uid, date: todayStr, fullTime: false
+        loginTime: firebase.firestore.FieldValue.serverTimestamp(),
+        uid: currentUser.uid, date: todayStr,
+        attendanceScore: autoFull ? 1.0 : 0.5,
+        fullTime: autoFull,
+        autoFull
       }, { merge: true });
-      Notifs.showToast('Half-day attendance logged!');
-      renderEmployeeDashboard();
-    });
-    document.getElementById('fullday-att-btn')?.addEventListener('click', async () => {
-      await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
-        fullTime: true, fullTimeAt: firebase.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
-      Notifs.showToast('Full day attendance recorded!');
+      Notifs.showToast(autoFull
+        ? '✅ Full attendance recorded (100%) — no pending notifications!'
+        : '🟡 Checked in (50%). Read all notifications by 8am for 100%.');
       renderEmployeeDashboard();
     });
 
-    // Auto full attendance if no new notifs today
-    if (hasLogin && !hasFull) autoCheckFullAttendance(todayStr);
+    // Mark all notifs read → upgrade to 100% if before 8am
+    document.getElementById('mark-notifs-read-att-btn')?.addEventListener('click', async () => {
+      const now = new Date();
+      const limit8am = new Date(); limit8am.setHours(8,0,0,0);
+      // Mark all notifs read
+      const todayStart = new Date(todayStr).getTime();
+      const notifSnap = await db.collection('notifications').doc(currentUser.uid).collection('items')
+        .where('createdAt', '>=', new firebase.firestore.Timestamp(Math.floor(todayStart/1000), 0))
+        .where('read', '==', false).get();
+      if (!notifSnap.empty) {
+        const batch = db.batch();
+        notifSnap.docs.forEach(d => batch.update(d.ref, { read: true }));
+        await batch.commit();
+      }
+      if (now <= limit8am) {
+        // Before 8am → upgrade to 100%
+        await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
+          attendanceScore: 1.0, fullTime: true,
+          fullTimeAt: firebase.firestore.FieldValue.serverTimestamp(), notifReadBy8am: true
+        }, { merge: true });
+        Notifs.showToast('✅ Full attendance (100%) — all notifications read before 8am!');
+      } else {
+        Notifs.showToast('Notifications marked as read. (Only counts for 100% if done before 8am.)');
+      }
+      renderEmployeeDashboard();
+    });
 
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>${err.message}</h4></div>`;
   }
 }
 
-async function autoCheckFullAttendance(todayStr) {
-  // If all today's notifications are read, mark full attendance automatically
-  const todayStart = new Date(todayStr).getTime();
-  const snap = await db.collection('notifications').doc(currentUser.uid).collection('items')
-    .where('createdAt', '>=', new firebase.firestore.Timestamp(Math.floor(todayStart/1000), 0)).get();
-  const todayNotifs = snap.docs.map(d=>d.data());
-  if (todayNotifs.length === 0 || todayNotifs.every(n=>n.read)) {
-    await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
-      fullTime: true, fullTimeAt: firebase.firestore.FieldValue.serverTimestamp(), autoMarked: true
-    }, { merge: true });
-    Notifs.showToast('✅ Full attendance auto-recorded (no pending notifications).');
-    renderEmployeeDashboard();
-  }
-}
+// Called by notifications.js markAllRead — upgrades attendance to 100% if before 8am
+window.tryUpgradeAttendanceOnNotifRead = async function() {
+  if (!currentUser) return;
+  const now = new Date();
+  const limit8am = new Date(); limit8am.setHours(8,0,0,0);
+  if (now > limit8am) return; // only counts before 8am
+  const todayStr = now.toISOString().slice(0,10);
+  const todaySnap = await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).get();
+  if (!todaySnap.exists || !todaySnap.data().loginTime) return; // must have checked in
+  const current = todaySnap.data();
+  if ((current.attendanceScore||0) >= 1.0) return; // already full
+  await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
+    attendanceScore: 1.0, fullTime: true,
+    fullTimeAt: firebase.firestore.FieldValue.serverTimestamp(), notifReadBy8am: true
+  }, { merge: true });
+  Notifs.showToast('✅ Full attendance (100%) — all notifications read before 8am!');
+};
 
 // ── Employee ID Card ──────────────────────────────
 function renderIDCard(containerId, u) {
@@ -907,42 +1078,86 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     `;
     const snap = await db.collection('users').get();
     const users = snap.docs.map(d=>({id:d.id,...d.data()}));
+    const now2 = new Date();
+    const daysElapsed2 = now2.getDate();
+    const daysInMonth2 = new Date(now2.getFullYear(), now2.getMonth()+1, 0).getDate();
     const userRows = await Promise.all(users.map(async u => {
       const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
       const kpi = await getKpiScore(u.id);
       const att = await getAttendanceScore(u.id);
-      const computed = net * (kpi*0.5 + att*0.5);
+      const mult = kpi*0.7 + att*0.3;
+      const computed = net * mult * (daysElapsed2 / daysInMonth2);
       const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';
-      return `<tr>
+      // Task completion
+      const taskSnap2 = await db.collection('tasks').where('assignedTo','==',u.id).get().catch(()=>({docs:[]}));
+      const tasksDone = taskSnap2.docs.filter(d=>d.data().status==='done').length;
+      const tasksTotal = taskSnap2.docs.length;
+      // Eval
+      const evalDoc = await db.collection('kpi_evals').doc(u.id).get().catch(()=>null);
+      const evalD = evalDoc?.exists ? evalDoc.data() : {};
+      return { uid:u.id, name:u.displayName||u.email, depts, net, kpi, att, computed, tasksDone, tasksTotal, evalD, row: `<tr>
         <td>${u.displayName||u.email}</td>
-        <td><code>${u.employeeId||'—'}</code></td>
         <td>${depts}</td>
-        <td>₱${formatNum(u.salary)}</td>
-        <td>₱${formatNum(u.allowance)}</td>
-        <td>₱${formatNum(u.deductions)}</td>
         <td>₱${formatNum(net)}</td>
-        <td>${Math.round(kpi*100)}%</td>
+        <td>${Math.round(kpi*100)}%<br><span style="font-size:10px;color:var(--text-muted)">${tasksDone}/${tasksTotal} tasks</span></td>
         <td>${Math.round(att*100)}%</td>
-        <td><strong>₱${formatNum(computed)}</strong></td>
-      </tr>`;
+        <td><strong style="color:var(--primary-light)">₱${formatNum(computed)}</strong><br><span style="font-size:10px;color:var(--text-muted)">${daysElapsed2}/${daysInMonth2} days</span></td>
+        <td style="text-align:center">
+          <span style="font-weight:700">${evalD.selfGrade!=null?evalD.selfGrade+'<small>/10</small>':'—'}</span>
+          ${evalD.selfNotes?`<div style="font-size:10px;color:var(--text-muted);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${evalD.selfNotes}</div>`:''}
+        </td>
+        <td style="text-align:center">
+          <span style="font-weight:700;color:var(--success)">${evalD.presidentGrade!=null?evalD.presidentGrade+'<small>/10</small>':'—'}</span>
+        </td>
+        <td><button class="btn-secondary btn-sm grade-emp-btn" data-uid="${u.id}" data-name="${u.displayName||u.email}" data-presgrade="${evalD.presidentGrade||''}" data-presnotes="${(evalD.presidentNotes||'').replace(/"/g,'&quot;')}">Grade</button></td>
+      </tr>` };
     }));
-    const now = new Date();
-    const defaultMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-    const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
+    const defaultMonth = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
+    const monthLabel = now2.toLocaleString('en-PH',{month:'long',year:'numeric'});
     document.getElementById('pf-content').innerHTML = `
       <div class="card" style="margin-bottom:16px">
         <div class="card-header">
           <h3>Team Payroll — ${monthLabel}</h3>
           <button class="btn-primary btn-sm" id="record-payroll-btn">Record Payroll</button>
         </div>
+        <div style="font-size:12px;color:var(--text-muted);padding:8px 16px">Computed earnings based on ${daysElapsed2} of ${daysInMonth2} days elapsed this month</div>
         <div class="table-wrap">
           <table class="data-table">
-            <thead><tr><th>Employee</th><th>ID</th><th>Dept</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net Pay</th><th>KPI</th><th>Attendance</th><th>Computed</th></tr></thead>
-            <tbody>${userRows.join('')}</tbody>
+            <thead><tr><th>Employee</th><th>Dept</th><th>Net Pay</th><th>Task KPI</th><th>Attendance</th><th>Earned So Far</th><th>Self /10</th><th>Pres /10</th><th></th></tr></thead>
+            <tbody>${userRows.map(r=>r.row).join('')}</tbody>
           </table>
         </div>
       </div>
     `;
+    // Grade buttons
+    document.querySelectorAll('.grade-emp-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const { uid, name, presgrade, presnotes } = btn.dataset;
+        openModal(`Grade: ${name}`, `
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Assign a president's performance grade for ${name} this month (1 = poor, 10 = outstanding).</p>
+          <div class="form-group"><label>President Grade (1–10)</label>
+            <input id="pres-grade-input" type="number" min="1" max="10" step="1" value="${presgrade||''}" placeholder="e.g. 8"/>
+          </div>
+          <div class="form-group"><label>Notes (optional)</label>
+            <textarea id="pres-grade-notes" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Feedback for the employee...">${decodeURIComponent(presnotes||'')}</textarea>
+          </div>
+        `, `<button class="btn-primary" id="save-pres-grade-btn">Save Grade</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+        document.getElementById('save-pres-grade-btn')?.addEventListener('click', async () => {
+          const grade = parseInt(document.getElementById('pres-grade-input').value);
+          const notes = document.getElementById('pres-grade-notes').value.trim();
+          if (!grade || grade < 1 || grade > 10) { Notifs.showToast('Enter 1–10.','error'); return; }
+          await db.collection('kpi_evals').doc(uid).set({
+            presidentGrade: grade, presidentNotes: notes,
+            presidentId: currentUser.uid,
+            presidentUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          // Notify employee
+          await Notifs.send(uid, { title:'KPI Grade Updated', body:`The president graded your performance: ${grade}/10.`, icon:'📊', type:'kpi_grade' });
+          closeModal(); Notifs.showToast(`Grade ${grade}/10 saved for ${name}.`);
+          window.renderPersonalFinance(currentUser, currentRole);
+        });
+      });
+    });
     document.getElementById('record-payroll-btn')?.addEventListener('click', () => {
       openModal('Record Monthly Payroll', `
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">This records current salary data as a payroll entry for all employees for the selected month.</p>
@@ -979,26 +1194,48 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   // Employee sees their own
   const u = userProfile;
   const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
-  const [kpi, att, cashAdvSnap, salaryHistSnap] = await Promise.all([
+  const now = new Date();
+  const daysElapsed = now.getDate();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+
+  const [kpi, att, cashAdvSnap, salaryHistSnap, evalSnap, myTasksSnap] = await Promise.all([
     getKpiScore(currentUser.uid),
     getAttendanceScore(currentUser.uid),
     db.collection('cash_advances').where('userId','==',currentUser.uid).orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
-    db.collection('salary_history').where('userId','==',currentUser.uid).orderBy('month','desc').limit(12).get().catch(()=>({docs:[]}))
+    db.collection('salary_history').where('userId','==',currentUser.uid).orderBy('month','desc').limit(12).get().catch(()=>({docs:[]})),
+    db.collection('kpi_evals').doc(currentUser.uid).get().catch(()=>null),
+    db.collection('tasks').where('assignedTo','==',currentUser.uid).get().catch(()=>({docs:[]}))
   ]);
+
   const cashAdvances  = cashAdvSnap.docs.map(d=>({id:d.id,...d.data()}));
   const salaryHistory = salaryHistSnap.docs.map(d=>({id:d.id,...d.data()}));
   const totalAdvance  = cashAdvances.filter(a=>a.status==='approved').reduce((s,a)=>s+(a.amount||0),0);
-  const computed      = net * (kpi*0.5 + att*0.5);
 
-  // YTD calculation
-  const thisYear = new Date().getFullYear().toString();
-  const ytdPay   = salaryHistory.filter(h=>h.month?.startsWith(thisYear)).reduce((s,h)=>s+(h.netPay||0),0);
+  const evalData       = evalSnap?.exists ? evalSnap.data() : {};
+  const selfGrade      = evalData.selfGrade || null;
+  const presGrade      = evalData.presidentGrade || null;
+  const selfNotes      = evalData.selfNotes || '';
 
-  const now = new Date();
+  const myTasks  = myTasksSnap.docs.map(d=>d.data());
+  const doneTasks= myTasks.filter(t=>t.status==='done');
+  const taskPct  = myTasks.length ? Math.round(doneTasks.length/myTasks.length*100) : 0;
+  const kpiProfile = await db.collection('kpi_targets').doc(currentUser.uid).get().catch(()=>null);
+  const targetScore   = kpiProfile?.exists ? (kpiProfile.data().targetScore||80) : 80;
+  const outcomeMet    = taskPct >= targetScore;
+
+  // Computed earnings based on days covered so far (not full month)
+  const multiplier    = kpi*0.7 + att*0.3;
+  const computedMonth = net * multiplier; // full month projected
+  const earnedSoFar   = computedMonth * (daysElapsed / daysInMonth); // prorated
+
+  // YTD = completed months from salary history + current month earned so far
+  const thisYear  = now.getFullYear().toString();
+  const ytdHistory= salaryHistory.filter(h=>h.month?.startsWith(thisYear));
+  const ytdPay    = ytdHistory.reduce((s,h)=>s+(h.finalPay||h.netPay||0),0) + earnedSoFar;
+
   const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
-
-  const kpiColor = kpi>=0.8?'var(--success)':kpi>=0.6?'var(--warning)':'var(--danger)';
-  const attColor = att>=0.85?'var(--success)':att>=0.6?'var(--warning)':'var(--danger)';
+  const kpiColor  = kpi>=0.8?'var(--success)':kpi>=0.6?'var(--warning)':'var(--danger)';
+  const attColor  = att>=0.85?'var(--success)':att>=0.6?'var(--warning)':'var(--danger)';
 
   c.innerHTML = `
     <div class="page-header">
@@ -1006,56 +1243,123 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       <button class="btn-primary btn-sm" id="req-advance-btn">+ Cash Advance</button>
     </div>
 
+    <!-- Top KPI stats -->
     <div class="kpi-row">
       <div class="kpi-card green">
-        <div class="kpi-label">Net Pay / Month</div>
-        <div class="kpi-value" style="font-size:16px">₱${formatNum(net)}</div>
-        <div class="kpi-sub">YTD: ₱${formatNum(ytdPay)}</div>
+        <div class="kpi-label">Earned So Far</div>
+        <div class="kpi-value" style="font-size:15px">₱${formatNum(earnedSoFar)}</div>
+        <div class="kpi-sub">${daysElapsed} of ${daysInMonth} days · YTD ₱${formatNum(ytdPay)}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Task KPI</div>
-        <div class="kpi-value" style="color:${kpiColor}">${Math.round(kpi*100)}%</div>
-        <div class="kpi-sub">70% weight</div>
+        <div class="kpi-value" style="color:${kpiColor}">${taskPct}%</div>
+        <div class="kpi-sub">${doneTasks.length}/${myTasks.length} done</div>
       </div>
       <div class="kpi-card accent">
         <div class="kpi-label">Attendance</div>
         <div class="kpi-value" style="color:${attColor}">${Math.round(att*100)}%</div>
-        <div class="kpi-sub">This month</div>
+        <div class="kpi-sub">${daysElapsed} days elapsed</div>
       </div>
-      <div class="kpi-card ${computed<net*0.9?'red':'green'}">
-        <div class="kpi-label">Computed Pay</div>
-        <div class="kpi-value" style="font-size:16px">₱${formatNum(computed)}</div>
+      <div class="kpi-card ${computedMonth<net*0.9?'red':'green'}">
+        <div class="kpi-label">Projected Full Month</div>
+        <div class="kpi-value" style="font-size:14px">₱${formatNum(computedMonth)}</div>
+        <div class="kpi-sub">Base ₱${formatNum(net)}</div>
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-header"><h3>Payroll Summary — ${monthLabel}</h3></div>
+    <!-- KPI Evaluation Card -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header">
+        <h3>📊 KPI Evaluation — ${monthLabel}</h3>
+        <button class="btn-secondary btn-sm" id="self-eval-btn">Self Evaluate</button>
+      </div>
       <div class="card-body">
+        <!-- Tasks section -->
+        <div style="margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:13px">
+            <span style="font-weight:600">Tasks Completed</span>
+            <strong style="color:${kpiColor}">${doneTasks.length} of ${myTasks.length}</strong>
+          </div>
+          <div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:${taskPct}%;background:${kpiColor}"></div></div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;color:var(--text-muted)">
+            <span>Target: ${targetScore}%</span>
+            <strong style="color:${outcomeMet?'var(--success)':'var(--danger)'}">
+              ${outcomeMet?'✅ Expected Outcome Met':'❌ Expected Outcome Not Met'}
+            </strong>
+          </div>
+        </div>
+        <!-- Grades -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px">
+          <div style="background:var(--s2);border-radius:10px;padding:12px;border:1.5px solid var(--border)">
+            <div style="font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:6px">Self Evaluation</div>
+            <div style="font-size:28px;font-weight:800;color:${selfGrade?'var(--primary-light)':'var(--text-muted)'}">
+              ${selfGrade!=null?selfGrade:'—'}<span style="font-size:14px;font-weight:400">/10</span>
+            </div>
+            ${selfNotes?`<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic">"${selfNotes}"</div>`:''}
+          </div>
+          <div style="background:var(--s2);border-radius:10px;padding:12px;border:1.5px solid var(--border)">
+            <div style="font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:6px">President's Grade</div>
+            <div style="font-size:28px;font-weight:800;color:${presGrade?'var(--success)':'var(--text-muted)'}">
+              ${presGrade!=null?presGrade:'—'}<span style="font-size:14px;font-weight:400">/10</span>
+            </div>
+            ${evalData.presidentNotes?`<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic">"${evalData.presidentNotes}"</div>`:'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Pending president review</div>'}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Payroll Breakdown -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h3>Payroll Breakdown — ${monthLabel}</h3></div>
+      <div class="card-body">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">
+          Days covered: ${daysElapsed} of ${daysInMonth} days this month
+        </div>
         <div class="payslip-row"><span>Base Salary</span><strong>₱${formatNum(u.salary)}</strong></div>
         <div class="payslip-row"><span>Allowances</span><span style="color:var(--success)">+₱${formatNum(u.allowance)}</span></div>
         <div class="payslip-row"><span>Deductions</span><span style="color:var(--danger)">-₱${formatNum(u.deductions)}</span></div>
-        <div class="payslip-row"><span>Net Pay</span><strong>₱${formatNum(net)}</strong></div>
-        <div style="height:1px;background:var(--border);margin:10px 0"></div>
-        <div class="payslip-row"><span>KPI Factor (${Math.round(kpi*100)}% tasks · 70%)</span><span style="color:${kpiColor}">${Math.round(kpi*70)}pts</span></div>
-        <div class="payslip-row"><span>Attendance Factor (${Math.round(att*100)}% · 30%)</span><span style="color:${attColor}">${Math.round(att*30)}pts</span></div>
-        <div class="payslip-row"><span>KPI×Attendance Multiplier</span><span>${(kpi*0.5+att*0.5).toFixed(2)}×</span></div>
+        <div class="payslip-row"><span>Net Pay (Full Month)</span><strong>₱${formatNum(net)}</strong></div>
+        <div style="height:1px;background:var(--border);margin:12px 0"></div>
+        <div style="font-size:12px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:8px;letter-spacing:0.5px">Performance Multiplier</div>
+        <div class="payslip-row">
+          <span>Task KPI (70%) — ${taskPct}% completion</span>
+          <span style="color:${kpiColor}">${(kpi*0.7).toFixed(2)}×</span>
+        </div>
+        <div class="payslip-row">
+          <span>Attendance (30%) — ${Math.round(att*100)}% rate (${daysElapsed} days)</span>
+          <span style="color:${attColor}">${(att*0.3).toFixed(2)}×</span>
+        </div>
+        <div class="payslip-row" style="font-weight:700">
+          <span>Combined Multiplier</span>
+          <span>${multiplier.toFixed(2)}×</span>
+        </div>
+        <div style="height:1px;background:var(--border);margin:12px 0"></div>
+        <div class="payslip-row">
+          <span>Projected Full Month (₱${formatNum(net)} × ${multiplier.toFixed(2)})</span>
+          <strong>₱${formatNum(computedMonth)}</strong>
+        </div>
+        <div class="payslip-row">
+          <span>Earned So Far (${daysElapsed}/${daysInMonth} days)</span>
+          <strong style="color:var(--primary-light)">₱${formatNum(earnedSoFar)}</strong>
+        </div>
         <div class="payslip-row" style="background:var(--surface2);border-radius:8px;padding:10px 14px;margin-top:8px">
           <span>Cash Advance Balance</span><span style="color:var(--danger)">-₱${formatNum(totalAdvance)}</span>
         </div>
         <div class="payslip-row" style="font-size:16px;font-weight:800;margin-top:8px;padding-top:8px;border-top:2px solid var(--border)">
-          <span>Final Take-Home</span><span>₱${formatNum(Math.max(0,computed-totalAdvance))}</span>
+          <span>Take-Home So Far</span><span style="color:var(--success)">₱${formatNum(Math.max(0,earnedSoFar-totalAdvance))}</span>
         </div>
         <button class="btn-secondary" style="margin-top:14px;width:100%" onclick="printPayslip()">Generate Payslip PDF</button>
       </div>
     </div>
 
-    <div class="card">
+    <!-- Salary History -->
+    <div class="card" style="margin-bottom:16px">
       <div class="card-header"><h3>Salary History</h3></div>
       <div class="card-body" style="padding:0">
         ${!salaryHistory.length
           ? '<div class="empty-state" style="padding:20px"><p style="font-size:13px;color:var(--text-muted)">No history yet. Records are added monthly by admin.</p></div>'
           : `<div class="table-wrap"><table class="data-table">
-              <thead><tr><th>Month</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net Pay</th><th>KPI</th><th>Final</th></tr></thead>
+              <thead><tr><th>Month</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net</th><th>KPI</th><th>Att</th><th>Final</th></tr></thead>
               <tbody>${salaryHistory.map(h=>`<tr>
                 <td>${h.month||'—'}</td>
                 <td>₱${formatNum(h.salary)}</td>
@@ -1063,12 +1367,14 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
                 <td style="color:var(--danger)">-₱${formatNum(h.deductions)}</td>
                 <td>₱${formatNum(h.netPay)}</td>
                 <td>${h.kpiScore?Math.round(h.kpiScore*100)+'%':'—'}</td>
+                <td>${h.attScore?Math.round(h.attScore*100)+'%':'—'}</td>
                 <td><strong>₱${formatNum(h.finalPay)}</strong></td>
               </tr>`).join('')}</tbody>
             </table></div>`}
       </div>
     </div>
 
+    <!-- Cash Advances -->
     <div class="card">
       <div class="card-header">
         <h3>Cash Advances</h3>
@@ -1090,6 +1396,33 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       </div>
     </div>
   `;
+
+  // Self Evaluation button
+  document.getElementById('self-eval-btn')?.addEventListener('click', () => {
+    openModal('Self Evaluation — KPI', `
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Rate your own performance this month (1 = poor, 10 = excellent). Be honest — the president also grades you.</p>
+      <div class="form-group">
+        <label>Self Grade (1–10)</label>
+        <input id="self-grade-input" type="number" min="1" max="10" step="1" value="${selfGrade||''}" placeholder="e.g. 7"/>
+      </div>
+      <div class="form-group">
+        <label>Notes / Justification</label>
+        <textarea id="self-notes-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="What did you accomplish? What could be better?">${selfNotes}</textarea>
+      </div>
+    `, `<button class="btn-primary" id="save-self-eval-btn">Save Evaluation</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    document.getElementById('save-self-eval-btn')?.addEventListener('click', async () => {
+      const grade = parseInt(document.getElementById('self-grade-input').value);
+      const notes = document.getElementById('self-notes-input').value.trim();
+      if (!grade || grade < 1 || grade > 10) { Notifs.showToast('Enter a grade between 1 and 10.','error'); return; }
+      await db.collection('kpi_evals').doc(currentUser.uid).set({
+        selfGrade: grade, selfNotes: notes, selfUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        userId: currentUser.uid, userName: userProfile.displayName || currentUser.email
+      }, { merge: true });
+      closeModal();
+      Notifs.showToast('Self evaluation saved!');
+      window.renderPersonalFinance(currentUser, currentRole);
+    });
+  });
 
   document.getElementById('req-advance-btn')?.addEventListener('click', () => {
     openModal('Request Cash Advance', `
@@ -1141,15 +1474,20 @@ async function getKpiScore(uid) {
 async function getAttendanceScore(uid) {
   try {
     const now = new Date();
-    // Only count current month records
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
-    const days = 22; // avg work days in a month
+    const daysElapsed = now.getDate(); // days so far this month (not a fixed 22)
     const snap = await db.collection('attendance').doc(uid).collection('records')
       .where(firebase.firestore.FieldPath.documentId(), '>=', monthStart).get();
-    const records = snap.docs.map(d=>d.data());
-    const fullDays = records.filter(r=>r.fullTime).length;
-    const halfDays = records.filter(r=>r.loginTime&&!r.fullTime).length;
-    return Math.min(1, (fullDays + halfDays*0.5) / days);
+    const records = snap.docs.map(d => d.data());
+    const totalScore = records.reduce((sum, r) => {
+      // New model: attendanceScore field (0, 0.5, 1.0)
+      // Fallback to legacy fullTime/loginTime model
+      const score = typeof r.attendanceScore === 'number'
+        ? r.attendanceScore
+        : (r.fullTime ? 1.0 : r.loginTime ? 0.5 : 0);
+      return sum + score;
+    }, 0);
+    return Math.min(1, totalScore / daysElapsed);
   } catch { return 0.5; }
 }
 
@@ -1724,11 +2062,12 @@ async function renderDepartments() {
         const subtabs = (cfg.subtabs || []).slice(0, 4);
         return `
           <div class="dept-card dept-card-clickable" data-dept="${name}" style="border-top-color:${cfg.color||'var(--primary-light)'}; cursor:pointer">
-            <div class="dept-name">${cfg.icon||'🗂️'} ${name}</div>
+            <div class="dept-icon-large">${cfg.icon||'🗂️'}</div>
+            <div class="dept-name" style="font-weight:700;font-size:14px;margin:4px 0">${name}</div>
             <div class="dept-subtabs-preview">
               ${subtabs.map(s => `<span class="dept-subtab-chip">${s}</span>`).join('')}
             </div>
-            <div class="dept-open-hint">Tap to open all tabs →</div>
+            <div class="dept-open-hint">Tap to open →</div>
           </div>`;
       }).join('')}
     </div>

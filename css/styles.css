@@ -950,7 +950,8 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   background-clip: text; margin-top: 1px;
 }
 
-.sidebar-nav { flex: 1; padding: 8px 0 8px 2px; }
+.sidebar-nav { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; padding: 8px 0 8px 2px; scrollbar-width: none; }
+.sidebar-nav::-webkit-scrollbar { display: none; }
 
 .nav-section-label {
   font-size: 10px; font-weight: 700; color: var(--text-light);
@@ -1013,6 +1014,11 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .nav-item[data-page="cash-advances"] .nav-icon    { background: linear-gradient(135deg,#FFD60A,#30D158); box-shadow: 0 2px 8px rgba(255,214,10,0.35); }
 .nav-item[data-page="help"] .nav-icon             { background: linear-gradient(135deg,#8B5CF6,#5856D6); box-shadow: 0 2px 8px rgba(139,92,246,0.30); }
 
+/* Dept pages use data-page="dept:X" — give all a gradient background */
+.nav-item[data-page^="dept:"] .nav-icon { background: linear-gradient(135deg,#FF9F0A,#FF6B6B); box-shadow: 0 2px 8px rgba(255,159,10,0.30); }
+/* Emoji icons get same pill/gradient treatment */
+.nav-icon.emoji-icon { font-size:16px; display:flex; align-items:center; justify-content:center; }
+
 .nav-badge {
   margin-left: auto; background: var(--grad-red); color: #fff;
   font-size: 10px; padding: 1px 6px; border-radius: var(--pill); font-weight: 700;
@@ -1051,6 +1057,10 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   min-height: calc(100dvh - var(--topbar-h));
   padding: 20px;
 }
+
+/* Lock scroll on body when sidebar is open on mobile */
+body.sidebar-open { overflow: hidden; }
+body.sidebar-open .main-content { pointer-events: none; user-select: none; }
 
 .bottom-nav {
   display: none;
@@ -2303,4 +2313,27 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
   border-radius:6px; color:var(--text-muted);
 }
 .dept-open-hint { font-size:11px; color:var(--primary-light); margin-top:4px; font-weight:600; }
+.dept-icon-large { font-size:36px; line-height:1; margin-bottom:4px; }
+
+/* Dept quick-tab buttons on employee dashboard */
+.dept-quick-tab {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; border-radius: 10px;
+  background: var(--s2); border: 1.5px solid var(--border);
+  color: var(--text); font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all var(--t1);
+}
+.dept-quick-tab:hover { background: var(--s3); border-color: var(--primary-light); transform: translateY(-1px); }
+
+
+/* ── Remember me / Guest save row ──────────────── */
+.remember-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text-muted);
+  cursor: pointer; margin-bottom: 14px;
+  user-select: none;
+}
+.remember-row input[type="checkbox"] {
+  width: 16px; height: 16px; accent-color: var(--primary-light); cursor: pointer;
+}
 

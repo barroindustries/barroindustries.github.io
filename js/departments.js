@@ -2740,10 +2740,17 @@ function printQuote(lines, q) {
 // ══════════════════════════════════════════════════
 window.renderApprovals = async function(currentUser) {
   const c = deptContainer();
+  // Check pending signup requests for badge
+  const signupSnap = await db.collection('signup_requests').where('status','==','pending').get().catch(()=>({size:0}));
+  const pendingSignups = signupSnap.size || 0;
+
   c.innerHTML = `
-    <div class="page-header"><h2>Approvals</h2></div>
+    <div class="page-header"><h2>✅ Approvals</h2></div>
     <div class="subtab-bar">
-      <button class="subtab-btn active" data-sub="roa">Quote / ROA</button>
+      <button class="subtab-btn active" data-sub="signups">
+        Sign-up Requests${pendingSignups>0?` <span class="nav-badge">${pendingSignups}</span>`:''}
+      </button>
+      <button class="subtab-btn" data-sub="roa">Quote / ROA</button>
       <button class="subtab-btn" data-sub="ca">Cash Advances</button>
     </div>
     <div id="approvals-content"><div class="loading-placeholder">Loading…</div></div>
@@ -2753,6 +2760,95 @@ window.renderApprovals = async function(currentUser) {
     const wrap = document.getElementById('approvals-content');
     if (!wrap) return;
     wrap.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+
+    if (sub === 'signups') {
+      // Sign-up Requests
+      const snap = await db.collection('signup_requests').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+      const items = snap.docs.map(d=>({id:d.id,...d.data()}));
+      if (!items.length) {
+        wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><h4>No signup requests yet</h4></div>';
+        return;
+      }
+      const pending = items.filter(i=>i.status==='pending');
+      wrap.innerHTML = `
+        ${pending.length?`<div class="alert-banner alert-warn" style="margin-bottom:12px">⚠️ ${pending.length} pending request${pending.length>1?'s':''}</div>`:''}
+        <div class="item-list">
+          ${items.map(item=>`
+          <div class="item-card" data-id="${item.id}">
+            <div class="item-top">
+              <div class="item-title">👤 ${item.fullName||'Unknown'}</div>
+              <span class="badge ${item.status==='approved'?'badge-green':item.status==='rejected'?'badge-red':'badge-warn'}">${item.status||'pending'}</span>
+            </div>
+            <div class="item-meta">
+              <span>✉️ ${item.email||'—'}</span>
+              <span>📱 ${item.phone||'—'}</span>
+              ${item.createdAt?`<span>📅 ${new Date(item.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
+            </div>
+            ${item.generatedPassword?`<div style="font-size:12px;margin-top:8px;padding:8px 10px;background:rgba(48,209,88,.1);border:1px solid rgba(48,209,88,.3);border-radius:8px;font-family:monospace">🔑 Generated Password: <strong>${item.generatedPassword}</strong><br><span style="font-size:10px;color:var(--text-muted)">Create Firebase Auth user with this password</span></div>`:''}
+            ${item.status==='pending'?`
+            <div style="display:flex;gap:8px;margin-top:12px">
+              <button class="btn-success signup-approve" data-id="${item.id}" data-name="${item.fullName}" data-email="${item.email}" data-phone="${item.phone||''}">✓ Approve & Generate Password</button>
+              <button class="btn-danger signup-reject" data-id="${item.id}" data-name="${item.fullName}">✗ Reject</button>
+            </div>`:''}
+          </div>`).join('')}
+        </div>`;
+
+      wrap.querySelectorAll('.signup-approve').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id    = btn.dataset.id;
+          const name  = btn.dataset.name;
+          const email = btn.dataset.email;
+          const phone = btn.dataset.phone;
+          const pwd   = generatePassword(name);
+          // Create Firestore user profile (no uid yet — president creates Firebase Auth manually)
+          const empCount = (await db.collection('users').get().catch(()=>({size:0}))).size;
+          const empId    = `BI-${new Date().getFullYear()}-${String(empCount+1).padStart(3,'0')}`;
+          await db.collection('users').add({
+            displayName: name, email, phone,
+            role: 'employee', departments: [],
+            employeeId: empId, salary: 0, allowance: 0, deductions: 0,
+            photoUrl: '', startDate: new Date().toISOString().slice(0,10),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            pendingPasswordSetup: true
+          });
+          await db.collection('signup_requests').doc(id).update({
+            status: 'approved',
+            generatedPassword: pwd,
+            approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            approvedBy: currentUser.uid
+          });
+          openModal('✓ Approved — Action Required', `
+            <p style="margin-bottom:14px;font-size:14px">Profile created for <strong>${name}</strong>.</p>
+            <div style="padding:14px;background:rgba(48,209,88,.1);border:1.5px solid rgba(48,209,88,.4);border-radius:10px;margin-bottom:14px">
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Generated Password</div>
+              <div style="font-size:22px;font-weight:800;font-family:monospace;letter-spacing:2px;color:var(--text)">${pwd}</div>
+            </div>
+            <p style="font-size:13px;color:var(--text-muted)">Next steps:</p>
+            <ol style="font-size:13px;color:var(--text-muted);line-height:2;padding-left:18px">
+              <li>Go to <strong>Firebase Console → Authentication → Add User</strong></li>
+              <li>Email: <strong>${email}</strong></li>
+              <li>Password: <strong>${pwd}</strong></li>
+              <li>Share this password with ${name} via phone or message</li>
+              <li>They can change it after first login</li>
+            </ol>
+          `, `<button class="btn-primary" onclick="closeModal()">Done</button>`);
+          Notifs.showToast(`${name} approved!`);
+          loadApprovalsSub('signups');
+        });
+      });
+
+      wrap.querySelectorAll('.signup-reject').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm(`Reject ${btn.dataset.name}'s request?`)) return;
+          await db.collection('signup_requests').doc(btn.dataset.id).update({
+            status: 'rejected', rejectedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          Notifs.showToast('Request rejected.');
+          loadApprovalsSub('signups');
+        });
+      });
+      return;
+    }
 
     if (sub === 'ca') {
       // Cash Advances

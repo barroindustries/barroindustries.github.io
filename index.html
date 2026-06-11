@@ -67,6 +67,44 @@
           <span class="lrc-sub">Brilliant Steel</span>
         </button>
       </div>
+      <div style="margin-top:10px">
+        <button class="login-role-card" id="signup-btn" style="width:100%;justify-content:flex-start;gap:12px;border-color:rgba(48,209,88,0.35);background:rgba(48,209,88,0.06)">
+          <span class="lrc-icon" style="background:linear-gradient(135deg,#30D158,#00D4AA)"><i data-lucide="user-plus"></i></span>
+          <div style="text-align:left">
+            <span class="lrc-label">Sign Up / Apply</span>
+            <span class="lrc-sub" style="display:block">Request access · Pending president approval</span>
+          </div>
+        </button>
+      </div>
+    </div>
+
+    <!-- ── Sign Up Form ── -->
+    <div id="signup-form-wrap" class="hidden">
+      <div class="login-form-header">
+        <button class="login-back-btn" id="signup-back-btn"><i data-lucide="arrow-left"></i></button>
+        <span class="login-type-pill" style="background:linear-gradient(135deg,#30D158,#00D4AA)">Apply for Access</span>
+      </div>
+      <div class="login-form">
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;text-align:center">Submit your details for review.<br>The president will approve and send your login.</p>
+        <div class="form-group">
+          <label>Full Name</label>
+          <input type="text" id="signup-name" placeholder="e.g. Juan dela Cruz" autocomplete="name"/>
+        </div>
+        <div class="form-group">
+          <label>Email Address</label>
+          <input type="email" id="signup-email" placeholder="your@email.com" autocomplete="email"/>
+        </div>
+        <div class="form-group">
+          <label>Phone / Mobile Number</label>
+          <input type="tel" id="signup-phone" placeholder="e.g. 09171234567" autocomplete="tel"/>
+        </div>
+        <div id="signup-error" class="error-msg hidden" style="margin-bottom:10px"></div>
+        <div id="signup-success" class="success-msg hidden" style="margin-bottom:10px">Application submitted! The president will review your request.</div>
+        <button class="btn-primary btn-full" id="signup-submit-btn">
+          <span id="signup-btn-text">Submit Application</span>
+          <span id="signup-spinner" class="spinner hidden"></span>
+        </button>
+      </div>
     </div>
 
     <!-- ── Login Form (shown after role pick) ── -->
@@ -89,6 +127,9 @@
             <button type="button" class="pw-toggle" id="pw-toggle"><i data-lucide="eye"></i></button>
           </div>
         </div>
+        <label class="remember-row">
+          <input type="checkbox" id="remember-me"/> Save login on this device
+        </label>
         <div id="login-error" class="error-msg hidden"></div>
         <button type="submit" class="btn-primary btn-full" id="login-btn">
           <span id="login-btn-text">Sign In</span>

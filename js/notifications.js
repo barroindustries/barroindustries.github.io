@@ -71,6 +71,10 @@ window.Notifs = (() => {
       batch.update(db.collection('notifications').doc(uid).collection('items').doc(n.id), { read: true });
     });
     await batch.commit();
+    // If before 8am and employee has checked in, upgrade attendance to 100%
+    if (typeof window.tryUpgradeAttendanceOnNotifRead === 'function') {
+      window.tryUpgradeAttendanceOnNotifRead();
+    }
   }
 
   // ── Send notification ─────────────────────────

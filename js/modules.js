@@ -704,10 +704,10 @@ window.renderCompanyOverviewNew = function(ct, canAdd) {
       <div class="card-header"><h3>🏢 About the Company</h3></div>
       <div class="card-body">
         <p style="font-size:14px;line-height:1.7;color:var(--text)">
-          <strong>Barro Industries OPC</strong> is a registered One Person Corporation in the Philippines. The company operates across multiple verticals under distinct trademarks, with its primary focus on manufacturing, design, and build services.
+          <strong>Barro Industries OPC</strong> is a SEC-registered One Person Corporation in the Philippines. The company's current active trademark is <strong>Barro Kitchens</strong> — a one-stop shop for kitchen design and build, covering the manufacturing industry from fabrication to full installation.
         </p>
         <p style="font-size:14px;line-height:1.7;color:var(--text);margin-top:10px">
-          Currently in active expansion, Barro Industries is building toward research and development, and plans to grow its trademark portfolio in the coming years.
+          Barro Kitchens will soon expand into research and development. Barro Industries OPC continues to grow its trademark portfolio, with more brands coming in the future.
         </p>
       </div>
     </div>
@@ -719,15 +719,15 @@ window.renderCompanyOverviewNew = function(ct, canAdd) {
           <div class="trademark-icon">🍳</div>
           <div>
             <div class="trademark-name">Barro Kitchens</div>
-            <div class="trademark-desc">Kitchen design and build · Manufacturing industry · One-stop shop for kitchen design, fabrication, and installation.</div>
-            <span class="badge badge-green" style="margin-top:6px;display:inline-block">Active</span>
+            <div class="trademark-desc">One-stop shop for kitchen design and build · Manufacturing industry · Full fabrication and installation services. R&D coming soon.</div>
+            <span class="badge badge-green" style="margin-top:6px;display:inline-block">Active — Only Current Trademark</span>
           </div>
         </div>
         <div class="trademark-card" style="opacity:0.6;margin-top:10px">
           <div class="trademark-icon">🔬</div>
           <div>
             <div class="trademark-name">More trademarks coming soon</div>
-            <div class="trademark-desc">Barro Industries continues to expand its brand portfolio.</div>
+            <div class="trademark-desc">Barro Industries OPC is SEC registered and will expand its brand portfolio under different trademarks.</div>
             <span class="badge badge-gray" style="margin-top:6px;display:inline-block">Upcoming</span>
           </div>
         </div>
@@ -742,6 +742,8 @@ window.renderCompanyOverviewNew = function(ct, canAdd) {
 async function renderPresidentMessageCard() {
   const card = document.getElementById('president-message-card');
   if (!card) return;
+  // Only show to employees and admin — not partners
+  if (typeof isBrilliantOnly === 'function' && isBrilliantOnly()) { card.style.display='none'; return; }
   try {
     const snap = await db.collection('users').where('role','==','president').limit(1).get();
     if (snap.empty) { card.style.display='none'; return; }
@@ -750,6 +752,7 @@ async function renderPresidentMessageCard() {
     if (pres.email !== 'neilbarro870@gmail.com') { card.style.display='none'; return; }
     const msg = await db.collection('president_message').doc('current').get();
     const msgText = msg.exists ? msg.data().message : 'Welcome to Barro Industries. Together, we build something great.';
+    const presName = 'Neil Barro'; // Always show as Neil Barro
     card.innerHTML = `
       <div class="card-header">
         <h3>Message from the President</h3>
@@ -758,10 +761,10 @@ async function renderPresidentMessageCard() {
       <div class="card-body">
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
           <div style="width:54px;height:54px;border-radius:50%;overflow:hidden;background:var(--primary-light);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff">
-            ${pres.photoUrl?`<img src="${pres.photoUrl}" style="width:100%;height:100%;object-fit:cover"/>`:pres.displayName?.[0]||'N'}
+            ${pres.photoUrl?`<img src="${pres.photoUrl}" style="width:100%;height:100%;object-fit:cover"/>`:presName[0]}
           </div>
           <div>
-            <div style="font-weight:700;font-size:15px">${pres.displayName||'Neil Barro'}</div>
+            <div style="font-weight:700;font-size:15px">${presName}</div>
             <div style="font-size:12px;color:var(--text-muted)">President, Barro Industries OPC</div>
           </div>
         </div>
