@@ -318,12 +318,14 @@ async function renderPresidentDashboard() {
   const c = document.getElementById('page-content');
   c.innerHTML = '<div class="loading-placeholder">Loading dashboard…</div>';
   try {
+    // Fetch each collection independently so one failure doesn't crash the dashboard
+    const safeGet = async (query) => { try { return await query.get(); } catch(e) { return { docs:[], size:0 }; } };
     const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap] = await Promise.all([
-      db.collection('users').get(),
-      db.collection('tasks').get(),
-      db.collection('submissions').get(),
-      db.collection('quotes').get(),
-      db.collection('approval_requests').where('status','==','pending').get()
+      safeGet(db.collection('users')),
+      safeGet(db.collection('tasks')),
+      safeGet(db.collection('submissions')),
+      safeGet(db.collection('quotes')),
+      safeGet(db.collection('approval_requests').where('status','==','pending'))
     ]);
     const users     = usersSnap.docs.map(d=>d.data());
     const tasks     = tasksSnap.docs.map(d=>d.data());
@@ -796,10 +798,11 @@ async function renderProgressReports() {
   const c = document.getElementById('page-content');
   c.innerHTML = '<div class="loading-placeholder">Loading progress reports…</div>';
   try {
+    const safeGet = async (q) => { try { return await q.get(); } catch(e) { return {docs:[],size:0}; } };
     const [usersSnap, tasksSnap, attSnap] = await Promise.all([
-      db.collection('users').get(),
-      db.collection('tasks').get(),
-      db.collection('attendance').get()
+      safeGet(db.collection('users')),
+      safeGet(db.collection('tasks')),
+      safeGet(db.collection('attendance'))
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const tasks = tasksSnap.docs.map(d=>d.data());
@@ -930,7 +933,8 @@ async function renderAnalytics() {
   if(!isPresident()&&currentRole!=='manager'){document.getElementById('page-content').innerHTML=renderAccessDenied('Analytics');return;}
   const c=document.getElementById('page-content');
   c.innerHTML='<div class="loading-placeholder">Loading analytics…</div>';
-  const [usersSnap,tasksSnap,quotesSnap,subsSnap,expSnap]=await Promise.all([db.collection('users').get(),db.collection('tasks').get(),db.collection('quotes').get(),db.collection('submissions').get(),db.collection('expenses').get()]);
+  const safeGet = async (q) => { try { return await q.get(); } catch(e) { return {docs:[],size:0}; } };
+  const [usersSnap,tasksSnap,quotesSnap,subsSnap,expSnap]=await Promise.all([safeGet(db.collection('users')),safeGet(db.collection('tasks')),safeGet(db.collection('quotes')),safeGet(db.collection('submissions')),safeGet(db.collection('expenses'))]);
   const users=usersSnap.docs.map(d=>({id:d.id,...d.data()}));
   const tasks=tasksSnap.docs.map(d=>d.data());
   const quotes=quotesSnap.docs.map(d=>d.data());
