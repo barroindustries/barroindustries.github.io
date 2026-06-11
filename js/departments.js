@@ -83,81 +83,281 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
 async function openTaskDetail(taskId, currentUser, currentRole) {
   const snap = await db.collection('tasks').doc(taskId).get();
   const t = {id:snap.id,...snap.data()};
+  const canManage = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+
+  // Load employees for reassignment dropdown
+  const empSnap = await db.collection('users').get();
+  const employees = empSnap.docs.map(d=>({id:d.id,...d.data()}))
+    .sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+
   openModal(t.title, `
-    <div style="margin-bottom:12px">
-      <span class="badge ${priorityBadge(t.priority)}">${t.priority||'medium'} priority</span>
-      <span class="badge ${statusBadge(t.status)}" style="margin-left:6px">${t.status||'open'}</span>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      <span class="badge ${priorityBadge(t.priority)}">${t.priority||'medium'}</span>
+      <span class="badge ${statusBadge(t.status)}">${t.status||'open'}</span>
+      ${t.department?`<span class="badge badge-gray">🗂 ${t.department}</span>`:''}
+      ${t.clickupTaskId?`<span class="badge badge-blue" title="Synced to ClickUp">⚙️ ClickUp</span>`:''}
     </div>
-    <p style="font-size:14px;line-height:1.6;margin-bottom:12px">${t.description||'No description.'}</p>
-    <div class="text-muted" style="margin-bottom:14px">
-      ${t.assignedToName?`Assigned to: <strong>${t.assignedToName}</strong> &nbsp;`:''}
-      ${t.dueDate?`Due: <strong>${t.dueDate}</strong>`:''}
+    <p style="font-size:14px;line-height:1.6;margin-bottom:12px;white-space:pre-wrap">${t.description||'No description.'}</p>
+    <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px;display:flex;gap:16px;flex-wrap:wrap">
+      ${t.assignedToName?`<span>👤 <strong>${t.assignedToName}</strong></span>`:''}
+      ${t.assignedEmail?`<span>✉️ ${t.assignedEmail}</span>`:''}
+      ${t.dueDate?`<span>📅 Due: <strong>${t.dueDate}</strong></span>`:''}
+      ${t.createdByName?`<span>🖊 Created by: ${t.createdByName}</span>`:''}
     </div>
+
+    ${canManage ? `
+    <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:10px">🎯 Designate / Reassign</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select id="reassign-sel" style="flex:1;min-width:180px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)">
+          <option value="">— Select employee —</option>
+          ${employees.map(e=>`<option value="${e.id}" data-name="${e.displayName||e.email}" data-email="${e.email||''}" ${e.id===t.assignedTo?'selected':''}>${e.displayName||e.email} (${e.email||'no email'})</option>`).join('')}
+        </select>
+        <button class="btn-primary btn-sm" id="designate-btn">Designate ✓</button>
+      </div>
+      <div style="margin-top:10px">
+        <input id="task-instruction" placeholder="Add instruction or note for assignee…" style="width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)" value=""/>
+      </div>
+    </div>` : ''}
+
     <hr class="divider"/>
     <div id="task-comments-wrap"></div>
   `, `
-    ${t.status!=='done'?`<button class="btn-success" id="mark-done-btn">✅ Mark Done</button>`:''}
-    ${(currentRole==='president'||currentRole==='owner'||currentRole==='manager'||t.createdBy===currentUser.uid)?`<button class="btn-danger" id="del-task-btn">Delete</button>`:''}
+    ${t.status!=='done'?`<button class="btn-success" id="mark-done-btn">✅ Mark Done</button>`:'<span style="color:var(--success);font-size:13px;font-weight:600">✅ Completed</span>'}
+    ${canManage||t.createdBy===currentUser.uid?`<button class="btn-danger" id="del-task-btn">Delete</button>`:''}
     <button class="btn-secondary" onclick="closeModal()">Close</button>
   `);
+
   renderComments('tasks', taskId, 'task-comments-wrap', currentUser);
+
   document.getElementById('mark-done-btn')?.addEventListener('click', async () => {
-    await db.collection('tasks').doc(taskId).update({status:'done'});
+    await db.collection('tasks').doc(taskId).update({ status:'done' });
+    if (t.clickupTaskId) ClickUp.updateTask(t.clickupTaskId, { status: 'complete' });
     closeModal(); renderTasks(currentUser, currentRole, t.department);
   });
+
   document.getElementById('del-task-btn')?.addEventListener('click', async () => {
-    if (confirm('Delete task?')) { await db.collection('tasks').doc(taskId).delete(); closeModal(); renderTasks(currentUser, currentRole, t.department); }
+    if (!confirm('Delete this task?')) return;
+    await db.collection('tasks').doc(taskId).delete();
+    closeModal(); renderTasks(currentUser, currentRole, t.department);
+  });
+
+  document.getElementById('designate-btn')?.addEventListener('click', async () => {
+    const sel          = document.getElementById('reassign-sel');
+    const newUid       = sel.value;
+    const newName      = sel.options[sel.selectedIndex]?.dataset.name || '';
+    const newEmail     = sel.options[sel.selectedIndex]?.dataset.email || '';
+    const instruction  = document.getElementById('task-instruction')?.value.trim();
+    if (!newUid) { Notifs.showToast('Select an employee first', 'error'); return; }
+
+    const creatorSnap  = await db.collection('users').doc(currentUser.uid).get();
+    const creatorName  = creatorSnap.exists ? creatorSnap.data().displayName : currentUser.email;
+
+    const update = {
+      assignedTo: newUid, assignedToName: newName, assignedEmail: newEmail,
+      lastModifiedBy: currentUser.uid, lastModifiedByName: creatorName,
+      lastModifiedAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    if (instruction) update.description = (t.description||'') + `\n\n📝 ${creatorName}: ${instruction}`;
+
+    await db.collection('tasks').doc(taskId).update(update);
+
+    // Sync reassignment to ClickUp
+    if (t.clickupTaskId) {
+      await ClickUp.reassignTask(t.clickupTaskId, t.assignedEmail, newEmail);
+      if (instruction) await ClickUp.updateTask(t.clickupTaskId, { description: update.description });
+    }
+
+    // Notify new assignee
+    await Notifs.send(newUid, {
+      title: '🎯 Task Designated to You',
+      body:  `"${t.title}" was designated to you by ${creatorName}${instruction?' — '+instruction:''}`,
+      icon:  '🎯', type: 'task_designated'
+    });
+
+    // Notify previous assignee if different
+    if (t.assignedTo && t.assignedTo !== newUid) {
+      await Notifs.send(t.assignedTo, {
+        title: '🔄 Task Reassigned',
+        body:  `"${t.title}" was reassigned by ${creatorName}`,
+        icon:  '🔄', type: 'task_modified'
+      });
+    }
+
+    Notifs.showToast(`Designated to ${newName}${t.clickupTaskId?' + ClickUp updated':''}`);
+    closeModal(); renderTasks(currentUser, currentRole, t.department);
   });
 }
 
-function openAddTaskModal(currentUser, currentRole) {
+async function openAddTaskModal(currentUser, currentRole) {
+  // Load employees for dropdown
+  const empSnap = await db.collection('users').get();
+  const employees = empSnap.docs.map(d => ({id: d.id, ...d.data()}))
+    .sort((a,b) => (a.displayName||'').localeCompare(b.displayName||''));
+
+  const deptOptions = Object.keys(window.DEPARTMENTS||{})
+    .map(k => `<option value="${k}">${k}</option>`).join('');
+
   openModal('New Task', `
     <div class="form-group"><label>Title</label><input id="t-title" placeholder="Task name"/></div>
     <div class="form-group"><label>Description</label><textarea id="t-desc" rows="3" placeholder="Details…"></textarea></div>
     <div class="form-row">
       <div class="form-group"><label>Priority</label>
-        <select id="t-priority"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select>
+        <select id="t-priority">
+          <option value="low">🟢 Low</option>
+          <option value="medium" selected>🟡 Medium</option>
+          <option value="high">🔴 High</option>
+          <option value="urgent">🚨 Urgent</option>
+        </select>
       </div>
       <div class="form-group"><label>Due Date</label><input id="t-due" type="date" value="${today()}"/></div>
     </div>
-    <div class="form-group"><label>Assign To (Name)</label><input id="t-assign" placeholder="Team member name"/></div>
-    <div class="form-group"><label>Assign To (UID — optional)</label><input id="t-uid" placeholder="Paste UID for notifications"/></div>
-    <div class="form-group"><label>Department</label><input id="t-dept" placeholder="Department"/></div>
+    <div class="form-group">
+      <label>Assign To</label>
+      <select id="t-assignee-sel">
+        <option value="">— Select employee —</option>
+        ${employees.map(e => `<option value="${e.id}" data-name="${e.displayName||e.email}" data-email="${e.email||''}">${e.displayName||e.email} ${e.email?'('+e.email+')':''}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group"><label>Department</label>
+      <select id="t-dept">
+        <option value="">— Select department —</option>
+        ${deptOptions}
+      </select>
+    </div>
+    <div class="form-group"><label>Notes / Instructions</label>
+      <textarea id="t-notes" rows="2" placeholder="Additional notes for the assignee…"></textarea>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;background:var(--surface2);padding:10px;border-radius:8px;font-size:12px;color:var(--text-muted);margin-top:4px">
+      <span>⚙️</span><span>Task will also be created in ClickUp for the selected department</span>
+    </div>
   `, `<button class="btn-primary" id="create-task-btn">Create Task</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   document.getElementById('create-task-btn').addEventListener('click', async () => {
-    const assignedTo  = document.getElementById('t-uid').value.trim();
-    const assignedName= document.getElementById('t-assign').value.trim();
-    const dept        = document.getElementById('t-dept').value.trim();
-    const snap        = await db.collection('users').doc(currentUser.uid).get();
-    const creatorName = snap.exists ? snap.data().displayName : '';
+    const title   = document.getElementById('t-title').value.trim();
+    const desc    = document.getElementById('t-desc').value.trim();
+    const notes   = document.getElementById('t-notes').value.trim();
+    const priority= document.getElementById('t-priority').value;
+    const dueDate = document.getElementById('t-due').value;
+    const dept    = document.getElementById('t-dept').value;
 
-    await db.collection('tasks').add({
-      title:          document.getElementById('t-title').value.trim(),
-      description:    document.getElementById('t-desc').value.trim(),
-      priority:       document.getElementById('t-priority').value,
-      dueDate:        document.getElementById('t-due').value,
-      assignedTo,
-      assignedToName: assignedName,
-      department:     dept,
-      status:         'open',
-      createdBy:      currentUser.uid,
-      createdByName:  creatorName,
-      createdAt:      firebase.firestore.FieldValue.serverTimestamp()
+    const sel     = document.getElementById('t-assignee-sel');
+    const assignedTo   = sel.value;
+    const assignedName = sel.options[sel.selectedIndex]?.dataset.name || '';
+    const assignedEmail= sel.options[sel.selectedIndex]?.dataset.email || '';
+
+    if (!title) { Notifs.showToast('Enter a task title', 'error'); return; }
+
+    const creatorSnap  = await db.collection('users').doc(currentUser.uid).get();
+    const creatorName  = creatorSnap.exists ? creatorSnap.data().displayName : currentUser.email;
+
+    const fullDesc = notes ? `${desc}\n\n📝 Instructions: ${notes}` : desc;
+
+    // 1. Save to Firestore
+    const docRef = await db.collection('tasks').add({
+      title, description: fullDesc, priority, dueDate,
+      assignedTo, assignedToName: assignedName, assignedEmail,
+      department: dept, status: 'open',
+      createdBy: currentUser.uid, createdByName: creatorName,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
 
+    // 2. Create in ClickUp
+    let clickupTaskId = null;
+    try {
+      clickupTaskId = await ClickUp.createTask({
+        title, description: fullDesc, priority, dueDate,
+        assignedEmail, department: dept
+      });
+      if (clickupTaskId) {
+        await db.collection('tasks').doc(docRef.id).update({ clickupTaskId });
+      }
+    } catch(e) { console.warn('ClickUp sync failed:', e.message); }
+
+    // 3. Notify assigned employee
     if (assignedTo) {
       await Notifs.send(assignedTo, {
         title: '📌 New Task Assigned',
-        body:  `"${document.getElementById('t-title').value.trim()}" assigned by ${creatorName}`,
+        body:  `"${title}" was assigned to you by ${creatorName}${dept?' ('+dept+')':''}`,
         icon:  '📌', type: 'task_assigned'
       });
     }
+
     closeModal();
-    Notifs.showToast('Task created!');
+    Notifs.showToast(`Task created${clickupTaskId ? ' + synced to ClickUp ✓' : ''}!`);
     renderTasks(currentUser, currentRole, dept);
   });
 }
+
+// ── ClickUp API Helper ────────────────────────────
+const ClickUp = {
+  BASE: 'https://api.clickup.com/api/v2',
+
+  headers() {
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': window.CLICKUP_API_KEY || ''
+    };
+  },
+
+  priorityMap: { urgent: 1, high: 2, medium: 3, low: 4 },
+
+  async createTask({ title, description, priority, dueDate, assignedEmail, department }) {
+    const listId = window.CLICKUP_LISTS?.[department];
+    if (!listId) { console.warn('No ClickUp list for dept:', department); return null; }
+    if (!window.CLICKUP_API_KEY || window.CLICKUP_API_KEY === 'YOUR_CLICKUP_API_KEY') {
+      console.warn('ClickUp API key not set'); return null;
+    }
+
+    const assignees = [];
+    if (assignedEmail && window.CLICKUP_MEMBERS?.[assignedEmail]) {
+      assignees.push(window.CLICKUP_MEMBERS[assignedEmail]);
+    }
+
+    const body = {
+      name: title,
+      description: description || '',
+      priority: ClickUp.priorityMap[priority] || 3,
+      assignees,
+      due_date: dueDate ? new Date(dueDate).getTime() : undefined,
+      due_date_time: !!dueDate
+    };
+
+    const res = await fetch(`${ClickUp.BASE}/list/${listId}/task`, {
+      method: 'POST',
+      headers: ClickUp.headers(),
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.err || `ClickUp ${res.status}`);
+    }
+    const data = await res.json();
+    return data.id;
+  },
+
+  async updateTask(clickupTaskId, changes) {
+    if (!clickupTaskId || !window.CLICKUP_API_KEY || window.CLICKUP_API_KEY === 'YOUR_CLICKUP_API_KEY') return;
+    await fetch(`${ClickUp.BASE}/task/${clickupTaskId}`, {
+      method: 'PUT',
+      headers: ClickUp.headers(),
+      body: JSON.stringify(changes)
+    }).catch(e => console.warn('ClickUp update failed:', e));
+  },
+
+  async reassignTask(clickupTaskId, oldEmail, newEmail) {
+    if (!clickupTaskId) return;
+    const addAssignees   = window.CLICKUP_MEMBERS?.[newEmail] ? [window.CLICKUP_MEMBERS[newEmail]] : [];
+    const remAssignees   = window.CLICKUP_MEMBERS?.[oldEmail] ? [window.CLICKUP_MEMBERS[oldEmail]] : [];
+    if (!addAssignees.length && !remAssignees.length) return;
+    await fetch(`${ClickUp.BASE}/task/${clickupTaskId}`, {
+      method: 'PUT',
+      headers: ClickUp.headers(),
+      body: JSON.stringify({ assignees: { add: addAssignees, rem: remAssignees } })
+    }).catch(e => console.warn('ClickUp reassign failed:', e));
+  }
+};
 
 // ══════════════════════════════════════════════════
 //  SUBMISSIONS

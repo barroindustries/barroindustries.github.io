@@ -43,6 +43,20 @@ window.CLICKUP_LISTS = {
   'Finance':   '901615221520'
 };
 
+// ── ClickUp Member Map (email → ClickUp user ID) ─
+window.CLICKUP_MEMBERS = {
+  'tecagshaira1@gmail.com':      101081236,
+  'cabilatazangenesis@gmail.com':101081235,
+  'isobarro2023@gmail.com':      101081234,
+  'brandonpaulchang12@gmail.com':101081086,
+  'margojilopez@gmail.com':      101081085,
+  'neilbarro870@gmail.com':      312718117
+};
+
+// ── ClickUp API Key ───────────────────────────────
+// Set your ClickUp personal API token here
+window.CLICKUP_API_KEY = 'YOUR_CLICKUP_API_KEY';
+
 // ── Auto-Logout ───────────────────────────────────
 window.AUTO_LOGOUT_MS = 60 * 60 * 1000; // 1 hour inactivity
 
