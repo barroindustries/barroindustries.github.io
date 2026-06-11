@@ -340,7 +340,8 @@ body::after {
 .form-group select {
   width: 100%; padding: 10px 12px;
   border: 1.5px solid var(--border);
-  border-radius: var(--r-sm); font-size: 14px;
+  border-radius: var(--r-sm);
+  font-size: 14px; /* base size */
   background: var(--s1); color: var(--text);
   transition: border-color var(--t2), box-shadow var(--t2), background var(--t2);
   outline: none; -webkit-appearance: none;
@@ -507,6 +508,53 @@ body::after {
 .pw-toggle:hover { color: var(--text); }
 .pw-toggle svg { width: 16px; height: 16px; stroke: currentColor; }
 .login-version { margin-top: 20px; font-size: 11px; color: var(--text-light); }
+
+/* ── Help / Guide Page ── */
+.help-guide { max-width: 700px; }
+.help-hero {
+  display: flex; align-items: center; gap: 16px;
+  padding: 20px; background: var(--s1); border-radius: var(--r);
+  border: 1px solid var(--border); margin-bottom: 20px;
+}
+.help-hero-icon {
+  width: 56px; height: 56px; border-radius: 14px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.help-hero h2 { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+.help-hero p  { font-size: 13px; color: var(--text-muted); }
+.help-section {
+  background: var(--s1); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 18px 20px; margin-bottom: 14px;
+}
+.help-section h3 {
+  font-size: 14px; font-weight: 700; color: var(--text);
+  display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+}
+.help-h-icon { width: 16px; height: 16px; stroke: var(--text-muted); flex-shrink: 0; }
+.help-steps {
+  list-style: decimal; padding-left: 20px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.help-steps li { font-size: 13px; color: var(--text-2); line-height: 1.6; }
+.help-list {
+  list-style: none; padding: 0;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.help-list li {
+  font-size: 13px; color: var(--text-2); line-height: 1.6;
+  padding-left: 16px; position: relative;
+}
+.help-list li::before {
+  content: '›'; position: absolute; left: 0;
+  color: var(--text-muted); font-weight: 700;
+}
+.help-tip {
+  margin-top: 14px; padding: 10px 14px; border-radius: var(--r-sm);
+  background: rgba(255,214,10,0.07); border: 1px solid rgba(255,214,10,0.18);
+  font-size: 12px; color: var(--text-2); line-height: 1.6;
+}
+.help-section p { font-size: 13px; color: var(--text-2); line-height: 1.7; }
+.help-section code { font-family: var(--font-mono); font-size: 12px; background: var(--s2); padding: 1px 5px; border-radius: 4px; }
 
 /* ── Login Role Picker ── */
 .login-pick-label {
@@ -1322,15 +1370,62 @@ body::after {
 ══════════════════════════════ */
 .expense-card { background: var(--s1); border-radius: var(--r); border: 1px solid var(--border); padding: 16px; }
 .upload-area {
-  border: 2px dashed rgba(255,255,255,0.12); border-radius: var(--r);
-  padding: 32px 20px; text-align: center; cursor: pointer;
-  background: var(--s0);
+  display: block;
+  border: 2px dashed rgba(255,255,255,0.14); border-radius: var(--r);
+  padding: 24px 20px; text-align: center; cursor: pointer;
+  background: var(--s0); position: relative;
   transition: border-color var(--t2), background var(--t2);
 }
-.upload-area:hover { border-color: var(--pink); background: rgba(255,45,120,0.04); }
-.upload-area .upload-icon { font-size: 32px; margin-bottom: 8px; opacity: 0.45; }
-.upload-area p { font-size: 13px; color: var(--text-muted); }
+.upload-area:hover, .upload-area.drag-over {
+  border-color: var(--pink); background: rgba(255,45,120,0.05);
+}
+.upload-area.drag-over { transform: scale(1.01); }
+.upload-area-inner { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.upload-icon-wrap {
+  width: 44px; height: 44px; border-radius: 12px;
+  background: var(--s2); display: flex; align-items: center; justify-content: center;
+  margin-bottom: 4px;
+}
+.upload-label-text { font-size: 13px; font-weight: 600; color: var(--text-2); }
+.upload-hint { font-size: 11px; color: var(--text-muted); }
 .upload-area input[type="file"] { display: none; }
+
+/* Upload progress */
+.upload-progress { margin-top: 10px; }
+.upload-progress.hidden { display: none; }
+.upload-bar-track { height: 5px; border-radius: 3px; background: var(--s2); overflow: hidden; margin-bottom: 6px; }
+.upload-bar-fill { height: 100%; border-radius: 3px; background: var(--primary); width: 0%; transition: width 0.4s var(--ease); }
+.upload-status { font-size: 12px; color: var(--text-muted); }
+
+/* Uploaded file chips */
+.uploaded-files-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.file-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: var(--pill);
+  background: var(--s2); border: 1px solid var(--border);
+  font-size: 12px; font-weight: 500; color: var(--text-2);
+  text-decoration: none; cursor: pointer;
+  transition: background var(--t1), color var(--t1);
+  max-width: 220px;
+}
+.file-chip span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-chip:hover { background: var(--s3); color: var(--text); }
+.file-chip-src {
+  font-size: 10px; color: var(--text-muted); flex-shrink: 0;
+  padding: 2px 5px; border-radius: var(--pill); background: var(--s1);
+}
+
+/* Storage status card */
+.storage-status-card {
+  padding: 16px 18px; border-radius: var(--r); border: 1px solid var(--border);
+  background: var(--s1);
+}
+.storage-status-card.drive-on  { border-color: rgba(255,214,10,0.20); }
+.storage-status-card.drive-off { border-color: rgba(10,132,255,0.18); }
+.storage-icon-wrap {
+  width: 40px; height: 40px; border-radius: 10px; background: var(--s2);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
 
 /* ══════════════════════════════
    DEPARTMENTS
@@ -1591,6 +1686,17 @@ body::after {
   }
 }
 
+/* ── iOS / Android: prevent auto-zoom on input focus ──
+   iOS Safari zooms in when any input font-size < 16px.
+   Force 16px on all touch devices.                    */
+@media (hover: none) and (pointer: coarse) {
+  input, textarea, select,
+  .form-group input, .form-group textarea, .form-group select {
+    font-size: 16px !important;
+    transform: translateZ(0); /* GPU layer prevents reflow zoom */
+  }
+}
+
 /* ══════════════════════════════
    SCROLLBAR
 ══════════════════════════════ */
@@ -1784,6 +1890,17 @@ html.light .payslip-row { border-bottom-color: rgba(0,0,0,0.06); color: rgba(29,
 
 /* kpi bar */
 html.light .kpi-bar-track { background: rgba(0,0,0,0.08); }
+
+/* help guide */
+html.light .help-hero  { background: #fff; border-color: rgba(0,0,0,0.08); }
+html.light .help-section { background: #fff; border-color: rgba(0,0,0,0.08); }
+html.light .help-section h3 { color: #1D1D1F; }
+html.light .help-steps li  { color: rgba(29,29,31,0.75); }
+html.light .help-list  li  { color: rgba(29,29,31,0.75); }
+html.light .help-list  li::before { color: rgba(29,29,31,0.35); }
+html.light .help-tip   { background: rgba(255,214,10,0.08); border-color: rgba(255,214,10,0.25); color: rgba(29,29,31,0.70); }
+html.light .help-section p  { color: rgba(29,29,31,0.75); }
+html.light .help-section code { background: rgba(0,0,0,0.06); }
 
 /* ══════════════════════════════════════════════════
    THEME TOGGLE BUTTON

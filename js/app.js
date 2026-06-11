@@ -62,6 +62,18 @@ function showApp() {
   if (window.lucide) lucide.createIcons();
   // Apply correct theme toggle icon
   _applyThemeIcon(localStorage.getItem('bi-theme') || 'dark');
+  // Reset any iOS zoom that happened during login input
+  _resetViewportZoom();
+}
+
+function _resetViewportZoom() {
+  // Briefly force initial-scale=1 to snap iOS back to normal zoom,
+  // then restore the original viewport (which allows user pinch-zoom).
+  const meta = document.querySelector('meta[name="viewport"]');
+  if (!meta) return;
+  const original = meta.content;
+  meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover';
+  setTimeout(() => { meta.content = original; }, 300);
 }
 
 // ── User Profile ──────────────────────────────────
@@ -234,12 +246,14 @@ function getSidebarItems() {
     items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'               });
     items.push({ icon:'bar-chart-2',   label:'Analytics',        page:'analytics',  section:true  });
     items.push({ icon:'building-2',    label:'Company',          page:'company'                   });
+    items.push({ icon:'help-circle',   label:'Help & Setup',     page:'help',       section:true  });
   } else if (bsOnly) {
     // ── Partner — Brilliant Steel ──
     items.push({ icon:'calculator',  label:'Quote Builder', page:'bs-quote-builder' });
     items.push({ icon:'file-text',   label:'Quotations',    page:'bs-quotations'    });
     items.push({ icon:'book-open',   label:'Client Data',   page:'bs-clients'       });
     items.push({ icon:'folder',      label:'Files',         page:'files'            });
+    items.push({ icon:'help-circle', label:'Help / Guide',  page:'help'             });
   } else {
     // ── Employee Personal ──
     items.push({ icon:'check-square', label:'My Tasks',         page:'tasks',             section:false });
@@ -251,6 +265,7 @@ function getSidebarItems() {
       const cfg = DEPARTMENTS[dept];
       if (cfg) items.push({ icon: cfg.icon, label: dept, page: `dept:${dept}`, section: true });
     });
+    items.push({ icon:'help-circle', label:'Help / Guide', page:'help', section:true });
   }
   return items;
 }
@@ -349,6 +364,7 @@ function navigateTo(page) {
     case 'bs-quote-builder': renderBrilliantSteel(currentUser, currentRole, 'Quote Builder'); break;
     case 'bs-quotations':    renderBrilliantSteel(currentUser, currentRole, 'Quotations Summary'); break;
     case 'bs-clients':       renderBrilliantSteel(currentUser, currentRole, 'Client Data'); break;
+    case 'help':             renderHelp(); break;
     default: c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><h4>Page not found</h4></div>`;
   }
 }
@@ -1570,6 +1586,370 @@ function renderAccessDenied(section) {
   return `<div class="access-denied"><div class="ad-icon">🔒</div><h3>Access Restricted</h3><p>You don't have access to ${section}.</p></div>`;
 }
 function formatNum(n) { return Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+// ── Help / Guide ──────────────────────────────────
+function renderHelp() {
+  const c = document.getElementById('page-content');
+  const bsOnly  = isBrilliantOnly();
+  const pres    = isPresident() || currentRole === 'manager';
+  const section = bsOnly ? 'partner' : pres ? 'admin' : 'employee';
+
+  const sections = {
+    admin:    renderHelpAdmin,
+    employee: renderHelpEmployee,
+    partner:  renderHelpPartner
+  };
+
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>Help &amp; Guide</h2>
+    </div>
+    <div class="subtab-bar" id="help-tabs">
+      ${pres
+        ? `<button class="subtab-btn active" data-sub="admin">Admin Guide</button>
+           <button class="subtab-btn" data-sub="employee">Employee Guide</button>
+           <button class="subtab-btn" data-sub="partner">Partner Guide</button>
+           <button class="subtab-btn" data-sub="storage">Storage Setup</button>`
+        : bsOnly
+          ? `<button class="subtab-btn active" data-sub="partner">Partner Guide</button>`
+          : `<button class="subtab-btn active" data-sub="employee">Your Guide</button>`}
+    </div>
+    <div id="help-content"></div>
+  `;
+
+  const load = (sub) => {
+    const wrap = document.getElementById('help-content');
+    if (sub === 'storage') {
+      wrap.innerHTML = `<div class="card"><div class="card-body">
+        <h3 style="margin-bottom:14px;font-size:16px">Storage System</h3>
+        <div id="storage-status-wrap"></div>
+        <div style="margin-top:20px;padding:16px;background:var(--s2);border-radius:var(--r);font-size:13px;line-height:1.7">
+          <p style="font-weight:700;margin-bottom:8px">To activate Google Drive storage:</p>
+          <ol style="padding-left:18px;color:var(--text-2)">
+            <li>Go to <strong>console.cloud.google.com</strong></li>
+            <li>Create a project → Enable <strong>Google Drive API</strong></li>
+            <li>Create an <strong>API Key</strong> + <strong>OAuth 2.0 Client ID</strong></li>
+            <li>Create a folder in Drive named <strong>BI-Operations</strong></li>
+            <li>Paste credentials into <code>js/config.js</code> and set <code>DRIVE_ENABLED: true</code></li>
+            <li>Redeploy to Netlify</li>
+          </ol>
+          <p style="margin-top:12px;color:var(--text-muted)">Full step-by-step instructions are in <code>GOOGLE_DRIVE_SETUP.md</code> in your project folder.</p>
+        </div>
+      </div></div>`;
+      Drive.renderStorageStatus('storage-status-wrap');
+    } else if (sections[sub]) {
+      wrap.innerHTML = sections[sub]();
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
+    }
+  };
+
+  c.querySelectorAll('.subtab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      load(btn.dataset.sub);
+    });
+  });
+
+  load(section);
+}
+
+function renderHelpAdmin() {
+  return `
+  <div class="help-guide">
+    <div class="help-hero">
+      <div class="help-hero-icon" style="background:rgba(255,45,120,0.10)"><i data-lucide="shield" style="stroke:var(--pink);width:28px;height:28px"></i></div>
+      <div><h2>Admin / President Guide</h2><p>Full command-center access to all features</p></div>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="log-in" class="help-h-icon"></i> Logging In</h3>
+      <ol class="help-steps">
+        <li>Open the app on your phone or browser</li>
+        <li>Tap <strong>Admin</strong> on the login screen</li>
+        <li>Enter your email and password → tap <strong>Sign In</strong></li>
+        <li>You'll land on your <strong>Command Center</strong> dashboard</li>
+      </ol>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="home" class="help-h-icon"></i> Command Center Dashboard</h3>
+      <p>Your dashboard shows real-time business metrics at a glance:</p>
+      <ul class="help-list">
+        <li><strong>Red banner</strong> — overdue tasks that need immediate action. Tap to go straight to tasks.</li>
+        <li><strong>Amber banner</strong> — pending approvals and cash advance requests waiting for your review.</li>
+        <li><strong>KPI cards</strong> — team size, open tasks, overdue count, quote pipeline value, monthly payroll burn.</li>
+        <li><strong>Live Task Feed</strong> — all open tasks sorted by urgency (overdue first → high priority). Tap "All Tasks" to manage them.</li>
+        <li><strong>Quick Actions</strong> — one-tap shortcuts to New Task, Approvals, Team, and Progress Reports.</li>
+      </ul>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="check-square" class="help-h-icon"></i> Managing Tasks</h3>
+      <ol class="help-steps">
+        <li>Tap <strong>Tasks</strong> in the sidebar → <strong>Departmental</strong> tab to see all team tasks</li>
+        <li>Use the <strong>My Tasks</strong> tab for tasks assigned to you personally</li>
+        <li>Tap <strong>+ New Task</strong> → fill in title, assignee, department, priority, due date</li>
+        <li>Tasks with red dots = high priority. Tasks in red = overdue.</li>
+        <li>Tap any task card to update status, add notes, or mark done</li>
+      </ol>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="shield-check" class="help-h-icon"></i> Approvals</h3>
+      <ul class="help-list">
+        <li><strong>Quote / ROA tab</strong> — Brilliant Steel quote requests from agents. Review total, client name, agent. Tap Approve or Reject.</li>
+        <li><strong>Cash Advances tab</strong> — Employee CA requests. See amount, repayment date, reason. Approve sends a notification to the employee.</li>
+      </ul>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="users" class="help-h-icon"></i> Team &amp; Payroll</h3>
+      <ol class="help-steps">
+        <li>Go to <strong>Team &amp; Payroll</strong> in the sidebar</li>
+        <li>See all employees with their salary breakdown (base, allowance, deductions, net)</li>
+        <li>Tap ✏️ to edit any employee's details, role, or pay</li>
+        <li>Tap <strong>+ Add Employee</strong> → fill in their profile (create their login in Firebase Console first)</li>
+        <li>Tap <strong>Record Payroll</strong> → select month → saves salary history for all employees</li>
+      </ol>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="trending-up" class="help-h-icon"></i> Progress Reports</h3>
+      <p>See each department's task completion rate, member KPIs, and attendance for the current month. Use the subtabs to drill into individual department members.</p>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="bar-chart-2" class="help-h-icon"></i> Analytics</h3>
+      <p>Charts for task completion by department, team performance table, and monthly trends. Use this to spot underperforming departments or employees.</p>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="hard-drive" class="help-h-icon"></i> Files &amp; Storage</h3>
+      <ul class="help-list">
+        <li>All files uploaded in the app go to <strong>Google Drive</strong> (if configured) or <strong>Firebase Cloud Storage</strong></li>
+        <li>Files are organized by department folder automatically</li>
+        <li>Every file becomes a shareable link — tap the link to open in Drive viewer</li>
+        <li>To set up Google Drive, tap the <strong>Storage Setup</strong> tab above</li>
+      </ul>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="moon" class="help-h-icon"></i> Tips</h3>
+      <ul class="help-list">
+        <li>Tap the <strong>sun/moon icon</strong> in the topbar to toggle light/dark mode</li>
+        <li>Tap your <strong>avatar</strong> in the topbar to update your profile photo and display name</li>
+        <li>The app works offline — cached data loads even without signal</li>
+        <li>Add to your home screen on iPhone: Safari → Share → Add to Home Screen</li>
+      </ul>
+    </div>
+  </div>`;
+}
+
+function renderHelpEmployee() {
+  return `
+  <div class="help-guide">
+    <div class="help-hero">
+      <div class="help-hero-icon" style="background:rgba(10,132,255,0.10)"><i data-lucide="user" style="stroke:var(--blue);width:28px;height:28px"></i></div>
+      <div><h2>Employee Guide</h2><p>Your personal dashboard for tasks, attendance, and pay</p></div>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="log-in" class="help-h-icon"></i> How to Log In</h3>
+      <ol class="help-steps">
+        <li>Open the app link your admin gave you (save it to your phone's home screen!)</li>
+        <li>On the login screen, tap <strong>Employee</strong></li>
+        <li>Enter your company email (e.g. <em>yourname@barroindustries.com</em>)</li>
+        <li>Enter your password → tap <strong>Sign In</strong></li>
+        <li>If you forgot your password → tap <strong>Forgot password?</strong> to get a reset email</li>
+      </ol>
+      <div class="help-tip">💡 <strong>Tip:</strong> On iPhone, go to Safari → Share button → "Add to Home Screen" to install the app like a native app.</div>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="home" class="help-h-icon"></i> Your Dashboard</h3>
+      <p>When you log in, you see your personal dashboard with:</p>
+      <ul class="help-list">
+        <li><strong>Attendance card</strong> — log your attendance for today (see below)</li>
+        <li><strong>Net Pay</strong> — your current monthly take-home amount</li>
+        <li><strong>Open Tasks</strong> — how many tasks are assigned to you right now</li>
+        <li><strong>Task KPI</strong> — your performance score (tasks completed vs. total). Your target is shown below the percentage.</li>
+        <li><strong>Task list</strong> — your most urgent open tasks. Red = overdue, orange = high priority.</li>
+      </ul>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="calendar" class="help-h-icon"></i> Logging Attendance</h3>
+      <ol class="help-steps">
+        <li>Every morning when you start work, open the app</li>
+        <li>On your dashboard, tap <strong>Log In (Half Day)</strong> to record your morning arrival</li>
+        <li>After completing a full work day, tap <strong>Mark Full Day</strong></li>
+        <li>Your attendance badge will turn green — "Full Day ✅"</li>
+        <li>Attendance affects your monthly pay — aim for full days!</li>
+      </ol>
+      <div class="help-tip">⚠️ <strong>Important:</strong> Log your attendance every day. Missing days reduces your attendance score, which affects your computed pay.</div>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="check-square" class="help-h-icon"></i> Managing Your Tasks</h3>
+      <ol class="help-steps">
+        <li>Tap <strong>My Tasks</strong> in the bottom nav or sidebar</li>
+        <li>You'll see all tasks assigned to you, sorted by urgency</li>
+        <li>Tap any task to see the full details (description, due date, priority)</li>
+        <li>When you finish a task, tap <strong>Mark Done</strong> — this improves your KPI score</li>
+        <li>Use the filter dropdown to view open, done, or all tasks</li>
+        <li>Tap <strong>+ New Task</strong> to create a task yourself</li>
+      </ol>
+      <div class="help-tip">💡 <strong>Your KPI score</strong> = tasks completed ÷ total tasks assigned. Higher score = higher computed pay.</div>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="credit-card" class="help-h-icon"></i> Personal Finance &amp; Payslip</h3>
+      <ol class="help-steps">
+        <li>Tap <strong>Personal Finance</strong> in the sidebar</li>
+        <li>See your <strong>base salary, allowances, deductions,</strong> and <strong>net pay</strong></li>
+        <li>Your <strong>KPI</strong> and <strong>attendance scores</strong> are shown with progress bars</li>
+        <li>The <strong>Computed Pay</strong> card shows your actual take-home after KPI adjustment</li>
+        <li>Tap <strong>Generate Payslip PDF</strong> to print or save your payslip</li>
+        <li><strong>Salary History</strong> section shows all past months' records</li>
+      </ol>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="banknote" class="help-h-icon"></i> Requesting a Cash Advance</h3>
+      <ol class="help-steps">
+        <li>Go to <strong>Personal Finance</strong></li>
+        <li>Tap <strong>+ Cash Advance</strong> in the top-right</li>
+        <li>Enter the <strong>amount needed</strong>, <strong>date needed</strong>, <strong>repayment date</strong>, and <strong>reason</strong></li>
+        <li>Tap <strong>Submit Request</strong></li>
+        <li>Your request goes to the president for approval</li>
+        <li>You'll receive an in-app notification when approved or declined</li>
+      </ol>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="folder" class="help-h-icon"></i> Files</h3>
+      <ul class="help-list">
+        <li>Tap <strong>Files</strong> to see your department's shared files</li>
+        <li>Tap the upload area to attach a file — it saves to Google Drive (or cloud storage) automatically</li>
+        <li>Every uploaded file becomes a link — tap to open it</li>
+      </ul>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="user" class="help-h-icon"></i> Your Profile</h3>
+      <ul class="help-list">
+        <li>Tap your <strong>avatar/initials</strong> in the top-right corner</li>
+        <li>Tap your photo to upload a new profile picture</li>
+        <li>You can update your display name here</li>
+        <li>Your employee ID, role, and department are shown (not editable by you)</li>
+      </ul>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="moon" class="help-h-icon"></i> Tips &amp; Shortcuts</h3>
+      <ul class="help-list">
+        <li>Use the <strong>bottom navigation bar</strong> for quick access to your most-used pages</li>
+        <li>Tap the <strong>sun/moon icon</strong> to switch between dark and light mode</li>
+        <li>The app works on any phone or computer browser — no app store needed</li>
+        <li>You'll get push notifications for task deadlines and approval results</li>
+      </ul>
+    </div>
+  </div>`;
+}
+
+function renderHelpPartner() {
+  return `
+  <div class="help-guide">
+    <div class="help-hero">
+      <div class="help-hero-icon" style="background:rgba(255,214,10,0.10)"><i data-lucide="handshake" style="stroke:var(--gold);width:28px;height:28px"></i></div>
+      <div><h2>Partner Guide — Brilliant Steel</h2><p>Quote builder, client management, and file sharing</p></div>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="log-in" class="help-h-icon"></i> How to Log In</h3>
+      <ol class="help-steps">
+        <li>Open the app link provided by Barro Industries admin</li>
+        <li>On the login screen, tap <strong>Partner</strong></li>
+        <li>Enter your Brilliant Steel email address</li>
+        <li>Enter your password → tap <strong>Sign In</strong></li>
+        <li>Your account must be set up by Barro Industries admin first — contact them if you can't log in</li>
+      </ol>
+      <div class="help-tip">💡 <strong>Tip:</strong> Save the app link to your phone's home screen for quick access. On iPhone: Safari → Share → "Add to Home Screen".</div>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="home" class="help-h-icon"></i> Your Dashboard</h3>
+      <p>After logging in, you'll see your Brilliant Steel dashboard with:</p>
+      <ul class="help-list">
+        <li><strong>Quote pipeline value</strong> — total value of all quotes you've built</li>
+        <li><strong>Quick access</strong> to Quote Builder, Quotations, and Client Data</li>
+      </ul>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="calculator" class="help-h-icon"></i> Building a Quote</h3>
+      <ol class="help-steps">
+        <li>Tap <strong>Quotes</strong> in the bottom nav or <strong>Quote Builder</strong> in the sidebar</li>
+        <li>Select or create a <strong>client</strong> from your client list</li>
+        <li>Add <strong>line items</strong> — description, quantity, unit price. The total calculates automatically.</li>
+        <li>Add any <strong>notes or terms</strong> at the bottom</li>
+        <li>Tap <strong>Save Draft</strong> to save without sending</li>
+        <li>When ready, tap <strong>Submit for Approval</strong> — this sends the quote to Barro Industries president for review</li>
+        <li>You'll receive a notification when it's approved or returned for revision</li>
+      </ol>
+      <div class="help-tip">⚠️ <strong>Note:</strong> Quotes are not final until approved by the Barro Industries president.</div>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="file-text" class="help-h-icon"></i> Quotations Summary</h3>
+      <ul class="help-list">
+        <li>See all your quotes with their current status: Draft, Sent, Accepted, Rejected</li>
+        <li>Use the filter tabs to find quotes by status</li>
+        <li>Tap any quote to view or edit it (drafts only)</li>
+        <li>Approved quotes can be downloaded or shared as PDF</li>
+      </ul>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="book-open" class="help-h-icon"></i> Client Data</h3>
+      <ol class="help-steps">
+        <li>Tap <strong>Clients</strong> in the sidebar</li>
+        <li>See all your saved clients with contact information</li>
+        <li>Tap <strong>+ Add Client</strong> to add a new client (name, company, email, phone)</li>
+        <li>Tap any client to view their history and quotes</li>
+      </ol>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="folder" class="help-h-icon"></i> Files</h3>
+      <ul class="help-list">
+        <li>Tap <strong>Files</strong> to access shared documents with Barro Industries</li>
+        <li>Upload product specs, drawings, or documents — they save to the shared Google Drive folder</li>
+        <li>Files from Barro Industries for you will also appear here</li>
+        <li>All files become shareable links — tap to open in your browser</li>
+      </ul>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="bell" class="help-h-icon"></i> Notifications</h3>
+      <ul class="help-list">
+        <li>Tap the <strong>bell icon</strong> in the top-right to see all notifications</li>
+        <li>You'll be notified when a quote is approved, rejected, or needs revision</li>
+        <li>Tap a notification to go directly to the relevant item</li>
+        <li>Tap <strong>Mark all read</strong> to clear the badge count</li>
+      </ul>
+    </div>
+
+    <div class="help-section">
+      <h3><i data-lucide="help-circle" class="help-h-icon"></i> Need Help?</h3>
+      <ul class="help-list">
+        <li>Contact Barro Industries admin for account issues, password resets, or access problems</li>
+        <li>For quote questions, use the in-app notification to message back on a quote</li>
+      </ul>
+    </div>
+  </div>`;
+}
 
 // ── Service Worker ────────────────────────────────
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(console.warn);
