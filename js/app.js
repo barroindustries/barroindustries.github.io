@@ -733,7 +733,7 @@ async function renderEmployeeDashboard() {
     const recentCA = caSnap.docs.map(d=>({id:d.id,...d.data()}));
 
     const attBadgeClass = hasFull ? 'badge-green' : hasLogin ? 'badge-orange' : 'badge-gray';
-    const attLabel      = hasFull ? '100% Full ✅' : hasLogin ? '50% Checked In 🟡' : 'Not Checked In';
+    const attLabel      = hasFull ? '100% Full ✅' : hasLogin ? '50% Timed In 🟡' : 'Not Timed In';
 
     // Dept quick tab buttons
     const deptTabsHTML = currentDepts.length ? `
@@ -795,11 +795,11 @@ async function renderEmployeeDashboard() {
         <div class="card-body">
           ${!hasLogin ? `
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
-              <strong>Step 1:</strong> Check in = 50%.<br>
+              <strong>Step 1:</strong> Time in = 50%.<br>
               <strong>Step 2:</strong> Check off every notification before 8am = 100%.
             </p>
             <button class="btn-primary" id="check-in-btn" style="width:100%">
-              <i data-lucide="log-in" style="width:14px;margin-right:6px"></i>Check In (Step 1)
+              <i data-lucide="log-in" style="width:14px;margin-right:6px"></i>Time In (Step 1)
             </button>` : hasFull ? `
             <div style="display:flex;align-items:center;gap:10px">
               <div style="width:40px;height:40px;border-radius:50%;background:rgba(48,209,88,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">✅</div>
@@ -898,7 +898,7 @@ async function renderEmployeeDashboard() {
       }, { merge: true });
       Notifs.showToast(autoFull
         ? '✅ Full attendance (100%) — no unchecked notifications!'
-        : '🟡 Checked in (50%). Open 🔔 and check off each notification before 8am for 100%.');
+        : '🟡 Timed in (50%). Open 🔔 and check off each notification before 8am for 100%.');
       renderEmployeeDashboard();
     });
 
@@ -2628,7 +2628,7 @@ function renderHelpEmployee() {
       <h3><i data-lucide="calendar" class="help-h-icon"></i> Logging Attendance</h3>
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Attendance is worth <strong>30%</strong> of your monthly pay. There are two steps every workday to get full attendance.</p>
       <ol class="help-steps">
-        <li><strong>Step 1 — Check In (50%):</strong> Every morning, open the app and tap <strong>Check In</strong> on your dashboard. Do this as soon as you start work.</li>
+        <li><strong>Step 1 — Time In (50%):</strong> Every morning, open the app and tap <strong>Time In</strong> on your dashboard. Do this as soon as you start work.</li>
         <li><strong>Step 2 — Check Notifications (100%):</strong> Before 8:00 AM, tap the 🔔 bell icon at the top of the screen. You will see a list of your notifications — each one has a checkbox. <strong>Check off every notification individually.</strong> Once all are checked before 8am, your attendance automatically upgrades from 50% to 100%.</li>
         <li>Your attendance badge turns green with a ✅ when you've completed both steps.</li>
         <li>If you miss the 8am deadline, you keep the 50% for that day — there is no way to recover the second half after 8am.</li>
