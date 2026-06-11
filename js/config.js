@@ -76,20 +76,20 @@ window.ROLES = {
 
 // ── Bottom Nav — Employee ────────────────────────
 window.BOTTOM_NAV_ITEMS = [
-  { icon: 'home',         label: 'Home',    page: 'dashboard'        },
-  { icon: 'check-square', label: 'Tasks',   page: 'tasks'            },
-  { icon: 'credit-card',  label: 'Finance', page: 'personal-finance' },
-  { icon: 'folder',       label: 'Files',   page: 'files'            },
-  { icon: 'banknote',     label: 'Cash',    page: 'cash'             }
+  { icon: 'home',         label: 'Home',       page: 'dashboard'        },
+  { icon: 'check-square', label: 'Tasks',      page: 'tasks'            },
+  { icon: 'megaphone',    label: 'Posts',      page: 'posts'            },
+  { icon: 'banknote',     label: 'Cash',       page: 'cash-advances'    },
+  { icon: 'credit-card',  label: 'Finance',    page: 'personal-finance' }
 ];
 
 // ── Bottom Nav — Admin / President ───────────────
 window.PRESIDENT_BOTTOM_NAV = [
-  { icon: 'home',         label: 'Home',     page: 'dashboard' },
-  { icon: 'check-square', label: 'Tasks',    page: 'tasks'     },
-  { icon: 'shield-check', label: 'Approve',  page: 'approvals' },
-  { icon: 'users',        label: 'Team',     page: 'team'      },
-  { icon: 'bar-chart-2',  label: 'Analytics',page: 'analytics' }
+  { icon: 'home',         label: 'Home',     page: 'dashboard'      },
+  { icon: 'check-square', label: 'Tasks',    page: 'tasks'          },
+  { icon: 'megaphone',    label: 'Posts',    page: 'posts'          },
+  { icon: 'users',        label: 'Team',     page: 'team-directory' },
+  { icon: 'shield-check', label: 'Approve',  page: 'approvals'      }
 ];
 
 // ── Bottom Nav — Partner (Brilliant Steel) ───────
@@ -98,5 +98,5 @@ window.BRILLIANT_BOTTOM_NAV = [
   { icon: 'calculator', label: 'Quotes',  page: 'bs-quote-builder' },
   { icon: 'file-text',  label: 'Summary', page: 'bs-quotations'    },
   { icon: 'book-open',  label: 'Clients', page: 'bs-clients'       },
-  { icon: 'folder',     label: 'Files',   page: 'files'            }
+  { icon: 'folder',     label: 'Files',   page: 'bs-files'         }
 ];

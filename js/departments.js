@@ -350,7 +350,15 @@ async function openAddTaskModal(currentUser, currentRole) {
     <div class="form-group"><label>Notes / Instructions</label>
       <textarea id="t-notes" rows="2" placeholder="Additional notes for the assignee…"></textarea>
     </div>
+    <div id="task-attach-area"></div>
   `, `<button class="btn-primary" id="create-task-btn">Create Task</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  let taskAttachment = null;
+  Drive.renderUploadArea('task-attach-area', r => { taskAttachment = r; }, {
+    label: '📎 Attach file to task',
+    dept: 'tasks',
+    subfolder: 'attachments'
+  });
 
   document.getElementById('create-task-btn').addEventListener('click', async () => {
     const title   = document.getElementById('t-title').value.trim();
@@ -373,10 +381,11 @@ async function openAddTaskModal(currentUser, currentRole) {
     const fullDesc = notes ? `${desc}\n\n📝 Instructions: ${notes}` : desc;
 
     // 1. Save to Firestore
-    const docRef = await db.collection('tasks').add({
+    await db.collection('tasks').add({
       title, description: fullDesc, priority, dueDate,
       assignedTo, assignedToName: assignedName, assignedEmail,
       department: dept, status: 'open',
+      attachments: taskAttachment ? [taskAttachment] : [],
       createdBy: currentUser.uid, createdByName: creatorName,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
@@ -743,10 +752,11 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
 // ══════════════════════════════════════════════════
 window.renderFinance = async function(currentUser, currentRole, subtab = 'Overview') {
   const c = deptContainer();
+  const tabs = ['Overview','Payroll','Taxes','Ledger','Records','Accounting','Purchasing','SSS / Gov'];
   c.innerHTML = `
     <div class="page-header"><h2>💰 Finance</h2></div>
-    <div class="subtab-bar">
-      ${['Overview','Accounting','Purchasing','SSS / Gov'].map(s =>
+    <div class="subtab-bar" style="flex-wrap:wrap">
+      ${tabs.map(s =>
         `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
       ).join('')}
     </div>
@@ -761,9 +771,11 @@ window.renderFinance = async function(currentUser, currentRole, subtab = 'Overvi
 async function loadFinanceContent(currentUser, currentRole, sub) {
   const content = document.getElementById('fin-content');
   switch(sub) {
-    case 'Overview':
-      await renderFinanceOverview(content, currentUser, currentRole);
-      break;
+    case 'Overview':     await renderFinanceOverview(content, currentUser, currentRole); break;
+    case 'Payroll':      await renderPayrollManagement(content, currentUser, currentRole); break;
+    case 'Taxes':        await renderTaxesTab(content, currentUser, currentRole); break;
+    case 'Ledger':       await renderLedgerTab(content, currentUser, currentRole); break;
+    case 'Records':      await renderRecordsTab(content, currentUser, currentRole); break;
     case 'Accounting':
       content.innerHTML = renderFileCollection('Accounting Documents', 'fin-acct', currentRole);
       bindFileCollection('fin-acct', currentUser, 'Finance', 'Accounting');
@@ -776,6 +788,385 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
       bindFileCollection('fin-sss', currentUser, 'Finance', 'SSS');
       break;
   }
+}
+
+// ── Payroll Management ───────────────────────────
+async function renderPayrollManagement(container, currentUser, currentRole) {
+  const [usersSnap, histSnap] = await Promise.all([
+    db.collection('users').get(),
+    db.collection('salary_history').orderBy('month','desc').limit(200).get().catch(()=>({docs:[]}))
+  ]);
+  const employees = usersSnap.docs.map(d=>({id:d.id,...d.data()}))
+    .filter(u=>u.role!=='partner')
+    .sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+  const history   = histSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const months    = [...new Set(history.map(h=>h.month))].sort().reverse();
+  const now       = new Date();
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+  container.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <select id="pr-month-sel" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px">
+        <option value="${thisMonth}">${new Date(thisMonth+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})} (Current)</option>
+        ${months.filter(m=>m!==thisMonth).map(m=>`<option value="${m}">${new Date(m+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}</option>`).join('')}
+      </select>
+      <div style="display:flex;gap:8px">
+        <button class="btn-primary btn-sm" id="gen-payroll-btn">Generate Payroll</button>
+        <button class="btn-secondary btn-sm" id="print-payroll-btn">🖨 Print All</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-body" style="padding:0">
+        <div class="table-wrap">
+          <table class="data-table" id="payroll-table">
+            <thead><tr>
+              <th>Photo</th><th>Employee</th><th>ID</th><th>Department</th>
+              <th>Base</th><th>Allowance</th><th>Deductions</th>
+              <th>SSS</th><th>PhilHealth</th><th>Pag-IBIG</th>
+              <th>Tax</th><th>Cash Adv</th><th>Net Pay</th><th></th>
+            </tr></thead>
+            <tbody id="payroll-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <div class="card-header"><h3>Payroll History</h3></div>
+      <div class="card-body" style="padding:0">
+        ${!history.length?'<div class="empty-state" style="padding:20px"><p>No payroll records yet.</p></div>':
+          `<div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Month</th><th>Employee</th><th>Base</th><th>Net Pay</th><th>Final Pay</th></tr></thead>
+            <tbody>${history.slice(0,30).map(h=>`<tr>
+              <td>${h.month||'—'}</td>
+              <td>${h.userName||'—'}</td>
+              <td>₱${fmt(h.salary)}</td>
+              <td>₱${fmt(h.netPay)}</td>
+              <td><strong>₱${fmt(h.finalPay)}</strong></td>
+            </tr>`).join('')}</tbody>
+          </table></div>`}
+      </div>
+    </div>
+  `;
+
+  async function loadPayrollTable(month) {
+    const tbody = document.getElementById('payroll-tbody');
+    tbody.innerHTML = '<tr><td colspan="14" style="text-align:center;padding:20px">Loading…</td></tr>';
+    const caSnap = await db.collection('cash_advances').where('status','==','approved').get().catch(()=>({docs:[]}));
+    const caByUser = {};
+    caSnap.docs.forEach(d=>{ const a=d.data(); caByUser[a.userId]=(caByUser[a.userId]||0)+(a.balance||0); });
+    tbody.innerHTML = employees.map(u => {
+      const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';
+      const base  = u.salary||0;
+      const allow = u.allowance||0;
+      const gross = base + allow;
+      const sss   = u.sss || Math.min(1125, Math.round(gross*0.045));
+      const ph    = u.philhealth || Math.round(gross*0.05);
+      const pagibig = u.pagibig || 100;
+      const tax   = u.tax || 0;
+      const caAdv = caByUser[u.id]||0;
+      const deduct= (u.deductions||0) + sss + ph + pagibig + tax;
+      const net   = gross - deduct - caAdv;
+      return `<tr>
+        <td style="text-align:center">
+          <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:14px;margin:0 auto">
+            ${u.photoUrl?`<img src="${u.photoUrl}" style="width:100%;height:100%;object-fit:cover"/>`:((u.displayName||'?')[0])}
+          </div>
+        </td>
+        <td><strong>${u.displayName||u.email}</strong><div style="font-size:11px;color:var(--text-muted)">${u.title||ROLES[u.role]?.label||u.role}</div></td>
+        <td><code>${u.employeeId||'—'}</code></td>
+        <td>${depts}</td>
+        <td>₱${fmt(base)}</td>
+        <td style="color:var(--success)">+₱${fmt(allow)}</td>
+        <td style="color:var(--danger)">-₱${fmt(u.deductions||0)}</td>
+        <td style="color:var(--danger)">-₱${fmt(sss)}</td>
+        <td style="color:var(--danger)">-₱${fmt(ph)}</td>
+        <td style="color:var(--danger)">-₱${fmt(pagibig)}</td>
+        <td style="color:var(--danger)">-₱${fmt(tax)}</td>
+        <td style="color:var(--danger)">${caAdv>0?`-₱${fmt(caAdv)}`:'-'}</td>
+        <td><strong style="color:${net>=0?'var(--success)':'var(--danger)'}">₱${fmt(net)}</strong></td>
+        <td>
+          <button class="btn-secondary btn-sm edit-emp-pay-btn" data-uid="${u.id}" title="Edit">✎</button>
+          <button class="btn-secondary btn-sm print-slip-btn" data-uid="${u.id}" title="Payslip">🖨</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    tbody.querySelectorAll('.edit-emp-pay-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const uid = btn.dataset.uid;
+        const emp = employees.find(u=>u.id===uid);
+        if (!emp) return;
+        openModal(`Edit Payroll — ${emp.displayName}`, `
+          <div class="form-row">
+            <div class="form-group"><label>Base Salary</label><input id="ep-salary" type="number" value="${emp.salary||0}"/></div>
+            <div class="form-group"><label>Allowance</label><input id="ep-allow" type="number" value="${emp.allowance||0}"/></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Other Deductions</label><input id="ep-deduct" type="number" value="${emp.deductions||0}"/></div>
+            <div class="form-group"><label>SSS</label><input id="ep-sss" type="number" value="${emp.sss||0}" placeholder="Auto-computed if 0"/></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>PhilHealth</label><input id="ep-ph" type="number" value="${emp.philhealth||0}" placeholder="Auto-computed if 0"/></div>
+            <div class="form-group"><label>Pag-IBIG</label><input id="ep-pi" type="number" value="${emp.pagibig||100}"/></div>
+          </div>
+          <div class="form-group"><label>Tax</label><input id="ep-tax" type="number" value="${emp.tax||0}"/></div>
+        `, `<button class="btn-primary" id="save-ep-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+        document.getElementById('save-ep-btn').addEventListener('click', async () => {
+          await db.collection('users').doc(uid).update({
+            salary:     parseFloat(document.getElementById('ep-salary').value)||0,
+            allowance:  parseFloat(document.getElementById('ep-allow').value)||0,
+            deductions: parseFloat(document.getElementById('ep-deduct').value)||0,
+            sss:        parseFloat(document.getElementById('ep-sss').value)||0,
+            philhealth: parseFloat(document.getElementById('ep-ph').value)||0,
+            pagibig:    parseFloat(document.getElementById('ep-pi').value)||100,
+            tax:        parseFloat(document.getElementById('ep-tax').value)||0,
+          });
+          closeModal(); Notifs.showToast('Payroll updated!');
+          loadPayrollTable(month);
+        });
+      });
+    });
+  }
+
+  loadPayrollTable(thisMonth);
+  document.getElementById('pr-month-sel').addEventListener('change', e => loadPayrollTable(e.target.value));
+
+  document.getElementById('gen-payroll-btn').addEventListener('click', async () => {
+    const month = document.getElementById('pr-month-sel').value;
+    if (!confirm(`Generate and save payroll for ${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}?`)) return;
+    const batch = db.batch();
+    for (const u of employees) {
+      const base = u.salary||0; const allow = u.allowance||0;
+      const net  = base + allow - (u.deductions||0);
+      const ref  = db.collection('salary_history').doc(`${u.id}_${month}`);
+      batch.set(ref, {userId:u.id, userName:u.displayName||u.email, month, salary:base, allowance:allow, deductions:u.deductions||0, netPay:net, finalPay:net, recordedBy:currentUser.uid, recordedAt:firebase.firestore.FieldValue.serverTimestamp()}, {merge:true});
+    }
+    await batch.commit();
+    Notifs.showToast('Payroll generated!');
+    loadFinanceContent(currentUser, currentRole, 'Payroll');
+  });
+}
+
+// ── Taxes Tab ───────────────────────────────────
+async function renderTaxesTab(container, currentUser, currentRole) {
+  const snap = await db.collection('tax_records').orderBy('createdAt','desc').limit(50).get().catch(()=>({docs:[]}));
+  const records = snap.docs.map(d=>({id:d.id,...d.data()}));
+  container.innerHTML = `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+      <button class="btn-primary btn-sm" id="add-tax-btn">+ Add Tax Record</button>
+    </div>
+    <div class="card">
+      <div class="card-body" style="padding:0">
+        ${!records.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📊</div><h4>No tax records yet</h4></div>':
+          `<div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Period</th><th>Type</th><th>Amount</th><th>Status</th><th>Due Date</th><th>Filed By</th><th></th></tr></thead>
+            <tbody>${records.map(r=>`<tr>
+              <td>${r.period||'—'}</td>
+              <td><span class="badge badge-blue">${r.type||'BIR'}</span></td>
+              <td><strong>₱${fmt(r.amount)}</strong></td>
+              <td><span class="badge ${r.status==='filed'?'badge-green':r.status==='paid'?'badge-blue':'badge-orange'}">${r.status||'pending'}</span></td>
+              <td>${r.dueDate||'—'}</td>
+              <td>${r.filedBy||'—'}</td>
+              <td>
+                <button class="btn-secondary btn-sm tax-edit-btn" data-id="${r.id}">✎</button>
+                ${r.fileUrl?`<a href="${r.fileUrl}" target="_blank" class="btn-secondary btn-sm">📎</a>`:''}
+              </td>
+            </tr>`).join('')}</tbody>
+          </table></div>`}
+      </div>
+    </div>
+  `;
+  document.getElementById('add-tax-btn').addEventListener('click', () => {
+    openModal('Add Tax Record', `
+      <div class="form-row">
+        <div class="form-group"><label>Period</label><input id="tax-period" placeholder="e.g. Q1 2026"/></div>
+        <div class="form-group"><label>Type</label>
+          <select id="tax-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+            <option>BIR - Quarterly</option><option>BIR - Annual ITR</option>
+            <option>VAT</option><option>Withholding Tax</option><option>Percentage Tax</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Amount (₱)</label><input id="tax-amount" type="number" step="0.01"/></div>
+        <div class="form-group"><label>Due Date</label><input id="tax-due" type="date"/></div>
+      </div>
+      <div class="form-group"><label>Status</label>
+        <select id="tax-status" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          <option value="pending">Pending</option><option value="filed">Filed</option><option value="paid">Paid</option>
+        </select>
+      </div>
+      <div id="tax-file-area"></div>
+    `, `<button class="btn-primary" id="save-tax-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    let taxFile = null;
+    Drive.renderUploadArea('tax-file-area', r=>{taxFile=r;},{label:'Attach BIR receipt/form',dept:'Finance',subfolder:'Taxes'});
+    document.getElementById('save-tax-btn').addEventListener('click', async () => {
+      await db.collection('tax_records').add({
+        period:   document.getElementById('tax-period').value.trim(),
+        type:     document.getElementById('tax-type').value,
+        amount:   parseFloat(document.getElementById('tax-amount').value)||0,
+        dueDate:  document.getElementById('tax-due').value,
+        status:   document.getElementById('tax-status').value,
+        fileUrl:  taxFile?.url||null, fileName: taxFile?.name||null,
+        filedBy:  currentUser.uid, filedByName: userProfile?.displayName||currentUser.email,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      closeModal(); Notifs.showToast('Tax record saved!');
+      renderTaxesTab(container, currentUser, currentRole);
+    });
+  });
+}
+
+// ── Ledger Tab ──────────────────────────────────
+async function renderLedgerTab(container, currentUser, currentRole) {
+  const snap = await db.collection('ledger').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]}));
+  const entries = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const totalDebit  = entries.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+  const totalCredit = entries.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0);
+  const balance     = totalCredit - totalDebit;
+
+  container.innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi-card green"><div class="kpi-label">Total Credits</div><div class="kpi-value">₱${fmt(totalCredit)}</div></div>
+      <div class="kpi-card red"><div class="kpi-label">Total Debits</div><div class="kpi-value">₱${fmt(totalDebit)}</div></div>
+      <div class="kpi-card ${balance>=0?'accent':'red'}"><div class="kpi-label">Balance</div><div class="kpi-value">₱${fmt(balance)}</div></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+      <button class="btn-primary btn-sm" id="add-ledger-btn">+ New Entry</button>
+    </div>
+    <div class="card">
+      <div class="card-body" style="padding:0">
+        ${!entries.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📒</div><h4>No ledger entries yet</h4></div>':
+          `<div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Debit</th><th>Credit</th><th>Ref #</th><th>By</th></tr></thead>
+            <tbody>${entries.map(e=>`<tr>
+              <td>${e.date||'—'}</td>
+              <td>${e.description||'—'}</td>
+              <td><span class="badge badge-blue">${e.category||'General'}</span></td>
+              <td style="color:var(--danger)">${e.type==='debit'?'₱'+fmt(e.amount):'-'}</td>
+              <td style="color:var(--success)">${e.type==='credit'?'₱'+fmt(e.amount):'-'}</td>
+              <td><code>${e.refNumber||'—'}</code></td>
+              <td style="font-size:11px">${e.addedByName||'—'}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>`}
+      </div>
+    </div>
+  `;
+  document.getElementById('add-ledger-btn').addEventListener('click', () => {
+    openModal('New Ledger Entry', `
+      <div class="form-row">
+        <div class="form-group"><label>Date</label><input id="led-date" type="date" value="${today()}"/></div>
+        <div class="form-group"><label>Type</label>
+          <select id="led-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+            <option value="credit">Credit (Income)</option><option value="debit">Debit (Expense)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label>Description</label><input id="led-desc" placeholder="e.g. Client payment — ABC Corp"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Amount (₱)</label><input id="led-amount" type="number" step="0.01"/></div>
+        <div class="form-group"><label>Category</label>
+          <select id="led-cat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+            <option>Sales Revenue</option><option>Operating Expense</option><option>Payroll</option>
+            <option>Tax</option><option>Materials</option><option>Utilities</option><option>Other</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label>Reference Number</label><input id="led-ref" placeholder="OR #, Invoice #, etc."/></div>
+      <div id="led-file-area"></div>
+    `, `<button class="btn-primary" id="save-led-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    let ledFile = null;
+    Drive.renderUploadArea('led-file-area', r=>{ledFile=r;},{label:'Attach receipt/invoice',dept:'Finance',subfolder:'Ledger'});
+    document.getElementById('save-led-btn').addEventListener('click', async () => {
+      await db.collection('ledger').add({
+        date:       document.getElementById('led-date').value,
+        type:       document.getElementById('led-type').value,
+        description:document.getElementById('led-desc').value.trim(),
+        amount:     parseFloat(document.getElementById('led-amount').value)||0,
+        category:   document.getElementById('led-cat').value,
+        refNumber:  document.getElementById('led-ref').value.trim(),
+        fileUrl:    ledFile?.url||null,
+        addedBy:    currentUser.uid,
+        addedByName:userProfile?.displayName||currentUser.email,
+        createdAt:  firebase.firestore.FieldValue.serverTimestamp()
+      });
+      closeModal(); Notifs.showToast('Ledger entry saved!');
+      renderLedgerTab(container, currentUser, currentRole);
+    });
+  });
+}
+
+// ── Records & Receipts Tab ──────────────────────
+async function renderRecordsTab(container, currentUser, currentRole) {
+  const snap = await db.collection('finance_records').orderBy('createdAt','desc').limit(100).get().catch(()=>({docs:[]}));
+  const records = snap.docs.map(d=>({id:d.id,...d.data()}));
+  container.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div style="display:flex;gap:8px">
+        <select id="rec-filter" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px">
+          <option value="">All Types</option>
+          <option>Receipt</option><option>Invoice</option><option>Voucher</option>
+          <option>Contract</option><option>Official Receipt</option><option>Other</option>
+        </select>
+      </div>
+      <button class="btn-primary btn-sm" id="add-rec-btn">+ Encode Record</button>
+    </div>
+    <div class="card">
+      <div class="card-body" style="padding:0">
+        ${!records.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧾</div><h4>No records yet</h4></div>':
+          `<div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>From/To</th><th>File</th><th>By</th></tr></thead>
+            <tbody id="rec-tbody">${records.map(r=>`<tr>
+              <td>${r.date||'—'}</td>
+              <td><span class="badge badge-blue">${r.type||'—'}</span></td>
+              <td>${r.description||'—'}</td>
+              <td>₱${fmt(r.amount)}</td>
+              <td>${r.party||'—'}</td>
+              <td>${r.fileUrl?`<a href="${r.fileUrl}" target="_blank" class="btn-secondary btn-sm">📎 View</a>`:'-'}</td>
+              <td style="font-size:11px">${r.encodedByName||'—'}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>`}
+      </div>
+    </div>
+  `;
+  document.getElementById('add-rec-btn').addEventListener('click', () => {
+    openModal('Encode Record / Receipt', `
+      <div class="form-row">
+        <div class="form-group"><label>Date</label><input id="rec-date" type="date" value="${today()}"/></div>
+        <div class="form-group"><label>Type</label>
+          <select id="rec-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+            <option>Receipt</option><option>Invoice</option><option>Official Receipt</option>
+            <option>Voucher</option><option>Contract</option><option>Other</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label>Description</label><input id="rec-desc" placeholder="What is this for?"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Amount (₱)</label><input id="rec-amount" type="number" step="0.01"/></div>
+        <div class="form-group"><label>From / To</label><input id="rec-party" placeholder="Supplier, client, or payee"/></div>
+      </div>
+      <div class="form-group"><label>Notes</label><textarea id="rec-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"></textarea></div>
+      <div id="rec-file-area"></div>
+    `, `<button class="btn-primary" id="save-rec-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    let recFile = null;
+    Drive.renderUploadArea('rec-file-area', r=>{recFile=r;},{label:'Attach receipt scan / photo',dept:'Finance',subfolder:'Records'});
+    document.getElementById('save-rec-btn').addEventListener('click', async () => {
+      await db.collection('finance_records').add({
+        date:         document.getElementById('rec-date').value,
+        type:         document.getElementById('rec-type').value,
+        description:  document.getElementById('rec-desc').value.trim(),
+        amount:       parseFloat(document.getElementById('rec-amount').value)||0,
+        party:        document.getElementById('rec-party').value.trim(),
+        notes:        document.getElementById('rec-notes').value.trim(),
+        fileUrl:      recFile?.url||null, fileName: recFile?.name||null,
+        encodedBy:    currentUser.uid,
+        encodedByName:userProfile?.displayName||currentUser.email,
+        createdAt:    firebase.firestore.FieldValue.serverTimestamp()
+      });
+      closeModal(); Notifs.showToast('Record saved!');
+      renderRecordsTab(container, currentUser, currentRole);
+    });
+  });
 }
 
 async function renderFinanceOverview(container, currentUser, currentRole) {
@@ -817,14 +1208,21 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
 }
 
 // ══════════════════════════════════════════════════
-//  SALES DEPARTMENT
+//  SALES — BARRO KITCHENS
 // ══════════════════════════════════════════════════
-window.renderSales = async function(currentUser, currentRole, subtab = 'Quote Builder') {
+window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quotes') {
+  window._bkCurrentUser = currentUser;
+  window._bkCurrentRole = currentRole;
   const c = deptContainer();
   c.innerHTML = `
-    <div class="page-header"><h2>🤝 Sales & Client Relations</h2></div>
+    <div class="page-header">
+      <div>
+        <h2>🍽️ Barro Kitchens — Sales</h2>
+        <p style="font-size:12px;color:var(--text-muted);margin:2px 0 0">One-stop kitchen design & build</p>
+      </div>
+    </div>
     <div class="subtab-bar">
-      ${['Quote Builder','Client Profiles','Work Plans','Proposals'].map(s =>
+      ${['BK Quotes','Quotations','BK Packages','Clients','Work Plans','Proposals'].map(s =>
         `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
       ).join('')}
     </div>
@@ -832,17 +1230,27 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'Quote Bu
   `;
   loadSalesContent(currentUser, currentRole, subtab);
   c.querySelectorAll('.subtab-btn').forEach(btn => {
-    btn.addEventListener('click', () => { c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); loadSalesContent(currentUser, currentRole, btn.dataset.sub); });
+    btn.addEventListener('click', () => {
+      c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadSalesContent(currentUser, currentRole, btn.dataset.sub);
+    });
   });
 };
 
 async function loadSalesContent(currentUser, currentRole, sub) {
   const content = document.getElementById('sales-content');
   switch(sub) {
-    case 'Quote Builder':
-      renderQuoteList(content, currentUser, currentRole, 'barro');
+    case 'BK Quotes':
+      renderBKQuoteList(content, currentUser, currentRole);
       break;
-    case 'Client Profiles':
+    case 'Quotations':
+      renderBKQuotationsSummary(content, currentUser, currentRole);
+      break;
+    case 'BK Packages':
+      renderBKPackages(content, currentUser, currentRole);
+      break;
+    case 'Clients':
       await renderClientProfiles(content, currentUser, currentRole, 'barro');
       break;
     case 'Work Plans':
@@ -853,6 +1261,454 @@ async function loadSalesContent(currentUser, currentRole, sub) {
       bindFileCollection('sales-props', currentUser, 'Sales and Client Relations', 'Proposals');
       break;
   }
+}
+
+// ── BK Quote List ────────────────────────────────
+function renderBKQuoteList(container, currentUser, currentRole) {
+  const isPrivileged = ['president','manager','finance'].includes(currentRole);
+  container.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <div id="bk-quote-stats" style="font-size:13px;color:var(--text-muted)"></div>
+      <button class="btn-primary btn-sm" id="new-bk-quote-btn">+ New BK Quote</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <select id="bk-filter-status" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+        <option value="">All Status</option>
+        <option value="draft">Draft</option>
+        <option value="sent">Sent</option>
+        <option value="accepted">Accepted</option>
+        <option value="rejected">Rejected</option>
+      </select>
+    </div>
+    <div id="bk-quote-list"><div class="loading-placeholder">Loading quotes…</div></div>
+  `;
+
+  const loadBKQuotes = async () => {
+    const wrap = document.getElementById('bk-quote-list');
+    const filterStatus = document.getElementById('bk-filter-status')?.value || '';
+    let q = db.collection('bk_quotes').orderBy('createdAt','desc');
+    if (!isPrivileged) q = q.where('createdBy','==',currentUser.uid);
+    const snap = await q.get().catch(()=>({docs:[]}));
+    let quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
+    if (filterStatus) quotes = quotes.filter(q=>q.status===filterStatus);
+
+    const statsEl = document.getElementById('bk-quote-stats');
+    if (statsEl) {
+      const total = quotes.reduce((s,q)=>s+(q.total||0),0);
+      const accepted = quotes.filter(q=>q.status==='accepted').length;
+      statsEl.textContent = `${quotes.length} quote${quotes.length!==1?'s':''} · ₱${fmt(total)} · ${accepted} accepted`;
+    }
+
+    if (!quotes.length) {
+      wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">🍽️</div><h4>No BK quotes yet</h4><p>Create your first Barro Kitchens quote</p></div>`;
+      return;
+    }
+    wrap.innerHTML = `<div class="item-list">${quotes.map(q=>`
+      <div class="item-card bk-quote-item" data-id="${q.id}" style="cursor:pointer">
+        <div class="item-top">
+          <div class="item-title">BK-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${q.clientName||'Unnamed'}</div>
+          <span class="badge ${statusBadge(q.status)}">${q.status||'draft'}</span>
+        </div>
+        <div class="item-meta">
+          <span>💰 ₱${fmt(q.total||0)}</span>
+          <span>📦 ${q.packageName||q.scope||'Custom'}</span>
+          <span>👤 ${q.agentName||'—'}</span>
+          ${q.createdAt?`<span>📅 ${new Date(q.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
+        </div>
+        ${q.notes?`<div style="font-size:12px;color:var(--text-muted);margin-top:6px;white-space:pre-line">${q.notes.slice(0,80)}${q.notes.length>80?'…':''}</div>`:''}
+      </div>`).join('')}</div>`;
+
+    wrap.querySelectorAll('.bk-quote-item').forEach(item => {
+      item.addEventListener('click', async () => {
+        const s = await db.collection('bk_quotes').doc(item.dataset.id).get();
+        openBKQuoteEditor(currentUser, currentRole, {id:s.id,...s.data()}, loadBKQuotes);
+      });
+    });
+  };
+
+  loadBKQuotes();
+  document.getElementById('new-bk-quote-btn').onclick = () => openBKQuoteEditor(currentUser, currentRole, null, loadBKQuotes);
+  document.getElementById('bk-filter-status')?.addEventListener('change', loadBKQuotes);
+}
+
+// ── BK Quote Editor ──────────────────────────────
+const BK_CATEGORIES = ['Cabinets & Storage','Countertops','Backsplash & Tiles','Appliances','Hardware & Fixtures','Ventilation / Hood','Lighting','Plumbing','Labor & Installation','Delivery & Logistics','Other'];
+
+function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
+  let lines = existing ? JSON.parse(JSON.stringify(existing.lineItems||[])) : [{category:'Cabinets & Storage',description:'',qty:1,unit:'set',price:0}];
+
+  const lineHTML = (l,i) => `
+    <div class="bk-line-row" data-i="${i}" style="display:grid;grid-template-columns:130px 1fr 60px 60px 100px 34px;gap:5px;align-items:center;margin-bottom:6px">
+      <select data-i="${i}" data-f="category" style="padding:5px 6px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:12px">
+        ${BK_CATEGORIES.map(c=>`<option ${c===l.category?'selected':''}>${c}</option>`).join('')}
+      </select>
+      <input type="text" value="${l.description||''}" data-i="${i}" data-f="description" placeholder="Item description" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%"/>
+      <input type="number" value="${l.qty||1}" data-i="${i}" data-f="qty" min="1" style="padding:5px 6px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%"/>
+      <select data-i="${i}" data-f="unit" style="padding:5px 4px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:11px">
+        ${['pc','set','lm','sqm','hr','lot','unit'].map(u=>`<option ${u===l.unit?'selected':''}>${u}</option>`).join('')}
+      </select>
+      <input type="number" value="${l.price||0}" data-i="${i}" data-f="price" min="0" step="0.01" placeholder="Unit price" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%"/>
+      <button class="btn-icon" data-rm="${i}" style="color:#ff453a;font-size:16px;padding:4px 7px">🗑</button>
+    </div>`;
+
+  openModal(existing ? `Edit Quote BK-${existing.quoteNumber||''}` : '🍽️ New Barro Kitchens Quote', `
+    <div class="form-row">
+      <div class="form-group"><label>Client Name</label><input id="bkq-client" value="${existing?.clientName||''}"/></div>
+      <div class="form-group"><label>Client Contact</label><input id="bkq-contact" value="${existing?.clientContact||''}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Client Address</label><input id="bkq-address" value="${existing?.clientAddress||''}"/></div>
+      <div class="form-group"><label>Scope / Package</label>
+        <select id="bkq-scope" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          ${['Custom Quote','Basic Kitchen Package','Standard Kitchen Package','Premium Kitchen Package','Full Kitchen Remodel','Commercial Kitchen','Supply Only'].map(s=>`<option ${s===(existing?.scope||'Custom Quote')?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Quote Date</label><input id="bkq-date" type="date" value="${existing?.date||today()}"/></div>
+      <div class="form-group"><label>Valid Until</label><input id="bkq-valid" type="date" value="${existing?.validUntil||''}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 140px"><label>VAT</label>
+        <select id="bkq-vat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          <option value="0" ${(existing?.vatRate||0)==0?'selected':''}>No VAT</option>
+          <option value="12" ${(existing?.vatRate||0)==12?'selected':''}>12% VAT</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0 0 140px"><label>Discount (₱)</label>
+        <input id="bkq-discount" type="number" min="0" value="${existing?.discount||0}" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"/>
+      </div>
+      <div class="form-group"><label>Status</label>
+        <select id="bkq-status" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          <option value="draft" ${(existing?.status||'draft')==='draft'?'selected':''}>Draft</option>
+          <option value="sent" ${existing?.status==='sent'?'selected':''}>Sent to Client</option>
+          <option value="accepted" ${existing?.status==='accepted'?'selected':''}>Accepted</option>
+          <option value="rejected" ${existing?.status==='rejected'?'selected':''}>Rejected</option>
+        </select>
+      </div>
+    </div>
+    <hr class="divider"/>
+    <div style="display:grid;grid-template-columns:130px 1fr 60px 60px 100px 34px;gap:5px;margin-bottom:6px">
+      <div style="font-size:11px;font-weight:700;color:var(--text-muted)">CATEGORY</div>
+      <div style="font-size:11px;font-weight:700;color:var(--text-muted)">DESCRIPTION</div>
+      <div style="font-size:11px;font-weight:700;color:var(--text-muted)">QTY</div>
+      <div style="font-size:11px;font-weight:700;color:var(--text-muted)">UNIT</div>
+      <div style="font-size:11px;font-weight:700;color:var(--text-muted)">UNIT PRICE</div>
+      <div></div>
+    </div>
+    <div id="bkq-lines"></div>
+    <button class="btn-secondary btn-sm" id="bkq-add-line" style="margin-top:6px;margin-bottom:8px">+ Add Line</button>
+    <div id="bkq-totals" class="quote-total" style="text-align:right;font-size:13px;line-height:1.8"></div>
+    <hr class="divider"/>
+    <div class="form-group"><label>Notes / Terms</label><textarea id="bkq-notes" rows="3" placeholder="Payment terms, delivery notes, etc.">${existing?.notes||''}</textarea></div>
+  `, `
+    <button class="btn-secondary" id="bkq-print-btn">🖨 Print / PDF</button>
+    <button class="btn-primary" id="bkq-save-btn">💾 Save Quote</button>
+    <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+  `);
+
+  const calcTotals = () => {
+    const sub = lines.reduce((s,l) => s + (parseFloat(l.qty)||0)*(parseFloat(l.price)||0), 0);
+    const disc = parseFloat(document.getElementById('bkq-discount')?.value||0)||0;
+    const vatRate = parseFloat(document.getElementById('bkq-vat')?.value||0)||0;
+    const afterDisc = Math.max(sub - disc, 0);
+    const vat = afterDisc * vatRate / 100;
+    const grand = afterDisc + vat;
+    const el = document.getElementById('bkq-totals');
+    if (el) el.innerHTML = `
+      <span>Subtotal: ₱${fmt(sub)}</span><br>
+      ${disc>0?`<span>Discount: — ₱${fmt(disc)}</span><br>`:''}
+      ${vatRate>0?`<span>VAT (${vatRate}%): ₱${fmt(vat)}</span><br>`:''}
+      <strong style="font-size:16px">Total: ₱${fmt(grand)}</strong>`;
+    return grand;
+  };
+
+  const renderLines = () => {
+    const cont = document.getElementById('bkq-lines');
+    if (!cont) return;
+    cont.innerHTML = lines.map((l,i)=>lineHTML(l,i)).join('');
+    cont.querySelectorAll('input,select').forEach(inp => {
+      inp.addEventListener('input', e => {
+        const i=parseInt(e.target.dataset.i), f=e.target.dataset.f;
+        if (!f||i===undefined||isNaN(i)) return;
+        lines[i][f] = ['qty','price'].includes(f) ? (parseFloat(e.target.value)||0) : e.target.value;
+        calcTotals();
+      });
+    });
+    cont.querySelectorAll('[data-rm]').forEach(btn => {
+      btn.onclick = () => { lines.splice(parseInt(btn.dataset.rm),1); renderLines(); };
+    });
+    calcTotals();
+  };
+
+  renderLines();
+  document.getElementById('bkq-add-line').onclick = () => { lines.push({category:'Cabinets & Storage',description:'',qty:1,unit:'pc',price:0}); renderLines(); };
+  document.getElementById('bkq-discount')?.addEventListener('input', calcTotals);
+  document.getElementById('bkq-vat')?.addEventListener('change', calcTotals);
+
+  document.getElementById('bkq-save-btn').onclick = async () => {
+    const grand = calcTotals();
+    const sub    = lines.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.price)||0),0);
+    const disc   = parseFloat(document.getElementById('bkq-discount')?.value||0)||0;
+    const vatRate= parseFloat(document.getElementById('bkq-vat')?.value||0)||0;
+    const uSnap  = await db.collection('users').doc(currentUser.uid).get();
+    const agentName = uSnap.exists ? uSnap.data().displayName : currentUser.email;
+    const data = {
+      clientName:    document.getElementById('bkq-client').value.trim(),
+      clientContact: document.getElementById('bkq-contact').value.trim(),
+      clientAddress: document.getElementById('bkq-address').value.trim(),
+      scope:         document.getElementById('bkq-scope').value,
+      date:          document.getElementById('bkq-date').value,
+      validUntil:    document.getElementById('bkq-valid').value,
+      vatRate,
+      discount:      disc,
+      subtotal:      sub,
+      total:         grand,
+      status:        document.getElementById('bkq-status').value,
+      notes:         document.getElementById('bkq-notes').value.trim(),
+      lineItems:     lines,
+      agentName,     createdBy: currentUser.uid,
+      brand:         'barro-kitchens',
+      updatedAt:     firebase.firestore.FieldValue.serverTimestamp()
+    };
+    if (existing) {
+      await db.collection('bk_quotes').doc(existing.id).update(data);
+      Notifs.showToast('Quote updated!');
+    } else {
+      const count = (await db.collection('bk_quotes').get()).size;
+      data.quoteNumber = `BK${new Date().getFullYear().toString().slice(-2)}${String(count+1).padStart(4,'0')}`;
+      data.createdAt   = firebase.firestore.FieldValue.serverTimestamp();
+      await db.collection('bk_quotes').add(data);
+      Notifs.showToast('BK Quote saved!');
+    }
+    closeModal();
+    if (onSave) onSave();
+  };
+
+  document.getElementById('bkq-print-btn').onclick = () => printBKQuote(lines, {
+    clientName:    document.getElementById('bkq-client').value,
+    clientContact: document.getElementById('bkq-contact').value,
+    clientAddress: document.getElementById('bkq-address').value,
+    scope:         document.getElementById('bkq-scope').value,
+    date:          document.getElementById('bkq-date').value,
+    validUntil:    document.getElementById('bkq-valid').value,
+    discount:      parseFloat(document.getElementById('bkq-discount')?.value||0),
+    vatRate:       parseFloat(document.getElementById('bkq-vat')?.value||0),
+    notes:         document.getElementById('bkq-notes').value,
+    quoteNumber:   existing?.quoteNumber||'—'
+  });
+}
+
+function printBKQuote(lines, q) {
+  const sub   = lines.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.price)||0),0);
+  const disc  = q.discount||0;
+  const vatR  = q.vatRate||0;
+  const after = Math.max(sub-disc,0);
+  const vat   = after*vatR/100;
+  const grand = after+vat;
+  const byCategory = {};
+  lines.forEach(l => { if(!byCategory[l.category]) byCategory[l.category]=[]; byCategory[l.category].push(l); });
+
+  const w = window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>Barro Kitchens — Quote ${q.quoteNumber}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',Arial,sans-serif;padding:36px;color:#222;background:#fff;font-size:13px}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:16px;border-bottom:2px solid #c8a45a}
+    .brand{font-size:22px;font-weight:900;color:#c8a45a;letter-spacing:-0.5px}
+    .brand-sub{font-size:11px;color:#666;margin-top:2px}
+    .q-info{text-align:right;font-size:12px;color:#555;line-height:1.6}
+    .q-no{font-size:16px;font-weight:800;color:#222}
+    .client-box{background:#f9f7f2;border:1px solid #e8d9b5;border-radius:8px;padding:12px 16px;margin-bottom:20px}
+    .client-label{font-size:10px;font-weight:700;color:#c8a45a;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px}
+    .client-name{font-size:15px;font-weight:700}
+    table{width:100%;border-collapse:collapse;margin-bottom:16px}
+    .cat-header td{background:#f9f7f2;font-size:11px;font-weight:700;color:#c8a45a;text-transform:uppercase;letter-spacing:0.5px;padding:8px 10px;border-top:1px solid #e8d9b5}
+    th{background:#c8a45a;color:#fff;padding:8px 10px;text-align:left;font-size:11px}
+    td{padding:7px 10px;border-bottom:1px solid #f0ebe0;vertical-align:top}
+    .text-right{text-align:right}
+    .totals{width:280px;margin-left:auto;border:1px solid #e8d9b5;border-radius:8px;overflow:hidden}
+    .totals td{padding:6px 14px;border-bottom:1px solid #f0ebe0;font-size:12px}
+    .totals .grand td{background:#c8a45a;color:#fff;font-weight:800;font-size:14px;border:none}
+    .notes{margin-top:20px;font-size:11px;color:#666;border-top:1px solid #eee;padding-top:12px}
+    .footer{margin-top:28px;font-size:10px;color:#aaa;text-align:center;border-top:1px solid #eee;padding-top:10px}
+  </style>
+  </head><body>
+  <div class="header">
+    <div>
+      <div class="brand">🍽️ Barro Kitchens</div>
+      <div class="brand-sub">A Trademark of Barro Industries OPC</div>
+      <div class="brand-sub">One-stop kitchen design & build solution</div>
+    </div>
+    <div class="q-info">
+      <div class="q-no">Quote ${q.quoteNumber}</div>
+      <div>Date: ${q.date}</div>
+      <div>Valid Until: ${q.validUntil||'—'}</div>
+      ${q.scope!=='Custom Quote'?`<div>Package: <strong>${q.scope}</strong></div>`:''}
+    </div>
+  </div>
+  <div class="client-box">
+    <div class="client-label">Quote For</div>
+    <div class="client-name">${q.clientName||'—'}</div>
+    ${q.clientContact?`<div style="font-size:12px;margin-top:2px;color:#555">${q.clientContact}</div>`:''}
+    ${q.clientAddress?`<div style="font-size:12px;margin-top:2px;color:#555">📍 ${q.clientAddress}</div>`:''}
+  </div>
+  <table>
+    <thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th class="text-right">Unit Price</th><th class="text-right">Amount</th></tr></thead>
+    <tbody>
+    ${Object.entries(byCategory).map(([cat,catLines])=>`
+      <tr class="cat-header"><td colspan="5">${cat}</td></tr>
+      ${catLines.map(l=>`<tr>
+        <td>${l.description||'—'}</td>
+        <td>${l.qty}</td>
+        <td>${l.unit||'pc'}</td>
+        <td class="text-right">₱${fmt(l.price)}</td>
+        <td class="text-right">₱${fmt((parseFloat(l.qty)||0)*(parseFloat(l.price)||0))}</td>
+      </tr>`).join('')}
+    `).join('')}
+    </tbody>
+  </table>
+  <table class="totals">
+    <tr><td>Subtotal</td><td class="text-right">₱${fmt(sub)}</td></tr>
+    ${disc>0?`<tr><td>Discount</td><td class="text-right">— ₱${fmt(disc)}</td></tr>`:''}
+    ${vatR>0?`<tr><td>VAT (${vatR}%)</td><td class="text-right">₱${fmt(after*vatR/100)}</td></tr>`:''}
+    <tr class="grand"><td>TOTAL</td><td class="text-right">₱${fmt(grand)}</td></tr>
+  </table>
+  ${q.notes?`<div class="notes"><strong>Notes / Terms:</strong><br>${q.notes}</div>`:''}
+  <div class="footer">Barro Kitchens · Barro Industries OPC · This quotation is valid until ${q.validUntil||'the stated date'}</div>
+  <script>window.print();<\/script></body></html>`);
+}
+
+// ── BK Quotations Summary ────────────────────────
+async function renderBKQuotationsSummary(container, currentUser, currentRole) {
+  const isPrivileged = ['president','manager','finance'].includes(currentRole);
+  container.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+  const q = isPrivileged
+    ? db.collection('bk_quotes').orderBy('createdAt','desc')
+    : db.collection('bk_quotes').where('createdBy','==',currentUser.uid).orderBy('createdAt','desc');
+  const snap = await q.get().catch(()=>({docs:[]}));
+  const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
+
+  const total      = quotes.reduce((s,q)=>s+(q.total||0),0);
+  const accepted   = quotes.filter(q=>q.status==='accepted');
+  const acceptedT  = accepted.reduce((s,q)=>s+(q.total||0),0);
+  const sent       = quotes.filter(q=>q.status==='sent').length;
+  const draft      = quotes.filter(q=>q.status==='draft').length;
+
+  container.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:20px">
+      <div class="stat-card"><div class="stat-num">${quotes.length}</div><div class="stat-label">Total Quotes</div></div>
+      <div class="stat-card"><div class="stat-num">₱${fmt(total)}</div><div class="stat-label">Quote Value</div></div>
+      <div class="stat-card"><div class="stat-num">${accepted.length}</div><div class="stat-label">Accepted</div></div>
+      <div class="stat-card"><div class="stat-num">₱${fmt(acceptedT)}</div><div class="stat-label">Accepted Value</div></div>
+      <div class="stat-card"><div class="stat-num">${sent}</div><div class="stat-label">Sent</div></div>
+      <div class="stat-card"><div class="stat-num">${draft}</div><div class="stat-label">Drafts</div></div>
+    </div>
+    <h4 style="font-weight:700;margin-bottom:10px">All Quotations</h4>
+    <div class="item-list">
+      ${!quotes.length
+        ? `<div class="empty-state"><div class="empty-icon">📋</div><h4>No quotations yet</h4></div>`
+        : quotes.map(q=>`
+        <div class="item-card" style="display:flex;align-items:center;gap:12px">
+          <div style="flex:1">
+            <div class="item-title" style="font-size:13px">BK-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${q.clientName||'Unnamed'}</div>
+            <div class="item-meta" style="margin-top:4px">
+              <span>${q.scope||'Custom'}</span>
+              <span>${q.agentName||'—'}</span>
+              ${q.date?`<span>${q.date}</span>`:''}
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-weight:700">₱${fmt(q.total||0)}</div>
+            <span class="badge ${statusBadge(q.status)}" style="margin-top:4px">${q.status||'draft'}</span>
+          </div>
+        </div>`).join('')}
+    </div>
+  `;
+}
+
+// ── BK Package Presets ───────────────────────────
+const BK_PACKAGES = [
+  {
+    name: '🥉 Basic Kitchen Package',
+    desc: 'Standard kitchen setup for small kitchens up to 8 sqm',
+    color: '#cd7f32',
+    items: [
+      {category:'Cabinets & Storage',description:'Base cabinets (melamine board)',qty:1,unit:'set',price:45000},
+      {category:'Cabinets & Storage',description:'Wall cabinets (melamine board)',qty:1,unit:'set',price:30000},
+      {category:'Countertops',description:'Granite countertop 2cm',qty:5,unit:'lm',price:3500},
+      {category:'Hardware & Fixtures',description:'Cabinet handles (stainless)',qty:1,unit:'set',price:4500},
+      {category:'Labor & Installation',description:'Installation & carpentry works',qty:1,unit:'lot',price:25000},
+    ]
+  },
+  {
+    name: '🥈 Standard Kitchen Package',
+    desc: 'Full kitchen for 10-15 sqm, includes sink & hood',
+    color: '#aaa',
+    items: [
+      {category:'Cabinets & Storage',description:'Base cabinets (18mm plywood + PVC)',qty:1,unit:'set',price:75000},
+      {category:'Cabinets & Storage',description:'Wall cabinets + island',qty:1,unit:'set',price:55000},
+      {category:'Countertops',description:'Engineered quartz countertop',qty:7,unit:'lm',price:5500},
+      {category:'Backsplash & Tiles',description:'Subway tile backsplash',qty:8,unit:'sqm',price:2200},
+      {category:'Appliances',description:'Kitchen sink (double bowl SS)',qty:1,unit:'pc',price:8500},
+      {category:'Ventilation / Hood',description:'Chimney range hood 90cm',qty:1,unit:'unit',price:18000},
+      {category:'Hardware & Fixtures',description:'Premium hardware set',qty:1,unit:'set',price:9500},
+      {category:'Labor & Installation',description:'Full installation & leveling',qty:1,unit:'lot',price:40000},
+    ]
+  },
+  {
+    name: '🥇 Premium Kitchen Package',
+    desc: 'High-end kitchen with imported materials, full appliances',
+    color: '#c8a45a',
+    items: [
+      {category:'Cabinets & Storage',description:'Custom solid wood base cabinets',qty:1,unit:'set',price:150000},
+      {category:'Cabinets & Storage',description:'Overhead cabinets + tall pantry',qty:1,unit:'set',price:95000},
+      {category:'Countertops',description:'Calacatta marble countertop',qty:8,unit:'lm',price:12000},
+      {category:'Backsplash & Tiles',description:'Large format porcelain tiles',qty:10,unit:'sqm',price:3800},
+      {category:'Appliances',description:'Farmhouse sink (fireclay)',qty:1,unit:'pc',price:28000},
+      {category:'Appliances',description:'Built-in dishwasher (60cm)',qty:1,unit:'unit',price:45000},
+      {category:'Ventilation / Hood',description:'Island range hood (designer)',qty:1,unit:'unit',price:55000},
+      {category:'Hardware & Fixtures',description:'Soft-close premium hardware',qty:1,unit:'set',price:22000},
+      {category:'Lighting',description:'LED under-cabinet lighting strip',qty:1,unit:'lot',price:12000},
+      {category:'Labor & Installation',description:'Full premium installation',qty:1,unit:'lot',price:80000},
+    ]
+  }
+];
+
+function renderBKPackages(container, currentUser, currentRole) {
+  container.innerHTML = `
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Click any package to create a pre-filled BK quote. You can edit all items after.</p>
+    <div style="display:flex;flex-direction:column;gap:16px">
+      ${BK_PACKAGES.map((pkg,i)=>`
+        <div class="item-card" style="border-left:4px solid ${pkg.color};padding:14px 16px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+            <div>
+              <div style="font-weight:700;font-size:15px">${pkg.name}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${pkg.desc}</div>
+            </div>
+            <button class="btn-primary btn-sm use-pkg-btn" data-pkg="${i}" style="margin-left:12px;white-space:nowrap">Use Package</button>
+          </div>
+          <div style="font-size:12px;color:var(--text-muted)">
+            <strong>Estimated total:</strong> ₱${fmt(pkg.items.reduce((s,l)=>s+l.qty*l.price,0))}
+          </div>
+          <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">
+            ${pkg.items.map(l=>`<span style="background:var(--s2);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:11px">${l.category}</span>`).join('')}
+          </div>
+        </div>`).join('')}
+    </div>
+  `;
+  container.querySelectorAll('.use-pkg-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pkg = BK_PACKAGES[parseInt(btn.dataset.pkg)];
+      // We need currentUser/currentRole — grab from outer scope
+      openBKQuoteEditor(
+        currentUser,
+        currentRole,
+        { scope: pkg.name.replace(/^[^\s]+ /,''), lineItems: pkg.items.map(i=>({...i})) },
+        () => { Notifs.showToast('Quote created from package!'); }
+      );
+    });
+  });
 }
 
 // ══════════════════════════════════════════════════
@@ -953,7 +1809,7 @@ async function renderProjects(container, currentUser, currentRole) {
 
 window.renderBrilliantSteel = async function(currentUser, currentRole, subtab = 'Dashboard') {
   const c = deptContainer();
-  const tabs = ['Dashboard','Quote Builder','Quotations Summary','Client Data'];
+  const tabs = ['Dashboard','Quote Builder','Quotations Summary','Client Data','Files'];
   c.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
       <span style="font-size:22px">⚙️</span>
@@ -962,7 +1818,7 @@ window.renderBrilliantSteel = async function(currentUser, currentRole, subtab = 
         <p style="font-size:11px;color:var(--text-muted)">Partner Company Operations</p>
       </div>
     </div>
-    <div class="subtab-bar">
+    <div class="subtab-bar" style="flex-wrap:wrap">
       ${tabs.map(s => `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`).join('')}
     </div>
     <div id="bs-content"><div class="loading-placeholder">Loading…</div></div>
@@ -984,7 +1840,33 @@ async function loadBSContent(currentUser, currentRole, sub) {
     case 'Quote Builder':      renderBSQuoteBuilder(content, currentUser, currentRole); break;
     case 'Quotations Summary': await renderBSQuotationsSummary(content, currentUser, currentRole); break;
     case 'Client Data':        renderBSClientData(content); break;
+    case 'Files':              renderBSFiles(content, currentUser, currentRole); break;
   }
+}
+
+function renderBSFiles(container, currentUser, currentRole) {
+  container.innerHTML = `
+    <div class="subtab-bar" id="bs-files-tabs" style="margin-bottom:14px">
+      <button class="subtab-btn active" data-sub="Images">🖼 Images</button>
+      <button class="subtab-btn" data-sub="Drawings">📐 Drawings</button>
+      <button class="subtab-btn" data-sub="Documents">📄 Documents</button>
+    </div>
+    <div id="bs-files-content"></div>
+  `;
+  const load = sub => {
+    const fc = document.getElementById('bs-files-content');
+    const collectionKey = `bs_files_${sub.toLowerCase()}`;
+    fc.innerHTML = renderFileCollection(`${sub}`, `bs-${sub.toLowerCase()}`, currentRole);
+    bindFileCollection(`bs-${sub.toLowerCase()}`, currentUser, 'Brilliant Steel', sub);
+  };
+  load('Images');
+  container.querySelectorAll('#bs-files-tabs .subtab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      container.querySelectorAll('#bs-files-tabs .subtab-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      load(btn.dataset.sub);
+    });
+  });
 }
 
 async function renderBSDashboard(container, currentUser, currentRole) {

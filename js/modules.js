@@ -1,0 +1,795 @@
+/* ═══════════════════════════════════════════════════
+   BARRO INDUSTRIES — Extended Modules v1
+   modules.js — Posts, Team, Finance Expansion,
+                Cash Advance, Attendance, Company
+═══════════════════════════════════════════════════ */
+'use strict';
+
+// ── PRESIDENT UID (Neil Barro) ────────────────────
+// This controls whose photo/name shows in the president
+// message card in Company Overview.
+const PRESIDENT_UID = 'neilbarro870@gmail.com'; // fallback: match by email
+
+function isRealPresident() {
+  return currentRole === 'president' &&
+    (userProfile?.email === 'neilbarro870@gmail.com' ||
+     userProfile?.uid   === PRESIDENT_UID);
+}
+
+// ══════════════════════════════════════════════════
+//  POSTS
+// ══════════════════════════════════════════════════
+
+window.renderPosts = async function() {
+  const c = document.getElementById('page-content');
+  const canPost  = isRealPresident();
+  const canApprove = isRealPresident() || currentRole === 'manager';
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>📣 Posts</h2>
+      <button class="btn-primary btn-sm" id="new-post-btn">+ ${canPost ? 'New Post' : 'Submit Post'}</button>
+    </div>
+    <div class="subtab-bar" id="posts-tabs">
+      <button class="subtab-btn active" data-sub="General">General</button>
+      ${currentDepts.map(d => `<button class="subtab-btn" data-sub="${d}">${d}</button>`).join('')}
+      ${canApprove ? '<button class="subtab-btn" data-sub="Pending">Pending Approval</button>' : ''}
+    </div>
+    <div id="posts-content"></div>
+  `;
+  loadPosts('General');
+  c.querySelectorAll('.subtab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadPosts(btn.dataset.sub);
+    });
+  });
+  document.getElementById('new-post-btn').addEventListener('click', () => openNewPostModal(canPost));
+};
+
+async function loadPosts(dept) {
+  const container = document.getElementById('posts-content');
+  container.innerHTML = '<div class="loading-placeholder">Loading posts…</div>';
+  try {
+    let q = db.collection('posts').orderBy('createdAt','desc');
+    if (dept === 'Pending') {
+      q = db.collection('posts').where('status','==','pending').orderBy('createdAt','desc');
+    } else if (dept === 'General') {
+      q = db.collection('posts').where('dept','==','General').where('status','==','published').orderBy('createdAt','desc');
+    } else {
+      q = db.collection('posts').where('dept','==',dept).where('status','==','published').orderBy('createdAt','desc');
+    }
+    const snap = await q.limit(30).get();
+    const posts = snap.docs.map(d => ({id:d.id,...d.data()}));
+    if (!posts.length) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><h4>No posts yet</h4></div>';
+      return;
+    }
+    const canApprove = isRealPresident() || currentRole === 'manager';
+    container.innerHTML = posts.map(p => {
+      const ts = p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+      const isOwn = p.authorId === currentUser.uid;
+      return `
+      <div class="post-card" data-id="${p.id}">
+        <div class="post-header">
+          <div class="post-avatar">${p.authorPhoto ? `<img src="${p.authorPhoto}"/>` : (p.authorName||'?')[0]}</div>
+          <div class="post-meta">
+            <div class="post-author">${p.authorName||'Unknown'}</div>
+            <div class="post-time">${ts}${p.dept&&p.dept!=='General'?` · ${p.dept}`:''}</div>
+          </div>
+          ${p.pinned ? '<span class="badge badge-blue">📌 Pinned</span>' : ''}
+          ${p.status==='pending' ? '<span class="badge badge-orange">Pending</span>' : ''}
+        </div>
+        ${p.title ? `<div class="post-title">${p.title}</div>` : ''}
+        <div class="post-body">${p.content||''}</div>
+        ${p.imageUrl ? `<img src="${p.imageUrl}" class="post-image" onclick="window.open('${p.imageUrl}','_blank')"/>` : ''}
+        ${p.fileUrl ? `<a href="${p.fileUrl}" target="_blank" class="post-attachment">📎 ${p.fileName||'Attachment'}</a>` : ''}
+        <div class="post-actions">
+          ${canApprove && p.status==='pending' ? `
+            <button class="btn-primary btn-sm post-approve-btn" data-id="${p.id}">✓ Approve</button>
+            <button class="btn-secondary btn-sm post-reject-btn" data-id="${p.id}">✗ Reject</button>
+          ` : ''}
+          ${(canApprove || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="margin-left:auto;color:var(--danger)">Delete</button>` : ''}
+          ${canApprove && p.status==='published' ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':'📌 Pin'}</button>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+    if (window.lucide) lucide.createIcons({nodes:[container]});
+
+    container.querySelectorAll('.post-approve-btn').forEach(btn => btn.addEventListener('click', async e => {
+      const id = e.target.dataset.id;
+      const postSnap = await db.collection('posts').doc(id).get();
+      const post = postSnap.data();
+      await db.collection('posts').doc(id).update({status:'published'});
+      await Notifs.send(post.authorId, {title:'Post Approved', body:`Your post "${post.title||post.content?.slice(0,30)}" was approved!`, icon:'✅', type:'post'});
+      Notifs.showToast('Post approved!');
+      loadPosts(dept);
+    }));
+    container.querySelectorAll('.post-reject-btn').forEach(btn => btn.addEventListener('click', async e => {
+      const id = e.target.dataset.id;
+      await db.collection('posts').doc(id).update({status:'rejected'});
+      Notifs.showToast('Post rejected.');
+      loadPosts(dept);
+    }));
+    container.querySelectorAll('.post-delete-btn').forEach(btn => btn.addEventListener('click', async e => {
+      if (!confirm('Delete this post?')) return;
+      await db.collection('posts').doc(e.target.dataset.id).delete();
+      Notifs.showToast('Deleted.');
+      loadPosts(dept);
+    }));
+    container.querySelectorAll('.post-pin-btn').forEach(btn => btn.addEventListener('click', async e => {
+      const id = e.target.dataset.id;
+      const snap = await db.collection('posts').doc(id).get();
+      await db.collection('posts').doc(id).update({pinned: !snap.data().pinned});
+      loadPosts(dept);
+    }));
+  } catch(err) {
+    container.innerHTML = `<div class="empty-state"><p>Error: ${err.message}</p></div>`;
+  }
+}
+
+function openNewPostModal(publishDirectly) {
+  openModal(publishDirectly ? 'New Post' : 'Submit Post for Approval', `
+    <div class="form-group"><label>Title (optional)</label><input id="post-title" placeholder="Post title…"/></div>
+    <div class="form-group"><label>Content</label><textarea id="post-content" rows="5" placeholder="Write your message…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text);resize:vertical"></textarea></div>
+    <div class="form-group"><label>Department</label>
+      <select id="post-dept" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+        <option value="General">General (All Staff)</option>
+        ${Object.keys(window.DEPARTMENTS||{}).map(d=>`<option value="${d}">${d}</option>`).join('')}
+      </select>
+    </div>
+    <div id="post-file-area"></div>
+  `, `<button class="btn-primary" id="save-post-btn">${publishDirectly ? 'Publish' : 'Submit for Approval'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  let uploadedFile = null;
+  Drive.renderUploadArea('post-file-area', r => { uploadedFile = r; }, { label: 'Attach image or file', dept: 'posts', subfolder: 'attachments' });
+
+  document.getElementById('save-post-btn').addEventListener('click', async () => {
+    const content = document.getElementById('post-content').value.trim();
+    if (!content) { Notifs.showToast('Write something first.', 'error'); return; }
+    const dept = document.getElementById('post-dept').value;
+    const status = publishDirectly ? 'published' : 'pending';
+    await db.collection('posts').add({
+      title:       document.getElementById('post-title').value.trim(),
+      content,
+      dept,
+      status,
+      authorId:    currentUser.uid,
+      authorName:  userProfile.displayName || currentUser.email,
+      authorPhoto: userProfile.photoUrl || null,
+      pinned:      false,
+      imageUrl:    uploadedFile?.url || null,
+      fileName:    uploadedFile?.name || null,
+      fileUrl:     uploadedFile?.url || null,
+      createdAt:   firebase.firestore.FieldValue.serverTimestamp()
+    });
+    if (status === 'published') {
+      await Notifs.sendToAll({title:`📣 New Post`, body:`${userProfile.displayName||'Someone'} posted: ${document.getElementById('post-title').value.trim()||content.slice(0,40)}`, icon:'📣', type:'post'});
+    } else {
+      await Notifs.sendToOwner({title:'New Post Awaiting Approval', body:`${userProfile.displayName} submitted a post for review.`, icon:'📋', type:'post_approval'});
+    }
+    closeModal();
+    Notifs.showToast(status==='published' ? 'Post published!' : 'Submitted for approval!');
+    window.renderPosts();
+  });
+}
+
+// ══════════════════════════════════════════════════
+//  TEAM TAB (Employee + Admin view)
+// ══════════════════════════════════════════════════
+
+window.renderTeamTab = async function() {
+  const c = document.getElementById('page-content');
+  const pres = currentRole === 'president' || currentRole === 'manager';
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>👥 Team</h2>
+      ${pres ? '<button class="btn-primary btn-sm" id="invite-user-btn">+ Invite Member</button>' : ''}
+    </div>
+    <div id="team-search-wrap" style="padding:0 0 14px">
+      <input id="team-search" placeholder="Search by name, role or department…"
+        style="width:100%;padding:9px 14px;border:1.5px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:14px"/>
+    </div>
+    <div id="team-grid" class="team-card-grid"></div>
+  `;
+  const snap = await db.collection('users').get();
+  const users = snap.docs.map(d=>({id:d.id,...d.data()}))
+    .filter(u => u.role !== 'partner' && !(Array.isArray(u.departments) && u.departments.length===1 && u.departments[0]==='Brilliant Steel'))
+    .sort((a,b) => {
+      const order = {president:0,manager:1,finance:2,employee:3,agent:4};
+      return (order[a.role]??5) - (order[b.role]??5);
+    });
+  renderTeamCards(users);
+
+  document.getElementById('team-search').addEventListener('input', e => {
+    const q = e.target.value.toLowerCase();
+    const filtered = q ? users.filter(u =>
+      (u.displayName||'').toLowerCase().includes(q) ||
+      (u.role||'').toLowerCase().includes(q) ||
+      (Array.isArray(u.departments)?u.departments:u.department?[u.department]:[]).join(' ').toLowerCase().includes(q)
+    ) : users;
+    renderTeamCards(filtered);
+  });
+
+  if (pres) {
+    document.getElementById('invite-user-btn')?.addEventListener('click', () => {
+      openModal('Invite Team Member', `
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">They'll receive a password reset email to set their own password.</p>
+        <div class="form-group"><label>Email</label><input id="inv-email" type="email" placeholder="employee@barroindustries.com"/></div>
+        <div class="form-group"><label>Display Name</label><input id="inv-name" placeholder="Full name"/></div>
+        <div class="form-group"><label>Role</label>
+          <select id="inv-role" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+            ${Object.entries(window.ROLES||{}).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label>Department(s)</label>
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:4px">
+            ${Object.keys(window.DEPARTMENTS||{}).map(d=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" class="inv-dept-cb" value="${d}"/>${d}</label>`).join('')}
+          </div>
+        </div>
+      `, `<button class="btn-primary" id="save-inv-btn">Send Invite</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      document.getElementById('save-inv-btn').addEventListener('click', async () => {
+        const email = document.getElementById('inv-email').value.trim();
+        if (!email) { Notifs.showToast('Enter an email.','error'); return; }
+        const depts = [...document.querySelectorAll('.inv-dept-cb:checked')].map(cb=>cb.value);
+        try {
+          const cred = await auth.createUserWithEmailAndPassword(email, Math.random().toString(36).slice(-10));
+          const uid = cred.user.uid;
+          const empCount = (await db.collection('users').get()).size;
+          const empId = `BI-${new Date().getFullYear()}-${String(empCount).padStart(3,'0')}`;
+          await db.collection('users').doc(uid).set({
+            uid, email,
+            displayName: document.getElementById('inv-name').value.trim() || email.split('@')[0],
+            role:        document.getElementById('inv-role').value,
+            departments: depts, department: depts[0]||'',
+            employeeId:  empId, salary:0, allowance:0, deductions:0,
+            photoUrl:'', startDate: new Date().toISOString().slice(0,10),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          await auth.sendPasswordResetEmail(email);
+          closeModal();
+          Notifs.showToast(`Invite sent to ${email}!`);
+          window.renderTeamTab();
+        } catch(err) { Notifs.showToast('Error: '+err.message,'error'); }
+      });
+    });
+  }
+};
+
+function renderTeamCards(users) {
+  const grid = document.getElementById('team-grid');
+  if (!grid) return;
+  if (!users.length) { grid.innerHTML = '<div class="empty-state"><div class="empty-icon">👥</div><h4>No team members found</h4></div>'; return; }
+  grid.innerHTML = users.map(u => {
+    const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(' · ') || 'Unassigned';
+    const initial = (u.displayName||u.email||'?')[0].toUpperCase();
+    const roleLabel = window.ROLES?.[u.role]?.label || u.role || 'Employee';
+    const badgeClass = window.ROLES?.[u.role]?.badge || 'badge-gray';
+    return `
+    <div class="team-card">
+      <div class="team-card-avatar">
+        ${u.photoUrl ? `<img src="${u.photoUrl}" alt="${u.displayName}"/>` : `<span>${initial}</span>`}
+      </div>
+      <div class="team-card-body">
+        <div class="team-card-name">${u.displayName||u.email}</div>
+        <span class="badge ${badgeClass}" style="font-size:10px;margin-bottom:4px">${roleLabel}</span>
+        <div class="team-card-dept">${depts}</div>
+        ${u.employeeId ? `<div class="team-card-id">${u.employeeId}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════
+//  ATTENDANCE CALENDAR (full-page)
+// ══════════════════════════════════════════════════
+
+window.renderAttendancePage = async function() {
+  const c = document.getElementById('page-content');
+  const pres = currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance';
+  const now  = new Date();
+
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>📅 Attendance</h2>
+      ${pres ? `<select id="att-emp-select" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px"><option value="">Loading…</option></select>` : ''}
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <button class="btn-secondary btn-sm" id="att-prev-month">‹</button>
+      <span id="att-month-label" style="font-weight:700;font-size:15px;min-width:140px;text-align:center"></span>
+      <button class="btn-secondary btn-sm" id="att-next-month">›</button>
+    </div>
+    <div id="att-legend" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;font-size:12px">
+      <span><span class="att-dot att-present"></span> Present</span>
+      <span><span class="att-dot att-half"></span> Half Day</span>
+      <span><span class="att-dot att-absent"></span> Absent</span>
+      <span><span class="att-dot att-holiday"></span> Holiday / Weekend</span>
+    </div>
+    <div id="att-calendar"></div>
+    <div id="att-summary" class="card" style="margin-top:16px"></div>
+  `;
+
+  let targetUid = currentUser.uid;
+  let targetName = userProfile.displayName || currentUser.email;
+  let viewYear  = now.getFullYear();
+  let viewMonth = now.getMonth();
+
+  if (pres) {
+    const usersSnap = await db.collection('users').get();
+    const empList = usersSnap.docs.map(d=>({id:d.id,...d.data()}))
+      .filter(u => u.role !== 'partner');
+    const sel = document.getElementById('att-emp-select');
+    sel.innerHTML = empList.map(u=>`<option value="${u.id}">${u.displayName||u.email}</option>`).join('');
+    sel.value = currentUser.uid;
+    sel.addEventListener('change', () => {
+      const picked = empList.find(u=>u.id===sel.value);
+      targetUid  = sel.value;
+      targetName = picked?.displayName || picked?.email || '';
+      renderAttMonth();
+    });
+  }
+
+  async function renderAttMonth() {
+    const calEl  = document.getElementById('att-calendar');
+    const sumEl  = document.getElementById('att-summary');
+    calEl.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+    const label = new Date(viewYear, viewMonth).toLocaleString('en-PH',{month:'long',year:'numeric'});
+    document.getElementById('att-month-label').textContent = label;
+
+    const monthStart = `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-01`;
+    const monthEnd   = `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-31`;
+    const snap = await db.collection('attendance').doc(targetUid).collection('records')
+      .where(firebase.firestore.FieldPath.documentId(),'>=',monthStart)
+      .where(firebase.firestore.FieldPath.documentId(),'<=',monthEnd).get();
+    const records = {};
+    snap.docs.forEach(d => { records[d.id] = d.data(); });
+
+    const daysInMonth = new Date(viewYear, viewMonth+1, 0).getDate();
+    const firstDay    = new Date(viewYear, viewMonth, 1).getDay();
+    const todayStr    = new Date().toISOString().slice(0,10);
+    const canEdit     = pres;
+
+    const dayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    let html = `<div class="att-cal-grid">
+      ${dayLabels.map(d=>`<div class="att-cal-hdr">${d}</div>`).join('')}
+      ${Array(firstDay).fill('<div></div>').join('')}`;
+
+    let fullCount=0, halfCount=0, absentCount=0, workDays=0;
+
+    for (let day=1; day<=daysInMonth; day++) {
+      const dateStr = `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+      const dow     = new Date(dateStr).getDay();
+      const isWeekend = dow===0||dow===6;
+      const isPast    = dateStr <= todayStr;
+      const rec       = records[dateStr];
+      let status = '';
+      if (!isWeekend && isPast) {
+        if (rec?.fullTime)                 { status='present'; fullCount++; workDays++; }
+        else if (rec?.loginTime)           { status='half';    halfCount++; workDays++; }
+        else if (dateStr < todayStr)       { status='absent';  absentCount++; workDays++; }
+      }
+      const cls = isWeekend?'att-weekend':status?`att-${status}`:'att-future';
+      const isToday = dateStr===todayStr;
+      html += `<div class="att-cal-day ${cls} ${isToday?'att-today':''}" data-date="${dateStr}" data-status="${status}">
+        <span class="att-day-num">${day}</span>
+        ${status==='present'?'<span class="att-mark">✓</span>':status==='half'?'<span class="att-mark">½</span>':status==='absent'?'<span class="att-mark">✗</span>':''}
+        ${canEdit&&!isWeekend?`<div class="att-edit-btn" data-date="${dateStr}" title="Edit">✎</div>`:''}
+      </div>`;
+    }
+    html += '</div>';
+    calEl.innerHTML = html;
+    if (window.lucide) lucide.createIcons({nodes:[calEl]});
+
+    const pct = workDays > 0 ? Math.round(((fullCount + halfCount*0.5)/workDays)*100) : 0;
+    sumEl.innerHTML = `
+      <div class="card-header"><h3>Summary — ${label} · ${targetName}</h3></div>
+      <div class="card-body">
+        <div class="kpi-row" style="margin:0">
+          <div class="kpi-card green"><div class="kpi-label">Present</div><div class="kpi-value">${fullCount}</div></div>
+          <div class="kpi-card warn"><div class="kpi-label">Half Day</div><div class="kpi-value">${halfCount}</div></div>
+          <div class="kpi-card red"><div class="kpi-label">Absent</div><div class="kpi-value">${absentCount}</div></div>
+          <div class="kpi-card accent"><div class="kpi-label">Rate</div><div class="kpi-value">${pct}%</div></div>
+        </div>
+      </div>`;
+
+    if (canEdit) {
+      calEl.querySelectorAll('.att-edit-btn').forEach(btn => {
+        btn.addEventListener('click', async e => {
+          e.stopPropagation();
+          const date = btn.dataset.date;
+          const cur  = records[date];
+          openModal(`Edit Attendance — ${date}`, `
+            <div class="form-group"><label>Status</label>
+              <select id="att-status-sel" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+                <option value="present" ${cur?.fullTime?'selected':''}>Present (Full Day)</option>
+                <option value="half" ${cur?.loginTime&&!cur?.fullTime?'selected':''}>Half Day</option>
+                <option value="absent" ${!cur?'selected':''}>Absent</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Note (optional)</label><input id="att-note" value="${cur?.note||''}" placeholder="e.g. sick leave"/></div>
+          `, `<button class="btn-primary" id="save-att-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+          document.getElementById('save-att-btn').addEventListener('click', async () => {
+            const status = document.getElementById('att-status-sel').value;
+            const note   = document.getElementById('att-note').value.trim();
+            const ref = db.collection('attendance').doc(targetUid).collection('records').doc(date);
+            if (status==='present')
+              await ref.set({date,uid:targetUid,loginTime:new Date(),fullTime:true,note,editedBy:currentUser.uid},{merge:true});
+            else if (status==='half')
+              await ref.set({date,uid:targetUid,loginTime:new Date(),fullTime:false,note,editedBy:currentUser.uid},{merge:true});
+            else
+              await ref.delete();
+            closeModal();
+            Notifs.showToast('Attendance updated!');
+            renderAttMonth();
+          });
+        });
+      });
+    }
+  }
+
+  document.getElementById('att-prev-month').addEventListener('click', () => {
+    viewMonth--; if(viewMonth<0){viewMonth=11;viewYear--;} renderAttMonth();
+  });
+  document.getElementById('att-next-month').addEventListener('click', () => {
+    viewMonth++; if(viewMonth>11){viewMonth=0;viewYear++;} renderAttMonth();
+  });
+
+  renderAttMonth();
+};
+
+// ══════════════════════════════════════════════════
+//  CASH ADVANCE — installment / credit-card style
+// ══════════════════════════════════════════════════
+
+window.renderCashAdvancePage = async function() {
+  const c = document.getElementById('page-content');
+  const pres = currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance';
+
+  if (pres) {
+    await renderCashAdvanceAdmin(c);
+  } else {
+    await renderCashAdvanceEmployee(c);
+  }
+};
+
+async function renderCashAdvanceEmployee(c) {
+  const snap = await db.collection('cash_advances').where('userId','==',currentUser.uid).orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+  const advances = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const totalBalance = advances.filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
+
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>💸 Cash Advance</h2>
+      <button class="btn-primary btn-sm" id="new-ca-btn">+ Request</button>
+    </div>
+    ${totalBalance>0?`<div class="alert-banner alert-warn"><span>Outstanding Balance: <strong>₱${fmtN(totalBalance)}</strong></span></div>`:''}
+    <div id="ca-list"></div>
+  `;
+
+  renderCAList(advances, document.getElementById('ca-list'), false);
+  document.getElementById('new-ca-btn').addEventListener('click', () => openCashAdvanceModal());
+}
+
+async function renderCashAdvanceAdmin(c) {
+  const snap = await db.collection('cash_advances').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+  const advances = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const pending = advances.filter(a=>a.status==='pending');
+  const totalOut = advances.filter(a=>a.status==='approved').reduce((s,a)=>s+(a.balance||a.amount||0),0);
+
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>💸 Cash Advances</h2>
+    </div>
+    <div class="kpi-row">
+      <div class="kpi-card warn"><div class="kpi-label">Pending</div><div class="kpi-value">${pending.length}</div></div>
+      <div class="kpi-card red"><div class="kpi-label">Outstanding</div><div class="kpi-value" style="font-size:14px">₱${fmtN(totalOut)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Total Records</div><div class="kpi-value">${advances.length}</div></div>
+    </div>
+    <div id="ca-list"></div>
+  `;
+  renderCAList(advances, document.getElementById('ca-list'), true);
+}
+
+function renderCAList(advances, container, isAdmin) {
+  if (!advances.length) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">💸</div><h4>No cash advances yet</h4></div>';
+    return;
+  }
+  container.innerHTML = advances.map(a => {
+    const interest  = a.interest || 0;
+    const terms     = a.terms || 1;
+    const monthly   = a.monthlyPayment || 0;
+    const balance   = typeof a.balance !== 'undefined' ? a.balance : a.amount;
+    const paidAmt   = (a.amount||0) - (balance||0);
+    const pct       = a.amount ? Math.round((paidAmt/(a.amount||1))*100) : 0;
+    const statusBadgeClass = a.status==='approved'?'badge-green':a.status==='rejected'?'badge-red':a.status==='paid'?'badge-blue':'badge-orange';
+    return `
+    <div class="ca-card">
+      <div class="ca-card-header">
+        ${isAdmin?`<div class="ca-card-name">${a.userName||'Employee'} <span style="font-size:11px;color:var(--text-muted)">${a.employeeId||''}</span></div>`:''}
+        <div class="ca-amount">₱${fmtN(a.amount)}</div>
+        <span class="badge ${statusBadgeClass}">${a.status||'pending'}</span>
+      </div>
+      <div class="ca-card-body">
+        <div class="ca-detail"><span>Reason</span><span>${a.reason||'—'}</span></div>
+        <div class="ca-detail"><span>Terms</span><span>${terms} month${terms>1?'s':''} · ${interest}% interest/mo</span></div>
+        <div class="ca-detail"><span>Monthly Payment</span><span style="font-weight:700">₱${fmtN(monthly)}</span></div>
+        <div class="ca-detail"><span>Total Payable</span><span>₱${fmtN(monthly*terms)}</span></div>
+        ${a.status==='approved'&&a.amount?`
+        <div style="margin-top:10px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+            <span>Paid ₱${fmtN(paidAmt)}</span><span>Balance ₱${fmtN(balance||0)}</span>
+          </div>
+          <div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:${pct}%;background:var(--success)"></div></div>
+        </div>
+        `:''}
+        ${a.date?`<div class="ca-detail" style="margin-top:6px"><span>Date</span><span>${a.date}</span></div>`:''}
+      </div>
+      ${isAdmin&&a.status==='pending'?`
+      <div class="ca-card-actions">
+        <button class="btn-primary btn-sm ca-approve-btn" data-id="${a.id}">✓ Approve</button>
+        <button class="btn-secondary btn-sm ca-reject-btn" data-id="${a.id}" style="color:var(--danger)">✗ Reject</button>
+      </div>`:''}
+      ${isAdmin&&a.status==='approved'&&(a.balance||0)>0?`
+      <div class="ca-card-actions">
+        <button class="btn-secondary btn-sm ca-payment-btn" data-id="${a.id}">Record Payment</button>
+      </div>`:''}
+    </div>`;
+  }).join('');
+
+  container.querySelectorAll('.ca-approve-btn').forEach(btn => btn.addEventListener('click', async e => {
+    const id = e.target.dataset.id;
+    const snap = await db.collection('cash_advances').doc(id).get();
+    const a = snap.data();
+    await db.collection('cash_advances').doc(id).update({
+      status: 'approved',
+      approvedBy: currentUser.uid,
+      approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      balance: a.amount
+    });
+    await Notifs.send(a.userId, {title:'Cash Advance Approved', body:`Your ₱${fmtN(a.amount)} cash advance request was approved!`, icon:'✅', type:'cash_advance'});
+    Notifs.showToast('Approved!');
+    window.renderCashAdvancePage();
+  }));
+
+  container.querySelectorAll('.ca-reject-btn').forEach(btn => btn.addEventListener('click', async e => {
+    const id = e.target.dataset.id;
+    const snap = await db.collection('cash_advances').doc(id).get();
+    await db.collection('cash_advances').doc(id).update({status:'rejected'});
+    await Notifs.send(snap.data().userId, {title:'Cash Advance Rejected', body:'Your cash advance request was not approved.', icon:'❌', type:'cash_advance'});
+    Notifs.showToast('Rejected.');
+    window.renderCashAdvancePage();
+  }));
+
+  container.querySelectorAll('.ca-payment-btn').forEach(btn => btn.addEventListener('click', async e => {
+    const id = e.target.dataset.id;
+    const snap = await db.collection('cash_advances').doc(id).get();
+    const a = snap.data();
+    openModal('Record Payment', `
+      <div class="ca-detail" style="margin-bottom:14px"><span>Balance:</span><strong>₱${fmtN(a.balance||0)}</strong></div>
+      <div class="ca-detail" style="margin-bottom:14px"><span>Monthly due:</span><strong>₱${fmtN(a.monthlyPayment||0)}</strong></div>
+      <div class="form-group"><label>Amount Paid</label><input id="pay-amount" type="number" value="${a.monthlyPayment||0}" min="0" max="${a.balance||0}"/></div>
+      <div class="form-group"><label>Date</label><input id="pay-date" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
+    `, `<button class="btn-primary" id="save-payment-btn">Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    document.getElementById('save-payment-btn').addEventListener('click', async () => {
+      const paid = parseFloat(document.getElementById('pay-amount').value)||0;
+      const newBal = Math.max(0, (a.balance||0) - paid);
+      const payments = [...(a.payments||[]), {amount:paid, date:document.getElementById('pay-date').value, recordedBy:currentUser.uid}];
+      await db.collection('cash_advances').doc(id).update({
+        balance: newBal, payments,
+        status: newBal <= 0 ? 'paid' : 'approved'
+      });
+      closeModal(); Notifs.showToast('Payment recorded!');
+      window.renderCashAdvancePage();
+    });
+  }));
+}
+
+function openCashAdvanceModal() {
+  const RATE = 2; // 2% per month interest
+  openModal('Request Cash Advance', `
+    <div class="form-group"><label>Amount (max ₱50,000)</label>
+      <input id="ca-amt" type="number" min="100" max="50000" step="100" placeholder="0.00" oninput="updateCACalc()"/>
+    </div>
+    <div class="form-group"><label>Repayment Terms</label>
+      <select id="ca-terms" onchange="updateCACalc()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+        <option value="1">1 month (lump sum)</option>
+        <option value="2">2 months</option>
+        <option value="3" selected>3 months</option>
+        <option value="6">6 months</option>
+        <option value="12">12 months</option>
+      </select>
+    </div>
+    <div id="ca-calc" class="ca-calc-box" style="display:none"></div>
+    <div class="form-group"><label>Date Needed</label><input id="ca-date" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
+    <div class="form-group"><label>Reason / Purpose</label>
+      <textarea id="ca-reason" rows="3" placeholder="e.g., Medical emergency, school fees…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea>
+    </div>
+  `, `<button class="btn-primary" id="submit-ca-btn">Submit Request</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  window.updateCACalc = () => {
+    const amt   = parseFloat(document.getElementById('ca-amt')?.value)||0;
+    const terms = parseInt(document.getElementById('ca-terms')?.value)||1;
+    const calc  = document.getElementById('ca-calc');
+    if (!calc) return;
+    if (!amt) { calc.style.display='none'; return; }
+    const total   = amt * Math.pow(1 + RATE/100, terms);
+    const monthly = total / terms;
+    const interest= total - amt;
+    calc.style.display = 'block';
+    calc.innerHTML = `
+      <div class="ca-detail"><span>Principal</span><span>₱${fmtN(amt)}</span></div>
+      <div class="ca-detail"><span>Interest (${RATE}%/mo × ${terms}mo)</span><span style="color:var(--danger)">+₱${fmtN(interest)}</span></div>
+      <div class="ca-detail"><span>Total Payable</span><span style="font-weight:700">₱${fmtN(total)}</span></div>
+      <div class="ca-detail" style="border-top:1.5px solid var(--border);padding-top:8px;margin-top:4px">
+        <span>Monthly Payment</span><span style="font-weight:800;font-size:16px;color:var(--primary-light)">₱${fmtN(monthly)}</span>
+      </div>`;
+  };
+
+  document.getElementById('submit-ca-btn').addEventListener('click', async () => {
+    const amt  = parseFloat(document.getElementById('ca-amt').value)||0;
+    if (!amt||amt<100) { Notifs.showToast('Enter a valid amount (min ₱100).','error'); return; }
+    if (amt>50000)     { Notifs.showToast('Maximum cash advance is ₱50,000.','error'); return; }
+    const terms   = parseInt(document.getElementById('ca-terms').value)||1;
+    const total   = amt * Math.pow(1 + RATE/100, terms);
+    const monthly = total / terms;
+    const name    = userProfile.displayName || currentUser.email;
+    await db.collection('cash_advances').add({
+      userId:         currentUser.uid,
+      userName:       name,
+      employeeId:     userProfile.employeeId || currentUser.uid,
+      amount:         amt,
+      terms,
+      interest:       RATE,
+      totalPayable:   Math.round(total*100)/100,
+      monthlyPayment: Math.round(monthly*100)/100,
+      balance:        0,
+      date:           document.getElementById('ca-date').value,
+      reason:         document.getElementById('ca-reason').value.trim(),
+      status:         'pending',
+      payments:       [],
+      createdAt:      firebase.firestore.FieldValue.serverTimestamp()
+    });
+    await Notifs.sendToOwner({title:'Cash Advance Request', body:`${name} requests ₱${fmtN(amt)} (${terms}-month plan).`, icon:'💸', type:'cash_advance'});
+    closeModal();
+    Notifs.showToast('Request submitted! Waiting for approval.');
+    window.renderCashAdvancePage();
+  });
+}
+
+function fmtN(n) {
+  return Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+// ══════════════════════════════════════════════════
+//  COMPANY TAB — About Barro Industries OPC
+// ══════════════════════════════════════════════════
+
+window.renderCompanyOverviewNew = function(ct, canAdd) {
+  ct.innerHTML = `
+    <div class="company-hero">
+      <div class="company-logo-wrap">
+        <img src="icons/icon-192.png" alt="Barro Industries" class="company-hero-logo" onerror="this.style.display='none'"/>
+      </div>
+      <h1 class="company-hero-name">Barro Industries OPC</h1>
+      <p class="company-hero-tagline">One Person Corporation · SEC Registered</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:10px">
+        <span class="badge badge-blue">Manufacturing</span>
+        <span class="badge badge-purple">Design & Build</span>
+        <span class="badge badge-green">R&D (Coming Soon)</span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-header"><h3>🏢 About the Company</h3></div>
+      <div class="card-body">
+        <p style="font-size:14px;line-height:1.7;color:var(--text)">
+          <strong>Barro Industries OPC</strong> is a registered One Person Corporation in the Philippines. The company operates across multiple verticals under distinct trademarks, with its primary focus on manufacturing, design, and build services.
+        </p>
+        <p style="font-size:14px;line-height:1.7;color:var(--text);margin-top:10px">
+          Currently in active expansion, Barro Industries is building toward research and development, and plans to grow its trademark portfolio in the coming years.
+        </p>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-header"><h3>™ Trademarks & Brands</h3></div>
+      <div class="card-body">
+        <div class="trademark-card">
+          <div class="trademark-icon">🍳</div>
+          <div>
+            <div class="trademark-name">Barro Kitchens</div>
+            <div class="trademark-desc">Kitchen design and build · Manufacturing industry · One-stop shop for kitchen design, fabrication, and installation.</div>
+            <span class="badge badge-green" style="margin-top:6px;display:inline-block">Active</span>
+          </div>
+        </div>
+        <div class="trademark-card" style="opacity:0.6;margin-top:10px">
+          <div class="trademark-icon">🔬</div>
+          <div>
+            <div class="trademark-name">More trademarks coming soon</div>
+            <div class="trademark-desc">Barro Industries continues to expand its brand portfolio.</div>
+            <span class="badge badge-gray" style="margin-top:6px;display:inline-block">Upcoming</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px" id="president-message-card"></div>
+  `;
+  renderPresidentMessageCard();
+};
+
+async function renderPresidentMessageCard() {
+  const card = document.getElementById('president-message-card');
+  if (!card) return;
+  try {
+    const snap = await db.collection('users').where('role','==','president').limit(1).get();
+    if (snap.empty) { card.style.display='none'; return; }
+    const pres = snap.docs[0].data();
+    // Only show if this is the actual Neil Barro account
+    if (pres.email !== 'neilbarro870@gmail.com') { card.style.display='none'; return; }
+    const msg = await db.collection('president_message').doc('current').get();
+    const msgText = msg.exists ? msg.data().message : 'Welcome to Barro Industries. Together, we build something great.';
+    card.innerHTML = `
+      <div class="card-header">
+        <h3>Message from the President</h3>
+        ${isRealPresident() ? '<button class="btn-secondary btn-sm" id="edit-msg-btn">Edit</button>' : ''}
+      </div>
+      <div class="card-body">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+          <div style="width:54px;height:54px;border-radius:50%;overflow:hidden;background:var(--primary-light);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff">
+            ${pres.photoUrl?`<img src="${pres.photoUrl}" style="width:100%;height:100%;object-fit:cover"/>`:pres.displayName?.[0]||'N'}
+          </div>
+          <div>
+            <div style="font-weight:700;font-size:15px">${pres.displayName||'Neil Barro'}</div>
+            <div style="font-size:12px;color:var(--text-muted)">President, Barro Industries OPC</div>
+          </div>
+        </div>
+        <blockquote style="font-size:14px;line-height:1.8;color:var(--text);border-left:3px solid var(--primary-light);padding-left:14px;margin:0;font-style:italic">${msgText}</blockquote>
+      </div>`;
+    document.getElementById('edit-msg-btn')?.addEventListener('click', () => {
+      openModal('Edit President Message', `
+        <div class="form-group"><label>Message</label>
+          <textarea id="pres-msg-input" rows="6" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text);resize:vertical">${msgText}</textarea>
+        </div>
+      `, `<button class="btn-primary" id="save-pres-msg">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      document.getElementById('save-pres-msg').addEventListener('click', async () => {
+        await db.collection('president_message').doc('current').set({
+          message: document.getElementById('pres-msg-input').value.trim(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        closeModal(); Notifs.showToast('Message updated!');
+        renderPresidentMessageCard();
+      });
+    });
+  } catch(e) { card.style.display='none'; }
+}
+
+// ══════════════════════════════════════════════════
+//  NOTIFICATIONS HELPERS (sendToAll, send)
+// ══════════════════════════════════════════════════
+// Extend Notifs with missing methods if not present
+document.addEventListener('DOMContentLoaded', () => {
+  if (window.Notifs && !window.Notifs.send) {
+    window.Notifs.send = async function(toUid, payload) {
+      try {
+        await db.collection('notifications').doc(toUid).collection('items').add({
+          ...payload, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      } catch(e) { console.warn('Notif send error:', e); }
+    };
+  }
+  if (window.Notifs && !window.Notifs.sendToAll) {
+    window.Notifs.sendToAll = async function(payload) {
+      try {
+        const snap = await db.collection('users').get();
+        const batch = db.batch();
+        snap.docs.forEach(doc => {
+          const ref = db.collection('notifications').doc(doc.id).collection('items').doc();
+          batch.set(ref, {...payload, read:false, createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+        });
+        await batch.commit();
+      } catch(e) { console.warn('sendToAll error:', e); }
+    };
+  }
+});

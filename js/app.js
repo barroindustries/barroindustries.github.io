@@ -238,29 +238,38 @@ function getSidebarItems() {
 
   if (pres) {
     // ── Admin / President Command Center ──
-    items.push({ icon:'check-square',  label:'Tasks',            page:'tasks',      section:false });
-    items.push({ icon:'shield-check',  label:'Approvals',        page:'approvals',  section:true  });
-    items.push({ icon:'trending-up',   label:'Progress Reports', page:'progress'                  });
-    items.push({ icon:'users',         label:'Team & Payroll',   page:'team',       section:true  });
-    items.push({ icon:'credit-card',   label:'Finance View',     page:'personal-finance'          });
-    items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'               });
-    items.push({ icon:'bar-chart-2',   label:'Analytics',        page:'analytics',  section:true  });
-    items.push({ icon:'building-2',    label:'Company',          page:'company'                   });
-    items.push({ icon:'help-circle',   label:'Help & Setup',     page:'help',       section:true  });
+    items.push({ icon:'check-square',  label:'Tasks',            page:'tasks',           section:false });
+    items.push({ icon:'megaphone',     label:'Posts',            page:'posts'                          });
+    items.push({ icon:'shield-check',  label:'Approvals',        page:'approvals',       section:true  });
+    items.push({ icon:'trending-up',   label:'Progress Reports', page:'progress'                       });
+    items.push({ icon:'users',         label:'Team & Payroll',   page:'team',            section:true  });
+    items.push({ icon:'users',         label:'Team Directory',   page:'team-directory'                 });
+    items.push({ icon:'calendar',      label:'Attendance',       page:'attendance'                     });
+    items.push({ icon:'banknote',      label:'Cash Advances',    page:'cash-advances'                  });
+    items.push({ icon:'credit-card',   label:'Finance View',     page:'personal-finance'               });
+    items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'                    });
+    items.push({ icon:'bar-chart-2',   label:'Analytics',        page:'analytics',       section:true  });
+    items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
+    items.push({ icon:'help-circle',   label:'Help & Setup',     page:'help',            section:true  });
   } else if (bsOnly) {
-    // ── Partner — Brilliant Steel ──
+    // ── Partner — Brilliant Steel (ISOLATED) ──
     items.push({ icon:'calculator',  label:'Quote Builder', page:'bs-quote-builder' });
     items.push({ icon:'file-text',   label:'Quotations',    page:'bs-quotations'    });
     items.push({ icon:'book-open',   label:'Client Data',   page:'bs-clients'       });
-    items.push({ icon:'folder',      label:'Files',         page:'files'            });
+    items.push({ icon:'folder',      label:'Files',         page:'bs-files'         });
     items.push({ icon:'help-circle', label:'Help / Guide',  page:'help'             });
   } else {
-    // ── Employee Personal ──
+    // ── Employee / Agent / Finance ──
     items.push({ icon:'check-square', label:'My Tasks',         page:'tasks',             section:false });
-    items.push({ icon:'credit-card',  label:'Personal Finance', page:'personal-finance',  section:true  });
-    items.push({ icon:'banknote',     label:'Cash & Expenses',  page:'cash'                            });
-    items.push({ icon:'folder',       label:'Files',            page:'files'                           });
-    items.push({ icon:'building-2',   label:'Company',          page:'company',           section:true  });
+    items.push({ icon:'megaphone',    label:'Posts',            page:'posts'                            });
+    items.push({ icon:'users',        label:'Team',             page:'team-directory',    section:true  });
+    items.push({ icon:'calendar',     label:'Attendance',       page:'attendance'                       });
+    items.push({ icon:'credit-card',  label:'Personal Finance', page:'personal-finance'                 });
+    items.push({ icon:'banknote',     label:'Cash Advance',     page:'cash-advances'                    });
+    items.push({ icon:'folder',       label:'Files',            page:'files'                            });
+    if (currentRole !== 'agent') {
+      items.push({ icon:'building-2', label:'Company', page:'company', section:true });
+    }
     currentDepts.forEach(dept => {
       const cfg = DEPARTMENTS[dept];
       if (cfg) items.push({ icon: cfg.icon, label: dept, page: `dept:${dept}`, section: true });
@@ -364,7 +373,13 @@ function navigateTo(page) {
     case 'bs-quote-builder': renderBrilliantSteel(currentUser, currentRole, 'Quote Builder'); break;
     case 'bs-quotations':    renderBrilliantSteel(currentUser, currentRole, 'Quotations Summary'); break;
     case 'bs-clients':       renderBrilliantSteel(currentUser, currentRole, 'Client Data'); break;
+    case 'bs-files':         renderBrilliantSteel(currentUser, currentRole, 'Files'); break;
     case 'help':             renderHelp(); break;
+    // ── New modules ──
+    case 'posts':            window.renderPosts?.(); break;
+    case 'team-directory':   window.renderTeamTab?.(); break;
+    case 'attendance':       window.renderAttendancePage?.(); break;
+    case 'cash-advances':    window.renderCashAdvancePage?.(); break;
     default: c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><h4>Page not found</h4></div>`;
   }
 }
@@ -1297,30 +1312,26 @@ async function renderCompany() {
   const c = document.getElementById('page-content');
   const canAdd = isPresident();
   c.innerHTML = `
-    <div class="page-header">
-      <h2>🏢 Company</h2>
-    </div>
-    <div class="tab-bar" id="company-tabs">
-      <button class="tab-btn active" data-tab="overview">Overview</button>
-      <button class="tab-btn" data-tab="memos">Memos</button>
-      <button class="tab-btn" data-tab="policies">Policies</button>
-      <button class="tab-btn" data-tab="downloads">Downloads</button>
-      <button class="tab-btn" data-tab="handbook">Handbook</button>
+    <div class="page-header"><h2>🏢 Company</h2></div>
+    <div class="subtab-bar" id="company-tabs" style="flex-wrap:wrap">
+      <button class="subtab-btn active" data-tab="overview">Overview</button>
+      <button class="subtab-btn" data-tab="memos">Memos</button>
+      <button class="subtab-btn" data-tab="policies">Policies</button>
+      <button class="subtab-btn" data-tab="downloads">Downloads</button>
+      <button class="subtab-btn" data-tab="handbook">Handbook</button>
     </div>
     <div id="company-tab-content"></div>
   `;
-
   function switchCompanyTab(tab) {
-    c.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+    c.querySelectorAll('.subtab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
     const ct = document.getElementById('company-tab-content');
-    if (tab==='overview')   renderCompanyOverview(ct, canAdd);
-    else if (tab==='memos')     renderCompanyMemos(ct, canAdd);
-    else if (tab==='policies')  renderCompanyPolicies(ct, canAdd);
-    else if (tab==='downloads') renderCompanyDownloads(ct, canAdd);
-    else if (tab==='handbook')  renderCompanyHandbook(ct, canAdd);
+    if (tab==='overview')        window.renderCompanyOverviewNew?.(ct, canAdd) || renderCompanyOverview(ct, canAdd);
+    else if (tab==='memos')      renderCompanyMemos(ct, canAdd);
+    else if (tab==='policies')   renderCompanyPolicies(ct, canAdd);
+    else if (tab==='downloads')  renderCompanyDownloads(ct, canAdd);
+    else if (tab==='handbook')   renderCompanyHandbook(ct, canAdd);
   }
-
-  c.querySelectorAll('.tab-btn').forEach(b=>b.addEventListener('click',()=>switchCompanyTab(b.dataset.tab)));
+  c.querySelectorAll('.subtab-btn').forEach(b=>b.addEventListener('click',()=>switchCompanyTab(b.dataset.tab)));
   switchCompanyTab('overview');
 }
 

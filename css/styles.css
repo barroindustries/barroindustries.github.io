@@ -1676,6 +1676,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .drawer.open { transform: translateX(0); }
 .drawer-header {
   padding: 12px 16px; border-bottom: 1px solid var(--border);
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
   display: flex; align-items: center; justify-content: space-between;
   background: rgba(255,255,255,0.02);
   gap: 8px;
@@ -2106,3 +2107,150 @@ html.light .topbar-brand {
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
 html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
+
+/* ══════════════════════════════════════════════
+   NEW MODULES — Posts, Team, Attendance,
+                 Cash Advance, Finance, Company
+══════════════════════════════════════════════ */
+
+/* ── Posts ─────────────────────────────────── */
+.post-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 16px; margin-bottom: 14px;
+  transition: box-shadow var(--t1);
+}
+.post-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,.12); }
+.post-header { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.post-avatar {
+  width:38px; height:38px; border-radius:50%;
+  background:var(--primary-light); display:flex; align-items:center;
+  justify-content:center; font-weight:700; color:#fff; font-size:15px;
+  overflow:hidden; flex-shrink:0;
+}
+.post-avatar img { width:100%; height:100%; object-fit:cover; }
+.post-meta { flex:1; }
+.post-author { font-weight:700; font-size:14px; color:var(--text); }
+.post-time { font-size:11px; color:var(--text-muted); }
+.post-title { font-size:16px; font-weight:700; color:var(--text); margin-bottom:8px; }
+.post-body { font-size:14px; color:var(--text); line-height:1.6; white-space:pre-wrap; margin-bottom:10px; }
+.post-image { width:100%; max-height:320px; object-fit:cover; border-radius:10px; cursor:pointer; margin-bottom:10px; }
+.post-attachment { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; background:var(--s1); border:1px solid var(--border); border-radius:8px; font-size:13px; color:var(--primary-light); text-decoration:none; margin-bottom:10px; }
+.post-actions { display:flex; gap:8px; padding-top:10px; border-top:1px solid var(--border); flex-wrap:wrap; }
+
+/* ── Team Cards ─────────────────────────────── */
+.team-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 14px;
+}
+.team-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 16px; text-align: center;
+  transition: transform var(--t1), box-shadow var(--t1);
+}
+.team-card:hover { transform:translateY(-2px); box-shadow:0 6px 24px rgba(0,0,0,.12); }
+.team-card-avatar {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: var(--primary-light); margin: 0 auto 10px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:24px; font-weight:700; color:#fff; overflow:hidden;
+}
+.team-card-avatar img { width:100%; height:100%; object-fit:cover; }
+.team-card-name { font-size:14px; font-weight:700; color:var(--text); margin-bottom:4px; }
+.team-card-dept { font-size:11px; color:var(--text-muted); margin-top:4px; }
+.team-card-id { font-size:10px; color:var(--text-muted); font-family:monospace; margin-top:2px; }
+
+/* ── Attendance Calendar ────────────────────── */
+.att-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.att-cal-hdr {
+  text-align:center; font-size:11px; font-weight:700;
+  color:var(--text-muted); padding:6px 0;
+}
+.att-cal-day {
+  border-radius: 8px; padding: 6px 4px; text-align:center;
+  min-height: 52px; font-size:13px; position:relative;
+  background: var(--surface); border:1px solid var(--border);
+  display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+  gap:2px;
+}
+.att-day-num { font-size:12px; font-weight:600; color:var(--text); }
+.att-mark { font-size:14px; font-weight:800; }
+.att-present { background:rgba(48,209,88,.12); border-color:rgba(48,209,88,.3); }
+.att-present .att-mark { color:#30d158; }
+.att-half { background:rgba(255,170,0,.12); border-color:rgba(255,170,0,.3); }
+.att-half .att-mark { color:#ffaa00; }
+.att-absent { background:rgba(255,69,58,.10); border-color:rgba(255,69,58,.25); }
+.att-absent .att-mark { color:#ff453a; }
+.att-weekend { background:var(--s1); opacity:0.5; }
+.att-future { background:var(--s1); opacity:0.7; }
+.att-today { outline:2px solid var(--primary-light); outline-offset:1px; }
+.att-edit-btn {
+  display:none; position:absolute; bottom:3px; right:3px;
+  font-size:11px; cursor:pointer; color:var(--text-muted);
+  background:var(--s2); border-radius:4px; padding:1px 4px;
+}
+.att-cal-day:hover .att-edit-btn { display:block; }
+.att-dot {
+  display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px;
+}
+.att-present.att-dot, .att-dot.att-present { background:#30d158; }
+.att-half.att-dot, .att-dot.att-half { background:#ffaa00; }
+.att-absent.att-dot, .att-dot.att-absent { background:#ff453a; }
+.att-holiday.att-dot { background:var(--s2); border:1px solid var(--border); }
+
+/* ── Cash Advance Cards ─────────────────────── */
+.ca-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 14px; padding: 16px; margin-bottom: 14px;
+}
+.ca-card-header { display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+.ca-card-name { flex:1; font-weight:600; font-size:14px; }
+.ca-amount { font-size:22px; font-weight:800; color:var(--text); }
+.ca-card-body { display:flex; flex-direction:column; gap:6px; }
+.ca-detail { display:flex; justify-content:space-between; font-size:13px; color:var(--text); }
+.ca-detail span:first-child { color:var(--text-muted); }
+.ca-card-actions { display:flex; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }
+.ca-calc-box {
+  background:var(--s2); border:1.5px solid var(--border);
+  border-radius:10px; padding:12px 14px; margin-bottom:8px;
+  display:flex; flex-direction:column; gap:6px;
+}
+
+/* ── Company Overview ───────────────────────── */
+.company-hero {
+  text-align:center; padding:28px 20px 20px;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:16px; margin-bottom:16px;
+}
+.company-hero-logo { width:80px; height:80px; border-radius:50%; object-fit:cover; margin-bottom:12px; }
+.company-hero-name { font-size:22px; font-weight:800; color:var(--text); margin:0 0 4px; }
+.company-hero-tagline { font-size:13px; color:var(--text-muted); margin:0; }
+.trademark-card { display:flex; align-items:flex-start; gap:14px; }
+.trademark-icon { font-size:28px; flex-shrink:0; }
+.trademark-name { font-weight:700; font-size:15px; color:var(--text); margin-bottom:4px; }
+.trademark-desc { font-size:13px; color:var(--text-muted); line-height:1.5; }
+
+/* ── Subtab bar wrapping ────────────────────── */
+.subtab-bar { flex-wrap: wrap; }
+
+/* ── Payroll table photo ────────────────────── */
+.payroll-photo { width:32px; height:32px; border-radius:50%; object-fit:cover; }
+
+
+/* ── BK Quote Builder ───────────────────────────── */
+.bk-line-row input[type="text"],
+.bk-line-row input[type="number"],
+.bk-line-row select { box-sizing: border-box; }
+
+/* ── Stat cards (quotations summary) ──────────────── */
+.stat-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px; text-align: center;
+}
+.stat-num  { font-size: 22px; font-weight: 800; color: var(--text); }
+.stat-label{ font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+

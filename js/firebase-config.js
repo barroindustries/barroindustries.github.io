@@ -20,3 +20,6 @@ firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db   = firebase.firestore();
 const storage = firebase.storage();
+
+// Sign out when app/tab is closed (session-only login)
+auth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
