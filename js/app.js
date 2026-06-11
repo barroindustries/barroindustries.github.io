@@ -545,7 +545,7 @@ function renderIDCard(containerId, u) {
         </div>
         <div class="id-card-info">
           <div class="id-card-name">${u.displayName||u.email}</div>
-          <div class="id-card-title">${u.title||ROLES[u.role]?.label||'Employee'}</div>
+          <div class="id-card-title">${(u.title&&u.title!==u.role?u.title:null)||ROLES[u.role]?.label||u.role||'Employee'}</div>
           <div class="id-card-detail"><span>🗂</span><strong>${Array.isArray(u.departments)&&u.departments.length?u.departments.join(', '):(u.department||'—')}</strong></div>
           <div class="id-card-detail"><span>✉️</span>${u.email}</div>
           ${u.startDate?`<div class="id-card-detail"><span>📅</span>Since ${u.startDate}</div>`:''}

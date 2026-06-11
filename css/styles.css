@@ -517,12 +517,46 @@ body::after {
 .menu-toggle:hover { background: var(--s2); color: var(--text); }
 
 .topbar-logo { display: flex; align-items: center; gap: 10px; flex: 1; }
-.topbar-logo-img { width: 30px; height: 30px; object-fit: contain; border-radius: 8px; }
+
+/* ID-card-style logo pill */
+.topbar-logo-card {
+  position: relative; overflow: hidden;
+  width: 34px; height: 34px; flex-shrink: 0;
+  background: linear-gradient(140deg, #0A0A1A 0%, #131330 60%, #1A0A2E 100%);
+  border: 1px solid rgba(255,214,10,0.35);
+  border-radius: 9px;
+  box-shadow: 0 0 10px rgba(255,214,10,0.18), inset 0 1px 0 rgba(255,255,255,0.06);
+  display: flex; align-items: center; justify-content: center;
+  padding: 3px;
+}
+/* gold shine sweep */
+.topbar-logo-card::after {
+  content: '';
+  position: absolute; top: -2px; left: -120%; width: 70%; height: calc(100% + 4px);
+  background: linear-gradient(90deg, transparent, rgba(255,214,10,0.15), transparent);
+  transform: skewX(-15deg);
+  animation: goldShine 4s ease-in-out infinite;
+}
+.topbar-logo-img { width: 100%; height: 100%; object-fit: contain; border-radius: 6px; }
+.topbar-logo-fallback {
+  width: 100%; height: 100%; border-radius: 6px;
+  background: var(--grad-pk-bl);
+  color: #fff; font-size: 11px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* brand text — matches id-card-company */
+.topbar-brand-wrap { display: flex; flex-direction: column; gap: 1px; }
 .topbar-brand {
-  font-size: 14px; font-weight: 800; letter-spacing: 0.3px;
+  font-size: 13px; font-weight: 800; letter-spacing: 0.5px; line-height: 1;
   background: linear-gradient(90deg, #FFFFFF 0%, rgba(255,214,10,0.85) 100%);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   background-clip: text;
+}
+.topbar-brand-sub {
+  font-size: 8px; font-weight: 600; letter-spacing: 2px;
+  color: rgba(255,255,255,0.38); line-height: 1;
+  text-transform: uppercase;
 }
 .topbar-right { display: flex; align-items: center; gap: 6px; }
 
@@ -601,7 +635,8 @@ body::after {
   border-right: 1px solid rgba(255,255,255,0.07);
   position: fixed; top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px)); bottom: 0; left: 0;
   z-index: 90; display: flex; flex-direction: column;
-  overflow-y: auto; overflow-x: hidden;
+  overflow-y: scroll; overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
   transition: transform var(--t3) var(--ease);
   scrollbar-width: none;
 }
@@ -956,7 +991,7 @@ body::after {
   background: linear-gradient(90deg, #fff, rgba(255,214,10,0.80));
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
-.id-card-title { font-size: 11px; opacity: 0.60; margin-bottom: 10px; }
+.id-card-title { font-size: 11px; opacity: 0.60; margin-bottom: 10px; text-transform: capitalize; letter-spacing: 0.3px; }
 .id-card-detail { font-size: 11px; opacity: 0.58; display: flex; gap: 6px; margin-bottom: 4px; line-height: 1.4; }
 .id-card-detail strong { opacity: 1; font-weight: 600; }
 .id-card-footer {
@@ -1319,7 +1354,7 @@ body::after {
   .form-row { grid-template-columns: 1fr; }
   .line-item-row     { grid-template-columns: 2fr 55px 80px 32px; }
   .line-items-header { grid-template-columns: 2fr 55px 80px 32px; }
-  .topbar-brand { display: none; }
+  .topbar-brand-wrap { display: none; }
   .notif-panel { right: 0; left: 0; width: auto; border-radius: 0 0 var(--r-lg) var(--r-lg); top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px)); }
   .modal-box { max-height: 94dvh; border-radius: var(--r-lg) var(--r-lg) 0 0; align-self: flex-end; margin-bottom: 0; margin-top: auto; }
   .page-header h2 { font-size: 19px; }
@@ -1562,3 +1597,15 @@ html.light ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.24); }
 
 /* Prevent double-scale for Lucide bn-icons on active */
 .bottom-nav-item.active .bn-icon:not(.emoji-icon) { transform: none; }
+
+/* Light mode topbar logo card */
+html.light .topbar-logo-card {
+  background: linear-gradient(140deg, #1A1A2E 0%, #16213E 60%, #0F3460 100%);
+  border-color: rgba(255,214,10,0.40);
+  box-shadow: 0 0 10px rgba(255,214,10,0.14), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+html.light .topbar-brand {
+  background: linear-gradient(90deg, #1D1D1F 0%, #6B3F00 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }

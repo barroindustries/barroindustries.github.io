@@ -76,8 +76,14 @@
   <header class="topbar" id="topbar">
     <button class="menu-toggle" id="menu-toggle">☰</button>
     <div class="topbar-logo">
-      <img src="icons/barro-logo.png" alt="BI" class="topbar-logo-img" onerror="this.style.display='none'"/>
-      <span class="topbar-brand">Barro Industries</span>
+      <div class="topbar-logo-card">
+        <img src="icons/barro-logo.png" alt="BI" class="topbar-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"/>
+        <div class="topbar-logo-fallback" style="display:none">BI</div>
+      </div>
+      <div class="topbar-brand-wrap">
+        <span class="topbar-brand">BARRO INDUSTRIES</span>
+        <span class="topbar-brand-sub">OPERATIONS</span>
+      </div>
     </div>
     <div class="topbar-right">
       <button class="theme-toggle-btn" id="theme-toggle-btn" title="Toggle light/dark mode" onclick="toggleTheme()">
