@@ -1002,38 +1002,109 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       <div class="card-header"><h3>Payroll History</h3></div>
       <div class="card-body" style="padding:0">
         ${!history.length?'<div class="empty-state" style="padding:20px"><p>No payroll records yet.</p></div>':
-          `<div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Month</th><th>Employee</th><th>Base</th><th>Net Pay</th><th>Final Pay</th></tr></thead>
-            <tbody>${history.slice(0,30).map(h=>`<tr>
+          `<div class="table-wrap"><table class="data-table" id="payroll-history-table">
+            <thead><tr><th>Month</th><th>Employee</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net Pay</th><th>Final Pay</th>${isRealPresident(currentUser)?'<th></th>':''}</tr></thead>
+            <tbody>${history.slice(0,50).map(h=>`<tr>
               <td>${h.month||'—'}</td>
               <td>${h.userName||'—'}</td>
               <td>₱${fmt(h.salary)}</td>
+              <td style="color:var(--success)">+₱${fmt(h.allowance)}</td>
+              <td style="color:var(--danger)">-₱${fmt(h.deductions)}</td>
               <td>₱${fmt(h.netPay)}</td>
               <td><strong>₱${fmt(h.finalPay)}</strong></td>
+              ${isRealPresident(currentUser)?`<td><button class="btn-secondary btn-sm hist-edit-btn" data-id="${h.id}" title="Edit">✎</button></td>`:''}
             </tr>`).join('')}</tbody>
           </table></div>`}
       </div>
     </div>
   `;
 
+  // ── History edit (president only) ───────────────
+  if (isRealPresident(currentUser)) {
+    container.querySelectorAll('.hist-edit-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const hid = btn.dataset.id;
+        const rec = history.find(h => h.id === hid);
+        if (!rec) return;
+        openModal(`Edit Payroll Record — ${rec.userName||'?'} (${rec.month||'?'})`, `
+          <div class="form-row">
+            <div class="form-group"><label>Base Salary</label><input id="hpe-salary" type="number" value="${rec.salary||0}"/></div>
+            <div class="form-group"><label>Allowance</label><input id="hpe-allow" type="number" value="${rec.allowance||0}"/></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Deductions</label><input id="hpe-deduct" type="number" value="${rec.deductions||0}"/></div>
+            <div class="form-group"><label>Net Pay</label><input id="hpe-net" type="number" value="${rec.netPay||0}"/></div>
+          </div>
+          <div class="form-group"><label>Final Pay</label><input id="hpe-final" type="number" value="${rec.finalPay||0}"/></div>
+          <div class="form-group"><label>Notes (optional)</label><input id="hpe-notes" type="text" value="${rec.notes||''}" placeholder="e.g. 13th month included"/></div>
+        `, `<button class="btn-primary" id="save-hpe-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+        document.getElementById('save-hpe-btn').addEventListener('click', async () => {
+          const salary    = parseFloat(document.getElementById('hpe-salary').value)||0;
+          const allowance = parseFloat(document.getElementById('hpe-allow').value)||0;
+          const deductions= parseFloat(document.getElementById('hpe-deduct').value)||0;
+          const netPay    = parseFloat(document.getElementById('hpe-net').value)||0;
+          const finalPay  = parseFloat(document.getElementById('hpe-final').value)||0;
+          const notes     = document.getElementById('hpe-notes').value.trim();
+          await db.collection('salary_history').doc(hid).update({
+            salary, allowance, deductions, netPay, finalPay,
+            ...(notes ? { notes } : {}),
+            editedBy: currentUser.uid,
+            editedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          closeModal();
+          Notifs.showToast('Payroll record updated!');
+          loadFinanceContent(currentUser, currentRole, 'Payroll');
+        });
+      });
+    });
+  }
+
+  // Shared state for gen-payroll to use after loadPayrollTable runs
+  let _caByUser = {}, _caDocsByUser = {}, _caOverrideByUser = {};
+
   async function loadPayrollTable(month) {
     const tbody = document.getElementById('payroll-tbody');
     tbody.innerHTML = '<tr><td colspan="14" style="text-align:center;padding:20px">Loading…</td></tr>';
-    const caSnap = await db.collection('cash_advances').where('status','==','approved').get().catch(()=>({docs:[]}));
-    const caByUser = {};
-    caSnap.docs.forEach(d=>{ const a=d.data(); caByUser[a.userId]=(caByUser[a.userId]||0)+(a.balance||0); });
+
+    const [caSnap, overrideSnap] = await Promise.all([
+      db.collection('cash_advances').where('status','==','approved').get().catch(()=>({docs:[]})),
+      db.collection('payroll_ca_overrides').where('month','==',month).get().catch(()=>({docs:[]}))
+    ]);
+
+    // Build CA totals + per-doc list per user
+    _caByUser = {}; _caDocsByUser = {};
+    caSnap.docs.forEach(d => {
+      const a = d.data();
+      _caByUser[a.userId] = (_caByUser[a.userId]||0) + (a.balance||0);
+      (_caDocsByUser[a.userId] = _caDocsByUser[a.userId]||[]).push({id:d.id,...a});
+    });
+
+    // Build override map: userId → { amount, docId }
+    _caOverrideByUser = {};
+    overrideSnap.docs.forEach(d => {
+      const o = d.data();
+      _caOverrideByUser[o.userId] = { amount: o.amount, docId: d.id };
+    });
+
     tbody.innerHTML = employees.map(u => {
-      const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';
-      const base  = u.salary||0;
-      const allow = u.allowance||0;
-      const gross = base + allow;
-      const sss   = u.sss || Math.min(1125, Math.round(gross*0.045));
-      const ph    = u.philhealth || Math.round(gross*0.05);
-      const pagibig = u.pagibig || 100;
-      const tax   = u.tax || 0;
-      const caAdv = caByUser[u.id]||0;
-      const deduct= (u.deductions||0) + sss + ph + pagibig + tax;
-      const net   = gross - deduct - caAdv;
+      const depts    = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';
+      const base     = u.salary||0;
+      const allow    = u.allowance||0;
+      const gross    = base + allow;
+      const sss      = u.sss || Math.min(1125, Math.round(gross*0.045));
+      const ph       = u.philhealth || Math.round(gross*0.05);
+      const pagibig  = u.pagibig || 100;
+      const tax      = u.tax || 0;
+      const caBalance= _caByUser[u.id]||0;
+      const hasOverride = _caOverrideByUser[u.id] !== undefined;
+      const caAdv    = hasOverride ? _caOverrideByUser[u.id].amount : caBalance;
+      const deduct   = (u.deductions||0) + sss + ph + pagibig + tax;
+      const net      = gross - deduct - caAdv;
+      const caCell   = caBalance > 0
+        ? `<div style="color:var(--danger);white-space:nowrap">-₱${fmt(caAdv)}${hasOverride?` <span style="font-size:10px;background:var(--primary-light);color:#fff;border-radius:4px;padding:1px 5px">custom</span>`:''}</div>
+           <div style="font-size:10px;color:var(--text-muted)">bal ₱${fmt(caBalance)}</div>`
+        : '<span style="color:var(--text-muted)">—</span>';
       return `<tr>
         <td style="text-align:center">
           <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:14px;margin:0 auto">
@@ -1050,10 +1121,14 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         <td style="color:var(--danger)">-₱${fmt(ph)}</td>
         <td style="color:var(--danger)">-₱${fmt(pagibig)}</td>
         <td style="color:var(--danger)">-₱${fmt(tax)}</td>
-        <td style="color:var(--danger)">${caAdv>0?`-₱${fmt(caAdv)}`:'-'}</td>
+        <td>${caCell}</td>
         <td><strong style="color:${net>=0?'var(--success)':'var(--danger)'}">₱${fmt(net)}</strong></td>
         <td>
-          <button class="btn-secondary btn-sm edit-emp-pay-btn" data-uid="${u.id}" title="Edit">✎</button>
+          <button class="btn-secondary btn-sm edit-emp-pay-btn"
+            data-uid="${u.id}"
+            data-ca-balance="${caBalance}"
+            data-ca-override="${hasOverride ? _caOverrideByUser[u.id].amount : ''}"
+            title="Edit">✎</button>
           <button class="btn-secondary btn-sm print-slip-btn" data-uid="${u.id}" title="Payslip">🖨</button>
         </td>
       </tr>`;
@@ -1061,9 +1136,12 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 
     tbody.querySelectorAll('.edit-emp-pay-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        const uid = btn.dataset.uid;
-        const emp = employees.find(u=>u.id===uid);
+        const uid        = btn.dataset.uid;
+        const emp        = employees.find(u=>u.id===uid);
+        const caBalance  = parseFloat(btn.dataset.caBalance)||0;
+        const caOverride = btn.dataset.caOverride; // '' means no override
         if (!emp) return;
+
         openModal(`Edit Payroll — ${emp.displayName}`, `
           <div class="form-row">
             <div class="form-group"><label>Base Salary</label><input id="ep-salary" type="number" value="${emp.salary||0}"/></div>
@@ -1078,7 +1156,17 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             <div class="form-group"><label>Pag-IBIG</label><input id="ep-pi" type="number" value="${emp.pagibig||100}"/></div>
           </div>
           <div class="form-group"><label>Tax</label><input id="ep-tax" type="number" value="${emp.tax||0}"/></div>
+          ${caBalance > 0 ? `
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+            <label style="font-weight:600">💳 Cash Advance Deduction This Month</label>
+            <div style="font-size:12px;color:var(--text-muted);margin:4px 0 8px">Outstanding balance: <strong>₱${fmt(caBalance)}</strong></div>
+            <input id="ep-ca-deduct" type="number" min="0" max="${caBalance}" step="0.01"
+              value="${caOverride}"
+              placeholder="Leave blank = deduct full ₱${fmt(caBalance)}"/>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Enter a partial amount to defer the rest to next month. Clear field to revert to full balance.</div>
+          </div>` : ''}
         `, `<button class="btn-primary" id="save-ep-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
         document.getElementById('save-ep-btn').addEventListener('click', async () => {
           await db.collection('users').doc(uid).update({
             salary:     parseFloat(document.getElementById('ep-salary').value)||0,
@@ -1089,6 +1177,20 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             pagibig:    parseFloat(document.getElementById('ep-pi').value)||100,
             tax:        parseFloat(document.getElementById('ep-tax').value)||0,
           });
+
+          // Save / clear CA deduction override
+          if (caBalance > 0) {
+            const caInput = document.getElementById('ep-ca-deduct');
+            const rawVal  = caInput?.value.trim();
+            const overrideRef = db.collection('payroll_ca_overrides').doc(`${uid}_${month}`);
+            if (rawVal !== '' && rawVal !== null && rawVal !== undefined) {
+              const amount = Math.min(parseFloat(rawVal)||0, caBalance);
+              await overrideRef.set({ userId:uid, month, amount, setBy:currentUser.uid, setAt:firebase.firestore.FieldValue.serverTimestamp() });
+            } else {
+              await overrideRef.delete().catch(()=>{});
+            }
+          }
+
           closeModal(); Notifs.showToast('Payroll updated!');
           loadPayrollTable(month);
         });
@@ -1102,14 +1204,66 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   document.getElementById('gen-payroll-btn').addEventListener('click', async () => {
     const month = document.getElementById('pr-month-sel').value;
     if (!confirm(`Generate and save payroll for ${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}?`)) return;
+
+    // 1. Write salary_history
     const batch = db.batch();
     for (const u of employees) {
-      const base = u.salary||0; const allow = u.allowance||0;
-      const net  = base + allow - (u.deductions||0);
-      const ref  = db.collection('salary_history').doc(`${u.id}_${month}`);
-      batch.set(ref, {userId:u.id, userName:u.displayName||u.email, month, salary:base, allowance:allow, deductions:u.deductions||0, netPay:net, finalPay:net, recordedBy:currentUser.uid, recordedAt:firebase.firestore.FieldValue.serverTimestamp()}, {merge:true});
+      const base     = u.salary||0;
+      const allow    = u.allowance||0;
+      const caBalance= _caByUser[u.id]||0;
+      const hasOvr   = _caOverrideByUser[u.id] !== undefined;
+      const caAdv    = hasOvr ? _caOverrideByUser[u.id].amount : caBalance;
+      const gross    = base + allow;
+      const sss      = u.sss || Math.min(1125, Math.round(gross*0.045));
+      const ph       = u.philhealth || Math.round(gross*0.05);
+      const pagibig  = u.pagibig || 100;
+      const tax      = u.tax || 0;
+      const deduct   = (u.deductions||0) + sss + ph + pagibig + tax;
+      const net      = gross - deduct - caAdv;
+      const ref      = db.collection('salary_history').doc(`${u.id}_${month}`);
+      batch.set(ref, {
+        userId:u.id, userName:u.displayName||u.email, month,
+        salary:base, allowance:allow, deductions:u.deductions||0,
+        sss, philHealth:ph, pagIbig:pagibig, tax,
+        caDeducted:caAdv, netPay:net, finalPay:net,
+        recordedBy:currentUser.uid,
+        recordedAt:firebase.firestore.FieldValue.serverTimestamp()
+      }, {merge:true});
     }
     await batch.commit();
+
+    // 2. Apply CA deductions to actual cash_advance balances
+    for (const u of employees) {
+      const caBalance = _caByUser[u.id]||0;
+      if (caBalance <= 0) continue;
+      const hasOvr    = _caOverrideByUser[u.id] !== undefined;
+      const deductAmt = hasOvr ? _caOverrideByUser[u.id].amount : caBalance;
+      if (deductAmt <= 0) continue;
+
+      let remaining = deductAmt;
+      const caDocs  = _caDocsByUser[u.id] || [];
+      const caBatch = db.batch();
+      for (const caDoc of caDocs) {
+        if (remaining <= 0) break;
+        const docBal   = caDoc.balance||0;
+        const toDeduct = Math.min(docBal, remaining);
+        const newBal   = Math.max(0, docBal - toDeduct);
+        caBatch.update(db.collection('cash_advances').doc(caDoc.id), {
+          balance: newBal,
+          ...(newBal <= 0 ? { status:'paid', paidAt:firebase.firestore.FieldValue.serverTimestamp() } : {})
+        });
+        remaining -= toDeduct;
+      }
+      await caBatch.commit();
+
+      // Notify employee about CA deduction
+      await Notifs.send(u.id, {
+        title: '💳 Cash Advance Deducted from Payroll',
+        body: `₱${fmt(deductAmt)} was deducted from your ${month} payroll. Remaining CA balance: ₱${fmt(Math.max(0, caBalance-deductAmt))}.`,
+        icon: '💳', type: 'cash_advance'
+      });
+    }
+
     Notifs.showToast('Payroll generated!');
     loadFinanceContent(currentUser, currentRole, 'Payroll');
   });
