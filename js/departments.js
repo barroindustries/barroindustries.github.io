@@ -17,6 +17,7 @@ function statusBadge(s) { return {open:'badge-blue',done:'badge-green',pending:'
 // ══════════════════════════════════════════════════
 window.renderTasks = async function(currentUser, currentRole, currentDept) {
   const c = deptContainer();
+  const canManage = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
   c.innerHTML = `
     <div class="page-header">
       <h2>✅ Tasks</h2>
@@ -27,14 +28,17 @@ window.renderTasks = async function(currentUser, currentRole, currentDept) {
           <option value="open">Open</option>
           <option value="done">Done</option>
         </select>
+        ${canManage?`<button class="btn-secondary btn-sm" id="sync-clickup-btn" title="Import tasks from ClickUp">⚙️ Sync ClickUp</button>`:''}
         <button class="btn-primary btn-sm" id="add-task-btn">+ New Task</button>
       </div>
     </div>
+    <div id="sync-status" style="display:none;padding:10px 0;font-size:13px;color:var(--text-muted)"></div>
     <div id="tasks-list" class="item-list"><div class="loading-placeholder">Loading…</div></div>
   `;
   loadTasksList(currentUser, currentRole, currentDept);
   document.getElementById('task-filter').onchange = () => loadTasksList(currentUser, currentRole, currentDept);
   document.getElementById('add-task-btn').onclick  = () => openAddTaskModal(currentUser, currentRole);
+  document.getElementById('sync-clickup-btn')?.addEventListener('click', () => syncClickUpTasks(currentUser, currentRole, currentDept));
 };
 
 async function loadTasksList(currentUser, currentRole, currentDept) {
@@ -2199,3 +2203,145 @@ window.renderDocCollection = function(container, collection, title, currentUser,
     });
   });
 };
+
+// ══════════════════════════════════════════════════
+//  CLICKUP SYNC — Import all ClickUp tasks to Firestore
+// ══════════════════════════════════════════════════
+
+// Reverse map: ClickUp user ID → email
+const CU_ID_TO_EMAIL = Object.fromEntries(
+  Object.entries(window.CLICKUP_MEMBERS||{}).map(([email, id]) => [id, email])
+);
+
+// Status mapping ClickUp → app
+function cuStatus(s) {
+  if (!s) return 'open';
+  s = s.toLowerCase();
+  if (s === 'complete' || s === 'completed') return 'done';
+  if (s === 'in progress') return 'in progress';
+  if (s === 'on hold') return 'on hold';
+  if (s === 'revising') return 'in progress';
+  return 'open';
+}
+
+// Priority mapping ClickUp → app
+function cuPriority(p) {
+  if (!p) return 'medium';
+  const n = typeof p === 'object' ? p.priority : p;
+  if (n === 1 || n === 'urgent') return 'urgent';
+  if (n === 2 || n === 'high') return 'high';
+  if (n === 3 || n === 'normal') return 'medium';
+  if (n === 4 || n === 'low') return 'low';
+  return 'medium';
+}
+
+// Department from ClickUp list name
+function cuDept(listName) {
+  if (!listName) return '';
+  if (listName.includes('Finance'))  return 'Finance';
+  if (listName.includes('Marketing'))return 'Marketing';
+  if (listName.includes('Design'))   return 'Design';
+  if (listName.includes('Admin'))    return 'Admin';
+  return listName.replace(' List','');
+}
+
+async function syncClickUpTasks(currentUser, currentRole, currentDept) {
+  const statusEl = document.getElementById('sync-status');
+  const btn      = document.getElementById('sync-clickup-btn');
+  if (!window.CLICKUP_API_KEY || window.CLICKUP_API_KEY === 'YOUR_CLICKUP_API_KEY') {
+    Notifs.showToast('Set CLICKUP_API_KEY in config.js first', 'error');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Syncing…';
+  if (statusEl) { statusEl.style.display=''; statusEl.textContent = 'Fetching tasks from ClickUp…'; }
+
+  try {
+    const lists = Object.values(window.CLICKUP_LISTS||{});
+    let allTasks = [];
+
+    for (const listId of lists) {
+      const res = await fetch(
+        `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&subtasks=true`,
+        { headers: { Authorization: window.CLICKUP_API_KEY } }
+      );
+      if (!res.ok) continue;
+      const data = await res.json();
+      allTasks = allTasks.concat(data.tasks || []);
+    }
+
+    if (statusEl) statusEl.textContent = `Found ${allTasks.length} ClickUp tasks. Syncing to app…`;
+
+    // Check existing tasks in Firestore by clickupTaskId
+    const existingSnap = await db.collection('tasks').get();
+    const existingCuIds = new Set(
+      existingSnap.docs.map(d => d.data().clickupTaskId).filter(Boolean)
+    );
+
+    // Resolve Firestore UIDs by email
+    const usersSnap = await db.collection('users').get();
+    const emailToUid = {};
+    usersSnap.docs.forEach(d => {
+      const data = d.data();
+      if (data.email) emailToUid[data.email.toLowerCase()] = d.id;
+    });
+
+    let created = 0, skipped = 0;
+    const batch = db.batch();
+
+    for (const t of allTasks) {
+      if (existingCuIds.has(t.id)) { skipped++; continue; }
+
+      // Primary assignee (first one)
+      const primaryAssignee = t.assignees?.[0];
+      const assignedEmail   = primaryAssignee ? (CU_ID_TO_EMAIL[primaryAssignee.id] || '') : '';
+      const assignedTo      = assignedEmail ? (emailToUid[assignedEmail.toLowerCase()] || '') : '';
+      const assignedToName  = primaryAssignee?.username || '';
+
+      // All assignees
+      const allAssigneeEmails = (t.assignees||[]).map(a => CU_ID_TO_EMAIL[a.id] || '').filter(Boolean);
+      const allAssigneeNames  = (t.assignees||[]).map(a => a.username || '').filter(Boolean);
+
+      const dueDate = t.due_date ? new Date(parseInt(t.due_date)).toISOString().slice(0,10) : '';
+      const dept    = cuDept(t.list?.name);
+
+      const docRef = db.collection('tasks').doc();
+      batch.set(docRef, {
+        title:            t.name,
+        description:      t.description || '',
+        status:           cuStatus(t.status),
+        priority:         cuPriority(t.priority),
+        dueDate,
+        department:       dept,
+        assignedTo,
+        assignedToName,
+        assignedEmail,
+        allAssignees:     allAssigneeNames,
+        allAssigneeEmails,
+        clickupTaskId:    t.id,
+        clickupUrl:       t.url || '',
+        tags:             (t.tags||[]).map(tg=>tg.name),
+        source:           'clickup',
+        createdBy:        currentUser.uid,
+        createdByName:    'ClickUp Import',
+        createdAt:        firebase.firestore.FieldValue.serverTimestamp()
+      });
+      created++;
+    }
+
+    await batch.commit();
+
+    if (statusEl) statusEl.textContent = `✅ Synced! ${created} tasks imported, ${skipped} already existed.`;
+    btn.textContent = `✅ Synced (${created} new)`;
+    Notifs.showToast(`ClickUp sync complete — ${created} tasks imported!`);
+    loadTasksList(currentUser, currentRole, currentDept);
+
+  } catch(err) {
+    console.error('ClickUp sync error:', err);
+    if (statusEl) statusEl.textContent = `❌ Sync failed: ${err.message}`;
+    btn.textContent = '⚙️ Sync ClickUp';
+    btn.disabled = false;
+    Notifs.showToast('Sync failed: ' + err.message, 'error');
+  }
+}
