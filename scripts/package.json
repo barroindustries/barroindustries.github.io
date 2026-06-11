@@ -1,0 +1,14 @@
+{
+  "name": "bi-sync",
+  "version": "1.0.0",
+  "description": "Barro Industries — Firebase to Google Drive nightly sync",
+  "main": "sync-to-drive.js",
+  "scripts": {
+    "sync": "node sync-to-drive.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "googleapis": "^140.0.0",
+    "node-fetch": "^2.7.0"
+  }
+}
