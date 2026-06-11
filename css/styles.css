@@ -494,18 +494,85 @@ body::after {
   animation: gradRun 5s ease infinite;
   margin-bottom: 4px; letter-spacing: -0.4px;
 }
-.login-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 28px; }
+.login-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 20px; }
 .login-form { text-align: left; }
 .pw-wrap { position: relative; }
 .pw-wrap input { padding-right: 44px; }
 .pw-toggle {
-  position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
   background: none; border: none; cursor: pointer;
-  font-size: 15px; color: var(--text-muted); padding: 4px;
+  color: var(--text-muted); padding: 6px; display: flex; align-items: center;
   transition: color var(--t1);
 }
 .pw-toggle:hover { color: var(--text); }
+.pw-toggle svg { width: 16px; height: 16px; stroke: currentColor; }
 .login-version { margin-top: 20px; font-size: 11px; color: var(--text-light); }
+
+/* ── Login Role Picker ── */
+.login-pick-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.8px;
+  text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px;
+}
+.login-role-cards {
+  display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px;
+}
+.login-role-card {
+  display: flex; align-items: center; gap: 14px;
+  padding: 14px 16px;
+  background: var(--s1); border: 1px solid var(--border);
+  border-radius: var(--r); cursor: pointer; text-align: left;
+  transition: background var(--t2), border-color var(--t2), transform var(--t1), box-shadow var(--t2);
+  width: 100%;
+}
+.login-role-card:hover {
+  background: var(--s2); border-color: rgba(255,255,255,0.18);
+  transform: translateX(3px); box-shadow: var(--sh-sm);
+}
+.login-role-card:active { transform: scale(0.98); }
+.lrc-icon {
+  width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--s2);
+}
+.lrc-icon svg { width: 20px; height: 20px; stroke: var(--text-2); }
+.login-role-card[data-type="admin"] .lrc-icon { background: rgba(255,45,120,0.12); }
+.login-role-card[data-type="admin"] .lrc-icon svg { stroke: var(--pink); }
+.login-role-card[data-type="employee"] .lrc-icon { background: rgba(10,132,255,0.12); }
+.login-role-card[data-type="employee"] .lrc-icon svg { stroke: var(--blue); }
+.login-role-card[data-type="partner"] .lrc-icon { background: rgba(255,214,10,0.10); }
+.login-role-card[data-type="partner"] .lrc-icon svg { stroke: var(--gold); }
+.lrc-label {
+  font-size: 14px; font-weight: 700; color: var(--text);
+  display: block; line-height: 1.2;
+}
+.lrc-sub { font-size: 11px; color: var(--text-muted); display: block; margin-top: 2px; }
+
+/* ── Login Form Header (back + pill) ── */
+.login-form-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 18px;
+}
+.login-back-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; flex-shrink: 0;
+  background: var(--s1); border: 1px solid var(--border);
+  border-radius: 50%; cursor: pointer; color: var(--text-muted);
+  transition: background var(--t1), color var(--t1);
+}
+.login-back-btn:hover { background: var(--s2); color: var(--text); }
+.login-back-btn svg { width: 16px; height: 16px; stroke: currentColor; }
+.login-type-pill {
+  flex: 1; padding: 5px 14px; border-radius: var(--pill);
+  background: var(--s2); border: 1px solid var(--border);
+  font-size: 12px; font-weight: 700; color: var(--text-2);
+  letter-spacing: 0.3px; text-align: center;
+}
+@keyframes slideInFromLeft {
+  from { opacity: 0; transform: translateX(-16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.login-form-slide-in {
+  animation: slideInFromLeft 0.25s var(--ease) both;
+}
 
 /* ══════════════════════════════
    APP SHELL
@@ -905,6 +972,90 @@ body::after {
   color: var(--text); line-height: 1; letter-spacing: -0.5px;
 }
 .kpi-sub { font-size: 11px; color: var(--text-muted); margin-top: 5px; }
+.kpi-icon-wrap {
+  width: 32px; height: 32px; border-radius: 8px; margin-bottom: 10px;
+  display: flex; align-items: center; justify-content: center;
+}
+.kpi-icon-wrap svg { width: 18px; height: 18px; stroke: currentColor; }
+
+/* ── KPI Progress Bar ── */
+.kpi-bar-track {
+  height: 6px; border-radius: 3px; background: var(--s2); overflow: hidden;
+}
+.kpi-bar-fill {
+  height: 100%; border-radius: 3px; transition: width 0.8s var(--ease);
+  background: var(--primary);
+}
+
+/* ── Alert Banners ── */
+.alert-banner {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; border-radius: var(--r-sm); margin-bottom: 14px;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+  transition: opacity var(--t1), transform var(--t1);
+  border: 1px solid transparent;
+}
+.alert-banner:hover { opacity: 0.88; transform: translateX(2px); }
+.alert-banner:active { transform: scale(0.98); }
+.alert-danger {
+  background: rgba(255,69,58,0.12); border-color: rgba(255,69,58,0.25); color: #FF453A;
+}
+.alert-warn {
+  background: rgba(255,170,0,0.10); border-color: rgba(255,170,0,0.22); color: #FFAA00;
+}
+.alert-chevron { font-size: 18px; font-weight: 700; opacity: 0.7; }
+
+/* ── Task Feed ── */
+.task-feed-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 18px; border-bottom: 1px solid var(--border);
+  transition: background var(--t1); cursor: pointer;
+}
+.task-feed-item:last-child { border-bottom: none; }
+.task-feed-item:hover { background: var(--s2); }
+.task-feed-item.task-overdue { background: rgba(255,69,58,0.04); }
+.task-feed-item.task-overdue:hover { background: rgba(255,69,58,0.08); }
+.task-feed-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.priority-dot-high   { background: var(--danger); box-shadow: 0 0 6px rgba(255,69,58,0.5); }
+.priority-dot-medium { background: var(--gold-3); box-shadow: 0 0 6px rgba(255,170,0,0.4); }
+.priority-dot-low    { background: var(--success); }
+.task-feed-title {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.task-feed-meta {
+  font-size: 11px; color: var(--text-muted); margin-top: 2px;
+}
+
+/* ── Quick Action Buttons ── */
+.quick-action-btn {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 11px 14px; border-radius: var(--r-sm);
+  background: var(--s1); border: 1px solid var(--border); cursor: pointer;
+  font-size: 13px; font-weight: 600; color: var(--text-2);
+  transition: background var(--t1), color var(--t1), border-color var(--t1);
+  text-align: left; min-height: 44px;
+}
+.quick-action-btn:hover { background: var(--s2); color: var(--text); border-color: rgba(255,255,255,0.15); }
+.quick-action-btn:active { background: var(--s3); transform: scale(0.98); }
+.quick-action-btn svg { width: 16px; height: 16px; stroke: currentColor; flex-shrink: 0; }
+
+/* ── Payslip Rows ── */
+.payslip-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 0; border-bottom: 1px solid var(--border);
+  font-size: 13px; color: var(--text-2);
+}
+.payslip-row:last-child { border-bottom: none; }
+.payslip-row strong { color: var(--text); }
+
+/* ── Live Clock ── */
+.live-clock-line {
+  font-size: 12px; color: var(--text-muted); font-weight: 600;
+  margin: -12px 0 16px; letter-spacing: 0.2px;
+}
 
 /* ── Cards ── */
 .card {
@@ -1387,7 +1538,7 @@ body::after {
   .menu-toggle { display: block; }
   .main-content {
     margin-left: 0; padding: 14px;
-    padding-bottom: calc(var(--bottom-nav-h) + 14px + env(safe-area-inset-bottom, 0));
+    padding-bottom: calc(var(--bottom-nav-h) + 16px + env(safe-area-inset-bottom, 0px));
   }
   .bottom-nav { display: flex; }
   .dashboard-grid { grid-template-columns: 1fr; }
@@ -1399,13 +1550,45 @@ body::after {
   .notif-panel { right: 0; left: 0; width: auto; border-radius: 0 0 var(--r-lg) var(--r-lg); top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px)); }
   .modal-box { max-height: 94dvh; border-radius: var(--r-lg) var(--r-lg) 0 0; align-self: flex-end; margin-bottom: 0; margin-top: auto; }
   .page-header h2 { font-size: 19px; }
+  /* 44px minimum tap targets */
+  .btn-primary, .btn-secondary, .btn-danger { min-height: 44px; }
+  .bottom-nav-item { min-height: 44px; }
+  .notif-btn, .theme-toggle-btn { min-width: 44px; min-height: 44px; }
+  .modal-close { min-width: 44px; min-height: 44px; }
+  /* Table scroll on mobile */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* Modal body scroll */
+  .modal-body { overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  /* Card body safe scroll */
+  .card-body { overflow-anchor: none; }
+  /* Alert banners full width */
+  .alert-banner { font-size: 12px; padding: 10px 14px; }
+  /* Task feed compact */
+  .task-feed-item { padding: 10px 14px; }
+  .task-feed-title { font-size: 12px; }
 }
 
 @media (max-width: 420px) {
-  .login-container { padding: 28px 18px 22px; }
-  .kpi-value { font-size: 22px; }
-  .bottom-nav-item .bn-label { display: none; }
-  .bottom-nav-item { padding: 8px 4px; }
+  .login-container { padding: 24px 16px 20px; }
+  .kpi-value { font-size: 20px; }
+  .kpi-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .kpi-card { padding: 14px 12px; }
+  .bottom-nav-item .bn-label { font-size: 9px; }
+  .page-header { flex-wrap: wrap; gap: 8px; }
+  .page-header h2 { font-size: 17px; }
+  .card-header h3 { font-size: 13px; }
+  .login-role-cards { gap: 8px; }
+  .login-role-card { padding: 12px 14px; }
+  .lrc-icon { width: 36px; height: 36px; }
+  .lrc-icon svg { width: 18px; height: 18px; }
+}
+
+/* Android-specific font rendering */
+@media (max-width: 768px) {
+  body {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
 }
 
 /* ══════════════════════════════
@@ -1573,6 +1756,34 @@ html.light .badge-purple { color: #5C34B0; }
 /* scrollbar */
 html.light ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.14); }
 html.light ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.24); }
+
+/* login role cards */
+html.light .login-role-card { color: #1D1D1F; }
+html.light .login-role-card:hover { background: rgba(0,0,0,0.06); }
+html.light .login-back-btn { color: rgba(29,29,31,0.55); }
+html.light .login-back-btn:hover { background: rgba(0,0,0,0.06); color: #1D1D1F; }
+html.light .login-type-pill { color: rgba(29,29,31,0.60); }
+
+/* alert banners */
+html.light .alert-danger { background: rgba(255,69,58,0.08); color: #C42B22; }
+html.light .alert-warn   { background: rgba(255,170,0,0.08); color: #C06000; }
+
+/* task feed */
+html.light .task-feed-item { border-bottom-color: rgba(0,0,0,0.05); }
+html.light .task-feed-item:hover { background: rgba(0,0,0,0.04); }
+html.light .task-feed-item.task-overdue { background: rgba(255,69,58,0.04); }
+html.light .task-feed-title { color: #1D1D1F; }
+html.light .task-feed-meta { color: rgba(29,29,31,0.50); }
+
+/* quick actions */
+html.light .quick-action-btn { color: rgba(29,29,31,0.70); }
+html.light .quick-action-btn:hover { background: rgba(0,0,0,0.06); color: #1D1D1F; }
+
+/* payslip */
+html.light .payslip-row { border-bottom-color: rgba(0,0,0,0.06); color: rgba(29,29,31,0.70); }
+
+/* kpi bar */
+html.light .kpi-bar-track { background: rgba(0,0,0,0.08); }
 
 /* ══════════════════════════════════════════════════
    THEME TOGGLE BUTTON

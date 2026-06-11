@@ -1951,49 +1951,121 @@ function printQuote(lines, q) {
 window.renderApprovals = async function(currentUser) {
   const c = deptContainer();
   c.innerHTML = `
-    <div class="page-header"><h2>✔️ Approval Requests</h2></div>
-    <div id="approvals-list" class="item-list"><div class="loading-placeholder">Loading…</div></div>
-  `;
-  const snap = await db.collection('approval_requests').orderBy('createdAt','desc').get();
-  const items = snap.docs.map(d => ({id:d.id,...d.data()}));
-  const list  = document.getElementById('approvals-list');
-
-  if (!items.length) { list.innerHTML = `<div class="empty-state"><div class="empty-icon">✔️</div><h4>No pending approvals</h4></div>`; return; }
-  list.innerHTML = items.map(item => `
-    <div class="item-card" data-id="${item.id}">
-      <div class="item-top">
-        <div class="item-title">⚙️ ${item.type==='bs_quote'?'Brilliant Steel Quote':'Request'} — ${item.clientName||''}</div>
-        <span class="badge ${statusBadge(item.status)}">${item.status||'pending'}</span>
-      </div>
-      <div class="item-meta">
-        <span>👤 ${item.agentName}</span>
-        <span>💰 ₱${fmt(item.total)}</span>
-        ${item.createdAt?`<span>📅 ${new Date(item.createdAt.toDate()).toLocaleDateString()}</span>`:''}
-      </div>
-      ${item.status==='pending'?`
-      <div style="display:flex;gap:8px;margin-top:12px">
-        <button class="btn-success approve-approval" data-id="${item.id}" data-agent="${item.agentId}" data-client="${item.clientName}">✅ Approve</button>
-        <button class="btn-danger reject-approval"  data-id="${item.id}" data-agent="${item.agentId}" data-client="${item.clientName}">❌ Reject</button>
-      </div>`:''}
+    <div class="page-header"><h2>Approvals</h2></div>
+    <div class="subtab-bar">
+      <button class="subtab-btn active" data-sub="roa">Quote / ROA</button>
+      <button class="subtab-btn" data-sub="ca">Cash Advances</button>
     </div>
-  `).join('');
+    <div id="approvals-content"><div class="loading-placeholder">Loading…</div></div>
+  `;
 
-  list.querySelectorAll('.approve-approval').forEach(btn => {
-    btn.addEventListener('click', async e => {
-      const id = e.currentTarget.dataset.id; const agentId = e.currentTarget.dataset.agent; const client = e.currentTarget.dataset.client;
-      await db.collection('approval_requests').doc(id).update({ status: 'approved' });
-      await Notifs.send(agentId, { title:'✅ Quote Approved', body:`Your quote for ${client} was approved by the owner.`, icon:'✅', type:'approval_result' });
-      Notifs.showToast('Quote approved!'); renderApprovals(currentUser);
+  const loadApprovalsSub = async (sub) => {
+    const wrap = document.getElementById('approvals-content');
+    if (!wrap) return;
+    wrap.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+
+    if (sub === 'ca') {
+      // Cash Advances
+      const snap = await db.collection('cash_advances').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+      const items = snap.docs.map(d=>({id:d.id,...d.data()}));
+      const pending = items.filter(i=>i.status==='pending');
+
+      if (!items.length) { wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">💸</div><h4>No cash advance requests</h4></div>'; return; }
+      wrap.innerHTML = `
+        ${pending.length?`<p style="font-size:12px;color:var(--warning);font-weight:600;margin-bottom:12px">⚠️ ${pending.length} pending request${pending.length>1?'s':''}</p>`:''}
+        <div class="item-list">
+          ${items.map(item=>`
+          <div class="item-card" data-id="${item.id}">
+            <div class="item-top">
+              <div class="item-title">💸 Cash Advance — ${item.userName||'Unknown'}</div>
+              <span class="badge ${statusBadge(item.status)}">${item.status||'pending'}</span>
+            </div>
+            <div class="item-meta">
+              <span>₱${fmt(item.amount)}</span>
+              <span>Date: ${item.date||'—'}</span>
+              <span>Repay: ${item.repayDate||'—'}</span>
+            </div>
+            ${item.reason?`<div style="font-size:12px;color:var(--text-muted);margin-top:6px;padding:8px 10px;background:var(--surface2);border-radius:6px">${item.reason}</div>`:''}
+            ${item.status==='pending'?`
+            <div style="display:flex;gap:8px;margin-top:12px">
+              <button class="btn-success ca-approve" data-id="${item.id}" data-uid="${item.userId}" data-name="${item.userName}" data-amount="${item.amount}">Approve</button>
+              <button class="btn-danger ca-reject" data-id="${item.id}" data-uid="${item.userId}" data-name="${item.userName}">Reject</button>
+            </div>`:''}
+          </div>`).join('')}
+        </div>
+      `;
+
+      wrap.querySelectorAll('.ca-approve').forEach(btn => {
+        btn.addEventListener('click', async e => {
+          const { id, uid, name, amount } = e.currentTarget.dataset;
+          await db.collection('cash_advances').doc(id).update({ status:'approved', approvedAt: firebase.firestore.FieldValue.serverTimestamp() });
+          await Notifs.send(uid, { title:'Cash Advance Approved', body:`Your ₱${fmt(parseFloat(amount))} request has been approved.`, icon:'💸', type:'cash_advance' });
+          Notifs.showToast(`Approved ₱${fmt(parseFloat(amount))} for ${name}`);
+          loadApprovalsSub('ca');
+        });
+      });
+      wrap.querySelectorAll('.ca-reject').forEach(btn => {
+        btn.addEventListener('click', async e => {
+          const { id, uid, name } = e.currentTarget.dataset;
+          await db.collection('cash_advances').doc(id).update({ status:'rejected' });
+          await Notifs.send(uid, { title:'Cash Advance Declined', body:'Your cash advance request was not approved this time.', icon:'💸', type:'cash_advance' });
+          Notifs.showToast('Request rejected.');
+          loadApprovalsSub('ca');
+        });
+      });
+
+    } else {
+      // Quote / ROA approvals
+      const snap = await db.collection('approval_requests').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+      const items = snap.docs.map(d => ({id:d.id,...d.data()}));
+      if (!items.length) { wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">✔️</div><h4>No quote approvals</h4></div>'; return; }
+
+      wrap.innerHTML = `<div class="item-list">${items.map(item => `
+        <div class="item-card" data-id="${item.id}">
+          <div class="item-top">
+            <div class="item-title">${item.type==='bs_quote'?'Brilliant Steel Quote':'Quote'} — ${item.clientName||''}</div>
+            <span class="badge ${statusBadge(item.status)}">${item.status||'pending'}</span>
+          </div>
+          <div class="item-meta">
+            <span>${item.agentName||'—'}</span>
+            <span>₱${fmt(item.total)}</span>
+            ${item.createdAt?`<span>${new Date(item.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
+          </div>
+          ${item.status==='pending'?`
+          <div style="display:flex;gap:8px;margin-top:12px">
+            <button class="btn-success approve-approval" data-id="${item.id}" data-agent="${item.agentId}" data-client="${item.clientName}">Approve</button>
+            <button class="btn-danger reject-approval"  data-id="${item.id}" data-agent="${item.agentId}" data-client="${item.clientName}">Reject</button>
+          </div>`:''}
+        </div>`).join('')}</div>`;
+
+      wrap.querySelectorAll('.approve-approval').forEach(btn => {
+        btn.addEventListener('click', async e => {
+          const { id, agent: agentId, client } = e.currentTarget.dataset;
+          await db.collection('approval_requests').doc(id).update({ status: 'approved' });
+          await Notifs.send(agentId, { title:'Quote Approved', body:`Your quote for ${client} was approved.`, icon:'✅', type:'approval_result' });
+          Notifs.showToast('Quote approved!'); loadApprovalsSub('roa');
+        });
+      });
+      wrap.querySelectorAll('.reject-approval').forEach(btn => {
+        btn.addEventListener('click', async e => {
+          const { id, agent: agentId, client } = e.currentTarget.dataset;
+          await db.collection('approval_requests').doc(id).update({ status: 'rejected' });
+          await Notifs.send(agentId, { title:'Quote Rejected', body:`Your quote for ${client} was not approved.`, icon:'❌', type:'approval_result' });
+          Notifs.showToast('Quote rejected.'); loadApprovalsSub('roa');
+        });
+      });
+    }
+  };
+
+  c.querySelectorAll('.subtab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      c.querySelectorAll('.subtab-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      loadApprovalsSub(btn.dataset.sub);
     });
   });
-  list.querySelectorAll('.reject-approval').forEach(btn => {
-    btn.addEventListener('click', async e => {
-      const id = e.currentTarget.dataset.id; const agentId = e.currentTarget.dataset.agent; const client = e.currentTarget.dataset.client;
-      await db.collection('approval_requests').doc(id).update({ status: 'rejected' });
-      await Notifs.send(agentId, { title:'❌ Quote Rejected', body:`Your quote for ${client} was not approved. Please revise.`, icon:'❌', type:'approval_result' });
-      Notifs.showToast('Quote rejected.'); renderApprovals(currentUser);
-    });
-  });
+
+  loadApprovalsSub('roa');
 };
 
 // ══════════════════════════════════════════════════

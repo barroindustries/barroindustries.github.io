@@ -44,27 +44,60 @@
     </div>
     <h1 class="login-title">Barro Industries</h1>
     <p class="login-sub">Operations System</p>
-    <form id="login-form" class="login-form" autocomplete="on">
-      <div class="form-group">
-        <label>Email Address</label>
-        <input type="email" id="email" placeholder="yourname@barroindustries.com" required autocomplete="email"/>
+
+    <!-- ── Role Picker ── -->
+    <div id="login-role-picker">
+      <p class="login-pick-label">Sign in as</p>
+      <div class="login-role-cards">
+        <button class="login-role-card" data-type="admin">
+          <span class="lrc-icon"><i data-lucide="shield"></i></span>
+          <span class="lrc-label">Admin</span>
+          <span class="lrc-sub">President · Manager</span>
+        </button>
+        <button class="login-role-card" data-type="employee">
+          <span class="lrc-icon"><i data-lucide="user"></i></span>
+          <span class="lrc-label">Employee</span>
+          <span class="lrc-sub">Staff · Agent · Finance</span>
+        </button>
+        <button class="login-role-card" data-type="partner">
+          <span class="lrc-icon"><i data-lucide="handshake"></i></span>
+          <span class="lrc-label">Partner</span>
+          <span class="lrc-sub">Brilliant Steel</span>
+        </button>
       </div>
-      <div class="form-group">
-        <label>Password</label>
-        <div class="pw-wrap">
-          <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password"/>
-          <button type="button" class="pw-toggle" id="pw-toggle">👁</button>
+    </div>
+
+    <!-- ── Login Form (shown after role pick) ── -->
+    <div id="login-form-wrap" class="hidden">
+      <div class="login-form-header">
+        <button class="login-back-btn" id="login-back-btn">
+          <i data-lucide="arrow-left"></i>
+        </button>
+        <span class="login-type-pill" id="login-type-pill">Admin</span>
+      </div>
+      <form id="login-form" class="login-form" autocomplete="on">
+        <div class="form-group">
+          <label>Email Address</label>
+          <input type="email" id="email" placeholder="yourname@barroindustries.com" required autocomplete="email"/>
         </div>
-      </div>
-      <div id="login-error" class="error-msg hidden"></div>
-      <button type="submit" class="btn-primary btn-full" id="login-btn">
-        <span id="login-btn-text">Sign In</span>
-        <span id="login-spinner" class="spinner hidden"></span>
-      </button>
-      <button type="button" class="btn-link" id="forgot-btn">Forgot password?</button>
-    </form>
-    <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
-    <div class="login-version">v3.0 · Barro Industries</div>
+        <div class="form-group">
+          <label>Password</label>
+          <div class="pw-wrap">
+            <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password"/>
+            <button type="button" class="pw-toggle" id="pw-toggle"><i data-lucide="eye"></i></button>
+          </div>
+        </div>
+        <div id="login-error" class="error-msg hidden"></div>
+        <button type="submit" class="btn-primary btn-full" id="login-btn">
+          <span id="login-btn-text">Sign In</span>
+          <span id="login-spinner" class="spinner hidden"></span>
+        </button>
+        <button type="button" class="btn-link" id="forgot-btn">Forgot password?</button>
+      </form>
+      <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
+    </div>
+
+    <div class="login-version">v3.1 · Barro Industries</div>
   </div>
 </div>
 

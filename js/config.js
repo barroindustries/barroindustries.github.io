@@ -102,26 +102,29 @@ window.ROLES = {
   finance:   { label: 'Finance Staff',  badge: 'badge-green',  canSeeAll: false }
 };
 
-// ── Bottom Nav Items ─────────────────────────────
+// ── Bottom Nav — Employee ────────────────────────
 window.BOTTOM_NAV_ITEMS = [
-  { icon: 'home',        label: 'Home',  page: 'dashboard' },
-  { icon: 'check-square',label: 'Tasks', page: 'tasks'     },
-  { icon: 'folder',      label: 'Files', page: 'files'     },
-  { icon: 'banknote',    label: 'Cash',  page: 'cash'      },
-  { icon: 'layers',      label: 'Dept',  page: 'my-dept'   }
+  { icon: 'home',         label: 'Home',    page: 'dashboard'        },
+  { icon: 'check-square', label: 'Tasks',   page: 'tasks'            },
+  { icon: 'credit-card',  label: 'Finance', page: 'personal-finance' },
+  { icon: 'folder',       label: 'Files',   page: 'files'            },
+  { icon: 'banknote',     label: 'Cash',    page: 'cash'             }
 ];
 
+// ── Bottom Nav — Admin / President ───────────────
 window.PRESIDENT_BOTTOM_NAV = [
-  { icon: 'home',         label: 'Home',      page: 'dashboard' },
-  { icon: 'check-square', label: 'Tasks',     page: 'tasks'     },
-  { icon: 'shield-check', label: 'Approvals', page: 'approvals' },
-  { icon: 'trending-up',  label: 'Progress',  page: 'progress'  },
-  { icon: 'users',        label: 'Team',      page: 'team'      }
+  { icon: 'home',         label: 'Home',     page: 'dashboard' },
+  { icon: 'check-square', label: 'Tasks',    page: 'tasks'     },
+  { icon: 'shield-check', label: 'Approve',  page: 'approvals' },
+  { icon: 'users',        label: 'Team',     page: 'team'      },
+  { icon: 'bar-chart-2',  label: 'Analytics',page: 'analytics' }
 ];
 
+// ── Bottom Nav — Partner (Brilliant Steel) ───────
 window.BRILLIANT_BOTTOM_NAV = [
   { icon: 'home',       label: 'Home',    page: 'dashboard'        },
   { icon: 'calculator', label: 'Quotes',  page: 'bs-quote-builder' },
   { icon: 'file-text',  label: 'Summary', page: 'bs-quotations'    },
-  { icon: 'book-open',  label: 'Clients', page: 'bs-clients'       }
+  { icon: 'book-open',  label: 'Clients', page: 'bs-clients'       },
+  { icon: 'folder',     label: 'Files',   page: 'files'            }
 ];
