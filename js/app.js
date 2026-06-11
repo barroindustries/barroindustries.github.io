@@ -1202,6 +1202,7 @@ function openProfileDrawer() {
   drawer.classList.remove('hidden');
   setTimeout(()=>drawer.classList.add('open'),10);
   overlay.classList.remove('hidden'); overlay.classList.add('active');
+  if (window.lucide) lucide.createIcons({ nodes: [drawer] });
   document.getElementById('profile-photo-wrap').addEventListener('click',()=>{
     const input=document.createElement('input'); input.type='file'; input.accept='image/*';
     input.onchange=async e=>{const file=e.target.files[0];if(!file)return;Notifs.showToast('Uploading…');try{const url=await Drive.uploadProfilePhoto(file,currentUser.uid);await db.collection('users').doc(currentUser.uid).update({photoUrl:url});userProfile.photoUrl=url;applyUserUI();document.getElementById('profile-photo-wrap').innerHTML=`<img src="${url}" style="width:100%;height:100%;object-fit:cover"/>`;Notifs.showToast('Photo updated!');}catch(err){Notifs.showToast('Upload failed','error');}};
