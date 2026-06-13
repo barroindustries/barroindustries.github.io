@@ -90,15 +90,18 @@ async function loadPosts(dept) {
           ${p.status==='published' ? `
             <button class="post-heart-btn${hearted?' hearted':''}" data-id="${p.id}" title="${hearted?'Unlike':'Like'}">
               <svg viewBox="0 0 24 24" fill="${hearted?'#FF6B2B':'none'}" stroke="${hearted?'#FF6B2B':'currentColor'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-              <span class="heart-count">${hearts.length||''}</span>
             </button>
+            ${hearts.length ? `<button class="post-likers-btn btn-link" data-id="${p.id}" data-hearts='${JSON.stringify(hearts)}' style="font-size:12px;color:var(--text-muted);padding:0 4px;background:none;border:none;cursor:pointer">${hearts.length} ❤️</button>` : ''}
           ` : ''}
           ${canApprove && p.status==='pending' ? `
             <button class="btn-primary btn-sm post-approve-btn" data-id="${p.id}">✓ Approve</button>
             <button class="btn-secondary btn-sm post-reject-btn" data-id="${p.id}">✗ Reject</button>
           ` : ''}
-          ${(canApprove || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="margin-left:auto;color:var(--danger)">Delete</button>` : ''}
-          ${canApprove && p.status==='published' ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':'📌 Pin'}</button>` : ''}
+          <div style="display:flex;gap:6px;margin-left:auto">
+            ${isOwn ? `<button class="btn-secondary btn-sm post-edit-btn" data-id="${p.id}" data-title="${(p.title||'').replace(/"/g,'&quot;')}" data-content="${(p.content||'').replace(/"/g,'&quot;')}">✎ Edit</button>` : ''}
+            ${(canApprove || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="color:var(--danger)">Delete</button>` : ''}
+            ${canApprove && p.status==='published' ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':'📌 Pin'}</button>` : ''}
+          </div>
         </div>
       </div>`;
     }).join('');
@@ -141,6 +144,44 @@ async function loadPosts(dept) {
         : firebase.firestore.FieldValue.arrayUnion(uid);
       await db.collection('posts').doc(id).update({hearts: newHearts});
       loadPosts(dept);
+    }));
+
+    // Show likers list
+    container.querySelectorAll('.post-likers-btn').forEach(btn => btn.addEventListener('click', async () => {
+      let uids = [];
+      try { uids = JSON.parse(btn.dataset.hearts); } catch{}
+      if (!uids.length) return;
+      openModal('❤️ Liked by', '<div class="loading-placeholder">Loading…</div>');
+      const names = await Promise.all(uids.map(uid =>
+        db.collection('users').doc(uid).get().then(s => s.exists ? (s.data().displayName || s.data().email) : uid).catch(()=>uid)
+      ));
+      document.getElementById('modal-body').innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${names.map(n=>`<div style="display:flex;align-items:center;gap:8px;font-size:14px"><span style="font-size:20px">❤️</span>${n}</div>`).join('')}
+        </div>`;
+    }));
+
+    // Edit post
+    container.querySelectorAll('.post-edit-btn').forEach(btn => btn.addEventListener('click', async e => {
+      const id      = btn.dataset.id;
+      const oldTitle   = btn.dataset.title || '';
+      const oldContent = btn.dataset.content || '';
+      openModal('✎ Edit Post', `
+        <div class="form-group"><label>Title (optional)</label><input id="edit-post-title" value="${oldTitle.replace(/&quot;/g,'"')}" placeholder="Post title…"/></div>
+        <div class="form-group"><label>Content</label><textarea id="edit-post-content" rows="5" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical">${oldContent.replace(/&quot;/g,'"')}</textarea></div>
+      `, `<button class="btn-primary" id="save-post-edit-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      document.getElementById('save-post-edit-btn').addEventListener('click', async () => {
+        const title   = document.getElementById('edit-post-title').value.trim();
+        const content = document.getElementById('edit-post-content').value.trim();
+        if (!content) { Notifs.showToast('Content required','error'); return; }
+        await db.collection('posts').doc(id).update({
+          title, content,
+          editedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        closeModal();
+        Notifs.showToast('Post updated!');
+        loadPosts(dept);
+      });
     }));
   } catch(err) {
     container.innerHTML = `<div class="empty-state"><p>Error: ${err.message}</p></div>`;
@@ -300,6 +341,43 @@ function renderTeamCards(users) {
 }
 
 // ══════════════════════════════════════════════════
+//  PHILIPPINE HOLIDAY LIST
+// ══════════════════════════════════════════════════
+function getPHHolidays(year) {
+  // Static holidays + computed ones
+  const holidays = {
+    [`${year}-01-01`]: { name:'New Year\'s Day', type:'regular' },
+    [`${year}-04-09`]: { name:'Araw ng Kagitingan', type:'regular' },
+    [`${year}-05-01`]: { name:'Labor Day', type:'regular' },
+    [`${year}-06-12`]: { name:'Independence Day', type:'regular' },
+    [`${year}-11-30`]: { name:'Bonifacio Day', type:'regular' },
+    [`${year}-12-25`]: { name:'Christmas Day', type:'regular' },
+    [`${year}-12-30`]: { name:'Rizal Day', type:'regular' },
+    [`${year}-02-25`]: { name:'EDSA People Power', type:'special' },
+    [`${year}-08-21`]: { name:'Ninoy Aquino Day', type:'special' },
+    [`${year}-11-01`]: { name:'All Saints\' Day', type:'special' },
+    [`${year}-12-08`]: { name:'Immaculate Conception', type:'special' },
+    [`${year}-12-31`]: { name:'New Year\'s Eve', type:'special' },
+  };
+  // National Heroes Day (last Monday of August)
+  const aug = new Date(year, 7, 31);
+  while (aug.getDay() !== 1) aug.setDate(aug.getDate()-1);
+  holidays[aug.toISOString().slice(0,10)] = { name:'National Heroes Day', type:'regular' };
+  // Holy Week (approx — these are fixed known dates)
+  const holyWeek = {
+    2024: { thu:'2024-03-28', fri:'2024-03-29' },
+    2025: { thu:'2025-04-17', fri:'2025-04-18' },
+    2026: { thu:'2026-04-02', fri:'2026-04-03' },
+    2027: { thu:'2027-03-25', fri:'2027-03-26' },
+  };
+  if (holyWeek[year]) {
+    holidays[holyWeek[year].thu] = { name:'Maundy Thursday', type:'special' };
+    holidays[holyWeek[year].fri] = { name:'Good Friday', type:'regular' };
+  }
+  return holidays;
+}
+
+// ══════════════════════════════════════════════════
 //  ATTENDANCE CALENDAR (full-page)
 // ══════════════════════════════════════════════════
 
@@ -320,10 +398,12 @@ window.renderAttendancePage = async function() {
       <button class="btn-secondary btn-sm" id="att-next-month">›</button>
     </div>
     <div id="att-legend" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;font-size:12px">
-      <span><span class="att-dot att-present"></span> Present</span>
-      <span><span class="att-dot att-half"></span> Half Day</span>
+      <span><span class="att-dot att-present"></span> Present (100%)</span>
+      <span><span class="att-dot att-half"></span> Half Day (50%)</span>
       <span><span class="att-dot att-absent"></span> Absent</span>
-      <span><span class="att-dot att-holiday"></span> Holiday / Weekend</span>
+      <span><span class="att-dot att-holiday" style="background:rgba(255,214,0,0.6)"></span> Holiday (no work)</span>
+      <span><span class="att-dot" style="background:var(--surface2);border:1px solid var(--border)"></span> Sunday (no work)</span>
+      <span style="color:var(--text-muted);font-style:italic">Saturdays are work days</span>
     </div>
     <div id="att-calendar"></div>
     <div id="att-summary" class="card" style="margin-top:16px"></div>
@@ -438,6 +518,7 @@ window.renderAttendancePage = async function() {
     const firstDay    = new Date(viewYear, viewMonth, 1).getDay();
     const todayStr    = new Date().toISOString().slice(0,10);
     const canEdit     = pres;
+    const phHolidays  = getPHHolidays(viewYear);
 
     const dayLabels = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     let html = `<div class="att-cal-grid">
@@ -447,23 +528,31 @@ window.renderAttendancePage = async function() {
     let fullCount=0, halfCount=0, absentCount=0, workDays=0;
 
     for (let day=1; day<=daysInMonth; day++) {
-      const dateStr = `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-      const dow     = new Date(dateStr).getDay();
-      const isWeekend = dow===0||dow===6;
+      const dateStr  = `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+      const dow      = new Date(dateStr).getDay();
+      const isSunday  = dow===0;
+      const holiday   = phHolidays[dateStr];
+      const isNoWork  = isSunday || !!holiday;
       const isPast    = dateStr <= todayStr;
       const rec       = records[dateStr];
       let status = '';
-      if (!isWeekend && isPast) {
-        if (rec?.fullTime)                 { status='present'; fullCount++; workDays++; }
-        else if (rec?.loginTime)           { status='half';    halfCount++; workDays++; }
+      if (!isNoWork && isPast) {
+        if (rec?.fullTime || (typeof rec?.attendanceScore==='number' && rec?.attendanceScore>=1))
+                                           { status='present'; fullCount++; workDays++; }
+        else if (rec?.loginTime || (typeof rec?.attendanceScore==='number' && rec?.attendanceScore>0))
+                                           { status='half';    halfCount++; workDays++; }
         else if (dateStr < todayStr)       { status='absent';  absentCount++; workDays++; }
       }
-      const cls = isWeekend?'att-weekend':status?`att-${status}`:'att-future';
+      const cls = isSunday?'att-weekend':holiday?'att-holiday':status?`att-${status}`:'att-future';
       const isToday = dateStr===todayStr;
-      html += `<div class="att-cal-day ${cls} ${isToday?'att-today':''}" data-date="${dateStr}" data-status="${status}">
+      const holidayTitle = holiday ? ` title="${holiday.name}"` : '';
+      html += `<div class="att-cal-day ${cls} ${isToday?'att-today':''}" data-date="${dateStr}" data-status="${status}"${holidayTitle}>
         <span class="att-day-num">${day}</span>
-        ${status==='present'?'<span class="att-mark">✓</span>':status==='half'?'<span class="att-mark">½</span>':status==='absent'?'<span class="att-mark">✗</span>':''}
-        ${canEdit&&!isWeekend?`<button class="att-edit-btn att-edit-visible" data-date="${dateStr}" title="Edit">✎</button>`:''}
+        ${holiday?`<span class="att-mark" style="font-size:9px;color:rgba(180,140,0,1)">🎌</span>`:
+          status==='present'?'<span class="att-mark">✓</span>':
+          status==='half'?'<span class="att-mark">½</span>':
+          status==='absent'?'<span class="att-mark">✗</span>':''}
+        ${canEdit&&!isNoWork?`<button class="att-edit-btn att-edit-visible" data-date="${dateStr}" title="Edit">✎</button>`:''}
       </div>`;
     }
     html += '</div>';
@@ -563,8 +652,12 @@ window.renderCashAdvancePage = async function() {
 };
 
 async function renderCashAdvanceEmployee(c) {
-  const snap = await db.collection('cash_advances').where('userId','==',currentUser.uid).orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
-  const advances = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const snap = await db.collection('cash_advances').where('userId','==',currentUser.uid).get().catch(()=>({docs:[]}));
+  const advances = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
+    const ta = a.createdAt?.toMillis?.() || 0;
+    const tb = b.createdAt?.toMillis?.() || 0;
+    return tb - ta;
+  });
   const active   = advances.filter(a=>a.status==='approved'&&(a.balance||0)>0);
   const pending  = advances.filter(a=>a.status==='pending');
   const totalBalance = active.reduce((s,a)=>s+(a.balance||0),0);

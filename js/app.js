@@ -561,13 +561,14 @@ async function renderPresidentDashboard() {
   try {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
     const todayStr = new Date().toISOString().slice(0,10);
-    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap] = await Promise.all([
+    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap] = await Promise.all([
       safeGet(db.collection('users')),
       safeGet(db.collection('tasks')),
       safeGet(db.collection('submissions')),
       safeGet(db.collection('quotes')),
       safeGet(db.collection('approval_requests').where('status','==','pending')),
-      safeGet(db.collection('cash_advances').where('status','==','pending'))
+      safeGet(db.collection('cash_advances').where('status','==','pending')),
+      safeGet(db.collection('attendance_extensions').where('status','==','pending'))
     ]);
 
     const users       = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -580,6 +581,7 @@ async function renderPresidentDashboard() {
     const totalQuotes = quotesSnap.docs.reduce((s,d)=>s+(d.data().total||0),0);
     const pendingApprovals = approvalsSnap.size;
     const pendingCA   = caSnap.size;
+    const pendingExtensions = extSnap.size || 0;
 
     // Total payroll burn (sum of net pay of all employees)
     const payrollBurn = users.reduce((s,u)=>(s+(u.salary||0)+(u.allowance||0)-(u.deductions||0)),0);
@@ -618,9 +620,9 @@ async function renderPresidentDashboard() {
         <span class="alert-chevron">›</span>
       </div>`:''}
 
-      ${pendingApprovals>0||pendingCA>0?`
+      ${pendingApprovals>0||pendingCA>0||pendingExtensions>0?`
       <div class="alert-banner alert-warn" onclick="navigateTo('approvals')">
-        <span>📋 ${pendingApprovals} approval${pendingApprovals!==1?'s':''} · ${pendingCA} cash advance${pendingCA!==1?'s':''} pending</span>
+        <span>📋 ${[pendingApprovals>0?pendingApprovals+' approval'+(pendingApprovals!==1?'s':''):'', pendingCA>0?pendingCA+' CA'+(pendingCA!==1?'s':''):'', pendingExtensions>0?pendingExtensions+' extension'+(pendingExtensions!==1?'s':''):''].filter(Boolean).join(' · ')} pending</span>
         <span class="alert-chevron">›</span>
       </div>`:''}
 
@@ -722,7 +724,7 @@ async function renderEmployeeDashboard() {
       db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
         .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get()),
       db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).get(),
-      db.collection('cash_advances').where('employeeId','==',currentUser.uid).orderBy('createdAt','desc').limit(3).get().catch(()=>({docs:[]})),
+      db.collection('cash_advances').where('userId','==',currentUser.uid).get().catch(()=>({docs:[]})),
       db.collection('attendance_extensions').doc(`${currentUser.uid}_${todayStr}`).get().catch(()=>({exists:false,data:()=>({})}))
     ]);
 
@@ -742,11 +744,11 @@ async function renderEmployeeDashboard() {
                           : (attData.fullTime ? 1.0 : hasLogin ? 0.5 : 0);
     const hasFull     = attScore >= 1.0;
 
-    // Attendance window: 7:00–8:00 AM (or approved extension)
+    // Attendance window: 7:00–9:00 AM (or approved extension)
     const nowHour      = now.getHours();
-    const inWindow     = nowHour >= 7 && nowHour < 8;   // normal 1-hr window
+    const inWindow     = nowHour >= 7 && nowHour < 9;   // normal 2-hr window
     const beforeWindow = nowHour < 7;
-    const afterWindow  = nowHour >= 8;
+    const afterWindow  = nowHour >= 9;
     const extData      = extSnap.exists ? extSnap.data() : null;
     const extApproved  = extData?.status === 'approved' && extData?.expiresAt
                            && now < extData.expiresAt.toDate();
@@ -767,7 +769,18 @@ async function renderEmployeeDashboard() {
     const kpiColor = taskScore >= targetScore ? 'var(--success)' : taskScore >= 60 ? 'var(--warning)' : 'var(--danger)';
 
     // Recent CA
-    const recentCA = caSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const recentCA = caSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
+      const ta = a.createdAt?.toMillis?.() || 0;
+      const tb = b.createdAt?.toMillis?.() || 0;
+      return tb - ta;
+    });
+
+    // Monthly attendance for Current Standing card
+    const monthAttScore = await getAttendanceScore(currentUser.uid);
+    const daysElapsedDash = now.getDate();
+    const workDaysDash = Math.max(1, daysElapsedDash);
+    const attDaysFull = Math.round(monthAttScore * workDaysDash);
+    const caBalance = recentCA.filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
 
     const attBadgeClass = hasFull ? 'badge-green' : hasLogin ? 'badge-orange' : 'badge-gray';
     const attLabel      = hasFull ? '100% Full ✅' : hasLogin ? '50% Timed In 🟡' : 'Not Timed In';
@@ -823,6 +836,30 @@ async function renderEmployeeDashboard() {
         </div>
       </div>
 
+      <!-- Current Standing Card -->
+      <div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,var(--surface),var(--surface2));border:1.5px solid var(--primary-light)">
+        <div class="card-header">
+          <h3>📊 Current Standing — ${now.toLocaleDateString('en-PH',{month:'long',year:'numeric'})}</h3>
+        </div>
+        <div class="card-body" style="display:flex;gap:16px;flex-wrap:wrap;padding:12px 16px">
+          <div style="flex:1;min-width:120px;text-align:center;padding:10px;background:rgba(48,209,88,0.08);border-radius:10px">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px">Attendance</div>
+            <div style="font-size:22px;font-weight:800;color:${monthAttScore>=0.9?'var(--success)':monthAttScore>=0.6?'var(--warning)':'var(--danger)'}">${Math.round(monthAttScore*100)}%</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">~${attDaysFull} / ${workDaysDash} days</div>
+          </div>
+          <div style="flex:1;min-width:120px;text-align:center;padding:10px;background:rgba(10,132,255,0.08);border-radius:10px">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px">Task KPI</div>
+            <div style="font-size:22px;font-weight:800;color:${kpiColor}">${taskScore}%</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${doneTasks.length}/${myTasks.length} tasks done</div>
+          </div>
+          <div style="flex:1;min-width:120px;text-align:center;padding:10px;background:rgba(255,100,0,0.08);border-radius:10px">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px">CA Balance</div>
+            <div style="font-size:22px;font-weight:800;color:${caBalance>0?'var(--danger)':'var(--success)'}">₱${formatNum(caBalance)}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${caBalance>0?'Outstanding':'No balance'}</div>
+          </div>
+        </div>
+      </div>
+
       <!-- Attendance Card -->
       <div class="card" style="margin-bottom:16px">
         <div class="card-header">
@@ -843,17 +880,17 @@ async function renderEmployeeDashboard() {
               <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,159,10,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">🟡</div>
               <div>
                 <div style="font-size:13px;font-weight:600;color:var(--warning)">50% — Timed In</div>
-                <div style="font-size:11px;color:var(--text-muted)">${inWindow||extApproved?'Check notifications before '+(extApproved?extExpiresStr:'8:00 AM')+' → 100%':'Window closed — 50% recorded for today'}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${extApproved?'Check notifications before '+extExpiresStr+' → 100%':'Check notifications anytime today → 100%'}</div>
               </div>
             </div>
-            ${(inWindow||extApproved)?`<div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--text-muted)">
-              Tap the 🔔 bell → check <em>every</em> notification individually before <strong>${extApproved?extExpiresStr:'8:00 AM'}</strong>.
+            ${!hasFull?`<div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--text-muted)">
+              Tap the 🔔 bell → check <em>every</em> notification anytime today${extApproved?' (before '+extExpiresStr+')':''} → 100%.
             </div>`:''}
           ` : canTimeIn ? `
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
               ${extApproved?`<span style="color:var(--warning)">⏰ Extension approved — expires ${extExpiresStr}</span><br>`:''}
               <strong>Step 1:</strong> Time in = 50%.<br>
-              <strong>Step 2:</strong> Check every notification before <strong>${extApproved?extExpiresStr:'8:00 AM'}</strong> = 100%.
+              <strong>Step 2:</strong> Check every notification anytime today = 100%.
             </p>
             <button class="btn-primary" id="check-in-btn" style="width:100%">
               <i data-lucide="log-in" style="width:14px;margin-right:6px"></i>Time In (Step 1)
@@ -893,7 +930,7 @@ async function renderEmployeeDashboard() {
                 <div style="font-size:24px">⚠️</div>
                 <div>
                   <div style="font-size:13px;font-weight:600;color:var(--warning)">Time window missed</div>
-                  <div style="font-size:11px;color:var(--text-muted)">Time In window was 7:00–8:00 AM. You can request an extension.</div>
+                  <div style="font-size:11px;color:var(--text-muted)">Time In window was 7:00–9:00 AM. You can request an extension.</div>
                 </div>
               </div>
               <button class="btn-secondary" id="req-ext-btn" style="width:100%">⏰ Request Time Extension</button>
@@ -978,7 +1015,7 @@ async function renderEmployeeDashboard() {
       }, { merge: true });
       Notifs.showToast(autoFull
         ? '✅ Full attendance (100%) — no unchecked notifications!'
-        : `🟡 Timed in (50%). Open 🔔 and check off each notification before ${extApproved?extExpiresStr:'8am'} for 100%.`);
+        : `🟡 Timed in (50%). Open 🔔 and check off each notification anytime today for 100%.`);
       renderEmployeeDashboard();
     });
 
@@ -997,7 +1034,7 @@ async function renderEmployeeDashboard() {
         // Notify president
         await Notifs.sendToOwner({
           title: '⏰ Attendance Extension Requested',
-          body:  `${userProfile.displayName||currentUser.email} missed the 7–8am window on ${todayStr} and is requesting an extension.`,
+          body:  `${userProfile.displayName||currentUser.email} missed the 7–9am window on ${todayStr} and is requesting an extension.`,
           icon:  '⏰', type: 'att_extension',
           link:  'attendance'
         });
@@ -1015,28 +1052,11 @@ async function renderEmployeeDashboard() {
 }
 
 // Called by notifications.js when all notifications checked — upgrades attendance to 100%
-// Valid within the 7–8am window OR within an approved 6-hr extension window
+// Allowed anytime during the day as long as employee has already timed in (7–9am window)
 window.tryUpgradeAttendanceOnNotifRead = async function() {
   if (!currentUser) return;
   const now      = new Date();
   const todayStr = now.toISOString().slice(0,10);
-
-  // Check normal window (7–8am)
-  const limit7am = new Date(); limit7am.setHours(7,0,0,0);
-  const limit8am = new Date(); limit8am.setHours(8,0,0,0);
-  let withinWindow = now >= limit7am && now < limit8am;
-
-  // Check approved extension
-  if (!withinWindow) {
-    const extSnap = await db.collection('attendance_extensions').doc(`${currentUser.uid}_${todayStr}`).get().catch(()=>null);
-    if (extSnap?.exists) {
-      const ext = extSnap.data();
-      if (ext.status === 'approved' && ext.expiresAt && now < ext.expiresAt.toDate()) {
-        withinWindow = true;
-      }
-    }
-  }
-  if (!withinWindow) return;
 
   const todaySnap = await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).get();
   if (!todaySnap.exists || !todaySnap.data().loginTime) return; // must have timed in first
@@ -1044,7 +1064,7 @@ window.tryUpgradeAttendanceOnNotifRead = async function() {
   if ((current.attendanceScore||0) >= 1.0) return; // already full
   await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
     attendanceScore: 1.0, fullTime: true,
-    fullTimeAt: firebase.firestore.FieldValue.serverTimestamp(), notifReadBy8am: true
+    fullTimeAt: firebase.firestore.FieldValue.serverTimestamp(), notifReadAnytime: true
   }, { merge: true });
   Notifs.showToast('✅ Full attendance (100%) — all notifications checked!');
 };
@@ -1368,16 +1388,20 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   const [kpi, att, cashAdvSnap, salaryHistSnap, evalSnap, myTasksSnap] = await Promise.all([
     getKpiScore(currentUser.uid),
     getAttendanceScore(currentUser.uid),
-    db.collection('cash_advances').where('userId','==',currentUser.uid).orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+    db.collection('cash_advances').where('userId','==',currentUser.uid).get().catch(()=>({docs:[]})),
     db.collection('salary_history').where('userId','==',currentUser.uid).orderBy('month','desc').limit(12).get().catch(()=>({docs:[]})),
     db.collection('kpi_evals').doc(currentUser.uid).get().catch(()=>null),
     db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
       .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get()).catch(()=>({docs:[]}))
   ]);
 
-  const cashAdvances  = cashAdvSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const cashAdvances  = cashAdvSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
+    const ta = a.createdAt?.toMillis?.() || 0;
+    const tb = b.createdAt?.toMillis?.() || 0;
+    return tb - ta;
+  });
   const salaryHistory = salaryHistSnap.docs.map(d=>({id:d.id,...d.data()}));
-  const totalAdvance  = cashAdvances.filter(a=>a.status==='approved').reduce((s,a)=>s+(a.amount||0),0);
+  const totalAdvance  = cashAdvances.filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
 
   const evalData       = evalSnap?.exists ? evalSnap.data() : {};
   const selfGrade      = evalData.selfGrade ?? null;
@@ -1569,19 +1593,24 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     <div class="card">
       <div class="card-header">
         <h3>Cash Advances</h3>
-        <span class="badge badge-orange">${cashAdvances.filter(a=>a.status==='pending').length} pending</span>
+        ${cashAdvances.filter(a=>a.status==='pending').length?`<span class="badge badge-orange">${cashAdvances.filter(a=>a.status==='pending').length} pending</span>`:''}
       </div>
+      ${totalAdvance>0?`<div style="background:rgba(255,100,0,0.08);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;gap:20px;font-size:13px">
+        <span>Outstanding Balance: <strong style="color:var(--danger)">₱${formatNum(totalAdvance)}</strong></span>
+        <span>Monthly Due: <strong>₱${formatNum(cashAdvances.filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.monthlyPayment||0),0))}</strong></span>
+      </div>`:''}
       <div class="card-body" style="padding:0">
         ${!cashAdvances.length
-          ? '<div class="empty-state" style="padding:20px"><p>No cash advances requested yet.</p></div>'
+          ? '<div class="empty-state" style="padding:20px"><p>No cash advances yet.</p></div>'
           : `<div class="table-wrap"><table class="data-table">
-              <thead><tr><th>Date</th><th>Amount</th><th>Repay By</th><th>Reason</th><th>Status</th></tr></thead>
+              <thead><tr><th>Date</th><th>Amount</th><th>Balance</th><th>Monthly</th><th>Reason</th><th>Status</th></tr></thead>
               <tbody>${cashAdvances.map(a=>`<tr>
                 <td>${a.date||'—'}</td>
                 <td>₱${formatNum(a.amount)}</td>
-                <td>${a.repayDate||'—'}</td>
-                <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.reason||'—'}</td>
-                <td><span class="badge ${a.status==='approved'?'badge-green':a.status==='rejected'?'badge-red':'badge-orange'}">${a.status}</span></td>
+                <td style="color:${(a.balance||0)>0?'var(--danger)':'var(--success)'}">₱${formatNum(a.balance||0)}</td>
+                <td>${a.monthlyPayment?'₱'+formatNum(a.monthlyPayment):'—'}</td>
+                <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.reason||'—'}</td>
+                <td><span class="badge ${a.status==='approved'?'badge-green':a.status==='rejected'?'badge-red':a.status==='paid'?'badge-green':'badge-orange'}">${a.status}</span></td>
               </tr>`).join('')}</tbody>
             </table></div>`}
       </div>
@@ -1719,6 +1748,105 @@ function printPayslip() {
   <script>window.print();<\/script></body></html>`);
 }
 
+// ── Employee Standings Modal ───────────────────────
+async function openEmpStandingsModal(uid, name, preloaded) {
+  window.openModal(`📊 ${name} — Standings`, '<div class="loading-placeholder" style="padding:30px;text-align:center">Loading standings…</div>');
+  const body = document.getElementById('modal-body');
+
+  try {
+    const now      = new Date();
+    const monthLabel = now.toLocaleString('en-PH', { month: 'long', year: 'numeric' });
+    const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+
+    const [attScore, caSnap, attRecSnap] = await Promise.all([
+      getAttendanceScore(uid),
+      db.collection('cash_advances').where('userId','==',uid).get().catch(()=>({docs:[]})),
+      db.collection('attendance').doc(uid).collection('records')
+        .where(firebase.firestore.FieldPath.documentId(), '>=', monthStart).get()
+        .catch(()=>({docs:[]}))
+    ]);
+
+    const caList  = caSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const caBalance = caList.filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
+    const caActive  = caList.filter(a=>a.status==='approved'&&(a.balance||0)>0).length;
+
+    const net    = preloaded.salary + preloaded.allowance - preloaded.deductions;
+    const kpiPct = preloaded.mTotal ? Math.round(preloaded.mDone / preloaded.mTotal * 100) : 0;
+    const attPct = Math.round(attScore * 100);
+    const attColor = attPct >= 80 ? 'var(--success,#30d158)' : attPct >= 50 ? 'var(--warning,#ffa040)' : 'var(--danger,#ff4444)';
+    const kpiColor = kpiPct >= 80 ? 'var(--success,#30d158)' : kpiPct >= 50 ? 'var(--warning,#ffa040)' : 'var(--danger,#ff4444)';
+
+    // Build attendance day grid
+    const attRecords = {};
+    attRecSnap.docs.forEach(d => { attRecords[d.id] = d.data(); });
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+    const dayBoxes = [];
+    for (let d = 1; d <= Math.min(now.getDate(), daysInMonth); d++) {
+      const ds = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const rec = attRecords[ds];
+      const dow = new Date(ds).getDay(); // 0=Sun
+      if (dow === 0) { dayBoxes.push(`<div class="att-day-box" style="background:rgba(100,100,100,0.15);border:1px solid rgba(100,100,100,0.2);opacity:0.5" title="${ds} — Sunday"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:10px">✗</span></div>`); continue; }
+      const score = rec ? (typeof rec.attendanceScore === 'number' ? rec.attendanceScore : rec.fullTime ? 1.0 : rec.loginTime ? 0.5 : 0) : 0;
+      const bg = score >= 1 ? 'rgba(48,209,88,0.18)' : score >= 0.5 ? 'rgba(255,160,64,0.18)' : 'rgba(255,68,68,0.12)';
+      const bc = score >= 1 ? 'rgba(48,209,88,0.4)' : score >= 0.5 ? 'rgba(255,160,64,0.4)' : 'rgba(255,68,68,0.25)';
+      const mark = score >= 1 ? '✓' : score >= 0.5 ? '½' : '✗';
+      const markColor = score >= 1 ? '#30d158' : score >= 0.5 ? '#ffa040' : '#ff6b6b';
+      const attLabel = score >= 1 ? 'Full' : score >= 0.5 ? 'Half' : 'Absent';
+      dayBoxes.push(`<div class="att-day-box" style="background:${bg};border:1px solid ${bc};border-radius:5px;padding:3px 4px;text-align:center;min-width:28px" title="${ds} — ${attLabel}"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:11px;color:${markColor};font-weight:700">${mark}</span></div>`);
+    }
+
+    body.innerHTML = `
+      <div style="padding:4px 0 16px">
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;text-align:center">${monthLabel}</div>
+
+        <!-- KPI Row -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:18px">
+          <div style="background:var(--surface2,rgba(255,255,255,0.05));border-radius:12px;padding:14px;text-align:center">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Attendance</div>
+            <div style="font-size:26px;font-weight:800;color:${attColor}">${attPct}%</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${attRecSnap.docs.length} days logged</div>
+          </div>
+          <div style="background:var(--surface2,rgba(255,255,255,0.05));border-radius:12px;padding:14px;text-align:center">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">Task KPI</div>
+            <div style="font-size:26px;font-weight:800;color:${kpiColor}">${kpiPct}%</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${preloaded.mDone}/${preloaded.mTotal} done</div>
+          </div>
+          <div style="background:var(--surface2,rgba(255,255,255,0.05));border-radius:12px;padding:14px;text-align:center">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px">CA Balance</div>
+            <div style="font-size:22px;font-weight:800;color:${caBalance>0?'var(--danger,#ff4444)':'var(--success,#30d158)'}">${caBalance>0?'₱'+formatNum(caBalance):'₱0'}</div>
+            <div style="font-size:10px;color:var(--text-muted);margin-top:3px">${caActive} active loan${caActive!==1?'s':''}</div>
+          </div>
+        </div>
+
+        <!-- Salary Breakdown -->
+        <div style="background:var(--surface2,rgba(255,255,255,0.05));border-radius:12px;padding:14px;margin-bottom:18px">
+          <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Salary Computation</div>
+          <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)"><span style="font-size:13px">Base Salary</span><span style="font-size:13px;font-weight:600">₱${formatNum(preloaded.salary)}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)"><span style="font-size:13px;color:var(--success,#30d158)">+ Allowances</span><span style="font-size:13px;font-weight:600;color:var(--success,#30d158)">₱${formatNum(preloaded.allowance)}</span></div>
+          <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)"><span style="font-size:13px;color:var(--danger,#ff4444)">− Deductions</span><span style="font-size:13px;font-weight:600;color:var(--danger,#ff4444)">₱${formatNum(preloaded.deductions)}</span></div>
+          ${caBalance > 0 ? `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)"><span style="font-size:13px;color:var(--danger,#ff4444)">− CA Outstanding</span><span style="font-size:13px;font-weight:600;color:var(--danger,#ff4444)">₱${formatNum(caBalance)}</span></div>` : ''}
+          <div style="display:flex;justify-content:space-between;padding:8px 0;margin-top:2px"><span style="font-size:14px;font-weight:700">Net Pay</span><span style="font-size:16px;font-weight:800;color:var(--primary-light,#6c8ef5)">₱${formatNum(Math.max(0, net - caBalance))}</span></div>
+          ${caBalance > 0 ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px">* Net deducted by CA outstanding balance</div>` : ''}
+        </div>
+
+        <!-- Attendance Grid -->
+        <div style="background:var(--surface2,rgba(255,255,255,0.05));border-radius:12px;padding:14px">
+          <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Attendance This Month</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">${dayBoxes.join('')}</div>
+          <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--text-muted)">
+            <span><span style="color:#30d158;font-weight:700">✓</span> Full</span>
+            <span><span style="color:#ffa040;font-weight:700">½</span> Half</span>
+            <span><span style="color:#ff6b6b;font-weight:700">✗</span> Absent</span>
+            <span style="opacity:.6">✗ Sundays</span>
+          </div>
+        </div>
+      </div>
+    `;
+  } catch(err) {
+    body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>${err.message}</p></div>`;
+  }
+}
+
 // ── Progress Reports ──────────────────────────────
 async function renderProgressReports() {
   if (!isPresident() && currentRole !== 'manager') {
@@ -1813,7 +1941,7 @@ async function renderProgressReports() {
             </div>
             <div id="prog-${dept.replace(/\s+/g,'_')}-members" style="display:none">
               <div class="table-wrap"><table class="data-table">
-                <thead><tr><th>Member</th><th>All Tasks Done</th><th>This Month</th><th>KPI</th></tr></thead>
+                <thead><tr><th>Member</th><th>All Tasks Done</th><th>This Month</th><th>KPI</th><th></th></tr></thead>
                 <tbody>
                   ${data.members.map(u=>{
                     const uDone  = tasks.filter(t=>t.assignedTo===u.id&&t.status==='done').length;
@@ -1826,6 +1954,7 @@ async function renderProgressReports() {
                       <td>${uDone}/${uTotal}</td>
                       <td>${uMDone}/${uMTotal}</td>
                       <td><span class="badge ${uPct>=80?'badge-green':uPct>=50?'badge-orange':'badge-red'}">${uPct}%</span></td>
+                      <td><button class="btn-sm btn-outline emp-standings-btn" data-uid="${u.id}" data-name="${encodeURIComponent(u.displayName||u.email)}" data-mdone="${uMDone}" data-mtotal="${uMTotal}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" style="font-size:11px;padding:3px 8px">📊 View</button></td>
                     </tr>`;
                   }).join('')}
                 </tbody>
@@ -1847,6 +1976,16 @@ async function renderProgressReports() {
         document.getElementById(`prog-${deptId}-content`).style.display = isTask  ? '' : 'none';
         document.getElementById(`prog-${deptId}-members`).style.display = isTask  ? 'none' : '';
       });
+    });
+
+    // Wire up employee standings modal buttons
+    c.querySelectorAll('.emp-standings-btn').forEach(btn => {
+      btn.addEventListener('click', () => openEmpStandingsModal(
+        btn.dataset.uid,
+        decodeURIComponent(btn.dataset.name),
+        { mDone: +btn.dataset.mdone, mTotal: +btn.dataset.mtotal,
+          salary: +btn.dataset.salary, allowance: +btn.dataset.allowance, deductions: +btn.dataset.deductions }
+      ));
     });
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>${err.message}</h4></div>`;

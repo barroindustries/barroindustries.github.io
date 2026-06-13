@@ -257,7 +257,25 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
   let tasks = snap.docs.map(d=>normTask(d.data(),d.id)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
   if (filter!=='mine'&&filter!=='all') tasks=tasks.filter(t=>t.status===filter);
   if (!tasks.length) { list.innerHTML=`<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks found</h4></div>`; return; }
-  list.innerHTML = tasks.map(t=>taskCard(t)).join('');
+
+  // For employees in "My Tasks" view, group into active and completed sections
+  const COMPLETED_STATUSES = ['approved','archived','on-hold'];
+  if (filter==='mine' && !isPriv) {
+    const active    = tasks.filter(t=>!COMPLETED_STATUSES.includes(t.status));
+    const completed = tasks.filter(t=>COMPLETED_STATUSES.includes(t.status));
+    list.innerHTML = `
+      ${active.length ? `
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:8px">Active (${active.length})</div>
+        <div class="item-list" style="margin-bottom:20px">${active.map(t=>taskCard(t)).join('')}</div>
+      ` : '<div class="empty-state" style="padding:16px"><div class="empty-icon">✅</div><p>No active tasks</p></div>'}
+      ${completed.length ? `
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:8px;margin-top:8px">Completed / On Hold (${completed.length})</div>
+        <div class="item-list">${completed.map(t=>taskCard(t)).join('')}</div>
+      ` : ''}
+    `;
+  } else {
+    list.innerHTML = tasks.map(t=>taskCard(t)).join('');
+  }
   list.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole)));
 }
 
@@ -859,7 +877,18 @@ window.renderComments = async function(collection, docId, containerId, currentUs
   const snap = await db.collection(collection).doc(docId).collection('comments').orderBy('createdAt').get();
   const comments = snap.docs.map(d => ({id:d.id,...d.data()}));
 
+  const isAdmin = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
   const isImage = url => url && /\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(url);
+
+  const renderMsgActions = (c) => {
+    const canEdit   = c.authorId === currentUser.uid;
+    const canDelete = canEdit || isAdmin;
+    if (!canEdit && !canDelete) return '';
+    return `<div class="comment-actions" style="display:flex;gap:4px;margin-top:4px">
+      ${canEdit?`<button class="btn-link comment-edit-btn" data-id="${c.id}" style="font-size:11px;color:var(--text-muted);padding:0">✎ Edit</button>`:''}
+      ${canDelete?`<button class="btn-link comment-del-btn" data-id="${c.id}" style="font-size:11px;color:var(--danger);padding:0">🗑 Delete</button>`:''}
+    </div>`;
+  };
 
   container.innerHTML = `
     <div class="comments-section">
@@ -868,16 +897,18 @@ window.renderComments = async function(collection, docId, containerId, currentUs
         ${comments.length===0
           ? '<div style="font-size:13px;color:var(--text-muted);padding:8px">No messages yet.</div>'
           : comments.map(c => `
-            <div class="comment-item">
+            <div class="comment-item" data-cid="${c.id}">
               <div class="comment-header">
                 <span class="comment-author">${c.authorName||'User'}</span>
                 <span class="comment-time">${c.createdAt?new Date(c.createdAt.toDate()).toLocaleString('en-PH'):''}</span>
+                ${c.editedAt?'<span style="font-size:10px;color:var(--text-muted)">(edited)</span>':''}
               </div>
               ${c.text?`<div class="comment-text">${c.text}</div>`:''}
               ${c.fileUrl ? (isImage(c.fileUrl)
                 ? `<div style="margin-top:6px"><img src="${c.fileUrl}" alt="${c.fileName||'image'}" style="max-width:220px;max-height:160px;border-radius:8px;cursor:pointer" onclick="window.open('${c.fileUrl}','_blank')"/></div>`
                 : `<div style="margin-top:6px"><a href="${c.fileUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--primary-light);text-decoration:none;background:var(--surface2);border-radius:8px;padding:5px 10px">📎 ${c.fileName||'Attachment'}</a></div>`
               ) : ''}
+              ${renderMsgActions(c)}
             </div>`).join('')}
       </div>
       <div id="comment-file-preview-${docId}" style="font-size:11px;color:var(--primary-light);margin-bottom:4px;min-height:16px"></div>
@@ -895,6 +926,32 @@ window.renderComments = async function(collection, docId, containerId, currentUs
     const f = e.target.files?.[0];
     const prev = document.getElementById(`comment-file-preview-${docId}`);
     if (prev) prev.textContent = f ? `📎 ${f.name}` : '';
+  });
+
+  // Edit message
+  container.querySelectorAll('.comment-edit-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const cid  = btn.dataset.id;
+      const item = container.querySelector(`.comment-item[data-cid="${cid}"]`);
+      if (!item) return;
+      const textDiv = item.querySelector('.comment-text');
+      const oldText = textDiv?.textContent || '';
+      const newText = prompt('Edit message:', oldText);
+      if (newText === null || newText === oldText) return;
+      await db.collection(collection).doc(docId).collection('comments').doc(cid).update({
+        text: newText.trim(), editedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      renderComments(collection, docId, containerId, currentUser);
+    });
+  });
+
+  // Delete message
+  container.querySelectorAll('.comment-del-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Delete this message?')) return;
+      await db.collection(collection).doc(docId).collection('comments').doc(btn.dataset.id).delete();
+      renderComments(collection, docId, containerId, currentUser);
+    });
   });
 
   const sendComment = async () => {
@@ -926,6 +983,27 @@ window.renderComments = async function(collection, docId, containerId, currentUs
       fileUrl: fileUrl || null, fileName: fileName || null,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+
+    // Notify task assignees + creator when a message is added (task thread only)
+    if (collection === 'tasks') {
+      try {
+        const taskSnap = await db.collection('tasks').doc(docId).get();
+        if (taskSnap.exists) {
+          const task = taskSnap.data();
+          const involved = new Set([...(task.assignedTo||[]), task.createdBy].filter(Boolean));
+          involved.delete(currentUser.uid); // don't notify self
+          const preview = text ? (text.length > 60 ? text.slice(0,60)+'…' : text) : `📎 ${fileName||'File'}`;
+          for (const uid of involved) {
+            await Notifs.send(uid, {
+              title: `💬 New message on "${task.title}"`,
+              body: `${name}: ${preview}`,
+              icon: '💬', type: 'task_message'
+            });
+          }
+        }
+      } catch(e) { console.warn('Notif failed', e); }
+    }
+
     input.value = '';
     if (fileInp) fileInp.value = '';
     const prev = document.getElementById(`comment-file-preview-${docId}`);
@@ -988,7 +1066,7 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
 // ══════════════════════════════════════════════════
 window.renderFinance = async function(currentUser, currentRole, subtab = 'Overview') {
   const c = deptContainer();
-  const tabs = ['Overview','Payroll','Taxes','Ledger','Records','Accounting','Purchasing','SSS / Gov','Tasks'];
+  const tabs = ['Overview','Payroll','Cash Advances','Taxes','Ledger','Records','Accounting','Purchasing','SSS / Gov','Tasks'];
   c.innerHTML = `
     <div class="page-header"><h2>💰 Finance</h2></div>
     <div class="subtab-bar" style="flex-wrap:wrap">
@@ -1022,6 +1100,9 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'SSS / Gov':
       content.innerHTML = renderFileCollection('SSS & Government Documents', 'fin-sss', currentRole);
       bindFileCollection('fin-sss', currentUser, 'Finance', 'SSS');
+      break;
+    case 'Cash Advances':
+      await renderFinanceCA(content, currentUser, currentRole);
       break;
     case 'Tasks':
       await renderDeptTasks(content, 'Finance', currentUser, currentRole);
@@ -1573,6 +1654,129 @@ async function renderRecordsTab(container, currentUser, currentRole) {
       renderRecordsTab(container, currentUser, currentRole);
     });
   });
+}
+
+async function renderFinanceCA(container, currentUser, currentRole) {
+  const isPrivileged = ['president','owner','manager','finance'].includes(currentRole);
+  container.innerHTML = '<div class="loading-placeholder">Loading cash advances…</div>';
+
+  const snap = await db.collection('cash_advances').get().catch(()=>({docs:[]}));
+  const all  = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
+    const ta = a.createdAt?.toMillis?.() || 0;
+    const tb = b.createdAt?.toMillis?.() || 0;
+    return tb - ta;
+  });
+  const pending  = all.filter(a=>a.status==='pending');
+  const active   = all.filter(a=>a.status==='approved'&&(a.balance||0)>0);
+  const settled  = all.filter(a=>a.status==='approved'&&(a.balance||0)<=0);
+  const rejected = all.filter(a=>a.status==='rejected');
+  const totalOutstanding = active.reduce((s,a)=>s+(a.balance||0),0);
+
+  container.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:14px">
+      <div class="kpi-card red"><div class="kpi-label">Outstanding</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalOutstanding)}</div></div>
+      <div class="kpi-card warn"><div class="kpi-label">Pending</div><div class="kpi-value">${pending.length}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Active Loans</div><div class="kpi-value">${active.length}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Settled</div><div class="kpi-value">${settled.length}</div></div>
+    </div>
+    ${isPrivileged?`<div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="btn-primary btn-sm" id="fin-ca-add-btn">+ Add CA Record</button>
+    </div>`:''}
+    <div class="subtab-bar" id="fin-ca-tabs" style="margin-bottom:14px">
+      <button class="subtab-btn active" data-sub="pending">Pending (${pending.length})</button>
+      <button class="subtab-btn" data-sub="active">Active (${active.length})</button>
+      <button class="subtab-btn" data-sub="all">All Records</button>
+    </div>
+    <div id="fin-ca-list"></div>
+  `;
+
+  const renderFinCAList = (records) => {
+    const list = document.getElementById('fin-ca-list');
+    if (!records.length) { list.innerHTML = '<div class="empty-state"><div class="empty-icon">💸</div><p>None.</p></div>'; return; }
+    list.innerHTML = records.map(a=>`
+      <div class="ca-card" data-id="${a.id}">
+        <div class="ca-card-header">
+          <div class="ca-card-name">${a.userName||'Unknown'} <span style="font-size:11px;color:var(--text-muted)">${a.employeeId||''}</span></div>
+          <span class="badge ${statusBadge(a.status)}">${a.status}</span>
+        </div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--text-muted);margin-bottom:10px">
+          <span>Amount: <strong>₱${fmt(a.amount)}</strong></span>
+          <span>Balance: <strong style="color:${(a.balance||0)>0?'var(--danger)':'var(--success)'}">₱${fmt(a.balance||0)}</strong></span>
+          ${a.monthlyPayment?`<span>Monthly: <strong>₱${fmt(a.monthlyPayment)}</strong></span>`:''}
+          <span>Date: ${a.date||'—'}</span>
+        </div>
+        ${a.reason?`<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${a.reason}</div>`:''}
+        ${a.status==='pending'&&isPrivileged?`
+        <div style="display:flex;gap:8px">
+          <button class="btn-success btn-sm fin-ca-approve" data-id="${a.id}" data-uid="${a.userId}" data-amount="${a.amount}" data-name="${a.userName||''}">✓ Approve</button>
+          <button class="btn-danger btn-sm fin-ca-reject" data-id="${a.id}" data-uid="${a.userId}" data-name="${a.userName||''}">✗ Reject</button>
+        </div>`:''}
+        ${a.status==='approved'&&(a.balance||0)>0&&isPrivileged?`
+        <button class="btn-secondary btn-sm fin-ca-pay" data-id="${a.id}" data-balance="${a.balance||0}" data-monthly="${a.monthlyPayment||0}" data-uid="${a.userId||''}" data-name="${a.userName||''}">💳 Record Payment</button>`:''}
+        ${isRealPresident()?`<button class="btn-secondary btn-sm fin-ca-del" data-id="${a.id}" style="color:var(--danger);margin-left:4px">🗑</button>`:''}
+      </div>`).join('');
+
+    list.querySelectorAll('.fin-ca-approve').forEach(btn=>btn.addEventListener('click',async e=>{
+      const {id,uid,name,amount}=e.currentTarget.dataset;
+      await db.collection('cash_advances').doc(id).update({status:'approved',balance:parseFloat(amount),approvedAt:firebase.firestore.FieldValue.serverTimestamp(),approvedBy:currentUser.uid});
+      await Notifs.send(uid,{title:'Cash Advance Approved',body:`Your ₱${fmt(parseFloat(amount))} request was approved.`,icon:'✅',type:'cash_advance'});
+      Notifs.showToast(`Approved for ${name}`);
+      renderFinanceCA(container,currentUser,currentRole);
+    }));
+    list.querySelectorAll('.fin-ca-reject').forEach(btn=>btn.addEventListener('click',async e=>{
+      const {id,uid,name}=e.currentTarget.dataset;
+      await db.collection('cash_advances').doc(id).update({status:'rejected'});
+      await Notifs.send(uid,{title:'Cash Advance Rejected',body:'Your request was not approved.',icon:'❌',type:'cash_advance'});
+      Notifs.showToast(`Rejected for ${name}`);
+      renderFinanceCA(container,currentUser,currentRole);
+    }));
+    list.querySelectorAll('.fin-ca-pay').forEach(btn=>btn.addEventListener('click',async e=>{
+      const {id,balance,monthly,uid,name}=e.currentTarget.dataset;
+      openModal('Record Payment — '+name,`
+        <div class="ca-detail" style="margin-bottom:12px"><span>Balance:</span><strong>₱${fmt(parseFloat(balance))}</strong></div>
+        <div class="form-group"><label>Amount Paid</label><input id="fin-pay-amt" type="number" value="${monthly}" min="0" max="${balance}"/></div>
+        <div class="form-group"><label>Date</label><input id="fin-pay-date" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
+      `,`<button class="btn-primary" id="fin-pay-save">Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      document.getElementById('fin-pay-save').addEventListener('click',async()=>{
+        const paid=parseFloat(document.getElementById('fin-pay-amt').value)||0;
+        const date=document.getElementById('fin-pay-date').value;
+        const newBal=Math.max(0,(parseFloat(balance)||0)-paid);
+        const caSnap=await db.collection('cash_advances').doc(id).get();
+        const payments=[...(caSnap.data().payments||[]),{amount:paid,date,recordedBy:currentUser.uid}];
+        await db.collection('cash_advances').doc(id).update({balance:newBal,payments,status:newBal===0?'paid':'approved',lastPaymentAt:firebase.firestore.FieldValue.serverTimestamp()});
+        if(uid) await Notifs.send(uid,{title:'💳 CA Payment Recorded',body:`₱${fmt(paid)} payment recorded. Remaining: ₱${fmt(newBal)}`,icon:'💳',type:'cash_advance'});
+        closeModal();
+        Notifs.showToast('Payment recorded!');
+        renderFinanceCA(container,currentUser,currentRole);
+      });
+    }));
+    list.querySelectorAll('.fin-ca-del').forEach(btn=>btn.addEventListener('click',async e=>{
+      if(!confirm('Delete this record permanently?'))return;
+      await db.collection('cash_advances').doc(btn.dataset.id).delete();
+      Notifs.showToast('Deleted.');
+      renderFinanceCA(container,currentUser,currentRole);
+    }));
+  };
+
+  let currentSub='pending';
+  const showSub=(sub)=>{
+    currentSub=sub;
+    const map={pending,active,all};
+    renderFinCAList(sub==='all'?all:(map[sub]||[]));
+  };
+  showSub('pending');
+
+  container.querySelectorAll('#fin-ca-tabs .subtab-btn').forEach(btn=>btn.addEventListener('click',()=>{
+    container.querySelectorAll('#fin-ca-tabs .subtab-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    showSub(btn.dataset.sub);
+  }));
+
+  if(isPrivileged){
+    document.getElementById('fin-ca-add-btn')?.addEventListener('click',()=>{
+      window.renderCashAdvancePage && window.openPresidentCashAdvanceModal ? window.openPresidentCashAdvanceModal() : navigateTo('cash-advance');
+    });
+  }
 }
 
 async function renderFinanceOverview(container, currentUser, currentRole) {
@@ -3152,15 +3356,22 @@ function printQuote(lines, q) {
 // ══════════════════════════════════════════════════
 window.renderApprovals = async function(currentUser) {
   const c = deptContainer();
-  // Check pending signup requests for badge
-  const signupSnap = await db.collection('signup_requests').where('status','==','pending').get().catch(()=>({size:0}));
+  // Check pending counts for badges
+  const [signupSnap, extSnap] = await Promise.all([
+    db.collection('signup_requests').where('status','==','pending').get().catch(()=>({size:0})),
+    db.collection('attendance_extensions').where('status','==','pending').get().catch(()=>({size:0}))
+  ]);
   const pendingSignups = signupSnap.size || 0;
+  const pendingExt     = extSnap.size || 0;
 
   c.innerHTML = `
     <div class="page-header"><h2>✅ Approvals</h2></div>
     <div class="subtab-bar">
       <button class="subtab-btn active" data-sub="signups">
         Sign-up Requests${pendingSignups>0?` <span class="nav-badge">${pendingSignups}</span>`:''}
+      </button>
+      <button class="subtab-btn" data-sub="attendance">
+        Attendance Extensions${pendingExt>0?` <span class="nav-badge">${pendingExt}</span>`:''}
       </button>
       <button class="subtab-btn" data-sub="roa">Quote / ROA</button>
       <button class="subtab-btn" data-sub="ca">Cash Advances</button>
@@ -3257,6 +3468,75 @@ window.renderApprovals = async function(currentUser) {
           });
           Notifs.showToast('Request rejected.');
           loadApprovalsSub('signups');
+        });
+      });
+      return;
+    }
+
+    if (sub === 'attendance') {
+      // Attendance Extension Requests
+      const snap = await db.collection('attendance_extensions').orderBy('requestedAt','desc').get().catch(()=>({docs:[]}));
+      const items = snap.docs.map(d=>({id:d.id,...d.data()}));
+      const pending = items.filter(i=>i.status==='pending');
+
+      if (!items.length) {
+        wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">⏰</div><h4>No extension requests</h4></div>';
+        return;
+      }
+      wrap.innerHTML = `
+        ${pending.length?`<div class="alert-banner alert-warn" style="margin-bottom:12px">⚠️ ${pending.length} pending request${pending.length>1?'s':''}</div>`:''}
+        <div class="item-list">
+          ${items.map(item=>`
+          <div class="item-card" data-id="${item.id}">
+            <div class="item-top">
+              <div class="item-title">⏰ ${item.userName||'Unknown'}</div>
+              <span class="badge ${item.status==='approved'?'badge-green':item.status==='denied'?'badge-red':'badge-warn'}">${item.status||'pending'}</span>
+            </div>
+            <div class="item-meta">
+              <span>📅 ${item.date||'—'}</span>
+              ${item.requestedAt?`<span>Requested: ${new Date(item.requestedAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})}</span>`:''}
+              ${item.status==='approved'&&item.expiresAt?`<span>Expires: ${new Date(item.expiresAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})}</span>`:''}
+            </div>
+            ${item.status==='pending'?`
+            <div style="display:flex;gap:8px;margin-top:12px">
+              <button class="btn-success ext-approve" data-id="${item.id}" data-uid="${item.uid}" data-name="${item.userName||''}">✓ Approve (6-hr)</button>
+              <button class="btn-danger ext-deny" data-id="${item.id}" data-uid="${item.uid}" data-name="${item.userName||''}">✗ Deny</button>
+            </div>`:''}
+          </div>`).join('')}
+        </div>
+      `;
+
+      wrap.querySelectorAll('.ext-approve').forEach(btn => {
+        btn.addEventListener('click', async e => {
+          const { id, uid, name } = e.currentTarget.dataset;
+          const expiresAt = new Date(); expiresAt.setHours(expiresAt.getHours() + 6);
+          await db.collection('attendance_extensions').doc(id).update({
+            status: 'approved',
+            approvedBy: currentUser.uid,
+            approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            expiresAt: firebase.firestore.Timestamp.fromDate(expiresAt)
+          });
+          await Notifs.send(uid, {
+            title: '✅ Extension Approved',
+            body: `Your time extension has been approved. You have 6 hours from now to time in.`,
+            icon: '✅', type: 'att_extension'
+          });
+          Notifs.showToast(`Extension approved for ${name}`);
+          loadApprovalsSub('attendance');
+        });
+      });
+
+      wrap.querySelectorAll('.ext-deny').forEach(btn => {
+        btn.addEventListener('click', async e => {
+          const { id, uid, name } = e.currentTarget.dataset;
+          await db.collection('attendance_extensions').doc(id).update({ status: 'denied' });
+          await Notifs.send(uid, {
+            title: '❌ Extension Denied',
+            body: 'Your attendance extension request was not approved.',
+            icon: '❌', type: 'att_extension'
+          });
+          Notifs.showToast(`Extension denied for ${name}`);
+          loadApprovalsSub('attendance');
         });
       });
       return;
@@ -3363,7 +3643,7 @@ window.renderApprovals = async function(currentUser) {
     });
   });
 
-  loadApprovalsSub('roa');
+  loadApprovalsSub('signups');
 };
 
 // ══════════════════════════════════════════════════
