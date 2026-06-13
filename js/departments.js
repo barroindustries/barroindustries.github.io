@@ -868,76 +868,121 @@ function openAddExpenseModal(currentUser) {
 }
 
 // ══════════════════════════════════════════════════
-//  COMMENTS (shared)
+//  COMMENTS — Messenger-style UI with seen receipts
 // ══════════════════════════════════════════════════
 window.renderComments = async function(collection, docId, containerId, currentUser) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
-  const snap = await db.collection(collection).doc(docId).collection('comments').orderBy('createdAt').get();
-  const comments = snap.docs.map(d => ({id:d.id,...d.data()}));
-
   const isAdmin = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
   const isImage = url => url && /\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(url);
 
-  const renderMsgActions = (c) => {
-    const canEdit   = c.authorId === currentUser.uid;
-    const canDelete = canEdit || isAdmin;
-    if (!canEdit && !canDelete) return '';
-    return `<div class="comment-actions" style="display:flex;gap:4px;margin-top:4px">
-      ${canEdit?`<button class="btn-link comment-edit-btn" data-id="${c.id}" style="font-size:11px;color:var(--text-muted);padding:0">✎ Edit</button>`:''}
-      ${canDelete?`<button class="btn-link comment-del-btn" data-id="${c.id}" style="font-size:11px;color:var(--danger);padding:0">🗑 Delete</button>`:''}
-    </div>`;
+  // Fetch comments + readers in parallel
+  const [snap, readersSnap] = await Promise.all([
+    db.collection(collection).doc(docId).collection('comments').orderBy('createdAt').get(),
+    collection === 'tasks'
+      ? db.collection(collection).doc(docId).collection('readers').get().catch(()=>({docs:[]}))
+      : Promise.resolve({docs:[]})
+  ]);
+  const comments = snap.docs.map(d => ({id:d.id,...d.data()}));
+  const readers  = readersSnap.docs.map(d=>({id:d.id,...d.data()}));
+
+  // Mark current user as read (tasks only)
+  if (collection === 'tasks') {
+    const myName = userProfile?.displayName || currentUser.email;
+    db.collection(collection).doc(docId).collection('readers').doc(currentUser.uid).set({
+      uid: currentUser.uid, name: myName,
+      readAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, {merge:true}).catch(()=>{});
+  }
+
+  // Build seen-by label per comment
+  const getSeenBy = (comment) => {
+    if (!comment.createdAt) return [];
+    const commentMs = comment.createdAt.toMillis?.() || 0;
+    return readers.filter(r => r.uid !== comment.authorId && (r.readAt?.toMillis?.() || 0) >= commentMs);
+  };
+
+  const initials = name => (name||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+  const timeLabel = ts => {
+    if (!ts) return '';
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    const now = new Date();
+    const diffH = (now - d) / 3600000;
+    if (diffH < 24) return d.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'});
+    return d.toLocaleDateString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
   };
 
   container.innerHTML = `
-    <div class="comments-section">
-      <h4>💬 Messages (${comments.length})</h4>
-      <div class="comment-list" id="clist-${docId}">
-        ${comments.length===0
-          ? '<div style="font-size:13px;color:var(--text-muted);padding:8px">No messages yet.</div>'
-          : comments.map(c => `
-            <div class="comment-item" data-cid="${c.id}">
-              <div class="comment-header">
-                <span class="comment-author">${c.authorName||'User'}</span>
-                <span class="comment-time">${c.createdAt?new Date(c.createdAt.toDate()).toLocaleString('en-PH'):''}</span>
-                ${c.editedAt?'<span style="font-size:10px;color:var(--text-muted)">(edited)</span>':''}
-              </div>
-              ${c.text?`<div class="comment-text">${c.text}</div>`:''}
-              ${c.fileUrl ? (isImage(c.fileUrl)
-                ? `<div style="margin-top:6px"><img src="${c.fileUrl}" alt="${c.fileName||'image'}" style="max-width:220px;max-height:160px;border-radius:8px;cursor:pointer" onclick="window.open('${c.fileUrl}','_blank')"/></div>`
-                : `<div style="margin-top:6px"><a href="${c.fileUrl}" target="_blank" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--primary-light);text-decoration:none;background:var(--surface2);border-radius:8px;padding:5px 10px">📎 ${c.fileName||'Attachment'}</a></div>`
-              ) : ''}
-              ${renderMsgActions(c)}
-            </div>`).join('')}
+    <div class="messenger-wrap">
+      <div class="messenger-header">
+        <span style="font-weight:700">💬 Messages</span>
+        <span style="font-size:11px;color:var(--text-muted)">${comments.length} message${comments.length!==1?'s':''}</span>
       </div>
-      <div id="comment-file-preview-${docId}" style="font-size:11px;color:var(--primary-light);margin-bottom:4px;min-height:16px"></div>
-      <div class="comment-input-row" style="display:flex;gap:6px;align-items:center">
-        <input id="comment-in-${docId}" placeholder="Write a message…" style="flex:1"/>
-        <label for="comment-file-${docId}" class="btn-secondary btn-sm" style="cursor:pointer;padding:7px 10px;margin:0" title="Attach file">📎</label>
-        <input type="file" id="comment-file-${docId}" style="display:none"
-          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"/>
-        <button class="btn-primary btn-sm" id="comment-send-${docId}">Send</button>
+      <div class="messenger-body" id="msbody-${docId}">
+        ${!comments.length ? `<div class="messenger-empty">No messages yet. Be the first to say something!</div>` :
+          comments.map((c, idx) => {
+            const isMine = c.authorId === currentUser.uid;
+            const seenBy = getSeenBy(c);
+            const isLast = idx === comments.length - 1;
+            const canEdit   = c.authorId === currentUser.uid;
+            const canDelete = canEdit || isAdmin;
+            return `
+            <div class="ms-row ${isMine?'ms-row-mine':'ms-row-theirs'}" data-cid="${c.id}">
+              ${!isMine ? `<div class="ms-avatar" title="${c.authorName||'User'}">${c.photoUrl?`<img src="${c.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(c.authorName||'U')}</div>` : ''}
+              <div class="ms-bubble-wrap">
+                ${!isMine ? `<div class="ms-name">${c.authorName||'User'}</div>` : ''}
+                <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'}">
+                  ${c.text?`<div class="ms-text">${c.text.replace(/\n/g,'<br/>')}</div>`:''}
+                  ${c.fileUrl ? (isImage(c.fileUrl)
+                    ? `<div style="margin-top:${c.text?'6':'0'}px"><img src="${c.fileUrl}" alt="${c.fileName||'img'}" style="max-width:200px;max-height:160px;border-radius:8px;cursor:pointer" onclick="window.open('${c.fileUrl}','_blank')"/></div>`
+                    : `<a href="${c.fileUrl}" target="_blank" class="ms-file-chip">📎 ${c.fileName||'Attachment'}</a>`
+                  ) : ''}
+                  <div class="ms-meta">
+                    <span class="ms-time">${timeLabel(c.createdAt)}</span>
+                    ${c.editedAt?'<span class="ms-edited">(edited)</span>':''}
+                  </div>
+                </div>
+                ${canEdit||canDelete ? `<div class="ms-actions">
+                  ${canEdit?`<button class="ms-act-btn comment-edit-btn" data-id="${c.id}">✎</button>`:''}
+                  ${canDelete?`<button class="ms-act-btn ms-del-btn comment-del-btn" data-id="${c.id}">🗑</button>`:''}
+                </div>` : ''}
+                ${isLast && seenBy.length ? `<div class="ms-seen">Seen by ${seenBy.map(r=>r.name.split(' ')[0]).join(', ')}</div>` : ''}
+              </div>
+              ${isMine ? `<div class="ms-avatar ms-avatar-mine" title="You">${userProfile?.photoUrl?`<img src="${userProfile.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(userProfile?.displayName||currentUser.email)}</div>` : ''}
+            </div>`;
+          }).join('')}
+      </div>
+      <div id="ms-file-preview-${docId}" style="font-size:11px;color:var(--primary-light);padding:0 12px 4px;min-height:16px"></div>
+      <div class="messenger-input-row">
+        <label for="comment-file-${docId}" class="ms-attach-btn" title="Attach file">📎</label>
+        <input type="file" id="comment-file-${docId}" style="display:none" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"/>
+        <input id="comment-in-${docId}" class="ms-input" placeholder="Type a message…"/>
+        <button class="ms-send-btn" id="comment-send-${docId}">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+        </button>
       </div>
     </div>
   `;
 
+  // Scroll to bottom
+  const body = document.getElementById(`msbody-${docId}`);
+  if (body) body.scrollTop = body.scrollHeight;
+
+  // File attach preview
   document.getElementById(`comment-file-${docId}`)?.addEventListener('change', e => {
     const f = e.target.files?.[0];
-    const prev = document.getElementById(`comment-file-preview-${docId}`);
+    const prev = document.getElementById(`ms-file-preview-${docId}`);
     if (prev) prev.textContent = f ? `📎 ${f.name}` : '';
   });
 
   // Edit message
   container.querySelectorAll('.comment-edit-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const cid  = btn.dataset.id;
-      const item = container.querySelector(`.comment-item[data-cid="${cid}"]`);
-      if (!item) return;
-      const textDiv = item.querySelector('.comment-text');
-      const oldText = textDiv?.textContent || '';
-      const newText = prompt('Edit message:', oldText);
-      if (newText === null || newText === oldText) return;
+      const cid = btn.dataset.id;
+      const c   = comments.find(x=>x.id===cid);
+      const newText = prompt('Edit message:', c?.text||'');
+      if (newText === null || newText === (c?.text||'')) return;
       await db.collection(collection).doc(docId).collection('comments').doc(cid).update({
         text: newText.trim(), editedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
@@ -955,17 +1000,16 @@ window.renderComments = async function(collection, docId, containerId, currentUs
   });
 
   const sendComment = async () => {
-    const input    = document.getElementById(`comment-in-${docId}`);
-    const fileInp  = document.getElementById(`comment-file-${docId}`);
-    const text     = input.value.trim();
-    const file     = fileInp?.files?.[0];
+    const input   = document.getElementById(`comment-in-${docId}`);
+    const fileInp = document.getElementById(`comment-file-${docId}`);
+    const text    = input.value.trim();
+    const file    = fileInp?.files?.[0];
     if (!text && !file) return;
 
     const sendBtn = document.getElementById(`comment-send-${docId}`);
-    if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = '…'; }
+    if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = '.5'; }
 
-    const s = await db.collection('users').doc(currentUser.uid).get();
-    const name = s.exists ? s.data().displayName : currentUser.email;
+    const myName = userProfile?.displayName || currentUser.email;
 
     let fileUrl = null, fileName = null;
     if (file) {
@@ -975,28 +1019,32 @@ window.renderComments = async function(collection, docId, containerId, currentUs
         await ref.put(file);
         fileUrl  = await ref.getDownloadURL();
         fileName = file.name;
-      } catch(err) { Notifs.showToast('File upload failed','error'); if(sendBtn){sendBtn.disabled=false;sendBtn.textContent='Send';} return; }
+      } catch(err) {
+        Notifs.showToast('File upload failed','error');
+        if(sendBtn){sendBtn.disabled=false;sendBtn.style.opacity='1';}
+        return;
+      }
     }
 
     await db.collection(collection).doc(docId).collection('comments').add({
-      text: text || '', authorId: currentUser.uid, authorName: name,
-      fileUrl: fileUrl || null, fileName: fileName || null,
+      text: text||'', authorId: currentUser.uid, authorName: myName,
+      fileUrl: fileUrl||null, fileName: fileName||null,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
 
-    // Notify task assignees + creator when a message is added (task thread only)
+    // Notify task assignees + creator (tasks only)
     if (collection === 'tasks') {
       try {
         const taskSnap = await db.collection('tasks').doc(docId).get();
         if (taskSnap.exists) {
           const task = taskSnap.data();
           const involved = new Set([...(task.assignedTo||[]), task.createdBy].filter(Boolean));
-          involved.delete(currentUser.uid); // don't notify self
-          const preview = text ? (text.length > 60 ? text.slice(0,60)+'…' : text) : `📎 ${fileName||'File'}`;
+          involved.delete(currentUser.uid);
+          const preview = text ? (text.length>60?text.slice(0,60)+'…':text) : `📎 ${fileName||'File'}`;
           for (const uid of involved) {
             await Notifs.send(uid, {
               title: `💬 New message on "${task.title}"`,
-              body: `${name}: ${preview}`,
+              body: `${myName}: ${preview}`,
               icon: '💬', type: 'task_message'
             });
           }
@@ -1006,13 +1054,15 @@ window.renderComments = async function(collection, docId, containerId, currentUs
 
     input.value = '';
     if (fileInp) fileInp.value = '';
-    const prev = document.getElementById(`comment-file-preview-${docId}`);
+    const prev = document.getElementById(`ms-file-preview-${docId}`);
     if (prev) prev.textContent = '';
     renderComments(collection, docId, containerId, currentUser);
   };
 
   document.getElementById(`comment-send-${docId}`)?.addEventListener('click', sendComment);
-  document.getElementById(`comment-in-${docId}`)?.addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey) sendComment(); });
+  document.getElementById(`comment-in-${docId}`)?.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendComment(); }
+  });
 };
 
 // ══════════════════════════════════════════════════
@@ -1066,7 +1116,7 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
 // ══════════════════════════════════════════════════
 window.renderFinance = async function(currentUser, currentRole, subtab = 'Overview') {
   const c = deptContainer();
-  const tabs = ['Overview','Payroll','Cash Advances','Taxes','Ledger','Records','Accounting','Purchasing','SSS / Gov','Tasks'];
+  const tabs = ['Overview','Payroll','HR Profiles','Cash Advances','Taxes','Ledger','Records','Accounting','Purchasing','SSS / Gov','Tasks'];
   c.innerHTML = `
     <div class="page-header"><h2>💰 Finance</h2></div>
     <div class="subtab-bar" style="flex-wrap:wrap">
@@ -1100,6 +1150,9 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'SSS / Gov':
       content.innerHTML = renderFileCollection('SSS & Government Documents', 'fin-sss', currentRole);
       bindFileCollection('fin-sss', currentUser, 'Finance', 'SSS');
+      break;
+    case 'HR Profiles':
+      await renderFinanceHRProfiles(content, currentUser, currentRole);
       break;
     case 'Cash Advances':
       await renderFinanceCA(content, currentUser, currentRole);
@@ -1779,6 +1832,651 @@ async function renderFinanceCA(container, currentUser, currentRole) {
   }
 }
 
+// ── HR Profiles + Payslip Generator ─────────────────
+async function renderFinanceHRProfiles(container, currentUser, currentRole) {
+  const isPriv = ['president','owner','manager','finance'].includes(currentRole);
+  container.innerHTML = '<div class="loading-placeholder">Loading worker profiles…</div>';
+
+  const now = new Date();
+  const monthStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+
+  const [profilesSnap, payslipsSnap] = await Promise.all([
+    db.collection('worker_profiles').orderBy('name').get().catch(()=>({docs:[]})),
+    db.collection('payslips').where('payPeriodMonth','==',monthStr).get().catch(()=>({docs:[]}))
+  ]);
+  const profiles = profilesSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const payslips = payslipsSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const totalDisbursed = payslips.reduce((s,p)=>s+(p.netPay||0),0);
+
+  container.innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi-card"><div class="kpi-label">Worker Profiles</div><div class="kpi-value">${profiles.length}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Payslips This Month</div><div class="kpi-value">${payslips.length}</div></div>
+      <div class="kpi-card accent"><div class="kpi-label">Disbursed (${now.toLocaleString('en-PH',{month:'short'})})</div><div class="kpi-value" style="font-size:16px">₱${fmt(totalDisbursed)}</div></div>
+    </div>
+    ${isPriv?`<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn-primary btn-sm" id="hrp-add-btn">+ Add Worker Profile</button>
+      <button class="btn-secondary btn-sm" id="hrp-payslip-history-btn">📄 All Payslips</button>
+    </div>`:''}
+    <div class="card">
+      <div class="card-header"><h3>👷 Worker Profiles</h3></div>
+      <div class="card-body" style="padding:0">
+        ${!profiles.length ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">👷</div><p>No worker profiles yet. Add one to start generating payslips.</p></div>' :
+        `<div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Name</th><th>Job Title</th><th>Dept</th><th>Type</th><th>Daily Rate</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            ${profiles.map(p=>`<tr>
+              <td style="font-weight:600">${p.name||'—'}</td>
+              <td>${p.jobTitle||'—'}</td>
+              <td><span class="badge badge-blue">${p.department||'—'}</span></td>
+              <td><span class="badge badge-purple">${p.employmentType||'—'}</span></td>
+              <td>₱${fmt(p.dailyRate||0)}</td>
+              <td><span class="badge ${p.status==='active'?'badge-green':'badge-gray'}">${p.status||'active'}</span></td>
+              <td style="white-space:nowrap">
+                <button class="btn-primary btn-sm hrp-gen-btn" data-id="${p.id}" style="margin-right:4px">📄 Payslip</button>
+                ${isPriv?`<button class="btn-secondary btn-sm hrp-edit-btn" data-id="${p.id}">✎ Edit</button>`:''}
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table></div>`}
+      </div>
+    </div>
+  `;
+
+  // Add profile
+  if (isPriv) {
+    document.getElementById('hrp-add-btn')?.addEventListener('click', () => openHRProfileForm(null, currentUser, currentRole, ()=>renderFinanceHRProfiles(container,currentUser,currentRole)));
+    document.getElementById('hrp-payslip-history-btn')?.addEventListener('click', () => openPayslipHistory(currentUser, currentRole));
+
+    container.querySelectorAll('.hrp-edit-btn').forEach(btn => {
+      const profile = profiles.find(p=>p.id===btn.dataset.id);
+      btn.addEventListener('click', () => openHRProfileForm(profile, currentUser, currentRole, ()=>renderFinanceHRProfiles(container,currentUser,currentRole)));
+    });
+  }
+
+  // Generate payslip
+  container.querySelectorAll('.hrp-gen-btn').forEach(btn => {
+    const profile = profiles.find(p=>p.id===btn.dataset.id);
+    btn.addEventListener('click', () => openPayslipGenerator(profile, currentUser, currentRole));
+  });
+}
+
+function openHRProfileForm(profile, currentUser, currentRole, onSave) {
+  const isEdit = !!profile;
+  const depts = ['Barro Kitchens','Barro Industries','Brilliant Steel','Finance','HR','Operations','General'];
+  const empTypes = ['Regular','Part-time','Contractual','Project-based'];
+  const workTypes = ['Onsite','Online','Hybrid','Remote'];
+
+  openModal(`${isEdit?'Edit':'Add'} Worker Profile`, `
+    <div class="form-row">
+      <div class="form-group"><label>Full Name *</label><input id="hrp-name" value="${profile?.name||''}"/></div>
+      <div class="form-group"><label>ID Number</label><input id="hrp-id" value="${profile?.idNumber||''}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Job Title</label><input id="hrp-title" value="${profile?.jobTitle||''}"/></div>
+      <div class="form-group"><label>Department</label><select id="hrp-dept">
+        ${depts.map(d=>`<option value="${d}" ${profile?.department===d?'selected':''}>${d}</option>`).join('')}
+        <option value="${profile?.department||''}" ${!depts.includes(profile?.department||'')?'selected':''}>Other</option>
+      </select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Employment Type</label><select id="hrp-emptype">
+        ${empTypes.map(t=>`<option value="${t}" ${profile?.employmentType===t?'selected':''}>${t}</option>`).join('')}
+      </select></div>
+      <div class="form-group"><label>Work Setup</label><select id="hrp-worktype">
+        ${workTypes.map(t=>`<option value="${t}" ${profile?.workType===t?'selected':''}>${t}</option>`).join('')}
+      </select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Daily Rate (₱)</label><input id="hrp-daily" type="number" value="${profile?.dailyRate||0}"/></div>
+      <div class="form-group"><label>Issued On</label><input id="hrp-issued" type="date" value="${profile?.issuedOn||new Date().toISOString().slice(0,10)}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Meal Allowance</label><input id="hrp-meal" type="number" value="${profile?.allowances?.meal||0}"/></div>
+      <div class="form-group"><label>Transport Allowance</label><input id="hrp-transport" type="number" value="${profile?.allowances?.transport||0}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>SSS Number</label><input id="hrp-sss" value="${profile?.ssNum||''}"/></div>
+      <div class="form-group"><label>PhilHealth</label><input id="hrp-ph" value="${profile?.phNum||''}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Pag-IBIG</label><input id="hrp-pib" value="${profile?.pagibigNum||''}"/></div>
+      <div class="form-group"><label>TIN</label><input id="hrp-tin" value="${profile?.tinNum||''}"/></div>
+    </div>
+    <div class="form-group"><label>Address</label><input id="hrp-addr" value="${profile?.address||''}"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Contact</label><input id="hrp-phone" value="${profile?.phone||''}"/></div>
+      <div class="form-group"><label>Status</label><select id="hrp-status">
+        <option value="active" ${profile?.status!=='inactive'?'selected':''}>Active</option>
+        <option value="inactive" ${profile?.status==='inactive'?'selected':''}>Inactive</option>
+      </select></div>
+    </div>
+  `, `<button class="btn-primary" id="hrp-save-btn">${isEdit?'Update':'Save'} Profile</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  document.getElementById('hrp-save-btn').addEventListener('click', async () => {
+    const name = document.getElementById('hrp-name').value.trim();
+    if (!name) { Notifs.showToast('Name is required','error'); return; }
+    const data = {
+      name,
+      idNumber: document.getElementById('hrp-id').value.trim(),
+      jobTitle: document.getElementById('hrp-title').value.trim(),
+      department: document.getElementById('hrp-dept').value,
+      employmentType: document.getElementById('hrp-emptype').value,
+      workType: document.getElementById('hrp-worktype').value,
+      dailyRate: parseFloat(document.getElementById('hrp-daily').value)||0,
+      issuedOn: document.getElementById('hrp-issued').value,
+      allowances: {
+        meal: parseFloat(document.getElementById('hrp-meal').value)||0,
+        transport: parseFloat(document.getElementById('hrp-transport').value)||0,
+      },
+      ssNum: document.getElementById('hrp-sss').value.trim(),
+      phNum: document.getElementById('hrp-ph').value.trim(),
+      pagibigNum: document.getElementById('hrp-pib').value.trim(),
+      tinNum: document.getElementById('hrp-tin').value.trim(),
+      address: document.getElementById('hrp-addr').value.trim(),
+      phone: document.getElementById('hrp-phone').value.trim(),
+      status: document.getElementById('hrp-status').value,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    if (!isEdit) { data.createdAt = firebase.firestore.FieldValue.serverTimestamp(); data.createdBy = currentUser.uid; }
+    if (isEdit) { await db.collection('worker_profiles').doc(profile.id).update(data); }
+    else         { await db.collection('worker_profiles').add(data); }
+    closeModal();
+    Notifs.showToast(isEdit ? 'Profile updated!' : 'Worker profile created!');
+    onSave();
+  });
+}
+
+async function openPayslipHistory(currentUser, currentRole) {
+  const snap = await db.collection('payslips').orderBy('createdAt','desc').limit(100).get().catch(()=>({docs:[]}));
+  const list = snap.docs.map(d=>({id:d.id,...d.data()}));
+
+  openModal('📄 Payslip History', `
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Worker</th><th>Period</th><th>Net Pay</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          ${!list.length ? '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">No payslips yet</td></tr>' :
+            list.map(p=>`<tr>
+              <td style="font-weight:600">${p.workerName||'—'}</td>
+              <td style="font-size:12px">${p.payPeriodStart||''} – ${p.payPeriodEnd||''}</td>
+              <td><strong>₱${fmt(p.netPay||0)}</strong></td>
+              <td><span class="badge ${p.status==='filed'?'badge-green':p.status==='submitted'?'badge-blue':'badge-gray'}">${p.status||'draft'}</span></td>
+              <td>
+                <button class="btn-secondary btn-sm ps-view-btn" data-id="${p.id}" style="font-size:11px">View</button>
+                ${['president','manager','finance'].includes(currentRole)&&p.status!=='filed'?`<button class="btn-success btn-sm ps-file-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px">File</button>`:''}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `);
+
+  document.querySelectorAll('.ps-view-btn').forEach(btn => {
+    const ps = list.find(p=>p.id===btn.dataset.id);
+    btn.addEventListener('click', () => ps && renderPayslipPreview(ps));
+  });
+  document.querySelectorAll('.ps-file-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const ps = list.find(p=>p.id===btn.dataset.id);
+      if (!ps) return;
+      await db.collection('payslips').doc(btn.dataset.id).update({
+        status: 'filed', filedBy: currentUser.uid,
+        filedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      Notifs.showToast('Payslip filed ✅');
+      btn.textContent = 'Filed'; btn.disabled = true;
+      btn.className = 'btn-secondary btn-sm';
+    });
+  });
+}
+
+function openPayslipGenerator(profile, currentUser, currentRole) {
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0,10);
+  // Compute default period: start of current week Mon
+  const dayOfWeek = now.getDay();
+  const monday = new Date(now); monday.setDate(now.getDate() - (dayOfWeek===0?6:dayOfWeek-1));
+  const periodStart = monday.toISOString().slice(0,10);
+
+  openModal(`📄 Generate Payslip — ${profile.name}`, `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <div class="form-group"><label>Pay Period Start</label><input id="ps-start" type="date" value="${periodStart}"/></div>
+      <div class="form-group"><label>Pay Period End</label><input id="ps-end" type="date" value="${todayStr}"/></div>
+      <div class="form-group"><label>Pay Date</label><input id="ps-date" type="date" value="${todayStr}"/></div>
+      <div class="form-group"><label>Business / Company Name</label><input id="ps-company" value="Barro Kitchens"/></div>
+    </div>
+
+    <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Earnings</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <div class="form-group" style="margin-bottom:6px"><label>Daily Rate</label><input id="ps-daily" type="number" value="${profile.dailyRate||0}"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>Rate/HR</label><input id="ps-rph" type="number" value="${(profile.dailyRate/8).toFixed(2)}"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>Hours Worked</label><input id="ps-hrs" type="number" value="50"/></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <div class="form-group" style="margin-bottom:6px"><label>OT Rate/HR</label><input id="ps-ot-rate" type="number" value="${(profile.dailyRate/8*1.25).toFixed(2)}"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>OT Hours</label><input id="ps-ot-hrs" type="number" value="0"/></div>
+        <div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <div class="form-group" style="margin-bottom:0"><label>Meal Allow</label><input id="ps-meal" type="number" value="${profile.allowances?.meal||0}"/></div>
+        <div class="form-group" style="margin-bottom:0"><label>Transport Allow</label><input id="ps-transport" type="number" value="${profile.allowances?.transport||0}"/></div>
+        <div class="form-group" style="margin-bottom:0"><label>Rent Allow</label><input id="ps-rent" type="number" value="0"/></div>
+      </div>
+    </div>
+
+    <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Deductions</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <div class="form-group" style="margin-bottom:6px"><label>SSS</label><input id="ps-sss" type="number" value="0"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>PhilHealth</label><input id="ps-ph" type="number" value="0"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>Pag-IBIG</label><input id="ps-pib" type="number" value="0"/></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+        <div class="form-group" style="margin-bottom:0"><label>Cash Advance</label><input id="ps-ca" type="number" value="0"/></div>
+        <div class="form-group" style="margin-bottom:0"><label>Loans</label><input id="ps-loans" type="number" value="0"/></div>
+        <div class="form-group" style="margin-bottom:0"><label>Taxes</label><input id="ps-tax" type="number" value="0"/></div>
+      </div>
+    </div>
+
+    <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Schedule</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:11px">
+        ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d,i)=>`<div>
+          <div style="text-align:center;color:var(--text-muted);margin-bottom:3px">${d}</div>
+          <input id="ps-sched-${i}" style="width:100%;padding:4px;font-size:10px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);text-align:center"
+            value="${d==='Sun'?'REST':d==='Sat'?'7AM-6PM':'7AM-4PM'}"/>
+        </div>`).join('')}
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Amount Already Paid (₱)</label><input id="ps-paid" type="number" value="0"/>
+    </div>
+    <div class="form-group">
+      <label>Prepared By</label><input id="ps-preparer" value="${currentUser?.displayName||''}"/>
+    </div>
+    <div class="form-group">
+      <label>Attach Transfer Proof (optional)</label>
+      <div id="ps-proof-area"></div>
+    </div>
+  `, `
+    <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+    <button class="btn-secondary" id="ps-preview-btn">👁 Preview</button>
+    <button class="btn-primary" id="ps-save-btn">💾 Save &amp; Generate</button>
+  `);
+
+  // Bind proof upload area
+  let proofFile = null;
+  if (window.Drive?.renderUploadArea) {
+    Drive.renderUploadArea('ps-proof-area', r => { proofFile = r; }, { label:'Upload transfer screenshot/photo', dept:'Finance', subfolder:'payslips' });
+  }
+
+  document.getElementById('ps-preview-btn').addEventListener('click', () => {
+    const d = collectPayslipData(profile, currentUser);
+    if (d) previewPayslip(d);
+  });
+
+  document.getElementById('ps-save-btn').addEventListener('click', async () => {
+    const d = collectPayslipData(profile, currentUser);
+    if (!d) return;
+    d.proofUrl = proofFile?.url || null;
+    d.status = 'draft';
+    d.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+    d.createdBy = currentUser.uid;
+    const ref = await db.collection('payslips').add(d);
+    // Log to ledger
+    await db.collection('ledger_entries').add({
+      type: 'payroll',
+      description: `Payslip — ${profile.name} (${d.payPeriodStart} to ${d.payPeriodEnd})`,
+      amount: d.netPay,
+      category: 'Payroll Expense',
+      workerId: profile.id,
+      workerName: profile.name,
+      payslipId: ref.id,
+      date: d.payDate,
+      createdBy: currentUser.uid,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    closeModal();
+    Notifs.showToast('Payslip saved! Opening for download…');
+    setTimeout(() => renderPayslipPreview({...d, id: ref.id}, true), 400);
+  });
+}
+
+function collectPayslipData(profile, currentUser) {
+  const daily    = parseFloat(document.getElementById('ps-daily').value)||0;
+  const rph      = parseFloat(document.getElementById('ps-rph').value)||0;
+  const hrs      = parseFloat(document.getElementById('ps-hrs').value)||0;
+  const regTotal = parseFloat((daily * (hrs/8)).toFixed(2));
+  const otRate   = parseFloat(document.getElementById('ps-ot-rate').value)||0;
+  const otHrs    = parseFloat(document.getElementById('ps-ot-hrs').value)||0;
+  const otTotal  = parseFloat((otRate * otHrs).toFixed(2));
+  const meal     = parseFloat(document.getElementById('ps-meal').value)||0;
+  const transport= parseFloat(document.getElementById('ps-transport').value)||0;
+  const rent     = parseFloat(document.getElementById('ps-rent').value)||0;
+  const allowTotal = meal + transport + rent;
+  const grossPay = regTotal + otTotal + allowTotal;
+
+  const sss   = parseFloat(document.getElementById('ps-sss').value)||0;
+  const ph    = parseFloat(document.getElementById('ps-ph').value)||0;
+  const pib   = parseFloat(document.getElementById('ps-pib').value)||0;
+  const ca    = parseFloat(document.getElementById('ps-ca').value)||0;
+  const loans = parseFloat(document.getElementById('ps-loans').value)||0;
+  const tax   = parseFloat(document.getElementById('ps-tax').value)||0;
+  const govTotal   = sss + ph + pib;
+  const otherTotal = ca + loans + tax;
+  const totalDeductions = govTotal + otherTotal;
+  const totalPay = grossPay - totalDeductions;
+  const paid     = parseFloat(document.getElementById('ps-paid').value)||0;
+  const netPay   = totalPay - paid;
+
+  const periodStart = document.getElementById('ps-start').value;
+  const periodEnd   = document.getElementById('ps-end').value;
+  if (!periodStart || !periodEnd) { Notifs.showToast('Set pay period dates','error'); return null; }
+
+  const sched = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d,i)=>({
+    day: d, hours: document.getElementById(`ps-sched-${i}`)?.value||'—'
+  }));
+
+  return {
+    workerId: profile.id,
+    workerName: profile.name,
+    workerIdNum: profile.idNumber||'',
+    jobTitle: profile.jobTitle||'',
+    department: profile.department||'',
+    tinNum: profile.tinNum||'',
+    ssNum: profile.ssNum||'',
+    phNum: profile.phNum||'',
+    pagibigNum: profile.pagibigNum||'',
+    payPeriodStart: periodStart,
+    payPeriodEnd: periodEnd,
+    payPeriodMonth: periodStart.slice(0,7),
+    payDate: document.getElementById('ps-date').value,
+    company: document.getElementById('ps-company').value||'Barro Kitchens',
+    preparedBy: document.getElementById('ps-preparer').value||currentUser?.displayName||'',
+    regular: { dailyRate: daily, ratePerHr: rph, hrsWorked: hrs, total: regTotal },
+    overtime: { ratePerHr: otRate, hours: otHrs, total: otTotal },
+    allowances: { meal, transport, rent, total: allowTotal },
+    grossPay,
+    deductions: {
+      govt: { sss, philhealth: ph, pagibig: pib, total: govTotal },
+      other: { cashAdvance: ca, loans, taxes: tax, total: otherTotal }
+    },
+    totalDeductions,
+    totalPay,
+    paid,
+    netPay,
+    schedule: sched
+  };
+}
+
+function previewPayslip(data) {
+  const html = buildPayslipHTML(data);
+  const win = window.open('','_blank','width=900,height=700');
+  if (!win) { Notifs.showToast('Allow popups to preview','error'); return; }
+  win.document.write(html);
+  win.document.close();
+}
+
+function renderPayslipPreview(ps, showExport = false) {
+  const html = buildPayslipHTML(ps);
+  const win = window.open('','_blank','width=900,height=700');
+  if (!win) { Notifs.showToast('Allow popups to view payslip','error'); return; }
+  win.document.write(html);
+  win.document.close();
+}
+
+function buildPayslipHTML(d) {
+  const f = n => (parseFloat(n)||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const fmtD = s => { if(!s) return '—'; const dt=new Date(s); return dt.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}); };
+  const co = d.company || 'Barro Kitchens';
+  const sched = d.schedule || [];
+
+  return `<!DOCTYPE html><html><head>
+<meta charset="UTF-8"/>
+<title>Payslip — ${d.workerName}</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #f0f0f0; }
+  .page { width:210mm; min-height:297mm; margin:0 auto; background:#fff; padding:12mm; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { border:1px solid #000; padding:3px 5px; vertical-align:middle; font-size:10px; }
+  .header-top { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
+  .company-logo { width:60px; height:60px; object-fit:contain; border:2px solid #000; padding:2px; flex-shrink:0; }
+  .company-name { font-size:22px; font-weight:900; letter-spacing:1px; }
+  .company-sub { font-size:9px; line-height:1.6; }
+  .section-header { background:#1a237e; color:#fff; font-weight:700; font-size:10px; padding:4px 6px; text-transform:uppercase; letter-spacing:.05em; }
+  .field-label { font-weight:700; font-size:9px; text-transform:uppercase; color:#333; }
+  .value-cell { font-weight:600; }
+  .number-cell { text-align:right; }
+  .total-row td { font-weight:700; background:#e3f2fd; }
+  .gross-row td { font-weight:800; font-size:12px; background:#1a237e; color:#fff; }
+  .net-row td { font-weight:800; font-size:13px; background:#ffeb3b; color:#000; }
+  .section-divider { background:#e0e0e0; }
+  .no-border td, .no-border th { border:none; }
+  .sig-line { border-top:1px solid #000; margin-top:30px; font-size:9px; text-align:center; }
+  .export-bar { position:fixed; top:0; left:0; right:0; background:#1a237e; color:#fff; padding:10px 20px; display:flex; gap:10px; align-items:center; z-index:999; }
+  .export-bar button { background:#fff; color:#1a237e; border:none; padding:6px 16px; border-radius:6px; font-weight:700; font-size:12px; cursor:pointer; }
+  .export-bar button:hover { background:#e3f2fd; }
+  @media print {
+    .export-bar { display:none !important; }
+    body { background:#fff; }
+    .page { padding:8mm; }
+  }
+</style>
+</head><body>
+<div class="export-bar">
+  <span style="font-weight:700">📄 Payslip — ${d.workerName}</span>
+  <button onclick="window.print()">🖨 Save as PDF / Print</button>
+  <button onclick="downloadJPEG()">📷 Save as JPEG</button>
+  ${d.proofUrl ? `<a href="${d.proofUrl}" target="_blank" style="color:#FFD60A;font-weight:600;margin-left:8px">📎 Transfer Proof</a>` : ''}
+  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,0.15);color:#fff">✕ Close</button>
+</div>
+<div style="height:48px"></div>
+<div class="page" id="payslip-page">
+  <!-- Header -->
+  <div class="header-top">
+    <img src="icons/barro-logo.png" class="company-logo" onerror="this.style.display='none'" alt=""/>
+    <div>
+      <div class="company-name">${co.toUpperCase()}</div>
+      <div class="company-sub">
+        NEILBARRO STEEL &amp; METAL FABRICATION SERVICES<br/>
+        PUROK 6, CARLATAN, 2500, CITY OF SAN FERNANDO, LA UNION, PHILIPPINES<br/>
+        CONTACT: NEIL BARRO, 0927-683-6300<br/>
+        TIN: 951-145-613-000
+      </div>
+    </div>
+  </div>
+  <div style="border:2px solid #000;padding:0;margin-top:4px">
+
+    <!-- Employee Information -->
+    <div class="section-header">Employee Information</div>
+    <table>
+      <tr>
+        <td class="field-label" style="width:15%">Full Name</td>
+        <td class="value-cell" style="width:35%">${d.workerName||''}</td>
+        <td class="field-label" style="width:10%">TIN</td>
+        <td style="width:40%">${d.tinNum||''}</td>
+      </tr>
+      <tr>
+        <td class="field-label">ID Number</td><td>${d.workerIdNum||''}</td>
+        <td class="field-label">PhilHealth</td><td>${d.phNum||''}</td>
+      </tr>
+      <tr>
+        <td class="field-label">Job Title</td><td>${d.jobTitle||''}</td>
+        <td class="field-label">SSS</td><td>${d.ssNum||''}</td>
+      </tr>
+      <tr>
+        <td class="field-label">Department</td><td>${d.department||''}</td>
+        <td class="field-label">PAG IBIG</td><td>${d.pagibigNum||''}</td>
+      </tr>
+    </table>
+
+    <!-- Pay Period -->
+    <div class="section-header">Pay Period Details</div>
+    <table>
+      <tr>
+        <td class="field-label" style="width:20%">Pay Period Covered</td>
+        <td style="width:30%">${fmtD(d.payPeriodStart)} – ${fmtD(d.payPeriodEnd)}</td>
+        <td class="field-label" style="width:15%">Pay Date</td>
+        <td>${fmtD(d.payDate)}</td>
+      </tr>
+    </table>
+
+    <!-- Earnings -->
+    <div class="section-header">Earnings</div>
+    <table>
+      <tr>
+        <th style="width:22%;text-align:center">Regular</th>
+        <th style="width:10%;text-align:right"></th>
+        <th style="width:16%;text-align:center">Overtime</th>
+        <th style="width:10%;text-align:right"></th>
+        <th style="width:22%;text-align:center">Allowances:</th>
+        <th style="width:10%;text-align:right"></th>
+      </tr>
+      <tr>
+        <td class="field-label">Daily Rate</td>
+        <td class="number-cell">${f(d.regular?.dailyRate)}</td>
+        <td class="field-label">OT Rate/hr</td>
+        <td class="number-cell">${f(d.overtime?.ratePerHr)}</td>
+        <td class="field-label">Transport</td>
+        <td class="number-cell">${(d.allowances?.transport||0)>0?f(d.allowances.transport):'-'}</td>
+      </tr>
+      <tr>
+        <td class="field-label">Rate/HR</td>
+        <td class="number-cell">${f(d.regular?.ratePerHr)}</td>
+        <td class="field-label">OT Hours</td>
+        <td class="number-cell">${(d.overtime?.hours||0)>0?f(d.overtime.hours):'-'}</td>
+        <td class="field-label">Meal</td>
+        <td class="number-cell">${(d.allowances?.meal||0)>0?f(d.allowances.meal):'-'}</td>
+      </tr>
+      <tr>
+        <td class="field-label">HRS Worked</td>
+        <td class="number-cell">${f(d.regular?.hrsWorked)}</td>
+        <td class="field-label" colspan="2"></td>
+        <td class="field-label">Rent</td>
+        <td class="number-cell">${(d.allowances?.rent||0)>0?f(d.allowances.rent):'-'}</td>
+      </tr>
+      <tr class="total-row">
+        <td>Total:</td><td class="number-cell">${f(d.regular?.total)}</td>
+        <td>Total:</td><td class="number-cell">${(d.overtime?.total||0)>0?f(d.overtime.total):'-'}</td>
+        <td>Total:</td><td class="number-cell">${(d.allowances?.total||0)>0?f(d.allowances.total):'-'}</td>
+      </tr>
+      <tr class="gross-row">
+        <td colspan="2" style="text-align:right">Total Gross Pay</td>
+        <td colspan="4" style="text-align:center;font-size:14px">${f(d.grossPay)}</td>
+      </tr>
+    </table>
+
+    <!-- Deductions -->
+    <div class="section-header">Deductions</div>
+    <table>
+      <tr>
+        <th style="width:22%;text-align:center">Government Mandatory</th>
+        <th style="width:10%"></th>
+        <th style="width:28%;text-align:center" colspan="2">Other Deductions:</th>
+        <th style="width:20%;text-align:center">Company Charges</th>
+        <th style="width:10%"></th>
+      </tr>
+      <tr>
+        <td class="field-label">SSS</td>
+        <td class="number-cell">${(d.deductions?.govt?.sss||0)>0?f(d.deductions.govt.sss):''}</td>
+        <td class="field-label">Cash Advance</td>
+        <td class="number-cell">${(d.deductions?.other?.cashAdvance||0)>0?f(d.deductions.other.cashAdvance):''}</td>
+        <td class="field-label">Company Charges</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td class="field-label">PhilHealth</td>
+        <td class="number-cell">${(d.deductions?.govt?.philhealth||0)>0?f(d.deductions.govt.philhealth):''}</td>
+        <td class="field-label">Loans</td>
+        <td class="number-cell">${(d.deductions?.other?.loans||0)>0?f(d.deductions.other.loans):''}</td>
+        <td class="field-label">Taxes</td>
+        <td class="number-cell">${(d.deductions?.other?.taxes||0)>0?f(d.deductions.other.taxes):''}</td>
+      </tr>
+      <tr>
+        <td class="field-label">Pag-IBIG</td>
+        <td class="number-cell">${(d.deductions?.govt?.pagibig||0)>0?f(d.deductions.govt.pagibig):''}</td>
+        <td colspan="4"></td>
+      </tr>
+      <tr class="total-row">
+        <td>Total</td><td class="number-cell">${(d.deductions?.govt?.total||0)>0?f(d.deductions.govt.total):'-'}</td>
+        <td>Total</td><td class="number-cell">${(d.deductions?.other?.total||0)>0?f(d.deductions.other.total):'-'}</td>
+        <td colspan="2"></td>
+      </tr>
+    </table>
+    <table>
+      <tr class="total-row">
+        <td style="width:30%;font-weight:700">Total Deductions</td>
+        <td class="number-cell">${f(d.totalDeductions)}</td>
+        <td colspan="2"></td>
+      </tr>
+      <tr style="background:#bbdefb;">
+        <td style="font-weight:800;font-size:12px">TOTAL PAY</td>
+        <td class="number-cell" style="font-weight:800;font-size:12px">${f(d.totalPay)}</td>
+        <td colspan="2"></td>
+      </tr>
+      <tr>
+        <td class="field-label">PAID</td>
+        <td class="number-cell">${(d.paid||0)>0?f(d.paid):'-'}</td>
+        <td colspan="2"></td>
+      </tr>
+      <tr class="net-row">
+        <td>NET PAY:</td>
+        <td class="number-cell">${f(d.netPay)}</td>
+        <td colspan="2"></td>
+      </tr>
+    </table>
+
+    <!-- Signatures -->
+    <table style="margin-top:4px">
+      <tr>
+        <td style="padding:24px 10px 6px;text-align:center;width:33%">
+          <div style="border-top:1px solid #000;padding-top:4px">${d.workerName||''}</div>
+          <div style="font-size:9px;color:#555">Acknowledged By</div>
+        </td>
+        <td style="padding:24px 10px 6px;width:34%"></td>
+        <td style="padding:24px 10px 6px;text-align:center;width:33%">
+          <div style="border-top:1px solid #000;padding-top:4px">${d.preparedBy||''}</div>
+          <div style="font-size:9px;color:#555">Prepared By</div>
+        </td>
+      </tr>
+    </table>
+
+    <!-- Schedule -->
+    <div class="section-header" style="margin-top:4px">Schedule</div>
+    <table>
+      <tr>${(d.schedule||[]).map(s=>`<th style="text-align:center;font-size:9px">${s.day}</th>`).join('')}</tr>
+      <tr>${(d.schedule||[]).map(s=>`<td style="text-align:center;font-size:9px">${s.hours}</td>`).join('')}</tr>
+    </table>
+    ${d.proofUrl ? `<div style="margin-top:8px;padding:6px;background:#f5f5f5;border:1px solid #ccc;border-radius:4px;font-size:10px">
+      📎 Transfer proof on file: <a href="${d.proofUrl}" target="_blank">${d.proofUrl}</a>
+    </div>` : ''}
+  </div>
+</div>
+<script>
+async function downloadJPEG() {
+  const btn = document.querySelector('.export-bar button:nth-child(3)');
+  if(btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
+  // Load html2canvas from CDN
+  if (!window.html2canvas) {
+    await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+  }
+  const el = document.getElementById('payslip-page');
+  const canvas = await html2canvas(el, { scale:2, useCORS:true, backgroundColor:'#fff', logging:false });
+  const link = document.createElement('a');
+  link.download = 'payslip-${(d.workerName||'worker').replace(/\\s+/g,'-')}-${d.payPeriodStart||''}.jpg';
+  link.href = canvas.toDataURL('image/jpeg', 0.95);
+  link.click();
+  if(btn) { btn.textContent = '📷 Save as JPEG'; btn.disabled = false; }
+}
+<\/script>
+</body></html>`;
+}
+
+// ── Finance Overview ──────────────────────────────
 async function renderFinanceOverview(container, currentUser, currentRole) {
   const [expSnap, salSnap] = await Promise.all([
     db.collection('expenses').get(),

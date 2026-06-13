@@ -320,21 +320,38 @@ function renderTeamCards(users) {
   const grid = document.getElementById('team-grid');
   if (!grid) return;
   if (!users.length) { grid.innerHTML = '<div class="empty-state"><div class="empty-icon">👥</div><h4>No team members found</h4></div>'; return; }
+  const now = Date.now();
   grid.innerHTML = users.map(u => {
     const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(' · ') || 'Unassigned';
     const initial = (u.displayName||u.email||'?')[0].toUpperCase();
     const roleLabel = window.ROLES?.[u.role]?.label || u.role || 'Employee';
     const badgeClass = window.ROLES?.[u.role]?.badge || 'badge-gray';
+
+    // Presence
+    const lastSeenMs = u.lastSeen?.toMillis?.() || u.lastSeen?.seconds*1000 || 0;
+    const diffMin = lastSeenMs ? Math.floor((now - lastSeenMs)/60000) : null;
+    const isOnline = diffMin !== null && diffMin < 5;
+    const lastActiveStr = diffMin === null ? '' :
+      diffMin < 1 ? 'Just now' :
+      diffMin < 60 ? `${diffMin}m ago` :
+      diffMin < 1440 ? `${Math.floor(diffMin/60)}h ago` :
+      `${Math.floor(diffMin/1440)}d ago`;
+
     return `
     <div class="team-card">
-      <div class="team-card-avatar">
+      <div class="team-card-avatar" style="position:relative">
         ${u.photoUrl ? `<img src="${u.photoUrl}" alt="${u.displayName}"/>` : `<span>${initial}</span>`}
+        ${isOnline ? `<span style="position:absolute;bottom:2px;right:2px;width:11px;height:11px;border-radius:50%;background:#30D158;border:2px solid var(--surface);display:block" title="Online"></span>` : ''}
       </div>
       <div class="team-card-body">
-        <div class="team-card-name">${u.displayName||u.email}</div>
+        <div class="team-card-name" style="display:flex;align-items:center;gap:6px">
+          ${u.displayName||u.email}
+          ${isOnline ? `<span style="font-size:9px;font-weight:700;color:#30D158;background:rgba(48,209,88,0.12);padding:1px 6px;border-radius:20px;letter-spacing:.04em">ONLINE</span>` : ''}
+        </div>
         <span class="badge ${badgeClass}" style="font-size:10px;margin-bottom:4px">${roleLabel}</span>
         <div class="team-card-dept">${depts}</div>
         ${u.employeeId ? `<div class="team-card-id">${u.employeeId}</div>` : ''}
+        ${lastActiveStr && !isOnline ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">Last active: ${lastActiveStr}</div>` : ''}
       </div>
     </div>`;
   }).join('');

@@ -29,11 +29,21 @@ document.addEventListener('DOMContentLoaded', () => {
       buildNav();
       navigateTo('dashboard');
       startAutoLogout();
+      startPresenceHeartbeat(user.uid);
     } else {
       showLogin();
     }
   });
 });
+
+// ── Presence Heartbeat ────────────────────────────
+let _presenceInterval = null;
+function startPresenceHeartbeat(uid) {
+  if (_presenceInterval) clearInterval(_presenceInterval);
+  const ping = () => db.collection('users').doc(uid).update({ lastSeen: firebase.firestore.FieldValue.serverTimestamp() }).catch(()=>{});
+  ping();
+  _presenceInterval = setInterval(ping, 60000); // every 60s
+}
 
 // ── Auto-Logout ───────────────────────────────────
 function startAutoLogout() {
@@ -1069,12 +1079,21 @@ window.tryUpgradeAttendanceOnNotifRead = async function() {
   Notifs.showToast('✅ Full attendance (100%) — all notifications checked!');
 };
 
-// ── Employee ID Card ──────────────────────────────
+// ── Employee ID Card + Calling Card toggle ────────
 function renderIDCard(containerId, u) {
   const el = document.getElementById(containerId);
   if (!el) return;
-  el.innerHTML = `
-    <div class="id-card">
+
+  let showingID = true;
+
+  const issuedOn = u.issuedOn || u.startDate || '';
+  const empType  = u.employmentType || '';
+  const workMode = u.workMode || '';
+  const roleLabel = (u.title&&u.title!==u.role?u.title:null)||ROLES[u.role]?.label||u.role||'Employee';
+  const deptLabel = Array.isArray(u.departments)&&u.departments.length?u.departments.join(', '):(u.department||'—');
+
+  const idHTML = `
+    <div class="id-card id-card--digital">
       <div class="id-card-top">
         <img src="icons/barro-logo.png" alt="BI" class="id-card-logo" onerror="this.style.display='none'"/>
         <div>
@@ -1083,40 +1102,49 @@ function renderIDCard(containerId, u) {
         </div>
       </div>
       <div class="id-card-body">
-        <div class="id-card-photo" id="id-card-photo-btn" title="Click to upload photo">
+        <div class="id-card-photo" style="cursor:default">
           ${u.photoUrl?`<img src="${u.photoUrl}" alt="Photo"/>`:`<span style="font-size:32px">👤</span>`}
-          <div class="id-card-photo-hint">📷 Change</div>
         </div>
         <div class="id-card-info">
           <div class="id-card-name">${u.displayName||u.email}</div>
-          <div class="id-card-title">${(u.title&&u.title!==u.role?u.title:null)||ROLES[u.role]?.label||u.role||'Employee'}</div>
-          <div class="id-card-detail"><span>🗂</span><strong>${Array.isArray(u.departments)&&u.departments.length?u.departments.join(', '):(u.department||'—')}</strong></div>
+          <div class="id-card-title">${roleLabel}</div>
+          <div class="id-card-detail"><span>🗂</span><strong>${deptLabel}</strong></div>
           <div class="id-card-detail"><span>✉️</span>${u.email}</div>
-          ${u.startDate?`<div class="id-card-detail"><span>📅</span>Since ${u.startDate}</div>`:''}
+          ${empType?`<div class="id-card-detail"><span>💼</span>${empType}${workMode?' · '+workMode:''}</div>`:''}
+          ${issuedOn?`<div class="id-card-detail"><span>📅</span>Issued: ${issuedOn}</div>`:''}
         </div>
       </div>
       <div class="id-card-footer">
         <div class="id-card-id">${u.employeeId||'BI-0000'}</div>
         <div class="id-card-status">ACTIVE</div>
       </div>
-    </div>
-  `;
-  document.getElementById('id-card-photo-btn')?.addEventListener('click', () => {
-    const input = document.createElement('input');
-    input.type='file'; input.accept='image/*';
-    input.onchange = async e => {
-      const file = e.target.files[0]; if (!file) return;
-      Notifs.showToast('Uploading photo…');
-      try {
-        const url = await Drive.uploadProfilePhoto(file, currentUser.uid);
-        await db.collection('users').doc(currentUser.uid).update({ photoUrl: url });
-        userProfile.photoUrl = url; applyUserUI();
-        renderIDCard(containerId, {...u, photoUrl:url});
-        Notifs.showToast('Photo updated!');
-      } catch(err) { Notifs.showToast('Upload failed: '+err.message,'error'); }
-    };
-    input.click();
-  });
+    </div>`;
+
+  const callingHTML = `
+    <div class="id-card id-card--calling" style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);text-align:center;padding:24px 20px;display:flex;flex-direction:column;align-items:center;gap:8px">
+      ${u.photoUrl?`<img src="${u.photoUrl}" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.3);margin-bottom:4px" alt=""/>`:
+        `<div style="width:72px;height:72px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-size:36px;margin-bottom:4px">👤</div>`}
+      <div style="font-size:18px;font-weight:800;color:#fff;letter-spacing:.5px">${u.displayName||u.email}</div>
+      <div style="font-size:12px;color:rgba(255,255,255,0.7);font-weight:600;text-transform:uppercase;letter-spacing:.08em">${roleLabel}</div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px">${deptLabel}</div>
+      <div style="width:100%;height:1px;background:rgba(255,255,255,0.15);margin:10px 0"></div>
+      <div style="font-size:12px;color:rgba(255,255,255,0.8)">✉️ ${u.email}</div>
+      ${u.phone?`<div style="font-size:12px;color:rgba(255,255,255,0.8)">📞 ${u.phone}</div>`:''}
+      <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:8px;letter-spacing:.1em">BARRO INDUSTRIES</div>
+    </div>`;
+
+  function render() {
+    el.innerHTML = `
+      <div style="display:flex;justify-content:center;gap:8px;margin-bottom:10px">
+        <button class="btn-sm ${showingID?'btn-primary':'btn-outline'}" id="id-toggle-id">🪪 Digital ID</button>
+        <button class="btn-sm ${!showingID?'btn-primary':'btn-outline'}" id="id-toggle-card">📇 Calling Card</button>
+      </div>
+      <div id="id-card-inner">${showingID ? idHTML : callingHTML}</div>`;
+    document.getElementById('id-toggle-id').addEventListener('click', () => { showingID=true; render(); });
+    document.getElementById('id-toggle-card').addEventListener('click', () => { showingID=false; render(); });
+  }
+
+  render();
 }
 
 // ── My Department (supports dual) ─────────────────
@@ -1241,8 +1269,10 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       const computed = net * mult * (daysElapsed2 / daysInMonth2);
       const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';
       // Task completion
-      const taskSnap2 = await db.collection('tasks').where('assignedTo','==',u.id).get().catch(()=>({docs:[]}));
-      const tasksDone = taskSnap2.docs.filter(d=>d.data().status==='done').length;
+      const DONE_ST = ['done','approved','archived'];
+      const taskSnap2 = await db.collection('tasks').where('assignedTo','array-contains',u.id).get()
+        .catch(()=>db.collection('tasks').where('assignedTo','==',u.id).get()).catch(()=>({docs:[]}));
+      const tasksDone = taskSnap2.docs.filter(d=>DONE_ST.includes(d.data().status)).length;
       const tasksTotal = taskSnap2.docs.length;
       // Eval
       const evalDoc = await db.collection('kpi_evals').doc(u.id).get().catch(()=>null);
@@ -1416,8 +1446,9 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   const selfDoneThisMonth = selfAssessMonth === currentMonth;
   const isPayrollWindow = now.getDate() <= 7;
 
+  const DONE_TASK_STATUSES_PR = ['done','approved','archived'];
   const myTasks  = myTasksSnap.docs.map(d=>d.data());
-  const doneTasks= myTasks.filter(t=>t.status==='done');
+  const doneTasks= myTasks.filter(t=>DONE_TASK_STATUSES_PR.includes(t.status));
   const taskPct  = myTasks.length ? Math.round(doneTasks.length/myTasks.length*100) : 0;
   const kpiProfile = await db.collection('kpi_targets').doc(currentUser.uid).get().catch(()=>null);
   const targetScore   = kpiProfile?.exists ? (kpiProfile.data().targetScore||80) : 80;
@@ -1690,9 +1721,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
 async function getKpiScore(uid) {
   try {
     // Task completion score (70% weight)
-    const taskSnap = await db.collection('tasks').where('assignedTo','==',uid).get();
+    const DONE_STATUSES = ['done','approved','archived'];
+    const taskSnap = await db.collection('tasks').where('assignedTo','array-contains',uid).get()
+      .catch(()=>db.collection('tasks').where('assignedTo','==',uid).get());
     const tasks = taskSnap.docs.map(d=>d.data());
-    const taskScore = tasks.length ? Math.min(1, tasks.filter(t=>t.status==='done').length / tasks.length) : 0.5;
+    const taskScore = tasks.length ? Math.min(1, tasks.filter(t=>DONE_STATUSES.includes(t.status)).length / tasks.length) : 0.5;
 
     // Deliverable quality score (30% weight) — read from kpi_targets collection
     let delivScore = 0.5;
