@@ -379,15 +379,14 @@ function getSidebarItems() {
 
   if (pres) {
     // ── Admin / President Command Center ──
-    items.push({ icon:'check-square',  label:'Tasks',            page:'tasks',           section:false });
+    items.push({ icon:'bar-chart-2',   label:'Analytics',        page:'analytics',       section:false });
+    items.push({ icon:'check-square',  label:'Tasks',            page:'tasks'                          });
     items.push({ icon:'megaphone',     label:'Posts',            page:'posts'                          });
     items.push({ icon:'shield-check',  label:'Approvals',        page:'approvals',       section:true  });
     items.push({ icon:'trending-up',   label:'Progress Reports', page:'progress'                       });
     items.push({ icon:'users',         label:'Team Directory',   page:'team-directory',  section:true  });
     items.push({ icon:'calendar',      label:'Attendance',       page:'attendance'                     });
-    items.push({ icon:'banknote',      label:'Cash Advances',    page:'cash-advances'                  });
     items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'                    });
-    items.push({ icon:'bar-chart-2',   label:'Analytics',        page:'analytics',       section:true  });
     items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
     items.push({ icon:'help-circle',   label:'Help & Setup',     page:'help',            section:true  });
   } else if (bsOnly) {
@@ -410,7 +409,6 @@ function getSidebarItems() {
     items.push({ icon:'users',       label:'Team',             page:'team-directory',    section:true, sectionLabel:'Management' });
     items.push({ icon:'calendar',    label:'Attendance',       page:'attendance'                       });
     items.push({ icon:'credit-card', label:'Personal Finance', page:'personal-finance'                 });
-    items.push({ icon:'banknote',    label:'Cash Advance',     page:'cash-advances'                    });
     items.push({ icon:'folder',      label:'Files',            page:'files'                            });
     if (currentRole !== 'agent') {
       items.push({ icon:'building-2', label:'Company', page:'company' });
@@ -571,14 +569,15 @@ async function renderPresidentDashboard() {
   try {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
     const todayStr = new Date().toISOString().slice(0,10);
-    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap] = await Promise.all([
-      safeGet(db.collection('users')),
+    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap] = await Promise.all([
+      dbCachedGet('users', () => db.collection('users').get(), 60000),
       safeGet(db.collection('tasks')),
       safeGet(db.collection('submissions')),
       safeGet(db.collection('quotes')),
       safeGet(db.collection('approval_requests').where('status','==','pending')),
       safeGet(db.collection('cash_advances').where('status','==','pending')),
-      safeGet(db.collection('attendance_extensions').where('status','==','pending'))
+      safeGet(db.collection('attendance_extensions').where('status','==','pending')),
+      safeGet(db.collection('signup_requests').where('status','==','pending')),
     ]);
 
     const users       = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -592,6 +591,8 @@ async function renderPresidentDashboard() {
     const pendingApprovals = approvalsSnap.size;
     const pendingCA   = caSnap.size;
     const pendingExtensions = extSnap.size || 0;
+    const pendingSignups = signupSnap.size || 0;
+    const totalPending = pendingApprovals + pendingCA + pendingExtensions + pendingSubs + pendingSignups;
 
     // Total payroll burn (sum of net pay of all employees)
     const payrollBurn = users.reduce((s,u)=>(s+(u.salary||0)+(u.allowance||0)-(u.deductions||0)),0);
@@ -618,7 +619,10 @@ async function renderPresidentDashboard() {
     c.innerHTML = `
       <div class="page-header">
         <h2>Command Center</h2>
-        <span class="badge badge-blue">${ROLES[currentRole]?.label||'President'}</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="badge badge-blue">${ROLES[currentRole]?.label||'President'}</span>
+          <button class="btn-secondary btn-sm" onclick="renderPresidentDashboard()" title="Refresh dashboard">↻ Refresh</button>
+        </div>
       </div>
       <div id="live-clock" class="live-clock-line"></div>
 
@@ -630,9 +634,9 @@ async function renderPresidentDashboard() {
         <span class="alert-chevron">›</span>
       </div>`:''}
 
-      ${pendingApprovals>0||pendingCA>0||pendingExtensions>0?`
+      ${totalPending>0?`
       <div class="alert-banner alert-warn" onclick="navigateTo('approvals')">
-        <span>📋 ${[pendingApprovals>0?pendingApprovals+' approval'+(pendingApprovals!==1?'s':''):'', pendingCA>0?pendingCA+' CA'+(pendingCA!==1?'s':''):'', pendingExtensions>0?pendingExtensions+' extension'+(pendingExtensions!==1?'s':''):''].filter(Boolean).join(' · ')} pending</span>
+        <span>📋 <strong>${totalPending} pending</strong> — ${[pendingSignups>0?pendingSignups+' signup'+(pendingSignups!==1?'s':''):'', pendingApprovals>0?pendingApprovals+' approval'+(pendingApprovals!==1?'s':''):'', pendingCA>0?pendingCA+' CA'+(pendingCA!==1?'s':''):'', pendingExtensions>0?pendingExtensions+' extension'+(pendingExtensions!==1?'s':''):'', pendingSubs>0?pendingSubs+' submission'+(pendingSubs!==1?'s':''):''].filter(Boolean).join(' · ')}</span>
         <span class="alert-chevron">›</span>
       </div>`:''}
 
@@ -813,7 +817,10 @@ async function renderEmployeeDashboard() {
     const taskOutcomeMet = myTasks.length > 0 && taskScore >= targetScore;
 
     c.innerHTML = `
-      <div class="page-header"><h2>👋 Hi, ${(u.displayName||'').split(' ')[0]}!</h2></div>
+      <div class="page-header">
+        <h2>👋 Hi, ${(u.displayName||'').split(' ')[0]}!</h2>
+        <button class="btn-secondary btn-sm" onclick="renderEmployeeDashboard()" title="Refresh">↻ Refresh</button>
+      </div>
       <div id="live-clock" class="live-clock-line"></div>
 
       <div id="emp-id-card-wrap" style="margin-bottom:16px"></div>
@@ -1110,6 +1117,7 @@ function renderIDCard(containerId, u) {
           <div class="id-card-title">${roleLabel}</div>
           <div class="id-card-detail"><span>🗂</span><strong>${deptLabel}</strong></div>
           <div class="id-card-detail"><span>✉️</span>${u.email}</div>
+          ${u.phone?`<div class="id-card-detail"><span>📞</span>${u.phone}</div>`:''}
           ${empType?`<div class="id-card-detail"><span>💼</span>${empType}${workMode?' · '+workMode:''}</div>`:''}
           ${issuedOn?`<div class="id-card-detail"><span>📅</span>Issued: ${issuedOn}</div>`:''}
         </div>
@@ -2511,38 +2519,289 @@ async function renderDepartments() {
 
 // ── Analytics ─────────────────────────────────────
 async function renderAnalytics() {
-  if(!isPresident()&&currentRole!=='manager'){document.getElementById('page-content').innerHTML=renderAccessDenied('Analytics');return;}
+  if(!isPresident()&&currentRole!=='manager'&&currentRole!=='finance'){document.getElementById('page-content').innerHTML=renderAccessDenied('Analytics');return;}
   const c=document.getElementById('page-content');
   c.innerHTML='<div class="loading-placeholder">Loading analytics…</div>';
   const safeGet = async (q) => { try { return await q.get(); } catch(e) { return {docs:[],size:0}; } };
-  const [usersSnap,tasksSnap,quotesSnap,subsSnap,expSnap]=await Promise.all([safeGet(db.collection('users')),safeGet(db.collection('tasks')),safeGet(db.collection('quotes')),safeGet(db.collection('submissions')),safeGet(db.collection('expenses'))]);
+
+  // Fetch all data upfront
+  const [usersSnap,tasksSnap,quotesSnap,subsSnap,expSnap,caSnap,payslipSnap,ledgerSnap,govSnap] = await Promise.all([
+    safeGet(db.collection('users')),
+    safeGet(db.collection('tasks')),
+    safeGet(db.collection('quotes')),
+    safeGet(db.collection('submissions')),
+    safeGet(db.collection('expenses')),
+    safeGet(db.collection('cash_advances')),
+    safeGet(db.collection('payslips')),
+    safeGet(db.collection('ledger_entries')),
+    safeGet(db.collection('gov_biddings').orderBy('createdAt','desc')).catch(()=>({docs:[]})),
+  ]);
   const users=usersSnap.docs.map(d=>({id:d.id,...d.data()}));
-  const tasks=tasksSnap.docs.map(d=>d.data());
-  const quotes=quotesSnap.docs.map(d=>d.data());
-  const subs=subsSnap.docs.map(d=>d.data());
-  const expenses=expSnap.docs.map(d=>d.data());
-  const totalPayroll=users.reduce((s,u)=>s+(u.salary||0)+(u.allowance||0)-(u.deductions||0),0);
-  const won=quotes.filter(q=>q.status==='accepted').reduce((s,q)=>s+(q.total||0),0);
-  const totalExp=expenses.filter(e=>e.status==='approved').reduce((s,e)=>s+(e.amount||0),0);
+  const tasks=tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const quotes=quotesSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const subs=subsSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const expenses=expSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const cas=caSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const payslips=payslipSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const ledger=ledgerSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const govBids=govSnap.docs.map(d=>({id:d.id,...d.data()}));
+
+  const fmt=n=>isNaN(n)?'0':Number(n).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const now=new Date(), thisMonth=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const inMonth=(obj,field='createdAt')=>{
+    const v=obj[field];
+    if(!v) return false;
+    const d=v.toDate?v.toDate():new Date(v);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` === thisMonth;
+  };
+
+  const SUBTABS = [
+    {id:'overview',label:'📊 Overview'},
+    {id:'sales',label:'🛒 Sales'},
+    {id:'marketing',label:'📣 Marketing'},
+    {id:'finance',label:'💰 Finance'},
+    {id:'production',label:'🏭 Production'},
+    {id:'government',label:'🏛️ Gov. Biddings'},
+  ];
+
   c.innerHTML=`
     <div class="page-header"><h2>📊 Analytics & Performance</h2></div>
-    <div class="kpi-row">
-      <div class="kpi-card"><div class="kpi-label">Team Size</div><div class="kpi-value">${users.length}</div></div>
-      <div class="kpi-card accent"><div class="kpi-label">Monthly Payroll</div><div class="kpi-value">₱${formatNum(totalPayroll)}</div></div>
-      <div class="kpi-card green"><div class="kpi-label">Revenue Won</div><div class="kpi-value">₱${formatNum(won)}</div></div>
-      <div class="kpi-card warn"><div class="kpi-label">Approved Expenses</div><div class="kpi-value">₱${formatNum(totalExp)}</div></div>
+    <div class="subtab-bar" id="analytics-subtabs">
+      ${SUBTABS.map((t,i)=>`<button class="subtab-btn${i===0?' active':''}" data-tab="${t.id}">${t.label}</button>`).join('')}
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-      <div class="card"><div class="card-header"><h3>Quote Status</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="q-chart"></canvas></div></div></div>
-      <div class="card"><div class="card-header"><h3>Submissions</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="s-chart"></canvas></div></div></div>
-    </div>
-    <div class="card"><div class="card-header"><h3>Team Performance</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Name</th><th>Role</th><th>Dept</th><th>Tasks Done</th><th>Net Pay</th></tr></thead>
-      <tbody>${users.map(u=>{const done=tasks.filter(t=>t.assignedTo===u.id&&t.status==='done').length;const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);return `<tr><td>${u.displayName||u.email}</td><td><span class="badge badge-blue">${ROLES[u.role]?.label||u.role}</span></td><td>${(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—'}</td><td>${done}</td><td>₱${formatNum(net)}</td></tr>`;}).join('')}</tbody>
-    </table></div></div></div>
+    <div id="analytics-content"></div>
   `;
-  new Chart(document.getElementById('q-chart'),{type:'bar',data:{labels:['Draft','Sent','Accepted','Rejected'],datasets:[{data:['draft','sent','accepted','rejected'].map(s=>quotes.filter(q=>q.status===s).length),backgroundColor:['#9e9e9e','#1565c0','#2e7d32','#c62828']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
-  new Chart(document.getElementById('s-chart'),{type:'pie',data:{labels:['Pending','Approved','Rejected'],datasets:[{data:[subs.filter(s=>!s.status||s.status==='pending').length,subs.filter(s=>s.status==='approved').length,subs.filter(s=>s.status==='rejected').length],backgroundColor:['#f57f17','#2e7d32','#c62828']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom'}}}});
+
+  const renderOverview = () => {
+    const totalPayroll=users.reduce((s,u)=>s+(u.salary||0)+(u.allowance||0)-(u.deductions||0),0);
+    const won=quotes.filter(q=>q.status==='accepted').reduce((s,q)=>s+(q.total||0),0);
+    const totalExp=expenses.filter(e=>e.status==='approved').reduce((s,e)=>s+(e.amount||0),0);
+    const doneTasks=tasks.filter(t=>['done','approved','archived'].includes(t.status));
+    const taskRate=tasks.length?Math.round(doneTasks.length/tasks.length*100):0;
+    const wrap=document.getElementById('analytics-content');
+    wrap.innerHTML=`
+      <div class="kpi-row" style="margin-top:16px">
+        <div class="kpi-card"><div class="kpi-label">Team Size</div><div class="kpi-value">${users.length}</div></div>
+        <div class="kpi-card accent"><div class="kpi-label">Monthly Payroll</div><div class="kpi-value">₱${fmt(totalPayroll)}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Revenue Won</div><div class="kpi-value">₱${fmt(won)}</div></div>
+        <div class="kpi-card warn"><div class="kpi-label">Approved Expenses</div><div class="kpi-value">₱${fmt(totalExp)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Task Completion</div><div class="kpi-value">${taskRate}%</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div class="card"><div class="card-header"><h3>Quote Pipeline</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="q-chart"></canvas></div></div></div>
+        <div class="card"><div class="card-header"><h3>Submissions</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="s-chart"></canvas></div></div></div>
+      </div>
+      <div class="card"><div class="card-header"><h3>Team Performance</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Name</th><th>Role</th><th>Dept</th><th>Tasks Done</th><th>Net Pay</th></tr></thead>
+        <tbody>${users.map(u=>{
+          const done=tasks.filter(t=>(Array.isArray(t.assignedTo)?t.assignedTo.includes(u.id):t.assignedTo===u.id)&&['done','approved','archived'].includes(t.status)).length;
+          const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);
+          return `<tr><td>${u.displayName||u.email||'—'}</td><td><span class="badge badge-blue">${ROLES[u.role]?.label||u.role||'—'}</span></td><td>${(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—'}</td><td>${done}</td><td>₱${fmt(net)}</td></tr>`;
+        }).join('')}</tbody>
+      </table></div></div></div>
+    `;
+    new Chart(document.getElementById('q-chart'),{type:'bar',data:{labels:['Draft','Sent','Accepted','Rejected'],datasets:[{data:['draft','sent','accepted','rejected'].map(s=>quotes.filter(q=>q.status===s).length),backgroundColor:['#636366','#0A84FF','#30D158','#FF453A']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
+    new Chart(document.getElementById('s-chart'),{type:'doughnut',data:{labels:['Pending','Approved','Rejected'],datasets:[{data:[subs.filter(s=>!s.status||s.status==='pending').length,subs.filter(s=>s.status==='approved').length,subs.filter(s=>s.status==='rejected').length],backgroundColor:['#FF9F0A','#30D158','#FF453A'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
+  };
+
+  const renderSales = () => {
+    const salesQuotes=quotes.filter(q=>q.department==='Sales'||q.type==='sales'||!q.department);
+    const won2=salesQuotes.filter(q=>q.status==='accepted').reduce((s,q)=>s+(q.total||0),0);
+    const pipeline=salesQuotes.filter(q=>q.status==='sent').reduce((s,q)=>s+(q.total||0),0);
+    const wonCount=salesQuotes.filter(q=>q.status==='accepted').length;
+    const lostCount=salesQuotes.filter(q=>q.status==='rejected').length;
+    const winRate=wonCount+lostCount>0?Math.round(wonCount/(wonCount+lostCount)*100):0;
+    const salesSubs=subs.filter(s=>s.department==='Sales'||s.type?.includes('sales'));
+    const salesTasks=tasks.filter(t=>t.department==='Sales'||t.category==='Sales');
+    const doneSalesTasks=salesTasks.filter(t=>['done','approved','archived'].includes(t.status));
+    const wrap=document.getElementById('analytics-content');
+    wrap.innerHTML=`
+      <div class="kpi-row" style="margin-top:16px">
+        <div class="kpi-card green"><div class="kpi-label">Revenue Won</div><div class="kpi-value">₱${fmt(won2)}</div></div>
+        <div class="kpi-card accent"><div class="kpi-label">Pipeline Value</div><div class="kpi-value">₱${fmt(pipeline)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Win Rate</div><div class="kpi-value">${winRate}%</div></div>
+        <div class="kpi-card warn"><div class="kpi-label">Total Quotes</div><div class="kpi-value">${salesQuotes.length}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Tasks Done</div><div class="kpi-value">${doneSalesTasks.length}/${salesTasks.length}</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div class="card"><div class="card-header"><h3>Quote Status Breakdown</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="sq-chart"></canvas></div></div></div>
+        <div class="card"><div class="card-header"><h3>Monthly Quote Volume</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="sq2-chart"></canvas></div></div></div>
+      </div>
+      <div class="card"><div class="card-header"><h3>Recent Quotes</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Client</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+        <tbody>${salesQuotes.slice(0,20).map(q=>{
+          const d=q.createdAt?.toDate?q.createdAt.toDate():new Date(q.createdAt||0);
+          const statusColor={draft:'#636366',sent:'#0A84FF',accepted:'#30D158',rejected:'#FF453A'}[q.status]||'#636366';
+          return `<tr><td>${q.clientName||q.client||'—'}</td><td>₱${fmt(q.total||q.amount||0)}</td><td><span style="color:${statusColor};font-weight:600">${q.status||'draft'}</span></td><td>${d.toLocaleDateString()}</td></tr>`;
+        }).join('')}</tbody>
+      </table></div></div></div>
+    `;
+    const statuses=['draft','sent','accepted','rejected'];
+    new Chart(document.getElementById('sq-chart'),{type:'bar',data:{labels:statuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:statuses.map(s=>salesQuotes.filter(q=>q.status===s).length),backgroundColor:['#636366','#0A84FF','#30D158','#FF453A']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
+    // last 6 months volume
+    const months=[],counts=[];
+    for(let i=5;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);months.push(d.toLocaleString('default',{month:'short'}));counts.push(salesQuotes.filter(q=>{const qd=q.createdAt?.toDate?q.createdAt.toDate():new Date(q.createdAt||0);return qd.getMonth()===d.getMonth()&&qd.getFullYear()===d.getFullYear();}).length);}
+    new Chart(document.getElementById('sq2-chart'),{type:'line',data:{labels:months,datasets:[{label:'Quotes',data:counts,borderColor:'#0A84FF',backgroundColor:'#0A84FF22',fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
+  };
+
+  const renderMarketing = () => {
+    const mktTasks=tasks.filter(t=>t.department==='Marketing'||t.category==='Marketing');
+    const doneMkt=mktTasks.filter(t=>['done','approved','archived'].includes(t.status));
+    const mktSubs=subs.filter(s=>s.department==='Marketing');
+    const mktExp=expenses.filter(e=>e.department==='Marketing'&&e.status==='approved').reduce((s,e)=>s+(e.amount||0),0);
+    const mktUsers=users.filter(u=>(Array.isArray(u.departments)?u.departments:u.department?[u.department]:[]).includes('Marketing'));
+    const wrap=document.getElementById('analytics-content');
+    wrap.innerHTML=`
+      <div class="kpi-row" style="margin-top:16px">
+        <div class="kpi-card"><div class="kpi-label">Team Members</div><div class="kpi-value">${mktUsers.length}</div></div>
+        <div class="kpi-card accent"><div class="kpi-label">Tasks</div><div class="kpi-value">${mktTasks.length}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Completed</div><div class="kpi-value">${doneMkt.length}</div></div>
+        <div class="kpi-card warn"><div class="kpi-label">Budget Used</div><div class="kpi-value">₱${fmt(mktExp)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Submissions</div><div class="kpi-value">${mktSubs.length}</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div class="card"><div class="card-header"><h3>Task Completion Rate</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="mkt-task-chart"></canvas></div></div></div>
+        <div class="card"><div class="card-header"><h3>Task Status Breakdown</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="mkt-status-chart"></canvas></div></div></div>
+      </div>
+      <div class="card"><div class="card-header"><h3>Marketing Team</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Name</th><th>Role</th><th>Tasks Done</th><th>Tasks Active</th></tr></thead>
+        <tbody>${mktUsers.map(u=>{
+          const uTasks=mktTasks.filter(t=>Array.isArray(t.assignedTo)?t.assignedTo.includes(u.id):t.assignedTo===u.id);
+          const uDone=uTasks.filter(t=>['done','approved','archived'].includes(t.status)).length;
+          const uActive=uTasks.filter(t=>['todo','in-progress','review'].includes(t.status)).length;
+          return `<tr><td>${u.displayName||u.email||'—'}</td><td><span class="badge badge-blue">${ROLES[u.role]?.label||u.role}</span></td><td>${uDone}</td><td>${uActive}</td></tr>`;
+        }).join('')}</tbody>
+      </table></div></div></div>
+    `;
+    const taskStatuses=['todo','in-progress','review','done','approved','archived'];
+    const statusCounts=taskStatuses.map(s=>mktTasks.filter(t=>t.status===s).length);
+    new Chart(document.getElementById('mkt-task-chart'),{type:'doughnut',data:{labels:['Done','Active'],datasets:[{data:[doneMkt.length,mktTasks.length-doneMkt.length],backgroundColor:['#30D158','#636366'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
+    new Chart(document.getElementById('mkt-status-chart'),{type:'bar',data:{labels:taskStatuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:statusCounts,backgroundColor:'#FF9F0A'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb',font:{size:10}},grid:{display:false}}}}});
+  };
+
+  const renderFinanceAnalytics = () => {
+    const totalPayroll=users.reduce((s,u)=>s+(u.salary||0)+(u.allowance||0)-(u.deductions||0),0);
+    const disbursed=ledger.filter(l=>l.type==='payslip').reduce((s,l)=>s+(l.amount||0),0);
+    const disbursedThisMonth=ledger.filter(l=>l.type==='payslip'&&inMonth(l)).reduce((s,l)=>s+(l.amount||0),0);
+    const caTotal=cas.filter(a=>a.status==='approved').reduce((s,a)=>s+(a.amount||0),0);
+    const caPending=cas.filter(a=>a.status==='pending').length;
+    const totalExp=expenses.filter(e=>e.status==='approved').reduce((s,e)=>s+(e.amount||0),0);
+    const expThisMonth=expenses.filter(e=>e.status==='approved'&&inMonth(e)).reduce((s,e)=>s+(e.amount||0),0);
+    const payslipsThisMonth=payslips.filter(p=>inMonth(p));
+    const wrap=document.getElementById('analytics-content');
+    wrap.innerHTML=`
+      <div class="kpi-row" style="margin-top:16px">
+        <div class="kpi-card accent"><div class="kpi-label">Total Payroll (Est.)</div><div class="kpi-value">₱${fmt(totalPayroll)}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Disbursed This Month</div><div class="kpi-value">₱${fmt(disbursedThisMonth)}</div></div>
+        <div class="kpi-card warn"><div class="kpi-label">CA Outstanding</div><div class="kpi-value">₱${fmt(caTotal)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">CA Pending</div><div class="kpi-value">${caPending}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Expenses This Month</div><div class="kpi-value">₱${fmt(expThisMonth)}</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div class="card"><div class="card-header"><h3>Expense Categories</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="fin-exp-chart"></canvas></div></div></div>
+        <div class="card"><div class="card-header"><h3>Cash Advance Status</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="fin-ca-chart"></canvas></div></div></div>
+      </div>
+      <div class="card"><div class="card-header"><h3>Payslips — This Month (${payslipsThisMonth.length})</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Worker</th><th>Pay Period</th><th>Gross</th><th>Net</th><th>Prepared By</th></tr></thead>
+        <tbody>${payslipsThisMonth.slice(0,20).map(p=>`<tr><td>${p.workerName||'—'}</td><td>${p.periodLabel||p.payPeriod||'—'}</td><td>₱${fmt(p.grossPay||0)}</td><td>₱${fmt(p.netPay||0)}</td><td>${p.preparedBy||'—'}</td></tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">No payslips this month</td></tr>'}</tbody>
+      </table></div></div></div>
+    `;
+    const cats=[...new Set(expenses.map(e=>e.category||'Other'))].slice(0,6);
+    const catAmts=cats.map(cat=>expenses.filter(e=>e.category===cat&&e.status==='approved').reduce((s,e)=>s+(e.amount||0),0));
+    new Chart(document.getElementById('fin-exp-chart'),{type:'bar',data:{labels:cats,datasets:[{data:catAmts,backgroundColor:'#0A84FF'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb',font:{size:10}},grid:{display:false}}}}});
+    new Chart(document.getElementById('fin-ca-chart'),{type:'doughnut',data:{labels:['Approved','Pending','Rejected'],datasets:[{data:[cas.filter(a=>a.status==='approved').length,cas.filter(a=>a.status==='pending').length,cas.filter(a=>a.status==='rejected').length],backgroundColor:['#30D158','#FF9F0A','#FF453A'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
+  };
+
+  const renderProduction = () => {
+    const prodTasks=tasks.filter(t=>t.department==='Production'||t.category==='Production');
+    const doneProd=prodTasks.filter(t=>['done','approved','archived'].includes(t.status));
+    const prodUsers=users.filter(u=>(Array.isArray(u.departments)?u.departments:u.department?[u.department]:[]).includes('Production'));
+    const prodSubs=subs.filter(s=>s.department==='Production');
+    const prodDoneMonth=prodTasks.filter(t=>['done','approved','archived'].includes(t.status)&&inMonth(t,'updatedAt'));
+    const wrap=document.getElementById('analytics-content');
+    wrap.innerHTML=`
+      <div class="kpi-row" style="margin-top:16px">
+        <div class="kpi-card"><div class="kpi-label">Team Size</div><div class="kpi-value">${prodUsers.length}</div></div>
+        <div class="kpi-card accent"><div class="kpi-label">Total Tasks</div><div class="kpi-value">${prodTasks.length}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Completed</div><div class="kpi-value">${doneProd.length}</div></div>
+        <div class="kpi-card warn"><div class="kpi-label">Done This Month</div><div class="kpi-value">${prodDoneMonth.length}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Submissions</div><div class="kpi-value">${prodSubs.length}</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div class="card"><div class="card-header"><h3>Task Status</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="prod-status-chart"></canvas></div></div></div>
+        <div class="card"><div class="card-header"><h3>Output Per Member</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="prod-member-chart"></canvas></div></div></div>
+      </div>
+      <div class="card"><div class="card-header"><h3>Production Tasks</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Task</th><th>Status</th><th>Assigned</th><th>Priority</th></tr></thead>
+        <tbody>${prodTasks.slice(0,20).map(t=>{
+          const assignedNames=(Array.isArray(t.assignedTo)?t.assignedTo:[t.assignedTo]).map(uid=>users.find(u=>u.id===uid)?.displayName||'?').join(', ');
+          const sc={todo:'#636366','in-progress':'#0A84FF',review:'#FF9F0A',done:'#30D158',approved:'#30D158',archived:'#636366'}[t.status]||'#636366';
+          return `<tr><td>${t.title||'—'}</td><td><span style="color:${sc};font-weight:600">${t.status||'—'}</span></td><td>${assignedNames||'—'}</td><td>${t.priority||'—'}</td></tr>`;
+        }).join('')}</tbody>
+      </table></div></div></div>
+    `;
+    const taskStatuses=['todo','in-progress','review','done','approved'];
+    new Chart(document.getElementById('prod-status-chart'),{type:'doughnut',data:{labels:taskStatuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:taskStatuses.map(s=>prodTasks.filter(t=>t.status===s).length),backgroundColor:['#636366','#0A84FF','#FF9F0A','#30D158','#34C759'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
+    const topMembers=prodUsers.slice(0,8);
+    new Chart(document.getElementById('prod-member-chart'),{type:'bar',data:{labels:topMembers.map(u=>(u.displayName||u.email||'?').split(' ')[0]),datasets:[{label:'Done',data:topMembers.map(u=>prodTasks.filter(t=>(Array.isArray(t.assignedTo)?t.assignedTo.includes(u.id):t.assignedTo===u.id)&&['done','approved','archived'].includes(t.status)).length),backgroundColor:'#30D158'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb',font:{size:10}},grid:{display:false}}}}});
+  };
+
+  const renderGovernment = () => {
+    const wonBids=govBids.filter(b=>b.status==='won');
+    const lostBids=govBids.filter(b=>b.status==='lost');
+    const pendingBids=govBids.filter(b=>!b.status||b.status==='pending'||b.status==='submitted');
+    const totalWon=wonBids.reduce((s,b)=>s+(b.contractAmount||b.bidAmount||0),0);
+    const totalBid=govBids.reduce((s,b)=>s+(b.bidAmount||b.contractAmount||0),0);
+    const winRate=wonBids.length+lostBids.length>0?Math.round(wonBids.length/(wonBids.length+lostBids.length)*100):0;
+    // fallback if govBids is empty — show from tasks tagged as gov
+    const govTasks=tasks.filter(t=>t.department==='Government Biddings'||t.category==='Government'||t.category==='Gov Biddings');
+    const wrap=document.getElementById('analytics-content');
+    wrap.innerHTML=`
+      <div class="kpi-row" style="margin-top:16px">
+        <div class="kpi-card green"><div class="kpi-label">Contracts Won</div><div class="kpi-value">₱${fmt(totalWon)}</div></div>
+        <div class="kpi-card accent"><div class="kpi-label">Total Bids</div><div class="kpi-value">${govBids.length}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Win Rate</div><div class="kpi-value">${winRate}%</div></div>
+        <div class="kpi-card warn"><div class="kpi-label">Pending / Submitted</div><div class="kpi-value">${pendingBids.length}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Gov Tasks</div><div class="kpi-value">${govTasks.length}</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+        <div class="card"><div class="card-header"><h3>Bid Outcomes</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="gov-outcome-chart"></canvas></div></div></div>
+        <div class="card"><div class="card-header"><h3>Gov Department Tasks</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="gov-task-chart"></canvas></div></div></div>
+      </div>
+      <div class="card"><div class="card-header"><h3>Bidding Records</h3></div><div class="card-body">${govBids.length?`<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Project</th><th>Agency</th><th>Bid Amount</th><th>Status</th><th>Date</th></tr></thead>
+        <tbody>${govBids.slice(0,20).map(b=>{
+          const d=b.createdAt?.toDate?b.createdAt.toDate():new Date(b.createdAt||0);
+          const sc={won:'#30D158',lost:'#FF453A',pending:'#FF9F0A',submitted:'#0A84FF'}[b.status]||'#636366';
+          return `<tr><td>${b.projectName||b.title||'—'}</td><td>${b.agency||'—'}</td><td>₱${fmt(b.bidAmount||b.contractAmount||0)}</td><td><span style="color:${sc};font-weight:600">${b.status||'pending'}</span></td><td>${d.toLocaleDateString()}</td></tr>`;
+        }).join('')}</tbody>
+      </table></div>`:`<p style="color:var(--text-muted);padding:16px;text-align:center">No bidding records found. Add records to the <code>gov_biddings</code> collection in Firestore.</p>`}</div></div>
+    `;
+    new Chart(document.getElementById('gov-outcome-chart'),{type:'doughnut',data:{labels:['Won','Lost','Pending'],datasets:[{data:[wonBids.length,lostBids.length,pendingBids.length],backgroundColor:['#30D158','#FF453A','#FF9F0A'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
+    const govStatuses=['todo','in-progress','review','done'];
+    new Chart(document.getElementById('gov-task-chart'),{type:'bar',data:{labels:govStatuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:govStatuses.map(s=>govTasks.filter(t=>t.status===s).length),backgroundColor:'#9BA8FF'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
+  };
+
+  const TAB_RENDERERS = {
+    overview: renderOverview,
+    sales: renderSales,
+    marketing: renderMarketing,
+    finance: renderFinanceAnalytics,
+    production: renderProduction,
+    government: renderGovernment,
+  };
+
+  // Wire subtab clicks
+  document.getElementById('analytics-subtabs').querySelectorAll('.subtab-btn').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      document.querySelectorAll('#analytics-subtabs .subtab-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      TAB_RENDERERS[btn.dataset.tab]?.();
+    });
+  });
+
+  // Load initial tab
+  renderOverview();
 }
 
 // ── Team / Payroll ────────────────────────────────

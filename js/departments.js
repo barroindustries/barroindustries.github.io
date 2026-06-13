@@ -72,7 +72,7 @@ async function notifyTaskInvolved(task,notifData,skipUid) {
 
 // ── Dept Tasks subtab (shared) ────────────────────
 async function renderDeptTasks(container, deptName, currentUser, currentRole) {
-  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
   container.innerHTML = '<div class="loading-placeholder">Loading tasks…</div>';
   try {
     let snap = await db.collection('tasks').where('department','==',deptName).get()
@@ -133,9 +133,9 @@ async function renderDeptTasks(container, deptName, currentUser, currentRole) {
 // ══════════════════════════════════════════════════
 window.renderTasks = async function(currentUser, currentRole, currentDept) {
   const c = deptContainer();
-  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
 
-  if (currentRole === 'president' || currentRole === 'owner') {
+  if (currentRole === 'president' || currentRole === 'owner' || currentRole === 'finance') {
     c.innerHTML = `
       <div class="page-header">
         <h2>✅ Tasks</h2>
@@ -241,7 +241,7 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
   const list   = document.getElementById('tasks-list');
   const filter = document.getElementById('task-filter')?.value||'mine';
   list.innerHTML = '<div class="loading-placeholder">Loading…</div>';
-  const isPriv = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+  const isPriv = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
 
   let snap;
   if (filter==='mine') {
@@ -283,7 +283,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   const snap = await db.collection('tasks').doc(taskId).get();
   if (!snap.exists) { Notifs.showToast('Task not found','error'); return; }
   const t       = normTask(snap.data(),snap.id);
-  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
   const isAssignee = t.assignedTo.includes(currentUser.uid);
   const isCreator  = t.createdBy===currentUser.uid;
   const canEdit    = isAdmin||isAssignee||isCreator;
@@ -453,7 +453,7 @@ async function recomputePresidentTaskScore(uid) {
 }
 
 async function openEditTaskModal(taskId, t, currentUser, currentRole) {
-  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
   let employees=[];
   if (isAdmin) {
     const empSnap = await db.collection('users').get();
@@ -874,7 +874,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
   const container = document.getElementById(containerId);
   if (!container) return;
 
-  const isAdmin = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
+  const isAdmin = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'finance';
   const isImage = url => url && /\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(url);
 
   // Fetch comments + readers in parallel
@@ -4055,24 +4055,34 @@ function printQuote(lines, q) {
 window.renderApprovals = async function(currentUser) {
   const c = deptContainer();
   // Check pending counts for badges
-  const [signupSnap, extSnap] = await Promise.all([
-    db.collection('signup_requests').where('status','==','pending').get().catch(()=>({size:0})),
-    db.collection('attendance_extensions').where('status','==','pending').get().catch(()=>({size:0}))
+  const [signupSnap, extSnap, caSnap, subsSnap] = await Promise.all([
+    db.collection('signup_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
+    db.collection('attendance_extensions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
+    db.collection('cash_advances').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
+    db.collection('submissions').where('status','==','pending').get().catch(()=>({size:0,docs:[]}))
   ]);
   const pendingSignups = signupSnap.size || 0;
   const pendingExt     = extSnap.size || 0;
+  const pendingCA      = caSnap.size || 0;
+  const pendingSubs    = subsSnap.size || 0;
+  const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs;
 
   c.innerHTML = `
-    <div class="page-header"><h2>✅ Approvals</h2></div>
-    <div class="subtab-bar">
-      <button class="subtab-btn active" data-sub="signups">
-        Sign-up Requests${pendingSignups>0?` <span class="nav-badge">${pendingSignups}</span>`:''}
+    <div class="page-header"><h2>✅ Approvals</h2>${totalPending>0?`<span class="badge badge-red" style="font-size:13px">${totalPending} pending</span>`:''}</div>
+    <div class="subtab-bar" style="flex-wrap:wrap">
+      <button class="subtab-btn active" data-sub="all">
+        📋 All Requests${totalPending>0?` <span class="nav-badge">${totalPending}</span>`:''}
+      </button>
+      <button class="subtab-btn" data-sub="signups">
+        Sign-ups${pendingSignups>0?` <span class="nav-badge">${pendingSignups}</span>`:''}
       </button>
       <button class="subtab-btn" data-sub="attendance">
-        Attendance Extensions${pendingExt>0?` <span class="nav-badge">${pendingExt}</span>`:''}
+        Attendance${pendingExt>0?` <span class="nav-badge">${pendingExt}</span>`:''}
       </button>
       <button class="subtab-btn" data-sub="roa">Quote / ROA</button>
-      <button class="subtab-btn" data-sub="ca">Cash Advances</button>
+      <button class="subtab-btn" data-sub="ca">
+        Cash Advances${pendingCA>0?` <span class="nav-badge">${pendingCA}</span>`:''}
+      </button>
     </div>
     <div id="approvals-content"><div class="loading-placeholder">Loading…</div></div>
   `;
@@ -4081,6 +4091,128 @@ window.renderApprovals = async function(currentUser) {
     const wrap = document.getElementById('approvals-content');
     if (!wrap) return;
     wrap.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+
+    if (sub === 'all') {
+      // ── All Pending Requests aggregated view ──
+      const [sgSnap, atSnap, caSnap2, subSnap2] = await Promise.all([
+        db.collection('signup_requests').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+        db.collection('attendance_extensions').where('status','==','pending').orderBy('requestedAt','desc').get().catch(()=>({docs:[]})),
+        db.collection('cash_advances').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+        db.collection('submissions').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]}))
+      ]);
+
+      const allPending = [
+        ...sgSnap.docs.map(d=>({id:d.id,type:'signup',icon:'👤',label:'Sign-up Request',name:d.data().fullName||d.data().email||'Unknown',detail:d.data().email||'',ts:d.data().createdAt,...d.data()})),
+        ...atSnap.docs.map(d=>({id:d.id,type:'attendance',icon:'⏰',label:'Attendance Extension',name:d.data().userName||'Unknown',detail:d.data().date||'',ts:d.data().requestedAt,...d.data()})),
+        ...caSnap2.docs.map(d=>({id:d.id,type:'ca',icon:'💸',label:'Cash Advance',name:d.data().userName||'Unknown',detail:`₱${fmt(d.data().amount||0)}`,ts:d.data().createdAt,...d.data()})),
+        ...subSnap2.docs.map(d=>({id:d.id,type:'submission',icon:'📤',label:'Work Submission',name:d.data().userName||d.data().authorName||'Unknown',detail:d.data().title||'',ts:d.data().createdAt,...d.data()}))
+      ];
+
+      if (!allPending.length) {
+        wrap.innerHTML = '<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">✅</div><h4>All clear!</h4><p>No pending requests at the moment.</p></div>';
+        return;
+      }
+
+      wrap.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${allPending.map(item => `
+          <div class="item-card pending-req-card" data-type="${item.type}" data-id="${item.id}" style="cursor:default">
+            <div class="item-top">
+              <div class="item-title">${item.icon} ${item.name}</div>
+              <span class="badge badge-warn">Pending</span>
+            </div>
+            <div class="item-meta" style="margin-top:4px">
+              <span class="badge badge-blue" style="font-size:10px">${item.label}</span>
+              ${item.detail?`<span style="font-size:12px;color:var(--text-muted)">${item.detail}</span>`:''}
+              ${item.ts?`<span style="font-size:11px;color:var(--text-muted)">${new Date(item.ts.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>`:''}
+            </div>
+            <div style="display:flex;gap:8px;margin-top:10px" class="req-actions">
+              ${item.type==='signup'?`
+                <button class="btn-success btn-sm sg-approve-btn" data-id="${item.id}" data-name="${item.name}" data-email="${item.email||''}" data-phone="${item.phone||''}">✓ Approve</button>
+                <button class="btn-danger btn-sm sg-reject-btn" data-id="${item.id}" data-name="${item.name}">✗ Reject</button>
+              `:item.type==='attendance'?`
+                <button class="btn-success btn-sm at-approve-btn" data-id="${item.id}" data-name="${item.name}">✓ Approve</button>
+                <button class="btn-danger btn-sm at-deny-btn" data-id="${item.id}" data-name="${item.name}">✗ Deny</button>
+              `:item.type==='ca'?`
+                <button class="btn-success btn-sm ca-approve-btn" data-id="${item.id}" data-name="${item.name}" data-amount="${item.amount||0}" data-uid="${item.userId||''}">✓ Approve CA</button>
+                <button class="btn-danger btn-sm ca-reject-btn" data-id="${item.id}" data-name="${item.name}">✗ Reject</button>
+              `:`
+                <button class="btn-success btn-sm sub-approve-btn" data-id="${item.id}">✓ Approve</button>
+                <button class="btn-danger btn-sm sub-reject-btn" data-id="${item.id}">✗ Reject</button>
+              `}
+            </div>
+          </div>`).join('')}
+        </div>`;
+
+      // Signup approve
+      wrap.querySelectorAll('.sg-approve-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const pwd = generatePassword(btn.dataset.name);
+          const empCount = (await db.collection('users').get().catch(()=>({size:0}))).size;
+          const empId = `BI-${new Date().getFullYear()}-${String(empCount+1).padStart(3,'0')}`;
+          await db.collection('users').add({ displayName:btn.dataset.name, email:btn.dataset.email, phone:btn.dataset.phone, role:'employee', departments:[], employeeId:empId, salary:0, allowance:0, deductions:0, photoUrl:'', startDate:new Date().toISOString().slice(0,10), createdAt:firebase.firestore.FieldValue.serverTimestamp(), pendingPasswordSetup:true });
+          await db.collection('signup_requests').doc(btn.dataset.id).update({ status:'approved', generatedPassword:pwd, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
+          Notifs.showToast(`${btn.dataset.name} approved! Password: ${pwd}`);
+          loadApprovalsSub('all');
+        });
+      });
+      wrap.querySelectorAll('.sg-reject-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm(`Reject ${btn.dataset.name}?`)) return;
+          await db.collection('signup_requests').doc(btn.dataset.id).update({ status:'rejected', rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          loadApprovalsSub('all');
+        });
+      });
+
+      // Attendance approve/deny
+      wrap.querySelectorAll('.at-approve-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const ext = new Date(); ext.setHours(ext.getHours()+2);
+          await db.collection('attendance_extensions').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), expiresAt:firebase.firestore.Timestamp.fromDate(ext) });
+          Notifs.showToast(`Extension approved for ${btn.dataset.name}`);
+          loadApprovalsSub('all');
+        });
+      });
+      wrap.querySelectorAll('.at-deny-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await db.collection('attendance_extensions').doc(btn.dataset.id).update({ status:'denied', deniedBy:currentUser.uid, deniedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          Notifs.showToast(`Extension denied for ${btn.dataset.name}`);
+          loadApprovalsSub('all');
+        });
+      });
+
+      // CA approve/reject
+      wrap.querySelectorAll('.ca-approve-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await db.collection('cash_advances').doc(btn.dataset.id).update({ status:'approved', balance:parseFloat(btn.dataset.amount)||0, approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (btn.dataset.uid) await Notifs.send(btn.dataset.uid, { title:'Cash Advance Approved', body:`Your CA of ₱${fmt(parseFloat(btn.dataset.amount)||0)} has been approved.`, icon:'💸', type:'ca_approved' });
+          Notifs.showToast(`CA approved for ${btn.dataset.name}`);
+          loadApprovalsSub('all');
+        });
+      });
+      wrap.querySelectorAll('.ca-reject-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await db.collection('cash_advances').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid, rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          loadApprovalsSub('all');
+        });
+      });
+
+      // Submission approve/reject
+      wrap.querySelectorAll('.sub-approve-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await db.collection('submissions').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          Notifs.showToast('Submission approved!');
+          loadApprovalsSub('all');
+        });
+      });
+      wrap.querySelectorAll('.sub-reject-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await db.collection('submissions').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid });
+          loadApprovalsSub('all');
+        });
+      });
+      return;
+    }
 
     if (sub === 'signups') {
       // Sign-up Requests
@@ -4341,7 +4473,7 @@ window.renderApprovals = async function(currentUser) {
     });
   });
 
-  loadApprovalsSub('signups');
+  loadApprovalsSub('all');
 };
 
 // ══════════════════════════════════════════════════
@@ -4404,7 +4536,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
 async function renderDocCollection(container, collection, title, currentUser, currentRole, opts = {}) {
   const snap = await db.collection(collection).orderBy('createdAt','desc').get();
   const docs = snap.docs.map(d => ({id:d.id,...d.data()}));
-  const canAdd = currentRole==='owner'||currentRole==='manager';
+  const canAdd = currentRole==='owner'||currentRole==='manager'||currentRole==='president'||currentRole==='finance';
 
   container.innerHTML = `
     ${canAdd?`<div style="text-align:right;margin-bottom:12px"><button class="btn-primary btn-sm" id="add-doc-btn">+ Add ${title.slice(0,-1)}</button></div>`:''}
@@ -4449,7 +4581,7 @@ async function renderDocCollection(container, collection, title, currentUser, cu
 //  SHARED: File Collection (upload/view)
 // ══════════════════════════════════════════════════
 function renderFileCollection(title, id, currentRole) {
-  const canUpload = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='employee'||currentRole==='agent';
+  const canUpload = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance'||currentRole==='employee'||currentRole==='agent';
   return `
     <div class="card">
       <div class="card-header"><h3>${title}</h3></div>

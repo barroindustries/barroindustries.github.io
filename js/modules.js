@@ -235,23 +235,24 @@ function openNewPostModal(publishDirectly) {
 }
 
 // ══════════════════════════════════════════════════
-//  TEAM TAB (Employee + Admin view)
+//  TEAM TAB — Aesthetic redesign with notes + calling cards
 // ══════════════════════════════════════════════════
 
 window.renderTeamTab = async function() {
   const c = document.getElementById('page-content');
-  const pres = currentRole === 'president' || currentRole === 'manager';
+  const pres = currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance';
   c.innerHTML = `
     <div class="page-header">
       <h2>👥 Team</h2>
       ${pres ? '<button class="btn-primary btn-sm" id="invite-user-btn">+ Invite Member</button>' : ''}
     </div>
-    <div id="team-search-wrap" style="padding:0 0 14px">
-      <input id="team-search" placeholder="Search by name, role or department…"
-        style="width:100%;padding:9px 14px;border:1.5px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:14px"/>
+    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+      <input id="team-search" placeholder="Search name, role or department…" class="ms-input" style="max-width:320px"/>
+      <button class="btn-secondary btn-sm" id="set-note-btn" style="white-space:nowrap">✏️ Set My Note</button>
     </div>
-    <div id="team-grid" class="team-card-grid"></div>
+    <div id="team-grid"></div>
   `;
+
   const snap = await db.collection('users').get();
   const users = snap.docs.map(d=>({id:d.id,...d.data()}))
     .filter(u => u.role !== 'partner' && !(Array.isArray(u.departments) && u.departments.length===1 && u.departments[0]==='Brilliant Steel'))
@@ -259,7 +260,8 @@ window.renderTeamTab = async function() {
       const order = {president:0,manager:1,finance:2,employee:3,agent:4};
       return (order[a.role]??5) - (order[b.role]??5);
     });
-  renderTeamCards(users);
+
+  renderTeamCards(users, currentUser);
 
   document.getElementById('team-search').addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
@@ -268,7 +270,35 @@ window.renderTeamTab = async function() {
       (u.role||'').toLowerCase().includes(q) ||
       (Array.isArray(u.departments)?u.departments:u.department?[u.department]:[]).join(' ').toLowerCase().includes(q)
     ) : users;
-    renderTeamCards(filtered);
+    renderTeamCards(filtered, currentUser);
+  });
+
+  // Set Note (IG-style status)
+  document.getElementById('set-note-btn').addEventListener('click', () => {
+    const me = users.find(u => u.id === currentUser.uid);
+    const current = me?.statusNote || '';
+    openModal('✏️ Set Your Note', `
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Share a quick status — what you're working on, your mood, or a quick update. Visible to everyone.</p>
+      <div class="form-group">
+        <input id="note-input" maxlength="60" placeholder="e.g. In a meeting until 3pm…" value="${current}"/>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;text-align:right"><span id="note-count">${current.length}</span>/60</div>
+      </div>
+    `, `<button class="btn-primary" id="save-note-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Clear Note</button>`);
+    document.getElementById('note-input').addEventListener('input', e => {
+      document.getElementById('note-count').textContent = e.target.value.length;
+    });
+    document.getElementById('save-note-btn').addEventListener('click', async () => {
+      const note = document.getElementById('note-input').value.trim();
+      await db.collection('users').doc(currentUser.uid).update({ statusNote: note });
+      closeModal(); Notifs.showToast('Note updated!');
+      window.renderTeamTab();
+    });
+    // "Clear Note" = close and clear
+    document.querySelector('#modal-footer .btn-secondary').onclick = async () => {
+      await db.collection('users').doc(currentUser.uid).update({ statusNote: '' });
+      closeModal(); Notifs.showToast('Note cleared');
+      window.renderTeamTab();
+    };
   });
 
   if (pres) {
@@ -277,6 +307,7 @@ window.renderTeamTab = async function() {
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">They'll receive a password reset email to set their own password.</p>
         <div class="form-group"><label>Email</label><input id="inv-email" type="email" placeholder="employee@barroindustries.com"/></div>
         <div class="form-group"><label>Display Name</label><input id="inv-name" placeholder="Full name"/></div>
+        <div class="form-group"><label>Phone</label><input id="inv-phone" type="tel" placeholder="+63 9XX XXX XXXX"/></div>
         <div class="form-group"><label>Role</label>
           <select id="inv-role" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
             ${Object.entries(window.ROLES||{}).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
@@ -300,6 +331,7 @@ window.renderTeamTab = async function() {
           await db.collection('users').doc(uid).set({
             uid, email,
             displayName: document.getElementById('inv-name').value.trim() || email.split('@')[0],
+            phone: document.getElementById('inv-phone').value.trim(),
             role:        document.getElementById('inv-role').value,
             departments: depts, department: depts[0]||'',
             employeeId:  empId, salary:0, allowance:0, deductions:0,
@@ -316,45 +348,93 @@ window.renderTeamTab = async function() {
   }
 };
 
-function renderTeamCards(users) {
+function showCallingCard(u) {
+  const roleLabel = window.ROLES?.[u.role]?.label || u.role || 'Employee';
+  const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(' · ') || 'Unassigned';
+  const initials = (u.displayName||u.email||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+  openModal(`📇 ${u.displayName||u.email}`, `
+    <div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);border-radius:16px;padding:28px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px">
+      ${u.photoUrl
+        ? `<img src="${u.photoUrl}" style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.3);margin-bottom:4px" alt=""/>`
+        : `<div style="width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:800;color:#fff;margin-bottom:4px">${initials}</div>`}
+      <div style="font-size:20px;font-weight:800;color:#fff;letter-spacing:.5px">${u.displayName||u.email}</div>
+      <div style="font-size:12px;color:rgba(255,255,255,0.7);font-weight:600;text-transform:uppercase;letter-spacing:.08em">${roleLabel}</div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.5)">${depts}</div>
+      <div style="width:100%;height:1px;background:rgba(255,255,255,0.15);margin:8px 0"></div>
+      ${u.email?`<div style="font-size:13px;color:rgba(255,255,255,0.8)">✉️ ${u.email}</div>`:''}
+      ${u.phone?`<div style="font-size:13px;color:rgba(255,255,255,0.8)">📞 ${u.phone}</div>`:''}
+      ${u.employeeId?`<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;letter-spacing:.1em">${u.employeeId}</div>`:''}
+      <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:6px;letter-spacing:.15em">BARRO INDUSTRIES</div>
+    </div>
+  `);
+}
+
+function renderTeamCards(users, currentUser) {
   const grid = document.getElementById('team-grid');
   if (!grid) return;
-  if (!users.length) { grid.innerHTML = '<div class="empty-state"><div class="empty-icon">👥</div><h4>No team members found</h4></div>'; return; }
+  if (!users.length) {
+    grid.innerHTML = '<div class="empty-state"><div class="empty-icon">👥</div><h4>No team members found</h4></div>';
+    return;
+  }
   const now = Date.now();
-  grid.innerHTML = users.map(u => {
-    const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(' · ') || 'Unassigned';
-    const initial = (u.displayName||u.email||'?')[0].toUpperCase();
-    const roleLabel = window.ROLES?.[u.role]?.label || u.role || 'Employee';
-    const badgeClass = window.ROLES?.[u.role]?.badge || 'badge-gray';
 
-    // Presence
-    const lastSeenMs = u.lastSeen?.toMillis?.() || u.lastSeen?.seconds*1000 || 0;
+  grid.innerHTML = `<div class="team-masonry">${users.map(u => {
+    const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(' · ') || 'Unassigned';
+    const initial = (u.displayName||u.email||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+    const roleLabel = window.ROLES?.[u.role]?.label || u.role || 'Employee';
+    const badgeColor = {president:'#9BA8FF',manager:'#30D158',finance:'#FFD60A',employee:'#0A84FF',agent:'#FF9F0A'}[u.role] || '#8E8E93';
+    const isMe = u.id === currentUser?.uid;
+
+    const lastSeenMs = u.lastSeen?.toMillis?.() || (u.lastSeen?.seconds ? u.lastSeen.seconds*1000 : 0);
     const diffMin = lastSeenMs ? Math.floor((now - lastSeenMs)/60000) : null;
     const isOnline = diffMin !== null && diffMin < 5;
-    const lastActiveStr = diffMin === null ? '' :
+    const lastActiveStr = diffMin === null ? 'Never' :
       diffMin < 1 ? 'Just now' :
       diffMin < 60 ? `${diffMin}m ago` :
       diffMin < 1440 ? `${Math.floor(diffMin/60)}h ago` :
       `${Math.floor(diffMin/1440)}d ago`;
 
+    const statusNote = u.statusNote?.trim();
+
     return `
-    <div class="team-card">
-      <div class="team-card-avatar" style="position:relative">
-        ${u.photoUrl ? `<img src="${u.photoUrl}" alt="${u.displayName}"/>` : `<span>${initial}</span>`}
-        ${isOnline ? `<span style="position:absolute;bottom:2px;right:2px;width:11px;height:11px;border-radius:50%;background:#30D158;border:2px solid var(--surface);display:block" title="Online"></span>` : ''}
-      </div>
-      <div class="team-card-body">
-        <div class="team-card-name" style="display:flex;align-items:center;gap:6px">
-          ${u.displayName||u.email}
-          ${isOnline ? `<span style="font-size:9px;font-weight:700;color:#30D158;background:rgba(48,209,88,0.12);padding:1px 6px;border-radius:20px;letter-spacing:.04em">ONLINE</span>` : ''}
+    <div class="team-member-card" data-uid="${u.id}">
+      ${statusNote ? `
+        <div class="team-note-bubble">
+          <span>${statusNote}</span>
+        </div>` : ''}
+      <div class="team-member-avatar-wrap">
+        <div class="team-member-avatar">
+          ${u.photoUrl
+            ? `<img src="${u.photoUrl}" alt="${u.displayName||''}"/>`
+            : `<span>${initial}</span>`}
         </div>
-        <span class="badge ${badgeClass}" style="font-size:10px;margin-bottom:4px">${roleLabel}</span>
-        <div class="team-card-dept">${depts}</div>
-        ${u.employeeId ? `<div class="team-card-id">${u.employeeId}</div>` : ''}
-        ${lastActiveStr && !isOnline ? `<div style="font-size:10px;color:var(--text-muted);margin-top:2px">Last active: ${lastActiveStr}</div>` : ''}
+        <span class="team-online-dot ${isOnline?'team-online-dot--on':'team-online-dot--off'}" title="${isOnline?'Online':'Last active: '+lastActiveStr}"></span>
+      </div>
+      <div class="team-member-name">${u.displayName||u.email}</div>
+      <div class="team-member-role" style="color:${badgeColor}">${roleLabel}${isMe?' · You':''}</div>
+      <div class="team-member-dept">${depts}</div>
+      ${isOnline
+        ? `<div class="team-status-pill team-status-pill--on">● Online</div>`
+        : lastSeenMs ? `<div class="team-status-pill">${lastActiveStr}</div>` : ''}
+      <div class="team-card-actions">
+        <button class="team-card-btn view-card-btn" data-uid="${u.id}" title="View calling card">📇</button>
       </div>
     </div>`;
-  }).join('');
+  }).join('')}</div>`;
+
+  // Wire up calling card buttons
+  grid.querySelectorAll('.view-card-btn').forEach(btn => {
+    const u = users.find(x => x.id === btn.dataset.uid);
+    if (u) btn.addEventListener('click', e => { e.stopPropagation(); showCallingCard(u); });
+  });
+
+  // Whole card click also opens calling card
+  grid.querySelectorAll('.team-member-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const u = users.find(x => x.id === card.dataset.uid);
+      if (u) showCallingCard(u);
+    });
+  });
 }
 
 // ══════════════════════════════════════════════════
