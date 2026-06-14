@@ -97,6 +97,7 @@
   --topbar-h:     56px;
   --sidebar-w:    258px;
   --bottom-nav-h: 52px;
+  --top-nav-h:    46px;
 
   /* ── Type ── */
   --font: 'Inter', -apple-system, 'SF Pro Text', system-ui, sans-serif;
@@ -824,7 +825,17 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   display: flex; align-items: center; justify-content: center;
 }
 
-/* brand text — matches id-card-company */
+/* Topbar title (replaces logo+brand on mobile) */
+.topbar-title {
+  flex: 1;
+  font-family: var(--font-display);
+  font-size: 14px; font-weight: 700; letter-spacing: -0.2px;
+  color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: linear-gradient(90deg, #FFFFFF 0%, rgba(255,214,10,0.85) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+/* Keep old brand vars in case anything references them */
 .topbar-brand-wrap { display: flex; flex-direction: column; gap: 1px; }
 .topbar-brand {
   font-size: 13px; font-weight: 800; letter-spacing: 0.5px; line-height: 1;
@@ -838,6 +849,51 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   text-transform: uppercase;
 }
 .topbar-right { display: flex; align-items: center; gap: 6px; }
+
+/* ── Top Nav Strip (mobile nav below topbar) ── */
+.top-nav-strip {
+  display: none; /* shown on mobile only */
+  position: fixed;
+  top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
+  left: 0; right: 0;
+  height: var(--top-nav-h);
+  background: rgba(7,7,16,0.94);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  z-index: 94;
+  overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  align-items: center;
+  padding: 0 6px;
+  gap: 2px;
+  box-sizing: border-box;
+}
+.top-nav-strip::-webkit-scrollbar { display: none; }
+.top-nav-item {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 2px; padding: 4px 10px;
+  border-radius: var(--r-sm);
+  color: var(--text-muted); cursor: pointer;
+  background: none; border: none;
+  font-size: 9px; font-weight: 600; white-space: nowrap;
+  flex-shrink: 0;
+  transition: color var(--t2), background var(--t1);
+  -webkit-tap-highlight-color: transparent;
+  position: relative;
+}
+.top-nav-item:active { background: var(--s2); }
+.top-nav-item .bn-icon { font-size: 18px; line-height: 1; transition: transform var(--t2); }
+.top-nav-item .bn-icon svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; display: block; }
+.top-nav-item .tn-label { font-size: 9px; font-weight: 600; }
+.top-nav-item.active { color: var(--pink); }
+.top-nav-item.active .bn-icon { transform: scale(1.12); filter: drop-shadow(0 0 4px var(--pink-glow)); }
+.top-nav-item .bn-badge {
+  position: absolute; top: 2px; right: 4px;
+  background: var(--pink); color: #fff; font-size: 9px;
+  padding: 1px 4px; border-radius: var(--pill); font-weight: 700;
+  box-shadow: 0 0 8px var(--pink-glow);
+}
 
 .notif-btn {
   position: relative; background: var(--s1);
@@ -892,12 +948,21 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   position: relative;
 }
 .notif-item:hover { background: var(--s1); }
-.notif-item.unread { background: rgba(255,45,120,0.05); }
+/* Unread = red dot + red tint */
+.notif-item.unread { background: rgba(255,59,48,0.07); }
 .notif-item.unread::before {
   content: '';
   position: absolute; left: 6px; top: 50%; transform: translateY(-50%);
   width: 5px; height: 5px; border-radius: 50%;
-  background: var(--pink); box-shadow: 0 0 6px var(--pink-glow);
+  background: #FF3B30; box-shadow: 0 0 6px rgba(255,59,48,0.50);
+}
+/* Read = green dot + green tint */
+.notif-item.read { background: rgba(48,209,88,0.04); }
+.notif-item.read::before {
+  content: '';
+  position: absolute; left: 6px; top: 50%; transform: translateY(-50%);
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #30D158; box-shadow: 0 0 6px rgba(48,209,88,0.30);
 }
 .notif-item-title { font-size: 13px; font-weight: 600; margin-bottom: 2px; color: var(--text); padding-left: 10px; }
 .notif-item.unread .notif-item-title { padding-left: 10px; }
@@ -1457,13 +1522,18 @@ body.sidebar-open .main-content { pointer-events: none; user-select: none; }
 .id-flip-inner.is-flipped { transform: rotateY(180deg); }
 .id-flip-front,
 .id-flip-back {
+  width: 100%;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
 }
-.id-flip-back { transform: rotateY(180deg); }
-/* When not flipped, back face is visually removed from layout */
-.id-flip-inner:not(.is-flipped) .id-flip-back { position: absolute; top: 0; left: 0; width: 100%; }
-.id-flip-inner.is-flipped .id-flip-front  { position: absolute; top: 0; left: 0; width: 100%; }
+/* Back face: always absolutely positioned + pre-rotated 180deg.
+   Front face stays in normal flow and sets the container height.
+   This prevents the layout jump / overlap during animation. */
+.id-flip-back {
+  position: absolute;
+  top: 0; left: 0;
+  transform: rotateY(180deg);
+}
 
 /* Swipe visual hint */
 .id-flip-hint {
@@ -1878,11 +1948,15 @@ body.sidebar-open .main-content { pointer-events: none; user-select: none; }
   #sidebar.open { transform: translateX(0); box-shadow: 4px 0 48px rgba(0,0,0,0.60); }
   .menu-toggle { display: block; }
   .main-content {
-    margin-left: 0; padding: 14px;
-    /* Extra bottom padding so content scrolls above the floating pill nav */
-    padding-bottom: calc(var(--bottom-nav-h) + 36px + env(safe-area-inset-bottom, 0px));
+    margin-left: 0;
+    margin-top: calc(var(--topbar-h) + var(--top-nav-h) + env(safe-area-inset-top, 0px));
+    padding: 14px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   }
-  .bottom-nav { display: flex; }
+  /* Top strip replaces bottom nav on mobile */
+  .top-nav-strip { display: flex; }
+  /* Bottom nav stays hidden on mobile */
+  .bottom-nav { display: none !important; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .kpi-row { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .form-row { grid-template-columns: 1fr; }

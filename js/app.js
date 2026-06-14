@@ -67,6 +67,10 @@ document.addEventListener('DOMContentLoaded', () => {
       navigateTo('dashboard');
       startAutoLogout();
       startPresenceHeartbeat(user.uid);
+      // Prompt for phone number if missing
+      if (!userProfile.phone) {
+        setTimeout(_promptPhoneNumber, 2000);
+      }
     } else {
       showLogin();
     }
@@ -142,23 +146,6 @@ function showApp() {
   _applyThemeIcon(localStorage.getItem('bi-theme') || 'dark');
   // Reset any iOS zoom that happened during login input
   _resetViewportZoom();
-  // Bottom nav scroll-shrink listener
-  _initNavShrink();
-}
-
-function _initNavShrink() {
-  const scrollEl = document.getElementById('main-content');
-  const nav      = document.getElementById('bottom-nav');
-  if (!scrollEl || !nav) return;
-  let ticking = false;
-  scrollEl.addEventListener('scroll', () => {
-    if (ticking) return;
-    ticking = true;
-    requestAnimationFrame(() => {
-      nav.classList.toggle('nav-shrunk', scrollEl.scrollTop > 60);
-      ticking = false;
-    });
-  }, { passive: true });
 }
 
 function _resetViewportZoom() {
@@ -425,7 +412,7 @@ function _applyThemeIcon(theme) {
 }
 
 // ── Navigation ────────────────────────────────────
-function buildNav() { buildSidebarNav(); buildBottomNav(); }
+function buildNav() { buildSidebarNav(); buildBottomNav(); buildTopNavStrip(); }
 
 function isPresident() { return currentRole === 'president'; }
 function isPartner() { return currentRole === 'partner'; }
@@ -530,22 +517,30 @@ function buildSidebarNav() {
 }
 
 function buildBottomNav() {
+  // Bottom nav is hidden on mobile (replaced by top-nav-strip).
+  // Keep function for desktop fallback compatibility.
   const nav = document.getElementById('bottom-nav');
   if (!nav) return;
+  // No-op on mobile — handled by buildTopNavStrip below
+}
+
+function buildTopNavStrip() {
+  const strip = document.getElementById('top-nav-strip');
+  if (!strip) return;
   const items = isPresident() ? window.PRESIDENT_BOTTOM_NAV
     : isPartner() ? (window.PARTNER_BOTTOM_NAV || window.BOTTOM_NAV_ITEMS)
     : isBrilliantOnly() ? window.BRILLIANT_BOTTOM_NAV
     : window.BOTTOM_NAV_ITEMS;
-  nav.innerHTML = items.map(item =>
-    `<button class="bottom-nav-item" data-page="${item.page}">
+  strip.innerHTML = items.map(item =>
+    `<button class="top-nav-item" data-page="${item.page}">
        ${_bnIcon(item.icon)}
-       <span class="bn-label">${item.label}</span>
+       <span class="tn-label">${item.label}</span>
      </button>`
   ).join('');
-  nav.querySelectorAll('[data-page]').forEach(btn => {
+  strip.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => navigateTo(btn.dataset.page));
   });
-  if (window.lucide) lucide.createIcons({ nodes: [nav] });
+  if (window.lucide) lucide.createIcons({ nodes: [strip] });
 }
 
 function closeSidebar() {
@@ -561,78 +556,21 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.classList.toggle('sidebar-open', isOpen);
   });
   document.getElementById('sidebar-overlay')?.addEventListener('click', closeSidebar);
-
-  // ── Pull-to-refresh ──────────────────────────────
-  initPullToRefresh();
 });
 
-function initPullToRefresh() {
-  const scrollEl = document.getElementById('main-content') || document.documentElement;
-  const THRESHOLD = 72;
-  let startY = 0, ptr = null, pulling = false, triggered = false;
+// Pull-to-refresh removed — navigation handled via top nav strip on mobile.
 
-  function getScrollTop() { return scrollEl.scrollTop || document.documentElement.scrollTop || 0; }
-
-  function createIndicator() {
-    if (ptr) return;
-    ptr = document.createElement('div');
-    ptr.id = 'ptr-indicator';
-    ptr.innerHTML = `<span class="ptr-arrow">↓</span><div class="ptr-icon"></div><div class="ptr-label">Pull to refresh</div>`;
-    ptr.style.cssText = 'position:fixed;top:calc(var(--topbar-h,56px) + env(safe-area-inset-top,0px) + 8px);left:50%;transform:translateX(-50%);z-index:9999;opacity:0;transition:opacity 0.2s';
-    document.body.appendChild(ptr);
-  }
-  function removeIndicator() {
-    if (ptr) { ptr.remove(); ptr = null; }
-  }
-
-  document.addEventListener('touchstart', e => {
-    if (getScrollTop() > 4) return; // only fire at very top
-    if (document.body.classList.contains('sidebar-open')) return;
-    // Skip if inside task panel or modal
-    if (e.target.closest('#task-fullscreen-panel') || e.target.closest('#modal-overlay')) return;
-    startY = e.touches[0].clientY;
-    startScrollTop = getScrollTop();
-    pulling = true;
-    triggered = false;
-  }, { passive: true });
-
-  document.addEventListener('touchmove', e => {
-    if (!pulling) return;
-    if (getScrollTop() > 4) { pulling = false; removeIndicator(); return; }
-    const dy = e.touches[0].clientY - startY;
-    if (dy <= 0) return;
-    const progress = Math.min(dy / THRESHOLD, 1);
-    createIndicator();
-    ptr.style.opacity = Math.min(progress * 1.5, 1);
-    const translateY = Math.min(dy * 0.38, 44);
-    ptr.style.transform = `translateX(-50%) translateY(${translateY}px)`;
-    ptr.querySelector('.ptr-arrow').style.transform = `rotate(${progress * 180}deg)`;
-    ptr.querySelector('.ptr-label').textContent = progress >= 1 ? 'Release to refresh' : 'Pull to refresh';
-    ptr.classList.toggle('ready', progress >= 1);
-  }, { passive: true });
-
-  document.addEventListener('touchend', e => {
-    if (!pulling || triggered) { pulling = false; return; }
-    pulling = false;
-    const dy = e.changedTouches[0].clientY - startY;
-    if (dy >= THRESHOLD && ptr) {
-      triggered = true;
-      ptr.classList.add('refreshing');
-      ptr.querySelector('.ptr-label').textContent = 'Refreshing…';
-      ptr.style.transform = `translateX(-50%) translateY(20px)`;
-      setTimeout(() => {
-        navigateTo(currentPage || 'dashboard');
-        setTimeout(removeIndicator, 400);
-      }, 700);
-    } else {
-      if (ptr) {
-        ptr.style.transition = 'opacity 0.25s, transform 0.25s';
-        ptr.style.opacity = '0';
-        ptr.style.transform = 'translateX(-50%) translateY(-16px)';
-        setTimeout(removeIndicator, 260);
-      }
-    }
-  }, { passive: true });
+// ── Quote Builder iframe ─────────────────────────
+function renderQuoteBuilderIframe() {
+  const c = document.getElementById('page-content');
+  c.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <h2 style="font-size:18px;font-weight:800;color:var(--text)">🧮 Quote Builder</h2>
+      <button class="btn-secondary btn-sm" onclick="document.getElementById('qb-frame').contentWindow.print()">🖨 Print / PDF</button>
+    </div>
+    <iframe id="qb-frame" src="quote-builder.html"
+      style="width:100%;height:calc(100dvh - 120px);border:none;border-radius:12px;background:#f5f6fa;"
+      allow="print" loading="lazy"></iframe>`;
 }
 
 // ── Navigate ──────────────────────────────────────
@@ -673,11 +611,11 @@ function navigateTo(page) {
     case 'approvals':        renderApprovals(currentUser); break;
     case 'team':             renderTeam(); break;
     case 'progress':         renderProgressReports(); break;
-    case 'bs-quote-builder': renderBrilliantSteel(currentUser, currentRole, 'Quote Builder'); break;
+    case 'bs-quote-builder': renderQuoteBuilderIframe(); break;
+    case 'bk-quote-builder': renderQuoteBuilderIframe(); break;
     case 'bs-quotations':    renderBrilliantSteel(currentUser, currentRole, 'Quotations Summary'); break;
     case 'bs-clients':       renderBrilliantSteel(currentUser, currentRole, 'Client Data'); break;
     case 'bs-files':         renderBrilliantSteel(currentUser, currentRole, 'Files'); break;
-    case 'bk-quote-builder': window.renderSales?.(currentUser, currentRole, 'BK Quotes'); break;
     case 'bk-quotations':    window.renderSales?.(currentUser, currentRole, 'Quotations'); break;
     case 'help':             renderHelp(); break;
     // ── New modules ──
@@ -690,7 +628,7 @@ function navigateTo(page) {
 }
 
 function setActiveNav(page) {
-  document.querySelectorAll('.nav-item, .bottom-nav-item').forEach(el => {
+  document.querySelectorAll('.nav-item, .bottom-nav-item, .top-nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
   });
 }
@@ -3698,6 +3636,27 @@ function openEditEmployeeModal(u) {
 }
 
 // ── Profile Drawer ────────────────────────────────
+function _promptPhoneNumber() {
+  openModal('📞 Add Your Phone Number',
+    `<p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Your phone number appears on your Digital ID and Calling Card so colleagues can reach you.</p>
+     <div class="form-group">
+       <label>Mobile Number</label>
+       <input id="phone-prompt-input" type="tel" placeholder="e.g. 09171234567" style="font-size:16px"/>
+     </div>`,
+    `<button class="btn-primary" id="phone-prompt-save">Save</button>
+     <button class="btn-secondary" onclick="closeModal()">Skip</button>`
+  );
+  document.getElementById('phone-prompt-save')?.addEventListener('click', async () => {
+    const phone = (document.getElementById('phone-prompt-input')?.value || '').trim();
+    if (!phone) return;
+    await db.collection('users').doc(currentUser.uid).update({ phone });
+    userProfile.phone = phone;
+    window.userProfile = userProfile;
+    closeModal();
+    Notifs.showToast('📞 Phone number saved!');
+  });
+}
+
 function openProfileDrawer() {
   const drawer=document.getElementById('profile-drawer');
   const overlay=document.getElementById('drawer-overlay');
@@ -3729,6 +3688,19 @@ function openProfileDrawer() {
         <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:16px;font-weight:800"><span>Net Pay</span><span>₱${formatNum(net)}</span></div>
       </div>
     </div>
+    <div class="card" style="margin-top:14px">
+      <div class="card-body" style="padding:14px 16px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:14px;font-weight:600;color:var(--text)">Appearance</span>
+          <button class="btn-secondary btn-sm" id="drawer-theme-btn" style="min-width:130px"></button>
+        </div>
+        ${!u.phone?`<div style="margin-top:12px">
+          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">📞 Phone Number</div>
+          <div style="display:flex;gap:8px"><input id="profile-phone" type="tel" placeholder="e.g. 09171234567" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px"/>
+          <button class="btn-primary btn-sm" id="save-phone-btn">Save</button></div>
+        </div>`:`<div style="margin-top:12px;font-size:13px;color:var(--text-muted)">📞 ${u.phone} <button class="btn-secondary btn-sm" id="edit-phone-btn" style="margin-left:8px">Edit</button></div>`}
+      </div>
+    </div>
     <button class="btn-danger" style="width:100%;margin-top:14px" onclick="auth.signOut()">🚪 Sign Out</button>
   `;
   drawer.classList.remove('hidden');
@@ -3741,6 +3713,44 @@ function openProfileDrawer() {
     input.click();
   });
   document.getElementById('save-name-btn').addEventListener('click',async()=>{const name=document.getElementById('profile-name').value.trim();if(!name)return;await db.collection('users').doc(currentUser.uid).update({displayName:name});userProfile.displayName=name;applyUserUI();Notifs.showToast('Name updated!');});
+
+  // Theme toggle
+  const themeBtn = document.getElementById('drawer-theme-btn');
+  if (themeBtn) {
+    const isDark = () => document.documentElement.getAttribute('data-theme') !== 'light';
+    const updateThemeLabel = () => { themeBtn.textContent = isDark() ? '☀️ Light Mode' : '🌙 Dark Mode'; };
+    updateThemeLabel();
+    themeBtn.addEventListener('click', () => { toggleTheme(); updateThemeLabel(); });
+  }
+
+  // Phone number
+  const savePhoneBtn = document.getElementById('save-phone-btn');
+  if (savePhoneBtn) {
+    savePhoneBtn.addEventListener('click', async () => {
+      const phone = (document.getElementById('profile-phone')?.value || '').trim();
+      if (!phone) return;
+      await db.collection('users').doc(currentUser.uid).update({ phone });
+      userProfile.phone = phone;
+      Notifs.showToast('Phone number saved!');
+      openProfileDrawer(); // re-render drawer
+    });
+  }
+  const editPhoneBtn = document.getElementById('edit-phone-btn');
+  if (editPhoneBtn) {
+    editPhoneBtn.addEventListener('click', () => {
+      const wrap = editPhoneBtn.closest('div[style]');
+      if (wrap) wrap.innerHTML = `<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">📞 Phone Number</div><div style="display:flex;gap:8px"><input id="profile-phone" type="tel" value="${userProfile.phone||''}" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px"/><button class="btn-primary btn-sm" id="save-phone-btn2">Save</button></div>`;
+      document.getElementById('save-phone-btn2')?.addEventListener('click', async () => {
+        const phone = (document.getElementById('profile-phone')?.value || '').trim();
+        if (!phone) return;
+        await db.collection('users').doc(currentUser.uid).update({ phone });
+        userProfile.phone = phone;
+        Notifs.showToast('Phone number saved!');
+        openProfileDrawer();
+      });
+    });
+  }
+
   document.getElementById('profile-close').onclick=closeProfileDrawer;
   overlay.addEventListener('click',closeProfileDrawer);
 }

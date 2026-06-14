@@ -2653,7 +2653,15 @@ async function loadSalesContent(currentUser, currentRole, sub) {
   const content = document.getElementById('sales-content');
   switch(sub) {
     case 'BK Quotes':
-      renderBKQuoteList(content, currentUser, currentRole);
+      // Full standalone quote builder (iframe)
+      content.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <span style="font-size:13px;color:var(--text-muted)">Use the builder below to create quotes. Print/PDF when ready.</span>
+          <button class="btn-secondary btn-sm" onclick="document.getElementById('bk-qb-frame').contentWindow.print()">🖨 Print / PDF</button>
+        </div>
+        <iframe id="bk-qb-frame" src="quote-builder.html"
+          style="width:100%;height:calc(100dvh - 200px);min-height:500px;border:none;border-radius:12px;background:#f5f6fa;"
+          allow="print" loading="lazy"></iframe>`;
       break;
     case 'Quotations':
       renderBKQuotationsSummary(content, currentUser, currentRole);

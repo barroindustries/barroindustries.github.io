@@ -145,23 +145,8 @@
   <!-- Topbar -->
   <header class="topbar" id="topbar">
     <button class="menu-toggle" id="menu-toggle">☰</button>
-    <div class="topbar-logo">
-      <div class="topbar-logo-card">
-        <img src="icons/barro-logo.png" alt="BI" class="topbar-logo-img" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"/>
-        <div class="topbar-logo-fallback" style="display:none">BI</div>
-      </div>
-      <div class="topbar-brand-wrap">
-        <span class="topbar-brand">BARRO INDUSTRIES</span>
-        <span class="topbar-brand-sub">OPERATIONS</span>
-      </div>
-    </div>
+    <div class="topbar-title">Barro Industries Operations System</div>
     <div class="topbar-right">
-      <button class="theme-toggle-btn" id="refresh-btn" title="Refresh" onclick="navigateTo(window.currentPage||'dashboard')">
-        <i data-lucide="refresh-cw"></i>
-      </button>
-      <button class="theme-toggle-btn" id="theme-toggle-btn" title="Toggle light/dark mode" onclick="toggleTheme()">
-        <i data-lucide="sun"></i>
-      </button>
       <button class="notif-btn" id="notif-btn">
         <i data-lucide="bell"></i>
         <span class="notif-badge hidden" id="notif-badge">0</span>
@@ -169,6 +154,9 @@
       <div class="topbar-avatar" id="topbar-avatar">?</div>
     </div>
   </header>
+
+  <!-- Top nav strip (mobile only) — populated by JS -->
+  <div class="top-nav-strip" id="top-nav-strip"></div>
 
   <!-- Notification Panel -->
   <div id="notif-panel" class="notif-panel hidden">
