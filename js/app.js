@@ -368,11 +368,13 @@ function _applyThemeIcon(theme) {
 function buildNav() { buildSidebarNav(); buildBottomNav(); }
 
 function isPresident() { return currentRole === 'president'; }
+function isPartner() { return currentRole === 'partner'; }
 function isBrilliantOnly() { return currentDepts.length === 1 && currentDepts[0] === 'Brilliant Steel'; }
 
 function getSidebarItems() {
   const pres   = isPresident() || currentRole === 'manager';
   const bsOnly = isBrilliantOnly();
+  const partner = isPartner();
   const items  = [];
 
   items.push({ icon:'home', label:'Dashboard', page:'dashboard' });
@@ -389,6 +391,13 @@ function getSidebarItems() {
     items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'                    });
     items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
     items.push({ icon:'help-circle',   label:'Help & Setup',     page:'help',            section:true  });
+  } else if (partner) {
+    // ── Partner role ──
+    items.push({ icon:'check-square', label:'My Tasks', page:'tasks' });
+    items.push({ icon:'megaphone',    label:'Posts',    page:'posts' });
+    items.push({ icon:'users',        label:'Team',     page:'team-directory', section:true, sectionLabel:'Directory' });
+    items.push({ icon:'folder',       label:'Files',    page:'files' });
+    items.push({ icon:'help-circle',  label:'Help',     page:'help',  section:true, sectionLabel:'Support' });
   } else if (bsOnly) {
     // ── Partner — Brilliant Steel (ISOLATED) ──
     items.push({ icon:'calculator',  label:'Quote Builder', page:'bs-quote-builder' });
@@ -461,6 +470,7 @@ function buildBottomNav() {
   const nav = document.getElementById('bottom-nav');
   if (!nav) return;
   const items = isPresident() ? window.PRESIDENT_BOTTOM_NAV
+    : isPartner() ? (window.PARTNER_BOTTOM_NAV || window.BOTTOM_NAV_ITEMS)
     : isBrilliantOnly() ? window.BRILLIANT_BOTTOM_NAV
     : window.BOTTOM_NAV_ITEMS;
   nav.innerHTML = items.map(item =>
@@ -494,6 +504,8 @@ document.addEventListener('DOMContentLoaded', () => {
 function navigateTo(page) {
   currentPage = page;
   setActiveNav(page);
+  // Close task fullscreen panel if open
+  if (typeof window.closeTaskPanel === 'function') window.closeTaskPanel();
   const c = document.getElementById('page-content');
   c.innerHTML = '<div class="loading-placeholder">Loading…</div>';
 
@@ -542,11 +554,56 @@ function setActiveNav(page) {
 async function renderDashboard() {
   if (isPresident() || currentRole === 'manager') {
     await renderPresidentDashboard();
+  } else if (isPartner()) {
+    await renderPartnerDashboard();
   } else if (isBrilliantOnly()) {
     renderBrilliantSteel(currentUser, currentRole, 'Dashboard');
   } else {
     await renderEmployeeDashboard();
   }
+}
+
+async function renderPartnerDashboard() {
+  const c = document.getElementById('page-content');
+  const u = userProfile;
+  c.innerHTML = `
+    <div class="page-header"><h2>👋 Welcome, ${(u.displayName||'Partner').split(' ')[0]}!</h2></div>
+    <div id="live-clock" class="live-clock-line"></div>
+    <div style="background:linear-gradient(135deg,rgba(155,168,255,0.1),rgba(10,132,255,0.08));border:1.5px solid rgba(155,168,255,0.2);border-radius:16px;padding:20px;margin-bottom:20px;text-align:center">
+      <div style="font-size:32px;margin-bottom:8px">🤝</div>
+      <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px">Partner Portal</div>
+      <div style="font-size:13px;color:var(--text-muted)">Welcome to Barro Industries partner access. Use the menu to navigate tasks, posts, and shared files.</div>
+    </div>
+    <div class="kpi-row" style="margin-bottom:16px" id="partner-kpi"></div>
+    <div id="partner-tasks-card"></div>
+  `;
+  liveDateTime('live-clock');
+  // Partner tasks
+  try {
+    const tasksSnap = await db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
+      .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get());
+    const tasks = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const open = tasks.filter(t=>!['done','approved','archived'].includes(t.status));
+    const done = tasks.filter(t=>['done','approved','archived'].includes(t.status));
+    document.getElementById('partner-kpi').innerHTML = `
+      <div class="kpi-card accent"><div class="kpi-label">Open Tasks</div><div class="kpi-value">${open.length}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Completed</div><div class="kpi-value">${done.length}</div></div>
+    `;
+    const todayStr = new Date().toISOString().slice(0,10);
+    document.getElementById('partner-tasks-card').innerHTML = `
+      <div class="card"><div class="card-header"><h3>My Tasks</h3><button class="btn-primary btn-sm" onclick="navigateTo('tasks')">All Tasks</button></div>
+      <div class="card-body" style="padding:0">
+        ${!open.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">✅</div><p>No open tasks</p></div>':
+          open.slice(0,6).map(t=>{
+            const isOverdue = t.dueDate && t.dueDate < todayStr;
+            return `<div class="task-feed-item ${isOverdue?'task-overdue':''}">
+              <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
+              <div style="flex:1;min-width:0"><div class="task-feed-title">${t.title}</div>${t.dueDate?`<div class="task-feed-meta" style="color:${isOverdue?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</div>`:''}</div>
+              <span class="badge ${isOverdue?'badge-red':'badge-blue'}">${isOverdue?'Overdue':t.status||'open'}</span>
+            </div>`;
+          }).join('')}
+      </div></div>`;
+  } catch(e) { /* non-critical */ }
 }
 
 function liveDateTime(elId) {
@@ -582,8 +639,9 @@ async function renderPresidentDashboard() {
 
     const users       = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const allTasks    = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
-    const openTasks   = allTasks.filter(t=>t.status!=='done');
-    const doneTasks   = allTasks.filter(t=>t.status==='done');
+    const CLOSED_STATUSES = ['done','approved','archived'];
+    const openTasks   = allTasks.filter(t=>!CLOSED_STATUSES.includes(t.status));
+    const doneTasks   = allTasks.filter(t=>CLOSED_STATUSES.includes(t.status));
     const overdueTasks= openTasks.filter(t=>t.dueDate && t.dueDate < todayStr);
     const highPriority= openTasks.filter(t=>t.priority==='high').length;
     const pendingSubs = subsSnap.docs.filter(d=>d.data().status==='pending').length;
@@ -615,14 +673,16 @@ async function renderPresidentDashboard() {
       if (t.priority==='high') return `<span class="badge badge-red">High</span>`;
       return `<span class="badge badge-blue">${t.status||'open'}</span>`;
     };
+    const getAssignedNames = (t) => {
+      const uids = Array.isArray(t.assignedTo) ? t.assignedTo : (t.assignedTo ? [t.assignedTo] : []);
+      if (!uids.length) return 'Unassigned';
+      return uids.map(uid => users.find(u=>u.id===uid)?.displayName || '?').join(', ');
+    };
 
     c.innerHTML = `
       <div class="page-header">
         <h2>Command Center</h2>
-        <div style="display:flex;gap:8px;align-items:center">
-          <span class="badge badge-blue">${ROLES[currentRole]?.label||'President'}</span>
-          <button class="btn-secondary btn-sm" onclick="renderPresidentDashboard()" title="Refresh dashboard">↻ Refresh</button>
-        </div>
+        <span class="badge badge-blue">${ROLES[currentRole]?.label||'President'}</span>
       </div>
       <div id="live-clock" class="live-clock-line"></div>
 
@@ -685,7 +745,7 @@ async function renderPresidentDashboard() {
                     <div style="flex:1;min-width:0">
                       <div class="task-feed-title">${t.title}</div>
                       <div class="task-feed-meta">
-                        ${t.assignedToName||'Unassigned'}
+                        ${getAssignedNames(t)}
                         ${t.dueDate?` · <span style="color:${isOverdue?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</span>`:''}
                         ${t.department?` · ${t.department}`:''}
                       </div>
@@ -750,6 +810,12 @@ async function renderEmployeeDashboard() {
     const u = userProfile;
     const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
 
+    // Holiday / Sunday check
+    const phHolidays = typeof getPHHolidays === 'function' ? getPHHolidays(now.getFullYear()) : {};
+    const todayHoliday = phHolidays[todayStr];
+    const isSundayToday = now.getDay() === 0;
+    const isNoWorkDay = isSundayToday || !!todayHoliday;
+
     // Attendance — new model: 0 / 0.5 / 1.0
     const attData     = attSnap.exists ? attSnap.data() : {};
     const hasLogin    = !!attData.loginTime;
@@ -796,8 +862,8 @@ async function renderEmployeeDashboard() {
     const attDaysFull = Math.round(monthAttScore * workDaysDash);
     const caBalance = recentCA.filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
 
-    const attBadgeClass = hasFull ? 'badge-green' : hasLogin ? 'badge-orange' : 'badge-gray';
-    const attLabel      = hasFull ? '100% Full ✅' : hasLogin ? '50% Timed In 🟡' : 'Not Timed In';
+    const attBadgeClass = isNoWorkDay ? 'badge-gray' : hasFull ? 'badge-green' : hasLogin ? 'badge-orange' : 'badge-gray';
+    const attLabel      = isNoWorkDay ? (isSundayToday?'Sunday':'Holiday') : hasFull ? '100% Full ✅' : hasLogin ? '50% Timed In 🟡' : 'Not Timed In';
 
     // Dept quick tab buttons
     const deptTabsHTML = currentDepts.length ? `
@@ -819,7 +885,6 @@ async function renderEmployeeDashboard() {
     c.innerHTML = `
       <div class="page-header">
         <h2>👋 Hi, ${(u.displayName||'').split(' ')[0]}!</h2>
-        <button class="btn-secondary btn-sm" onclick="renderEmployeeDashboard()" title="Refresh">↻ Refresh</button>
       </div>
       <div id="live-clock" class="live-clock-line"></div>
 
@@ -884,7 +949,15 @@ async function renderEmployeeDashboard() {
           <span class="badge ${attBadgeClass}">${attLabel}</span>
         </div>
         <div class="card-body">
-          ${hasFull ? `
+          ${isNoWorkDay ? `
+            <div style="display:flex;align-items:center;gap:14px;padding:4px 0">
+              <div style="font-size:32px">${isSundayToday?'😴':'🎌'}</div>
+              <div>
+                <div style="font-size:14px;font-weight:700;color:var(--text)">${isSundayToday?'It\'s Sunday — rest day!':todayHoliday.name}</div>
+                <div style="font-size:12px;color:var(--text-muted);margin-top:3px">No attendance required today. Enjoy your ${isSundayToday?'day off':'holiday'}!</div>
+              </div>
+            </div>`
+          : hasFull ? `
             <div style="display:flex;align-items:center;gap:10px">
               <div style="width:40px;height:40px;border-radius:50%;background:rgba(48,209,88,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">✅</div>
               <div>
@@ -1143,13 +1216,30 @@ function renderIDCard(containerId, u) {
 
   function render() {
     el.innerHTML = `
-      <div style="display:flex;justify-content:center;gap:8px;margin-bottom:10px">
-        <button class="btn-sm ${showingID?'btn-primary':'btn-outline'}" id="id-toggle-id">🪪 Digital ID</button>
-        <button class="btn-sm ${!showingID?'btn-primary':'btn-outline'}" id="id-toggle-card">📇 Calling Card</button>
-      </div>
-      <div id="id-card-inner">${showingID ? idHTML : callingHTML}</div>`;
-    document.getElementById('id-toggle-id').addEventListener('click', () => { showingID=true; render(); });
-    document.getElementById('id-toggle-card').addEventListener('click', () => { showingID=false; render(); });
+      <div style="position:relative;overflow:hidden;touch-action:pan-y">
+        <div id="id-card-inner" style="transition:transform 0.35s cubic-bezier(.4,0,.2,1)">
+          ${showingID ? idHTML : callingHTML}
+        </div>
+        <div style="display:flex;justify-content:center;gap:6px;margin-top:10px;align-items:center">
+          <div style="width:20px;height:4px;border-radius:2px;background:${showingID?'var(--primary-light)':'rgba(255,255,255,0.2)'};transition:background 0.3s"></div>
+          <div style="width:20px;height:4px;border-radius:2px;background:${!showingID?'var(--primary-light)':'rgba(255,255,255,0.2)'};transition:background 0.3s"></div>
+        </div>
+        <div style="text-align:center;font-size:10px;color:var(--text-muted);margin-top:4px">swipe to flip</div>
+      </div>`;
+
+    // Swipe gesture
+    const inner = el.querySelector('[id="id-card-inner"]');
+    let startX = 0, isDragging = false;
+    inner.addEventListener('touchstart', e => { startX = e.touches[0].clientX; isDragging = true; }, { passive:true });
+    inner.addEventListener('touchend', e => {
+      if (!isDragging) return;
+      isDragging = false;
+      const dx = e.changedTouches[0].clientX - startX;
+      if (Math.abs(dx) > 40) { showingID = dx > 0; render(); }
+    }, { passive:true });
+    // Also allow click to toggle (for desktop)
+    inner.style.cursor = 'pointer';
+    inner.addEventListener('click', () => { showingID = !showingID; render(); });
   }
 
   render();
@@ -1926,6 +2016,9 @@ async function renderProgressReports() {
       return ts && `${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}` === monthStr;
     });
 
+    // Helper to check assignedTo array
+    const isAssigned = (t, uid) => Array.isArray(t.assignedTo) ? t.assignedTo.includes(uid) : t.assignedTo === uid;
+
     c.innerHTML = `
       <div class="page-header"><h2>📈 Progress Reports & KPIs</h2><span class="badge badge-blue">${monthLabel}</span></div>
       <div class="kpi-row">
@@ -1933,7 +2026,51 @@ async function renderProgressReports() {
         <div class="kpi-card green"><div class="kpi-label">This Month Tasks</div><div class="kpi-value">${monthTasks.length}</div><div class="kpi-sub">${monthTasks.filter(t=>t.status==='done').length} done</div></div>
         <div class="kpi-card"><div class="kpi-label">Overall KPI</div><div class="kpi-value">${tasks.length?Math.round(tasks.filter(t=>t.status==='done').length/tasks.length*100):0}%</div></div>
       </div>
+      <div class="subtab-bar" id="progress-top-tabs" style="margin-bottom:16px">
+        <button class="subtab-btn active" data-ptab="dept">By Department</button>
+        <button class="subtab-btn" data-ptab="members">All Members</button>
+      </div>
+      <div id="progress-dept-view"></div>
+      <div id="progress-members-view" style="display:none">
+        <div class="card">
+          <div class="card-header"><h3>👥 All Members Progress</h3></div>
+          <div class="card-body" style="padding:0">
+            <div class="table-wrap"><table class="data-table">
+              <thead><tr><th>Member</th><th>Department</th><th>This Month</th><th>All Time</th><th>KPI</th><th></th></tr></thead>
+              <tbody>
+                ${users.filter(u=>u.role!=='partner').map(u=>{
+                  const uDone   = tasks.filter(t=>isAssigned(t,u.id)&&t.status==='done').length;
+                  const uTotal  = tasks.filter(t=>isAssigned(t,u.id)).length;
+                  const uMDone  = monthTasks.filter(t=>isAssigned(t,u.id)&&t.status==='done').length;
+                  const uMTotal = monthTasks.filter(t=>isAssigned(t,u.id)).length;
+                  const uPct    = uTotal ? Math.round(uDone/uTotal*100) : 0;
+                  const depts   = Array.isArray(u.departments)&&u.departments.length ? u.departments.join(', ') : u.department||'—';
+                  return `<tr>
+                    <td>
+                      <div style="display:flex;align-items:center;gap:8px">
+                        <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0">
+                          ${u.photoUrl?`<img src="${u.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:(u.displayName||'?')[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <div style="font-size:13px;font-weight:600">${u.displayName||u.email}</div>
+                          <div style="font-size:11px;color:var(--text-muted)">${u.role||''}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td style="font-size:12px;color:var(--text-muted)">${depts}</td>
+                    <td style="font-size:12px"><strong>${uMDone}</strong>/${uMTotal}</td>
+                    <td style="font-size:12px"><strong>${uDone}</strong>/${uTotal}</td>
+                    <td><span class="badge ${uPct>=80?'badge-green':uPct>=50?'badge-orange':'badge-red'}">${uPct}%</span></td>
+                    <td><button class="btn-sm btn-outline emp-standings-btn" data-uid="${u.id}" data-name="${encodeURIComponent(u.displayName||u.email)}" data-mdone="${uMDone}" data-mtotal="${uMTotal}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" style="font-size:11px;padding:3px 8px">📊 View</button></td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table></div>
+          </div>
+        </div>
+      </div>
     `;
+    const deptView = document.getElementById('progress-dept-view');
     Object.entries(deptMap).forEach(([dept, data]) => {
       const cfg = DEPARTMENTS[dept]||{icon:'🗂️',color:'var(--primary-light)'};
       const total = data.tasks.length;
@@ -1946,7 +2083,7 @@ async function renderProgressReports() {
       });
       const mDone = mTasks.filter(t=>t.status==='done').length;
       const mPct  = mTasks.length ? Math.round(mDone/mTasks.length*100) : 0;
-      c.innerHTML += `
+      deptView.innerHTML += `
         <div class="card" style="margin-bottom:12px">
           <div class="card-header" style="border-left:4px solid ${cfg.color}">
             <h3>${cfg.icon} ${dept}</h3>
@@ -1985,10 +2122,10 @@ async function renderProgressReports() {
                 <thead><tr><th>Member</th><th>All Tasks Done</th><th>This Month</th><th>KPI</th><th></th></tr></thead>
                 <tbody>
                   ${data.members.map(u=>{
-                    const uDone  = tasks.filter(t=>t.assignedTo===u.id&&t.status==='done').length;
-                    const uTotal = tasks.filter(t=>t.assignedTo===u.id).length;
-                    const uMDone = monthTasks.filter(t=>t.assignedTo===u.id&&t.status==='done').length;
-                    const uMTotal= monthTasks.filter(t=>t.assignedTo===u.id).length;
+                    const uDone  = tasks.filter(t=>isAssigned(t,u.id)&&t.status==='done').length;
+                    const uTotal = tasks.filter(t=>isAssigned(t,u.id)).length;
+                    const uMDone = monthTasks.filter(t=>isAssigned(t,u.id)&&t.status==='done').length;
+                    const uMTotal= monthTasks.filter(t=>isAssigned(t,u.id)).length;
                     const uPct   = uTotal ? Math.round(uDone/uTotal*100) : 0;
                     return `<tr>
                       <td>${u.displayName||u.email}</td>
@@ -2019,7 +2156,18 @@ async function renderProgressReports() {
       });
     });
 
-    // Wire up employee standings modal buttons
+    // Wire up top-level tabs (By Department / All Members)
+    c.querySelectorAll('[data-ptab]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        c.querySelectorAll('[data-ptab]').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.dataset.ptab;
+        document.getElementById('progress-dept-view').style.display    = tab==='dept'    ? '' : 'none';
+        document.getElementById('progress-members-view').style.display = tab==='members' ? '' : 'none';
+      });
+    });
+
+    // Wire up employee standings modal buttons (in both views)
     c.querySelectorAll('.emp-standings-btn').forEach(btn => {
       btn.addEventListener('click', () => openEmpStandingsModal(
         btn.dataset.uid,

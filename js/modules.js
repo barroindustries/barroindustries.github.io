@@ -22,8 +22,22 @@ function isRealPresident() {
 
 window.renderPosts = async function() {
   const c = document.getElementById('page-content');
+  const partner = typeof isPartner === 'function' && isPartner();
   const canPost  = isRealPresident();
   const canApprove = isRealPresident() || currentRole === 'manager';
+
+  if (partner) {
+    c.innerHTML = `
+      <div class="page-header"><h2>📣 Posts</h2></div>
+      <div class="subtab-bar" id="posts-tabs">
+        <button class="subtab-btn active" data-sub="Partners">Partners</button>
+      </div>
+      <div id="posts-content"></div>
+    `;
+    loadPosts('Partners');
+    return;
+  }
+
   c.innerHTML = `
     <div class="page-header">
       <h2>📣 Posts</h2>
@@ -241,10 +255,11 @@ function openNewPostModal(publishDirectly) {
 window.renderTeamTab = async function() {
   const c = document.getElementById('page-content');
   const pres = currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance';
+  const viewingAsPartner = typeof isPartner === 'function' && isPartner();
   c.innerHTML = `
     <div class="page-header">
       <h2>👥 Team</h2>
-      ${pres ? '<button class="btn-primary btn-sm" id="invite-user-btn">+ Invite Member</button>' : ''}
+      ${pres && !viewingAsPartner ? '<button class="btn-primary btn-sm" id="invite-user-btn">+ Invite Member</button>' : ''}
     </div>
     <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
       <input id="team-search" placeholder="Search name, role or department…" class="ms-input" style="max-width:320px"/>
@@ -254,8 +269,17 @@ window.renderTeamTab = async function() {
   `;
 
   const snap = await db.collection('users').get();
+  const viewingAsPartner = typeof isPartner === 'function' && isPartner();
   const users = snap.docs.map(d=>({id:d.id,...d.data()}))
-    .filter(u => u.role !== 'partner' && !(Array.isArray(u.departments) && u.departments.length===1 && u.departments[0]==='Brilliant Steel'))
+    .filter(u => {
+      // Always hide other partners from everyone
+      if (u.role === 'partner') return false;
+      // Hide Brilliant Steel-only staff from partners
+      if (viewingAsPartner && Array.isArray(u.departments) && u.departments.length===1 && u.departments[0]==='Brilliant Steel') return false;
+      // Hide Brilliant Steel-only from non-partners too (original behavior)
+      if (!viewingAsPartner && Array.isArray(u.departments) && u.departments.length===1 && u.departments[0]==='Brilliant Steel') return false;
+      return true;
+    })
     .sort((a,b) => {
       const order = {president:0,manager:1,finance:2,employee:3,agent:4};
       return (order[a.role]??5) - (order[b.role]??5);

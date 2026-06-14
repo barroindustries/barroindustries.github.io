@@ -93,6 +93,15 @@ window.PRESIDENT_BOTTOM_NAV = [
   { icon: 'shield-check', label: 'Approve',  page: 'approvals'      }
 ];
 
+// ── Bottom Nav — External Partner ────────────────
+window.PARTNER_BOTTOM_NAV = [
+  { icon: 'home',         label: 'Home',  page: 'dashboard'      },
+  { icon: 'check-square', label: 'Tasks', page: 'tasks'          },
+  { icon: 'megaphone',    label: 'Posts', page: 'posts'          },
+  { icon: 'users',        label: 'Team',  page: 'team-directory' },
+  { icon: 'folder',       label: 'Files', page: 'files'          }
+];
+
 // ── Bottom Nav — Partner (Brilliant Steel) ───────
 window.BRILLIANT_BOTTOM_NAV = [
   { icon: 'home',       label: 'Home',    page: 'dashboard'        },

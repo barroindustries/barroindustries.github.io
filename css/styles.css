@@ -1059,13 +1059,15 @@ body.sidebar-open .main-content { pointer-events: none; user-select: none; }
 .bottom-nav {
   display: none;
   position: fixed; bottom: 0; left: 0; right: 0;
-  height: var(--bottom-nav-h);
+  min-height: var(--bottom-nav-h);
+  height: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px));
   background: var(--bottom-nav-bg);
   backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
   border-top: 1px solid rgba(255,255,255,0.07);
-  z-index: 95; padding: 0 4px;
-  padding-bottom: env(safe-area-inset-bottom, 0);
-  justify-content: space-around; align-items: center;
+  z-index: 95;
+  padding: 0 4px env(safe-area-inset-bottom, 0px);
+  justify-content: space-around; align-items: flex-start;
+  box-sizing: border-box;
 }
 /* gradient top line on bottom nav */
 .bottom-nav::before {
@@ -1076,11 +1078,12 @@ body.sidebar-open .main-content { pointer-events: none; user-select: none; }
 }
 .bottom-nav-item {
   display: flex; flex-direction: column; align-items: center;
-  gap: 3px; padding: 8px 6px; border-radius: var(--r-sm);
+  gap: 3px; padding: 8px 2px; border-radius: var(--r-sm);
   color: var(--text-muted); cursor: pointer;
   background: none; border: none; font-size: 10px; font-weight: 500;
   transition: color var(--t2), transform var(--t1);
   flex: 1; min-width: 0; position: relative;
+  height: var(--bottom-nav-h); box-sizing: border-box;
 }
 .bottom-nav-item .bn-icon { font-size: 22px; line-height: 1; transition: transform var(--t2); }
 .bottom-nav-item .bn-label { font-size: 9px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
@@ -1387,26 +1390,28 @@ body.sidebar-open .main-content { pointer-events: none; user-select: none; }
   display: flex; gap: 3px; margin-bottom: 18px;
   background: rgba(255,255,255,0.04);
   border: 1px solid var(--border);
-  border-radius: var(--r-sm);
+  border-radius: 12px;
   padding: 4px;
   overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  flex-wrap: nowrap;
 }
 .subtab-bar::-webkit-scrollbar { display: none; }
 .subtab-btn {
-  padding: 7px 14px; border-radius: 8px;
+  padding: 8px 14px; border-radius: 9px;
   border: none; background: none;
   font-size: 13px; font-weight: 500; color: var(--text-muted);
   cursor: pointer; white-space: nowrap; flex-shrink: 0;
   transition: background var(--t2), color var(--t2), box-shadow var(--t2);
+  min-height: 36px; display: flex; align-items: center;
 }
 .subtab-btn.active {
   background: var(--grad-pk-bl);
   background-size: 200% 200%;
   color: #fff; font-weight: 600;
-  box-shadow: var(--sh-pink);
+  box-shadow: 0 2px 12px rgba(155,168,255,0.35);
   animation: gradRun 5s ease infinite;
 }
-.subtab-btn:hover:not(.active) { background: var(--s2); color: var(--text-2); }
+.subtab-btn:hover:not(.active) { background: rgba(255,255,255,0.06); color: var(--text); }
 
 /* ══════════════════════════════
    ITEM LISTS
@@ -1773,7 +1778,7 @@ body.sidebar-open .main-content { pointer-events: none; user-select: none; }
   .menu-toggle { display: block; }
   .main-content {
     margin-left: 0; padding: 14px;
-    padding-bottom: calc(var(--bottom-nav-h) + 16px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(var(--bottom-nav-h) + 20px + env(safe-area-inset-bottom, 0px));
   }
   .bottom-nav { display: flex; }
   .dashboard-grid { grid-template-columns: 1fr; }
@@ -2344,8 +2349,10 @@ html.light .team-member-card:hover { border-color: var(--primary); }
 .trademark-name { font-weight:700; font-size:15px; color:var(--text); margin-bottom:4px; }
 .trademark-desc { font-size:13px; color:var(--text-muted); line-height:1.5; }
 
-/* ── Subtab bar wrapping ────────────────────── */
-.subtab-bar { flex-wrap: wrap; }
+/* ── Subtab bar responsive (scrolls horizontally, no wrapping needed) ── */
+@media (max-width: 480px) {
+  .subtab-btn { padding: 7px 10px; font-size: 12px; }
+}
 
 /* ── Payroll table photo ────────────────────── */
 .payroll-photo { width:32px; height:32px; border-radius:50%; object-fit:cover; }
@@ -2992,3 +2999,15 @@ html.light .form-group select {
 html.light .ms-bubble-theirs { background: #f0f0f5; border-color: #ddd; }
 html.light .messenger-body { background: #f8f8fc; }
 html.light .ms-input { background: #fff; }
+
+/* ── Task fullscreen panel messenger fills height ── */
+#task-fullscreen-panel .messenger-wrap {
+  flex: 1; margin-top: 0; border-radius: 0; border: none;
+  overflow: hidden; display: flex; flex-direction: column;
+}
+#task-fullscreen-panel .messenger-body {
+  max-height: none; flex: 1;
+}
+#task-fullscreen-panel #task-comments-wrap {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+}

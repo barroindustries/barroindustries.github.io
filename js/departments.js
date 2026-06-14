@@ -64,10 +64,11 @@ function taskCard(t) {
   </div>`;
 }
 async function notifyTaskInvolved(task,notifData,skipUid) {
+  const dataWithTask = { ...notifData, taskId: task.id };
   const involved=new Set([...(task.assignedTo||[]),task.createdBy].filter(Boolean));
   involved.delete(skipUid);
-  await Promise.all(Array.from(involved).map(uid=>Notifs.send(uid,notifData)));
-  await Notifs.sendToOwner(notifData);
+  await Promise.all(Array.from(involved).map(uid=>Notifs.send(uid,dataWithTask)));
+  await Notifs.sendToOwner(dataWithTask);
 }
 
 // ── Dept Tasks subtab (shared) ────────────────────
@@ -279,6 +280,16 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
   list.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole)));
 }
 
+function closeTaskPanel() {
+  const panel = document.getElementById('task-fullscreen-panel');
+  if (!panel) return;
+  panel.style.transform = 'translateY(100%)';
+  panel.style.opacity = '0';
+  setTimeout(() => panel.remove(), 320);
+}
+window.closeTaskPanel = closeTaskPanel;
+window.openTaskDetail = openTaskDetail;
+
 async function openTaskDetail(taskId, currentUser, currentRole) {
   const snap = await db.collection('tasks').doc(taskId).get();
   if (!snap.exists) { Notifs.showToast('Task not found','error'); return; }
@@ -287,77 +298,122 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   const isAssignee = t.assignedTo.includes(currentUser.uid);
   const isCreator  = t.createdBy===currentUser.uid;
   const canEdit    = isAdmin||isAssignee||isCreator;
-  const canSubmit  = isAssignee&&!['submitted','approved','on-hold','archived'].includes(t.status);
+  const canSubmit  = isAssignee&&!['submitted','review','approved','on-hold','archived'].includes(t.status);
   const allowedStatuses = isAdmin?TASK_STATUSES:TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value));
 
-  openModal(t.title, `
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-      <span class="badge ${priorityBadge(t.priority)}">${t.priority||'medium'}</span>
-      <span class="badge ${statusBadge(t.status)}">${statusLabel(t.status)}</span>
-      ${t.department?`<span class="badge badge-gray">🗂 ${t.department}</span>`:''}
-    </div>
-    <p style="font-size:14px;line-height:1.6;margin-bottom:12px;white-space:pre-wrap">${t.description||'No description.'}</p>
-    <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap">
-      ${t.assignedToNames?.length?`<span>👥 <strong>${t.assignedToNames.join(', ')}</strong></span>`:''}
-      ${t.dueDate?`<span>📅 Due: <strong>${t.dueDate}</strong></span>`:''}
-      ${t.createdByName?`<span>🖊 By: ${t.createdByName}</span>`:''}
-    </div>
+  // Remove existing panel
+  document.getElementById('task-fullscreen-panel')?.remove();
 
-    <!-- ── Current Standing ── -->
-    <div style="background:rgba(255,159,10,0.08);border:1.5px solid rgba(255,159,10,0.28);border-radius:10px;padding:12px 14px;margin-bottom:14px">
-      <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,159,10,0.9);margin-bottom:6px">📍 Current Standing</div>
-      ${t.currentStanding
-        ? `<p style="font-size:13px;line-height:1.5;margin:0 0 ${canEdit?'10px':'0'};color:var(--text)">${t.currentStanding}</p>`
-        : `<p style="font-size:12px;color:var(--text-muted);margin:0 0 ${canEdit?'10px':'0'}">No standing set yet.</p>`}
-      ${canEdit?`<div style="display:flex;gap:6px">
-        <input id="cs-input" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"
-          placeholder="e.g. Awaiting materials from supplier…"
-          value="${(t.currentStanding||'').replace(/"/g,'&quot;')}"/>
-        <button class="btn-primary btn-sm" id="cs-save-btn">Set</button>
-      </div>`:''}
-    </div>
+  const panel = document.createElement('div');
+  panel.id = 'task-fullscreen-panel';
+  panel.style.cssText = `
+    position:fixed;
+    top:calc(var(--topbar-h) + env(safe-area-inset-top,0px));
+    left:0;right:0;bottom:0;
+    background:var(--bg);
+    z-index:4000;
+    display:flex;flex-direction:column;
+    transform:translateY(100%);
+    opacity:0;
+    transition:transform 0.32s cubic-bezier(.4,0,.2,1),opacity 0.32s;
+    overflow:hidden;
+  `;
 
-    ${canEdit?`<div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:14px">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:8px">Change Status</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <select id="status-sel" style="flex:1;min-width:160px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)">
-          ${allowedStatuses.map(s=>`<option value="${s.value}"${t.status===s.value?' selected':''}>${s.label}</option>`).join('')}
-        </select>
-        <button class="btn-primary btn-sm" id="update-status-btn">Update</button>
+  panel.innerHTML = `
+    <!-- Top bar inside panel -->
+    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0">
+      <button id="task-panel-back" style="background:none;border:none;color:var(--primary-light);font-size:22px;cursor:pointer;padding:0 4px;line-height:1">‹</button>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:15px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</div>
+        <div style="display:flex;gap:6px;margin-top:3px;flex-wrap:wrap">
+          <span class="badge ${priorityBadge(t.priority)}" style="font-size:10px">${t.priority||'medium'}</span>
+          <span class="badge ${statusBadge(t.status)}" style="font-size:10px">${statusLabel(t.status)}</span>
+          ${t.department?`<span class="badge badge-gray" style="font-size:10px">🗂 ${t.department}</span>`:''}
+        </div>
       </div>
-    </div>`:''}
-
-    ${isAdmin?`<div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:14px">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:10px">👥 Add Assignee</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <select id="reassign-sel" style="flex:1;min-width:180px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)">
-          <option value="">— Loading… —</option>
-        </select>
-        <button class="btn-primary btn-sm" id="designate-btn">+ Add</button>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        ${canSubmit?`<button class="btn-success btn-sm" id="submit-task-btn">📤 Submit</button>`:''}
+        ${canEdit?`<button class="btn-secondary btn-sm" id="edit-task-btn">✎</button>`:''}
+        ${isAdmin||isCreator?`<button class="btn-danger btn-sm" id="del-task-btn">🗑</button>`:''}
       </div>
-      <input id="task-instruction" placeholder="Note for assignee (optional)…" style="width:100%;margin-top:8px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"/>
-    </div>`:''}
+    </div>
 
-    ${currentRole==='president'&&SCORE_STATUSES.includes(t.status)?`<div style="background:var(--surface2);border:1.5px solid var(--primary-light);border-radius:10px;padding:14px;margin-bottom:14px">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--primary-light);margin-bottom:8px">🔒 President Score (hidden from employees)</div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <input id="pres-score" type="number" min="1" max="10" step="0.5" value="${t.presidentScore||''}" placeholder="1–10" style="width:80px;padding:8px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text)"/>
-        <span style="font-size:12px;color:var(--text-muted)">/ 10 — averages into employee KPI president rating</span>
-        <button class="btn-primary btn-sm" id="save-score-btn">Save</button>
+    <!-- Scrollable content + messaging below -->
+    <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+      <!-- Task info section (scrollable) -->
+      <div style="flex:0 0 auto;overflow-y:auto;max-height:42%;padding:16px;border-bottom:1px solid var(--border)" id="task-info-scroll">
+
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap">
+          ${t.assignedToNames?.length?`<span>👥 <strong>${t.assignedToNames.join(', ')}</strong></span>`:''}
+          ${t.dueDate?`<span>📅 Due: <strong style="color:${t.dueDate<new Date().toISOString().slice(0,10)?'var(--danger)':'inherit'}">${t.dueDate}</strong></span>`:''}
+          ${t.createdByName?`<span>🖊 By: ${t.createdByName}</span>`:''}
+        </div>
+
+        ${t.description?`<p style="font-size:14px;line-height:1.6;margin-bottom:12px;white-space:pre-wrap;color:var(--text)">${t.description}</p>`:''}
+
+        <!-- Current Standing -->
+        <div style="background:rgba(255,159,10,0.08);border:1.5px solid rgba(255,159,10,0.28);border-radius:10px;padding:12px 14px;margin-bottom:12px">
+          <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,159,10,0.9);margin-bottom:6px">📍 Current Standing</div>
+          ${t.currentStanding
+            ? `<p style="font-size:13px;line-height:1.5;margin:0 0 ${canEdit?'10px':'0'};color:var(--text)">${t.currentStanding}</p>`
+            : `<p style="font-size:12px;color:var(--text-muted);margin:0 0 ${canEdit?'10px':'0'}">No standing set yet.</p>`}
+          ${canEdit?`<div style="display:flex;gap:6px">
+            <input id="cs-input" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"
+              placeholder="e.g. Awaiting materials from supplier…"
+              value="${(t.currentStanding||'').replace(/"/g,'&quot;')}"/>
+            <button class="btn-primary btn-sm" id="cs-save-btn">Set</button>
+          </div>`:''}
+        </div>
+
+        ${canEdit?`<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:8px">Change Status</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <select id="status-sel" style="flex:1;min-width:160px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)">
+              ${allowedStatuses.map(s=>`<option value="${s.value}"${t.status===s.value?' selected':''}>${s.label}</option>`).join('')}
+            </select>
+            <button class="btn-primary btn-sm" id="update-status-btn">Update</button>
+          </div>
+        </div>`:''}
+
+        ${isAdmin?`<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:10px">👥 Add Assignee</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <select id="reassign-sel" style="flex:1;min-width:180px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)">
+              <option value="">— Loading… —</option>
+            </select>
+            <button class="btn-primary btn-sm" id="designate-btn">+ Add</button>
+          </div>
+          <input id="task-instruction" placeholder="Note for assignee (optional)…" style="width:100%;margin-top:8px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"/>
+        </div>`:''}
+
+        ${currentRole==='president'&&SCORE_STATUSES.includes(t.status)?`<div style="background:var(--surface2);border:1.5px solid var(--primary-light);border-radius:10px;padding:12px;margin-bottom:10px">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--primary-light);margin-bottom:8px">🔒 President Score</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <input id="pres-score" type="number" min="1" max="10" step="0.5" value="${t.presidentScore||''}" placeholder="1–10" style="width:80px;padding:8px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text)"/>
+            <span style="font-size:12px;color:var(--text-muted)">/ 10</span>
+            <button class="btn-primary btn-sm" id="save-score-btn">Save</button>
+          </div>
+          ${t.presidentScore?`<div style="margin-top:6px;font-size:12px;color:var(--text-muted)">Current: <strong>${t.presidentScore}/10</strong></div>`:''}
+        </div>`:''}
       </div>
-      ${t.presidentScore?`<div style="margin-top:6px;font-size:12px;color:var(--text-muted)">Current: <strong>${t.presidentScore}/10</strong></div>`:''}
-    </div>`:''}
 
-    <hr class="divider"/>
-    <div id="task-comments-wrap"></div>
-  `, `
-    ${canSubmit?`<button class="btn-success" id="submit-task-btn">📤 Submit for Review</button>`:''}
-    ${canEdit?`<button class="btn-secondary" id="edit-task-btn">✎ Edit</button>`:''}
-    ${isAdmin||isCreator?`<button class="btn-danger" id="del-task-btn">Delete</button>`:''}
-    <button class="btn-secondary" onclick="closeModal()">Close</button>
-  `);
+      <!-- Messaging section fills remaining space -->
+      <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+        <div id="task-comments-wrap" style="height:100%;display:flex;flex-direction:column"></div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+  // Trigger animation
+  requestAnimationFrame(() => {
+    panel.style.transform = 'translateY(0)';
+    panel.style.opacity = '1';
+  });
 
   renderComments('tasks',taskId,'task-comments-wrap',currentUser);
+
+  document.getElementById('task-panel-back').addEventListener('click', closeTaskPanel);
 
   // Current Standing save
   document.getElementById('cs-save-btn')?.addEventListener('click', async () => {
@@ -372,10 +428,10 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     await notifyTaskInvolved(t, {
       title: '📍 Task Standing Updated',
       body: `"${t.title}" — ${val||'(cleared)'}`,
-      icon: '📍', type: 'task_standing'
+      icon: '📍', type: 'task_standing', taskId: taskId
     }, currentUser.uid);
     Notifs.showToast('Standing updated!');
-    closeModal(); renderTasks(currentUser, currentRole, t.department);
+    closeTaskPanel(); renderTasks(currentUser, currentRole, t.department);
   });
 
   // Load employees for designate
@@ -393,26 +449,26 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
     await db.collection('tasks').doc(taskId).update({status:newStatus,lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()});
-    await notifyTaskInvolved(t,{title:'📋 Task Status Updated',body:`"${t.title}" → ${statusLabel(newStatus)} (${actorName})`,icon:'📋',type:'task_status'},currentUser.uid);
+    await notifyTaskInvolved(t,{title:'📋 Task Status Updated',body:`"${t.title}" → ${statusLabel(newStatus)} (${actorName})`,icon:'📋',type:'task_status',taskId},currentUser.uid);
     Notifs.showToast(`Status → ${statusLabel(newStatus)}`);
-    closeModal(); renderTasks(currentUser,currentRole,t.department);
+    closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 
   document.getElementById('submit-task-btn')?.addEventListener('click', async()=>{
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
-    await db.collection('tasks').doc(taskId).update({status:'submitted',submittedBy:currentUser.uid,submittedByName:actorName,submittedAt:firebase.firestore.FieldValue.serverTimestamp(),lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()});
-    await notifyTaskInvolved(t,{title:'📤 Task Submitted for Review',body:`"${t.title}" submitted by ${actorName}`,icon:'📤',type:'task_submitted'},currentUser.uid);
+    await db.collection('tasks').doc(taskId).update({status:'review',submittedBy:currentUser.uid,submittedByName:actorName,submittedAt:firebase.firestore.FieldValue.serverTimestamp(),lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()});
+    await notifyTaskInvolved(t,{title:'📤 Task Submitted for Review',body:`"${t.title}" submitted by ${actorName}`,icon:'📤',type:'task_submitted',taskId},currentUser.uid);
     Notifs.showToast('Submitted for review!');
-    closeModal(); renderTasks(currentUser,currentRole,t.department);
+    closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 
-  document.getElementById('edit-task-btn')?.addEventListener('click',()=>{ closeModal(); openEditTaskModal(taskId,t,currentUser,currentRole); });
+  document.getElementById('edit-task-btn')?.addEventListener('click',()=>{ closeTaskPanel(); openEditTaskModal(taskId,t,currentUser,currentRole); });
 
   document.getElementById('del-task-btn')?.addEventListener('click', async()=>{
     if (!confirm('Delete this task?')) return;
     await db.collection('tasks').doc(taskId).delete();
-    closeModal(); renderTasks(currentUser,currentRole,t.department);
+    closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 
   document.getElementById('designate-btn')?.addEventListener('click', async()=>{
@@ -425,10 +481,10 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     const update={assignedTo:[...t.assignedTo,newUid],assignedToNames:[...t.assignedToNames,newName],lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()};
     if (note) update.description=(t.description||'')+`\n\n📝 ${actorName}: ${note}`;
     await db.collection('tasks').doc(taskId).update(update);
-    await Notifs.send(newUid,{title:'🎯 Task Assigned to You',body:`"${t.title}" assigned by ${actorName}${note?' — '+note:''}`,icon:'🎯',type:'task_designated'});
-    await Notifs.sendToOwner({title:'👥 Task Assignee Added',body:`${actorName} added ${newName} to "${t.title}"`,icon:'👥',type:'task_modified'});
+    await Notifs.send(newUid,{title:'🎯 Task Assigned to You',body:`"${t.title}" assigned by ${actorName}${note?' — '+note:''}`,icon:'🎯',type:'task_designated',taskId});
+    await Notifs.sendToOwner({title:'👥 Task Assignee Added',body:`${actorName} added ${newName} to "${t.title}"`,icon:'👥',type:'task_modified',taskId});
     Notifs.showToast(`${newName} added`);
-    closeModal(); renderTasks(currentUser,currentRole,t.department);
+    closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 
   document.getElementById('save-score-btn')?.addEventListener('click', async()=>{
@@ -437,7 +493,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     await db.collection('tasks').doc(taskId).update({presidentScore:score});
     for (const uid of t.assignedTo) await recomputePresidentTaskScore(uid);
     Notifs.showToast('Score saved & KPI updated!');
-    closeModal(); renderTasks(currentUser,currentRole,t.department);
+    closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 }
 
@@ -4094,18 +4150,20 @@ window.renderApprovals = async function(currentUser) {
 
     if (sub === 'all') {
       // ── All Pending Requests aggregated view ──
-      const [sgSnap, atSnap, caSnap2, subSnap2] = await Promise.all([
+      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap] = await Promise.all([
         db.collection('signup_requests').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
         db.collection('attendance_extensions').where('status','==','pending').orderBy('requestedAt','desc').get().catch(()=>({docs:[]})),
         db.collection('cash_advances').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
-        db.collection('submissions').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]}))
+        db.collection('submissions').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+        db.collection('tasks').where('status','==','review').orderBy('lastModifiedAt','desc').get().catch(()=>({docs:[]}))
       ]);
 
       const allPending = [
         ...sgSnap.docs.map(d=>({id:d.id,type:'signup',icon:'👤',label:'Sign-up Request',name:d.data().fullName||d.data().email||'Unknown',detail:d.data().email||'',ts:d.data().createdAt,...d.data()})),
         ...atSnap.docs.map(d=>({id:d.id,type:'attendance',icon:'⏰',label:'Attendance Extension',name:d.data().userName||'Unknown',detail:d.data().date||'',ts:d.data().requestedAt,...d.data()})),
         ...caSnap2.docs.map(d=>({id:d.id,type:'ca',icon:'💸',label:'Cash Advance',name:d.data().userName||'Unknown',detail:`₱${fmt(d.data().amount||0)}`,ts:d.data().createdAt,...d.data()})),
-        ...subSnap2.docs.map(d=>({id:d.id,type:'submission',icon:'📤',label:'Work Submission',name:d.data().userName||d.data().authorName||'Unknown',detail:d.data().title||'',ts:d.data().createdAt,...d.data()}))
+        ...subSnap2.docs.map(d=>({id:d.id,type:'submission',icon:'📤',label:'Work Submission',name:d.data().userName||d.data().authorName||'Unknown',detail:d.data().title||'',ts:d.data().createdAt,...d.data()})),
+        ...reviewTasksSnap.docs.map(d=>({id:d.id,type:'review-task',icon:'📋',label:'Task for Review',name:d.data().title||'Untitled Task',detail:(()=>{const uids=Array.isArray(d.data().assignedTo)?d.data().assignedTo:[d.data().assignedTo].filter(Boolean);return uids.length?'by '+d.data().assignedToNames?.join(', '):'';})(),ts:d.data().lastModifiedAt||d.data().createdAt,...d.data()}))
       ];
 
       if (!allPending.length) {
@@ -4136,6 +4194,10 @@ window.renderApprovals = async function(currentUser) {
               `:item.type==='ca'?`
                 <button class="btn-success btn-sm ca-approve-btn" data-id="${item.id}" data-name="${item.name}" data-amount="${item.amount||0}" data-uid="${item.userId||''}">✓ Approve CA</button>
                 <button class="btn-danger btn-sm ca-reject-btn" data-id="${item.id}" data-name="${item.name}">✗ Reject</button>
+              `:item.type==='review-task'?`
+                <button class="btn-primary btn-sm rt-view-btn" data-id="${item.id}">👁 View Task</button>
+                <button class="btn-success btn-sm rt-approve-btn" data-id="${item.id}" data-name="${item.name}">✓ Approve</button>
+                <button class="btn-danger btn-sm rt-reject-btn" data-id="${item.id}" data-name="${item.name}">✗ Send Back</button>
               `:`
                 <button class="btn-success btn-sm sub-approve-btn" data-id="${item.id}">✓ Approve</button>
                 <button class="btn-danger btn-sm sub-reject-btn" data-id="${item.id}">✗ Reject</button>
@@ -4208,6 +4270,29 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.sub-reject-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           await db.collection('submissions').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid });
+          loadApprovalsSub('all');
+        });
+      });
+
+      // Review task view/approve/reject
+      wrap.querySelectorAll('.rt-view-btn').forEach(btn => {
+        btn.addEventListener('click', () => openTaskDetail(btn.dataset.id, currentUser, currentRole));
+      });
+      wrap.querySelectorAll('.rt-approve-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await db.collection('tasks').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
+          if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await notifyTaskInvolved(t2,{title:'✅ Task Approved',body:`"${btn.dataset.name}" has been approved!`,icon:'✅',type:'task_status'},currentUser.uid);}
+          Notifs.showToast(`"${btn.dataset.name}" approved!`);
+          loadApprovalsSub('all');
+        });
+      });
+      wrap.querySelectorAll('.rt-reject-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await db.collection('tasks').doc(btn.dataset.id).update({ status:'in-progress', lastModifiedBy:currentUser.uid, lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
+          if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await notifyTaskInvolved(t2,{title:'🔁 Task Sent Back',body:`"${btn.dataset.name}" was sent back for revision.`,icon:'🔁',type:'task_status'},currentUser.uid);}
+          Notifs.showToast(`"${btn.dataset.name}" sent back for revision.`);
           loadApprovalsSub('all');
         });
       });
