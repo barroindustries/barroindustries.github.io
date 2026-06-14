@@ -1634,11 +1634,12 @@ async function renderLedgerTab(container, currentUser, currentRole) {
       <div class="card-body" style="padding:0">
         ${!entries.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📒</div><h4>No ledger entries yet</h4></div>':
           `<div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Debit</th><th>Credit</th><th>Ref #</th><th>By</th></tr></thead>
+            <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Source</th><th>Debit</th><th>Credit</th><th>Ref #</th><th>By</th></tr></thead>
             <tbody>${entries.map(e=>`<tr>
               <td>${e.date||'—'}</td>
               <td>${e.description||'—'}</td>
               <td><span class="badge badge-blue">${e.category||'General'}</span></td>
+              <td style="font-size:11px">${e.source&&e.source!=='Finance'?`<span class="badge badge-gray">${e.source}</span>`:'<span style="color:var(--text-muted)">Finance</span>'}</td>
               <td style="color:var(--danger)">${e.type==='debit'?'₱'+fmt(e.amount):'-'}</td>
               <td style="color:var(--success)">${e.type==='credit'?'₱'+fmt(e.amount):'-'}</td>
               <td><code>${e.refNumber||'—'}</code></td>
@@ -4719,54 +4720,186 @@ function bindFileCollection(id, currentUser, dept, subfolder) {
 // ══════════════════════════════════════════════════
 async function renderBudgeting(container, currentUser, currentRole, dept) {
   const collection = `budgets_${dept.toLowerCase().replace(/\s+/g,'_')}`;
-  const snap = await db.collection(collection).get();
-  const items = snap.docs.map(d => ({id:d.id,...d.data()}));
-  const total    = items.reduce((s,i) => s+(i.budget||0), 0);
-  const spent    = items.reduce((s,i) => s+(i.spent||0), 0);
-  const canEdit  = currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
+  // Allow: admins, finance, president, and members of this dept
+  const isDeptMember = (window.currentDepts||[]).includes(dept);
+  const canEdit = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance'||isDeptMember;
+
+  // Load budget lines + dept expenses from shared ledger
+  const [budgetSnap, ledgerSnap] = await Promise.all([
+    db.collection(collection).orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+    db.collection('ledger').where('dept','==',dept).limit(100).get().catch(()=>({docs:[]}))
+  ]);
+
+  const items    = budgetSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const expenses = ledgerSnap.docs.map(d=>({id:d.id,...d.data()}))
+    .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+
+  // Compute spent per budget line from ledger entries
+  items.forEach(item => {
+    item.spent = expenses
+      .filter(e=>e.budgetLineId===item.id && e.type==='debit')
+      .reduce((s,e)=>s+(e.amount||0),0);
+  });
+
+  const totalBudget = items.reduce((s,i)=>s+(i.budget||0),0);
+  const totalSpent  = expenses.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+  const totalIncome = expenses.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0);
 
   container.innerHTML = `
-    <div class="kpi-row">
-      <div class="kpi-card"><div class="kpi-label">Total Budget</div><div class="kpi-value">₱${fmt(total)}</div></div>
-      <div class="kpi-card accent"><div class="kpi-label">Total Spent</div><div class="kpi-value">₱${fmt(spent)}</div></div>
-      <div class="kpi-card green"><div class="kpi-label">Remaining</div><div class="kpi-value">₱${fmt(total-spent)}</div></div>
+    <div class="kpi-row" style="margin-bottom:14px">
+      <div class="kpi-card"><div class="kpi-label">Total Budget</div><div class="kpi-value">₱${fmt(totalBudget)}</div></div>
+      <div class="kpi-card red"><div class="kpi-label">Total Spent</div><div class="kpi-value">₱${fmt(totalSpent)}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Remaining</div><div class="kpi-value">₱${fmt(totalBudget-totalSpent)}</div></div>
+      ${totalIncome>0?`<div class="kpi-card accent"><div class="kpi-label">Income</div><div class="kpi-value">₱${fmt(totalIncome)}</div></div>`:''}
     </div>
-    ${canEdit?`<div style="text-align:right;margin-bottom:12px"><button class="btn-primary btn-sm" id="add-budget-btn">+ Add Budget Line</button></div>`:''}
-    <div class="card">
-      <div class="card-body">
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead><tr><th>Item</th><th>Budget</th><th>Spent</th><th>Remaining</th></tr></thead>
+    ${canEdit?`<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:12px">
+      <button class="btn-secondary btn-sm" id="add-budget-line-btn">+ Budget Line</button>
+      <button class="btn-primary btn-sm" id="log-expense-btn">📤 Log Expense / Income</button>
+    </div>`:''}
+
+    <!-- Budget allocations -->
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-header"><h3>📊 Budget Allocation</h3></div>
+      <div class="card-body" style="padding:0">
+        ${!items.length?'<div class="empty-state" style="padding:20px"><div class="empty-icon">📊</div><p>No budget lines yet.</p></div>':
+          `<div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Item</th><th>Allocated</th><th>Spent</th><th>Remaining</th><th>%</th></tr></thead>
             <tbody>
-              ${items.map(i => `<tr>
-                <td>${i.name}</td>
-                <td>₱${fmt(i.budget)}</td>
-                <td>₱${fmt(i.spent)}</td>
-                <td style="color:${i.budget-i.spent<0?'var(--danger)':'var(--success)'}">₱${fmt(i.budget-i.spent)}</td>
+              ${items.map(i=>{
+                const pct = i.budget>0?Math.min(Math.round(i.spent/i.budget*100),100):0;
+                const rem = i.budget-i.spent;
+                return `<tr>
+                  <td style="font-weight:600">${i.name}</td>
+                  <td>₱${fmt(i.budget)}</td>
+                  <td style="color:var(--danger)">₱${fmt(i.spent)}</td>
+                  <td style="color:${rem<0?'var(--danger)':'var(--success)'}">₱${fmt(rem)}</td>
+                  <td>
+                    <div style="display:flex;align-items:center;gap:6px;min-width:80px">
+                      <div style="flex:1;height:6px;background:var(--surface2);border-radius:3px">
+                        <div style="width:${pct}%;height:100%;border-radius:3px;background:${pct>=90?'var(--danger)':pct>=70?'var(--warning,#ff9f0a)':'var(--primary-light)'}"></div>
+                      </div>
+                      <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">${pct}%</span>
+                    </div>
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table></div>`}
+      </div>
+    </div>
+
+    <!-- Expense log (synced with Finance Ledger) -->
+    <div class="card">
+      <div class="card-header">
+        <h3>🧾 Expense / Income Log</h3>
+        <span style="font-size:11px;color:var(--text-muted)">Synced with Finance Ledger</span>
+      </div>
+      <div class="card-body" style="padding:0">
+        ${!expenses.length?'<div class="empty-state" style="padding:20px"><div class="empty-icon">🧾</div><p>No expenses logged yet.</p></div>':
+          `<div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Date</th><th>Description</th><th>Line Item</th><th>Type</th><th>Amount</th><th>By</th></tr></thead>
+            <tbody>
+              ${expenses.map(e=>`<tr>
+                <td style="font-size:12px">${e.date||'—'}</td>
+                <td style="font-size:12px">${e.description||'—'}</td>
+                <td style="font-size:11px;color:var(--text-muted)">${e.budgetLineName||'—'}</td>
+                <td><span class="badge ${e.type==='credit'?'badge-green':'badge-red'}">${e.type==='credit'?'Income':'Expense'}</span></td>
+                <td style="color:${e.type==='credit'?'var(--success)':'var(--danger)'};font-weight:600">₱${fmt(e.amount)}</td>
+                <td style="font-size:11px;color:var(--text-muted)">${e.addedByName||'—'}</td>
               </tr>`).join('')}
             </tbody>
-          </table>
-        </div>
+          </table></div>`}
       </div>
     </div>
   `;
 
-  document.getElementById('add-budget-btn')?.addEventListener('click', () => {
+  // Add budget line
+  document.getElementById('add-budget-line-btn')?.addEventListener('click', () => {
     openModal('Add Budget Line', `
       <div class="form-group"><label>Item Name</label><input id="bg-name" placeholder="e.g. Social Media Ads"/></div>
-      <div class="form-row">
-        <div class="form-group"><label>Budget (₱)</label><input id="bg-budget" type="number" step="0.01"/></div>
-        <div class="form-group"><label>Spent So Far (₱)</label><input id="bg-spent" type="number" step="0.01" value="0"/></div>
-      </div>
+      <div class="form-group"><label>Allocated Budget (₱)</label><input id="bg-budget" type="number" step="0.01" min="0"/></div>
     `, `<button class="btn-primary" id="save-bg-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     document.getElementById('save-bg-btn').addEventListener('click', async () => {
+      const name = document.getElementById('bg-name').value.trim();
+      if (!name) { Notifs.showToast('Enter item name','error'); return; }
       await db.collection(collection).add({
-        name:   document.getElementById('bg-name').value.trim(),
+        name,
         budget: parseFloat(document.getElementById('bg-budget').value)||0,
-        spent:  parseFloat(document.getElementById('bg-spent').value)||0,
+        dept,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       closeModal(); renderBudgeting(container, currentUser, currentRole, dept);
+    });
+  });
+
+  // Log expense / income → writes to shared Finance ledger
+  document.getElementById('log-expense-btn')?.addEventListener('click', () => {
+    const lineOptions = items.map(i=>`<option value="${i.id}" data-name="${i.name}">${i.name}</option>`).join('');
+    openModal('Log Expense / Income', `
+      <div class="form-row">
+        <div class="form-group"><label>Date</label><input id="exp-date" type="date" value="${today()}"/></div>
+        <div class="form-group"><label>Type</label>
+          <select id="exp-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+            <option value="debit">Expense (Debit)</option>
+            <option value="credit">Income (Credit)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label>Description</label><input id="exp-desc" placeholder="e.g. Facebook Ads payment"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Amount (₱)</label><input id="exp-amount" type="number" step="0.01" min="0"/></div>
+        <div class="form-group"><label>Budget Line</label>
+          <select id="exp-line" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+            <option value="">— None / General —</option>
+            ${lineOptions}
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label>Reference # (optional)</label><input id="exp-ref" placeholder="OR #, Invoice #…"/></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:10px;background:rgba(155,168,255,0.08);border-radius:8px;font-size:12px;color:var(--text-muted)">
+        🔗 This entry will also appear in Finance → Ledger
+      </div>
+    `, `<button class="btn-primary" id="save-exp-btn">Save & Sync to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+    document.getElementById('save-exp-btn').addEventListener('click', async () => {
+      const amount = parseFloat(document.getElementById('exp-amount').value)||0;
+      const desc   = document.getElementById('exp-desc').value.trim();
+      if (!desc) { Notifs.showToast('Enter a description','error'); return; }
+      if (!amount) { Notifs.showToast('Enter an amount','error'); return; }
+      const type = document.getElementById('exp-type').value;
+      const lineId = document.getElementById('exp-line').value;
+      const lineSel = document.getElementById('exp-line');
+      const lineName = lineId ? lineSel.options[lineSel.selectedIndex].dataset.name : null;
+      const uName = userProfile?.displayName || currentUser.email;
+
+      // Write to shared Finance ledger with dept tag
+      await db.collection('ledger').add({
+        date:          document.getElementById('exp-date').value,
+        type,
+        description:   desc,
+        amount,
+        category:      dept + (type==='credit'?' Income':' Expense'),
+        dept,
+        budgetLineId:  lineId || null,
+        budgetLineName:lineName || null,
+        refNumber:     document.getElementById('exp-ref').value.trim() || null,
+        addedBy:       currentUser.uid,
+        addedByName:   uName,
+        source:        dept, // Finance can see which dept this came from
+        createdAt:     firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+      // Notify finance dept
+      await Notifs.sendToDept('Finance', {
+        title: `💸 ${dept} logged a ${type==='debit'?'expense':'income'}`,
+        body:  `${uName}: ${desc} — ₱${amount.toLocaleString()}`,
+        icon:  type==='debit'?'📤':'📥',
+        type:  'finance_entry'
+      }).catch(()=>{});
+
+      closeModal();
+      Notifs.showToast('Entry saved and synced to Finance!');
+      renderBudgeting(container, currentUser, currentRole, dept);
     });
   });
 }
