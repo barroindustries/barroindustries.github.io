@@ -172,57 +172,62 @@ function initPullToRefresh() {
   const ind  = document.getElementById('ptr-indicator');
   if (!mc || !ind) return;
 
-  const THRESHOLD = 72, MAX_PULL = 110;
-  let startY = 0, pulling = false, refreshing = false;
+  // Higher threshold = harder pull required before refresh fires
+  const THRESHOLD = 130, MAX_PULL = 180, DEAD_ZONE = 28;
+  let startY = 0, pulling = false, refreshing = false, lastDy = 0;
 
   function updateInd(dist) {
-    const pct = Math.min(dist / THRESHOLD, 1);
+    const pct   = Math.min(dist / THRESHOLD, 1);
     const ready = dist >= THRESHOLD;
-    ind.style.transform = `translateX(-50%) translateY(${Math.min(dist * 0.55, 48)}px)`;
-    ind.style.opacity   = String(Math.min(pct * 2, 1));
+    // Slide in from above: starts at -70px, reaches +42px at full pull
+    ind.style.transform = `translateX(-50%) translateY(${Math.min(dist * 0.50, 42)}px)`;
+    ind.style.opacity   = String(Math.min(pct * 1.6, 1));
     ind.classList.toggle('ready', ready);
     ind.classList.remove('refreshing');
     ind.querySelector('.ptr-label').textContent = ready ? 'Release to refresh' : 'Pull to refresh';
   }
 
+  function hideInd() {
+    ind.style.transition = 'transform .32s ease,opacity .32s ease';
+    ind.style.transform  = 'translateX(-50%) translateY(-80px)';
+    ind.style.opacity    = '0';
+    setTimeout(() => { ind.style.transition = ''; }, 340);
+  }
+
   mc.addEventListener('touchstart', e => {
+    // Only engage when content is scrolled all the way to top
     if (refreshing || mc.scrollTop > 0) return;
     startY  = e.touches[0].clientY;
+    lastDy  = 0;
     pulling = true;
   }, { passive: true });
 
   mc.addEventListener('touchmove', e => {
     if (!pulling || refreshing) return;
-    const dy = e.touches[0].clientY - startY;
-    if (dy <= 0) { pulling = false; return; }
+    const raw = e.touches[0].clientY - startY;
+    if (raw <= 0) { pulling = false; hideInd(); return; }
+    // Dead zone: first DEAD_ZONE px of downward motion don't count
+    const dy = Math.max(0, raw - DEAD_ZONE);
+    lastDy = dy;
+    if (dy === 0) return; // still in dead zone — don't show indicator
     updateInd(Math.min(dy, MAX_PULL));
   }, { passive: true });
 
   mc.addEventListener('touchend', async () => {
     if (!pulling) return;
     pulling = false;
-    const dy = parseFloat(ind.style.opacity) * THRESHOLD;
-    if (dy < THRESHOLD * 0.9) {
-      ind.style.transition = 'transform .3s,opacity .3s';
-      ind.style.transform  = 'translateX(-50%) translateY(-70px)';
-      ind.style.opacity    = '0';
-      setTimeout(() => { ind.style.transition = ''; }, 320);
-      return;
-    }
+    if (lastDy < THRESHOLD) { hideInd(); return; }
     // Trigger refresh
     refreshing = true;
     ind.classList.add('refreshing');
     ind.querySelector('.ptr-label').textContent = 'Refreshing…';
     try { await navigateTo(currentPage); } catch(e) { /* ignore */ }
     await new Promise(r => setTimeout(r, 500));
-    ind.style.transition = 'transform .35s,opacity .35s';
-    ind.style.transform  = 'translateX(-50%) translateY(-70px)';
-    ind.style.opacity    = '0';
+    hideInd();
     setTimeout(() => {
-      ind.style.transition = '';
       ind.classList.remove('ready','refreshing');
       refreshing = false;
-    }, 370);
+    }, 360);
   }, { passive: true });
 }
 
@@ -3996,43 +4001,67 @@ function openProfileDrawer() {
   const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);
   const depts=(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'Unassigned';
   body.innerHTML=`
-    <div style="text-align:center;margin-bottom:20px">
-      <div id="profile-photo-wrap" style="width:80px;height:80px;border-radius:50%;overflow:hidden;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:700;color:#fff;cursor:pointer;margin:0 auto 10px">
-        ${u.photoUrl?`<img src="${u.photoUrl}" style="width:100%;height:100%;object-fit:cover"/>`:(u.displayName||'?')[0].toUpperCase()}
+    <!-- ── Avatar hero ── -->
+    <div class="profile-hero">
+      <div id="profile-photo-wrap" class="profile-avatar-wrap">
+        ${u.photoUrl
+          ? `<img src="${u.photoUrl}" class="profile-avatar-img"/>`
+          : `<span class="profile-avatar-initials">${(u.displayName||'?')[0].toUpperCase()}</span>`}
+        <div class="profile-avatar-edit-badge"><i data-lucide="camera"></i></div>
       </div>
-      <p style="font-size:11px;color:var(--text-muted)">Click photo to change</p>
+      <div class="profile-hero-name">${u.displayName||'User'}</div>
+      <div class="profile-hero-role">${ROLES[u.role]?.label||u.role||'Employee'} · ${depts}</div>
+      ${u.employeeId?`<div class="profile-hero-id">${u.employeeId}</div>`:''}
     </div>
-    <div class="form-group"><label>Display Name</label>
-      <div style="display:flex;gap:8px"><input id="profile-name" value="${u.displayName||''}" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px"/>
-      <button class="btn-primary btn-sm" id="save-name-btn">Save</button></div>
-    </div>
-    <div class="form-group"><label>Email</label><input value="${u.email||''}" disabled style="background:var(--surface2);padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;width:100%"/></div>
-    <div class="form-group"><label>Employee ID</label><input value="${u.employeeId||'—'}" disabled style="background:var(--surface2);padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;width:100%;font-family:monospace"/></div>
-    <div class="form-group"><label>Role</label><input value="${ROLES[u.role]?.label||u.role}" disabled style="background:var(--surface2);padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;width:100%"/></div>
-    <div class="form-group"><label>Departments</label><input value="${depts}" disabled style="background:var(--surface2);padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;width:100%"/></div>
-    <div class="card" style="margin-top:10px">
-      <div class="card-header"><h3>💰 My Salary</h3></div>
-      <div class="card-body">
-        <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span>Base</span><strong>₱${formatNum(u.salary)}</strong></div>
-        <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span>Allowance</span><span style="color:var(--success)">+₱${formatNum(u.allowance)}</span></div>
-        <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)"><span>Deductions</span><span style="color:var(--danger)">-₱${formatNum(u.deductions)}</span></div>
-        <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:16px;font-weight:800"><span>Net Pay</span><span>₱${formatNum(net)}</span></div>
+
+    <!-- ── Edit name ── -->
+    <div class="profile-section-label">DISPLAY NAME</div>
+    <div class="profile-inset-card">
+      <div class="profile-row-edit">
+        <input id="profile-name" class="profile-inline-input" value="${u.displayName||''}" placeholder="Your name"/>
+        <button class="btn-primary btn-sm" id="save-name-btn">Save</button>
       </div>
     </div>
-    <div class="card" style="margin-top:14px">
-      <div class="card-body" style="padding:14px 16px">
-        <div style="display:flex;align-items:center;justify-content:space-between">
-          <span style="font-size:14px;font-weight:600;color:var(--text)">Appearance</span>
-          <button class="btn-secondary btn-sm" id="drawer-theme-btn" style="min-width:130px"></button>
-        </div>
-        ${!u.phone?`<div style="margin-top:12px">
-          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">📞 Phone Number</div>
-          <div style="display:flex;gap:8px"><input id="profile-phone" type="tel" placeholder="e.g. 09171234567" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px"/>
-          <button class="btn-primary btn-sm" id="save-phone-btn">Save</button></div>
-        </div>`:`<div style="margin-top:12px;font-size:13px;color:var(--text-muted)">📞 ${u.phone} <button class="btn-secondary btn-sm" id="edit-phone-btn" style="margin-left:8px">Edit</button></div>`}
-      </div>
+
+    <!-- ── Info rows ── -->
+    <div class="profile-section-label">ACCOUNT</div>
+    <div class="profile-inset-card">
+      <div class="profile-info-row"><span class="pir-label">Email</span><span class="pir-value">${u.email||'—'}</span></div>
+      <div class="profile-info-row"><span class="pir-label">Employee ID</span><span class="pir-value pir-mono">${u.employeeId||'—'}</span></div>
+      <div class="profile-info-row"><span class="pir-label">Role</span><span class="pir-value">${ROLES[u.role]?.label||u.role||'—'}</span></div>
+      <div class="profile-info-row no-border"><span class="pir-label">Department</span><span class="pir-value">${depts}</span></div>
     </div>
-    <button class="btn-danger" style="width:100%;margin-top:14px" onclick="auth.signOut()">🚪 Sign Out</button>
+
+    <!-- ── Salary ── -->
+    <div class="profile-section-label">COMPENSATION</div>
+    <div class="profile-inset-card">
+      <div class="profile-info-row"><span class="pir-label">Base Salary</span><strong class="pir-value">₱${formatNum(u.salary)}</strong></div>
+      <div class="profile-info-row"><span class="pir-label">Allowance</span><span class="pir-value" style="color:var(--success)">+₱${formatNum(u.allowance)}</span></div>
+      <div class="profile-info-row"><span class="pir-label">Deductions</span><span class="pir-value" style="color:var(--danger)">−₱${formatNum(u.deductions)}</span></div>
+      <div class="profile-info-row no-border"><span class="pir-label" style="font-weight:700">Net Pay</span><strong class="pir-value" style="font-size:16px">₱${formatNum(net)}</strong></div>
+    </div>
+
+    <!-- ── Settings ── -->
+    <div class="profile-section-label">SETTINGS</div>
+    <div class="profile-inset-card">
+      <div class="profile-info-row ${!u.phone?'no-border':''}">
+        <span class="pir-label">Appearance</span>
+        <button class="btn-secondary btn-sm" id="drawer-theme-btn"></button>
+      </div>
+      ${u.phone
+        ? `<div class="profile-info-row no-border"><span class="pir-label">Phone</span><span class="pir-value pir-phone">${u.phone}<button class="btn-secondary btn-sm" id="edit-phone-btn" style="margin-left:10px">Edit</button></span></div>`
+        : `<div class="profile-info-row no-border">
+            <div style="width:100%">
+              <div class="pir-label" style="margin-bottom:8px">Phone Number</div>
+              <div style="display:flex;gap:8px"><input id="profile-phone" type="tel" placeholder="09171234567" class="profile-inline-input"/><button class="btn-primary btn-sm" id="save-phone-btn">Save</button></div>
+            </div>
+           </div>`}
+    </div>
+
+    <!-- ── Sign out ── -->
+    <div style="padding:0 0 calc(24px + env(safe-area-inset-bottom,0px))">
+      <button class="btn-danger profile-signout-btn" onclick="auth.signOut()">Sign Out</button>
+    </div>
   `;
   drawer.classList.remove('hidden');
   setTimeout(()=>drawer.classList.add('open'),10);

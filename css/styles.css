@@ -981,16 +981,34 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   display: flex; align-items: center; gap: 4px; flex-shrink: 0;
 }
 .notif-action-btn {
-  width: 28px; height: 28px; border-radius: 50%;
+  width: 30px; height: 30px; border-radius: 50%;
   border: none; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  transition: background var(--t1), color var(--t1);
+  transition: background var(--t1), transform 80ms;
   flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
 }
-.notif-read-btn { background: rgba(48,209,88,0.1); color: #30D158; }
-.notif-read-btn:hover { background: rgba(48,209,88,0.22); }
-.notif-view-btn { background: rgba(108,142,245,0.1); color: var(--primary-light); }
-.notif-view-btn:hover { background: rgba(108,142,245,0.22); }
+.notif-action-btn:active { transform: scale(0.88); }
+.notif-action-btn svg {
+  display: block;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+.notif-read-btn {
+  background: rgba(48,209,88,0.13);
+  color: #30D158;
+  border: 1px solid rgba(48,209,88,0.22);
+}
+.notif-read-btn:hover { background: rgba(48,209,88,0.24); }
+.notif-read-btn svg { stroke: #30D158; }
+
+.notif-view-btn {
+  background: rgba(10,132,255,0.12);
+  color: #0A84FF;
+  border: 1px solid rgba(10,132,255,0.20);
+}
+.notif-view-btn:hover { background: rgba(10,132,255,0.22); }
+.notif-view-btn svg { stroke: #0A84FF; }
 
 /* ══════════════════════════════
    SIDEBAR
@@ -1151,6 +1169,8 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 /* Lock scroll on body when sidebar is open on mobile */
 body.sidebar-open { overflow: hidden; }
 body.sidebar-open .main-content { pointer-events: none; user-select: none; }
+/* Hide top nav strip when sidebar is open — sidebar is the nav */
+body.sidebar-open .top-nav-strip { display: none !important; }
 
 .bottom-nav {
   display: none;
@@ -2034,7 +2054,8 @@ body.sidebar-open .main-content { pointer-events: none; user-select: none; }
 ══════════════════════════════ */
 @media (max-width: 768px) {
   #sidebar { transform: translateX(-100%); }
-  #sidebar.open { transform: translateX(0); box-shadow: 4px 0 48px rgba(0,0,0,0.60); }
+  /* z-index 96 = above top-nav-strip (94) so user info is fully visible */
+  #sidebar.open { transform: translateX(0); box-shadow: 4px 0 48px rgba(0,0,0,0.60); z-index: 96; }
   .menu-toggle { display: block; }
   .main-content {
     margin-left: 0;
@@ -3521,6 +3542,19 @@ html.light .ms-input { background: #fff; }
     border-left: none;
     border-radius: 0;
     width: 100%;
+    z-index: 198; /* above sidebar overlay (190) */
+  }
+}
+
+/* ── Sidebar — full height on mobile, starts at top ── */
+@media (max-width: 768px) {
+  #sidebar {
+    top: 0;
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  /* Sidebar top section gets extra padding so avatar clears notch */
+  #sidebar .sidebar-top {
+    padding-top: calc(18px + env(safe-area-inset-top, 0px));
   }
 }
 
@@ -3604,4 +3638,251 @@ html.light .nav-item:hover { background: rgba(0,0,0,0.05); }
 html.light .bottom-nav { border-radius: 24px; }
 html.light .modal-box::after { background: rgba(0,0,0,0.18); }
 html.light .subtab-btn.active { background: rgba(255,45,120,0.10); }
+
+/* ══════════════════════════════════════════
+   TASK 4 — Splash + Topbar Logo + Light Mode
+══════════════════════════════════════════ */
+
+/* ── Splash: polish ── */
+#splash-screen {
+  background: #070710 !important; /* always dark regardless of theme */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.splash-logo {
+  width: 110px; height: 110px;
+  animation: splashLogoPulse 2s ease-in-out infinite, splashIn 0.6s var(--spring) forwards;
+  filter: drop-shadow(0 0 36px rgba(108,142,245,0.65));
+}
+@keyframes splashLogoPulse {
+  0%, 100% { filter: drop-shadow(0 0 28px rgba(108,142,245,0.55)); }
+  50%       { filter: drop-shadow(0 0 52px rgba(108,142,245,0.90)); }
+}
+.splash-wordmark {
+  font-size: 12px; letter-spacing: 0.22em;
+  color: rgba(240,240,255,0.50);
+  margin-bottom: 36px;
+}
+.splash-bar {
+  width: 100px; height: 3px;
+  background: rgba(255,255,255,0.10);
+  border-radius: 2px;
+}
+.splash-bar::after {
+  background: linear-gradient(90deg, transparent 0%, var(--primary-light) 50%, transparent 100%);
+  animation: splashBarRun 1.3s ease-in-out infinite;
+}
+
+/* ── Topbar: logo area ── */
+.topbar-logo-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.topbar-logo-card {
+  width: 32px; height: 32px;
+  border-radius: 9px;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(108,142,245,0.15);
+}
+.topbar-logo-img {
+  width: 32px; height: 32px;
+  object-fit: contain;
+}
+.topbar-logo-fallback {
+  width: 32px; height: 32px;
+  align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 800;
+  color: var(--primary-light);
+  letter-spacing: -0.5px;
+}
+.topbar-wordmark-stack {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+  min-width: 0;
+}
+.topbar-brand-main {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: rgba(255,255,255,0.95);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar-brand-sub {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.40);
+}
+
+/* ── Light mode topbar text ── */
+html.light .topbar { background: rgba(248,248,252,0.92); }
+html.light .topbar-brand-main { color: rgba(0,0,0,0.85); }
+html.light .topbar-brand-sub  { color: rgba(0,0,0,0.38); }
+html.light .topbar-logo-card  { background: rgba(108,142,245,0.10); }
+html.light .menu-toggle       { color: var(--text-primary); }
+html.light .notif-btn         { color: var(--text-primary); }
+
+/* Hide sub-label on very small screens, keep brand name */
+@media (max-width: 360px) {
+  .topbar-brand-sub { display: none; }
+  .topbar-brand-main { font-size: 13px; }
+}
 html.light .drawer-back-btn:hover { background: rgba(10,132,255,0.07); }
+
+/* ══════════════════════════════════════════
+   TASK 5 — Profile Drawer Polish
+══════════════════════════════════════════ */
+
+/* ── Hero section ── */
+.profile-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 20px 20px;
+  text-align: center;
+}
+.profile-avatar-wrap {
+  position: relative;
+  width: 88px; height: 88px;
+  border-radius: 50%;
+  overflow: visible;
+  cursor: pointer;
+  margin-bottom: 14px;
+}
+.profile-avatar-img {
+  width: 88px; height: 88px;
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.35);
+}
+.profile-avatar-initials {
+  width: 88px; height: 88px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 36px; font-weight: 700; color: #fff;
+  background: linear-gradient(135deg, var(--primary-light), var(--pink));
+  box-shadow: 0 4px 24px rgba(108,142,245,0.40);
+}
+.profile-avatar-edit-badge {
+  position: absolute;
+  bottom: 2px; right: 2px;
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: var(--s2);
+  border: 2px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+}
+.profile-avatar-edit-badge svg {
+  width: 13px; height: 13px;
+  stroke: var(--text-muted);
+  fill: none; stroke-width: 2;
+}
+.profile-hero-name {
+  font-size: 22px; font-weight: 700; letter-spacing: -0.4px;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.profile-hero-role {
+  font-size: 13px; color: var(--text-muted);
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.profile-hero-id {
+  font-size: 11px; color: var(--text-muted);
+  font-family: monospace;
+  background: var(--s1);
+  padding: 3px 10px;
+  border-radius: 20px;
+  margin-top: 4px;
+  letter-spacing: 0.05em;
+}
+
+/* ── Section labels ── */
+.profile-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 14px 20px 6px;
+}
+
+/* ── Inset grouped card ── */
+.profile-inset-card {
+  margin: 0 16px 4px;
+  background: var(--s1);
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.profile-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 0.5px solid var(--border);
+  gap: 12px;
+}
+.profile-info-row.no-border { border-bottom: none; }
+.pir-label {
+  font-size: 14px;
+  color: var(--text);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.pir-value {
+  font-size: 14px;
+  color: var(--text-muted);
+  text-align: right;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pir-mono { font-family: monospace; font-size: 12px; }
+.pir-phone { font-size: 14px; display: flex; align-items: center; }
+
+/* ── Editable row ── */
+.profile-row-edit {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+}
+.profile-inline-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  color: var(--text);
+  min-width: 0;
+}
+.profile-inline-input::placeholder { color: var(--text-muted); }
+
+/* ── Sign out ── */
+.profile-signout-btn {
+  width: calc(100% - 32px);
+  margin: 16px 16px 0;
+  display: block;
+  padding: 14px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 14px;
+}
+
+/* ── Light mode overrides ── */
+html.light .profile-inset-card { background: rgba(0,0,0,0.03); border-color: rgba(0,0,0,0.08); }
+html.light .profile-info-row   { border-color: rgba(0,0,0,0.07); }
+html.light .profile-section-label { color: rgba(0,0,0,0.40); }
+html.light .profile-hero-id    { background: rgba(0,0,0,0.05); }

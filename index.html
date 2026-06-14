@@ -157,7 +157,17 @@
   <!-- Topbar -->
   <header class="topbar" id="topbar">
     <button class="menu-toggle" id="menu-toggle">☰</button>
-    <div class="topbar-title">Barro Industries Operations System</div>
+    <div class="topbar-logo-area">
+      <div class="topbar-logo-card">
+        <img src="icons/barro-logo.png" alt="BI" class="topbar-logo-img"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"/>
+        <div class="topbar-logo-fallback" style="display:none">BI</div>
+      </div>
+      <div class="topbar-wordmark-stack">
+        <span class="topbar-brand-main">Barro Industries</span>
+        <span class="topbar-brand-sub">Operations</span>
+      </div>
+    </div>
     <div class="topbar-right">
       <button class="notif-btn" id="notif-btn">
         <i data-lucide="bell"></i>
