@@ -273,17 +273,18 @@ window.renderTeamTab = async function() {
     : await db.collection('users').get();
   const users = snap.docs.map(d=>({id:d.id,...d.data()}))
     .filter(u => {
-      // Always hide other partners from everyone
-      if (u.role === 'partner') return false;
-      // Hide Brilliant Steel-only staff from partners
-      if (viewingAsPartner && Array.isArray(u.departments) && u.departments.length===1 && u.departments[0]==='Brilliant Steel') return false;
-      // Hide Brilliant Steel-only from non-partners too (original behavior)
-      if (!viewingAsPartner && Array.isArray(u.departments) && u.departments.length===1 && u.departments[0]==='Brilliant Steel') return false;
+      if (viewingAsPartner) {
+        // Partners only see other partners
+        return u.role === 'partner';
+      }
+      // Admin/employees see the full team (including partners)
+      // Hide Brilliant Steel-only staff (internal operational filter)
+      if (Array.isArray(u.departments) && u.departments.length===1 && u.departments[0]==='Brilliant Steel') return false;
       return true;
     })
     .sort((a,b) => {
-      const order = {president:0,manager:1,finance:2,employee:3,agent:4};
-      return (order[a.role]??5) - (order[b.role]??5);
+      const order = {president:0,manager:1,finance:2,employee:3,agent:4,partner:5};
+      return (order[a.role]??6) - (order[b.role]??6);
     });
 
   renderTeamCards(users, currentUser);
@@ -407,7 +408,7 @@ function renderTeamCards(users, currentUser) {
     const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(' · ') || 'Unassigned';
     const initial = (u.displayName||u.email||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
     const roleLabel = window.ROLES?.[u.role]?.label || u.role || 'Employee';
-    const badgeColor = {president:'#9BA8FF',manager:'#30D158',finance:'#FFD60A',employee:'#0A84FF',agent:'#FF9F0A'}[u.role] || '#8E8E93';
+    const badgeColor = {president:'#9BA8FF',manager:'#30D158',finance:'#FFD60A',employee:'#0A84FF',agent:'#FF9F0A',partner:'#FF6B6B'}[u.role] || '#8E8E93';
     const isMe = u.id === currentUser?.uid;
 
     const lastSeenMs = u.lastSeen?.toMillis?.() || (u.lastSeen?.seconds ? u.lastSeen.seconds*1000 : 0);
