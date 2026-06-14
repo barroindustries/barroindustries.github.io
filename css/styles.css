@@ -3659,10 +3659,41 @@ html.light .subtab-btn.active { background: rgba(255,45,120,0.10); }
   0%, 100% { filter: drop-shadow(0 0 28px rgba(108,142,245,0.55)); }
   50%       { filter: drop-shadow(0 0 52px rgba(108,142,245,0.90)); }
 }
-.splash-wordmark {
-  font-size: 12px; letter-spacing: 0.22em;
-  color: rgba(240,240,255,0.50);
+/* old single-line wordmark — replaced by stack below */
+.splash-wordmark { display: none; }
+
+/* New two-line wordmark */
+.splash-wordmark-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   margin-bottom: 36px;
+  gap: 2px;
+}
+.splash-word-main {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: rgba(240,240,255,0.92);
+}
+.splash-word-sub {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(240,240,255,0.42);
+}
+
+/* BI initials fallback */
+.splash-bi-fallback {
+  width: 100px; height: 100px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, var(--primary-light), var(--pink));
+  align-items: center; justify-content: center;
+  font-size: 42px; font-weight: 800; color: #fff;
+  letter-spacing: -2px;
+  margin-bottom: 20px;
+  box-shadow: 0 8px 40px rgba(108,142,245,0.50);
 }
 .splash-bar {
   width: 100px; height: 3px;
@@ -3738,6 +3769,64 @@ html.light .notif-btn         { color: var(--text-primary); }
   .topbar-brand-main { font-size: 13px; }
 }
 html.light .drawer-back-btn:hover { background: rgba(10,132,255,0.07); }
+
+/* ══════════════════════════════════════════
+   Top Nav — equal-space tabs, no notif tab
+══════════════════════════════════════════ */
+.top-nav-strip {
+  justify-content: space-around;
+  padding: 0 4px;
+  overflow-x: hidden;
+}
+.top-nav-item {
+  flex: 1;
+  justify-content: center;
+  padding: 6px 4px;
+  min-width: 0;
+}
+.top-nav-item .tn-label {
+  font-size: 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* ══════════════════════════════════════════
+   Notifications — left content, centered actions
+══════════════════════════════════════════ */
+.notif-item {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+.notif-item-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.notif-item-emoji { margin-top: 1px; }
+.notif-item-text  { text-align: left; }
+.notif-item-body  { white-space: normal; }
+.notif-item-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--border);
+}
+.notif-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 20px;
+  padding: 5px 14px;
+  height: auto;
+  width: auto;
+}
+.notif-btn-label { font-size: 12px; font-weight: 600; }
 
 /* ══════════════════════════════════════════
    TASK 5 — Profile Drawer Polish

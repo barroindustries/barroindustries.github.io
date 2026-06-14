@@ -99,22 +99,27 @@ window.Notifs = (() => {
 
     list.innerHTML = items.map(n => {
       const nav = isNavigable(n);
+      const hasActions = !n.read || nav;
       return `
       <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${n.id}" data-type="${n.type||''}" data-task-id="${n.taskId||''}">
-        <div class="notif-item-emoji">${n.icon || '🔔'}</div>
-        <div class="notif-item-text">
-          <div class="notif-item-title">${n.title}</div>
-          <div class="notif-item-body">${n.body || ''}</div>
-          <div class="notif-item-time">${timeAgo(n.createdAt)}</div>
+        <div class="notif-item-main">
+          <div class="notif-item-emoji">${n.icon || '🔔'}</div>
+          <div class="notif-item-text">
+            <div class="notif-item-title">${n.title}</div>
+            <div class="notif-item-body">${n.body || ''}</div>
+            <div class="notif-item-time">${timeAgo(n.createdAt)}</div>
+          </div>
         </div>
-        <div class="notif-item-actions">
+        ${hasActions ? `<div class="notif-item-actions">
           ${!n.read ? `<button class="notif-action-btn notif-read-btn" data-id="${n.id}" title="Mark as read" aria-label="Mark as read">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-          </button>` : `<div style="width:28px"></div>`}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <span class="notif-btn-label">Mark Read</span>
+          </button>` : ''}
           ${nav ? `<button class="notif-action-btn notif-view-btn" title="Open" aria-label="Open">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-          </button>` : `<div style="width:28px"></div>`}
-        </div>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+            <span class="notif-btn-label">Open</span>
+          </button>` : ''}
+        </div>` : ''}
       </div>`;
     }).join('');
 

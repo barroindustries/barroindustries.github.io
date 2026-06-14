@@ -32,9 +32,13 @@
 ══════════════════════════════════ -->
 <div id="splash-screen">
   <div class="splash-inner">
-    <img src="icons/barrokit.png" alt="Barro Kitchens" class="splash-logo"
-         onerror="this.src='icons/barro-logo.png'"/>
-    <div class="splash-wordmark">Barro Kitchens</div>
+    <img src="icons/barro-logo.png" alt="Barro Industries" class="splash-logo"
+         onerror="this.style.display='none';document.getElementById('splash-bi-fallback').style.display='flex'"/>
+    <div id="splash-bi-fallback" class="splash-bi-fallback" style="display:none">BI</div>
+    <div class="splash-wordmark-stack">
+      <span class="splash-word-main">Barro Industries</span>
+      <span class="splash-word-sub">Operations System</span>
+    </div>
     <div class="splash-bar"></div>
   </div>
 </div>
