@@ -223,7 +223,7 @@ window.Notifs = (() => {
     const bar = document.createElement('div');
     bar.id = 'push-prompt-bar';
     bar.style.cssText = `
-      position:fixed;bottom:70px;left:50%;transform:translateX(-50%);
+      position:fixed;bottom:calc(16px + 52px + 12px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);
       background:var(--surface,#1e2a3a);border:1.5px solid var(--primary-light,#3d5afe);
       border-radius:14px;padding:12px 18px;display:flex;align-items:center;gap:12px;
       z-index:8888;box-shadow:0 6px 24px rgba(0,0,0,0.35);max-width:92vw;
@@ -291,7 +291,7 @@ window.Notifs = (() => {
     const toast = document.createElement('div');
     toast.id = 'bi-toast';
     toast.style.cssText = `
-      position:fixed; bottom:80px; left:50%; transform:translateX(-50%);
+      position:fixed; bottom:calc(16px + 52px + 16px + env(safe-area-inset-bottom,0px)); left:50%; transform:translateX(-50%);
       background:${type === 'error' ? '#c62828' : '#1a237e'};
       color:#fff; padding:10px 20px; border-radius:30px;
       font-size:13px; font-weight:600; z-index:9999;

@@ -59,6 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       showApp();
+      Notifs.startListener(user.uid);
       Notifs.initPush(user.uid);
       Notifs.checkDeadlines(user.uid);
       checkPayrollDuties(user);
@@ -141,6 +142,23 @@ function showApp() {
   _applyThemeIcon(localStorage.getItem('bi-theme') || 'dark');
   // Reset any iOS zoom that happened during login input
   _resetViewportZoom();
+  // Bottom nav scroll-shrink listener
+  _initNavShrink();
+}
+
+function _initNavShrink() {
+  const scrollEl = document.getElementById('main-content');
+  const nav      = document.getElementById('bottom-nav');
+  if (!scrollEl || !nav) return;
+  let ticking = false;
+  scrollEl.addEventListener('scroll', () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      nav.classList.toggle('nav-shrunk', scrollEl.scrollTop > 60);
+      ticking = false;
+    });
+  }, { passive: true });
 }
 
 function _resetViewportZoom() {

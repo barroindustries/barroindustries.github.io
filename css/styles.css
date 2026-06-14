@@ -1066,39 +1066,50 @@ body.sidebar-open .main-content { pointer-events: none; user-select: none; }
 
 .bottom-nav {
   display: none;
-  position: fixed; bottom: 0; left: 0; right: 0;
-  min-height: var(--bottom-nav-h);
-  height: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px));
+  position: fixed;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  left: 50%; transform: translateX(-50%);
+  width: auto; min-width: 260px; max-width: 380px;
+  height: var(--bottom-nav-h);
   background: var(--bottom-nav-bg);
-  backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
-  border-top: 1px solid rgba(255,255,255,0.07);
+  backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.50), 0 2px 8px rgba(0,0,0,0.30);
   z-index: 95;
-  padding: 0 4px env(safe-area-inset-bottom, 0px);
-  justify-content: space-around; align-items: flex-start;
+  padding: 0 8px;
+  justify-content: space-around; align-items: center;
   box-sizing: border-box;
+  transition: height 0.25s var(--ease), opacity 0.25s var(--ease), box-shadow 0.25s var(--ease);
 }
-/* gradient top line on bottom nav */
-.bottom-nav::before {
-  content: '';
-  position: absolute; top: 0; left: 10%; right: 10%; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--pink), var(--blue), transparent);
-  opacity: 0.40;
+/* Shrunk state — triggered by JS scroll listener */
+.bottom-nav.nav-shrunk {
+  height: calc(var(--bottom-nav-h) - 14px);
+  opacity: 0.72;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35), 0 1px 4px rgba(0,0,0,0.20);
 }
 .bottom-nav-item {
-  display: flex; flex-direction: column; align-items: center;
-  gap: 3px; padding: 8px 2px; border-radius: var(--r-sm);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 0 12px;
   color: var(--text-muted); cursor: pointer;
-  background: none; border: none; font-size: 10px; font-weight: 500;
+  background: none; border: none;
   transition: color var(--t2), transform var(--t1);
   flex: 1; min-width: 0; position: relative;
-  height: var(--bottom-nav-h); box-sizing: border-box;
+  height: 100%; box-sizing: border-box;
 }
-.bottom-nav-item .bn-icon { font-size: 22px; line-height: 1; transition: transform var(--t2); }
-.bottom-nav-item .bn-label { font-size: 9px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.bottom-nav-item .bn-icon {
+  font-size: 22px; line-height: 1;
+  transition: transform var(--t2), font-size 0.25s var(--ease);
+}
+/* Shrunk state — smaller icons */
+.bottom-nav.nav-shrunk .bottom-nav-item .bn-icon { font-size: 18px; }
+.bottom-nav.nav-shrunk .bottom-nav-item .bn-icon svg { width: 18px; height: 18px; }
+/* Labels hidden — pill nav is icon-only */
+.bottom-nav-item .bn-label { display: none; }
 .bottom-nav-item.active { color: var(--pink); }
-.bottom-nav-item.active .bn-icon { transform: scale(1.10); filter: drop-shadow(0 0 6px var(--pink-glow)); }
+.bottom-nav-item.active .bn-icon { transform: scale(1.15); filter: drop-shadow(0 0 6px var(--pink-glow)); }
 .bottom-nav-item .bn-badge {
-  position: absolute; top: 5px; right: 10px;
+  position: absolute; top: 4px; right: 6px;
   background: var(--pink); color: #fff; font-size: 9px;
   padding: 1px 4px; border-radius: var(--pill); font-weight: 700;
   box-shadow: 0 0 8px var(--pink-glow);
@@ -1868,7 +1879,8 @@ body.sidebar-open .main-content { pointer-events: none; user-select: none; }
   .menu-toggle { display: block; }
   .main-content {
     margin-left: 0; padding: 14px;
-    padding-bottom: calc(var(--bottom-nav-h) + 20px + env(safe-area-inset-bottom, 0px));
+    /* Extra bottom padding so content scrolls above the floating pill nav */
+    padding-bottom: calc(var(--bottom-nav-h) + 36px + env(safe-area-inset-bottom, 0px));
   }
   .bottom-nav { display: flex; }
   .dashboard-grid { grid-template-columns: 1fr; }
@@ -1882,7 +1894,7 @@ body.sidebar-open .main-content { pointer-events: none; user-select: none; }
   .page-header h2 { font-size: 19px; }
   /* 44px minimum tap targets */
   .btn-primary, .btn-secondary, .btn-danger { min-height: 44px; }
-  .bottom-nav-item { min-height: 44px; }
+  /* bottom-nav-item tap target provided by pill container height */
   .notif-btn, .theme-toggle-btn { min-width: 44px; min-height: 44px; }
   .modal-close { min-width: 44px; min-height: 44px; }
   /* Table scroll on mobile */
@@ -1903,7 +1915,7 @@ body.sidebar-open .main-content { pointer-events: none; user-select: none; }
   .kpi-value { font-size: 20px; }
   .kpi-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .kpi-card { padding: 14px 12px; }
-  .bottom-nav-item .bn-label { font-size: 9px; }
+  /* .bn-label hidden globally via pill nav styles */
   .page-header { flex-wrap: wrap; gap: 8px; }
   .page-header h2 { font-size: 17px; }
   .card-header h3 { font-size: 13px; }
