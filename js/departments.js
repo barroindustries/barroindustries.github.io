@@ -2579,12 +2579,29 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
   window._bkCurrentUser = currentUser;
   window._bkCurrentRole = currentRole;
   const c = deptContainer();
+  const isPriv = ['president','owner','manager','finance'].includes(currentRole);
+  const tools = [
+    { icon:'📝', label:'BK Quotes',     sub:'BK Quotes'  },
+    { icon:'📊', label:'Quotations',    sub:'Quotations' },
+    { icon:'📦', label:'BK Packages',   sub:'BK Packages'},
+    { icon:'👤', label:'Clients',       sub:'Clients'    },
+    { icon:'📋', label:'Work Plans',    sub:'Work Plans' },
+    { icon:'📄', label:'Proposals',     sub:'Proposals'  },
+  ];
   c.innerHTML = `
     <div class="page-header">
       <div>
         <h2>🍽️ Barro Kitchens — Sales</h2>
         <p style="font-size:12px;color:var(--text-muted);margin:2px 0 0">One-stop kitchen design & build</p>
       </div>
+    </div>
+    <!-- Work Tools Quick Launch -->
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">
+      ${tools.map(t=>`
+        <button class="sales-tool-btn" data-sub="${t.sub}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;background:var(--surface);border:1.5px solid var(--border);border-radius:14px;cursor:pointer;transition:all 0.18s;font-size:11px;font-weight:700;color:var(--text);letter-spacing:.02em">
+          <span style="font-size:22px">${t.icon}</span>
+          ${t.label}
+        </button>`).join('')}
     </div>
     <div class="subtab-bar">
       ${['BK Quotes','Quotations','BK Packages','Clients','Work Plans','Proposals','Tasks'].map(s =>
@@ -2594,6 +2611,26 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
     <div id="sales-content"><div class="loading-placeholder">Loading…</div></div>
   `;
   loadSalesContent(currentUser, currentRole, subtab);
+
+  // Tool button clicks jump to that subtab
+  c.querySelectorAll('.sales-tool-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
+      c.querySelector(`.subtab-btn[data-sub="${btn.dataset.sub}"]`)?.classList.add('active');
+      loadSalesContent(currentUser, currentRole, btn.dataset.sub);
+      // Scroll to content
+      document.getElementById('sales-content')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    btn.addEventListener('mouseenter', () => {
+      btn.style.borderColor = 'var(--primary-light)';
+      btn.style.background  = 'var(--surface2)';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.borderColor = 'var(--border)';
+      btn.style.background  = 'var(--surface)';
+    });
+  });
+
   c.querySelectorAll('.subtab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));

@@ -538,7 +538,79 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.classList.toggle('sidebar-open', isOpen);
   });
   document.getElementById('sidebar-overlay')?.addEventListener('click', closeSidebar);
+
+  // ── Pull-to-refresh ──────────────────────────────
+  initPullToRefresh();
 });
+
+function initPullToRefresh() {
+  const scrollEl = document.getElementById('main-content') || document.documentElement;
+  const THRESHOLD = 72;
+  let startY = 0, startScrollTop = 0, ptr = null, pulling = false, triggered = false;
+
+  function getScrollTop() { return scrollEl.scrollTop || document.documentElement.scrollTop || 0; }
+
+  function createIndicator() {
+    if (ptr) return;
+    ptr = document.createElement('div');
+    ptr.id = 'ptr-indicator';
+    ptr.innerHTML = `<span class="ptr-arrow">↓</span><div class="ptr-icon"></div><div class="ptr-label">Pull to refresh</div>`;
+    ptr.style.cssText = 'position:fixed;top:calc(var(--topbar-h,56px) + env(safe-area-inset-top,0px) + 8px);left:50%;transform:translateX(-50%);z-index:9999;opacity:0;transition:opacity 0.2s';
+    document.body.appendChild(ptr);
+  }
+  function removeIndicator() {
+    if (ptr) { ptr.remove(); ptr = null; }
+  }
+
+  document.addEventListener('touchstart', e => {
+    if (getScrollTop() > 4) return; // only fire at very top
+    if (document.body.classList.contains('sidebar-open')) return;
+    // Skip if inside task panel or modal
+    if (e.target.closest('#task-fullscreen-panel') || e.target.closest('#modal-overlay')) return;
+    startY = e.touches[0].clientY;
+    startScrollTop = getScrollTop();
+    pulling = true;
+    triggered = false;
+  }, { passive: true });
+
+  document.addEventListener('touchmove', e => {
+    if (!pulling) return;
+    if (getScrollTop() > 4) { pulling = false; removeIndicator(); return; }
+    const dy = e.touches[0].clientY - startY;
+    if (dy <= 0) return;
+    const progress = Math.min(dy / THRESHOLD, 1);
+    createIndicator();
+    ptr.style.opacity = Math.min(progress * 1.5, 1);
+    const translateY = Math.min(dy * 0.38, 44);
+    ptr.style.transform = `translateX(-50%) translateY(${translateY}px)`;
+    ptr.querySelector('.ptr-arrow').style.transform = `rotate(${progress * 180}deg)`;
+    ptr.querySelector('.ptr-label').textContent = progress >= 1 ? 'Release to refresh' : 'Pull to refresh';
+    ptr.classList.toggle('ready', progress >= 1);
+  }, { passive: true });
+
+  document.addEventListener('touchend', e => {
+    if (!pulling || triggered) { pulling = false; return; }
+    pulling = false;
+    const dy = e.changedTouches[0].clientY - startY;
+    if (dy >= THRESHOLD && ptr) {
+      triggered = true;
+      ptr.classList.add('refreshing');
+      ptr.querySelector('.ptr-label').textContent = 'Refreshing…';
+      ptr.style.transform = `translateX(-50%) translateY(20px)`;
+      setTimeout(() => {
+        navigateTo(currentPage || 'dashboard');
+        setTimeout(removeIndicator, 400);
+      }, 700);
+    } else {
+      if (ptr) {
+        ptr.style.transition = 'opacity 0.25s, transform 0.25s';
+        ptr.style.opacity = '0';
+        ptr.style.transform = 'translateX(-50%) translateY(-16px)';
+        setTimeout(removeIndicator, 260);
+      }
+    }
+  }, { passive: true });
+}
 
 // ── Navigate ──────────────────────────────────────
 function navigateTo(page) {
@@ -574,6 +646,8 @@ function navigateTo(page) {
     case 'bs-quotations':    renderBrilliantSteel(currentUser, currentRole, 'Quotations Summary'); break;
     case 'bs-clients':       renderBrilliantSteel(currentUser, currentRole, 'Client Data'); break;
     case 'bs-files':         renderBrilliantSteel(currentUser, currentRole, 'Files'); break;
+    case 'bk-quote-builder': window.renderSales?.(currentUser, currentRole, 'BK Quotes'); break;
+    case 'bk-quotations':    window.renderSales?.(currentUser, currentRole, 'Quotations'); break;
     case 'help':             renderHelp(); break;
     // ── New modules ──
     case 'posts':            window.renderPosts?.(); break;
@@ -863,6 +937,9 @@ async function renderPresidentDashboard() {
               </button>
               <button class="quick-action-btn" onclick="navigateTo('progress')">
                 <i data-lucide="trending-up"></i> Progress Reports
+              </button>
+              <button class="quick-action-btn" onclick="navigateTo('bk-quote-builder')">
+                <i data-lucide="file-plus"></i> BK Quote Builder
               </button>
             </div>
           </div>
@@ -1304,35 +1381,51 @@ function renderIDCard(containerId, u) {
       <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:8px;letter-spacing:.1em">BARRO INDUSTRIES</div>
     </div>`;
 
-  function render() {
-    el.innerHTML = `
-      <div style="position:relative;overflow:hidden;touch-action:pan-y">
-        <div id="id-card-inner" style="transition:transform 0.35s cubic-bezier(.4,0,.2,1)">
-          ${showingID ? idHTML : callingHTML}
-        </div>
-        <div style="display:flex;justify-content:center;gap:6px;margin-top:10px;align-items:center">
-          <div style="width:20px;height:4px;border-radius:2px;background:${showingID?'var(--primary-light)':'rgba(255,255,255,0.2)'};transition:background 0.3s"></div>
-          <div style="width:20px;height:4px;border-radius:2px;background:${!showingID?'var(--primary-light)':'rgba(255,255,255,0.2)'};transition:background 0.3s"></div>
-        </div>
-        <div style="text-align:center;font-size:10px;color:var(--text-muted);margin-top:4px">swipe to flip</div>
-      </div>`;
+  // Build the full flip scene once (no re-render on flip)
+  el.innerHTML = `
+    <div class="id-flip-scene" id="id-flip-scene-${containerId}">
+      <div class="id-flip-inner" id="id-flip-inner-${containerId}">
+        <div class="id-flip-front">${idHTML}</div>
+        <div class="id-flip-back">${callingHTML}</div>
+      </div>
+      <div class="id-flip-dots">
+        <div class="id-flip-dot active" id="id-dot0-${containerId}"></div>
+        <div class="id-flip-dot"        id="id-dot1-${containerId}"></div>
+      </div>
+      <div class="id-flip-hint">
+        <span>⟵</span>swipe to flip<span>⟶</span>
+      </div>
+    </div>`;
 
-    // Swipe gesture
-    const inner = el.querySelector('[id="id-card-inner"]');
-    let startX = 0, isDragging = false;
-    inner.addEventListener('touchstart', e => { startX = e.touches[0].clientX; isDragging = true; }, { passive:true });
-    inner.addEventListener('touchend', e => {
-      if (!isDragging) return;
-      isDragging = false;
-      const dx = e.changedTouches[0].clientX - startX;
-      if (Math.abs(dx) > 40) { showingID = dx > 0; render(); }
-    }, { passive:true });
-    // Also allow click to toggle (for desktop)
-    inner.style.cursor = 'pointer';
-    inner.addEventListener('click', () => { showingID = !showingID; render(); });
+  const scene = document.getElementById(`id-flip-scene-${containerId}`);
+  const inner = document.getElementById(`id-flip-inner-${containerId}`);
+  const dot0  = document.getElementById(`id-dot0-${containerId}`);
+  const dot1  = document.getElementById(`id-dot1-${containerId}`);
+
+  function setFlipped(flipped) {
+    showingID = !flipped;
+    inner.classList.toggle('is-flipped', flipped);
+    dot0.classList.toggle('active', !flipped);
+    dot1.classList.toggle('active', flipped);
   }
 
-  render();
+  // Touch swipe
+  let startX = 0, startTime = 0;
+  scene.addEventListener('touchstart', e => {
+    startX = e.touches[0].clientX;
+    startTime = Date.now();
+  }, { passive: true });
+  scene.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - startX;
+    const dt = Date.now() - startTime;
+    // Fast swipe (velocity) or long drag
+    if (Math.abs(dx) > 35 || (Math.abs(dx) > 18 && dt < 200)) {
+      setFlipped(dx < 0 ? true : false);
+    }
+  }, { passive: true });
+
+  // Click to toggle (desktop)
+  scene.addEventListener('click', () => setFlipped(showingID));
 }
 
 // ── My Department (supports dual) ─────────────────

@@ -156,6 +156,13 @@
   from { opacity: 0; transform: translateY(20px) scale(0.97); }
   to   { opacity: 1; transform: translateY(0)    scale(1);    }
 }
+@keyframes ptr-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes ptr-bounce {
+  0%,100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
 @keyframes slideIn {
   from { opacity: 0; transform: translateX(-12px); }
   to   { opacity: 1; transform: translateX(0); }
@@ -1382,6 +1389,86 @@ body.sidebar-open .main-content { pointer-events: none; user-select: none; }
   border: 1px solid rgba(48,209,88,0.25);
   box-shadow: 0 0 8px rgba(48,209,88,0.20);
 }
+
+/* ══════════════════════════════
+   PULL-TO-REFRESH
+══════════════════════════════ */
+#ptr-indicator {
+  position: absolute;
+  top: 0; left: 50%; transform: translateX(-50%) translateY(-56px);
+  z-index: 200;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 10px 20px;
+  background: var(--surface);
+  border-radius: var(--pill);
+  box-shadow: var(--sh-md);
+  border: 1px solid var(--border);
+  transition: opacity 0.2s;
+  pointer-events: none;
+  white-space: nowrap;
+}
+#ptr-indicator .ptr-icon {
+  width: 22px; height: 22px;
+  border: 2.5px solid var(--primary-light);
+  border-top-color: transparent;
+  border-radius: 50%;
+  display: none;
+}
+#ptr-indicator .ptr-arrow {
+  font-size: 18px;
+  transition: transform 0.25s cubic-bezier(.4,0,.2,1);
+  display: block;
+}
+#ptr-indicator.ready .ptr-arrow { transform: rotate(180deg); }
+#ptr-indicator.refreshing .ptr-icon { display: block; animation: ptr-spin 0.7s linear infinite; }
+#ptr-indicator.refreshing .ptr-arrow { display: none; }
+#ptr-indicator .ptr-label {
+  font-size: 11px; font-weight: 600; color: var(--text-muted); letter-spacing: .03em;
+}
+
+/* ══════════════════════════════
+   ID CARD 3D FLIP
+══════════════════════════════ */
+.id-flip-scene {
+  perspective: 900px;
+  width: 100%; max-width: 380px; margin: 0 auto;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.id-flip-inner {
+  position: relative;
+  width: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.55s cubic-bezier(.4,0,.2,1);
+}
+.id-flip-inner.is-flipped { transform: rotateY(180deg); }
+.id-flip-front,
+.id-flip-back {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.id-flip-back { transform: rotateY(180deg); }
+/* When not flipped, back face is visually removed from layout */
+.id-flip-inner:not(.is-flipped) .id-flip-back { position: absolute; top: 0; left: 0; width: 100%; }
+.id-flip-inner.is-flipped .id-flip-front  { position: absolute; top: 0; left: 0; width: 100%; }
+
+/* Swipe visual hint */
+.id-flip-hint {
+  text-align: center; font-size: 10px;
+  color: var(--text-muted); margin-top: 6px;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.id-flip-hint span { opacity: 0.5; animation: ptr-bounce 1.8s ease-in-out infinite; }
+.id-flip-dots {
+  display: flex; justify-content: center; gap: 6px; margin-top: 8px;
+}
+.id-flip-dot {
+  width: 22px; height: 4px; border-radius: 2px;
+  background: rgba(255,255,255,0.15);
+  transition: background 0.3s;
+}
+.id-flip-dot.active { background: var(--primary-light); }
 
 /* ══════════════════════════════
    SUBTABS
