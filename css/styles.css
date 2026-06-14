@@ -97,7 +97,7 @@
   --topbar-h:     56px;
   --sidebar-w:    258px;
   --bottom-nav-h: 52px;
-  --top-nav-h:    46px;
+  --top-nav-h:    50px;
 
   /* ── Type ── */
   --font: 'Inter', -apple-system, 'SF Pro Text', system-ui, sans-serif;
@@ -3277,3 +3277,331 @@ html.light .ms-input { background: #fff; }
 #task-fullscreen-panel #task-comments-wrap {
   flex: 1; display: flex; flex-direction: column; overflow: hidden;
 }
+
+/* ═══════════════════════════════════════════════════════════
+   iOS DESIGN OVERHAUL — v1
+   Large titles · Spring easing · Grouped surfaces · Inset lists
+   Appended as cascade layer — overrides prior rules on cascade.
+═══════════════════════════════════════════════════════════ */
+
+/* ── iOS motion tokens ── */
+:root {
+  --ios-spring:     cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ios-spring-out: cubic-bezier(0.34, 1.28, 0.64, 1);
+  --ios-enter:      cubic-bezier(0.36, 0.66, 0.04, 1);
+  /* Override default ease with iOS standard */
+  --ease: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  /* Slightly larger radii for iOS feel */
+  --r:     16px;
+  --r-sm:  12px;
+  --r-lg:  20px;
+  --r-xl:  26px;
+}
+
+/* ── Large Title Page Headers ── */
+.page-header {
+  padding: 6px 0 8px;
+  margin-bottom: 18px;
+}
+.page-header h2 {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.7px;
+  line-height: 1.12;
+  color: var(--text);
+}
+
+@media (max-width: 768px) {
+  .page-header h2 {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    line-height: 1.1;
+  }
+  .page-header {
+    margin-bottom: 20px;
+    padding: 8px 0 4px;
+  }
+}
+
+/* ── Task feed — inset separators (not full-width) ── */
+.task-feed-item {
+  padding: 13px 16px;
+  border-bottom: none;
+  position: relative;
+  transition: background 120ms var(--ios-spring);
+}
+.task-feed-item::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 52px; right: 0;
+  height: 0.5px;
+  background: var(--border);
+}
+.task-feed-item:last-child::after { display: none; }
+.task-feed-item:active { background: var(--s2); }
+
+/* ── Top nav strip — iOS tab bar feel ── */
+.top-nav-strip {
+  background: rgba(7,7,16,0.88);
+  backdrop-filter: blur(32px) saturate(160%);
+  -webkit-backdrop-filter: blur(32px) saturate(160%);
+  border-bottom: 0.5px solid rgba(255,255,255,0.09);
+  height: 50px;
+  padding: 0 6px;
+  gap: 0;
+}
+.top-nav-item {
+  padding: 6px 11px;
+  border-radius: 10px;
+  gap: 3px;
+  min-height: 44px;
+  transition: color 160ms var(--ios-spring), background 160ms var(--ios-spring);
+}
+.top-nav-item .bn-icon { font-size: 20px; }
+.top-nav-item .tn-label { font-size: 10px; font-weight: 600; letter-spacing: -0.1px; }
+.top-nav-item.active {
+  color: var(--pink);
+  background: rgba(255,45,120,0.10);
+}
+.top-nav-item.active .bn-icon {
+  transform: scale(1.10);
+  filter: drop-shadow(0 0 5px rgba(255,45,120,0.50));
+}
+
+/* ── Bottom sheet modal on mobile ── */
+@keyframes sheetRise {
+  from { transform: translateY(60px); opacity: 0.7; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@media (max-width: 768px) {
+  .modal-overlay {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+  .modal-box {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 92dvh !important;
+    border-radius: 22px 22px 0 0 !important;
+    margin: 0 !important;
+    align-self: flex-end !important;
+    animation: sheetRise 0.36s var(--ios-spring) both !important;
+  }
+  /* Pull handle */
+  .modal-box::after {
+    content: '';
+    position: absolute; top: 8px; left: 50%;
+    transform: translateX(-50%);
+    width: 36px; height: 4px; border-radius: 2px;
+    background: rgba(255,255,255,0.20);
+    z-index: 10; pointer-events: none;
+  }
+  .modal-header {
+    padding-top: 26px;
+  }
+}
+
+/* ── Sidebar nav items — iOS Settings style ── */
+.nav-item {
+  padding: 11px 14px;
+  border-radius: 10px;
+  margin: 1px 8px;
+  width: calc(100% - 16px);
+  font-size: 14px;
+  font-weight: 500;
+  min-height: 44px;
+  transition: background 160ms var(--ios-spring), color 160ms var(--ios-spring);
+}
+/* Remove right-edge bar indicator; use background instead */
+.nav-item.active::after { display: none; }
+.nav-item.active {
+  background: rgba(255,45,120,0.12);
+  color: var(--pink);
+  font-weight: 600;
+}
+.nav-item:hover {
+  background: rgba(255,255,255,0.07);
+}
+
+/* ── Back buttons — iOS text+chevron style ── */
+.drawer-back-btn {
+  background: none;
+  border: none;
+  box-shadow: none;
+  color: var(--blue-2);
+  padding: 8px 6px;
+  font-size: 16px;
+  font-weight: 500;
+  border-radius: var(--r-sm);
+}
+.drawer-back-btn:hover {
+  background: rgba(10,132,255,0.10);
+  color: var(--blue);
+  box-shadow: none;
+  transform: none;
+}
+.drawer-back-btn:active { transform: scale(0.96) !important; }
+.drawer-back-btn svg { width: 16px; height: 16px; }
+
+/* ── Haptic-feel button press ── */
+.btn-primary:active    { transform: scale(0.96) !important; transition-duration: 70ms !important; }
+.btn-secondary:active  { transform: scale(0.96) !important; transition-duration: 70ms !important; }
+.btn-danger:active     { transform: scale(0.96) !important; transition-duration: 70ms !important; }
+.btn-success:active    { transform: scale(0.96) !important; transition-duration: 70ms !important; }
+.login-role-card:active { transform: scale(0.97) !important; transition-duration: 70ms !important; }
+.quick-action-btn:active { background: var(--s3) !important; transform: scale(0.99) !important; }
+
+/* ── KPI cards — cleaner feel ── */
+.kpi-value {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.8px;
+}
+.kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+/* ── Card headers ── */
+.card-header h3 {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+/* ── Notification items — more iOS-spacious ── */
+.notif-item {
+  padding: 13px 16px;
+}
+.notif-item-title { font-size: 14px; font-weight: 600; }
+.notif-item-body  { font-size: 13px; }
+.notif-item-time  { font-size: 11px; }
+.notif-item:active { background: var(--s2); transition: background 80ms; }
+
+/* ── Springy bottom nav pill ── */
+.bottom-nav {
+  border-radius: 24px;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  height: 58px;
+  min-width: 250px;
+  padding: 0 10px;
+}
+.bottom-nav-item .bn-icon { font-size: 24px; }
+.bottom-nav-item .bn-icon svg { width: 24px; height: 24px; }
+.bottom-nav-item:active .bn-icon { transform: scale(0.88); transition-duration: 80ms; }
+
+/* ── Subtab bar — iOS segmented control ── */
+.subtab-bar {
+  border-radius: 12px;
+  padding: 3px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.09);
+}
+.subtab-btn {
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+  transition: all 200ms var(--ios-spring);
+}
+.subtab-btn.active {
+  background: rgba(255,45,120,0.18);
+  color: var(--pink);
+  box-shadow: 0 1px 8px rgba(255,45,120,0.22),
+    inset 0 1px 0 rgba(255,255,255,0.14),
+    inset 0 -1px 0 rgba(0,0,0,0.10);
+}
+
+/* ── Drawer — full-screen on mobile (iOS sheet) ── */
+@media (max-width: 768px) {
+  .drawer {
+    top: 0;
+    border-left: none;
+    border-radius: 0;
+    width: 100%;
+  }
+}
+
+/* ── Item cards — rounded on mobile ── */
+@media (max-width: 768px) {
+  .item-card { border-radius: 14px !important; }
+  .kpi-card  { border-radius: 16px !important; padding: 16px 14px; }
+  .card      { border-radius: 18px !important; }
+}
+
+/* ── PTR indicator — rounded pill ── */
+#ptr-indicator {
+  border-radius: 22px;
+  padding: 9px 18px;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 28px rgba(0,0,0,0.40), var(--glass-spec-sm);
+  border: 1px solid var(--glass-border-sm);
+}
+.ptr-label { font-size: 13px; font-weight: 600; color: var(--text-2); }
+/* On mobile, ptr must clear the top-nav-strip (50px tall below 56px topbar) */
+@media (max-width: 768px) {
+  #ptr-indicator {
+    top: calc(env(safe-area-inset-top, 0px) + 56px + 50px + 8px);
+  }
+}
+
+/* ── Item title — slightly larger ── */
+.item-title { font-size: 15px; font-weight: 600; }
+
+/* ── Badge — iOS red dot style ── */
+.nav-badge {
+  background: #FF3B30;
+  min-width: 18px; height: 18px;
+  font-size: 11px; padding: 0 5px;
+  border-radius: var(--pill);
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 1px 6px rgba(255,59,48,0.50);
+}
+
+/* ── Mobile padding refinements ── */
+@media (max-width: 768px) {
+  .main-content {
+    padding: 16px;
+    padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
+  }
+  .kpi-row { gap: 10px; }
+}
+
+/* ── Form labels — iOS style ── */
+.form-group label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+/* ── Login container on mobile ── */
+@media (max-width: 480px) {
+  .login-container {
+    padding: 36px 24px 28px;
+    border-radius: 28px;
+  }
+}
+
+/* ── Light mode iOS tints ── */
+html.light .top-nav-strip {
+  background: rgba(248,248,252,0.92);
+  border-bottom-color: rgba(0,0,0,0.10);
+}
+html.light .top-nav-item.active {
+  color: var(--pink);
+  background: rgba(255,45,120,0.07);
+}
+html.light .nav-item.active {
+  background: rgba(255,45,120,0.08);
+  color: var(--pink);
+}
+html.light .nav-item:hover { background: rgba(0,0,0,0.05); }
+html.light .bottom-nav { border-radius: 24px; }
+html.light .modal-box::after { background: rgba(0,0,0,0.18); }
+html.light .subtab-btn.active { background: rgba(255,45,120,0.10); }
+html.light .drawer-back-btn:hover { background: rgba(10,132,255,0.07); }
