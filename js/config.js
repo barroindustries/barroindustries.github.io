@@ -63,6 +63,11 @@ window.DEPARTMENTS = {
     key: 'Brilliant Steel', icon: '⚙️', color: '#37474f',
     subtabs: ['Dashboard', 'Quote Builder', 'Quotations Summary', 'Client Data'],
     navOrder: 7, isSeparate: true
+  },
+  'Partners': {
+    key: 'Partners', icon: '🤝', color: '#0a84ff',
+    subtabs: ['Overview', 'Tasks', 'Quotes', 'Activity'],
+    navOrder: 8, isPartnerDept: true
   }
 };
 
@@ -95,11 +100,11 @@ window.PRESIDENT_BOTTOM_NAV = [
 
 // ── Bottom Nav — External Partner ────────────────
 window.PARTNER_BOTTOM_NAV = [
-  { icon: 'home',         label: 'Home',  page: 'dashboard'      },
-  { icon: 'check-square', label: 'Tasks', page: 'tasks'          },
-  { icon: 'megaphone',    label: 'Posts', page: 'posts'          },
-  { icon: 'users',        label: 'Team',  page: 'team-directory' },
-  { icon: 'folder',       label: 'Files', page: 'files'          }
+  { icon: 'home',         label: 'Home',   page: 'dashboard'       },
+  { icon: 'check-square', label: 'Tasks',  page: 'tasks'           },
+  { icon: 'calculator',   label: 'Quotes', page: 'bs-quote-builder'},
+  { icon: 'file-text',    label: 'Summary',page: 'bs-quotations'   },
+  { icon: 'book-open',    label: 'Clients',page: 'bs-clients'      }
 ];
 
 // ── Bottom Nav — Partner (Brilliant Steel) ───────

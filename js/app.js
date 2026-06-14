@@ -11,6 +11,15 @@ let currentDepts = [];   // array — supports dual department
 let currentPage  = 'dashboard';
 let userProfile  = {};
 let logoutTimer  = null;
+let selectedLoginType = null; // 'admin' | 'employee' | 'partner' — set on login card click
+
+// Role → login type mapping
+const ROLE_TYPE_MAP = {
+  president: 'admin', owner: 'admin', manager: 'admin', finance: 'admin',
+  employee:  'employee', agent: 'employee',
+  partner:   'partner'
+};
+const LOGIN_TYPE_LABELS = { admin: 'Admin', employee: 'Employee', partner: 'Partner' };
 
 // ── Boot ──────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -21,8 +30,35 @@ document.addEventListener('DOMContentLoaded', () => {
     if (user) {
       currentUser = user;
       await loadUserProfile(user);
+
+      // ── Login type gate ───────────────────────────
+      // If user picked a login type, enforce it matches their actual role.
+      // selectedLoginType is null when auth restores from a previous session (no gate).
+      if (selectedLoginType) {
+        const expectedType = ROLE_TYPE_MAP[currentRole] || 'employee';
+        if (expectedType !== selectedLoginType) {
+          const actualLabel   = LOGIN_TYPE_LABELS[expectedType]   || expectedType;
+          const selectedLabel = LOGIN_TYPE_LABELS[selectedLoginType] || selectedLoginType;
+          // Wrong portal — sign out and show error in login form
+          await auth.signOut();
+          showLogin();
+          // Keep form wrap visible (not role picker) so the error element is shown
+          document.getElementById('login-role-picker')?.classList.add('hidden');
+          const formWrap = document.getElementById('login-form-wrap');
+          formWrap?.classList.remove('hidden');
+          // Clear password so they can't retry; keep email pre-filled
+          document.getElementById('password').value = '';
+          setLoginLoading(false);
+          setTimeout(() => {
+            showLoginError(`⚠️ Wrong login portal. This account is an ${actualLabel} account — please use ${actualLabel} login.`);
+          }, 80);
+          selectedLoginType = null;
+          return;
+        }
+        selectedLoginType = null; // clear after successful check
+      }
+
       showApp();
-      Notifs.startListener(user.uid);
       Notifs.initPush(user.uid);
       Notifs.checkDeadlines(user.uid);
       checkPayrollDuties(user);
@@ -194,8 +230,8 @@ function initLogin() {
   document.querySelectorAll('.login-role-card[data-type]').forEach(card => {
     card.addEventListener('click', () => {
       const type = card.dataset.type;
-      const labels = { admin:'Admin', employee:'Employee', partner:'Partner' };
-      document.getElementById('login-type-pill').textContent = labels[type] || type;
+      selectedLoginType = type; // store for post-login role check
+      document.getElementById('login-type-pill').textContent = LOGIN_TYPE_LABELS[type] || type;
       document.getElementById('login-role-picker').classList.add('hidden');
       const fw = document.getElementById('login-form-wrap');
       fw.classList.remove('hidden');
@@ -260,6 +296,7 @@ function initLogin() {
     document.getElementById('login-role-picker').classList.remove('hidden');
     clearLoginError();
     document.getElementById('password').value = '';
+    selectedLoginType = null; // reset so restored sessions aren't gated
   });
 
   document.getElementById('login-form')?.addEventListener('submit', async e => {
@@ -392,12 +429,15 @@ function getSidebarItems() {
     items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
     items.push({ icon:'help-circle',   label:'Help & Setup',     page:'help',            section:true  });
   } else if (partner) {
-    // ── Partner role ──
-    items.push({ icon:'check-square', label:'My Tasks', page:'tasks' });
-    items.push({ icon:'megaphone',    label:'Posts',    page:'posts' });
-    items.push({ icon:'users',        label:'Team',     page:'team-directory', section:true, sectionLabel:'Directory' });
-    items.push({ icon:'folder',       label:'Files',    page:'files' });
-    items.push({ icon:'help-circle',  label:'Help',     page:'help',  section:true, sectionLabel:'Support' });
+    // ── External Partner role ──
+    items.push({ icon:'check-square', label:'My Tasks',      page:'tasks'            });
+    items.push({ icon:'megaphone',    label:'Posts',         page:'posts'            });
+    items.push({ icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' });
+    items.push({ icon:'file-text',    label:'Quotations',    page:'bs-quotations'    });
+    items.push({ icon:'book-open',    label:'Client Data',   page:'bs-clients'       });
+    items.push({ icon:'users',        label:'Team',          page:'team-directory',   section:true, sectionLabel:'Directory' });
+    items.push({ icon:'folder',       label:'Files',         page:'files'            });
+    items.push({ icon:'help-circle',  label:'Help',          page:'help',             section:true, sectionLabel:'Support' });
   } else if (bsOnly) {
     // ── Partner — Brilliant Steel (ISOLATED) ──
     items.push({ icon:'calculator',  label:'Quote Builder', page:'bs-quote-builder' });
@@ -569,41 +609,91 @@ async function renderPartnerDashboard() {
   c.innerHTML = `
     <div class="page-header"><h2>👋 Welcome, ${(u.displayName||'Partner').split(' ')[0]}!</h2></div>
     <div id="live-clock" class="live-clock-line"></div>
-    <div style="background:linear-gradient(135deg,rgba(155,168,255,0.1),rgba(10,132,255,0.08));border:1.5px solid rgba(155,168,255,0.2);border-radius:16px;padding:20px;margin-bottom:20px;text-align:center">
-      <div style="font-size:32px;margin-bottom:8px">🤝</div>
-      <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px">Partner Portal</div>
-      <div style="font-size:13px;color:var(--text-muted)">Welcome to Barro Industries partner access. Use the menu to navigate tasks, posts, and shared files.</div>
+    <div class="kpi-row" style="margin-bottom:16px" id="partner-kpi">
+      <div class="kpi-card" style="opacity:.5"><div class="kpi-label">Open Tasks</div><div class="kpi-value">—</div></div>
+      <div class="kpi-card" style="opacity:.5"><div class="kpi-label">Completed</div><div class="kpi-value">—</div></div>
+      <div class="kpi-card" style="opacity:.5"><div class="kpi-label">My Quotes</div><div class="kpi-value">—</div></div>
+      <div class="kpi-card" style="opacity:.5"><div class="kpi-label">Quote Value</div><div class="kpi-value">—</div></div>
     </div>
-    <div class="kpi-row" style="margin-bottom:16px" id="partner-kpi"></div>
-    <div id="partner-tasks-card"></div>
+    <div id="partner-cards-row" style="display:flex;flex-direction:column;gap:14px">
+      <div id="partner-tasks-card"></div>
+      <div id="partner-quotes-card"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px">
+      <button class="btn-secondary" onclick="navigateTo('bs-quote-builder')" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:14px;font-size:12px;font-weight:700">
+        <span style="font-size:24px">🧮</span>Quote Builder
+      </button>
+      <button class="btn-secondary" onclick="navigateTo('bs-quotations')" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:14px;font-size:12px;font-weight:700">
+        <span style="font-size:24px">📄</span>Quotations
+      </button>
+      <button class="btn-secondary" onclick="navigateTo('bs-clients')" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:14px;font-size:12px;font-weight:700">
+        <span style="font-size:24px">📋</span>Clients
+      </button>
+    </div>
   `;
   liveDateTime('live-clock');
-  // Partner tasks
+
   try {
-    const tasksSnap = await db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
-      .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get());
-    const tasks = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
-    const open = tasks.filter(t=>!['done','approved','archived'].includes(t.status));
-    const done = tasks.filter(t=>['done','approved','archived'].includes(t.status));
+    const [tasksSnap, quotesSnap] = await Promise.all([
+      db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
+        .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get()),
+      db.collection('bs_quotes').where('createdBy','==',currentUser.uid).orderBy('createdAt','desc').limit(20).get()
+        .catch(()=>({docs:[]}))
+    ]);
+
+    const tasks  = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const quotes = quotesSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const open   = tasks.filter(t=>!['done','approved','archived'].includes(t.status));
+    const done   = tasks.filter(t=>['done','approved','archived'].includes(t.status));
+    const totalQVal = quotes.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+    const todayStr  = new Date().toISOString().slice(0,10);
+
     document.getElementById('partner-kpi').innerHTML = `
       <div class="kpi-card accent"><div class="kpi-label">Open Tasks</div><div class="kpi-value">${open.length}</div></div>
       <div class="kpi-card green"><div class="kpi-label">Completed</div><div class="kpi-value">${done.length}</div></div>
+      <div class="kpi-card"><div class="kpi-label">My Quotes</div><div class="kpi-value">${quotes.length}</div></div>
+      <div class="kpi-card accent"><div class="kpi-label">Quote Value</div><div class="kpi-value" style="font-size:16px">₱${totalQVal.toLocaleString()}</div></div>
     `;
-    const todayStr = new Date().toISOString().slice(0,10);
+
     document.getElementById('partner-tasks-card').innerHTML = `
-      <div class="card"><div class="card-header"><h3>My Tasks</h3><button class="btn-primary btn-sm" onclick="navigateTo('tasks')">All Tasks</button></div>
-      <div class="card-body" style="padding:0">
-        ${!open.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">✅</div><p>No open tasks</p></div>':
-          open.slice(0,6).map(t=>{
-            const isOverdue = t.dueDate && t.dueDate < todayStr;
-            return `<div class="task-feed-item ${isOverdue?'task-overdue':''}">
-              <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
-              <div style="flex:1;min-width:0"><div class="task-feed-title">${t.title}</div>${t.dueDate?`<div class="task-feed-meta" style="color:${isOverdue?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</div>`:''}</div>
-              <span class="badge ${isOverdue?'badge-red':'badge-blue'}">${isOverdue?'Overdue':t.status||'open'}</span>
-            </div>`;
-          }).join('')}
-      </div></div>`;
-  } catch(e) { /* non-critical */ }
+      <div class="card">
+        <div class="card-header"><h3>📋 My Tasks</h3><button class="btn-primary btn-sm" onclick="navigateTo('tasks')">All Tasks</button></div>
+        <div class="card-body" style="padding:0">
+          ${!open.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">✅</div><p>No open tasks</p></div>':
+            open.slice(0,5).map(t=>{
+              const isOverdue = t.dueDate && t.dueDate < todayStr;
+              return `<div class="task-feed-item" style="cursor:pointer" onclick="window.openTaskDetail&&window.openTaskDetail('${t.id}',window.currentUser,window.currentRole)">
+                <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
+                <div style="flex:1;min-width:0"><div class="task-feed-title">${t.title}</div>${t.dueDate?`<div class="task-feed-meta" style="color:${isOverdue?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</div>`:''}</div>
+                <span class="badge ${isOverdue?'badge-red':'badge-blue'}">${isOverdue?'Overdue':t.status||'open'}</span>
+              </div>`;
+            }).join('')}
+        </div>
+      </div>`;
+
+    document.getElementById('partner-quotes-card').innerHTML = `
+      <div class="card">
+        <div class="card-header"><h3>🧮 Recent Quotes</h3><button class="btn-primary btn-sm" onclick="navigateTo('bs-quotations')">All Quotes</button></div>
+        <div class="card-body" style="padding:0">
+          ${!quotes.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📄</div><p>No quotes yet. Use Quote Builder to create one.</p></div>':
+            quotes.slice(0,4).map(q=>{
+              const amt = q.total||q.grandTotal||0;
+              const ts  = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric'}):'';
+              return `<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border)">
+                <div style="font-size:20px">📄</div>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;font-weight:600">${q.clientName||q.client||'Unknown Client'}</div>
+                  <div style="font-size:11px;color:var(--text-muted)">${ts}</div>
+                </div>
+                <div style="text-align:right;flex-shrink:0">
+                  <div style="font-size:13px;font-weight:700">₱${amt.toLocaleString()}</div>
+                  <span class="badge ${q.status==='approved'?'badge-green':q.status==='pending'||q.status==='submitted'?'badge-orange':'badge-gray'}" style="font-size:10px">${q.status||'draft'}</span>
+                </div>
+              </div>`;
+            }).join('')}
+        </div>
+      </div>`;
+  } catch(e) { console.warn('[partnerDashboard]',e); }
 }
 
 function liveDateTime(elId) {
@@ -1287,7 +1377,204 @@ function renderDeptModule(dept) {
     case 'Design':                     renderDesign(currentUser, currentRole); break;
     case 'Brilliant Steel':            renderBrilliantSteel(currentUser, currentRole); break;
     case 'Government Biddings':        renderGovBiddings(); break;
+    case 'Partners':                   renderPartnersDept(); break;
     default:                           renderGenericDept(dept); break;
+  }
+}
+
+async function renderPartnersDept() {
+  if (!isPresident() && currentRole !== 'manager') {
+    document.getElementById('page-content').innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><p>Admin access only</p></div>';
+    return;
+  }
+  const c = document.getElementById('page-content');
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>🤝 Partners</h2>
+    </div>
+    <div class="subtab-bar" id="partners-dept-tabs">
+      <button class="subtab-btn active" data-sub="overview">Overview</button>
+      <button class="subtab-btn" data-sub="tasks">Tasks</button>
+      <button class="subtab-btn" data-sub="quotes">Quotes</button>
+      <button class="subtab-btn" data-sub="activity">Activity</button>
+    </div>
+    <div id="partners-dept-content"><div class="loading-placeholder">Loading…</div></div>
+  `;
+  c.querySelectorAll('#partners-dept-tabs .subtab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      c.querySelectorAll('#partners-dept-tabs .subtab-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      loadPartnersDeptTab(btn.dataset.sub);
+    });
+  });
+  loadPartnersDeptTab('overview');
+}
+
+async function loadPartnersDeptTab(sub) {
+  const content = document.getElementById('partners-dept-content');
+  content.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+
+  // Fetch partners + their tasks + quotes in parallel
+  const [usersSnap, tasksSnap, quotesSnap] = await Promise.all([
+    db.collection('users').where('role','==','partner').get().catch(()=>({docs:[]})),
+    db.collection('tasks').where('department','==','Partners').get().catch(()=>({docs:[]})),
+    db.collection('bs_quotes').orderBy('createdAt','desc').limit(50).get().catch(()=>({docs:[]}))
+  ]);
+
+  const partners = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const tasks    = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const quotes   = quotesSnap.docs.map(d=>({id:d.id,...d.data()}));
+
+  // Also get tasks assigned to any partner uid
+  const partnerUids = partners.map(p=>p.id);
+
+  switch(sub) {
+    case 'overview': {
+      const openTasks = tasks.filter(t=>!['done','approved','archived'].includes(t.status));
+      const doneTasks = tasks.filter(t=>t.status==='done'||t.status==='approved');
+      const totalQuoteVal = quotes.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+      const pendingQuotes = quotes.filter(q=>q.status==='pending'||q.status==='submitted');
+      content.innerHTML = `
+        <div class="kpi-row" style="margin-bottom:16px">
+          <div class="kpi-card accent"><div class="kpi-label">Partners</div><div class="kpi-value">${partners.length}</div></div>
+          <div class="kpi-card"><div class="kpi-label">Open Tasks</div><div class="kpi-value">${openTasks.length}</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Done Tasks</div><div class="kpi-value">${doneTasks.length}</div></div>
+          <div class="kpi-card accent"><div class="kpi-label">Total Quote Value</div><div class="kpi-value">₱${totalQuoteVal.toLocaleString()}</div></div>
+          <div class="kpi-card"><div class="kpi-label">Pending Quotes</div><div class="kpi-value">${pendingQuotes.length}</div></div>
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <div class="card-header"><h3>👥 Partner Accounts</h3>
+            <button class="btn-primary btn-sm" onclick="navigateTo('team-directory')">Manage Team</button>
+          </div>
+          <div class="card-body" style="padding:0">
+            ${!partners.length?'<div class="empty-state" style="padding:20px"><p>No partner accounts yet.</p></div>':
+              partners.map(p=>{
+                const pTasks = tasks.filter(t=>Array.isArray(t.assignedTo)?t.assignedTo.includes(p.id):t.assignedTo===p.id);
+                const pDone  = pTasks.filter(t=>t.status==='done'||t.status==='approved').length;
+                const pOpen  = pTasks.filter(t=>!['done','approved','archived'].includes(t.status)).length;
+                const pPct   = pTasks.length ? Math.round(pDone/pTasks.length*100) : 0;
+                const lastSeen = p.lastSeen?.toDate ? p.lastSeen.toDate() : null;
+                const minsAgo  = lastSeen ? Math.floor((Date.now()-lastSeen)/60000) : null;
+                const onlineDot = minsAgo!==null&&minsAgo<5 ? '#30d158' : '#8e8e93';
+                return `<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border)">
+                  <div style="position:relative">
+                    <div style="width:38px;height:38px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff">
+                      ${p.photoUrl?`<img src="${p.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:(p.displayName||'?')[0].toUpperCase()}
+                    </div>
+                    <div style="position:absolute;bottom:0;right:0;width:10px;height:10px;border-radius:50%;background:${onlineDot};border:2px solid var(--surface)"></div>
+                  </div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13px;font-weight:700">${p.displayName||p.email}</div>
+                    <div style="font-size:11px;color:var(--text-muted)">${p.email||''} ${lastSeen?'· Last seen '+(minsAgo<60?minsAgo+'m ago':Math.floor(minsAgo/60)+'h ago'):''}</div>
+                  </div>
+                  <div style="text-align:right;flex-shrink:0">
+                    <div style="font-size:11px;color:var(--text-muted)">Tasks: ${pOpen} open · ${pDone} done</div>
+                    <span class="badge ${pPct>=80?'badge-green':pPct>=50?'badge-orange':'badge-red'}" style="font-size:10px">${pPct}% KPI</span>
+                  </div>
+                </div>`;
+              }).join('')}
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>📋 Recent Tasks</h3>
+            <button class="btn-primary btn-sm" onclick="document.querySelector('[data-sub=tasks]').click()">All Tasks</button>
+          </div>
+          <div class="card-body" style="padding:0">
+            ${!tasks.length?'<div class="empty-state" style="padding:20px"><p>No tasks yet. Assign tasks with department = Partners.</p></div>':
+              tasks.slice(0,5).map(t=>`<div class="task-feed-item">
+                <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
+                <div style="flex:1;min-width:0"><div class="task-feed-title">${t.title}</div>
+                <div class="task-feed-meta">${t.dueDate?'Due '+t.dueDate:''}</div></div>
+                <span class="badge ${t.status==='done'||t.status==='approved'?'badge-green':t.status==='review'?'badge-orange':'badge-blue'}">${t.status||'open'}</span>
+              </div>`).join('')}
+          </div>
+        </div>
+      `;
+      break;
+    }
+    case 'tasks': {
+      content.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <span style="font-size:13px;color:var(--text-muted)">${tasks.length} task${tasks.length!==1?'s':''} in Partners dept</span>
+          <button class="btn-primary btn-sm" onclick="navigateTo('tasks')">+ New Task</button>
+        </div>
+        ${!tasks.length?'<div class="empty-state"><div class="empty-icon">📋</div><p>No tasks yet. Create tasks and set department to "Partners".</p></div>':
+          `<div class="card"><div class="card-body" style="padding:0">
+            ${tasks.map(t=>`<div class="task-feed-item" style="cursor:pointer" onclick="window.openTaskDetail&&window.openTaskDetail('${t.id}',window.currentUser,window.currentRole)">
+              <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
+              <div style="flex:1;min-width:0">
+                <div class="task-feed-title">${t.title}</div>
+                <div class="task-feed-meta">${Array.isArray(t.assignedToNames)&&t.assignedToNames.length?'👥 '+t.assignedToNames.join(', '):''} ${t.dueDate?'· Due '+t.dueDate:''}</div>
+              </div>
+              <span class="badge ${t.status==='done'||t.status==='approved'?'badge-green':t.status==='review'?'badge-orange':t.status==='overdue'?'badge-red':'badge-blue'}">${t.status||'open'}</span>
+            </div>`).join('')}
+          </div></div>`}
+      `;
+      break;
+    }
+    case 'quotes': {
+      const totalVal = quotes.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+      const approved = quotes.filter(q=>q.status==='approved');
+      const pending  = quotes.filter(q=>q.status==='pending'||q.status==='submitted');
+      content.innerHTML = `
+        <div class="kpi-row" style="margin-bottom:14px">
+          <div class="kpi-card accent"><div class="kpi-label">Total Quotes</div><div class="kpi-value">${quotes.length}</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Approved</div><div class="kpi-value">${approved.length}</div></div>
+          <div class="kpi-card"><div class="kpi-label">Pending</div><div class="kpi-value">${pending.length}</div></div>
+          <div class="kpi-card accent"><div class="kpi-label">Pipeline Value</div><div class="kpi-value" style="font-size:16px">₱${totalVal.toLocaleString()}</div></div>
+        </div>
+        ${!quotes.length?'<div class="empty-state"><div class="empty-icon">📄</div><p>No quotes yet.</p></div>':
+          `<div class="card"><div class="card-body" style="padding:0">
+            <div class="table-wrap"><table class="data-table">
+              <thead><tr><th>Client</th><th>Created By</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+              <tbody>
+                ${quotes.map(q=>{
+                  const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
+                  const amt = q.total||q.grandTotal||0;
+                  return `<tr>
+                    <td style="font-size:13px;font-weight:600">${q.clientName||q.client||'—'}</td>
+                    <td style="font-size:12px;color:var(--text-muted)">${q.createdByName||'—'}</td>
+                    <td style="font-size:13px;font-weight:600">₱${amt.toLocaleString()}</td>
+                    <td><span class="badge ${q.status==='approved'?'badge-green':q.status==='pending'||q.status==='submitted'?'badge-orange':'badge-gray'}">${q.status||'draft'}</span></td>
+                    <td style="font-size:11px;color:var(--text-muted)">${ts}</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table></div>
+          </div></div>`}
+      `;
+      break;
+    }
+    case 'activity': {
+      // Show recent notifications/actions from partner accounts
+      const notifPromises = partners.slice(0,5).map(p =>
+        db.collection('notifications').doc(p.id).collection('items')
+          .orderBy('createdAt','desc').limit(5).get().catch(()=>({docs:[]}))
+          .then(snap => snap.docs.map(d=>({...d.data(), partnerName: p.displayName||p.email})))
+      );
+      const allNotifArrays = await Promise.all(notifPromises);
+      const allActivity = allNotifArrays.flat().sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0)).slice(0,20);
+      content.innerHTML = `
+        <div class="card"><div class="card-header"><h3>📡 Recent Partner Activity</h3></div>
+          <div class="card-body" style="padding:0">
+            ${!allActivity.length?'<div class="empty-state" style="padding:20px"><p>No recent activity.</p></div>':
+              allActivity.map(n=>{
+                const ts = n.createdAt?.toDate?n.createdAt.toDate().toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+                return `<div style="display:flex;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);align-items:flex-start">
+                  <div style="font-size:20px">${n.icon||'🔔'}</div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:12px;font-weight:600;color:var(--primary-light)">${n.partnerName}</div>
+                    <div style="font-size:13px;font-weight:600">${n.title||''}</div>
+                    <div style="font-size:12px;color:var(--text-muted)">${n.body||''}</div>
+                    <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${ts}</div>
+                  </div>
+                </div>`;
+              }).join('')}
+          </div>
+        </div>
+      `;
+      break;
+    }
   }
 }
 
@@ -3448,9 +3735,11 @@ async function loadSuggestions() {
 // ── Help / Guide ──────────────────────────────────
 function renderHelp() {
   const c = document.getElementById('page-content');
-  const bsOnly  = isBrilliantOnly();
-  const pres    = isPresident() || currentRole === 'manager';
-  const section = bsOnly ? 'partner' : pres ? 'admin' : 'employee';
+  const bsOnly   = isBrilliantOnly();
+  const extPartner = isPartner(); // external partner role
+  const isAnyPartner = bsOnly || extPartner;
+  const pres     = isPresident() || currentRole === 'manager';
+  const section  = isAnyPartner ? 'partner' : pres ? 'admin' : 'employee';
 
   const sections = {
     admin:    renderHelpAdmin,
@@ -3469,7 +3758,7 @@ function renderHelp() {
            <button class="subtab-btn" data-sub="partner">Partner Guide</button>
            <button class="subtab-btn" data-sub="storage">Storage Setup</button>
            <button class="subtab-btn" data-sub="suggestions">💡 Suggestion Box</button>`
-        : bsOnly
+        : isAnyPartner
           ? `<button class="subtab-btn active" data-sub="partner">Partner Guide</button>
              <button class="subtab-btn" data-sub="suggestions">💡 Suggestion Box</button>`
           : `<button class="subtab-btn active" data-sub="employee">Your Guide</button>
