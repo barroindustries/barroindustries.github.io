@@ -173,8 +173,8 @@ function initPullToRefresh() {
   if (!mc || !ind) return;
 
   // Higher threshold = harder pull required before refresh fires
-  const THRESHOLD = 130, MAX_PULL = 180, DEAD_ZONE = 28;
-  let startY = 0, pulling = false, refreshing = false, lastDy = 0;
+  const THRESHOLD = 220, MAX_PULL = 280, DEAD_ZONE = 70;
+  let startY = 0, startTime = 0, pulling = false, refreshing = false, lastDy = 0;
 
   function updateInd(dist) {
     const pct   = Math.min(dist / THRESHOLD, 1);
@@ -195,21 +195,27 @@ function initPullToRefresh() {
   }
 
   mc.addEventListener('touchstart', e => {
-    // Only engage when content is scrolled all the way to top
-    if (refreshing || mc.scrollTop > 0) return;
-    startY  = e.touches[0].clientY;
-    lastDy  = 0;
-    pulling = true;
+    // Only engage when content is truly at the top
+    if (refreshing || mc.scrollTop > 2) return;
+    startY    = e.touches[0].clientY;
+    startTime = Date.now();
+    lastDy    = 0;
+    pulling   = true;
   }, { passive: true });
 
   mc.addEventListener('touchmove', e => {
     if (!pulling || refreshing) return;
     const raw = e.touches[0].clientY - startY;
+    // Cancel if finger moved up or sideways more than down
     if (raw <= 0) { pulling = false; hideInd(); return; }
-    // Dead zone: first DEAD_ZONE px of downward motion don't count
+    // Dead zone: first 70px of downward drag are ignored entirely
     const dy = Math.max(0, raw - DEAD_ZONE);
     lastDy = dy;
-    if (dy === 0) return; // still in dead zone — don't show indicator
+    if (dy === 0) return;
+    // Velocity guard: if the drag is happening very slowly it's probably
+    // an accidental scroll — only show indicator after 120ms of intentional pull
+    const elapsed = Date.now() - startTime;
+    if (dy < 30 && elapsed < 120) return;
     updateInd(Math.min(dy, MAX_PULL));
   }, { passive: true });
 

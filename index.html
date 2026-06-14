@@ -32,9 +32,17 @@
 ══════════════════════════════════ -->
 <div id="splash-screen">
   <div class="splash-inner">
-    <img src="icons/barro-logo.png" alt="Barro Industries" class="splash-logo"
-         onerror="this.style.display='none';document.getElementById('splash-bi-fallback').style.display='flex'"/>
-    <div id="splash-bi-fallback" class="splash-bi-fallback" style="display:none">BI</div>
+    <div class="splash-logo-ring">
+      <svg class="splash-ring-svg" viewBox="0 0 120 120">
+        <circle class="splash-ring-track" cx="60" cy="60" r="54"/>
+        <circle class="splash-ring-arc"   cx="60" cy="60" r="54"/>
+      </svg>
+      <div class="splash-logo-circle">
+        <img src="icons/barro-logo.png" alt="Barro Industries" class="splash-logo"
+             onerror="this.style.display='none';document.getElementById('splash-bi-fallback').style.display='flex'"/>
+        <div id="splash-bi-fallback" class="splash-bi-fallback" style="display:none">BI</div>
+      </div>
+    </div>
     <div class="splash-wordmark-stack">
       <span class="splash-word-main">Barro Industries</span>
       <span class="splash-word-sub">Operations System</span>

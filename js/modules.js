@@ -103,9 +103,10 @@ async function loadPosts(dept) {
         <div class="post-actions">
           ${p.status==='published' ? `
             <button class="post-heart-btn${hearted?' hearted':''}" data-id="${p.id}" title="${hearted?'Unlike':'Like'}">
-              <svg viewBox="0 0 24 24" fill="${hearted?'#FF6B2B':'none'}" stroke="${hearted?'#FF6B2B':'currentColor'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+              <svg class="heart-svg" viewBox="0 0 24 24" fill="${hearted?'#FF6B2B':'none'}" stroke="${hearted?'#FF6B2B':'currentColor'}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+              ${hearts.length ? `<span class="heart-count">${hearts.length}</span>` : '<span class="heart-count" style="display:none">0</span>'}
             </button>
-            ${hearts.length ? `<button class="post-likers-btn btn-link" data-id="${p.id}" data-hearts='${JSON.stringify(hearts)}' style="font-size:12px;color:var(--text-muted);padding:0 4px;background:none;border:none;cursor:pointer">${hearts.length} ❤️</button>` : ''}
+            ${hearts.length ? `<button class="post-likers-btn btn-link" data-id="${p.id}" data-hearts='${JSON.stringify(hearts)}' style="font-size:12px;color:var(--text-muted);padding:0 4px;background:none;border:none;cursor:pointer"></button>` : ''}
           ` : ''}
           ${canApprove && p.status==='pending' ? `
             <button class="btn-primary btn-sm post-approve-btn" data-id="${p.id}">✓ Approve</button>
@@ -150,14 +151,29 @@ async function loadPosts(dept) {
     }));
     container.querySelectorAll('.post-heart-btn').forEach(btn => btn.addEventListener('click', async e => {
       const id = btn.dataset.id;
-      const snap = await db.collection('posts').doc(id).get();
-      const hearts = snap.data().hearts || [];
+      const isHearted = btn.classList.contains('hearted');
+      const countEl = btn.querySelector('.heart-count');
+      const svg = btn.querySelector('.heart-svg');
+
+      // Optimistic UI update — instant feedback
+      btn.classList.toggle('hearted', !isHearted);
+      const currentCount = parseInt(countEl?.textContent || '0') || 0;
+      const newCount = isHearted ? Math.max(0, currentCount - 1) : currentCount + 1;
+      if (countEl) { countEl.textContent = newCount; countEl.style.display = newCount > 0 ? '' : 'none'; }
+      if (svg) {
+        svg.setAttribute('fill', !isHearted ? '#FF6B2B' : 'none');
+        svg.setAttribute('stroke', !isHearted ? '#FF6B2B' : 'currentColor');
+      }
+      // Bounce animation
+      btn.classList.add('heart-pop');
+      btn.addEventListener('animationend', () => btn.classList.remove('heart-pop'), { once: true });
+
+      // Persist to Firestore
       const uid = currentUser.uid;
-      const newHearts = hearts.includes(uid)
+      const op = isHearted
         ? firebase.firestore.FieldValue.arrayRemove(uid)
         : firebase.firestore.FieldValue.arrayUnion(uid);
-      await db.collection('posts').doc(id).update({hearts: newHearts});
-      loadPosts(dept);
+      await db.collection('posts').doc(id).update({ hearts: op });
     }));
 
     // Show likers list

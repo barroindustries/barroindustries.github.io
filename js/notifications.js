@@ -110,16 +110,21 @@ window.Notifs = (() => {
             <div class="notif-item-time">${timeAgo(n.createdAt)}</div>
           </div>
         </div>
-        ${hasActions ? `<div class="notif-item-actions">
-          ${!n.read ? `<button class="notif-action-btn notif-read-btn" data-id="${n.id}" title="Mark as read" aria-label="Mark as read">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-            <span class="notif-btn-label">Mark Read</span>
-          </button>` : ''}
+        <div class="notif-item-actions">
+          ${!n.read
+            ? `<button class="notif-action-btn notif-read-btn" data-id="${n.id}" title="Mark as read" aria-label="Mark as read">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                <span class="notif-btn-label">Mark Read</span>
+               </button>`
+            : `<button class="notif-action-btn notif-unread-btn" data-id="${n.id}" title="Mark as unread" aria-label="Mark as unread">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/></svg>
+                <span class="notif-btn-label">Unread</span>
+               </button>`}
           ${nav ? `<button class="notif-action-btn notif-view-btn" title="Open" aria-label="Open">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
             <span class="notif-btn-label">Open</span>
           </button>` : ''}
-        </div>` : ''}
+        </div>
       </div>`;
     }).join('');
 
@@ -130,13 +135,64 @@ window.Notifs = (() => {
         const item = btn.closest('.notif-item');
         item?.classList.remove('unread');
         item?.classList.add('read');
-        btn.style.display = 'none';
         await markRead(uid, btn.dataset.id);
+        // Swap to unread button without full re-render
+        btn.outerHTML = `<button class="notif-action-btn notif-unread-btn" data-id="${btn.dataset.id}" title="Mark as unread" aria-label="Mark as unread">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/></svg>
+          <span class="notif-btn-label">Unread</span>
+        </button>`;
+        // Re-attach unread listener to the new button
+        item?.querySelector('.notif-unread-btn')?.addEventListener('click', async e2 => {
+          e2.stopPropagation();
+          const nb = e2.currentTarget;
+          item.classList.remove('read');
+          item.classList.add('unread');
+          await markUnread(uid, nb.dataset.id);
+          nb.outerHTML = `<button class="notif-action-btn notif-read-btn" data-id="${nb.dataset.id}" title="Mark as read" aria-label="Mark as read">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <span class="notif-btn-label">Mark Read</span>
+          </button>`;
+          item.querySelector('.notif-read-btn')?.addEventListener('click', async e3 => {
+            e3.stopPropagation();
+            const rb = e3.currentTarget;
+            item.classList.remove('unread'); item.classList.add('read');
+            await markRead(uid, rb.dataset.id);
+            rb.outerHTML = `<button class="notif-action-btn notif-unread-btn" data-id="${rb.dataset.id}" title="Mark as unread"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/></svg><span class="notif-btn-label">Unread</span></button>`;
+          });
+          const remaining2 = list.querySelectorAll('.notif-item.unread').length;
+          _updatePanelHint(remaining2, items.length);
+        });
         const remaining = list.querySelectorAll('.notif-item.unread').length;
         _updatePanelHint(remaining, items.length);
         if (remaining === 0 && typeof window.tryUpgradeAttendanceOnNotifRead === 'function') {
           window.tryUpgradeAttendanceOnNotifRead();
         }
+      });
+    });
+
+    // Mark-as-unread buttons (for already-read items)
+    list.querySelectorAll('.notif-unread-btn').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const item = btn.closest('.notif-item');
+        item?.classList.remove('read');
+        item?.classList.add('unread');
+        await markUnread(uid, btn.dataset.id);
+        btn.outerHTML = `<button class="notif-action-btn notif-read-btn" data-id="${btn.dataset.id}" title="Mark as read" aria-label="Mark as read">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          <span class="notif-btn-label">Mark Read</span>
+        </button>`;
+        item?.querySelector('.notif-read-btn')?.addEventListener('click', async e2 => {
+          e2.stopPropagation();
+          const rb = e2.currentTarget;
+          item.classList.remove('unread'); item.classList.add('read');
+          await markRead(uid, rb.dataset.id);
+          rb.outerHTML = `<button class="notif-action-btn notif-unread-btn" data-id="${rb.dataset.id}" title="Mark as unread"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/></svg><span class="notif-btn-label">Unread</span></button>`;
+          const remaining3 = list.querySelectorAll('.notif-item.unread').length;
+          _updatePanelHint(remaining3, items.length);
+        });
+        const remaining = list.querySelectorAll('.notif-item.unread').length;
+        _updatePanelHint(remaining, items.length);
       });
     });
 
@@ -380,21 +436,35 @@ window.Notifs = (() => {
     const panel    = document.getElementById('notif-panel');
     const backdrop = document.getElementById('notif-backdrop');
 
+    const closePanel = () => {
+      panel?.classList.add('hidden');
+      backdrop?.classList.add('hidden');
+    };
+    const openPanel = () => {
+      panel?.classList.remove('hidden');
+      backdrop?.classList.remove('hidden');
+    };
+    const isPanelOpen = () => panel && !panel.classList.contains('hidden');
+
     btn?.addEventListener('click', e => {
       e.stopPropagation();
       if (window.innerWidth <= 768) {
-        // Mobile: navigate to notifications page
-        if (typeof navigateTo === 'function') navigateTo('notifications');
+        // Mobile: toggle between notifications page and previous page
+        if (window.currentPage === 'notifications') {
+          if (typeof navigateTo === 'function') navigateTo('dashboard');
+        } else {
+          if (typeof navigateTo === 'function') navigateTo('notifications');
+        }
       } else {
-        // Desktop: toggle dropdown panel
-        panel?.classList.toggle('hidden');
-        backdrop?.classList.toggle('hidden');
+        // Desktop: toggle dropdown panel open/closed
+        if (isPanelOpen()) {
+          closePanel();
+        } else {
+          openPanel();
+        }
       }
     });
-    backdrop?.addEventListener('click', () => {
-      panel?.classList.add('hidden');
-      backdrop?.classList.add('hidden');
-    });
+    backdrop?.addEventListener('click', closePanel);
   }
 
   return { startListener, stopListener, send, sendToDept, sendToOwner, showToast, initPush, checkDeadlines, initToggle, renderPage, markAllRead,
