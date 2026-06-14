@@ -63,6 +63,26 @@ window.Notifs = (() => {
     await Promise.all(unread.map(n => markRead(_lastUid, n.id)));
   }
 
+  function _navigateFromNotif(type, taskId) {
+    document.getElementById('notif-panel')?.classList.add('hidden');
+    document.getElementById('notif-backdrop')?.classList.add('hidden');
+    if (taskId || type?.startsWith('task')) {
+      if (taskId && typeof window.openTaskDetail === 'function') {
+        window.openTaskDetail(taskId, window.currentUser, window.currentRole);
+      } else if (typeof navigateTo === 'function') navigateTo('tasks');
+    } else if (type === 'cash_advance' || type === 'ca_approved') {
+      if (typeof navigateTo === 'function') navigateTo('personal-finance');
+    } else if (type?.startsWith('att')) {
+      if (typeof navigateTo === 'function') navigateTo('attendance');
+    } else if (type === 'post' || type === 'post_approval') {
+      if (typeof navigateTo === 'function') navigateTo('posts');
+    } else if (type === 'approval_result') {
+      if (typeof navigateTo === 'function') navigateTo('approvals');
+    } else if (type === 'payroll' || type === 'kpi_grade' || type === 'self_assessment') {
+      if (typeof navigateTo === 'function') navigateTo('personal-finance');
+    }
+  }
+
   function _renderIntoList(list, items, uid) {
     if (!list) return;
     if (items.length === 0) {
@@ -74,38 +94,40 @@ window.Notifs = (() => {
     const unreadCount = items.filter(n => !n.read).length;
     _updatePanelHint(unreadCount, items.length);
 
+    const NAV_TYPES = new Set(['task_assigned','task_status','task_message','task_comment','cash_advance','ca_approved','att_extension_approved','att_extension_denied','attendance','post','post_approval','approval_result','payroll','kpi_grade','self_assessment']);
+    const isNavigable = n => n.taskId || NAV_TYPES.has(n.type) || n.type?.startsWith('task') || n.type?.startsWith('att');
+
     list.innerHTML = items.map(n => {
-      const isNavigable = n.taskId || n.type?.startsWith('task') || n.type?.startsWith('att') || n.type === 'cash_advance' || n.type === 'ca_approved' || n.type === 'post';
+      const nav = isNavigable(n);
       return `
       <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${n.id}" data-type="${n.type||''}" data-task-id="${n.taskId||''}">
-        <div style="display:flex;align-items:flex-start;gap:10px;width:100%">
-          <input type="checkbox" class="notif-checkbox" data-id="${n.id}"
-            ${n.read ? 'checked' : ''}
-            style="margin-top:3px;width:16px;height:16px;accent-color:var(--primary-light);flex-shrink:0;cursor:pointer"/>
-          <div style="flex:1;min-width:0;cursor:${isNavigable?'pointer':'default'}" class="notif-body-link">
-            <div class="notif-item-title">${n.icon || '🔔'} ${n.title}</div>
-            <div class="notif-item-body">${n.body || ''}</div>
-            <div class="notif-item-time">${timeAgo(n.createdAt)}${isNavigable?` <span style="color:var(--primary-light);font-size:10px">Tap to open →</span>`:''}</div>
-          </div>
+        <div class="notif-item-emoji">${n.icon || '🔔'}</div>
+        <div class="notif-item-text">
+          <div class="notif-item-title">${n.title}</div>
+          <div class="notif-item-body">${n.body || ''}</div>
+          <div class="notif-item-time">${timeAgo(n.createdAt)}</div>
+        </div>
+        <div class="notif-item-actions">
+          ${!n.read ? `<button class="notif-action-btn notif-read-btn" data-id="${n.id}" title="Mark as read" aria-label="Mark as read">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          </button>` : `<div style="width:28px"></div>`}
+          ${nav ? `<button class="notif-action-btn notif-view-btn" title="Open" aria-label="Open">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>` : `<div style="width:28px"></div>`}
         </div>
       </div>`;
     }).join('');
 
-    // Bind checkbox — toggle read/unread
-    list.querySelectorAll('.notif-checkbox').forEach(cb => {
-      cb.addEventListener('change', async () => {
-        const item = cb.closest('.notif-item');
-        if (cb.checked) {
-          item?.classList.remove('unread');
-          item?.classList.add('read');
-          await markRead(uid, cb.dataset.id);
-        } else {
-          item?.classList.remove('read');
-          item?.classList.add('unread');
-          await markUnread(uid, cb.dataset.id);
-        }
-        // Re-count unchecked for attendance upgrade
-        const remaining = list.querySelectorAll('.notif-checkbox:not(:checked)').length;
+    // Mark-as-read buttons
+    list.querySelectorAll('.notif-read-btn').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const item = btn.closest('.notif-item');
+        item?.classList.remove('unread');
+        item?.classList.add('read');
+        btn.style.display = 'none';
+        await markRead(uid, btn.dataset.id);
+        const remaining = list.querySelectorAll('.notif-item.unread').length;
         _updatePanelHint(remaining, items.length);
         if (remaining === 0 && typeof window.tryUpgradeAttendanceOnNotifRead === 'function') {
           window.tryUpgradeAttendanceOnNotifRead();
@@ -113,35 +135,21 @@ window.Notifs = (() => {
       });
     });
 
-    // Bind nav links — click body to navigate to relevant item
-    list.querySelectorAll('.notif-body-link').forEach(link => {
-      link.addEventListener('click', async () => {
-        const item = link.closest('.notif-item');
-        const type = item.dataset.type || '';
-        const taskId = item.dataset.taskId || '';
-        // Mark as read
-        const cb = item.querySelector('.notif-checkbox');
-        if (cb && !cb.checked) { cb.checked = true; await markRead(uid, item.dataset.id); }
-        // Close notification panel
-        document.getElementById('notif-panel')?.classList.add('hidden');
-        // Navigate
-        if (taskId || type.startsWith('task')) {
-          if (taskId && typeof window.openTaskDetail === 'function') {
-            const currentUser = window.currentUser;
-            const currentRole = window.currentRole;
-            window.openTaskDetail(taskId, currentUser, currentRole);
-          } else {
-            if (typeof navigateTo === 'function') navigateTo('tasks');
-          }
-        } else if (type === 'cash_advance' || type === 'ca_approved') {
-          if (typeof navigateTo === 'function') navigateTo('personal-finance');
-        } else if (type === 'att_extension_approved' || type === 'att_extension_denied' || type === 'attendance') {
-          if (typeof navigateTo === 'function') navigateTo('attendance');
-        } else if (type === 'post' || type === 'post_approval') {
-          if (typeof navigateTo === 'function') navigateTo('posts');
-        } else if (type === 'approval_result') {
-          if (typeof navigateTo === 'function') navigateTo('approvals');
+    // View/open buttons
+    list.querySelectorAll('.notif-view-btn').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        const item = btn.closest('.notif-item');
+        const type = item?.dataset.type || '';
+        const taskId = item?.dataset.taskId || '';
+        // Auto mark as read on view
+        if (item?.classList.contains('unread')) {
+          item.classList.remove('unread');
+          item.classList.add('read');
+          item.querySelector('.notif-read-btn')?.remove();
+          await markRead(uid, item.dataset.id);
         }
+        _navigateFromNotif(type, taskId);
       });
     });
   }

@@ -132,12 +132,28 @@ async function checkPayrollDuties(user) {
   } catch(e) { console.warn('[checkPayrollDuties]', e); }
 }
 
+// ── Splash ────────────────────────────────────────
+const _splashStart = Date.now();
+const _SPLASH_MIN_MS = 1600;
+function hideSplash() {
+  const splash = document.getElementById('splash-screen');
+  if (!splash || splash.classList.contains('hiding')) return;
+  const wait = Math.max(0, _SPLASH_MIN_MS - (Date.now() - _splashStart));
+  setTimeout(() => {
+    splash.classList.add('hiding');
+    setTimeout(() => { splash.style.display = 'none'; }, 420);
+  }, wait);
+}
+
 // ── Screens ───────────────────────────────────────
 function showLogin() {
+  hideSplash();
   document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('app-shell').classList.add('hidden');
 }
+let _ptrInit = false;
 function showApp() {
+  hideSplash();
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-shell').classList.remove('hidden');
   // Init Lucide icons for static topbar elements
@@ -146,6 +162,68 @@ function showApp() {
   _applyThemeIcon(localStorage.getItem('bi-theme') || 'dark');
   // Reset any iOS zoom that happened during login input
   _resetViewportZoom();
+  // Pull-to-refresh (init once)
+  if (!_ptrInit) { _ptrInit = true; initPullToRefresh(); }
+}
+
+// ── Pull-to-Refresh ───────────────────────────────
+function initPullToRefresh() {
+  const mc   = document.getElementById('main-content');
+  const ind  = document.getElementById('ptr-indicator');
+  if (!mc || !ind) return;
+
+  const THRESHOLD = 72, MAX_PULL = 110;
+  let startY = 0, pulling = false, refreshing = false;
+
+  function updateInd(dist) {
+    const pct = Math.min(dist / THRESHOLD, 1);
+    const ready = dist >= THRESHOLD;
+    ind.style.transform = `translateX(-50%) translateY(${Math.min(dist * 0.55, 48)}px)`;
+    ind.style.opacity   = String(Math.min(pct * 2, 1));
+    ind.classList.toggle('ready', ready);
+    ind.classList.remove('refreshing');
+    ind.querySelector('.ptr-label').textContent = ready ? 'Release to refresh' : 'Pull to refresh';
+  }
+
+  mc.addEventListener('touchstart', e => {
+    if (refreshing || mc.scrollTop > 0) return;
+    startY  = e.touches[0].clientY;
+    pulling = true;
+  }, { passive: true });
+
+  mc.addEventListener('touchmove', e => {
+    if (!pulling || refreshing) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy <= 0) { pulling = false; return; }
+    updateInd(Math.min(dy, MAX_PULL));
+  }, { passive: true });
+
+  mc.addEventListener('touchend', async () => {
+    if (!pulling) return;
+    pulling = false;
+    const dy = parseFloat(ind.style.opacity) * THRESHOLD;
+    if (dy < THRESHOLD * 0.9) {
+      ind.style.transition = 'transform .3s,opacity .3s';
+      ind.style.transform  = 'translateX(-50%) translateY(-70px)';
+      ind.style.opacity    = '0';
+      setTimeout(() => { ind.style.transition = ''; }, 320);
+      return;
+    }
+    // Trigger refresh
+    refreshing = true;
+    ind.classList.add('refreshing');
+    ind.querySelector('.ptr-label').textContent = 'Refreshing…';
+    try { await navigateTo(currentPage); } catch(e) { /* ignore */ }
+    await new Promise(r => setTimeout(r, 500));
+    ind.style.transition = 'transform .35s,opacity .35s';
+    ind.style.transform  = 'translateX(-50%) translateY(-70px)';
+    ind.style.opacity    = '0';
+    setTimeout(() => {
+      ind.style.transition = '';
+      ind.classList.remove('ready','refreshing');
+      refreshing = false;
+    }, 370);
+  }, { passive: true });
 }
 
 function _resetViewportZoom() {
@@ -567,18 +645,12 @@ document.addEventListener('DOMContentLoaded', () => {
 function renderNotificationsPage() {
   const c = document.getElementById('page-content');
   c.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div class="page-header">
       <h2 style="font-size:18px;font-weight:800;color:var(--text)">🔔 Notifications</h2>
-      <button class="btn-secondary btn-sm" id="notif-page-mark-all">Mark all read</button>
     </div>
     <div id="notif-page-list" class="notif-list" style="max-height:none;overflow:visible">
       <div class="empty-state">No notifications</div>
     </div>`;
-  // Wire mark-all
-  document.getElementById('notif-page-mark-all')?.addEventListener('click', () => {
-    window.Notifs?.markAllRead?.();
-  });
-  // Ask Notifs module to render into this new container
   window.Notifs?.renderPage?.();
 }
 
@@ -1767,7 +1839,10 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         <td style="text-align:center">
           <span style="font-weight:700;color:var(--success)">${evalD.presidentGrade!=null?evalD.presidentGrade+'<small>/10</small>':evalD.presidentGradeFromTasks!=null?evalD.presidentGradeFromTasks+'<small>/10 🔒</small>':'—'}</span>
         </td>
-        <td><button class="btn-secondary btn-sm grade-emp-btn" data-uid="${u.id}" data-name="${u.displayName||u.email}" data-presgrade="${evalD.presidentGrade||''}" data-presnotes="${(evalD.presidentNotes||'').replace(/"/g,'&quot;')}" data-presimprove="${(evalD.presidentImprovements||'').replace(/"/g,'&quot;')}">Grade</button></td>
+        <td style="display:flex;gap:4px;flex-wrap:wrap">
+          <button class="btn-secondary btn-sm view-profile-btn" data-uid="${u.id}" data-name="${(u.displayName||u.email).replace(/"/g,'&quot;')}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" data-mdone="${tasksDone}" data-mtotal="${tasksTotal}">Profile</button>
+          <button class="btn-secondary btn-sm grade-emp-btn" data-uid="${u.id}" data-name="${u.displayName||u.email}" data-presgrade="${evalD.presidentGrade||''}" data-presnotes="${(evalD.presidentNotes||'').replace(/"/g,'&quot;')}" data-presimprove="${(evalD.presidentImprovements||'').replace(/"/g,'&quot;')}">Grade</button>
+        </td>
       </tr>` };
     }));
     const defaultMonth = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
@@ -1822,6 +1897,16 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
           await Notifs.send(uid, { title:'📊 KPI Grade Updated', body: notifBody, icon:'📊', type:'kpi_grade' });
           closeModal(); Notifs.showToast(`Grade ${grade}/10 saved for ${name}.`);
           window.renderPersonalFinance(currentUser, currentRole);
+        });
+      });
+    });
+    // Profile buttons
+    document.querySelectorAll('.view-profile-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const { uid, name, salary, allowance, deductions, mdone, mtotal } = btn.dataset;
+        openWorkerProfilePanel(uid, name, {
+          salary: +salary, allowance: +allowance, deductions: +deductions,
+          mDone: +mdone, mTotal: +mtotal
         });
       });
     });
@@ -1939,6 +2024,17 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
   const kpiColor  = kpi>=0.8?'var(--success)':kpi>=0.6?'var(--warning)':'var(--danger)';
   const attColor  = att>=0.85?'var(--success)':att>=0.6?'var(--warning)':'var(--danger)';
+
+  // Cache for printPayslip()
+  window._payslipData = {
+    name: u.displayName || currentUser.email,
+    employeeId: u.employeeId || '—',
+    department: (Array.isArray(u.departments)&&u.departments.length ? u.departments.join(', ') : u.department) || '—',
+    salary: u.salary||0, allowance: u.allowance||0, deductions: u.deductions||0,
+    net, kpi, att, multiplier, computedMonth, earnedSoFar, totalAdvance,
+    monthLabel, taskPct, doneTasks: doneTasks.length, myTasksTotal: myTasks.length,
+    salaryHistory
+  };
 
   c.innerHTML = `
     <div class="page-header">
@@ -2234,23 +2330,24 @@ async function getAttendanceScore(uid) {
 }
 
 function printPayslip() {
-  const u = userProfile;
-  const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
+  const pd = window._payslipData;
+  if (!pd) { Notifs?.showToast('Load your Finance page first.','error'); return; }
+  const now = new Date();
+  const STYLES = `*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Helvetica Neue',Arial,sans-serif;padding:40px;color:#1a1a2e;background:#fff;max-width:720px;margin:0 auto}.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:20px;border-bottom:3px solid #1a237e}.company{font-size:22px;font-weight:900;color:#1a237e;letter-spacing:-0.5px}.company-sub{font-size:11px;color:#666;margin-top:2px}.payslip-label{background:#1a237e;color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:4px;letter-spacing:1px;text-transform:uppercase}.emp-info{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;background:#f5f6fa;border-radius:8px;padding:16px;margin-bottom:20px}.emp-info .label{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px}.emp-info .value{font-size:13px;font-weight:700;color:#1a1a2e}.stitle{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:#888;font-weight:700;margin-bottom:8px;margin-top:20px}table{width:100%;border-collapse:collapse;margin-bottom:4px}td{padding:8px 10px;font-size:13px;border-bottom:1px solid #eef0f5}td:last-child{text-align:right}.tr td{font-weight:700;font-size:15px;background:#f5f6fa;border-bottom:none}.hr td{background:#e8eaf6;font-weight:800;font-size:15px;color:#1a237e;border:none}.pos{color:#2e7d32}.neg{color:#c62828}.ms{background:#f5f6fa;border-radius:8px;padding:12px 14px;margin:12px 0}.mr{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:#555}.ss{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:36px}.sl{border-top:1px solid #aaa;padding-top:6px;text-align:center;font-size:11px;color:#888}.footer{margin-top:28px;padding-top:12px;border-top:1px solid #eee;font-size:10px;color:#aaa;text-align:center}@media print{body{padding:20px}button{display:none!important}}`;
   const w = window.open('','_blank');
-  w.document.write(`<html><head><title>Payslip — ${u.displayName}</title>
-  <style>body{font-family:sans-serif;padding:40px;color:#1a1d2e}.logo{font-size:22px;font-weight:800;color:#1a237e}table{width:100%;border-collapse:collapse;margin:16px 0}td{padding:8px 12px;border-bottom:1px solid #eee}.total{font-weight:bold;font-size:16px;background:#f0f2f8}.footer{margin-top:30px;font-size:11px;color:#999;border-top:1px solid #eee;padding-top:10px}</style>
-  </head><body>
-  <div class="logo">Barro Industries</div>
-  <h3 style="margin:4px 0">Payslip — ${new Date().toLocaleDateString('en-PH',{month:'long',year:'numeric'})}</h3>
-  <p>Employee: <strong>${u.displayName}</strong> &nbsp; ID: <strong>${u.employeeId||'—'}</strong></p>
-  <table>
-    <tr><td>Base Salary</td><td style="text-align:right">₱${formatNum(u.salary)}</td></tr>
-    <tr><td>Allowances</td><td style="text-align:right;color:green">+₱${formatNum(u.allowance)}</td></tr>
-    <tr><td>Deductions</td><td style="text-align:right;color:red">-₱${formatNum(u.deductions)}</td></tr>
-    <tr class="total"><td><strong>Net Pay</strong></td><td style="text-align:right"><strong>₱${formatNum(net)}</strong></td></tr>
-  </table>
-  <div class="footer">Generated: ${new Date().toLocaleString('en-PH')} · Barro Industries</div>
-  <script>window.print();<\/script></body></html>`);
+  w.document.write(`<!DOCTYPE html><html><head><title>Payslip — ${pd.name}</title><style>${STYLES}</style></head><body>
+<div class="header"><div><div class="company">BARRO INDUSTRIES</div><div class="company-sub">Employee Payslip</div></div><div style="text-align:right"><div class="payslip-label">Payslip</div><div style="font-size:12px;color:#666;margin-top:6px">Period: ${pd.monthLabel}</div><div style="font-size:11px;color:#999">Generated: ${now.toLocaleDateString('en-PH')}</div></div></div>
+<div class="emp-info"><div><div class="label">Employee Name</div><div class="value">${pd.name}</div></div><div><div class="label">Employee ID</div><div class="value">${pd.employeeId}</div></div><div><div class="label">Department</div><div class="value">${pd.department}</div></div><div><div class="label">Pay Period</div><div class="value">${pd.monthLabel}</div></div></div>
+<div class="stitle">Earnings &amp; Deductions</div>
+<table><tr><td>Base Salary</td><td>₱${formatNum(pd.salary)}</td></tr><tr><td class="pos">Allowances</td><td class="pos">+₱${formatNum(pd.allowance)}</td></tr><tr><td class="neg">Deductions</td><td class="neg">-₱${formatNum(pd.deductions)}</td></tr><tr class="tr"><td><strong>Net Pay (Full Month)</strong></td><td>₱${formatNum(pd.net)}</td></tr></table>
+<div class="ms"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#666;margin-bottom:6px">Performance Multiplier</div><div class="mr"><span>Task KPI (70%)</span><span>${Math.round(pd.kpi*100)}% → ${(pd.kpi*0.7).toFixed(2)}×</span></div><div class="mr"><span>Attendance (30%)</span><span>${Math.round(pd.att*100)}% → ${(pd.att*0.3).toFixed(2)}×</span></div><div class="mr" style="font-weight:700;color:#1a1a2e;margin-top:4px;border-top:1px solid #ddd;padding-top:4px"><span>Combined Multiplier</span><span>${pd.multiplier.toFixed(2)}×</span></div></div>
+<div class="stitle">Computed Pay</div>
+<table><tr><td>Tasks Completed</td><td>${pd.doneTasks} of ${pd.myTasksTotal} (${pd.taskPct}%)</td></tr><tr><td>Projected Full Month (₱${formatNum(pd.net)} × ${pd.multiplier.toFixed(2)})</td><td>₱${formatNum(pd.computedMonth)}</td></tr><tr><td class="neg">CA Outstanding Balance</td><td class="neg">-₱${formatNum(pd.totalAdvance)}</td></tr><tr class="hr"><td>Take-Home So Far</td><td>₱${formatNum(Math.max(0,pd.earnedSoFar-pd.totalAdvance))}</td></tr></table>
+<div class="ss"><div class="sl">Prepared by: Finance</div><div class="sl">Noted by: HR</div><div class="sl">Approved by: President</div></div>
+<div class="footer">System-generated payslip · Barro Industries · ${now.toLocaleString('en-PH')}</div>
+<div style="text-align:center;margin-top:20px"><button onclick="window.print()" style="padding:10px 24px;background:#1a237e;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer">🖨️ Print / Save as PDF</button></div>
+</body></html>`);
+  w.document.close();
 }
 
 // ── Employee Standings Modal ───────────────────────
@@ -2350,6 +2447,217 @@ async function openEmpStandingsModal(uid, name, preloaded) {
   } catch(err) {
     body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>${err.message}</p></div>`;
   }
+}
+
+// ── Worker Profile Panel ──────────────────────────
+async function openWorkerProfilePanel(uid, name, preloaded) {
+  document.getElementById('worker-profile-panel')?.remove();
+  const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const panel = document.createElement('div');
+  panel.id = 'worker-profile-panel';
+  panel.style.cssText = 'position:fixed;inset:0;z-index:4000;background:var(--bg);overflow:hidden;transform:translateY(100%);transition:transform 0.3s cubic-bezier(0.32,0.72,0,1);display:flex;flex-direction:column';
+  panel.innerHTML = `
+    <div style="position:relative;background:var(--bg);border-bottom:1px solid var(--border);padding:14px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0">
+      <button id="wp-back-btn" style="background:none;border:none;cursor:pointer;color:var(--text);font-size:22px;padding:2px 8px;line-height:1;font-weight:300">‹</button>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:16px;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(name)}</div>
+        <div style="font-size:11px;color:var(--text-muted)" id="wp-subtitle">Worker Profile</div>
+      </div>
+      <button class="btn-secondary btn-sm" id="wp-payslip-btn">🖨️ Payslip</button>
+    </div>
+    <div style="display:flex;border-bottom:1px solid var(--border);background:var(--bg);flex-shrink:0">
+      ${['Overview','Salary','Tasks','Attendance'].map((t,i)=>`<button class="wp-tab" data-tab="${t.toLowerCase()}" style="flex:1;padding:11px 4px;border:none;background:none;font-size:12px;font-weight:600;cursor:pointer;color:${i===0?'var(--primary-light)':'var(--text-muted)'};border-bottom:${i===0?'2px solid var(--primary-light)':'2px solid transparent'};transition:color .15s,border-color .15s">${t}</button>`).join('')}
+    </div>
+    <div id="wp-tab-content" style="flex:1;overflow-y:auto;padding:16px">
+      <div class="loading-placeholder" style="text-align:center;padding:40px">Loading…</div>
+    </div>`;
+  document.body.appendChild(panel);
+  requestAnimationFrame(() => { panel.style.transform = 'translateY(0)'; });
+
+  function activateTab(tabName) {
+    panel.querySelectorAll('.wp-tab').forEach(t => {
+      const a = t.dataset.tab === tabName;
+      t.style.color = a ? 'var(--primary-light)' : 'var(--text-muted)';
+      t.style.borderBottomColor = a ? 'var(--primary-light)' : 'transparent';
+    });
+    renderWorkerProfileTab(uid, name, preloaded, tabName, panel);
+  }
+  panel.querySelectorAll('.wp-tab').forEach(tab => { tab.addEventListener('click', () => activateTab(tab.dataset.tab)); });
+  panel.querySelector('#wp-back-btn')?.addEventListener('click', () => { panel.style.transform = 'translateY(100%)'; setTimeout(() => panel.remove(), 300); });
+  panel.querySelector('#wp-payslip-btn')?.addEventListener('click', () => printWorkerPayslip(uid, name, preloaded));
+  activateTab('overview');
+}
+
+async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
+  const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const content = panel.querySelector('#wp-tab-content');
+  const subtitle = panel.querySelector('#wp-subtitle');
+  content.innerHTML = '<div class="loading-placeholder" style="text-align:center;padding:40px">Loading…</div>';
+  try {
+    if (tabName === 'overview') {
+      subtitle.textContent = 'Overview';
+      const [kpi, att, caSnap, userSnap, evalSnap] = await Promise.all([
+        getKpiScore(uid), getAttendanceScore(uid),
+        db.collection('cash_advances').where('userId','==',uid).get().catch(()=>({docs:[]})),
+        db.collection('users').doc(uid).get().catch(()=>null),
+        db.collection('kpi_evals').doc(uid).get().catch(()=>null)
+      ]);
+      const u = userSnap?.exists ? userSnap.data() : {};
+      const evalD = evalSnap?.exists ? evalSnap.data() : {};
+      const caBalance = caSnap.docs.map(d=>d.data()).filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
+      const net = (preloaded.salary||0)+(preloaded.allowance||0)-(preloaded.deductions||0);
+      const mult = kpi*0.7+att*0.3;
+      const now = new Date();
+      const daysElapsed = now.getDate(), daysInMonth = new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+      const earnedSoFar = net*mult*(daysElapsed/daysInMonth);
+      const kpiPct = Math.round(kpi*100), attPct = Math.round(att*100);
+      const kpiColor = kpiPct>=80?'var(--success)':kpiPct>=50?'var(--warning)':'var(--danger)';
+      const attColor = attPct>=80?'var(--success)':attPct>=50?'var(--warning)':'var(--danger)';
+      const dept = (Array.isArray(u.departments)&&u.departments.length?u.departments.join(', '):u.department)||'—';
+      const role = u.role?(window.ROLES?.[u.role]?.label||u.role):'—';
+      const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
+      const selfGrade = evalD.selfGrade??null, presGrade = evalD.presidentGrade??evalD.presidentGradeFromTasks??null;
+      content.innerHTML = `
+        <div style="background:var(--surface2);border-radius:14px;padding:16px;margin-bottom:14px;display:flex;align-items:center;gap:14px">
+          <div style="width:50px;height:50px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--primary-light));display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:#fff;flex-shrink:0">${(name||'?')[0].toUpperCase()}</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:2px">${esc(name)}</div>
+            <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${esc(dept)}</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap">
+              <span class="badge badge-blue" style="font-size:10px">${esc(role)}</span>
+              ${u.employeeId?`<span class="badge badge-gray" style="font-size:10px">ID: ${esc(u.employeeId)}</span>`:''}
+            </div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+          <div style="background:var(--surface2);border-radius:12px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">Task KPI</div><div style="font-size:24px;font-weight:800;color:${kpiColor}">${kpiPct}%</div><div style="font-size:10px;color:var(--text-muted)">${preloaded.mDone||0}/${preloaded.mTotal||0} done</div></div>
+          <div style="background:var(--surface2);border-radius:12px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">Attendance</div><div style="font-size:24px;font-weight:800;color:${attColor}">${attPct}%</div><div style="font-size:10px;color:var(--text-muted)">${daysElapsed} days</div></div>
+          <div style="background:var(--surface2);border-radius:12px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--text-muted);margin-bottom:3px">CA Balance</div><div style="font-size:20px;font-weight:800;color:${caBalance>0?'var(--danger)':'var(--success)'}">₱${formatNum(caBalance)}</div><div style="font-size:10px;color:var(--text-muted)">${caBalance>0?'outstanding':'cleared'}</div></div>
+        </div>
+        <div style="background:var(--surface2);border-radius:12px;padding:14px;margin-bottom:14px">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:10px">${monthLabel} — Pay</div>
+          <div class="payslip-row"><span>Base Salary</span><strong>₱${formatNum(preloaded.salary)}</strong></div>
+          <div class="payslip-row"><span style="color:var(--success)">+ Allowances</span><span style="color:var(--success)">₱${formatNum(preloaded.allowance)}</span></div>
+          <div class="payslip-row"><span style="color:var(--danger)">− Deductions</span><span style="color:var(--danger)">₱${formatNum(preloaded.deductions)}</span></div>
+          <div class="payslip-row" style="font-weight:700;border-top:1px solid var(--border);margin-top:6px;padding-top:6px"><span>Net (Full Month)</span><span>₱${formatNum(net)}</span></div>
+          <div class="payslip-row"><span style="color:var(--text-muted)">× Multiplier (${mult.toFixed(2)}×)</span><span></span></div>
+          <div class="payslip-row" style="font-size:15px;font-weight:800;border-top:1px solid var(--border);margin-top:6px;padding-top:6px"><span>Earned So Far</span><span style="color:var(--primary-light)">₱${formatNum(earnedSoFar)}</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div style="background:var(--surface2);border-radius:12px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Self Grade</div><div style="font-size:28px;font-weight:800;color:${selfGrade!=null?'var(--primary-light)':'var(--text-muted)'}">${selfGrade!=null?selfGrade:'—'}<span style="font-size:12px;font-weight:400">/10</span></div></div>
+          <div style="background:var(--surface2);border-radius:12px;padding:12px;text-align:center"><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">President Grade</div><div style="font-size:28px;font-weight:800;color:${presGrade!=null?'var(--success)':'var(--text-muted)'}">${presGrade!=null?presGrade:'—'}<span style="font-size:12px;font-weight:400">/10</span></div></div>
+        </div>`;
+
+    } else if (tabName === 'salary') {
+      subtitle.textContent = 'Salary History';
+      const snap = await db.collection('salary_history').where('userId','==',uid).orderBy('month','desc').limit(12).get().catch(()=>({docs:[]}));
+      const history = snap.docs.map(d=>d.data());
+      content.innerHTML = history.length ? `
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Month</th><th>Base</th><th>Allow.</th><th>Deduct.</th><th>Net</th><th>KPI</th><th>Att</th><th>Final</th></tr></thead>
+          <tbody>${history.map(h=>`<tr>
+            <td>${h.month||'—'}</td><td>₱${formatNum(h.salary||0)}</td>
+            <td style="color:var(--success)">+₱${formatNum(h.allowance||0)}</td>
+            <td style="color:var(--danger)">-₱${formatNum(h.deductions||0)}</td>
+            <td>₱${formatNum(h.netPay||0)}</td>
+            <td>${h.kpiScore!=null?Math.round(h.kpiScore*100)+'%':'—'}</td>
+            <td>${h.attScore!=null?Math.round(h.attScore*100)+'%':'—'}</td>
+            <td><strong style="color:var(--primary-light)">₱${formatNum(h.finalPay||0)}</strong></td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+        <div style="margin-top:10px;font-size:12px;color:var(--text-muted)">Last ${history.length} recorded month${history.length!==1?'s':''}</div>
+      ` : '<div class="empty-state" style="padding:40px"><div class="empty-icon">📊</div><p>No salary records yet.</p></div>';
+
+    } else if (tabName === 'tasks') {
+      subtitle.textContent = 'Task History';
+      const snap = await db.collection('tasks').where('assignedTo','array-contains',uid).get()
+        .catch(()=>db.collection('tasks').where('assignedTo','==',uid).get()).catch(()=>({docs:[]}));
+      const tasks = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+      const DONE = ['done','approved','archived'];
+      const done = tasks.filter(t=>DONE.includes(t.status)).length;
+      const SC = {done:'var(--success)',approved:'var(--success)',archived:'var(--text-muted)',in_progress:'var(--primary-light)',pending:'var(--warning)',review:'var(--warning)'};
+      content.innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+          <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800;color:var(--success)">${done}</div><div style="font-size:10px;color:var(--text-muted)">Completed</div></div>
+          <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800;color:var(--primary-light)">${tasks.length-done}</div><div style="font-size:10px;color:var(--text-muted)">Active</div></div>
+          <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800">${tasks.length}</div><div style="font-size:10px;color:var(--text-muted)">Total</div></div>
+        </div>
+        ${tasks.length ? tasks.map(t=>`<div style="background:var(--surface2);border-radius:10px;padding:11px 13px;margin-bottom:7px;border-left:3px solid ${SC[t.status]||'var(--border)'}"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div style="font-size:13px;font-weight:600;color:var(--text);flex:1">${esc(t.title||'Untitled')}</div><span class="badge" style="background:${SC[t.status]||'var(--surface2)'};color:#fff;font-size:10px;white-space:nowrap;flex-shrink:0">${t.status||'pending'}</span></div>${t.department?`<div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(t.department)}</div>`:''}</div>`).join('')
+          : '<div class="empty-state" style="padding:30px"><div class="empty-icon">✅</div><p>No tasks assigned.</p></div>'}`;
+
+    } else if (tabName === 'attendance') {
+      subtitle.textContent = 'Attendance';
+      const now = new Date();
+      const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+      const snap = await db.collection('attendance').doc(uid).collection('records')
+        .where(firebase.firestore.FieldPath.documentId(),'>=',monthStart).get().catch(()=>({docs:[]}));
+      const recs = {}; snap.docs.forEach(d => { recs[d.id] = d.data(); });
+      const daysInMonth = new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+      const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
+      let full=0, half=0, absent=0;
+      const boxes = [];
+      for (let d=1; d<=Math.min(now.getDate(),daysInMonth); d++) {
+        const ds = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+        const dow = new Date(ds).getDay();
+        if (dow===0) { boxes.push(`<div style="background:rgba(100,100,100,0.1);border:1px solid rgba(100,100,100,0.15);border-radius:5px;padding:3px 4px;text-align:center;min-width:28px;opacity:0.4"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:10px">—</span></div>`); continue; }
+        const rec = recs[ds];
+        const score = rec?(typeof rec.attendanceScore==='number'?rec.attendanceScore:rec.fullTime?1:rec.loginTime?0.5:0):0;
+        const bg=score>=1?'rgba(48,209,88,0.18)':score>=0.5?'rgba(255,160,64,0.18)':'rgba(255,68,68,0.12)';
+        const bc=score>=1?'rgba(48,209,88,0.4)':score>=0.5?'rgba(255,160,64,0.4)':'rgba(255,68,68,0.25)';
+        const mark=score>=1?'✓':score>=0.5?'½':'✗';
+        const mc=score>=1?'#30d158':score>=0.5?'#ffa040':'#ff6b6b';
+        if (score>=1) full++; else if (score>=0.5) half++; else absent++;
+        boxes.push(`<div style="background:${bg};border:1px solid ${bc};border-radius:5px;padding:3px 4px;text-align:center;min-width:28px"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:11px;color:${mc};font-weight:700">${mark}</span></div>`);
+      }
+      content.innerHTML = `
+        <div style="font-size:13px;font-weight:700;margin-bottom:12px">${monthLabel}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+          <div style="background:rgba(48,209,88,0.1);border:1px solid rgba(48,209,88,0.3);border-radius:10px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#30d158">${full}</div><div style="font-size:10px;color:var(--text-muted)">Full Days</div></div>
+          <div style="background:rgba(255,160,64,0.1);border:1px solid rgba(255,160,64,0.3);border-radius:10px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#ffa040">${half}</div><div style="font-size:10px;color:var(--text-muted)">Half Days</div></div>
+          <div style="background:rgba(255,68,68,0.1);border:1px solid rgba(255,68,68,0.25);border-radius:10px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#ff6b6b">${absent}</div><div style="font-size:10px;color:var(--text-muted)">Absences</div></div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">${boxes.join('')}</div>
+        <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--text-muted)">
+          <span><span style="color:#30d158;font-weight:700">✓</span> Full</span>
+          <span><span style="color:#ffa040;font-weight:700">½</span> Half</span>
+          <span><span style="color:#ff6b6b;font-weight:700">✗</span> Absent</span>
+        </div>`;
+    }
+  } catch(err) {
+    content.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>${err.message}</p></div>`;
+  }
+}
+
+async function printWorkerPayslip(uid, name, preloaded) {
+  const now = new Date();
+  const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
+  const daysElapsed = now.getDate(), daysInMonth = new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+  const [userSnap, kpi, att] = await Promise.all([
+    db.collection('users').doc(uid).get().catch(()=>null),
+    getKpiScore(uid), getAttendanceScore(uid)
+  ]);
+  const u = userSnap?.exists ? userSnap.data() : {};
+  const salary=preloaded.salary||u.salary||0, allowance=preloaded.allowance||u.allowance||0, deductions=preloaded.deductions||u.deductions||0;
+  const net=salary+allowance-deductions, mult=kpi*0.7+att*0.3;
+  const computedMonth=net*mult, earnedSoFar=computedMonth*(daysElapsed/daysInMonth);
+  const dept=(Array.isArray(u.departments)&&u.departments.length?u.departments.join(', '):u.department)||'—';
+  const role=u.role?(window.ROLES?.[u.role]?.label||u.role):'—';
+  const empId=u.employeeId||'—';
+  const STYLES=`*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Helvetica Neue',Arial,sans-serif;padding:40px;color:#1a1a2e;background:#fff;max-width:720px;margin:0 auto}.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:20px;border-bottom:3px solid #1a237e}.company{font-size:22px;font-weight:900;color:#1a237e}.company-sub{font-size:11px;color:#666;margin-top:2px}.pl{background:#1a237e;color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:4px;letter-spacing:1px;text-transform:uppercase}.ei{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;background:#f5f6fa;border-radius:8px;padding:16px;margin-bottom:20px}.ei .lb{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px}.ei .vl{font-size:13px;font-weight:700;color:#1a1a2e}.st{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:#888;font-weight:700;margin-bottom:8px;margin-top:20px}table{width:100%;border-collapse:collapse}td{padding:8px 10px;font-size:13px;border-bottom:1px solid #eef0f5}td:last-child{text-align:right}.tr td{font-weight:700;font-size:15px;background:#f5f6fa;border-bottom:none}.hr td{background:#e8eaf6;font-weight:800;font-size:15px;color:#1a237e;border:none}.pos{color:#2e7d32}.neg{color:#c62828}.ms{background:#f5f6fa;border-radius:8px;padding:12px 14px;margin:12px 0}.mr{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:#555}.ss{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:36px}.sl{border-top:1px solid #aaa;padding-top:6px;text-align:center;font-size:11px;color:#888}.footer{margin-top:28px;padding-top:12px;border-top:1px solid #eee;font-size:10px;color:#aaa;text-align:center}@media print{body{padding:20px}button{display:none!important}}`;
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html><head><title>Payslip — ${name}</title><style>${STYLES}</style></head><body>
+<div class="header"><div><div class="company">BARRO INDUSTRIES</div><div class="company-sub">Employee Payslip</div></div><div style="text-align:right"><div class="pl">Payslip</div><div style="font-size:12px;color:#666;margin-top:6px">Period: ${monthLabel}</div><div style="font-size:11px;color:#999">Generated: ${now.toLocaleDateString('en-PH')}</div></div></div>
+<div class="ei"><div><div class="lb">Employee Name</div><div class="vl">${name}</div></div><div><div class="lb">Employee ID</div><div class="vl">${empId}</div></div><div><div class="lb">Department</div><div class="vl">${dept}</div></div><div><div class="lb">Position / Role</div><div class="vl">${role}</div></div><div><div class="lb">Pay Period</div><div class="vl">${monthLabel}</div></div><div><div class="lb">Days Covered</div><div class="vl">${daysElapsed} of ${daysInMonth} days</div></div></div>
+<div class="st">Earnings &amp; Deductions</div>
+<table><tr><td>Base Salary</td><td>₱${formatNum(salary)}</td></tr><tr><td class="pos">Allowances</td><td class="pos">+₱${formatNum(allowance)}</td></tr><tr><td class="neg">Deductions</td><td class="neg">-₱${formatNum(deductions)}</td></tr><tr class="tr"><td><strong>Net Pay (Full Month)</strong></td><td>₱${formatNum(net)}</td></tr></table>
+<div class="ms"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#666;margin-bottom:6px">Performance Multiplier</div><div class="mr"><span>Task KPI (70%)</span><span>${Math.round(kpi*100)}% → ${(kpi*0.7).toFixed(2)}×</span></div><div class="mr"><span>Attendance (30%)</span><span>${Math.round(att*100)}% → ${(att*0.3).toFixed(2)}×</span></div><div class="mr" style="font-weight:700;color:#1a1a2e;margin-top:4px;border-top:1px solid #ddd;padding-top:4px"><span>Combined Multiplier</span><span>${mult.toFixed(2)}×</span></div></div>
+<div class="st">Computed Pay</div>
+<table><tr><td>Tasks Completed</td><td>${preloaded.mDone||0} of ${preloaded.mTotal||0}</td></tr><tr><td>Projected Full Month (₱${formatNum(net)} × ${mult.toFixed(2)})</td><td>₱${formatNum(computedMonth)}</td></tr><tr class="hr"><td>Earned So Far (${daysElapsed}/${daysInMonth} days)</td><td>₱${formatNum(earnedSoFar)}</td></tr></table>
+<div class="ss"><div class="sl">Prepared by: Finance</div><div class="sl">Noted by: HR</div><div class="sl">Approved by: President</div></div>
+<div class="footer">System-generated payslip · Barro Industries · ${now.toLocaleString('en-PH')}</div>
+<div style="text-align:center;margin-top:20px"><button onclick="window.print()" style="padding:10px 24px;background:#1a237e;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer">🖨️ Print / Save as PDF</button></div>
+</body></html>`);
+  w.document.close();
 }
 
 // ── Progress Reports ──────────────────────────────

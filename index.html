@@ -28,9 +28,21 @@
 <body>
 
 <!-- ══════════════════════════════════
+     SPLASH SCREEN (shown while Firebase auth resolves)
+══════════════════════════════════ -->
+<div id="splash-screen">
+  <div class="splash-inner">
+    <img src="icons/barrokit.png" alt="Barro Kitchens" class="splash-logo"
+         onerror="this.src='icons/barro-logo.png'"/>
+    <div class="splash-wordmark">Barro Kitchens</div>
+    <div class="splash-bar"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════
      LOGIN SCREEN
 ══════════════════════════════════ -->
-<div id="login-screen" class="screen active">
+<div id="login-screen" class="screen">
   <div class="login-bg"></div>
   <div class="login-container">
     <div class="login-logo-wrap">
@@ -193,6 +205,13 @@
 
   <!-- Sidebar overlay (mobile) -->
   <div class="sidebar-overlay hidden" id="sidebar-overlay"></div>
+
+  <!-- Pull-to-refresh indicator -->
+  <div id="ptr-indicator">
+    <div class="ptr-arrow">↓</div>
+    <div class="ptr-icon"></div>
+    <span class="ptr-label">Pull to refresh</span>
+  </div>
 
   <!-- Main content -->
   <main class="main-content" id="main-content">
