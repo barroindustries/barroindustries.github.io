@@ -86,7 +86,8 @@ window.BOTTOM_NAV_ITEMS = [
   { icon: 'check-square', label: 'Tasks',      page: 'tasks'            },
   { icon: 'megaphone',    label: 'Posts',      page: 'posts'            },
   { icon: 'banknote',     label: 'Cash',       page: 'cash-advances'    },
-  { icon: 'credit-card',  label: 'Finance',    page: 'personal-finance' }
+  { icon: 'credit-card',  label: 'Finance',    page: 'personal-finance' },
+  { icon: 'bell',         label: 'Notifs',     page: 'notifications',   badge: true }
 ];
 
 // ── Bottom Nav — Admin / President ───────────────
@@ -95,7 +96,8 @@ window.PRESIDENT_BOTTOM_NAV = [
   { icon: 'check-square', label: 'Tasks',    page: 'tasks'          },
   { icon: 'megaphone',    label: 'Posts',    page: 'posts'          },
   { icon: 'users',        label: 'Team',     page: 'team-directory' },
-  { icon: 'shield-check', label: 'Approve',  page: 'approvals'      }
+  { icon: 'shield-check', label: 'Approve',  page: 'approvals'      },
+  { icon: 'bell',         label: 'Notifs',   page: 'notifications', badge: true }
 ];
 
 // ── Bottom Nav — External Partner ────────────────
@@ -104,7 +106,7 @@ window.PARTNER_BOTTOM_NAV = [
   { icon: 'check-square', label: 'Tasks',  page: 'tasks'           },
   { icon: 'calculator',   label: 'Quotes', page: 'bs-quote-builder'},
   { icon: 'file-text',    label: 'Summary',page: 'bs-quotations'   },
-  { icon: 'book-open',    label: 'Clients',page: 'bs-clients'      }
+  { icon: 'bell',         label: 'Notifs', page: 'notifications',  badge: true }
 ];
 
 // ── Bottom Nav — Partner (Brilliant Steel) ───────
@@ -113,7 +115,7 @@ window.BRILLIANT_BOTTOM_NAV = [
   { icon: 'calculator', label: 'Quotes',  page: 'bs-quote-builder' },
   { icon: 'file-text',  label: 'Summary', page: 'bs-quotations'    },
   { icon: 'book-open',  label: 'Clients', page: 'bs-clients'       },
-  { icon: 'folder',     label: 'Files',   page: 'bs-files'         }
+  { icon: 'bell',       label: 'Notifs',  page: 'notifications',   badge: true }
 ];
 
 // ── Firestore In-Memory Cache ─────────────────────

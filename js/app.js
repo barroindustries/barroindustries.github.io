@@ -533,7 +533,10 @@ function buildTopNavStrip() {
     : window.BOTTOM_NAV_ITEMS;
   strip.innerHTML = items.map(item =>
     `<button class="top-nav-item" data-page="${item.page}">
-       ${_bnIcon(item.icon)}
+       <span class="tn-icon-wrap" style="position:relative;display:inline-flex">
+         ${_bnIcon(item.icon)}
+         ${item.badge ? `<span class="tn-badge" style="display:none">0</span>` : ''}
+       </span>
        <span class="tn-label">${item.label}</span>
      </button>`
   ).join('');
@@ -559,6 +562,25 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // Pull-to-refresh removed — navigation handled via top nav strip on mobile.
+
+// ── Notifications Page ───────────────────────────
+function renderNotificationsPage() {
+  const c = document.getElementById('page-content');
+  c.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <h2 style="font-size:18px;font-weight:800;color:var(--text)">🔔 Notifications</h2>
+      <button class="btn-secondary btn-sm" id="notif-page-mark-all">Mark all read</button>
+    </div>
+    <div id="notif-page-list" class="notif-list" style="max-height:none;overflow:visible">
+      <div class="empty-state">No notifications</div>
+    </div>`;
+  // Wire mark-all
+  document.getElementById('notif-page-mark-all')?.addEventListener('click', () => {
+    window.Notifs?.markAllRead?.();
+  });
+  // Ask Notifs module to render into this new container
+  window.Notifs?.renderPage?.();
+}
 
 // ── Quote Builder iframe ─────────────────────────
 function renderQuoteBuilderIframe() {
@@ -613,6 +635,7 @@ function navigateTo(page) {
     case 'progress':         renderProgressReports(); break;
     case 'bs-quote-builder': renderQuoteBuilderIframe(); break;
     case 'bk-quote-builder': renderQuoteBuilderIframe(); break;
+    case 'notifications':    renderNotificationsPage(); break;
     case 'bs-quotations':    renderBrilliantSteel(currentUser, currentRole, 'Quotations Summary'); break;
     case 'bs-clients':       renderBrilliantSteel(currentUser, currentRole, 'Client Data'); break;
     case 'bs-files':         renderBrilliantSteel(currentUser, currentRole, 'Files'); break;

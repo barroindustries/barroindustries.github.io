@@ -36,11 +36,34 @@ window.Notifs = (() => {
       bn.textContent = count;
       bn.style.display = count > 0 ? 'block' : 'none';
     }
+    // Update top-nav-strip badge for notifications item
+    const tnBadge = document.querySelector('.top-nav-item[data-page="notifications"] .tn-badge');
+    if (tnBadge) {
+      tnBadge.textContent = count > 99 ? '99+' : count;
+      tnBadge.style.display = count > 0 ? 'flex' : 'none';
+    }
   }
 
   // ── Panel ─────────────────────────────────────
+  let _lastItems = [], _lastUid = null;
+
   function renderPanel(items, uid) {
-    const list = document.getElementById('notif-list');
+    _lastItems = items; _lastUid = uid;
+    _renderIntoList(document.getElementById('notif-list'), items, uid);
+    _renderIntoList(document.getElementById('notif-page-list'), items, uid);
+  }
+
+  function renderPage() {
+    _renderIntoList(document.getElementById('notif-page-list'), _lastItems, _lastUid);
+  }
+
+  async function markAllRead() {
+    if (!_lastUid || _lastItems.length === 0) return;
+    const unread = _lastItems.filter(n => !n.read);
+    await Promise.all(unread.map(n => markRead(_lastUid, n.id)));
+  }
+
+  function _renderIntoList(list, items, uid) {
     if (!list) return;
     if (items.length === 0) {
       list.innerHTML = '<div class="empty-state" style="padding:30px"><div class="empty-icon">🔔</div><p>No notifications</p></div>';
@@ -338,7 +361,7 @@ window.Notifs = (() => {
     return `${Math.floor(diff / 86400)}d ago`;
   }
 
-  // Panel toggle
+  // Panel toggle — on mobile navigates to the notifications page; on desktop shows the dropdown
   function initToggle() {
     const btn      = document.getElementById('notif-btn');
     const panel    = document.getElementById('notif-panel');
@@ -346,16 +369,22 @@ window.Notifs = (() => {
 
     btn?.addEventListener('click', e => {
       e.stopPropagation();
-      panel.classList.toggle('hidden');
-      backdrop.classList.toggle('hidden');
+      if (window.innerWidth <= 768) {
+        // Mobile: navigate to notifications page
+        if (typeof navigateTo === 'function') navigateTo('notifications');
+      } else {
+        // Desktop: toggle dropdown panel
+        panel?.classList.toggle('hidden');
+        backdrop?.classList.toggle('hidden');
+      }
     });
     backdrop?.addEventListener('click', () => {
-      panel.classList.add('hidden');
-      backdrop.classList.add('hidden');
+      panel?.classList.add('hidden');
+      backdrop?.classList.add('hidden');
     });
   }
 
-  return { startListener, stopListener, send, sendToDept, sendToOwner, showToast, initPush, checkDeadlines, initToggle,
+  return { startListener, stopListener, send, sendToDept, sendToOwner, showToast, initPush, checkDeadlines, initToggle, renderPage, markAllRead,
     requestPushPermission: (uid) => {
       const vapidKey = window.FCM_CONFIG?.VAPID_KEY;
       if (!vapidKey || vapidKey === 'YOUR_VAPID_KEY_HERE') { showToast('Push notifications not configured yet.','error'); return; }
