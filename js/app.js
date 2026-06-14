@@ -168,34 +168,61 @@ function showApp() {
 
 // ── Pull-to-Refresh ───────────────────────────────
 function initPullToRefresh() {
-  const mc   = document.getElementById('main-content');
-  const ind  = document.getElementById('ptr-indicator');
+  const mc  = document.getElementById('main-content');
+  const ind = document.getElementById('ptr-indicator');
   if (!mc || !ind) return;
 
-  // Higher threshold = harder pull required before refresh fires
-  const THRESHOLD = 220, MAX_PULL = 280, DEAD_ZONE = 70;
+  const DEAD_ZONE    = 70;   // px ignored at the start of the drag
+  const THRESHOLD    = 220;  // px past dead zone → soft refresh (navigateTo)
+  const HARD_THRESH  = 400;  // px past dead zone → hard refresh (location.reload)
+  const MAX_PULL     = 450;  // visual cap
+
+  // SVG ring: circumference of r=14 circle = 2π×14 ≈ 87.96
+  const CIRC = 2 * Math.PI * 14;
+  const arc  = ind.querySelector('.ptr-ring-arc');
+  const icon = ind.querySelector('.ptr-ring-icon');
+  const lbl  = ind.querySelector('.ptr-label');
+
   let startY = 0, startTime = 0, pulling = false, refreshing = false, lastDy = 0;
 
+  function setArc(pct) {
+    if (!arc) return;
+    // dashoffset: CIRC = empty, 0 = full ring
+    arc.style.strokeDashoffset = String(CIRC * (1 - Math.min(pct, 1)));
+  }
+
   function updateInd(dist) {
-    const pct   = Math.min(dist / THRESHOLD, 1);
-    const ready = dist >= THRESHOLD;
-    // Slide in from above: starts at -70px, reaches +42px at full pull
-    ind.style.transform = `translateX(-50%) translateY(${Math.min(dist * 0.50, 42)}px)`;
-    ind.style.opacity   = String(Math.min(pct * 1.6, 1));
-    ind.classList.toggle('ready', ready);
-    ind.classList.remove('refreshing');
-    ind.querySelector('.ptr-label').textContent = ready ? 'Release to refresh' : 'Pull to refresh';
+    const softPct = Math.min(dist / THRESHOLD, 1);
+    const hard    = dist >= HARD_THRESH;
+    const ready   = dist >= THRESHOLD;
+
+    // Slide in — travels further the more you pull
+    const travel = Math.min(dist * 0.48, 52);
+    ind.style.transform = `translateX(-50%) translateY(${travel}px)`;
+    ind.style.opacity   = String(Math.min(softPct * 1.8, 1));
+
+    setArc(softPct);
+    ind.classList.toggle('ptr-ready', ready);
+    ind.classList.toggle('ptr-hard',  hard);
+    ind.classList.remove('ptr-refreshing');
+
+    if (icon) icon.textContent = ready ? '↑' : '↓';
+    if (lbl)  lbl.textContent  = hard ? '🔄 Release for full reload' : ready ? 'Release to refresh' : 'Pull to refresh';
   }
 
   function hideInd() {
-    ind.style.transition = 'transform .32s ease,opacity .32s ease';
-    ind.style.transform  = 'translateX(-50%) translateY(-80px)';
+    ind.style.transition = 'transform .30s cubic-bezier(0.25,0.46,0.45,0.94), opacity .30s ease';
+    ind.style.transform  = 'translateX(-50%) translateY(-90px)';
     ind.style.opacity    = '0';
-    setTimeout(() => { ind.style.transition = ''; }, 340);
+    setTimeout(() => {
+      ind.style.transition = '';
+      ind.classList.remove('ptr-ready','ptr-hard','ptr-refreshing');
+      setArc(0);
+      if (icon) icon.textContent = '↓';
+    }, 320);
   }
 
   mc.addEventListener('touchstart', e => {
-    // Only engage when content is truly at the top
     if (refreshing || mc.scrollTop > 2) return;
     startY    = e.touches[0].clientY;
     startTime = Date.now();
@@ -206,14 +233,10 @@ function initPullToRefresh() {
   mc.addEventListener('touchmove', e => {
     if (!pulling || refreshing) return;
     const raw = e.touches[0].clientY - startY;
-    // Cancel if finger moved up or sideways more than down
     if (raw <= 0) { pulling = false; hideInd(); return; }
-    // Dead zone: first 70px of downward drag are ignored entirely
     const dy = Math.max(0, raw - DEAD_ZONE);
     lastDy = dy;
     if (dy === 0) return;
-    // Velocity guard: if the drag is happening very slowly it's probably
-    // an accidental scroll — only show indicator after 120ms of intentional pull
     const elapsed = Date.now() - startTime;
     if (dy < 30 && elapsed < 120) return;
     updateInd(Math.min(dy, MAX_PULL));
@@ -223,17 +246,22 @@ function initPullToRefresh() {
     if (!pulling) return;
     pulling = false;
     if (lastDy < THRESHOLD) { hideInd(); return; }
-    // Trigger refresh
+
+    const doHardReload = lastDy >= HARD_THRESH;
     refreshing = true;
-    ind.classList.add('refreshing');
-    ind.querySelector('.ptr-label').textContent = 'Refreshing…';
+    ind.classList.add('ptr-refreshing');
+    if (lbl) lbl.textContent = doHardReload ? 'Reloading…' : 'Refreshing…';
+    setArc(1); // fill ring completely
+
+    if (doHardReload) {
+      await new Promise(r => setTimeout(r, 500));
+      location.reload();
+      return;
+    }
     try { await navigateTo(currentPage); } catch(e) { /* ignore */ }
-    await new Promise(r => setTimeout(r, 500));
+    await new Promise(r => setTimeout(r, 400));
     hideInd();
-    setTimeout(() => {
-      ind.classList.remove('ready','refreshing');
-      refreshing = false;
-    }, 360);
+    setTimeout(() => { refreshing = false; }, 340);
   }, { passive: true });
 }
 
@@ -648,6 +676,54 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.classList.toggle('sidebar-open', isOpen);
   });
   document.getElementById('sidebar-overlay')?.addEventListener('click', closeSidebar);
+
+  // ── Left-edge swipe to open / right-swipe-back to close sidebar ──────────
+  (function initSidebarSwipe() {
+    const EDGE_ZONE  = 22;  // px from left edge to start opening
+    const OPEN_DIST  = 72;  // px rightward drag needed to open
+    const CLOSE_DIST = 72;  // px leftward drag needed to close
+    const MAX_TRAVEL = 260; // don't track drags wider than this
+
+    let sx = 0, sy = 0, tracking = false, mode = null; // mode: 'open' | 'close'
+
+    document.addEventListener('touchstart', e => {
+      const t = e.touches[0];
+      sx = t.clientX; sy = t.clientY;
+      tracking = false; mode = null;
+
+      const sidebar = document.getElementById('sidebar');
+      const isOpen  = sidebar?.classList.contains('open');
+
+      if (!isOpen && sx <= EDGE_ZONE) {
+        tracking = true; mode = 'open';
+      } else if (isOpen && sx <= 60) {
+        // Allow close-drag from near the sidebar's left side too
+        tracking = true; mode = 'close';
+      }
+    }, { passive: true });
+
+    document.addEventListener('touchmove', e => {
+      if (!tracking) return;
+      const dx = e.touches[0].clientX - sx;
+      const dy = Math.abs(e.touches[0].clientY - sy);
+      // If vertical movement dominates, bail out
+      if (dy > Math.abs(dx) + 8) { tracking = false; return; }
+      if (Math.abs(dx) > MAX_TRAVEL) { tracking = false; return; }
+
+      if (mode === 'open' && dx >= OPEN_DIST) {
+        tracking = false;
+        const sidebar = document.getElementById('sidebar');
+        sidebar?.classList.add('open');
+        document.getElementById('sidebar-overlay')?.classList.remove('hidden');
+        document.body.classList.add('sidebar-open');
+      } else if (mode === 'close' && dx <= -CLOSE_DIST) {
+        tracking = false;
+        closeSidebar();
+      }
+    }, { passive: true });
+
+    document.addEventListener('touchend', () => { tracking = false; mode = null; }, { passive: true });
+  })();
 });
 
 // Pull-to-refresh removed — navigation handled via top nav strip on mobile.
@@ -1101,8 +1177,7 @@ async function renderEmployeeDashboard() {
     });
 
     // Monthly attendance for Current Standing card (fetched in Promise.all above)
-    const daysElapsedDash = now.getDate();
-    const workDaysDash = Math.max(1, daysElapsedDash);
+    const workDaysDash = countWorkDays(now.getFullYear(), now.getMonth(), now.getDate());
     const attDaysFull = Math.round(monthAttScore * workDaysDash);
     const caBalance = recentCA.filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
 
@@ -1813,8 +1888,9 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     const snap = await dbCachedGet('users', () => db.collection('users').get(), 60000);
     const users = snap.docs.map(d=>({id:d.id,...d.data()}));
     const now2 = new Date();
-    const daysElapsed2 = now2.getDate();
-    const daysInMonth2 = new Date(now2.getFullYear(), now2.getMonth()+1, 0).getDate();
+    const daysElapsed2 = countWorkDays(now2.getFullYear(), now2.getMonth(), now2.getDate());
+    const daysInMonth2 = countWorkDays(now2.getFullYear(), now2.getMonth(),
+                           new Date(now2.getFullYear(), now2.getMonth()+1, 0).getDate());
     const defaultMonth2 = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
     const userRows = await Promise.all(users.map(async u => {
       const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
@@ -1980,8 +2056,9 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   const u = userProfile;
   const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
   const now = new Date();
-  const daysElapsed = now.getDate();
-  const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+  const daysElapsed  = countWorkDays(now.getFullYear(), now.getMonth(), now.getDate());
+  const daysInMonth  = countWorkDays(now.getFullYear(), now.getMonth(),
+                         new Date(now.getFullYear(), now.getMonth()+1, 0).getDate());
 
   const [kpi, att, cashAdvSnap, salaryHistSnap, evalSnap, myTasksSnap] = await Promise.all([
     getKpiScore(currentUser.uid),
@@ -2320,23 +2397,41 @@ async function getKpiScore(uid) {
   } catch { return 0.5; }
 }
 
+// ── Shared helpers — used by all attendance/KPI calcs ──────────────────────
+
+/**
+ * Count Mon–Sat workdays from the 1st up to and including `upTo` date.
+ * Sundays are excluded (day 0). No public-holiday deduction here — kept simple.
+ */
+function countWorkDays(year, month, upToDay) {
+  let count = 0;
+  for (let d = 1; d <= upToDay; d++) {
+    const dow = new Date(year, month, d).getDay();
+    if (dow !== 0) count++; // 0 = Sunday
+  }
+  return Math.max(1, count);
+}
+
+/** Normalise a Firestore attendance record to a 0/0.5/1.0 score. */
+function _attRecScore(r) {
+  if (!r) return 0;
+  if (typeof r.attendanceScore === 'number') return r.attendanceScore;
+  if (r.fullTime)  return 1.0;
+  if (r.loginTime) return 0.5;
+  return 0;
+}
+
 async function getAttendanceScore(uid) {
   try {
     const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
-    const daysElapsed = now.getDate(); // days so far this month (not a fixed 22)
+    const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
+    const monthStart = new Date(y, m, 1).toISOString().slice(0, 10);
+    // Denominator = workdays elapsed (Mon–Sat only)
+    const workDaysElapsed = countWorkDays(y, m, d);
     const snap = await db.collection('attendance').doc(uid).collection('records')
       .where(firebase.firestore.FieldPath.documentId(), '>=', monthStart).get();
-    const records = snap.docs.map(d => d.data());
-    const totalScore = records.reduce((sum, r) => {
-      // New model: attendanceScore field (0, 0.5, 1.0)
-      // Fallback to legacy fullTime/loginTime model
-      const score = typeof r.attendanceScore === 'number'
-        ? r.attendanceScore
-        : (r.fullTime ? 1.0 : r.loginTime ? 0.5 : 0);
-      return sum + score;
-    }, 0);
-    return Math.min(1, totalScore / daysElapsed);
+    const totalScore = snap.docs.reduce((sum, doc) => sum + _attRecScore(doc.data()), 0);
+    return Math.min(1, totalScore / workDaysElapsed);
   } catch { return 0.5; }
 }
 
@@ -2519,7 +2614,8 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
       const net = (preloaded.salary||0)+(preloaded.allowance||0)-(preloaded.deductions||0);
       const mult = kpi*0.7+att*0.3;
       const now = new Date();
-      const daysElapsed = now.getDate(), daysInMonth = new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+      const daysElapsed = countWorkDays(now.getFullYear(), now.getMonth(), now.getDate());
+      const daysInMonth = countWorkDays(now.getFullYear(), now.getMonth(), new Date(now.getFullYear(),now.getMonth()+1,0).getDate());
       const earnedSoFar = net*mult*(daysElapsed/daysInMonth);
       const kpiPct = Math.round(kpi*100), attPct = Math.round(att*100);
       const kpiColor = kpiPct>=80?'var(--success)':kpiPct>=50?'var(--warning)':'var(--danger)';
@@ -2642,7 +2738,8 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
 async function printWorkerPayslip(uid, name, preloaded) {
   const now = new Date();
   const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
-  const daysElapsed = now.getDate(), daysInMonth = new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+  const daysElapsed = countWorkDays(now.getFullYear(), now.getMonth(), now.getDate());
+  const daysInMonth = countWorkDays(now.getFullYear(), now.getMonth(), new Date(now.getFullYear(),now.getMonth()+1,0).getDate());
   const [userSnap, kpi, att] = await Promise.all([
     db.collection('users').doc(uid).get().catch(()=>null),
     getKpiScore(uid), getAttendanceScore(uid)
@@ -3042,6 +3139,18 @@ async function renderCompanyOverview(ct, canAdd) {
           <div class="co-value-icon" style="background:rgba(255,149,0,0.10)"><i data-lucide="trending-up" style="width:20px;height:20px;stroke:#FF9500"></i></div>
           <div class="co-value-name">Growth</div>
           <div class="co-value-desc">We invest in continuous improvement — for the business and for each individual.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- System Credit -->
+    <div class="co-section">
+      <div class="co-credit-card">
+        <div class="co-credit-icon"><i data-lucide="code-2" style="width:18px;height:18px;stroke:var(--primary-light)"></i></div>
+        <div class="co-credit-body">
+          <div class="co-credit-title">Operations System</div>
+          <div class="co-credit-sub">Developed by <strong>Neil Barro</strong> &nbsp;·&nbsp; v9.4</div>
+          <div class="co-credit-note">Internal platform for operations, attendance, KPIs, finance, and team management.</div>
         </div>
       </div>
     </div>
