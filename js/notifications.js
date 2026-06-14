@@ -309,14 +309,15 @@ window.Notifs = (() => {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().slice(0, 10);
 
+    const DONE_STATUSES = ['done','approved','archived'];
     const snap = await db.collection('tasks')
-      .where('assignedTo', '==', uid)
+      .where('assignedTo', 'array-contains', uid)
       .where('dueDate', '==', tomorrowStr)
-      .where('status', '!=', 'done')
-      .get();
+      .get().catch(() => ({ docs: [] }));
 
     snap.docs.forEach(d => {
       const task = d.data();
+      if (DONE_STATUSES.includes(task.status)) return; // skip completed tasks
       send(uid, {
         title: '⏰ Task Due Tomorrow',
         body:  `"${task.title}" is due tomorrow.`,

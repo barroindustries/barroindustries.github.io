@@ -268,8 +268,9 @@ window.renderTeamTab = async function() {
     <div id="team-grid"></div>
   `;
 
-  const snap = await db.collection('users').get();
-  const viewingAsPartner = typeof isPartner === 'function' && isPartner();
+  const snap = typeof dbCachedGet === 'function'
+    ? await dbCachedGet('users', () => db.collection('users').get(), 60000)
+    : await db.collection('users').get();
   const users = snap.docs.map(d=>({id:d.id,...d.data()}))
     .filter(u => {
       // Always hide other partners from everyone
@@ -536,7 +537,9 @@ window.renderAttendancePage = async function() {
   let viewMonth = now.getMonth();
 
   if (pres) {
-    const usersSnap = await db.collection('users').get();
+    const usersSnap = typeof dbCachedGet === 'function'
+      ? await dbCachedGet('users', () => db.collection('users').get(), 60000)
+      : await db.collection('users').get();
     const empList = usersSnap.docs.map(d=>({id:d.id,...d.data()}))
       .filter(u => u.role !== 'partner');
     const sel = document.getElementById('att-emp-select');

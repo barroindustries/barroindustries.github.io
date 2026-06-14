@@ -17,8 +17,10 @@ const TASK_STATUSES = [
   { value:'brainstorm',   label:'Brainstorming',         badge:'badge-purple' },
   { value:'in-progress',  label:'In Progress',           badge:'badge-blue'   },
   { value:'submitted',    label:'Submitted for Review',  badge:'badge-orange' },
+  { value:'review',       label:'In Review',             badge:'badge-orange' }, // alias for submitted
   { value:'returned',     label:'Returned for Revision', badge:'badge-red'    },
   { value:'approved',     label:'Approved',              badge:'badge-green'  },
+  { value:'done',         label:'Done',                  badge:'badge-green'  },
   { value:'on-hold',      label:'On Hold',               badge:'badge-orange' },
   { value:'archived',     label:'Archived',              badge:'badge-gray'   },
 ];
@@ -211,7 +213,9 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
 
   wrap.innerHTML = '<div class="loading-placeholder">Loading…</div>';
   try {
-    const snap  = await db.collection('tasks').get();
+    const snap  = typeof dbCachedGet==='function'
+      ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000)
+      : await db.collection('tasks').get();
     const tasks = snap.docs.map(d=>normTask(d.data(),d.id)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     if (!tasks.length) { wrap.innerHTML='<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks yet</h4></div>'; return; }
 
@@ -249,7 +253,9 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
     snap = await db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
       .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get());
   } else if (isPriv||filter==='all') {
-    snap = await db.collection('tasks').get();
+    snap = typeof dbCachedGet==='function'
+      ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000)
+      : await db.collection('tasks').get();
   } else {
     snap = await db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
       .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get());
@@ -449,6 +455,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
     await db.collection('tasks').doc(taskId).update({status:newStatus,lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()});
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     await notifyTaskInvolved(t,{title:'📋 Task Status Updated',body:`"${t.title}" → ${statusLabel(newStatus)} (${actorName})`,icon:'📋',type:'task_status',taskId},currentUser.uid);
     Notifs.showToast(`Status → ${statusLabel(newStatus)}`);
     closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
@@ -458,6 +465,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
     await db.collection('tasks').doc(taskId).update({status:'review',submittedBy:currentUser.uid,submittedByName:actorName,submittedAt:firebase.firestore.FieldValue.serverTimestamp(),lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()});
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     await notifyTaskInvolved(t,{title:'📤 Task Submitted for Review',body:`"${t.title}" submitted by ${actorName}`,icon:'📤',type:'task_submitted',taskId},currentUser.uid);
     Notifs.showToast('Submitted for review!');
     closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
@@ -669,6 +677,7 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
       await Notifs.send(a.uid,{title:'📌 New Task Assigned',body:`"${title}" assigned by ${creatorName}`,icon:'📌',type:'task_assigned'});
     }
     await Notifs.sendToOwner({title:'📌 New Task Created',body:`${creatorName} created "${title}"`,icon:'📌',type:'task_created'});
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     closeModal(); Notifs.showToast('Task created!');
     renderTasks(currentUser,currentRole,document.getElementById('t-dept')?.value||'');
   });
@@ -4319,6 +4328,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.rt-approve-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           await db.collection('tasks').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
           const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
           if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await notifyTaskInvolved(t2,{title:'✅ Task Approved',body:`"${btn.dataset.name}" has been approved!`,icon:'✅',type:'task_status'},currentUser.uid);}
           Notifs.showToast(`"${btn.dataset.name}" approved!`);
@@ -4328,6 +4338,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.rt-reject-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           await db.collection('tasks').doc(btn.dataset.id).update({ status:'in-progress', lastModifiedBy:currentUser.uid, lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
           const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
           if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await notifyTaskInvolved(t2,{title:'🔁 Task Sent Back',body:`"${btn.dataset.name}" was sent back for revision.`,icon:'🔁',type:'task_status'},currentUser.uid);}
           Notifs.showToast(`"${btn.dataset.name}" sent back for revision.`);

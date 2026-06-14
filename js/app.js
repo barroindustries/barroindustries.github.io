@@ -181,6 +181,11 @@ async function loadUserProfile(user) {
     } else {
       currentDepts = [];
     }
+    // Expose state on window so inline onclick handlers in templates can access them
+    window.currentUser  = currentUser;
+    window.currentRole  = currentRole;
+    window.currentDepts = currentDepts;
+    window.userProfile  = userProfile;
     applyUserUI();
   } catch(err) {
     console.error('Profile load error:', err);
@@ -546,7 +551,7 @@ document.addEventListener('DOMContentLoaded', () => {
 function initPullToRefresh() {
   const scrollEl = document.getElementById('main-content') || document.documentElement;
   const THRESHOLD = 72;
-  let startY = 0, startScrollTop = 0, ptr = null, pulling = false, triggered = false;
+  let startY = 0, ptr = null, pulling = false, triggered = false;
 
   function getScrollTop() { return scrollEl.scrollTop || document.documentElement.scrollTop || 0; }
 
@@ -615,10 +620,18 @@ function initPullToRefresh() {
 // ── Navigate ──────────────────────────────────────
 function navigateTo(page) {
   currentPage = page;
+  window.currentPage = page;
   setActiveNav(page);
   // Close task fullscreen panel if open
   if (typeof window.closeTaskPanel === 'function') window.closeTaskPanel();
   const c = document.getElementById('page-content');
+  // Destroy any Chart.js instances before wiping the DOM to prevent memory leaks
+  if (window.Chart) {
+    c.querySelectorAll('canvas').forEach(canvas => {
+      const existing = Chart.getChart(canvas);
+      if (existing) existing.destroy();
+    });
+  }
   c.innerHTML = '<div class="loading-placeholder">Loading…</div>';
 
   // dept: prefix for dual dept tabs
@@ -770,18 +783,20 @@ async function renderPartnerDashboard() {
   } catch(e) { console.warn('[partnerDashboard]',e); }
 }
 
+// Single clock interval — cleared before each new dashboard render
+let _liveDateInterval = null;
 function liveDateTime(elId) {
+  if (_liveDateInterval) { clearInterval(_liveDateInterval); _liveDateInterval = null; }
   const update = () => {
     const el = document.getElementById(elId);
-    if (!el) return;
-    const now = new Date();
-    el.textContent = now.toLocaleString('en-PH', {
+    if (!el) { clearInterval(_liveDateInterval); _liveDateInterval = null; return; }
+    el.textContent = new Date().toLocaleString('en-PH', {
       weekday:'long', year:'numeric', month:'long', day:'numeric',
       hour:'2-digit', minute:'2-digit', second:'2-digit'
     });
   };
   update();
-  return setInterval(update, 1000);
+  _liveDateInterval = setInterval(update, 1000);
 }
 
 async function renderPresidentDashboard() {
@@ -791,10 +806,10 @@ async function renderPresidentDashboard() {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
     const todayStr = new Date().toISOString().slice(0,10);
     const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap] = await Promise.all([
-      dbCachedGet('users', () => db.collection('users').get(), 60000),
-      safeGet(db.collection('tasks')),
-      safeGet(db.collection('submissions')),
-      safeGet(db.collection('quotes')),
+      dbCachedGet('users',         () => db.collection('users').get(),                                    60000),
+      dbCachedGet('tasks-all',     () => db.collection('tasks').get(),                                    30000),
+      dbCachedGet('submissions',   () => db.collection('submissions').get(),                              30000),
+      dbCachedGet('quotes-all',    () => db.collection('quotes').get(),                                   30000),
       safeGet(db.collection('approval_requests').where('status','==','pending')),
       safeGet(db.collection('cash_advances').where('status','==','pending')),
       safeGet(db.collection('attendance_extensions').where('status','==','pending')),
@@ -961,12 +976,15 @@ async function renderEmployeeDashboard() {
   try {
     const now      = new Date();
     const todayStr = now.toISOString().slice(0,10);
-    const [myTasksSnap, attSnap, caSnap, extSnap] = await Promise.all([
-      db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
-        .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get()),
-      db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).get(),
-      db.collection('cash_advances').where('userId','==',currentUser.uid).get().catch(()=>({docs:[]})),
-      db.collection('attendance_extensions').doc(`${currentUser.uid}_${todayStr}`).get().catch(()=>({exists:false,data:()=>({})}))
+    const uid = currentUser.uid;
+    const [myTasksSnap, attSnap, caSnap, extSnap, kpiProfile, monthAttScore] = await Promise.all([
+      db.collection('tasks').where('assignedTo','array-contains', uid).get()
+        .catch(()=>db.collection('tasks').where('assignedTo','==', uid).get()),
+      db.collection('attendance').doc(uid).collection('records').doc(todayStr).get(),
+      db.collection('cash_advances').where('userId','==', uid).get().catch(()=>({docs:[]})),
+      db.collection('attendance_extensions').doc(`${uid}_${todayStr}`).get().catch(()=>({exists:false,data:()=>({})})),
+      db.collection('kpi_targets').doc(uid).get().catch(()=>null),
+      getAttendanceScore(uid)
     ]);
 
     const DONE_TASK_STATUSES = ['approved','archived','done'];
@@ -995,7 +1013,6 @@ async function renderEmployeeDashboard() {
     const nowHour      = now.getHours();
     const inWindow     = nowHour >= 7 && nowHour < 9;   // normal 2-hr window
     const beforeWindow = nowHour < 7;
-    const afterWindow  = nowHour >= 9;
     const extData      = extSnap.exists ? extSnap.data() : null;
     const extApproved  = extData?.status === 'approved' && extData?.expiresAt
                            && now < extData.expiresAt.toDate();
@@ -1010,7 +1027,6 @@ async function renderEmployeeDashboard() {
 
     // KPI computation
     const taskScore = myTasks.length > 0 ? Math.round((doneTasks.length / myTasks.length) * 100) : 0;
-    const kpiProfile = await db.collection('kpi_targets').doc(currentUser.uid).get().catch(()=>null);
     const kpiTarget  = kpiProfile?.exists ? kpiProfile.data() : {};
     const targetScore = kpiTarget.targetScore || 80;
     const kpiColor = taskScore >= targetScore ? 'var(--success)' : taskScore >= 60 ? 'var(--warning)' : 'var(--danger)';
@@ -1022,8 +1038,7 @@ async function renderEmployeeDashboard() {
       return tb - ta;
     });
 
-    // Monthly attendance for Current Standing card
-    const monthAttScore = await getAttendanceScore(currentUser.uid);
+    // Monthly attendance for Current Standing card (fetched in Promise.all above)
     const daysElapsedDash = now.getDate();
     const workDaysDash = Math.max(1, daysElapsedDash);
     const attDaysFull = Math.round(monthAttScore * workDaysDash);
@@ -2375,6 +2390,8 @@ async function renderProgressReports() {
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const tasks = tasksSnap.docs.map(d=>d.data());
+    const DONE_TASK_STATUSES = ['done','approved','archived'];
+    const isDoneTask = t => DONE_TASK_STATUSES.includes(t.status);
 
     // Group by dept
     const deptMap = {};
@@ -2402,9 +2419,9 @@ async function renderProgressReports() {
     c.innerHTML = `
       <div class="page-header"><h2>📈 Progress Reports & KPIs</h2><span class="badge badge-blue">${monthLabel}</span></div>
       <div class="kpi-row">
-        <div class="kpi-card accent"><div class="kpi-label">All Tasks (Total)</div><div class="kpi-value">${tasks.length}</div><div class="kpi-sub">${tasks.filter(t=>t.status==='done').length} done</div></div>
-        <div class="kpi-card green"><div class="kpi-label">This Month Tasks</div><div class="kpi-value">${monthTasks.length}</div><div class="kpi-sub">${monthTasks.filter(t=>t.status==='done').length} done</div></div>
-        <div class="kpi-card"><div class="kpi-label">Overall KPI</div><div class="kpi-value">${tasks.length?Math.round(tasks.filter(t=>t.status==='done').length/tasks.length*100):0}%</div></div>
+        <div class="kpi-card accent"><div class="kpi-label">All Tasks (Total)</div><div class="kpi-value">${tasks.length}</div><div class="kpi-sub">${tasks.filter(isDoneTask).length} done</div></div>
+        <div class="kpi-card green"><div class="kpi-label">This Month Tasks</div><div class="kpi-value">${monthTasks.length}</div><div class="kpi-sub">${monthTasks.filter(isDoneTask).length} done</div></div>
+        <div class="kpi-card"><div class="kpi-label">Overall KPI</div><div class="kpi-value">${tasks.length?Math.round(tasks.filter(isDoneTask).length/tasks.length*100):0}%</div></div>
       </div>
       <div class="subtab-bar" id="progress-top-tabs" style="margin-bottom:16px">
         <button class="subtab-btn active" data-ptab="dept">By Department</button>
@@ -2419,9 +2436,9 @@ async function renderProgressReports() {
               <thead><tr><th>Member</th><th>Department</th><th>This Month</th><th>All Time</th><th>KPI</th><th></th></tr></thead>
               <tbody>
                 ${users.filter(u=>u.role!=='partner').map(u=>{
-                  const uDone   = tasks.filter(t=>isAssigned(t,u.id)&&t.status==='done').length;
+                  const uDone   = tasks.filter(t=>isAssigned(t,u.id)&&isDoneTask(t)).length;
                   const uTotal  = tasks.filter(t=>isAssigned(t,u.id)).length;
-                  const uMDone  = monthTasks.filter(t=>isAssigned(t,u.id)&&t.status==='done').length;
+                  const uMDone  = monthTasks.filter(t=>isAssigned(t,u.id)&&isDoneTask(t)).length;
                   const uMTotal = monthTasks.filter(t=>isAssigned(t,u.id)).length;
                   const uPct    = uTotal ? Math.round(uDone/uTotal*100) : 0;
                   const depts   = Array.isArray(u.departments)&&u.departments.length ? u.departments.join(', ') : u.department||'—';
@@ -2454,14 +2471,14 @@ async function renderProgressReports() {
     Object.entries(deptMap).forEach(([dept, data]) => {
       const cfg = DEPARTMENTS[dept]||{icon:'🗂️',color:'var(--primary-light)'};
       const total = data.tasks.length;
-      const done  = data.tasks.filter(t=>t.status==='done').length;
+      const done  = data.tasks.filter(isDoneTask).length;
       const pct   = total ? Math.round(done/total*100) : 0;
       // month-only stats for this dept
       const mTasks = data.tasks.filter(t => {
         const ts = t.createdAt?.seconds ? new Date(t.createdAt.seconds*1000) : null;
         return ts && `${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}` === monthStr;
       });
-      const mDone = mTasks.filter(t=>t.status==='done').length;
+      const mDone = mTasks.filter(isDoneTask).length;
       const mPct  = mTasks.length ? Math.round(mDone/mTasks.length*100) : 0;
       deptView.innerHTML += `
         <div class="card" style="margin-bottom:12px">
@@ -2490,7 +2507,7 @@ async function renderProgressReports() {
                   ${data.tasks.slice(0,10).map(t=>`<tr>
                     <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.title}</td>
                     <td style="font-size:12px">${t.assignedToName||'—'}</td>
-                    <td><span class="badge ${t.status==='done'?'badge-green':'badge-blue'}">${t.status||'open'}</span></td>
+                    <td><span class="badge ${isDoneTask(t)?'badge-green':t.status==='review'?'badge-orange':'badge-blue'}">${t.status||'open'}</span></td>
                     <td style="font-size:11px;color:var(--text-muted)">${t.dueDate||'—'}</td>
                   </tr>`).join('')}
                   ${data.tasks.length>10?`<tr><td colspan="4" style="font-size:12px;color:var(--text-muted);text-align:center">+ ${data.tasks.length-10} more tasks</td></tr>`:''}
@@ -2502,9 +2519,9 @@ async function renderProgressReports() {
                 <thead><tr><th>Member</th><th>All Tasks Done</th><th>This Month</th><th>KPI</th><th></th></tr></thead>
                 <tbody>
                   ${data.members.map(u=>{
-                    const uDone  = tasks.filter(t=>isAssigned(t,u.id)&&t.status==='done').length;
+                    const uDone  = tasks.filter(t=>isAssigned(t,u.id)&&isDoneTask(t)).length;
                     const uTotal = tasks.filter(t=>isAssigned(t,u.id)).length;
-                    const uMDone = monthTasks.filter(t=>isAssigned(t,u.id)&&t.status==='done').length;
+                    const uMDone = monthTasks.filter(t=>isAssigned(t,u.id)&&isDoneTask(t)).length;
                     const uMTotal= monthTasks.filter(t=>isAssigned(t,u.id)).length;
                     const uPct   = uTotal ? Math.round(uDone/uTotal*100) : 0;
                     return `<tr>
@@ -3347,10 +3364,24 @@ async function renderTeam() {
     <div id="team-table"><div class="loading-placeholder">Loading…</div></div>`;
   const snap=await dbCachedGet('users', () => db.collection('users').get(), 60000);
   const users=snap.docs.map(d=>({id:d.id,...d.data()}));
+  const now = Date.now();
+  const onlineThresholdMs = 3 * 60 * 1000; // 3 min = online
+  const recentThresholdMs = 30 * 60 * 1000; // 30 min = recently active
+  function getPresence(u) {
+    const ls = u.lastSeen?.toDate ? u.lastSeen.toDate() : null;
+    if (!ls) return { dot: 'gray', label: 'Unknown' };
+    const diff = now - ls.getTime();
+    if (diff < onlineThresholdMs) return { dot: 'green', label: 'Online' };
+    if (diff < recentThresholdMs) return { dot: 'orange', label: Math.floor(diff/60000)+'m ago' };
+    const hrs = Math.floor(diff/3600000);
+    const days = Math.floor(diff/86400000);
+    return { dot: 'gray', label: days>0?days+'d ago':hrs+'h ago' };
+  }
   document.getElementById('team-table').innerHTML=`<div class="card"><div class="table-wrap"><table class="data-table">
-    <thead><tr><th>Employee</th><th>Username</th><th>ID</th><th>Role</th><th>Departments</th><th>Base</th><th>Net</th><th></th></tr></thead>
-    <tbody>${users.map(u=>{const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);const depts=(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';return `<tr>
+    <thead><tr><th>Employee</th><th>Status</th><th>Username</th><th>ID</th><th>Role</th><th>Departments</th><th>Base</th><th>Net</th><th></th></tr></thead>
+    <tbody>${users.map(u=>{const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);const depts=(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';const pres=getPresence(u);return `<tr>
       <td>${u.displayName||u.email}</td>
+      <td><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)"><span style="width:8px;height:8px;border-radius:50%;background:${pres.dot==='green'?'#30D158':pres.dot==='orange'?'#FF9F0A':'#636366'};flex-shrink:0${pres.dot==='green'?';box-shadow:0 0 0 2px rgba(48,209,88,0.3)':''};display:inline-block"></span>${pres.label}</span></td>
       <td>${u.username?`<code style="font-size:11px">${u.username}</code>`:'<span style="color:var(--text-muted);font-size:11px">email login</span>'}</td>
       <td><code style="font-size:11px">${u.employeeId||'—'}</code></td>
       <td><span class="badge badge-blue">${ROLES[u.role]?.label||u.role}</span></td>
