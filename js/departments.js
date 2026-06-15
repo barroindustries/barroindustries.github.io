@@ -3803,7 +3803,7 @@ function openITTicketModal(ticket, currentUser, canEdit, onRefresh) {
 
 window.renderBrilliantSteel = async function(currentUser, currentRole, subtab = 'Dashboard') {
   const c = deptContainer();
-  const tabs = ['Dashboard','Quote Builder','Quotations Summary','Client Data','Files'];
+  const tabs = ['Dashboard','Quotations Summary','Client Data','Files'];
   c.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
       <span style="font-size:22px">⚙️</span>
@@ -3831,9 +3831,8 @@ async function loadBSContent(currentUser, currentRole, sub) {
   const content = document.getElementById('bs-content');
   switch(sub) {
     case 'Dashboard':          await renderBSDashboard(content, currentUser, currentRole); break;
-    case 'Quote Builder':      renderBSQuoteBuilder(content, currentUser, currentRole); break;
     case 'Quotations Summary': await renderBSQuotationsSummary(content, currentUser, currentRole); break;
-    case 'Client Data':        renderBSClientData(content); break;
+    case 'Client Data':        await renderBSClientData(content, currentUser, currentRole); break;
     case 'Files':              renderBSFiles(content, currentUser, currentRole); break;
   }
 }
@@ -3841,19 +3840,23 @@ async function loadBSContent(currentUser, currentRole, sub) {
 function renderBSFiles(container, currentUser, currentRole) {
   container.innerHTML = `
     <div class="subtab-bar" id="bs-files-tabs" style="margin-bottom:14px">
-      <button class="subtab-btn active" data-sub="Images">🖼 Images</button>
+      <button class="subtab-btn active" data-sub="Quotations">📋 Quotations</button>
+      <button class="subtab-btn" data-sub="Images">🖼 Images</button>
       <button class="subtab-btn" data-sub="Drawings">📐 Drawings</button>
       <button class="subtab-btn" data-sub="Documents">📄 Documents</button>
     </div>
     <div id="bs-files-content"></div>
   `;
-  const load = sub => {
+  const load = async sub => {
     const fc = document.getElementById('bs-files-content');
-    const collectionKey = `bs_files_${sub.toLowerCase()}`;
-    fc.innerHTML = renderFileCollection(`${sub}`, `bs-${sub.toLowerCase()}`, currentRole);
-    bindFileCollection(`bs-${sub.toLowerCase()}`, currentUser, 'Brilliant Steel', sub);
+    if (sub === 'Quotations') {
+      await renderBSQuotationFiles(fc, currentUser, currentRole);
+    } else {
+      fc.innerHTML = renderFileCollection(`${sub}`, `bs-${sub.toLowerCase()}`, currentRole);
+      bindFileCollection(`bs-${sub.toLowerCase()}`, currentUser, 'Brilliant Steel', sub);
+    }
   };
-  load('Images');
+  load('Quotations');
   container.querySelectorAll('#bs-files-tabs .subtab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       container.querySelectorAll('#bs-files-tabs .subtab-btn').forEach(b=>b.classList.remove('active'));
@@ -3861,6 +3864,93 @@ function renderBSFiles(container, currentUser, currentRole) {
       load(btn.dataset.sub);
     });
   });
+}
+
+async function renderBSQuotationFiles(container, currentUser, currentRole) {
+  container.innerHTML = '<div class="loading-placeholder">Loading quotation files…</div>';
+  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'employee';
+  try {
+    const snap = isPrivileged
+      ? await db.collection('bs_quotes').orderBy('createdAt','desc').get()
+      : await db.collection('bs_quotes').where('createdBy','==',currentUser.uid).orderBy('createdAt','desc').get();
+    const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
+
+    // Group quotes by client name (folder per client)
+    const clientFolders = {};
+    quotes.forEach(q => {
+      const key = (q.clientName||'').trim() || 'Unknown Client';
+      if (!clientFolders[key]) clientFolders[key] = [];
+      clientFolders[key].push(q);
+    });
+
+    const folders = Object.entries(clientFolders).sort((a,b) => {
+      const latestA = Math.max(...a[1].map(q=>q.createdAt?.seconds||0));
+      const latestB = Math.max(...b[1].map(q=>q.createdAt?.seconds||0));
+      return latestB - latestA;
+    });
+
+    if (!folders.length) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">📁</div><h4>No quotation files yet</h4><p style="color:var(--text-muted);font-size:13px">Filed quotations will appear here, organized by client.</p></div>';
+      return;
+    }
+
+    container.innerHTML = `
+      <div style="margin-bottom:12px">
+        <input id="bs-qfile-search" placeholder="Search client or quote number…" class="ms-input" style="max-width:300px"/>
+      </div>
+      <div id="bs-qfile-folders" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px"></div>
+    `;
+
+    const renderFolders = (list) => {
+      const grid = container.querySelector('#bs-qfile-folders');
+      if (!list.length) { grid.innerHTML = '<p style="color:var(--text-muted);font-size:13px">No results.</p>'; return; }
+      grid.innerHTML = list.map(([clientName, qs]) => {
+        const total = qs.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+        const latestDate = qs[0].createdAt?.toDate?.()?.toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'})||'';
+        return `
+          <div class="card bs-qfolder-card" style="cursor:pointer" onclick="this.querySelector('.bs-qfolder-body').style.display=this.querySelector('.bs-qfolder-body').style.display==='block'?'none':'block'">
+            <div class="card-header" style="gap:10px">
+              <div style="font-size:28px;flex-shrink:0">📁</div>
+              <div style="flex:1;min-width:0">
+                <div style="font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${clientName}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${qs.length} file${qs.length!==1?'s':''} · ₱${total.toLocaleString()} · Last: ${latestDate}</div>
+              </div>
+            </div>
+            <div class="bs-qfolder-body" style="display:none;padding:10px 16px 14px;border-top:1px solid var(--border)">
+              ${qs.map(q => {
+                const ts = q.createdAt?.toDate?.()?.toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'})||'';
+                const status = q.status||q.approvalStatus||'draft';
+                const badge = status==='filed'||status==='approved'?'badge-green':status==='pending_approval'||status==='pending_review'||status==='sent'?'badge-orange':status==='rejected'?'badge-red':'badge-gray';
+                return `
+                  <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+                    <span style="font-size:18px">📄</span>
+                    <div style="flex:1;min-width:0">
+                      <div style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${q.quoteNumber||q.id.slice(-8)}</div>
+                      <div style="font-size:11px;color:var(--text-muted)">${ts}${isPrivileged&&q.agentName?' · '+q.agentName:''}</div>
+                    </div>
+                    <div style="text-align:right;flex-shrink:0">
+                      <div style="font-size:12px;font-weight:700">₱${(q.total||q.grandTotal||0).toLocaleString()}</div>
+                      <span class="badge ${badge}" style="font-size:10px">${status}</span>
+                    </div>
+                  </div>`;
+              }).join('')}
+            </div>
+          </div>`;
+      }).join('');
+    };
+
+    renderFolders(folders);
+
+    container.querySelector('#bs-qfile-search').addEventListener('input', e => {
+      const q = e.target.value.toLowerCase();
+      renderFolders(q ? folders.filter(([name, qs]) =>
+        name.toLowerCase().includes(q) ||
+        qs.some(qt => (qt.quoteNumber||'').toLowerCase().includes(q))
+      ) : folders);
+    });
+  } catch(err) {
+    container.innerHTML = `<div class="empty-state"><p>Error: ${err.message}</p></div>`;
+  }
 }
 
 async function renderBSDashboard(container, currentUser, currentRole) {
@@ -4467,40 +4557,69 @@ function renderBSQuoteBuilder(container, currentUser, currentRole) {
 // ── Brilliant Steel Quotations Summary ────────────
 async function renderBSQuotationsSummary(container, currentUser, currentRole) {
   const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
-  const snap = isPrivileged
+  // Sales dept employees can see all quotes (including partner-filed); partners only see their own
+  const canSeeAll = isPrivileged ||
+    (currentRole === 'employee' && (window.currentDepts||[]).includes('Sales'));
+  const isPartnerRole = currentRole === 'partner';
+  const snap = canSeeAll
     ? await db.collection('bs_quotes').get()
     : await db.collection('bs_quotes').where('createdBy','==',currentUser.uid).get();
-  const all = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-  const forApproval = all.filter(q=>q.approvalStatus==='pending_review'||q.status==='sent');
-  const approved    = all.filter(q=>q.approvalStatus==='approved');
-  const rejected    = all.filter(q=>q.approvalStatus==='rejected');
+  const all = snap.docs.map(d=>({id:d.id,...d.data()}))
+    // Partners cannot see records created by Sales (non-partner) users
+    .filter(q => !isPartnerRole || q.createdBy === currentUser.uid)
+    .sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+  const forApproval   = all.filter(q=>q.status==='pending_approval'||q.approvalStatus==='pending_review'||q.status==='sent');
+  const filed         = all.filter(q=>q.status==='filed'||q.approvalStatus==='approved');
+  const drafts        = all.filter(q=>!q.status||q.status==='draft');
+  const needsRevision = all.filter(q=>q.status==='needs_revision'||q.approvalStatus==='needs_revision');
+  const rejected      = all.filter(q=>q.approvalStatus==='rejected'||q.status==='rejected');
 
   const renderList = (quotes) => !quotes.length
     ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">📋</div><h4>No quotations here</h4></div>'
     : `<div class="card"><div class="table-wrap"><table class="data-table">
-        <thead><tr><th>Quote #</th><th>Client</th><th>Total</th><th>Agent</th><th>Status</th>${isPrivileged?'<th>Action</th>':''}</tr></thead>
-        <tbody>${quotes.map(q=>`<tr>
-          <td><code>${q.quoteNumber||q.id.slice(-8)}</code></td>
-          <td><strong>${q.clientName||'—'}</strong><div style="font-size:11px;color:var(--text-muted)">${q.clientCompany||''}</div></td>
-          <td>₱${fmt(q.total)}</td>
-          <td>${q.agentName||'—'}</td>
-          <td><span class="badge ${q.approvalStatus==='approved'?'badge-green':q.approvalStatus==='rejected'?'badge-red':'badge-orange'}">${q.approvalStatus||q.status||'draft'}</span></td>
-          ${isPrivileged?`<td style="display:flex;gap:6px">
-            ${q.approvalStatus==='pending_review'?`
-              <button class="btn-primary btn-sm bs-approve-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${q.clientName}" data-qno="${q.quoteNumber}">✅ Approve</button>
-              <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${q.clientName}" data-qno="${q.quoteNumber}">❌ Reject</button>
-            `:q.approvalStatus==='approved'?'<span style="color:var(--success);font-size:12px">Approved</span>':'<span style="color:var(--danger);font-size:12px">Rejected</span>'}
-          </td>`:''}
-        </tr>`).join('')}</tbody>
+        <thead><tr><th>Quote #</th><th>Client</th><th>Total</th><th>Agent</th><th>Status</th>${canSeeAll?'<th>Action</th>':''}</tr></thead>
+        <tbody>${quotes.map(q=>{
+          const status = q.status||q.approvalStatus||'draft';
+          const badge = status==='filed'||status==='approved'?'badge-green':status==='pending_approval'||status==='pending_review'||status==='sent'?'badge-orange':status==='rejected'?'badge-red':'badge-gray';
+          const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
+          return `<tr>
+            <td><code>${q.quoteNumber||q.id.slice(-8)}</code></td>
+            <td><strong>${q.clientName||'—'}</strong><div style="font-size:11px;color:var(--text-muted)">${q.clientCompany||''}</div></td>
+            <td>₱${fmt(q.total||q.grandTotal||0)}</td>
+            <td>${q.agentName||q.createdByName||'—'}</td>
+            <td>
+              <span class="badge ${badge}">${status}</span>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${ts}</div>
+            </td>
+            ${canSeeAll?`<td style="white-space:nowrap;display:flex;gap:6px">
+              ${(status==='pending_approval'||status==='pending_review'||status==='sent')?`
+                <button class="btn-primary btn-sm bs-approve-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${q.clientName||''}" data-qno="${q.quoteNumber||''}">✅ Approve</button>
+                <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${q.clientName||''}" data-qno="${q.quoteNumber||''}">❌ Reject</button>
+                <button class="btn-secondary btn-sm bs-edit-return-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${q.clientName||''}" data-qno="${q.quoteNumber||''}">✎ Edit &amp; Return</button>
+              `:(status==='filed'||status==='approved')?'<span style="color:var(--success);font-size:12px">✓ Filed</span>':'<span style="color:var(--danger);font-size:12px">Rejected</span>'}
+            </td>`:''}
+          </tr>`;
+        }).join('')}</tbody>
       </table></div></div>`;
 
+  const kpiRow = `
+    <div class="kpi-row" style="margin-bottom:14px">
+      <div class="kpi-card warn"><div class="kpi-label">Pending Approval</div><div class="kpi-value">${forApproval.length}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Filed / Approved</div><div class="kpi-value">${filed.length}</div></div>
+      <div class="kpi-card accent"><div class="kpi-label">Needs Revision</div><div class="kpi-value">${needsRevision.length}</div></div>
+      <div class="kpi-card red"><div class="kpi-label">Rejected</div><div class="kpi-value">${rejected.length}</div></div>
+    </div>`;
+
   container.innerHTML = `
-    <div class="subtab-bar" style="margin-top:0">
-      <button class="subtab-btn active" data-qsub="for-approval">For Approval (${forApproval.length})</button>
-      <button class="subtab-btn" data-qsub="approved">Approved (${approved.length})</button>
+    ${kpiRow}
+    <div class="subtab-bar" style="margin-top:0;flex-wrap:wrap">
+      <button class="subtab-btn active" data-qsub="filed">Filed / Approved (${filed.length})</button>
+      <button class="subtab-btn" data-qsub="for-approval">Pending Approval (${forApproval.length})</button>
+      ${needsRevision.length?`<button class="subtab-btn" data-qsub="needs-revision" style="border-color:var(--warning);color:var(--warning)">↩ Needs Revision (${needsRevision.length})</button>`:''}
+      <button class="subtab-btn" data-qsub="drafts">Drafts (${drafts.length})</button>
       <button class="subtab-btn" data-qsub="rejected">Rejected (${rejected.length})</button>
     </div>
-    <div id="qs-content">${renderList(forApproval)}</div>
+    <div id="qs-content">${renderList(filed)}</div>
   `;
 
   const qsContent = container.querySelector('#qs-content');
@@ -4509,7 +4628,8 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
       container.querySelectorAll('[data-qsub]').forEach(b=>b.classList.remove('active'));
       btn.classList.add('active');
       const which = btn.dataset.qsub;
-      qsContent.innerHTML = renderList(which==='for-approval'?forApproval:which==='approved'?approved:rejected);
+      const listMap = { 'filed': filed, 'for-approval': forApproval, 'drafts': drafts, 'rejected': rejected, 'needs-revision': needsRevision };
+      qsContent.innerHTML = renderList(listMap[which]||[]);
       bindQuoteActions(qsContent, currentUser, currentRole, container);
     });
   });
@@ -4520,51 +4640,185 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
   el.querySelectorAll('.bs-approve-btn').forEach(btn => {
     btn.addEventListener('click', async e => {
       const b = e.currentTarget;
-      await db.collection('bs_quotes').doc(b.dataset.id).update({ approvalStatus: 'approved', approvedAt: firebase.firestore.FieldValue.serverTimestamp(), approvedBy: currentUser.uid });
+      await db.collection('bs_quotes').doc(b.dataset.id).update({
+        status: 'filed', approvalStatus: 'approved',
+        approvedAt: firebase.firestore.FieldValue.serverTimestamp(), approvedBy: currentUser.uid
+      });
       await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'approved'})));
-      if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'✅ Quote Approved!', body:`Quotation "${b.dataset.qno}" for ${b.dataset.name} was approved.`, icon:'✅', type:'quote_approved' });
-      Notifs.showToast('Quote approved!');
+      if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'✅ Quote Approved!', body:`Quotation "${b.dataset.qno}" for ${b.dataset.name} was approved and filed.`, icon:'✅', type:'quote_approved' });
+      Notifs.showToast('Quote approved and filed!');
       renderBSQuotationsSummary(container, currentUser, currentRole);
     });
   });
   el.querySelectorAll('.bs-reject-btn').forEach(btn => {
     btn.addEventListener('click', async e => {
       const b = e.currentTarget;
-      await db.collection('bs_quotes').doc(b.dataset.id).update({ approvalStatus: 'rejected', rejectedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      await db.collection('bs_quotes').doc(b.dataset.id).update({
+        status: 'rejected', approvalStatus: 'rejected',
+        rejectedAt: firebase.firestore.FieldValue.serverTimestamp(), rejectedBy: currentUser.uid
+      });
       await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'rejected'})));
       if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'❌ Quote Not Approved', body:`Quotation "${b.dataset.qno}" for ${b.dataset.name} was not approved.`, icon:'❌', type:'quote_rejected' });
       Notifs.showToast('Quote rejected.');
       renderBSQuotationsSummary(container, currentUser, currentRole);
     });
   });
+  el.querySelectorAll('.bs-edit-return-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      const b = e.currentTarget;
+      const snap = await db.collection('bs_quotes').doc(b.dataset.id).get();
+      const q = snap.data();
+      openModal(`✎ Edit Quote — ${b.dataset.qno}`, `
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Edit this quotation and return it to the submitter for filing.</p>
+        <div class="form-group"><label>President's Notes / Feedback</label>
+          <textarea id="pres-notes" rows="4" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Explain what changes are needed…">${q.presidentNotes||''}</textarea>
+        </div>
+        <div class="form-group"><label>Adjusted Total (₱) — optional</label>
+          <input id="pres-total" type="number" value="${q.total||q.grandTotal||0}" style="width:100%"/>
+        </div>
+      `, `
+        <button class="btn-primary" id="pres-return-btn">↩ Return to Submitter</button>
+        <button class="btn-secondary" onclick="closeModal()">Cancel</button>
+      `);
+      document.getElementById('pres-return-btn').addEventListener('click', async () => {
+        const notes = document.getElementById('pres-notes').value.trim();
+        const newTotal = parseFloat(document.getElementById('pres-total').value)||q.total||0;
+        await db.collection('bs_quotes').doc(b.dataset.id).update({
+          status: 'needs_revision',
+          approvalStatus: 'needs_revision',
+          presidentNotes: notes,
+          total: newTotal,
+          returnedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          returnedBy: currentUser.uid
+        });
+        if (b.dataset.by) await Notifs.send(b.dataset.by, {
+          title: '↩ Quote Returned for Revision',
+          body: `"${b.dataset.qno}" for ${b.dataset.name} was reviewed and returned. Please check the notes and re-submit.`,
+          icon: '✎', type: 'quote_returned'
+        });
+        closeModal();
+        Notifs.showToast('Quote returned to submitter.');
+        renderBSQuotationsSummary(container, currentUser, currentRole);
+      });
+    });
+  });
 }
 
 // ── Brilliant Steel Client Data ────────────────────
-function renderBSClientData(container) {
-  const sheetId = window.SHEETS_CONFIG?.SPREADSHEET_ID;
-  const sheetUrl = sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit?usp=sharing` : '';
-  container.innerHTML = `
-    <div class="page-header"><h2>👤 Client Data</h2>
-      ${sheetUrl?`<a href="${sheetUrl}" target="_blank" class="btn-primary btn-sm">↗ Open in Google Sheets</a>`:''}
-    </div>
-    ${sheetUrl?`
-      <div class="card" style="margin-bottom:14px">
-        <div class="card-body" style="padding:0;border-radius:10px;overflow:hidden;position:relative">
-          <iframe src="${sheetUrl.replace('/edit','/htmlview')}&rm=minimal"
-            style="width:100%;height:480px;border:none"
-            title="Brilliant Steel Clients"></iframe>
+async function renderBSClientData(container, currentUser, currentRole) {
+  container.innerHTML = '<div class="loading-placeholder">Loading client data…</div>';
+  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'employee';
+  try {
+    const snap = isPrivileged
+      ? await db.collection('bs_quotes').orderBy('createdAt','desc').get()
+      : await db.collection('bs_quotes').where('createdBy','==',currentUser.uid).orderBy('createdAt','desc').get();
+    const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
+
+    // Build unique client map
+    const clientMap = {};
+    quotes.forEach(q => {
+      const key = (q.clientName||'').trim().toLowerCase() || q.id;
+      if (!clientMap[key]) {
+        clientMap[key] = {
+          name: q.clientName||'Unnamed',
+          company: q.clientCompany||'',
+          address: q.clientAddress||'',
+          contact: q.clientContact||q.clientPhone||'',
+          email: q.clientEmail||'',
+          tin: q.clientTin||'',
+          quotes: [],
+          totalValue: 0,
+          lastActivity: q.createdAt?.seconds||0
+        };
+      }
+      clientMap[key].quotes.push(q);
+      clientMap[key].totalValue += (q.total||q.grandTotal||0);
+      if ((q.createdAt?.seconds||0) > clientMap[key].lastActivity) {
+        clientMap[key].lastActivity = q.createdAt?.seconds||0;
+        clientMap[key].email = q.clientEmail || clientMap[key].email;
+        clientMap[key].contact = q.clientContact||q.clientPhone || clientMap[key].contact;
+        clientMap[key].company = q.clientCompany || clientMap[key].company;
+        clientMap[key].address = q.clientAddress || clientMap[key].address;
+        clientMap[key].tin = q.clientTin || clientMap[key].tin;
+      }
+    });
+
+    const clients = Object.values(clientMap).sort((a,b) => b.lastActivity - a.lastActivity);
+
+    if (!clients.length) {
+      container.innerHTML = '<div class="empty-state"><div class="empty-icon">👤</div><h4>No client data yet</h4><p style="color:var(--text-muted);font-size:13px">Clients will appear here once quotations are filed.</p></div>';
+      return;
+    }
+
+    let searchVal = '';
+    const render = (list) => {
+      const wrap = container.querySelector('#bs-client-list');
+      if (!wrap) return;
+      if (!list.length) { wrap.innerHTML = '<div class="empty-state"><p>No clients match your search.</p></div>'; return; }
+      wrap.innerHTML = list.map((cl,i) => `
+        <div class="card" style="margin-bottom:10px">
+          <div class="card-header" style="cursor:pointer;user-select:none" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+            <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
+              <div style="width:38px;height:38px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-weight:800;color:white;font-size:15px;flex-shrink:0">${(cl.name[0]||'?').toUpperCase()}</div>
+              <div style="min-width:0">
+                <div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${cl.name}</div>
+                ${cl.company?`<div style="font-size:11px;color:var(--text-muted)">${cl.company}</div>`:''}
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+              <span class="badge badge-blue">${cl.quotes.length} quote${cl.quotes.length!==1?'s':''}</span>
+              <span style="font-size:13px;font-weight:700;color:var(--success)">₱${cl.totalValue.toLocaleString()}</span>
+              <span style="color:var(--text-muted);font-size:16px">›</span>
+            </div>
+          </div>
+          <div class="card-body" style="display:none;padding-top:0">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-bottom:12px;padding-top:10px;border-top:1px solid var(--border)">
+              ${cl.address?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">Address</div><div style="font-size:13px;margin-top:2px">${cl.address}</div></div>`:''}
+              ${cl.contact?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">Contact</div><div style="font-size:13px;margin-top:2px">${cl.contact}</div></div>`:''}
+              ${cl.email?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">Email</div><div style="font-size:13px;margin-top:2px">${cl.email}</div></div>`:''}
+              ${cl.tin?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">TIN</div><div style="font-size:13px;margin-top:2px">${cl.tin}</div></div>`:''}
+            </div>
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px;margin-bottom:8px">Quotation History</div>
+            <div class="table-wrap"><table class="data-table">
+              <thead><tr><th>Quote #</th><th>Amount</th><th>Status</th><th>Date</th>${isPrivileged?'<th>By</th>':''}</tr></thead>
+              <tbody>${cl.quotes.map(q=>{
+                const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
+                const status = q.status||q.approvalStatus||'draft';
+                const badge = status==='filed'||status==='approved'?'badge-green':status==='pending_approval'||status==='pending_review'||status==='sent'?'badge-orange':status==='rejected'?'badge-red':'badge-gray';
+                return `<tr>
+                  <td><code>${q.quoteNumber||q.id.slice(-8)}</code></td>
+                  <td style="font-weight:600">₱${(q.total||q.grandTotal||0).toLocaleString()}</td>
+                  <td><span class="badge ${badge}">${status}</span></td>
+                  <td style="color:var(--text-muted);font-size:11px">${ts}</td>
+                  ${isPrivileged?`<td style="font-size:12px;color:var(--text-muted)">${q.agentName||q.createdByName||'—'}</td>`:''}
+                </tr>`;
+              }).join('')}</tbody>
+            </table></div>
+          </div>
         </div>
+      `).join('');
+    };
+
+    container.innerHTML = `
+      <div class="page-header" style="margin-bottom:14px">
+        <h3 style="font-size:15px;font-weight:700">👤 Client Data <span style="font-size:12px;font-weight:400;color:var(--text-muted)">${clients.length} client${clients.length!==1?'s':''}</span></h3>
+        <input id="bs-client-search" placeholder="Search clients…" class="ms-input" style="max-width:260px"/>
       </div>
-      <p style="font-size:12px;color:var(--text-muted);text-align:center">Data from Google Sheets · <a href="${sheetUrl}" target="_blank">Edit directly in Sheets ↗</a></p>
-    `:`
-      <div class="card"><div class="card-body">
-        <div class="empty-state"><div class="empty-icon">📊</div>
-          <h4>Google Sheets Not Configured</h4>
-          <p>Set <code>SPREADSHEET_ID</code> in js/config.js and enable <code>SHEETS_CONFIG.ENABLED = true</code>.</p>
-        </div>
-      </div></div>
-    `}
-  `;
+      <div id="bs-client-list"></div>
+    `;
+    render(clients);
+
+    container.querySelector('#bs-client-search').addEventListener('input', e => {
+      const q = e.target.value.toLowerCase();
+      render(q ? clients.filter(cl =>
+        cl.name.toLowerCase().includes(q) ||
+        (cl.company||'').toLowerCase().includes(q) ||
+        (cl.address||'').toLowerCase().includes(q)
+      ) : clients);
+    });
+  } catch(err) {
+    container.innerHTML = `<div class="empty-state"><p>Error loading clients: ${err.message}</p></div>`;
+  }
 }
 
 // ══════════════════════════════════════════════════

@@ -1596,10 +1596,29 @@ function buildVerifyModal(){
       </div>
     </div>`;
   });
+  // Approval option
+  const reqApproval = document.getElementById('reqApprovalCheck')?.checked || false;
+  html += `<div class="verify-item" style="border-bottom:none;padding-top:14px;border-top:1px solid #eee;margin-top:6px">
+    <div class="verify-icon">📋</div>
+    <div class="verify-info">
+      <div class="verify-label" style="font-size:13px;font-weight:700">Request Approval Before Filing?</div>
+      <div class="verify-val" style="margin-top:4px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="reqApprovalCheck" ${reqApproval?'checked':''} style="width:auto;cursor:pointer;accent-color:#F0A500;">
+          <span>Send to president for review first — they can edit and return before filing</span>
+        </label>
+      </div>
+    </div>
+  </div>`;
   document.getElementById('verifyBody').innerHTML=html;
   const ok=canFile();
   const btn=document.getElementById('fileBtn');
   btn.disabled=!ok;btn.style.opacity=ok?'1':'0.5';
+  // Update button label based on approval toggle
+  document.getElementById('reqApprovalCheck')?.addEventListener('change', e => {
+    btn.textContent = e.target.checked ? '📤 Submit for Approval' : '📁 File Quotation';
+  });
+  if(reqApproval) btn.textContent='📤 Submit for Approval';
 }
 
 function toggleWaive(id,cb){
@@ -1609,21 +1628,79 @@ function toggleWaive(id,cb){
 
 function fileQuotation(){
   if(!canFile()) return;
+  const reqApproval = document.getElementById('reqApprovalCheck')?.checked || false;
+  const quotePayload = buildQuotePayload();
+
+  if(reqApproval){
+    // Send for president approval — don't mark as filed yet
+    quoteStatus='pending_approval';
+    document.getElementById('verifyModal').style.display='none';
+    saveToStorage();
+    window.parent.postMessage({ type:'QUOTE_APPROVAL_REQUESTED', payload: quotePayload }, '*');
+    // Show feedback
+    document.getElementById('filedBadge').textContent='⏳ Pending Approval';
+    document.getElementById('filedBadge').classList.add('show');
+    document.getElementById('filedBadge').style.background='#E67E22';
+    return;
+  }
+
   quoteStatus='filed';
+  document.getElementById('filedBadge').textContent='✓ FILED';
+  document.getElementById('filedBadge').style.background='';
   document.getElementById('filedBadge').classList.add('show');
   document.getElementById('verifyModal').style.display='none';
   saveToStorage();
-  // Append to filed log
+
+  // Notify parent app to save to Firestore
+  window.parent.postMessage({ type:'QUOTE_FILED', payload: quotePayload }, '*');
+
+  // Local log for offline/standalone use
   try{
     const log=JSON.parse(localStorage.getItem('bkqb_filed_log')||'[]');
-    log.push({
-      quoteNo:document.getElementById('quoteNo').value,
-      clientName:document.getElementById('clientName').value,
-      filedAt:new Date().toISOString(),
-      total:items.reduce((s,i)=>s+i.amount,0),
-    });
+    log.push({ quoteNo: quotePayload.quoteNumber, clientName: quotePayload.clientName, filedAt: new Date().toISOString(), total: quotePayload.total });
     localStorage.setItem('bkqb_filed_log',JSON.stringify(log));
   }catch(e){}
+}
+
+function buildQuotePayload(){
+  const co = currentCo;
+  const quoteNo = document.getElementById('quoteNo').value;
+  const subtotal = items.reduce((s,i)=>s+i.amount,0);
+  const showVat = document.getElementById('showVat')?.checked;
+  const showMarkup = document.getElementById('showMarkup')?.checked;
+  const markupType = document.getElementById('markupType')?.value||'retail';
+  const consts = DB.constants||{};
+  const markupRates = {retail:consts.markup?.retail||1.30,commercial:consts.markup?.commercial||1.20,government:consts.markup?.government||1.15};
+  const vatRate = consts.vat||0.12;
+  let afterMarkup = subtotal;
+  if(showMarkup) afterMarkup *= markupRates[markupType]||1.30;
+  const vatAmt = showVat ? afterMarkup*vatRate : 0;
+  const grand = afterMarkup + vatAmt;
+  return {
+    quoteNumber:   quoteNo,
+    company:       co,
+    clientName:    document.getElementById('clientName')?.value?.trim()||'',
+    clientCompany: document.getElementById('clientCompany')?.value?.trim()||'',
+    clientAddress: document.getElementById('clientAddress')?.value?.trim()||'',
+    clientPhone:   document.getElementById('clientPhone')?.value?.trim()||'',
+    clientEmail:   document.getElementById('clientEmail')?.value?.trim()||'',
+    salesperson:   document.getElementById('salesperson')?.value?.trim()||'',
+    purpose:       document.getElementById('purpose')?.value||'',
+    location:      document.getElementById('qnoLoc')?.value||'',
+    leadSource:    document.getElementById('qnoMethod')?.value||'',
+    quoteDate:     document.getElementById('quoteDate')?.value||'',
+    items:         items,
+    subtotal,
+    total:         grand,
+    grandTotal:    grand,
+    vatIncluded:   showVat,
+    markupApplied: showMarkup,
+    markupType:    markupType,
+    waiveFlags,
+    status:        'filed',
+    source:        'quote-builder-v2',
+    filedAt:       new Date().toISOString(),
+  };
 }
 
 function closeVerifyModal(e){

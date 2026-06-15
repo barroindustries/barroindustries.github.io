@@ -938,10 +938,14 @@ async function renderPartnerDashboard() {
     const totalQVal = quotes.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
     const todayStr  = new Date().toISOString().slice(0,10);
 
+    const needsRevision   = quotes.filter(q=>q.status==='needs_revision'||q.approvalStatus==='needs_revision');
+    const pendingApproval = quotes.filter(q=>q.status==='pending_approval'||q.approvalStatus==='pending_review'||q.status==='sent');
+    const filedQuotes     = quotes.filter(q=>q.status==='filed'||q.approvalStatus==='approved');
+
     document.getElementById('partner-kpi').innerHTML = `
       <div class="kpi-card accent"><div class="kpi-label">Open Tasks</div><div class="kpi-value">${open.length}</div></div>
-      <div class="kpi-card green"><div class="kpi-label">Completed</div><div class="kpi-value">${done.length}</div></div>
-      <div class="kpi-card"><div class="kpi-label">My Quotes</div><div class="kpi-value">${quotes.length}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Filed Quotes</div><div class="kpi-value">${filedQuotes.length}</div></div>
+      <div class="kpi-card ${needsRevision.length?'warn':''}"><div class="kpi-label">${needsRevision.length?'⚠ Needs Revision':'Pending Approval'}</div><div class="kpi-value">${needsRevision.length||pendingApproval.length}</div></div>
       <div class="kpi-card accent"><div class="kpi-label">Quote Value</div><div class="kpi-value" style="font-size:16px">₱${totalQVal.toLocaleString()}</div></div>
     `;
 
@@ -962,22 +966,40 @@ async function renderPartnerDashboard() {
       </div>`;
 
     document.getElementById('partner-quotes-card').innerHTML = `
+      ${needsRevision.length?`<div class="card" style="border:2px solid var(--warning);margin-bottom:10px">
+        <div class="card-header" style="background:rgba(255,159,10,.08)">
+          <h3 style="color:var(--warning)">↩ Returned for Revision (${needsRevision.length})</h3>
+          <button class="btn-primary btn-sm" onclick="navigateTo('bs-quotations')">View All</button>
+        </div>
+        <div class="card-body" style="padding:0">
+          ${needsRevision.map(q=>`<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)">
+            <span style="font-size:18px">📝</span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600">${q.quoteNumber||q.id.slice(-8)} — ${q.clientName||'Client'}</div>
+              ${q.presidentNotes?`<div style="font-size:12px;color:var(--warning);margin-top:2px;font-style:italic">"${q.presidentNotes}"</div>`:'<div style="font-size:12px;color:var(--text-muted)">Open Quote Builder to revise and resubmit.</div>'}
+            </div>
+          </div>`).join('')}
+        </div>
+      </div>`:''}
       <div class="card">
-        <div class="card-header"><h3>🧮 Recent Quotes</h3><button class="btn-primary btn-sm" onclick="navigateTo('bs-quotations')">All Quotes</button></div>
+        <div class="card-header"><h3>📋 My Quotations</h3><button class="btn-primary btn-sm" onclick="navigateTo('bs-quotations')">All Quotes</button></div>
         <div class="card-body" style="padding:0">
           ${!quotes.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📄</div><p>No quotes yet. Use Quote Builder to create one.</p></div>':
-            quotes.slice(0,4).map(q=>{
+            quotes.slice(0,5).map(q=>{
               const amt = q.total||q.grandTotal||0;
               const ts  = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric'}):'';
+              const st  = q.status||q.approvalStatus||'draft';
+              const bc  = st==='filed'||st==='approved'?'badge-green':st==='needs_revision'?'badge-orange':st==='pending_approval'||st==='pending_review'||st==='sent'?'badge-blue':'badge-gray';
+              const ico = st==='filed'||st==='approved'?'✅':st==='needs_revision'?'↩':st==='pending_approval'||st==='sent'?'⏳':'📄';
               return `<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border)">
-                <div style="font-size:20px">📄</div>
+                <div style="font-size:20px">${ico}</div>
                 <div style="flex:1;min-width:0">
-                  <div style="font-size:13px;font-weight:600">${q.clientName||q.client||'Unknown Client'}</div>
-                  <div style="font-size:11px;color:var(--text-muted)">${ts}</div>
+                  <div style="font-size:13px;font-weight:600">${q.clientName||'Unknown Client'}</div>
+                  <div style="font-size:11px;color:var(--text-muted)">${q.quoteNumber||''} · ${ts}</div>
                 </div>
                 <div style="text-align:right;flex-shrink:0">
                   <div style="font-size:13px;font-weight:700">₱${amt.toLocaleString()}</div>
-                  <span class="badge ${q.status==='approved'?'badge-green':q.status==='pending'||q.status==='submitted'?'badge-orange':'badge-gray'}" style="font-size:10px">${q.status||'draft'}</span>
+                  <span class="badge ${bc}" style="font-size:10px">${st}</span>
                 </div>
               </div>`;
             }).join('')}
@@ -1354,17 +1376,17 @@ async function renderEmployeeDashboard() {
               <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,159,10,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">🟡</div>
               <div>
                 <div style="font-size:13px;font-weight:600;color:var(--warning)">50% — Timed In</div>
-                <div style="font-size:11px;color:var(--text-muted)">${extApproved?'Check notifications before '+extExpiresStr+' → 100%':'Check notifications anytime today → 100%'}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${extApproved?'Check notifications before '+extExpiresStr+' → 100%':'Check all notifications before 9:00 AM → 100%'}</div>
               </div>
             </div>
             ${!hasFull?`<div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--text-muted)">
-              Tap the 🔔 bell → check <em>every</em> notification anytime today${extApproved?' (before '+extExpiresStr+')':''} → 100%.
+              Tap the 🔔 bell → check <em>every</em> notification before 9:00 AM${extApproved?' (before '+extExpiresStr+')':''} → 100%.
             </div>`:''}
           ` : canTimeIn ? `
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
               ${extApproved?`<span style="color:var(--warning)">⏰ Extension approved — expires ${extExpiresStr}</span><br>`:''}
-              <strong>Step 1:</strong> Time in = 50%.<br>
-              <strong>Step 2:</strong> Check every notification anytime today = 100%.
+              <strong>Step 1:</strong> Time in (7–9 AM) = 50%.<br>
+              <strong>Step 2:</strong> Check every notification before 9:00 AM = 100%.
             </p>
             <button class="btn-primary" id="check-in-btn" style="width:100%">
               <i data-lucide="log-in" style="width:14px;margin-right:6px"></i>Time In (Step 1)
@@ -1489,7 +1511,7 @@ async function renderEmployeeDashboard() {
       }, { merge: true });
       Notifs.showToast(autoFull
         ? '✅ Full attendance (100%) — no unchecked notifications!'
-        : `🟡 Timed in (50%). Open 🔔 and check off each notification anytime today for 100%.`);
+        : `🟡 Timed in (50%). Open 🔔 and check off every notification before 9:00 AM for 100%.`);
       renderEmployeeDashboard();
     });
 
@@ -1526,11 +1548,17 @@ async function renderEmployeeDashboard() {
 }
 
 // Called by notifications.js when all notifications checked — upgrades attendance to 100%
-// Allowed anytime during the day as long as employee has already timed in (7–9am window)
+// Must time in AND read all notifications before 9:00 AM
 window.tryUpgradeAttendanceOnNotifRead = async function() {
   if (!currentUser) return;
   const now      = new Date();
   const todayStr = now.toISOString().slice(0,10);
+
+  // 9am is the hard deadline for both time-in and notification reading
+  if (now.getHours() >= 9) {
+    Notifs.showToast('⏰ Deadline passed — notifications must be checked before 9:00 AM for full attendance.', 'error');
+    return;
+  }
 
   const todaySnap = await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).get();
   if (!todaySnap.exists || !todaySnap.data().loginTime) return; // must have timed in first
@@ -1538,7 +1566,7 @@ window.tryUpgradeAttendanceOnNotifRead = async function() {
   if ((current.attendanceScore||0) >= 1.0) return; // already full
   await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
     attendanceScore: 1.0, fullTime: true,
-    fullTimeAt: firebase.firestore.FieldValue.serverTimestamp(), notifReadAnytime: true
+    fullTimeAt: firebase.firestore.FieldValue.serverTimestamp()
   }, { merge: true });
   Notifs.showToast('✅ Full attendance (100%) — all notifications checked!');
 };
@@ -4768,16 +4796,16 @@ function renderHelpEmployee() {
 
     <div class="help-section">
       <h3><i data-lucide="calendar" class="help-h-icon"></i> Logging Attendance</h3>
-      <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Attendance is worth <strong>30%</strong> of your monthly pay. Both steps must be completed within the <strong>7:00–8:00 AM window</strong> each workday.</p>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Attendance is worth <strong>30%</strong> of your monthly pay. Both steps must be completed within the <strong>7:00–9:00 AM window</strong> each workday.</p>
       <ol class="help-steps">
-        <li><strong>Step 1 — Time In (50%) · 7:00–8:00 AM:</strong> Open the app between 7am and 8am and tap <strong>Time In</strong> on your dashboard. This records that you showed up for work.</li>
-        <li><strong>Step 2 — Check Notifications (100%) · before 8:00 AM:</strong> While still in the window, tap the 🔔 bell icon. Each notification has a checkbox — <strong>check every one individually.</strong> Once all are checked before 8am, your attendance automatically upgrades to 100%.</li>
+        <li><strong>Step 1 — Time In (50%) · 7:00–9:00 AM:</strong> Open the app between 7am and 9am and tap <strong>Time In</strong> on your dashboard. This records that you showed up for work.</li>
+        <li><strong>Step 2 — Check Notifications (100%) · before 9:00 AM:</strong> Tap the 🔔 bell icon. Each notification has a checkbox — <strong>check every one individually.</strong> Once all are checked before 9am, your attendance automatically upgrades to 100%.</li>
         <li>Your attendance badge turns green (✅) when both steps are done.</li>
-        <li><strong>Missed the window?</strong> If it is already past 8am and you have not yet timed in, tap <strong>⏰ Request Time Extension</strong> on your dashboard. This sends a request to the president.</li>
+        <li><strong>Missed the window?</strong> If it is already past 9am and you have not yet timed in, tap <strong>⏰ Request Time Extension</strong> on your dashboard. This sends a request to the president.</li>
         <li><strong>Extension approval:</strong> If the president approves, you will receive a notification and your dashboard will show a Time In button with an expiry time. You have <strong>6 hours from the time of approval</strong> to complete both steps.</li>
-        <li><strong>Extension denied or expired:</strong> The day is recorded as absent. Maintain the habit of opening the app before 8am to avoid this.</li>
+        <li><strong>Extension denied or expired:</strong> The day is recorded as absent. Maintain the habit of opening the app before 9am to avoid this.</li>
       </ol>
-      <div class="help-tip">⚠️ <strong>Key rules:</strong> The Time In window is <em>7:00–8:00 AM only</em>. You cannot time in before 7am or after 8am without an approved extension. Always check each notification individually — there is no "mark all" shortcut.</div>
+      <div class="help-tip">⚠️ <strong>Key rules:</strong> The Time In window is <em>7:00–9:00 AM only</em>. You cannot time in before 7am or after 9am without an approved extension. Notifications must also be checked before 9am for full attendance. Always check each notification individually — there is no "mark all" shortcut.</div>
     </div>
 
     <div class="help-section">
@@ -4940,6 +4968,83 @@ function renderHelpPartner() {
     </div>
   </div>`;
 }
+
+// ── Quote Builder iframe → Firestore bridge ───────
+window.addEventListener('message', async (e) => {
+  const { type, payload } = e.data || {};
+  if (!payload || !currentUser || !db) return;
+  if (type !== 'QUOTE_FILED' && type !== 'QUOTE_APPROVAL_REQUESTED') return;
+
+  try {
+    const agentName = userProfile?.displayName || currentUser.email;
+    const data = {
+      quoteNumber:    payload.quoteNumber || '',
+      company:        payload.company || 'BK',
+      clientName:     payload.clientName || '',
+      clientCompany:  payload.clientCompany || '',
+      clientAddress:  payload.clientAddress || '',
+      clientPhone:    payload.clientPhone || '',
+      clientEmail:    payload.clientEmail || '',
+      salesperson:    payload.salesperson || agentName,
+      purpose:        payload.purpose || '',
+      location:       payload.location || '',
+      leadSource:     payload.leadSource || '',
+      quoteDate:      payload.quoteDate || '',
+      items:          payload.items || [],
+      subtotal:       payload.subtotal || 0,
+      total:          payload.total || 0,
+      grandTotal:     payload.grandTotal || 0,
+      vatIncluded:    payload.vatIncluded || false,
+      markupApplied:  payload.markupApplied || false,
+      markupType:     payload.markupType || '',
+      source:         'quote-builder-v2',
+      agentName,
+      createdBy:      currentUser.uid,
+      createdByName:  agentName,
+      createdByRole:  currentRole || 'partner',
+      createdAt:      firebase.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (type === 'QUOTE_FILED') {
+      data.status = 'filed';
+      data.approvalStatus = 'filed';
+      data.filedAt = firebase.firestore.FieldValue.serverTimestamp();
+      await db.collection('bs_quotes').add(data);
+      // Notify president so they're aware of filed quotes
+      await Notifs.sendToOwner({
+        title: '📋 Quote Filed',
+        body: `${agentName} filed "${payload.quoteNumber}" for ${payload.clientName} — ₱${(payload.total||0).toLocaleString()}`,
+        icon: '📋', type: 'quote_filed'
+      });
+      if (typeof Notifs?.showToast === 'function') Notifs.showToast('Quote saved to Firestore!');
+    } else {
+      // QUOTE_APPROVAL_REQUESTED
+      data.status = 'pending_approval';
+      data.approvalStatus = 'pending_review';
+      data.reviewRequestedAt = firebase.firestore.FieldValue.serverTimestamp();
+      const docRef = await db.collection('bs_quotes').add(data);
+      await db.collection('approval_requests').add({
+        type: 'bs_quote',
+        quoteId: docRef.id,
+        quoteNumber: payload.quoteNumber,
+        clientName: payload.clientName,
+        total: payload.total || 0,
+        agentName,
+        agentId: currentUser.uid,
+        status: 'pending',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      await Notifs.sendToOwner({
+        title: '📤 Quote Awaiting Approval',
+        body: `${agentName} submitted "${payload.quoteNumber}" for ${payload.clientName} — ₱${(payload.total||0).toLocaleString()} — please review.`,
+        icon: '📤', type: 'quote_review_request'
+      });
+      if (typeof Notifs?.showToast === 'function') Notifs.showToast('Sent for approval!');
+    }
+  } catch(err) {
+    console.error('[QB bridge]', err);
+  }
+});
 
 // ── Service Worker ────────────────────────────────
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(console.warn);
