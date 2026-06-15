@@ -236,11 +236,19 @@ window.Notifs = (() => {
   }
 
   // ── Send notification ─────────────────────────
-  async function send(targetUid, { title, body, icon = '🔔', type = 'general', link = null } = {}) {
+  async function send(targetUid, { title, body, icon = '🔔', type = 'general', link = null, dedupKey = null } = {}) {
+    // If a dedupKey is provided, skip if a notif with that key already exists today
+    if (dedupKey) {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const existing = await db.collection('notifications').doc(targetUid).collection('items')
+        .where('dedupKey', '==', dedupKey).where('dedupDate', '==', todayStr).limit(1).get().catch(()=>({empty:true}));
+      if (!existing.empty) return;
+    }
     const data = {
       title, body, icon, type, link,
       read:      false,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      ...(dedupKey ? { dedupKey, dedupDate: new Date().toISOString().slice(0, 10) } : {})
     };
     await db.collection('notifications').doc(targetUid).collection('items').add(data);
 

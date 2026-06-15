@@ -160,7 +160,8 @@ async function checkPayrollDuties(user) {
       body: isUrgent
         ? `Please complete your self-assessment for ${monthLabel} today before payroll is finalized.`
         : `Reminder: Your self-assessment for ${monthLabel} is due tomorrow. Go to Personal Finance → Self Evaluate.`,
-      icon: isUrgent ? '🚨' : '📋', type: 'payroll_reminder'
+      icon: isUrgent ? '🚨' : '📋', type: 'payroll_reminder',
+      dedupKey: `selfassess-${currentMonth}`
     });
     localStorage.setItem(dedupKey, '1');
   } catch(e) { console.warn('[checkPayrollDuties]', e); }
@@ -189,7 +190,8 @@ async function checkCAReminder(user) {
     await Notifs.send(user.uid, {
       title: '💳 Payroll in 7 Days — CA Deduction',
       body: `You have ₱${totalBalance.toLocaleString('en-PH')} outstanding CA. Go to Personal Finance to set your preferred deduction amount for this payroll.`,
-      icon: '💳', type: 'ca_deduct_remind'
+      icon: '💳', type: 'ca_deduct_remind',
+      dedupKey: `ca-remind-${todayStr}`
     });
     localStorage.setItem(dedupKey, '1');
   } catch(e) { console.warn('[checkCAReminder]', e); }
@@ -2111,13 +2113,26 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
           });
         }
         await batch.commit();
-        // Notify all employees
+        // Also write payroll total to ledger so finance analytics picks it up
         const monthLabel2 = new Date(month+'-02').toLocaleString('en-PH',{month:'long',year:'numeric'});
+        const totalPayroll2 = empDocs.reduce((s, doc) => {
+          const u2 = doc.data();
+          return s + (u2.salary||0) + (u2.allowance||0) - (u2.deductions||0);
+        }, 0);
+        await db.collection('ledger').add({
+          type: 'payslip', description: `Payroll — ${monthLabel2}`,
+          amount: totalPayroll2, dept: 'Payroll',
+          date: month + '-01',
+          recordedBy: currentUser.uid,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        // Notify all employees
         for (const doc of empDocs) {
           await Notifs.send(doc.id, {
             title: '💰 Payroll Recorded',
             body: `Your payroll for ${monthLabel2} has been recorded. Check Personal Finance for your breakdown.`,
-            icon: '💰', type: 'payroll'
+            icon: '💰', type: 'payroll',
+            dedupKey: `payroll-${doc.id}-${month}`
           });
         }
         closeModal();
@@ -3281,7 +3296,30 @@ async function renderCompanyOverview(ct, canAdd) {
         </div>
       </div>
     </div>
+
+    ${canAdd ? `
+    <!-- Admin Controls -->
+    <div class="co-section">
+      <h3 class="co-section-title">⚙️ Admin Controls</h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-danger" id="co-force-logout-btn" style="display:flex;align-items:center;gap:6px">
+          <i data-lucide="log-out" style="width:15px;height:15px;stroke:currentColor"></i> Force Logout All Members
+        </button>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);margin-top:8px">Immediately signs out all active sessions. Use during security incidents or system updates.</p>
+    </div>` : ''}
   `;
+  if (canAdd) {
+    document.getElementById('co-force-logout-btn')?.addEventListener('click', async () => {
+      if (!confirm('This will immediately sign out ALL active members. Continue?')) return;
+      await db.collection('settings').doc('system').set({
+        forceLogoutAt: firebase.firestore.FieldValue.serverTimestamp(),
+        excludeUid: currentUser.uid,
+        triggeredBy: currentUser.uid
+      }, { merge: true });
+      Notifs.showToast('All members have been logged out.', 'success');
+    });
+  }
   if (window.lucide) lucide.createIcons({ nodes: [ct] });
 }
 

@@ -157,6 +157,8 @@ window.renderTasks = async function(currentUser, currentRole, currentDept) {
       </div>
       <div class="subtab-bar">
         <button class="subtab-btn active" data-sub="departmental">📂 Departmental</button>
+        <button class="subtab-btn" data-sub="overdue">🔴 Overdue</button>
+        <button class="subtab-btn" data-sub="neardue">🟡 Near Due</button>
         <button class="subtab-btn" data-sub="mine">👤 My Tasks</button>
       </div>
       <div id="tasks-subtab-content"></div>
@@ -197,6 +199,28 @@ window.renderTasks = async function(currentUser, currentRole, currentDept) {
 async function loadPresidentTasks(sub, currentUser, currentRole) {
   const wrap = document.getElementById('tasks-subtab-content');
   if (!wrap) return;
+
+  if (sub === 'overdue' || sub === 'neardue') {
+    wrap.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const in3Days  = new Date(); in3Days.setDate(in3Days.getDate() + 3);
+    const in3Str   = in3Days.toISOString().slice(0, 10);
+    const snap = await db.collection('tasks').get().catch(()=>({docs:[]}));
+    let tasks = snap.docs.map(d=>normTask(d.data(),d.id)).filter(t=>!DONE_STATUSES.includes(t.status)&&t.status!=='archived');
+    if (sub === 'overdue') {
+      tasks = tasks.filter(t=>t.dueDate && t.dueDate < todayStr)
+        .sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||''));
+      if (!tasks.length) { wrap.innerHTML='<div class="empty-state"><div class="empty-icon">✅</div><h4>No overdue tasks</h4></div>'; return; }
+      wrap.innerHTML = `<div style="margin-bottom:10px"><span class="badge badge-red" style="font-size:13px">${tasks.length} overdue task${tasks.length>1?'s':''}</span></div><div class="item-list">${tasks.map(t=>taskCard(t)).join('')}</div>`;
+    } else {
+      tasks = tasks.filter(t=>t.dueDate && t.dueDate >= todayStr && t.dueDate <= in3Str)
+        .sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||''));
+      if (!tasks.length) { wrap.innerHTML='<div class="empty-state"><div class="empty-icon">🟡</div><h4>No tasks due in the next 3 days</h4></div>'; return; }
+      wrap.innerHTML = `<div style="margin-bottom:10px"><span class="badge badge-orange" style="font-size:13px">${tasks.length} task${tasks.length>1?'s':''} due within 3 days</span></div><div class="item-list">${tasks.map(t=>taskCard(t)).join('')}</div>`;
+    }
+    wrap.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole)));
+    return;
+  }
 
   if (sub === 'mine') {
     wrap.innerHTML = `
@@ -5335,23 +5359,65 @@ function renderFileCollection(title, id, currentRole) {
 function bindFileCollection(id, currentUser, dept, subfolder) {
   const filesDiv = document.getElementById(`${id}-files`);
   const collection = `files_${id.replace(/-/g,'_')}`;
+  const role = window.currentRole || '';
+  const canDelete = role === 'president' || role === 'owner' || role === 'manager';
+  const canRequestDelete = role === 'finance';
 
-  // Load files
+  const reloadFiles = () => {
   db.collection(collection).orderBy('createdAt','desc').get().then(snap => {
     const files = snap.docs.map(d => ({id:d.id,...d.data()}));
     if (!files.length) { filesDiv.innerHTML = `<div class="empty-state" style="padding:20px"><div class="empty-icon">📁</div><p>No files uploaded yet</p></div>`; return; }
     filesDiv.innerHTML = files.map(f => `
-      <div class="item-card">
+      <div class="item-card" data-file-id="${f.id}">
         <div class="item-top">
           <div class="item-title">📄 ${f.name}</div>
-          ${f.url?`<a href="${f.url}" target="_blank" class="btn-primary btn-sm">Open</a>`:''}
+          <div style="display:flex;gap:6px;align-items:center">
+            ${f.url?`<a href="${f.url}" target="_blank" class="btn-primary btn-sm">Open</a>`:''}
+            ${canDelete ? `<button class="btn-danger btn-sm file-delete-btn" data-id="${f.id}" data-name="${(f.name||'').replace(/"/g,'&quot;')}" style="font-size:11px">Delete</button>` : ''}
+            ${canRequestDelete ? `<button class="btn-secondary btn-sm file-req-delete-btn" data-id="${f.id}" data-name="${(f.name||'').replace(/"/g,'&quot;')}" style="font-size:11px;color:var(--danger)">Request Delete</button>` : ''}
+          </div>
         </div>
         <div class="item-meta">
           <span>👤 ${f.uploadedByName||'—'}</span>
           ${f.createdAt?`<span>${new Date(f.createdAt.toDate()).toLocaleDateString()}</span>`:''}
+          ${f.deleteRequested?`<span style="color:var(--danger);font-size:11px;font-weight:600">⏳ Delete requested</span>`:''}
         </div>
       </div>`).join('');
+
+    // Direct delete (president/manager)
+    filesDiv.querySelectorAll('.file-delete-btn').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        if (!confirm(`Delete "${btn.dataset.name}"? This cannot be undone.`)) return;
+        await db.collection(collection).doc(btn.dataset.id).delete();
+        Notifs.showToast('File deleted.');
+        reloadFiles();
+      });
+    });
+
+    // Request delete (finance — notifies president)
+    filesDiv.querySelectorAll('.file-req-delete-btn').forEach(btn => {
+      btn.addEventListener('click', async e => {
+        e.stopPropagation();
+        if (!confirm(`Request deletion of "${btn.dataset.name}"? The president will be notified to approve.`)) return;
+        await db.collection(collection).doc(btn.dataset.id).update({ deleteRequested: true, deleteRequestedBy: currentUser.uid });
+        // Notify president
+        const presSnap = await db.collection('users').where('role','==','president').limit(1).get().catch(()=>({empty:true}));
+        if (!presSnap.empty) {
+          const requesterName = window.userProfile?.displayName || currentUser.email;
+          await Notifs.send(presSnap.docs[0].id, {
+            title: '🗑️ File Deletion Request',
+            body: `${requesterName} is requesting to delete "${btn.dataset.name}". Go to Files to approve.`,
+            icon: '🗑️', type: 'file_delete_request'
+          });
+        }
+        Notifs.showToast('Deletion request sent to president.');
+        reloadFiles();
+      });
+    });
   });
+  };
+  reloadFiles();
 
   // Bind upload
   const uploadDiv = document.getElementById(`${id}-upload`);

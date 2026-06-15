@@ -460,6 +460,7 @@ function renderTeamCards(users, currentUser) {
         : lastSeenMs ? `<div class="team-status-pill">${lastActiveStr}</div>` : ''}
       <div class="team-card-actions">
         <button class="team-card-btn view-card-btn" data-uid="${u.id}" title="View calling card">📇</button>
+        ${!isMe ? `<button class="team-card-btn nudge-btn" data-uid="${u.id}" data-name="${(u.displayName||u.email).replace(/"/g,'&quot;')}" title="Nudge ${u.displayName||u.email}">👋</button>` : ''}
       </div>
     </div>`;
   }).join('')}</div>`;
@@ -468,6 +469,26 @@ function renderTeamCards(users, currentUser) {
   grid.querySelectorAll('.view-card-btn').forEach(btn => {
     const u = users.find(x => x.id === btn.dataset.uid);
     if (u) btn.addEventListener('click', e => { e.stopPropagation(); showCallingCard(u); });
+  });
+
+  // Nudge buttons
+  grid.querySelectorAll('.nudge-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const { uid, name } = btn.dataset;
+      if (!confirm(`Send a nudge to ${name}?`)) return;
+      btn.disabled = true; btn.textContent = '⏳';
+      const senderName = window.userProfile?.displayName || currentUser?.displayName || 'Someone';
+      await Notifs.send(uid, {
+        title: `👋 You've been nudged!`,
+        body: `${senderName} is trying to get your attention. Check in when you can.`,
+        icon: '👋', type: 'nudge',
+        dedupKey: `nudge-${uid}-${new Date().toISOString().slice(0,10)}-${currentUser?.uid}`
+      });
+      btn.textContent = '✅'; btn.title = 'Nudge sent!';
+      Notifs.showToast(`Nudge sent to ${name}!`);
+      setTimeout(() => { btn.disabled = false; btn.textContent = '👋'; btn.title = `Nudge ${name}`; }, 3000);
+    });
   });
 
   // Whole card click also opens calling card

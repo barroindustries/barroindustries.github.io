@@ -177,7 +177,7 @@
       </div>
       <div class="topbar-wordmark-stack">
         <span class="topbar-brand-main">Barro Industries</span>
-        <span class="topbar-brand-sub">Operations · v9.4</span>
+        <span class="topbar-brand-sub" id="topbar-version-str">Operations · v9.4</span>
       </div>
     </div>
     <div class="topbar-right">
@@ -300,8 +300,12 @@
 <script defer src="js/modules.js"></script>
 <script>
   window.addEventListener('load', () => {
-    const el = document.getElementById('login-version-str');
-    if (el && window.APP_VERSION) el.textContent = 'v' + window.APP_VERSION + ' · Barro Industries';
+    if (window.APP_VERSION) {
+      const el = document.getElementById('login-version-str');
+      if (el) el.textContent = 'v' + window.APP_VERSION + ' · Barro Industries';
+      const tb = document.getElementById('topbar-version-str');
+      if (tb) tb.textContent = 'Operations · v' + window.APP_VERSION;
+    }
   });
 </script>
 </body>
