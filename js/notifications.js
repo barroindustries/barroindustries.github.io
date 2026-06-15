@@ -339,19 +339,20 @@ window.Notifs = (() => {
     const overlay = document.createElement('div');
     overlay.id = 'push-prompt-overlay';
     overlay.style.cssText = `
-      position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9100;
-      display:flex;align-items:flex-end;justify-content:center;
+      position:fixed;inset:0;background:rgba(0,0,0,0.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+      z-index:9100;display:flex;align-items:flex-end;justify-content:center;
       padding-bottom:calc(env(safe-area-inset-bottom,0px) + 16px);
       animation:fadeIn .22s ease;
     `;
     overlay.innerHTML = `
       <div style="
-        background:var(--surface,#1a2235);
-        border:1.5px solid var(--primary-light,#3d5afe);
+        background:rgba(20,30,55,0.72);
+        backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
+        border:1px solid rgba(255,255,255,0.12);
         border-radius:22px 22px 16px 16px;
         padding:28px 24px 24px;
         width:min(440px,96vw);
-        box-shadow:0 -6px 40px rgba(0,0,0,0.5);
+        box-shadow:0 -6px 40px rgba(0,0,0,0.4),0 0 0 0.5px rgba(255,255,255,0.06) inset;
         animation:slideUp .28s cubic-bezier(.22,.68,0,1.2);
       ">
         <div style="text-align:center;margin-bottom:20px">

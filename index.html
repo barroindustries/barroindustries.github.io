@@ -293,6 +293,14 @@
 <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
 <script defer src="js/firebase-config.js"></script>
 <script defer src="js/config.js"></script>
+<script defer>
+  /* runs immediately after config.js (defer preserves order) */
+  const _v = window.APP_VERSION || '9.4';
+  const _lvEl = document.getElementById('login-version-str');
+  if (_lvEl) _lvEl.textContent = 'v' + _v + ' · Barro Industries';
+  const _tbEl = document.getElementById('topbar-version-str');
+  if (_tbEl) _tbEl.textContent = 'Operations · v' + _v;
+</script>
 <script defer src="js/drive.js"></script>
 <script defer src="js/notifications.js"></script>
 <script defer src="js/departments.js"></script>
