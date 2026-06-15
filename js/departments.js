@@ -11,6 +11,17 @@ function fmt(n) { return Number(n||0).toLocaleString('en-PH',{minimumFractionDig
 function today() { return new Date().toISOString().slice(0,10); }
 function priorityBadge(p) { return {high:'badge-red',medium:'badge-orange',low:'badge-green',urgent:'badge-red'}[p]||'badge-gray'; }
 
+// Returns true if user is an admin role OR is a member of the given department.
+// Use this for write-access checks inside department modules so that dept members
+// can manage their own content regardless of their system role.
+function canEditDept(dept) {
+  const role = window.currentRole || '';
+  if (['president','owner','manager','finance'].includes(role)) return true;
+  return (window.currentDepts || []).includes(dept);
+}
+// Shorthand for Finance-specific privilege (Payroll, HR Profiles, etc.)
+function isFinancePriv() { return canEditDept('Finance'); }
+
 // ── Task Status System ─────────────────────────────
 const TASK_STATUSES = [
   { value:'backlog',      label:'Backlog',               badge:'badge-gray'   },
@@ -75,13 +86,13 @@ async function notifyTaskInvolved(task,notifData,skipUid) {
 
 // ── Dept Tasks subtab (shared) ────────────────────
 async function renderDeptTasks(container, deptName, currentUser, currentRole) {
-  const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
+  const isAdmin = canEditDept(deptName);
   container.innerHTML = '<div class="loading-placeholder">Loading tasks…</div>';
   try {
     let snap = await db.collection('tasks').where('department','==',deptName).get()
       .catch(()=>({docs:[]}));
     let tasks = snap.docs.map(d=>normTask(d.data(),d.id));
-    // Non-admins only see tasks they're involved in
+    // Non-dept-members only see tasks they're involved in
     if (!isAdmin) {
       tasks = tasks.filter(t=>(t.assignedTo||[]).includes(currentUser.uid)||t.createdBy===currentUser.uid);
     }
@@ -1162,13 +1173,13 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
       bindFileCollection('mkt-designs', currentUser, 'Marketing', 'Designs');
       break;
     case 'Plan':
-      await renderDocCollection(content, 'marketing_plans', 'Marketing Plans', currentUser, currentRole, { icon:'📅', color:'#880e4f' });
+      await renderDocCollection(content, 'marketing_plans', 'Marketing Plans', currentUser, currentRole, { icon:'📅', color:'#880e4f', dept:'Marketing' });
       break;
     case 'Budgeting':
       await renderBudgeting(content, currentUser, currentRole, 'Marketing');
       break;
     case 'Proposals':
-      await renderDocCollection(content, 'marketing_proposals', 'Marketing Proposals', currentUser, currentRole, { icon:'📝', color:'#880e4f' });
+      await renderDocCollection(content, 'marketing_proposals', 'Marketing Proposals', currentUser, currentRole, { icon:'📝', color:'#880e4f', dept:'Marketing' });
       break;
     case 'Tasks':
       await renderDeptTasks(content, 'Marketing', currentUser, currentRole);
@@ -1181,11 +1192,21 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
 // ══════════════════════════════════════════════════
 window.renderFinance = async function(currentUser, currentRole, subtab = 'Overview') {
   const c = deptContainer();
-  const tabs = ['Overview','Payroll','HR Profiles','Cash Advances','Taxes','Ledger','Records','Accounting','Purchasing','SSS / Gov','Tasks'];
+  // Finance tools vs HR tools — visually separated
+  const finTabs = ['Overview','Ledger','Accounting','Purchasing','Records','Taxes','SSS / Gov','Tasks'];
+  const hrTabs  = ['Payroll','HR Profiles','Cash Advances'];
+  const allTabs = [...finTabs, ...hrTabs];
   c.innerHTML = `
-    <div class="page-header"><h2>💰 Finance</h2></div>
-    <div class="subtab-bar" style="flex-wrap:wrap">
-      ${tabs.map(s =>
+    <div class="page-header"><h2>💰 Finance & HR</h2></div>
+    <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--text-muted);padding:0 4px 4px;text-transform:uppercase">Finance</div>
+    <div class="subtab-bar" style="flex-wrap:wrap;margin-bottom:4px">
+      ${finTabs.map(s =>
+        `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
+      ).join('')}
+    </div>
+    <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--text-muted);padding:4px 4px;text-transform:uppercase">HR</div>
+    <div class="subtab-bar" style="flex-wrap:wrap;margin-bottom:12px">
+      ${hrTabs.map(s =>
         `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
       ).join('')}
     </div>
@@ -1193,7 +1214,11 @@ window.renderFinance = async function(currentUser, currentRole, subtab = 'Overvi
   `;
   loadFinanceContent(currentUser, currentRole, subtab);
   c.querySelectorAll('.subtab-btn').forEach(btn => {
-    btn.addEventListener('click', () => { c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); loadFinanceContent(currentUser, currentRole, btn.dataset.sub); });
+    btn.addEventListener('click', () => {
+      c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadFinanceContent(currentUser, currentRole, btn.dataset.sub);
+    });
   });
 };
 
@@ -1210,7 +1235,7 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
       bindFileCollection('fin-acct', currentUser, 'Finance', 'Accounting');
       break;
     case 'Purchasing':
-      await renderDocCollection(content, 'purchase_orders', 'Purchase Orders', currentUser, currentRole, { icon:'🛒', color:'#1b5e20' });
+      await renderDocCollection(content, 'purchase_orders', 'Purchase Orders', currentUser, currentRole, { icon:'🛒', color:'#1b5e20', dept:'Finance' });
       break;
     case 'SSS / Gov':
       content.innerHTML = renderFileCollection('SSS & Government Documents', 'fin-sss', currentRole);
@@ -1515,7 +1540,29 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     }
     await batch.commit();
 
-    // 2. Apply CA deductions to actual cash_advance balances
+    // 2. Auto-write ledger debit entry for total payroll disbursement
+    const totalNetPay = employees.reduce((s, u) => {
+      const base  = u.salary||0, allow = u.allowance||0;
+      const caAdv = (_caOverrideByUser[u.id]?.amount ?? _caByUser[u.id]) || 0;
+      const deduct = (u.deductions||0)+(u.sss||0)+(u.philhealth||0)+(u.pagibig||0)+(u.tax||0);
+      return s + (base + allow - deduct - caAdv);
+    }, 0);
+    if (totalNetPay > 0) {
+      await db.collection('ledger').add({
+        date:        month + '-01',
+        type:        'debit',
+        description: `Payroll — ${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})} (${employees.length} employees)`,
+        amount:      totalNetPay,
+        category:    'Payroll',
+        source:      'Finance',
+        refNumber:   `PAY-${month}`,
+        addedBy:     currentUser.uid,
+        addedByName: window.userProfile?.displayName || currentUser.email,
+        createdAt:   firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+
+    // 4. Apply CA deductions to actual cash_advance balances
     for (const u of employees) {
       const caBalance = _caByUser[u.id]||0;
       if (caBalance <= 0) continue;
@@ -1776,7 +1823,7 @@ async function renderRecordsTab(container, currentUser, currentRole) {
 }
 
 async function renderFinanceCA(container, currentUser, currentRole) {
-  const isPrivileged = ['president','owner','manager','finance'].includes(currentRole);
+  const isPrivileged = isFinancePriv();
   container.innerHTML = '<div class="loading-placeholder">Loading cash advances…</div>';
 
   const snap = await db.collection('cash_advances').get().catch(()=>({docs:[]}));
@@ -1900,7 +1947,7 @@ async function renderFinanceCA(container, currentUser, currentRole) {
 
 // ── HR Profiles + Payslip Generator ─────────────────
 async function renderFinanceHRProfiles(container, currentUser, currentRole) {
-  const isPriv = ['president','owner','manager','finance'].includes(currentRole);
+  const isPriv = isFinancePriv();
   container.innerHTML = '<div class="loading-placeholder">Loading worker profiles…</div>';
 
   const now = new Date();
@@ -2673,7 +2720,7 @@ async function loadSalesContent(currentUser, currentRole, sub) {
       await renderClientProfiles(content, currentUser, currentRole, 'barro');
       break;
     case 'Work Plans':
-      await renderDocCollection(content, 'work_plans', 'Work Plans', currentUser, currentRole, { icon:'📋', color:'#e65100' });
+      await renderDocCollection(content, 'work_plans', 'Work Plans', currentUser, currentRole, { icon:'📋', color:'#e65100', dept:'Sales' });
       break;
     case 'Proposals':
       content.innerHTML = renderFileCollection('Proposals', 'sales-props', currentRole);
@@ -4678,7 +4725,8 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
 async function renderDocCollection(container, collection, title, currentUser, currentRole, opts = {}) {
   const snap = await db.collection(collection).orderBy('createdAt','desc').get();
   const docs = snap.docs.map(d => ({id:d.id,...d.data()}));
-  const canAdd = currentRole==='owner'||currentRole==='manager'||currentRole==='president'||currentRole==='finance';
+  const canAdd = opts.dept ? canEditDept(opts.dept)
+    : (currentRole==='owner'||currentRole==='manager'||currentRole==='president'||currentRole==='finance');
 
   container.innerHTML = `
     ${canAdd?`<div style="text-align:right;margin-bottom:12px"><button class="btn-primary btn-sm" id="add-doc-btn">+ Add ${title.slice(0,-1)}</button></div>`:''}
@@ -5036,7 +5084,8 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
 
 // ── Shared doc collection helper ──────────────────
 window.renderDocCollection = function(container, collection, title, currentUser, currentRole, cfg) {
-  const canAdd = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+  const canAdd = cfg?.dept ? canEditDept(cfg.dept)
+    : (currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance');
   container.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div></div>
