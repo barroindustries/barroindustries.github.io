@@ -69,6 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
       navigateTo('dashboard');
       startAutoLogout();
       startPresenceHeartbeat(user.uid);
+      startForceLogoutListener(user.uid);
       // Prompt for phone number if missing
       if (!userProfile.phone) {
         setTimeout(_promptPhoneNumber, 2000);
@@ -86,6 +87,25 @@ function startPresenceHeartbeat(uid) {
   const ping = () => db.collection('users').doc(uid).update({ lastSeen: firebase.firestore.FieldValue.serverTimestamp() }).catch(()=>{});
   ping();
   _presenceInterval = setInterval(ping, 60000); // every 60s
+}
+
+// ── Force Logout (president-triggered) ───────────
+let _forceLogoutUnsub = null;
+function startForceLogoutListener(uid) {
+  if (_forceLogoutUnsub) _forceLogoutUnsub();
+  // Record when this session started so we only react to NEW force-logout events
+  const sessionStart = Date.now();
+  _forceLogoutUnsub = db.collection('settings').doc('system').onSnapshot(snap => {
+    const data = snap.data();
+    if (!data?.forceLogoutAt) return;
+    const flTime = data.forceLogoutAt.toDate?.()?.getTime?.() || 0;
+    // If the force-logout was triggered after this session started, sign out
+    if (flTime > sessionStart && data.excludeUid !== uid) {
+      Notifs.stopListener();
+      auth.signOut();
+      Notifs.showToast('You have been signed out by an administrator.', 'info');
+    }
+  }, () => {});
 }
 
 // ── Auto-Logout ───────────────────────────────────
@@ -1662,6 +1682,7 @@ function renderDeptModule(dept) {
     case 'Marketing':                  renderMarketing(currentUser, currentRole); break;
     case 'Finance':                    renderFinance(currentUser, currentRole); break;
     case 'Sales': renderSales(currentUser, currentRole); break;
+    case 'IT':                         window.renderIT?.(currentUser, currentRole); break;
     case 'Design':                     renderDesign(currentUser, currentRole); break;
     case 'Brilliant Steel':            renderBrilliantSteel(currentUser, currentRole); break;
     case 'Government Biddings':        renderGovBiddings(); break;
@@ -3860,6 +3881,7 @@ async function renderTeam() {
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn-secondary btn-sm" id="add-worker-btn">👷 Create Worker Account</button>
         <button class="btn-primary btn-sm" id="add-emp-btn">+ Add Employee Profile</button>
+        ${isPresident()?`<button class="btn-danger btn-sm" id="force-logout-all-btn">🔴 Logout All</button>`:''}
       </div>
     </div>
     <div id="team-table"><div class="loading-placeholder">Loading…</div></div>`;
@@ -3895,6 +3917,15 @@ async function renderTeam() {
   document.querySelectorAll('.edit-emp-btn').forEach(btn=>btn.addEventListener('click',()=>{const u=users.find(x=>x.id===btn.dataset.uid);if(u)openEditEmployeeModal(u);}));
   document.getElementById('add-emp-btn').addEventListener('click', openAddEmployeeModal);
   document.getElementById('add-worker-btn').addEventListener('click', openCreateWorkerModal);
+  document.getElementById('force-logout-all-btn')?.addEventListener('click', async () => {
+    if (!confirm('This will immediately sign out ALL active members. Continue?')) return;
+    await db.collection('settings').doc('system').set({
+      forceLogoutAt: firebase.firestore.FieldValue.serverTimestamp(),
+      excludeUid: currentUser.uid,
+      triggeredBy: currentUser.uid
+    }, { merge: true });
+    Notifs.showToast('All members have been logged out.', 'success');
+  });
   if (window.lucide) lucide.createIcons({ nodes: [document.getElementById('team-table')] });
 }
 

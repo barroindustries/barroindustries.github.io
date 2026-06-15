@@ -55,6 +55,10 @@ window.DEPARTMENTS = {
     key: 'Government Biddings', icon: '🏛️', color: '#004d40',
     subtabs: ['PhilGEPS', 'Active Bids', 'Archive'], navOrder: 5
   },
+  'IT': {
+    key: 'IT', icon: '💻', color: '#0d47a1',
+    subtabs: ['Overview', 'IT Tickets', 'Assets', 'Software', 'Access Control', 'Network', 'Tasks'], navOrder: 6
+  },
   'Design': {
     key: 'Design', icon: '🎨', color: '#4a148c',
     subtabs: ['Projects', 'Clients', 'Product Designs', 'References'], navOrder: 6

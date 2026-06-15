@@ -3291,6 +3291,486 @@ async function renderProjects(container, currentUser, currentRole) {
 }
 
 // ══════════════════════════════════════════════════
+//  IT DEPARTMENT
+// ══════════════════════════════════════════════════
+window.renderIT = async function(currentUser, currentRole, subtab = 'Overview') {
+  const c = deptContainer();
+  const canEdit = canEditDept('IT');
+  c.innerHTML = `
+    <div class="page-header"><h2>💻 IT Department</h2></div>
+    <div class="subtab-bar" style="flex-wrap:wrap">
+      ${['Overview','IT Tickets','Assets','Software','Access Control','Network','Tasks'].map(s =>
+        `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
+      ).join('')}
+    </div>
+    <div id="it-content"><div class="loading-placeholder">Loading…</div></div>
+  `;
+  loadITContent(currentUser, currentRole, subtab, canEdit);
+  c.querySelectorAll('.subtab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadITContent(currentUser, currentRole, btn.dataset.sub, canEdit);
+    });
+  });
+};
+
+async function loadITContent(currentUser, currentRole, sub, canEdit) {
+  const content = document.getElementById('it-content');
+  if (!content) return;
+
+  // ── Overview ──────────────────────────────────────
+  if (sub === 'Overview') {
+    const [ticketsSnap, assetsSnap] = await Promise.all([
+      db.collection('it_tickets').get().catch(()=>({docs:[]})),
+      db.collection('it_assets').get().catch(()=>({docs:[]}))
+    ]);
+    const tickets  = ticketsSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const assets   = assetsSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const openT    = tickets.filter(t=>t.status==='open').length;
+    const inProgT  = tickets.filter(t=>t.status==='in-progress').length;
+    const totalA   = assets.length;
+    const activeA  = assets.filter(a=>a.status==='active').length;
+    content.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:20px">
+        <div class="card" style="text-align:center;padding:16px">
+          <div style="font-size:28px;margin-bottom:4px">🎫</div>
+          <div style="font-size:22px;font-weight:700;color:var(--accent)">${openT}</div>
+          <div style="font-size:12px;color:var(--text-muted)">Open Tickets</div>
+        </div>
+        <div class="card" style="text-align:center;padding:16px">
+          <div style="font-size:28px;margin-bottom:4px">⏳</div>
+          <div style="font-size:22px;font-weight:700;color:#FF9F0A">${inProgT}</div>
+          <div style="font-size:12px;color:var(--text-muted)">In Progress</div>
+        </div>
+        <div class="card" style="text-align:center;padding:16px">
+          <div style="font-size:28px;margin-bottom:4px">🖥️</div>
+          <div style="font-size:22px;font-weight:700;color:var(--text)">${totalA}</div>
+          <div style="font-size:12px;color:var(--text-muted)">Total Assets</div>
+        </div>
+        <div class="card" style="text-align:center;padding:16px">
+          <div style="font-size:28px;margin-bottom:4px">✅</div>
+          <div style="font-size:22px;font-weight:700;color:#30D158">${activeA}</div>
+          <div style="font-size:12px;color:var(--text-muted)">Active Assets</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3>Recent Open Tickets</h3></div>
+        <div class="item-list" style="padding:8px 12px 12px">
+          ${tickets.filter(t=>t.status==='open').slice(0,5).map(t=>`
+            <div class="item-card">
+              <div class="item-top">
+                <div class="item-title">${t.title||'Untitled'}</div>
+                <span class="badge ${t.priority==='high'?'badge-red':t.priority==='medium'?'badge-orange':'badge-gray'}">${t.priority||'low'}</span>
+              </div>
+              <div class="item-meta">
+                <span>${t.category||'General'}</span>
+                ${t.requestedBy?`<span>👤 ${t.requestedBy}</span>`:''}
+                ${t.createdAt?`<span>${new Date(t.createdAt.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric'})}</span>`:''}
+              </div>
+            </div>`).join('') || '<div class="empty-state" style="padding:16px"><div class="empty-icon">✅</div><p>No open tickets</p></div>'}
+        </div>
+      </div>`;
+    return;
+  }
+
+  // ── IT Tickets ────────────────────────────────────
+  if (sub === 'IT Tickets') {
+    const snap = await db.collection('it_tickets').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+    const tickets = snap.docs.map(d=>({id:d.id,...d.data()}));
+    content.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <select id="it-ticket-filter" class="select-sm">
+          <option value="all">All Tickets</option>
+          <option value="open">Open</option>
+          <option value="in-progress">In Progress</option>
+          <option value="resolved">Resolved</option>
+          <option value="closed">Closed</option>
+        </select>
+        <button class="btn-primary btn-sm" id="new-it-ticket-btn">+ New Ticket</button>
+      </div>
+      <div id="it-ticket-list" class="item-list"></div>`;
+    function renderTickets(filter) {
+      const list = document.getElementById('it-ticket-list');
+      const shown = filter==='all' ? tickets : tickets.filter(t=>t.status===filter);
+      if (!shown.length) { list.innerHTML='<div class="empty-state"><div class="empty-icon">🎫</div><h4>No tickets</h4></div>'; return; }
+      list.innerHTML = shown.map(t=>`
+        <div class="item-card it-ticket-card" data-id="${t.id}" style="cursor:pointer">
+          <div class="item-top">
+            <div class="item-title">${t.title||'Untitled'}</div>
+            <span class="badge ${t.status==='open'?'badge-orange':t.status==='in-progress'?'badge-blue':t.status==='resolved'?'badge-green':'badge-gray'}">${t.status||'open'}</span>
+          </div>
+          <div class="item-meta">
+            <span class="badge badge-blue" style="font-size:10px">${t.category||'General'}</span>
+            <span class="badge ${t.priority==='high'?'badge-red':t.priority==='medium'?'badge-orange':'badge-gray'}" style="font-size:10px">${t.priority||'low'} priority</span>
+            ${t.requestedBy?`<span>👤 ${t.requestedBy}</span>`:''}
+            ${t.assignedTo?`<span>🔧 ${t.assignedTo}</span>`:''}
+          </div>
+        </div>`).join('');
+      list.querySelectorAll('.it-ticket-card').forEach(card => {
+        card.addEventListener('click', () => {
+          const t = tickets.find(x=>x.id===card.dataset.id);
+          if (t) openITTicketModal(t, currentUser, canEdit, ()=>loadITContent(currentUser, currentRole, 'IT Tickets', canEdit));
+        });
+      });
+    }
+    renderTickets('all');
+    document.getElementById('it-ticket-filter').onchange = e => renderTickets(e.target.value);
+    document.getElementById('new-it-ticket-btn')?.addEventListener('click', () => {
+      openModal('New IT Ticket', `
+        <div class="form-group"><label>Title</label><input id="it-t-title" placeholder="Brief description of issue"/></div>
+        <div class="form-row">
+          <div class="form-group"><label>Category</label>
+            <select id="it-t-cat"><option>Hardware</option><option>Software</option><option>Network</option><option>Access / Accounts</option><option>Printer</option><option>Other</option></select>
+          </div>
+          <div class="form-group"><label>Priority</label>
+            <select id="it-t-pri"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
+          </div>
+        </div>
+        <div class="form-group"><label>Description</label><textarea id="it-t-desc" rows="4" placeholder="What's happening? Include any error messages."></textarea></div>
+        <div class="form-group"><label>Requested By</label><input id="it-t-req" value="${currentUser.displayName||''}"/></div>
+      `, `<button class="btn-primary" id="save-it-ticket-btn">Submit Ticket</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      document.getElementById('save-it-ticket-btn').addEventListener('click', async () => {
+        const title = document.getElementById('it-t-title').value.trim();
+        if (!title) { Notifs.showToast('Please enter a title.','error'); return; }
+        await db.collection('it_tickets').add({
+          title, category: document.getElementById('it-t-cat').value,
+          priority: document.getElementById('it-t-pri').value,
+          description: document.getElementById('it-t-desc').value.trim(),
+          requestedBy: document.getElementById('it-t-req').value.trim(),
+          status: 'open', createdBy: currentUser.uid,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        closeModal(); loadITContent(currentUser, currentRole, 'IT Tickets', canEdit);
+      });
+    });
+    return;
+  }
+
+  // ── Assets ────────────────────────────────────────
+  if (sub === 'Assets') {
+    const snap = await db.collection('it_assets').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+    const assets = snap.docs.map(d=>({id:d.id,...d.data()}));
+    content.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <select id="it-asset-filter" class="select-sm">
+          <option value="all">All Assets</option>
+          <option value="active">Active</option>
+          <option value="maintenance">In Maintenance</option>
+          <option value="retired">Retired</option>
+        </select>
+        ${canEdit?`<button class="btn-primary btn-sm" id="new-asset-btn">+ Add Asset</button>`:''}
+      </div>
+      <div class="card"><div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Name</th><th>Type</th><th>Serial / ID</th><th>Assigned To</th><th>Status</th><th>Purchased</th>${canEdit?'<th></th>':''}</tr></thead>
+        <tbody id="it-asset-tbody">
+          ${!assets.length?`<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px">No assets recorded</td></tr>`
+            :assets.map(a=>`<tr>
+              <td>${a.name||'—'}</td>
+              <td>${a.type||'—'}</td>
+              <td><code style="font-size:11px">${a.serial||'—'}</code></td>
+              <td>${a.assignedTo||'—'}</td>
+              <td><span class="badge ${a.status==='active'?'badge-green':a.status==='maintenance'?'badge-orange':'badge-gray'}">${a.status||'active'}</span></td>
+              <td>${a.purchasedDate||'—'}</td>
+              ${canEdit?`<td><button class="btn-icon edit-asset-btn" data-id="${a.id}"><i data-lucide="pencil" style="width:14px;height:14px"></i></button></td>`:''}
+            </tr>`).join('')}
+        </tbody>
+      </table></div></div>`;
+    if (canEdit) {
+      document.getElementById('new-asset-btn')?.addEventListener('click', () => {
+        openModal('Add Asset', `
+          <div class="form-row">
+            <div class="form-group"><label>Asset Name</label><input id="a-name" placeholder="e.g. Dell Laptop 01"/></div>
+            <div class="form-group"><label>Type</label>
+              <select id="a-type"><option>Laptop</option><option>Desktop</option><option>Monitor</option><option>Printer</option><option>Network Device</option><option>Phone</option><option>Tablet</option><option>Server</option><option>Other</option></select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Serial / Asset ID</label><input id="a-serial" placeholder="SN-XXXXX"/></div>
+            <div class="form-group"><label>Assigned To</label><input id="a-assigned" placeholder="Employee name"/></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Purchase Date</label><input id="a-date" type="date"/></div>
+            <div class="form-group"><label>Status</label>
+              <select id="a-status"><option value="active">Active</option><option value="maintenance">In Maintenance</option><option value="retired">Retired</option></select>
+            </div>
+          </div>
+          <div class="form-group"><label>Notes</label><textarea id="a-notes" rows="2"></textarea></div>
+        `, `<button class="btn-primary" id="save-asset-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+        document.getElementById('save-asset-btn').addEventListener('click', async () => {
+          await db.collection('it_assets').add({
+            name: document.getElementById('a-name').value.trim(),
+            type: document.getElementById('a-type').value,
+            serial: document.getElementById('a-serial').value.trim(),
+            assignedTo: document.getElementById('a-assigned').value.trim(),
+            purchasedDate: document.getElementById('a-date').value,
+            status: document.getElementById('a-status').value,
+            notes: document.getElementById('a-notes').value.trim(),
+            createdBy: currentUser.uid,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          closeModal(); loadITContent(currentUser, currentRole, 'Assets', canEdit);
+        });
+      });
+      document.querySelectorAll('.edit-asset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const asset = assets.find(a=>a.id===btn.dataset.id);
+          if (!asset) return;
+          openModal('Edit Asset', `
+            <div class="form-row">
+              <div class="form-group"><label>Asset Name</label><input id="ea-name" value="${asset.name||''}"/></div>
+              <div class="form-group"><label>Assigned To</label><input id="ea-assigned" value="${asset.assignedTo||''}"/></div>
+            </div>
+            <div class="form-group"><label>Status</label>
+              <select id="ea-status">
+                <option value="active" ${asset.status==='active'?'selected':''}>Active</option>
+                <option value="maintenance" ${asset.status==='maintenance'?'selected':''}>In Maintenance</option>
+                <option value="retired" ${asset.status==='retired'?'selected':''}>Retired</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Notes</label><textarea id="ea-notes" rows="2">${asset.notes||''}</textarea></div>
+          `, `<button class="btn-primary" id="upd-asset-btn">Update</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+          document.getElementById('upd-asset-btn').addEventListener('click', async () => {
+            await db.collection('it_assets').doc(asset.id).update({
+              name: document.getElementById('ea-name').value.trim(),
+              assignedTo: document.getElementById('ea-assigned').value.trim(),
+              status: document.getElementById('ea-status').value,
+              notes: document.getElementById('ea-notes').value.trim(),
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            closeModal(); loadITContent(currentUser, currentRole, 'Assets', canEdit);
+          });
+        });
+      });
+      if (window.lucide) lucide.createIcons({ nodes: [content] });
+    }
+    return;
+  }
+
+  // ── Software ──────────────────────────────────────
+  if (sub === 'Software') {
+    const snap = await db.collection('it_software').orderBy('name','asc').get().catch(()=>({docs:[]}));
+    const items = snap.docs.map(d=>({id:d.id,...d.data()}));
+    content.innerHTML = `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+        ${canEdit?`<button class="btn-primary btn-sm" id="new-sw-btn">+ Add Software</button>`:''}
+      </div>
+      <div class="card"><div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Software</th><th>Vendor</th><th>License Type</th><th>License Key / ID</th><th>Seats</th><th>Expiry</th><th>Status</th>${canEdit?'<th></th>':''}</tr></thead>
+        <tbody>
+          ${!items.length?`<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px">No software records</td></tr>`
+            :items.map(s=>{
+              const expiry = s.expiryDate ? new Date(s.expiryDate) : null;
+              const isExp  = expiry && expiry < new Date();
+              const isSoon = expiry && !isExp && (expiry - new Date()) < 30*24*3600*1000;
+              return `<tr>
+                <td>${s.name||'—'}</td>
+                <td>${s.vendor||'—'}</td>
+                <td>${s.licenseType||'—'}</td>
+                <td><code style="font-size:10px">${s.licenseKey||'—'}</code></td>
+                <td>${s.seats||'—'}</td>
+                <td style="color:${isExp?'var(--danger)':isSoon?'#FF9F0A':'inherit'}">${s.expiryDate||'—'}${isExp?' ⚠️':isSoon?' 🔔':''}</td>
+                <td><span class="badge ${s.status==='active'?'badge-green':s.status==='expired'?'badge-red':'badge-gray'}">${s.status||'active'}</span></td>
+                ${canEdit?`<td><button class="btn-icon edit-sw-btn" data-id="${s.id}"><i data-lucide="pencil" style="width:14px;height:14px"></i></button></td>`:''}
+              </tr>`;
+            }).join('')}
+        </tbody>
+      </table></div></div>`;
+    document.getElementById('new-sw-btn')?.addEventListener('click', () => {
+      openModal('Add Software / License', `
+        <div class="form-row">
+          <div class="form-group"><label>Software Name</label><input id="sw-name" placeholder="e.g. Adobe Creative Cloud"/></div>
+          <div class="form-group"><label>Vendor</label><input id="sw-vendor" placeholder="e.g. Adobe"/></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>License Type</label>
+            <select id="sw-ltype"><option>Subscription</option><option>Perpetual</option><option>Open Source</option><option>Trial</option><option>Volume</option></select>
+          </div>
+          <div class="form-group"><label>Seats / Users</label><input id="sw-seats" type="number" placeholder="1"/></div>
+        </div>
+        <div class="form-group"><label>License Key / ID</label><input id="sw-key" placeholder="XXXX-XXXX-XXXX"/></div>
+        <div class="form-row">
+          <div class="form-group"><label>Purchase Date</label><input id="sw-bought" type="date"/></div>
+          <div class="form-group"><label>Expiry Date</label><input id="sw-exp" type="date"/></div>
+        </div>
+        <div class="form-group"><label>Notes</label><textarea id="sw-notes" rows="2"></textarea></div>
+      `, `<button class="btn-primary" id="save-sw-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      document.getElementById('save-sw-btn').addEventListener('click', async () => {
+        const name = document.getElementById('sw-name').value.trim();
+        if (!name) { Notifs.showToast('Enter a name.','error'); return; }
+        await db.collection('it_software').add({
+          name, vendor: document.getElementById('sw-vendor').value.trim(),
+          licenseType: document.getElementById('sw-ltype').value,
+          seats: parseInt(document.getElementById('sw-seats').value)||1,
+          licenseKey: document.getElementById('sw-key').value.trim(),
+          purchasedDate: document.getElementById('sw-bought').value,
+          expiryDate: document.getElementById('sw-exp').value,
+          notes: document.getElementById('sw-notes').value.trim(),
+          status: 'active', createdBy: currentUser.uid,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        closeModal(); loadITContent(currentUser, currentRole, 'Software', canEdit);
+      });
+    });
+    if (window.lucide) lucide.createIcons({ nodes: [content] });
+    return;
+  }
+
+  // ── Access Control ────────────────────────────────
+  if (sub === 'Access Control') {
+    const snap = await db.collection('it_access').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+    const records = snap.docs.map(d=>({id:d.id,...d.data()}));
+    content.innerHTML = `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+        ${canEdit?`<button class="btn-primary btn-sm" id="new-access-btn">+ Add Record</button>`:''}
+      </div>
+      <div class="card"><div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Employee</th><th>System / App</th><th>Access Level</th><th>Status</th><th>Granted By</th><th>Date</th>${canEdit?'<th></th>':''}</tr></thead>
+        <tbody>
+          ${!records.length?`<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px">No access records</td></tr>`
+            :records.map(r=>`<tr>
+              <td>${r.employee||'—'}</td>
+              <td>${r.system||'—'}</td>
+              <td><span class="badge badge-blue">${r.level||'Read'}</span></td>
+              <td><span class="badge ${r.status==='active'?'badge-green':'badge-gray'}">${r.status||'active'}</span></td>
+              <td>${r.grantedBy||'—'}</td>
+              <td>${r.date||'—'}</td>
+              ${canEdit?`<td><button class="btn-sm btn-danger revoke-access-btn" data-id="${r.id}" data-emp="${r.employee||'this user'}" style="font-size:11px;padding:3px 8px">Revoke</button></td>`:''}
+            </tr>`).join('')}
+        </tbody>
+      </table></div></div>`;
+    document.getElementById('new-access-btn')?.addEventListener('click', () => {
+      openModal('Grant Access', `
+        <div class="form-row">
+          <div class="form-group"><label>Employee Name</label><input id="ac-emp" placeholder="Full name"/></div>
+          <div class="form-group"><label>System / App</label><input id="ac-sys" placeholder="e.g. Google Workspace, Firebase"/></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Access Level</label>
+            <select id="ac-lvl"><option>Read</option><option>Write</option><option>Admin</option><option>Owner</option></select>
+          </div>
+          <div class="form-group"><label>Date Granted</label><input id="ac-date" type="date" value="${today()}"/></div>
+        </div>
+        <div class="form-group"><label>Notes</label><textarea id="ac-notes" rows="2"></textarea></div>
+      `, `<button class="btn-primary" id="save-access-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      document.getElementById('save-access-btn').addEventListener('click', async () => {
+        await db.collection('it_access').add({
+          employee: document.getElementById('ac-emp').value.trim(),
+          system: document.getElementById('ac-sys').value.trim(),
+          level: document.getElementById('ac-lvl').value,
+          date: document.getElementById('ac-date').value,
+          grantedBy: currentUser.displayName||currentUser.uid,
+          notes: document.getElementById('ac-notes').value.trim(),
+          status: 'active', createdBy: currentUser.uid,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        closeModal(); loadITContent(currentUser, currentRole, 'Access Control', canEdit);
+      });
+    });
+    content.querySelectorAll('.revoke-access-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm(`Revoke access for ${btn.dataset.emp}?`)) return;
+        await db.collection('it_access').doc(btn.dataset.id).update({ status:'revoked', revokedAt: firebase.firestore.FieldValue.serverTimestamp(), revokedBy: currentUser.uid });
+        loadITContent(currentUser, currentRole, 'Access Control', canEdit);
+      });
+    });
+    return;
+  }
+
+  // ── Network ───────────────────────────────────────
+  if (sub === 'Network') {
+    const snap = await db.collection('it_network').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+    const notes = snap.docs.map(d=>({id:d.id,...d.data()}));
+    content.innerHTML = `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+        ${canEdit?`<button class="btn-primary btn-sm" id="new-net-btn">+ Add Network Note</button>`:''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        ${!notes.length?`<div class="empty-state"><div class="empty-icon">🌐</div><h4>No network notes yet</h4></div>`
+          :notes.map(n=>`
+            <div class="card">
+              <div class="card-header">
+                <h3>🌐 ${n.title||'Untitled'}</h3>
+                <span class="badge badge-blue" style="font-size:10px">${n.type||'General'}</span>
+              </div>
+              <div style="padding:0 16px 16px;font-size:13px;white-space:pre-wrap;color:var(--text)">${n.content||''}</div>
+              ${n.updatedAt?`<div style="padding:0 16px 8px;font-size:11px;color:var(--text-muted)">Updated ${new Date(n.updatedAt.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'})}</div>`:''}
+            </div>`).join('')}
+      </div>`;
+    document.getElementById('new-net-btn')?.addEventListener('click', () => {
+      openModal('Add Network Note', `
+        <div class="form-row">
+          <div class="form-group"><label>Title</label><input id="net-title" placeholder="e.g. Office WiFi Credentials"/></div>
+          <div class="form-group"><label>Type</label>
+            <select id="net-type"><option>WiFi</option><option>Router / Modem</option><option>IP Config</option><option>VPN</option><option>ISP Details</option><option>Server</option><option>General</option></select>
+          </div>
+        </div>
+        <div class="form-group"><label>Content / Notes</label><textarea id="net-content" rows="6" placeholder="SSID, passwords, IPs, ports, etc."></textarea></div>
+      `, `<button class="btn-primary" id="save-net-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      document.getElementById('save-net-btn').addEventListener('click', async () => {
+        const title = document.getElementById('net-title').value.trim();
+        if (!title) { Notifs.showToast('Enter a title.','error'); return; }
+        await db.collection('it_network').add({
+          title, type: document.getElementById('net-type').value,
+          content: document.getElementById('net-content').value,
+          createdBy: currentUser.uid,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        closeModal(); loadITContent(currentUser, currentRole, 'Network', canEdit);
+      });
+    });
+    return;
+  }
+
+  // ── Tasks ─────────────────────────────────────────
+  if (sub === 'Tasks') {
+    await renderDeptTasks(content, 'IT', currentUser, currentRole);
+    return;
+  }
+}
+
+function openITTicketModal(ticket, currentUser, canEdit, onRefresh) {
+  const isAssigned = canEdit || ticket.createdBy === currentUser.uid;
+  openModal(`🎫 ${ticket.title||'Ticket'}`, `
+    <div style="margin-bottom:12px">
+      <div class="item-meta" style="gap:8px;margin-bottom:8px">
+        <span class="badge ${ticket.status==='open'?'badge-orange':ticket.status==='in-progress'?'badge-blue':ticket.status==='resolved'?'badge-green':'badge-gray'}">${ticket.status||'open'}</span>
+        <span class="badge ${ticket.priority==='high'?'badge-red':ticket.priority==='medium'?'badge-orange':'badge-gray'}">${ticket.priority||'low'} priority</span>
+        <span class="badge badge-blue" style="font-size:10px">${ticket.category||'General'}</span>
+      </div>
+      ${ticket.description?`<p style="font-size:13px;margin-bottom:12px;white-space:pre-wrap">${ticket.description}</p>`:''}
+      ${ticket.requestedBy?`<div style="font-size:12px;color:var(--text-muted)">Requested by: ${ticket.requestedBy}</div>`:''}
+    </div>
+    ${canEdit?`
+      <div class="form-row" style="margin-top:12px">
+        <div class="form-group"><label>Status</label>
+          <select id="it-t-status">
+            <option value="open" ${ticket.status==='open'?'selected':''}>Open</option>
+            <option value="in-progress" ${ticket.status==='in-progress'?'selected':''}>In Progress</option>
+            <option value="resolved" ${ticket.status==='resolved'?'selected':''}>Resolved</option>
+            <option value="closed" ${ticket.status==='closed'?'selected':''}>Closed</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Assigned To (IT)</label><input id="it-t-assign" value="${ticket.assignedTo||''}"/></div>
+      </div>
+      <div class="form-group"><label>Resolution Notes</label><textarea id="it-t-res" rows="3">${ticket.resolutionNotes||''}</textarea></div>
+    `:'<p style="font-size:12px;color:var(--text-muted)">Only IT staff can update this ticket.</p>'}
+  `, canEdit?`<button class="btn-primary" id="upd-ticket-btn">Update Ticket</button><button class="btn-secondary" onclick="closeModal()">Close</button>`
+    :`<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  document.getElementById('upd-ticket-btn')?.addEventListener('click', async () => {
+    await db.collection('it_tickets').doc(ticket.id).update({
+      status: document.getElementById('it-t-status').value,
+      assignedTo: document.getElementById('it-t-assign').value.trim(),
+      resolutionNotes: document.getElementById('it-t-res').value.trim(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: currentUser.uid
+    });
+    closeModal(); onRefresh?.();
+  });
+}
+
+// ══════════════════════════════════════════════════
 //  BRILLIANT STEEL
 // ══════════════════════════════════════════════════
 // ══════════════════════════════════════════════════
