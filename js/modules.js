@@ -1323,31 +1323,3 @@ async function renderPresidentMessageCard() {
   } catch(e) { card.style.display='none'; }
 }
 
-// ══════════════════════════════════════════════════
-//  NOTIFICATIONS HELPERS (sendToAll, send)
-// ══════════════════════════════════════════════════
-// Extend Notifs with missing methods if not present
-document.addEventListener('DOMContentLoaded', () => {
-  if (window.Notifs && !window.Notifs.send) {
-    window.Notifs.send = async function(toUid, payload) {
-      try {
-        await db.collection('notifications').doc(toUid).collection('items').add({
-          ...payload, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-      } catch(e) { console.warn('Notif send error:', e); }
-    };
-  }
-  if (window.Notifs && !window.Notifs.sendToAll) {
-    window.Notifs.sendToAll = async function(payload) {
-      try {
-        const snap = await db.collection('users').get();
-        const batch = db.batch();
-        snap.docs.forEach(doc => {
-          const ref = db.collection('notifications').doc(doc.id).collection('items').doc();
-          batch.set(ref, {...payload, read:false, createdAt:firebase.firestore.FieldValue.serverTimestamp()});
-        });
-        await batch.commit();
-      } catch(e) { console.warn('sendToAll error:', e); }
-    };
-  }
-});

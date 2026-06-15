@@ -257,6 +257,17 @@ window.Notifs = (() => {
     await Promise.all(promises);
   }
 
+  // ── Send to all users ────────────────────────
+  async function sendToAll(notifData) {
+    const snap = await db.collection('users').get();
+    const batch = db.batch();
+    snap.docs.forEach(doc => {
+      const ref = db.collection('notifications').doc(doc.id).collection('items').doc();
+      batch.set(ref, { ...notifData, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    });
+    await batch.commit();
+  }
+
   // ── Send to president / owner ─────────────────
   async function sendToOwner(notifData) {
     const [presSnap, ownerSnap] = await Promise.all([
@@ -467,7 +478,7 @@ window.Notifs = (() => {
     backdrop?.addEventListener('click', closePanel);
   }
 
-  return { startListener, stopListener, send, sendToDept, sendToOwner, showToast, initPush, checkDeadlines, initToggle, renderPage, markAllRead,
+  return { startListener, stopListener, send, sendToDept, sendToAll, sendToOwner, showToast, initPush, checkDeadlines, initToggle, renderPage, markAllRead,
     requestPushPermission: (uid) => {
       const vapidKey = window.FCM_CONFIG?.VAPID_KEY;
       if (!vapidKey || vapidKey === 'YOUR_VAPID_KEY_HERE') { showToast('Push notifications not configured yet.','error'); return; }
