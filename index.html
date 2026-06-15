@@ -45,7 +45,7 @@
     </div>
     <div class="splash-wordmark-stack">
       <span class="splash-word-main">Barro Industries</span>
-      <span class="splash-word-sub">Operations System · v9.4</span>
+      <span class="splash-word-sub" id="splash-version-str">Operations System · v9.4</span>
     </div>
     <div class="splash-bar"></div>
   </div>
@@ -300,6 +300,8 @@
   if (_lvEl) _lvEl.textContent = 'v' + _v + ' · Barro Industries';
   const _tbEl = document.getElementById('topbar-version-str');
   if (_tbEl) _tbEl.textContent = 'Operations · v' + _v;
+  const _spEl = document.getElementById('splash-version-str');
+  if (_spEl) _spEl.textContent = 'Operations System · v' + _v;
 </script>
 <script defer src="js/drive.js"></script>
 <script defer src="js/notifications.js"></script>
