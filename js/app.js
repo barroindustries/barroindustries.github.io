@@ -812,7 +812,7 @@ function renderQuoteBuilderIframe() {
       <h2 style="font-size:18px;font-weight:800;color:var(--text)">🧮 Quote Builder</h2>
       <button class="btn-secondary btn-sm" onclick="document.getElementById('qb-frame').contentWindow.print()">🖨 Print / PDF</button>
     </div>
-    <iframe id="qb-frame" src="quote-builder.html"
+    <iframe id="qb-frame" src="quote-builder-v2.html"
       style="width:100%;height:calc(100dvh - 120px);border:none;border-radius:12px;background:#f5f6fa;"
       allow="print" loading="lazy"></iframe>`;
 }
