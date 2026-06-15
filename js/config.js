@@ -27,7 +27,7 @@ window.EMAIL_CONFIG = {
 };
 
 // ── FCM (Push Notifications) ─────────────────────
-window.FCM_CONFIG = { VAPID_KEY: 'YOUR_VAPID_KEY_HERE' };
+window.FCM_CONFIG = { VAPID_KEY: 'BOA1XyfiU9FmeTyy-4XqRD6-JOh_vNyqHwbwhiBkS2gTyUndms-SjmfDetMCg8IKs9-FgMrSRh0ECNydPUfWCkk' };
 
 // ── Auto-Logout ───────────────────────────────────
 // 10 days — keeps session alive so push notifications stay active in background
