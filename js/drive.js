@@ -54,7 +54,10 @@ window.Drive = (() => {
   // ── Delete File ────────────────────────────────────
   async function deleteFile(fileRef) {
     try { await storage.ref(fileRef.id).delete(); }
-    catch (e) { console.warn('Firebase delete failed:', e); }
+    catch (e) {
+      console.warn('Firebase delete failed:', e);
+      throw e; // let callers handle and surface the failure
+    }
   }
 
   // ── Resolve best URL (Drive if synced, else Firebase) ──
@@ -142,6 +145,11 @@ window.Drive = (() => {
         bar.style.width = '100%';
         bar.style.background = 'var(--danger)';
         status.textContent = `❌ Upload failed: ${err.message}`;
+        setTimeout(() => {
+          progress.classList.add('hidden');
+          bar.style.width = '0%';
+          bar.style.background = '';
+        }, 3000);
       }
     };
 

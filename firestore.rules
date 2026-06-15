@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuth() { return request.auth != null; }
+    function isOwner(uid) { return request.auth.uid == uid; }
+
+    function getRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    function isAdmin()          { return getRole() in ['president', 'manager']; }
+    function isFinanceOrAdmin() { return getRole() in ['president', 'manager', 'finance']; }
+    function isPresident()      { return getRole() == 'president'; }
+
+    // ── Users ──────────────────────────────────────────
+    match /users/{uid} {
+      allow read: if isAuth();
+      allow create: if isAuth() && isOwner(uid);
+      allow update: if isAuth() && (isOwner(uid) || isAdmin());
+      allow delete: if isAuth() && isPresident();
+    }
+
+    // ── Employee ID counter ────────────────────────────
+    match /_counters/{docId} {
+      allow read, write: if isAuth() && isAdmin();
+    }
+
+    // ── Posts ─────────────────────────────────────────
+    match /posts/{postId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth() && (resource.data.authorId == request.auth.uid || isAdmin());
+      allow delete: if isAuth() && (resource.data.authorId == request.auth.uid || isAdmin());
+    }
+
+    // ── Notifications — each user can only access their own ──
+    match /notifications/{uid}/{document=**} {
+      allow read, write: if isAuth() && isOwner(uid);
+    }
+
+    // ── Attendance ─────────────────────────────────────
+    match /attendance/{uid}/{document=**} {
+      allow read: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+      allow write: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+    }
+
+    // ── Attendance extension requests ──────────────────
+    match /attendance_extensions/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update, delete: if isAuth() && isAdmin();
+    }
+
+    // ── Cash advances ─────────────────────────────────
+    match /cash_advances/{docId} {
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid ||
+        (resource.data.private == true && isFinanceOrAdmin()) ||
+        (!resource.data.private && isFinanceOrAdmin())
+      );
+      allow create: if isAuth();
+      allow update: if isAuth() && (
+        resource.data.userId == request.auth.uid || isFinanceOrAdmin()
+      );
+      allow delete: if isAuth() && isPresident();
+    }
+
+    // ── Tasks ─────────────────────────────────────────
+    match /tasks/{taskId} {
+      allow read: if isAuth();
+      allow create: if isAuth() && isAdmin();
+      allow update: if isAuth() && (
+        (request.auth.uid in resource.data.assignedTo) || isAdmin()
+      );
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    // ── KPI evaluations ───────────────────────────────
+    match /kpi_evals/{uid} {
+      allow read: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+      allow write: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+    }
+
+    // ── Settings — read all, write only president ──────
+    match /settings/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && isPresident();
+    }
+
+    // ── President message ─────────────────────────────
+    match /president_message/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && isPresident();
+    }
+
+    // ── Quotations ────────────────────────────────────
+    match /quotations/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && isAdmin();
+    }
+  }
+}

@@ -5,6 +5,13 @@
 ═══════════════════════════════════════════════════ */
 'use strict';
 
+// ── HTML escape — prevents XSS when inserting user content into innerHTML ──
+function escHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 // ── PRESIDENT UID (Neil Barro) ────────────────────
 // This controls whose photo/name shows in the president
 // message card in Company Overview.
@@ -80,6 +87,8 @@ async function loadPosts(dept) {
       return;
     }
     const canApprove = isRealPresident() || currentRole === 'manager';
+    // Store post data by id so edit button can retrieve it without fragile data-* encoding
+    const postMap = new Map(posts.map(p => [p.id, p]));
     container.innerHTML = posts.map(p => {
       const ts = p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
       const isOwn = p.authorId === currentUser.uid;
@@ -88,16 +97,16 @@ async function loadPosts(dept) {
       return `
       <div class="post-card" data-id="${p.id}">
         <div class="post-header">
-          <div class="post-avatar">${p.authorPhoto ? `<img src="${p.authorPhoto}"/>` : (p.authorName||'?')[0]}</div>
+          <div class="post-avatar">${p.authorPhoto ? `<img src="${escHtml(p.authorPhoto)}"/>` : escHtml((p.authorName||'?')[0])}</div>
           <div class="post-meta">
-            <div class="post-author">${p.authorName||'Unknown'}</div>
-            <div class="post-time">${ts}${p.dept&&p.dept!=='General'?` · ${p.dept}`:''}</div>
+            <div class="post-author">${escHtml(p.authorName||'Unknown')}</div>
+            <div class="post-time">${escHtml(ts)}${p.dept&&p.dept!=='General'?` · ${escHtml(p.dept)}`:''}</div>
           </div>
           ${p.pinned ? '<span class="badge badge-blue">📌 Pinned</span>' : ''}
           ${p.status==='pending' ? '<span class="badge badge-orange">Pending</span>' : ''}
         </div>
-        ${p.title ? `<div class="post-title">${p.title}</div>` : ''}
-        <div class="post-body">${p.content||''}</div>
+        ${p.title ? `<div class="post-title">${escHtml(p.title)}</div>` : ''}
+        <div class="post-body">${escHtml(p.content||'')}</div>
         ${p.imageUrl ? `<img src="${p.imageUrl}" class="post-image" onclick="window.open('${p.imageUrl}','_blank')"/>` : ''}
         ${p.fileUrl ? `<a href="${p.fileUrl}" target="_blank" class="post-attachment">📎 ${p.fileName||'Attachment'}</a>` : ''}
         <div class="post-actions">
@@ -113,7 +122,7 @@ async function loadPosts(dept) {
             <button class="btn-secondary btn-sm post-reject-btn" data-id="${p.id}">✗ Reject</button>
           ` : ''}
           <div style="display:flex;gap:6px;margin-left:auto">
-            ${isOwn ? `<button class="btn-secondary btn-sm post-edit-btn" data-id="${p.id}" data-title="${(p.title||'').replace(/"/g,'&quot;')}" data-content="${(p.content||'').replace(/"/g,'&quot;')}">✎ Edit</button>` : ''}
+            ${isOwn ? `<button class="btn-secondary btn-sm post-edit-btn" data-id="${p.id}">✎ Edit</button>` : ''}
             ${(canApprove || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="color:var(--danger)">Delete</button>` : ''}
             ${canApprove && p.status==='published' ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':'📌 Pin'}</button>` : ''}
           </div>
@@ -125,6 +134,7 @@ async function loadPosts(dept) {
     container.querySelectorAll('.post-approve-btn').forEach(btn => btn.addEventListener('click', async e => {
       const id = e.target.dataset.id;
       const postSnap = await db.collection('posts').doc(id).get();
+      if (!postSnap.exists) { Notifs.showToast('Post no longer exists.', 'error'); loadPosts(dept); return; }
       const post = postSnap.data();
       await db.collection('posts').doc(id).update({status:'published'});
       await Notifs.send(post.authorId, {title:'Post Approved', body:`Your post "${post.title||post.content?.slice(0,30)}" was approved!`, icon:'✅', type:'post'});
@@ -194,12 +204,15 @@ async function loadPosts(dept) {
     // Edit post
     container.querySelectorAll('.post-edit-btn').forEach(btn => btn.addEventListener('click', async e => {
       const id      = btn.dataset.id;
-      const oldTitle   = btn.dataset.title || '';
-      const oldContent = btn.dataset.content || '';
+      const post    = postMap.get(id) || {};
+      const oldTitle   = post.title || '';
+      const oldContent = post.content || '';
       openModal('✎ Edit Post', `
-        <div class="form-group"><label>Title (optional)</label><input id="edit-post-title" value="${oldTitle.replace(/&quot;/g,'"')}" placeholder="Post title…"/></div>
-        <div class="form-group"><label>Content</label><textarea id="edit-post-content" rows="5" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical">${oldContent.replace(/&quot;/g,'"')}</textarea></div>
+        <div class="form-group"><label>Title (optional)</label><input id="edit-post-title" placeholder="Post title…"/></div>
+        <div class="form-group"><label>Content</label><textarea id="edit-post-content" rows="5" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea></div>
       `, `<button class="btn-primary" id="save-post-edit-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      document.getElementById('edit-post-title').value   = oldTitle;
+      document.getElementById('edit-post-content').value = oldContent;
       document.getElementById('save-post-edit-btn').addEventListener('click', async () => {
         const title   = document.getElementById('edit-post-title').value.trim();
         const content = document.getElementById('edit-post-content').value.trim();
@@ -248,9 +261,9 @@ function openNewPostModal(publishDirectly) {
       authorName:  userProfile.displayName || currentUser.email,
       authorPhoto: userProfile.photoUrl || null,
       pinned:      false,
-      imageUrl:    uploadedFile?.url || null,
+      imageUrl:    uploadedFile && /\.(jpe?g|png|gif|webp|svg)$/i.test(uploadedFile.name) ? uploadedFile.url : null,
       fileName:    uploadedFile?.name || null,
-      fileUrl:     uploadedFile?.url || null,
+      fileUrl:     uploadedFile && !/\.(jpe?g|png|gif|webp|svg)$/i.test(uploadedFile.name) ? uploadedFile.url : null,
       createdAt:   firebase.firestore.FieldValue.serverTimestamp()
     });
     if (status === 'published') {
@@ -366,10 +379,21 @@ window.renderTeamTab = async function() {
         if (!email) { Notifs.showToast('Enter an email.','error'); return; }
         const depts = [...document.querySelectorAll('.inv-dept-cb:checked')].map(cb=>cb.value);
         try {
-          const cred = await auth.createUserWithEmailAndPassword(email, Math.random().toString(36).slice(-10));
+          // Use a secondary app instance so the admin session is not replaced
+          const secondaryApp = firebase.initializeApp(window.firebaseConfig, `invite-${Date.now()}`);
+          const tempPass = Array.from(crypto.getRandomValues(new Uint8Array(12)))
+            .map(b => b.toString(36)).join('').slice(0, 10);
+          const cred = await secondaryApp.auth().createUserWithEmailAndPassword(email, tempPass);
           const uid = cred.user.uid;
-          const empCount = (await db.collection('users').get()).size;
-          const empId = `BI-${new Date().getFullYear()}-${String(empCount).padStart(3,'0')}`;
+          await secondaryApp.delete();
+          // Atomic counter so concurrent invites never collide on the same employee ID
+          const counterRef = db.collection('_counters').doc('employees');
+          const empId = await db.runTransaction(async t => {
+            const snap = await t.get(counterRef);
+            const next = (snap.exists ? snap.data().count : 0) + 1;
+            t.set(counterRef, { count: next }, { merge: true });
+            return `BI-${new Date().getFullYear()}-${String(next).padStart(3,'0')}`;
+          });
           await db.collection('users').doc(uid).set({
             uid, email,
             displayName: document.getElementById('inv-name').value.trim() || email.split('@')[0],
@@ -669,7 +693,7 @@ window.renderAttendancePage = async function() {
     document.getElementById('att-month-label').textContent = label;
 
     const monthStart = `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-01`;
-    const monthEnd   = `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-31`;
+    const monthEnd   = new Date(viewYear, viewMonth+1, 0).toISOString().slice(0,10);
     const snap = await db.collection('attendance').doc(targetUid).collection('records')
       .where(firebase.firestore.FieldPath.documentId(),'>=',monthStart)
       .where(firebase.firestore.FieldPath.documentId(),'<=',monthEnd).get();
@@ -774,9 +798,9 @@ window.renderAttendancePage = async function() {
             const note   = document.getElementById('att-note').value.trim();
             const ref = db.collection('attendance').doc(targetUid).collection('records').doc(date);
             if (status==='present')
-              await ref.set({date,uid:targetUid,loginTime:new Date(),fullTime:true,note,editedBy:currentUser.uid,editedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:true,note,editedBy:currentUser.uid,editedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
             else if (status==='half')
-              await ref.set({date,uid:targetUid,loginTime:new Date(),fullTime:false,note,editedBy:currentUser.uid,editedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:false,note,editedBy:currentUser.uid,editedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
             else
               await ref.delete();
             closeModal();
@@ -931,7 +955,9 @@ function renderCAEmployeeCards(advances, container) {
 async function renderCashAdvanceAdmin(c) {
   const [snap, usersSnap] = await Promise.all([
     db.collection('cash_advances').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
-    dbCachedGet('users', () => db.collection('users').get(), 60000)
+    typeof dbCachedGet === 'function'
+      ? dbCachedGet('users', () => db.collection('users').get(), 60000)
+      : db.collection('users').get()
   ]);
   const allAdvances = snap.docs.map(d=>({id:d.id,...d.data()}));
   const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -1051,25 +1077,29 @@ function renderCAList(advances, container, isAdmin) {
       <div class="form-group"><label>Date</label><input id="pay-date" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
     `, `<button class="btn-primary" id="save-payment-btn">Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     document.getElementById('save-payment-btn').addEventListener('click', async () => {
-      const paid = parseFloat(document.getElementById('pay-amount').value)||0;
-      const newBal = Math.max(0, (a.balance||0) - paid);
-      const payments = [...(a.payments||[]), {amount:paid, date:document.getElementById('pay-date').value, recordedBy:currentUser.uid}];
-      await db.collection('cash_advances').doc(id).update({
-        balance: newBal, payments,
-        status: newBal <= 0 ? 'paid' : 'approved'
-      });
-      // Notify the employee
-      const statusMsg = newBal <= 0 ? 'fully paid off 🎉' : `balance remaining: ₱${fmtN(newBal)}`;
-      await Notifs.send(a.userId, {
-        title: '💳 Cash Advance Payment Recorded',
-        body: `₱${fmtN(paid)} payment was recorded on your cash advance. ${statusMsg.charAt(0).toUpperCase()+statusMsg.slice(1)}.`,
-        icon: '💳', type: 'cash_advance'
-      });
-      closeModal(); Notifs.showToast('Payment recorded!');
-      await window.renderCashAdvancePage();
-      // Stay on Active Loans/CA's tab after payment
-      const activeBtn = document.querySelector('#ca-tabs [data-sub="active"]');
-      if (activeBtn) activeBtn.click();
+      try {
+        const paid = parseFloat(document.getElementById('pay-amount').value)||0;
+        const newBal = Math.max(0, (a.balance||0) - paid);
+        const payments = [...(a.payments||[]), {amount:paid, date:document.getElementById('pay-date').value, recordedBy:currentUser.uid}];
+        await db.collection('cash_advances').doc(id).update({
+          balance: newBal, payments,
+          status: newBal <= 0 ? 'paid' : 'approved'
+        });
+        // Notify the employee
+        const statusMsg = newBal <= 0 ? 'fully paid off 🎉' : `balance remaining: ₱${fmtN(newBal)}`;
+        await Notifs.send(a.userId, {
+          title: '💳 Cash Advance Payment Recorded',
+          body: `₱${fmtN(paid)} payment was recorded on your cash advance. ${statusMsg.charAt(0).toUpperCase()+statusMsg.slice(1)}.`,
+          icon: '💳', type: 'cash_advance'
+        });
+        closeModal(); Notifs.showToast('Payment recorded!');
+        await window.renderCashAdvancePage();
+        // Stay on Active Loans/CA's tab after payment
+        const activeBtn = document.querySelector('#ca-tabs [data-sub="active"]');
+        if (activeBtn) activeBtn.click();
+      } catch(err) {
+        Notifs.showToast('Error recording payment: ' + err.message, 'error');
+      }
     });
   }));
 

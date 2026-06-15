@@ -161,7 +161,7 @@ async function checkPayrollDuties(user) {
         ? `Please complete your self-assessment for ${monthLabel} today before payroll is finalized.`
         : `Reminder: Your self-assessment for ${monthLabel} is due tomorrow. Go to Personal Finance → Self Evaluate.`,
       icon: isUrgent ? '🚨' : '📋', type: 'payroll_reminder',
-      dedupKey: `selfassess-${currentMonth}`
+      dedupKey: `selfassess-${user.uid}-${currentMonth}`
     });
     localStorage.setItem(dedupKey, '1');
   } catch(e) { console.warn('[checkPayrollDuties]', e); }
@@ -345,8 +345,13 @@ async function loadUserProfile(user) {
   try {
     let snap = await db.collection('users').doc(user.uid).get();
     if (!snap.exists) {
-      const empCount = (await dbCachedGet('users', () => db.collection('users').get(), 60000)).size;
-      const empId    = `BI-${new Date().getFullYear()}-${String(empCount+1).padStart(3,'0')}`;
+      const counterRef = db.collection('_counters').doc('employees');
+      const empId = await db.runTransaction(async t => {
+        const c = await t.get(counterRef);
+        const next = (c.exists ? c.data().count : 0) + 1;
+        t.set(counterRef, { count: next }, { merge: true });
+        return `BI-${new Date().getFullYear()}-${String(next).padStart(3,'0')}`;
+      });
       const profile  = {
         uid: user.uid, email: user.email,
         displayName: user.displayName || user.email.split('@')[0],
@@ -549,9 +554,10 @@ function initLogin() {
 function generatePassword(fullName) {
   const parts  = fullName.trim().split(/\s+/);
   const base   = parts[parts.length - 1] || parts[0]; // last name preferred
-  const digits = String(Math.floor(Math.random() * 900) + 100); // 3 digits
+  const rand   = crypto.getRandomValues(new Uint32Array(2));
+  const digits = String((rand[0] % 900) + 100); // 3 digits, cryptographically random
   const syms   = ['!', '@', '#', '$', '%', '&'];
-  const sym    = syms[Math.floor(Math.random() * syms.length)];
+  const sym    = syms[rand[1] % syms.length];
   return base + digits + sym;
 }
 function setLoginLoading(on) {

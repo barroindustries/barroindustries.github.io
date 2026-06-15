@@ -6,6 +6,7 @@
 
 window.Notifs = (() => {
   let unsubscribe = null;
+  let _fcmLoadingPromise = null; // serialises concurrent _registerPush calls
 
   // ── Start listener ────────────────────────────
   function startListener(uid) {
@@ -105,8 +106,8 @@ window.Notifs = (() => {
         <div class="notif-item-main">
           <div class="notif-item-emoji">${n.icon || '🔔'}</div>
           <div class="notif-item-text">
-            <div class="notif-item-title">${n.title}</div>
-            <div class="notif-item-body">${n.body || ''}</div>
+            <div class="notif-item-title">${escHtml(n.title)}</div>
+            <div class="notif-item-body">${escHtml(n.body || '')}</div>
             <div class="notif-item-time">${timeAgo(n.createdAt)}</div>
           </div>
         </div>
@@ -239,16 +240,16 @@ window.Notifs = (() => {
   async function send(targetUid, { title, body, icon = '🔔', type = 'general', link = null, dedupKey = null } = {}) {
     // If a dedupKey is provided, skip if a notif with that key already exists today
     if (dedupKey) {
-      const todayStr = new Date().toISOString().slice(0, 10);
+      // Single-field query — no composite index required
       const existing = await db.collection('notifications').doc(targetUid).collection('items')
-        .where('dedupKey', '==', dedupKey).where('dedupDate', '==', todayStr).limit(1).get().catch(()=>({empty:true}));
+        .where('dedupKey', '==', dedupKey).limit(1).get().catch(()=>({empty:true}));
       if (!existing.empty) return;
     }
     const data = {
       title, body, icon, type, link,
       read:      false,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      ...(dedupKey ? { dedupKey, dedupDate: new Date().toISOString().slice(0, 10) } : {})
+      ...(dedupKey ? { dedupKey } : {})
     };
     await db.collection('notifications').doc(targetUid).collection('items').add(data);
 
@@ -260,36 +261,54 @@ window.Notifs = (() => {
 
   // ── Send to department ────────────────────────
   async function sendToDept(department, notifData) {
-    // Query both legacy `department` (string) and `departments` (array) fields
     const [snap1, snap2] = await Promise.all([
       db.collection('users').where('department', '==', department).get().catch(()=>({docs:[]})),
       db.collection('users').where('departments', 'array-contains', department).get().catch(()=>({docs:[]}))
     ]);
     const seen = new Set();
     const allDocs = [...snap1.docs, ...snap2.docs].filter(d => { if (seen.has(d.id)) return false; seen.add(d.id); return true; });
-    await Promise.all(allDocs.map(d => send(d.id, notifData)));
+    // Use batch writes — avoids per-user dedupKey read + stays under Firestore write limits
+    const docs = allDocs.slice();
+    while (docs.length) {
+      const chunk = docs.splice(0, 499);
+      const batch = db.batch();
+      chunk.forEach(doc => {
+        const ref = db.collection('notifications').doc(doc.id).collection('items').doc();
+        batch.set(ref, { ...notifData, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      });
+      await batch.commit();
+    }
   }
 
   // ── Send to all users ────────────────────────
   async function sendToAll(notifData) {
     const snap = await db.collection('users').get();
-    const batch = db.batch();
-    snap.docs.forEach(doc => {
-      const ref = db.collection('notifications').doc(doc.id).collection('items').doc();
-      batch.set(ref, { ...notifData, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-    });
-    await batch.commit();
+    const docs = snap.docs.slice();
+    while (docs.length) {
+      const chunk = docs.splice(0, 499);
+      const batch = db.batch();
+      chunk.forEach(doc => {
+        const ref = db.collection('notifications').doc(doc.id).collection('items').doc();
+        batch.set(ref, { ...notifData, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      });
+      await batch.commit();
+    }
   }
 
   // ── Send to president / owner ─────────────────
   async function sendToOwner(notifData) {
     const [presSnap, ownerSnap] = await Promise.all([
-      db.collection('users').where('role','==','president').get(),
-      db.collection('users').where('role','==','owner').get()
+      db.collection('users').where('role','==','president').get().catch(()=>({docs:[]})),
+      db.collection('users').where('role','==','owner').get().catch(()=>({docs:[]}))
     ]);
     const allDocs = [...presSnap.docs, ...ownerSnap.docs];
-    const promises = allDocs.map(d => send(d.id, notifData));
-    await Promise.all(promises);
+    if (!allDocs.length) return;
+    const batch = db.batch();
+    allDocs.forEach(d => {
+      const ref = db.collection('notifications').doc(d.id).collection('items').doc();
+      batch.set(ref, { ...notifData, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    });
+    await batch.commit();
   }
 
   // ── Email (EmailJS) ───────────────────────────
@@ -418,15 +437,18 @@ window.Notifs = (() => {
         return;
       }
 
-      // Lazy-load messaging SDK
+      // Lazy-load messaging SDK — one shared promise so concurrent callers don't race
       if (!window._fcmLoaded) {
-        await new Promise((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = 'https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js';
-          s.onload = resolve; s.onerror = reject;
-          document.head.appendChild(s);
-        });
-        window._fcmLoaded = true;
+        if (!_fcmLoadingPromise) {
+          _fcmLoadingPromise = new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js';
+            s.onload = () => { window._fcmLoaded = true; resolve(); };
+            s.onerror = reject;
+            document.head.appendChild(s);
+          });
+        }
+        await _fcmLoadingPromise;
       }
 
       const swReg = await navigator.serviceWorker.register('firebase-messaging-sw.js')
@@ -486,12 +508,13 @@ window.Notifs = (() => {
     tomorrowSnap.docs.forEach(d => {
       const task = { id: d.id, ...d.data() };
       if (DONE_STATUSES.includes(task.status)) return;
-      toNotify.push({ task, key: `deadline-tmrw-${task.id}`, title: '⏰ Due Tomorrow', body: `"${task.title}" is due tomorrow.` });
+      // Date embedded in key — no composite index needed, fires exactly once per task per day
+      toNotify.push({ task, key: `deadline-tmrw-${task.id}-${tomorrowStr}`, title: '⏰ Due Tomorrow', body: `"${task.title}" is due tomorrow.` });
     });
     todaySnap.docs.forEach(d => {
       const task = { id: d.id, ...d.data() };
       if (DONE_STATUSES.includes(task.status)) return;
-      toNotify.push({ task, key: `deadline-today-${task.id}`, title: '🚨 Due Today', body: `"${task.title}" is due today! Complete and submit it.` });
+      toNotify.push({ task, key: `deadline-today-${task.id}-${todayStr}`, title: '🚨 Due Today', body: `"${task.title}" is due today! Complete and submit it.` });
     });
 
     for (const { task, key, title, body } of toNotify) {
@@ -505,11 +528,10 @@ window.Notifs = (() => {
     const now  = new Date();
     const hour = now.getHours();
     const dow  = now.getDay(); // 0=Sun
-    if (dow === 0 || hour < 7 || hour >= 8) return; // Mon–Sat, 7:00–7:59 AM only
+    if (dow === 0 || hour < 7 || hour >= 9) return; // Mon–Sat, 7:00–8:59 AM only
 
     const todayStr = now.toISOString().slice(0, 10);
     const dedupKey = `bi-att-remind-${uid}-${todayStr}`;
-    if (localStorage.getItem(dedupKey)) return;
 
     // Skip if already timed in
     try {
@@ -518,12 +540,13 @@ window.Notifs = (() => {
     } catch {}
 
     const name = displayName || 'there';
+    // dedupKey in Firestore prevents duplicate reminders across devices/sessions
     await send(uid, {
       title: `🌅 Good morning, ${name}!`,
       body:  "Don't forget to time in today. Wishing you a productive day! 💪",
-      icon:  '🌅', type: 'att_morning_remind'
+      icon:  '🌅', type: 'att_morning_remind',
+      dedupKey
     });
-    localStorage.setItem(dedupKey, '1');
   }
 
   // ── Helpers ───────────────────────────────────

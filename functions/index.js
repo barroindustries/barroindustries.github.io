@@ -37,13 +37,17 @@ exports.sendPushOnNotification = functions.firestore
     try {
       await admin.messaging().send(message);
     } catch (err) {
-      if (err.code === 'messaging/registration-token-not-registered') {
-        // Stale token — remove it so we don't keep retrying
+      if (err.code === 'messaging/registration-token-not-registered' ||
+          err.code === 'messaging/invalid-registration-token') {
+        // Stale/invalid token — remove it so we don't keep retrying
         await admin.firestore()
           .collection('users').doc(uid)
           .update({ fcmToken: admin.firestore.FieldValue.delete() });
       } else {
+        // Re-throw transient errors (network, quota) so Cloud Functions
+        // retries with its built-in exponential backoff
         console.error('[FCM] Send error:', err.code, err.message);
+        throw err;
       }
     }
     return null;

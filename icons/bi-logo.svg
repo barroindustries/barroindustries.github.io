@@ -1,0 +1,41 @@
+<svg width="1024" height="1024" viewBox="0 0 680 680" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="biGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e040fb"/>
+      <stop offset="100%" stop-color="#00e5ff"/>
+    </linearGradient>
+    <linearGradient id="starGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e040fb"/>
+      <stop offset="100%" stop-color="#00e5ff"/>
+    </linearGradient>
+    <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#e040fb" stop-opacity="0"/>
+      <stop offset="30%" stop-color="#e040fb"/>
+      <stop offset="70%" stop-color="#00e5ff"/>
+      <stop offset="100%" stop-color="#00e5ff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="40" y="40" width="600" height="600" rx="100" ry="100" fill="#0a0a0a"/>
+
+  <g transform="translate(215, 215)">
+    <path d="M0,-55 C5,-5 5,-5 55,0 C5,5 5,5 0,55 C-5,5 -5,5 -55,0 C-5,-5 -5,-5 0,-55Z" fill="url(#starGrad)"/>
+  </g>
+
+  <g transform="translate(320, 165)">
+    <path d="M0,-32 C3,-3 3,-3 32,0 C3,3 3,3 0,32 C-3,3 -3,3 -32,0 C-3,-3 -3,-3 0,-32Z" fill="url(#starGrad)"/>
+  </g>
+
+  <g transform="translate(385, 215)">
+    <path d="M0,-20 C2,-2 2,-2 20,0 C2,2 2,2 0,20 C-2,2 -2,2 -20,0 C-2,-2 -2,-2 0,-20Z" fill="url(#starGrad)"/>
+  </g>
+
+  <text x="340" y="500" text-anchor="middle"
+    font-family="Arial Black, Arial, sans-serif"
+    font-weight="900"
+    font-size="230"
+    fill="url(#biGrad)"
+    letter-spacing="8">BI</text>
+
+  <rect x="140" y="520" width="400" height="4" rx="2" fill="url(#lineGrad)"/>
+</svg>
