@@ -3264,7 +3264,7 @@ async function renderCompanyOverview(ct, canAdd) {
         <div class="co-credit-icon"><i data-lucide="code-2" style="width:18px;height:18px;stroke:var(--primary-light)"></i></div>
         <div class="co-credit-body">
           <div class="co-credit-title">Operations System</div>
-          <div class="co-credit-sub">Developed by <strong>Neil Barro</strong> &nbsp;·&nbsp; v9.4</div>
+          <div class="co-credit-sub">Developed by <strong>Neil Barro</strong> &nbsp;·&nbsp; v${window.APP_VERSION||'9.4'}</div>
           <div class="co-credit-note">Internal platform for operations, attendance, KPIs, finance, and team management.</div>
         </div>
       </div>

@@ -3,6 +3,10 @@
    config.js
 ═══════════════════════════════════════════════════ */
 
+// ── App Version ──────────────────────────────────
+// Auto-incremented by git pre-commit hook (scripts/bump-version.sh)
+window.APP_VERSION = '9.4.1';
+
 // ── Google Drive API Config ──────────────────────
 window.DRIVE_CONFIG = {
   CLIENT_ID:    'YOUR_GOOGLE_OAUTH_CLIENT_ID',
