@@ -1,0 +1,1150 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "lastUpdated": "2026-06-16",
+    "description": "Barro Kitchens Product Database with pricing formulas and labor constants",
+    "formulaTypes": {
+      "fixed": "Fixed price regardless of dimensions",
+      "per_length": "Base price + (length_mm - defaultLength_mm) * pricePerMm",
+      "per_area": "Base price + (area_sqm) * pricePerSqm",
+      "per_run": "Price per run/section, multiplied by quantity of runs",
+      "configurable": "Price varies by selected spec/variant"
+    },
+    "laborNotes": "laborHours = estimated fabrication + installation hours per unit. Timeline = totalLaborHours / teamSize / 8hrs"
+  },
+  "categories": [
+    {
+      "id": "cooking_line",
+      "label": "Cooking Line",
+      "code": "CE",
+      "color": "#E74C3C",
+      "icon": "🔥"
+    },
+    {
+      "id": "prep_washing",
+      "label": "Preparation & Washing",
+      "code": "PW",
+      "color": "#3498DB",
+      "icon": "🧼"
+    },
+    {
+      "id": "refrigeration",
+      "label": "Refrigeration",
+      "code": "RF",
+      "color": "#00BCD4",
+      "icon": "❄️"
+    },
+    {
+      "id": "ventilation",
+      "label": "Ventilation",
+      "code": "VT",
+      "color": "#27AE60",
+      "icon": "💨"
+    },
+    {
+      "id": "gas_line",
+      "label": "Gas Line",
+      "code": "GL",
+      "color": "#F39C12",
+      "icon": "⛽"
+    },
+    {
+      "id": "fire_suppression",
+      "label": "Fire Suppression",
+      "code": "FS",
+      "color": "#E67E22",
+      "icon": "🧯"
+    },
+    {
+      "id": "miscellaneous",
+      "label": "Miscellaneous",
+      "code": "MS",
+      "color": "#8E44AD",
+      "icon": "🔧"
+    }
+  ],
+  "products": [
+
+    // ─── COOKING LINE ────────────────────────────────────────────────────
+    {
+      "id": "CE-001",
+      "category": "cooking_line",
+      "name": "SS Open Top LP Stove (1 Burner)",
+      "shortName": "LP Stove 1B",
+      "formulaType": "fixed",
+      "basePrice": 18000,
+      "defaultDimensions": { "W": 600, "D": 700, "H": 850 },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.1mm", "SS304 1.5mm"], "default": "SS304 1.1mm", "priceAdder": [0, 2500] },
+        { "key": "burnerBrand", "label": "Burner Brand", "options": ["Standard", "Katsura HP"], "default": "Standard", "priceAdder": [0, 3500] }
+      ],
+      "laborHours": { "fabrication": 8, "installation": 2, "teamSize": 2 },
+      "leadTime": "10-14 days",
+      "notes": "LP burner, SS304 1.1mm top",
+      "unit": "pc"
+    },
+    {
+      "id": "CE-002",
+      "category": "cooking_line",
+      "name": "SS Open Top LP Stove (2 Burner)",
+      "shortName": "LP Stove 2B",
+      "formulaType": "fixed",
+      "basePrice": 32000,
+      "defaultDimensions": { "W": 800, "D": 700, "H": 850 },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.1mm", "SS304 1.5mm"], "default": "SS304 1.1mm", "priceAdder": [0, 3500] }
+      ],
+      "laborHours": { "fabrication": 12, "installation": 2, "teamSize": 2 },
+      "leadTime": "10-14 days",
+      "notes": "2x LP burners, SS304",
+      "unit": "pc"
+    },
+    {
+      "id": "CE-003",
+      "category": "cooking_line",
+      "name": "SS Open Top LP Stove (3 Burner)",
+      "shortName": "LP Stove 3B",
+      "formulaType": "fixed",
+      "basePrice": 61000,
+      "defaultDimensions": { "W": 1000, "D": 700, "H": 850 },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.1mm", "SS304 1.5mm"], "default": "SS304 1.1mm", "priceAdder": [0, 5000] }
+      ],
+      "laborHours": { "fabrication": 16, "installation": 3, "teamSize": 2 },
+      "leadTime": "10-14 days",
+      "notes": "3x LP burners, SS304",
+      "unit": "pc"
+    },
+    {
+      "id": "CE-004",
+      "category": "cooking_line",
+      "name": "SS Open Top HP Stove (4 Burner)",
+      "shortName": "HP Stove 4B",
+      "formulaType": "fixed",
+      "basePrice": 155000,
+      "defaultDimensions": { "W": 1200, "D": 700, "H": 850 },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.1mm", "SS304 1.5mm"], "default": "SS304 1.1mm", "priceAdder": [0, 7000] },
+        { "key": "burnerBrand", "label": "Burner Brand", "options": ["Standard HP", "Katsura HP", "Paloma HP"], "default": "Standard HP", "priceAdder": [0, 8000, 12000] }
+      ],
+      "laborHours": { "fabrication": 24, "installation": 4, "teamSize": 2 },
+      "leadTime": "14-21 days",
+      "notes": "4x HP burners, SS304",
+      "unit": "pc"
+    },
+    {
+      "id": "CE-005",
+      "category": "cooking_line",
+      "name": "SS Open Top HP Stove (4 Burner Square)",
+      "shortName": "HP Stove 4B Square",
+      "formulaType": "fixed",
+      "basePrice": 198000,
+      "defaultDimensions": { "W": 1200, "D": 700, "H": 850 },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.1mm", "SS304 1.5mm"], "default": "SS304 1.1mm", "priceAdder": [0, 7000] }
+      ],
+      "laborHours": { "fabrication": 28, "installation": 4, "teamSize": 2 },
+      "leadTime": "14-21 days",
+      "notes": "HP burners square type",
+      "unit": "pc"
+    },
+    {
+      "id": "CE-006",
+      "category": "cooking_line",
+      "name": "SS Wok Stove (1 Burner HP)",
+      "shortName": "Wok Stove 1B HP",
+      "formulaType": "fixed",
+      "basePrice": 31000,
+      "defaultDimensions": { "W": 600, "D": 700, "H": 850 },
+      "specs": [
+        { "key": "wokSize", "label": "Wok Ring Size", "options": ["Standard (36cm)", "Large (40cm)"], "default": "Standard (36cm)", "priceAdder": [0, 2000] }
+      ],
+      "laborHours": { "fabrication": 10, "installation": 2, "teamSize": 2 },
+      "leadTime": "10-14 days",
+      "notes": "1x Katsura HP burner, wok base",
+      "unit": "pc"
+    },
+    {
+      "id": "CE-007",
+      "category": "cooking_line",
+      "name": "SS Combi Griller-Griddle",
+      "shortName": "Combi Griller-Griddle",
+      "formulaType": "fixed",
+      "basePrice": 64000,
+      "defaultDimensions": { "W": 900, "D": 700, "H": 850 },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.1mm", "SS304 1.5mm"], "default": "SS304 1.1mm", "priceAdder": [0, 5000] }
+      ],
+      "laborHours": { "fabrication": 20, "installation": 3, "teamSize": 2 },
+      "leadTime": "14-21 days",
+      "notes": "H-type burners, lava rocks, griddle",
+      "unit": "pc"
+    },
+    {
+      "id": "CE-008",
+      "category": "cooking_line",
+      "name": "SS Griller-Griddle-2LP Combi",
+      "shortName": "Griller+Griddle+2LP",
+      "formulaType": "fixed",
+      "basePrice": 158000,
+      "defaultDimensions": { "W": 1200, "D": 700, "H": 850 },
+      "specs": [],
+      "laborHours": { "fabrication": 32, "installation": 4, "teamSize": 2 },
+      "leadTime": "14-21 days",
+      "notes": "Griller + griddle + 2 LP burners",
+      "unit": "pc"
+    },
+    {
+      "id": "CE-009",
+      "category": "cooking_line",
+      "name": "SS Double Fryer",
+      "shortName": "Double Fryer",
+      "formulaType": "fixed",
+      "basePrice": 48000,
+      "defaultDimensions": { "W": 700, "D": 700, "H": 850 },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.1mm", "SS304 1.5mm"], "default": "SS304 1.1mm", "priceAdder": [0, 3000] }
+      ],
+      "laborHours": { "fabrication": 12, "installation": 2, "teamSize": 2 },
+      "leadTime": "10-14 days",
+      "notes": "SS304 double fryer",
+      "unit": "pc"
+    },
+    {
+      "id": "CE-010",
+      "category": "cooking_line",
+      "name": "SS Griddle with Stand",
+      "shortName": "Griddle w/ Stand",
+      "formulaType": "fixed",
+      "basePrice": 58000,
+      "defaultDimensions": { "W": 700, "D": 700, "H": 850 },
+      "specs": [],
+      "laborHours": { "fabrication": 14, "installation": 2, "teamSize": 2 },
+      "leadTime": "10-14 days",
+      "notes": "Semi-nonstick griddle plate",
+      "unit": "pc"
+    },
+    {
+      "id": "CE-011",
+      "category": "cooking_line",
+      "name": "SS Commercial Rice Steamer Gas (6-Tray)",
+      "shortName": "Rice Steamer Gas 6T",
+      "formulaType": "fixed",
+      "basePrice": 85000,
+      "defaultDimensions": { "W": 700, "D": 700, "H": 1200 },
+      "specs": [
+        { "key": "trays", "label": "Tray Count", "options": ["6 Trays", "9 Trays", "12 Trays"], "default": "6 Trays", "priceAdder": [0, 12000, 22000] }
+      ],
+      "laborHours": { "fabrication": 16, "installation": 2, "teamSize": 2 },
+      "leadTime": "14-21 days",
+      "notes": "Gas type",
+      "unit": "pc"
+    },
+    {
+      "id": "CE-012",
+      "category": "cooking_line",
+      "name": "2-Deck Oven (6-Tray)",
+      "shortName": "2-Deck Oven",
+      "formulaType": "fixed",
+      "basePrice": 138000,
+      "defaultDimensions": { "W": 700, "D": 700, "H": 1400 },
+      "specs": [
+        { "key": "decks", "label": "Decks", "options": ["2 Deck", "3 Deck"], "default": "2 Deck", "priceAdder": [0, 45000] }
+      ],
+      "laborHours": { "fabrication": 24, "installation": 3, "teamSize": 2 },
+      "leadTime": "21-30 days",
+      "notes": "Fiber glass insulation",
+      "unit": "pc"
+    },
+
+    // ─── PREPARATION & WASHING ───────────────────────────────────────────
+    {
+      "id": "PW-001",
+      "category": "prep_washing",
+      "name": "SS Preparation Table (1 Layer)",
+      "shortName": "Prep Table 1L",
+      "formulaType": "per_length",
+      "basePrice": 14000,
+      "defaultDimensions": { "W": 900, "D": 600, "H": 850 },
+      "formula": {
+        "baseLengthMm": 900,
+        "pricePerExtraMm": 8.5,
+        "comment": "Price increases ~₱8.50 per mm beyond 900mm width"
+      },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.2mm", "SS304 1.5mm", "SS316 1.2mm"], "default": "SS304 1.2mm", "priceAdder": [0, 3000, 8000] },
+        { "key": "shelf", "label": "Undershelf", "options": ["Adjustable shelf", "Solid shelf", "None"], "default": "Adjustable shelf", "priceAdder": [0, 0, -1500] }
+      ],
+      "laborHours": { "fabrication": 6, "installation": 1, "teamSize": 2 },
+      "leadTime": "7-10 days",
+      "notes": "SS304, adjustable shelf",
+      "unit": "pc"
+    },
+    {
+      "id": "PW-002",
+      "category": "prep_washing",
+      "name": "SS Preparation Table (2 Layer, Movable)",
+      "shortName": "Prep Table 2L",
+      "formulaType": "per_length",
+      "basePrice": 26500,
+      "defaultDimensions": { "W": 900, "D": 600, "H": 850 },
+      "formula": {
+        "baseLengthMm": 900,
+        "pricePerExtraMm": 12.0,
+        "comment": "Price increases ~₱12 per mm beyond 900mm width"
+      },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.2mm", "SS304 1.5mm"], "default": "SS304 1.2mm", "priceAdder": [0, 4000] },
+        { "key": "casters", "label": "Casters", "options": ["With lock casters", "Fixed legs"], "default": "With lock casters", "priceAdder": [0, -800] }
+      ],
+      "laborHours": { "fabrication": 8, "installation": 1, "teamSize": 2 },
+      "leadTime": "7-10 days",
+      "notes": "SS304, 2 layers, casters",
+      "unit": "pc"
+    },
+    {
+      "id": "PW-003",
+      "category": "prep_washing",
+      "name": "SS Preparation Table (3 Layer)",
+      "shortName": "Prep Table 3L",
+      "formulaType": "per_length",
+      "basePrice": 31000,
+      "defaultDimensions": { "W": 900, "D": 600, "H": 850 },
+      "formula": {
+        "baseLengthMm": 900,
+        "pricePerExtraMm": 14.0
+      },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.2mm", "SS304 1.5mm"], "default": "SS304 1.2mm", "priceAdder": [0, 5000] }
+      ],
+      "laborHours": { "fabrication": 10, "installation": 1, "teamSize": 2 },
+      "leadTime": "7-10 days",
+      "notes": "SS304, 3 layers",
+      "unit": "pc"
+    },
+    {
+      "id": "PW-004",
+      "category": "prep_washing",
+      "name": "SS Wash Sink (Single) + Gooseneck Faucet",
+      "shortName": "Single Sink",
+      "formulaType": "fixed",
+      "basePrice": 18500,
+      "defaultDimensions": { "W": 500, "D": 500, "H": 850 },
+      "specs": [
+        { "key": "basinDepth", "label": "Basin Depth", "options": ["250mm", "300mm", "350mm"], "default": "300mm", "priceAdder": [−500, 0, 1500] },
+        { "key": "faucet", "label": "Faucet Type", "options": ["Gooseneck", "Pre-rinse spray"], "default": "Gooseneck", "priceAdder": [0, 4500] }
+      ],
+      "laborHours": { "fabrication": 6, "installation": 2, "teamSize": 2 },
+      "leadTime": "7-10 days",
+      "notes": "SS304, 1 basin",
+      "unit": "pc"
+    },
+    {
+      "id": "PW-005",
+      "category": "prep_washing",
+      "name": "SS Sink Table + Gooseneck Faucet",
+      "shortName": "Sink Table",
+      "formulaType": "per_length",
+      "basePrice": 22000,
+      "defaultDimensions": { "W": 600, "D": 500, "H": 850 },
+      "formula": {
+        "baseLengthMm": 600,
+        "pricePerExtraMm": 11.0
+      },
+      "specs": [
+        { "key": "faucet", "label": "Faucet Type", "options": ["Gooseneck", "Pre-rinse spray"], "default": "Gooseneck", "priceAdder": [0, 4500] }
+      ],
+      "laborHours": { "fabrication": 8, "installation": 2, "teamSize": 2 },
+      "leadTime": "7-10 days",
+      "notes": "SS304, integrated drainboard",
+      "unit": "pc"
+    },
+    {
+      "id": "PW-006",
+      "category": "prep_washing",
+      "name": "SS Double Sink Table + Pre-Rinse Faucet",
+      "shortName": "Double Sink Table",
+      "formulaType": "per_length",
+      "basePrice": 52000,
+      "defaultDimensions": { "W": 1000, "D": 600, "H": 850 },
+      "formula": {
+        "baseLengthMm": 1000,
+        "pricePerExtraMm": 18.0
+      },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.2mm", "SS304 1.5mm"], "default": "SS304 1.2mm", "priceAdder": [0, 5000] }
+      ],
+      "laborHours": { "fabrication": 14, "installation": 3, "teamSize": 2 },
+      "leadTime": "10-14 days",
+      "notes": "SS304, 2 basins",
+      "unit": "pc"
+    },
+    {
+      "id": "PW-007",
+      "category": "prep_washing",
+      "name": "SS Double Sink Table + Pre-Rinse (Large)",
+      "shortName": "Double Sink Large",
+      "formulaType": "per_length",
+      "basePrice": 28000,
+      "defaultDimensions": { "W": 1000, "D": 500, "H": 850 },
+      "formula": {
+        "baseLengthMm": 1000,
+        "pricePerExtraMm": 12.0
+      },
+      "specs": [],
+      "laborHours": { "fabrication": 12, "installation": 3, "teamSize": 2 },
+      "leadTime": "10-14 days",
+      "notes": "SS304, large basin",
+      "unit": "pc"
+    },
+    {
+      "id": "PW-008",
+      "category": "prep_washing",
+      "name": "SS Giant Triple Sink with Faucet",
+      "shortName": "Triple Sink",
+      "formulaType": "per_length",
+      "basePrice": 198000,
+      "defaultDimensions": { "W": 1510, "D": 500, "H": 850 },
+      "formula": {
+        "baseLengthMm": 1510,
+        "pricePerExtraMm": 25.0
+      },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.2mm", "SS304 1.5mm", "SS316 1.2mm"], "default": "SS304 1.2mm", "priceAdder": [0, 8000, 18000] }
+      ],
+      "laborHours": { "fabrication": 24, "installation": 4, "teamSize": 3 },
+      "leadTime": "14-21 days",
+      "notes": "SS304, 3 basins, institutional",
+      "unit": "pc"
+    },
+    {
+      "id": "PW-009",
+      "category": "prep_washing",
+      "name": "SS Double Sink with Slotted Bottom",
+      "shortName": "Double Sink Slotted",
+      "formulaType": "fixed",
+      "basePrice": 68000,
+      "defaultDimensions": { "W": 900, "D": 600, "H": 850 },
+      "specs": [],
+      "laborHours": { "fabrication": 14, "installation": 3, "teamSize": 2 },
+      "leadTime": "10-14 days",
+      "notes": "SS304, slotted bottom",
+      "unit": "pc"
+    },
+    {
+      "id": "PW-010",
+      "category": "prep_washing",
+      "name": "SS Dish Rack (Movable, 4 Layer)",
+      "shortName": "Dish Rack 4L",
+      "formulaType": "fixed",
+      "basePrice": 16700,
+      "defaultDimensions": { "W": 600, "D": 500, "H": 1600 },
+      "specs": [
+        { "key": "layers", "label": "Layers", "options": ["4 layers", "5 layers", "6 layers"], "default": "4 layers", "priceAdder": [0, 3500, 6500] }
+      ],
+      "laborHours": { "fabrication": 6, "installation": 0.5, "teamSize": 2 },
+      "leadTime": "7-10 days",
+      "notes": "SS304, 4 shelves, casters",
+      "unit": "pc"
+    },
+    {
+      "id": "PW-011",
+      "category": "prep_washing",
+      "name": "SS Rice Cooker Table",
+      "shortName": "Rice Cooker Table",
+      "formulaType": "fixed",
+      "basePrice": 55000,
+      "defaultDimensions": { "W": 780, "D": 320, "H": 600 },
+      "specs": [],
+      "laborHours": { "fabrication": 10, "installation": 1, "teamSize": 2 },
+      "leadTime": "7-10 days",
+      "notes": "SS304",
+      "unit": "pc"
+    },
+    {
+      "id": "PW-012",
+      "category": "prep_washing",
+      "name": "SS Gooseneck Faucet",
+      "shortName": "Gooseneck Faucet",
+      "formulaType": "fixed",
+      "basePrice": 1000,
+      "defaultDimensions": {},
+      "specs": [
+        { "key": "type", "label": "Type", "options": ["Standard gooseneck", "Long-reach gooseneck", "Pre-rinse spray"], "default": "Standard gooseneck", "priceAdder": [0, 500, 4000] }
+      ],
+      "laborHours": { "fabrication": 0, "installation": 0.5, "teamSize": 1 },
+      "leadTime": "in-stock",
+      "notes": "Standard",
+      "unit": "pc"
+    },
+    {
+      "id": "PW-013",
+      "category": "prep_washing",
+      "name": "SS Wall Cladding",
+      "shortName": "Wall Cladding",
+      "formulaType": "per_area",
+      "basePrice": 0,
+      "defaultDimensions": { "W": 1000, "H": 1000 },
+      "formula": {
+        "pricePerSqm": 72000,
+        "comment": "₱72,000 per sqm (supply + install). Input W × H in mm."
+      },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.0mm", "SS304 1.2mm", "SS316 1.0mm"], "default": "SS304 1.0mm", "priceAdder": [0, 5000, 15000] }
+      ],
+      "laborHours": { "fabrication": 8, "installation": 4, "teamSize": 2, "perSqm": true },
+      "leadTime": "10-14 days",
+      "notes": "Per sqm. Input dimensions to auto-calculate.",
+      "unit": "sqm"
+    },
+    {
+      "id": "PW-014",
+      "category": "prep_washing",
+      "name": "UVC Sterilizing Cabinet XXL",
+      "shortName": "UVC Cabinet",
+      "formulaType": "fixed",
+      "basePrice": 88000,
+      "defaultDimensions": { "W": 450, "D": 365, "H": 645 },
+      "specs": [],
+      "laborHours": { "fabrication": 0, "installation": 1, "teamSize": 1 },
+      "leadTime": "7-14 days",
+      "notes": "UV sterilization",
+      "unit": "pc"
+    },
+    {
+      "id": "PW-015",
+      "category": "prep_washing",
+      "name": "SS Storage Cabinet (3 Layer + Drain)",
+      "shortName": "Storage Cabinet 3L+Drain",
+      "formulaType": "per_length",
+      "basePrice": 163000,
+      "defaultDimensions": { "W": 600, "D": 500, "H": 1800 },
+      "formula": {
+        "baseLengthMm": 600,
+        "pricePerExtraMm": 20.0
+      },
+      "specs": [],
+      "laborHours": { "fabrication": 20, "installation": 2, "teamSize": 2 },
+      "leadTime": "14-21 days",
+      "notes": "SS304, 3 shelves, drain tube",
+      "unit": "pc"
+    },
+    {
+      "id": "PW-016",
+      "category": "prep_washing",
+      "name": "SS Storage Cabinet Enclosure",
+      "shortName": "Cabinet Enclosure",
+      "formulaType": "per_length",
+      "basePrice": 68000,
+      "defaultDimensions": { "W": 910, "D": 600, "H": 800 },
+      "formula": {
+        "baseLengthMm": 910,
+        "pricePerExtraMm": 18.0
+      },
+      "specs": [],
+      "laborHours": { "fabrication": 14, "installation": 2, "teamSize": 2 },
+      "leadTime": "10-14 days",
+      "notes": "Over existing cabinet",
+      "unit": "pc"
+    },
+
+    // ─── REFRIGERATION ───────────────────────────────────────────────────
+    {
+      "id": "RF-001",
+      "category": "refrigeration",
+      "name": "Upright Chiller (1-Door)",
+      "shortName": "Upright Chiller 1D",
+      "formulaType": "fixed",
+      "basePrice": 55000,
+      "defaultDimensions": { "W": 600, "D": 600, "H": 1900 },
+      "specs": [
+        { "key": "capacity", "label": "Capacity", "options": ["270L (1-door)", "400L (1-door wide)"], "default": "270L (1-door)", "priceAdder": [0, 12000] },
+        { "key": "type", "label": "Type", "options": ["Glass door", "Solid door"], "default": "Glass door", "priceAdder": [0, -3000] }
+      ],
+      "laborHours": { "fabrication": 0, "installation": 2, "teamSize": 2 },
+      "leadTime": "7-14 days",
+      "notes": "Brand varies by availability",
+      "unit": "pc"
+    },
+    {
+      "id": "RF-002",
+      "category": "refrigeration",
+      "name": "Upright Chiller (2-Door)",
+      "shortName": "Upright Chiller 2D",
+      "formulaType": "fixed",
+      "basePrice": 95000,
+      "defaultDimensions": { "W": 1200, "D": 600, "H": 1900 },
+      "specs": [
+        { "key": "type", "label": "Type", "options": ["Glass door", "Solid door"], "default": "Glass door", "priceAdder": [0, -5000] }
+      ],
+      "laborHours": { "fabrication": 0, "installation": 2, "teamSize": 2 },
+      "leadTime": "7-14 days",
+      "notes": "",
+      "unit": "pc"
+    },
+    {
+      "id": "RF-003",
+      "category": "refrigeration",
+      "name": "Undercounter Chiller",
+      "shortName": "Undercounter Chiller",
+      "formulaType": "fixed",
+      "basePrice": 45000,
+      "defaultDimensions": { "W": 1200, "D": 600, "H": 850 },
+      "specs": [
+        { "key": "doors", "label": "Doors", "options": ["2-door", "3-door"], "default": "2-door", "priceAdder": [0, 15000] }
+      ],
+      "laborHours": { "fabrication": 0, "installation": 1.5, "teamSize": 2 },
+      "leadTime": "7-14 days",
+      "notes": "Flush with prep table height",
+      "unit": "pc"
+    },
+    {
+      "id": "RF-004",
+      "category": "refrigeration",
+      "name": "Blast Chiller / Blast Freezer",
+      "shortName": "Blast Chiller",
+      "formulaType": "configurable",
+      "basePrice": 180000,
+      "defaultDimensions": { "W": 800, "D": 800, "H": 1900 },
+      "specs": [
+        { "key": "mode", "label": "Mode", "options": ["Chiller only", "Freezer only", "Combi Chill+Freeze"], "default": "Chiller only", "priceAdder": [0, 5000, 20000] },
+        { "key": "capacity", "label": "Capacity (kg)", "options": ["10kg", "20kg", "40kg"], "default": "10kg", "priceAdder": [0, 45000, 120000] }
+      ],
+      "laborHours": { "fabrication": 0, "installation": 3, "teamSize": 2 },
+      "leadTime": "14-21 days",
+      "notes": "Industrial blast chiller",
+      "unit": "pc"
+    },
+    {
+      "id": "RF-005",
+      "category": "refrigeration",
+      "name": "Chest Freezer",
+      "shortName": "Chest Freezer",
+      "formulaType": "configurable",
+      "basePrice": 18000,
+      "defaultDimensions": {},
+      "specs": [
+        { "key": "capacity", "label": "Capacity", "options": ["100L", "200L", "400L", "600L"], "default": "200L", "priceAdder": [-5000, 0, 12000, 25000] }
+      ],
+      "laborHours": { "fabrication": 0, "installation": 0.5, "teamSize": 1 },
+      "leadTime": "in-stock",
+      "notes": "",
+      "unit": "pc"
+    },
+
+    // ─── VENTILATION ─────────────────────────────────────────────────────
+    {
+      "id": "VT-001",
+      "category": "ventilation",
+      "name": "SS Range Hood + Baffle Filter + Lamp",
+      "shortName": "Range Hood",
+      "formulaType": "per_length",
+      "basePrice": 39000,
+      "defaultDimensions": { "W": 1000, "D": 900, "H": 500 },
+      "formula": {
+        "baseLengthMm": 1000,
+        "pricePerExtraMm": 28.0,
+        "comment": "Price scales with hood length. ₱28 per extra mm beyond 1000mm."
+      },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.2mm", "SS304 1.5mm"], "default": "SS304 1.2mm", "priceAdder": [0, 6000] },
+        { "key": "filter", "label": "Filter Type", "options": ["Baffle filter", "Mesh filter"], "default": "Baffle filter", "priceAdder": [0, -2000] },
+        { "key": "lamp", "label": "Lamp", "options": ["With LED lamp", "Without lamp"], "default": "With LED lamp", "priceAdder": [0, -1500] }
+      ],
+      "laborHours": { "fabrication": 12, "installation": 4, "teamSize": 2 },
+      "leadTime": "14-21 days",
+      "notes": "SS304, price scales by length",
+      "unit": "pc"
+    },
+    {
+      "id": "VT-002",
+      "category": "ventilation",
+      "name": "SS Range Hood Large (5m)",
+      "shortName": "Range Hood 5m",
+      "formulaType": "per_length",
+      "basePrice": 117000,
+      "defaultDimensions": { "W": 5000, "D": 900, "H": 500 },
+      "formula": {
+        "baseLengthMm": 5000,
+        "pricePerExtraMm": 20.0
+      },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.2mm", "SS304 1.5mm"], "default": "SS304 1.2mm", "priceAdder": [0, 12000] }
+      ],
+      "laborHours": { "fabrication": 32, "installation": 8, "teamSize": 3 },
+      "leadTime": "21-30 days",
+      "notes": "SS304, 5m, baffle filter, lamp",
+      "unit": "pc"
+    },
+    {
+      "id": "VT-003",
+      "category": "ventilation",
+      "name": "SS Exhaust Hood (Institutional)",
+      "shortName": "Exhaust Hood Institutional",
+      "formulaType": "per_length",
+      "basePrice": 185000,
+      "defaultDimensions": { "W": 5000, "D": 1200, "H": 600 },
+      "formula": {
+        "baseLengthMm": 5000,
+        "pricePerExtraMm": 28.0
+      },
+      "specs": [
+        { "key": "material", "label": "Steel Grade", "options": ["SS304 1.5mm", "SS316 1.2mm"], "default": "SS304 1.5mm", "priceAdder": [0, 25000] }
+      ],
+      "laborHours": { "fabrication": 40, "installation": 10, "teamSize": 3 },
+      "leadTime": "21-30 days",
+      "notes": "SS304, heavy duty",
+      "unit": "pc"
+    },
+    {
+      "id": "VT-004",
+      "category": "ventilation",
+      "name": "Galva Exhaust Duct + Elbows (~1m run)",
+      "shortName": "Exhaust Duct 1m",
+      "formulaType": "per_run",
+      "basePrice": 18000,
+      "defaultDimensions": {},
+      "formula": {
+        "pricePerRun": 18000,
+        "comment": "Price per ~1m run of ductwork. Multiply by number of runs."
+      },
+      "specs": [
+        { "key": "size", "label": "Duct Size", "options": ["300mm dia", "400mm dia", "500mm dia", "600mm dia"], "default": "400mm dia", "priceAdder": [−2000, 0, 3500, 7000] }
+      ],
+      "laborHours": { "fabrication": 4, "installation": 2, "teamSize": 2 },
+      "leadTime": "7-14 days",
+      "notes": "Lock former, fully welded",
+      "unit": "run"
+    },
+    {
+      "id": "VT-005",
+      "category": "ventilation",
+      "name": "Exhaust Motor Blower 2HP",
+      "shortName": "Blower 2HP",
+      "formulaType": "fixed",
+      "basePrice": 110000,
+      "defaultDimensions": {},
+      "specs": [
+        { "key": "phase", "label": "Phase", "options": ["Single phase", "3-phase"], "default": "Single phase", "priceAdder": [0, 8000] }
+      ],
+      "laborHours": { "fabrication": 0, "installation": 4, "teamSize": 2 },
+      "leadTime": "7-14 days",
+      "notes": "Industrial, galvanized casing",
+      "unit": "pc"
+    },
+    {
+      "id": "VT-006",
+      "category": "ventilation",
+      "name": "Exhaust Motor Blower 3HP",
+      "shortName": "Blower 3HP",
+      "formulaType": "fixed",
+      "basePrice": 110000,
+      "defaultDimensions": {},
+      "specs": [
+        { "key": "phase", "label": "Phase", "options": ["Single phase", "3-phase"], "default": "Single phase", "priceAdder": [0, 10000] }
+      ],
+      "laborHours": { "fabrication": 0, "installation": 4, "teamSize": 2 },
+      "leadTime": "7-14 days",
+      "notes": "Industrial, galvanized casing",
+      "unit": "pc"
+    },
+    {
+      "id": "VT-007",
+      "category": "ventilation",
+      "name": "Fresh Air Blower 2HP",
+      "shortName": "Fresh Air Blower 2HP",
+      "formulaType": "fixed",
+      "basePrice": 85000,
+      "defaultDimensions": {},
+      "specs": [
+        { "key": "phase", "label": "Phase", "options": ["Single phase", "3-phase"], "default": "Single phase", "priceAdder": [0, 8000] }
+      ],
+      "laborHours": { "fabrication": 0, "installation": 4, "teamSize": 2 },
+      "leadTime": "7-14 days",
+      "notes": "Centrifugal, galvanized",
+      "unit": "pc"
+    },
+    {
+      "id": "VT-008",
+      "category": "ventilation",
+      "name": "Fresh Air Blower 3HP",
+      "shortName": "Fresh Air Blower 3HP",
+      "formulaType": "fixed",
+      "basePrice": 110000,
+      "defaultDimensions": {},
+      "specs": [
+        { "key": "phase", "label": "Phase", "options": ["Single phase", "3-phase"], "default": "Single phase", "priceAdder": [0, 10000] }
+      ],
+      "laborHours": { "fabrication": 0, "installation": 4, "teamSize": 2 },
+      "leadTime": "7-14 days",
+      "notes": "Centrifugal, galvanized",
+      "unit": "pc"
+    },
+    {
+      "id": "VT-009",
+      "category": "ventilation",
+      "name": "SS Fresh Air Ducting (per run)",
+      "shortName": "Fresh Air Duct",
+      "formulaType": "per_run",
+      "basePrice": 150000,
+      "defaultDimensions": {},
+      "formula": {
+        "pricePerRun": 150000
+      },
+      "specs": [],
+      "laborHours": { "fabrication": 8, "installation": 4, "teamSize": 2 },
+      "leadTime": "14-21 days",
+      "notes": "Lock former, elbows incl.",
+      "unit": "run"
+    },
+    {
+      "id": "VT-010",
+      "category": "ventilation",
+      "name": "Air Diffuser + Galva Drop Box 300×300",
+      "shortName": "Air Diffuser 300",
+      "formulaType": "fixed",
+      "basePrice": 3800,
+      "defaultDimensions": { "W": 300, "H": 300 },
+      "specs": [],
+      "laborHours": { "fabrication": 0, "installation": 0.5, "teamSize": 1 },
+      "leadTime": "in-stock",
+      "notes": "Ceiling mount",
+      "unit": "pc"
+    },
+    {
+      "id": "VT-011",
+      "category": "ventilation",
+      "name": "Magnetic Switch (Single Phase)",
+      "shortName": "Magnetic Switch 1P",
+      "formulaType": "fixed",
+      "basePrice": 5800,
+      "defaultDimensions": {},
+      "specs": [],
+      "laborHours": { "fabrication": 0, "installation": 1, "teamSize": 1 },
+      "leadTime": "in-stock",
+      "notes": "",
+      "unit": "pc"
+    },
+    {
+      "id": "VT-012",
+      "category": "ventilation",
+      "name": "Magnetic Switch (3-Phase)",
+      "shortName": "Magnetic Switch 3P",
+      "formulaType": "fixed",
+      "basePrice": 10500,
+      "defaultDimensions": {},
+      "specs": [],
+      "laborHours": { "fabrication": 0, "installation": 1, "teamSize": 1 },
+      "leadTime": "in-stock",
+      "notes": "",
+      "unit": "pc"
+    },
+    {
+      "id": "VT-013",
+      "category": "ventilation",
+      "name": "Exhaust Delivery + Labor + Installation",
+      "shortName": "Exhaust Install Package",
+      "formulaType": "fixed",
+      "basePrice": 43000,
+      "defaultDimensions": {},
+      "specs": [
+        { "key": "scope", "label": "Scope", "options": ["Small kitchen", "Medium kitchen", "Large/institutional"], "default": "Small kitchen", "priceAdder": [0, 25000, 65000] }
+      ],
+      "laborHours": { "fabrication": 0, "installation": 16, "teamSize": 3 },
+      "leadTime": "—",
+      "notes": "Base install cost",
+      "unit": "lot"
+    },
+
+    // ─── GAS LINE ────────────────────────────────────────────────────────
+    {
+      "id": "GL-001",
+      "category": "gas_line",
+      "name": "Gas Line System + Tank Farm (4×50kg)",
+      "shortName": "Gas Line + Tank Farm",
+      "formulaType": "fixed",
+      "basePrice": 91000,
+      "defaultDimensions": {},
+      "specs": [
+        { "key": "tanks", "label": "Tank Count", "options": ["4×50kg tanks", "6×50kg tanks", "8×50kg tanks"], "default": "4×50kg tanks", "priceAdder": [0, 18000, 36000] },
+        { "key": "cage", "label": "Cage Type", "options": ["Standard cage incl.", "Heavy-duty cage"], "default": "Standard cage incl.", "priceAdder": [0, 8000] }
+      ],
+      "laborHours": { "fabrication": 8, "installation": 8, "teamSize": 3 },
+      "leadTime": "7-14 days",
+      "notes": "BI pipes, fully welded, cage incl.",
+      "unit": "lot"
+    },
+    {
+      "id": "GL-002",
+      "category": "gas_line",
+      "name": "Gas Line Topping (to Existing Main)",
+      "shortName": "Gas Line Topping",
+      "formulaType": "per_run",
+      "basePrice": 150000,
+      "defaultDimensions": {},
+      "formula": {
+        "pricePerRun": 150000,
+        "comment": "Price per connection point to existing main"
+      },
+      "specs": [],
+      "laborHours": { "fabrication": 4, "installation": 8, "teamSize": 2 },
+      "leadTime": "7-14 days",
+      "notes": "Adaptor + piping",
+      "unit": "lot"
+    },
+    {
+      "id": "GL-003",
+      "category": "gas_line",
+      "name": "Gas Line — Fryer/Griddle Connection",
+      "shortName": "Gas Line Fryer/Griddle",
+      "formulaType": "fixed",
+      "basePrice": 22000,
+      "defaultDimensions": {},
+      "specs": [
+        { "key": "burners", "label": "Connections", "options": ["2-burner", "4-burner", "6-burner"], "default": "2-burner", "priceAdder": [0, 8000, 16000] }
+      ],
+      "laborHours": { "fabrication": 2, "installation": 4, "teamSize": 2 },
+      "leadTime": "3-5 days",
+      "notes": "2-burner connection",
+      "unit": "lot"
+    },
+
+    // ─── FIRE SUPPRESSION ────────────────────────────────────────────────
+    {
+      "id": "FS-001",
+      "category": "fire_suppression",
+      "name": "Fire Suppression System (Small)",
+      "shortName": "Fire Suppression Small",
+      "formulaType": "fixed",
+      "basePrice": 185400,
+      "defaultDimensions": {},
+      "specs": [
+        { "key": "agent", "label": "Agent Type", "options": ["Wet chemical (standard)", "Dry chemical"], "default": "Wet chemical (standard)", "priceAdder": [0, -15000] },
+        { "key": "nozzles", "label": "Nozzle Count", "options": ["2 nozzles", "3 nozzles", "4 nozzles"], "default": "2 nozzles", "priceAdder": [0, 12000, 24000] }
+      ],
+      "laborHours": { "fabrication": 0, "installation": 16, "teamSize": 3 },
+      "leadTime": "21-30 days",
+      "notes": "BFP compliant, wet chem",
+      "unit": "system"
+    },
+    {
+      "id": "FS-002",
+      "category": "fire_suppression",
+      "name": "Fire Suppression System (Large)",
+      "shortName": "Fire Suppression Large",
+      "formulaType": "fixed",
+      "basePrice": 370000,
+      "defaultDimensions": {},
+      "specs": [
+        { "key": "agent", "label": "Agent Type", "options": ["Wet chemical (standard)", "Dry chemical"], "default": "Wet chemical (standard)", "priceAdder": [0, -25000] },
+        { "key": "nozzles", "label": "Nozzle Count", "options": ["4 nozzles", "6 nozzles", "8 nozzles"], "default": "4 nozzles", "priceAdder": [0, 18000, 36000] }
+      ],
+      "laborHours": { "fabrication": 0, "installation": 24, "teamSize": 3 },
+      "leadTime": "30-45 days",
+      "notes": "BFP compliant, large coverage",
+      "unit": "system"
+    },
+
+    // ─── MISCELLANEOUS ───────────────────────────────────────────────────
+    {
+      "id": "MS-001",
+      "category": "miscellaneous",
+      "name": "SS Grease Trap 15 GPM",
+      "shortName": "Grease Trap 15GPM",
+      "formulaType": "fixed",
+      "basePrice": 8500,
+      "defaultDimensions": {},
+      "specs": [],
+      "laborHours": { "fabrication": 0, "installation": 1, "teamSize": 1 },
+      "leadTime": "in-stock",
+      "notes": "SS304 with basket",
+      "unit": "pc"
+    },
+    {
+      "id": "MS-002",
+      "category": "miscellaneous",
+      "name": "SS Grease Trap 20 GPM",
+      "shortName": "Grease Trap 20GPM",
+      "formulaType": "fixed",
+      "basePrice": 22000,
+      "defaultDimensions": {},
+      "specs": [],
+      "laborHours": { "fabrication": 0, "installation": 1, "teamSize": 1 },
+      "leadTime": "in-stock",
+      "notes": "SS304 large, basket",
+      "unit": "pc"
+    },
+    {
+      "id": "MS-003",
+      "category": "miscellaneous",
+      "name": "5kg Volcanic Rock / Lava Rock",
+      "shortName": "Lava Rock 5kg",
+      "formulaType": "fixed",
+      "basePrice": 2500,
+      "defaultDimensions": {},
+      "specs": [],
+      "laborHours": { "fabrication": 0, "installation": 0, "teamSize": 1 },
+      "leadTime": "in-stock",
+      "notes": "For grillers",
+      "unit": "bag"
+    },
+    {
+      "id": "MS-004",
+      "category": "miscellaneous",
+      "name": "Fryer Basket",
+      "shortName": "Fryer Basket",
+      "formulaType": "fixed",
+      "basePrice": 5000,
+      "defaultDimensions": {},
+      "specs": [
+        { "key": "size", "label": "Size", "options": ["Standard", "Large"], "default": "Standard", "priceAdder": [0, 1500] }
+      ],
+      "laborHours": { "fabrication": 0, "installation": 0, "teamSize": 1 },
+      "leadTime": "in-stock",
+      "notes": "SS304",
+      "unit": "pc"
+    },
+    {
+      "id": "MS-005",
+      "category": "miscellaneous",
+      "name": "Delivery + Installation + Labor (Small)",
+      "shortName": "D+I+L Small",
+      "formulaType": "fixed",
+      "basePrice": 43000,
+      "defaultDimensions": {},
+      "specs": [],
+      "laborHours": { "fabrication": 0, "installation": 8, "teamSize": 3 },
+      "leadTime": "—",
+      "notes": "1–3 items, same city",
+      "unit": "lot"
+    },
+    {
+      "id": "MS-006",
+      "category": "miscellaneous",
+      "name": "Delivery + Installation + Labor (Medium)",
+      "shortName": "D+I+L Medium",
+      "formulaType": "fixed",
+      "basePrice": 88000,
+      "defaultDimensions": {},
+      "specs": [],
+      "laborHours": { "fabrication": 0, "installation": 16, "teamSize": 4 },
+      "leadTime": "—",
+      "notes": "Full kitchen, same city",
+      "unit": "lot"
+    },
+    {
+      "id": "MS-007",
+      "category": "miscellaneous",
+      "name": "Delivery + Installation + Labor (Large)",
+      "shortName": "D+I+L Large",
+      "formulaType": "fixed",
+      "basePrice": 120000,
+      "defaultDimensions": {},
+      "specs": [],
+      "laborHours": { "fabrication": 0, "installation": 24, "teamSize": 4 },
+      "leadTime": "—",
+      "notes": "Full kitchen, out-of-town",
+      "unit": "lot"
+    },
+    {
+      "id": "MS-008",
+      "category": "miscellaneous",
+      "name": "Water Pipeline Extension",
+      "shortName": "Water Pipeline Ext.",
+      "formulaType": "fixed",
+      "basePrice": 35000,
+      "defaultDimensions": {},
+      "specs": [],
+      "laborHours": { "fabrication": 0, "installation": 8, "teamSize": 2 },
+      "leadTime": "—",
+      "notes": "Sinks to internal pipeline",
+      "unit": "lot"
+    },
+    {
+      "id": "MS-009",
+      "category": "miscellaneous",
+      "name": "Piping + Drainage Works (~4.5m)",
+      "shortName": "Piping + Drainage",
+      "formulaType": "per_run",
+      "basePrice": 15500,
+      "defaultDimensions": {},
+      "formula": {
+        "pricePerRun": 15500,
+        "comment": "Per ~4.5m drainage run"
+      },
+      "specs": [],
+      "laborHours": { "fabrication": 0, "installation": 4, "teamSize": 2 },
+      "leadTime": "—",
+      "notes": "Drain pipe from sink",
+      "unit": "run"
+    },
+    {
+      "id": "MS-010",
+      "category": "miscellaneous",
+      "name": "Cladding Installation (Labor Only)",
+      "shortName": "Cladding Labor",
+      "formulaType": "fixed",
+      "basePrice": 7500,
+      "defaultDimensions": {},
+      "specs": [],
+      "laborHours": { "fabrication": 0, "installation": 4, "teamSize": 2 },
+      "leadTime": "—",
+      "notes": "For SS wall cladding",
+      "unit": "lot"
+    },
+    {
+      "id": "MS-011",
+      "category": "miscellaneous",
+      "name": "Oven Repair / Reconditioning",
+      "shortName": "Oven Reconditioning",
+      "formulaType": "fixed",
+      "basePrice": 68000,
+      "defaultDimensions": {},
+      "specs": [],
+      "laborHours": { "fabrication": 16, "installation": 4, "teamSize": 2 },
+      "leadTime": "—",
+      "notes": "Full recondition",
+      "unit": "lot"
+    },
+    {
+      "id": "MS-012",
+      "category": "miscellaneous",
+      "name": "Preventive Maintenance Service",
+      "shortName": "PM Service",
+      "formulaType": "fixed",
+      "basePrice": 8500,
+      "defaultDimensions": {},
+      "specs": [],
+      "laborHours": { "fabrication": 0, "installation": 4, "teamSize": 2 },
+      "leadTime": "—",
+      "notes": "Per visit",
+      "unit": "visit"
+    }
+  ],
+
+  "laborRoles": [
+    { "id": "foreman",    "label": "Foreman",                 "ratePerDay": 1500 },
+    { "id": "sr_welder",  "label": "Sr. Welder / Fabricator", "ratePerDay": 1200 },
+    { "id": "welder",     "label": "Welder / Fabricator",     "ratePerDay": 1000 },
+    { "id": "finisher",   "label": "Finisher / Painter",      "ratePerDay": 1000 },
+    { "id": "techgasac",  "label": "Technician (HVAC/Gas)",   "ratePerDay": 1200 },
+    { "id": "driver",     "label": "Driver / Helper",         "ratePerDay": 1000 },
+    { "id": "subcon",     "label": "Subcontractor",           "ratePerDay": 1500 }
+  ],
+
+  "constants": {
+    "_comment": "Edit these values to adjust global pricing coefficients",
+    "markup": {
+      "retail": 1.30,
+      "commercial": 1.20,
+      "government": 1.15,
+      "_comment": "Applied as multiplier on top of computed price"
+    },
+    "vat": 0.12,
+    "defaultTeamSize": 3,
+    "workHoursPerDay": 8,
+    "travelDayRate": 3500,
+    "materialPriceIndexMultiplier": 1.0,
+    "_comment2": "Increase materialPriceIndexMultiplier to globally adjust for material price increases"
+  }
+}
