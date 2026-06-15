@@ -2119,10 +2119,14 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
           const u2 = doc.data();
           return s + (u2.salary||0) + (u2.allowance||0) - (u2.deductions||0);
         }, 0);
-        await db.collection('ledger').add({
+        await db.collection('ledger_entries').add({
           type: 'payslip', description: `Payroll — ${monthLabel2}`,
           amount: totalPayroll2, dept: 'Payroll',
           date: month + '-01',
+          payPeriod: month, periodLabel: monthLabel2,
+          preparedBy: currentUser.displayName || currentUser.email,
+          grossPay: totalPayroll2, netPay: totalPayroll2,
+          workerName: 'All Employees',
           recordedBy: currentUser.uid,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -2352,8 +2356,8 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         ${!salaryHistory.length
           ? '<div class="empty-state" style="padding:20px"><p style="font-size:13px;color:var(--text-muted)">No history yet. Records are added monthly by admin.</p></div>'
           : `<div class="table-wrap"><table class="data-table">
-              <thead><tr><th>Month</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net</th><th>KPI</th><th>Att</th><th>Final</th></tr></thead>
-              <tbody>${salaryHistory.map(h=>`<tr>
+              <thead><tr><th>Month</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net</th><th>KPI</th><th>Att</th><th>Final</th><th></th></tr></thead>
+              <tbody>${salaryHistory.map(h=>`<tr data-hist-id="${h.id}">
                 <td>${h.month||'—'}</td>
                 <td>₱${formatNum(h.salary)}</td>
                 <td style="color:var(--success)">+₱${formatNum(h.allowance)}</td>
@@ -2362,6 +2366,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
                 <td>${h.kpiScore?Math.round(h.kpiScore*100)+'%':'—'}</td>
                 <td>${h.attScore?Math.round(h.attScore*100)+'%':'—'}</td>
                 <td><strong>₱${formatNum(h.finalPay)}</strong></td>
+                <td>${currentRole==='president'||currentRole==='owner'
+                  ? `<button class="btn-danger btn-sm ph-delete-btn" data-id="${h.id}" data-month="${h.month||''}">Delete</button>`
+                  : currentRole==='finance'
+                    ? `<button class="btn-secondary btn-sm ph-req-delete-btn" data-id="${h.id}" data-month="${h.month||''}" style="font-size:11px;color:var(--danger)">Request Delete</button>`
+                    : ''}</td>
               </tr>`).join('')}</tbody>
             </table></div>`}
       </div>
@@ -2397,6 +2406,31 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       </div>
     </div>
   `;
+
+  // Salary history delete (president) / request delete (finance)
+  document.querySelectorAll('.ph-delete-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm(`Delete payroll record for ${btn.dataset.month}? This cannot be undone.`)) return;
+      await db.collection('salary_history').doc(btn.dataset.id).delete();
+      Notifs.showToast('Record deleted.');
+      window.renderPersonalFinance(currentUser, currentRole);
+    });
+  });
+  document.querySelectorAll('.ph-req-delete-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm(`Request deletion of payroll record for ${btn.dataset.month}? The president will be notified.`)) return;
+      const presSnap = await db.collection('users').where('role','==','president').limit(1).get().catch(()=>({empty:true}));
+      if (!presSnap.empty) {
+        await Notifs.send(presSnap.docs[0].id, {
+          title: '🗑️ Payroll Delete Request',
+          body: `${userProfile?.displayName||currentUser.email} is requesting to delete the payroll history record for ${btn.dataset.month}. Record ID: ${btn.dataset.id}`,
+          icon: '🗑️', type: 'payroll_delete_request'
+        });
+      }
+      Notifs.showToast('Deletion request sent to president.');
+      btn.disabled = true; btn.textContent = '⏳ Requested';
+    });
+  });
 
   // Self Evaluation button
   document.getElementById('self-eval-btn')?.addEventListener('click', () => {
