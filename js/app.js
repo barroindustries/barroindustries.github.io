@@ -1705,6 +1705,7 @@ async function renderPartnersDept() {
       <button class="subtab-btn active" data-sub="overview">Overview</button>
       <button class="subtab-btn" data-sub="tasks">Tasks</button>
       <button class="subtab-btn" data-sub="quotes">Quotes</button>
+      <button class="subtab-btn" data-sub="quote-builder">Quote Builder</button>
       <button class="subtab-btn" data-sub="activity">Activity</button>
     </div>
     <div id="partners-dept-content"><div class="loading-placeholder">Loading…</div></div>
@@ -1852,6 +1853,17 @@ async function loadPartnersDeptTab(sub) {
             </table></div>
           </div></div>`}
       `;
+      break;
+    }
+    case 'quote-builder': {
+      content.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <span style="font-size:13px;color:var(--text-muted)">Create quotes for partner projects. Print/PDF when ready.</span>
+          <button class="btn-secondary btn-sm" onclick="document.getElementById('partners-qb-frame').contentWindow.print()">🖨 Print / PDF</button>
+        </div>
+        <iframe id="partners-qb-frame" src="quote-builder-v2.html"
+          style="width:100%;height:calc(100dvh - 200px);min-height:500px;border:none;border-radius:12px;background:#f5f6fa;"
+          allow="print" loading="lazy"></iframe>`;
       break;
     }
     case 'activity': {
@@ -3881,7 +3893,7 @@ async function renderTeam() {
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn-secondary btn-sm" id="add-worker-btn">👷 Create Worker Account</button>
         <button class="btn-primary btn-sm" id="add-emp-btn">+ Add Employee Profile</button>
-        ${isPresident()?`<button class="btn-danger btn-sm" id="force-logout-all-btn">🔴 Logout All</button>`:''}
+        ${(isPresident()||currentDepts.includes('IT'))?`<button class="btn-danger btn-sm" id="force-logout-all-btn">🔴 Logout All</button>`:''}
       </div>
     </div>
     <div id="team-table"><div class="loading-placeholder">Loading…</div></div>`;

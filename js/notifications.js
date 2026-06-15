@@ -252,9 +252,14 @@ window.Notifs = (() => {
 
   // ── Send to department ────────────────────────
   async function sendToDept(department, notifData) {
-    const snap = await db.collection('users').where('department', '==', department).get();
-    const promises = snap.docs.map(d => send(d.id, notifData));
-    await Promise.all(promises);
+    // Query both legacy `department` (string) and `departments` (array) fields
+    const [snap1, snap2] = await Promise.all([
+      db.collection('users').where('department', '==', department).get().catch(()=>({docs:[]})),
+      db.collection('users').where('departments', 'array-contains', department).get().catch(()=>({docs:[]}))
+    ]);
+    const seen = new Set();
+    const allDocs = [...snap1.docs, ...snap2.docs].filter(d => { if (seen.has(d.id)) return false; seen.add(d.id); return true; });
+    await Promise.all(allDocs.map(d => send(d.id, notifData)));
   }
 
   // ── Send to all users ────────────────────────
