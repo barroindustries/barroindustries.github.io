@@ -411,6 +411,13 @@ window.Notifs = (() => {
 
   async function _registerPush(uid, vapidKey) {
     try {
+      // Service workers require HTTPS — skip on file://
+      if (location.protocol === 'file:') {
+        console.warn('[FCM] Push notifications require HTTPS hosting. In-app notifications will still work.');
+        showToast('ℹ️ Device push requires HTTPS hosting. In-app notifications are active.', 'info');
+        return;
+      }
+
       // Lazy-load messaging SDK
       if (!window._fcmLoaded) {
         await new Promise((resolve, reject) => {
@@ -422,9 +429,9 @@ window.Notifs = (() => {
         window._fcmLoaded = true;
       }
 
-      // Use the firebase-messaging-sw.js for background handling
-      const swReg = await navigator.serviceWorker.register('/firebase-messaging-sw.js', { scope: '/' })
-        .catch(() => navigator.serviceWorker.ready);
+      const swReg = await navigator.serviceWorker.register('firebase-messaging-sw.js')
+        .catch(err => { console.warn('[FCM] SW register failed:', err); return null; });
+      if (!swReg) return;
 
       const messaging = firebase.messaging();
       const token = await messaging.getToken({ vapidKey, serviceWorkerRegistration: swReg });
@@ -469,10 +476,6 @@ window.Notifs = (() => {
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().slice(0, 10);
 
-    // Dedup key: store which tasks were already notified today
-    const dedupKey = `bi-deadline-sent-${uid}-${todayStr}`;
-    const alreadySent = new Set(JSON.parse(localStorage.getItem(dedupKey) || '[]'));
-
     const DONE_STATUSES = ['done','approved','archived'];
     const [tomorrowSnap, todaySnap] = await Promise.all([
       db.collection('tasks').where('assignedTo','array-contains',uid).where('dueDate','==',tomorrowStr).get().catch(()=>({docs:[]})),
@@ -483,21 +486,18 @@ window.Notifs = (() => {
     tomorrowSnap.docs.forEach(d => {
       const task = { id: d.id, ...d.data() };
       if (DONE_STATUSES.includes(task.status)) return;
-      if (alreadySent.has(`tmrw-${task.id}`)) return;
-      toNotify.push({ task, key: `tmrw-${task.id}`, title: '⏰ Due Tomorrow', body: `"${task.title}" is due tomorrow.` });
+      toNotify.push({ task, key: `deadline-tmrw-${task.id}`, title: '⏰ Due Tomorrow', body: `"${task.title}" is due tomorrow.` });
     });
     todaySnap.docs.forEach(d => {
       const task = { id: d.id, ...d.data() };
       if (DONE_STATUSES.includes(task.status)) return;
-      if (alreadySent.has(`today-${task.id}`)) return;
-      toNotify.push({ task, key: `today-${task.id}`, title: '🚨 Due Today', body: `"${task.title}" is due today! Complete and submit it.` });
+      toNotify.push({ task, key: `deadline-today-${task.id}`, title: '🚨 Due Today', body: `"${task.title}" is due today! Complete and submit it.` });
     });
 
     for (const { task, key, title, body } of toNotify) {
-      await send(uid, { title, body, icon: '⏰', type: 'deadline', taskId: task.id });
-      alreadySent.add(key);
+      // dedupKey checked in Firestore — safe across devices and sessions
+      await send(uid, { title, body, icon: '⏰', type: 'deadline', taskId: task.id, dedupKey: key });
     }
-    if (toNotify.length) localStorage.setItem(dedupKey, JSON.stringify([...alreadySent]));
   }
 
   // ── Attendance morning reminder ────────────────
