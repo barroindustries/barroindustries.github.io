@@ -320,37 +320,79 @@ window.Notifs = (() => {
     }
   }
 
-  // Show a soft prompt banner asking user to enable push notifications
+  // Push notification permission prompt — full-screen card style
   function _showPushPrompt(uid, vapidKey) {
-    if (document.getElementById('push-prompt-bar')) return; // already showing
-    const bar = document.createElement('div');
-    bar.id = 'push-prompt-bar';
-    bar.style.cssText = `
-      position:fixed;bottom:calc(16px + 52px + 12px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);
-      background:var(--surface,#1e2a3a);border:1.5px solid var(--primary-light,#3d5afe);
-      border-radius:14px;padding:12px 18px;display:flex;align-items:center;gap:12px;
-      z-index:8888;box-shadow:0 6px 24px rgba(0,0,0,0.35);max-width:92vw;
+    if (document.getElementById('push-prompt-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'push-prompt-overlay';
+    overlay.style.cssText = `
+      position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9100;
+      display:flex;align-items:flex-end;justify-content:center;
+      padding-bottom:calc(env(safe-area-inset-bottom,0px) + 16px);
+      animation:fadeIn .22s ease;
     `;
-    bar.innerHTML = `
-      <span style="font-size:22px">🔔</span>
-      <div style="flex:1;font-size:13px;color:var(--text,#e0e0e0)">
-        <strong>Enable push notifications</strong><br>
-        <span style="font-size:11px;opacity:.8">Get notified about tasks, payroll & more on this device</span>
+    overlay.innerHTML = `
+      <div style="
+        background:var(--surface,#1a2235);
+        border:1.5px solid var(--primary-light,#3d5afe);
+        border-radius:22px 22px 16px 16px;
+        padding:28px 24px 24px;
+        width:min(440px,96vw);
+        box-shadow:0 -6px 40px rgba(0,0,0,0.5);
+        animation:slideUp .28s cubic-bezier(.22,.68,0,1.2);
+      ">
+        <div style="text-align:center;margin-bottom:20px">
+          <div style="font-size:44px;margin-bottom:10px">🔔</div>
+          <div style="font-size:18px;font-weight:800;color:var(--text,#e8eaf0);margin-bottom:8px">Allow Notifications</div>
+          <div style="font-size:13px;color:var(--text-muted,#8a9bc0);line-height:1.6">
+            Please allow notifications so you can receive alerts for:
+          </div>
+          <div style="margin:14px 0;display:flex;flex-direction:column;gap:8px;text-align:left">
+            ${[
+              ['✅','Task assignments & status updates'],
+              ['💬','New messages & comments'],
+              ['📋','Self-assessment & payroll reminders'],
+              ['⏰','Attendance & deadline alerts'],
+              ['💸','Cash advance approvals'],
+            ].map(([icon,text])=>`
+              <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text,#e8eaf0)">
+                <span style="font-size:16px;flex-shrink:0">${icon}</span>${text}
+              </div>`).join('')}
+          </div>
+        </div>
+        <button id="push-allow-btn" style="
+          width:100%;padding:14px;background:var(--primary-light,#3d5afe);color:#fff;
+          border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;
+          margin-bottom:10px;letter-spacing:.02em;
+        ">🔔 Allow Notifications</button>
+        <button id="push-deny-btn" style="
+          width:100%;padding:11px;background:transparent;color:var(--text-muted,#8a9bc0);
+          border:1.5px solid var(--border,#2a3a52);border-radius:12px;font-size:13px;cursor:pointer;
+        ">Not now</button>
       </div>
-      <button id="push-allow-btn" style="background:var(--primary-light,#3d5afe);color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer">Allow</button>
-      <button id="push-deny-btn" style="background:transparent;color:var(--text-muted,#90a4ae);border:none;font-size:18px;cursor:pointer;padding:0 4px">✕</button>
     `;
-    document.body.appendChild(bar);
+
+    // Inject animations once
+    if (!document.getElementById('push-prompt-styles')) {
+      const s = document.createElement('style');
+      s.id = 'push-prompt-styles';
+      s.textContent = `
+        @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+        @keyframes slideUp { from{transform:translateY(60px);opacity:0} to{transform:translateY(0);opacity:1} }
+      `;
+      document.head.appendChild(s);
+    }
+
+    document.body.appendChild(overlay);
 
     document.getElementById('push-allow-btn').onclick = async () => {
-      bar.remove();
+      overlay.remove();
       const permission = await Notification.requestPermission();
       if (permission === 'granted') await _registerPush(uid, vapidKey);
     };
-    document.getElementById('push-deny-btn').onclick = () => bar.remove();
-
-    // Auto-dismiss after 30 seconds
-    setTimeout(() => bar.remove(), 30000);
+    document.getElementById('push-deny-btn').onclick = () => overlay.remove();
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    setTimeout(() => overlay.remove(), 60000);
   }
 
   async function _registerPush(uid, vapidKey) {
@@ -406,28 +448,68 @@ window.Notifs = (() => {
     setTimeout(() => toast.remove(), 3500);
   }
 
-  // ── Deadline checker ──────────────────────────
+  // ── Deadline checker (runs once per day per task) ──
   async function checkDeadlines(uid) {
-    const tomorrow = new Date();
+    const todayStr    = new Date().toISOString().slice(0, 10);
+    const tomorrow    = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().slice(0, 10);
 
-    const DONE_STATUSES = ['done','approved','archived'];
-    const snap = await db.collection('tasks')
-      .where('assignedTo', 'array-contains', uid)
-      .where('dueDate', '==', tomorrowStr)
-      .get().catch(() => ({ docs: [] }));
+    // Dedup key: store which tasks were already notified today
+    const dedupKey = `bi-deadline-sent-${uid}-${todayStr}`;
+    const alreadySent = new Set(JSON.parse(localStorage.getItem(dedupKey) || '[]'));
 
-    snap.docs.forEach(d => {
-      const task = d.data();
-      if (DONE_STATUSES.includes(task.status)) return; // skip completed tasks
-      send(uid, {
-        title: '⏰ Task Due Tomorrow',
-        body:  `"${task.title}" is due tomorrow.`,
-        icon:  '⏰',
-        type:  'deadline'
-      });
+    const DONE_STATUSES = ['done','approved','archived'];
+    const [tomorrowSnap, todaySnap] = await Promise.all([
+      db.collection('tasks').where('assignedTo','array-contains',uid).where('dueDate','==',tomorrowStr).get().catch(()=>({docs:[]})),
+      db.collection('tasks').where('assignedTo','array-contains',uid).where('dueDate','==',todayStr).get().catch(()=>({docs:[]}))
+    ]);
+
+    const toNotify = [];
+    tomorrowSnap.docs.forEach(d => {
+      const task = { id: d.id, ...d.data() };
+      if (DONE_STATUSES.includes(task.status)) return;
+      if (alreadySent.has(`tmrw-${task.id}`)) return;
+      toNotify.push({ task, key: `tmrw-${task.id}`, title: '⏰ Due Tomorrow', body: `"${task.title}" is due tomorrow.` });
     });
+    todaySnap.docs.forEach(d => {
+      const task = { id: d.id, ...d.data() };
+      if (DONE_STATUSES.includes(task.status)) return;
+      if (alreadySent.has(`today-${task.id}`)) return;
+      toNotify.push({ task, key: `today-${task.id}`, title: '🚨 Due Today', body: `"${task.title}" is due today! Complete and submit it.` });
+    });
+
+    for (const { task, key, title, body } of toNotify) {
+      await send(uid, { title, body, icon: '⏰', type: 'deadline', taskId: task.id });
+      alreadySent.add(key);
+    }
+    if (toNotify.length) localStorage.setItem(dedupKey, JSON.stringify([...alreadySent]));
+  }
+
+  // ── Attendance morning reminder ────────────────
+  async function checkAttendanceReminder(uid, displayName) {
+    const now  = new Date();
+    const hour = now.getHours();
+    const dow  = now.getDay(); // 0=Sun
+    if (dow === 0 || hour < 7 || hour >= 8) return; // Mon–Sat, 7:00–7:59 AM only
+
+    const todayStr = now.toISOString().slice(0, 10);
+    const dedupKey = `bi-att-remind-${uid}-${todayStr}`;
+    if (localStorage.getItem(dedupKey)) return;
+
+    // Skip if already timed in
+    try {
+      const rec = await db.collection('attendance').doc(uid).collection('records').doc(todayStr).get();
+      if (rec.exists) return;
+    } catch {}
+
+    const name = displayName || 'there';
+    await send(uid, {
+      title: `🌅 Good morning, ${name}!`,
+      body:  "Don't forget to time in today. Wishing you a productive day! 💪",
+      icon:  '🌅', type: 'att_morning_remind'
+    });
+    localStorage.setItem(dedupKey, '1');
   }
 
   // ── Helpers ───────────────────────────────────
@@ -478,7 +560,7 @@ window.Notifs = (() => {
     backdrop?.addEventListener('click', closePanel);
   }
 
-  return { startListener, stopListener, send, sendToDept, sendToAll, sendToOwner, showToast, initPush, checkDeadlines, initToggle, renderPage, markAllRead,
+  return { startListener, stopListener, send, sendToDept, sendToAll, sendToOwner, showToast, initPush, checkDeadlines, checkAttendanceReminder, initToggle, renderPage, markAllRead,
     requestPushPermission: (uid) => {
       const vapidKey = window.FCM_CONFIG?.VAPID_KEY;
       if (!vapidKey || vapidKey === 'YOUR_VAPID_KEY_HERE') { showToast('Push notifications not configured yet.','error'); return; }

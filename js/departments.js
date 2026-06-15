@@ -173,6 +173,7 @@ window.renderTasks = async function(currentUser, currentRole, currentDept) {
     return;
   }
 
+  const hasDept = (window.currentDepts||[]).length > 0;
   c.innerHTML = `
     <div class="page-header">
       <h2>✅ Tasks</h2>
@@ -180,6 +181,7 @@ window.renderTasks = async function(currentUser, currentRole, currentDept) {
         <select id="task-filter" class="select-sm">
           <option value="mine">My Tasks</option>
           ${isAdmin?'<option value="all">All Tasks</option>':''}
+          ${hasDept||isAdmin?`<option value="dept">📂 Dept Tasks</option>`:''}
           ${TASK_STATUSES.map(s=>`<option value="${s.value}">${s.label}</option>`).join('')}
         </select>
         <button class="btn-primary btn-sm" id="add-task-btn">+ New Task</button>
@@ -259,6 +261,7 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
   list.innerHTML = '<div class="loading-placeholder">Loading…</div>';
   const isPriv = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
 
+  const userDepts = window.currentDepts || [];
   let snap;
   if (filter==='mine') {
     snap = await db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
@@ -267,13 +270,28 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
     snap = typeof dbCachedGet==='function'
       ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000)
       : await db.collection('tasks').get();
+  } else if (filter==='dept') {
+    // Show all tasks from the user's departments
+    snap = typeof dbCachedGet==='function'
+      ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000)
+      : await db.collection('tasks').get();
   } else {
-    snap = await db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
-      .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get());
+    // Status filter — fetch all dept tasks so employees can see overdue etc. across their dept
+    snap = typeof dbCachedGet==='function'
+      ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000)
+      : await db.collection('tasks').get();
   }
 
   let tasks = snap.docs.map(d=>normTask(d.data(),d.id)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-  if (filter!=='mine'&&filter!=='all') tasks=tasks.filter(t=>t.status===filter);
+  // For non-admin: filter to dept tasks or their own tasks
+  if (!isPriv && filter!=='mine') {
+    tasks = tasks.filter(t=>
+      userDepts.includes(t.department) ||
+      (t.assignedTo||[]).includes(currentUser.uid) ||
+      t.createdBy===currentUser.uid
+    );
+  }
+  if (filter!=='mine'&&filter!=='all'&&filter!=='dept') tasks=tasks.filter(t=>t.status===filter);
   if (!tasks.length) { list.innerHTML=`<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks found</h4></div>`; return; }
 
   // For employees in "My Tasks" view, group into active and completed sections
@@ -4213,23 +4231,28 @@ function printQuote(lines, q) {
 window.renderApprovals = async function(currentUser) {
   const c = deptContainer();
   // Check pending counts for badges
-  const [signupSnap, extSnap, caSnap, subsSnap] = await Promise.all([
+  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap] = await Promise.all([
     db.collection('signup_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('attendance_extensions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('cash_advances').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
-    db.collection('submissions').where('status','==','pending').get().catch(()=>({size:0,docs:[]}))
+    db.collection('submissions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
+    db.collection('tasks').where('status','==','review').get().catch(()=>({size:0,docs:[]}))
   ]);
   const pendingSignups = signupSnap.size || 0;
   const pendingExt     = extSnap.size || 0;
   const pendingCA      = caSnap.size || 0;
   const pendingSubs    = subsSnap.size || 0;
-  const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs;
+  const pendingReview  = reviewTasksCountSnap.size || 0;
+  const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs + pendingReview;
 
   c.innerHTML = `
     <div class="page-header"><h2>✅ Approvals</h2>${totalPending>0?`<span class="badge badge-red" style="font-size:13px">${totalPending} pending</span>`:''}</div>
     <div class="subtab-bar" style="flex-wrap:wrap">
       <button class="subtab-btn active" data-sub="all">
         📋 All Requests${totalPending>0?` <span class="nav-badge">${totalPending}</span>`:''}
+      </button>
+      <button class="subtab-btn" data-sub="review-tasks">
+        Tasks for Review${pendingReview>0?` <span class="nav-badge">${pendingReview}</span>`:''}
       </button>
       <button class="subtab-btn" data-sub="signups">
         Sign-ups${pendingSignups>0?` <span class="nav-badge">${pendingSignups}</span>`:''}
@@ -4400,6 +4423,52 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('all');
         });
       });
+      return;
+    }
+
+    if (sub === 'review-tasks') {
+      const snap = await db.collection('tasks').where('status','==','review').orderBy('lastModifiedAt','desc').get().catch(()=>({docs:[]}));
+      const tasks = snap.docs.map(d=>({id:d.id,...d.data()}));
+      if (!tasks.length) {
+        wrap.innerHTML = '<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">✅</div><h4>No tasks awaiting review</h4></div>';
+        return;
+      }
+      wrap.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px">
+        ${tasks.map(t=>{
+          const names = (t.assignedToNames||[]).join(', ') || (Array.isArray(t.assignedTo)?t.assignedTo:[t.assignedTo]).filter(Boolean).join(', ') || 'Unassigned';
+          const dept  = t.department || '';
+          const ts    = t.lastModifiedAt||t.createdAt;
+          return `<div class="item-card" style="cursor:default">
+            <div class="item-top">
+              <div class="item-title">📋 ${t.title||'Untitled Task'}</div>
+              <span class="badge badge-warn">For Review</span>
+            </div>
+            <div class="item-meta" style="margin-top:4px;gap:6px">
+              ${dept?`<span class="badge badge-blue" style="font-size:10px">${dept}</span>`:''}
+              <span style="font-size:12px;color:var(--text-muted)">by ${names}</span>
+              ${ts?`<span style="font-size:11px;color:var(--text-muted)">${new Date(ts.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric'})}</span>`:''}
+            </div>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <button class="btn-primary btn-sm rt-view-btn" data-id="${t.id}">👁 View</button>
+              <button class="btn-success btn-sm rt-approve-btn" data-id="${t.id}" data-name="${t.title||'Task'}">✓ Approve</button>
+              <button class="btn-danger btn-sm rt-reject-btn" data-id="${t.id}" data-name="${t.title||'Task'}">✗ Send Back</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+      wrap.querySelectorAll('.rt-view-btn').forEach(btn=>btn.addEventListener('click',()=>openTaskDetail(btn.dataset.id,currentUser,window.currentRole||'president')));
+      wrap.querySelectorAll('.rt-approve-btn').forEach(btn=>btn.addEventListener('click',async()=>{
+        if (!confirm(`Approve "${btn.dataset.name}"?`)) return;
+        await db.collection('tasks').doc(btn.dataset.id).update({status:'approved',approvedAt:firebase.firestore.FieldValue.serverTimestamp(),approvedBy:currentUser.uid});
+        Notifs.showToast(`"${btn.dataset.name}" approved!`,'success');
+        loadApprovalsSub('review-tasks');
+      }));
+      wrap.querySelectorAll('.rt-reject-btn').forEach(btn=>btn.addEventListener('click',async()=>{
+        if (!confirm(`Send "${btn.dataset.name}" back for revision?`)) return;
+        await db.collection('tasks').doc(btn.dataset.id).update({status:'in-progress',sentBackAt:firebase.firestore.FieldValue.serverTimestamp(),sentBackBy:currentUser.uid});
+        Notifs.showToast(`"${btn.dataset.name}" sent back for revision.`,'info');
+        loadApprovalsSub('review-tasks');
+      }));
       return;
     }
 

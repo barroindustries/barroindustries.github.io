@@ -62,7 +62,9 @@ document.addEventListener('DOMContentLoaded', () => {
       Notifs.startListener(user.uid);
       Notifs.initPush(user.uid);
       Notifs.checkDeadlines(user.uid);
+      Notifs.checkAttendanceReminder(user.uid, userProfile.displayName);
       checkPayrollDuties(user);
+      checkCAReminder(user);
       buildNav();
       navigateTo('dashboard');
       startAutoLogout();
@@ -103,8 +105,8 @@ function resetLogoutTimer() {
 }
 
 // ── Payroll Duties Check ─────────────────────────
-// Called on every login. If it's the 1st-3rd of the month and employee hasn't
-// done their self-assessment for this month, send them a reminder notification.
+// Sends at most 2 reminders per month: day before month-end, and on the 1st.
+// Uses localStorage dedup so repeated logins on the same day don't re-send.
 async function checkPayrollDuties(user) {
   try {
     const uDoc = await db.collection('users').doc(user.uid).get();
@@ -112,24 +114,65 @@ async function checkPayrollDuties(user) {
     const role = uDoc.data().role;
     if (role === 'president' || role === 'owner' || role === 'partner') return;
 
-    const now = new Date();
-    const day = now.getDate();
+    const now  = new Date();
+    const day  = now.getDate();
+    const monthEnd = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
     const currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const todayStr = now.toISOString().slice(0, 10);
 
-    // Remind on 1st–7th of the month (payroll window)
-    if (day > 7) return;
+    // Only fire on the last day of the month (1-day-before reminder) or the 1st (day-of)
+    const isLastDay  = day === monthEnd;
+    const isFirstDay = day === 1;
+    if (!isLastDay && !isFirstDay) return;
+
+    // Dedup: only send once per day
+    const dedupKey = `bi-selfassess-remind-${user.uid}-${todayStr}`;
+    if (localStorage.getItem(dedupKey)) return;
 
     const evalDoc = await db.collection('kpi_evals').doc(user.uid).get().catch(()=>null);
     const selfAssessMonth = evalDoc?.exists ? evalDoc.data().selfAssessMonth : null;
-    if (selfAssessMonth === currentMonth) return; // already done
+    if (selfAssessMonth === currentMonth) return; // already done this month
 
     const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
+    const isUrgent = isFirstDay;
     await Notifs.send(user.uid, {
-      title: '📋 Self-Assessment Required',
-      body: `Please complete your self-assessment for ${monthLabel}. Go to Personal Finance → Self Evaluate.`,
-      icon: '📋', type: 'payroll_reminder'
+      title: isUrgent ? '🚨 Self-Assessment Due Today' : '📋 Self-Assessment Reminder',
+      body: isUrgent
+        ? `Please complete your self-assessment for ${monthLabel} today before payroll is finalized.`
+        : `Reminder: Your self-assessment for ${monthLabel} is due tomorrow. Go to Personal Finance → Self Evaluate.`,
+      icon: isUrgent ? '🚨' : '📋', type: 'payroll_reminder'
     });
+    localStorage.setItem(dedupKey, '1');
   } catch(e) { console.warn('[checkPayrollDuties]', e); }
+}
+
+// ── CA Deduction Reminder ─────────────────────────
+// 7 days before the 25th (payday), remind employees with an active CA
+// to submit their preferred deduction amount for the upcoming payroll.
+async function checkCAReminder(user) {
+  try {
+    const now    = new Date();
+    const day    = now.getDate();
+    const PAYDAY = 25;
+    if (day !== PAYDAY - 7) return; // only fires on the 18th
+
+    const todayStr = now.toISOString().slice(0, 10);
+    const dedupKey = `bi-ca-remind-${user.uid}-${todayStr}`;
+    if (localStorage.getItem(dedupKey)) return;
+
+    const snap = await db.collection('cash_advances')
+      .where('userId','==',user.uid).where('status','==','approved').get().catch(()=>({docs:[]}));
+    const activeCA = snap.docs.filter(d=>(d.data().balance||0)>0);
+    if (!activeCA.length) return;
+
+    const totalBalance = activeCA.reduce((s,d)=>s+(d.data().balance||0),0);
+    await Notifs.send(user.uid, {
+      title: '💳 Payroll in 7 Days — CA Deduction',
+      body: `You have ₱${totalBalance.toLocaleString('en-PH')} outstanding CA. Go to Personal Finance to set your preferred deduction amount for this payroll.`,
+      icon: '💳', type: 'ca_deduct_remind'
+    });
+    localStorage.setItem(dedupKey, '1');
+  } catch(e) { console.warn('[checkCAReminder]', e); }
 }
 
 // ── Splash ────────────────────────────────────────
@@ -2280,7 +2323,10 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     <div class="card">
       <div class="card-header">
         <h3>Cash Advances</h3>
-        ${cashAdvances.filter(a=>a.status==='pending').length?`<span class="badge badge-orange">${cashAdvances.filter(a=>a.status==='pending').length} pending</span>`:''}
+        <div style="display:flex;gap:8px;align-items:center">
+          ${cashAdvances.filter(a=>a.status==='pending').length?`<span class="badge badge-orange">${cashAdvances.filter(a=>a.status==='pending').length} pending</span>`:''}
+          ${totalAdvance>0?`<button class="btn-secondary btn-sm" id="ca-deduct-req-btn">💳 Set Deduction</button>`:''}
+        </div>
       </div>
       ${totalAdvance>0?`<div style="background:rgba(255,100,0,0.08);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;gap:20px;font-size:13px">
         <span>Outstanding Balance: <strong style="color:var(--danger)">₱${formatNum(totalAdvance)}</strong></span>
@@ -2370,6 +2416,54 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       await Notifs.sendToOwner({ title:'Cash Advance Request', body:`${name} requests ₱${formatNum(amount)} cash advance.`, icon:'💸', type:'cash_advance' });
       closeModal(); Notifs.showToast('Request submitted! Waiting for approval.');
       renderPersonalFinance(currentUser, currentRole);
+    });
+  });
+
+  // CA Deduction Override — employee requests how much to deduct this payroll
+  document.getElementById('ca-deduct-req-btn')?.addEventListener('click', async () => {
+    const now2 = new Date();
+    const month = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
+    const activeCA = cashAdvances.filter(a=>a.status==='approved'&&(a.balance||0)>0);
+    if (!activeCA.length) { Notifs.showToast('No active cash advance balance.', 'error'); return; }
+    const totalBal = activeCA.reduce((s,a)=>s+(a.balance||0),0);
+    const existing = await db.collection('payroll_ca_overrides')
+      .where('userId','==',currentUser.uid).where('month','==',month).limit(1).get().catch(()=>({docs:[]}));
+    const currentOverride = existing.docs[0]?.data()?.amount || '';
+
+    openModal('Set CA Deduction for This Payroll', `
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
+        Your current outstanding CA balance is <strong>₱${formatNum(totalBal)}</strong>.<br>
+        Enter how much you want deducted from your <strong>${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}</strong> payroll.
+        If left at full balance, the full amount will be deducted.
+      </p>
+      <div class="form-group">
+        <label>Deduction Amount (₱) — max ₱${formatNum(totalBal)}</label>
+        <input id="ca-override-amt" type="number" step="100" min="0" max="${totalBal}" value="${currentOverride||totalBal}" placeholder="${totalBal}"/>
+      </div>
+      <div class="form-group">
+        <label>Reason / Note (optional)</label>
+        <input id="ca-override-note" placeholder="e.g., Please deduct ₱3,000 only this month"/>
+      </div>
+    `, `<button class="btn-primary" id="save-ca-override-btn">Submit Request</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+    document.getElementById('save-ca-override-btn')?.addEventListener('click', async () => {
+      const amt = parseFloat(document.getElementById('ca-override-amt').value)||0;
+      const note = document.getElementById('ca-override-note').value.trim();
+      if (amt <= 0 || amt > totalBal) { Notifs.showToast(`Enter an amount between ₱1 and ₱${formatNum(totalBal)}.`, 'error'); return; }
+      const docId = `${currentUser.uid}_${month}`;
+      await db.collection('payroll_ca_overrides').doc(docId).set({
+        userId: currentUser.uid,
+        userName: userProfile.displayName || currentUser.email,
+        month, amount: amt, note,
+        submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      await Notifs.sendToOwner({
+        title: '💳 CA Deduction Request',
+        body: `${userProfile.displayName||currentUser.email} requests ₱${formatNum(amt)} CA deduction for ${month} payroll.`,
+        icon: '💳', type: 'ca_deduct_req'
+      });
+      closeModal();
+      Notifs.showToast(`CA deduction request (₱${formatNum(amt)}) submitted!`);
     });
   });
 };
