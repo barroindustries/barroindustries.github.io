@@ -1,0 +1,1702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quote Builder v2 — Barro Kitchens</title>
+<style>
+:root {
+  --dark-blue:#1E3A5F; --mid-blue:#2E5F8A; --light-blue:#D6E4F0;
+  --accent:#F0A500; --gray-light:#F5F6FA; --gray-mid:#DDE2EC;
+  --gray-dark:#6B7280; --green:#27AE60; --red:#E74C3C; --orange:#E67E22;
+  --teal:#00BCD4; --purple:#8E44AD;
+  --text:#1A1F2E; --font:'Segoe UI',system-ui,sans-serif;
+  --cat-cooking:#E74C3C; --cat-prep:#3498DB; --cat-ref:#00BCD4;
+  --cat-vent:#27AE60; --cat-gas:#F39C12; --cat-fire:#E67E22; --cat-misc:#8E44AD;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:var(--font);background:var(--gray-light);color:var(--text);font-size:14px;}
+
+/* ── TOP BAR ── */
+.topbar{background:var(--dark-blue);color:white;display:flex;align-items:center;
+  justify-content:space-between;padding:0 18px;height:52px;position:sticky;top:0;z-index:300;
+  box-shadow:0 2px 8px rgba(0,0,0,.3);gap:10px;flex-wrap:wrap;}
+.topbar-logo{font-size:16px;font-weight:700;}
+.topbar-logo span{color:var(--accent);}
+.topbar-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.btn{padding:7px 13px;border:none;border-radius:6px;cursor:pointer;font-size:12px;
+  font-weight:600;transition:all .15s;display:inline-flex;align-items:center;gap:5px;}
+.btn-outline{background:transparent;border:1.5px solid rgba(255,255,255,.45);color:white;}
+.btn-outline:hover{background:rgba(255,255,255,.1);}
+.btn-accent{background:var(--accent);color:#1a1a1a;}
+.btn-accent:hover{background:#d4920a;}
+.btn-green{background:var(--green);color:white;}
+.btn-green:hover{background:#1f8f4e;}
+.btn-red{background:var(--red);color:white;}
+.btn-sm{padding:5px 10px;font-size:11px;}
+
+/* ── PILLS ── */
+.toggle-pills{display:flex;background:rgba(255,255,255,.12);border-radius:7px;padding:2px;gap:2px;}
+.toggle-pills button{padding:4px 12px;border:none;border-radius:5px;cursor:pointer;
+  font-size:12px;font-weight:700;color:rgba(255,255,255,.65);background:transparent;transition:all .15s;}
+.toggle-pills button.active{background:white;color:var(--dark-blue);}
+
+/* ── LAYOUT ── */
+.main{max-width:1100px;margin:0 auto;padding:18px 14px;}
+.section{background:white;border-radius:10px;padding:18px 22px;margin-bottom:12px;
+  box-shadow:0 1px 4px rgba(0,0,0,.06);}
+.sec-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
+  color:var(--mid-blue);margin-bottom:12px;border-bottom:2px solid var(--light-blue);padding-bottom:7px;
+  display:flex;align-items:center;justify-content:space-between;}
+label{font-size:11px;font-weight:600;color:var(--gray-dark);text-transform:uppercase;letter-spacing:.4px;}
+input,select,textarea{border:1.5px solid var(--gray-mid);border-radius:6px;padding:7px 9px;
+  font-size:13px;font-family:var(--font);width:100%;transition:border-color .15s;}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--mid-blue);}
+.fg{display:flex;flex-direction:column;gap:3px;}
+.fg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:10px;}
+.fg.full{grid-column:1/-1;}
+
+/* ── QUOTE NO ── */
+.qno-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;}
+.qno-sep{font-size:16px;font-weight:700;color:var(--gray-dark);padding-bottom:9px;}
+.qno-box{background:var(--light-blue);border-radius:7px;padding:8px 14px;
+  font-size:16px;font-weight:800;color:var(--dark-blue);letter-spacing:.8px;white-space:nowrap;align-self:flex-end;}
+
+/* ── STATUS BAR ── */
+.status-bar{display:flex;align-items:center;gap:8px;padding:8px 0;font-size:12px;}
+.status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.status-dot.online{background:var(--green);}
+.status-dot.offline{background:var(--orange);}
+.status-dot.loading{background:var(--accent);animation:pulse .8s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+
+/* ── CATEGORY TABS ── */
+.cat-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;}
+.cat-tab{padding:5px 12px;border-radius:20px;border:1.5px solid var(--gray-mid);
+  font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;background:white;color:var(--text);}
+.cat-tab:hover{border-color:var(--mid-blue);}
+.cat-tab.active{color:white;border-color:transparent;}
+
+/* ── PRODUCT SEARCH ── */
+.search-wrap{position:relative;}
+.search-input{width:100%;padding:9px 12px;border:1.5px solid var(--gray-mid);border-radius:7px;
+  font-size:13px;font-family:var(--font);padding-right:34px;}
+.search-input:focus{outline:none;border-color:var(--mid-blue);}
+.search-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  background:none;border:none;cursor:pointer;color:var(--gray-dark);font-size:16px;padding:2px;}
+.search-dropdown{position:absolute;top:calc(100% + 4px);left:0;right:0;background:white;
+  border:1.5px solid var(--mid-blue);border-radius:8px;z-index:400;max-height:280px;overflow-y:auto;
+  box-shadow:0 6px 20px rgba(0,0,0,.15);display:none;}
+.search-dropdown.open{display:block;}
+.sd-group{font-size:10px;font-weight:700;color:var(--mid-blue);text-transform:uppercase;
+  letter-spacing:.7px;padding:7px 11px 3px;background:var(--gray-light);
+  position:sticky;top:0;border-bottom:1px solid var(--gray-mid);}
+.sd-item{padding:9px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid #f0f2f7;
+  display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+.sd-item:last-child{border-bottom:none;}
+.sd-item:hover,.sd-item.focused{background:var(--light-blue);}
+.sd-item-info{flex:1;}
+.sd-item-name{font-weight:600;font-size:13px;}
+.sd-item-meta{font-size:11px;color:var(--gray-dark);margin-top:1px;}
+.sd-item-price{font-size:12px;font-weight:700;color:var(--mid-blue);white-space:nowrap;flex-shrink:0;}
+
+/* ── CALCULATOR PANEL ── */
+.calc-panel{background:var(--light-blue);border:1.5px solid var(--mid-blue);
+  border-radius:10px;padding:16px;margin-top:10px;display:none;}
+.calc-panel.open{display:block;}
+.calc-title{font-size:13px;font-weight:700;color:var(--dark-blue);margin-bottom:12px;
+  display:flex;align-items:center;gap:8px;}
+.calc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;align-items:end;}
+.calc-price-row{display:flex;align-items:center;gap:10px;margin-top:12px;
+  background:white;border-radius:7px;padding:10px 14px;border:1.5px solid var(--mid-blue);}
+.calc-price-label{font-size:11px;font-weight:600;color:var(--gray-dark);text-transform:uppercase;letter-spacing:.4px;flex:1;}
+.calc-price-value{font-size:18px;font-weight:800;color:var(--dark-blue);}
+.calc-formula-hint{font-size:11px;color:var(--gray-dark);margin-top:6px;font-style:italic;}
+.spec-group{background:white;border-radius:7px;padding:10px;border:1px solid var(--gray-mid);margin-top:8px;}
+.spec-group label{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:var(--gray-dark);}
+.spec-adder{font-size:11px;font-weight:600;color:var(--green);margin-left:auto;}
+.spec-adder.neg{color:var(--red);}
+
+/* ── ITEMS TABLE ── */
+table{width:100%;border-collapse:collapse;}
+.items-table{table-layout:fixed;width:100%;}
+.items-table th:nth-child(1){width:4%;}
+.items-table th:nth-child(2){width:30%;}
+.items-table th:nth-child(3){width:12%;}
+.items-table th:nth-child(4){width:5%;}
+.items-table th:nth-child(5){width:9%;}
+.items-table th:nth-child(6){width:12%;}
+.items-table th:nth-child(7){width:12%;}
+.items-table th:nth-child(8){width:12%;}
+.items-table th:nth-child(9){width:4%;}
+th{background:var(--dark-blue);color:white;text-align:left;padding:7px 8px;
+  font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
+td{padding:8px 8px;border-bottom:1px solid var(--gray-mid);font-size:13px;vertical-align:middle;}
+.cat-row td{background:var(--light-blue);font-weight:700;font-size:11px;text-transform:uppercase;
+  letter-spacing:.5px;color:var(--mid-blue);padding:5px 8px;}
+.subtotal-row td{background:#f0f4ff;font-weight:700;font-size:12px;color:var(--dark-blue);
+  text-align:right;padding:5px 8px;border-bottom:2px solid var(--mid-blue);}
+tr:hover td{background:#fafbff;}
+.del-btn{color:var(--red);background:none;border:none;cursor:pointer;font-size:15px;padding:2px 5px;border-radius:4px;}
+.del-btn:hover{background:#fdecea;}
+.edit-price{border:1.5px dashed var(--orange);border-radius:4px;width:100%;text-align:right;padding:4px 5px;box-sizing:border-box;}
+.cell-edit{outline:none;border-radius:3px;min-height:1em;padding:1px 3px;transition:background .12s;}
+.cell-edit:hover{background:rgba(46,95,138,.07);cursor:text;}
+.cell-edit:focus{background:rgba(46,95,138,.1);outline:1px dashed var(--mid-blue);}
+.cell-num{width:100%;text-align:center;border:1.5px solid var(--gray-mid);border-radius:4px;
+  padding:3px 2px;font-size:12px;font-family:var(--font);}
+.cell-unit{width:100%;border:1.5px solid var(--gray-mid);border-radius:4px;
+  padding:3px 2px;font-size:11px;font-family:var(--font);}
+.formula-badge{font-size:10px;background:var(--accent);color:#1a1a1a;padding:1px 5px;
+  border-radius:3px;font-weight:700;margin-left:4px;white-space:nowrap;}
+.spec-badge{font-size:10px;background:var(--light-blue);color:var(--mid-blue);padding:1px 5px;
+  border-radius:3px;margin-right:3px;display:inline-block;}
+.empty-state{text-align:center;padding:40px;color:var(--gray-dark);}
+
+/* ── TOTALS ── */
+.totals-box{display:flex;justify-content:flex-end;margin-top:10px;}
+.totals-tbl{min-width:320px;}
+.totals-tbl td{padding:5px 11px;border-bottom:none;font-size:13px;}
+.totals-tbl tr.grand td{font-weight:700;font-size:15px;border-top:2px solid var(--dark-blue);padding-top:9px;}
+.totals-tbl td:last-child{text-align:right;}
+
+/* ── INTERNAL PANEL ── */
+.int-panel{background:#fffbf0;border:1.5px dashed var(--orange);border-radius:9px;padding:14px;margin-top:10px;}
+.int-panel .sec-title{color:var(--orange);border-bottom-color:#f0d080;}
+.labor-tbl{width:100%;border-collapse:collapse;margin-bottom:10px;}
+.labor-tbl th{background:#f0e0c0;color:#6b3a00;font-size:11px;text-transform:uppercase;padding:5px 9px;}
+.labor-tbl td{padding:6px 9px;border-bottom:1px solid #f0e0b0;font-size:13px;}
+.labor-tbl input{width:58px;text-align:center;padding:4px;font-size:13px;
+  border:1.5px solid var(--gray-mid);border-radius:5px;}
+.labor-tbl tfoot td{font-weight:700;background:#fff5e0;border-top:2px solid #f0c060;}
+.timeline-box{background:#fff5e0;border:1.5px solid #f0c060;border-radius:7px;padding:10px 14px;
+  margin-top:10px;font-size:13px;}
+.timeline-box strong{display:block;font-size:15px;color:var(--dark-blue);}
+
+/* ── TERMS ── */
+.terms-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.terms-block{background:var(--gray-light);border-radius:7px;padding:10px 13px;transition:opacity .15s;}
+.terms-block h4{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--mid-blue);margin-bottom:5px;display:flex;align-items:center;gap:7px;}
+.terms-block p,.terms-block li{font-size:12px;color:var(--text);line-height:1.5;}
+.terms-block.full{grid-column:1/-1;}
+.term-off{opacity:.35;}
+.term-cb{width:14px;height:14px;cursor:pointer;accent-color:var(--mid-blue);flex-shrink:0;}
+.term-content{min-height:30px;outline:none;border-radius:4px;padding:3px 5px;transition:background .15s;margin-top:2px;}
+.term-content:hover{background:rgba(46,95,138,.06);cursor:text;}
+.term-content:focus{background:rgba(46,95,138,.09);outline:1.5px dashed var(--mid-blue);}
+.term-content:empty:before{content:'(empty — click to add)';color:#bbb;font-style:italic;}
+
+/* ── SIGNATURE ── */
+.sig-row{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:14px;}
+.sig-box{border-top:1.5px solid var(--gray-mid);padding-top:10px;text-align:center;}
+.sig-name{font-weight:700;font-size:14px;}
+.sig-box small{color:var(--gray-dark);font-size:11px;line-height:1.5;}
+
+/* ── ADMIN PANEL ── */
+.admin-panel{background:white;border:2px dashed var(--mid-blue);border-radius:10px;padding:18px;margin-bottom:12px;display:none;}
+.admin-panel.open{display:block;}
+.admin-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;}
+.admin-actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+
+/* ── COEFFICIENTS TABLE ── */
+.coef-table{width:100%;border-collapse:collapse;font-size:12px;}
+.coef-table th{background:var(--dark-blue);color:white;padding:6px 9px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;}
+.coef-table td{padding:6px 9px;border-bottom:1px solid var(--gray-mid);}
+.coef-table tr:hover td{background:var(--gray-light);}
+.coef-table input{border:1.5px solid var(--gray-mid);border-radius:4px;padding:3px 6px;font-size:12px;width:100%;}
+.coef-table input:focus{border-color:var(--mid-blue);outline:none;}
+.coef-tag{display:inline-block;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;color:white;}
+
+/* ── MOBILE ── */
+@media(max-width:700px){
+  .topbar{height:auto;padding:8px 12px;gap:8px;flex-direction:column;align-items:stretch;}
+  .topbar>div:first-child{flex-wrap:wrap;justify-content:space-between;}
+  .topbar-right{justify-content:flex-end;flex-wrap:wrap;gap:6px;}
+  .toggle-pills button{padding:5px 10px;font-size:11px;}
+  .btn{padding:8px 12px;font-size:12px;min-height:40px;}
+  .main{padding:10px 8px;}
+  .section{padding:12px 14px;}
+  .fg-grid{grid-template-columns:1fr;}
+  .fg.full{grid-column:auto;}
+  .qno-row{flex-direction:column;align-items:stretch;gap:6px;}
+  .qno-sep{display:none;}
+  .qno-box{font-size:13px;padding:6px 10px;}
+  .calc-grid{grid-template-columns:1fr 1fr;}
+  #tableWrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+  .items-table{min-width:700px;}
+  td,th{padding:5px 5px!important;font-size:11px!important;}
+  .cell-num,.cell-unit,.edit-price{font-size:11px!important;}
+  .totals-box{justify-content:stretch;}
+  .totals-tbl{width:100%;}
+  .terms-grid{grid-template-columns:1fr;}
+  .sig-row{grid-template-columns:1fr;}
+  input,select,textarea{font-size:16px!important;}
+  .del-btn{padding:6px 10px;font-size:18px;}
+}
+@media(max-width:420px){
+  .topbar-right .btn-outline:not(.btn-accent):not(#btnVerify){display:none;}
+}
+
+/* ── VERIFY / FILE MODAL ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;
+  display:flex;align-items:center;justify-content:center;padding:16px;}
+.modal-box{background:white;border-radius:12px;width:100%;max-width:520px;
+  box-shadow:0 8px 32px rgba(0,0,0,.25);overflow:hidden;display:flex;flex-direction:column;max-height:90vh;}
+.modal-hdr{background:var(--dark-blue);color:white;padding:15px 20px;
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.modal-hdr h3{font-size:15px;font-weight:700;letter-spacing:.3px;}
+.modal-x{background:none;border:none;color:white;font-size:20px;cursor:pointer;padding:0 4px;line-height:1;}
+.modal-body{padding:18px 20px;overflow-y:auto;flex:1;}
+.modal-footer{padding:14px 20px;border-top:1px solid var(--gray-mid);
+  display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;background:white;}
+.verify-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;
+  border-bottom:1px solid var(--gray-mid);}
+.verify-item:last-child{border-bottom:none;}
+.verify-icon{font-size:17px;flex-shrink:0;width:22px;text-align:center;}
+.verify-info{flex:1;}
+.verify-label{font-weight:700;font-size:13px;}
+.verify-val{font-size:12px;color:var(--gray-dark);margin-top:2px;}
+.verify-waive{display:flex;align-items:center;gap:6px;margin-top:6px;
+  font-size:11px;font-weight:600;color:var(--orange);cursor:pointer;}
+.verify-waive input[type=checkbox]{width:auto;cursor:pointer;accent-color:var(--orange);}
+.filed-badge{background:var(--green);color:white;padding:4px 11px;border-radius:20px;
+  font-size:11px;font-weight:700;letter-spacing:.5px;display:none;white-space:nowrap;}
+.filed-badge.show{display:inline-flex;align-items:center;gap:5px;}
+
+/* ── PRINT ── */
+@media print {
+  body{background:white;font-size:10.5pt;}
+  .topbar,.add-panel,.no-print,.del-btn,.int-panel,.calc-panel,.admin-panel,
+  .qno-builder-section,.totals-controls,.status-bar,.cat-tabs{display:none!important;}
+  .term-off{display:none!important;}
+  .section{box-shadow:none;border:none;border-bottom:1px solid #ddd;margin-bottom:6px;padding:8px 0;border-radius:0;}
+  .main{padding:0;max-width:100%;}
+  .print-header{display:flex!important;justify-content:space-between;align-items:flex-start;
+    margin-bottom:12px;padding-bottom:10px;border-bottom:2.5px solid #1E3A5F;}
+  th{padding:6px 9px;font-size:9.5pt;}
+  td{padding:5px 9px;font-size:10pt;}
+  .items-table{table-layout:fixed!important;width:100%!important;}
+  @page{margin:13mm 11mm 8mm;}
+}
+.print-header{display:none;}
+@media print{.print-header{display:flex!important;}.no-print{display:none!important;}}
+</style>
+</head>
+<body>
+
+<!-- ── TOP BAR ── -->
+<div class="topbar no-print">
+  <div style="display:flex;align-items:center;gap:10px;">
+    <div class="topbar-logo" id="navLogo">BARRO <span>KITCHENS</span></div>
+    <div class="toggle-pills">
+      <button id="coBK" class="active" onclick="setCompany('BK')">🍳 Barro Kitchens</button>
+      <button id="coBS" onclick="setCompany('BS')">⚙ Brilliant Steel</button>
+    </div>
+    <div class="toggle-pills">
+      <button id="btnClient" class="active" onclick="setView('client')">📄 Client</button>
+      <button id="btnInternal" onclick="setView('internal')">🔒 Internal</button>
+      <button id="btnAdmin" onclick="setView('admin')">⚙ Admin</button>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span class="filed-badge" id="filedBadge">✓ FILED</span>
+    <button class="btn btn-outline" onclick="clearForm()">🗑 New</button>
+    <button class="btn btn-outline" id="btnVerify" onclick="doVerifyAndFile()" style="border-color:var(--accent);color:var(--accent);">📋 Verify &amp; File</button>
+    <button class="btn btn-outline" id="btnPrint" onclick="doPrint()">🖨 Print/PDF</button>
+    <button class="btn btn-accent" id="btnShare" onclick="doShare()">🔗 Share</button>
+  </div>
+</div>
+
+<div class="main">
+
+<!-- ── PRINT HEADER ── -->
+<div class="print-header" id="printHeader">
+  <div style="display:flex;align-items:flex-start;gap:12px;">
+    <img id="phLogo" style="height:56px;display:none;flex-shrink:0;margin-top:1px;">
+    <div id="phDetails">
+      <div id="phName" style="font-size:16pt;font-weight:900;color:#1E3A5F;letter-spacing:.4px;line-height:1.1;"></div>
+      <div id="phSub" style="font-size:9pt;color:#555;margin-top:2px;"></div>
+      <div id="phAddr" style="font-size:9pt;color:#555;margin-top:1px;"></div>
+      <div id="phContact" style="font-size:9pt;color:#555;margin-top:1px;"></div>
+    </div>
+  </div>
+  <div style="text-align:right;">
+    <div style="font-size:14pt;font-weight:900;color:#1E3A5F;letter-spacing:1px;">PRICE QUOTATION</div>
+    <div id="phQuoteNo" style="font-size:11pt;font-weight:700;color:#333;margin-top:4px;"></div>
+    <div id="phDate" style="font-size:10pt;color:#555;margin-top:2px;"></div>
+    <div id="phSalesperson" style="font-size:10pt;color:#555;margin-top:1px;"></div>
+  </div>
+</div>
+
+<!-- ── DATA SOURCE STATUS ── -->
+<div class="section no-print" style="padding:12px 18px;">
+  <div class="status-bar">
+    <div class="status-dot loading" id="statusDot"></div>
+    <span id="statusMsg">Loading product database…</span>
+    <button class="btn btn-outline btn-sm no-print" style="margin-left:auto;background:var(--dark-blue);" onclick="reloadDatabase()">↻ Reload DB</button>
+  </div>
+</div>
+
+<!-- ── ADMIN PANEL ── -->
+<div class="admin-panel" id="adminPanel">
+  <div class="sec-title">⚙ Admin — Add / Edit Product</div>
+  <div class="admin-grid">
+    <div class="fg"><label>Product ID</label><input id="aId" placeholder="e.g. CE-013"></div>
+    <div class="fg"><label>Category</label>
+      <select id="aCat">
+        <option value="cooking_line">🔥 Cooking Line</option>
+        <option value="prep_washing">🧼 Preparation &amp; Washing</option>
+        <option value="refrigeration">❄️ Refrigeration</option>
+        <option value="ventilation">💨 Ventilation</option>
+        <option value="gas_line">⛽ Gas Line</option>
+        <option value="fire_suppression">🧯 Fire Suppression</option>
+        <option value="miscellaneous">🔧 Miscellaneous</option>
+      </select>
+    </div>
+    <div class="fg full"><label>Product Name</label><input id="aName" placeholder="Full product name"></div>
+    <div class="fg"><label>Formula Type</label>
+      <select id="aFormula" onchange="toggleAdminFormulaFields()">
+        <option value="fixed">Fixed price</option>
+        <option value="per_length">Per length (mm)</option>
+        <option value="per_area">Per area (sqm)</option>
+        <option value="per_run">Per run</option>
+        <option value="configurable">Configurable (specs)</option>
+      </select>
+    </div>
+    <div class="fg"><label>Base Price (₱)</label><input type="number" id="aBase" placeholder="0"></div>
+    <div class="fg" id="aPerMmField" style="display:none;"><label>₱ per extra mm</label><input type="number" id="aPerMm" placeholder="0.00" step="0.01"></div>
+    <div class="fg" id="aPerSqmField" style="display:none;"><label>₱ per sqm</label><input type="number" id="aPerSqm" placeholder="0"></div>
+    <div class="fg"><label>Default W (mm)</label><input type="number" id="aW" placeholder="0"></div>
+    <div class="fg"><label>Default D (mm)</label><input type="number" id="aD" placeholder="0"></div>
+    <div class="fg"><label>Default H (mm)</label><input type="number" id="aH" placeholder="0"></div>
+    <div class="fg"><label>Fab Hours</label><input type="number" id="aFab" placeholder="0" step="0.5"></div>
+    <div class="fg"><label>Install Hours</label><input type="number" id="aInst" placeholder="0" step="0.5"></div>
+    <div class="fg"><label>Team Size</label><input type="number" id="aTeam" value="2"></div>
+    <div class="fg"><label>Lead Time</label><input id="aLead" placeholder="e.g. 7-14 days"></div>
+    <div class="fg"><label>Unit</label><input id="aUnit" value="pc" placeholder="pc / lot / sqm / run"></div>
+    <div class="fg full"><label>Notes / Specs summary</label><input id="aNotes" placeholder="Notes visible on quote"></div>
+  </div>
+  <div class="admin-actions">
+    <button class="btn btn-green" onclick="saveAdminProduct()">💾 Save to Database</button>
+    <button class="btn btn-outline no-print" style="background:var(--dark-blue);" onclick="exportDatabase()">📥 Export database JSON</button>
+    <button class="btn btn-outline no-print" style="background:var(--dark-blue);" onclick="importDatabase()">📤 Import database JSON</button>
+    <input type="file" id="importFile" accept=".json" style="display:none;" onchange="handleImport(event)">
+  </div>
+
+  <!-- COEFFICIENTS TABLE -->
+  <div style="margin-top:18px;">
+    <div class="sec-title">Constants &amp; Coefficients Template</div>
+    <p style="font-size:12px;color:var(--gray-dark);margin-bottom:10px;">
+      Edit these values to adjust global pricing. Changes apply to all new calculations.
+    </p>
+    <table class="coef-table" id="coefTable">
+      <thead>
+        <tr>
+          <th>Constant</th>
+          <th>Description</th>
+          <th>Value</th>
+          <th>Type</th>
+        </tr>
+      </thead>
+      <tbody id="coefTbody"></tbody>
+    </table>
+    <button class="btn btn-accent" style="margin-top:10px;" onclick="saveConstants()">💾 Save Constants</button>
+  </div>
+</div>
+
+<!-- ── QUOTE NUMBER ── -->
+<div class="section qno-builder-section no-print">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+    <div class="sec-title" style="margin-bottom:0;border:none;padding:0;">Quote Number</div>
+    <div class="toggle-pills" style="background:var(--gray-mid);">
+      <button id="qnoBtnAuto" class="active" onclick="setQnoMode('auto')" style="color:var(--dark-blue);">Auto</button>
+      <button id="qnoBtnManual" onclick="setQnoMode('manual')" style="color:var(--dark-blue);">Manual</button>
+    </div>
+  </div>
+  <div id="qnoBuilderRow" class="qno-row">
+    <div class="fg"><label>Co.</label><input id="qnoCo" value="BK" style="width:55px;font-weight:700;text-align:center;" readonly></div>
+    <div class="qno-sep">-</div>
+    <div class="fg"><label>Location</label>
+      <select id="qnoLoc" onchange="buildQuoteNo()">
+        <option value="LU">LU — La Union</option><option value="BG">BG — Baguio</option>
+        <option value="ML">ML — Manila</option><option value="SB">SB — Subic</option>
+        <option value="CL">CL — Clark</option><option value="DA">DA — Davao</option>
+        <option value="CB">CB — Cebu</option><option value="IG">IG — Ilocos</option>
+        <option value="OT">OT — Other</option>
+      </select>
+    </div>
+    <div class="qno-sep">-</div>
+    <div class="fg"><label>Lead Source</label>
+      <select id="qnoMethod" onchange="buildQuoteNo()">
+        <option value="FB">FB — Facebook</option><option value="VB">VB — Viber</option>
+        <option value="OF">OF — In Office</option><option value="RF">RF — Referral</option>
+        <option value="IG">IG — Instagram</option><option value="WB">WB — Website</option>
+        <option value="EM">EM — Email</option>
+      </select>
+    </div>
+    <div class="qno-sep">-</div>
+    <div class="fg"><label>Date</label><input type="date" id="quoteDate" oninput="buildQuoteNo()" style="max-width:165px;"></div>
+    <div class="qno-sep">-</div>
+    <div class="fg"><label>Client #</label><input type="number" id="qnoSeq" value="1" min="1" max="999" style="max-width:70px;text-align:center;" oninput="buildQuoteNo()"></div>
+    <div class="qno-sep" style="padding-bottom:0;align-self:flex-end;">→</div>
+    <div class="qno-box" id="qnoPreview">BK-LU-FB-000000-001</div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:flex-end;margin-top:10px;flex-wrap:wrap;">
+    <div class="fg" style="flex:1;max-width:320px;">
+      <label id="qnoLabel">Quote Number <span style="color:var(--gray-dark);font-weight:400;text-transform:none;">(auto)</span></label>
+      <input type="text" id="quoteNo" placeholder="Auto-generated" readonly style="background:var(--gray-light);" oninput="updatePrintHeader()">
+    </div>
+    <div class="fg"><label>Salesperson</label><input type="text" id="salesperson" placeholder="Name" oninput="updatePrintHeader()"></div>
+    <div class="fg"><label>Project Type</label>
+      <select id="purpose">
+        <option>Restaurant</option><option>Hotel Restaurant</option><option>Hospital / Institutional</option>
+        <option>Government / Bidding</option><option>Residential</option><option>Cafe / Coffee Shop</option>
+        <option>Catering / Food Service</option><option>Other</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<!-- ── CLIENT INFO ── -->
+<div class="section">
+  <div class="sec-title">Client Information</div>
+  <div class="fg-grid">
+    <div class="fg full"><label>Client Name</label><input id="clientName" placeholder="Full name"></div>
+    <div class="fg full"><label>Company / Business Name</label><input id="clientCompany" placeholder="Company name (if applicable)"></div>
+    <div class="fg full"><label>Project Address / Site</label><input id="clientAddress" placeholder="Full address"></div>
+    <div class="fg"><label>Contact Number</label><input id="clientPhone" placeholder="+63…"></div>
+    <div class="fg"><label>Email</label><input id="clientEmail" type="email" placeholder="email@example.com"></div>
+  </div>
+</div>
+
+<!-- ── ADD ITEMS ── -->
+<div class="section no-print">
+  <div class="sec-title">Add Items to Quote</div>
+
+  <!-- Category filter tabs -->
+  <div class="cat-tabs" id="catTabs">
+    <button class="cat-tab active" onclick="filterCat('all',this)" style="background:var(--dark-blue);color:white;border-color:var(--dark-blue);">All</button>
+    <button class="cat-tab" onclick="filterCat('cooking_line',this)" id="tabCooking">🔥 Cooking Line</button>
+    <button class="cat-tab" onclick="filterCat('prep_washing',this)" id="tabPrep">🧼 Prep &amp; Washing</button>
+    <button class="cat-tab" onclick="filterCat('refrigeration',this)" id="tabRef">❄️ Refrigeration</button>
+    <button class="cat-tab" onclick="filterCat('ventilation',this)" id="tabVent">💨 Ventilation</button>
+    <button class="cat-tab" onclick="filterCat('gas_line',this)" id="tabGas">⛽ Gas Line</button>
+    <button class="cat-tab" onclick="filterCat('fire_suppression',this)" id="tabFire">🧯 Fire Suppression</button>
+    <button class="cat-tab" onclick="filterCat('miscellaneous',this)" id="tabMisc">🔧 Miscellaneous</button>
+  </div>
+
+  <!-- Product search -->
+  <div class="search-wrap" style="margin-bottom:10px;">
+    <input id="searchInput" class="search-input" type="text" placeholder="Search products… (type to filter)"
+      oninput="handleSearch()" onfocus="openDropdown()" autocomplete="off">
+    <button class="search-clear" onclick="clearSearch()" title="Clear">✕</button>
+    <div class="search-dropdown" id="searchDropdown"></div>
+  </div>
+
+  <!-- Calculator panel (shown after selecting product) -->
+  <div class="calc-panel" id="calcPanel">
+    <div class="calc-title" id="calcTitle">⚙ Configure Item</div>
+    <div class="calc-grid" id="calcInputs"></div>
+    <div id="specGroups"></div>
+    <div class="calc-price-row">
+      <div>
+        <div class="calc-price-label">Computed Unit Price</div>
+        <div class="calc-formula-hint" id="calcHint"></div>
+      </div>
+      <div class="calc-price-value" id="calcPriceDisplay">₱0</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+      <div class="fg" style="min-width:80px;max-width:100px;">
+        <label>Qty</label>
+        <input type="number" id="calcQty" value="1" min="1" oninput="recomputePrice()">
+      </div>
+      <div class="fg" style="min-width:120px;max-width:200px;">
+        <label>Unit</label>
+        <input type="text" id="calcUnit" value="pc">
+      </div>
+      <div style="align-self:flex-end;margin-left:auto;">
+        <button class="btn btn-green" onclick="addItemFromCalc()">➕ Add to Quote</button>
+        <button class="btn btn-outline no-print" style="background:var(--dark-blue);margin-left:6px;" onclick="dismissCalc()">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── QUOTE ITEMS TABLE ── -->
+<div class="section">
+  <div class="sec-title">
+    <span>Quote Items</span>
+    <div class="no-print" style="display:flex;gap:6px;">
+      <label style="font-size:11px;text-transform:none;display:flex;align-items:center;gap:5px;cursor:pointer;">
+        <input type="checkbox" id="showVat" onchange="renderTotals()" style="width:auto;"> Show VAT (12%)
+      </label>
+      <label style="font-size:11px;text-transform:none;display:flex;align-items:center;gap:5px;cursor:pointer;margin-left:8px;">
+        <input type="checkbox" id="showMarkup" onchange="renderTotals()" style="width:auto;"> Apply markup
+        <select id="markupType" onchange="renderTotals()" style="font-size:11px;padding:2px 4px;width:auto;font-weight:600;">
+          <option value="retail">Retail (30%)</option>
+          <option value="commercial">Commercial (20%)</option>
+          <option value="government">Government (15%)</option>
+        </select>
+      </label>
+    </div>
+  </div>
+
+  <div id="tableWrap" style="overflow-x:auto;">
+    <table class="items-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Description</th>
+          <th>Dimensions</th>
+          <th>Qty</th>
+          <th>Unit</th>
+          <th>Unit Price</th>
+          <th>Amount</th>
+          <th>Lead Time</th>
+          <th class="no-print">Del</th>
+        </tr>
+      </thead>
+      <tbody id="itemsTbody">
+        <tr><td colspan="9" class="empty-state">No items yet. Use the search above to add products.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Totals -->
+  <div class="totals-box">
+    <table class="totals-tbl" id="totalsTbl"></table>
+  </div>
+</div>
+
+<!-- ── INTERNAL PANEL (Labor & Timeline) ── -->
+<div class="int-panel" id="internalPanel" style="display:none;">
+  <div class="sec-title">🔒 Internal — Labor &amp; Timeline Estimate</div>
+  <p style="font-size:12px;color:var(--gray-dark);margin-bottom:10px;">
+    Labor hours are auto-estimated from product formulas. Adjust days/people per role below.
+  </p>
+
+  <table class="labor-tbl" id="laborTbl">
+    <thead>
+      <tr>
+        <th>Role</th>
+        <th>Days</th>
+        <th>People</th>
+        <th>Day Rate (₱)</th>
+        <th>Total (₱)</th>
+      </tr>
+    </thead>
+    <tbody id="laborTbody"></tbody>
+    <tfoot>
+      <tr>
+        <td colspan="4" style="text-align:right;font-weight:700;">Total Labor Cost</td>
+        <td id="laborTotal" style="text-align:right;font-weight:700;">₱0</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="timeline-box" id="timelineBox">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--gray-dark);margin-bottom:4px;">Timeline Estimate</div>
+    <strong id="timelineEstimate">—</strong>
+    <div id="timelineDetail" style="font-size:12px;color:var(--gray-dark);margin-top:4px;"></div>
+  </div>
+
+  <div style="margin-top:10px;font-size:12px;color:var(--orange);">
+    ⚠️ This panel is hidden in the client view and in print mode.
+  </div>
+</div>
+
+<!-- ── TERMS & CONDITIONS ── -->
+<div class="section terms-section">
+  <div class="sec-title">Terms &amp; Conditions</div>
+  <div class="terms-grid" id="termsGrid"></div>
+  <div class="sig-row">
+    <div class="sig-box">
+      <div style="height:36px;"></div>
+      <div class="sig-name" id="sigClientName">CLIENT NAME</div>
+      <small>Signature over printed name<br>Date: ___________________</small>
+    </div>
+    <div class="sig-box">
+      <div style="height:36px;"></div>
+      <div class="sig-name" id="sigContact"></div>
+      <small id="sigTitle"></small>
+    </div>
+  </div>
+</div>
+
+</div><!-- /main -->
+
+<!-- ── VERIFY & FILE MODAL ── -->
+<div class="modal-overlay no-print" id="verifyModal" style="display:none;" onclick="closeVerifyModal(event)">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-hdr">
+      <h3>📋 Verify &amp; File Quotation</h3>
+      <button class="modal-x" onclick="closeVerifyModal()">✕</button>
+    </div>
+    <div class="modal-body" id="verifyBody"></div>
+    <div class="modal-footer">
+      <button class="btn btn-outline no-print" style="background:var(--dark-blue);" onclick="closeVerifyModal()">Cancel</button>
+      <button class="btn btn-green" id="fileBtn" onclick="fileQuotation()" disabled style="opacity:.5;">📁 File Quotation</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+//  COMPANY CONFIG
+// ═══════════════════════════════════════════════════════════════════
+const CO = {
+  BK:{name:'BARRO KITCHENS',sub:'by Barro Industries OPC',
+    addr:'La Union  |  Baguio City  |  Manila',contact:'09276836300  |  hello@barroindustries.com',
+    sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'},nav:'BARRO <span>KITCHENS</span>',code:'BK'},
+  BS:{name:'BRILLIANT STEEL CORPORATION',sub:'',addr:'Pasig City, Metro Manila',contact:'09276836300',
+    sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'},nav:'<span>BRILLIANT</span> STEEL',code:'BS'},
+};
+
+// ═══════════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════════
+let items=[], currentView='client', currentCo='BK', qnoMode='auto';
+let currentCatFilter='all', focusedSearchIdx=-1;
+let DB={products:[],categories:[],laborRoles:[],constants:{}};
+let selectedProduct=null;
+let termsContent={}, termsEnabled={
+  tc_completion:true,tc_payment:true,tc_warranty:true,
+  tc_scope:true,tc_validity:true,tc_site:true,tc_acceptance:true
+};
+let quoteStatus='draft'; // 'draft' | 'filed'
+let waiveFlags={};
+
+// ═══════════════════════════════════════════════════════════════════
+//  DATABASE LOADING
+//  Tries to load from a local/relative products-database.json first,
+//  then falls back to embedded fallback data.
+// ═══════════════════════════════════════════════════════════════════
+async function loadDatabase() {
+  setStatus('loading','Loading product database…');
+
+  // file:// protocol blocks fetch — skip directly to embedded data
+  if (location.protocol === 'file:') {
+    DB = getEmbeddedDB();
+    setStatus('offline','📦 Using embedded data (open via a web server to load products-database.json)');
+    initUI();
+    return;
+  }
+
+  try {
+    // Timeout after 5 seconds
+    const controller = new AbortController();
+    const timer = setTimeout(()=>controller.abort(), 5000);
+    const r = await fetch('products-database.json?v='+Date.now(), {signal:controller.signal});
+    clearTimeout(timer);
+    if (!r.ok) throw new Error('fetch failed');
+    const text = await r.text();
+    // Strip JS-style comments before parsing
+    const clean = text.replace(/\/\/.*$/gm,'').replace(/\/\*[\s\S]*?\*\//g,'');
+    DB = JSON.parse(clean);
+    setStatus('online',`✅ Database loaded — ${DB.products.length} products in ${DB.categories.length} categories`);
+  } catch(e) {
+    setStatus('offline','⚠️ Using embedded data (could not load products-database.json)');
+    DB = getEmbeddedDB();
+  }
+  initUI();
+}
+
+function reloadDatabase(){ loadDatabase(); }
+
+function setStatus(type, msg){
+  const dot = document.getElementById('statusDot');
+  dot.className = 'status-dot '+(type==='online'?'online':type==='offline'?'offline':'loading');
+  document.getElementById('statusMsg').textContent = msg;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', ()=>{
+  document.getElementById('quoteDate').value = new Date().toISOString().split('T')[0];
+  setCompany('BK');
+  renderTerms();
+  loadFromStorage();
+  buildQuoteNo();
+  loadDatabase();
+  document.addEventListener('click', e=>{
+    if(!e.target.closest('.search-wrap')) closeDropdown();
+  });
+  document.getElementById('searchInput').addEventListener('keydown', e=>{
+    if(e.key==='ArrowDown'){e.preventDefault();moveFocus(1);}
+    else if(e.key==='ArrowUp'){e.preventDefault();moveFocus(-1);}
+    else if(e.key==='Enter'){e.preventDefault();selectFocused();}
+    else if(e.key==='Escape') closeDropdown();
+  });
+});
+
+function initUI(){
+  buildCoefTable();
+  renderItems();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  COMPANY & VIEW
+// ═══════════════════════════════════════════════════════════════════
+function setCompany(co){
+  currentCo=co;
+  const c=CO[co];
+  document.getElementById('coBK').classList.toggle('active',co==='BK');
+  document.getElementById('coBS').classList.toggle('active',co==='BS');
+  document.getElementById('navLogo').innerHTML=c.nav;
+  document.getElementById('qnoCo').value=c.code;
+  document.getElementById('phName').textContent=c.name;
+  document.getElementById('phSub').textContent=c.sub;
+  document.getElementById('phAddr').textContent=c.addr;
+  document.getElementById('phContact').textContent=c.contact;
+  document.getElementById('sigContact').textContent=c.sig.name;
+  document.getElementById('sigTitle').textContent=c.sig.title;
+  buildQuoteNo();
+}
+
+function setView(v){
+  currentView=v;
+  ['client','internal','admin'].forEach(x=>{
+    document.getElementById('btn'+x.charAt(0).toUpperCase()+x.slice(1)).classList.toggle('active',v===x);
+  });
+  document.getElementById('internalPanel').style.display=(v==='internal')?'block':'none';
+  document.getElementById('adminPanel').classList.toggle('open',v==='admin');
+  if(v==='internal') buildLaborTable();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  QUOTE NUMBER
+// ═══════════════════════════════════════════════════════════════════
+function setQnoMode(m){
+  qnoMode=m;
+  document.getElementById('qnoBtnAuto').classList.toggle('active',m==='auto');
+  document.getElementById('qnoBtnManual').classList.toggle('active',m==='manual');
+  const qn=document.getElementById('quoteNo');
+  if(m==='manual'){qn.removeAttribute('readonly');qn.style.background='white';
+    document.getElementById('qnoLabel').innerHTML='Quote Number';}
+  else{qn.setAttribute('readonly','');qn.style.background='var(--gray-light)';
+    document.getElementById('qnoLabel').innerHTML='Quote Number <span style="color:var(--gray-dark);font-weight:400;text-transform:none;">(auto)</span>';}
+  buildQuoteNo();
+}
+
+function buildQuoteNo(){
+  if(qnoMode!=='auto') return;
+  const co=document.getElementById('qnoCo').value||'BK';
+  const loc=document.getElementById('qnoLoc').value||'XX';
+  const mth=document.getElementById('qnoMethod').value||'XX';
+  const d=document.getElementById('quoteDate').value||new Date().toISOString().split('T')[0];
+  const dt=d.replace(/-/g,'').slice(2);
+  const seq=String(document.getElementById('qnoSeq').value||1).padStart(3,'0');
+  const no=`${co}-${loc}-${mth}-${dt}-${seq}`;
+  document.getElementById('qnoPreview').textContent=no;
+  document.getElementById('quoteNo').value=no;
+  updatePrintHeader();
+}
+
+function updatePrintHeader(){
+  const no=document.getElementById('quoteNo').value;
+  const d=document.getElementById('quoteDate').value;
+  const sp=document.getElementById('salesperson').value;
+  document.getElementById('phQuoteNo').textContent=no?'Quote No.: '+no:'';
+  document.getElementById('phDate').textContent=d?'Date: '+new Date(d+'T12:00:00').toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'}):'';
+  document.getElementById('phSalesperson').textContent=sp?'Prepared by: '+sp:'';
+  const cn=document.getElementById('clientName').value;
+  document.getElementById('sigClientName').textContent=cn||'CLIENT NAME';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  CATEGORY FILTER
+// ═══════════════════════════════════════════════════════════════════
+function filterCat(cat, btn){
+  currentCatFilter=cat;
+  document.querySelectorAll('.cat-tab').forEach(b=>{
+    b.classList.remove('active');
+    b.style.background='';b.style.color='';b.style.borderColor='';
+  });
+  btn.classList.add('active');
+  const catObj = DB.categories.find(c=>c.id===cat);
+  if(catObj){btn.style.background=catObj.color;btn.style.color='white';btn.style.borderColor=catObj.color;}
+  else{btn.style.background='var(--dark-blue)';btn.style.color='white';btn.style.borderColor='var(--dark-blue)';}
+  handleSearch();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  PRODUCT SEARCH
+// ═══════════════════════════════════════════════════════════════════
+function filteredProducts(q=''){
+  let prods = DB.products||[];
+  if(currentCatFilter!=='all') prods=prods.filter(p=>p.category===currentCatFilter);
+  if(q) prods=prods.filter(p=>
+    p.name.toLowerCase().includes(q.toLowerCase())||
+    (p.shortName||'').toLowerCase().includes(q.toLowerCase())||
+    p.id.toLowerCase().includes(q.toLowerCase())
+  );
+  return prods;
+}
+
+function handleSearch(){
+  const q=document.getElementById('searchInput').value.trim();
+  renderDropdown(filteredProducts(q));
+  document.getElementById('searchDropdown').classList.add('open');
+}
+
+function renderDropdown(prods){
+  const dd=document.getElementById('searchDropdown');
+  if(!prods.length){dd.innerHTML='<div style="padding:12px;color:var(--gray-dark);font-size:13px;">No products found</div>';return;}
+  const cats={};
+  prods.forEach(p=>{(cats[p.category]=cats[p.category]||[]).push(p);});
+  let html='';
+  Object.entries(cats).forEach(([catId,ps])=>{
+    const catObj=DB.categories.find(c=>c.id===catId)||{label:catId,icon:'•'};
+    html+=`<div class="sd-group">${catObj.icon||''} ${catObj.label}</div>`;
+    ps.forEach((p,i)=>{
+      const baseP=formatPeso(p.basePrice);
+      html+=`<div class="sd-item" data-id="${p.id}" onclick="selectProduct('${p.id}')">
+        <div class="sd-item-info">
+          <div class="sd-item-name">${p.name}</div>
+          <div class="sd-item-meta">${p.id} · ${p.formulaType==='fixed'?'Fixed price':p.formulaType==='per_length'?'Scales by length':p.formulaType==='per_area'?'Per sqm':p.formulaType==='per_run'?'Per run':'Configurable'}</div>
+        </div>
+        <div class="sd-item-price">${p.formulaType==='fixed'?baseP:'from '+baseP}</div>
+      </div>`;
+    });
+  });
+  dd.innerHTML=html;
+  focusedSearchIdx=-1;
+}
+
+function openDropdown(){
+  handleSearch();
+}
+
+function closeDropdown(){
+  document.getElementById('searchDropdown').classList.remove('open');
+  focusedSearchIdx=-1;
+}
+
+function clearSearch(){
+  document.getElementById('searchInput').value='';
+  closeDropdown();
+  dismissCalc();
+}
+
+function moveFocus(dir){
+  const items=document.querySelectorAll('#searchDropdown .sd-item');
+  if(!items.length) return;
+  items[focusedSearchIdx]&&items[focusedSearchIdx].classList.remove('focused');
+  focusedSearchIdx=Math.max(0,Math.min(items.length-1,focusedSearchIdx+dir));
+  items[focusedSearchIdx].classList.add('focused');
+  items[focusedSearchIdx].scrollIntoView({block:'nearest'});
+}
+
+function selectFocused(){
+  const items=document.querySelectorAll('#searchDropdown .sd-item');
+  if(focusedSearchIdx>=0&&items[focusedSearchIdx]) items[focusedSearchIdx].click();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  CALCULATOR / CONFIGURATOR
+// ═══════════════════════════════════════════════════════════════════
+function selectProduct(id){
+  selectedProduct = DB.products.find(p=>p.id===id);
+  if(!selectedProduct) return;
+  closeDropdown();
+  document.getElementById('searchInput').value=selectedProduct.name;
+  buildCalcPanel(selectedProduct);
+}
+
+function buildCalcPanel(p){
+  const panel=document.getElementById('calcPanel');
+  document.getElementById('calcTitle').innerHTML=`⚙ Configure: <strong>${p.name}</strong> <span class="formula-badge">${p.id}</span>`;
+  document.getElementById('calcUnit').value=p.unit||'pc';
+  document.getElementById('calcQty').value=1;
+
+  // Dimension inputs based on formula type
+  let inputsHtml='';
+  if(p.formulaType==='per_length'){
+    const dW=p.defaultDimensions.W||900;
+    inputsHtml+=`<div class="fg"><label>Width / Length (mm)</label>
+      <input type="number" id="cW" value="${dW}" min="100" step="10" oninput="recomputePrice()"></div>`;
+    if(p.defaultDimensions.D){
+      inputsHtml+=`<div class="fg"><label>Depth (mm)</label>
+        <input type="number" id="cD" value="${p.defaultDimensions.D}" min="100" step="10" oninput="recomputePrice()"></div>`;
+    }
+    if(p.defaultDimensions.H){
+      inputsHtml+=`<div class="fg"><label>Height (mm)</label>
+        <input type="number" id="cH" value="${p.defaultDimensions.H}" min="100" step="10" oninput="recomputePrice()"></div>`;
+    }
+  } else if(p.formulaType==='per_area'){
+    const dW=p.defaultDimensions.W||1000;
+    const dH=p.defaultDimensions.H||1000;
+    inputsHtml+=`<div class="fg"><label>Width (mm)</label>
+      <input type="number" id="cW" value="${dW}" min="100" step="10" oninput="recomputePrice()"></div>`;
+    inputsHtml+=`<div class="fg"><label>Height (mm)</label>
+      <input type="number" id="cH" value="${dH}" min="100" step="10" oninput="recomputePrice()"></div>`;
+  } else if(p.formulaType==='per_run'){
+    inputsHtml+=`<div class="fg"><label>Number of Runs</label>
+      <input type="number" id="cRuns" value="1" min="1" step="1" oninput="recomputePrice()"></div>`;
+  } else {
+    // Fixed — show default dimensions read-only
+    if(p.defaultDimensions&&Object.keys(p.defaultDimensions).length){
+      ['W','D','H'].forEach(k=>{
+        if(p.defaultDimensions[k])
+          inputsHtml+=`<div class="fg"><label>${k==='W'?'Width':k==='D'?'Depth':'Height'} (mm)</label>
+            <input type="number" id="c${k}" value="${p.defaultDimensions[k]}" min="100" step="10" oninput="recomputePrice()"></div>`;
+      });
+    }
+  }
+  document.getElementById('calcInputs').innerHTML=inputsHtml;
+
+  // Spec selectors
+  let specsHtml='';
+  if(p.specs&&p.specs.length){
+    specsHtml='<div style="margin-top:10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--gray-dark);">Specifications</div>';
+    p.specs.forEach((s,i)=>{
+      specsHtml+=`<div class="spec-group">
+        <label>${s.label}</label>
+        <select id="spec_${i}" onchange="recomputePrice()" style="margin-top:4px;">`;
+      s.options.forEach((opt,oi)=>{
+        const adder=s.priceAdder&&s.priceAdder[oi]?s.priceAdder[oi]:0;
+        const adderStr=adder===0?'':(adder>0?` (+₱${adder.toLocaleString()})`:(` (−₱${Math.abs(adder).toLocaleString()})`));
+        specsHtml+=`<option value="${oi}" ${oi===s.options.indexOf(s.default)?'selected':''}>${opt}${adderStr}</option>`;
+      });
+      specsHtml+=`</select></div>`;
+    });
+  }
+  document.getElementById('specGroups').innerHTML=specsHtml;
+
+  panel.classList.add('open');
+  recomputePrice();
+}
+
+function computePrice(p){
+  if(!p) return 0;
+  let price = p.basePrice||0;
+  const consts = DB.constants||{};
+  const matMult = consts.materialPriceIndexMultiplier||1.0;
+
+  if(p.formulaType==='per_length' && p.formula){
+    const W = parseFloat(document.getElementById('cW')?.value||p.defaultDimensions.W||900);
+    const base = p.formula.baseLengthMm||900;
+    const ppm = p.formula.pricePerExtraMm||0;
+    const extra = Math.max(0, W-base);
+    price = p.basePrice + extra*ppm;
+  } else if(p.formulaType==='per_area' && p.formula){
+    const W = parseFloat(document.getElementById('cW')?.value||p.defaultDimensions.W||1000);
+    const H = parseFloat(document.getElementById('cH')?.value||p.defaultDimensions.H||1000);
+    const sqm = (W*H)/1e6;
+    price = sqm * (p.formula.pricePerSqm||0);
+  } else if(p.formulaType==='per_run' && p.formula){
+    const runs = parseFloat(document.getElementById('cRuns')?.value||1);
+    price = (p.formula.pricePerRun||p.basePrice) * runs;
+  }
+
+  price *= matMult;
+
+  // Add spec price adders
+  if(p.specs&&p.specs.length){
+    p.specs.forEach((s,i)=>{
+      const sel=document.getElementById(`spec_${i}`);
+      if(sel){
+        const oi=parseInt(sel.value||0);
+        const adder=s.priceAdder&&s.priceAdder[oi]?s.priceAdder[oi]:0;
+        price+=adder;
+      }
+    });
+  }
+
+  return Math.max(0,Math.round(price));
+}
+
+function recomputePrice(){
+  if(!selectedProduct) return;
+  const p=selectedProduct;
+  const price=computePrice(p);
+  const qty=parseInt(document.getElementById('calcQty').value||1);
+  document.getElementById('calcPriceDisplay').textContent=formatPeso(price);
+
+  // Formula hint
+  let hint='';
+  if(p.formulaType==='per_length'&&p.formula){
+    const W=parseFloat(document.getElementById('cW')?.value||p.defaultDimensions.W||900);
+    const extra=Math.max(0,W-(p.formula.baseLengthMm||900));
+    hint=`Base ₱${p.basePrice.toLocaleString()} + ${extra}mm × ₱${p.formula.pricePerExtraMm}/mm`;
+  } else if(p.formulaType==='per_area'&&p.formula){
+    const W=parseFloat(document.getElementById('cW')?.value||1000);
+    const H=parseFloat(document.getElementById('cH')?.value||1000);
+    hint=`${(W/1000).toFixed(2)}m × ${(H/1000).toFixed(2)}m = ${((W*H)/1e6).toFixed(3)} sqm × ₱${(p.formula.pricePerSqm||0).toLocaleString()}/sqm`;
+  } else if(p.formulaType==='per_run'&&p.formula){
+    const runs=parseFloat(document.getElementById('cRuns')?.value||1);
+    hint=`${runs} run(s) × ₱${(p.formula.pricePerRun||p.basePrice).toLocaleString()} per run`;
+  }
+  document.getElementById('calcHint').textContent=hint;
+}
+
+function dismissCalc(){
+  selectedProduct=null;
+  document.getElementById('calcPanel').classList.remove('open');
+}
+
+function getDimString(p){
+  const types={'per_length':'cW','per_area':'cW','fixed':'cW'};
+  const W=document.getElementById('cW')?.value;
+  const D=document.getElementById('cD')?.value;
+  const H=document.getElementById('cH')?.value;
+  const runs=document.getElementById('cRuns')?.value;
+  if(p.formulaType==='per_run') return runs?`${runs} run(s)`:'';
+  const parts=[];
+  if(W) parts.push(`W${W}`);
+  if(D) parts.push(`D${D}`);
+  if(H) parts.push(`H${H}`);
+  return parts.join(' × ')+(parts.length?' mm':'');
+}
+
+function getSpecString(p){
+  if(!p.specs||!p.specs.length) return '';
+  return p.specs.map((s,i)=>{
+    const sel=document.getElementById(`spec_${i}`);
+    if(!sel) return '';
+    return s.options[parseInt(sel.value||0)]||'';
+  }).filter(Boolean).join(', ');
+}
+
+function addItemFromCalc(){
+  if(!selectedProduct) return;
+  const p=selectedProduct;
+  const price=computePrice(p);
+  const qty=parseInt(document.getElementById('calcQty').value||1);
+  const unit=document.getElementById('calcUnit').value||p.unit||'pc';
+  const dimStr=getDimString(p);
+  const specStr=getSpecString(p);
+
+  // Build spec snapshot for display
+  const specSnapshot=[];
+  if(p.specs) p.specs.forEach((s,i)=>{
+    const sel=document.getElementById(`spec_${i}`);
+    if(sel) specSnapshot.push({label:s.label,value:s.options[parseInt(sel.value||0)]||''});
+  });
+
+  items.push({
+    id:p.id,
+    category:p.category,
+    name:p.name,
+    dims:dimStr,
+    specs:specSnapshot,
+    specStr,
+    qty,
+    unit,
+    unitPrice:price,
+    amount:price*qty,
+    leadTime:p.leadTime||'—',
+    laborHours:p.laborHours||null,
+    formulaType:p.formulaType,
+  });
+
+  saveToStorage();
+  renderItems();
+  clearSearch();
+  dismissCalc();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  RENDER ITEMS TABLE
+// ═══════════════════════════════════════════════════════════════════
+function renderItems(){
+  const tbody=document.getElementById('itemsTbody');
+  if(!items.length){
+    tbody.innerHTML='<tr><td colspan="9" class="empty-state">No items yet. Use the search above to add products.</td></tr>';
+    renderTotals(); return;
+  }
+
+  // Group by category
+  const catMap={};
+  items.forEach((item,idx)=>{(catMap[item.category]=catMap[item.category]||[]).push({item,idx});});
+
+  let html=''; let globalN=1;
+  const catOrder=DB.categories?DB.categories.map(c=>c.id):Object.keys(catMap);
+  const catKeys=[...catOrder.filter(k=>catMap[k]),...Object.keys(catMap).filter(k=>!catOrder.includes(k))];
+
+  catKeys.forEach(catId=>{
+    if(!catMap[catId]) return;
+    const catObj=DB.categories?DB.categories.find(c=>c.id===catId)||{label:catId}:{label:catId};
+    html+=`<tr class="cat-row"><td colspan="9">${catObj.icon||''} ${catObj.label}</td></tr>`;
+    let subtotal=0;
+    catMap[catId].forEach(({item,idx})=>{
+      subtotal+=item.amount;
+      const specHtml=item.specs&&item.specs.length?
+        '<div style="margin-top:3px;">'+item.specs.map(s=>`<span class="spec-badge">${s.value}</span>`).join('')+'</div>':'';
+      const dimHtml=item.dims?`<div class="dim-cell" style="font-size:11px;color:var(--gray-dark);">${item.dims}</div>`:'';
+      html+=`<tr>
+        <td style="text-align:center;color:var(--gray-dark);font-size:12px;">${globalN++}</td>
+        <td>
+          <div class="name-cell cell-edit" contenteditable="true" onblur="editName(${idx},this)">${item.name}</div>
+          ${dimHtml}${specHtml}
+          <div class="notes-cell cell-edit" contenteditable="true" onblur="editNotes(${idx},this)" placeholder="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${item.notes||''}</div>
+        </td>
+        <td style="font-size:11px;">${item.dims||'—'}</td>
+        <td style="text-align:center;"><input class="cell-num" type="number" min="1" value="${item.qty}" onchange="updateQty(${idx},this)" style="width:50px;"></td>
+        <td style="text-align:center;"><input class="cell-unit" type="text" value="${item.unit}" onchange="updateUnit(${idx},this)" style="width:55px;"></td>
+        <td style="text-align:right;"><input class="edit-price" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"></td>
+        <td style="text-align:right;font-weight:600;">${formatPeso(item.amount)}</td>
+        <td style="font-size:11px;color:var(--gray-dark);">${item.leadTime||'—'}</td>
+        <td class="no-print" style="text-align:center;"><button class="del-btn" onclick="deleteItem(${idx})" title="Remove">✕</button></td>
+      </tr>`;
+    });
+    html+=`<tr class="subtotal-row"><td colspan="8" style="text-align:right;">Subtotal — ${catObj.label}: ${formatPeso(subtotal)}</td><td class="no-print"></td></tr>`;
+  });
+
+  tbody.innerHTML=html;
+  renderTotals();
+  if(currentView==='internal') buildLaborTable();
+}
+
+function renderTotals(){
+  const subtotal=items.reduce((s,i)=>s+i.amount,0);
+  const showVat=document.getElementById('showVat')?.checked;
+  const showMarkup=document.getElementById('showMarkup')?.checked;
+  const markupType=document.getElementById('markupType')?.value||'retail';
+  const consts=DB.constants||{};
+  const markupRates={retail:consts.markup?.retail||1.30,commercial:consts.markup?.commercial||1.20,government:consts.markup?.government||1.15};
+  const markupMult=markupRates[markupType]||1.30;
+  const vatRate=consts.vat||0.12;
+
+  let afterMarkup=subtotal;
+  let markupAmt=0;
+  if(showMarkup){markupAmt=afterMarkup*(markupMult-1);afterMarkup*=markupMult;}
+  const vatAmt=showVat?afterMarkup*vatRate:0;
+  const grand=afterMarkup+vatAmt;
+
+  let html='';
+  html+=`<tr><td>Subtotal</td><td>${formatPeso(subtotal)}</td></tr>`;
+  if(showMarkup) html+=`<tr><td>Markup (${Math.round((markupMult-1)*100)}%)</td><td>${formatPeso(markupAmt)}</td></tr>`;
+  if(showVat) html+=`<tr><td>VAT (12%)</td><td>${formatPeso(vatAmt)}</td></tr>`;
+  html+=`<tr class="grand"><td>GRAND TOTAL</td><td>${formatPeso(grand)}</td></tr>`;
+  document.getElementById('totalsTbl').innerHTML=html;
+}
+
+// ── Item edits ──
+function editName(idx,el){items[idx].name=el.innerText.trim();saveToStorage();}
+function editNotes(idx,el){items[idx].notes=el.innerText.trim();saveToStorage();}
+function updateQty(idx,el){items[idx].qty=parseInt(el.value)||1;items[idx].amount=items[idx].unitPrice*items[idx].qty;saveToStorage();renderItems();}
+function updateUnit(idx,el){items[idx].unit=el.value;saveToStorage();}
+function updatePrice(idx,el){items[idx].unitPrice=parseFloat(el.value)||0;items[idx].amount=items[idx].unitPrice*items[idx].qty;saveToStorage();renderItems();}
+function deleteItem(idx){items.splice(idx,1);saveToStorage();renderItems();}
+
+// ═══════════════════════════════════════════════════════════════════
+//  LABOR & TIMELINE
+// ═══════════════════════════════════════════════════════════════════
+let laborState={};
+function buildLaborTable(){
+  const roles=DB.laborRoles||[];
+  const tbody=document.getElementById('laborTbody');
+  if(!laborState._init){
+    roles.forEach(r=>{laborState[r.id]={days:0,people:1,rate:r.ratePerDay};});
+    // Auto-estimate from items
+    autoEstimateLabor();
+    laborState._init=true;
+  }
+  let html='';
+  roles.forEach(r=>{
+    const s=laborState[r.id]||{days:0,people:1,rate:r.ratePerDay};
+    const total=(s.days||0)*(s.people||1)*(s.rate||0);
+    html+=`<tr>
+      <td>${r.label}</td>
+      <td><input type="number" min="0" step="0.5" value="${s.days||0}" onchange="updateLabor('${r.id}','days',this.value)"></td>
+      <td><input type="number" min="1" step="1" value="${s.people||1}" onchange="updateLabor('${r.id}','people',this.value)"></td>
+      <td style="text-align:right;">${formatPeso(s.rate||0)}/day</td>
+      <td style="text-align:right;">${formatPeso(total)}</td>
+    </tr>`;
+  });
+  tbody.innerHTML=html;
+  computeLaborTotal();
+}
+
+function autoEstimateLabor(){
+  let totalFabHours=0, totalInstHours=0;
+  items.forEach(item=>{
+    if(!item.laborHours) return;
+    const qty=item.qty||1;
+    totalFabHours+=(item.laborHours.fabrication||0)*qty;
+    totalInstHours+=(item.laborHours.installation||0)*qty;
+  });
+  const hpd=DB.constants?.workHoursPerDay||8;
+  // Assign fabrication to sr_welder and welder, installation to welder and finisher
+  if(laborState.sr_welder) laborState.sr_welder.days=Math.ceil(totalFabHours/2/hpd);
+  if(laborState.welder) laborState.welder.days=Math.ceil(totalFabHours/2/hpd);
+  if(laborState.finisher) laborState.finisher.days=Math.ceil(totalInstHours/2/hpd);
+  if(laborState.driver) laborState.driver.days=Math.ceil(totalInstHours/3/hpd);
+  if(laborState.foreman) laborState.foreman.days=Math.ceil((totalFabHours+totalInstHours)/3/hpd);
+}
+
+function updateLabor(roleId, field, val){
+  if(!laborState[roleId]) laborState[roleId]={};
+  laborState[roleId][field]=parseFloat(val)||0;
+  computeLaborTotal();
+  buildLaborTable();
+}
+
+function computeLaborTotal(){
+  const roles=DB.laborRoles||[];
+  let total=0;
+  roles.forEach(r=>{
+    const s=laborState[r.id]||{};
+    total+=(s.days||0)*(s.people||1)*(s.rate||r.ratePerDay||0);
+  });
+  document.getElementById('laborTotal').textContent=formatPeso(total);
+  computeTimeline();
+}
+
+function computeTimeline(){
+  const roles=DB.laborRoles||[];
+  let maxDays=0;
+  let totalPeopleDays=0;
+  roles.forEach(r=>{
+    const s=laborState[r.id]||{};
+    if((s.days||0)>(maxDays)) maxDays=s.days||0;
+    totalPeopleDays+=(s.days||0)*(s.people||1);
+  });
+
+  // Lead time from items
+  let maxLeadDays=0;
+  items.forEach(item=>{
+    const lt=item.leadTime||'';
+    const m=lt.match(/(\d+)/);
+    if(m) maxLeadDays=Math.max(maxLeadDays,parseInt(m[1])||0);
+  });
+
+  const totalDays=Math.max(maxDays,Math.ceil(maxLeadDays*1.2));
+  const avgTeamSize=roles.reduce((s,r)=>s+(laborState[r.id]?.people||0),0)/Math.max(1,roles.filter(r=>(laborState[r.id]?.days||0)>0).length)||3;
+
+  document.getElementById('timelineEstimate').textContent=
+    totalDays?`~${totalDays} working days (${(totalDays/5).toFixed(1)} weeks)`:'—';
+  document.getElementById('timelineDetail').textContent=
+    totalDays?`Based on longest lead time + fabrication/installation time. Average team: ~${Math.round(avgTeamSize)} people.`:'Add items to estimate.';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  TERMS
+// ═══════════════════════════════════════════════════════════════════
+const TERMS_DEF=[
+  {id:'tc_completion',title:'Completion',content:'Work will be completed within the agreed timeline from date of down payment receipt. Delays due to client-side changes or site issues are not included.'},
+  {id:'tc_payment',title:'Payment Terms',content:'50% down payment upon confirmation. Balance upon delivery and installation.'},
+  {id:'tc_warranty',title:'Warranty',content:'12 months warranty on fabrication workmanship. Warranty does not cover misuse, physical damage, or failure to maintain equipment properly.'},
+  {id:'tc_scope',title:'Scope of Work',content:'Price covers fabrication, delivery, and installation as specified. Electrical works, gas connections, and civil works are excluded unless stated.'},
+  {id:'tc_validity',title:'Quotation Validity',content:'This quotation is valid for 30 days from date of issuance. Prices are subject to change after validity.'},
+  {id:'tc_site',title:'Site Requirements',content:'Client is responsible for ensuring site is ready for installation. Barro Kitchens is not liable for delays due to unprepared site conditions.'},
+  {id:'tc_acceptance',title:'Acceptance',content:'By signing this quotation, the client accepts all terms and conditions stated herein.'},
+];
+
+function renderTerms(){
+  const grid=document.getElementById('termsGrid');
+  let html='';
+  TERMS_DEF.forEach(t=>{
+    const enabled=termsEnabled[t.id]!==false;
+    html+=`<div class="terms-block ${enabled?'':'term-off'}">
+      <h4>
+        <input type="checkbox" class="term-cb" ${enabled?'checked':''} onchange="toggleTerm('${t.id}',this)">
+        ${t.title}
+      </h4>
+      <div class="term-content" contenteditable="true" onblur="saveTerm('${t.id}',this)">${termsContent[t.id]||t.content}</div>
+    </div>`;
+  });
+  grid.innerHTML=html;
+}
+
+function toggleTerm(id,cb){termsEnabled[id]=cb.checked;renderTerms();saveToStorage();}
+function saveTerm(id,el){termsContent[id]=el.innerHTML;saveToStorage();}
+
+// ═══════════════════════════════════════════════════════════════════
+//  ADMIN — ADD PRODUCT
+// ═══════════════════════════════════════════════════════════════════
+function toggleAdminFormulaFields(){
+  const ft=document.getElementById('aFormula').value;
+  document.getElementById('aPerMmField').style.display=ft==='per_length'?'block':'none';
+  document.getElementById('aPerSqmField').style.display=ft==='per_area'?'block':'none';
+}
+
+function saveAdminProduct(){
+  const id=(document.getElementById('aId').value||'').trim().toUpperCase();
+  const name=(document.getElementById('aName').value||'').trim();
+  if(!id||!name){alert('ID and Name are required.');return;}
+  const ft=document.getElementById('aFormula').value;
+  const basePrice=parseFloat(document.getElementById('aBase').value)||0;
+  const W=parseFloat(document.getElementById('aW').value)||0;
+  const D=parseFloat(document.getElementById('aD').value)||0;
+  const H=parseFloat(document.getElementById('aH').value)||0;
+
+  const newProd={
+    id,
+    category:document.getElementById('aCat').value,
+    name,
+    shortName:name.length>30?name.slice(0,30)+'…':name,
+    formulaType:ft,
+    basePrice,
+    defaultDimensions:{...(W?{W}:{}),...(D?{D}:{}),...(H?{H}:{})},
+    specs:[],
+    laborHours:{
+      fabrication:parseFloat(document.getElementById('aFab').value)||0,
+      installation:parseFloat(document.getElementById('aInst').value)||0,
+      teamSize:parseInt(document.getElementById('aTeam').value)||2,
+    },
+    leadTime:document.getElementById('aLead').value||'—',
+    notes:document.getElementById('aNotes').value||'',
+    unit:document.getElementById('aUnit').value||'pc',
+  };
+
+  if(ft==='per_length'){
+    const ppm=parseFloat(document.getElementById('aPerMm').value)||0;
+    newProd.formula={baseLengthMm:W||900,pricePerExtraMm:ppm};
+  } else if(ft==='per_area'){
+    const psqm=parseFloat(document.getElementById('aPerSqm').value)||0;
+    newProd.formula={pricePerSqm:psqm};
+  } else if(ft==='per_run'){
+    newProd.formula={pricePerRun:basePrice};
+  }
+
+  // Replace or add
+  const existIdx=DB.products.findIndex(p=>p.id===id);
+  if(existIdx>=0){DB.products[existIdx]=newProd;}
+  else{DB.products.push(newProd);}
+  saveToStorage();
+  setStatus('online',`✅ Product ${id} saved to local database (${DB.products.length} total). Export JSON to make permanent.`);
+}
+
+function exportDatabase(){
+  const json=JSON.stringify(DB,null,2);
+  const blob=new Blob([json],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='products-database.json';a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importDatabase(){document.getElementById('importFile').click();}
+function handleImport(e){
+  const file=e.target.files[0];if(!file)return;
+  const r=new FileReader();
+  r.onload=ev=>{
+    try{
+      const data=JSON.parse(ev.target.result);
+      if(data.products&&data.categories){DB=data;initUI();setStatus('online',`✅ Imported: ${DB.products.length} products`);}
+      else{alert('Invalid database JSON.');}
+    }catch(err){alert('JSON parse error: '+err.message);}
+  };
+  r.readAsText(file);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  COEFFICIENTS TABLE
+// ═══════════════════════════════════════════════════════════════════
+const COEF_DEFS=[
+  {key:'markup.retail',label:'Retail Markup',desc:'Multiplier for retail customers (e.g. 1.30 = 30% markup)',type:'multiplier',path:['markup','retail']},
+  {key:'markup.commercial',label:'Commercial Markup',desc:'Multiplier for commercial clients',type:'multiplier',path:['markup','commercial']},
+  {key:'markup.government',label:'Government Markup',desc:'Multiplier for gov/bidding',type:'multiplier',path:['markup','government']},
+  {key:'vat',label:'VAT Rate',desc:'Value Added Tax rate (0.12 = 12%)',type:'rate',path:['vat']},
+  {key:'materialPriceIndexMultiplier',label:'Material Price Index',desc:'Global materials cost adjuster (1.0 = current, 1.10 = 10% increase)',type:'multiplier',path:['materialPriceIndexMultiplier']},
+  {key:'workHoursPerDay',label:'Work Hours / Day',desc:'Standard working hours per day for timeline calculation',type:'hours',path:['workHoursPerDay']},
+  {key:'travelDayRate',label:'Travel Day Rate (₱)',desc:'Daily cost of travel day for out-of-town projects',type:'currency',path:['travelDayRate']},
+];
+
+function buildCoefTable(){
+  const tbody=document.getElementById('coefTbody');
+  const consts=DB.constants||{};
+  let html='';
+  COEF_DEFS.forEach(def=>{
+    let val=consts;
+    def.path.forEach(k=>{val=val&&typeof val==='object'?val[k]:val;});
+    const typeColors={multiplier:'var(--mid-blue)',rate:'var(--green)',hours:'var(--accent)',currency:'var(--orange)'};
+    html+=`<tr>
+      <td style="font-weight:600;">${def.label}</td>
+      <td style="color:var(--gray-dark);font-size:12px;">${def.desc}</td>
+      <td><input type="number" step="0.01" id="coef_${def.key}" value="${val||0}" style="max-width:120px;"></td>
+      <td><span class="coef-tag" style="background:${typeColors[def.type]||'#999'}">${def.type}</span></td>
+    </tr>`;
+  });
+  tbody.innerHTML=html;
+}
+
+function saveConstants(){
+  if(!DB.constants) DB.constants={};
+  COEF_DEFS.forEach(def=>{
+    const el=document.getElementById('coef_'+def.key);
+    if(!el) return;
+    let val=parseFloat(el.value)||0;
+    let obj=DB.constants;
+    def.path.slice(0,-1).forEach(k=>{if(!obj[k])obj[k]={};obj=obj[k];});
+    obj[def.path[def.path.length-1]]=val;
+  });
+  saveToStorage();
+  setStatus('online','✅ Constants saved. Use Export to make permanent.');
+  recomputePrice();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  SHARE
+// ═══════════════════════════════════════════════════════════════════
+function shareQuote(){
+  const state={
+    items,
+    clientName:document.getElementById('clientName').value,
+    clientCompany:document.getElementById('clientCompany').value,
+    clientAddress:document.getElementById('clientAddress').value,
+    clientPhone:document.getElementById('clientPhone').value,
+    clientEmail:document.getElementById('clientEmail').value,
+    quoteNo:document.getElementById('quoteNo').value,
+    salesperson:document.getElementById('salesperson').value,
+    quoteDate:document.getElementById('quoteDate').value,
+    purpose:document.getElementById('purpose').value,
+    termsContent,termsEnabled,currentCo
+  };
+  const json=JSON.stringify(state);
+  const compressed=btoa(encodeURIComponent(json));
+  const url=location.href.split('#')[0]+'#quote='+compressed;
+  if(url.length>100000){alert('Quote too large to share via URL. Use Print/PDF instead.');return;}
+  navigator.clipboard.writeText(url).then(()=>alert('Share link copied to clipboard!'))
+    .catch(()=>prompt('Copy this link:',url));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  STORAGE
+// ═══════════════════════════════════════════════════════════════════
+function saveToStorage(){
+  try{
+    const client={
+      clientName:document.getElementById('clientName').value,
+      clientCompany:document.getElementById('clientCompany').value,
+      clientAddress:document.getElementById('clientAddress').value,
+      clientPhone:document.getElementById('clientPhone').value,
+      clientEmail:document.getElementById('clientEmail').value,
+      salesperson:document.getElementById('salesperson').value,
+      quoteDate:document.getElementById('quoteDate').value,
+      purpose:document.getElementById('purpose').value,
+      quoteNo:document.getElementById('quoteNo').value,
+      currentCo,qnoMode,
+      qnoLoc:document.getElementById('qnoLoc').value,
+      qnoMethod:document.getElementById('qnoMethod').value,
+      qnoSeq:document.getElementById('qnoSeq').value,
+    };
+    localStorage.setItem('bkqb_client',JSON.stringify(client));
+    localStorage.setItem('bkqb_items',JSON.stringify(items));
+    localStorage.setItem('bkqb_terms_content',JSON.stringify(termsContent));
+    localStorage.setItem('bkqb_terms_enabled',JSON.stringify(termsEnabled));
+    localStorage.setItem('bkqb_status',quoteStatus);
+  }catch(e){}
+}
+
+function loadFromStorage(){
+  // Check URL hash first
+  const hash=location.hash;
+  if(hash.startsWith('#quote=')){
+    try{
+      const json=decodeURIComponent(atob(hash.slice(7)));
+      const state=JSON.parse(json);
+      items=state.items||[];
+      document.getElementById('clientName').value=state.clientName||'';
+      document.getElementById('clientCompany').value=state.clientCompany||'';
+      document.getElementById('clientAddress').value=state.clientAddress||'';
+      document.getElementById('clientPhone').value=state.clientPhone||'';
+      document.getElementById('clientEmail').value=state.clientEmail||'';
+      document.getElementById('quoteDate').value=state.quoteDate||'';
+      document.getElementById('salesperson').value=state.salesperson||'';
+      document.getElementById('purpose').value=state.purpose||'Restaurant';
+      termsContent=state.termsContent||{};
+      termsEnabled=state.termsEnabled||{};
+      if(state.currentCo) setCompany(state.currentCo);
+      return;
+    }catch(e){}
+  }
+  try{
+    const sc_raw=localStorage.getItem('bkqb_client');
+    if(sc_raw){
+      const c=JSON.parse(sc_raw);
+      document.getElementById('clientName').value=c.clientName||'';
+      document.getElementById('clientCompany').value=c.clientCompany||'';
+      document.getElementById('clientAddress').value=c.clientAddress||'';
+      document.getElementById('clientPhone').value=c.clientPhone||'';
+      document.getElementById('clientEmail').value=c.clientEmail||'';
+      document.getElementById('salesperson').value=c.salesperson||'';
+      if(c.quoteDate) document.getElementById('quoteDate').value=c.quoteDate;
+      if(c.purpose) document.getElementById('purpose').value=c.purpose;
+      if(c.qnoLoc) document.getElementById('qnoLoc').value=c.qnoLoc;
+      if(c.qnoMethod) document.getElementById('qnoMethod').value=c.qnoMethod;
+      if(c.qnoSeq) document.getElementById('qnoSeq').value=c.qnoSeq;
+      if(c.currentCo) setCompany(c.currentCo);
+      if(c.qnoMode) setQnoMode(c.qnoMode);
+    }
+    const si=localStorage.getItem('bkqb_items');
+    const stc=localStorage.getItem('bkqb_terms_content');
+    const ste=localStorage.getItem('bkqb_terms_enabled');
+    const sst=localStorage.getItem('bkqb_status');
+    if(si) items=JSON.parse(si);
+    if(stc) termsContent=JSON.parse(stc);
+    if(ste) termsEnabled=JSON.parse(ste);
+    if(sst) quoteStatus=sst;
+    if(quoteStatus==='filed') document.getElementById('filedBadge').classList.add('show');
+  }catch(e){}
+  renderItems();
+}
+
+function clearForm(){
+  if(!confirm('Start a new quote? Current data will be cleared.')) return;
+  items=[];termsContent={};
+  termsEnabled={tc_completion:true,tc_payment:true,tc_warranty:true,tc_scope:true,tc_validity:true,tc_site:true,tc_acceptance:true};
+  laborState={};quoteStatus='draft';waiveFlags={};
+  ['clientName','clientCompany','clientAddress','clientPhone','clientEmail','salesperson'].forEach(id=>{
+    const el=document.getElementById(id);if(el)el.value='';
+  });
+  document.getElementById('quoteDate').value=new Date().toISOString().split('T')[0];
+  document.getElementById('filedBadge').classList.remove('show');
+  saveToStorage();
+  buildQuoteNo();
+  renderItems();
+  renderTerms();
+  dismissCalc();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  VERIFY & FILE WORKFLOW
+// ═══════════════════════════════════════════════════════════════════
+const VERIFY_CHECKS=[
+  {id:'quoteNo',   label:'Quote Number',    req:true,  get:()=>document.getElementById('quoteNo').value.trim()},
+  {id:'quoteDate', label:'Date',            req:true,  get:()=>document.getElementById('quoteDate').value},
+  {id:'salesperson',label:'Salesperson',    req:false, get:()=>document.getElementById('salesperson').value.trim()},
+  {id:'clientName',label:'Client Name',     req:true,  get:()=>document.getElementById('clientName').value.trim()},
+  {id:'clientPhone',label:'Contact Number', req:false, get:()=>document.getElementById('clientPhone').value.trim()},
+  {id:'clientEmail',label:'Email',          req:false, get:()=>document.getElementById('clientEmail').value.trim()},
+  {id:'items',     label:'Quote Items',     req:true,  get:()=>items.length?`${items.length} item(s) added`:''},
+];
+
+function canFile(){
+  return VERIFY_CHECKS.every(c=>!!c.get()||waiveFlags[c.id]);
+}
+
+function doVerifyAndFile(){
+  buildVerifyModal();
+  document.getElementById('verifyModal').style.display='flex';
+}
+
+function buildVerifyModal(){
+  let html='';
+  VERIFY_CHECKS.forEach(c=>{
+    const val=c.get();
+    const ok=!!val;
+    const waived=!!waiveFlags[c.id];
+    const icon=ok?'✅':waived?'⬜':'⚠️';
+    html+=`<div class="verify-item">
+      <div class="verify-icon">${icon}</div>
+      <div class="verify-info">
+        <div class="verify-label">${c.label}${c.req?' <span style="color:var(--red);font-size:11px;">required</span>':''}</div>
+        <div class="verify-val">${val||'<em style="color:#aaa;">Not filled in</em>'}</div>
+        ${!ok?`<label class="verify-waive">
+          <input type="checkbox" ${waived?'checked':''} onchange="toggleWaive('${c.id}',this)">
+          Mark as N/A — not required for this quote
+        </label>`:''}
+      </div>
+    </div>`;
+  });
+  document.getElementById('verifyBody').innerHTML=html;
+  const ok=canFile();
+  const btn=document.getElementById('fileBtn');
+  btn.disabled=!ok;btn.style.opacity=ok?'1':'0.5';
+}
+
+function toggleWaive(id,cb){
+  waiveFlags[id]=cb.checked;
+  buildVerifyModal();
+}
+
+function fileQuotation(){
+  if(!canFile()) return;
+  quoteStatus='filed';
+  document.getElementById('filedBadge').classList.add('show');
+  document.getElementById('verifyModal').style.display='none';
+  saveToStorage();
+  // Append to filed log
+  try{
+    const log=JSON.parse(localStorage.getItem('bkqb_filed_log')||'[]');
+    log.push({
+      quoteNo:document.getElementById('quoteNo').value,
+      clientName:document.getElementById('clientName').value,
+      filedAt:new Date().toISOString(),
+      total:items.reduce((s,i)=>s+i.amount,0),
+    });
+    localStorage.setItem('bkqb_filed_log',JSON.stringify(log));
+  }catch(e){}
+}
+
+function closeVerifyModal(e){
+  if(e&&e.target!==document.getElementById('verifyModal')) return;
+  document.getElementById('verifyModal').style.display='none';
+}
+
+function doPrint(){
+  if(quoteStatus!=='filed'){
+    if(!confirm('This quote has not been filed yet.\n\nFile it before printing to keep records.\n\nOK → Verify & File first\nCancel → Print anyway')){
+      window.print(); return;
+    }
+    doVerifyAndFile(); return;
+  }
+  window.print();
+}
+
+function doShare(){
+  if(quoteStatus!=='filed'){
+    if(!confirm('This quote has not been filed yet.\n\nFile it before sharing to keep records.\n\nOK → Verify & File first\nCancel → Share anyway')){
+      shareQuote(); return;
+    }
+    doVerifyAndFile(); return;
+  }
+  shareQuote();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════════════
+function formatPeso(n){
+  if(!n&&n!==0) return '—';
+  return '₱'+Math.round(n).toLocaleString('en-PH');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  EMBEDDED FALLBACK DB (minimal, for offline use)
+// ═══════════════════════════════════════════════════════════════════
+function getEmbeddedDB(){
+  return {
+    categories:[
+      {id:'cooking_line',label:'Cooking Line',code:'CE',color:'#E74C3C',icon:'🔥'},
+      {id:'prep_washing',label:'Preparation & Washing',code:'PW',color:'#3498DB',icon:'🧼'},
+      {id:'refrigeration',label:'Refrigeration',code:'RF',color:'#00BCD4',icon:'❄️'},
+      {id:'ventilation',label:'Ventilation',code:'VT',color:'#27AE60',icon:'💨'},
+      {id:'gas_line',label:'Gas Line',code:'GL',color:'#F39C12',icon:'⛽'},
+      {id:'fire_suppression',label:'Fire Suppression',code:'FS',color:'#E67E22',icon:'🧯'},
+      {id:'miscellaneous',label:'Miscellaneous',code:'MS',color:'#8E44AD',icon:'🔧'},
+    ],
+    products:[
+      {id:'CE-001',category:'cooking_line',name:'SS Open Top LP Stove (1 Burner)',shortName:'LP Stove 1B',formulaType:'fixed',basePrice:18000,defaultDimensions:{W:600,D:700,H:850},specs:[],laborHours:{fabrication:8,installation:2,teamSize:2},leadTime:'10-14 days',notes:'LP burner, SS304 1.1mm top',unit:'pc'},
+      {id:'CE-002',category:'cooking_line',name:'SS Open Top LP Stove (2 Burner)',shortName:'LP Stove 2B',formulaType:'fixed',basePrice:32000,defaultDimensions:{W:800,D:700,H:850},specs:[],laborHours:{fabrication:12,installation:2,teamSize:2},leadTime:'10-14 days',notes:'2x LP burners',unit:'pc'},
+      {id:'CE-003',category:'cooking_line',name:'SS Open Top LP Stove (3 Burner)',shortName:'LP Stove 3B',formulaType:'fixed',basePrice:61000,defaultDimensions:{W:1000,D:700,H:850},specs:[],laborHours:{fabrication:16,installation:3,teamSize:2},leadTime:'10-14 days',notes:'3x LP burners',unit:'pc'},
+      {id:'CE-004',category:'cooking_line',name:'SS Open Top HP Stove (4 Burner)',shortName:'HP Stove 4B',formulaType:'fixed',basePrice:155000,defaultDimensions:{W:1200,D:700,H:850},specs:[],laborHours:{fabrication:24,installation:4,teamSize:2},leadTime:'14-21 days',notes:'4x HP burners',unit:'pc'},
+      {id:'PW-001',category:'prep_washing',name:'SS Preparation Table (1 Layer)',shortName:'Prep Table 1L',formulaType:'per_length',basePrice:14000,defaultDimensions:{W:900,D:600,H:850},formula:{baseLengthMm:900,pricePerExtraMm:8.5},specs:[],laborHours:{fabrication:6,installation:1,teamSize:2},leadTime:'7-10 days',notes:'SS304, adjustable shelf',unit:'pc'},
+      {id:'PW-004',category:'prep_washing',name:'SS Wash Sink (Single) + Gooseneck Faucet',shortName:'Single Sink',formulaType:'fixed',basePrice:18500,defaultDimensions:{W:500,D:500,H:850},specs:[],laborHours:{fabrication:6,installation:2,teamSize:2},leadTime:'7-10 days',notes:'SS304, 1 basin',unit:'pc'},
+      {id:'PW-013',category:'prep_washing',name:'SS Wall Cladding',shortName:'Wall Cladding',formulaType:'per_area',basePrice:0,defaultDimensions:{W:1000,H:1000},formula:{pricePerSqm:72000},specs:[],laborHours:{fabrication:8,installation:4,teamSize:2},leadTime:'10-14 days',notes:'Per sqm',unit:'sqm'},
+      {id:'VT-001',category:'ventilation',name:'SS Range Hood + Baffle Filter + Lamp',shortName:'Range Hood',formulaType:'per_length',basePrice:39000,defaultDimensions:{W:1000,D:900,H:500},formula:{baseLengthMm:1000,pricePerExtraMm:28},specs:[],laborHours:{fabrication:12,installation:4,teamSize:2},leadTime:'14-21 days',notes:'SS304, scales by length',unit:'pc'},
+      {id:'GL-001',category:'gas_line',name:'Gas Line System + Tank Farm (4×50kg)',shortName:'Gas Line + Tank Farm',formulaType:'fixed',basePrice:91000,defaultDimensions:{},specs:[],laborHours:{fabrication:8,installation:8,teamSize:3},leadTime:'7-14 days',notes:'BI pipes, fully welded',unit:'lot'},
+      {id:'FS-001',category:'fire_suppression',name:'Fire Suppression System (Small)',shortName:'Fire Suppression Small',formulaType:'fixed',basePrice:185400,defaultDimensions:{},specs:[],laborHours:{fabrication:0,installation:16,teamSize:3},leadTime:'21-30 days',notes:'BFP compliant, wet chem',unit:'system'},
+      {id:'MS-005',category:'miscellaneous',name:'Delivery + Installation + Labor (Small)',shortName:'D+I+L Small',formulaType:'fixed',basePrice:43000,defaultDimensions:{},specs:[],laborHours:{fabrication:0,installation:8,teamSize:3},leadTime:'—',notes:'1-3 items, same city',unit:'lot'},
+      {id:'MS-006',category:'miscellaneous',name:'Delivery + Installation + Labor (Medium)',shortName:'D+I+L Medium',formulaType:'fixed',basePrice:88000,defaultDimensions:{},specs:[],laborHours:{fabrication:0,installation:16,teamSize:4},leadTime:'—',notes:'Full kitchen, same city',unit:'lot'},
+    ],
+    laborRoles:[
+      {id:'foreman',label:'Foreman',ratePerDay:1500},
+      {id:'sr_welder',label:'Sr. Welder / Fabricator',ratePerDay:1200},
+      {id:'welder',label:'Welder / Fabricator',ratePerDay:1000},
+      {id:'finisher',label:'Finisher / Painter',ratePerDay:1000},
+      {id:'techgasac',label:'Technician (HVAC/Gas)',ratePerDay:1200},
+      {id:'driver',label:'Driver / Helper',ratePerDay:1000},
+      {id:'subcon',label:'Subcontractor',ratePerDay:1500},
+    ],
+    constants:{markup:{retail:1.30,commercial:1.20,government:1.15},vat:0.12,materialPriceIndexMultiplier:1.0,workHoursPerDay:8,travelDayRate:3500}
+  };
+}
+</script>
+</body>
+</html>
