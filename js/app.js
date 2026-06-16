@@ -628,23 +628,41 @@ function friendlyError(code) {
 }
 
 // ── Theme ─────────────────────────────────────────
+const THEMES = {
+  dark:  { label: 'Obsidian', cls: null },
+  light: { label: 'Aurora',   cls: 'light' },
+  pink:  { label: 'Astral',   cls: 'theme-pink' },
+  grey:  { label: 'Slate',    cls: 'theme-grey' },
+};
+
 function initTheme() {
-  const saved = localStorage.getItem('bi-theme') || 'dark';
-  document.documentElement.classList.toggle('light', saved === 'light');
-  _applyThemeIcon(saved);
+  setTheme(localStorage.getItem('bi-theme') || 'dark', false);
+}
+
+function setTheme(theme, persist = true) {
+  if (!THEMES[theme]) theme = 'dark';
+  const html = document.documentElement;
+  Object.values(THEMES).forEach(t => { if (t.cls) html.classList.remove(t.cls); });
+  const cls = THEMES[theme].cls;
+  if (cls) html.classList.add(cls);
+  if (persist) localStorage.setItem('bi-theme', theme);
+  _applyThemeIcon(theme);
+}
+
+function getTheme() {
+  return localStorage.getItem('bi-theme') || 'dark';
 }
 
 function toggleTheme() {
-  const isLight = document.documentElement.classList.toggle('light');
-  const theme = isLight ? 'light' : 'dark';
-  localStorage.setItem('bi-theme', theme);
-  _applyThemeIcon(theme);
+  const order = ['dark', 'light', 'pink', 'grey'];
+  const next = order[(order.indexOf(getTheme()) + 1) % order.length];
+  setTheme(next);
 }
 
 function _applyThemeIcon(theme) {
   const btn = document.getElementById('theme-toggle-btn');
   if (!btn) return;
-  const iconName = theme === 'light' ? 'moon' : 'sun';
+  const iconName = theme === 'dark' ? 'moon' : 'sun';
   btn.innerHTML = `<i data-lucide="${iconName}"></i>`;
   if (window.lucide) lucide.createIcons({ nodes: [btn] });
 }
@@ -923,7 +941,7 @@ async function renderProductDatabase() {
   c.innerHTML = '<div class="loading-placeholder">Loading products…</div>';
 
   await seedProductsIfEmpty();
-  const snap = await db.collection('products').orderBy('category').get();
+  const snap = await db.collection('products').orderBy('category').limit(500).get();
   const products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
   // Group by category
@@ -2240,8 +2258,20 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       <div class="page-header"><h2>💳 Personal Finance — Team</h2></div>
       <div id="pf-content"><div class="loading-placeholder">Loading…</div></div>
     `;
-    const snap = await dbCachedGet('users', () => db.collection('users').get(), 60000);
+    // Fetch users, all tasks, kpi_evals, and kpi_targets in parallel — single round trip
+    // instead of up to 3 queries per user (N+1 fix).
+    const [snap, tasksAllSnap, evalsSnap, kpiTargetsSnap] = await Promise.all([
+      dbCachedGet('users',       () => db.collection('users').get(),        60000),
+      dbCachedGet('tasks-all',   () => db.collection('tasks').get(),        30000),
+      dbCachedGet('kpi-evals',   () => db.collection('kpi_evals').get(),    60000),
+      dbCachedGet('kpi-targets', () => db.collection('kpi_targets').get(),  60000),
+    ]);
     const users = snap.docs.map(d=>({id:d.id,...d.data()}));
+    // Build lookup maps from the bulk fetches
+    const allTasks      = tasksAllSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const evalsMap      = Object.fromEntries(evalsSnap.docs.map(d=>[d.id, d.data()]));
+    const kpiTargetsMap = Object.fromEntries(kpiTargetsSnap.docs.map(d=>[d.id, d.data()]));
+    const DONE_ST = ['done','approved','archived'];
     const now2 = new Date();
     const daysElapsed2 = countWorkDays(now2.getFullYear(), now2.getMonth(), now2.getDate());
     const daysInMonth2 = countWorkDays(now2.getFullYear(), now2.getMonth(),
@@ -2249,20 +2279,24 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     const defaultMonth2 = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
     const userRows = await Promise.all(users.map(async u => {
       const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
-      const kpi = await getKpiScore(u.id);
+      // KPI score — computed from bulk-fetched data, no extra Firestore reads
+      const userTasks   = allTasks.filter(t =>
+        (Array.isArray(t.assignedTo) ? t.assignedTo.includes(u.id) : t.assignedTo === u.id)
+      );
+      const tasksDone   = userTasks.filter(t=>DONE_ST.includes(t.status)).length;
+      const tasksTotal  = userTasks.length;
+      const taskScore   = tasksTotal ? Math.min(1, tasksDone / tasksTotal) : 0.5;
+      const kpiTargetD  = kpiTargetsMap[u.id] || {};
+      const delivScore  = typeof kpiTargetD.deliverableScore === 'number'
+        ? Math.min(1, kpiTargetD.deliverableScore / 100) : 0.5;
+      const kpi = taskScore * 0.7 + delivScore * 0.3;
+      // Attendance score still requires a per-user subcollection read
       const att = await getAttendanceScore(u.id);
       const mult = kpi*0.7 + att*0.3;
       const computed = net * mult * (daysElapsed2 / daysInMonth2);
       const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';
-      // Task completion
-      const DONE_ST = ['done','approved','archived'];
-      const taskSnap2 = await db.collection('tasks').where('assignedTo','array-contains',u.id).get()
-        .catch(()=>db.collection('tasks').where('assignedTo','==',u.id).get()).catch(()=>({docs:[]}));
-      const tasksDone = taskSnap2.docs.filter(d=>DONE_ST.includes(d.data().status)).length;
-      const tasksTotal = taskSnap2.docs.length;
-      // Eval
-      const evalDoc = await db.collection('kpi_evals').doc(u.id).get().catch(()=>null);
-      const evalD = evalDoc?.exists ? evalDoc.data() : {};
+      // Eval — from the already-fetched bulk snapshot (no extra reads)
+      const evalD = evalsMap[u.id] || {};
       const selfDone2 = evalD.selfAssessMonth === defaultMonth2;
       return { uid:u.id, name:u.displayName||u.email, depts, net, kpi, att, computed, tasksDone, tasksTotal, evalD, selfDone: selfDone2, row: `<tr>
         <td>${u.displayName||u.email}</td>
@@ -2372,13 +2406,32 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         const btn2 = document.getElementById('save-pr-btn');
         btn2.disabled = true; btn2.textContent = 'Recording…';
         const batch = db.batch();
-        const usersSnap2 = await dbCachedGet('users', () => db.collection('users').get(), 60000);
+        // Bulk-fetch users + tasks + kpi_targets to avoid N+1 reads in the loop below
+        const [usersSnap2, tasksSn2, kpiTgtSn2] = await Promise.all([
+          dbCachedGet('users',       () => db.collection('users').get(),       60000),
+          dbCachedGet('tasks-all',   () => db.collection('tasks').get(),       30000),
+          dbCachedGet('kpi-targets', () => db.collection('kpi_targets').get(), 60000),
+        ]);
+        const _allTasks2    = tasksSn2.docs.map(d=>({id:d.id,...d.data()}));
+        const _kpiTgtMap2   = Object.fromEntries(kpiTgtSn2.docs.map(d=>[d.id, d.data()]));
+        const _DONE2        = ['done','approved','archived'];
         const empDocs = usersSnap2.docs.filter(d => !['partner'].includes(d.data().role));
-        for (const doc of empDocs) {
-          const u2 = doc.data();
+        // Compute attendance in parallel across all employees, then write batch
+        const empPayloads = await Promise.all(empDocs.map(async doc => {
+          const u2   = doc.data();
           const net2 = (u2.salary||0)+(u2.allowance||0)-(u2.deductions||0);
-          const kpi2 = await getKpiScore(doc.id);
+          // KPI from bulk data
+          const ut2  = _allTasks2.filter(t =>
+            (Array.isArray(t.assignedTo) ? t.assignedTo.includes(doc.id) : t.assignedTo === doc.id)
+          );
+          const ts2  = ut2.length ? Math.min(1, ut2.filter(t=>_DONE2.includes(t.status)).length / ut2.length) : 0.5;
+          const td2  = _kpiTgtMap2[doc.id] || {};
+          const ds2  = typeof td2.deliverableScore === 'number' ? Math.min(1, td2.deliverableScore/100) : 0.5;
+          const kpi2 = ts2*0.7 + ds2*0.3;
           const att2 = await getAttendanceScore(doc.id);
+          return { doc, u2, net2, kpi2, att2 };
+        }));
+        for (const { doc, u2, net2, kpi2, att2 } of empPayloads) {
           const finalPay = net2 * (kpi2*0.7 + att2*0.3);
           const ref = db.collection('salary_history').doc(`${doc.id}_${month}`);
           batch.set(ref, {
@@ -2392,10 +2445,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         await batch.commit();
         // Also write payroll total to ledger so finance analytics picks it up
         const monthLabel2 = new Date(month+'-02').toLocaleString('en-PH',{month:'long',year:'numeric'});
-        const totalPayroll2 = empDocs.reduce((s, doc) => {
-          const u2 = doc.data();
-          return s + (u2.salary||0) + (u2.allowance||0) - (u2.deductions||0);
-        }, 0);
+        const totalPayroll2 = empPayloads.reduce((s, { net2 }) => s + net2, 0);
         await db.collection('ledger_entries').add({
           type: 'payslip', description: `Payroll — ${monthLabel2}`,
           amount: totalPayroll2, dept: 'Payroll',
@@ -2407,15 +2457,15 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
           recordedBy: currentUser.uid,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
-        // Notify all employees
-        for (const doc of empDocs) {
-          await Notifs.send(doc.id, {
+        // Notify all employees in parallel
+        await Promise.all(empPayloads.map(({ doc }) =>
+          Notifs.send(doc.id, {
             title: '💰 Payroll Recorded',
             body: `Your payroll for ${monthLabel2} has been recorded. Check Personal Finance for your breakdown.`,
             icon: '💰', type: 'payroll',
             dedupKey: `payroll-${doc.id}-${month}`
-          });
-        }
+          })
+        ));
         closeModal();
         Notifs.showToast(`Payroll recorded for ${month}!`);
         window.renderPersonalFinance(currentUser, currentRole);
@@ -4722,9 +4772,14 @@ function openProfileDrawer() {
     <!-- ── Settings ── -->
     <div class="profile-section-label">SETTINGS</div>
     <div class="profile-inset-card">
-      <div class="profile-info-row ${!u.phone?'no-border':''}">
+      <div class="profile-info-row no-border" style="flex-direction:column;align-items:stretch;gap:10px">
         <span class="pir-label">Appearance</span>
-        <button class="btn-secondary btn-sm" id="drawer-theme-btn"></button>
+        <div class="theme-picker" id="drawer-theme-picker">
+          <button class="theme-swatch theme-swatch-dark"  data-theme="dark"  title="Obsidian"><span class="theme-swatch-dot"></span>Obsidian</button>
+          <button class="theme-swatch theme-swatch-light" data-theme="light" title="Aurora"><span class="theme-swatch-dot"></span>Aurora</button>
+          <button class="theme-swatch theme-swatch-pink"  data-theme="pink"  title="Astral"><span class="theme-swatch-dot"></span>Astral</button>
+          <button class="theme-swatch theme-swatch-grey"  data-theme="grey"  title="Slate"><span class="theme-swatch-dot"></span>Slate</button>
+        </div>
       </div>
       ${u.phone
         ? `<div class="profile-info-row no-border"><span class="pir-label">Phone</span><span class="pir-value pir-phone">${u.phone}<button class="btn-secondary btn-sm" id="edit-phone-btn" style="margin-left:10px">Edit</button></span></div>`
@@ -4780,13 +4835,19 @@ function openProfileDrawer() {
   });
   document.getElementById('save-name-btn').addEventListener('click',async()=>{const name=document.getElementById('profile-name').value.trim();if(!name)return;await db.collection('users').doc(currentUser.uid).update({displayName:name});userProfile.displayName=name;applyUserUI();Notifs.showToast('Name updated!');});
 
-  // Theme toggle
-  const themeBtn = document.getElementById('drawer-theme-btn');
-  if (themeBtn) {
-    const isDark = () => document.documentElement.getAttribute('data-theme') !== 'light';
-    const updateThemeLabel = () => { themeBtn.textContent = isDark() ? '☀️ Light Mode' : '🌙 Dark Mode'; };
-    updateThemeLabel();
-    themeBtn.addEventListener('click', () => { toggleTheme(); updateThemeLabel(); });
+  // Theme picker
+  const themePicker = document.getElementById('drawer-theme-picker');
+  if (themePicker) {
+    const updateActive = () => {
+      const current = getTheme();
+      themePicker.querySelectorAll('.theme-swatch').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.theme === current);
+      });
+    };
+    updateActive();
+    themePicker.querySelectorAll('.theme-swatch').forEach(btn => {
+      btn.addEventListener('click', () => { setTheme(btn.dataset.theme); updateActive(); });
+    });
   }
 
   // Phone number

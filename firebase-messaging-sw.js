@@ -27,19 +27,21 @@ const messaging = firebase.messaging();
 // Handle background messages (app closed or in background tab)
 messaging.onBackgroundMessage(payload => {
   const { title, body, icon } = payload.notification || {};
+  const data = payload.data || {};
   const notifTitle = title || 'Barro Industries';
   const notifBody  = body  || 'You have a new notification.';
 
+  // Use unique notifId so each notification shows independently (not replace-on-same-tag)
+  const tag = data.notifId || (data.type + '-' + Date.now());
+
   self.registration.showNotification(notifTitle, {
-    body:  notifBody,
-    icon:  icon || '/icons/icon-192.png',
-    badge: '/icons/barro-logo.png',
-    tag:   payload.data?.type || 'general',
-    data:  payload.data || {},
+    body:    notifBody,
+    icon:    icon || '/icons/icon-192.png',
+    badge:   '/icons/barro-logo.png',
+    tag:     tag,
+    data:    data,
     vibrate: [200, 100, 200],
-    actions: [
-      { action: 'open', title: 'Open App' }
-    ]
+    actions: [{ action: 'open', title: 'Open App' }]
   });
 });
 

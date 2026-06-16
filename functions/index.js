@@ -17,18 +17,25 @@ exports.sendPushOnNotification = functions.firestore
     const fcmToken = userDoc.data().fcmToken;
     if (!fcmToken) return null;
 
+    const { itemId } = context.params;
     const message = {
       token: fcmToken,
       notification: {
         title: title || 'Barro Industries',
         body:  body  || 'You have a new notification.',
       },
+      // Pass type + unique ID as data so the SW can use them
+      data: {
+        type:    type    || 'general',
+        notifId: itemId,               // unique per notification doc
+        uid:     uid,
+      },
       webpush: {
         notification: {
-          icon:  '/icons/icon-192.png',
-          badge: '/icons/barro-logo.png',
-          tag:   type || 'general',
-          renotify: false,
+          icon:     '/icons/icon-192.png',
+          badge:    '/icons/barro-logo.png',
+          tag:      itemId,            // unique → notifications stack, not replace
+          renotify: true,              // vibrate/sound even if same tag unlikely
         },
         fcmOptions: { link: '/' }
       }

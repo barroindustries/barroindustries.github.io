@@ -22,6 +22,18 @@ function canEditDept(dept) {
 // Shorthand for Finance-specific privilege (Payroll, HR Profiles, etc.)
 function isFinancePriv() { return canEditDept('Finance'); }
 
+// Wrap a click handler so Firestore/JS errors surface as a toast + console.error
+// instead of failing silently (the button just looks like it "did nothing").
+function onClickSafe(btn, fn) {
+  btn.addEventListener('click', async () => {
+    try { await fn(); }
+    catch (e) {
+      console.error('[action failed]', e);
+      Notifs.showToast(`Action failed: ${e.message||e}`, 'error');
+    }
+  });
+}
+
 // ── Task Status System ─────────────────────────────
 const TASK_STATUSES = [
   { value:'backlog',      label:'Backlog',               badge:'badge-gray'   },
@@ -714,7 +726,7 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
     const creatorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
     const desc=document.getElementById('t-desc').value.trim();
     const notes=document.getElementById('t-notes').value.trim();
-    await db.collection('tasks').add({
+    const taskRef = await db.collection('tasks').add({
       title, description:notes?`${desc}\n\n📝 Instructions: ${notes}`:desc,
       priority:document.getElementById('t-priority').value,
       status:document.getElementById('t-status').value,
@@ -726,10 +738,11 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
       createdBy:currentUser.uid,createdByName:creatorName,
       createdAt:firebase.firestore.FieldValue.serverTimestamp()
     });
+    const taskId = taskRef.id;
     for (const a of newAssignees) {
-      await Notifs.send(a.uid,{title:'📌 New Task Assigned',body:`"${title}" assigned by ${creatorName}`,icon:'📌',type:'task_assigned'});
+      await Notifs.send(a.uid,{title:'📌 New Task Assigned',body:`"${title}" assigned by ${creatorName}`,icon:'📌',type:'task_assigned',taskId,dedupKey:`task-assigned-${taskId}-${a.uid}`});
     }
-    await Notifs.sendToOwner({title:'📌 New Task Created',body:`${creatorName} created "${title}"`,icon:'📌',type:'task_created'});
+    await Notifs.sendToOwner({title:'📌 New Task Created',body:`${creatorName} created "${title}"`,icon:'📌',type:'task_created',dedupKey:`task-created-${taskId}`});
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     closeModal(); Notifs.showToast('Task created!');
     renderTasks(currentUser,currentRole,document.getElementById('t-dept')?.value||'');
@@ -1235,7 +1248,7 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
 window.renderFinance = async function(currentUser, currentRole, subtab = 'Overview') {
   const c = deptContainer();
   // Finance tools vs HR tools — visually separated
-  const finTabs = ['Overview','Ledger','Accounting','Purchasing','Records','Taxes','SSS / Gov','Tasks'];
+  const finTabs = ['Overview','Ledger','Cash Receipts','Cash Disbursements','General Journal','Accounting','Purchasing','Records','Taxes','SSS / Gov','Tasks'];
   const hrTabs  = ['Payroll','HR Profiles','Cash Advances'];
   const allTabs = [...finTabs, ...hrTabs];
   c.innerHTML = `
@@ -1271,6 +1284,9 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'Payroll':      await renderPayrollManagement(content, currentUser, currentRole); break;
     case 'Taxes':        await renderTaxesTab(content, currentUser, currentRole); break;
     case 'Ledger':       await renderLedgerTab(content, currentUser, currentRole); break;
+    case 'Cash Receipts':       await renderCashReceiptJournal(content, currentUser, currentRole); break;
+    case 'Cash Disbursements':  await renderCashDisbursementJournal(content, currentUser, currentRole); break;
+    case 'General Journal':     await renderGeneralJournal(content, currentUser, currentRole); break;
     case 'Records':      await renderRecordsTab(content, currentUser, currentRole); break;
     case 'Accounting':
       content.innerHTML = renderFileCollection('Accounting Documents', 'fin-acct', currentRole);
@@ -1950,6 +1966,236 @@ async function renderLedgerTab(container, currentUser, currentRole) {
   });
 }
 
+// ── Cash Receipt Journal (for cash-based receipts only) ──
+async function renderCashReceiptJournal(container, currentUser, currentRole) {
+  const snap = await db.collection('cash_receipt_journal').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]}));
+  const entries = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const totalCash = entries.reduce((s,e)=>s+(e.debitCash||0),0);
+
+  container.innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi-card green"><div class="kpi-label">Total Cash Received</div><div class="kpi-value">₱${fmt(totalCash)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Entries</div><div class="kpi-value">${entries.length}</div></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+      <button class="btn-primary btn-sm" id="add-crj-btn">+ New Receipt Entry</button>
+    </div>
+    <div class="card">
+      <div class="card-body" style="padding:0">
+        ${!entries.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧾</div><h4>No cash receipt entries yet</h4></div>':
+          `<div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Reference</th><th>Date</th><th>Customer</th><th>Debit Cash</th><th>Debit Sales Discount</th><th>Credit A/R</th><th>Credit Sales Revenue</th><th>Credit Sundry (Acct)</th><th>Credit Sundry (Amount)</th></tr></thead>
+            <tbody>${entries.map(e=>`<tr>
+              <td><code>${e.reference||'—'}</code></td>
+              <td>${e.date||'—'}</td>
+              <td>${e.customer||'—'}</td>
+              <td style="color:var(--success)">₱${fmt(e.debitCash)}</td>
+              <td>${e.debitSalesDiscount?'₱'+fmt(e.debitSalesDiscount):'—'}</td>
+              <td>${e.creditAR?'₱'+fmt(e.creditAR):'—'}</td>
+              <td>${e.creditSalesRevenue?'₱'+fmt(e.creditSalesRevenue):'—'}</td>
+              <td>${e.creditSundryAcct||'—'}</td>
+              <td>${e.creditSundryAmount?'₱'+fmt(e.creditSundryAmount):'—'}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>`}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('add-crj-btn').addEventListener('click', () => {
+    openModal('New Cash Receipt Entry', `
+      <div class="form-row">
+        <div class="form-group"><label>Reference</label><input id="crj-ref" placeholder="OR #, Receipt #…"/></div>
+        <div class="form-group"><label>Date</label><input id="crj-date" type="date" value="${today()}"/></div>
+      </div>
+      <div class="form-group"><label>Customer</label><input id="crj-customer" placeholder="Customer name"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Debit: Cash (₱)</label><input id="crj-cash" type="number" step="0.01" value="0"/></div>
+        <div class="form-group"><label>Debit: Sales Discount (₱)</label><input id="crj-discount" type="number" step="0.01" value="0"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Credit: Accounts Receivable (₱)</label><input id="crj-ar" type="number" step="0.01" value="0"/></div>
+        <div class="form-group"><label>Credit: Sales Revenue (₱)</label><input id="crj-revenue" type="number" step="0.01" value="0"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Credit: Sundry Account</label><input id="crj-sundry-acct" placeholder="e.g. Other Income"/></div>
+        <div class="form-group"><label>Credit: Sundry Amount (₱)</label><input id="crj-sundry-amt" type="number" step="0.01" value="0"/></div>
+      </div>
+    `, `<button class="btn-primary" id="save-crj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+    document.getElementById('save-crj-btn').addEventListener('click', async () => {
+      const customer = document.getElementById('crj-customer').value.trim();
+      const debitCash = parseFloat(document.getElementById('crj-cash').value)||0;
+      if (!customer) { Notifs.showToast('Enter a customer name.','error'); return; }
+      if (!debitCash) { Notifs.showToast('Enter the cash amount received.','error'); return; }
+      await db.collection('cash_receipt_journal').add({
+        reference:           document.getElementById('crj-ref').value.trim(),
+        date:                document.getElementById('crj-date').value,
+        customer,
+        debitCash,
+        debitSalesDiscount:  parseFloat(document.getElementById('crj-discount').value)||0,
+        creditAR:            parseFloat(document.getElementById('crj-ar').value)||0,
+        creditSalesRevenue:  parseFloat(document.getElementById('crj-revenue').value)||0,
+        creditSundryAcct:    document.getElementById('crj-sundry-acct').value.trim(),
+        creditSundryAmount:  parseFloat(document.getElementById('crj-sundry-amt').value)||0,
+        addedBy:    currentUser.uid,
+        addedByName: window.userProfile?.displayName || currentUser.email,
+        createdAt:  firebase.firestore.FieldValue.serverTimestamp()
+      });
+      closeModal(); Notifs.showToast('Cash receipt entry saved!');
+      renderCashReceiptJournal(container, currentUser, currentRole);
+    });
+  });
+}
+
+// ── Cash Disbursement Journal (for cash-based expenses only) ──
+async function renderCashDisbursementJournal(container, currentUser, currentRole) {
+  const snap = await db.collection('cash_disbursement_journal').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]}));
+  const entries = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const totalCash = entries.reduce((s,e)=>s+(e.creditCash||0),0);
+
+  container.innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi-card red"><div class="kpi-label">Total Cash Disbursed</div><div class="kpi-value">₱${fmt(totalCash)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Entries</div><div class="kpi-value">${entries.length}</div></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+      <button class="btn-primary btn-sm" id="add-cdj-btn">+ New Disbursement Entry</button>
+    </div>
+    <div class="card">
+      <div class="card-body" style="padding:0">
+        ${!entries.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧾</div><h4>No cash disbursement entries yet</h4></div>':
+          `<div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Reference</th><th>Date</th><th>Payee</th><th>Credit Cash</th><th>Debit COS–Direct Material</th><th>Debit Accounts Payable</th><th>Debit COS–Direct Labor</th><th>Debit Sundry (Acct)</th><th>Debit Sundry (Amount)</th></tr></thead>
+            <tbody>${entries.map(e=>`<tr>
+              <td><code>${e.reference||'—'}</code></td>
+              <td>${e.date||'—'}</td>
+              <td>${e.payee||'—'}</td>
+              <td style="color:var(--danger)">₱${fmt(e.creditCash)}</td>
+              <td>${e.debitMaterial?'₱'+fmt(e.debitMaterial):'—'}</td>
+              <td>${e.debitAP?'₱'+fmt(e.debitAP):'—'}</td>
+              <td>${e.debitLabor?'₱'+fmt(e.debitLabor):'—'}</td>
+              <td>${e.debitSundryAcct||'—'}</td>
+              <td>${e.debitSundryAmount?'₱'+fmt(e.debitSundryAmount):'—'}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>`}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('add-cdj-btn').addEventListener('click', () => {
+    openModal('New Cash Disbursement Entry', `
+      <div class="form-row">
+        <div class="form-group"><label>Reference</label><input id="cdj-ref" placeholder="Voucher #, Check #…"/></div>
+        <div class="form-group"><label>Date</label><input id="cdj-date" type="date" value="${today()}"/></div>
+      </div>
+      <div class="form-group"><label>Payee</label><input id="cdj-payee" placeholder="Payee name"/></div>
+      <div class="form-group"><label>Credit: Cash (₱)</label><input id="cdj-cash" type="number" step="0.01" value="0"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Debit: COS – Direct Material (₱)</label><input id="cdj-material" type="number" step="0.01" value="0"/></div>
+        <div class="form-group"><label>Debit: Accounts Payable (₱)</label><input id="cdj-ap" type="number" step="0.01" value="0"/></div>
+      </div>
+      <div class="form-group"><label>Debit: COS – Direct Labor (₱)</label><input id="cdj-labor" type="number" step="0.01" value="0"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Debit: Sundry Account</label><input id="cdj-sundry-acct" placeholder="e.g. Utilities Expense"/></div>
+        <div class="form-group"><label>Debit: Sundry Amount (₱)</label><input id="cdj-sundry-amt" type="number" step="0.01" value="0"/></div>
+      </div>
+    `, `<button class="btn-primary" id="save-cdj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+    document.getElementById('save-cdj-btn').addEventListener('click', async () => {
+      const payee = document.getElementById('cdj-payee').value.trim();
+      const creditCash = parseFloat(document.getElementById('cdj-cash').value)||0;
+      if (!payee) { Notifs.showToast('Enter a payee name.','error'); return; }
+      if (!creditCash) { Notifs.showToast('Enter the cash amount disbursed.','error'); return; }
+      await db.collection('cash_disbursement_journal').add({
+        reference:         document.getElementById('cdj-ref').value.trim(),
+        date:              document.getElementById('cdj-date').value,
+        payee,
+        creditCash,
+        debitMaterial:     parseFloat(document.getElementById('cdj-material').value)||0,
+        debitAP:           parseFloat(document.getElementById('cdj-ap').value)||0,
+        debitLabor:        parseFloat(document.getElementById('cdj-labor').value)||0,
+        debitSundryAcct:   document.getElementById('cdj-sundry-acct').value.trim(),
+        debitSundryAmount: parseFloat(document.getElementById('cdj-sundry-amt').value)||0,
+        addedBy:    currentUser.uid,
+        addedByName: window.userProfile?.displayName || currentUser.email,
+        createdAt:  firebase.firestore.FieldValue.serverTimestamp()
+      });
+      closeModal(); Notifs.showToast('Cash disbursement entry saved!');
+      renderCashDisbursementJournal(container, currentUser, currentRole);
+    });
+  });
+}
+
+// ── General Journal (for non-cash transactions) ──
+async function renderGeneralJournal(container, currentUser, currentRole) {
+  const snap = await db.collection('general_journal').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]}));
+  const entries = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const totalDebit  = entries.reduce((s,e)=>s+(e.debit||0),0);
+  const totalCredit = entries.reduce((s,e)=>s+(e.credit||0),0);
+
+  container.innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi-card red"><div class="kpi-label">Total Debit</div><div class="kpi-value">₱${fmt(totalDebit)}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Total Credit</div><div class="kpi-value">₱${fmt(totalCredit)}</div></div>
+      <div class="kpi-card ${totalDebit===totalCredit?'accent':'red'}"><div class="kpi-label">Balanced?</div><div class="kpi-value" style="font-size:16px">${totalDebit===totalCredit?'✓ Yes':'✗ No'}</div></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+      <button class="btn-primary btn-sm" id="add-gj-btn">+ New Journal Entry</button>
+    </div>
+    <div class="card">
+      <div class="card-body" style="padding:0">
+        ${!entries.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📓</div><h4>No general journal entries yet</h4></div>':
+          `<div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Date</th><th>Account Title</th><th>Reference</th><th>Debit</th><th>Credit</th></tr></thead>
+            <tbody>${entries.map(e=>`<tr>
+              <td>${e.date||'—'}</td>
+              <td>${e.accountTitle||'—'}</td>
+              <td><code>${e.reference||'—'}</code></td>
+              <td style="color:var(--danger)">${e.debit?'₱'+fmt(e.debit):'—'}</td>
+              <td style="color:var(--success)">${e.credit?'₱'+fmt(e.credit):'—'}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>`}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('add-gj-btn').addEventListener('click', () => {
+    openModal('New General Journal Entry', `
+      <p style="margin-bottom:10px;color:var(--text-muted);font-size:12px">For non-cash transactions (accruals, adjustments, write-offs, depreciation, etc). Add a debit line and a credit line as two separate entries so the journal stays balanced.</p>
+      <div class="form-row">
+        <div class="form-group"><label>Date</label><input id="gj-date" type="date" value="${today()}"/></div>
+        <div class="form-group"><label>Reference</label><input id="gj-ref" placeholder="JE #, memo #…"/></div>
+      </div>
+      <div class="form-group"><label>Account Title</label><input id="gj-account" placeholder="e.g. Accumulated Depreciation"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Debit (₱)</label><input id="gj-debit" type="number" step="0.01" value="0"/></div>
+        <div class="form-group"><label>Credit (₱)</label><input id="gj-credit" type="number" step="0.01" value="0"/></div>
+      </div>
+    `, `<button class="btn-primary" id="save-gj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+    document.getElementById('save-gj-btn').addEventListener('click', async () => {
+      const accountTitle = document.getElementById('gj-account').value.trim();
+      const debit  = parseFloat(document.getElementById('gj-debit').value)||0;
+      const credit = parseFloat(document.getElementById('gj-credit').value)||0;
+      if (!accountTitle) { Notifs.showToast('Enter an account title.','error'); return; }
+      if (!debit && !credit) { Notifs.showToast('Enter a debit or credit amount.','error'); return; }
+      if (debit && credit) { Notifs.showToast('Enter either a debit OR a credit, not both, on one line.','error'); return; }
+      await db.collection('general_journal').add({
+        date:        document.getElementById('gj-date').value,
+        reference:   document.getElementById('gj-ref').value.trim(),
+        accountTitle,
+        debit,
+        credit,
+        addedBy:    currentUser.uid,
+        addedByName: window.userProfile?.displayName || currentUser.email,
+        createdAt:  firebase.firestore.FieldValue.serverTimestamp()
+      });
+      closeModal(); Notifs.showToast('Journal entry saved!');
+      renderGeneralJournal(container, currentUser, currentRole);
+    });
+  });
+}
+
 // ── Records & Receipts Tab ──────────────────────
 async function renderRecordsTab(container, currentUser, currentRole) {
   const snap = await db.collection('finance_records').orderBy('createdAt','desc').limit(100).get().catch(()=>({docs:[]}));
@@ -2086,14 +2332,14 @@ async function renderFinanceCA(container, currentUser, currentRole) {
     list.querySelectorAll('.fin-ca-approve').forEach(btn=>btn.addEventListener('click',async e=>{
       const {id,uid,name,amount}=e.currentTarget.dataset;
       await db.collection('cash_advances').doc(id).update({status:'approved',balance:parseFloat(amount),approvedAt:firebase.firestore.FieldValue.serverTimestamp(),approvedBy:currentUser.uid});
-      await Notifs.send(uid,{title:'Cash Advance Approved',body:`Your ₱${fmt(parseFloat(amount))} request was approved.`,icon:'✅',type:'cash_advance'});
+      await Notifs.send(uid,{title:'Cash Advance Approved',body:`Your ₱${fmt(parseFloat(amount))} request was approved.`,icon:'✅',type:'cash_advance',dedupKey:`ca-approved-${id}`});
       Notifs.showToast(`Approved for ${name}`);
       renderFinanceCA(container,currentUser,currentRole);
     }));
     list.querySelectorAll('.fin-ca-reject').forEach(btn=>btn.addEventListener('click',async e=>{
       const {id,uid,name}=e.currentTarget.dataset;
       await db.collection('cash_advances').doc(id).update({status:'rejected'});
-      await Notifs.send(uid,{title:'Cash Advance Rejected',body:'Your request was not approved.',icon:'❌',type:'cash_advance'});
+      await Notifs.send(uid,{title:'Cash Advance Rejected',body:'Your request was not approved.',icon:'❌',type:'cash_advance',dedupKey:`ca-rejected-${id}`});
       Notifs.showToast(`Rejected for ${name}`);
       renderFinanceCA(container,currentUser,currentRole);
     }));
@@ -2177,7 +2423,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
       <div class="card-body" style="padding:0">
         ${!profiles.length ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">👷</div><p>No worker profiles yet. Add one to start generating payslips.</p></div>' :
         `<div class="table-wrap"><table class="data-table">
-          <thead><tr><th>Name</th><th>Job Title</th><th>Dept</th><th>Type</th><th>Daily Rate</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Name</th><th>Job Title</th><th>Dept</th><th>Type</th><th>Daily Rate</th><th>CA Balance</th><th>Payroll</th><th>Status</th><th></th></tr></thead>
           <tbody>
             ${profiles.map(p=>`<tr>
               <td style="font-weight:600">${p.name||'—'}</td>
@@ -2185,6 +2431,8 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
               <td><span class="badge badge-blue">${p.department||'—'}</span></td>
               <td><span class="badge badge-purple">${p.employmentType||'—'}</span></td>
               <td>₱${fmt(p.dailyRate||0)}</td>
+              <td>${p.caBalance>0?`<span style="color:var(--danger)">₱${fmt(p.caBalance)}</span>`:'<span style="color:var(--text-muted)">—</span>'}</td>
+              <td><span class="badge ${p.includeInPayroll!==false?'badge-green':'badge-gray'}">${p.includeInPayroll!==false?'Included':'Excluded'}</span></td>
               <td><span class="badge ${p.status==='active'?'badge-green':'badge-gray'}">${p.status||'active'}</span></td>
               <td style="white-space:nowrap">
                 <button class="btn-primary btn-sm hrp-gen-btn" data-id="${p.id}" style="margin-right:4px">📄 Payslip</button>
@@ -2265,6 +2513,15 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
         <option value="inactive" ${profile?.status==='inactive'?'selected':''}>Inactive</option>
       </select></div>
     </div>
+    <div class="form-row">
+      <div class="form-group"><label>Cash Advance Balance (₱)</label><input id="hrp-ca-balance" type="number" value="${profile?.caBalance||0}"/></div>
+      <div class="form-group" style="display:flex;align-items:center;padding-top:22px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
+          <input type="checkbox" id="hrp-include-payroll" ${profile?.includeInPayroll!==false?'checked':''} style="width:18px;height:18px"/>
+          Include in Payroll
+        </label>
+      </div>
+    </div>
   `, `<button class="btn-primary" id="hrp-save-btn">${isEdit?'Update':'Save'} Profile</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   document.getElementById('hrp-save-btn').addEventListener('click', async () => {
@@ -2290,6 +2547,8 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       address: document.getElementById('hrp-addr').value.trim(),
       phone: document.getElementById('hrp-phone').value.trim(),
       status: document.getElementById('hrp-status').value,
+      caBalance: parseFloat(document.getElementById('hrp-ca-balance').value)||0,
+      includeInPayroll: document.getElementById('hrp-include-payroll').checked,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     };
     if (!isEdit) { data.createdAt = firebase.firestore.FieldValue.serverTimestamp(); data.createdBy = currentUser.uid; }
@@ -2301,48 +2560,82 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
   });
 }
 
+// Payslip workflow: draft → verified → filed → submitted (sequential, no skipping)
+const PAYSLIP_STAGES = ['draft','verified','filed','submitted'];
+function payslipStageBadge(status) {
+  return { draft:'badge-gray', verified:'badge-blue', filed:'badge-orange', submitted:'badge-green' }[status] || 'badge-gray';
+}
+
 async function openPayslipHistory(currentUser, currentRole) {
+  const canAct = ['president','owner','manager','finance'].includes(currentRole);
   const snap = await db.collection('payslips').orderBy('createdAt','desc').limit(100).get().catch(()=>({docs:[]}));
   const list = snap.docs.map(d=>({id:d.id,...d.data()}));
 
-  openModal('📄 Payslip History', `
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead><tr><th>Worker</th><th>Period</th><th>Net Pay</th><th>Status</th><th></th></tr></thead>
-        <tbody>
-          ${!list.length ? '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">No payslips yet</td></tr>' :
-            list.map(p=>`<tr>
-              <td style="font-weight:600">${p.workerName||'—'}</td>
-              <td style="font-size:12px">${p.payPeriodStart||''} – ${p.payPeriodEnd||''}</td>
-              <td><strong>₱${fmt(p.netPay||0)}</strong></td>
-              <td><span class="badge ${p.status==='filed'?'badge-green':p.status==='submitted'?'badge-blue':'badge-gray'}">${p.status||'draft'}</span></td>
-              <td>
-                <button class="btn-secondary btn-sm ps-view-btn" data-id="${p.id}" style="font-size:11px">View</button>
-                ${['president','manager','finance'].includes(currentRole)&&p.status!=='filed'?`<button class="btn-success btn-sm ps-file-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px">File</button>`:''}
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>
-  `);
+  const renderRows = () => list.map(p=>{
+    const status = p.status || 'draft';
+    const stageIdx = PAYSLIP_STAGES.indexOf(status);
+    const nextStage = PAYSLIP_STAGES[stageIdx+1];
+    const nextLabel = { verified:'✓ Verify', filed:'📁 File', submitted:'📤 Submit' }[nextStage];
+    return `<tr>
+      <td style="font-weight:600">${p.workerName||'—'}</td>
+      <td style="font-size:12px">${p.payPeriodStart||''} – ${p.payPeriodEnd||''}</td>
+      <td><strong>₱${fmt(p.netPay||0)}</strong></td>
+      <td><span class="badge ${payslipStageBadge(status)}">${status}</span></td>
+      <td style="white-space:nowrap">
+        <button class="btn-secondary btn-sm ps-view-btn" data-id="${p.id}" style="font-size:11px">View</button>
+        ${canAct && nextStage ? `<button class="btn-success btn-sm ps-advance-btn" data-id="${p.id}" data-next="${nextStage}" style="font-size:11px;margin-left:4px">${nextLabel}</button>` : ''}
+        ${canAct && status!=='draft' ? `<button class="btn-secondary btn-sm ps-override-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px" title="Manually set status">⚙ Override</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
 
-  document.querySelectorAll('.ps-view-btn').forEach(btn => {
-    const ps = list.find(p=>p.id===btn.dataset.id);
-    btn.addEventListener('click', () => ps && renderPayslipPreview(ps));
-  });
-  document.querySelectorAll('.ps-file-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
+  const renderModal = () => {
+    openModal('📄 Payslip History', `
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>Worker</th><th>Period</th><th>Net Pay</th><th>Status</th><th></th></tr></thead>
+          <tbody>${!list.length ? '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">No payslips yet</td></tr>' : renderRows()}</tbody>
+        </table>
+      </div>
+    `);
+    bindRows();
+  };
+
+  const bindRows = () => {
+    document.querySelectorAll('.ps-view-btn').forEach(btn => {
       const ps = list.find(p=>p.id===btn.dataset.id);
-      if (!ps) return;
-      await db.collection('payslips').doc(btn.dataset.id).update({
-        status: 'filed', filedBy: currentUser.uid,
-        filedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      Notifs.showToast('Payslip filed ✅');
-      btn.textContent = 'Filed'; btn.disabled = true;
-      btn.className = 'btn-secondary btn-sm';
+      btn.addEventListener('click', () => ps && renderPayslipPreview(ps));
     });
-  });
+    document.querySelectorAll('.ps-advance-btn').forEach(btn => onClickSafe(btn, async () => {
+        const ps = list.find(p=>p.id===btn.dataset.id);
+        const next = btn.dataset.next;
+        if (!ps || !next) return;
+        if (!confirm(`Mark ${ps.workerName}'s payslip (${ps.payPeriodStart} – ${ps.payPeriodEnd}) as "${next}"?`)) return;
+        const fieldPrefix = { verified:'verified', filed:'filed', submitted:'submitted' }[next];
+        await db.collection('payslips').doc(ps.id).update({
+          status: next,
+          [`${fieldPrefix}By`]: currentUser.uid,
+          [`${fieldPrefix}At`]: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        ps.status = next;
+        Notifs.showToast(`Payslip marked as ${next}.`);
+        renderModal();
+    }));
+    document.querySelectorAll('.ps-override-btn').forEach(btn => onClickSafe(btn, async () => {
+        const ps = list.find(p=>p.id===btn.dataset.id);
+        if (!ps) return;
+        const choice = prompt(`Manual override — set status for ${ps.workerName}'s payslip.\nOptions: ${PAYSLIP_STAGES.join(', ')}`, ps.status||'draft');
+        if (!choice || !PAYSLIP_STAGES.includes(choice)) { if (choice) Notifs.showToast('Invalid status','error'); return; }
+        await db.collection('payslips').doc(ps.id).update({
+          status: choice, overriddenBy: currentUser.uid, overriddenAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        ps.status = choice;
+        Notifs.showToast(`Status manually set to "${choice}".`);
+        renderModal();
+    }));
+  };
+
+  renderModal();
 }
 
 function openPayslipGenerator(profile, currentUser, currentRole) {
@@ -2362,14 +2655,40 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     </div>
 
     <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Daily Time Log</div>
+        <span style="font-size:10px;color:var(--text-muted)">Auto-computes hours · −1hr lunch if shift spans 12–1PM</span>
+      </div>
+      <table style="width:100%;font-size:11px;border-collapse:collapse">
+        <thead><tr>
+          <th style="text-align:left;padding:4px">Day</th><th style="padding:4px">Time In</th><th style="padding:4px">Time Out</th><th style="padding:4px">Hours</th>
+        </tr></thead>
+        <tbody>
+          ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<tr>
+            <td style="padding:4px">${d}</td>
+            <td style="padding:4px"><input id="ps-tin-${i}" type="time" class="ps-time-input" value="${d==='Sun'?'':'07:00'}" style="width:100%;padding:4px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text)"/></td>
+            <td style="padding:4px"><input id="ps-tout-${i}" type="time" class="ps-time-input" value="${d==='Sun'?'':(d==='Sat'?'18:00':'16:00')}" style="width:100%;padding:4px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text)"/></td>
+            <td style="padding:4px;text-align:center;font-weight:600" id="ps-dayhrs-${i}">0.00</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <div style="display:flex;justify-content:flex-end;margin-top:8px;font-size:12px">
+        Computed Total: <strong style="margin-left:6px" id="ps-computed-total">0.00</strong>&nbsp;hrs
+      </div>
+    </div>
+
+    <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
       <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Earnings</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
         <div class="form-group" style="margin-bottom:6px"><label>Daily Rate</label><input id="ps-daily" type="number" value="${profile.dailyRate||0}"/></div>
         <div class="form-group" style="margin-bottom:6px"><label>Rate/HR</label><input id="ps-rph" type="number" value="${(profile.dailyRate/8).toFixed(2)}"/></div>
-        <div class="form-group" style="margin-bottom:6px"><label>Hours Worked</label><input id="ps-hrs" type="number" value="50"/></div>
+        <div class="form-group" style="margin-bottom:6px">
+          <label>Hours Worked <span style="font-size:9px;color:var(--text-muted);font-weight:400">(auto, editable)</span></label>
+          <input id="ps-hrs" type="number" value="0"/>
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <div class="form-group" style="margin-bottom:6px"><label>OT Rate/HR</label><input id="ps-ot-rate" type="number" value="${(profile.dailyRate/8*1.25).toFixed(2)}"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>OT Rate/HR <span style="font-size:9px;color:var(--text-muted);font-weight:400">(regular rate)</span></label><input id="ps-ot-rate" type="number" value="${(profile.dailyRate/8).toFixed(2)}"/></div>
         <div class="form-group" style="margin-bottom:6px"><label>OT Hours</label><input id="ps-ot-hrs" type="number" value="0"/></div>
         <div></div>
       </div>
@@ -2388,20 +2707,13 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
         <div class="form-group" style="margin-bottom:6px"><label>Pag-IBIG</label><input id="ps-pib" type="number" value="0"/></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <div class="form-group" style="margin-bottom:0"><label>Cash Advance</label><input id="ps-ca" type="number" value="0"/></div>
-        <div class="form-group" style="margin-bottom:0"><label>Loans</label><input id="ps-loans" type="number" value="0"/></div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>Cash Advance Deduction</label>
+          <input id="ps-ca" type="number" value="0"/>
+          <div style="font-size:10px;color:var(--text-muted);margin-top:3px">Balance: ₱<span id="ps-ca-balance-display">${fmt(profile.caBalance||0)}</span> · Remaining after deduction: ₱<span id="ps-ca-remaining-display" style="font-weight:700">${fmt(profile.caBalance||0)}</span></div>
+        </div>
+        <div class="form-group" style="margin-bottom:0"><label>Other Deduction (Loans, etc.)</label><input id="ps-loans" type="number" value="0"/></div>
         <div class="form-group" style="margin-bottom:0"><label>Taxes</label><input id="ps-tax" type="number" value="0"/></div>
-      </div>
-    </div>
-
-    <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Schedule</div>
-      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:11px">
-        ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d,i)=>`<div>
-          <div style="text-align:center;color:var(--text-muted);margin-bottom:3px">${d}</div>
-          <input id="ps-sched-${i}" style="width:100%;padding:4px;font-size:10px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text);text-align:center"
-            value="${d==='Sun'?'REST':d==='Sat'?'7AM-6PM':'7AM-4PM'}"/>
-        </div>`).join('')}
       </div>
     </div>
 
@@ -2427,6 +2739,36 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     Drive.renderUploadArea('ps-proof-area', r => { proofFile = r; }, { label:'Upload transfer screenshot/photo', dept:'Finance', subfolder:'payslips' });
   }
 
+  // ── Auto-compute hours from daily time log (−1hr lunch if shift spans 12–1PM) ──
+  const recomputeHours = () => {
+    let total = 0;
+    for (let i = 0; i < 7; i++) {
+      const hrs = computeDayHours(
+        document.getElementById(`ps-tin-${i}`)?.value,
+        document.getElementById(`ps-tout-${i}`)?.value
+      );
+      const cell = document.getElementById(`ps-dayhrs-${i}`);
+      if (cell) cell.textContent = hrs.toFixed(2);
+      total += hrs;
+    }
+    const totalEl = document.getElementById('ps-computed-total');
+    if (totalEl) totalEl.textContent = total.toFixed(2);
+    const hrsInput = document.getElementById('ps-hrs');
+    if (hrsInput) hrsInput.value = total.toFixed(2);
+  };
+  document.querySelectorAll('.ps-time-input').forEach(inp => inp.addEventListener('input', recomputeHours));
+  recomputeHours();
+
+  // ── Live CA remaining-balance preview ──
+  const updateCaRemaining = () => {
+    const balance = profile.caBalance || 0;
+    const deduct  = parseFloat(document.getElementById('ps-ca')?.value) || 0;
+    const remain  = Math.max(0, balance - deduct);
+    const el = document.getElementById('ps-ca-remaining-display');
+    if (el) el.textContent = fmt(remain);
+  };
+  document.getElementById('ps-ca')?.addEventListener('input', updateCaRemaining);
+
   document.getElementById('ps-preview-btn').addEventListener('click', () => {
     const d = collectPayslipData(profile, currentUser);
     if (d) previewPayslip(d);
@@ -2440,6 +2782,10 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     d.createdAt = firebase.firestore.FieldValue.serverTimestamp();
     d.createdBy = currentUser.uid;
     const ref = await db.collection('payslips').add(d);
+    // Apply CA deduction to the worker's running balance
+    if (d.deductions.other.cashAdvance > 0) {
+      await db.collection('worker_profiles').doc(profile.id).update({ caBalance: d.caBalanceAfter });
+    }
     // Log to ledger
     await db.collection('ledger_entries').add({
       type: 'payroll',
@@ -2454,9 +2800,22 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
     closeModal();
-    Notifs.showToast('Payslip saved! Opening for download…');
+    Notifs.showToast('Payslip saved as draft! Verify and file it from Payslip History.');
     setTimeout(() => renderPayslipPreview({...d, id: ref.id}, true), 400);
   });
+}
+
+// Hours between two "HH:MM" time strings, minus a flat 1hr lunch deduction
+// if the shift overlaps the 12:00–13:00 lunch window. Handles overnight shifts.
+function computeDayHours(timeIn, timeOut) {
+  if (!timeIn || !timeOut) return 0;
+  const toMin = t => { const [h,m] = t.split(':').map(Number); return h*60+m; };
+  let inM = toMin(timeIn), outM = toMin(timeOut);
+  if (outM <= inM) outM += 24*60; // overnight shift
+  let mins = outM - inM;
+  const lunchStart = 12*60, lunchEnd = 13*60;
+  if (inM < lunchEnd && outM > lunchStart) mins -= 60; // shift spans 12–1PM lunch
+  return Math.max(0, mins/60);
 }
 
 function collectPayslipData(profile, currentUser) {
@@ -2490,8 +2849,14 @@ function collectPayslipData(profile, currentUser) {
   const periodEnd   = document.getElementById('ps-end').value;
   if (!periodStart || !periodEnd) { Notifs.showToast('Set pay period dates','error'); return null; }
 
-  const sched = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((d,i)=>({
-    day: d, hours: document.getElementById(`ps-sched-${i}`)?.value||'—'
+  const caBalanceBefore = profile.caBalance || 0;
+  const caBalanceAfter  = Math.max(0, caBalanceBefore - ca);
+
+  const timeLog = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>({
+    day: d,
+    timeIn:  document.getElementById(`ps-tin-${i}`)?.value || '',
+    timeOut: document.getElementById(`ps-tout-${i}`)?.value || '',
+    hours: computeDayHours(document.getElementById(`ps-tin-${i}`)?.value, document.getElementById(`ps-tout-${i}`)?.value)
   }));
 
   return {
@@ -2518,11 +2883,13 @@ function collectPayslipData(profile, currentUser) {
       govt: { sss, philhealth: ph, pagibig: pib, total: govTotal },
       other: { cashAdvance: ca, loans, taxes: tax, total: otherTotal }
     },
+    caBalanceBefore,
+    caBalanceAfter,
     totalDeductions,
     totalPay,
     paid,
     netPay,
-    schedule: sched
+    schedule: timeLog
   };
 }
 
@@ -2760,10 +3127,11 @@ function buildPayslipHTML(d) {
     </table>
 
     <!-- Schedule -->
-    <div class="section-header" style="margin-top:4px">Schedule</div>
+    <div class="section-header" style="margin-top:4px">Daily Time Log</div>
     <table>
       <tr>${(d.schedule||[]).map(s=>`<th style="text-align:center;font-size:9px">${s.day}</th>`).join('')}</tr>
-      <tr>${(d.schedule||[]).map(s=>`<td style="text-align:center;font-size:9px">${s.hours}</td>`).join('')}</tr>
+      <tr>${(d.schedule||[]).map(s=>`<td style="text-align:center;font-size:8px">${s.timeIn&&s.timeOut?`${s.timeIn}–${s.timeOut}`:'REST'}</td>`).join('')}</tr>
+      <tr>${(d.schedule||[]).map(s=>`<td style="text-align:center;font-size:9px;font-weight:700">${(s.hours||0).toFixed?s.hours.toFixed(2):s.hours} hrs</td>`).join('')}</tr>
     </table>
     ${d.proofUrl ? `<div style="margin-top:8px;padding:6px;background:#f5f5f5;border:1px solid #ccc;border-radius:4px;font-size:10px">
       📎 Transfer proof on file: <a href="${d.proofUrl}" target="_blank">${d.proofUrl}</a>
@@ -5209,23 +5577,27 @@ window.renderApprovals = async function(currentUser) {
 
     if (sub === 'all') {
       // ── All Pending Requests aggregated view ──
+      // No .orderBy() here — combining it with .where() requires a Firestore composite
+      // index per-collection. If that index isn't provisioned, the query is rejected and
+      // silently swallowed by .catch(), making items vanish from "All Requests". We sort
+      // client-side instead so a missing index can never hide pending items.
       const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2] = await Promise.all([
-        db.collection('signup_requests').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
-        db.collection('attendance_extensions').where('status','==','pending').orderBy('requestedAt','desc').get().catch(()=>({docs:[]})),
-        db.collection('cash_advances').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
-        db.collection('submissions').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
-        db.collection('tasks').where('status','==','review').orderBy('lastModifiedAt','desc').get().catch(()=>({docs:[]})),
-        db.collection('payroll_delete_requests').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]}))
+        db.collection('signup_requests').where('status','==','pending').get().catch(e=>{console.error('signup_requests query failed',e);return {docs:[]};}),
+        db.collection('attendance_extensions').where('status','==','pending').get().catch(e=>{console.error('attendance_extensions query failed',e);return {docs:[]};}),
+        db.collection('cash_advances').where('status','==','pending').get().catch(e=>{console.error('cash_advances query failed',e);return {docs:[]};}),
+        db.collection('submissions').where('status','==','pending').get().catch(e=>{console.error('submissions query failed',e);return {docs:[]};}),
+        db.collection('tasks').where('status','==','review').get().catch(e=>{console.error('tasks query failed',e);return {docs:[]};}),
+        db.collection('payroll_delete_requests').where('status','==','pending').get().catch(e=>{console.error('payroll_delete_requests query failed',e);return {docs:[]};})
       ]);
 
       const allPending = [
-        ...sgSnap.docs.map(d=>({id:d.id,type:'signup',icon:'👤',label:'Sign-up Request',name:d.data().fullName||d.data().email||'Unknown',detail:d.data().email||'',ts:d.data().createdAt,...d.data()})),
-        ...atSnap.docs.map(d=>({id:d.id,type:'attendance',icon:'⏰',label:'Attendance Extension',name:d.data().userName||'Unknown',detail:d.data().date||'',ts:d.data().requestedAt,...d.data()})),
-        ...caSnap2.docs.map(d=>({id:d.id,type:'ca',icon:'💸',label:'Cash Advance',name:d.data().userName||'Unknown',detail:`₱${fmt(d.data().amount||0)}`,ts:d.data().createdAt,...d.data()})),
-        ...subSnap2.docs.map(d=>({id:d.id,type:'submission',icon:'📤',label:'Work Submission',name:d.data().userName||d.data().authorName||'Unknown',detail:d.data().title||'',ts:d.data().createdAt,...d.data()})),
-        ...reviewTasksSnap.docs.map(d=>({id:d.id,type:'review-task',icon:'📋',label:'Task for Review',name:d.data().title||'Untitled Task',detail:(()=>{const uids=Array.isArray(d.data().assignedTo)?d.data().assignedTo:[d.data().assignedTo].filter(Boolean);return uids.length?'by '+d.data().assignedToNames?.join(', '):'';})(),ts:d.data().lastModifiedAt||d.data().createdAt,...d.data()})),
-        ...finReqSnap2.docs.map(d=>({id:d.id,type:'finance-req',icon:'💼',label:'Finance Request',name:`Delete: ${d.data().userName||'?'} (${d.data().month||'?'})`,detail:`by ${d.data().requestedByName||'?'} — ${d.data().reason||''}`,ts:d.data().createdAt,...d.data()}))
-      ];
+        ...sgSnap.docs.map(d=>({id:d.id,...d.data(),type:'signup',icon:'👤',label:'Sign-up Request',name:d.data().fullName||d.data().email||'Unknown',detail:d.data().email||'',ts:d.data().createdAt})),
+        ...atSnap.docs.map(d=>({id:d.id,...d.data(),type:'attendance',icon:'⏰',label:'Attendance Extension',name:d.data().userName||'Unknown',detail:d.data().date||'',ts:d.data().requestedAt})),
+        ...caSnap2.docs.map(d=>({id:d.id,...d.data(),type:'ca',icon:'💸',label:'Cash Advance',name:d.data().userName||'Unknown',detail:`₱${fmt(d.data().amount||0)}`,ts:d.data().createdAt})),
+        ...subSnap2.docs.map(d=>({id:d.id,...d.data(),type:'submission',icon:'📤',label:'Work Submission',name:d.data().userName||d.data().authorName||'Unknown',detail:d.data().title||'',ts:d.data().createdAt})),
+        ...reviewTasksSnap.docs.map(d=>({id:d.id,...d.data(),type:'review-task',icon:'📋',label:'Task for Review',name:d.data().title||'Untitled Task',detail:(()=>{const uids=Array.isArray(d.data().assignedTo)?d.data().assignedTo:[d.data().assignedTo].filter(Boolean);return uids.length?'by '+d.data().assignedToNames?.join(', '):'';})(),ts:d.data().lastModifiedAt||d.data().createdAt})),
+        ...finReqSnap2.docs.map(d=>({id:d.id,...d.data(),type:'finance-req',icon:'💼',label:'Finance Request',name:`Delete: ${d.data().userName||'?'} (${d.data().month||'?'})`,detail:`by ${d.data().requestedByName||'?'} — ${d.data().reason||''}`,ts:d.data().createdAt}))
+      ].sort((a,b)=>(b.ts?.seconds||0)-(a.ts?.seconds||0));
 
       if (!allPending.length) {
         wrap.innerHTML = '<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">✅</div><h4>All clear!</h4><p>No pending requests at the moment.</p></div>';
@@ -5271,8 +5643,7 @@ window.renderApprovals = async function(currentUser) {
         </div>`;
 
       // Signup approve
-      wrap.querySelectorAll('.sg-approve-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+      wrap.querySelectorAll('.sg-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           const pwd = generatePassword(btn.dataset.name);
           const empCount = (await db.collection('users').get().catch(()=>({size:0}))).size;
           const empId = `BI-${new Date().getFullYear()}-${String(empCount+1).padStart(3,'0')}`;
@@ -5280,113 +5651,90 @@ window.renderApprovals = async function(currentUser) {
           await db.collection('signup_requests').doc(btn.dataset.id).update({ status:'approved', generatedPassword:pwd, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
           Notifs.showToast(`${btn.dataset.name} approved! Password: ${pwd}`);
           loadApprovalsSub('all');
-        });
-      });
-      wrap.querySelectorAll('.sg-reject-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+      }));
+      wrap.querySelectorAll('.sg-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!confirm(`Reject ${btn.dataset.name}?`)) return;
           await db.collection('signup_requests').doc(btn.dataset.id).update({ status:'rejected', rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
           loadApprovalsSub('all');
-        });
-      });
+      }));
 
       // Attendance approve/deny
-      wrap.querySelectorAll('.at-approve-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+      wrap.querySelectorAll('.at-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           const ext = new Date(); ext.setHours(ext.getHours()+2);
           await db.collection('attendance_extensions').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), expiresAt:firebase.firestore.Timestamp.fromDate(ext) });
           Notifs.showToast(`Extension approved for ${btn.dataset.name}`);
           loadApprovalsSub('all');
-        });
-      });
-      wrap.querySelectorAll('.at-deny-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+      }));
+      wrap.querySelectorAll('.at-deny-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('attendance_extensions').doc(btn.dataset.id).update({ status:'denied', deniedBy:currentUser.uid, deniedAt:firebase.firestore.FieldValue.serverTimestamp() });
           Notifs.showToast(`Extension denied for ${btn.dataset.name}`);
           loadApprovalsSub('all');
-        });
-      });
+      }));
 
       // CA approve/reject
-      wrap.querySelectorAll('.ca-approve-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+      wrap.querySelectorAll('.ca-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('cash_advances').doc(btn.dataset.id).update({ status:'approved', balance:parseFloat(btn.dataset.amount)||0, approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.uid) await Notifs.send(btn.dataset.uid, { title:'Cash Advance Approved', body:`Your CA of ₱${fmt(parseFloat(btn.dataset.amount)||0)} has been approved.`, icon:'💸', type:'ca_approved' });
           Notifs.showToast(`CA approved for ${btn.dataset.name}`);
           loadApprovalsSub('all');
-        });
-      });
-      wrap.querySelectorAll('.ca-reject-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+      }));
+      wrap.querySelectorAll('.ca-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('cash_advances').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid, rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
           loadApprovalsSub('all');
-        });
-      });
+      }));
 
       // Submission approve/reject
-      wrap.querySelectorAll('.sub-approve-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+      wrap.querySelectorAll('.sub-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('submissions').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           Notifs.showToast('Submission approved!');
           loadApprovalsSub('all');
-        });
-      });
-      wrap.querySelectorAll('.sub-reject-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+      }));
+      wrap.querySelectorAll('.sub-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('submissions').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid });
           loadApprovalsSub('all');
-        });
-      });
+      }));
 
       // Review task view/approve/reject
       wrap.querySelectorAll('.rt-view-btn').forEach(btn => {
         btn.addEventListener('click', () => openTaskDetail(btn.dataset.id, currentUser, currentRole));
       });
-      wrap.querySelectorAll('.rt-approve-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+      wrap.querySelectorAll('.rt-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('tasks').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
           const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
           if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await notifyTaskInvolved(t2,{title:'✅ Task Approved',body:`"${btn.dataset.name}" has been approved!`,icon:'✅',type:'task_status'},currentUser.uid);}
           Notifs.showToast(`"${btn.dataset.name}" approved!`);
           loadApprovalsSub('all');
-        });
-      });
-      wrap.querySelectorAll('.rt-reject-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+      }));
+      wrap.querySelectorAll('.rt-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('tasks').doc(btn.dataset.id).update({ status:'in-progress', lastModifiedBy:currentUser.uid, lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
           const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
           if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await notifyTaskInvolved(t2,{title:'🔁 Task Sent Back',body:`"${btn.dataset.name}" was sent back for revision.`,icon:'🔁',type:'task_status'},currentUser.uid);}
           Notifs.showToast(`"${btn.dataset.name}" sent back for revision.`);
           loadApprovalsSub('all');
-        });
-      });
+      }));
 
       // Finance request approve/deny (from "all" view)
-      wrap.querySelectorAll('.fr-approve-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+      wrap.querySelectorAll('.fr-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!confirm(`Approve deletion of ${btn.dataset.name} (${btn.dataset.month}) payroll record?`)) return;
           if (btn.dataset.histId) await db.collection('salary_history').doc(btn.dataset.histId).delete();
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await Notifs.send(btn.dataset.reqBy, { title:'✅ Payroll Delete Approved', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record has been approved.`, icon:'✅', type:'payroll_delete_approved' });
           Notifs.showToast('Record deleted and requester notified.');
           loadApprovalsSub('all');
-        });
-      });
-      wrap.querySelectorAll('.fr-deny-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+      }));
+      wrap.querySelectorAll('.fr-deny-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'denied', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await Notifs.send(btn.dataset.reqBy, { title:'❌ Payroll Delete Denied', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record was denied by the President.`, icon:'❌', type:'payroll_delete_denied' });
           Notifs.showToast('Request denied and requester notified.');
           loadApprovalsSub('all');
-        });
-      });
+      }));
       return;
     }
 
     if (sub === 'finance-requests') {
-      const snap = await db.collection('payroll_delete_requests').orderBy('createdAt','desc').limit(100).get().catch(()=>({docs:[]}));
+      const snap = await db.collection('payroll_delete_requests').orderBy('createdAt','desc').limit(100).get().catch(e=>{console.error('payroll_delete_requests query failed',e);return {docs:[]};});
       const reqs = snap.docs.map(d=>({id:d.id,...d.data()}));
       const pending = reqs.filter(r=>r.status==='pending');
       const resolved = reqs.filter(r=>r.status!=='pending');
@@ -5421,24 +5769,20 @@ window.renderApprovals = async function(currentUser) {
           </div>` : ''}
       `;
 
-      wrap.querySelectorAll('.fr-approve-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+      wrap.querySelectorAll('.fr-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!confirm(`Approve deletion of ${btn.dataset.name} (${btn.dataset.month}) payroll record?`)) return;
           if (btn.dataset.histId) await db.collection('salary_history').doc(btn.dataset.histId).delete();
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await Notifs.send(btn.dataset.reqBy, { title:'✅ Payroll Delete Approved', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record has been approved.`, icon:'✅', type:'payroll_delete_approved' });
           Notifs.showToast('Record deleted and requester notified.');
           loadApprovalsSub('finance-requests');
-        });
-      });
-      wrap.querySelectorAll('.fr-deny-btn').forEach(btn => {
-        btn.addEventListener('click', async () => {
+      }));
+      wrap.querySelectorAll('.fr-deny-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'denied', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await Notifs.send(btn.dataset.reqBy, { title:'❌ Payroll Delete Denied', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record was denied.`, icon:'❌', type:'payroll_delete_denied' });
           Notifs.showToast('Request denied.');
           loadApprovalsSub('finance-requests');
-        });
-      });
+      }));
       return;
     }
 
@@ -5681,7 +6025,7 @@ window.renderApprovals = async function(currentUser) {
         btn.addEventListener('click', async e => {
           const { id, uid, name, amount } = e.currentTarget.dataset;
           await db.collection('cash_advances').doc(id).update({ status:'approved', approvedAt: firebase.firestore.FieldValue.serverTimestamp() });
-          await Notifs.send(uid, { title:'Cash Advance Approved', body:`Your ₱${fmt(parseFloat(amount))} request has been approved.`, icon:'💸', type:'cash_advance' });
+          await Notifs.send(uid, { title:'Cash Advance Approved', body:`Your ₱${fmt(parseFloat(amount))} request has been approved.`, icon:'💸', type:'cash_advance', dedupKey:`ca-approved-${id}` });
           Notifs.showToast(`Approved ₱${fmt(parseFloat(amount))} for ${name}`);
           loadApprovalsSub('ca');
         });
@@ -5690,7 +6034,7 @@ window.renderApprovals = async function(currentUser) {
         btn.addEventListener('click', async e => {
           const { id, uid, name } = e.currentTarget.dataset;
           await db.collection('cash_advances').doc(id).update({ status:'rejected' });
-          await Notifs.send(uid, { title:'Cash Advance Declined', body:'Your cash advance request was not approved this time.', icon:'💸', type:'cash_advance' });
+          await Notifs.send(uid, { title:'Cash Advance Declined', body:'Your cash advance request was not approved this time.', icon:'💸', type:'cash_advance', dedupKey:`ca-rejected-${id}` });
           Notifs.showToast('Request rejected.');
           loadApprovalsSub('ca');
         });

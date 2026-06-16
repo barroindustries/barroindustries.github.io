@@ -530,6 +530,7 @@ function renderTeamCards(users, currentUser) {
 function getPHHolidays(year) {
   // Static holidays + computed ones
   const holidays = {
+    // ── Regular Holidays ──
     [`${year}-01-01`]: { name:'New Year\'s Day', type:'regular' },
     [`${year}-04-09`]: { name:'Araw ng Kagitingan', type:'regular' },
     [`${year}-05-01`]: { name:'Labor Day', type:'regular' },
@@ -537,27 +538,61 @@ function getPHHolidays(year) {
     [`${year}-11-30`]: { name:'Bonifacio Day', type:'regular' },
     [`${year}-12-25`]: { name:'Christmas Day', type:'regular' },
     [`${year}-12-30`]: { name:'Rizal Day', type:'regular' },
-    [`${year}-02-25`]: { name:'EDSA People Power', type:'special' },
+    // ── Special Non-Working Holidays ──
+    [`${year}-02-25`]: { name:'EDSA People Power Revolution', type:'special' },
     [`${year}-08-21`]: { name:'Ninoy Aquino Day', type:'special' },
     [`${year}-11-01`]: { name:'All Saints\' Day', type:'special' },
-    [`${year}-12-08`]: { name:'Immaculate Conception', type:'special' },
+    [`${year}-11-02`]: { name:'All Souls\' Day', type:'special' },
+    [`${year}-12-08`]: { name:'Feast of the Immaculate Conception', type:'special' },
+    [`${year}-12-24`]: { name:'Christmas Eve', type:'special' },
     [`${year}-12-31`]: { name:'New Year\'s Eve', type:'special' },
   };
   // National Heroes Day (last Monday of August)
   const aug = new Date(year, 7, 31);
   while (aug.getDay() !== 1) aug.setDate(aug.getDate()-1);
   holidays[aug.toISOString().slice(0,10)] = { name:'National Heroes Day', type:'regular' };
-  // Holy Week (approx — these are fixed known dates)
+
+  // Holy Week — Maundy Thursday (special), Good Friday (regular), Black Saturday (special)
   const holyWeek = {
-    2024: { thu:'2024-03-28', fri:'2024-03-29' },
-    2025: { thu:'2025-04-17', fri:'2025-04-18' },
-    2026: { thu:'2026-04-02', fri:'2026-04-03' },
-    2027: { thu:'2027-03-25', fri:'2027-03-26' },
+    2024: { thu:'2024-03-28', fri:'2024-03-29', sat:'2024-03-30' },
+    2025: { thu:'2025-04-17', fri:'2025-04-18', sat:'2025-04-19' },
+    2026: { thu:'2026-04-02', fri:'2026-04-03', sat:'2026-04-04' },
+    2027: { thu:'2027-03-25', fri:'2027-03-26', sat:'2027-03-27' },
+    2028: { thu:'2028-04-13', fri:'2028-04-14', sat:'2028-04-15' },
   };
   if (holyWeek[year]) {
     holidays[holyWeek[year].thu] = { name:'Maundy Thursday', type:'special' };
     holidays[holyWeek[year].fri] = { name:'Good Friday', type:'regular' };
+    holidays[holyWeek[year].sat] = { name:'Black Saturday', type:'special' };
   }
+
+  // Chinese New Year (first day of the lunar new year — fixed known dates)
+  const chineseNY = {
+    2024:'2024-02-10', 2025:'2025-01-29', 2026:'2026-02-17',
+    2027:'2027-02-06', 2028:'2028-01-26',
+  };
+  if (chineseNY[year]) {
+    holidays[chineseNY[year]] = { name:'Chinese New Year', type:'special' };
+  }
+
+  // Eid ul-Fitr (end of Ramadan — approximate, subject to moon sighting proclamation)
+  const eidAlFitr = {
+    2024:'2024-04-10', 2025:'2025-03-31', 2026:'2026-03-20',
+    2027:'2027-03-09', 2028:'2028-02-26',
+  };
+  if (eidAlFitr[year]) {
+    holidays[eidAlFitr[year]] = { name:'Eid\'l Fitr (End of Ramadan)', type:'regular' };
+  }
+
+  // Eid ul-Adha (Feast of Sacrifice — approximate, subject to proclamation)
+  const eidAlAdha = {
+    2024:'2024-06-17', 2025:'2025-06-07', 2026:'2026-05-27',
+    2027:'2027-05-17', 2028:'2028-05-05',
+  };
+  if (eidAlAdha[year]) {
+    holidays[eidAlAdha[year]] = { name:'Eid\'l Adha (Feast of Sacrifice)', type:'regular' };
+  }
+
   return holidays;
 }
 
@@ -954,7 +989,7 @@ function renderCAEmployeeCards(advances, container) {
 
 async function renderCashAdvanceAdmin(c) {
   const [snap, usersSnap] = await Promise.all([
-    db.collection('cash_advances').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+    db.collection('cash_advances').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]})),
     typeof dbCachedGet === 'function'
       ? dbCachedGet('users', () => db.collection('users').get(), 60000)
       : db.collection('users').get()
@@ -1052,7 +1087,7 @@ function renderCAList(advances, container, isAdmin) {
       approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
       balance: a.amount
     });
-    await Notifs.send(a.userId, {title:'Cash Advance Approved', body:`Your ₱${fmtN(a.amount)} cash advance request was approved!`, icon:'✅', type:'cash_advance'});
+    await Notifs.send(a.userId, {title:'Cash Advance Approved', body:`Your ₱${fmtN(a.amount)} cash advance request was approved!`, icon:'✅', type:'cash_advance', dedupKey:`ca-approved-${id}`});
     Notifs.showToast('Approved!');
     window.renderCashAdvancePage();
   }));
@@ -1061,7 +1096,7 @@ function renderCAList(advances, container, isAdmin) {
     const id = e.target.dataset.id;
     const snap = await db.collection('cash_advances').doc(id).get();
     await db.collection('cash_advances').doc(id).update({status:'rejected'});
-    await Notifs.send(snap.data().userId, {title:'Cash Advance Rejected', body:'Your cash advance request was not approved.', icon:'❌', type:'cash_advance'});
+    await Notifs.send(snap.data().userId, {title:'Cash Advance Rejected', body:'Your cash advance request was not approved.', icon:'❌', type:'cash_advance', dedupKey:`ca-rejected-${id}`});
     Notifs.showToast('Rejected.');
     window.renderCashAdvancePage();
   }));
