@@ -1777,6 +1777,7 @@ body.sidebar-open .top-nav-strip { display: none !important; }
   position: absolute; inset: 0;
   background: linear-gradient(90deg, transparent, rgba(255,255,255,0.03), transparent);
   transform: translateX(-100%) skewX(-12deg);
+  pointer-events: none; /* decorative shimmer only — must never intercept clicks on card content */
 }
 .item-card:hover {
   background: var(--s2); transform: translateY(-1px);
@@ -3181,6 +3182,7 @@ body::before {
   background: linear-gradient(180deg,
     rgba(255,255,255,0.07) 0%, transparent 55%);
   transform: none !important; animation: none !important;
+  pointer-events: none !important; /* this override cancels the off-screen transform, so it must also stay non-interactive or it blocks every click on the card */
 }
 .item-card:hover::before { animation: none !important; }
 

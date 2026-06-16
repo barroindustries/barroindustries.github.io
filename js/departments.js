@@ -1255,7 +1255,7 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
 window.renderFinance = async function(currentUser, currentRole, subtab = 'Overview') {
   const c = deptContainer();
   // Finance tools vs HR tools — visually separated
-  const finTabs = ['Overview','Ledger','Cash Receipts','Cash Disbursements','General Journal','Accounting','Purchasing','Records','Taxes','SSS / Gov','Tasks'];
+  const finTabs = ['Overview','Ledger','Cash Receipts','Cash Disbursements','General Journal','Purchasing','Records','Taxes','SSS / Gov','Tasks'];
   const hrTabs  = ['Payroll','HR Profiles','Cash Advances'];
   const allTabs = [...finTabs, ...hrTabs];
   c.innerHTML = `
@@ -1295,10 +1295,6 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'Cash Disbursements':  await renderCashDisbursementJournal(content, currentUser, currentRole); break;
     case 'General Journal':     await renderGeneralJournal(content, currentUser, currentRole); break;
     case 'Records':      await renderRecordsTab(content, currentUser, currentRole); break;
-    case 'Accounting':
-      content.innerHTML = renderFileCollection('Accounting Documents', 'fin-acct', currentRole);
-      bindFileCollection('fin-acct', currentUser, 'Finance', 'Accounting');
-      break;
     case 'Purchasing':
       await renderDocCollection(content, 'purchase_orders', 'Purchase Orders', currentUser, currentRole, { icon:'🛒', color:'#1b5e20', dept:'Finance' });
       break;
@@ -2274,6 +2270,13 @@ async function renderRecordsTab(container, currentUser, currentRole) {
       renderRecordsTab(container, currentUser, currentRole);
     });
   });
+
+  // ── Accounting Documents (file archive) ──────────────
+  const acctSection = document.createElement('div');
+  acctSection.style.marginTop = '24px';
+  acctSection.innerHTML = renderFileCollection('Accounting Documents', 'fin-acct', currentRole);
+  container.appendChild(acctSection);
+  bindFileCollection('fin-acct', currentUser, 'Finance', 'Accounting');
 }
 
 async function renderFinanceCA(container, currentUser, currentRole) {
