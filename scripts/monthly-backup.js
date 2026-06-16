@@ -145,11 +145,10 @@ function getPrevMonthRange() {
 
 const EXPORTS = [
   {
-    name:       'attendance',
-    filename:   'attendance',
-    dateField:  'date',          // stored as 'YYYY-MM-DD' string
-    dateIsStr:  true,            // string comparison instead of Timestamp
-    csvFields:  ['userId','userName','date','timeIn','status','attendancePct','dept'],
+    name:         'attendance',
+    filename:     'attendance',
+    type:         'subcollection', // attendance/{uid}/records/{date} — not a flat collection
+    csvFields:    ['userId','date','loginTime','timeOut','fullTime','attendanceScore','note','editedBy'],
   },
   {
     name:       'tasks',
@@ -208,14 +207,43 @@ const EXPORTS = [
   },
 ];
 
+// ── Fetch attendance subcollections: attendance/{uid}/records/{date} ────────
+// The root 'attendance' collection holds one doc per user (uid as doc ID).
+// Actual records live in the 'records' subcollection keyed by 'YYYY-MM-DD'.
+async function fetchAttendanceSubcollection({ start, end }) {
+  const startStr = start.toISOString().slice(0, 10);
+  const endStr   = end.toISOString().slice(0, 10); // exclusive
+  const usersSnap = await db.collection('attendance').get();
+  const results = [];
+
+  // Fetch each user's records subcollection in parallel
+  await Promise.all(usersSnap.docs.map(async userDoc => {
+    const uid = userDoc.id;
+    const recsSnap = await userDoc.ref.collection('records')
+      .where(admin.firestore.FieldPath.documentId(), '>=', startStr)
+      .where(admin.firestore.FieldPath.documentId(), '<',  endStr)
+      .get();
+    for (const rec of recsSnap.docs) {
+      results.push(serialize({ id: rec.id, userId: uid, ...rec.data() }));
+    }
+  }));
+
+  // Sort by userId then date for readable output
+  results.sort((a, b) => a.userId.localeCompare(b.userId) || a.date?.localeCompare(b.date ?? ''));
+  return results;
+}
+
 // ── Fetch and filter a collection ──────────────────────────────────────────
 async function fetchCollection(col, { start, end }) {
-  let snap;
+  // Attendance is a subcollection — handled separately
+  if (col.type === 'subcollection') {
+    return fetchAttendanceSubcollection({ start, end });
+  }
 
+  let snap;
   if (!col.dateField) {
     snap = await db.collection(col.name).get();
   } else if (col.dateIsStr) {
-    // date stored as 'YYYY-MM-DD' string
     const startStr = start.toISOString().slice(0, 10);
     const endStr   = end.toISOString().slice(0, 10);
     snap = await db.collection(col.name)
@@ -235,14 +263,15 @@ async function fetchCollection(col, { start, end }) {
 // ── Export task comments as a separate JSON ────────────────────────────────
 async function fetchTaskComments() {
   const tasksSnap = await db.collection('tasks').get();
-  const result = [];
-  for (const taskDoc of tasksSnap.docs) {
-    const commentsSnap = await taskDoc.ref.collection('task-comments').get();
-    for (const c of commentsSnap.docs) {
-      result.push(serialize({ id: c.id, taskId: taskDoc.id, ...c.data() }));
-    }
-  }
-  return result;
+  const nested = await Promise.all(
+    tasksSnap.docs.map(async taskDoc => {
+      const commentsSnap = await taskDoc.ref.collection('task-comments').get();
+      return commentsSnap.docs.map(c =>
+        serialize({ id: c.id, taskId: taskDoc.id, ...c.data() })
+      );
+    })
+  );
+  return nested.flat();
 }
 
 // ── Upload a single export (JSON + optional CSV) ───────────────────────────

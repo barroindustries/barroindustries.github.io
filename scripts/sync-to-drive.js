@@ -211,21 +211,23 @@ async function syncPostDoc(doc, stats) {
 }
 
 // ── Sync task-comments subcollection ──────────────────────────────────────
+// Fetches all task subcollections in parallel instead of sequentially.
 async function syncTaskComments(stats) {
   console.log('\n📁 Scanning subcollection: task-comments');
   const tasksSnap = await db.collection('tasks').get();
+  console.log(`   ${tasksSnap.size} tasks to scan`);
 
-  for (const taskDoc of tasksSnap.docs) {
+  await Promise.all(tasksSnap.docs.map(async taskDoc => {
     const commentsSnap = await taskDoc.ref.collection('task-comments').get();
-    for (const commentDoc of commentsSnap.docs) {
+    await Promise.all(commentsSnap.docs.map(async commentDoc => {
       const data = commentDoc.data();
       if (isFirebaseUrl(data.fileUrl) && !data.driveFileUrl) {
         const fObj = { url: data.fileUrl, name: data.fileName || `comment-${commentDoc.id}` };
         const driveUrl = await syncFileObject(fObj, 'Task Messages', stats);
         if (driveUrl) await commentDoc.ref.update({ driveFileUrl: driveUrl });
       }
-    }
-  }
+    }));
+  }));
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────

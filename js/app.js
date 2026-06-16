@@ -3583,14 +3583,15 @@ function renderCompanyBiOps(ct) {
 
 // ── Company: Overview ─────────────────────────────
 async function renderCompanyOverview(ct, canAdd) {
-  // Always show Neil Barro as president — fetch his Firestore profile by email
+  // Fetch the president's profile by role — not by hardcoded email
   let photoURL = '';
-  const presidentName = 'Neil Barro';
+  let presidentName = 'President';
   try {
-    const presSnap = await db.collection('users').where('email','==','neilbarro870@gmail.com').limit(1).get();
+    const presSnap = await db.collection('users').where('role','==','president').limit(1).get();
     if (!presSnap.empty) {
       const pd = presSnap.docs[0].data();
-      photoURL = pd.photoUrl || pd.photoURL || '';
+      photoURL     = pd.photoUrl || pd.photoURL || '';
+      presidentName = pd.displayName || pd.email || presidentName;
     }
   } catch(e) { /* non-critical */ }
   const initials = 'NB';

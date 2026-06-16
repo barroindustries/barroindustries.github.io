@@ -1,12 +1,12 @@
 // ═══════════════════════════════════════════════════════
-//  Barro Industries — Service Worker v9
+//  Barro Industries — Service Worker v11
 //  Strategy:
 //    • Install → pre-cache core app shell
 //    • Static assets (JS/CSS/icons) → Cache-first, update in background
 //    • HTML / API → Network-first, cache as offline fallback
 // ═══════════════════════════════════════════════════════
 
-const CACHE_VER   = 'bi-ops-v9';
+const CACHE_VER   = 'bi-ops-v11';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 

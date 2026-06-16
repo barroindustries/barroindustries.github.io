@@ -31,12 +31,19 @@ auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 // Firestore offline persistence — caches all reads to IndexedDB so the app
 // loads instantly from disk on the next visit while fresh data syncs in background.
 // Multi-tab: falls back gracefully if another tab already owns the lock.
-db.enableIndexedDbPersistence({ synchronizeTabs: true }).catch(err => {
-  if (err.code === 'failed-precondition') {
-    // Multiple tabs open — persistence available in one tab only
-    console.warn('[Firestore] Offline persistence unavailable: multiple tabs open.');
-  } else if (err.code === 'unimplemented') {
-    // Browser doesn't support IndexedDB
-    console.warn('[Firestore] Offline persistence not supported in this browser.');
-  }
-});
+// `enableIndexedDbPersistence` was removed from the compat SDK in newer Firebase
+// versions (confirmed gone in 10.12.2) — feature-detect so older/newer SDKs both
+// degrade gracefully instead of throwing an uncaught TypeError at boot.
+if (typeof db.enableIndexedDbPersistence === 'function') {
+  db.enableIndexedDbPersistence({ synchronizeTabs: true }).catch(err => {
+    if (err.code === 'failed-precondition') {
+      // Multiple tabs open — persistence available in one tab only
+      console.warn('[Firestore] Offline persistence unavailable: multiple tabs open.');
+    } else if (err.code === 'unimplemented') {
+      // Browser doesn't support IndexedDB
+      console.warn('[Firestore] Offline persistence not supported in this browser.');
+    }
+  });
+} else {
+  console.warn('[Firestore] enableIndexedDbPersistence not available on this SDK version — skipping offline persistence.');
+}

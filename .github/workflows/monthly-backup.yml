@@ -2,9 +2,9 @@ name: Monthly Firestore → Google Drive Backup
 
 on:
   schedule:
-    # 12:01 AM Philippine Time on the 1st of every month
-    # PH Time = UTC+8, so 12:01 AM PH = 16:01 UTC previous day
-    - cron: '1 16 1 * *'
+    # 1:00 AM Philippine Time on the 1st of every month
+    # PH Time = UTC+8, so 1:00 AM PH on the 1st = 17:00 UTC on the 1st
+    - cron: '0 17 1 * *'
   workflow_dispatch:   # Manual trigger from GitHub Actions tab
 
 jobs:

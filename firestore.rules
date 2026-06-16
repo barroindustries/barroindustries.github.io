@@ -2,8 +2,9 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isAuth() { return request.auth != null; }
-    function isOwner(uid) { return request.auth.uid == uid; }
+    // ── Auth helpers ───────────────────────────────────
+    function isAuth()         { return request.auth != null; }
+    function isOwner(uid)     { return request.auth.uid == uid; }
 
     function getRole() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
@@ -25,7 +26,7 @@ service cloud.firestore {
       allow read, write: if isAuth() && isAdmin();
     }
 
-    // ── Posts ─────────────────────────────────────────
+    // ── Posts ──────────────────────────────────────────
     match /posts/{postId} {
       allow read: if isAuth();
       allow create: if isAuth();
@@ -33,7 +34,7 @@ service cloud.firestore {
       allow delete: if isAuth() && (resource.data.authorId == request.auth.uid || isAdmin());
     }
 
-    // ── Notifications — each user can only access their own ──
+    // ── Notifications — each user owns their own ───────
     match /notifications/{uid}/{document=**} {
       allow read, write: if isAuth() && isOwner(uid);
     }
@@ -51,12 +52,10 @@ service cloud.firestore {
       allow update, delete: if isAuth() && isAdmin();
     }
 
-    // ── Cash advances ─────────────────────────────────
+    // ── Cash advances ──────────────────────────────────
     match /cash_advances/{docId} {
       allow read: if isAuth() && (
-        resource.data.userId == request.auth.uid ||
-        (resource.data.private == true && isFinanceOrAdmin()) ||
-        (!resource.data.private && isFinanceOrAdmin())
+        resource.data.userId == request.auth.uid || isFinanceOrAdmin()
       );
       allow create: if isAuth();
       allow update: if isAuth() && (
@@ -65,7 +64,7 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
-    // ── Tasks ─────────────────────────────────────────
+    // ── Tasks ──────────────────────────────────────────
     match /tasks/{taskId} {
       allow read: if isAuth();
       allow create: if isAuth() && isAdmin();
@@ -75,28 +74,232 @@ service cloud.firestore {
       allow delete: if isAuth() && isAdmin();
     }
 
-    // ── KPI evaluations ───────────────────────────────
+    // ── KPI evaluations ────────────────────────────────
     match /kpi_evals/{uid} {
       allow read: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
       allow write: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
     }
 
-    // ── Settings — read all, write only president ──────
+    // ── KPI targets ────────────────────────────────────
+    match /kpi_targets/{uid} {
+      allow read: if isAuth() && (isOwner(uid) || isAdmin());
+      allow write: if isAuth() && isAdmin();
+    }
+
+    // ── Settings ───────────────────────────────────────
     match /settings/{docId} {
       allow read: if isAuth();
       allow write: if isAuth() && isPresident();
     }
 
-    // ── President message ─────────────────────────────
+    // ── President message ──────────────────────────────
     match /president_message/{docId} {
       allow read: if isAuth();
       allow write: if isAuth() && isPresident();
     }
 
-    // ── Quotations ────────────────────────────────────
-    match /quotations/{docId} {
+    // ── Salary history ─────────────────────────────────
+    match /salary_history/{docId} {
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid || isFinanceOrAdmin()
+      );
+      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
+    }
+
+    // ── Payroll CA overrides ───────────────────────────
+    match /payroll_ca_overrides/{docId} {
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid || isFinanceOrAdmin()
+      );
+      allow write: if isAuth() && isFinanceOrAdmin();
+    }
+
+    // ── Payroll delete requests ────────────────────────
+    match /payroll_delete_requests/{docId} {
+      allow read: if isAuth() && isFinanceOrAdmin();
+      allow create: if isAuth() && isFinanceOrAdmin();
+      allow update, delete: if isAuth() && isPresident();
+    }
+
+    // ── Expenses ───────────────────────────────────────
+    match /expenses/{docId} {
+      allow read: if isAuth() && (
+        resource.data.createdBy == request.auth.uid || isFinanceOrAdmin()
+      );
+      allow create: if isAuth();
+      allow update: if isAuth() && (
+        resource.data.createdBy == request.auth.uid || isFinanceOrAdmin()
+      );
+      allow delete: if isAuth() && isFinanceOrAdmin();
+    }
+
+    // ── Submissions ────────────────────────────────────
+    match /submissions/{docId} {
+      allow read: if isAuth() && (
+        resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+      allow create: if isAuth();
+      allow update: if isAuth() && isAdmin();
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    // ── Quotes (internal) ──────────────────────────────
+    // NOTE: was incorrectly named 'quotations' in previous rules — fixed
+    match /quotes/{docId} {
       allow read: if isAuth();
       allow write: if isAuth() && isAdmin();
+    }
+
+    // ── BS Quotes (Brilliant Steel partner) ────────────
+    match /bs_quotes/{docId} {
+      allow read: if isAuth() && (
+        resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+      allow create: if isAuth();
+      allow update: if isAuth() && (
+        resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    // ── BK Quotes ──────────────────────────────────────
+    match /bk_quotes/{docId} {
+      allow read: if isAuth() && (
+        resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+      allow create: if isAuth();
+      allow update: if isAuth() && (
+        resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    // ── Approval requests ──────────────────────────────
+    match /approval_requests/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update, delete: if isAuth() && isAdmin();
+    }
+
+    // ── Signup requests — anyone can apply (pre-auth) ──
+    match /signup_requests/{docId} {
+      allow create: if true;
+      allow read, update, delete: if isAuth() && isAdmin();
+    }
+
+    // ── Products catalog ───────────────────────────────
+    match /products/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && isAdmin();
+    }
+
+    // ── Reference materials ────────────────────────────
+    match /resources/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && isAdmin();
+    }
+    match /policies/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && isAdmin();
+    }
+    match /handbook/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && isAdmin();
+    }
+    match /memos/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && isAdmin();
+    }
+
+    // ── Projects ───────────────────────────────────────
+    match /projects/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth() && (
+        resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    // ── IT collections ─────────────────────────────────
+    match /it_tickets/{docId} {
+      allow read: if isAuth();
+      allow create: if isAuth();
+      allow update: if isAuth() && (
+        resource.data.createdBy == request.auth.uid || isAdmin()
+      );
+      allow delete: if isAuth() && isAdmin();
+    }
+    match /it_assets/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && isAdmin();
+    }
+    match /it_software/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && isAdmin();
+    }
+    match /it_access/{docId} {
+      allow read: if isAuth() && isAdmin();
+      allow write: if isAuth() && isAdmin();
+    }
+    match /it_network/{docId} {
+      allow read: if isAuth() && isAdmin();
+      allow write: if isAuth() && isAdmin();
+    }
+
+    // ── Finance journals & records ─────────────────────
+    match /ledger/{docId} {
+      allow read, write: if isAuth() && isFinanceOrAdmin();
+    }
+    match /ledger_entries/{docId} {
+      allow read, write: if isAuth() && isFinanceOrAdmin();
+    }
+    match /cash_receipt_journal/{docId} {
+      allow read, write: if isAuth() && isFinanceOrAdmin();
+    }
+    match /cash_disbursement_journal/{docId} {
+      allow read, write: if isAuth() && isFinanceOrAdmin();
+    }
+    match /general_journal/{docId} {
+      allow read, write: if isAuth() && isFinanceOrAdmin();
+    }
+    match /finance_records/{docId} {
+      allow read, write: if isAuth() && isFinanceOrAdmin();
+    }
+    match /tax_records/{docId} {
+      allow read, write: if isAuth() && isFinanceOrAdmin();
+    }
+
+    // ── Payslips & Worker profiles (Brilliant Steel) ───
+    match /payslips/{docId} {
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid || isFinanceOrAdmin()
+      );
+      allow write: if isAuth() && isFinanceOrAdmin();
+    }
+    match /worker_profiles/{docId} {
+      allow read: if isAuth() && isFinanceOrAdmin();
+      allow write: if isAuth() && isFinanceOrAdmin();
+    }
+
+    // ── Government biddings ────────────────────────────
+    match /gov_biddings/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && isAdmin();
+    }
+
+    // ── Departments config ─────────────────────────────
+    match /departments/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && isAdmin();
+    }
+
+    // ── Suggestions ────────────────────────────────────
+    match /suggestions/{docId} {
+      allow read: if isAuth() && isAdmin();
+      allow create: if isAuth();
+      allow update, delete: if isAuth() && isAdmin();
     }
   }
 }

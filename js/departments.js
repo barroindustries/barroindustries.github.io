@@ -34,6 +34,13 @@ function onClickSafe(btn, fn) {
   });
 }
 
+// Best-effort notification send — never throw. A failed push/notification must
+// not make an already-successful approve/deny/delete look like it failed.
+async function safeNotify(fn) {
+  try { await fn(); }
+  catch (e) { console.warn('[notification failed, action itself still succeeded]', e); }
+}
+
 // ── Task Status System ─────────────────────────────
 const TASK_STATUSES = [
   { value:'backlog',      label:'Backlog',               badge:'badge-gray'   },
@@ -5674,7 +5681,7 @@ window.renderApprovals = async function(currentUser) {
       // CA approve/reject
       wrap.querySelectorAll('.ca-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('cash_advances').doc(btn.dataset.id).update({ status:'approved', balance:parseFloat(btn.dataset.amount)||0, approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
-          if (btn.dataset.uid) await Notifs.send(btn.dataset.uid, { title:'Cash Advance Approved', body:`Your CA of ₱${fmt(parseFloat(btn.dataset.amount)||0)} has been approved.`, icon:'💸', type:'ca_approved' });
+          if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, { title:'Cash Advance Approved', body:`Your CA of ₱${fmt(parseFloat(btn.dataset.amount)||0)} has been approved.`, icon:'💸', type:'ca_approved' }));
           Notifs.showToast(`CA approved for ${btn.dataset.name}`);
           loadApprovalsSub('all');
       }));
@@ -5702,7 +5709,7 @@ window.renderApprovals = async function(currentUser) {
           await db.collection('tasks').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
           const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
-          if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await notifyTaskInvolved(t2,{title:'✅ Task Approved',body:`"${btn.dataset.name}" has been approved!`,icon:'✅',type:'task_status'},currentUser.uid);}
+          if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'✅ Task Approved',body:`"${btn.dataset.name}" has been approved!`,icon:'✅',type:'task_status'},currentUser.uid));}
           Notifs.showToast(`"${btn.dataset.name}" approved!`);
           loadApprovalsSub('all');
       }));
@@ -5710,7 +5717,7 @@ window.renderApprovals = async function(currentUser) {
           await db.collection('tasks').doc(btn.dataset.id).update({ status:'in-progress', lastModifiedBy:currentUser.uid, lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
           const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
-          if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await notifyTaskInvolved(t2,{title:'🔁 Task Sent Back',body:`"${btn.dataset.name}" was sent back for revision.`,icon:'🔁',type:'task_status'},currentUser.uid);}
+          if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'🔁 Task Sent Back',body:`"${btn.dataset.name}" was sent back for revision.`,icon:'🔁',type:'task_status'},currentUser.uid));}
           Notifs.showToast(`"${btn.dataset.name}" sent back for revision.`);
           loadApprovalsSub('all');
       }));
@@ -5720,13 +5727,13 @@ window.renderApprovals = async function(currentUser) {
           if (!confirm(`Approve deletion of ${btn.dataset.name} (${btn.dataset.month}) payroll record?`)) return;
           if (btn.dataset.histId) await db.collection('salary_history').doc(btn.dataset.histId).delete();
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
-          if (btn.dataset.reqBy) await Notifs.send(btn.dataset.reqBy, { title:'✅ Payroll Delete Approved', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record has been approved.`, icon:'✅', type:'payroll_delete_approved' });
+          if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'✅ Payroll Delete Approved', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record has been approved.`, icon:'✅', type:'payroll_delete_approved' }));
           Notifs.showToast('Record deleted and requester notified.');
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.fr-deny-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'denied', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
-          if (btn.dataset.reqBy) await Notifs.send(btn.dataset.reqBy, { title:'❌ Payroll Delete Denied', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record was denied by the President.`, icon:'❌', type:'payroll_delete_denied' });
+          if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'❌ Payroll Delete Denied', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record was denied by the President.`, icon:'❌', type:'payroll_delete_denied' }));
           Notifs.showToast('Request denied and requester notified.');
           loadApprovalsSub('all');
       }));
@@ -5773,13 +5780,13 @@ window.renderApprovals = async function(currentUser) {
           if (!confirm(`Approve deletion of ${btn.dataset.name} (${btn.dataset.month}) payroll record?`)) return;
           if (btn.dataset.histId) await db.collection('salary_history').doc(btn.dataset.histId).delete();
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
-          if (btn.dataset.reqBy) await Notifs.send(btn.dataset.reqBy, { title:'✅ Payroll Delete Approved', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record has been approved.`, icon:'✅', type:'payroll_delete_approved' });
+          if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'✅ Payroll Delete Approved', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record has been approved.`, icon:'✅', type:'payroll_delete_approved' }));
           Notifs.showToast('Record deleted and requester notified.');
           loadApprovalsSub('finance-requests');
       }));
       wrap.querySelectorAll('.fr-deny-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'denied', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
-          if (btn.dataset.reqBy) await Notifs.send(btn.dataset.reqBy, { title:'❌ Payroll Delete Denied', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record was denied.`, icon:'❌', type:'payroll_delete_denied' });
+          if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'❌ Payroll Delete Denied', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record was denied.`, icon:'❌', type:'payroll_delete_denied' }));
           Notifs.showToast('Request denied.');
           loadApprovalsSub('finance-requests');
       }));
