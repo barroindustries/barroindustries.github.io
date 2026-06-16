@@ -2433,7 +2433,7 @@ function buildPayslipHTML(d) {
 <div class="page" id="payslip-page">
   <!-- Header -->
   <div class="header-top">
-    <img src="icons/barro-logo.png" class="company-logo" onerror="this.style.display='none'" alt=""/>
+    <img src="icons/barro-industries.png" class="company-logo" onerror="this.style.display='none'" alt=""/>
     <div>
       <div class="company-name">${co.toUpperCase()}</div>
       <div class="company-sub">
@@ -4042,7 +4042,7 @@ function renderBSQuoteBuilder(container, currentUser, currentRole) {
     <!-- Print Header -->
     <div class="bs-print-header" id="bs-ph">
       <div style="display:flex;align-items:flex-start;gap:12px">
-        <img src="icons/barro-logo.png" style="height:50px;flex-shrink:0" onerror="this.style.display='none'"/>
+        <img src="icons/barro-industries.png" style="height:50px;flex-shrink:0" onerror="this.style.display='none'"/>
         <div>
           <div style="font-size:16pt;font-weight:900;color:#37474f;letter-spacing:.4px">BRILLIANT STEEL</div>
           <div style="font-size:9pt;color:#555;margin-top:2px">Steel Fabrication &amp; Design</div>

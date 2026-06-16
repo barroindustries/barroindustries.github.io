@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (scripts/bump-version.sh)
-window.APP_VERSION = '9.4.20';
+window.APP_VERSION = '9.4.21';
 
 // ── Google Drive API Config ──────────────────────
 window.DRIVE_CONFIG = {
