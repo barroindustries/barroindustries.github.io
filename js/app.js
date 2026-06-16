@@ -3220,7 +3220,7 @@ function renderCompanyBiOps(ct) {
 
       <!-- Hero -->
       <div style="display:flex;align-items:center;gap:18px;background:linear-gradient(135deg,#0a0e09 0%,#0d1510 100%);border:1px solid rgba(255,215,0,0.18);border-radius:16px;padding:20px 22px;margin-bottom:18px">
-        <img src="icons/logo biops.png" alt="BI Ops" style="width:72px;height:72px;border-radius:14px;flex-shrink:0;box-shadow:0 0 20px rgba(255,215,0,0.2)"/>
+        <img src="icons/bi-logo.svg" alt="BI Ops" style="width:72px;height:72px;border-radius:14px;flex-shrink:0"/>
         <div>
           <div style="font-size:11px;font-weight:600;letter-spacing:2.5px;color:#B8860B;margin-bottom:4px">BI OPS SYSTEM</div>
           <div style="font-size:20px;font-weight:700;color:#fff;line-height:1.2">Barro Industries</div>
