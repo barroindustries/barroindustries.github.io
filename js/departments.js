@@ -1297,14 +1297,19 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
 
 // ── Payroll Management ───────────────────────────
 async function renderPayrollManagement(container, currentUser, currentRole) {
-  const [usersSnap, histSnap] = await Promise.all([
+  const [usersSnap, histSnap, delReqSnap] = await Promise.all([
     db.collection('users').get(),
-    db.collection('salary_history').orderBy('month','desc').limit(200).get().catch(()=>({docs:[]}))
+    db.collection('salary_history').orderBy('month','desc').limit(200).get().catch(()=>({docs:[]})),
+    db.collection('payroll_delete_requests').where('status','==','pending').get().catch(()=>({docs:[]}))
   ]);
   const employees = usersSnap.docs.map(d=>({id:d.id,...d.data()}))
     .filter(u=>u.role!=='partner')
     .sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
   const history   = histSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const delReqs   = delReqSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const pendingDelIds = new Set(delReqs.map(r=>r.historyId));
+  const canFinance = isFinancePriv();
+  const isPres     = isRealPresident(currentUser);
   const months    = [...new Set(history.map(h=>h.month))].sort().reverse();
   const now       = new Date();
   const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
@@ -1335,12 +1340,31 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         </div>
       </div>
     </div>
+    ${isPres && delReqs.length ? `
+    <div class="card" style="margin-top:14px;border:2px solid var(--danger)">
+      <div class="card-header" style="background:rgba(220,53,69,0.08)"><h3 style="color:var(--danger)">⚠️ Pending Payroll Delete Approvals (${delReqs.length})</h3></div>
+      <div class="card-body" style="padding:0">
+        <div class="table-wrap"><table class="data-table" id="del-req-table">
+          <thead><tr><th>Month</th><th>Employee</th><th>Requested By</th><th>Reason</th><th></th></tr></thead>
+          <tbody>${delReqs.map(r=>`<tr>
+            <td>${r.month||'—'}</td>
+            <td>${r.userName||'—'}</td>
+            <td style="font-size:11px">${r.requestedByName||'—'}</td>
+            <td style="font-size:11px;color:var(--text-muted)">${r.reason||'—'}</td>
+            <td style="white-space:nowrap">
+              <button class="btn-primary btn-sm del-req-approve" data-req-id="${r.id}" data-hist-id="${r.historyId}" title="Approve deletion">✓ Approve</button>
+              <button class="btn-secondary btn-sm del-req-deny" data-req-id="${r.id}" data-req-by="${r.requestedBy}" style="margin-left:4px" title="Deny">✕ Deny</button>
+            </td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>
+    </div>` : ''}
     <div class="card" style="margin-top:14px">
       <div class="card-header"><h3>Payroll History</h3></div>
       <div class="card-body" style="padding:0">
         ${!history.length?'<div class="empty-state" style="padding:20px"><p>No payroll records yet.</p></div>':
           `<div class="table-wrap"><table class="data-table" id="payroll-history-table">
-            <thead><tr><th>Month</th><th>Employee</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net Pay</th><th>Final Pay</th>${isRealPresident(currentUser)?'<th></th>':''}</tr></thead>
+            <thead><tr><th>Month</th><th>Employee</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net Pay</th><th>Final Pay</th><th>Ledger</th>${canFinance?'<th></th>':''}</tr></thead>
             <tbody>${history.slice(0,50).map(h=>`<tr>
               <td>${h.month||'—'}</td>
               <td>${h.userName||'—'}</td>
@@ -1349,9 +1373,13 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               <td style="color:var(--danger)">-₱${fmt(h.deductions)}</td>
               <td>₱${fmt(h.netPay)}</td>
               <td><strong>₱${fmt(h.finalPay)}</strong></td>
-              ${isRealPresident(currentUser)?`<td style="white-space:nowrap">
+              <td><span class="badge badge-blue" style="font-size:10px">Expense</span></td>
+              ${canFinance?`<td style="white-space:nowrap">
                 <button class="btn-secondary btn-sm hist-edit-btn" data-id="${h.id}" title="Edit">✎</button>
-                <button class="btn-danger btn-sm hist-del-btn" data-id="${h.id}" title="Delete" style="margin-left:4px">✕</button>
+                ${pendingDelIds.has(h.id)
+                  ? `<button class="btn-secondary btn-sm" style="margin-left:4px;opacity:0.6;cursor:default" disabled title="Awaiting president approval">⏳</button>`
+                  : `<button class="btn-danger btn-sm hist-del-btn" data-id="${h.id}" data-name="${h.userName||''}" data-month="${h.month||''}" title="${isPres?'Delete':'Request deletion'}" style="margin-left:4px">${isPres?'✕':'🗑'}</button>`
+                }
               </td>`:''}
             </tr>`).join('')}</tbody>
           </table></div>`}
@@ -1359,18 +1387,8 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     </div>
   `;
 
-  // ── History edit + delete (president only) ──────
-  if (isRealPresident(currentUser)) {
-    container.querySelectorAll('.hist-del-btn').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const rec = history.find(h => h.id === btn.dataset.id);
-        if (!confirm(`Delete payroll record for ${rec?.userName||'?'} (${rec?.month||'?'})? This cannot be undone.`)) return;
-        await db.collection('salary_history').doc(btn.dataset.id).delete();
-        Notifs.showToast('Record deleted');
-        loadFinanceContent(currentUser, currentRole, 'Payroll');
-      });
-    });
-
+  // ── History edit (Finance & above) ──────────────
+  if (canFinance) {
     container.querySelectorAll('.hist-edit-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const hid = btn.dataset.id;
@@ -1402,12 +1420,122 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             editedBy: currentUser.uid,
             editedAt: firebase.firestore.FieldValue.serverTimestamp()
           });
+          // Keep ledger entry in sync
+          const ledgerRef = `PAY-${rec.month}-${rec.userId}`;
+          const ledgerSnap = await db.collection('ledger').where('refNumber','==',ledgerRef).limit(1).get().catch(()=>({docs:[]}));
+          if (!ledgerSnap.docs.length && rec.userId) {
+            // Individual entry didn't exist yet — create it
+            await db.collection('ledger').add({
+              date: rec.month + '-01',
+              type: 'debit',
+              description: `Payslip — ${rec.userName||'?'} (${new Date(rec.month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})})`,
+              amount: finalPay,
+              category: 'Payroll Expense',
+              source: 'Finance',
+              refNumber: ledgerRef,
+              addedBy: currentUser.uid,
+              addedByName: window.userProfile?.displayName || currentUser.email,
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          } else if (ledgerSnap.docs.length) {
+            await ledgerSnap.docs[0].ref.update({ amount: finalPay });
+          }
           closeModal();
           Notifs.showToast('Payroll record updated!');
           loadFinanceContent(currentUser, currentRole, 'Payroll');
         });
       });
     });
+
+    // ── Delete: president deletes directly; finance requests approval ──
+    container.querySelectorAll('.hist-del-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const hid   = btn.dataset.id;
+        const name  = btn.dataset.name;
+        const month = btn.dataset.month;
+
+        if (isPres) {
+          if (!confirm(`Delete payroll record for ${name||'?'} (${month||'?'})? This cannot be undone.`)) return;
+          await db.collection('salary_history').doc(hid).delete();
+          // Remove matching ledger entry if any
+          const lSnap = await db.collection('ledger').where('refNumber','==',`PAY-${month}-${hid.split('_')[0]}`).limit(1).get().catch(()=>({docs:[]}));
+          if (lSnap.docs.length) await lSnap.docs[0].ref.delete();
+          Notifs.showToast('Record deleted');
+          loadFinanceContent(currentUser, currentRole, 'Payroll');
+        } else {
+          // Finance requests president approval
+          openModal('Request Payroll Record Deletion', `
+            <p style="margin-bottom:12px;color:var(--text-muted);font-size:13px">You are requesting deletion of the payroll record for <strong>${name}</strong> (${month}). The President must approve before it is deleted.</p>
+            <div class="form-group"><label>Reason for deletion</label><input id="del-reason" placeholder="e.g. Duplicate entry, incorrect data…"/></div>
+          `, `<button class="btn-primary" id="submit-del-req-btn">Submit for Approval</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+          document.getElementById('submit-del-req-btn').addEventListener('click', async () => {
+            const reason = document.getElementById('del-reason').value.trim();
+            if (!reason) { Notifs.showToast('Please enter a reason.','error'); return; }
+            const rec = history.find(h => h.id === hid);
+            await db.collection('payroll_delete_requests').add({
+              historyId:       hid,
+              userId:          rec?.userId || '',
+              userName:        name,
+              month,
+              reason,
+              requestedBy:     currentUser.uid,
+              requestedByName: window.userProfile?.displayName || currentUser.email,
+              status:          'pending',
+              createdAt:       firebase.firestore.FieldValue.serverTimestamp()
+            });
+            await Notifs.sendToOwner({
+              title: '🗑 Payroll Delete Request',
+              body:  `${window.userProfile?.displayName||currentUser.email} requested deletion of ${name}'s ${month} payroll record. Reason: ${reason}`,
+              icon: '🗑', type: 'payroll_delete_request'
+            });
+            closeModal();
+            Notifs.showToast('Deletion request sent to President for approval.');
+            loadFinanceContent(currentUser, currentRole, 'Payroll');
+          });
+        }
+      });
+    });
+
+    // ── President: approve or deny pending delete requests ──────────
+    if (isPres) {
+      container.querySelectorAll('.del-req-approve').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const reqId  = btn.dataset.reqId;
+          const histId = btn.dataset.histId;
+          const req    = delReqs.find(r => r.id === reqId);
+          if (!confirm(`Approve deletion of ${req?.userName||'?'} (${req?.month||'?'}) payroll record?`)) return;
+          await db.collection('salary_history').doc(histId).delete();
+          await db.collection('payroll_delete_requests').doc(reqId).update({ status:'approved', resolvedAt: firebase.firestore.FieldValue.serverTimestamp() });
+          if (req?.requestedBy) {
+            await Notifs.send(req.requestedBy, {
+              title: '✅ Payroll Delete Approved',
+              body: `Your request to delete ${req.userName}'s ${req.month} payroll record has been approved.`,
+              icon: '✅', type: 'payroll_delete_approved'
+            });
+          }
+          Notifs.showToast('Record deleted and requester notified.');
+          loadFinanceContent(currentUser, currentRole, 'Payroll');
+        });
+      });
+
+      container.querySelectorAll('.del-req-deny').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const reqId  = btn.dataset.reqId;
+          const reqBy  = btn.dataset.reqBy;
+          const req    = delReqs.find(r => r.id === reqId);
+          await db.collection('payroll_delete_requests').doc(reqId).update({ status:'denied', resolvedAt: firebase.firestore.FieldValue.serverTimestamp() });
+          if (reqBy) {
+            await Notifs.send(reqBy, {
+              title: '❌ Payroll Delete Denied',
+              body: `Your request to delete ${req?.userName||'?'}'s ${req?.month||'?'} payroll record was denied by the President.`,
+              icon: '❌', type: 'payroll_delete_denied'
+            });
+          }
+          Notifs.showToast('Request denied and requester notified.');
+          loadFinanceContent(currentUser, currentRole, 'Payroll');
+        });
+      });
+    }
   }
 
   // Shared state for gen-payroll to use after loadPayrollTable runs
@@ -1582,26 +1710,57 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     }
     await batch.commit();
 
-    // 2. Auto-write ledger debit entry for total payroll disbursement
-    const totalNetPay = employees.reduce((s, u) => {
-      const base  = u.salary||0, allow = u.allowance||0;
-      const caAdv = (_caOverrideByUser[u.id]?.amount ?? _caByUser[u.id]) || 0;
+    // 2. Auto-write per-employee ledger debit entries (Payroll Expense)
+    const monthLabel = new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'});
+    let totalNetPay = 0;
+    for (const u of employees) {
+      const base   = u.salary||0, allow = u.allowance||0;
+      const caAdv  = (_caOverrideByUser[u.id]?.amount ?? _caByUser[u.id]) || 0;
       const deduct = (u.deductions||0)+(u.sss||0)+(u.philhealth||0)+(u.pagibig||0)+(u.tax||0);
-      return s + (base + allow - deduct - caAdv);
-    }, 0);
-    if (totalNetPay > 0) {
-      await db.collection('ledger').add({
+      const empNet = base + allow - deduct - caAdv;
+      totalNetPay += empNet;
+      const ledgerRef = `PAY-${month}-${u.id}`;
+      // Upsert so re-generating the same month doesn't duplicate
+      const existing = await db.collection('ledger').where('refNumber','==',ledgerRef).limit(1).get().catch(()=>({docs:[]}));
+      const entry = {
         date:        month + '-01',
         type:        'debit',
-        description: `Payroll — ${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})} (${employees.length} employees)`,
-        amount:      totalNetPay,
-        category:    'Payroll',
+        description: `Payslip — ${u.displayName||u.email} (${monthLabel})`,
+        amount:      empNet,
+        category:    'Payroll Expense',
         source:      'Finance',
-        refNumber:   `PAY-${month}`,
+        refNumber:   ledgerRef,
         addedBy:     currentUser.uid,
         addedByName: window.userProfile?.displayName || currentUser.email,
         createdAt:   firebase.firestore.FieldValue.serverTimestamp()
-      });
+      };
+      if (existing.docs.length) {
+        await existing.docs[0].ref.update({ amount: empNet });
+      } else {
+        await db.collection('ledger').add(entry);
+      }
+    }
+    // Also write/update the aggregate summary entry
+    if (totalNetPay > 0) {
+      const aggRef  = `PAY-${month}`;
+      const aggSnap = await db.collection('ledger').where('refNumber','==',aggRef).limit(1).get().catch(()=>({docs:[]}));
+      const aggEntry = {
+        date:        month + '-01',
+        type:        'debit',
+        description: `Payroll Total — ${monthLabel} (${employees.length} employees)`,
+        amount:      totalNetPay,
+        category:    'Payroll',
+        source:      'Finance',
+        refNumber:   aggRef,
+        addedBy:     currentUser.uid,
+        addedByName: window.userProfile?.displayName || currentUser.email,
+        createdAt:   firebase.firestore.FieldValue.serverTimestamp()
+      };
+      if (aggSnap.docs.length) {
+        await aggSnap.docs[0].ref.update({ amount: totalNetPay, description: aggEntry.description });
+      } else {
+        await db.collection('ledger').add(aggEntry);
+      }
     }
 
     // 4. Apply CA deductions to actual cash_advance balances
@@ -4240,35 +4399,17 @@ function renderBSQuoteBuilder(container, currentUser, currentRole) {
   `;
 
   // ── Quote Builder Logic ──────────────────────────
-  const BS_PRODUCTS = {
-    'Steel Fabrication': [
-      { code:'SF-001', name:'Custom Steel Counter', unit:'unit', baseRate:4500 },
-      { code:'SF-002', name:'Steel Work Table',     unit:'unit', baseRate:3800 },
-      { code:'SF-003', name:'Steel Shelving Unit',  unit:'unit', baseRate:2200 },
-      { code:'SF-004', name:'Steel Cabinet',        unit:'unit', baseRate:5500 },
-      { code:'SF-005', name:'Steel Frame Structure',unit:'set',  baseRate:8000 },
-    ],
-    'Stainless Products': [
-      { code:'SS-001', name:'Stainless Steel Sink',      unit:'unit', baseRate:6000 },
-      { code:'SS-002', name:'Stainless Hood / Exhaust',  unit:'unit', baseRate:7500 },
-      { code:'SS-003', name:'Stainless Wall Panel',      unit:'sqm',  baseRate:1200 },
-      { code:'SS-004', name:'Stainless Prep Table',      unit:'unit', baseRate:4200 },
-      { code:'SS-005', name:'Stainless Grease Trap',     unit:'unit', baseRate:3000 },
-    ],
-    'Aluminum Works': [
-      { code:'AL-001', name:'Aluminum Partition',  unit:'sqm',  baseRate:950  },
-      { code:'AL-002', name:'Aluminum Door Frame', unit:'unit', baseRate:4800 },
-      { code:'AL-003', name:'Aluminum Window',     unit:'unit', baseRate:3500 },
-    ],
-    'Installation': [
-      { code:'IN-001', name:'Installation — Standard',  unit:'lot', baseRate:5000  },
-      { code:'IN-002', name:'Installation — Heavy',     unit:'lot', baseRate:12000 },
-      { code:'IN-003', name:'Site Survey / Inspection', unit:'trip',baseRate:1500  },
-    ],
-  };
-
   let bsLines = [];
   let bsRowCount = 0;
+  let allProds = []; // loaded from Firestore
+
+  // Load products from Firestore (seeded by renderProductDatabase if empty)
+  (async () => {
+    try {
+      const snap = await db.collection('products').get();
+      allProds = snap.docs.map(d => ({ ...d.data(), cat: d.data().category || 'Other' }));
+    } catch(e) { allProds = []; }
+  })();
 
   // Quote number builder
   const buildQno = () => {
@@ -4309,7 +4450,6 @@ function renderBSQuoteBuilder(container, currentUser, currentRole) {
   // Product search
   const searchEl = document.getElementById('bs-product-search');
   const dd       = document.getElementById('bs-search-dd');
-  const allProds = Object.entries(BS_PRODUCTS).flatMap(([cat,prods]) => prods.map(p=>({...p,cat})));
 
   const filterProds = (q) => {
     const term = q.toLowerCase();
@@ -4669,35 +4809,65 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
       const snap = await db.collection('bs_quotes').doc(b.dataset.id).get();
       const q = snap.data();
       openModal(`✎ Edit Quote — ${b.dataset.qno}`, `
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Edit this quotation and return it to the submitter for filing.</p>
-        <div class="form-group"><label>President's Notes / Feedback</label>
-          <textarea id="pres-notes" rows="4" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Explain what changes are needed…">${q.presidentNotes||''}</textarea>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Edit this quotation directly. You can approve after editing, or return it to the submitter.</p>
+        <div class="form-group"><label>Client Name</label>
+          <input id="pres-client" type="text" value="${(q.clientName||'').replace(/"/g,'&quot;')}" style="width:100%"/>
         </div>
-        <div class="form-group"><label>Adjusted Total (₱) — optional</label>
+        <div class="form-group"><label>Client Company</label>
+          <input id="pres-company" type="text" value="${(q.clientCompany||'').replace(/"/g,'&quot;')}" style="width:100%"/>
+        </div>
+        <div class="form-group"><label>Scope / Description</label>
+          <textarea id="pres-scope" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical">${q.scope||q.description||''}</textarea>
+        </div>
+        <div class="form-group"><label>Adjusted Total (₱)</label>
           <input id="pres-total" type="number" value="${q.total||q.grandTotal||0}" style="width:100%"/>
         </div>
+        <div class="form-group"><label>President's Notes / Feedback</label>
+          <textarea id="pres-notes" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Optional notes for the submitter…">${q.presidentNotes||''}</textarea>
+        </div>
       `, `
-        <button class="btn-primary" id="pres-return-btn">↩ Return to Submitter</button>
+        <button class="btn-success" id="pres-approve-edit-btn">✅ Save &amp; Approve</button>
+        <button class="btn-primary" id="pres-return-btn">↩ Save &amp; Return</button>
         <button class="btn-secondary" onclick="closeModal()">Cancel</button>
       `);
-      document.getElementById('pres-return-btn').addEventListener('click', async () => {
-        const notes = document.getElementById('pres-notes').value.trim();
-        const newTotal = parseFloat(document.getElementById('pres-total').value)||q.total||0;
+
+      const getEdits = () => ({
+        clientName:    document.getElementById('pres-client').value.trim(),
+        clientCompany: document.getElementById('pres-company').value.trim(),
+        scope:         document.getElementById('pres-scope').value.trim(),
+        total:         parseFloat(document.getElementById('pres-total').value)||q.total||0,
+        presidentNotes: document.getElementById('pres-notes').value.trim(),
+        editedByPresident: true,
+        editedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        editedBy: currentUser.uid
+      });
+
+      document.getElementById('pres-approve-edit-btn').addEventListener('click', async () => {
+        const edits = getEdits();
         await db.collection('bs_quotes').doc(b.dataset.id).update({
-          status: 'needs_revision',
-          approvalStatus: 'needs_revision',
-          presidentNotes: notes,
-          total: newTotal,
-          returnedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          returnedBy: currentUser.uid
+          ...edits, status: 'filed', approvalStatus: 'approved',
+          approvedAt: firebase.firestore.FieldValue.serverTimestamp(), approvedBy: currentUser.uid
+        });
+        await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'approved'})));
+        if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'✅ Quote Approved!', body:`Quotation "${b.dataset.qno}" for ${edits.clientName||b.dataset.name} was approved and filed.`, icon:'✅', type:'quote_approved' });
+        closeModal();
+        Notifs.showToast('Quote edited, approved and filed!');
+        renderBSQuotationsSummary(container, currentUser, currentRole);
+      });
+
+      document.getElementById('pres-return-btn').addEventListener('click', async () => {
+        const edits = getEdits();
+        await db.collection('bs_quotes').doc(b.dataset.id).update({
+          ...edits, status: 'needs_revision', approvalStatus: 'needs_revision',
+          returnedAt: firebase.firestore.FieldValue.serverTimestamp(), returnedBy: currentUser.uid
         });
         if (b.dataset.by) await Notifs.send(b.dataset.by, {
           title: '↩ Quote Returned for Revision',
-          body: `"${b.dataset.qno}" for ${b.dataset.name} was reviewed and returned. Please check the notes and re-submit.`,
+          body: `"${b.dataset.qno}" for ${edits.clientName||b.dataset.name} was reviewed and returned. Please check the notes and re-submit.`,
           icon: '✎', type: 'quote_returned'
         });
         closeModal();
-        Notifs.showToast('Quote returned to submitter.');
+        Notifs.showToast('Quote updated and returned to submitter.');
         renderBSQuotationsSummary(container, currentUser, currentRole);
       });
     });
@@ -5019,6 +5189,7 @@ window.renderApprovals = async function(currentUser) {
         Attendance${pendingExt>0?` <span class="nav-badge">${pendingExt}</span>`:''}
       </button>
       <button class="subtab-btn" data-sub="roa">Quote / ROA</button>
+      <button class="subtab-btn" data-sub="quote-files">📁 Quote Files</button>
       <button class="subtab-btn" data-sub="ca">
         Cash Advances${pendingCA>0?` <span class="nav-badge">${pendingCA}</span>`:''}
       </button>
@@ -5438,6 +5609,8 @@ window.renderApprovals = async function(currentUser) {
         });
       });
 
+    } else if (sub === 'quote-files') {
+      await renderBSQuotationFiles(wrap, currentUser, window.currentRole || 'president');
     } else {
       // Quote / ROA approvals
       const snap = await db.collection('approval_requests').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));

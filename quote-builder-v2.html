@@ -1710,9 +1710,7 @@ function closeVerifyModal(e){
 
 function doPrint(){
   if(quoteStatus!=='filed'){
-    if(!confirm('This quote has not been filed yet.\n\nFile it before printing to keep records.\n\nOK → Verify & File first\nCancel → Print anyway')){
-      window.print(); return;
-    }
+    alert('Please file this quote before printing. Tap "Verify & File" to complete filing first.');
     doVerifyAndFile(); return;
   }
   window.print();
@@ -1720,9 +1718,7 @@ function doPrint(){
 
 function doShare(){
   if(quoteStatus!=='filed'){
-    if(!confirm('This quote has not been filed yet.\n\nFile it before sharing to keep records.\n\nOK → Verify & File first\nCancel → Share anyway')){
-      shareQuote(); return;
-    }
+    alert('Please file this quote before sharing. Tap "Verify & File" to complete filing first.');
     doVerifyAndFile(); return;
   }
   shareQuote();

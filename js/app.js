@@ -62,7 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
       Notifs.startListener(user.uid);
       Notifs.initPush(user.uid);
       Notifs.checkDeadlines(user.uid);
-      Notifs.checkAttendanceReminder(user.uid, userProfile.displayName);
+      if (userProfile.role !== 'partner') Notifs.checkAttendanceReminder(user.uid, userProfile.displayName);
       checkPayrollDuties(user);
       checkCAReminder(user);
       buildNav();
@@ -406,6 +406,56 @@ function applyUserUI() {
   if (sr) sr.textContent = roleName;
   const sd = document.getElementById('sidebar-user-dept');
   if (sd) sd.textContent = currentDepts.join(' · ') || '';
+
+  // Prompt for profile photo once per session if missing
+  if (!userProfile.photoUrl && !sessionStorage.getItem('photo-prompt-shown')) {
+    sessionStorage.setItem('photo-prompt-shown', '1');
+    setTimeout(showPhotoPrompt, 1200);
+  }
+}
+
+function showPhotoPrompt() {
+  if (document.getElementById('photo-prompt-banner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'photo-prompt-banner';
+  banner.style.cssText = `
+    position:fixed;bottom:24px;right:24px;z-index:9999;
+    background:var(--surface2,#1e2433);border:1px solid var(--border,#2a3147);
+    border-radius:16px;padding:18px 20px;width:290px;
+    box-shadow:0 8px 32px rgba(0,0,0,0.35);
+    display:flex;flex-direction:column;gap:12px;
+    animation:slideUpIn .3s ease;
+  `;
+  banner.innerHTML = `
+    <style>
+      @keyframes slideUpIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+    </style>
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="width:44px;height:44px;border-radius:50%;background:var(--surface3,#252b3b);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">📷</div>
+      <div>
+        <div style="font-weight:600;font-size:14px;color:var(--text,#e2e8f0)">Add a profile photo</div>
+        <div style="font-size:12px;color:var(--text-muted,#8b9ab5);margin-top:2px">Help your teammates recognize you</div>
+      </div>
+      <button id="photo-prompt-close" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--text-muted,#8b9ab5);font-size:18px;line-height:1;padding:0;flex-shrink:0">×</button>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button id="photo-prompt-upload" style="flex:1;padding:8px;border-radius:10px;border:none;background:var(--accent,#4f80ff);color:#fff;font-size:13px;font-weight:600;cursor:pointer">Upload Photo</button>
+      <button id="photo-prompt-later" style="flex:1;padding:8px;border-radius:10px;border:1px solid var(--border,#2a3147);background:transparent;color:var(--text-muted,#8b9ab5);font-size:13px;cursor:pointer">Later</button>
+    </div>
+  `;
+  document.body.appendChild(banner);
+
+  document.getElementById('photo-prompt-close').onclick = () => banner.remove();
+  document.getElementById('photo-prompt-later').onclick = () => banner.remove();
+  document.getElementById('photo-prompt-upload').onclick = () => {
+    banner.remove();
+    openProfileDrawer();
+    // Trigger the photo picker after drawer opens
+    setTimeout(() => {
+      const wrap = document.getElementById('profile-photo-wrap');
+      if (wrap) wrap.click();
+    }, 400);
+  };
 }
 
 // ── Login ─────────────────────────────────────────
@@ -625,6 +675,7 @@ function getSidebarItems() {
     items.push({ icon:'calendar',      label:'Attendance',       page:'attendance'                     });
     items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'                    });
     items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
+    items.push({ icon:'package',       label:'Product Database', page:'product-database', section:true, sectionLabel:'Catalog' });
     items.push({ icon:'help-circle',   label:'Help & Setup',     page:'help',            section:true  });
   } else if (partner) {
     // ── External Partner role ──
@@ -825,6 +876,208 @@ function renderQuoteBuilderIframe() {
       allow="print" loading="lazy"></iframe>`;
 }
 
+// ── Product Database (president only) ────────────
+const DEFAULT_PRODUCTS = {
+  'Steel Fabrication': [
+    { code:'SF-001', name:'Custom Steel Counter', unit:'unit', baseRate:4500 },
+    { code:'SF-002', name:'Steel Work Table',     unit:'unit', baseRate:3800 },
+    { code:'SF-003', name:'Steel Shelving Unit',  unit:'unit', baseRate:2200 },
+    { code:'SF-004', name:'Steel Cabinet',        unit:'unit', baseRate:5500 },
+    { code:'SF-005', name:'Steel Frame Structure',unit:'set',  baseRate:8000 },
+  ],
+  'Stainless Products': [
+    { code:'SS-001', name:'Stainless Steel Sink',     unit:'unit', baseRate:6000 },
+    { code:'SS-002', name:'Stainless Hood / Exhaust', unit:'unit', baseRate:7500 },
+    { code:'SS-003', name:'Stainless Wall Panel',     unit:'sqm',  baseRate:1200 },
+    { code:'SS-004', name:'Stainless Prep Table',     unit:'unit', baseRate:4200 },
+    { code:'SS-005', name:'Stainless Grease Trap',    unit:'unit', baseRate:3000 },
+  ],
+  'Aluminum Works': [
+    { code:'AL-001', name:'Aluminum Partition',  unit:'sqm',  baseRate:950  },
+    { code:'AL-002', name:'Aluminum Door Frame', unit:'unit', baseRate:4800 },
+    { code:'AL-003', name:'Aluminum Window',     unit:'unit', baseRate:3500 },
+  ],
+  'Installation': [
+    { code:'IN-001', name:'Installation — Standard',  unit:'lot',  baseRate:5000  },
+    { code:'IN-002', name:'Installation — Heavy',     unit:'lot',  baseRate:12000 },
+    { code:'IN-003', name:'Site Survey / Inspection', unit:'trip', baseRate:1500  },
+  ],
+};
+
+async function seedProductsIfEmpty() {
+  const snap = await db.collection('products').limit(1).get();
+  if (!snap.empty) return;
+  const batch = db.batch();
+  Object.entries(DEFAULT_PRODUCTS).forEach(([cat, prods]) => {
+    prods.forEach(p => {
+      const ref = db.collection('products').doc(p.code);
+      batch.set(ref, { ...p, category: cat, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    });
+  });
+  await batch.commit();
+}
+
+async function renderProductDatabase() {
+  if (!isPresident()) return;
+  const c = document.getElementById('page-content');
+  c.innerHTML = '<div class="loading-placeholder">Loading products…</div>';
+
+  await seedProductsIfEmpty();
+  const snap = await db.collection('products').orderBy('category').get();
+  const products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  // Group by category
+  const byCategory = {};
+  products.forEach(p => {
+    const cat = p.category || 'Uncategorized';
+    if (!byCategory[cat]) byCategory[cat] = [];
+    byCategory[cat].push(p);
+  });
+
+  const allCategories = [...new Set([...Object.keys(DEFAULT_PRODUCTS), ...Object.keys(byCategory)])];
+
+  c.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+      <h2 style="font-size:20px;font-weight:800;color:var(--text)">📦 Product Database</h2>
+      <button class="btn-primary btn-sm" id="pdb-add-btn">+ Add Product</button>
+    </div>
+
+    <div id="pdb-add-form" style="display:none" class="card" style="margin-bottom:16px">
+      <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group"><label>Product Name</label><input type="text" id="pdb-f-name" placeholder="e.g. Steel Shelf"></div>
+        <div class="form-group"><label>Code</label><input type="text" id="pdb-f-code" placeholder="e.g. SF-006"></div>
+        <div class="form-group"><label>Category</label>
+          <select id="pdb-f-cat">
+            ${allCategories.map(c=>`<option>${c}</option>`).join('')}
+            <option value="__new__">+ New Category…</option>
+          </select>
+        </div>
+        <div class="form-group" id="pdb-newcat-wrap" style="display:none"><label>New Category Name</label><input type="text" id="pdb-f-newcat" placeholder="Category name"></div>
+        <div class="form-group"><label>Unit</label><input type="text" id="pdb-f-unit" placeholder="unit / sqm / lot"></div>
+        <div class="form-group"><label>Base Rate (₱)</label><input type="number" id="pdb-f-rate" placeholder="0.00" min="0" step="0.01"></div>
+        <div style="grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn-secondary btn-sm" id="pdb-cancel-btn">Cancel</button>
+          <button class="btn-primary btn-sm" id="pdb-save-btn">Save Product</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="pdb-tables">
+      ${allCategories.map(cat => {
+        const prods = byCategory[cat] || [];
+        return `
+        <div class="card" style="margin-bottom:14px">
+          <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+            <h3 style="font-size:14px;font-weight:700">${cat}</h3>
+            <span style="font-size:12px;color:var(--text-muted)">${prods.length} item${prods.length!==1?'s':''}</span>
+          </div>
+          <div class="card-body" style="padding:0">
+            ${!prods.length ? '<div style="padding:16px;color:var(--text-muted);font-size:13px">No products in this category.</div>' : `
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Code</th><th>Product Name</th><th>Unit</th><th style="text-align:right">Base Rate</th><th></th></tr></thead>
+                <tbody>
+                  ${prods.map(p => `
+                    <tr data-pid="${p.id}">
+                      <td><span style="font-family:monospace;font-size:12px">${p.code||p.id}</span></td>
+                      <td><span class="pdb-name-cell">${p.name}</span></td>
+                      <td><span class="pdb-unit-cell">${p.unit||'—'}</span></td>
+                      <td style="text-align:right"><span class="pdb-rate-cell">₱${Number(p.baseRate||0).toLocaleString('en-PH',{minimumFractionDigits:2})}</span></td>
+                      <td style="text-align:right;white-space:nowrap">
+                        <button class="btn-secondary btn-sm pdb-edit-btn" data-pid="${p.id}">Edit</button>
+                        <button class="btn-danger btn-sm pdb-del-btn" data-pid="${p.id}" data-name="${(p.name||'').replace(/"/g,'&quot;')}" style="margin-left:4px">Delete</button>
+                      </td>
+                    </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>`}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+
+  // Add product toggle
+  document.getElementById('pdb-add-btn').addEventListener('click', () => {
+    document.getElementById('pdb-add-form').style.display = '';
+    document.getElementById('pdb-add-btn').style.display = 'none';
+  });
+  document.getElementById('pdb-cancel-btn').addEventListener('click', () => {
+    document.getElementById('pdb-add-form').style.display = 'none';
+    document.getElementById('pdb-add-btn').style.display = '';
+  });
+  document.getElementById('pdb-f-cat').addEventListener('change', e => {
+    document.getElementById('pdb-newcat-wrap').style.display = e.target.value === '__new__' ? '' : 'none';
+  });
+
+  // Save new product
+  document.getElementById('pdb-save-btn').addEventListener('click', async () => {
+    const name    = document.getElementById('pdb-f-name').value.trim();
+    const code    = document.getElementById('pdb-f-code').value.trim().toUpperCase();
+    const catSel  = document.getElementById('pdb-f-cat').value;
+    const cat     = catSel === '__new__' ? document.getElementById('pdb-f-newcat').value.trim() : catSel;
+    const unit    = document.getElementById('pdb-f-unit').value.trim();
+    const rate    = parseFloat(document.getElementById('pdb-f-rate').value) || 0;
+    if (!name || !code || !cat) { Notifs.showToast('Name, code, and category are required', 'error'); return; }
+    const btn = document.getElementById('pdb-save-btn');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      await db.collection('products').doc(code).set({ code, name, category: cat, unit, baseRate: rate, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      Notifs.showToast('Product saved!', 'success');
+      renderProductDatabase();
+    } catch(e) { Notifs.showToast('Error saving product', 'error'); btn.disabled=false; btn.textContent='Save Product'; }
+  });
+
+  // Edit & Delete
+  c.addEventListener('click', async e => {
+    // DELETE
+    if (e.target.classList.contains('pdb-del-btn')) {
+      const pid  = e.target.dataset.pid;
+      const name = e.target.dataset.name;
+      if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+      await db.collection('products').doc(pid).delete();
+      Notifs.showToast('Product deleted', 'success');
+      renderProductDatabase();
+      return;
+    }
+    // EDIT — inline row editing
+    if (e.target.classList.contains('pdb-edit-btn')) {
+      const pid = e.target.dataset.pid;
+      const tr  = c.querySelector(`tr[data-pid="${pid}"]`);
+      if (!tr) return;
+      const prod = products.find(p => p.id === pid);
+      if (!prod) return;
+      tr.innerHTML = `
+        <td><span style="font-family:monospace;font-size:12px">${prod.code||prod.id}</span></td>
+        <td><input type="text" class="pdb-inline-inp" id="pdb-e-name" value="${(prod.name||'').replace(/"/g,'&quot;')}" style="width:100%"></td>
+        <td><input type="text" class="pdb-inline-inp" id="pdb-e-unit" value="${prod.unit||''}" style="width:60px"></td>
+        <td><input type="number" class="pdb-inline-inp" id="pdb-e-rate" value="${prod.baseRate||0}" min="0" step="0.01" style="width:90px;text-align:right"></td>
+        <td style="white-space:nowrap">
+          <button class="btn-primary btn-sm pdb-save-edit-btn" data-pid="${pid}">Save</button>
+          <button class="btn-secondary btn-sm pdb-cancel-edit-btn" style="margin-left:4px">Cancel</button>
+        </td>`;
+      return;
+    }
+    // SAVE EDIT
+    if (e.target.classList.contains('pdb-save-edit-btn')) {
+      const pid  = e.target.dataset.pid;
+      const name = document.getElementById('pdb-e-name')?.value.trim();
+      const unit = document.getElementById('pdb-e-unit')?.value.trim();
+      const rate = parseFloat(document.getElementById('pdb-e-rate')?.value) || 0;
+      if (!name) { Notifs.showToast('Name is required', 'error'); return; }
+      e.target.disabled = true; e.target.textContent = 'Saving…';
+      await db.collection('products').doc(pid).update({ name, unit, baseRate: rate, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      Notifs.showToast('Product updated!', 'success');
+      renderProductDatabase();
+      return;
+    }
+    // CANCEL EDIT
+    if (e.target.classList.contains('pdb-cancel-edit-btn')) {
+      renderProductDatabase();
+    }
+  });
+}
+
 // ── Navigate ──────────────────────────────────────
 function navigateTo(page) {
   currentPage = page;
@@ -876,6 +1129,7 @@ function navigateTo(page) {
     case 'team-directory':   window.renderTeamTab?.(); break;
     case 'attendance':       window.renderAttendancePage?.(); break;
     case 'cash-advances':    window.renderCashAdvancePage?.(); break;
+    case 'product-database': isPresident() ? renderProductDatabase() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔒</div><h4>Access Denied</h4></div>`); break;
     default: c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><h4>Page not found</h4></div>`;
   }
 }
@@ -905,12 +1159,7 @@ async function renderPartnerDashboard() {
   c.innerHTML = `
     <div class="page-header"><h2>👋 Welcome, ${(u.displayName||'Partner').split(' ')[0]}!</h2></div>
     <div id="live-clock" class="live-clock-line"></div>
-    <div class="kpi-row" style="margin-bottom:16px" id="partner-kpi">
-      <div class="kpi-card" style="opacity:.5"><div class="kpi-label">Open Tasks</div><div class="kpi-value">—</div></div>
-      <div class="kpi-card" style="opacity:.5"><div class="kpi-label">Completed</div><div class="kpi-value">—</div></div>
-      <div class="kpi-card" style="opacity:.5"><div class="kpi-label">My Quotes</div><div class="kpi-value">—</div></div>
-      <div class="kpi-card" style="opacity:.5"><div class="kpi-label">Quote Value</div><div class="kpi-value">—</div></div>
-    </div>
+    <div id="partner-kpi"></div>
     <div id="partner-cards-row" style="display:flex;flex-direction:column;gap:14px">
       <div id="partner-tasks-card"></div>
       <div id="partner-quotes-card"></div>
@@ -948,12 +1197,6 @@ async function renderPartnerDashboard() {
     const pendingApproval = quotes.filter(q=>q.status==='pending_approval'||q.approvalStatus==='pending_review'||q.status==='sent');
     const filedQuotes     = quotes.filter(q=>q.status==='filed'||q.approvalStatus==='approved');
 
-    document.getElementById('partner-kpi').innerHTML = `
-      <div class="kpi-card accent"><div class="kpi-label">Open Tasks</div><div class="kpi-value">${open.length}</div></div>
-      <div class="kpi-card green"><div class="kpi-label">Filed Quotes</div><div class="kpi-value">${filedQuotes.length}</div></div>
-      <div class="kpi-card ${needsRevision.length?'warn':''}"><div class="kpi-label">${needsRevision.length?'⚠ Needs Revision':'Pending Approval'}</div><div class="kpi-value">${needsRevision.length||pendingApproval.length}</div></div>
-      <div class="kpi-card accent"><div class="kpi-label">Quote Value</div><div class="kpi-value" style="font-size:16px">₱${totalQVal.toLocaleString()}</div></div>
-    `;
 
     document.getElementById('partner-tasks-card').innerHTML = `
       <div class="card">
