@@ -3195,6 +3195,7 @@ async function renderCompany() {
       <button class="subtab-btn" data-tab="policies">Policies</button>
       <button class="subtab-btn" data-tab="downloads">Downloads</button>
       <button class="subtab-btn" data-tab="handbook">Handbook</button>
+      <button class="subtab-btn" data-tab="bi-ops">BI Ops System</button>
     </div>
     <div id="company-tab-content"></div>
   `;
@@ -3206,9 +3207,85 @@ async function renderCompany() {
     else if (tab==='policies')   renderCompanyPolicies(ct, canAdd);
     else if (tab==='downloads')  renderCompanyDownloads(ct, canAdd);
     else if (tab==='handbook')   renderCompanyHandbook(ct, canAdd);
+    else if (tab==='bi-ops')     renderCompanyBiOps(ct);
   }
   c.querySelectorAll('.subtab-btn').forEach(b=>b.addEventListener('click',()=>switchCompanyTab(b.dataset.tab)));
   switchCompanyTab('overview');
+}
+
+// ── Company: BI Ops System ────────────────────────
+function renderCompanyBiOps(ct) {
+  ct.innerHTML = `
+    <div style="padding:16px 0">
+
+      <!-- Hero -->
+      <div style="display:flex;align-items:center;gap:18px;background:linear-gradient(135deg,#0a0e09 0%,#0d1510 100%);border:1px solid rgba(255,215,0,0.18);border-radius:16px;padding:20px 22px;margin-bottom:18px">
+        <img src="icons/logo biops.png" alt="BI Ops" style="width:72px;height:72px;border-radius:14px;flex-shrink:0;box-shadow:0 0 20px rgba(255,215,0,0.2)"/>
+        <div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:2.5px;color:#B8860B;margin-bottom:4px">BI OPS SYSTEM</div>
+          <div style="font-size:20px;font-weight:700;color:#fff;line-height:1.2">Barro Industries</div>
+          <div style="font-size:13px;color:#8a8070;margin-top:3px">Business Intelligence Operations Platform</div>
+        </div>
+      </div>
+
+      <!-- About -->
+      <div class="co-section">
+        <h3 class="co-section-title">What is BI Ops?</h3>
+        <p class="co-body">
+          <strong style="color:var(--gold)">BI Ops</strong> is Barro Industries' proprietary intelligence hub — a centralized platform for data analytics,
+          reporting, and operational management across all business units. It transforms raw data into clear,
+          actionable insights, giving every team member a single source of truth for company performance.
+        </p>
+      </div>
+
+      <!-- Capabilities -->
+      <div class="co-section">
+        <h3 class="co-section-title">Core Capabilities</h3>
+        <div class="co-biz-grid" style="grid-template-columns:1fr 1fr">
+          <div class="co-value-card">
+            <div class="co-value-icon" style="background:rgba(255,214,10,0.10)"><i data-lucide="layout-dashboard" style="width:20px;height:20px;stroke:var(--gold)"></i></div>
+            <div class="co-value-name">Unified Dashboards</div>
+            <div class="co-value-desc">Real-time KPIs, revenue metrics, and operational data across all departments in one view.</div>
+          </div>
+          <div class="co-value-card">
+            <div class="co-value-icon" style="background:rgba(10,132,255,0.10)"><i data-lucide="link" style="width:20px;height:20px;stroke:#0A84FF"></i></div>
+            <div class="co-value-name">Data Integration</div>
+            <div class="co-value-desc">Connects with existing tools and data sources without disrupting current workflows.</div>
+          </div>
+          <div class="co-value-card">
+            <div class="co-value-icon" style="background:rgba(48,209,88,0.10)"><i data-lucide="zap" style="width:20px;height:20px;stroke:#30D158"></i></div>
+            <div class="co-value-name">Automated Reporting</div>
+            <div class="co-value-desc">Scheduled reports and alerts surface critical information automatically — no manual pulls.</div>
+          </div>
+          <div class="co-value-card">
+            <div class="co-value-icon" style="background:rgba(255,159,10,0.10)"><i data-lucide="search" style="width:20px;height:20px;stroke:#FF9F0A"></i></div>
+            <div class="co-value-name">Deep Analytics</div>
+            <div class="co-value-desc">Drill into trends, anomalies, and forecasts with tools built for both executives and staff.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Platform -->
+      <div class="co-section">
+        <h3 class="co-section-title">Available On</h3>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+          ${[['smartphone','iOS','Mobile App'],['smartphone','Android','Mobile App'],['monitor','Desktop','Mac & Windows'],['globe','Web','Browser']].map(([icon,name,sub])=>`
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 10px;text-align:center">
+              <i data-lucide="${icon}" style="width:22px;height:22px;stroke:var(--gold);margin-bottom:6px"></i>
+              <div style="font-size:13px;font-weight:600;color:var(--text)">${name}</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${sub}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <!-- Footer badge -->
+      <div style="text-align:center;padding:14px 0 4px">
+        <span style="font-size:10px;font-weight:600;letter-spacing:2px;color:#4a4035">BARRO INDUSTRIES · BI OPS · 2026</span>
+      </div>
+    </div>
+  `;
+  if (window.lucide) lucide.createIcons();
 }
 
 // ── Company: Overview ─────────────────────────────

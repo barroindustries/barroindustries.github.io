@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Barro Industries — BI Ops System</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #0a0c0e;
+    color: #e8e0cc;
+    min-height: 100vh;
+  }
+
+  /* Hero */
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 72px 24px 48px;
+    text-align: center;
+    border-bottom: 1px solid rgba(255,215,0,0.12);
+  }
+  .logo-wrap {
+    width: 140px;
+    height: 140px;
+    margin-bottom: 28px;
+    filter: drop-shadow(0 0 24px rgba(255,215,0,0.18));
+  }
+  .logo-wrap img { width: 100%; height: 100%; border-radius: 32px; }
+  .hero h1 {
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    color: #fff;
+    margin-bottom: 6px;
+  }
+  .hero .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 3px;
+    color: #B8860B;
+    background: rgba(255,215,0,0.08);
+    border: 1px solid rgba(255,215,0,0.2);
+    border-radius: 4px;
+    padding: 4px 12px;
+    margin-bottom: 20px;
+  }
+  .hero p {
+    font-size: 17px;
+    line-height: 1.7;
+    color: #a89f88;
+    max-width: 540px;
+  }
+
+  /* Gold divider */
+  .divider {
+    width: 60px;
+    height: 2px;
+    background: linear-gradient(90deg, #FFD700, #B8860B);
+    border-radius: 1px;
+    margin: 28px auto;
+  }
+
+  /* Content sections */
+  .content {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 56px 32px 80px;
+  }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 3px;
+    color: #B8860B;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .section-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 14px;
+  }
+  .section-body {
+    font-size: 15px;
+    line-height: 1.8;
+    color: #a89f88;
+    margin-bottom: 48px;
+  }
+
+  /* Pillars grid */
+  .pillars {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 56px;
+  }
+  .pillar {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,215,0,0.12);
+    border-radius: 12px;
+    padding: 24px 20px;
+  }
+  .pillar-icon {
+    font-size: 22px;
+    margin-bottom: 12px;
+  }
+  .pillar h3 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #FFD700;
+    margin-bottom: 8px;
+    letter-spacing: 0.2px;
+  }
+  .pillar p {
+    font-size: 13px;
+    line-height: 1.7;
+    color: #8a8070;
+  }
+
+  /* Stat row */
+  .stats {
+    display: flex;
+    gap: 0;
+    border: 1px solid rgba(255,215,0,0.12);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 56px;
+  }
+  .stat {
+    flex: 1;
+    padding: 28px 20px;
+    text-align: center;
+    border-right: 1px solid rgba(255,215,0,0.12);
+  }
+  .stat:last-child { border-right: none; }
+  .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: #FFD700;
+    letter-spacing: -0.5px;
+  }
+  .stat-label {
+    font-size: 12px;
+    color: #6a6050;
+    margin-top: 4px;
+    letter-spacing: 0.5px;
+  }
+
+  /* Footer */
+  footer {
+    border-top: 1px solid rgba(255,215,0,0.08);
+    padding: 28px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+  footer .brand {
+    font-size: 13px;
+    font-weight: 600;
+    color: #B8860B;
+    letter-spacing: 1px;
+  }
+  footer .copy {
+    font-size: 12px;
+    color: #4a4035;
+  }
+  @media (max-width: 600px) {
+    .stats { flex-direction: column; }
+    .stat { border-right: none; border-bottom: 1px solid rgba(255,215,0,0.12); }
+    .stat:last-child { border-bottom: none; }
+    .hero h1 { font-size: 26px; }
+    footer { flex-direction: column; gap: 8px; text-align: center; }
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="logo-wrap">
+    <img src="icons/logo biops.png" alt="Barro Industries BI Ops Logo"/>
+  </div>
+  <div class="badge">BI OPS SYSTEM</div>
+  <h1>Barro Industries</h1>
+  <div class="divider"></div>
+  <p>A centralized business intelligence platform built for Barro Industries — consolidating data, analytics, and operational insights into one unified system.</p>
+</div>
+
+<div class="content">
+
+  <div class="section-label">About the System</div>
+  <div class="section-title">What is BI Ops?</div>
+  <div class="section-body">
+    BI Ops (Business Intelligence Operations) is Barro Industries' proprietary intelligence hub designed to centralize reporting, data analytics, and performance tracking across all business units. The system transforms raw operational data into clear, actionable insights — enabling faster decisions, reducing manual reporting overhead, and giving the Barro Industries team a single source of truth for company performance.
+  </div>
+
+  <div class="section-label">Core Capabilities</div>
+  <div class="pillars">
+    <div class="pillar">
+      <div class="pillar-icon">📊</div>
+      <h3>Unified Dashboards</h3>
+      <p>Real-time visibility into KPIs, revenue metrics, and operational data across all departments in one place.</p>
+    </div>
+    <div class="pillar">
+      <div class="pillar-icon">🔗</div>
+      <h3>Data Integration</h3>
+      <p>Connects with existing tools and data sources to consolidate reporting without disrupting existing workflows.</p>
+    </div>
+    <div class="pillar">
+      <div class="pillar-icon">⚡</div>
+      <h3>Automated Reporting</h3>
+      <p>Scheduled reports and alerts surface critical information automatically — no manual data pulls required.</p>
+    </div>
+    <div class="pillar">
+      <div class="pillar-icon">🔍</div>
+      <h3>Deep Analytics</h3>
+      <p>Drill down into trends, anomalies, and forecasts with tools built for both executives and analysts.</p>
+    </div>
+  </div>
+
+  <div class="section-label">Platform</div>
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-value">iOS</div>
+      <div class="stat-label">Mobile App</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">Android</div>
+      <div class="stat-label">Mobile App</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">Desktop</div>
+      <div class="stat-label">Mac &amp; Windows</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">Web</div>
+      <div class="stat-label">Browser Access</div>
+    </div>
+  </div>
+
+  <div class="section-label">Company</div>
+  <div class="section-title">Barro Industries</div>
+  <div class="section-body">
+    Barro Industries is committed to building internal systems that scale with the business. BI Ops is part of a broader investment in operational infrastructure — ensuring every team member has access to the data they need, when they need it, without friction.
+  </div>
+
+</div>
+
+<footer>
+  <div class="brand">BARRO INDUSTRIES · BI OPS</div>
+  <div class="copy">© 2026 Barro Industries. All rights reserved.</div>
+</footer>
+
+</body>
+</html>
