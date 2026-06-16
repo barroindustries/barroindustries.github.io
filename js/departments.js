@@ -1255,7 +1255,7 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
 window.renderFinance = async function(currentUser, currentRole, subtab = 'Overview') {
   const c = deptContainer();
   // Finance tools vs HR tools — visually separated
-  const finTabs = ['Overview','Ledger','Cash Receipts','Cash Disbursements','General Journal','Purchasing','Records','Taxes','SSS / Gov','Tasks'];
+  const finTabs = ['Overview','Ledger','Cash Receipts','Cash Disbursements','Purchasing','Records','Taxes','SSS / Gov','Tasks'];
   const hrTabs  = ['Payroll','HR Profiles','Cash Advances'];
   const allTabs = [...finTabs, ...hrTabs];
   c.innerHTML = `
@@ -1293,7 +1293,6 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'Ledger':       await renderLedgerTab(content, currentUser, currentRole); break;
     case 'Cash Receipts':       await renderCashReceiptJournal(content, currentUser, currentRole); break;
     case 'Cash Disbursements':  await renderCashDisbursementJournal(content, currentUser, currentRole); break;
-    case 'General Journal':     await renderGeneralJournal(content, currentUser, currentRole); break;
     case 'Records':      await renderRecordsTab(content, currentUser, currentRole); break;
     case 'Purchasing':
       await renderDocCollection(content, 'purchase_orders', 'Purchase Orders', currentUser, currentRole, { icon:'🛒', color:'#1b5e20', dept:'Finance' });
@@ -1889,10 +1888,28 @@ async function renderTaxesTab(container, currentUser, currentRole) {
   });
 }
 
-// ── Ledger Tab ──────────────────────────────────
+// ── Ledger Tab (includes merged General Journal entries) ─────
 async function renderLedgerTab(container, currentUser, currentRole) {
-  const snap = await db.collection('ledger').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]}));
-  const entries = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const [ledgerSnap, gjSnap] = await Promise.all([
+    db.collection('ledger').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]})),
+    db.collection('general_journal').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]}))
+  ]);
+
+  // Normalize ledger entries
+  const ledgerEntries = ledgerSnap.docs.map(d => ({id:d.id, _src:'ledger', ...d.data()}));
+
+  // Normalize general journal entries to ledger shape
+  const gjEntries = gjSnap.docs.flatMap(d => {
+    const e = {id:d.id, _src:'journal', ...d.data()};
+    const rows = [];
+    if (e.debit)  rows.push({...e, type:'debit',  amount:e.debit,  description:e.accountTitle||'—', category:'Journal Entry', refNumber:e.reference, source:'Journal'});
+    if (e.credit) rows.push({...e, type:'credit', amount:e.credit, description:e.accountTitle||'—', category:'Journal Entry', refNumber:e.reference, source:'Journal'});
+    return rows;
+  });
+
+  // Merge and sort by date desc
+  const entries = [...ledgerEntries, ...gjEntries].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+
   const totalDebit  = entries.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
   const totalCredit = entries.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0);
   const balance     = totalCredit - totalDebit;
@@ -1910,7 +1927,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
       <div class="card-body" style="padding:0">
         ${!entries.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📒</div><h4>No ledger entries yet</h4></div>':
           `<div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Source</th><th>Debit</th><th>Credit</th><th>Ref #</th><th>By</th></tr></thead>
+            <thead><tr><th>Date</th><th>Description / Account</th><th>Category</th><th>Source</th><th>Debit</th><th>Credit</th><th>Ref #</th><th>By</th></tr></thead>
             <tbody>${entries.map(e=>`<tr>
               <td>${e.date||'—'}</td>
               <td>${e.description||'—'}</td>
@@ -1935,17 +1952,18 @@ async function renderLedgerTab(container, currentUser, currentRole) {
           </select>
         </div>
       </div>
-      <div class="form-group"><label>Description</label><input id="led-desc" placeholder="e.g. Client payment — ABC Corp"/></div>
+      <div class="form-group"><label>Description / Account Title</label><input id="led-desc" placeholder="e.g. Client payment — ABC Corp, or Accumulated Depreciation"/></div>
       <div class="form-row">
         <div class="form-group"><label>Amount (₱)</label><input id="led-amount" type="number" step="0.01"/></div>
         <div class="form-group"><label>Category</label>
           <select id="led-cat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
             <option>Sales Revenue</option><option>Operating Expense</option><option>Payroll</option>
-            <option>Tax</option><option>Materials</option><option>Utilities</option><option>Other</option>
+            <option>Tax</option><option>Materials</option><option>Utilities</option>
+            <option>Journal Entry (Non-cash)</option><option>Other</option>
           </select>
         </div>
       </div>
-      <div class="form-group"><label>Reference Number</label><input id="led-ref" placeholder="OR #, Invoice #, etc."/></div>
+      <div class="form-group"><label>Reference Number</label><input id="led-ref" placeholder="OR #, Invoice #, JE #, etc."/></div>
       <div id="led-file-area"></div>
     `, `<button class="btn-primary" id="save-led-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     let ledFile = null;
@@ -2125,76 +2143,6 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
       });
       closeModal(); Notifs.showToast('Cash disbursement entry saved!');
       renderCashDisbursementJournal(container, currentUser, currentRole);
-    });
-  });
-}
-
-// ── General Journal (for non-cash transactions) ──
-async function renderGeneralJournal(container, currentUser, currentRole) {
-  const snap = await db.collection('general_journal').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]}));
-  const entries = snap.docs.map(d=>({id:d.id,...d.data()}));
-  const totalDebit  = entries.reduce((s,e)=>s+(e.debit||0),0);
-  const totalCredit = entries.reduce((s,e)=>s+(e.credit||0),0);
-
-  container.innerHTML = `
-    <div class="kpi-row">
-      <div class="kpi-card red"><div class="kpi-label">Total Debit</div><div class="kpi-value">₱${fmt(totalDebit)}</div></div>
-      <div class="kpi-card green"><div class="kpi-label">Total Credit</div><div class="kpi-value">₱${fmt(totalCredit)}</div></div>
-      <div class="kpi-card ${totalDebit===totalCredit?'accent':'red'}"><div class="kpi-label">Balanced?</div><div class="kpi-value" style="font-size:16px">${totalDebit===totalCredit?'✓ Yes':'✗ No'}</div></div>
-    </div>
-    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-      <button class="btn-primary btn-sm" id="add-gj-btn">+ New Journal Entry</button>
-    </div>
-    <div class="card">
-      <div class="card-body" style="padding:0">
-        ${!entries.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📓</div><h4>No general journal entries yet</h4></div>':
-          `<div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Date</th><th>Account Title</th><th>Reference</th><th>Debit</th><th>Credit</th></tr></thead>
-            <tbody>${entries.map(e=>`<tr>
-              <td>${e.date||'—'}</td>
-              <td>${e.accountTitle||'—'}</td>
-              <td><code>${e.reference||'—'}</code></td>
-              <td style="color:var(--danger)">${e.debit?'₱'+fmt(e.debit):'—'}</td>
-              <td style="color:var(--success)">${e.credit?'₱'+fmt(e.credit):'—'}</td>
-            </tr>`).join('')}</tbody>
-          </table></div>`}
-      </div>
-    </div>
-  `;
-
-  document.getElementById('add-gj-btn').addEventListener('click', () => {
-    openModal('New General Journal Entry', `
-      <p style="margin-bottom:10px;color:var(--text-muted);font-size:12px">For non-cash transactions (accruals, adjustments, write-offs, depreciation, etc). Add a debit line and a credit line as two separate entries so the journal stays balanced.</p>
-      <div class="form-row">
-        <div class="form-group"><label>Date</label><input id="gj-date" type="date" value="${today()}"/></div>
-        <div class="form-group"><label>Reference</label><input id="gj-ref" placeholder="JE #, memo #…"/></div>
-      </div>
-      <div class="form-group"><label>Account Title</label><input id="gj-account" placeholder="e.g. Accumulated Depreciation"/></div>
-      <div class="form-row">
-        <div class="form-group"><label>Debit (₱)</label><input id="gj-debit" type="number" step="0.01" value="0"/></div>
-        <div class="form-group"><label>Credit (₱)</label><input id="gj-credit" type="number" step="0.01" value="0"/></div>
-      </div>
-    `, `<button class="btn-primary" id="save-gj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-
-    document.getElementById('save-gj-btn').addEventListener('click', async () => {
-      const accountTitle = document.getElementById('gj-account').value.trim();
-      const debit  = parseFloat(document.getElementById('gj-debit').value)||0;
-      const credit = parseFloat(document.getElementById('gj-credit').value)||0;
-      if (!accountTitle) { Notifs.showToast('Enter an account title.','error'); return; }
-      if (!debit && !credit) { Notifs.showToast('Enter a debit or credit amount.','error'); return; }
-      if (debit && credit) { Notifs.showToast('Enter either a debit OR a credit, not both, on one line.','error'); return; }
-      await db.collection('general_journal').add({
-        date:        document.getElementById('gj-date').value,
-        reference:   document.getElementById('gj-ref').value.trim(),
-        accountTitle,
-        debit,
-        credit,
-        addedBy:    currentUser.uid,
-        addedByName: window.userProfile?.displayName || currentUser.email,
-        createdAt:  firebase.firestore.FieldValue.serverTimestamp()
-      });
-      closeModal(); Notifs.showToast('Journal entry saved!');
-      renderGeneralJournal(container, currentUser, currentRole);
     });
   });
 }
