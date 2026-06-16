@@ -4087,6 +4087,36 @@ html.light .drawer-back-btn:hover { background: rgba(10,132,255,0.07); }
   border-radius: 14px;
 }
 
+/* ── Notification toggle switch ── */
+.notif-toggle-wrap {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 26px;
+  cursor: pointer;
+}
+.notif-toggle-wrap input { opacity: 0; width: 0; height: 0; position: absolute; }
+.notif-toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: rgba(255,255,255,0.15);
+  border-radius: 26px;
+  transition: background .2s;
+}
+.notif-toggle-slider::before {
+  content: '';
+  position: absolute;
+  width: 20px; height: 20px;
+  left: 3px; top: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform .2s;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+.notif-toggle-wrap input:checked + .notif-toggle-slider { background: var(--primary); }
+.notif-toggle-wrap input:checked + .notif-toggle-slider::before { transform: translateX(18px); }
+html.light .notif-toggle-slider { background: rgba(0,0,0,0.15); }
+
 /* ── Light mode overrides ── */
 html.light .profile-inset-card { background: rgba(0,0,0,0.03); border-color: rgba(0,0,0,0.08); }
 html.light .profile-info-row   { border-color: rgba(0,0,0,0.07); }

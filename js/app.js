@@ -4736,6 +4736,34 @@ function openProfileDrawer() {
            </div>`}
     </div>
 
+    <!-- ── Notification Settings ── -->
+    <div class="profile-section-label">NOTIFICATIONS</div>
+    <div class="profile-inset-card" id="notif-settings-card">
+      ${(()=>{
+        const ns = u.notifSettings || {};
+        const toggle = (key, label, desc='') => `
+          <div class="profile-info-row" style="align-items:flex-start;padding:12px 0">
+            <div style="flex:1;min-width:0">
+              <div style="font-size:13px;font-weight:600;color:var(--text)">${label}</div>
+              ${desc?`<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${desc}</div>`:''}
+            </div>
+            <label class="notif-toggle-wrap" style="flex-shrink:0;margin-left:12px">
+              <input type="checkbox" class="notif-toggle" data-key="${key}" ${ns[key]!==false?'checked':''}>
+              <span class="notif-toggle-slider"></span>
+            </label>
+          </div>`;
+        return [
+          toggle('push',         'Push Notifications',   'Browser / device alerts'),
+          toggle('tasks',        'Task Updates',          'Assignments, status changes, approvals'),
+          toggle('payroll',      'Payroll & Salary',      'Payslips, CA deductions, payroll alerts'),
+          toggle('finance',      'Finance Alerts',        'Ledger, expense reports, request outcomes'),
+          toggle('attendance',   'Attendance Reminders',  'Clock-in / clock-out reminders'),
+          toggle('deadlines',    'Deadline Alerts',       'Upcoming and overdue task deadlines'),
+          toggle('announcements','Announcements',         'Company-wide posts and news'),
+        ].join('');
+      })()}
+    </div>
+
     <!-- ── Sign out ── -->
     <div style="padding:0 0 calc(24px + env(safe-area-inset-bottom,0px))">
       <button class="btn-danger profile-signout-btn" onclick="auth.signOut()">Sign Out</button>
@@ -4788,6 +4816,20 @@ function openProfileDrawer() {
       });
     });
   }
+
+  // Notification setting toggles
+  document.querySelectorAll('.notif-toggle').forEach(chk => {
+    chk.addEventListener('change', async () => {
+      const key = chk.dataset.key;
+      const val = chk.checked;
+      const update = {};
+      update[`notifSettings.${key}`] = val;
+      await db.collection('users').doc(currentUser.uid).update(update);
+      if (!userProfile.notifSettings) userProfile.notifSettings = {};
+      userProfile.notifSettings[key] = val;
+      window.userProfile = userProfile;
+    });
+  });
 
   document.getElementById('profile-close').onclick=closeProfileDrawer;
   overlay.addEventListener('click',closeProfileDrawer);

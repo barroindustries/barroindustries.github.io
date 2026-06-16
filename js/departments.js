@@ -5159,19 +5159,21 @@ function printQuote(lines, q) {
 window.renderApprovals = async function(currentUser) {
   const c = deptContainer();
   // Check pending counts for badges
-  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap] = await Promise.all([
+  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap, finReqSnap] = await Promise.all([
     db.collection('signup_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('attendance_extensions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('cash_advances').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('submissions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
-    db.collection('tasks').where('status','==','review').get().catch(()=>({size:0,docs:[]}))
+    db.collection('tasks').where('status','==','review').get().catch(()=>({size:0,docs:[]})),
+    db.collection('payroll_delete_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]}))
   ]);
   const pendingSignups = signupSnap.size || 0;
   const pendingExt     = extSnap.size || 0;
   const pendingCA      = caSnap.size || 0;
   const pendingSubs    = subsSnap.size || 0;
   const pendingReview  = reviewTasksCountSnap.size || 0;
-  const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs + pendingReview;
+  const pendingFinReqs = finReqSnap.size || 0;
+  const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs + pendingReview + pendingFinReqs;
 
   c.innerHTML = `
     <div class="page-header"><h2>✅ Approvals</h2>${totalPending>0?`<span class="badge badge-red" style="font-size:13px">${totalPending} pending</span>`:''}</div>
@@ -5193,6 +5195,9 @@ window.renderApprovals = async function(currentUser) {
       <button class="subtab-btn" data-sub="ca">
         Cash Advances${pendingCA>0?` <span class="nav-badge">${pendingCA}</span>`:''}
       </button>
+      <button class="subtab-btn" data-sub="finance-requests">
+        💼 Finance Requests${pendingFinReqs>0?` <span class="nav-badge">${pendingFinReqs}</span>`:''}
+      </button>
     </div>
     <div id="approvals-content"><div class="loading-placeholder">Loading…</div></div>
   `;
@@ -5204,12 +5209,13 @@ window.renderApprovals = async function(currentUser) {
 
     if (sub === 'all') {
       // ── All Pending Requests aggregated view ──
-      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap] = await Promise.all([
+      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2] = await Promise.all([
         db.collection('signup_requests').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
         db.collection('attendance_extensions').where('status','==','pending').orderBy('requestedAt','desc').get().catch(()=>({docs:[]})),
         db.collection('cash_advances').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
         db.collection('submissions').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
-        db.collection('tasks').where('status','==','review').orderBy('lastModifiedAt','desc').get().catch(()=>({docs:[]}))
+        db.collection('tasks').where('status','==','review').orderBy('lastModifiedAt','desc').get().catch(()=>({docs:[]})),
+        db.collection('payroll_delete_requests').where('status','==','pending').orderBy('createdAt','desc').get().catch(()=>({docs:[]}))
       ]);
 
       const allPending = [
@@ -5217,7 +5223,8 @@ window.renderApprovals = async function(currentUser) {
         ...atSnap.docs.map(d=>({id:d.id,type:'attendance',icon:'⏰',label:'Attendance Extension',name:d.data().userName||'Unknown',detail:d.data().date||'',ts:d.data().requestedAt,...d.data()})),
         ...caSnap2.docs.map(d=>({id:d.id,type:'ca',icon:'💸',label:'Cash Advance',name:d.data().userName||'Unknown',detail:`₱${fmt(d.data().amount||0)}`,ts:d.data().createdAt,...d.data()})),
         ...subSnap2.docs.map(d=>({id:d.id,type:'submission',icon:'📤',label:'Work Submission',name:d.data().userName||d.data().authorName||'Unknown',detail:d.data().title||'',ts:d.data().createdAt,...d.data()})),
-        ...reviewTasksSnap.docs.map(d=>({id:d.id,type:'review-task',icon:'📋',label:'Task for Review',name:d.data().title||'Untitled Task',detail:(()=>{const uids=Array.isArray(d.data().assignedTo)?d.data().assignedTo:[d.data().assignedTo].filter(Boolean);return uids.length?'by '+d.data().assignedToNames?.join(', '):'';})(),ts:d.data().lastModifiedAt||d.data().createdAt,...d.data()}))
+        ...reviewTasksSnap.docs.map(d=>({id:d.id,type:'review-task',icon:'📋',label:'Task for Review',name:d.data().title||'Untitled Task',detail:(()=>{const uids=Array.isArray(d.data().assignedTo)?d.data().assignedTo:[d.data().assignedTo].filter(Boolean);return uids.length?'by '+d.data().assignedToNames?.join(', '):'';})(),ts:d.data().lastModifiedAt||d.data().createdAt,...d.data()})),
+        ...finReqSnap2.docs.map(d=>({id:d.id,type:'finance-req',icon:'💼',label:'Finance Request',name:`Delete: ${d.data().userName||'?'} (${d.data().month||'?'})`,detail:`by ${d.data().requestedByName||'?'} — ${d.data().reason||''}`,ts:d.data().createdAt,...d.data()}))
       ];
 
       if (!allPending.length) {
@@ -5252,6 +5259,9 @@ window.renderApprovals = async function(currentUser) {
                 <button class="btn-primary btn-sm rt-view-btn" data-id="${item.id}">👁 View Task</button>
                 <button class="btn-success btn-sm rt-approve-btn" data-id="${item.id}" data-name="${item.name}">✓ Approve</button>
                 <button class="btn-danger btn-sm rt-reject-btn" data-id="${item.id}" data-name="${item.name}">✗ Send Back</button>
+              `:item.type==='finance-req'?`
+                <button class="btn-success btn-sm fr-approve-btn" data-id="${item.id}" data-hist-id="${item.historyId||''}" data-name="${item.userName||''}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">✓ Approve Deletion</button>
+                <button class="btn-danger btn-sm fr-deny-btn" data-id="${item.id}" data-name="${item.userName||''}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">✗ Deny</button>
               `:`
                 <button class="btn-success btn-sm sub-approve-btn" data-id="${item.id}">✓ Approve</button>
                 <button class="btn-danger btn-sm sub-reject-btn" data-id="${item.id}">✗ Reject</button>
@@ -5350,6 +5360,83 @@ window.renderApprovals = async function(currentUser) {
           if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await notifyTaskInvolved(t2,{title:'🔁 Task Sent Back',body:`"${btn.dataset.name}" was sent back for revision.`,icon:'🔁',type:'task_status'},currentUser.uid);}
           Notifs.showToast(`"${btn.dataset.name}" sent back for revision.`);
           loadApprovalsSub('all');
+        });
+      });
+
+      // Finance request approve/deny (from "all" view)
+      wrap.querySelectorAll('.fr-approve-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm(`Approve deletion of ${btn.dataset.name} (${btn.dataset.month}) payroll record?`)) return;
+          if (btn.dataset.histId) await db.collection('salary_history').doc(btn.dataset.histId).delete();
+          await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (btn.dataset.reqBy) await Notifs.send(btn.dataset.reqBy, { title:'✅ Payroll Delete Approved', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record has been approved.`, icon:'✅', type:'payroll_delete_approved' });
+          Notifs.showToast('Record deleted and requester notified.');
+          loadApprovalsSub('all');
+        });
+      });
+      wrap.querySelectorAll('.fr-deny-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'denied', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (btn.dataset.reqBy) await Notifs.send(btn.dataset.reqBy, { title:'❌ Payroll Delete Denied', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record was denied by the President.`, icon:'❌', type:'payroll_delete_denied' });
+          Notifs.showToast('Request denied and requester notified.');
+          loadApprovalsSub('all');
+        });
+      });
+      return;
+    }
+
+    if (sub === 'finance-requests') {
+      const snap = await db.collection('payroll_delete_requests').orderBy('createdAt','desc').limit(100).get().catch(()=>({docs:[]}));
+      const reqs = snap.docs.map(d=>({id:d.id,...d.data()}));
+      const pending = reqs.filter(r=>r.status==='pending');
+      const resolved = reqs.filter(r=>r.status!=='pending');
+
+      const reqCard = (r, showActions) => `
+        <div class="item-card" style="cursor:default">
+          <div class="item-top">
+            <div class="item-title">🗑 Delete Payroll Record — ${r.userName||'?'} (${r.month||'?'})</div>
+            <span class="badge ${r.status==='pending'?'badge-warn':r.status==='approved'?'badge-green':'badge-red'}">${r.status==='pending'?'Pending':r.status==='approved'?'Approved':'Denied'}</span>
+          </div>
+          <div class="item-meta" style="margin-top:4px;flex-wrap:wrap;gap:6px">
+            <span class="badge badge-blue" style="font-size:10px">Payroll Delete</span>
+            <span style="font-size:12px;color:var(--text-muted)">Requested by: <strong>${r.requestedByName||'?'}</strong></span>
+            ${r.reason?`<span style="font-size:12px;color:var(--text-muted)">Reason: ${r.reason}</span>`:''}
+            ${r.createdAt?`<span style="font-size:11px;color:var(--text-muted)">${new Date(r.createdAt.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'})}</span>`:''}
+          </div>
+          ${showActions?`<div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn-success btn-sm fr-approve-btn" data-id="${r.id}" data-hist-id="${r.historyId||''}" data-name="${r.userName||''}" data-month="${r.month||''}" data-req-by="${r.requestedBy||''}">✓ Approve Deletion</button>
+            <button class="btn-danger btn-sm fr-deny-btn" data-id="${r.id}" data-name="${r.userName||''}" data-month="${r.month||''}" data-req-by="${r.requestedBy||''}">✗ Deny</button>
+          </div>`:''}
+        </div>`;
+
+      wrap.innerHTML = `
+        ${!pending.length && !resolved.length ? '<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">💼</div><h4>No finance requests</h4></div>' : ''}
+        ${pending.length ? `<h4 style="margin:0 0 10px;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Pending (${pending.length})</h4>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
+            ${pending.map(r=>reqCard(r,true)).join('')}
+          </div>` : ''}
+        ${resolved.length ? `<h4 style="margin:0 0 10px;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">History</h4>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            ${resolved.slice(0,20).map(r=>reqCard(r,false)).join('')}
+          </div>` : ''}
+      `;
+
+      wrap.querySelectorAll('.fr-approve-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm(`Approve deletion of ${btn.dataset.name} (${btn.dataset.month}) payroll record?`)) return;
+          if (btn.dataset.histId) await db.collection('salary_history').doc(btn.dataset.histId).delete();
+          await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (btn.dataset.reqBy) await Notifs.send(btn.dataset.reqBy, { title:'✅ Payroll Delete Approved', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record has been approved.`, icon:'✅', type:'payroll_delete_approved' });
+          Notifs.showToast('Record deleted and requester notified.');
+          loadApprovalsSub('finance-requests');
+        });
+      });
+      wrap.querySelectorAll('.fr-deny-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'denied', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (btn.dataset.reqBy) await Notifs.send(btn.dataset.reqBy, { title:'❌ Payroll Delete Denied', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record was denied.`, icon:'❌', type:'payroll_delete_denied' });
+          Notifs.showToast('Request denied.');
+          loadApprovalsSub('finance-requests');
         });
       });
       return;
