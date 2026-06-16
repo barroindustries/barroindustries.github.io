@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Barro Industries — Operations Tracker</title>
+<style>
+  :root {
+    --dark-blue: #1F3864;
+    --med-blue: #2E5FA3;
+    --light-blue: #D6E4F0;
+    --white: #FFFFFF;
+    --green: #E2EFDA; --green-t: #375623;
+    --orange: #FCE4D6; --orange-t: #833C00;
+    --red: #FFDCE0; --red-t: #9C0006;
+    --teal: #D9F2F5; --teal-t: #006064;
+    --purple: #EAD1DC; --purple-t: #4A235A;
+    --yellow: #FFF2CC; --yellow-t: #7D6608;
+    --gray: #F2F2F2; --gray-t: #555555;
+    --gold: #FFF3CD;
+    --sidebar: #16294a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f4f8; color: #222; min-height: 100vh; }
+
+  /* ── LAYOUT ── */
+  .app { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: 220px; min-width: 220px; background: var(--sidebar);
+    display: flex; flex-direction: column; padding: 0; position: fixed;
+    top: 0; left: 0; height: 100vh; z-index: 100;
+  }
+  .sidebar-logo {
+    padding: 22px 18px 16px; border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+  .sidebar-logo h2 { color: #fff; font-size: 13px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+  .sidebar-logo p { color: rgba(255,255,255,0.45); font-size: 10px; margin-top: 2px; }
+  .sidebar-nav { flex: 1; padding: 14px 0; }
+  .nav-section { padding: 10px 18px 4px; color: rgba(255,255,255,0.35); font-size: 9px; letter-spacing: 1.5px; text-transform: uppercase; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 18px; color: rgba(255,255,255,0.7);
+    cursor: pointer; font-size: 13px; border-left: 3px solid transparent;
+    transition: all 0.15s;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.07); color: #fff; }
+  .nav-item.active { background: rgba(46,95,163,0.4); color: #fff; border-left-color: #5b9bd5; }
+  .nav-item .icon { font-size: 15px; }
+  .sidebar-footer { padding: 14px 18px; border-top: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.3); font-size: 10px; }
+
+  .main { margin-left: 220px; flex: 1; display: flex; flex-direction: column; min-height: 100vh; }
+
+  .topbar {
+    background: var(--dark-blue); color: #fff;
+    padding: 0 28px; height: 56px; display: flex; align-items: center;
+    justify-content: space-between; position: sticky; top: 0; z-index: 50;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  }
+  .topbar h1 { font-size: 15px; font-weight: 700; letter-spacing: 0.5px; }
+  .topbar-right { display: flex; gap: 10px; align-items: center; }
+  .topbar-date { font-size: 11px; color: rgba(255,255,255,0.5); }
+  .btn {
+    padding: 6px 14px; border-radius: 5px; font-size: 12px; font-weight: 600;
+    cursor: pointer; border: none; transition: all 0.15s;
+  }
+  .btn-primary { background: var(--med-blue); color: #fff; }
+  .btn-primary:hover { background: #1e4a8a; }
+  .btn-success { background: var(--green-t); color: #fff; }
+  .btn-success:hover { background: #2a4219; }
+  .btn-outline { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.3); }
+  .btn-outline:hover { background: rgba(255,255,255,0.1); }
+  .btn-sm { padding: 4px 10px; font-size: 11px; }
+  .btn-danger { background: #c0392b; color: #fff; }
+  .btn-danger:hover { background: #922b21; }
+  .btn-add { background: #27ae60; color: #fff; }
+  .btn-add:hover { background: #1e8449; }
+
+  .content { padding: 24px 28px; flex: 1; }
+
+  /* ── TABS ── */
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* ── DASHBOARD ── */
+  .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 22px; }
+  .kpi-card {
+    background: #fff; border-radius: 10px; padding: 18px 16px 14px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.07); border-top: 4px solid var(--med-blue);
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .kpi-card.green { border-top-color: var(--green-t); }
+  .kpi-card.teal  { border-top-color: #006064; }
+  .kpi-card.gold  { border-top-color: #c9860a; }
+  .kpi-card.purple{ border-top-color: var(--purple-t); }
+  .kpi-label { font-size: 10px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: #888; }
+  .kpi-value { font-size: 30px; font-weight: 800; color: var(--dark-blue); line-height: 1; }
+  .kpi-card.green .kpi-value  { color: var(--green-t); }
+  .kpi-card.teal  .kpi-value  { color: #006064; }
+  .kpi-card.gold  .kpi-value  { color: #c9860a; }
+  .kpi-card.purple .kpi-value { color: var(--purple-t); }
+  .kpi-sub { font-size: 10px; color: #aaa; margin-top: 2px; }
+
+  .dash-section-title {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase;
+    color: var(--dark-blue); border-bottom: 2px solid var(--light-blue);
+    padding-bottom: 6px; margin: 22px 0 12px;
+  }
+  .dash-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .dash-card { background: #fff; border-radius: 10px; padding: 18px; box-shadow: 0 1px 6px rgba(0,0,0,0.07); }
+  .dash-card h3 { font-size: 11px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; color: #888; margin-bottom: 12px; }
+
+  .summary-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .summary-table th { background: var(--dark-blue); color: #fff; padding: 7px 10px; text-align: left; font-size: 10px; letter-spacing: 0.5px; }
+  .summary-table td { padding: 7px 10px; border-bottom: 1px solid #eee; }
+  .summary-table tr:last-child td { border-bottom: none; }
+  .summary-table tr:hover td { background: var(--light-blue); }
+
+  .amount-highlight { font-size: 15px; font-weight: 800; color: var(--dark-blue); }
+  .amount-won { color: var(--green-t); }
+  .amount-active { color: #c9860a; }
+
+  .pipeline-bar { display: flex; height: 22px; border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+  .pipeline-seg { display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: #fff; transition: all 0.3s; min-width: 0; overflow: hidden; }
+
+  /* ── TABLES ── */
+  .table-toolbar {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap;
+  }
+  .search-box {
+    padding: 7px 12px; border: 1.5px solid #ddd; border-radius: 6px;
+    font-size: 13px; width: 260px; outline: none;
+  }
+  .search-box:focus { border-color: var(--med-blue); }
+  .filter-select {
+    padding: 7px 10px; border: 1.5px solid #ddd; border-radius: 6px;
+    font-size: 12px; outline: none; cursor: pointer; background: #fff;
+  }
+  .filter-select:focus { border-color: var(--med-blue); }
+
+  .table-wrap { overflow-x: auto; border-radius: 10px; box-shadow: 0 1px 8px rgba(0,0,0,0.08); background: #fff; }
+  table.data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .data-table th {
+    background: var(--dark-blue); color: #fff; padding: 10px 10px; text-align: left;
+    font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase;
+    white-space: nowrap; position: sticky; top: 0; z-index: 10;
+  }
+  .data-table th:first-child { width: 36px; }
+  .data-table td {
+    padding: 8px 10px; border-bottom: 1px solid #f0f0f0; vertical-align: middle;
+    max-width: 260px;
+  }
+  .data-table tr.alt td { background: #f8fbff; }
+  .data-table tr:hover td { background: #eef4fb !important; }
+  .data-table tr.hidden-row { display: none; }
+
+  .editable {
+    cursor: text; border-radius: 3px; min-height: 20px;
+    transition: background 0.12s;
+  }
+  .editable:hover { background: rgba(46,95,163,0.08); }
+  .editable:focus {
+    outline: 2px solid var(--med-blue); background: #fff;
+    border-radius: 3px; padding: 1px 4px;
+  }
+  [contenteditable="true"]:empty:before { content: attr(data-placeholder); color: #bbb; font-style: italic; }
+
+  .status-badge {
+    display: inline-block; padding: 3px 9px; border-radius: 20px;
+    font-size: 10px; font-weight: 700; white-space: nowrap; cursor: pointer;
+    user-select: none;
+  }
+
+  .status-select {
+    border: none; background: transparent; font-size: 10px; font-weight: 700;
+    cursor: pointer; outline: none; width: 100%; padding: 0;
+  }
+
+  .amount-cell { text-align: right; font-weight: 700; color: var(--dark-blue); white-space: nowrap; }
+  .amount-cell .editable { display: inline-block; text-align: right; min-width: 80px; }
+
+  .del-btn {
+    background: none; border: none; cursor: pointer; color: #ccc;
+    font-size: 14px; padding: 2px 5px; border-radius: 3px;
+    transition: all 0.12s;
+  }
+  .del-btn:hover { color: var(--red-t); background: var(--red); }
+
+  .row-num { color: #aaa; font-size: 11px; text-align: center; }
+
+  /* Status colors */
+  .s-completed, .s-won-completed     { background: var(--green); color: var(--green-t); }
+  .s-won-ongoing, .s-ongoing         { background: var(--teal); color: var(--teal-t); }
+  .s-quotation-sent, .s-active-pending{ background: var(--yellow); color: var(--yellow-t); }
+  .s-proposal-sent                   { background: var(--gold); color: var(--yellow-t); }
+  .s-design-stage                    { background: var(--purple); color: var(--purple-t); }
+  .s-lost, .s-failed, .s-disqualified{ background: var(--red); color: var(--red-t); }
+  .s-prospective                     { background: var(--light-blue); color: var(--med-blue); }
+
+  .outcome-won     { background: var(--green); color: var(--green-t); }
+  .outcome-pending { background: var(--yellow); color: var(--yellow-t); }
+  .outcome-na      { background: var(--gray); color: var(--gray-t); }
+
+  .notes-cell { color: #777; font-size: 11px; font-style: italic; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .docs-cell { color: #555; font-size: 10px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .empty-row { text-align: center; color: #bbb; padding: 30px; font-style: italic; }
+
+  /* ── MODAL ── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45);
+    z-index: 1000; align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: #fff; border-radius: 12px; padding: 28px;
+    max-width: 580px; width: 95%; box-shadow: 0 8px 40px rgba(0,0,0,0.22);
+    max-height: 90vh; overflow-y: auto;
+  }
+  .modal h2 { font-size: 16px; color: var(--dark-blue); margin-bottom: 18px; }
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .form-group { display: flex; flex-direction: column; gap: 4px; }
+  .form-group.full { grid-column: 1/-1; }
+  .form-group label { font-size: 11px; font-weight: 600; color: #666; letter-spacing: 0.4px; text-transform: uppercase; }
+  .form-group input, .form-group select, .form-group textarea {
+    padding: 8px 10px; border: 1.5px solid #ddd; border-radius: 6px;
+    font-size: 13px; outline: none; font-family: inherit;
+  }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--med-blue); }
+  .form-group textarea { resize: vertical; min-height: 60px; }
+  .modal-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+
+  /* ── SAVE INDICATOR ── */
+  .save-indicator {
+    position: fixed; bottom: 20px; right: 20px;
+    background: var(--green-t); color: #fff; padding: 8px 18px;
+    border-radius: 20px; font-size: 12px; font-weight: 600;
+    opacity: 0; transition: opacity 0.3s; z-index: 999;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  }
+  .save-indicator.show { opacity: 1; }
+
+  /* ── PRINT ── */
+  @media print {
+    .sidebar, .topbar-right, .table-toolbar, .del-btn, .btn-add { display: none !important; }
+    .main { margin-left: 0; }
+    .topbar { background: var(--dark-blue) !important; print-color-adjust: exact; }
+    .data-table th { background: var(--dark-blue) !important; print-color-adjust: exact; }
+  }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #f0f0f0; }
+  ::-webkit-scrollbar-thumb { background: #bbb; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #999; }
+
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 10px; background: var(--light-blue); color: var(--dark-blue); font-weight: 600; margin: 1px; }
+
+  .search-highlight { background: #fff59d; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h2>⚙ Barro Industries</h2>
+      <p>Operations System</p>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">Main</div>
+      <div class="nav-item active" onclick="showPage('dashboard',this)">
+        <span class="icon">📊</span> Dashboard
+      </div>
+      <div class="nav-section">Records</div>
+      <div class="nav-item" onclick="showPage('clients',this)">
+        <span class="icon">👥</span> Client Records
+      </div>
+      <div class="nav-item" onclick="showPage('biddings',this)">
+        <span class="icon">🏛</span> Gov't Biddings
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      Last saved: <span id="lastSaved">Never</span>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="topbar">
+      <h1 id="pageTitle">Dashboard</h1>
+      <div class="topbar-right">
+        <span class="topbar-date" id="todayDate"></span>
+        <button class="btn btn-outline btn-sm" onclick="exportCSV()">⬇ Export CSV</button>
+        <button class="btn btn-success btn-sm" onclick="saveAll()">💾 Save</button>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- ══ DASHBOARD ══ -->
+      <div class="page active" id="page-dashboard">
+        <div class="kpi-grid" id="kpiGrid"></div>
+        <div class="dash-grid-2">
+          <div class="dash-card">
+            <h3>📈 Client Pipeline</h3>
+            <div class="pipeline-bar" id="clientPipelineBar"></div>
+            <div id="clientStatusTable"></div>
+          </div>
+          <div class="dash-card">
+            <h3>🏛 Biddings Summary</h3>
+            <div id="biddingsSummary"></div>
+          </div>
+        </div>
+        <div class="dash-section-title">💰 Financial Overview</div>
+        <div class="dash-grid-2">
+          <div class="dash-card">
+            <h3>Client Revenue</h3>
+            <div id="clientFinancials"></div>
+          </div>
+          <div class="dash-card">
+            <h3>Biddings Revenue</h3>
+            <div id="biddingsFinancials"></div>
+          </div>
+        </div>
+        <div class="dash-section-title">📋 Sector Breakdown</div>
+        <div class="dash-card" id="sectorCard"></div>
+      </div>
+
+      <!-- ══ CLIENT RECORDS ══ -->
+      <div class="page" id="page-clients">
+        <div class="table-toolbar">
+          <input class="search-box" id="clientSearch" placeholder="🔍 Search clients, quotation #, subject..." oninput="filterClients()">
+          <select class="filter-select" id="clientStatusFilter" onchange="filterClients()">
+            <option value="">All Statuses</option>
+            <option>Quotation Sent</option>
+            <option>Design Stage</option>
+            <option>Proposal Sent</option>
+            <option>Won / Ongoing</option>
+            <option>Ongoing</option>
+            <option>Completed</option>
+            <option>Lost / No Response</option>
+          </select>
+          <select class="filter-select" id="clientSectorFilter" onchange="filterClients()">
+            <option value="">All Sectors</option>
+            <option>Food Service</option>
+            <option>Café</option>
+            <option>Restaurant</option>
+            <option>Hospital</option>
+            <option>Hospitality</option>
+            <option>Education</option>
+            <option>B2B / Corporate</option>
+            <option>Institutional</option>
+            <option>Bakery</option>
+          </select>
+          <button class="btn btn-add btn-sm" onclick="addClientRow()">+ Add Client</button>
+          <span id="clientCount" style="font-size:12px;color:#888;margin-left:auto;"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="clientTable">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Client Name</th>
+                <th>Sector</th>
+                <th>Location</th>
+                <th>Contact / Attn</th>
+                <th>Quotation No.</th>
+                <th>Date</th>
+                <th>Project Title / Subject</th>
+                <th style="text-align:right;">Quoted Amount (₱)</th>
+                <th>Status</th>
+                <th>Documents on File</th>
+                <th>Remarks / Notes</th>
+                <th>Date Added</th>
+                <th>Last Updated</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="clientBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ══ GOVERNMENT BIDDINGS ══ -->
+      <div class="page" id="page-biddings">
+        <div class="table-toolbar">
+          <input class="search-box" id="bidSearch" placeholder="🔍 Search agency, description, category..." oninput="filterBids()">
+          <select class="filter-select" id="bidStatusFilter" onchange="filterBids()">
+            <option value="">All Statuses</option>
+            <option>Won / Completed</option>
+            <option>Active / Pending</option>
+            <option>Prospective</option>
+            <option>Lost / Failed</option>
+            <option>Disqualified</option>
+          </select>
+          <select class="filter-select" id="bidYearFilter" onchange="filterBids()">
+            <option value="">All Years</option>
+            <option>2024</option>
+            <option>2025</option>
+            <option>2026</option>
+          </select>
+          <button class="btn btn-add btn-sm" onclick="addBidRow()">+ Add Bid</button>
+          <span id="bidCount" style="font-size:12px;color:#888;margin-left:auto;"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" id="bidTable">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Agency / Client</th>
+                <th>Location</th>
+                <th>Category / Lot</th>
+                <th>Item Description</th>
+                <th>Year</th>
+                <th>Status</th>
+                <th>Outcome</th>
+                <th style="text-align:right;">ABC / Contract (₱)</th>
+                <th style="text-align:right;">Bid Price (₱)</th>
+                <th>Documents on File</th>
+                <th>Remarks / Notes</th>
+                <th>Date Submitted</th>
+                <th>Last Updated</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="bidBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- SAVE INDICATOR -->
+<div class="save-indicator" id="saveIndicator">✓ Saved</div>
+
+<script>
+// ══════════════════════════════════════════════
+// DATA
+// ══════════════════════════════════════════════
+const DEFAULT_CLIENTS = [
+  {name:"Aboy Asuncion",sector:"Food Service",location:"San Juan, La Union",contact:"Mr. Aboy Asuncion",qnum:"LUON07022025-1",date:"July 2, 2025",title:"Supply & Fabrication of Range Hood and Ducting System",amount:218500,status:"Quotation Sent",docs:"Price Quotation (PDF, JPG)",notes:"",dateAdded:"",lastUpdated:""},
+  {name:"Alyssa Flores",sector:"Food Service",location:"South Pob., Bucay, Abra",contact:"Alyssa Flores",qnum:"BNOF04092025-2",date:"April 9, 2025",title:"Supply & Fabrication of Kitchen Equipment",amount:290000,status:"Quotation Sent",docs:"Proposal 2025-04-09 (DOCX, PDF)",notes:"",dateAdded:"",lastUpdated:""},
+  {name:"Alyssa Marie",sector:"Food Service",location:"Baguio City",contact:"Alyssa Marie Malasig",qnum:"ONBG26032025-01",date:"March 26, 2025",title:"Table Framing Fabrication",amount:18500,status:"Quotation Sent",docs:"Price Quotation (DOCX, PDF)",notes:"",dateAdded:"",lastUpdated:""},
+  {name:"Andrew Ducas",sector:"Food Service",location:"Baguio City",contact:"Andrew Ducas",qnum:"BGON062025-2",date:"June 30, 2025",title:"Supply & Fabrication of Kitchen Equipment",amount:145000,status:"Quotation Sent",docs:"Quotation + Revised Final (multiple versions)",notes:"Multiple revisions; Final version issued",dateAdded:"",lastUpdated:""},
+  {name:"Antonino",sector:"Food Service",location:"Urdaneta City, Pangasinan",contact:"Antonino",qnum:"—",date:"—",title:"Kitchen Equipment Supply & Fabrication",amount:null,status:"Quotation Sent",docs:"Quotation PDF + XLSM",notes:"Amount in XLSM workbook",dateAdded:"",lastUpdated:""},
+  {name:"Ar. Kryzia Bea (Snooze Coffee)",sector:"Café",location:"Leonardwood, Baguio City",contact:"Ar. Kryzia Bea",qnum:"BGON04092025-1",date:"April 14, 2025",title:"Supply & Fabrication of Custom Kitchen Setup and Equipment",amount:595500,status:"Design Stage",docs:"Proposal + Floor Plans (13 revisions) + AI Renders",notes:"Detailed kitchen plans; 13 plan revisions on file",dateAdded:"",lastUpdated:""},
+  {name:"Ar. Richard",sector:"Food Service",location:"La Union",contact:"Ar. Richard",qnum:"LUON09272401",date:"Sep 27, 2024",title:"Fabrication of Kitchen Equipment",amount:308000,status:"Quotation Sent",docs:"Price Quotation (DOCX, PDF) + Built-ins List",notes:"",dateAdded:"",lastUpdated:""},
+  {name:"Arfaz",sector:"Food Service",location:"Unknown Location",contact:"Arfaz",qnum:"FB-ONMN060425-1",date:"June 4, 2025",title:"Range Hood and Ducting Fabrication",amount:78000,status:"Quotation Sent",docs:"Price Quotation (DOCX, JPG, PDF)",notes:"Estimated total from line items",dateAdded:"",lastUpdated:""},
+  {name:"Bakers Ph",sector:"Bakery",location:"Brgy 44, Laoag City, IN",contact:"Bakers Ph",qnum:"BGON-07182025-1",date:"July 18, 2025",title:"SS Preparation Table with Overhead Shelves",amount:35000,status:"Quotation Sent",docs:"Quotation 2025-07-18 (DOCX, PDF)",notes:"",dateAdded:"",lastUpdated:""},
+  {name:"Bethany Hospital",sector:"Hospital",location:"San Fernando, La Union",contact:"Bethany Hospital",qnum:"Multiple",date:"Nov 2024 – Feb 2026",title:"Hospital Kitchen Equipment, Exhaust, Trolleys, and Site Works",amount:1656300,status:"Completed",docs:"Contract + Final Billing Invoice + Multiple Quotations + Job Order + Site Photos",notes:"Completed multi-phase; final billing ₱1,656,300; repeat billings on file",dateAdded:"",lastUpdated:""},
+  {name:"Brilliant Steel Corp.",sector:"B2B / Corporate",location:"N/A",contact:"Brilliant Steel Corp.",qnum:"—",date:"June 2026",title:"Product Lineup Fabrication Proposal",amount:null,status:"Proposal Sent",docs:"Product Lineup Proposal (DOCX)",notes:"B2B partnership proposal; no amount specified",dateAdded:"",lastUpdated:""},
+  {name:"BSBT",sector:"Institutional",location:"Baguio City",contact:"BSBT",qnum:"—",date:"2025",title:"Kitchen & Bar Setup Fabrication",amount:null,status:"Ongoing",docs:"Quotation + MOA + Kitchen Plans + AutoCAD DWG + Design Files",notes:"MOA signed; detailed DWG kitchen/bar/gym plans",dateAdded:"",lastUpdated:""},
+  {name:"BSU",sector:"Education",location:"La Trinidad, Benguet",contact:"Benguet State Univ.",qnum:"RFQ01262026-2",date:"Jan 26, 2026",title:"Various Equipment Supply",amount:106000,status:"Quotation Sent",docs:"Quotation (DOCX)",notes:"",dateAdded:"",lastUpdated:""},
+  {name:"Candelaria Dist. Hospital",sector:"Hospital",location:"Zambales",contact:"Candelaria District Hosp.",qnum:"—",date:"2025",title:"Hospital Kitchen Equipment & Fabrication (3 Sections)",amount:2292000,status:"Quotation Sent",docs:"Proposal + Revised Price Quotation (2 parts DOCX + PDF)",notes:"Full hospital kitchen; 3 sections totaling ₱2,292,000",dateAdded:"",lastUpdated:""},
+  {name:"Casa Carmelo",sector:"Hospitality",location:"La Union",contact:"Casa Carmelo 2.0",qnum:"LUON012325-1",date:"Jan 23, 2025",title:"Fabrication of 3 Open Top Low Pressure Range Stove",amount:63800,status:"Quotation Sent",docs:"Quotation 2.0 + Revised (DOCX, PDF)",notes:"Version 2 with revision",dateAdded:"",lastUpdated:""},
+  {name:"Chateau De Maisons",sector:"Hospitality",location:"Baguio City",contact:"Chateau De Maisons",qnum:"—",date:"August 2025",title:"Kitchen Equipment Layout Design",amount:null,status:"Design Stage",docs:"AutoCAD DWG Plan (Aug 2025)",notes:"Design in progress; plan file only",dateAdded:"",lastUpdated:""},
+  {name:"Chimichanga",sector:"Restaurant",location:"Kisad Road, Baguio City",contact:"Chimichanga Restaurant",qnum:"BGON012425-1",date:"Jan 24, 2025",title:"Fabrication of Kitchen Equipment",amount:754600,status:"Quotation Sent",docs:"Quotation (with & without price versions, DOCX + PDF)",notes:"Two versions: priced and unpriced",dateAdded:"",lastUpdated:""},
+  {name:"Cosmos",sector:"Food Service",location:"La Union",contact:"Cosmos",qnum:"LUON-07172025-1",date:"July 17, 2025",title:"Rotary Oven Repair",amount:118000,status:"Quotation Sent",docs:"Quotation + Repair Scope (DOCX, PDF, JPG)",notes:"Repair/maintenance quotation",dateAdded:"",lastUpdated:""},
+  {name:"DepEd Baguio",sector:"Education",location:"Baguio City",contact:"DepEd – Baguio City",qnum:"—",date:"Nov 18, 2024",title:"Supply of School Laboratory Equipment",amount:1196487,status:"Won / Ongoing",docs:"Market Survey + Quotation + PO-3277 (Narciso) + PO Signed",notes:"PO issued; two signed POs on file; active government order",dateAdded:"",lastUpdated:""},
+  {name:"DMMMSU (Sales)",sector:"Education",location:"La Union",contact:"DMMMSU",qnum:"—",date:"2024",title:"Kitchen Equipment Supply & Fabrication (Project Portfolio)",amount:null,status:"Completed",docs:"Project Portfolio (DOCX)",notes:"Government project completed via Biddings; portfolio doc for reference",dateAdded:"",lastUpdated:""},
+  {name:"El Cielito",sector:"Hospitality",location:"50 North Dr., Baguio City",contact:"El Cielito Hotel",qnum:"BGON07112401",date:"Nov 7, 2024",title:"Supply & Installation of Exhaust and Fresh Air System",amount:1428800,status:"Quotation Sent",docs:"Price Quotation (DOCX)",notes:"Ventilation system quotation",dateAdded:"",lastUpdated:""},
+  {name:"Florante Ponce",sector:"Food Service",location:"La Union",contact:"Florante Ponce",qnum:"LUON04112025-1",date:"April 11, 2025",title:"Kitchen Fabrication Works",amount:112350,status:"Quotation Sent",docs:"Quotation 2025-04-11 + Preliminary (DOCX, JPG, PDF)",notes:"Formal and preliminary versions",dateAdded:"",lastUpdated:""},
+  {name:"Hatche Cafe",sector:"Café",location:"Baguio City",contact:"JC Versoza / Hatche Cafe",qnum:"BGON09202501",date:"2025",title:"Kitchen Fabrication Setup",amount:469280,status:"Quotation Sent",docs:"Formal Quotation + Stove Quotation (DOCX, PDF)",notes:"Two versions: base ₱419,000 + revised ₱469,280",dateAdded:"",lastUpdated:""},
+  {name:"Henry",sector:"Food Service",location:"Unknown Location",contact:"Henry",qnum:"—",date:"—",title:"Kitchen Equipment",amount:null,status:"Quotation Sent",docs:"Quotation (XLSM workbook)",notes:"Amount in XLSM workbook",dateAdded:"",lastUpdated:""},
+  {name:"ITRMC",sector:"Hospital",location:"La Union",contact:"ITRMC",qnum:"LUON07062025-1",date:"Oct 14, 2025",title:"Supply & Fabrication of Kitchen Equipment",amount:998000,status:"Won / Ongoing",docs:"Multiple Quotations (Sep–Nov 2025) + PO 2026-01-0040 + Canvas Forms + Site Photos + Job Order",notes:"PO 2026-01-0040 issued; signed canvass forms; site photos Dec 2025; multiple quotation revisions",dateAdded:"",lastUpdated:""},
+  {name:"J&V",sector:"Food Service",location:"Unknown Location",contact:"J&V",qnum:"—",date:"—",title:"Kitchen Layout Design",amount:null,status:"Design Stage",docs:"AutoCAD DWG Plan + Reference Image",notes:"Design phase only; no quotation issued yet",dateAdded:"",lastUpdated:""},
+  {name:"Jackie Red Ausa",sector:"Food Service",location:"Loacan, Itogon, Benguet",contact:"Jackie Red Ausa",qnum:"BGON07012025-1",date:"July 1, 2025",title:"Fabrication, Supply & Installation of Kitchen Setup",amount:1246900,status:"Quotation Sent",docs:"Price Quotation (DOCX, PDF)",notes:"Full kitchen setup quotation",dateAdded:"",lastUpdated:""},
+  {name:"Jessa Sison",sector:"Food Service",location:"Vigan, Ilocos Sur",contact:"Jessa Sison",qnum:"—",date:"—",title:"Supply of Armchairs",amount:null,status:"Quotation Sent",docs:"Quotation Workbook (XLSM) + Reference Photos",notes:"Furniture/armchair quotation; amount in XLSM",dateAdded:"",lastUpdated:""},
+  {name:"Jomarcann",sector:"Food Service",location:"Sta. Cruz, Ilocos Sur",contact:"Jomarcann",qnum:"—",date:"—",title:"Kitchen Equipment Supply & Fabrication",amount:null,status:"Quotation Sent",docs:"Quotation PDF + XLSM",notes:"Amount in XLSM workbook",dateAdded:"",lastUpdated:""},
+  {name:"Joms Lano",sector:"Food Service",location:"Baguio City",contact:"Joms Lano",qnum:"—",date:"Dec 2024",title:"Kitchen Equipment & Ducting (Billing + Additionals)",amount:null,status:"Completed",docs:"Price Quotation + Billing Invoice + Additionals + Ducting Extension + Final Billing + Range Hood",notes:"Completed; billing invoice and final billing PDFs on file",dateAdded:"",lastUpdated:""},
+  {name:"Jorence Madio",sector:"Food Service",location:"Rodriguez, Rizal",contact:"Jorence Madio",qnum:"—",date:"Aug 25, 2025",title:"Kitchen Equipment Supply & Fabrication",amount:null,status:"Quotation Sent",docs:"Quotation 2025-08-25 (PDF)",notes:"PDF only; amount not extractable",dateAdded:"",lastUpdated:""},
+  {name:"Juan Paolo Prado",sector:"Food Service",location:"Makati (Sison Bus Stop)",contact:"Juan Paolo Prado",qnum:"MKON06182025-01",date:"June 18, 2025",title:"Fabrication & Installation of Range Hood + Fire Suppression",amount:942200,status:"Quotation Sent",docs:"Multiple Quotations + Fire Suppression Specs (DOCX, JPG, PDF)",notes:"Includes fire suppression system specs",dateAdded:"",lastUpdated:""},
+  {name:"Jun Tamayo",sector:"Food Service",location:"Unknown Location",contact:"Jun Tamayo",qnum:"—",date:"—",title:"BI Sheet Exhaust System & AC Pancake Supply",amount:690000,status:"Quotation Sent",docs:"Price Quotation + AC Supply Quotation (DOCX, PDF)",notes:"Includes ventilation and AC equipment",dateAdded:"",lastUpdated:""},
+  {name:"Justin Bautista",sector:"Food Service",location:"Tondaligan, Bonuan, Pangasinan",contact:"Justin Bautista",qnum:"ONBG0362025-01",date:"March 26, 2025",title:"Fabrication of Kitchen Equipment",amount:557300,status:"Quotation Sent",docs:"Quotation (with & without price versions, DOCX, PDF)",notes:"Revised total ₱557,300; base ₱410,000",dateAdded:"",lastUpdated:""},
+  {name:"Kings College",sector:"Education",location:"La Trinidad, Benguet",contact:"Kings College",qnum:"BGON12102401",date:"Dec 10, 2024",title:"Fabrication & Repair of Hood and Duct System",amount:199000,status:"Quotation Sent",docs:"Quotation (DOCX, PDF)",notes:"",dateAdded:"",lastUpdated:""},
+  {name:"Lorma Colleges",sector:"Education",location:"San Fernando, La Union",contact:"Lorma Colleges",qnum:"—",date:"Aug 1, 2025",title:"Kitchen Equipment (Preliminary Quotation)",amount:null,status:"Quotation Sent",docs:"Preliminary Quotation (XLSX)",notes:"Preliminary only; amount in XLSX workbook",dateAdded:"",lastUpdated:""},
+  {name:"Melrog Matthews",sector:"Food Service",location:"Sta. Cruz, Ilocos Sur",contact:"Melrog Matthews",qnum:"—",date:"—",title:"Kitchen Equipment Layout Design",amount:null,status:"Design Stage",docs:"Quotation PDF + AutoCAD DWG Plans",notes:"AutoCAD design files; detailed floor plan",dateAdded:"",lastUpdated:""},
+  {name:"Mikee Amlap",sector:"Food Service",location:"Unknown Location",contact:"Mikee Amlap",qnum:"BGON-04152025-1",date:"April 15, 2025",title:"Food Processing Equipment Supply",amount:91000,status:"Quotation Sent",docs:"Price Quotation (DOCX)",notes:"Estimated from line items",dateAdded:"",lastUpdated:""},
+  {name:"Ridgewood Hotel",sector:"Hospitality",location:"Baguio City",contact:"August Tero / Ridgewood Hotel",qnum:"BGOF013125-1",date:"Jan 31, 2025",title:"Kitchen Equipment Supply + Preventive Maintenance Contract",amount:313900,status:"Ongoing",docs:"Multiple Quotations + Job Order (Final) + Preventive Maintenance (Monthly)",notes:"Repeat client; active PM contract ₱24,000/year; Job Order finalized",dateAdded:"",lastUpdated:""},
+  {name:"Tita BETH'S 2 Chefs",sector:"Restaurant",location:"Laoag City, Ilocos Norte",contact:"Tita Beth's 2 Chefs",qnum:"LUON07032025-1",date:"July 3, 2025",title:"Kitchen Equipment Setup (Full Kitchen)",amount:1378800,status:"Quotation Sent",docs:"Price Quotation + Photos (DOCX, JPG, PDF) – 3 sections",notes:"Full kitchen; total across 3 sections",dateAdded:"",lastUpdated:""},
+  {name:"Vhia Chan",sector:"Food Service",location:"La Union",contact:"Vhiacel Chan",qnum:"LUON06302025-1",date:"June 30, 2025",title:"Range Hood System Fabrication",amount:50000,status:"Quotation Sent",docs:"Quotation (DOCX, PDF)",notes:"",dateAdded:"",lastUpdated:""},
+];
+
+const DEFAULT_BIDS = [
+  {agency:"DMMMSU",location:"San Fernando, La Union",category:"Kitchen Equipment",description:"Supply & Fabrication of Kitchen Equipment (various lots)",year:2024,status:"Won / Completed",outcome:"WON",abc:13494887,bidPrice:13494887,docs:"Project Portfolio DOCX, Completion Docs",notes:"Kitchen equipment portfolio; completed and delivered",dateSubmitted:"",lastUpdated:""},
+  {agency:"DMMMSU",location:"San Fernando, La Union",category:"Appliances",description:"Supply of Appliances (AC units, refrigerators, etc.)",year:2024,status:"Won / Completed",outcome:"WON",abc:1709634,bidPrice:1709634,docs:"Project Portfolio DOCX",notes:"Part of same portfolio; delivered",dateSubmitted:"",lastUpdated:""},
+  {agency:"ISPSC",location:"Ilocos Sur",category:"Machinery & Equipment",description:"Supply of Machinery & Equipment (various kitchen/lab items)",year:2025,status:"Won / Completed",outcome:"WON",abc:5157746.28,bidPrice:5100000,docs:"Notice of Award, MOA, Job Order, NTP, PhilGEPS Docs",notes:"ABC ₱5,157,746.28; submitted ₱5,100,000; full PhilGEPS docs on file; MOA + NTP signed",dateSubmitted:"",lastUpdated:""},
+  {agency:"ISPSC",location:"Ilocos Sur",category:"Kitchen Fixtures",description:"Supply & Installation of Kitchen Fixtures and Equipment",year:2025,status:"Active / Pending",outcome:"Pending",abc:5157746.28,bidPrice:5100000,docs:"Bid Documents + Technical Specs",notes:"Bid submitted; awaiting award; same ABC as machinery lot",dateSubmitted:"",lastUpdated:""},
+  {agency:"DepEd",location:"Baguio City",category:"Laboratory Equipment",description:"Supply of School Laboratory & Science Equipment",year:2024,status:"Won / Completed",outcome:"WON",abc:1196487,bidPrice:1196487,docs:"Market Survey, PO-3277 (Narciso), PO Signed (DepEd)",notes:"Two signed POs on file; purchase order awarded Nov 18, 2024",dateSubmitted:"",lastUpdated:""},
+  {agency:"ITRMC",location:"La Union",category:"Kitchen Equipment",description:"Supply & Fabrication of Kitchen Equipment",year:2025,status:"Won / Completed",outcome:"WON",abc:998000,bidPrice:998000,docs:"Multiple Quotations, PO 2026-01-0040, Canvas Forms, Job Order, Site Photos",notes:"PO 2026-01-0040 issued Jan 2026; site photos Dec 2025; finalized",dateSubmitted:"",lastUpdated:""},
+  {agency:"BSU",location:"La Trinidad, Benguet",category:"Equipment Supply",description:"Supply of Various Equipment (RFQ)",year:2026,status:"Active / Pending",outcome:"Pending",abc:106000,bidPrice:106000,docs:"RFQ Quotation 2026-01-26",notes:"RFQ submitted Jan 26, 2026; awaiting award",dateSubmitted:"",lastUpdated:""},
+  {agency:"Bethany Hospital",location:"San Fernando, La Union",category:"Kitchen & Systems",description:"Hospital Kitchen Equipment, Exhaust, Trolleys, and Site Works",year:2024,status:"Won / Completed",outcome:"WON",abc:1656300,bidPrice:1656300,docs:"Contract, Billing Invoice, Final Billing, Multiple Quotations, Job Order, Site Photos",notes:"Completed multi-phase project; final billing issued",dateSubmitted:"",lastUpdated:""},
+  {agency:"Candelaria Dist. Hospital",location:"Zambales",category:"Kitchen Equipment",description:"Hospital Kitchen Equipment & Fabrication (3 Sections)",year:2025,status:"Active / Pending",outcome:"Pending",abc:2292000,bidPrice:2292000,docs:"Revised Quotation Parts 1 & 2 (DOCX + PDF)",notes:"Proposal submitted; 3 sections; awaiting award",dateSubmitted:"",lastUpdated:""},
+  {agency:"Kings College",location:"La Trinidad, Benguet",category:"HVAC / Hood Systems",description:"Fabrication & Repair of Hood and Duct System",year:2024,status:"Active / Pending",outcome:"Pending",abc:199000,bidPrice:199000,docs:"Quotation (DOCX, PDF)",notes:"Quotation submitted; awaiting decision",dateSubmitted:"",lastUpdated:""},
+  {agency:"El Cielito Hotel",location:"Baguio City",category:"Ventilation System",description:"Supply & Installation of Exhaust and Fresh Air System",year:2024,status:"Prospective",outcome:"N/A",abc:1428800,bidPrice:null,docs:"Price Quotation (DOCX)",notes:"Large ventilation project; quotation issued; awaiting PO",dateSubmitted:"",lastUpdated:""},
+  {agency:"Chateau De Maisons",location:"Baguio City",category:"Kitchen Design",description:"Kitchen Equipment Layout and Design",year:2025,status:"Prospective",outcome:"N/A",abc:null,bidPrice:null,docs:"AutoCAD DWG Plan",notes:"Design phase; no bid submitted yet",dateSubmitted:"",lastUpdated:""},
+  {agency:"Lorma Colleges",location:"San Fernando, La Union",category:"Kitchen Equipment",description:"Kitchen Equipment Supply (Preliminary Quotation)",year:2025,status:"Prospective",outcome:"N/A",abc:null,bidPrice:null,docs:"Preliminary Quotation (XLSX)",notes:"Preliminary stage; formal bid not yet submitted",dateSubmitted:"",lastUpdated:""},
+  {agency:"J&V",location:"Unknown",category:"Kitchen Design",description:"Kitchen Layout Design",year:2025,status:"Prospective",outcome:"N/A",abc:null,bidPrice:null,docs:"AutoCAD DWG + Reference Image",notes:"Design only; no formal bid",dateSubmitted:"",lastUpdated:""},
+  {agency:"BSBT",location:"Baguio City",category:"Kitchen & Bar Setup",description:"Kitchen & Bar Fabrication (MOA Signed)",year:2025,status:"Active / Pending",outcome:"Pending",abc:null,bidPrice:null,docs:"MOA, Kitchen Plans, AutoCAD DWG, Design Files",notes:"MOA signed; negotiated project, not PhilGEPS",dateSubmitted:"",lastUpdated:""},
+  {agency:"Ridgewood Hotel",location:"Baguio City",category:"Kitchen Equipment",description:"Kitchen Equipment Supply + Preventive Maintenance",year:2025,status:"Active / Pending",outcome:"Pending",abc:313900,bidPrice:313900,docs:"Multiple Quotations, Job Order (Final), PM Contract",notes:"Repeat client; PM contract active ₱24,000/yr",dateSubmitted:"",lastUpdated:""},
+  {agency:"Chimichanga Restaurant",location:"Baguio City",category:"Kitchen Equipment",description:"Fabrication of Kitchen Equipment",year:2025,status:"Prospective",outcome:"N/A",abc:754600,bidPrice:754600,docs:"Quotation (DOCX + PDF, with/without price versions)",notes:"Private sector; large kitchen setup quotation",dateSubmitted:"",lastUpdated:""},
+  {agency:"Jackie Red Ausa",location:"Itogon, Benguet",category:"Kitchen Setup",description:"Fabrication, Supply & Installation of Full Kitchen Setup",year:2025,status:"Prospective",outcome:"N/A",abc:1246900,bidPrice:1246900,docs:"Price Quotation (DOCX, PDF)",notes:"Full kitchen fabrication quotation",dateSubmitted:"",lastUpdated:""},
+];
+
+// ══════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════
+let clients = [];
+let bids = [];
+
+function loadData() {
+  try {
+    const sc = localStorage.getItem('barro_clients');
+    const sb = localStorage.getItem('barro_bids');
+    clients = sc ? JSON.parse(sc) : JSON.parse(JSON.stringify(DEFAULT_CLIENTS));
+    bids    = sb ? JSON.parse(sb) : JSON.parse(JSON.stringify(DEFAULT_BIDS));
+  } catch(e) {
+    clients = JSON.parse(JSON.stringify(DEFAULT_CLIENTS));
+    bids    = JSON.parse(JSON.stringify(DEFAULT_BIDS));
+  }
+}
+
+function saveAll() {
+  try {
+    localStorage.setItem('barro_clients', JSON.stringify(clients));
+    localStorage.setItem('barro_bids', JSON.stringify(bids));
+    const now = new Date();
+    document.getElementById('lastSaved').textContent = now.toLocaleTimeString();
+    const ind = document.getElementById('saveIndicator');
+    ind.classList.add('show');
+    setTimeout(() => ind.classList.remove('show'), 2000);
+  } catch(e) { alert('Save failed: ' + e.message); }
+}
+
+function autoSave() { saveAll(); }
+
+// ══════════════════════════════════════════════
+// NAV
+// ══════════════════════════════════════════════
+const PAGE_TITLES = { dashboard:'Dashboard', clients:'Client Records', biddings:'Gov\'t Biddings' };
+
+function showPage(id, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  if (el) el.classList.add('active');
+  document.getElementById('pageTitle').textContent = PAGE_TITLES[id] || id;
+  if (id === 'dashboard') renderDashboard();
+}
+
+// ══════════════════════════════════════════════
+// STATUS HELPERS
+// ══════════════════════════════════════════════
+function statusClass(s) {
+  if (!s) return '';
+  const u = s.toLowerCase().replace(/[^a-z\/]/g,'').replace(/\//g,'-');
+  const map = {
+    'completed':'s-completed','won-completed':'s-won-completed',
+    'won-ongoing':'s-won-ongoing','ongoing':'s-ongoing',
+    'quotation-sent':'s-quotation-sent','active-pending':'s-active-pending',
+    'proposal-sent':'s-proposal-sent','design-stage':'s-design-stage',
+    'prospective':'s-prospective','lost':'s-lost','failed':'s-failed',
+    'disqualified':'s-disqualified','lost-no-response':'s-lost'
+  };
+  for (const [k,v] of Object.entries(map)) {
+    if (u.includes(k.replace('-',''))) return v;
+  }
+  return '';
+}
+
+function outcomeClass(o) {
+  if (!o) return '';
+  if (o === 'WON') return 'outcome-won';
+  if (o === 'Pending') return 'outcome-pending';
+  return 'outcome-na';
+}
+
+function fmt(n) {
+  if (!n && n !== 0) return '—';
+  return '₱' + Number(n).toLocaleString('en-PH', {minimumFractionDigits:0, maximumFractionDigits:2});
+}
+
+function parseAmt(s) {
+  if (!s || s === '—' || s === '') return null;
+  return parseFloat(s.toString().replace(/[₱,\s]/g,'')) || null;
+}
+
+// ══════════════════════════════════════════════
+// CLIENT TABLE
+// ══════════════════════════════════════════════
+const CLIENT_STATUSES = ['Quotation Sent','Design Stage','Proposal Sent','Won / Ongoing','Ongoing','Completed','Lost / No Response'];
+const SECTORS = ['Food Service','Café','Restaurant','Hospital','Hospitality','Education','B2B / Corporate','Institutional','Bakery'];
+
+function renderClients() {
+  const tbody = document.getElementById('clientBody');
+  tbody.innerHTML = '';
+  clients.forEach((c, i) => {
+    const tr = document.createElement('tr');
+    tr.className = i % 2 === 1 ? 'alt' : '';
+    tr.dataset.index = i;
+    tr.innerHTML = `
+      <td class="row-num">${i+1}</td>
+      <td><div class="editable" contenteditable="true" data-field="name" data-idx="${i}">${esc(c.name)}</div></td>
+      <td>
+        <select class="filter-select" style="border:none;font-size:11px;background:transparent;padding:0;" onchange="updateClientField(${i},'sector',this.value)">
+          ${SECTORS.map(s=>`<option${c.sector===s?' selected':''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td><div class="editable" contenteditable="true" data-field="location" data-idx="${i}">${esc(c.location)}</div></td>
+      <td><div class="editable" contenteditable="true" data-field="contact" data-idx="${i}" style="color:#777;font-size:11px;">${esc(c.contact)}</div></td>
+      <td><div class="editable" contenteditable="true" data-field="qnum" data-idx="${i}" style="font-family:monospace;font-size:11px;">${esc(c.qnum)}</div></td>
+      <td><div class="editable" contenteditable="true" data-field="date" data-idx="${i}" style="font-size:11px;">${esc(c.date)}</div></td>
+      <td style="max-width:280px;"><div class="editable" contenteditable="true" data-field="title" data-idx="${i}" style="white-space:normal;line-height:1.4;">${esc(c.title)}</div></td>
+      <td class="amount-cell">
+        <div class="editable" contenteditable="true" data-field="amount" data-idx="${i}" data-type="amount">${c.amount ? fmt(c.amount) : '—'}</div>
+      </td>
+      <td>
+        <select class="status-badge ${statusClass(c.status)}" onchange="updateClientField(${i},'status',this.value);this.className='status-badge '+statusClass(this.value)">
+          ${CLIENT_STATUSES.map(s=>`<option value="${s}"${c.status===s?' selected':''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td><div class="docs-cell editable" contenteditable="true" data-field="docs" data-idx="${i}" title="${esc(c.docs)}">${esc(c.docs)}</div></td>
+      <td><div class="notes-cell editable" contenteditable="true" data-field="notes" data-idx="${i}" title="${esc(c.notes)}">${esc(c.notes)}</div></td>
+      <td><div class="editable" contenteditable="true" data-field="dateAdded" data-idx="${i}" style="font-size:11px;color:#aaa;">${esc(c.dateAdded)}</div></td>
+      <td><div class="editable" contenteditable="true" data-field="lastUpdated" data-idx="${i}" style="font-size:11px;color:#aaa;">${esc(c.lastUpdated)}</div></td>
+      <td><button class="del-btn" onclick="deleteClient(${i})" title="Delete row">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+  attachClientEditors();
+  updateClientCount();
+}
+
+function attachClientEditors() {
+  document.querySelectorAll('#clientBody [contenteditable]').forEach(el => {
+    el.addEventListener('blur', () => {
+      const i = parseInt(el.dataset.idx);
+      const field = el.dataset.field;
+      let val = el.innerText.trim();
+      if (el.dataset.type === 'amount') {
+        clients[i].amount = parseAmt(val);
+        el.innerText = clients[i].amount ? fmt(clients[i].amount) : '—';
+      } else {
+        clients[i][field] = val;
+      }
+      autoSave();
+    });
+    el.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); el.blur(); } });
+  });
+}
+
+function updateClientField(i, field, val) {
+  clients[i][field] = val;
+  autoSave();
+}
+
+function deleteClient(i) {
+  if (!confirm(`Delete "${clients[i].name}"?`)) return;
+  clients.splice(i, 1);
+  renderClients();
+  autoSave();
+}
+
+function addClientRow() {
+  clients.push({name:"New Client",sector:"Food Service",location:"",contact:"",qnum:"",date:"",title:"",amount:null,status:"Quotation Sent",docs:"",notes:"",dateAdded:today(),lastUpdated:today()});
+  renderClients();
+  autoSave();
+  setTimeout(() => {
+    const rows = document.querySelectorAll('#clientBody tr');
+    const last = rows[rows.length - 1];
+    if (last) last.scrollIntoView({behavior:'smooth'});
+  }, 100);
+}
+
+function filterClients() {
+  const search = document.getElementById('clientSearch').value.toLowerCase();
+  const status = document.getElementById('clientStatusFilter').value;
+  const sector = document.getElementById('clientSectorFilter').value;
+  let visible = 0;
+  document.querySelectorAll('#clientBody tr').forEach((tr, i) => {
+    const c = clients[i];
+    if (!c) return;
+    const matchSearch = !search || [c.name,c.qnum,c.title,c.location,c.contact,c.docs,c.notes].some(f => f && f.toLowerCase().includes(search));
+    const matchStatus = !status || c.status === status;
+    const matchSector = !sector || c.sector === sector;
+    const show = matchSearch && matchStatus && matchSector;
+    tr.classList.toggle('hidden-row', !show);
+    if (show) visible++;
+  });
+  document.getElementById('clientCount').textContent = `Showing ${visible} of ${clients.length}`;
+}
+
+function updateClientCount() {
+  document.getElementById('clientCount').textContent = `${clients.length} clients`;
+}
+
+// ══════════════════════════════════════════════
+// BIDS TABLE
+// ══════════════════════════════════════════════
+const BID_STATUSES = ['Won / Completed','Active / Pending','Prospective','Lost / Failed','Disqualified'];
+const BID_OUTCOMES = ['WON','Pending','N/A'];
+
+function renderBids() {
+  const tbody = document.getElementById('bidBody');
+  tbody.innerHTML = '';
+  bids.forEach((b, i) => {
+    const tr = document.createElement('tr');
+    tr.className = i % 2 === 1 ? 'alt' : '';
+    tr.dataset.index = i;
+    tr.innerHTML = `
+      <td class="row-num">${i+1}</td>
+      <td><div class="editable" contenteditable="true" data-field="agency" data-idx="${i}" style="font-weight:700;">${esc(b.agency)}</div></td>
+      <td><div class="editable" contenteditable="true" data-field="location" data-idx="${i}" style="font-size:11px;">${esc(b.location)}</div></td>
+      <td><div class="editable" contenteditable="true" data-field="category" data-idx="${i}" style="font-size:11px;">${esc(b.category)}</div></td>
+      <td style="max-width:280px;"><div class="editable" contenteditable="true" data-field="description" data-idx="${i}" style="white-space:normal;line-height:1.4;font-size:11px;">${esc(b.description)}</div></td>
+      <td style="text-align:center;"><div class="editable" contenteditable="true" data-field="year" data-idx="${i}" style="font-weight:700;">${esc(String(b.year))}</div></td>
+      <td>
+        <select class="status-badge ${statusClass(b.status)}" onchange="updateBidField(${i},'status',this.value);this.className='status-badge '+statusClass(this.value)">
+          ${BID_STATUSES.map(s=>`<option value="${s}"${b.status===s?' selected':''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td>
+        <select class="status-badge ${outcomeClass(b.outcome)}" onchange="updateBidField(${i},'outcome',this.value);this.className='status-badge '+outcomeClass(this.value)">
+          ${BID_OUTCOMES.map(s=>`<option value="${s}"${b.outcome===s?' selected':''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td class="amount-cell"><div class="editable" contenteditable="true" data-field="abc" data-idx="${i}" data-type="amount">${b.abc ? fmt(b.abc) : '—'}</div></td>
+      <td class="amount-cell"><div class="editable" contenteditable="true" data-field="bidPrice" data-idx="${i}" data-type="amount" style="color:#555;font-weight:400;">${b.bidPrice ? fmt(b.bidPrice) : '—'}</div></td>
+      <td><div class="docs-cell editable" contenteditable="true" data-field="docs" data-idx="${i}" title="${esc(b.docs)}">${esc(b.docs)}</div></td>
+      <td><div class="notes-cell editable" contenteditable="true" data-field="notes" data-idx="${i}" title="${esc(b.notes)}">${esc(b.notes)}</div></td>
+      <td><div class="editable" contenteditable="true" data-field="dateSubmitted" data-idx="${i}" style="font-size:11px;color:#aaa;">${esc(b.dateSubmitted)}</div></td>
+      <td><div class="editable" contenteditable="true" data-field="lastUpdated" data-idx="${i}" style="font-size:11px;color:#aaa;">${esc(b.lastUpdated)}</div></td>
+      <td><button class="del-btn" onclick="deleteBid(${i})" title="Delete row">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+  attachBidEditors();
+  updateBidCount();
+}
+
+function attachBidEditors() {
+  document.querySelectorAll('#bidBody [contenteditable]').forEach(el => {
+    el.addEventListener('blur', () => {
+      const i = parseInt(el.dataset.idx);
+      const field = el.dataset.field;
+      let val = el.innerText.trim();
+      if (el.dataset.type === 'amount') {
+        bids[i][field] = parseAmt(val);
+        el.innerText = bids[i][field] ? fmt(bids[i][field]) : '—';
+      } else {
+        bids[i][field] = val;
+      }
+      autoSave();
+    });
+    el.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); el.blur(); } });
+  });
+}
+
+function updateBidField(i, field, val) {
+  bids[i][field] = val;
+  autoSave();
+}
+
+function deleteBid(i) {
+  if (!confirm(`Delete "${bids[i].agency}" bid?`)) return;
+  bids.splice(i, 1);
+  renderBids();
+  autoSave();
+}
+
+function addBidRow() {
+  bids.push({agency:"New Agency",location:"",category:"",description:"",year:new Date().getFullYear(),status:"Prospective",outcome:"N/A",abc:null,bidPrice:null,docs:"",notes:"",dateSubmitted:today(),lastUpdated:today()});
+  renderBids();
+  autoSave();
+  setTimeout(() => {
+    const rows = document.querySelectorAll('#bidBody tr');
+    const last = rows[rows.length - 1];
+    if (last) last.scrollIntoView({behavior:'smooth'});
+  }, 100);
+}
+
+function filterBids() {
+  const search = document.getElementById('bidSearch').value.toLowerCase();
+  const status = document.getElementById('bidStatusFilter').value;
+  const year   = document.getElementById('bidYearFilter').value;
+  let visible = 0;
+  document.querySelectorAll('#bidBody tr').forEach((tr, i) => {
+    const b = bids[i];
+    if (!b) return;
+    const matchSearch = !search || [b.agency,b.category,b.description,b.location,b.docs,b.notes].some(f => f && f.toString().toLowerCase().includes(search));
+    const matchStatus = !status || b.status === status;
+    const matchYear   = !year   || String(b.year) === year;
+    const show = matchSearch && matchStatus && matchYear;
+    tr.classList.toggle('hidden-row', !show);
+    if (show) visible++;
+  });
+  document.getElementById('bidCount').textContent = `Showing ${visible} of ${bids.length}`;
+}
+
+function updateBidCount() {
+  document.getElementById('bidCount').textContent = `${bids.length} bids`;
+}
+
+// ══════════════════════════════════════════════
+// DASHBOARD
+// ══════════════════════════════════════════════
+function renderDashboard() {
+  // Counts
+  const total = clients.length;
+  const completed = clients.filter(c => c.status === 'Completed').length;
+  const wonOngoing = clients.filter(c => c.status === 'Won / Ongoing' || c.status === 'Ongoing').length;
+  const quoteSent  = clients.filter(c => c.status === 'Quotation Sent' || c.status === 'Proposal Sent').length;
+  const design     = clients.filter(c => c.status === 'Design Stage').length;
+
+  // Amounts
+  const pipelineAmt  = clients.filter(c => ['Quotation Sent','Proposal Sent','Design Stage'].includes(c.status)).reduce((s,c) => s + (c.amount||0), 0);
+  const wonAmt       = clients.filter(c => ['Won / Ongoing','Ongoing','Completed'].includes(c.status)).reduce((s,c) => s + (c.amount||0), 0);
+
+  const bWon    = bids.filter(b => b.status === 'Won / Completed').reduce((s,b) => s + (b.abc||0), 0);
+  const bActive = bids.filter(b => b.status === 'Active / Pending').reduce((s,b) => s + (b.abc||0), 0);
+  const bProsp  = bids.filter(b => b.status === 'Prospective').reduce((s,b) => s + (b.abc||0), 0);
+  const bWonCnt = bids.filter(b => b.status === 'Won / Completed').length;
+  const winRate = bids.length ? Math.round(bWonCnt / bids.length * 100) : 0;
+
+  // KPI Cards
+  document.getElementById('kpiGrid').innerHTML = `
+    <div class="kpi-card"><div class="kpi-label">Total Clients</div><div class="kpi-value">${total}</div><div class="kpi-sub">on record</div></div>
+    <div class="kpi-card green"><div class="kpi-label">Completed</div><div class="kpi-value">${completed}</div><div class="kpi-sub">${fmt(wonAmt)} total value</div></div>
+    <div class="kpi-card teal"><div class="kpi-label">Won / Ongoing</div><div class="kpi-value">${wonOngoing}</div><div class="kpi-sub">active projects</div></div>
+    <div class="kpi-card gold"><div class="kpi-label">Quotation Sent</div><div class="kpi-value">${quoteSent}</div><div class="kpi-sub">${fmt(pipelineAmt)} pipeline</div></div>
+    <div class="kpi-card purple"><div class="kpi-label">Design Stage</div><div class="kpi-value">${design}</div><div class="kpi-sub">in design</div></div>
+  `;
+
+  // Client pipeline bar
+  const colors = {'Completed':'#375623','Won / Ongoing':'#006064','Ongoing':'#006064','Quotation Sent':'#c9860a','Proposal Sent':'#c9860a','Design Stage':'#4A235A','Lost / No Response':'#9C0006'};
+  const statusCounts = {};
+  clients.forEach(c => { statusCounts[c.status] = (statusCounts[c.status]||0) + 1; });
+  let barHTML = '';
+  for (const [st, cnt] of Object.entries(statusCounts)) {
+    const pct = (cnt / total * 100).toFixed(1);
+    barHTML += `<div class="pipeline-seg" style="width:${pct}%;background:${colors[st]||'#aaa'};" title="${st}: ${cnt} (${pct}%)">${pct > 8 ? cnt : ''}</div>`;
+  }
+  document.getElementById('clientPipelineBar').innerHTML = barHTML;
+
+  // Client status table
+  let cst = `<table class="summary-table"><tr><th>Status</th><th>Count</th><th>%</th><th>Amount (₱)</th></tr>`;
+  const allStatuses = ['Quotation Sent','Proposal Sent','Design Stage','Won / Ongoing','Ongoing','Completed','Lost / No Response'];
+  allStatuses.forEach(st => {
+    const cnt = clients.filter(c => c.status === st).length;
+    if (cnt === 0) return;
+    const amt = clients.filter(c => c.status === st).reduce((s,c) => s + (c.amount||0), 0);
+    const pct = (cnt / total * 100).toFixed(0);
+    cst += `<tr><td><span class="status-badge ${statusClass(st)}" style="font-size:10px;">${st}</span></td><td><b>${cnt}</b></td><td>${pct}%</td><td>${amt ? fmt(amt) : '—'}</td></tr>`;
+  });
+  cst += '</table>';
+  document.getElementById('clientStatusTable').innerHTML = cst;
+
+  // Biddings summary
+  document.getElementById('biddingsSummary').innerHTML = `
+    <table class="summary-table">
+      <tr><th>Status</th><th>Count</th><th>ABC Total (₱)</th></tr>
+      ${[['Won / Completed',bWon],['Active / Pending',bActive],['Prospective',bProsp]].map(([st,amt]) => {
+        const cnt = bids.filter(b => b.status === st).length;
+        return `<tr><td><span class="status-badge ${statusClass(st)}" style="font-size:10px;">${st}</span></td><td><b>${cnt}</b></td><td>${amt ? fmt(amt) : '—'}</td></tr>`;
+      }).join('')}
+      <tr><td colspan="2"><b>Bid Win Rate</b></td><td><b>${winRate}%</b></td></tr>
+    </table>
+  `;
+
+  // Client financials
+  document.getElementById('clientFinancials').innerHTML = `
+    <div style="margin-bottom:10px;">
+      <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.5px;">Won + Completed Revenue</div>
+      <div class="amount-highlight amount-won">${fmt(wonAmt)}</div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.5px;">Quotation Pipeline</div>
+      <div class="amount-highlight amount-active">${fmt(pipelineAmt)}</div>
+    </div>
+  `;
+
+  // Biddings financials
+  document.getElementById('biddingsFinancials').innerHTML = `
+    <div style="margin-bottom:8px;">
+      <div style="font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;">Won / Completed</div>
+      <div class="amount-highlight amount-won">${fmt(bWon)}</div>
+    </div>
+    <div style="margin-bottom:8px;">
+      <div style="font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;">Active Bids</div>
+      <div class="amount-highlight amount-active">${fmt(bActive)}</div>
+    </div>
+    <div>
+      <div style="font-size:11px;color:#888;letter-spacing:.5px;text-transform:uppercase;">Prospective</div>
+      <div class="amount-highlight" style="color:var(--med-blue);">${fmt(bProsp)}</div>
+    </div>
+  `;
+
+  // Sector breakdown
+  const sectors = {};
+  clients.forEach(c => {
+    if (!sectors[c.sector]) sectors[c.sector] = {count:0, amount:0};
+    sectors[c.sector].count++;
+    sectors[c.sector].amount += c.amount||0;
+  });
+  let sec = `<table class="summary-table"><tr><th>Sector</th><th>Clients</th><th>%</th><th>Total Quoted (₱)</th></tr>`;
+  Object.entries(sectors).sort((a,b) => b[1].count - a[1].count).forEach(([s,d]) => {
+    sec += `<tr><td>${s}</td><td><b>${d.count}</b></td><td>${(d.count/total*100).toFixed(0)}%</td><td>${d.amount ? fmt(d.amount) : '—'}</td></tr>`;
+  });
+  sec += '</table>';
+  document.getElementById('sectorCard').innerHTML = sec;
+}
+
+// ══════════════════════════════════════════════
+// EXPORT CSV
+// ══════════════════════════════════════════════
+function exportCSV() {
+  const active = document.querySelector('.page.active').id;
+  let rows = [], filename;
+  if (active === 'page-clients') {
+    filename = 'Barro_Clients.csv';
+    rows.push(['#','Client Name','Sector','Location','Contact','Quotation No.','Date','Project Title','Quoted Amount','Status','Documents','Notes','Date Added','Last Updated']);
+    clients.forEach((c,i) => rows.push([i+1,c.name,c.sector,c.location,c.contact,c.qnum,c.date,c.title,c.amount||'',c.status,c.docs,c.notes,c.dateAdded,c.lastUpdated]));
+  } else if (active === 'page-biddings') {
+    filename = 'Barro_Biddings.csv';
+    rows.push(['#','Agency','Location','Category','Description','Year','Status','Outcome','ABC Amount','Bid Price','Documents','Notes','Date Submitted','Last Updated']);
+    bids.forEach((b,i) => rows.push([i+1,b.agency,b.location,b.category,b.description,b.year,b.status,b.outcome,b.abc||'',b.bidPrice||'',b.docs,b.notes,b.dateSubmitted,b.lastUpdated]));
+  } else {
+    alert('Navigate to Client Records or Biddings to export.'); return;
+  }
+  const csv = rows.map(r => r.map(v => `"${String(v||'').replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent('﻿' + csv);
+  a.download = filename;
+  a.click();
+}
+
+// ══════════════════════════════════════════════
+// UTILS
+// ══════════════════════════════════════════════
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function today() {
+  return new Date().toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'});
+}
+
+// ══════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'});
+  loadData();
+  renderClients();
+  renderBids();
+  renderDashboard();
+
+  // Auto-save on visibility change
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveAll(); });
+});
+</script>
+</body>
+</html>
