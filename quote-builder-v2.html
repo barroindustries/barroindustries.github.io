@@ -643,6 +643,11 @@ tr:hover td{background:#fafbff;}
   </div>
 </div>
 
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+<script defer src="js/firebase-config.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
 //  COMPANY CONFIG
@@ -677,12 +682,54 @@ let waiveFlags={};
 async function loadDatabase() {
   setStatus('loading','Loading product database…');
 
-  // file:// protocol blocks fetch — skip directly to embedded data
+  // file:// protocol blocks Firestore/fetch — skip directly to embedded data
   if (location.protocol === 'file:') {
     DB = getEmbeddedDB();
-    setStatus('offline','📦 Using embedded data (open via a web server to load products-database.json)');
+    setStatus('offline','📦 Using embedded data (open via a web server to load the live database)');
     initUI();
     return;
+  }
+
+  // Primary source: Firestore "products" collection — synced live with the
+  // President's Product Database page.
+  try {
+    if (typeof db === 'undefined') throw new Error('firestore not initialized');
+    const [snap, metaSnap] = await Promise.all([
+      db.collection('products').limit(1000).get(),
+      db.collection('productMeta').doc('config').get(),
+    ]);
+    if (snap.empty) throw new Error('no products in firestore yet');
+    const meta = metaSnap.exists ? metaSnap.data() : {};
+    DB = {
+      products: snap.docs.map(d => {
+        const p = d.data();
+        return {
+          id: d.id,
+          category: p.category,
+          name: p.title || p.name || '',
+          shortName: p.title || p.name || '',
+          formulaType: p.formulaType || 'fixed',
+          basePrice: p.basePrice ?? p.baseRate ?? 0,
+          defaultDimensions: p.measurement || {},
+          formula: p.formula || {},
+          specs: [],
+          capitalMaterials: p.capitalMaterials || 0,
+          capitalLabor: p.capitalLabor || 0,
+          laborHours: null,
+          leadTime: '',
+          notes: p.specifications || p.notes || '',
+          unit: p.unit || 'pc',
+        };
+      }),
+      categories: meta.categories || [],
+      laborRoles: meta.laborRoles || [],
+      constants: meta.constants || {},
+    };
+    setStatus('online',`✅ Live database — ${DB.products.length} products in ${DB.categories.length} categories`);
+    initUI();
+    return;
+  } catch (e) {
+    console.warn('[quote-builder] Firestore product load failed, falling back', e);
   }
 
   try {
@@ -698,7 +745,7 @@ async function loadDatabase() {
     DB = JSON.parse(clean);
     setStatus('online',`✅ Database loaded — ${DB.products.length} products in ${DB.categories.length} categories`);
   } catch(e) {
-    setStatus('offline','⚠️ Using embedded data (could not load products-database.json)');
+    setStatus('offline','⚠️ Using embedded data (could not load products database)');
     DB = getEmbeddedDB();
   }
   initUI();

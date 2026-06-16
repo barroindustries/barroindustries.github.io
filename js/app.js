@@ -895,44 +895,74 @@ function renderQuoteBuilderIframe() {
 }
 
 // ── Product Database (president only) ────────────
-const DEFAULT_PRODUCTS = {
-  'Steel Fabrication': [
-    { code:'SF-001', name:'Custom Steel Counter', unit:'unit', baseRate:4500 },
-    { code:'SF-002', name:'Steel Work Table',     unit:'unit', baseRate:3800 },
-    { code:'SF-003', name:'Steel Shelving Unit',  unit:'unit', baseRate:2200 },
-    { code:'SF-004', name:'Steel Cabinet',        unit:'unit', baseRate:5500 },
-    { code:'SF-005', name:'Steel Frame Structure',unit:'set',  baseRate:8000 },
-  ],
-  'Stainless Products': [
-    { code:'SS-001', name:'Stainless Steel Sink',     unit:'unit', baseRate:6000 },
-    { code:'SS-002', name:'Stainless Hood / Exhaust', unit:'unit', baseRate:7500 },
-    { code:'SS-003', name:'Stainless Wall Panel',     unit:'sqm',  baseRate:1200 },
-    { code:'SS-004', name:'Stainless Prep Table',     unit:'unit', baseRate:4200 },
-    { code:'SS-005', name:'Stainless Grease Trap',    unit:'unit', baseRate:3000 },
-  ],
-  'Aluminum Works': [
-    { code:'AL-001', name:'Aluminum Partition',  unit:'sqm',  baseRate:950  },
-    { code:'AL-002', name:'Aluminum Door Frame', unit:'unit', baseRate:4800 },
-    { code:'AL-003', name:'Aluminum Window',     unit:'unit', baseRate:3500 },
-  ],
-  'Installation': [
-    { code:'IN-001', name:'Installation — Standard',  unit:'lot',  baseRate:5000  },
-    { code:'IN-002', name:'Installation — Heavy',     unit:'lot',  baseRate:12000 },
-    { code:'IN-003', name:'Site Survey / Inspection', unit:'trip', baseRate:1500  },
-  ],
-};
-
-async function seedProductsIfEmpty() {
-  const snap = await db.collection('products').limit(1).get();
-  if (!snap.empty) return;
-  const batch = db.batch();
-  Object.entries(DEFAULT_PRODUCTS).forEach(([cat, prods]) => {
-    prods.forEach(p => {
-      const ref = db.collection('products').doc(p.code);
-      batch.set(ref, { ...p, category: cat, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+// Single source of truth for the quote builders. Seeded once from
+// products-database.json, then lives entirely in Firestore so president
+// edits (title, measurement, specs, price, capital) sync live everywhere.
+// One-time, additive: imports the full 153-item catalog (with measurement/
+// formula data) the first time the page loads. Gated on productMeta/config
+// rather than the products collection being empty, since older builds had
+// already seeded a handful of placeholder products (Steel Fabrication, etc.)
+// under a legacy schema — those are left untouched and just display via the
+// legacy-field fallback in normalizeProduct() below, migrating to the new
+// schema automatically the next time someone edits and saves them.
+async function seedCatalogIfNeeded() {
+  const metaSnap = await db.collection('productMeta').doc('config').get();
+  if (metaSnap.exists) return;
+  try {
+    const r = await fetch('products-database.json?v=' + Date.now());
+    const text = await r.text();
+    const clean = text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    const seedDb = JSON.parse(clean);
+    const existing = await db.collection('products').limit(1000).get();
+    const existingIds = new Set(existing.docs.map(d => d.id));
+    const batch = db.batch();
+    seedDb.products.forEach(p => {
+      if (existingIds.has(p.id)) return; // never overwrite an existing doc
+      const ref = db.collection('products').doc(p.id);
+      batch.set(ref, {
+        title: p.name,
+        category: p.category,
+        unit: p.unit || 'unit',
+        basePrice: p.basePrice || 0,
+        measurement: p.defaultDimensions || {},
+        specifications: p.notes || '',
+        capitalMaterials: 0,
+        capitalLabor: 0,
+        formulaType: p.formulaType || 'fixed',
+        formula: p.formula || {},
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
     });
-  });
-  await batch.commit();
+    batch.set(db.collection('productMeta').doc('config'), {
+      categories: seedDb.categories || [],
+      laborRoles: seedDb.laborRoles || [],
+      constants: seedDb.constants || {},
+    });
+    await batch.commit();
+  } catch (e) {
+    console.warn('[products] seed from products-database.json failed', e);
+  }
+}
+
+function pdbCategoryLabel(catId, categories) {
+  return categories.find(c => c.id === catId)?.label || catId || 'Uncategorized';
+}
+
+// Legacy docs (pre-rich-schema) only have {name, baseRate, code, category}.
+// Fall back to those so old placeholder products still display correctly
+// until they're next edited and saved under the new schema.
+function normalizeProduct(p) {
+  return {
+    ...p,
+    title: p.title || p.name || '',
+    basePrice: p.basePrice ?? p.baseRate ?? 0,
+    measurement: p.measurement || {},
+    specifications: p.specifications || p.notes || '',
+    capitalMaterials: p.capitalMaterials || 0,
+    capitalLabor: p.capitalLabor || 0,
+    formulaType: p.formulaType || 'fixed',
+    formula: p.formula || {},
+  };
 }
 
 async function renderProductDatabase() {
@@ -940,19 +970,57 @@ async function renderProductDatabase() {
   const c = document.getElementById('page-content');
   c.innerHTML = '<div class="loading-placeholder">Loading products…</div>';
 
-  await seedProductsIfEmpty();
-  const snap = await db.collection('products').orderBy('category').limit(500).get();
-  const products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  await seedCatalogIfNeeded();
+  const [snap, metaSnap] = await Promise.all([
+    db.collection('products').limit(1000).get(),
+    db.collection('productMeta').doc('config').get(),
+  ]);
+  const products = snap.docs.map(d => normalizeProduct({ id: d.id, ...d.data() }));
+  const meta = metaSnap.exists ? metaSnap.data() : { categories: [] };
+  const categories = meta.categories || [];
 
   // Group by category
   const byCategory = {};
   products.forEach(p => {
-    const cat = p.category || 'Uncategorized';
+    const cat = p.category || 'uncategorized';
     if (!byCategory[cat]) byCategory[cat] = [];
     byCategory[cat].push(p);
   });
+  const allCatIds = [...new Set([...categories.map(c => c.id), ...Object.keys(byCategory)])];
 
-  const allCategories = [...new Set([...Object.keys(DEFAULT_PRODUCTS), ...Object.keys(byCategory)])];
+  const fmt = n => `₱${Number(n || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+  const measureStr = m => (m && (m.W || m.D || m.H)) ? `${m.W || '—'} × ${m.D || '—'} × ${m.H || '—'} mm` : '—';
+
+  // prefix scopes element IDs so the hidden "Add Product" form and an
+  // inline "Edit" row never collide (getElementById only ever finds the
+  // first match in the DOM, which silently broke saves when both existed).
+  const formRow = (p = {}, prefix = 'pdb-f') => `
+    <div class="form-group"><label>Title</label><input type="text" id="${prefix}-title" placeholder="e.g. SS Prep Table" value="${(p.title||'').replace(/"/g,'&quot;')}"></div>
+    <div class="form-group"><label>Code</label><input type="text" id="${prefix}-code" placeholder="e.g. SF-006" value="${p.id||''}" ${p.id?'disabled':''}></div>
+    <div class="form-group"><label>Category</label>
+      <select id="${prefix}-cat">
+        ${allCatIds.map(cid=>`<option value="${cid}" ${p.category===cid?'selected':''}>${pdbCategoryLabel(cid, categories)}</option>`).join('')}
+        <option value="__new__">+ New Category…</option>
+      </select>
+    </div>
+    <div class="form-group" id="${prefix}-newcat-wrap" style="display:none"><label>New Category Name</label><input type="text" id="${prefix}-newcat" placeholder="Category name"></div>
+    <div class="form-group"><label>Unit</label><input type="text" id="${prefix}-unit" placeholder="unit / sqm / lot" value="${p.unit||''}"></div>
+    <div class="form-group"><label>Price (₱)</label><input type="number" id="${prefix}-price" placeholder="0.00" min="0" step="0.01" value="${p.basePrice||''}"></div>
+    <div class="form-group"><label>Capital — Materials (₱)</label><input type="number" id="${prefix}-capmat" placeholder="0.00" min="0" step="0.01" value="${p.capitalMaterials||''}"></div>
+    <div class="form-group"><label>Capital — Labor (₱)</label><input type="number" id="${prefix}-caplab" placeholder="0.00" min="0" step="0.01" value="${p.capitalLabor||''}"></div>
+    <div class="form-group"><label>Measurement — Width (mm)</label><input type="number" id="${prefix}-w" min="0" value="${p.measurement?.W||''}"></div>
+    <div class="form-group"><label>Measurement — Depth (mm)</label><input type="number" id="${prefix}-d" min="0" value="${p.measurement?.D||''}"></div>
+    <div class="form-group"><label>Measurement — Height (mm)</label><input type="number" id="${prefix}-h" min="0" value="${p.measurement?.H||''}"></div>
+    <div class="form-group"><label>Pricing Type</label>
+      <select id="${prefix}-formula">
+        <option value="fixed" ${p.formulaType==='fixed'||!p.formulaType?'selected':''}>Fixed price</option>
+        <option value="per_length" ${p.formulaType==='per_length'?'selected':''}>Scales by length (width)</option>
+        <option value="per_area" ${p.formulaType==='per_area'?'selected':''}>Scales by area (sqm)</option>
+      </select>
+    </div>
+    <div class="form-group" id="${prefix}-coef-wrap"><label id="${prefix}-coef-label">Price per extra mm (₱)</label><input type="number" id="${prefix}-coef" min="0" step="0.01" value="${p.formula?.pricePerExtraMm||p.formula?.pricePerSqm||''}"></div>
+    <div class="form-group" style="grid-column:1/-1"><label>Specifications</label><textarea id="${prefix}-specs" rows="2" placeholder="Material grade, thickness, finish, etc.">${p.specifications||''}</textarea></div>
+  `;
 
   c.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
@@ -962,17 +1030,7 @@ async function renderProductDatabase() {
 
     <div id="pdb-add-form" style="display:none" class="card" style="margin-bottom:16px">
       <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-        <div class="form-group"><label>Product Name</label><input type="text" id="pdb-f-name" placeholder="e.g. Steel Shelf"></div>
-        <div class="form-group"><label>Code</label><input type="text" id="pdb-f-code" placeholder="e.g. SF-006"></div>
-        <div class="form-group"><label>Category</label>
-          <select id="pdb-f-cat">
-            ${allCategories.map(c=>`<option>${c}</option>`).join('')}
-            <option value="__new__">+ New Category…</option>
-          </select>
-        </div>
-        <div class="form-group" id="pdb-newcat-wrap" style="display:none"><label>New Category Name</label><input type="text" id="pdb-f-newcat" placeholder="Category name"></div>
-        <div class="form-group"><label>Unit</label><input type="text" id="pdb-f-unit" placeholder="unit / sqm / lot"></div>
-        <div class="form-group"><label>Base Rate (₱)</label><input type="number" id="pdb-f-rate" placeholder="0.00" min="0" step="0.01"></div>
+        ${formRow()}
         <div style="grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end">
           <button class="btn-secondary btn-sm" id="pdb-cancel-btn">Cancel</button>
           <button class="btn-primary btn-sm" id="pdb-save-btn">Save Product</button>
@@ -981,29 +1039,33 @@ async function renderProductDatabase() {
     </div>
 
     <div id="pdb-tables">
-      ${allCategories.map(cat => {
-        const prods = byCategory[cat] || [];
+      ${allCatIds.map(catId => {
+        const prods = byCategory[catId] || [];
         return `
         <div class="card" style="margin-bottom:14px">
           <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
-            <h3 style="font-size:14px;font-weight:700">${cat}</h3>
+            <h3 style="font-size:14px;font-weight:700">${pdbCategoryLabel(catId, categories)}</h3>
             <span style="font-size:12px;color:var(--text-muted)">${prods.length} item${prods.length!==1?'s':''}</span>
           </div>
           <div class="card-body" style="padding:0">
             ${!prods.length ? '<div style="padding:16px;color:var(--text-muted);font-size:13px">No products in this category.</div>' : `
             <div class="table-wrap">
               <table class="data-table">
-                <thead><tr><th>Code</th><th>Product Name</th><th>Unit</th><th style="text-align:right">Base Rate</th><th></th></tr></thead>
+                <thead><tr><th>Code</th><th>Title</th><th>Measurement</th><th>Specifications</th><th>Unit</th><th style="text-align:right">Price</th><th style="text-align:right">Capital (Mat.)</th><th style="text-align:right">Capital (Labor)</th><th></th></tr></thead>
                 <tbody>
                   ${prods.map(p => `
                     <tr data-pid="${p.id}">
-                      <td><span style="font-family:monospace;font-size:12px">${p.code||p.id}</span></td>
-                      <td><span class="pdb-name-cell">${p.name}</span></td>
-                      <td><span class="pdb-unit-cell">${p.unit||'—'}</span></td>
-                      <td style="text-align:right"><span class="pdb-rate-cell">₱${Number(p.baseRate||0).toLocaleString('en-PH',{minimumFractionDigits:2})}</span></td>
+                      <td><span style="font-family:monospace;font-size:12px">${p.id}</span></td>
+                      <td>${p.title||''}</td>
+                      <td style="font-size:12px">${measureStr(p.measurement)}</td>
+                      <td style="font-size:12px;max-width:220px">${(p.specifications||'—')}</td>
+                      <td>${p.unit||'—'}</td>
+                      <td style="text-align:right">${fmt(p.basePrice)}</td>
+                      <td style="text-align:right">${fmt(p.capitalMaterials)}</td>
+                      <td style="text-align:right">${fmt(p.capitalLabor)}</td>
                       <td style="text-align:right;white-space:nowrap">
                         <button class="btn-secondary btn-sm pdb-edit-btn" data-pid="${p.id}">Edit</button>
-                        <button class="btn-danger btn-sm pdb-del-btn" data-pid="${p.id}" data-name="${(p.name||'').replace(/"/g,'&quot;')}" style="margin-left:4px">Delete</button>
+                        <button class="btn-danger btn-sm pdb-del-btn" data-pid="${p.id}" data-name="${(p.title||'').replace(/"/g,'&quot;')}" style="margin-left:4px">Delete</button>
                       </td>
                     </tr>`).join('')}
                 </tbody>
@@ -1015,35 +1077,73 @@ async function renderProductDatabase() {
     </div>
   `;
 
+  const coefLabelFor = ft => ft === 'per_area' ? 'Price per extra sqm (₱)' : 'Price per extra mm (₱)';
+  const syncCoefLabel = prefix => {
+    const ft = document.getElementById(`${prefix}-formula`)?.value;
+    const wrap = document.getElementById(`${prefix}-coef-wrap`);
+    const label = document.getElementById(`${prefix}-coef-label`);
+    if (!wrap || !label) return;
+    wrap.style.display = ft === 'fixed' ? 'none' : '';
+    label.textContent = coefLabelFor(ft);
+  };
+
+  function wireForm(prefix = 'pdb-f') {
+    document.getElementById(`${prefix}-cat`).addEventListener('change', e => {
+      document.getElementById(`${prefix}-newcat-wrap`).style.display = e.target.value === '__new__' ? '' : 'none';
+    });
+    document.getElementById(`${prefix}-formula`).addEventListener('change', () => syncCoefLabel(prefix));
+    syncCoefLabel(prefix);
+  }
+
   // Add product toggle
   document.getElementById('pdb-add-btn').addEventListener('click', () => {
     document.getElementById('pdb-add-form').style.display = '';
     document.getElementById('pdb-add-btn').style.display = 'none';
+    wireForm('pdb-f');
   });
   document.getElementById('pdb-cancel-btn').addEventListener('click', () => {
-    document.getElementById('pdb-add-form').style.display = 'none';
-    document.getElementById('pdb-add-btn').style.display = '';
-  });
-  document.getElementById('pdb-f-cat').addEventListener('change', e => {
-    document.getElementById('pdb-newcat-wrap').style.display = e.target.value === '__new__' ? '' : 'none';
+    renderProductDatabase();
   });
 
-  // Save new product
+  async function collectAndSaveProduct(existingId, prefix = 'pdb-f') {
+    const title   = document.getElementById(`${prefix}-title`).value.trim();
+    const code    = (document.getElementById(`${prefix}-code`).value.trim() || existingId || '').toUpperCase();
+    const catSel  = document.getElementById(`${prefix}-cat`).value;
+    const category = catSel === '__new__' ? document.getElementById(`${prefix}-newcat`).value.trim() : catSel;
+    const unit    = document.getElementById(`${prefix}-unit`).value.trim();
+    const basePrice = parseFloat(document.getElementById(`${prefix}-price`).value) || 0;
+    const capitalMaterials = parseFloat(document.getElementById(`${prefix}-capmat`).value) || 0;
+    const capitalLabor = parseFloat(document.getElementById(`${prefix}-caplab`).value) || 0;
+    const W = parseFloat(document.getElementById(`${prefix}-w`).value) || 0;
+    const D = parseFloat(document.getElementById(`${prefix}-d`).value) || 0;
+    const H = parseFloat(document.getElementById(`${prefix}-h`).value) || 0;
+    const formulaType = document.getElementById(`${prefix}-formula`).value;
+    const coef = parseFloat(document.getElementById(`${prefix}-coef`).value) || 0;
+    const specifications = document.getElementById(`${prefix}-specs`).value.trim();
+    if (!title || !code || !category) { Notifs.showToast('Title, code, and category are required', 'error'); return false; }
+
+    const measurement = { ...(W ? { W } : {}), ...(D ? { D } : {}), ...(H ? { H } : {}) };
+    const formula = formulaType === 'per_length' ? { baseLengthMm: W || 0, pricePerExtraMm: coef }
+      : formulaType === 'per_area' ? { pricePerSqm: coef }
+      : {};
+
+    await db.collection('products').doc(code).set({
+      title, category, unit, basePrice, capitalMaterials, capitalLabor,
+      measurement, specifications, formulaType, formula,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      ...(existingId ? {} : { createdAt: firebase.firestore.FieldValue.serverTimestamp() }),
+    }, { merge: true });
+    return true;
+  }
+
   document.getElementById('pdb-save-btn').addEventListener('click', async () => {
-    const name    = document.getElementById('pdb-f-name').value.trim();
-    const code    = document.getElementById('pdb-f-code').value.trim().toUpperCase();
-    const catSel  = document.getElementById('pdb-f-cat').value;
-    const cat     = catSel === '__new__' ? document.getElementById('pdb-f-newcat').value.trim() : catSel;
-    const unit    = document.getElementById('pdb-f-unit').value.trim();
-    const rate    = parseFloat(document.getElementById('pdb-f-rate').value) || 0;
-    if (!name || !code || !cat) { Notifs.showToast('Name, code, and category are required', 'error'); return; }
     const btn = document.getElementById('pdb-save-btn');
     btn.disabled = true; btn.textContent = 'Saving…';
     try {
-      await db.collection('products').doc(code).set({ code, name, category: cat, unit, baseRate: rate, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-      Notifs.showToast('Product saved!', 'success');
-      renderProductDatabase();
-    } catch(e) { Notifs.showToast('Error saving product', 'error'); btn.disabled=false; btn.textContent='Save Product'; }
+      const ok = await collectAndSaveProduct(null, 'pdb-f');
+      if (ok) { Notifs.showToast('Product saved!', 'success'); renderProductDatabase(); }
+      else { btn.disabled = false; btn.textContent = 'Save Product'; }
+    } catch (e) { Notifs.showToast('Error saving product', 'error'); btn.disabled = false; btn.textContent = 'Save Product'; }
   });
 
   // Edit & Delete
@@ -1058,35 +1158,34 @@ async function renderProductDatabase() {
       renderProductDatabase();
       return;
     }
-    // EDIT — inline row editing
+    // EDIT — open the same form pre-filled, inline above the row's table
     if (e.target.classList.contains('pdb-edit-btn')) {
       const pid = e.target.dataset.pid;
-      const tr  = c.querySelector(`tr[data-pid="${pid}"]`);
-      if (!tr) return;
       const prod = products.find(p => p.id === pid);
       if (!prod) return;
-      tr.innerHTML = `
-        <td><span style="font-family:monospace;font-size:12px">${prod.code||prod.id}</span></td>
-        <td><input type="text" class="pdb-inline-inp" id="pdb-e-name" value="${(prod.name||'').replace(/"/g,'&quot;')}" style="width:100%"></td>
-        <td><input type="text" class="pdb-inline-inp" id="pdb-e-unit" value="${prod.unit||''}" style="width:60px"></td>
-        <td><input type="number" class="pdb-inline-inp" id="pdb-e-rate" value="${prod.baseRate||0}" min="0" step="0.01" style="width:90px;text-align:right"></td>
-        <td style="white-space:nowrap">
-          <button class="btn-primary btn-sm pdb-save-edit-btn" data-pid="${pid}">Save</button>
-          <button class="btn-secondary btn-sm pdb-cancel-edit-btn" style="margin-left:4px">Cancel</button>
-        </td>`;
+      const tr = c.querySelector(`tr[data-pid="${pid}"]`);
+      const colSpan = tr.children.length;
+      tr.outerHTML = `<tr data-pid="${pid}" data-editing="1"><td colspan="${colSpan}">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px 0">
+          ${formRow(prod, 'pdb-e')}
+          <div style="grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn-secondary btn-sm pdb-cancel-edit-btn">Cancel</button>
+            <button class="btn-primary btn-sm pdb-save-edit-btn" data-pid="${pid}">Save</button>
+          </div>
+        </div>
+      </td></tr>`;
+      wireForm('pdb-e');
       return;
     }
     // SAVE EDIT
     if (e.target.classList.contains('pdb-save-edit-btn')) {
-      const pid  = e.target.dataset.pid;
-      const name = document.getElementById('pdb-e-name')?.value.trim();
-      const unit = document.getElementById('pdb-e-unit')?.value.trim();
-      const rate = parseFloat(document.getElementById('pdb-e-rate')?.value) || 0;
-      if (!name) { Notifs.showToast('Name is required', 'error'); return; }
+      const pid = e.target.dataset.pid;
       e.target.disabled = true; e.target.textContent = 'Saving…';
-      await db.collection('products').doc(pid).update({ name, unit, baseRate: rate, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-      Notifs.showToast('Product updated!', 'success');
-      renderProductDatabase();
+      try {
+        const ok = await collectAndSaveProduct(pid, 'pdb-e');
+        if (ok) { Notifs.showToast('Product updated!', 'success'); renderProductDatabase(); }
+        else { e.target.disabled = false; e.target.textContent = 'Save'; }
+      } catch (err) { Notifs.showToast('Error saving product', 'error'); e.target.disabled = false; e.target.textContent = 'Save'; }
       return;
     }
     // CANCEL EDIT

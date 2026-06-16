@@ -193,6 +193,10 @@ service cloud.firestore {
       allow read: if isAuth();
       allow write: if isAuth() && isAdmin();
     }
+    match /productMeta/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && isAdmin();
+    }
 
     // ── Reference materials ────────────────────────────
     match /resources/{docId} {
