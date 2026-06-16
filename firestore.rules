@@ -34,9 +34,13 @@ service cloud.firestore {
       allow delete: if isAuth() && (resource.data.authorId == request.auth.uid || isAdmin());
     }
 
-    // ── Notifications — each user owns their own ───────
+    // ── Notifications — anyone signed in can deliver a notification
+    // into another user's inbox (Notifs.send/sendToDept/sendToAll/sendToOwner
+    // all write cross-user by design); only the inbox owner can read it or
+    // mark it read/unread.
     match /notifications/{uid}/{document=**} {
-      allow read, write: if isAuth() && isOwner(uid);
+      allow read, update, delete: if isAuth() && isOwner(uid);
+      allow create: if isAuth();
     }
 
     // ── Attendance ─────────────────────────────────────
