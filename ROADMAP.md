@@ -39,6 +39,13 @@ This file is the running source of truth for what's done and what's left to make
 - **Synced:** re-opening + re-applying the BOM re-prices against current Inventory unit costs — so a steel-price change in Inventory flows into the product's material cost (and therefore the Internal Cost & Margin panel). Verified end-to-end (2×₱3,500 sheet + 4×₱850 tube = ₱10,400 → auto-filled).
 - _Future polish:_ auto-recompute all products' `capitalMaterials` on an inventory price change (batch), rather than per-product re-apply.
 
+### High-priority "run remotely" gaps — CLOSED (post-V10, ultracode pass)
+Designed via a fan-out spec workflow, then implemented + adversarially reviewed (5 findings, all fixed) before deploy.
+- **Per-role dashboards.** `renderManagerDashboard` (team attendance present/half/not-in derived from `fullTime`/`attendanceScore`/`loginTime`, dept task health, dept pending) + `renderFinanceDashboard` (MTD income/expense/net from ledger, payroll summary, expense-by-category bars, pending payables, low stock). The dispatch already routed manager→/finance→ but the fns were undefined (live "Dashboard error" bug) — now defined. No new collections.
+- **Audit log.** `window.logAudit(action,entity,id,details)` (config.js, fire-and-forget) instrumented at ~12 sensitive mutation sites (payroll ×4, product save/delete, inventory save/delete, stock movement, production order save/delete, expense, password reset, leave approve/reject). President-only `renderAuditLog` viewer (filterable). Rule: **forgery-proof** — create requires `actorUid==auth.uid && actorRole==getRole() && ts==request.time` + `keys().hasOnly([...])`; immutable (`update:false`); president may prune (`delete: isPresident`).
+- **Leave management.** `leave_requests` + `leave_balances/{uid}` collections. Employee "My Leave" (balance KPIs, request modal: 4 types, working-day calc excl. Sundays, client balance check) + finance/admin approve/reject (decrements balance, notifies). Rules: create shape-validated (`days` 1–366, `userName` string); **only finance/admin update** (employees can't tamper post-approval); president deletes. Balances in their own collection so finance writes them without broad `users` write.
+- All three deployed (`firestore.rules`) and verified in the running app (stubbed Firestore for the auth-gated paths). Sidebar: Leave (all roles), Audit Log (president, Security section).
+
 
 ### Critical fixes (production was broken at launch)
 - **Dashboard crash** — TDZ `ReferenceError` in `renderPresidentDashboard` (president + manager saw "Dashboard error"). Fixed.

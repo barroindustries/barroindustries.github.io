@@ -438,6 +438,58 @@ service cloud.firestore {
       allow delete:         if isAuth() && isAdmin();
     }
 
+    // ── Audit log (append-only) ─────────────────────────
+    // Who-changed-what trail on sensitive mutations. A signed-in user may APPEND
+    // an entry, but ONLY describing THEMSELVES (actorUid == their uid) with their
+    // real role (actorRole == getRole()) and a server timestamp (no backdating) —
+    // so entries can't be forged in another person's name. Entries are immutable
+    // (no update); only the president may prune (e.g. clearing spam). Admins read.
+    match /audit_log/{docId} {
+      allow read:   if isAuth() && isAdmin();
+      allow create: if isAuth()
+        && request.resource.data.actorUid == request.auth.uid
+        && request.resource.data.actorRole == getRole()
+        && request.resource.data.ts == request.time
+        && request.resource.data.keys().hasOnly(['ts','action','entity','entityId','details','actorUid','actorName','actorRole']);
+      allow update: if false;
+      allow delete: if isAuth() && isPresident();
+    }
+
+    // ── Leave requests ──────────────────────────────────
+    // Employees file their own request (pending only) and read their own;
+    // finance/admin read all + approve/reject; only the president deletes.
+    match /leave_requests/{docId} {
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid || isFinanceOrAdmin()
+      );
+      // Shape-validate days/userName on every create; an employee may only file
+      // their OWN request as pending. Finance/admin may file on anyone's behalf.
+      allow create: if isAuth()
+        && request.resource.data.days is number
+        && request.resource.data.days > 0
+        && request.resource.data.days <= 366
+        && request.resource.data.userName is string
+        && (
+          isFinanceOrAdmin() ||
+          (request.resource.data.userId == request.auth.uid
+            && request.resource.data.status == 'pending')
+        );
+      // Only finance/admin may mutate a request after it's filed (approve/reject).
+      // Employees never update — the client only ever creates — so the owner has
+      // no update path (which would otherwise let them tamper post-approval).
+      allow update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
+    }
+
+    // ── Leave balances (remaining day counters per user) ─
+    // Kept in their own collection (NOT on the users doc) so finance can set
+    // balances without being granted broad write access to user profiles.
+    // The owner reads their own balance; finance/admin read all + write.
+    match /leave_balances/{uid} {
+      allow read:  if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+      allow write: if isAuth() && isFinanceOrAdmin();
+    }
+
     // ── Suggestions ────────────────────────────────────
     match /suggestions/{docId} {
       allow read: if isAuth() && isAdmin();

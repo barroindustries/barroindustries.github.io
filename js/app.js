@@ -697,10 +697,12 @@ function getSidebarItems() {
     items.push({ icon:'trending-up',   label:'Progress Reports', page:'progress'                       });
     items.push({ icon:'users',         label:'Team Directory',   page:'team-directory',  section:true  });
     items.push({ icon:'calendar',      label:'Attendance',       page:'attendance'                     });
+    items.push({ icon:'palmtree',      label:'Leave',            page:'leave'                          });
     items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'                    });
     items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
     items.push({ icon:'boxes',         label:'Inventory',        page:'inventory',       section:true, sectionLabel:'Operations' });
     items.push({ icon:'package',       label:'Product Database', page:'product-database', section:true, sectionLabel:'Catalog' });
+    items.push({ icon:'scroll-text',   label:'Audit Log',        page:'audit-log',       section:true, sectionLabel:'Security' });
     items.push({ icon:'book-open',     label:'SOPs',             page:'sops',            section:true, sectionLabel:'Resources' });
     items.push({ icon:'help-circle',   label:'Help & Setup',     page:'help'             });
   } else if (partner) {
@@ -733,6 +735,7 @@ function getSidebarItems() {
     // Management section below
     items.push({ icon:'users',       label:'Team',             page:'team-directory',    section:true, sectionLabel:'Management' });
     items.push({ icon:'calendar',    label:'Attendance',       page:'attendance'                       });
+    items.push({ icon:'palmtree',    label:'Leave',            page:'leave'                            });
     items.push({ icon:'credit-card', label:'Personal Finance', page:'personal-finance'                 });
     items.push({ icon:'folder',      label:'Files',            page:'files'                            });
     items.push({ icon:'boxes',       label:'Inventory',        page:'inventory'                        });
@@ -1046,6 +1049,64 @@ function normalizeProduct(p) {
   };
 }
 
+// ── Audit Log viewer (president only) ─────────────
+async function renderAuditLog() {
+  if (!isPresident()) return;
+  const c = document.getElementById('page-content');
+  c.innerHTML = '<div class="loading-placeholder">Loading audit log…</div>';
+  let entries = [];
+  try {
+    const snap = await db.collection('audit_log').orderBy('ts','desc').limit(500).get();
+    entries = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+  } catch (e) {
+    c.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Could not load audit log</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(e.message||'')}</p></div>`;
+    return;
+  }
+  const entities = [...new Set(entries.map(e=>e.entity).filter(Boolean))].sort();
+  const actions  = [...new Set(entries.map(e=>e.action).filter(Boolean))].sort();
+  const actBadge = a => ({create:'badge-green',update:'badge-blue',delete:'badge-red',approve:'badge-green',reject:'badge-orange',reset:'badge-orange'}[a]||'badge-gray');
+  const fmtTs = ts => { try { return ts?.toDate ? ts.toDate().toLocaleString('en-PH',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'; } catch(_) { return '—'; } };
+
+  c.innerHTML = `
+    <div class="page-header"><h2>📜 Audit Log</h2><span class="badge badge-gray">${entries.length} recent entr${entries.length===1?'y':'ies'}</span></div>
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Append-only trail of changes to sensitive data (payroll, finance, inventory, products, production, deals, passwords). Newest first, last 500.</p>
+    <div class="subtab-bar" style="flex-wrap:wrap;gap:8px;margin-bottom:12px">
+      <select id="audit-entity" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">
+        <option value="all">All entities</option>${entities.map(e=>`<option value="${escHtml(e)}">${escHtml(e)}</option>`).join('')}
+      </select>
+      <select id="audit-action" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">
+        <option value="all">All actions</option>${actions.map(a=>`<option value="${escHtml(a)}">${escHtml(a)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="card"><div class="card-body" style="padding:0">
+      ${!entries.length ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">📜</div><h4>No audit entries yet</h4><p>Sensitive changes will be recorded here.</p></div>' :
+      `<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Entity</th><th>ID</th><th>Details</th></tr></thead>
+        <tbody id="audit-tbody"></tbody>
+      </table></div>`}
+    </div></div>`;
+
+  const draw = () => {
+    const fe = document.getElementById('audit-entity')?.value || 'all';
+    const fa = document.getElementById('audit-action')?.value || 'all';
+    const rows = entries.filter(e => (fe==='all'||e.entity===fe) && (fa==='all'||e.action===fa));
+    const tb = document.getElementById('audit-tbody');
+    if (!tb) return;
+    tb.innerHTML = rows.map(e => `
+      <tr>
+        <td style="white-space:nowrap;font-size:12px">${fmtTs(e.ts)}</td>
+        <td style="font-size:12px">${escHtml(e.actorName||'—')}${e.actorRole?`<div style="color:var(--text-muted)">${escHtml(e.actorRole)}</div>`:''}</td>
+        <td><span class="badge ${actBadge(e.action)}">${escHtml(e.action||'—')}</span></td>
+        <td style="font-size:12px">${escHtml(e.entity||'—')}</td>
+        <td style="font-size:11px;font-family:monospace;color:var(--text-muted)">${escHtml(e.entityId||'—')}</td>
+        <td style="font-size:11px;color:var(--text-muted);max-width:240px;word-break:break-word">${escHtml(JSON.stringify(e.details||{}))}</td>
+      </tr>`).join('') || '<tr><td colspan="6" style="padding:16px;text-align:center;color:var(--text-muted)">No entries match the filter.</td></tr>';
+  };
+  document.getElementById('audit-entity')?.addEventListener('change', draw);
+  document.getElementById('audit-action')?.addEventListener('change', draw);
+  draw();
+}
+
 async function renderProductDatabase() {
   if (!isPresident()) return;
   const c = document.getElementById('page-content');
@@ -1252,6 +1313,7 @@ async function renderProductDatabase() {
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       ...(existingId ? {} : { createdAt: firebase.firestore.FieldValue.serverTimestamp() }),
     }, { merge: true });
+    window.logAudit && window.logAudit(existingId ? 'update' : 'create', 'product', code, { title, basePrice });
     return true;
   }
 
@@ -1351,6 +1413,7 @@ async function renderProductDatabase() {
       const name = e.target.dataset.name;
       if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
       await db.collection('products').doc(pid).delete();
+      window.logAudit && window.logAudit('delete', 'product', pid, { name });
       Notifs.showToast('Product deleted', 'success');
       renderProductDatabase();
       return;
@@ -1448,8 +1511,10 @@ function navigateTo(page) {
     case 'team-directory':   window.renderTeamTab?.(); break;
     case 'attendance':       window.renderAttendancePage?.(); break;
     case 'cash-advances':    window.renderCashAdvancePage?.(); break;
+    case 'leave':            window.renderLeavePage?.(); break;
     case 'inventory':        window.renderInventory?.(); break;
     case 'product-database': isPresident() ? renderProductDatabase() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔒</div><h4>Access Denied</h4></div>`); break;
+    case 'audit-log':        isPresident() ? renderAuditLog() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔒</div><h4>Access Denied</h4></div>`); break;
     default: c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><h4>Page not found</h4></div>`;
   }
 }
@@ -1474,8 +1539,12 @@ async function getAllQuotes() {
 
 // ── DASHBOARD ─────────────────────────────────────
 async function renderDashboard() {
-  if (isPresident() || currentRole === 'manager') {
+  if (isPresident()) {
     await renderPresidentDashboard();
+  } else if (currentRole === 'manager') {
+    await renderManagerDashboard();
+  } else if (currentRole === 'finance') {
+    await renderFinanceDashboard();
   } else if (isPartner()) {
     await renderPartnerDashboard();
   } else if (isBrilliantOnly()) {
@@ -1833,6 +1902,205 @@ async function renderPresidentDashboard() {
     if (window.lucide) lucide.createIcons({ nodes: [c] });
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${err.message}</p></div>`;
+  }
+}
+
+// ── MANAGER DASHBOARD ─────────────────────────────
+// Department-scoped oversight: team attendance, dept task health, dept approvals.
+async function renderManagerDashboard() {
+  const c = document.getElementById('page-content');
+  c.innerHTML = '<div class="loading-placeholder">Loading dashboard…</div>';
+  try {
+    const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
+    const todayStr = bizDate();
+    const depts = currentDepts || [];
+    const [usersSnap, tasksSnap, subsSnap, approvalsSnap, caSnap] = await Promise.all([
+      dbCachedGet('users',     () => db.collection('users').get(), 60000),
+      dbCachedGet('tasks-all', () => db.collection('tasks').get(), 30000),
+      dbCachedGet('submissions', () => db.collection('submissions').get(), 30000),
+      safeGet(db.collection('approval_requests').where('status','==','pending')),
+      safeGet(db.collection('cash_advances').where('status','==','pending')),
+    ]);
+    const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const inDept = (u) => { const ud = Array.isArray(u.departments)?u.departments:(u.department?[u.department]:[]); return depts.some(d=>ud.includes(d)); };
+    const team = users.filter(inDept);
+    const teamIds = new Set(team.map(u=>u.id));
+    const allTasks = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const deptTasks = allTasks.filter(t => depts.includes(t.department) ||
+      (Array.isArray(t.assignedTo)?t.assignedTo:(t.assignedTo?[t.assignedTo]:[])).some(uid=>teamIds.has(uid)));
+    const CLOSED = ['done','approved','archived'];
+    const openT = deptTasks.filter(t=>!CLOSED.includes(t.status));
+    const doneT = deptTasks.filter(t=>CLOSED.includes(t.status));
+    const overdueT = openT.filter(t=>t.dueDate && t.dueDate < todayStr);
+    const subs = subsSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const deptPending = subs.filter(s=>s.status==='pending' && (depts.includes(s.department)||teamIds.has(s.createdBy)||teamIds.has(s.uid))).length
+      + (approvalsSnap.size||0) + (caSnap.size||0);
+
+    // Today's attendance for the team (admin can read attendance/{uid}/records/{date})
+    // Attendance status is COMPUTED from the record's fields (the app never
+    // stores a `status` key): full day = fullTime/score≥1, half = loginTime/score>0,
+    // and an absent person simply has no record yet → 'unmarked'. (Mirrors modules.js.)
+    const attStatus = (data) => {
+      if (!data) return 'unmarked';
+      if (data.fullTime || (typeof data.attendanceScore==='number' && data.attendanceScore>=1)) return 'present';
+      if (data.loginTime || (typeof data.attendanceScore==='number' && data.attendanceScore>0)) return 'half';
+      return 'unmarked';
+    };
+    const att = await Promise.all(team.map(u =>
+      db.collection('attendance').doc(u.id).collection('records').doc(todayStr).get()
+        .then(d => ({ uid:u.id, name:u.displayName||u.email, status: attStatus(d.exists ? d.data() : null) }))
+        .catch(() => ({ uid:u.id, name:u.displayName||u.email, status:'unmarked' }))));
+    const present = att.filter(a=>a.status==='present').length;
+    const half    = att.filter(a=>a.status==='half').length;
+    const unmarked = att.filter(a=>a.status==='unmarked').length;
+
+    const priorityOrder = { high:0, medium:1, low:2 };
+    const sortedOpen = [...openT].sort((a,b)=>{
+      const aO=a.dueDate&&a.dueDate<todayStr?0:1, bO=b.dueDate&&b.dueDate<todayStr?0:1;
+      if(aO!==bO) return aO-bO;
+      return (priorityOrder[a.priority]??2)-(priorityOrder[b.priority]??2);
+    });
+    const nameOf = uid => escHtml(users.find(u=>u.id===uid)?.displayName || '?');
+    const assignedNames = t => { const ids=Array.isArray(t.assignedTo)?t.assignedTo:(t.assignedTo?[t.assignedTo]:[]); return ids.length?ids.map(nameOf).join(', '):'Unassigned'; };
+
+    c.innerHTML = `
+      <div class="page-header"><h2>Manager Dashboard</h2><span class="badge badge-purple">${escHtml(depts.join(' · ')||'Manager')}</span></div>
+      <div id="live-clock" class="live-clock-line"></div>
+      ${overdueT.length?`<div class="alert-banner alert-danger" onclick="navigateTo('tasks')"><span>⚠️ <strong>${overdueT.length} overdue</strong> in your ${depts.length>1?'departments':'department'}</span><span class="alert-chevron">›</span></div>`:''}
+      ${deptPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>📋 <strong>${deptPending} pending</strong> approval${deptPending>1?'s':''} / request${deptPending>1?'s':''}</span><span class="alert-chevron">›</span></div>`:''}
+      <div class="kpi-row">
+        <div class="kpi-card"><div class="kpi-icon-wrap" style="background:rgba(10,132,255,0.12)"><i data-lucide="users" style="stroke:#0A84FF;width:18px"></i></div><div class="kpi-label">Team</div><div class="kpi-value">${team.length}</div></div>
+        <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="user-check" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Present today</div><div class="kpi-value">${present}</div><div class="kpi-sub">${half} half · ${unmarked} not in yet</div></div>
+        <div class="kpi-card ${openT.length?'accent':''}"><div class="kpi-icon-wrap" style="background:rgba(155,168,255,0.12)"><i data-lucide="check-square" style="stroke:#9BA8FF;width:18px"></i></div><div class="kpi-label">Open Tasks</div><div class="kpi-value">${openT.length}</div><div class="kpi-sub">${doneT.length} done</div></div>
+        <div class="kpi-card ${overdueT.length?'red':''}"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="alert-triangle" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Overdue</div><div class="kpi-value">${overdueT.length}</div></div>
+      </div>
+      <div class="dashboard-grid">
+        <div class="card">
+          <div class="card-header"><h3>Department Tasks</h3><button class="btn-primary btn-sm" onclick="navigateTo('tasks')">All Tasks</button></div>
+          <div class="card-body" style="padding:0">
+            ${!sortedOpen.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">✅</div><p>No open tasks in your department</p></div>':
+              sortedOpen.slice(0,8).map(t=>{const ov=t.dueDate&&t.dueDate<todayStr;return `<div class="task-feed-item ${ov?'task-overdue':''}">
+                <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
+                <div style="flex:1;min-width:0"><div class="task-feed-title">${escHtml(t.title)}</div><div class="task-feed-meta">${assignedNames(t)}${t.dueDate?` · <span style="color:${ov?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</span>`:''}</div></div>
+                <span class="badge ${ov?'badge-red':'badge-blue'}">${ov?'Overdue':t.status||'open'}</span></div>`;}).join('')}
+          </div>
+        </div>
+        <div>
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-header"><h3>👥 Team Today</h3><button class="btn-primary btn-sm" onclick="navigateTo('attendance')">Attendance</button></div>
+            <div class="card-body" style="padding:0">
+              ${!team.length?'<div class="empty-state" style="padding:20px"><p>No team members assigned</p></div>':
+                att.slice(0,12).map(a=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid var(--border)">
+                  <span style="width:8px;height:8px;border-radius:50%;background:${a.status==='present'?'var(--success)':a.status==='half'?'var(--warning)':'var(--text-muted)'}"></span>
+                  <span style="flex:1;font-size:13px">${escHtml(a.name)}</span>
+                  <span class="badge ${a.status==='present'?'badge-green':a.status==='half'?'badge-orange':'badge-gray'}" style="font-size:10px">${a.status==='unmarked'?'not in':a.status}</span>
+                </div>`).join('')}
+            </div>
+          </div>
+          <div class="card"><div class="card-header"><h3>Quick Actions</h3></div>
+            <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+              <button class="quick-action-btn" onclick="navigateTo('tasks')"><i data-lucide="plus-circle"></i> New Task</button>
+              <button class="quick-action-btn" onclick="navigateTo('approvals')"><i data-lucide="shield-check"></i> Approvals${deptPending?`<span class="badge badge-red" style="margin-left:auto">${deptPending}</span>`:''}</button>
+              <button class="quick-action-btn" onclick="navigateTo('team-directory')"><i data-lucide="users"></i> Team Directory</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    liveDateTime('live-clock');
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
+  } catch(err) {
+    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
+  }
+}
+
+// ── FINANCE DASHBOARD ─────────────────────────────
+// Money oversight: MTD income/expense/net, payroll, expense-by-category, pending payables.
+async function renderFinanceDashboard() {
+  const c = document.getElementById('page-content');
+  c.innerHTML = '<div class="loading-placeholder">Loading dashboard…</div>';
+  try {
+    const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
+    const todayStr = bizDate();
+    const mtd = todayStr.slice(0,7);
+    const [usersSnap, ledgerSnap, expSnap, caSnap, invSnap, jobSnap] = await Promise.all([
+      dbCachedGet('users', fetchUsersWithPayroll, 60000),
+      safeGet(db.collection('ledger')),
+      safeGet(db.collection('expenses')),
+      safeGet(db.collection('cash_advances').where('status','==','pending')),
+      safeGet(db.collection('inventory_items')),
+      safeGet(db.collection('job_costs')),
+    ]);
+    const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const payrollGross = users.reduce((s,u)=>s+(u.salary||0)+(u.allowance||0),0);
+    const payrollDeduct = users.reduce((s,u)=>s+(u.deductions||0),0);
+    const payrollNet = payrollGross - payrollDeduct;
+
+    const ledger = ledgerSnap.docs.map(d=>d.data());
+    const mtdLedger = ledger.filter(e=>(e.date||'').slice(0,7)===mtd);
+    const mtdIncome  = mtdLedger.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0);
+    const mtdExpense = mtdLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+    const mtdNet = mtdIncome - mtdExpense;
+
+    const expenses = expSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const pendingExp = expenses.filter(e=>e.status==='pending');
+    const pendingExpTotal = pendingExp.reduce((s,e)=>s+(e.amount||0),0);
+    // Expense by category (this month, approved + pending)
+    const monthExp = expenses.filter(e=>(e.date||'').slice(0,7)===mtd);
+    const byCat = {};
+    monthExp.forEach(e=>{ const k=e.category||'Other'; byCat[k]=(byCat[k]||0)+(e.amount||0); });
+    const catRows = Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
+    const catMax = catRows.reduce((m,[,v])=>Math.max(m,v),0)||1;
+    const monthExpTotal = catRows.reduce((s,[,v])=>s+v,0);
+
+    const lowStock = invSnap.docs.map(d=>d.data()).filter(i=>(i.reorderLevel||0)>0 && (i.qty||0)<=(i.reorderLevel||0)).length;
+    const jobs = jobSnap.docs.map(d=>d.data());
+    const totalMargin = jobs.reduce((s,j)=>s+((j.revenue||0)-((j.materialsCost||0)+(j.laborCost||0)+(j.otherCost||0))),0);
+
+    c.innerHTML = `
+      <div class="page-header"><h2>Finance Dashboard</h2><span class="badge badge-green">${ROLES[currentRole]?.label||'Finance'}</span></div>
+      <div id="live-clock" class="live-clock-line"></div>
+      ${pendingExp.length?`<div class="alert-banner alert-warn" onclick="navigateTo('cash-advances')"><span>💸 <strong>${pendingExp.length} expense${pendingExp.length>1?'s':''}</strong> awaiting approval · ₱${formatNum(pendingExpTotal)}</span><span class="alert-chevron">›</span></div>`:''}
+      <div class="kpi-row">
+        <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="trending-up" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Income (MTD)</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdIncome)}</div></div>
+        <div class="kpi-card red"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="trending-down" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Expense (MTD)</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdExpense)}</div></div>
+        <div class="kpi-card ${mtdNet>=0?'green':'red'}"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="line-chart" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Net Income (MTD)</div><div class="kpi-value" style="font-size:15px;color:${mtdNet>=0?'var(--success)':'var(--danger)'}">₱${formatNum(mtdNet)}</div></div>
+        <div class="kpi-card warn"><div class="kpi-icon-wrap" style="background:rgba(255,170,0,0.12)"><i data-lucide="banknote" style="stroke:#FFAA00;width:18px"></i></div><div class="kpi-label">Monthly Payroll</div><div class="kpi-value" style="font-size:15px">₱${formatNum(payrollNet)}</div><div class="kpi-sub">${users.length} staff</div></div>
+        <div class="kpi-card ${pendingExpTotal>0?'accent':''}" style="cursor:pointer" onclick="navigateTo('cash-advances')"><div class="kpi-icon-wrap" style="background:rgba(155,168,255,0.12)"><i data-lucide="receipt" style="stroke:#9BA8FF;width:18px"></i></div><div class="kpi-label">Payables (pending)</div><div class="kpi-value" style="font-size:15px">₱${formatNum(pendingExpTotal)}</div></div>
+        <div class="kpi-card ${lowStock>0?'red':''}" style="cursor:pointer" onclick="navigateTo('inventory')"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="boxes" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Low Stock</div><div class="kpi-value">${lowStock}</div></div>
+      </div>
+      <div class="dashboard-grid">
+        <div class="card">
+          <div class="card-header"><h3>Expenses by Category (this month)</h3><button class="btn-primary btn-sm" onclick="navigateTo('dept:Finance')">Finance</button></div>
+          <div class="card-body">
+            ${!catRows.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📊</div><p>No expenses recorded this month</p></div>':
+              catRows.map(([k,v])=>`<div style="margin-bottom:10px">
+                <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span>${escHtml(k)}</span><span style="font-weight:700">₱${formatNum(v)}</span></div>
+                <div style="height:8px;background:var(--surface2);border-radius:4px;overflow:hidden"><div style="height:100%;width:${Math.round(v/catMax*100)}%;background:var(--primary);border-radius:4px"></div></div>
+              </div>`).join('')+`<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;border-top:1px solid var(--border);padding-top:8px;margin-top:8px"><span>Total</span><span>₱${formatNum(monthExpTotal)}</span></div>`}
+          </div>
+        </div>
+        <div>
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-header"><h3>💰 Payroll Summary</h3><button class="btn-primary btn-sm" onclick="navigateTo('dept:Finance')">Payroll</button></div>
+            <div class="card-body">
+              <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px"><span>Gross (salary + allowance)</span><strong>₱${formatNum(payrollGross)}</strong></div>
+              <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px;color:var(--text-muted)"><span>Deductions</span><span>− ₱${formatNum(payrollDeduct)}</span></div>
+              <div style="display:flex;justify-content:space-between;padding:8px 0 2px;font-size:14px;font-weight:700;border-top:2px solid var(--border)"><span>Net Payroll</span><span>₱${formatNum(payrollNet)}</span></div>
+            </div>
+          </div>
+          <div class="card"><div class="card-header"><h3>Quick Actions</h3></div>
+            <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+              <button class="quick-action-btn" onclick="navigateTo('cash-advances')"><i data-lucide="receipt"></i> Review Expenses${pendingExp.length?`<span class="badge badge-red" style="margin-left:auto">${pendingExp.length}</span>`:''}</button>
+              <button class="quick-action-btn" onclick="navigateTo('dept:Finance')"><i data-lucide="calculator"></i> Accounting & Reports</button>
+              <button class="quick-action-btn" onclick="navigateTo('inventory')"><i data-lucide="boxes"></i> Inventory & Job Costs</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    liveDateTime('live-clock');
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
+  } catch(err) {
+    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
   }
 }
 
@@ -5189,6 +5457,7 @@ function openAddEmployeeModal() {
       allowance:parseFloat(document.getElementById('emp-allow').value)||0,
       deductions:parseFloat(document.getElementById('emp-deduct').value)||0,
     });
+    window.logAudit && window.logAudit('create','payroll',ref.id,{ salary:parseFloat(document.getElementById('emp-salary').value)||0 });
     dbCacheInvalidate('users'); closeModal(); renderTeam();
   });
 }
@@ -5313,6 +5582,7 @@ function openCreateWorkerModal() {
       });
       // Pay → protected payroll/{uid} (keyed by Auth UID == users doc id).
       await db.collection('payroll').doc(uid).set({ salary, allowance: allow, deductions: 0 });
+      window.logAudit && window.logAudit('create','payroll',uid,{ salary, allowance: allow });
 
       dbCacheInvalidate('users');
 
@@ -5375,6 +5645,7 @@ function openEditEmployeeModal(u) {
       allowance:parseFloat(document.getElementById('eu-allow').value)||0,
       deductions:parseFloat(document.getElementById('eu-deduct').value)||0,
     }, {merge:true});
+    window.logAudit && window.logAudit('update','payroll',u.id,{ salary:parseFloat(document.getElementById('eu-salary').value)||0 });
     dbCacheInvalidate('users'); closeModal(); renderTeam();
   });
 
@@ -5411,6 +5682,7 @@ function openEditEmployeeModal(u) {
         // Server-side reset via Admin SDK — no password is ever stored or recovered.
         const resetFn = firebase.functions().httpsCallable('adminResetPassword');
         await resetFn({ targetUid: u.id, newPassword });
+        window.logAudit && window.logAudit('reset','password',u.id,{ name:u.displayName||'' });  // never log the password
 
         openModal('✅ Password Reset', `
           <p style="margin-bottom:12px">New credentials for <strong>${escHtml(u.displayName)}</strong>:</p>

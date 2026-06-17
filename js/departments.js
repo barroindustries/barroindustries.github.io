@@ -998,6 +998,7 @@ function openAddExpenseModal(currentUser) {
       fileName:        uploadedFile?.name||null,
       createdAt:       firebase.firestore.FieldValue.serverTimestamp()
     });
+    window.logAudit && window.logAudit('create','expense',null,{ amount:parseFloat(document.getElementById('e-amount').value)||0, description:document.getElementById('e-desc').value.trim() });
     await Notifs.sendToOwner({ title:'💸 New Expense Submitted', body:`${name} submitted an expense of ₱${document.getElementById('e-amount').value}`, icon:'💸', type:'expense_new' });
     closeModal();
     Notifs.showToast('Expense submitted!');
@@ -1676,6 +1677,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             pagibig:    parseFloat(document.getElementById('ep-pi').value)||0,
             tax:        parseFloat(document.getElementById('ep-tax').value)||0,
           }, {merge:true});
+          window.logAudit && window.logAudit('update','payroll',uid,{ salary:parseFloat(document.getElementById('ep-salary').value)||0 });
 
           // Save / clear CA deduction override
           if (caBalance > 0) {
@@ -6922,7 +6924,7 @@ function prodOrderModal(order, currentUser, currentRole, onSaved) {
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     };
     try {
-      if(order){ await db.collection('production_orders').doc(order.id).update(data); }
+      if(order){ await db.collection('production_orders').doc(order.id).update(data); window.logAudit&&window.logAudit('update','production_order',order.id,{title:data.title,stage:data.stage}); }
       else {
         // order number PO-YYMM-### (best-effort sequential; falls back to time suffix)
         let seq = '001';
@@ -6933,14 +6935,15 @@ function prodOrderModal(order, currentUser, currentRole, onSaved) {
         data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
         data.createdBy = currentUser.uid;
         data.createdByName = userProfile?.displayName || currentUser.email || '';
-        await db.collection('production_orders').add(data);
+        const _po = await db.collection('production_orders').add(data);
+        window.logAudit&&window.logAudit('create','production_order',data.orderNo,{title:data.title,client:data.client||''});
       }
       closeModal(); Notifs.showToast('Order saved'); onSaved && onSaved();
     } catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
   });
   document.getElementById('po-del')?.addEventListener('click', async ()=>{
     if(!confirm('Delete this production order?')) return;
-    try { await db.collection('production_orders').doc(order.id).delete(); closeModal(); Notifs.showToast('Deleted'); onSaved && onSaved(); }
+    try { await db.collection('production_orders').doc(order.id).delete(); window.logAudit&&window.logAudit('delete','production_order',order.id,{orderNo:order.orderNo||''}); closeModal(); Notifs.showToast('Deleted'); onSaved && onSaved(); }
     catch(ex){ Notifs.showToast('Delete failed (admin only)','error'); }
   });
 }

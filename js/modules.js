@@ -1522,14 +1522,14 @@ async function renderPresidentMessageCard() {
         supplier:document.getElementById('iv-supplier').value.trim(), supplierContact:document.getElementById('iv-supcontact').value.trim(),
         updatedAt:firebase.firestore.FieldValue.serverTimestamp() };
       try{
-        if(item) await db.collection('inventory_items').doc(item.id).update(data);
-        else { data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await db.collection('inventory_items').add(data); }
+        if(item){ await db.collection('inventory_items').doc(item.id).update(data); window.logAudit&&window.logAudit('update','inventory_item',item.id,{name,qty:data.qty}); }
+        else { data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); const _r=await db.collection('inventory_items').add(data); window.logAudit&&window.logAudit('create','inventory_item',_r.id,{name,qty:data.qty}); }
         closeModal(); Notifs.showToast('Item saved'); onSaved&&onSaved();
       }catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
     });
     document.getElementById('iv-del')?.addEventListener('click', async ()=>{
       if(!confirm('Delete this item?')) return;
-      try{ await db.collection('inventory_items').doc(item.id).delete(); closeModal(); Notifs.showToast('Item deleted'); onSaved&&onSaved(); }
+      try{ await db.collection('inventory_items').doc(item.id).delete(); window.logAudit&&window.logAudit('delete','inventory_item',item.id,{name:item.name||''}); closeModal(); Notifs.showToast('Item deleted'); onSaved&&onSaved(); }
       catch(ex){ Notifs.showToast('Delete failed','error'); }
     });
   }
@@ -1555,6 +1555,7 @@ async function renderPresidentMessageCard() {
           note:document.getElementById('mv-note').value.trim(),
           by:currentUser.uid, byName:userProfile?.displayName||currentUser.email,
           date:bizDate(), createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+        window.logAudit&&window.logAudit('create','stock_movement',item.id,{itemName:item.name||'',type,qty,delta});
         closeModal(); Notifs.showToast('Stock updated'); onSaved&&onSaved();
       }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
     });
@@ -1643,6 +1644,179 @@ async function renderPresidentMessageCard() {
       try{ await db.collection('job_costs').doc(job.id).delete(); closeModal(); Notifs.showToast('Deleted'); onSaved&&onSaved(); }
       catch(ex){ Notifs.showToast('Delete failed','error'); }
     });
+  }
+})();
+
+// ═══════════════════════════════════════════════════
+//  LEAVE MANAGEMENT — requests, approval, balances
+//  leave_requests collection + leave_balances/{uid}. Modeled on cash advances:
+//  employees file their own pending request; finance/admin approve and the
+//  approval decrements the vacation/sick balance + notifies the requester.
+// ═══════════════════════════════════════════════════
+(function(){
+  const LEAVE_TYPES = [
+    { id:'vacation',  label:'Vacation Leave',  icon:'🌴', drawsBalance:true  },
+    { id:'sick',      label:'Sick Leave',      icon:'🤒', drawsBalance:true  },
+    { id:'emergency', label:'Emergency Leave', icon:'🚨', drawsBalance:false },
+    { id:'unpaid',    label:'Unpaid Leave',    icon:'📅', drawsBalance:false },
+  ];
+  const leaveType = id => LEAVE_TYPES.find(t=>t.id===id) || LEAVE_TYPES[0];
+  const lvBadge = s => s==='approved'?'badge-green':s==='rejected'?'badge-red':'badge-orange';
+  const esc = s => (window.escHtml ? window.escHtml(s) : (s==null?'':String(s)));
+
+  // Inclusive working-day count, excluding Sundays (Manila "Sunday = no work").
+  function workingDays(start, end){
+    if(!start||!end) return 0;
+    const s=new Date(start+'T00:00:00'), e=new Date(end+'T00:00:00');
+    if(isNaN(s)||isNaN(e)||e<s) return 0;
+    let n=0; const d=new Date(s);
+    while(d<=e){ if(d.getDay()!==0) n++; d.setDate(d.getDate()+1); if(n>366) break; }
+    return n;
+  }
+  async function getBalance(uid){
+    try{ const d=await db.collection('leave_balances').doc(uid).get(); return d.exists?d.data():{vacation:0,sick:0}; }
+    catch(_){ return {vacation:0,sick:0}; }
+  }
+  function leaveRow(r, showWho){
+    const t=leaveType(r.type);
+    return `<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border)">
+      <span style="font-size:20px">${t.icon}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600">${t.label} · ${r.days||0} day${(r.days||0)!==1?'s':''}${showWho?` — ${esc(r.userName||'')}`:''}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${esc(r.startDate||'')} → ${esc(r.endDate||'')}${r.reason?` · ${esc(r.reason)}`:''}</div>
+      </div>
+      <span class="badge ${lvBadge(r.status)}">${esc(r.status||'pending')}</span>
+    </div>`;
+  }
+
+  window.renderLeavePage = async function(container){
+    const c = container || document.getElementById('page-content');
+    if(!c) return;
+    const isAdmin = currentRole==='president'||currentRole==='manager'||currentRole==='finance';
+    return isAdmin ? renderLeaveAdmin(c) : renderLeaveEmployee(c);
+  };
+
+  async function renderLeaveEmployee(c){
+    c.innerHTML = '<div class="loading-placeholder">Loading leave…</div>';
+    const [snap, bal] = await Promise.all([
+      db.collection('leave_requests').where('userId','==',currentUser.uid).get().catch(()=>({docs:[]})),
+      getBalance(currentUser.uid),
+    ]);
+    const reqs = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    const pending = reqs.filter(r=>r.status==='pending').length;
+    c.innerHTML = `
+      <div class="page-header"><h2>🌴 My Leave</h2><button class="btn-primary btn-sm" id="new-leave-btn">+ Request Leave</button></div>
+      <div class="kpi-row" style="margin-bottom:14px">
+        <div class="kpi-card green"><div class="kpi-label">Vacation left</div><div class="kpi-value">${bal.vacation||0}<span style="font-size:12px;font-weight:500"> days</span></div></div>
+        <div class="kpi-card"><div class="kpi-label">Sick left</div><div class="kpi-value">${bal.sick||0}<span style="font-size:12px;font-weight:500"> days</span></div></div>
+        <div class="kpi-card ${pending?'accent':''}"><div class="kpi-label">Pending</div><div class="kpi-value">${pending}</div></div>
+      </div>
+      <div class="card"><div class="card-header"><h3>My Requests</h3></div><div class="card-body" style="padding:0">
+        ${!reqs.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🌴</div><h4>No leave requests yet</h4><p>Tap "Request Leave" to file one.</p></div>':
+          reqs.map(r=>leaveRow(r,false)).join('')}
+      </div></div>`;
+    document.getElementById('new-leave-btn').onclick = ()=>openLeaveModal(bal, c);
+  }
+
+  async function renderLeaveAdmin(c){
+    c.innerHTML = '<div class="loading-placeholder">Loading leave…</div>';
+    const snap = await db.collection('leave_requests').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]}));
+    const reqs = snap.docs.map(d=>({id:d.id,...d.data()}));
+    const pending = reqs.filter(r=>r.status==='pending');
+    const approved = reqs.filter(r=>r.status==='approved').length;
+    c.innerHTML = `
+      <div class="page-header"><h2>🌴 Leave Management</h2><button class="btn-secondary btn-sm" id="my-leave-btn">My Leave</button></div>
+      <div class="kpi-row" style="margin-bottom:14px">
+        <div class="kpi-card ${pending.length?'accent':''}"><div class="kpi-label">Pending</div><div class="kpi-value">${pending.length}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Approved</div><div class="kpi-value">${approved}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Total Requests</div><div class="kpi-value">${reqs.length}</div></div>
+      </div>
+      ${pending.length?`<div class="card" style="margin-bottom:14px;border:1.5px solid var(--warning)"><div class="card-header"><h3>⏳ Pending Approval</h3></div><div class="card-body" style="padding:0">
+        ${pending.map(r=>`<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+          <span style="font-size:20px">${leaveType(r.type).icon}</span>
+          <div style="flex:1;min-width:160px">
+            <div style="font-size:13px;font-weight:600">${esc(r.userName||'Employee')} — ${leaveType(r.type).label} · ${r.days||0}d</div>
+            <div style="font-size:11px;color:var(--text-muted)">${esc(r.startDate||'')} → ${esc(r.endDate||'')}${r.reason?` · ${esc(r.reason)}`:''}</div>
+          </div>
+          <button class="btn-success btn-sm lv-approve" data-id="${r.id}">Approve</button>
+          <button class="btn-secondary btn-sm lv-reject" data-id="${r.id}">Reject</button>
+        </div>`).join('')}
+      </div></div>`:''}
+      <div class="card"><div class="card-header"><h3>All Requests</h3></div><div class="card-body" style="padding:0">
+        ${!reqs.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🌴</div><h4>No leave requests</h4></div>':
+          reqs.map(r=>leaveRow(r,true)).join('')}
+      </div></div>`;
+    document.getElementById('my-leave-btn').onclick = ()=>renderLeaveEmployee(c);
+    c.querySelectorAll('.lv-approve').forEach(b=>b.addEventListener('click',()=>approveLeave(reqs.find(r=>r.id===b.dataset.id),c)));
+    c.querySelectorAll('.lv-reject').forEach(b=>b.addEventListener('click',()=>rejectLeave(reqs.find(r=>r.id===b.dataset.id),c)));
+  }
+
+  function openLeaveModal(bal, c){
+    const today = window.bizDate?window.bizDate():new Date().toISOString().slice(0,10);
+    openModal('🌴 Request Leave', `
+      <div class="form-group"><label>Leave Type</label>
+        <select id="lv-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          ${LEAVE_TYPES.map(t=>`<option value="${t.id}">${t.icon} ${t.label}${t.drawsBalance?` (${bal[t.id]||0} left)`:''}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Start Date</label><input id="lv-start" type="date" value="${today}"/></div>
+        <div class="form-group"><label>End Date</label><input id="lv-end" type="date" value="${today}"/></div>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px" id="lv-days-hint">1 working day (excl. Sundays)</div>
+      <div class="form-group"><label>Reason</label><textarea id="lv-reason" rows="2" placeholder="Brief reason"></textarea></div>
+      <div id="lv-err" class="error-msg hidden"></div>
+    `, `<button class="btn-primary" id="lv-save">Submit Request</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    const upd = ()=>{ const d=workingDays(document.getElementById('lv-start').value, document.getElementById('lv-end').value); document.getElementById('lv-days-hint').textContent=`${d} working day${d!==1?'s':''} (excl. Sundays)`; };
+    document.getElementById('lv-start').addEventListener('change',upd);
+    document.getElementById('lv-end').addEventListener('change',upd);
+    document.getElementById('lv-save').addEventListener('click', async ()=>{
+      const type=document.getElementById('lv-type').value;
+      const startDate=document.getElementById('lv-start').value, endDate=document.getElementById('lv-end').value;
+      const reason=document.getElementById('lv-reason').value.trim();
+      const err=document.getElementById('lv-err');
+      const days=workingDays(startDate,endDate);
+      if(!startDate||!endDate||days<=0){ err.textContent='Pick a valid date range.'; err.classList.remove('hidden'); return; }
+      const lt=leaveType(type);
+      if(lt.drawsBalance && days > (bal[type]||0)){ err.textContent=`Not enough ${lt.label.toLowerCase()} — ${bal[type]||0} day(s) left, ${days} requested.`; err.classList.remove('hidden'); return; }
+      try{
+        await db.collection('leave_requests').add({
+          userId:currentUser.uid, userName:userProfile?.displayName||currentUser.email,
+          type, startDate, endDate, days, reason, status:'pending',
+          createdAt:firebase.firestore.FieldValue.serverTimestamp(),
+        });
+        window.logAudit && window.logAudit('create','leave',null,{ user:userProfile?.displayName||currentUser.email, type, days });
+        try{ await Notifs.sendToOwner({ title:'🌴 Leave Request', body:`${userProfile?.displayName||currentUser.email} requests ${days}-day ${lt.label} (${startDate}→${endDate}).`, icon:'🌴', type:'leave' }); }catch(_){}
+        closeModal(); Notifs.showToast('Leave request submitted!'); window.renderLeavePage(c);
+      }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+    });
+  }
+
+  async function approveLeave(r, c){
+    if(!r) return;
+    try{
+      await db.collection('leave_requests').doc(r.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+      const lt=leaveType(r.type);
+      if(lt.drawsBalance){
+        const bal=await getBalance(r.userId);
+        const newBal=Math.max(0,(bal[r.type]||0)-(r.days||0));
+        await db.collection('leave_balances').doc(r.userId).set({ [r.type]:newBal, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+      }
+      window.logAudit && window.logAudit('approve','leave',r.id,{ user:r.userName, type:r.type, days:r.days });
+      try{ Notifs.send(r.userId, { title:'Leave Approved ✅', body:`Your ${r.days}-day ${lt.label} (${r.startDate}→${r.endDate}) was approved.`, icon:'✅', type:'leave', dedupKey:`leave-ok-${r.id}` }); }catch(_){}
+      Notifs.showToast('Leave approved'); window.renderLeavePage(c);
+    }catch(ex){ Notifs.showToast('Approve failed: '+(ex.message||ex.code),'error'); }
+  }
+
+  async function rejectLeave(r, c){
+    if(!r) return;
+    const reason = prompt('Reason for rejection (optional):')||'';
+    try{
+      await db.collection('leave_requests').doc(r.id).update({ status:'rejected', approvedBy:currentUser.uid, rejectedReason:reason, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+      window.logAudit && window.logAudit('reject','leave',r.id,{ user:r.userName, type:r.type });
+      try{ Notifs.send(r.userId, { title:'Leave Rejected', body:`Your ${leaveType(r.type).label} request was not approved.${reason?' Reason: '+reason:''}`, icon:'❌', type:'leave', dedupKey:`leave-no-${r.id}` }); }catch(_){}
+      Notifs.showToast('Leave rejected'); window.renderLeavePage(c);
+    }catch(ex){ Notifs.showToast('Reject failed','error'); }
   }
 })();
 

@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '9.4.54';
+window.APP_VERSION = '9.4.55';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -208,3 +208,25 @@ window.fetchUsersWithPayroll = async function() {
     else Object.keys(_store).forEach(k => delete _store[k]);
   };
 })();
+
+// ── Audit log (append-only) ───────────────────────
+// Records who-changed-what on sensitive data (payroll, finance, inventory,
+// products, production, partner deals, password resets). FIRE-AND-FORGET:
+// the whole thing is wrapped so it can NEVER throw or reject into the caller —
+// a failed/denied audit write must never break the user's actual mutation.
+// Call (do NOT await): window.logAudit('update','payroll',uid,{salary});
+window.logAudit = function(action, entity, entityId, details) {
+  try {
+    if (typeof db === 'undefined' || !db) return;
+    db.collection('audit_log').add({
+      ts:        firebase.firestore.FieldValue.serverTimestamp(),
+      action:    action || 'update',
+      entity:    entity || 'unknown',
+      entityId:  entityId || null,
+      details:   details || {},
+      actorUid:  (window.currentUser && window.currentUser.uid) || null,
+      actorName: (window.userProfile && window.userProfile.displayName) || (window.currentUser && window.currentUser.email) || 'system',
+      actorRole: window.currentRole || null,
+    }).catch(() => {});  // swallow permission/network errors silently
+  } catch (_) { /* never propagate */ }
+};
