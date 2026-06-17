@@ -4,8 +4,37 @@
 ═══════════════════════════════════════════════════ */
 
 // ── App Version ──────────────────────────────────
-// Auto-incremented by git pre-commit hook (scripts/bump-version.sh)
-window.APP_VERSION = '9.4.33';
+// Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
+window.APP_VERSION = '9.4.34';
+
+// ── Business timezone helpers (Philippines, UTC+8) ──────────────────
+// IMPORTANT: use these wherever a calendar "day" or local hour matters
+// (attendance, payroll, deadlines, reminders). Plain new Date().toISOString()
+// returns a UTC date, which lands on the WRONG day for the first 8 hours of every
+// Manila day and silently corrupted attendance + pay. These anchor to Asia/Manila
+// regardless of the device's own timezone — so the app is correct even when an
+// admin opens it while travelling abroad.
+window.BIZ_TZ = 'Asia/Manila';
+window.bizDate = function(date) {
+  // → "YYYY-MM-DD" in Manila time. Pass a Date to convert it, or omit for today.
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: window.BIZ_TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(date || new Date());
+};
+window.bizHour = function(date) {
+  // → 0–23, the current hour in Manila.
+  const h = new Intl.DateTimeFormat('en-GB', {
+    timeZone: window.BIZ_TZ, hour: '2-digit', hour12: false
+  }).format(date || new Date());
+  return parseInt(h, 10) % 24;
+};
+window.bizDow = function(date) {
+  // → 0–6 (0 = Sunday), the current day-of-week in Manila.
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: window.BIZ_TZ, weekday: 'short' })
+    .format(date || new Date());
+  return { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 }[wd];
+};
+window.bizYear = function() { return parseInt(window.bizDate().slice(0, 4), 10); };
 
 // ── Google Drive API Config ──────────────────────
 window.DRIVE_CONFIG = {

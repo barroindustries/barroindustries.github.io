@@ -134,11 +134,12 @@ async function checkPayrollDuties(user) {
     const role = uDoc.data().role;
     if (role === 'president' || role === 'owner' || role === 'partner') return;
 
-    const now  = new Date();
-    const day  = now.getDate();
-    const monthEnd = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
-    const currentMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-    const todayStr = now.toISOString().slice(0, 10);
+    const todayStr = bizDate();
+    const year   = parseInt(todayStr.slice(0,4),10);
+    const month  = parseInt(todayStr.slice(5,7),10) - 1;
+    const day    = parseInt(todayStr.slice(8,10),10);
+    const monthEnd     = new Date(year, month+1, 0).getDate();
+    const currentMonth = todayStr.slice(0,7);
 
     // Only fire on the last day of the month (1-day-before reminder) or the 1st (day-of)
     const isLastDay  = day === monthEnd;
@@ -153,7 +154,7 @@ async function checkPayrollDuties(user) {
     const selfAssessMonth = evalDoc?.exists ? evalDoc.data().selfAssessMonth : null;
     if (selfAssessMonth === currentMonth) return; // already done this month
 
-    const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
+    const monthLabel = new Date(year, month, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
     const isUrgent = isFirstDay;
     await Notifs.send(user.uid, {
       title: isUrgent ? '🚨 Self-Assessment Due Today' : '📋 Self-Assessment Reminder',
@@ -172,12 +173,11 @@ async function checkPayrollDuties(user) {
 // to submit their preferred deduction amount for the upcoming payroll.
 async function checkCAReminder(user) {
   try {
-    const now    = new Date();
-    const day    = now.getDate();
+    const todayStr = bizDate();
+    const day    = parseInt(todayStr.slice(8,10),10);
     const PAYDAY = 25;
     if (day !== PAYDAY - 7) return; // only fires on the 18th
 
-    const todayStr = now.toISOString().slice(0, 10);
     const dedupKey = `bi-ca-remind-${user.uid}-${todayStr}`;
     if (localStorage.getItem(dedupKey)) return;
 
@@ -694,7 +694,8 @@ function getSidebarItems() {
     items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'                    });
     items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
     items.push({ icon:'package',       label:'Product Database', page:'product-database', section:true, sectionLabel:'Catalog' });
-    items.push({ icon:'help-circle',   label:'Help & Setup',     page:'help',            section:true  });
+    items.push({ icon:'book-open',     label:'SOPs',             page:'sops',            section:true, sectionLabel:'Resources' });
+    items.push({ icon:'help-circle',   label:'Help & Setup',     page:'help'             });
   } else if (partner) {
     // ── External Partner role ──
     items.push({ icon:'check-square', label:'My Tasks',      page:'tasks'            });
@@ -704,7 +705,8 @@ function getSidebarItems() {
     items.push({ icon:'book-open',    label:'Client Data',   page:'bs-clients'       });
     items.push({ icon:'users',        label:'Team',          page:'team-directory',   section:true, sectionLabel:'Directory' });
     items.push({ icon:'folder',       label:'Files',         page:'files'            });
-    items.push({ icon:'help-circle',  label:'Help',          page:'help',             section:true, sectionLabel:'Support' });
+    items.push({ icon:'book-open',    label:'SOPs',          page:'sops',             section:true, sectionLabel:'Resources' });
+    items.push({ icon:'help-circle',  label:'Help',          page:'help'             });
   } else if (bsOnly) {
     // ── Partner — Brilliant Steel (ISOLATED) ──
     items.push({ icon:'calculator',  label:'Quote Builder', page:'bs-quote-builder' });
@@ -729,7 +731,8 @@ function getSidebarItems() {
     if (currentRole !== 'agent') {
       items.push({ icon:'building-2', label:'Company', page:'company' });
     }
-    items.push({ icon:'help-circle', label:'Help / Guide', page:'help', section:true, sectionLabel:'Support' });
+    items.push({ icon:'book-open',   label:'SOPs',         page:'sops', section:true, sectionLabel:'Resources' });
+    items.push({ icon:'help-circle', label:'Help / Guide', page:'help' });
   }
   return items;
 }
@@ -1241,6 +1244,7 @@ function navigateTo(page) {
     case 'bs-files':         renderBrilliantSteel(currentUser, currentRole, 'Files'); break;
     case 'bk-quotations':    window.renderSales?.(currentUser, currentRole, 'Quotations'); break;
     case 'help':             renderHelp(); break;
+    case 'sops':             renderSOPs(); break;
     // ── New modules ──
     case 'posts':            window.renderPosts?.(); break;
     case 'team-directory':   window.renderTeamTab?.(); break;
@@ -1255,6 +1259,18 @@ function setActiveNav(page) {
   document.querySelectorAll('.nav-item, .bottom-nav-item, .top-nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
   });
+}
+
+// Merge the real quote collections (Barro Kitchens + Brilliant Steel) plus the
+// legacy `quotes` collection into one {docs:[...]} shape, so dashboards and
+// analytics reflect where quotes are actually saved (bk_quotes / bs_quotes).
+async function getAllQuotes() {
+  const [bk, bs, legacy] = await Promise.all([
+    db.collection('bk_quotes').get().catch(()=>({docs:[]})),
+    db.collection('bs_quotes').get().catch(()=>({docs:[]})),
+    db.collection('quotes').get().catch(()=>({docs:[]}))
+  ]);
+  return { docs: [...bk.docs, ...bs.docs, ...legacy.docs] };
 }
 
 // ── DASHBOARD ─────────────────────────────────────
@@ -1277,6 +1293,7 @@ async function renderPartnerDashboard() {
     <div class="page-header"><h2>👋 Welcome, ${(u.displayName||'Partner').split(' ')[0]}!</h2></div>
     <div id="live-clock" class="live-clock-line"></div>
     <div id="partner-kpi"></div>
+    <div id="partner-earnings-card"></div>
     <div id="partner-cards-row" style="display:flex;flex-direction:column;gap:14px">
       <div id="partner-tasks-card"></div>
       <div id="partner-quotes-card"></div>
@@ -1296,19 +1313,44 @@ async function renderPartnerDashboard() {
   liveDateTime('live-clock');
 
   try {
-    const [tasksSnap, quotesSnap] = await Promise.all([
+    const [tasksSnap, quotesSnap, dealsSnap] = await Promise.all([
       db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
         .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get()),
       db.collection('bs_quotes').where('createdBy','==',currentUser.uid).orderBy('createdAt','desc').limit(20).get()
+        .catch(()=>({docs:[]})),
+      db.collection('partner_deals').where('partnerUid','==',currentUser.uid).orderBy('createdAt','desc').get()
         .catch(()=>({docs:[]}))
     ]);
 
     const tasks  = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
     const quotes = quotesSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const deals  = dealsSnap.docs.map(d=>({id:d.id,...d.data()}));
     const open   = tasks.filter(t=>!['done','approved','archived'].includes(t.status));
     const done   = tasks.filter(t=>['done','approved','archived'].includes(t.status));
     const totalQVal = quotes.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
-    const todayStr  = new Date().toISOString().slice(0,10);
+    const todayStr  = bizDate();
+
+    // Earnings card
+    const activeDeals    = deals.filter(d=>d.status==='active');
+    const completedDeals = deals.filter(d=>d.status==='completed'||d.status==='paid');
+    const paidDeals      = deals.filter(d=>d.status==='paid');
+    const totalEarned    = completedDeals.reduce((s,d)=>s+(d.partnerShare||0),0);
+    const totalPaid      = paidDeals.reduce((s,d)=>s+(d.partnerShare||0),0);
+    const totalPending   = totalEarned - totalPaid;
+    const el = document.getElementById('partner-earnings-card');
+    if (el) el.innerHTML = deals.length ? `
+      <div class="card" style="margin-bottom:14px;border:2px solid var(--primary)">
+        <div class="card-header"><h3>💰 My Earnings (50/50 Split)</h3></div>
+        <div class="card-body">
+          <div class="kpi-row" style="margin-bottom:12px">
+            <div class="kpi-card accent"><div class="kpi-label">Active Deals</div><div class="kpi-value">${activeDeals.length}</div></div>
+            <div class="kpi-card green"><div class="kpi-label">Total Earned</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalEarned)}</div></div>
+            <div class="kpi-card"><div class="kpi-label">Paid Out</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalPaid)}</div></div>
+            <div class="kpi-card" style="border-color:var(--warning)"><div class="kpi-label">Pending</div><div class="kpi-value" style="font-size:15px;color:var(--warning)">₱${fmt(totalPending)}</div></div>
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);text-align:center">Your share = 50% of gross profit per closed deal</div>
+        </div>
+      </div>` : '';
 
     const needsRevision   = quotes.filter(q=>q.status==='needs_revision'||q.approvalStatus==='needs_revision');
     const pendingApproval = quotes.filter(q=>q.status==='pending_approval'||q.approvalStatus==='pending_review'||q.status==='sent');
@@ -1395,12 +1437,12 @@ async function renderPresidentDashboard() {
   c.innerHTML = '<div class="loading-placeholder">Loading dashboard…</div>';
   try {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
-    const todayStr = new Date().toISOString().slice(0,10);
+    const todayStr = bizDate();
     const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap] = await Promise.all([
       dbCachedGet('users',         () => db.collection('users').get(),                                    60000),
       dbCachedGet('tasks-all',     () => db.collection('tasks').get(),                                    30000),
       dbCachedGet('submissions',   () => db.collection('submissions').get(),                              30000),
-      dbCachedGet('quotes-all',    () => db.collection('quotes').get(),                                   30000),
+      dbCachedGet('all-quotes',    getAllQuotes,                                                          30000),
       safeGet(db.collection('approval_requests').where('status','==','pending')),
       safeGet(db.collection('cash_advances').where('status','==','pending')),
       safeGet(db.collection('attendance_extensions').where('status','==','pending')),
@@ -1415,12 +1457,15 @@ async function renderPresidentDashboard() {
     const overdueTasks= openTasks.filter(t=>t.dueDate && t.dueDate < todayStr);
     const highPriority= openTasks.filter(t=>t.priority==='high').length;
     const pendingSubs = subsSnap.docs.filter(d=>d.data().status==='pending').length;
-    const totalQuotes = quotesSnap.docs.reduce((s,d)=>s+(d.data().total||0),0);
+    const totalQuotes = activeQuotes.reduce((s,q)=>s+(q.total||0),0);
     const pendingApprovals = approvalsSnap.size;
     const pendingCA   = caSnap.size;
     const pendingExtensions = extSnap.size || 0;
     const pendingSignups = signupSnap.size || 0;
     const totalPending = pendingApprovals + pendingCA + pendingExtensions + pendingSubs + pendingSignups;
+
+    // Active pipeline = value of all non-rejected quotes (BK + BS), not the legacy `quotes` collection
+    const activeQuotes = quotesSnap.docs.map(d=>d.data()).filter(q=>q.status!=='rejected');
 
     // Total payroll burn (sum of net pay of all employees)
     const payrollBurn = users.reduce((s,u)=>(s+(u.salary||0)+(u.allowance||0)-(u.deductions||0)),0);
@@ -1566,7 +1611,7 @@ async function renderEmployeeDashboard() {
   c.innerHTML = '<div class="loading-placeholder">Loading…</div>';
   try {
     const now      = new Date();
-    const todayStr = now.toISOString().slice(0,10);
+    const todayStr = bizDate();
     const uid = currentUser.uid;
     const [myTasksSnap, attSnap, caSnap, extSnap, kpiProfile, monthAttScore] = await Promise.all([
       db.collection('tasks').where('assignedTo','array-contains', uid).get()
@@ -1586,10 +1631,10 @@ async function renderEmployeeDashboard() {
     const u = userProfile;
     const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
 
-    // Holiday / Sunday check
-    const phHolidays = typeof getPHHolidays === 'function' ? getPHHolidays(now.getFullYear()) : {};
+    // Holiday / Sunday check — anchored to Manila time
+    const phHolidays = typeof getPHHolidays === 'function' ? getPHHolidays(bizYear()) : {};
     const todayHoliday = phHolidays[todayStr];
-    const isSundayToday = now.getDay() === 0;
+    const isSundayToday = bizDow() === 0;
     const isNoWorkDay = isSundayToday || !!todayHoliday;
 
     // Attendance — new model: 0 / 0.5 / 1.0
@@ -1600,8 +1645,8 @@ async function renderEmployeeDashboard() {
                           : (attData.fullTime ? 1.0 : hasLogin ? 0.5 : 0);
     const hasFull     = attScore >= 1.0;
 
-    // Attendance window: 7:00–9:00 AM (or approved extension)
-    const nowHour      = now.getHours();
+    // Attendance window: 7:00–9:00 AM Manila time (or approved extension)
+    const nowHour      = bizHour();
     const inWindow     = nowHour >= 7 && nowHour < 9;   // normal 2-hr window
     const beforeWindow = nowHour < 7;
     const extData      = extSnap.exists ? extSnap.data() : null;
@@ -1859,10 +1904,10 @@ async function renderEmployeeDashboard() {
     // Attendance buttons — new model
     document.getElementById('check-in-btn')?.addEventListener('click', async () => {
       // Check if no new notifs today (or all already read) → auto 100%
-      const todayStart = new Date(todayStr).getTime();
+      // Manila midnight (not UTC) so early-morning notifications are counted.
+      const todayStart = new Date(todayStr + 'T00:00:00+08:00').getTime();
       let autoFull = false;
       try {
-        const now8am = new Date(); now8am.setHours(8,0,0,0);
         const notifSnap = await db.collection('notifications').doc(currentUser.uid).collection('items')
           .where('createdAt', '>=', new firebase.firestore.Timestamp(Math.floor(todayStart/1000), 0)).get();
         const todayNotifs = notifSnap.docs.map(d => d.data());
@@ -1917,11 +1962,10 @@ async function renderEmployeeDashboard() {
 // Must time in AND read all notifications before 9:00 AM
 window.tryUpgradeAttendanceOnNotifRead = async function() {
   if (!currentUser) return;
-  const now      = new Date();
-  const todayStr = now.toISOString().slice(0,10);
+  const todayStr = bizDate();
 
-  // 9am is the hard deadline for both time-in and notification reading
-  if (now.getHours() >= 9) {
+  // 9am Manila is the hard deadline for both time-in and notification reading
+  if (bizHour() >= 9) {
     Notifs.showToast('⏰ Deadline passed — notifications must be checked before 9:00 AM for full attendance.', 'error');
     return;
   }
@@ -2099,6 +2143,7 @@ async function renderPartnersDept() {
     </div>
     <div class="subtab-bar" id="partners-dept-tabs">
       <button class="subtab-btn active" data-sub="overview">Overview</button>
+      <button class="subtab-btn" data-sub="deals">💰 Deals</button>
       <button class="subtab-btn" data-sub="tasks">Tasks</button>
       <button class="subtab-btn" data-sub="quotes">Quotes</button>
       <button class="subtab-btn" data-sub="quote-builder">Quote Builder</button>
@@ -2135,6 +2180,54 @@ async function loadPartnersDeptTab(sub) {
   const partnerUids = partners.map(p=>p.id);
 
   switch(sub) {
+    case 'deals': {
+      const dealsSnap = await db.collection('partner_deals').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+      const deals = dealsSnap.docs.map(d=>({id:d.id,...d.data()}));
+      const totalContractVal = deals.reduce((s,d)=>s+(d.totalContractValue||0),0);
+      const totalProfit      = deals.reduce((s,d)=>s+(d.grossProfit||0),0);
+      const totalPartnerPay  = deals.reduce((s,d)=>s+(d.partnerShare||0),0);
+      const totalPaid        = deals.filter(d=>d.status==='paid').reduce((s,d)=>s+(d.partnerShare||0),0);
+      content.innerHTML = `
+        <div class="kpi-row" style="margin-bottom:14px">
+          <div class="kpi-card accent"><div class="kpi-label">Total Deals</div><div class="kpi-value">${deals.length}</div></div>
+          <div class="kpi-card"><div class="kpi-label">Contract Value</div><div class="kpi-value" style="font-size:14px">₱${fmt(totalContractVal)}</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Gross Profit</div><div class="kpi-value" style="font-size:14px">₱${fmt(totalProfit)}</div></div>
+          <div class="kpi-card accent"><div class="kpi-label">Partner Share</div><div class="kpi-value" style="font-size:14px">₱${fmt(totalPartnerPay)}</div></div>
+          <div class="kpi-card"><div class="kpi-label">Paid Out</div><div class="kpi-value" style="font-size:14px">₱${fmt(totalPaid)}</div></div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+          <button class="btn-primary btn-sm" id="add-deal-btn">+ New Deal</button>
+        </div>
+        ${!deals.length?'<div class="empty-state"><div class="empty-icon">🤝</div><p>No deals yet. Click "+ New Deal" to record a partner deal.</p></div>':
+          `<div class="card"><div class="card-body" style="padding:0">
+            <div class="table-wrap"><table class="data-table">
+              <thead><tr><th>Client</th><th>Partner</th><th>Contract</th><th>Cost</th><th>Profit</th><th>Share (50%)</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody>
+                ${deals.map(d=>{
+                  const stColor = d.status==='paid'?'badge-green':d.status==='completed'?'badge-blue':d.status==='cancelled'?'badge-red':'badge-orange';
+                  return `<tr>
+                    <td style="font-weight:600">${escHtml(d.clientName||'—')}</td>
+                    <td style="font-size:12px;color:var(--text-muted)">${escHtml(d.partnerName||'—')}</td>
+                    <td>₱${fmt(d.totalContractValue||0)}</td>
+                    <td>₱${fmt(d.costAmount||0)}</td>
+                    <td style="color:var(--success)">₱${fmt(d.grossProfit||0)}</td>
+                    <td style="font-weight:700;color:var(--primary-light)">₱${fmt(d.partnerShare||0)}</td>
+                    <td><span class="badge ${stColor}">${d.status||'active'}</span></td>
+                    <td>
+                      ${d.status==='active'?`<button class="btn-secondary btn-xs" onclick="window._closeDeal('${d.id}')">Close</button>`:''}
+                      ${d.status==='completed'?`<button class="btn-primary btn-xs" onclick="window._markDealPaid('${d.id}')">Mark Paid</button>`:''}
+                    </td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table></div>
+          </div></div>`}
+      `;
+      document.getElementById('add-deal-btn')?.addEventListener('click', () => _showAddDealModal(partners, () => loadPartnersDeptTab('deals')));
+      window._closeDeal   = async (id) => { if(!confirm('Mark this deal as completed?')) return; await db.collection('partner_deals').doc(id).update({status:'completed'}); loadPartnersDeptTab('deals'); };
+      window._markDealPaid = async (id) => { if(!confirm('Mark partner share as paid out?')) return; await db.collection('partner_deals').doc(id).update({status:'paid', paidOutDate: firebase.firestore.FieldValue.serverTimestamp()}); loadPartnersDeptTab('deals'); };
+      break;
+    }
     case 'overview': {
       const openTasks = tasks.filter(t=>!['done','approved','archived'].includes(t.status));
       const doneTasks = tasks.filter(t=>t.status==='done'||t.status==='approved');
@@ -2293,6 +2386,247 @@ async function loadPartnersDeptTab(sub) {
       break;
     }
   }
+}
+
+// ── Partner Deal Modal ────────────────────────────
+function _showAddDealModal(partners, onSaved) {
+  const partnerOpts = partners.map(p=>`<option value="${p.id}">${escHtml(p.displayName||p.email)}</option>`).join('');
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay active';
+  modal.innerHTML = `
+    <div class="modal" style="max-width:480px">
+      <div class="modal-header"><h3>🤝 New Partner Deal</h3><button class="modal-close" id="deal-modal-close">✕</button></div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
+        <div><label class="form-label">Client Name *</label><input class="form-input" id="dl-client" placeholder="e.g. Gerry's Grill Bulacan"/></div>
+        <div><label class="form-label">Project Description</label><input class="form-input" id="dl-desc" placeholder="e.g. Full kitchen setup with exhaust system"/></div>
+        <div><label class="form-label">Partner *</label><select class="form-input" id="dl-partner"><option value="">— Select Partner —</option>${partnerOpts}</select></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label class="form-label">Total Contract Value (₱) *</label><input class="form-input" id="dl-contract" type="number" min="0" placeholder="0"/></div>
+          <div><label class="form-label">Project Cost to BI (₱) *</label><input class="form-input" id="dl-cost" type="number" min="0" placeholder="0"/></div>
+        </div>
+        <div id="dl-calc" style="background:var(--surface-2);border-radius:10px;padding:12px;font-size:13px;display:none">
+          <div style="display:flex;justify-content:space-between"><span>Gross Profit:</span><span id="dl-gross" style="font-weight:700;color:var(--success)">₱0</span></div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px"><span>Partner Share (50%):</span><span id="dl-share" style="font-weight:700;color:var(--primary-light)">₱0</span></div>
+        </div>
+        <div><label class="form-label">Notes</label><textarea class="form-input" id="dl-notes" rows="2" placeholder="Any additional notes…"></textarea></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="deal-modal-cancel">Cancel</button>
+        <button class="btn-primary" id="deal-modal-save">Save Deal</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const close = () => { modal.remove(); };
+  document.getElementById('deal-modal-close').onclick = close;
+  document.getElementById('deal-modal-cancel').onclick = close;
+  const updateCalc = () => {
+    const contract = parseFloat(document.getElementById('dl-contract').value)||0;
+    const cost     = parseFloat(document.getElementById('dl-cost').value)||0;
+    const gross    = contract - cost;
+    const share    = gross * 0.5;
+    const calc = document.getElementById('dl-calc');
+    if (contract > 0 || cost > 0) {
+      calc.style.display = 'block';
+      document.getElementById('dl-gross').textContent = '₱'+fmt(Math.max(0,gross));
+      document.getElementById('dl-share').textContent = '₱'+fmt(Math.max(0,share));
+    } else { calc.style.display = 'none'; }
+  };
+  document.getElementById('dl-contract').addEventListener('input', updateCalc);
+  document.getElementById('dl-cost').addEventListener('input', updateCalc);
+  document.getElementById('deal-modal-save').onclick = async () => {
+    const clientName = document.getElementById('dl-client').value.trim();
+    const partnerSel = document.getElementById('dl-partner');
+    const partnerUid = partnerSel.value;
+    const partnerName = partnerSel.options[partnerSel.selectedIndex]?.text || '';
+    const contract = parseFloat(document.getElementById('dl-contract').value)||0;
+    const cost     = parseFloat(document.getElementById('dl-cost').value)||0;
+    if (!clientName) { Notifs.showToast('Client name is required','error'); return; }
+    if (!partnerUid) { Notifs.showToast('Select a partner','error'); return; }
+    if (!contract)  { Notifs.showToast('Enter total contract value','error'); return; }
+    const gross = contract - cost;
+    const share = Math.max(0, gross * 0.5);
+    const btn = document.getElementById('deal-modal-save');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      await db.collection('partner_deals').add({
+        clientName, projectDescription: document.getElementById('dl-desc').value.trim(),
+        partnerUid, partnerName: partnerName.replace(/^— .* —$/, '').trim(),
+        totalContractValue: contract, costAmount: cost,
+        grossProfit: gross, partnerShare: share,
+        status: 'active', notes: document.getElementById('dl-notes').value.trim(),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        createdBy: currentUser.uid
+      });
+      Notifs.showToast('Deal saved successfully','success');
+      // Notify the partner
+      safeNotify(()=>Notifs.send(partnerUid,{
+        title:'🤝 New Deal Registered',
+        body:`President registered a new deal: ${clientName}. Your 50% share: ₱${fmt(share)}.`,
+        icon:'🤝', type:'partner_deal'
+      }));
+      close(); onSaved?.();
+    } catch(e) { btn.disabled=false; btn.textContent='Save Deal'; Notifs.showToast('Error: '+e.message,'error'); }
+  };
+}
+
+// ── SOPs ──────────────────────────────────────────
+function renderSOPs() {
+  const c = document.getElementById('page-content');
+  const sops = [
+    {
+      title: '📅 Daily Attendance',
+      icon: '📅',
+      items: [
+        'Time in by <strong>8:00 AM</strong> via the Operations App → Attendance tab.',
+        'Tap <em>Time In</em>. The system records the exact Manila time.',
+        'If arriving after 8:00 AM, the record is automatically flagged as <strong>Late</strong>.',
+        'For absences: notify your Manager or President via Posts/Messages <em>before</em> 8:00 AM.',
+        'Extension requests (remote work, off-site) must be submitted through the Attendance page.',
+        'Time out is recorded automatically at end of shift or can be tapped manually.',
+        'Attendance directly affects your monthly KPI score and payroll calculation.',
+      ]
+    },
+    {
+      title: '💰 Cash Advance (CA)',
+      icon: '💰',
+      items: [
+        'Submit a CA request via <em>Personal Finance → Cash Advance</em>.',
+        'Maximum CA is <strong>₱50,000</strong>. Requests above this are not accepted.',
+        'All requests start as <em>Pending</em> and require Finance/President approval.',
+        'Once approved, cash is released by the Finance team.',
+        'Deductions begin on the next payroll (25th of the month).',
+        '7 days before payday, you will receive a reminder to set your preferred deduction amount.',
+        'Do not file a new CA while a previous balance remains unpaid without prior approval.',
+      ]
+    },
+    {
+      title: '📊 Monthly Self-Assessment',
+      icon: '📊',
+      items: [
+        'Complete your self-assessment by the <strong>last working day of each month</strong>.',
+        'Access via <em>Personal Finance → Self Evaluate</em>.',
+        'Rate your performance honestly — this feeds the President\'s KPI review.',
+        'Self-assessments that are not completed default to 0/5 for that month.',
+        'You will receive a push notification reminder on the last day of the month and on the 1st.',
+      ]
+    },
+    {
+      title: '📄 Sales Quotations (BK / BS)',
+      icon: '📄',
+      items: [
+        'All quotations must be created via the <strong>Quote Builder</strong> in the app — no free-hand quotes.',
+        'Fill in client name, contact details, and all line items before submitting.',
+        'Once complete, use <em>Submit for Approval</em> — do not share with clients before the President approves.',
+        'The President reviews quotes and may return them for revision with notes.',
+        'Approved quotes are marked <em>Filed</em> and may be shared as PDF with the client.',
+        'Follow up with clients within <strong>2 business days</strong> of sharing the quote.',
+        'Log all client decisions (accepted, declined, negotiating) in the Client Data tab.',
+      ]
+    },
+    {
+      title: '🤝 Partner Deal Process (50/50)',
+      icon: '🤝',
+      items: [
+        'Partners (Brilliant Steel / external) bring in clients and co-manage projects.',
+        'When a client prospect is identified, the partner creates a quote via Quote Builder and submits for approval.',
+        'Once the client accepts and the project begins, the <strong>President registers the deal</strong> in the Partners → Deals tab.',
+        'The deal records: client name, total contract value, and Barro Industries\' project cost.',
+        'Gross Profit = Contract Value − Cost. <strong>Partner Share = 50% of Gross Profit.</strong>',
+        'The partner can see their deal pipeline and earnings in their dashboard at any time.',
+        'Payment is released by Finance when the project is marked <em>Completed</em> and approved by the President.',
+        'Always agree on the project scope in writing (quote) before starting fabrication.',
+      ]
+    },
+    {
+      title: '📁 Files & Document Management',
+      icon: '📁',
+      items: [
+        'All project files, proposals, and client documents are uploaded via <em>Files</em> in the app.',
+        'Files are stored in Firebase Storage and mirrored to Google Drive nightly.',
+        'Name files clearly: <strong>[Dept]-[ClientOrProject]-[Date]</strong> e.g. <em>Sales-GerrysBulacan-2026-06-17.pdf</em>.',
+        'Do not share download links outside the app — use the app\'s built-in file sharing.',
+        'Sensitive HR and Finance documents are restricted to Finance/President roles.',
+        'Old or superseded files should be archived, not deleted.',
+      ]
+    },
+    {
+      title: '🔔 Notifications & Communication',
+      icon: '🔔',
+      items: [
+        'Enable push notifications on your device for the app — critical for deadline alerts.',
+        'For urgent matters, use the <em>Posts</em> tab for team-wide announcements.',
+        'Task comments are the official record for task-related discussions — use them.',
+        'Do not use personal messaging apps for work instructions that need a paper trail.',
+        'The President may send a forced message to all users via the app for major announcements.',
+      ]
+    },
+    {
+      title: '🖥️ IT & System Access',
+      icon: '🖥️',
+      items: [
+        'Report all IT issues via <em>IT Department → IT Tickets</em>.',
+        'Do not share your login credentials with anyone — each account is personal.',
+        'If you believe your account was accessed without permission, notify IT immediately.',
+        'Company devices used for work must be logged in to the Operations App.',
+        'Software installation on company assets requires IT approval first.',
+        'App sessions auto-logout after 10 days of inactivity — this is by design for security.',
+      ]
+    },
+    {
+      title: '✅ Tasks & Work Plans',
+      icon: '✅',
+      items: [
+        'All assigned tasks appear in <em>My Tasks</em>. Check daily.',
+        'Update task status as work progresses: <em>In Progress → Submitted for Review → Done</em>.',
+        'If a task is blocked, set it to <em>On Hold</em> and add a comment explaining why.',
+        'Overdue tasks are flagged automatically — address or escalate immediately.',
+        'Do not close a task without confirming completion with the assigning manager.',
+        'Proposals and work submissions go through the <em>Submissions</em> tab for approval.',
+      ]
+    },
+    {
+      title: '🏛️ Government Biddings',
+      icon: '🏛️',
+      items: [
+        'All PhilGEPS bid opportunities are logged in <em>Government Biddings → PhilGEPS</em>.',
+        'Active bids must have complete documentation uploaded before the bid deadline.',
+        'Track bid status: Open → Submitted → Awarded/Failed.',
+        'Post-bid evaluation notes must be filed in the Archive tab win or lose.',
+        'All bidding documents require President approval before submission.',
+      ]
+    },
+  ];
+
+  c.innerHTML = `
+    <div class="page-header">
+      <h2>📋 Standard Operating Procedures</h2>
+      <p style="font-size:13px;color:var(--text-muted);margin-top:4px">Barro Industries — Official SOPs for all staff and partners</p>
+    </div>
+    <div id="sop-list" style="display:flex;flex-direction:column;gap:8px">
+      ${sops.map((s,i)=>`
+        <div class="card sop-card" style="overflow:hidden">
+          <div class="sop-header" style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;cursor:pointer;user-select:none" data-sop-idx="${i}">
+            <div style="font-size:15px;font-weight:700">${s.title}</div>
+            <span class="sop-chevron" style="font-size:18px;transition:transform .2s">›</span>
+          </div>
+          <div class="sop-body" style="display:none;padding:0 16px 16px 16px">
+            <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:7px">
+              ${s.items.map(item=>`<li style="font-size:13px;line-height:1.6;color:var(--text-primary)">${item}</li>`).join('')}
+            </ol>
+          </div>
+        </div>`).join('')}
+    </div>
+  `;
+  // Accordion toggle
+  c.querySelectorAll('.sop-header').forEach(hdr => {
+    hdr.addEventListener('click', () => {
+      const body    = hdr.nextElementSibling;
+      const chevron = hdr.querySelector('.sop-chevron');
+      const isOpen  = body.style.display !== 'none';
+      body.style.display    = isOpen ? 'none'  : 'block';
+      chevron.style.transform = isOpen ? ''     : 'rotate(90deg)';
+    });
+  });
 }
 
 function renderGovBiddings() {
@@ -3003,13 +3337,17 @@ async function getKpiScore(uid) {
 
 /**
  * Count Mon–Sat workdays from the 1st up to and including `upTo` date.
- * Sundays are excluded (day 0). No public-holiday deduction here — kept simple.
+ * Sundays (day 0) AND public holidays are excluded, so the payroll denominator
+ * matches the attendance calendar (which already treats holidays as no-penalty).
  */
 function countWorkDays(year, month, upToDay) {
+  const hol = (typeof getPHHolidays === 'function') ? getPHHolidays(year) : {};
   let count = 0;
   for (let d = 1; d <= upToDay; d++) {
-    const dow = new Date(year, month, d).getDay();
-    if (dow !== 0) count++; // 0 = Sunday
+    if (new Date(year, month, d).getDay() === 0) continue; // Sunday
+    const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    if (hol[ds]) continue;                                 // public holiday
+    count++;
   }
   return Math.max(1, count);
 }
@@ -3025,13 +3363,16 @@ function _attRecScore(r) {
 
 async function getAttendanceScore(uid) {
   try {
-    const now = new Date();
-    const y = now.getFullYear(), m = now.getMonth(), d = now.getDate();
-    const monthStart = new Date(y, m, 1).toISOString().slice(0, 10);
-    // Denominator = workdays elapsed (Mon–Sat only)
+    const todayStr = bizDate();                            // YYYY-MM-DD Manila
+    const y = parseInt(todayStr.slice(0,4),10);
+    const m = parseInt(todayStr.slice(5,7),10) - 1;
+    const d = parseInt(todayStr.slice(8,10),10);
+    const monthStart = `${todayStr.slice(0,7)}-01`;
+    // Denominator = workdays elapsed this month (Mon–Sat, holidays excluded)
     const workDaysElapsed = countWorkDays(y, m, d);
     const snap = await db.collection('attendance').doc(uid).collection('records')
-      .where(firebase.firestore.FieldPath.documentId(), '>=', monthStart).get();
+      .where(firebase.firestore.FieldPath.documentId(), '>=', monthStart)
+      .where(firebase.firestore.FieldPath.documentId(), '<=', todayStr).get();
     const totalScore = snap.docs.reduce((sum, doc) => sum + _attRecScore(doc.data()), 0);
     return Math.min(1, totalScore / workDaysElapsed);
   } catch { return 0.5; }
@@ -4183,7 +4524,7 @@ async function renderAnalytics() {
   const [usersSnap,tasksSnap,quotesSnap,subsSnap,expSnap,caSnap,payslipSnap,ledgerSnap,govSnap] = await Promise.all([
     safeGet(db.collection('users')),
     safeGet(db.collection('tasks')),
-    safeGet(db.collection('quotes')),
+    getAllQuotes(),
     safeGet(db.collection('submissions')),
     safeGet(db.collection('expenses')),
     safeGet(db.collection('cash_advances')),

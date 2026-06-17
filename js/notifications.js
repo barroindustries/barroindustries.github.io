@@ -102,9 +102,9 @@ window.Notifs = (() => {
       const nav = isNavigable(n);
       const hasActions = !n.read || nav;
       return `
-      <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${n.id}" data-type="${n.type||''}" data-task-id="${n.taskId||''}">
+      <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${escHtml(n.id)}" data-type="${escHtml(n.type||'')}" data-task-id="${escHtml(n.taskId||'')}">
         <div class="notif-item-main">
-          <div class="notif-item-emoji">${n.icon || '🔔'}</div>
+          <div class="notif-item-emoji">${escHtml(n.icon || '🔔')}</div>
           <div class="notif-item-text">
             <div class="notif-item-title">${escHtml(n.title)}</div>
             <div class="notif-item-body">${escHtml(n.body || '')}</div>
@@ -493,10 +493,8 @@ window.Notifs = (() => {
 
   // ── Deadline checker (runs once per day per task) ──
   async function checkDeadlines(uid) {
-    const todayStr    = new Date().toISOString().slice(0, 10);
-    const tomorrow    = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+    const todayStr    = window.bizDate();
+    const tomorrowStr = window.bizDate(new Date(Date.now() + 24 * 60 * 60 * 1000));
 
     const DONE_STATUSES = ['done','approved','archived'];
     const [tomorrowSnap, todaySnap] = await Promise.all([
@@ -525,12 +523,11 @@ window.Notifs = (() => {
 
   // ── Attendance morning reminder ────────────────
   async function checkAttendanceReminder(uid, displayName) {
-    const now  = new Date();
-    const hour = now.getHours();
-    const dow  = now.getDay(); // 0=Sun
-    if (dow === 0 || hour < 7 || hour >= 9) return; // Mon–Sat, 7:00–8:59 AM only
+    const hour = window.bizHour();
+    const dow  = window.bizDow(); // 0=Sun, Manila time
+    if (dow === 0 || hour < 7 || hour >= 9) return; // Mon–Sat, 7:00–8:59 AM Manila only
 
-    const todayStr = now.toISOString().slice(0, 10);
+    const todayStr = window.bizDate();
     const dedupKey = `bi-att-remind-${uid}-${todayStr}`;
 
     // Skip if already timed in

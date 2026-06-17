@@ -8,7 +8,7 @@
 // ── Shared helpers ────────────────────────────────
 function deptContainer() { return document.getElementById('page-content'); }
 function fmt(n) { return Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); }
-function today() { return new Date().toISOString().slice(0,10); }
+function today() { return (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10)); }
 function priorityBadge(p) { return {high:'badge-red',medium:'badge-orange',low:'badge-green',urgent:'badge-red'}[p]||'badge-gray'; }
 
 // Returns true if user is an admin role OR is a member of the given department.

@@ -13,11 +13,31 @@ service cloud.firestore {
     function isFinanceOrAdmin() { return getRole() in ['president', 'manager', 'finance']; }
     function isPresident()      { return getRole() == 'president'; }
 
+    // True when a user-profile update leaves all privileged fields untouched.
+    // Used so a non-admin can edit their own name/photo/phone but NOT promote
+    // themselves (role) or change their own pay/department/employee ID.
+    function userPrivilegedFieldsUnchanged() {
+      return request.resource.data.role        == resource.data.role
+          && request.resource.data.salary      == resource.data.salary
+          && request.resource.data.allowance   == resource.data.allowance
+          && request.resource.data.deductions  == resource.data.deductions
+          && request.resource.data.department  == resource.data.department
+          && request.resource.data.departments == resource.data.departments
+          && request.resource.data.employeeId  == resource.data.employeeId;
+    }
+
     // ── Users ──────────────────────────────────────────
     match /users/{uid} {
       allow read: if isAuth();
-      allow create: if isAuth() && isOwner(uid);
-      allow update: if isAuth() && (isOwner(uid) || isAdmin());
+      // Self-signup creates its own doc as 'employee'; admins create staff/worker docs.
+      allow create: if isAuth() && (
+        isAdmin() || (isOwner(uid) && request.resource.data.role == 'employee')
+      );
+      // Owner-first short-circuit: routine self-updates (name/photo/phone/lastSeen)
+      // need no role lookup. Privileged fields are frozen unless an admin makes the change.
+      allow update: if isAuth() && (
+        (isOwner(uid) && userPrivilegedFieldsUnchanged()) || isAdmin()
+      );
       allow delete: if isAuth() && isPresident();
     }
 
@@ -61,9 +81,22 @@ service cloud.firestore {
       allow read: if isAuth() && (
         resource.data.userId == request.auth.uid || isFinanceOrAdmin()
       );
-      allow create: if isAuth();
+      // Employees may only file their OWN request, pending and unfunded.
+      // Finance/admin may record/approve any (e.g. president-entered advances).
+      allow create: if isAuth() && (
+        isFinanceOrAdmin() ||
+        (request.resource.data.userId == request.auth.uid
+          && request.resource.data.status == 'pending'
+          && request.resource.data.balance == 0)
+      );
+      // Only finance/admin can approve or change the money. Owners may edit
+      // non-financial details (e.g. reason) but never status/balance/amount.
       allow update: if isAuth() && (
-        resource.data.userId == request.auth.uid || isFinanceOrAdmin()
+        isFinanceOrAdmin() ||
+        (resource.data.userId == request.auth.uid
+          && request.resource.data.status  == resource.data.status
+          && request.resource.data.balance == resource.data.balance
+          && request.resource.data.amount  == resource.data.amount)
       );
       allow delete: if isAuth() && isPresident();
     }
@@ -131,9 +164,12 @@ service cloud.firestore {
       allow read: if isAuth() && (
         resource.data.createdBy == request.auth.uid || isFinanceOrAdmin()
       );
-      allow create: if isAuth();
+      allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
+      // Owners may edit their own expense details but not approve it (status frozen).
       allow update: if isAuth() && (
-        resource.data.createdBy == request.auth.uid || isFinanceOrAdmin()
+        isFinanceOrAdmin() ||
+        (resource.data.createdBy == request.auth.uid
+          && request.resource.data.status == resource.data.status)
       );
       allow delete: if isAuth() && isFinanceOrAdmin();
     }
@@ -143,7 +179,7 @@ service cloud.firestore {
       allow read: if isAuth() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
       );
-      allow create: if isAuth();
+      allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
       allow update: if isAuth() && isAdmin();
       allow delete: if isAuth() && isAdmin();
     }
@@ -160,7 +196,7 @@ service cloud.firestore {
       allow read: if isAuth() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
       );
-      allow create: if isAuth();
+      allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
       allow update: if isAuth() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
       );
@@ -172,7 +208,7 @@ service cloud.firestore {
       allow read: if isAuth() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
       );
-      allow create: if isAuth();
+      allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
       allow update: if isAuth() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
       );
@@ -188,8 +224,25 @@ service cloud.firestore {
 
     // ── Signup requests — anyone can apply (pre-auth) ──
     match /signup_requests/{docId} {
-      allow create: if true;
+      // Public but constrained to the exact application shape, so this open
+      // endpoint can't be abused to write arbitrary or oversized documents.
+      allow create: if request.resource.data.keys().hasOnly(['fullName','email','phone','status','createdAt'])
+        && request.resource.data.status == 'pending'
+        && request.resource.data.fullName is string && request.resource.data.fullName.size() <= 120
+        && request.resource.data.email    is string && request.resource.data.email.size() <= 200
+        && request.resource.data.phone    is string && request.resource.data.phone.size() <= 40;
       allow read, update, delete: if isAuth() && isAdmin();
+    }
+
+    // ── Partner deals (50/50 profit split) ────────────
+    match /partner_deals/{docId} {
+      // Partners can read their own deals; admins can read all.
+      allow read: if isAuth() && (
+        resource.data.partnerUid == request.auth.uid || isAdmin()
+      );
+      // Only admins can create/update deals — partners cannot self-register earnings.
+      allow create, update: if isAuth() && isAdmin();
+      allow delete: if isAuth() && isPresident();
     }
 
     // ── Products catalog ───────────────────────────────

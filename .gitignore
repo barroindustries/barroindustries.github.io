@@ -1,0 +1,16 @@
+# Dependencies (installed via npm / deployed by Firebase — never commit)
+node_modules/
+functions/node_modules/
+scripts/node_modules/
+
+# OS / editor cruft
+.DS_Store
+**/.DS_Store
+*.log
+
+# Local env / secrets — never commit service-account keys
+.env
+.env.*
+*serviceAccount*.json
+firebase-debug.log
+.firebase/
