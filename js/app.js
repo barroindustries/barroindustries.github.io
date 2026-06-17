@@ -5012,7 +5012,6 @@ function openCreateWorkerModal() {
         title, salary, allowance: allow, deductions: 0,
         startDate:   start,
         hrManagedAccount: true,
-        hrPwToken:   btoa(password),   // HR recovery token (base64, for reset only)
         createdBy:   currentUser.uid,
         createdAt:   firebase.firestore.FieldValue.serverTimestamp()
       });
@@ -5105,18 +5104,12 @@ function openEditEmployeeModal(u) {
       if (!newPassword || newPassword.length < 6) {
         errEl.textContent = 'Password must be at least 6 characters.'; errEl.classList.remove('hidden'); return;
       }
-      if (!u.hrPwToken) {
-        errEl.textContent = 'No stored recovery token. Password must be reset via Firebase Console.'; errEl.classList.remove('hidden'); return;
-      }
 
       saveBtn.disabled = true; saveBtn.textContent = 'Resetting…';
       try {
-        const currentPw  = atob(u.hrPwToken);
-        const workerAuth = _getWorkerAuth();
-        const cred = await workerAuth.signInWithEmailAndPassword(u.authEmail, currentPw);
-        await cred.user.updatePassword(newPassword);
-        await workerAuth.signOut();
-        await db.collection('users').doc(u.id).update({ hrPwToken: btoa(newPassword) });
+        // Server-side reset via Admin SDK — no password is ever stored or recovered.
+        const resetFn = firebase.functions().httpsCallable('adminResetPassword');
+        await resetFn({ targetUid: u.id, newPassword });
 
         openModal('✅ Password Reset', `
           <p style="margin-bottom:12px">New credentials for <strong>${escHtml(u.displayName)}</strong>:</p>
@@ -5128,11 +5121,9 @@ function openEditEmployeeModal(u) {
         `, `<button class="btn-primary" onclick="closeModal()">Done</button>`);
       } catch(err) {
         saveBtn.disabled = false; saveBtn.textContent = 'Set Password';
-        if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-          errEl.textContent = 'Stored credentials have changed (worker may have updated their password). Use Firebase Console to reset.';
-        } else {
-          errEl.textContent = err.message || 'Reset failed.';
-        }
+        // HttpsError messages from the callable are surfaced verbatim
+        // (e.g. permission-denied, not-found, weak password).
+        errEl.textContent = err.message || 'Reset failed.';
         errEl.classList.remove('hidden');
       }
     });
