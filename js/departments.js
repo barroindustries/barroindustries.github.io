@@ -5205,11 +5205,12 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
   const renderList = (quotes) => !quotes.length
     ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">📋</div><h4>No quotations here</h4></div>'
     : `<div class="card"><div class="table-wrap"><table class="data-table">
-        <thead><tr><th>Quote #</th><th>Client</th><th>Total</th><th>Agent</th><th>Status</th>${canSeeAll?'<th>Action</th>':''}</tr></thead>
+        <thead><tr><th>Quote #</th><th>Client</th><th>Total</th><th>Agent</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>${quotes.map(q=>{
           const status = q.status||q.approvalStatus||'draft';
           const badge = status==='filed'||status==='approved'?'badge-green':status==='pending_approval'||status==='pending_review'||status==='sent'?'badge-orange':status==='rejected'?'badge-red':'badge-gray';
           const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
+          const canDeleteDirect = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
           return `<tr>
             <td><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code></td>
             <td><strong>${escHtml(q.clientName||'—')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(q.clientCompany||'')}</div></td>
@@ -5217,20 +5218,45 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
             <td>${escHtml(q.agentName||q.createdByName||'—')}</td>
             <td>
               <span class="badge ${badge}">${status}</span>
+              ${q.deleteRequested?'<span class="badge badge-red" style="font-size:9px;margin-left:4px">🗑 del req</span>':''}
               <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${ts}</div>
             </td>
-            ${canSeeAll?`<td style="white-space:nowrap;display:flex;gap:6px">
-              ${(status==='pending_approval'||status==='pending_review'||status==='sent')?`
+            <td style="white-space:nowrap;display:flex;gap:6px;flex-wrap:wrap">
+              ${canSeeAll&&(status==='pending_approval'||status==='pending_review'||status==='sent')?`
                 <button class="btn-primary btn-sm bs-approve-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">✅ Approve</button>
                 <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">❌ Reject</button>
                 <button class="btn-secondary btn-sm bs-edit-return-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">✎ Edit &amp; Return</button>
-              `:(status==='filed'||status==='approved')?'<span style="color:var(--success);font-size:12px">✓ Filed</span>':'<span style="color:var(--danger);font-size:12px">Rejected</span>'}
-            </td>`:''}
+              `:''}
+              ${canDeleteDirect
+                ? `<button class="btn-secondary btn-sm bs-del-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" style="color:var(--danger)">🗑 Delete</button>`
+                : `<button class="btn-secondary btn-sm bs-delreq-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" ${q.deleteRequested?'disabled':''}>${q.deleteRequested?'⏳ Requested':'🗑 Request Delete'}</button>`}
+            </td>
           </tr>`;
         }).join('')}</tbody>
       </table></div></div>`;
 
+  // ── Quote analytics: made vs successful ──
+  const totalMade   = all.length;
+  const successful  = filed.length;                       // filed/approved = won
+  const winRate     = totalMade ? Math.round(successful/totalMade*100) : 0;
+  const wonValue    = filed.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+  const pipelineVal = all.filter(q=>!(q.status==='rejected'||q.approvalStatus==='rejected'))
+                         .reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+  const analytics = `
+    <div class="card" style="margin-bottom:14px;border:1.5px solid var(--primary)">
+      <div class="card-header"><h3>📊 Quote Analytics</h3></div>
+      <div class="card-body">
+        <div class="kpi-row">
+          <div class="kpi-card"><div class="kpi-label">Quotes Made</div><div class="kpi-value">${totalMade}</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Successful</div><div class="kpi-value">${successful}</div></div>
+          <div class="kpi-card accent"><div class="kpi-label">Win Rate</div><div class="kpi-value">${winRate}%</div></div>
+          <div class="kpi-card"><div class="kpi-label">Pipeline ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(pipelineVal)}</div></div>
+          <div class="kpi-card green"><div class="kpi-label">Won ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(wonValue)}</div></div>
+        </div>
+      </div>
+    </div>`;
   const kpiRow = `
+    ${analytics}
     <div class="kpi-row" style="margin-bottom:14px">
       <div class="kpi-card warn"><div class="kpi-label">Pending Approval</div><div class="kpi-value">${forApproval.length}</div></div>
       <div class="kpi-card green"><div class="kpi-label">Filed / Approved</div><div class="kpi-value">${filed.length}</div></div>
@@ -5265,6 +5291,35 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
 }
 
 function bindQuoteActions(el, currentUser, currentRole, container) {
+  // Direct delete (president/manager only — Firestore rules enforce isAdmin)
+  el.querySelectorAll('.bs-del-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      const b = e.currentTarget;
+      if (!confirm(`Delete quote "${b.dataset.qno||b.dataset.id}"? This cannot be undone.`)) return;
+      try {
+        await db.collection('bs_quotes').doc(b.dataset.id).delete();
+        window.logAudit && window.logAudit('delete','quote',b.dataset.id,{ quoteNo:b.dataset.qno });
+        Notifs.showToast('Quote deleted');
+        renderBSQuotationsSummary(container, currentUser, currentRole);
+      } catch(ex){ Notifs.showToast('Delete failed','error'); }
+    });
+  });
+  // Request delete (partner / sales staff) — flags the quote + notifies the president
+  el.querySelectorAll('.bs-delreq-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      const b = e.currentTarget;
+      const reason = prompt('Reason for deleting this quote? (sent to the president for approval)')||'';
+      try {
+        await db.collection('bs_quotes').doc(b.dataset.id).update({
+          deleteRequested:true, deleteReason:reason,
+          deleteRequestedBy:currentUser.uid, deleteRequestedAt:firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await Notifs.sendToOwner({ title:'🗑 Quote Delete Requested', body:`${userProfile?.displayName||currentUser.email} requests deleting quote "${b.dataset.qno}".${reason?' Reason: '+reason:''}`, icon:'🗑', type:'quote_delete_request' });
+        Notifs.showToast('Delete request sent to president');
+        renderBSQuotationsSummary(container, currentUser, currentRole);
+      } catch(ex){ Notifs.showToast('Request failed: '+(ex.message||ex.code),'error'); }
+    });
+  });
   el.querySelectorAll('.bs-approve-btn').forEach(btn => {
     btn.addEventListener('click', async e => {
       const b = e.currentTarget;
