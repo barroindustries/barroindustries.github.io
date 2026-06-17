@@ -2486,10 +2486,9 @@ function _showAddDealModal(partners, onSaved) {
   };
 }
 
-// ── SOPs ──────────────────────────────────────────
-function renderSOPs() {
-  const c = document.getElementById('page-content');
-  const sops = [
+// ── SOPs (Firestore-backed, president-editable) ───
+async function renderSOPs() {
+  const DEFAULT_SOPS = [
     {
       title: '📅 Daily Attendance',
       icon: '📅',
@@ -2614,21 +2613,44 @@ function renderSOPs() {
     },
   ];
 
+  const c = document.getElementById('page-content');
+  c.innerHTML = '<div class="loading-placeholder">Loading SOPs…</div>';
+  const canEditSOPs = isPresident() || currentRole === 'manager';
+
+  // SOPs live in Firestore so the president can edit them in-app without a code
+  // push. Seed the built-in defaults the first time an admin opens the page.
+  let snap = await db.collection('sops').orderBy('order').get().catch(()=>({docs:[],empty:true}));
+  if (snap.empty && canEditSOPs) {
+    try {
+      const batch = db.batch();
+      DEFAULT_SOPS.forEach((s,i)=> batch.set(db.collection('sops').doc(), { title:s.title, items:s.items, order:i }));
+      await batch.commit();
+      snap = await db.collection('sops').orderBy('order').get();
+    } catch(e) { /* seed failed → fall back to in-code defaults below */ }
+  }
+  const sops = (snap.docs && snap.docs.length)
+    ? snap.docs.map(d=>({id:d.id, ...d.data()}))
+    : DEFAULT_SOPS.map((s,i)=>({id:null, order:i, ...s}));
+
   c.innerHTML = `
     <div class="page-header">
       <h2>📋 Standard Operating Procedures</h2>
       <p style="font-size:13px;color:var(--text-muted);margin-top:4px">Barro Industries — Official SOPs for all staff and partners</p>
+      ${canEditSOPs?`<button class="btn-primary btn-sm" id="sop-add-btn" style="margin-top:10px">＋ Add SOP</button>`:''}
     </div>
     <div id="sop-list" style="display:flex;flex-direction:column;gap:8px">
       ${sops.map((s,i)=>`
         <div class="card sop-card" style="overflow:hidden">
           <div class="sop-header" style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;cursor:pointer;user-select:none" data-sop-idx="${i}">
             <div style="font-size:15px;font-weight:700">${s.title}</div>
-            <span class="sop-chevron" style="font-size:18px;transition:transform .2s">›</span>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+              ${canEditSOPs&&s.id?`<button class="sop-edit-btn btn-secondary btn-sm" data-sop-id="${s.id}" onclick="event.stopPropagation()" title="Edit">✎</button>`:''}
+              <span class="sop-chevron" style="font-size:18px;transition:transform .2s">›</span>
+            </div>
           </div>
           <div class="sop-body" style="display:none;padding:0 16px 16px 16px">
             <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:7px">
-              ${s.items.map(item=>`<li style="font-size:13px;line-height:1.6;color:var(--text-primary)">${item}</li>`).join('')}
+              ${(s.items||[]).map(item=>`<li style="font-size:13px;line-height:1.6;color:var(--text-primary)">${item}</li>`).join('')}
             </ol>
           </div>
         </div>`).join('')}
@@ -2643,6 +2665,45 @@ function renderSOPs() {
       body.style.display    = isOpen ? 'none'  : 'block';
       chevron.style.transform = isOpen ? ''     : 'rotate(90deg)';
     });
+  });
+  // President / manager: edit or add SOPs
+  if (canEditSOPs) {
+    c.querySelectorAll('.sop-edit-btn').forEach(btn =>
+      btn.addEventListener('click', () => openSOPEditor(btn.dataset.sopId, sops.find(s=>s.id===btn.dataset.sopId))));
+    document.getElementById('sop-add-btn')?.addEventListener('click', () =>
+      openSOPEditor(null, { title:'', items:[], order:sops.length }));
+  }
+}
+
+// President/manager SOP editor. Items are stored as an array of strings; basic
+// inline HTML (<strong>/<em>) is allowed since only admins can write (matches
+// the original built-in SOPs). The textarea round-trips raw HTML safely.
+function openSOPEditor(id, sop) {
+  sop = sop || { title:'', items:[], order:0 };
+  openModal(id ? 'Edit SOP' : 'Add SOP', `
+    <div class="form-group"><label>Title (include an emoji, e.g. 📅 Daily Attendance)</label>
+      <input id="sop-e-title" value="${escHtml(sop.title||'')}" placeholder="📋 Procedure name"/></div>
+    <div class="form-group"><label>Steps — one per line (you can use &lt;strong&gt; and &lt;em&gt;)</label>
+      <textarea id="sop-e-items" rows="10" style="font-family:inherit">${(sop.items||[]).map(escHtml).join('\n')}</textarea></div>
+    <div id="sop-e-err" class="error-msg hidden" style="margin-top:6px"></div>
+  `, `<button class="btn-primary" id="sop-e-save">Save</button>${id?'<button class="btn-danger" id="sop-e-del">Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  document.getElementById('sop-e-save').addEventListener('click', async () => {
+    const title = document.getElementById('sop-e-title').value.trim();
+    const items = document.getElementById('sop-e-items').value.split('\n').map(x=>x.trim()).filter(Boolean);
+    const err = document.getElementById('sop-e-err');
+    if (!title || !items.length) { err.textContent='Title and at least one step are required.'; err.classList.remove('hidden'); return; }
+    const data = { title, items, order: sop.order ?? 0 };
+    try {
+      if (id) await db.collection('sops').doc(id).update(data);
+      else    await db.collection('sops').add(data);
+      closeModal(); renderSOPs();
+    } catch(e) { err.textContent = 'Save failed: '+(e.message||e.code); err.classList.remove('hidden'); }
+  });
+  document.getElementById('sop-e-del')?.addEventListener('click', async () => {
+    if (!confirm('Delete this SOP permanently?')) return;
+    try { await db.collection('sops').doc(id).delete(); closeModal(); renderSOPs(); }
+    catch(e) { Notifs.showToast('Delete failed','error'); }
   });
 }
 

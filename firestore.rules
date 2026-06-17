@@ -152,6 +152,12 @@ service cloud.firestore {
       allow write: if isAuth() && isPresident();
     }
 
+    // ── SOPs — readable by all staff, editable by admins (president/manager) ─
+    match /sops/{docId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && isAdmin();
+    }
+
     // ── Payroll (live pay: salary/allowance/deductions) ─
     // Moved off the world-readable users doc so pay isn't visible to all staff.
     // Each user may read their OWN pay; only finance/admin may read others or write.
