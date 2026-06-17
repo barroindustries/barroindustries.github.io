@@ -42,18 +42,18 @@ body{font-family:var(--font);background:var(--gray-light);color:var(--text);font
 .toggle-pills button.active{background:white;color:var(--dark-blue);}
 
 /* ── LAYOUT ── */
-.main{max-width:1100px;margin:0 auto;padding:18px 14px;}
-.section{background:white;border-radius:10px;padding:18px 22px;margin-bottom:12px;
+.main{max-width:1080px;margin:0 auto;padding:12px 10px;}
+.section{background:white;border-radius:9px;padding:12px 16px;margin-bottom:9px;
   box-shadow:0 1px 4px rgba(0,0,0,.06);}
 .sec-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
-  color:var(--mid-blue);margin-bottom:12px;border-bottom:2px solid var(--light-blue);padding-bottom:7px;
+  color:var(--mid-blue);margin-bottom:9px;border-bottom:2px solid var(--light-blue);padding-bottom:5px;
   display:flex;align-items:center;justify-content:space-between;}
 label{font-size:11px;font-weight:600;color:var(--gray-dark);text-transform:uppercase;letter-spacing:.4px;}
-input,select,textarea{border:1.5px solid var(--gray-mid);border-radius:6px;padding:7px 9px;
+input,select,textarea{border:1.5px solid var(--gray-mid);border-radius:6px;padding:6px 8px;
   font-size:13px;font-family:var(--font);width:100%;transition:border-color .15s;}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--mid-blue);}
 .fg{display:flex;flex-direction:column;gap:3px;}
-.fg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:10px;}
+.fg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;}
 .fg.full{grid-column:1/-1;}
 
 /* ── QUOTE NO ── */
@@ -151,6 +151,13 @@ tr:hover td{background:#fafbff;}
   border-radius:3px;font-weight:700;margin-left:4px;white-space:nowrap;}
 .spec-badge{font-size:10px;background:var(--light-blue);color:var(--mid-blue);padding:1px 5px;
   border-radius:3px;margin-right:3px;display:inline-block;}
+.spec-line{display:flex;align-items:flex-start;gap:5px;margin-top:3px;}
+.spec-tag{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--mid-blue);
+  background:var(--light-blue);padding:1px 5px;border-radius:3px;flex-shrink:0;margin-top:1px;}
+.spec-edit{font-size:11px;color:var(--text);flex:1;line-height:1.4;}
+.price-print{display:none;}
+.lead-in{width:90px!important;text-align:center;}
+[contenteditable][data-ph]:empty:before{content:attr(data-ph);color:#bbb;font-style:italic;}
 .empty-state{text-align:center;padding:40px;color:var(--gray-dark);}
 
 /* ── TOTALS ── */
@@ -158,7 +165,29 @@ tr:hover td{background:#fafbff;}
 .totals-tbl{min-width:320px;}
 .totals-tbl td{padding:5px 11px;border-bottom:none;font-size:13px;}
 .totals-tbl tr.grand td{font-weight:700;font-size:15px;border-top:2px solid var(--dark-blue);padding-top:9px;}
+.totals-tbl tr.discount td{color:var(--red);}
+.totals-tbl tr.commission td{color:var(--purple);font-size:12px;}
 .totals-tbl td:last-child{text-align:right;}
+
+/* ── PRICING CONTROLS ── */
+.pricing-controls{display:flex;flex-wrap:wrap;gap:14px;align-items:center;
+  background:var(--gray-light);border-radius:8px;padding:10px 14px;margin-top:12px;}
+.pc-row{display:flex;align-items:center;gap:7px;}
+.pc-lbl{font-size:11px;font-weight:600;color:var(--gray-dark);text-transform:uppercase;letter-spacing:.4px;}
+.pc-check{font-size:12px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;letter-spacing:0;}
+.pc-check input{width:auto;cursor:pointer;}
+.pricing-controls select{width:auto;min-width:110px;font-size:12px;padding:5px 7px;font-weight:600;}
+.pc-hint{font-size:10px;color:var(--gray-dark);font-style:italic;}
+
+/* ── PAYMENT SUMMARY ── */
+.payment-summary{margin-top:8px;}
+.pay-tbl{width:100%;border-collapse:collapse;margin-top:6px;}
+.pay-tbl th{background:var(--mid-blue);color:white;font-size:10.5px;text-transform:uppercase;
+  letter-spacing:.4px;padding:6px 9px;text-align:left;}
+.pay-tbl td{padding:6px 9px;border-bottom:1px solid var(--gray-mid);font-size:12.5px;}
+.pay-tbl td:last-child{text-align:right;font-weight:600;}
+.pay-tbl tr.pay-head td{background:var(--light-blue);font-weight:700;color:var(--dark-blue);}
+.pay-note{font-size:11px;color:var(--gray-dark);margin-top:6px;line-height:1.5;font-style:italic;}
 
 /* ── INTERNAL PANEL ── */
 .int-panel{background:#fffbf0;border:1.5px dashed var(--orange);border-radius:9px;padding:14px;margin-top:10px;}
@@ -188,10 +217,13 @@ tr:hover td{background:#fafbff;}
 .term-content:empty:before{content:'(empty — click to add)';color:#bbb;font-style:italic;}
 
 /* ── SIGNATURE ── */
-.sig-row{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:14px;}
-.sig-box{border-top:1.5px solid var(--gray-mid);padding-top:10px;text-align:center;}
+.sig-row{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:16px;}
+.sig-box{border-top:1.5px solid var(--gray-mid);padding-top:8px;text-align:center;position:relative;}
+.sig-role{position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:white;padding:0 8px;
+  font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--mid-blue);white-space:nowrap;}
 .sig-name{font-weight:700;font-size:14px;}
-.sig-box small{color:var(--gray-dark);font-size:11px;line-height:1.5;}
+.sig-box small{color:var(--gray-dark);font-size:11px;line-height:1.5;display:block;}
+.sig-filed{color:var(--green);font-weight:600;margin-top:2px;}
 
 /* ── ADMIN PANEL ── */
 .admin-panel{background:white;border:2px dashed var(--mid-blue);border-radius:10px;padding:18px;margin-bottom:12px;display:none;}
@@ -228,14 +260,19 @@ tr:hover td{background:#fafbff;}
   td,th{padding:5px 5px!important;font-size:11px!important;}
   .cell-num,.cell-unit,.edit-price{font-size:11px!important;}
   .totals-box{justify-content:stretch;}
-  .totals-tbl{width:100%;}
+  .totals-tbl{width:100%;min-width:0;}
   .terms-grid{grid-template-columns:1fr;}
-  .sig-row{grid-template-columns:1fr;}
+  .sig-row{grid-template-columns:1fr;gap:14px;}
   input,select,textarea{font-size:16px!important;}
   .del-btn{padding:6px 10px;font-size:18px;}
+  .pricing-controls{flex-direction:column;align-items:stretch;gap:10px;}
+  .pc-row{flex-wrap:wrap;}
+  .pricing-controls select{flex:1;min-width:0;}
+  .pay-tbl td,.pay-tbl th{font-size:12px;padding:6px 7px;}
+  .lead-in{width:100%!important;}
 }
 @media(max-width:420px){
-  .topbar-right .btn-outline:not(.btn-accent):not(#btnVerify){display:none;}
+  .topbar-right .btn-outline:not(.btn-accent):not(#btnVerify):not(#btnPrint){display:none;}
 }
 
 /* ── VERIFY / FILE MODAL ── */
@@ -264,20 +301,67 @@ tr:hover td{background:#fafbff;}
   font-size:11px;font-weight:700;letter-spacing:.5px;display:none;white-space:nowrap;}
 .filed-badge.show{display:inline-flex;align-items:center;gap:5px;}
 
+/* ── TRUST FOOTER / AGENT / BILL STRIP ── */
+.agent-tag{margin-top:5px;font-size:8.5pt;font-weight:800;letter-spacing:1px;color:#fff;
+  background:var(--purple);padding:2px 8px;border-radius:4px;display:inline-block;}
+.bill-strip{margin-bottom:8px;}
+.print-footer{margin-top:14px;padding-top:10px;border-top:2px solid var(--dark-blue);text-align:center;}
+.pf-trust{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 14px;margin-bottom:8px;}
+.pf-badge{font-size:8.5pt;font-weight:700;color:var(--dark-blue);}
+.pf-thanks{font-size:10pt;font-weight:700;color:var(--dark-blue);margin-bottom:3px;}
+.pf-creds{font-size:8pt;color:#666;line-height:1.5;}
+.body-agent .commission-agent-only{display:table-row;}
+
 /* ── PRINT ── */
+.print-only{display:none;}
 @media print {
-  body{background:white;font-size:10.5pt;}
+  body{background:white;font-size:9pt;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
   .topbar,.add-panel,.no-print,.del-btn,.int-panel,.calc-panel,.admin-panel,
-  .qno-builder-section,.totals-controls,.status-bar,.cat-tabs{display:none!important;}
+  .qno-builder-section,.totals-controls,.status-bar,.cat-tabs,.pricing-controls{display:none!important;}
   .term-off{display:none!important;}
-  .section{box-shadow:none;border:none;border-bottom:1px solid #ddd;margin-bottom:6px;padding:8px 0;border-radius:0;}
+  .print-only{display:block!important;}
+  .section{box-shadow:none;border:none;margin-bottom:6px;padding:3px 0 6px;border-radius:0;
+    border-bottom:1px solid #e3e7ef;page-break-inside:avoid;}
+  .sec-title{font-size:8.5pt;color:#1E3A5F;border-bottom:1.5px solid #1E3A5F;margin-bottom:5px;padding-bottom:2px;letter-spacing:.6px;}
   .main{padding:0;max-width:100%;}
   .print-header{display:flex!important;justify-content:space-between;align-items:flex-start;
-    margin-bottom:12px;padding-bottom:10px;border-bottom:2.5px solid #1E3A5F;}
-  th{padding:6px 9px;font-size:9.5pt;}
-  td{padding:5px 9px;font-size:10pt;}
+    margin-bottom:8px;padding-bottom:7px;border-bottom:2.5px solid #1E3A5F;}
+  th{padding:3px 6px;font-size:8pt;background:#1E3A5F!important;color:#fff!important;}
+  td{padding:2.5px 6px;font-size:8.5pt;}
   .items-table{table-layout:fixed!important;width:100%!important;}
-  @page{margin:13mm 11mm 8mm;}
+  .cat-row td{padding:2.5px 6px;font-size:7.5pt;background:#D6E4F0!important;color:#1E3A5F!important;}
+  .subtotal-row td{padding:2.5px 6px;font-size:8pt;background:#f0f4ff!important;}
+  /* hide editable form controls — render values as plain text in print */
+  .cell-num,.cell-unit,.lead-in{border:none!important;background:transparent!important;
+    padding:0!important;font-size:8.5pt!important;-webkit-appearance:none;appearance:none;text-align:inherit;}
+  .edit-price{display:none!important;}
+  .price-print{display:inline!important;font-size:8.5pt;}
+  .spec-tag{display:none!important;}
+  .spec-line{display:block;margin-top:1px;}
+  .spec-edit{font-size:8pt;color:#333;}
+  .notes-cell{font-size:8pt;color:#333;}
+  .totals-tbl{min-width:0;width:48%;margin-left:auto;}
+  .totals-tbl td{font-size:9pt;padding:2.5px 8px;}
+  .totals-tbl tr.grand td{font-size:10.5pt;}
+  .pay-tbl td,.pay-tbl th{font-size:8pt;padding:2.5px 6px;}
+  .pay-note{font-size:7.5pt;}
+  .terms-grid{gap:5px 14px;}
+  .terms-block{background:transparent;padding:2px 0;}
+  .terms-block h4{font-size:8pt;}
+  .terms-block p,.terms-block li,.term-content{font-size:7.8pt;line-height:1.35;}
+  .term-cb{display:none!important;}
+  .sig-row{margin-top:20px;page-break-inside:avoid;}
+  .di-empty{display:none!important;}
+  .bill-strip{background:#F5F6FA!important;border:1px solid #DDE2EC;border-radius:5px;padding:5px 9px;
+    font-size:8.5pt;line-height:1.4;}
+  /* commission + agent box: client copy hides; agent copy shows */
+  .agent-only{display:none!important;}
+  .agent-box{display:none!important;}
+  body.body-agent .agent-only{display:table-row!important;}
+  body.body-agent .agent-box{display:block!important;}
+  .agent-box{background:#f3e9fb!important;border:1.5px solid #8E44AD;border-radius:6px;
+    padding:8px 11px;margin-top:8px;page-break-inside:avoid;}
+  @page{margin:11mm 10mm 7mm;}
 }
 .print-header{display:none;}
 @media print{.print-header{display:flex!important;}.no-print{display:none!important;}}
@@ -304,6 +388,7 @@ tr:hover td{background:#fafbff;}
     <button class="btn btn-outline" onclick="clearForm()">🗑 New</button>
     <button class="btn btn-outline" id="btnVerify" onclick="doVerifyAndFile()" style="border-color:var(--accent);color:var(--accent);">📋 Verify &amp; File</button>
     <button class="btn btn-outline" id="btnPrint" onclick="doPrint()">🖨 Print/PDF</button>
+    <button class="btn btn-outline" id="btnAgentPrint" onclick="doPrintAgent()" style="border-color:var(--purple);color:#d9b3ff;">🧾 Agent Copy</button>
     <button class="btn btn-accent" id="btnShare" onclick="doShare()">🔗 Share</button>
   </div>
 </div>
@@ -324,10 +409,15 @@ tr:hover td{background:#fafbff;}
   <div style="text-align:right;">
     <div style="font-size:14pt;font-weight:900;color:#1E3A5F;letter-spacing:1px;">PRICE QUOTATION</div>
     <div id="phQuoteNo" style="font-size:11pt;font-weight:700;color:#333;margin-top:4px;"></div>
-    <div id="phDate" style="font-size:10pt;color:#555;margin-top:2px;"></div>
-    <div id="phSalesperson" style="font-size:10pt;color:#555;margin-top:1px;"></div>
+    <div id="phDate" style="font-size:9.5pt;color:#555;margin-top:2px;"></div>
+    <div id="phValid" style="font-size:9.5pt;color:#555;margin-top:1px;"></div>
+    <div id="phSalesperson" style="font-size:9.5pt;color:#555;margin-top:1px;"></div>
+    <div id="phAgentTag" class="agent-tag" style="display:none;">AGENT COPY — CONFIDENTIAL</div>
   </div>
 </div>
+
+<!-- Client billing strip (print) -->
+<div class="print-only bill-strip" id="billStrip"></div>
 
 <!-- ── DATA SOURCE STATUS ── -->
 <div class="section no-print" style="padding:12px 18px;">
@@ -450,7 +540,7 @@ tr:hover td{background:#fafbff;}
     </div>
     <div class="fg"><label>Salesperson</label><input type="text" id="salesperson" placeholder="Name" oninput="updatePrintHeader()"></div>
     <div class="fg"><label>Project Type</label>
-      <select id="purpose">
+      <select id="purpose" onchange="updatePrintHeader();saveToStorage();">
         <option>Restaurant</option><option>Hotel Restaurant</option><option>Hospital / Institutional</option>
         <option>Government / Bidding</option><option>Residential</option><option>Cafe / Coffee Shop</option>
         <option>Catering / Food Service</option><option>Other</option>
@@ -460,14 +550,14 @@ tr:hover td{background:#fafbff;}
 </div>
 
 <!-- ── CLIENT INFO ── -->
-<div class="section">
+<div class="section no-print">
   <div class="sec-title">Client Information</div>
   <div class="fg-grid">
-    <div class="fg full"><label>Client Name</label><input id="clientName" placeholder="Full name"></div>
-    <div class="fg full"><label>Company / Business Name</label><input id="clientCompany" placeholder="Company name (if applicable)"></div>
-    <div class="fg full"><label>Project Address / Site</label><input id="clientAddress" placeholder="Full address"></div>
-    <div class="fg"><label>Contact Number</label><input id="clientPhone" placeholder="+63…"></div>
-    <div class="fg"><label>Email</label><input id="clientEmail" type="email" placeholder="email@example.com"></div>
+    <div class="fg full"><label>Client Name</label><input id="clientName" placeholder="Full name" oninput="updatePrintHeader();saveToStorage();"></div>
+    <div class="fg full"><label>Company / Business Name</label><input id="clientCompany" placeholder="Company name (if applicable)" oninput="updatePrintHeader();saveToStorage();"></div>
+    <div class="fg full"><label>Project Address / Site</label><input id="clientAddress" placeholder="Full address" oninput="renderBillStrip();saveToStorage();"></div>
+    <div class="fg"><label>Contact Number</label><input id="clientPhone" placeholder="+63…" oninput="renderBillStrip();saveToStorage();"></div>
+    <div class="fg"><label>Email</label><input id="clientEmail" type="email" placeholder="email@example.com" oninput="renderBillStrip();saveToStorage();"></div>
   </div>
 </div>
 
@@ -489,11 +579,14 @@ tr:hover td{background:#fafbff;}
   </div>
 
   <!-- Product search -->
-  <div class="search-wrap" style="margin-bottom:10px;">
-    <input id="searchInput" class="search-input" type="text" placeholder="Search products… (type to filter)"
-      oninput="handleSearch()" onfocus="openDropdown()" autocomplete="off">
-    <button class="search-clear" onclick="clearSearch()" title="Clear">✕</button>
-    <div class="search-dropdown" id="searchDropdown"></div>
+  <div style="display:flex;gap:8px;align-items:stretch;margin-bottom:10px;flex-wrap:wrap;">
+    <div class="search-wrap" style="flex:1;min-width:200px;">
+      <input id="searchInput" class="search-input" type="text" placeholder="Search products… (type to filter)"
+        oninput="handleSearch()" onfocus="openDropdown()" autocomplete="off">
+      <button class="search-clear" onclick="clearSearch()" title="Clear">✕</button>
+      <div class="search-dropdown" id="searchDropdown"></div>
+    </div>
+    <button class="btn btn-outline" style="background:var(--dark-blue);white-space:nowrap;" onclick="addCustomItem()">➕ Custom item</button>
   </div>
 
   <!-- Calculator panel (shown after selecting product) -->
@@ -529,19 +622,6 @@ tr:hover td{background:#fafbff;}
 <div class="section">
   <div class="sec-title">
     <span>Quote Items</span>
-    <div class="no-print" style="display:flex;gap:6px;">
-      <label style="font-size:11px;text-transform:none;display:flex;align-items:center;gap:5px;cursor:pointer;">
-        <input type="checkbox" id="showVat" onchange="renderTotals()" style="width:auto;"> Show VAT (12%)
-      </label>
-      <label style="font-size:11px;text-transform:none;display:flex;align-items:center;gap:5px;cursor:pointer;margin-left:8px;">
-        <input type="checkbox" id="showMarkup" onchange="renderTotals()" style="width:auto;"> Apply markup
-        <select id="markupType" onchange="renderTotals()" style="font-size:11px;padding:2px 4px;width:auto;font-weight:600;">
-          <option value="retail">Retail (30%)</option>
-          <option value="commercial">Commercial (20%)</option>
-          <option value="government">Government (15%)</option>
-        </select>
-      </label>
-    </div>
   </div>
 
   <div id="tableWrap" style="overflow-x:auto;">
@@ -565,10 +645,135 @@ tr:hover td{background:#fafbff;}
     </table>
   </div>
 
+  <!-- ── PRICING CONTROLS (no-print) ── -->
+  <div class="pricing-controls no-print">
+    <div class="pc-row">
+      <label class="pc-check"><input type="checkbox" id="showVat" onchange="renderTotals()"> Add VAT (12%)</label>
+    </div>
+    <div class="pc-row">
+      <label class="pc-lbl">Discount</label>
+      <select id="discountPct" onchange="renderTotals()">
+        <option value="0">No discount</option>
+        <option value="10">10%</option><option value="15">15%</option>
+        <option value="20">20%</option><option value="25">25%</option>
+        <option value="30">30%</option><option value="35">35%</option>
+        <option value="40">40%</option><option value="45">45%</option>
+        <option value="50">50%</option>
+      </select>
+    </div>
+    <div class="pc-row">
+      <label class="pc-lbl">Referral / Agent commission</label>
+      <select id="commissionPct" onchange="renderTotals()">
+        <option value="0">None</option>
+        <option value="3">3%</option>
+        <option value="5">5%</option>
+        <option value="10">10%</option>
+      </select>
+      <span class="pc-hint">computed from grand total</span>
+    </div>
+  </div>
+
   <!-- Totals -->
   <div class="totals-box">
     <table class="totals-tbl" id="totalsTbl"></table>
   </div>
+</div>
+
+<!-- ── DELIVERY & INSTALLATION ── -->
+<div class="section" id="diSection">
+  <div class="sec-title">Delivery &amp; Installation</div>
+  <div class="fg-grid no-print">
+    <div class="fg"><label>Delivery Method</label>
+      <select id="diMethod" onchange="updateDiPrint()">
+        <option value="">— Select method —</option>
+        <option value="Company delivery truck">Company delivery truck</option>
+        <option value="Third-party courier / freight">Third-party courier / freight</option>
+        <option value="Client pick-up">Client pick-up</option>
+        <option value="Site delivery (provincial)">Site delivery (provincial)</option>
+        <option value="Other">Other</option>
+      </select>
+    </div>
+    <div class="fg"><label>Free Delivery?</label>
+      <label class="pc-check" style="padding-top:7px;"><input type="checkbox" id="diFree" onchange="onFreeDeliveryChange()"> FREE delivery (FOC)</label>
+    </div>
+    <div class="fg" id="diAmountWrap"><label>Delivery &amp; Installation Amount (₱)</label>
+      <input type="number" id="diAmount" min="0" step="100" placeholder="0" oninput="renderTotals();updateDiPrint();"></div>
+    <div class="fg" id="diIncludeWrap"><label>Include in Grand Total?</label>
+      <select id="diInclude" onchange="renderTotals();updateDiPrint();">
+        <option value="yes">Yes — add to total</option>
+        <option value="no">No — show as separate / FOC</option>
+      </select>
+    </div>
+    <div class="fg full"><label>Delivery &amp; Installation Notes / Terms</label>
+      <textarea id="diNotes" rows="2" placeholder="e.g. Delivery within Metro Manila. Installation includes positioning, leveling, and leak-testing of gas lines. Hauling above 2nd floor not included." oninput="updateDiPrint()"></textarea></div>
+  </div>
+  <div class="print-only" id="diPrint"></div>
+</div>
+
+<!-- ── PROJECT TIMELINE ── -->
+<div class="section" id="timelineSection">
+  <div class="sec-title">Project Timeline &amp; Completion</div>
+  <div class="fg-grid no-print">
+    <div class="fg"><label>Start Date (basis)</label>
+      <input type="date" id="projStart" oninput="renderTimeline();renderTotals();"></div>
+    <div class="fg"><label>Overall Lead Time (calendar days)</label>
+      <input type="number" id="overallLead" min="0" step="1" placeholder="auto from items" oninput="renderTimeline();renderTotals();"></div>
+    <div class="fg"><label>&nbsp;</label>
+      <button class="btn btn-outline" style="background:var(--dark-blue);" onclick="autoFillLead()">↻ Auto-estimate from items</button></div>
+  </div>
+  <div id="timelineSummary" class="payment-summary"></div>
+</div>
+
+<!-- ── PAYMENT SCHEDULE ── -->
+<div class="section">
+  <div class="sec-title">Payment Terms &amp; Schedule</div>
+  <div class="fg-grid no-print">
+    <div class="fg"><label>Down Payment</label>
+      <select id="dpMode" onchange="onDpModeChange()">
+        <option value="10">10% Down Payment</option>
+        <option value="15">15% Down Payment</option>
+        <option value="20">20% Down Payment</option>
+        <option value="30">30% Down Payment</option>
+        <option value="40">40% Down Payment</option>
+        <option value="50" selected>50% Down Payment</option>
+        <option value="60">60% Down Payment</option>
+        <option value="custom">Custom amount (₱)</option>
+      </select>
+    </div>
+    <div class="fg" id="dpCustomWrap" style="display:none;">
+      <label>Custom Down Payment (₱)</label>
+      <input type="number" id="dpCustom" min="0" step="100" placeholder="0" oninput="renderTotals()">
+    </div>
+    <div class="fg"><label>Balance Payment Method</label>
+      <select id="balMode" onchange="onBalModeChange()">
+        <option value="lump">Pay full balance after completion</option>
+        <option value="stagger3">3 staggered payments (during project)</option>
+        <option value="stagger4">4 staggered payments (during project)</option>
+        <option value="stagger5">5 staggered payments (during project)</option>
+        <option value="install3">Installment — 3 months</option>
+        <option value="install6">Installment — 6 months</option>
+        <option value="install9">Installment — 9 months</option>
+        <option value="install12">Installment — 12 months</option>
+      </select>
+    </div>
+    <div class="fg" id="interestWrap" style="display:none;">
+      <label>Installment Interest Rate (% per annum)</label>
+      <input type="number" id="interestRate" min="0" step="0.5" value="0" oninput="renderTotals()">
+    </div>
+  </div>
+  <div id="paymentSummary" class="payment-summary"></div>
+</div>
+
+<!-- ── REMARKS & PAYMENT DETAILS ── -->
+<div class="section" id="remarksSection">
+  <div class="sec-title">Remarks &amp; Payment Details</div>
+  <div class="fg-grid no-print">
+    <div class="fg full"><label>Remarks / Special Notes to Client</label>
+      <textarea id="remarks" rows="2" placeholder="e.g. This quotation includes free design consultation. Custom finishes available upon request." oninput="updateRemarksPrint()"></textarea></div>
+    <div class="fg full"><label>Payment / Bank Details (for deposit)</label>
+      <textarea id="bankDetails" rows="2" placeholder="Bank: BDO  |  Account Name: Barro Industries OPC  |  Account No.: 0000-0000-0000  |  GCash: 0927 683 6300" oninput="updateRemarksPrint()"></textarea></div>
+  </div>
+  <div class="print-only" id="remarksPrint"></div>
 </div>
 
 <!-- ── INTERNAL PANEL (Labor & Timeline) ── -->
@@ -614,16 +819,34 @@ tr:hover td{background:#fafbff;}
   <div class="terms-grid" id="termsGrid"></div>
   <div class="sig-row">
     <div class="sig-box">
-      <div style="height:36px;"></div>
+      <div class="sig-role">Conforme — Accepted by Client</div>
+      <div style="height:34px;"></div>
       <div class="sig-name" id="sigClientName">CLIENT NAME</div>
       <small>Signature over printed name<br>Date: ___________________</small>
     </div>
     <div class="sig-box">
-      <div style="height:36px;"></div>
+      <div class="sig-role">Reviewed &amp; Approved by</div>
+      <div style="height:34px;"></div>
       <div class="sig-name" id="sigContact"></div>
       <small id="sigTitle"></small>
+      <small class="sig-filed" id="sigFiledDate"></small>
     </div>
   </div>
+</div>
+
+<!-- ── AGENT COMMISSION BOX (agent copy print only) ── -->
+<div class="print-only agent-box" id="agentBox"></div>
+
+<!-- ── TRUST FOOTER (print only) ── -->
+<div class="print-only print-footer" id="printFooter">
+  <div class="pf-trust">
+    <span class="pf-badge">✔ 12-Month Workmanship Warranty</span>
+    <span class="pf-badge">✔ Food-Grade SS304 Materials</span>
+    <span class="pf-badge">✔ BFP / DOH Compliant Builds</span>
+    <span class="pf-badge">✔ Nationwide Delivery &amp; Installation</span>
+  </div>
+  <div class="pf-thanks" id="pfThanks"></div>
+  <div class="pf-creds" id="pfCreds"></div>
 </div>
 
 </div><!-- /main -->
@@ -655,9 +878,13 @@ tr:hover td{background:#fafbff;}
 const CO = {
   BK:{name:'BARRO KITCHENS',sub:'by Barro Industries OPC',
     addr:'La Union  |  Baguio City  |  Manila',contact:'09276836300  |  hello@barroindustries.com',
-    sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'},nav:'BARRO <span>KITCHENS</span>',code:'BK'},
+    sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'},nav:'BARRO <span>KITCHENS</span>',code:'BK',
+    thanks:'Thank you for considering Barro Kitchens. We look forward to building a kitchen you can rely on for years.',
+    creds:'Barro Industries OPC  •  DTI / BIR Registered  •  hello@barroindustries.com  •  0927 683 6300  •  La Union | Baguio | Manila'},
   BS:{name:'BRILLIANT STEEL CORPORATION',sub:'',addr:'Pasig City, Metro Manila',contact:'09276836300',
-    sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'},nav:'<span>BRILLIANT</span> STEEL',code:'BS'},
+    sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'},nav:'<span>BRILLIANT</span> STEEL',code:'BS',
+    thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
+    creds:'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300'},
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -673,6 +900,7 @@ let termsContent={}, termsEnabled={
 };
 let quoteStatus='draft'; // 'draft' | 'filed'
 let waiveFlags={};
+let filedAt=''; // ISO timestamp set when the quote is filed/reviewed
 
 // ═══════════════════════════════════════════════════════════════════
 //  DATABASE LOADING
@@ -767,7 +995,13 @@ document.addEventListener('DOMContentLoaded', ()=>{
   setCompany('BK');
   renderTerms();
   loadFromStorage();
+  // Default the project start basis to the quote date if not already set
+  const ps=document.getElementById('projStart');
+  if(ps && !ps.value) ps.value=document.getElementById('quoteDate').value;
   buildQuoteNo();
+  renderTimeline();
+  updateDiPrint();
+  updateRemarksPrint();
   loadDatabase();
   document.addEventListener('click', e=>{
     if(!e.target.closest('.search-wrap')) closeDropdown();
@@ -801,6 +1035,8 @@ function setCompany(co){
   document.getElementById('phContact').textContent=c.contact;
   document.getElementById('sigContact').textContent=c.sig.name;
   document.getElementById('sigTitle').textContent=c.sig.title;
+  const pft=document.getElementById('pfThanks'); if(pft) pft.textContent=c.thanks||'';
+  const pfc=document.getElementById('pfCreds'); if(pfc) pfc.textContent=c.creds||'';
   buildQuoteNo();
 }
 
@@ -848,10 +1084,34 @@ function updatePrintHeader(){
   const d=document.getElementById('quoteDate').value;
   const sp=document.getElementById('salesperson').value;
   document.getElementById('phQuoteNo').textContent=no?'Quote No.: '+no:'';
-  document.getElementById('phDate').textContent=d?'Date: '+new Date(d+'T12:00:00').toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'}):'';
+  document.getElementById('phDate').textContent=d?'Date: '+fmtDate(new Date(d+'T12:00:00')):'';
+  document.getElementById('phValid').textContent=d?'Valid Until: '+fmtDate(addDays(d,30)):'';
   document.getElementById('phSalesperson').textContent=sp?'Prepared by: '+sp:'';
   const cn=document.getElementById('clientName').value;
   document.getElementById('sigClientName').textContent=cn||'CLIENT NAME';
+  renderBillStrip();
+  updateFiledSig();
+}
+
+function renderBillStrip(){
+  const box=document.getElementById('billStrip'); if(!box) return;
+  const name=document.getElementById('clientName')?.value?.trim()||'';
+  const co=document.getElementById('clientCompany')?.value?.trim()||'';
+  const addr=document.getElementById('clientAddress')?.value?.trim()||'';
+  const phone=document.getElementById('clientPhone')?.value?.trim()||'';
+  const email=document.getElementById('clientEmail')?.value?.trim()||'';
+  const purpose=document.getElementById('purpose')?.value||'';
+  if(!name&&!co&&!addr){ box.innerHTML=''; return; }
+  const l1=`<strong>BILL TO:</strong> ${name||'—'}${co?' — '+co:''}`;
+  const parts=[]; if(addr)parts.push(addr); if(phone)parts.push('☎ '+phone); if(email)parts.push('✉ '+email);
+  const l2=parts.join('  |  ');
+  const l3=purpose?`Project Type: ${purpose}`:'';
+  box.innerHTML=`<div>${l1}</div>${l2?`<div>${l2}</div>`:''}${l3?`<div style="color:#666;">${l3}</div>`:''}`;
+}
+
+function updateFiledSig(){
+  const el=document.getElementById('sigFiledDate'); if(!el) return;
+  el.textContent=(quoteStatus==='filed'&&filedAt)?('Reviewed & filed: '+fmtDate(new Date(filedAt))):'';
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1147,6 +1407,33 @@ function addItemFromCalc(){
   dismissCalc();
 }
 
+// Add a blank, fully-editable custom line item (not from the DB)
+function addCustomItem(){
+  items.push({
+    id:'CUSTOM',
+    category:currentCatFilter!=='all'?currentCatFilter:'miscellaneous',
+    name:'New custom item',
+    dims:'',
+    specs:[],
+    specEdit:'',
+    qty:1,
+    unit:'pc',
+    unitPrice:0,
+    amount:0,
+    leadTime:'',
+    laborHours:null,
+    formulaType:'fixed',
+  });
+  saveToStorage();
+  renderItems();
+  // Focus the new item's name for immediate editing
+  setTimeout(()=>{
+    const cells=document.querySelectorAll('#itemsTbody .name-cell');
+    const last=cells[cells.length-1];
+    if(last){last.focus();document.getSelection()?.selectAllChildren(last);}
+  },30);
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  RENDER ITEMS TABLE
 // ═══════════════════════════════════════════════════════════════════
@@ -1172,22 +1459,21 @@ function renderItems(){
     let subtotal=0;
     catMap[catId].forEach(({item,idx})=>{
       subtotal+=item.amount;
-      const specHtml=item.specs&&item.specs.length?
-        '<div style="margin-top:3px;">'+item.specs.map(s=>`<span class="spec-badge">${s.value}</span>`).join('')+'</div>':'';
-      const dimHtml=item.dims?`<div class="dim-cell" style="font-size:11px;color:var(--gray-dark);">${item.dims}</div>`:'';
+      const specText=item.specEdit!==undefined?item.specEdit
+        :(item.specs&&item.specs.length?item.specs.map(s=>s.label?`${s.label}: ${s.value}`:s.value).join(' • '):'');
       html+=`<tr>
         <td style="text-align:center;color:var(--gray-dark);font-size:12px;">${globalN++}</td>
         <td>
           <div class="name-cell cell-edit" contenteditable="true" onblur="editName(${idx},this)">${item.name}</div>
-          ${dimHtml}${specHtml}
-          <div class="notes-cell cell-edit" contenteditable="true" onblur="editNotes(${idx},this)" placeholder="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${item.notes||''}</div>
+          <div class="spec-line"><span class="spec-tag no-print">Specs</span><span class="spec-edit cell-edit" contenteditable="true" data-ph="Click to add specifications…" onblur="editSpecs(${idx},this)">${specText}</span></div>
+          <div class="notes-cell cell-edit" contenteditable="true" onblur="editNotes(${idx},this)" data-ph="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${item.notes||''}</div>
         </td>
         <td style="font-size:11px;">${item.dims||'—'}</td>
         <td style="text-align:center;"><input class="cell-num" type="number" min="1" value="${item.qty}" onchange="updateQty(${idx},this)" style="width:50px;"></td>
         <td style="text-align:center;"><input class="cell-unit" type="text" value="${item.unit}" onchange="updateUnit(${idx},this)" style="width:55px;"></td>
-        <td style="text-align:right;"><input class="edit-price" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"></td>
+        <td style="text-align:right;"><input class="edit-price" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"><span class="price-print">${formatPeso(item.unitPrice)}</span></td>
         <td style="text-align:right;font-weight:600;">${formatPeso(item.amount)}</td>
-        <td style="font-size:11px;color:var(--gray-dark);">${item.leadTime||'—'}</td>
+        <td style="text-align:center;"><input class="cell-unit lead-in" type="text" value="${item.leadTime||''}" placeholder="e.g. 7-14 days" onchange="updateLead(${idx},this)"></td>
         <td class="no-print" style="text-align:center;"><button class="del-btn" onclick="deleteItem(${idx})" title="Remove">✕</button></td>
       </tr>`;
     });
@@ -1199,32 +1485,214 @@ function renderItems(){
   if(currentView==='internal') buildLaborTable();
 }
 
-function renderTotals(){
+function computeTotals(){
   const subtotal=items.reduce((s,i)=>s+i.amount,0);
-  const showVat=document.getElementById('showVat')?.checked;
-  const showMarkup=document.getElementById('showMarkup')?.checked;
-  const markupType=document.getElementById('markupType')?.value||'retail';
   const consts=DB.constants||{};
-  const markupRates={retail:consts.markup?.retail||1.30,commercial:consts.markup?.commercial||1.20,government:consts.markup?.government||1.15};
-  const markupMult=markupRates[markupType]||1.30;
   const vatRate=consts.vat||0.12;
+  const showVat=document.getElementById('showVat')?.checked;
+  const discPct=parseFloat(document.getElementById('discountPct')?.value||0);
+  const commPct=parseFloat(document.getElementById('commissionPct')?.value||0);
+  const diFree=document.getElementById('diFree')?.checked;
+  const diAmount=diFree?0:parseFloat(document.getElementById('diAmount')?.value||0);
+  const diInclude=(document.getElementById('diInclude')?.value||'yes')==='yes';
 
-  let afterMarkup=subtotal;
-  let markupAmt=0;
-  if(showMarkup){markupAmt=afterMarkup*(markupMult-1);afterMarkup*=markupMult;}
-  const vatAmt=showVat?afterMarkup*vatRate:0;
-  const grand=afterMarkup+vatAmt;
+  const diAdded=diInclude?diAmount:0;
+  const preDiscount=subtotal+diAdded;
+  const discountAmt=preDiscount*(discPct/100);
+  const net=preDiscount-discountAmt;          // discount applied BELOW items, before VAT
+  const vatAmt=showVat?net*vatRate:0;
+  const grand=net+vatAmt;
+  const commissionAmt=grand*(commPct/100);
 
+  return {subtotal,diAmount,diAdded,diInclude,discPct,discountAmt,net,showVat,vatAmt,grand,commPct,commissionAmt};
+}
+
+function renderTotals(){
+  const t=computeTotals();
   let html='';
-  html+=`<tr><td>Subtotal</td><td>${formatPeso(subtotal)}</td></tr>`;
-  if(showMarkup) html+=`<tr><td>Markup (${Math.round((markupMult-1)*100)}%)</td><td>${formatPeso(markupAmt)}</td></tr>`;
-  if(showVat) html+=`<tr><td>VAT (12%)</td><td>${formatPeso(vatAmt)}</td></tr>`;
-  html+=`<tr class="grand"><td>GRAND TOTAL</td><td>${formatPeso(grand)}</td></tr>`;
+  html+=`<tr><td>Subtotal</td><td>${formatPeso(t.subtotal)}</td></tr>`;
+  if(t.diAdded>0) html+=`<tr><td>Delivery &amp; Installation</td><td>${formatPeso(t.diAdded)}</td></tr>`;
+  if(t.discPct>0) html+=`<tr class="discount"><td>Discount (${t.discPct}%)</td><td>−${formatPeso(t.discountAmt)}</td></tr>`;
+  if(t.discPct>0||t.diAdded>0) html+=`<tr><td>Net Amount</td><td>${formatPeso(t.net)}</td></tr>`;
+  if(t.showVat) html+=`<tr><td>VAT (12%)</td><td>${formatPeso(t.vatAmt)}</td></tr>`;
+  html+=`<tr class="grand"><td>GRAND TOTAL</td><td>${formatPeso(t.grand)}</td></tr>`;
+  html+=`<tr class="cur-note"><td colspan="2" style="font-size:10px;color:var(--gray-dark);font-weight:400;text-align:right;">All amounts in Philippine Peso (₱), VAT ${t.showVat?'included':'exclusive'}.</td></tr>`;
+  if(t.commPct>0) html+=`<tr class="commission agent-only"><td>Referral/Agent Commission (${t.commPct}%)</td><td>${formatPeso(t.commissionAmt)}</td></tr>`;
   document.getElementById('totalsTbl').innerHTML=html;
+  renderTimeline();
+  renderPaymentSchedule(t.grand);
+  updateDiPrint();
+  saveToStorage();
+}
+
+// ── Payment schedule ──
+function onDpModeChange(){
+  const mode=document.getElementById('dpMode').value;
+  document.getElementById('dpCustomWrap').style.display=(mode==='custom')?'flex':'none';
+  renderTotals();
+}
+function onBalModeChange(){
+  const mode=document.getElementById('balMode').value;
+  document.getElementById('interestWrap').style.display=mode.startsWith('install')?'flex':'none';
+  renderTotals();
+}
+
+function getDpAmount(grand){
+  const mode=document.getElementById('dpMode')?.value||'50';
+  if(mode==='custom') return Math.min(grand,parseFloat(document.getElementById('dpCustom')?.value||0));
+  return grand*(parseFloat(mode)/100);
+}
+
+function renderPaymentSchedule(grand){
+  const box=document.getElementById('paymentSummary');
+  if(!box) return;
+  if(!grand){box.innerHTML='<div class="pay-note">Add items to compute the payment schedule.</div>';return;}
+  const dpMode=document.getElementById('dpMode')?.value||'50';
+  const dp=getDpAmount(grand);
+  const balance=Math.max(0,grand-dp);
+  const balMode=document.getElementById('balMode')?.value||'lump';
+  const dpLabel=dpMode==='custom'?'Down Payment (custom)':`Down Payment (${dpMode}%)`;
+
+  let rows=`<tr class="pay-head"><td>Total Contract Price</td><td>${formatPeso(grand)}</td></tr>`;
+  rows+=`<tr><td>${dpLabel}</td><td>${formatPeso(dp)}</td></tr>`;
+  rows+=`<tr><td>Balance</td><td>${formatPeso(balance)}</td></tr>`;
+  let note='';
+
+  const lead=getLeadDays();
+  const start=getStartDate();
+  const compDate=lead?addDays(start,lead):null;
+
+  if(balMode==='lump'){
+    rows+=`<tr><td>Balance — payable in full upon completion${compDate?' ('+fmtDate(compDate)+')':''}</td><td>${formatPeso(balance)}</td></tr>`;
+    note='Full balance is due upon project completion and final acceptance'+(compDate?` (estimated ${fmtDate(compDate)})`:'')+'.';
+  } else if(balMode.startsWith('stagger')){
+    const n=parseInt(balMode.replace('stagger',''));
+    const per=balance/n;
+    for(let i=1;i<=n;i++){
+      const when=lead?(' — due '+fmtDate(addDays(start,Math.round(lead*i/n)))):'';
+      rows+=`<tr><td>Progress payment ${i} of ${n}${when}</td><td>${formatPeso(per)}</td></tr>`;
+    }
+    note=`Balance divided into ${n} equal staggered payments`+
+      (lead?` scheduled evenly across the ${lead}-day project duration, the last falling on the estimated completion date (${fmtDate(compDate)}).`
+           :` billed at equal progress milestones during the project duration. Set the overall lead time above to compute payment dates.`);
+  } else if(balMode.startsWith('install')){
+    const months=parseInt(balMode.replace('install',''));
+    const annual=parseFloat(document.getElementById('interestRate')?.value||0);
+    const r=annual/100/12;
+    let monthly,totalPay,interestTotal;
+    if(r>0){
+      monthly=balance*r/(1-Math.pow(1+r,-months));
+      totalPay=monthly*months;
+      interestTotal=totalPay-balance;
+    } else {
+      monthly=balance/months;totalPay=balance;interestTotal=0;
+    }
+    rows+=`<tr><td>${months}-month installment — monthly payment</td><td>${formatPeso(monthly)}</td></tr>`;
+    if(interestTotal>0){
+      rows+=`<tr><td>Total interest (@ ${annual}% p.a.)</td><td>${formatPeso(interestTotal)}</td></tr>`;
+      rows+=`<tr class="pay-head"><td>Total payable (DP + financed balance)</td><td>${formatPeso(dp+totalPay)}</td></tr>`;
+    }
+    note=`Balance financed over ${months} monthly installments`+
+      (annual>0?` at ${annual}% per annum (standard amortization). Interest accrues on the outstanding balance; full settlement at any time stops further interest.`:` (0% interest — balance divided equally).`)+
+      ` Payments are due on the same day each month following the down payment. Late payments may incur a 2% monthly surcharge. Equipment remains the property of the company until full payment is received.`;
+  }
+
+  let html=`<table class="pay-tbl"><tbody>${rows}</tbody></table>`;
+  if(note) html+=`<div class="pay-note">${note}</div>`;
+  box.innerHTML=html;
+}
+
+function onFreeDeliveryChange(){
+  const free=document.getElementById('diFree')?.checked;
+  const amt=document.getElementById('diAmount');
+  const inc=document.getElementById('diInclude');
+  if(free && amt) amt.value='0';
+  if(amt) amt.disabled=free;
+  if(inc) inc.disabled=free;
+  document.getElementById('diAmountWrap').style.opacity=free?'.45':'1';
+  document.getElementById('diIncludeWrap').style.opacity=free?'.45':'1';
+  renderTotals(); updateDiPrint();
+}
+
+function updateDiPrint(){
+  const method=document.getElementById('diMethod')?.value||'';
+  const free=document.getElementById('diFree')?.checked;
+  const notes=(document.getElementById('diNotes')?.value||'').trim();
+  const amount=free?0:parseFloat(document.getElementById('diAmount')?.value||0);
+  const include=(document.getElementById('diInclude')?.value||'yes')==='yes';
+  const sec=document.getElementById('diSection');
+  const box=document.getElementById('diPrint');
+  if(!box) return;
+  if(!method&&!notes&&!amount&&!free){ if(sec) sec.classList.add('di-empty'); box.innerHTML=''; saveToStorage(); return; }
+  if(sec) sec.classList.remove('di-empty');
+  let html='';
+  if(method) html+=`<p style="font-size:9pt;"><strong>Delivery method:</strong> ${method}</p>`;
+  if(notes) html+=`<p style="font-size:9pt;line-height:1.5;margin-top:3px;">${notes.replace(/\n/g,'<br>')}</p>`;
+  if(free) html+=`<p style="font-size:9pt;font-weight:700;color:#1f8f4e;margin-top:3px;">✔ FREE Delivery &amp; Installation (FOC)</p>`;
+  else if(amount) html+=`<p style="font-size:9pt;font-weight:700;margin-top:3px;">Delivery &amp; Installation: ${formatPeso(amount)}${include?'':' (billed separately)'}</p>`;
+  box.innerHTML=html;
+  saveToStorage();
+}
+
+function updateRemarksPrint(){
+  const remarks=(document.getElementById('remarks')?.value||'').trim();
+  const bank=(document.getElementById('bankDetails')?.value||'').trim();
+  const sec=document.getElementById('remarksSection');
+  const box=document.getElementById('remarksPrint');
+  if(!box) return;
+  if(!remarks&&!bank){ if(sec) sec.classList.add('di-empty'); box.innerHTML=''; saveToStorage(); return; }
+  if(sec) sec.classList.remove('di-empty');
+  let html='';
+  if(remarks) html+=`<p style="font-size:9pt;line-height:1.5;">${remarks.replace(/\n/g,'<br>')}</p>`;
+  if(bank) html+=`<p style="font-size:9pt;line-height:1.5;margin-top:4px;"><strong>Payment / Bank Details:</strong><br>${bank.replace(/\n/g,'<br>')}</p>`;
+  box.innerHTML=html;
+  saveToStorage();
+}
+
+// ── Project timeline / completion ──
+function autoLeadDays(){
+  let max=0;
+  items.forEach(it=>{
+    const m=(it.leadTime||'').match(/(\d+)\s*(?:[-–to]+\s*(\d+))?/);
+    if(m){ const v=parseInt(m[2]||m[1])||0; if(v>max) max=v; }
+  });
+  return max;
+}
+function getStartDate(){
+  return document.getElementById('projStart')?.value
+    || document.getElementById('quoteDate')?.value
+    || new Date().toISOString().split('T')[0];
+}
+function getLeadDays(){
+  const v=document.getElementById('overallLead')?.value;
+  return (v!==''&&v!=null)?(parseInt(v)||0):autoLeadDays();
+}
+function autoFillLead(){
+  const el=document.getElementById('overallLead');
+  if(el){ el.value=autoLeadDays()||0; }
+  renderTimeline(); renderTotals();
+}
+function renderTimeline(){
+  const box=document.getElementById('timelineSummary'); if(!box) return;
+  const el=document.getElementById('overallLead');
+  if(el){ const a=autoLeadDays(); el.placeholder=a?('auto: '+a+' days'):'auto from items'; }
+  const lead=getLeadDays();
+  if(!lead){ box.innerHTML='<div class="pay-note">Enter or auto-estimate the overall lead time to compute the completion date.</div>'; return; }
+  const start=getStartDate();
+  const comp=addDays(start,lead);
+  let html='<table class="pay-tbl"><tbody>';
+  html+=`<tr class="pay-head"><td>Start Date (basis)</td><td>${fmtDate(new Date(start+'T12:00:00'))}</td></tr>`;
+  html+=`<tr><td>Overall Lead Time</td><td>${lead} calendar days (~${(lead/7).toFixed(1)} weeks)</td></tr>`;
+  html+=`<tr class="pay-head"><td>Estimated Completion</td><td>${fmtDate(comp)}</td></tr>`;
+  html+='</tbody></table>';
+  html+='<div class="pay-note">Lead time begins upon receipt of the down payment and approved design. Calendar days; subject to site readiness and unforeseen supply delays.</div>';
+  box.innerHTML=html;
 }
 
 // ── Item edits ──
 function editName(idx,el){items[idx].name=el.innerText.trim();saveToStorage();}
+function editSpecs(idx,el){items[idx].specEdit=el.innerText.trim();saveToStorage();}
+function updateLead(idx,el){items[idx].leadTime=el.value.trim();saveToStorage();}
 function editNotes(idx,el){items[idx].notes=el.innerText.trim();saveToStorage();}
 function updateQty(idx,el){items[idx].qty=parseInt(el.value)||1;items[idx].amount=items[idx].unitPrice*items[idx].qty;saveToStorage();renderItems();}
 function updateUnit(idx,el){items[idx].unit=el.value;saveToStorage();}
@@ -1327,7 +1795,7 @@ function computeTimeline(){
 // ═══════════════════════════════════════════════════════════════════
 const TERMS_DEF=[
   {id:'tc_completion',title:'Completion',content:'Work will be completed within the agreed timeline from date of down payment receipt. Delays due to client-side changes or site issues are not included.'},
-  {id:'tc_payment',title:'Payment Terms',content:'50% down payment upon confirmation. Balance upon delivery and installation.'},
+  {id:'tc_payment',title:'Payment Terms',content:'Down payment due upon confirmation; balance settled per the Payment Schedule above. All payments are non-refundable once fabrication has commenced.'},
   {id:'tc_warranty',title:'Warranty',content:'12 months warranty on fabrication workmanship. Warranty does not cover misuse, physical damage, or failure to maintain equipment properly.'},
   {id:'tc_scope',title:'Scope of Work',content:'Price covers fabrication, delivery, and installation as specified. Electrical works, gas connections, and civil works are excluded unless stated.'},
   {id:'tc_validity',title:'Quotation Validity',content:'This quotation is valid for 30 days from date of issuance. Prices are subject to change after validity.'},
@@ -1402,12 +1870,40 @@ function saveAdminProduct(){
     newProd.formula={pricePerRun:basePrice};
   }
 
-  // Replace or add
+  // Replace or add locally
   const existIdx=DB.products.findIndex(p=>p.id===id);
   if(existIdx>=0){DB.products[existIdx]=newProd;}
   else{DB.products.push(newProd);}
   saveToStorage();
-  setStatus('online',`✅ Product ${id} saved to local database (${DB.products.length} total). Export JSON to make permanent.`);
+  persistProductToDB(id,newProd);
+}
+
+// Write a product to the live Firestore database (falls back to local-only)
+async function persistProductToDB(id,prod){
+  if(location.protocol==='file:'||typeof db==='undefined'){
+    setStatus('offline',`💾 Product ${id} saved locally (${DB.products.length} total). Export JSON or open via the web app to sync to the live database.`);
+    return;
+  }
+  try{
+    setStatus('loading',`Saving ${id} to live database…`);
+    await db.collection('products').doc(id).set({
+      category:     prod.category,
+      title:        prod.name,
+      formulaType:  prod.formulaType,
+      basePrice:    prod.basePrice,
+      measurement:  prod.defaultDimensions||{},
+      formula:      prod.formula||{},
+      specifications:prod.notes||'',
+      unit:         prod.unit||'pc',
+      laborHours:   prod.laborHours||{},
+      leadTime:     prod.leadTime||'',
+      updatedAt:    new Date().toISOString(),
+    },{merge:true});
+    setStatus('online',`✅ Product ${id} saved to the live database (${DB.products.length} total).`);
+  }catch(e){
+    console.warn('[quote-builder] product save to Firestore failed',e);
+    setStatus('offline',`⚠️ Saved locally only — could not reach live database (${e.message}). Export JSON to back up.`);
+  }
 }
 
 function exportDatabase(){
@@ -1494,7 +1990,8 @@ function shareQuote(){
     salesperson:document.getElementById('salesperson').value,
     quoteDate:document.getElementById('quoteDate').value,
     purpose:document.getElementById('purpose').value,
-    termsContent,termsEnabled,currentCo
+    termsContent,termsEnabled,currentCo,
+    pricing:getPricingFields()
   };
   const json=JSON.stringify(state);
   const compressed=btoa(encodeURIComponent(json));
@@ -1529,7 +2026,36 @@ function saveToStorage(){
     localStorage.setItem('bkqb_terms_content',JSON.stringify(termsContent));
     localStorage.setItem('bkqb_terms_enabled',JSON.stringify(termsEnabled));
     localStorage.setItem('bkqb_status',quoteStatus);
+    localStorage.setItem('bkqb_filedAt',filedAt||'');
+    localStorage.setItem('bkqb_pricing',JSON.stringify(getPricingFields()));
   }catch(e){}
+}
+
+// Pricing / payment / delivery fields — single source for save, load, payload
+const PRICING_IDS=['showVat','discountPct','commissionPct','diMethod','diFree','diNotes','diAmount','diInclude',
+  'projStart','overallLead','dpMode','dpCustom','balMode','interestRate','remarks','bankDetails'];
+function getPricingFields(){
+  const o={};
+  PRICING_IDS.forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el) return;
+    o[id]=el.type==='checkbox'?el.checked:el.value;
+  });
+  return o;
+}
+function applyPricingFields(o){
+  if(!o) return;
+  PRICING_IDS.forEach(id=>{
+    const el=document.getElementById(id);
+    if(!el||o[id]===undefined) return;
+    if(el.type==='checkbox') el.checked=!!o[id]; else el.value=o[id];
+  });
+  if(document.getElementById('diFree')) onFreeDeliveryChange();
+  if(document.getElementById('dpMode')) onDpModeChange();
+  if(document.getElementById('balMode')) onBalModeChange();
+  renderTimeline();
+  updateDiPrint();
+  updateRemarksPrint();
 }
 
 function loadFromStorage(){
@@ -1551,6 +2077,9 @@ function loadFromStorage(){
       termsContent=state.termsContent||{};
       termsEnabled=state.termsEnabled||{};
       if(state.currentCo) setCompany(state.currentCo);
+      if(state.quoteNo) document.getElementById('quoteNo').value=state.quoteNo;
+      applyPricingFields(state.pricing);
+      renderItems();
       return;
     }catch(e){}
   }
@@ -1576,29 +2105,43 @@ function loadFromStorage(){
     const stc=localStorage.getItem('bkqb_terms_content');
     const ste=localStorage.getItem('bkqb_terms_enabled');
     const sst=localStorage.getItem('bkqb_status');
+    const spr=localStorage.getItem('bkqb_pricing');
+    const sfa=localStorage.getItem('bkqb_filedAt');
     if(si) items=JSON.parse(si);
     if(stc) termsContent=JSON.parse(stc);
     if(ste) termsEnabled=JSON.parse(ste);
     if(sst) quoteStatus=sst;
+    if(sfa) filedAt=sfa;
+    if(spr) applyPricingFields(JSON.parse(spr));
     if(quoteStatus==='filed') document.getElementById('filedBadge').classList.add('show');
   }catch(e){}
   renderItems();
+  updatePrintHeader();
 }
 
 function clearForm(){
   if(!confirm('Start a new quote? Current data will be cleared.')) return;
   items=[];termsContent={};
   termsEnabled={tc_completion:true,tc_payment:true,tc_warranty:true,tc_scope:true,tc_validity:true,tc_site:true,tc_acceptance:true};
-  laborState={};quoteStatus='draft';waiveFlags={};
+  laborState={};quoteStatus='draft';waiveFlags={};filedAt='';
   ['clientName','clientCompany','clientAddress','clientPhone','clientEmail','salesperson'].forEach(id=>{
     const el=document.getElementById(id);if(el)el.value='';
   });
-  document.getElementById('quoteDate').value=new Date().toISOString().split('T')[0];
+  const today=new Date().toISOString().split('T')[0];
+  // Reset pricing / payment / delivery fields to defaults
+  applyPricingFields({showVat:false,discountPct:'0',commissionPct:'0',diMethod:'',diFree:false,diNotes:'',
+    diAmount:'',diInclude:'yes',projStart:today,overallLead:'',dpMode:'50',dpCustom:'',balMode:'lump',
+    interestRate:'0',remarks:'',bankDetails:''});
+  document.getElementById('quoteDate').value=today;
   document.getElementById('filedBadge').classList.remove('show');
+  document.getElementById('filedBadge').textContent='✓ FILED';
+  document.getElementById('filedBadge').style.background='';
+  updateFiledSig();
   saveToStorage();
   buildQuoteNo();
   renderItems();
   renderTerms();
+  updatePrintHeader();
   dismissCalc();
 }
 
@@ -1692,6 +2235,8 @@ function fileQuotation(){
   }
 
   quoteStatus='filed';
+  filedAt=new Date().toISOString();
+  updateFiledSig();
   document.getElementById('filedBadge').textContent='✓ FILED';
   document.getElementById('filedBadge').style.background='';
   document.getElementById('filedBadge').classList.add('show');
@@ -1712,17 +2257,28 @@ function fileQuotation(){
 function buildQuotePayload(){
   const co = currentCo;
   const quoteNo = document.getElementById('quoteNo').value;
-  const subtotal = items.reduce((s,i)=>s+i.amount,0);
-  const showVat = document.getElementById('showVat')?.checked;
-  const showMarkup = document.getElementById('showMarkup')?.checked;
-  const markupType = document.getElementById('markupType')?.value||'retail';
-  const consts = DB.constants||{};
-  const markupRates = {retail:consts.markup?.retail||1.30,commercial:consts.markup?.commercial||1.20,government:consts.markup?.government||1.15};
-  const vatRate = consts.vat||0.12;
-  let afterMarkup = subtotal;
-  if(showMarkup) afterMarkup *= markupRates[markupType]||1.30;
-  const vatAmt = showVat ? afterMarkup*vatRate : 0;
-  const grand = afterMarkup + vatAmt;
+  const t = computeTotals();
+  const grand = t.grand;
+  const dp = getDpAmount(grand);
+  const balance = Math.max(0,grand-dp);
+  const dpMode = document.getElementById('dpMode')?.value||'50';
+  const balMode = document.getElementById('balMode')?.value||'lump';
+  const pricing = getPricingFields();
+
+  // Editable snapshot — lets the saved quotation be re-opened and edited later
+  const editableState = {
+    items, termsContent, termsEnabled, currentCo:co, quoteNo, filedAt,
+    clientName:    document.getElementById('clientName')?.value||'',
+    clientCompany: document.getElementById('clientCompany')?.value||'',
+    clientAddress: document.getElementById('clientAddress')?.value||'',
+    clientPhone:   document.getElementById('clientPhone')?.value||'',
+    clientEmail:   document.getElementById('clientEmail')?.value||'',
+    salesperson:   document.getElementById('salesperson')?.value||'',
+    quoteDate:     document.getElementById('quoteDate')?.value||'',
+    purpose:       document.getElementById('purpose')?.value||'',
+    pricing,
+  };
+
   return {
     quoteNumber:   quoteNo,
     company:       co,
@@ -1737,22 +2293,83 @@ function buildQuotePayload(){
     leadSource:    document.getElementById('qnoMethod')?.value||'',
     quoteDate:     document.getElementById('quoteDate')?.value||'',
     items:         items,
-    subtotal,
+    subtotal:      t.subtotal,
+    deliveryInstall:{ amount:t.diAmount, includedInTotal:t.diInclude,
+                      free:document.getElementById('diFree')?.checked||false,
+                      method:document.getElementById('diMethod')?.value||'',
+                      notes:document.getElementById('diNotes')?.value||'' },
+    timeline:{ startDate:getStartDate(), leadDays:getLeadDays(),
+               completionDate:getLeadDays()?addDays(getStartDate(),getLeadDays()).toISOString().split('T')[0]:'' },
+    remarks:       document.getElementById('remarks')?.value||'',
+    bankDetails:   document.getElementById('bankDetails')?.value||'',
+    validUntil:    document.getElementById('quoteDate')?.value?addDays(document.getElementById('quoteDate').value,30).toISOString().split('T')[0]:'',
+    discountPct:   t.discPct,
+    discountAmount:t.discountAmt,
+    netAmount:     t.net,
+    vatIncluded:   t.showVat,
+    vatAmount:     t.vatAmt,
     total:         grand,
     grandTotal:    grand,
-    vatIncluded:   showVat,
-    markupApplied: showMarkup,
-    markupType:    markupType,
+    commissionPct: t.commPct,
+    commissionAmount:t.commissionAmt,
+    payment: {
+      downPaymentMode: dpMode,
+      downPayment:     dp,
+      balance:         balance,
+      balanceMode:     balMode,
+      interestRate:    parseFloat(document.getElementById('interestRate')?.value||0),
+    },
+    editableState,
     waiveFlags,
     status:        'filed',
     source:        'quote-builder-v2',
-    filedAt:       new Date().toISOString(),
+    filedAt:       filedAt||new Date().toISOString(),
   };
 }
+
+// Reload a previously-filed quotation for editing (called from parent app or hash)
+function loadEditableState(state){
+  if(!state) return;
+  try{
+    items=state.items||[];
+    termsContent=state.termsContent||{};
+    termsEnabled=state.termsEnabled||termsEnabled;
+    if(state.filedAt){ filedAt=state.filedAt; quoteStatus='filed'; }
+    if(state.currentCo) setCompany(state.currentCo);
+    if(state.quoteNo){setQnoMode('manual');document.getElementById('quoteNo').value=state.quoteNo;}
+    ['clientName','clientCompany','clientAddress','clientPhone','clientEmail','salesperson','quoteDate','purpose'].forEach(id=>{
+      const el=document.getElementById(id);if(el&&state[id]!==undefined) el.value=state[id];
+    });
+    applyPricingFields(state.pricing);
+    renderTerms();renderItems();updatePrintHeader();
+  }catch(e){console.warn('loadEditableState failed',e);}
+}
+window.addEventListener('message',ev=>{
+  const d=ev.data||{};
+  if(d.type==='LOAD_QUOTE' && d.payload) loadEditableState(d.payload.editableState||d.payload);
+});
 
 function closeVerifyModal(e){
   if(e&&e.target!==document.getElementById('verifyModal')) return;
   document.getElementById('verifyModal').style.display='none';
+}
+
+function buildAgentBox(){
+  const box=document.getElementById('agentBox'); if(!box) return;
+  const t=computeTotals();
+  const agent=document.getElementById('salesperson')?.value?.trim()||'—';
+  if(!t.commPct){
+    box.innerHTML=`<div style="font-weight:800;color:#8E44AD;letter-spacing:.5px;">AGENT / SALES COPY</div>
+      <div style="font-size:9pt;margin-top:3px;">Agent: <strong>${agent}</strong> — no referral commission was set on this quotation.</div>`;
+    return;
+  }
+  box.innerHTML=`<div style="font-weight:800;color:#8E44AD;letter-spacing:.5px;">AGENT / SALES COPY — COMMISSION</div>
+    <table class="pay-tbl" style="margin-top:5px;"><tbody>
+      <tr><td>Agent / Salesperson</td><td>${agent}</td></tr>
+      <tr><td>Grand Total (basis)</td><td>${formatPeso(t.grand)}</td></tr>
+      <tr class="pay-head"><td>Referral / Agent Commission (${t.commPct}%)</td><td>${formatPeso(t.commissionAmt)}</td></tr>
+    </tbody></table>
+    <div class="pay-note">Commission is computed on the grand total and payable upon full client settlement. CONFIDENTIAL — for the agent only; do not give this copy to the client.</div>`;
 }
 
 function doPrint(){
@@ -1760,7 +2377,27 @@ function doPrint(){
     alert('Please file this quote before printing. Tap "Verify & File" to complete filing first.');
     doVerifyAndFile(); return;
   }
+  document.body.classList.remove('body-agent');
+  document.getElementById('phAgentTag').style.display='none';
+  const prev=document.title;
+  document.title=quoteFileName('');
   window.print();
+  setTimeout(()=>{document.title=prev;},800);
+}
+
+function doPrintAgent(){
+  if(!items.length){ alert('Add at least one item before printing an agent copy.'); return; }
+  buildAgentBox();
+  document.body.classList.add('body-agent');
+  document.getElementById('phAgentTag').style.display='inline-block';
+  const prev=document.title;
+  document.title=quoteFileName('Agent Copy');
+  window.print();
+  setTimeout(()=>{
+    document.body.classList.remove('body-agent');
+    document.getElementById('phAgentTag').style.display='none';
+    document.title=prev;
+  },800);
 }
 
 function doShare(){
@@ -1777,6 +2414,24 @@ function doShare(){
 function formatPeso(n){
   if(!n&&n!==0) return '—';
   return '₱'+Math.round(n).toLocaleString('en-PH');
+}
+function addDays(iso,n){
+  const d=new Date((iso||new Date().toISOString().split('T')[0])+'T12:00:00');
+  d.setDate(d.getDate()+Math.round(n||0));
+  return d;
+}
+function fmtDate(d){
+  if(!(d instanceof Date)||isNaN(d)) return '';
+  return d.toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'});
+}
+function sanitizeFile(s){
+  return (s||'').replace(/[\\/:*?"<>|]+/g,' ').replace(/\s+/g,' ').trim();
+}
+function quoteFileName(suffix){
+  const no=document.getElementById('quoteNo')?.value?.trim()||'Quotation';
+  const cn=document.getElementById('clientName')?.value?.trim()||'';
+  let base=sanitizeFile(no+(cn?' - '+cn:''));
+  return base+(suffix?' ('+suffix+')':'');
 }
 
 // ═══════════════════════════════════════════════════════════════════
