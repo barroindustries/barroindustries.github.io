@@ -6648,15 +6648,20 @@ async function openQuoteApprovalReview(ctx, onDone){
   if(!snap || !snap.exists){ Notifs.showToast('Quote not found','error'); return; }
   const q = snap.data();
   const ta = 'width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical';
+  const hasSnapshot = !!q.editableState;
   openModal(`📝 Review Quote — ${escHtml(quoteNumber||q.quoteNumber||'')}`, `
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Open the full quote in the builder to review/edit line items, or adjust the key fields below, then approve or return it to the partner.</p>
-    <button class="btn-secondary btn-sm" id="qar-open-builder" style="margin-bottom:14px">🔧 Open full quote in Builder</button>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Open the full quote in the builder to review/edit line items (saved back to the partner's quote), or adjust the key fields below, then approve or return it to the partner.</p>
+    <button class="btn-secondary btn-sm" id="qar-open-builder" style="margin-bottom:14px" ${hasSnapshot?'':'disabled title="No editable snapshot for this quote"'}>🔧 Open full quote in Builder${hasSnapshot?'':' (no snapshot)'}</button>
     <div class="form-group"><label>Client Name</label><input id="qar-client" value="${(q.clientName||'').replace(/"/g,'&quot;')}"/></div>
     <div class="form-group"><label>Scope / Description</label><textarea id="qar-scope" rows="3" style="${ta}">${escHtml(q.scope||q.description||'')}</textarea></div>
     <div class="form-group"><label>Adjusted Total (₱)</label><input id="qar-total" type="number" value="${q.total||q.grandTotal||0}"/></div>
     <div class="form-group"><label>Notes for Partner</label><textarea id="qar-notes" rows="2" placeholder="What to revise, or why approved…" style="${ta}">${escHtml(q.presidentNotes||'')}</textarea></div>
   `, `<button class="btn-success" id="qar-approve">✅ Save &amp; Approve</button><button class="btn-primary" id="qar-return">↩ Save &amp; Return to Partner</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-  document.getElementById('qar-open-builder').addEventListener('click', ()=>{ closeModal(); window.reopenQuoteFromDoc('bs_quotes', quoteId, 'bs-quote-builder'); });
+  if (hasSnapshot) document.getElementById('qar-open-builder').addEventListener('click', ()=>{
+    window._qbReviewContext = { quoteId, partnerUid: agentId, quoteNumber: quoteNumber||q.quoteNumber, clientName: q.clientName||clientName };
+    closeModal();
+    window.reopenQuoteFromDoc('bs_quotes', quoteId, 'bs-quote-builder');
+  });
   const getEdits = ()=>({ clientName:document.getElementById('qar-client').value.trim(), scope:document.getElementById('qar-scope').value.trim(), total:parseFloat(document.getElementById('qar-total').value)||q.total||0, presidentNotes:document.getElementById('qar-notes').value.trim(), editedByPresident:true, editedAt:firebase.firestore.FieldValue.serverTimestamp(), editedBy:currentUser.uid });
   document.getElementById('qar-approve').addEventListener('click', async ()=>{
     const e=getEdits();

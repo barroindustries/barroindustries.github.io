@@ -923,19 +923,92 @@ function renderQuoteBuilderIframe() {
   // A "Reopen" action from the Quotations list stashes the quote's editable
   // snapshot here — load it into the builder once the iframe is ready.
   const reopenState = window._qbReopenState; window._qbReopenState = null;
+  // President-review mode: editing a partner's quote to hand it back. The edits
+  // are saved to the SAME (partner-owned) quote doc, not a new president copy.
+  const reviewCtx = window._qbReviewContext; window._qbReviewContext = null;
+  const reviewBanner = reviewCtx ? `
+    <div id="qb-review-bar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:linear-gradient(135deg,rgba(255,159,10,.12),transparent);border:1.5px solid var(--warning,#ff9f0a);border-radius:12px;padding:10px 14px;margin-bottom:10px">
+      <div style="flex:1;min-width:180px;font-size:12px"><strong>Reviewing ${escHtml(reviewCtx.quoteNumber||'partner quote')}</strong> for ${escHtml(reviewCtx.clientName||'')} — edit the line items, then save it back to the partner.</div>
+      <button class="btn-primary btn-sm" id="qb-return-edit">↩ Save edits &amp; Return to Partner</button>
+      <button class="btn-success btn-sm" id="qb-approve-edit">✅ Save edits &amp; Approve</button>
+    </div>` : '';
   c.innerHTML = `
+    ${reviewBanner}
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
-      <h2 style="font-size:16px;font-weight:800;color:var(--text)">🧮 Quote Builder${reopenState?' <span style="font-size:12px;font-weight:600;color:var(--text-muted)">(editing a copy)</span>':''}</h2>
+      <h2 style="font-size:16px;font-weight:800;color:var(--text)">🧮 Quote Builder${reviewCtx?' <span style="font-size:12px;font-weight:600;color:var(--warning,#ff9f0a)">(reviewing a partner quote)</span>':reopenState?' <span style="font-size:12px;font-weight:600;color:var(--text-muted)">(editing a copy)</span>':''}</h2>
       <button class="btn-secondary btn-sm" onclick="document.getElementById('qb-frame')?.contentWindow?.print()">🖨 Print / PDF</button>
     </div>
     <iframe id="qb-frame" src="${qbSrc}" allow="print"
-      style="width:100%;height:calc(100dvh - 200px);min-height:460px;border:none;border-radius:12px;background:#f5f6fa"></iframe>`;
+      style="width:100%;height:calc(100dvh - ${reviewCtx?'250':'200'}px);min-height:460px;border:none;border-radius:12px;background:#f5f6fa"></iframe>`;
   if (reopenState) {
     const frame = document.getElementById('qb-frame');
     frame?.addEventListener('load', () => {
       setTimeout(() => { try { frame.contentWindow.postMessage({ type:'LOAD_QUOTE', payload:{ editableState: reopenState } }, '*'); } catch(_){} }, 450);
     });
   }
+  if (reviewCtx) {
+    document.getElementById('qb-return-edit')?.addEventListener('click', () => saveReviewedPartnerQuote(reviewCtx, 'return'));
+    document.getElementById('qb-approve-edit')?.addEventListener('click', () => saveReviewedPartnerQuote(reviewCtx, 'approve'));
+  }
+}
+
+// Ask the builder iframe for its current edited state (resolves with the payload).
+function requestBuilderState(frame, timeoutMs = 4000) {
+  return new Promise((resolve, reject) => {
+    if (!frame || !frame.contentWindow) return reject(new Error('Builder not ready'));
+    const to = setTimeout(() => { window.removeEventListener('message', h); reject(new Error('Builder did not respond')); }, timeoutMs);
+    function h(ev) { if (ev.data && ev.data.type === 'QUOTE_STATE') { clearTimeout(to); window.removeEventListener('message', h); resolve(ev.data.payload || {}); } }
+    window.addEventListener('message', h);
+    try { frame.contentWindow.postMessage({ type: 'REQUEST_STATE' }, '*'); } catch (e) { clearTimeout(to); window.removeEventListener('message', h); reject(e); }
+  });
+}
+
+// Save the president's edits back onto the partner's OWN quote doc (not a new copy),
+// then approve it or return it for revision, and notify the partner.
+async function saveReviewedPartnerQuote(ctx, action) {
+  const frame = document.getElementById('qb-frame');
+  let payload;
+  try { payload = await requestBuilderState(frame); }
+  catch (e) { Notifs.showToast('Could not read the edited quote — try again', 'error'); return; }
+  const notes = action === 'return'
+    ? (prompt('Notes for the partner (what changed / what to confirm)?') || '')
+    : '';
+  const update = {
+    clientName:    payload.clientName || ctx.clientName || '',
+    clientCompany: payload.clientCompany || '',
+    clientAddress: payload.clientAddress || '',
+    clientPhone:   payload.clientPhone || '',
+    clientEmail:   payload.clientEmail || '',
+    items:         payload.items || [],
+    total:         payload.total || payload.grandTotal || 0,
+    grandTotal:    payload.grandTotal || payload.total || 0,
+    editableState: payload.editableState || null,
+    editedByPresident: true,
+    editedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    editedBy: currentUser.uid,
+  };
+  if (action === 'approve') {
+    update.status = 'filed'; update.approvalStatus = 'approved';
+    update.approvedAt = firebase.firestore.FieldValue.serverTimestamp(); update.approvedBy = currentUser.uid;
+  } else {
+    update.status = 'needs_revision'; update.approvalStatus = 'needs_revision';
+    update.presidentNotes = notes;
+    update.returnedAt = firebase.firestore.FieldValue.serverTimestamp(); update.returnedBy = currentUser.uid;
+  }
+  try {
+    await db.collection('bs_quotes').doc(ctx.quoteId).update(update);
+    await db.collection('approval_requests').where('quoteId','==',ctx.quoteId).get()
+      .then(s => Promise.all(s.docs.map(d => d.ref.update({ status: action === 'approve' ? 'approved' : 'returned' }))))
+      .catch(()=>{});
+    if (ctx.partnerUid) {
+      await Notifs.send(ctx.partnerUid, action === 'approve'
+        ? { title:'✅ Quote Approved!', body:`The president edited and approved "${ctx.quoteNumber}" for ${update.clientName}. It is now filed.`, icon:'✅', type:'quote_approved' }
+        : { title:'↩ Quote Revised & Returned', body:`The president edited "${ctx.quoteNumber}" for ${update.clientName} and returned it.${notes?' Notes: '+notes:''} Open it to review the changes.`, icon:'✎', type:'quote_returned' }).catch(()=>{});
+    }
+    window.logAudit && window.logAudit('update','quote',ctx.quoteId,{ presidentEdited:true, action });
+    Notifs.showToast(action === 'approve' ? 'Approved with edits + partner notified' : 'Edited & returned to partner');
+    navigateTo('approvals');
+  } catch (ex) { Notifs.showToast('Save failed: '+(ex.message||ex.code), 'error'); }
 }
 
 // Reopen a filed quote into the builder from anywhere (Quotations list, Client

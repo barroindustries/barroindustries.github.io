@@ -2435,6 +2435,9 @@ function loadEditableState(state){
 window.addEventListener('message',ev=>{
   const d=ev.data||{};
   if(d.type==='LOAD_QUOTE' && d.payload) loadEditableState(d.payload.editableState||d.payload);
+  // Host (president review mode) asks for the current edited state to save it back
+  // to the original quote without going through the File flow.
+  if(d.type==='REQUEST_STATE'){ try{ window.parent.postMessage({ type:'QUOTE_STATE', payload: buildQuotePayload() }, '*'); }catch(e){} }
 });
 
 function closeVerifyModal(e){
