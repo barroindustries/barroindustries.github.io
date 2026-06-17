@@ -1007,7 +1007,7 @@ async function renderProductDatabase() {
       </select>
     </div>
     <div class="form-group" id="${prefix}-newcat-wrap" style="display:none"><label>New Category Name</label><input type="text" id="${prefix}-newcat" placeholder="Category name"></div>
-    <div class="form-group"><label>Unit</label><input type="text" id="${prefix}-unit" placeholder="unit / sqm / lot" value="${p.unit||''}"></div>
+    <div class="form-group"><label>Unit</label><input type="text" id="${prefix}-unit" placeholder="unit / sqm / lot" value="${escHtml(p.unit||'')}"></div>
     <div class="form-group"><label>Price (₱)</label><input type="number" id="${prefix}-price" placeholder="0.00" min="0" step="0.01" value="${p.basePrice||''}"></div>
     <div class="form-group"><label>Capital — Materials (₱)</label><input type="number" id="${prefix}-capmat" placeholder="0.00" min="0" step="0.01" value="${p.capitalMaterials||''}"></div>
     <div class="form-group"><label>Capital — Labor (₱)</label><input type="number" id="${prefix}-caplab" placeholder="0.00" min="0" step="0.01" value="${p.capitalLabor||''}"></div>
@@ -1022,7 +1022,7 @@ async function renderProductDatabase() {
       </select>
     </div>
     <div class="form-group" id="${prefix}-coef-wrap"><label id="${prefix}-coef-label">Price per extra mm (₱)</label><input type="number" id="${prefix}-coef" min="0" step="0.01" value="${p.formula?.pricePerExtraMm||p.formula?.pricePerSqm||''}"></div>
-    <div class="form-group" style="grid-column:1/-1"><label>Specifications</label><textarea id="${prefix}-specs" rows="2" placeholder="Material grade, thickness, finish, etc.">${p.specifications||''}</textarea></div>
+    <div class="form-group" style="grid-column:1/-1"><label>Specifications</label><textarea id="${prefix}-specs" rows="2" placeholder="Material grade, thickness, finish, etc.">${escHtml(p.specifications||'')}</textarea></div>
   `;
 
   c.innerHTML = `
@@ -1059,10 +1059,10 @@ async function renderProductDatabase() {
                   ${prods.map(p => `
                     <tr data-pid="${p.id}">
                       <td><span style="font-family:monospace;font-size:12px">${p.id}</span></td>
-                      <td>${p.title||''}</td>
+                      <td>${escHtml(p.title||'')}</td>
                       <td style="font-size:12px">${measureStr(p.measurement)}</td>
-                      <td style="font-size:12px;max-width:220px">${(p.specifications||'—')}</td>
-                      <td>${p.unit||'—'}</td>
+                      <td style="font-size:12px;max-width:220px">${escHtml(p.specifications||'—')}</td>
+                      <td>${escHtml(p.unit||'—')}</td>
                       <td style="text-align:right">${fmt(p.basePrice)}</td>
                       <td style="text-align:right">${fmt(p.capitalMaterials)}</td>
                       <td style="text-align:right">${fmt(p.capitalLabor)}</td>
@@ -1290,7 +1290,7 @@ async function renderPartnerDashboard() {
   const c = document.getElementById('page-content');
   const u = userProfile;
   c.innerHTML = `
-    <div class="page-header"><h2>👋 Welcome, ${(u.displayName||'Partner').split(' ')[0]}!</h2></div>
+    <div class="page-header"><h2>👋 Welcome, ${escHtml((u.displayName||'Partner').split(' ')[0])}!</h2></div>
     <div id="live-clock" class="live-clock-line"></div>
     <div id="partner-kpi"></div>
     <div id="partner-earnings-card"></div>
@@ -1366,7 +1366,7 @@ async function renderPartnerDashboard() {
               const isOverdue = t.dueDate && t.dueDate < todayStr;
               return `<div class="task-feed-item" style="cursor:pointer" onclick="window.openTaskDetail&&window.openTaskDetail('${t.id}',window.currentUser,window.currentRole)">
                 <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
-                <div style="flex:1;min-width:0"><div class="task-feed-title">${t.title}</div>${t.dueDate?`<div class="task-feed-meta" style="color:${isOverdue?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</div>`:''}</div>
+                <div style="flex:1;min-width:0"><div class="task-feed-title">${escHtml(t.title)}</div>${t.dueDate?`<div class="task-feed-meta" style="color:${isOverdue?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</div>`:''}</div>
                 <span class="badge ${isOverdue?'badge-red':'badge-blue'}">${isOverdue?'Overdue':t.status||'open'}</span>
               </div>`;
             }).join('')}
@@ -1383,8 +1383,8 @@ async function renderPartnerDashboard() {
           ${needsRevision.map(q=>`<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)">
             <span style="font-size:18px">📝</span>
             <div style="flex:1;min-width:0">
-              <div style="font-size:13px;font-weight:600">${q.quoteNumber||q.id.slice(-8)} — ${q.clientName||'Client'}</div>
-              ${q.presidentNotes?`<div style="font-size:12px;color:var(--warning);margin-top:2px;font-style:italic">"${q.presidentNotes}"</div>`:'<div style="font-size:12px;color:var(--text-muted)">Open Quote Builder to revise and resubmit.</div>'}
+              <div style="font-size:13px;font-weight:600">${q.quoteNumber||q.id.slice(-8)} — ${escHtml(q.clientName||'Client')}</div>
+              ${q.presidentNotes?`<div style="font-size:12px;color:var(--warning);margin-top:2px;font-style:italic">"${escHtml(q.presidentNotes)}"</div>`:'<div style="font-size:12px;color:var(--text-muted)">Open Quote Builder to revise and resubmit.</div>'}
             </div>
           </div>`).join('')}
         </div>
@@ -1402,8 +1402,8 @@ async function renderPartnerDashboard() {
               return `<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border)">
                 <div style="font-size:20px">${ico}</div>
                 <div style="flex:1;min-width:0">
-                  <div style="font-size:13px;font-weight:600">${q.clientName||'Unknown Client'}</div>
-                  <div style="font-size:11px;color:var(--text-muted)">${q.quoteNumber||''} · ${ts}</div>
+                  <div style="font-size:13px;font-weight:600">${escHtml(q.clientName||'Unknown Client')}</div>
+                  <div style="font-size:11px;color:var(--text-muted)">${escHtml(q.quoteNumber||'')} · ${ts}</div>
                 </div>
                 <div style="text-align:right;flex-shrink:0">
                   <div style="font-size:13px;font-weight:700">₱${amt.toLocaleString()}</div>
@@ -1490,7 +1490,7 @@ async function renderPresidentDashboard() {
     const getAssignedNames = (t) => {
       const uids = Array.isArray(t.assignedTo) ? t.assignedTo : (t.assignedTo ? [t.assignedTo] : []);
       if (!uids.length) return 'Unassigned';
-      return uids.map(uid => users.find(u=>u.id===uid)?.displayName || '?').join(', ');
+      return uids.map(uid => escHtml(users.find(u=>u.id===uid)?.displayName || '?')).join(', ');
     };
 
     c.innerHTML = `
@@ -1557,11 +1557,11 @@ async function renderPresidentDashboard() {
                   return `<div class="task-feed-item ${isOverdue?'task-overdue':''}">
                     <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
                     <div style="flex:1;min-width:0">
-                      <div class="task-feed-title">${t.title}</div>
+                      <div class="task-feed-title">${escHtml(t.title)}</div>
                       <div class="task-feed-meta">
                         ${getAssignedNames(t)}
                         ${t.dueDate?` · <span style="color:${isOverdue?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</span>`:''}
-                        ${t.department?` · ${t.department}`:''}
+                        ${t.department?` · ${escHtml(t.department)}`:''}
                       </div>
                     </div>
                     ${taskBadge(t)}
@@ -1700,7 +1700,7 @@ async function renderEmployeeDashboard() {
 
     c.innerHTML = `
       <div class="page-header">
-        <h2>👋 Hi, ${(u.displayName||'').split(' ')[0]}!</h2>
+        <h2>👋 Hi, ${escHtml((u.displayName||'').split(' ')[0])}!</h2>
       </div>
       <div id="live-clock" class="live-clock-line"></div>
 
@@ -1859,7 +1859,7 @@ async function renderEmployeeDashboard() {
                   return `<div class="task-feed-item ${isOverdue?'task-overdue':''}">
                     <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
                     <div style="flex:1;min-width:0">
-                      <div class="task-feed-title">${t.title}</div>
+                      <div class="task-feed-title">${escHtml(t.title)}</div>
                       ${t.dueDate?`<div class="task-feed-meta" style="color:${isOverdue?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</div>`:''}
                     </div>
                     <span class="badge ${isOverdue?'badge-red':t.priority==='high'?'badge-red':'badge-blue'}">${isOverdue?'Overdue':t.priority||'open'}</span>
@@ -2004,16 +2004,16 @@ function renderIDCard(containerId, u) {
       </div>
       <div class="id-card-body">
         <div class="id-card-photo" style="cursor:default">
-          ${u.photoUrl?`<img src="${u.photoUrl}" alt="Photo"/>`:`<span style="font-size:32px">👤</span>`}
+          ${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" alt="Photo"/>`:`<span style="font-size:32px">👤</span>`}
         </div>
         <div class="id-card-info">
-          <div class="id-card-name">${u.displayName||u.email}</div>
-          <div class="id-card-title">${roleLabel}</div>
-          <div class="id-card-detail"><span>🗂</span><strong>${deptLabel}</strong></div>
-          <div class="id-card-detail"><span>✉️</span>${u.email}</div>
-          ${u.phone?`<div class="id-card-detail"><span>📞</span>${u.phone}</div>`:''}
-          ${empType?`<div class="id-card-detail"><span>💼</span>${empType}${workMode?' · '+workMode:''}</div>`:''}
-          ${issuedOn?`<div class="id-card-detail"><span>📅</span>Issued: ${issuedOn}</div>`:''}
+          <div class="id-card-name">${escHtml(u.displayName||u.email)}</div>
+          <div class="id-card-title">${escHtml(roleLabel)}</div>
+          <div class="id-card-detail"><span>🗂</span><strong>${escHtml(deptLabel)}</strong></div>
+          <div class="id-card-detail"><span>✉️</span>${escHtml(u.email)}</div>
+          ${u.phone?`<div class="id-card-detail"><span>📞</span>${escHtml(u.phone)}</div>`:''}
+          ${empType?`<div class="id-card-detail"><span>💼</span>${escHtml(empType)}${workMode?' · '+escHtml(workMode):''}</div>`:''}
+          ${issuedOn?`<div class="id-card-detail"><span>📅</span>Issued: ${escHtml(issuedOn)}</div>`:''}
         </div>
       </div>
       <div class="id-card-footer">
@@ -2024,14 +2024,14 @@ function renderIDCard(containerId, u) {
 
   const callingHTML = `
     <div class="id-card id-card--calling" style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);text-align:center;padding:24px 20px;display:flex;flex-direction:column;align-items:center;gap:8px">
-      ${u.photoUrl?`<img src="${u.photoUrl}" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.3);margin-bottom:4px" alt=""/>`:
+      ${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.3);margin-bottom:4px" alt=""/>`:
         `<div style="width:72px;height:72px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-size:36px;margin-bottom:4px">👤</div>`}
-      <div style="font-size:18px;font-weight:800;color:#fff;letter-spacing:.5px">${u.displayName||u.email}</div>
-      <div style="font-size:12px;color:rgba(255,255,255,0.7);font-weight:600;text-transform:uppercase;letter-spacing:.08em">${roleLabel}</div>
-      <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px">${deptLabel}</div>
+      <div style="font-size:18px;font-weight:800;color:#fff;letter-spacing:.5px">${escHtml(u.displayName||u.email)}</div>
+      <div style="font-size:12px;color:rgba(255,255,255,0.7);font-weight:600;text-transform:uppercase;letter-spacing:.08em">${escHtml(roleLabel)}</div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px">${escHtml(deptLabel)}</div>
       <div style="width:100%;height:1px;background:rgba(255,255,255,0.15);margin:10px 0"></div>
-      <div style="font-size:12px;color:rgba(255,255,255,0.8)">✉️ ${u.email}</div>
-      ${u.phone?`<div style="font-size:12px;color:rgba(255,255,255,0.8)">📞 ${u.phone}</div>`:''}
+      <div style="font-size:12px;color:rgba(255,255,255,0.8)">✉️ ${escHtml(u.email)}</div>
+      ${u.phone?`<div style="font-size:12px;color:rgba(255,255,255,0.8)">📞 ${escHtml(u.phone)}</div>`:''}
       <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:8px;letter-spacing:.1em">BARRO INDUSTRIES</div>
     </div>`;
 
@@ -2257,13 +2257,13 @@ async function loadPartnersDeptTab(sub) {
                 return `<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border)">
                   <div style="position:relative">
                     <div style="width:38px;height:38px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff">
-                      ${p.photoUrl?`<img src="${p.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:(p.displayName||'?')[0].toUpperCase()}
+                      ${p.photoUrl?`<img src="${escHtml(p.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:(p.displayName||'?')[0].toUpperCase()}
                     </div>
                     <div style="position:absolute;bottom:0;right:0;width:10px;height:10px;border-radius:50%;background:${onlineDot};border:2px solid var(--surface)"></div>
                   </div>
                   <div style="flex:1;min-width:0">
-                    <div style="font-size:13px;font-weight:700">${p.displayName||p.email}</div>
-                    <div style="font-size:11px;color:var(--text-muted)">${p.email||''} ${lastSeen?'· Last seen '+(minsAgo<60?minsAgo+'m ago':Math.floor(minsAgo/60)+'h ago'):''}</div>
+                    <div style="font-size:13px;font-weight:700">${escHtml(p.displayName||p.email)}</div>
+                    <div style="font-size:11px;color:var(--text-muted)">${escHtml(p.email||'')} ${lastSeen?'· Last seen '+(minsAgo<60?minsAgo+'m ago':Math.floor(minsAgo/60)+'h ago'):''}</div>
                   </div>
                   <div style="text-align:right;flex-shrink:0">
                     <div style="font-size:11px;color:var(--text-muted)">Tasks: ${pOpen} open · ${pDone} done</div>
@@ -2281,7 +2281,7 @@ async function loadPartnersDeptTab(sub) {
             ${!tasks.length?'<div class="empty-state" style="padding:20px"><p>No tasks yet. Assign tasks with department = Partners.</p></div>':
               tasks.slice(0,5).map(t=>`<div class="task-feed-item">
                 <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
-                <div style="flex:1;min-width:0"><div class="task-feed-title">${t.title}</div>
+                <div style="flex:1;min-width:0"><div class="task-feed-title">${escHtml(t.title)}</div>
                 <div class="task-feed-meta">${t.dueDate?'Due '+t.dueDate:''}</div></div>
                 <span class="badge ${t.status==='done'||t.status==='approved'?'badge-green':t.status==='review'?'badge-orange':'badge-blue'}">${t.status||'open'}</span>
               </div>`).join('')}
@@ -2301,8 +2301,8 @@ async function loadPartnersDeptTab(sub) {
             ${tasks.map(t=>`<div class="task-feed-item" style="cursor:pointer" onclick="window.openTaskDetail&&window.openTaskDetail('${t.id}',window.currentUser,window.currentRole)">
               <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
               <div style="flex:1;min-width:0">
-                <div class="task-feed-title">${t.title}</div>
-                <div class="task-feed-meta">${Array.isArray(t.assignedToNames)&&t.assignedToNames.length?'👥 '+t.assignedToNames.join(', '):''} ${t.dueDate?'· Due '+t.dueDate:''}</div>
+                <div class="task-feed-title">${escHtml(t.title)}</div>
+                <div class="task-feed-meta">${Array.isArray(t.assignedToNames)&&t.assignedToNames.length?'👥 '+escHtml(t.assignedToNames.join(', ')):''} ${t.dueDate?'· Due '+t.dueDate:''}</div>
               </div>
               <span class="badge ${t.status==='done'||t.status==='approved'?'badge-green':t.status==='review'?'badge-orange':t.status==='overdue'?'badge-red':'badge-blue'}">${t.status||'open'}</span>
             </div>`).join('')}
@@ -2330,8 +2330,8 @@ async function loadPartnersDeptTab(sub) {
                   const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
                   const amt = q.total||q.grandTotal||0;
                   return `<tr>
-                    <td style="font-size:13px;font-weight:600">${q.clientName||q.client||'—'}</td>
-                    <td style="font-size:12px;color:var(--text-muted)">${q.createdByName||'—'}</td>
+                    <td style="font-size:13px;font-weight:600">${escHtml(q.clientName||q.client||'—')}</td>
+                    <td style="font-size:12px;color:var(--text-muted)">${escHtml(q.createdByName||'—')}</td>
                     <td style="font-size:13px;font-weight:600">₱${amt.toLocaleString()}</td>
                     <td><span class="badge ${q.status==='approved'?'badge-green':q.status==='pending'||q.status==='submitted'?'badge-orange':'badge-gray'}">${q.status||'draft'}</span></td>
                     <td style="font-size:11px;color:var(--text-muted)">${ts}</td>
@@ -2372,9 +2372,9 @@ async function loadPartnersDeptTab(sub) {
                 return `<div style="display:flex;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);align-items:flex-start">
                   <div style="font-size:20px">${n.icon||'🔔'}</div>
                   <div style="flex:1;min-width:0">
-                    <div style="font-size:12px;font-weight:600;color:var(--primary-light)">${n.partnerName}</div>
-                    <div style="font-size:13px;font-weight:600">${n.title||''}</div>
-                    <div style="font-size:12px;color:var(--text-muted)">${n.body||''}</div>
+                    <div style="font-size:12px;font-weight:600;color:var(--primary-light)">${escHtml(n.partnerName)}</div>
+                    <div style="font-size:13px;font-weight:600">${escHtml(n.title||'')}</div>
+                    <div style="font-size:12px;color:var(--text-muted)">${escHtml(n.body||'')}</div>
                     <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${ts}</div>
                   </div>
                 </div>`;
@@ -2731,8 +2731,8 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       const evalD = evalsMap[u.id] || {};
       const selfDone2 = evalD.selfAssessMonth === defaultMonth2;
       return { uid:u.id, name:u.displayName||u.email, depts, net, kpi, att, computed, tasksDone, tasksTotal, evalD, selfDone: selfDone2, row: `<tr>
-        <td>${u.displayName||u.email}</td>
-        <td>${depts}</td>
+        <td>${escHtml(u.displayName||u.email)}</td>
+        <td>${escHtml(depts)}</td>
         <td>₱${formatNum(net)}</td>
         <td>${Math.round(kpi*100)}%<br><span style="font-size:10px;color:var(--text-muted)">${tasksDone}/${tasksTotal} tasks</span></td>
         <td>${Math.round(att*100)}%</td>
@@ -2740,7 +2740,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         <td style="text-align:center">
           ${selfDone2
             ? `<span style="font-weight:700">${evalD.selfGrade!=null?evalD.selfGrade+'<small>/10</small>':'✅'}</span>
-               ${evalD.selfNotes?`<div style="font-size:10px;color:var(--text-muted);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${evalD.selfNotes}</div>`:''}`
+               ${evalD.selfNotes?`<div style="font-size:10px;color:var(--text-muted);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(evalD.selfNotes)}</div>`:''}`
             : `<span style="color:var(--danger);font-size:11px;font-weight:700">⚠️ Pending</span>`
           }
         </td>
@@ -2749,7 +2749,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         </td>
         <td style="display:flex;gap:4px;flex-wrap:wrap">
           <button class="btn-secondary btn-sm view-profile-btn" data-uid="${u.id}" data-name="${(u.displayName||u.email).replace(/"/g,'&quot;')}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" data-mdone="${tasksDone}" data-mtotal="${tasksTotal}">Profile</button>
-          <button class="btn-secondary btn-sm grade-emp-btn" data-uid="${u.id}" data-name="${u.displayName||u.email}" data-presgrade="${evalD.presidentGrade||''}" data-presnotes="${(evalD.presidentNotes||'').replace(/"/g,'&quot;')}" data-presimprove="${(evalD.presidentImprovements||'').replace(/"/g,'&quot;')}">Grade</button>
+          <button class="btn-secondary btn-sm grade-emp-btn" data-uid="${u.id}" data-name="${escHtml(u.displayName||u.email)}" data-presgrade="${evalD.presidentGrade||''}" data-presnotes="${escHtml(evalD.presidentNotes||'')}" data-presimprove="${escHtml(evalD.presidentImprovements||'')}">Grade</button>
         </td>
       </tr>` };
     }));
@@ -2775,16 +2775,16 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       btn.addEventListener('click', () => {
         const { uid, name, presgrade, presnotes, presimprove } = btn.dataset;
         openModal(`Grade: ${name}`, `
-          <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Assign a performance grade for ${name} (1 = poor, 10 = outstanding). Improvement areas are visible to the employee.</p>
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Assign a performance grade for ${escHtml(name)} (1 = poor, 10 = outstanding). Improvement areas are visible to the employee.</p>
           <div class="form-group"><label>President Grade (1–10)</label>
             <input id="pres-grade-input" type="number" min="1" max="10" step="1" value="${presgrade||''}" placeholder="e.g. 8"/>
           </div>
           <div class="form-group"><label>General Notes (internal only)</label>
-            <textarea id="pres-grade-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Internal remarks…">${(presnotes||'')}</textarea>
+            <textarea id="pres-grade-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Internal remarks…">${escHtml(presnotes||'')}</textarea>
           </div>
           <div class="form-group">
             <label>📝 Development Areas <span style="font-size:11px;color:var(--primary-light)">(shown to employee)</span></label>
-            <textarea id="pres-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:2px solid var(--primary-light);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="What should this employee focus on improving? They will see this.">${(presimprove||'')}</textarea>
+            <textarea id="pres-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:2px solid var(--primary-light);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="What should this employee focus on improving? They will see this.">${escHtml(presimprove||'')}</textarea>
           </div>
         `, `<button class="btn-primary" id="save-pres-grade-btn">Save Grade</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
         document.getElementById('save-pres-grade-btn')?.addEventListener('click', async () => {
@@ -2824,7 +2824,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       const pendingHtml = pendingSelf.length
         ? `<div style="background:#fff3e0;border:1px solid #ff8f00;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px">
             <strong>⚠️ ${pendingSelf.length} employee${pendingSelf.length>1?'s have':'has'} not submitted self-assessment:</strong>
-            <div style="color:#e65100;margin-top:4px">${pendingSelf.join(', ')}</div>
+            <div style="color:#e65100;margin-top:4px">${pendingSelf.map(escHtml).join(', ')}</div>
            </div>`
         : `<div style="background:#e8f5e9;border:1px solid #2e7d32;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#2e7d32">✅ All employees have completed their self-assessment.</div>`;
       openModal('Record Monthly Payroll', `
@@ -2996,7 +2996,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     ${presidentImprovements ? `
     <div style="background:linear-gradient(135deg,var(--surface2),var(--surface));border:2px solid var(--primary-light);border-radius:12px;padding:14px 18px;margin-bottom:16px">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--primary-light);margin-bottom:6px">📝 Your Development Areas — from President</div>
-      <div style="font-size:13px;line-height:1.6;color:var(--text);white-space:pre-wrap">${presidentImprovements}</div>
+      <div style="font-size:13px;line-height:1.6;color:var(--text);white-space:pre-wrap">${escHtml(presidentImprovements)}</div>
     </div>` : ''}
 
     <!-- Top KPI stats -->
@@ -3051,7 +3051,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
             <div style="font-size:28px;font-weight:800;color:${selfGrade?'var(--primary-light)':'var(--text-muted)'}">
               ${selfGrade!=null?selfGrade:'—'}<span style="font-size:14px;font-weight:400">/10</span>
             </div>
-            ${selfNotes?`<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic">"${selfNotes}"</div>`:''}
+            ${selfNotes?`<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic">"${escHtml(selfNotes)}"</div>`:''}
           </div>
           <div style="background:var(--s2);border-radius:10px;padding:12px;border:1.5px solid var(--border)">
             <div style="font-size:11px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:6px">Performance Grade</div>
@@ -3158,7 +3158,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
                 <td>₱${formatNum(a.amount)}</td>
                 <td style="color:${(a.balance||0)>0?'var(--danger)':'var(--success)'}">₱${formatNum(a.balance||0)}</td>
                 <td>${a.monthlyPayment?'₱'+formatNum(a.monthlyPayment):'—'}</td>
-                <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.reason||'—'}</td>
+                <td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(a.reason||'—')}</td>
                 <td><span class="badge ${a.status==='approved'?'badge-green':a.status==='rejected'?'badge-red':a.status==='paid'?'badge-green':'badge-orange'}">${a.status}</span></td>
               </tr>`).join('')}</tbody>
             </table></div>`}
@@ -3203,11 +3203,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       </div>
       <div class="form-group">
         <label>What did you accomplish this month? <span style="color:var(--danger)">*</span></label>
-        <textarea id="self-notes-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="List your key accomplishments and contributions…">${selfNotes}</textarea>
+        <textarea id="self-notes-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="List your key accomplishments and contributions…">${escHtml(selfNotes)}</textarea>
       </div>
       <div class="form-group">
         <label>What can you improve? <span style="color:var(--danger)">*</span></label>
-        <textarea id="self-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Be specific about areas you want to work on…">${evalData.selfImprovements||''}</textarea>
+        <textarea id="self-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Be specific about areas you want to work on…">${escHtml(evalData.selfImprovements||'')}</textarea>
       </div>
     `, `<button class="btn-primary" id="save-self-eval-btn">Submit Assessment</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     document.getElementById('save-self-eval-btn')?.addEventListener('click', async () => {
@@ -3383,9 +3383,9 @@ function printPayslip() {
   const now = new Date();
   const STYLES = `*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Helvetica Neue',Arial,sans-serif;padding:40px;color:#1a1a2e;background:#fff;max-width:720px;margin:0 auto}.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:20px;border-bottom:3px solid #1a237e}.company{font-size:22px;font-weight:900;color:#1a237e;letter-spacing:-0.5px}.company-sub{font-size:11px;color:#666;margin-top:2px}.payslip-label{background:#1a237e;color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:4px;letter-spacing:1px;text-transform:uppercase}.emp-info{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;background:#f5f6fa;border-radius:8px;padding:16px;margin-bottom:20px}.emp-info .label{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px}.emp-info .value{font-size:13px;font-weight:700;color:#1a1a2e}.stitle{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:#888;font-weight:700;margin-bottom:8px;margin-top:20px}table{width:100%;border-collapse:collapse;margin-bottom:4px}td{padding:8px 10px;font-size:13px;border-bottom:1px solid #eef0f5}td:last-child{text-align:right}.tr td{font-weight:700;font-size:15px;background:#f5f6fa;border-bottom:none}.hr td{background:#e8eaf6;font-weight:800;font-size:15px;color:#1a237e;border:none}.pos{color:#2e7d32}.neg{color:#c62828}.ms{background:#f5f6fa;border-radius:8px;padding:12px 14px;margin:12px 0}.mr{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:#555}.ss{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:36px}.sl{border-top:1px solid #aaa;padding-top:6px;text-align:center;font-size:11px;color:#888}.footer{margin-top:28px;padding-top:12px;border-top:1px solid #eee;font-size:10px;color:#aaa;text-align:center}@media print{body{padding:20px}button{display:none!important}}`;
   const w = window.open('','_blank');
-  w.document.write(`<!DOCTYPE html><html><head><title>Payslip — ${pd.name}</title><style>${STYLES}</style></head><body>
+  w.document.write(`<!DOCTYPE html><html><head><title>Payslip — ${escHtml(pd.name)}</title><style>${STYLES}</style></head><body>
 <div class="header"><div><div class="company">BARRO INDUSTRIES</div><div class="company-sub">Employee Payslip</div></div><div style="text-align:right"><div class="payslip-label">Payslip</div><div style="font-size:12px;color:#666;margin-top:6px">Period: ${pd.monthLabel}</div><div style="font-size:11px;color:#999">Generated: ${now.toLocaleDateString('en-PH')}</div></div></div>
-<div class="emp-info"><div><div class="label">Employee Name</div><div class="value">${pd.name}</div></div><div><div class="label">Employee ID</div><div class="value">${pd.employeeId}</div></div><div><div class="label">Department</div><div class="value">${pd.department}</div></div><div><div class="label">Pay Period</div><div class="value">${pd.monthLabel}</div></div></div>
+<div class="emp-info"><div><div class="label">Employee Name</div><div class="value">${escHtml(pd.name)}</div></div><div><div class="label">Employee ID</div><div class="value">${escHtml(pd.employeeId)}</div></div><div><div class="label">Department</div><div class="value">${escHtml(pd.department)}</div></div><div><div class="label">Pay Period</div><div class="value">${pd.monthLabel}</div></div></div>
 <div class="stitle">Earnings &amp; Deductions</div>
 <table><tr><td>Base Salary</td><td>₱${formatNum(pd.salary)}</td></tr><tr><td class="pos">Allowances</td><td class="pos">+₱${formatNum(pd.allowance)}</td></tr><tr><td class="neg">Deductions</td><td class="neg">-₱${formatNum(pd.deductions)}</td></tr><tr class="tr"><td><strong>Net Pay (Full Month)</strong></td><td>₱${formatNum(pd.net)}</td></tr></table>
 <div class="ms"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#666;margin-bottom:6px">Performance Multiplier</div><div class="mr"><span>Task KPI (70%)</span><span>${Math.round(pd.kpi*100)}% → ${(pd.kpi*0.7).toFixed(2)}×</span></div><div class="mr"><span>Attendance (30%)</span><span>${Math.round(pd.att*100)}% → ${(pd.att*0.3).toFixed(2)}×</span></div><div class="mr" style="font-weight:700;color:#1a1a2e;margin-top:4px;border-top:1px solid #ddd;padding-top:4px"><span>Combined Multiplier</span><span>${pd.multiplier.toFixed(2)}×</span></div></div>
@@ -3695,9 +3695,9 @@ async function printWorkerPayslip(uid, name, preloaded) {
   const empId=u.employeeId||'—';
   const STYLES=`*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Helvetica Neue',Arial,sans-serif;padding:40px;color:#1a1a2e;background:#fff;max-width:720px;margin:0 auto}.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:20px;border-bottom:3px solid #1a237e}.company{font-size:22px;font-weight:900;color:#1a237e}.company-sub{font-size:11px;color:#666;margin-top:2px}.pl{background:#1a237e;color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:4px;letter-spacing:1px;text-transform:uppercase}.ei{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;background:#f5f6fa;border-radius:8px;padding:16px;margin-bottom:20px}.ei .lb{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px}.ei .vl{font-size:13px;font-weight:700;color:#1a1a2e}.st{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:#888;font-weight:700;margin-bottom:8px;margin-top:20px}table{width:100%;border-collapse:collapse}td{padding:8px 10px;font-size:13px;border-bottom:1px solid #eef0f5}td:last-child{text-align:right}.tr td{font-weight:700;font-size:15px;background:#f5f6fa;border-bottom:none}.hr td{background:#e8eaf6;font-weight:800;font-size:15px;color:#1a237e;border:none}.pos{color:#2e7d32}.neg{color:#c62828}.ms{background:#f5f6fa;border-radius:8px;padding:12px 14px;margin:12px 0}.mr{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:#555}.ss{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:36px}.sl{border-top:1px solid #aaa;padding-top:6px;text-align:center;font-size:11px;color:#888}.footer{margin-top:28px;padding-top:12px;border-top:1px solid #eee;font-size:10px;color:#aaa;text-align:center}@media print{body{padding:20px}button{display:none!important}}`;
   const w=window.open('','_blank');
-  w.document.write(`<!DOCTYPE html><html><head><title>Payslip — ${name}</title><style>${STYLES}</style></head><body>
+  w.document.write(`<!DOCTYPE html><html><head><title>Payslip — ${escHtml(name)}</title><style>${STYLES}</style></head><body>
 <div class="header"><div><div class="company">BARRO INDUSTRIES</div><div class="company-sub">Employee Payslip</div></div><div style="text-align:right"><div class="pl">Payslip</div><div style="font-size:12px;color:#666;margin-top:6px">Period: ${monthLabel}</div><div style="font-size:11px;color:#999">Generated: ${now.toLocaleDateString('en-PH')}</div></div></div>
-<div class="ei"><div><div class="lb">Employee Name</div><div class="vl">${name}</div></div><div><div class="lb">Employee ID</div><div class="vl">${empId}</div></div><div><div class="lb">Department</div><div class="vl">${dept}</div></div><div><div class="lb">Position / Role</div><div class="vl">${role}</div></div><div><div class="lb">Pay Period</div><div class="vl">${monthLabel}</div></div><div><div class="lb">Days Covered</div><div class="vl">${daysElapsed} of ${daysInMonth} days</div></div></div>
+<div class="ei"><div><div class="lb">Employee Name</div><div class="vl">${escHtml(name)}</div></div><div><div class="lb">Employee ID</div><div class="vl">${escHtml(empId)}</div></div><div><div class="lb">Department</div><div class="vl">${escHtml(dept)}</div></div><div><div class="lb">Position / Role</div><div class="vl">${escHtml(role)}</div></div><div><div class="lb">Pay Period</div><div class="vl">${monthLabel}</div></div><div><div class="lb">Days Covered</div><div class="vl">${daysElapsed} of ${daysInMonth} days</div></div></div>
 <div class="st">Earnings &amp; Deductions</div>
 <table><tr><td>Base Salary</td><td>₱${formatNum(salary)}</td></tr><tr><td class="pos">Allowances</td><td class="pos">+₱${formatNum(allowance)}</td></tr><tr><td class="neg">Deductions</td><td class="neg">-₱${formatNum(deductions)}</td></tr><tr class="tr"><td><strong>Net Pay (Full Month)</strong></td><td>₱${formatNum(net)}</td></tr></table>
 <div class="ms"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#666;margin-bottom:6px">Performance Multiplier</div><div class="mr"><span>Task KPI (70%)</span><span>${Math.round(kpi*100)}% → ${(kpi*0.7).toFixed(2)}×</span></div><div class="mr"><span>Attendance (30%)</span><span>${Math.round(att*100)}% → ${(att*0.3).toFixed(2)}×</span></div><div class="mr" style="font-weight:700;color:#1a1a2e;margin-top:4px;border-top:1px solid #ddd;padding-top:4px"><span>Combined Multiplier</span><span>${mult.toFixed(2)}×</span></div></div>
@@ -3783,15 +3783,15 @@ async function renderProgressReports() {
                     <td>
                       <div style="display:flex;align-items:center;gap:8px">
                         <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0">
-                          ${u.photoUrl?`<img src="${u.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:(u.displayName||'?')[0].toUpperCase()}
+                          ${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:(u.displayName||'?')[0].toUpperCase()}
                         </div>
                         <div>
-                          <div style="font-size:13px;font-weight:600">${u.displayName||u.email}</div>
-                          <div style="font-size:11px;color:var(--text-muted)">${u.role||''}</div>
+                          <div style="font-size:13px;font-weight:600">${escHtml(u.displayName||u.email)}</div>
+                          <div style="font-size:11px;color:var(--text-muted)">${escHtml(u.role||'')}</div>
                         </div>
                       </div>
                     </td>
-                    <td style="font-size:12px;color:var(--text-muted)">${depts}</td>
+                    <td style="font-size:12px;color:var(--text-muted)">${escHtml(depts)}</td>
                     <td style="font-size:12px"><strong>${uMDone}</strong>/${uMTotal}</td>
                     <td style="font-size:12px"><strong>${uDone}</strong>/${uTotal}</td>
                     <td><span class="badge ${uPct>=80?'badge-green':uPct>=50?'badge-orange':'badge-red'}">${uPct}%</span></td>
@@ -3842,8 +3842,8 @@ async function renderProgressReports() {
                 <thead><tr><th>Task</th><th>Assigned To</th><th>Status</th><th>Due</th></tr></thead>
                 <tbody>
                   ${data.tasks.slice(0,10).map(t=>`<tr>
-                    <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.title}</td>
-                    <td style="font-size:12px">${t.assignedToName||'—'}</td>
+                    <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.title)}</td>
+                    <td style="font-size:12px">${escHtml(t.assignedToName||'—')}</td>
                     <td><span class="badge ${isDoneTask(t)?'badge-green':t.status==='review'?'badge-orange':'badge-blue'}">${t.status||'open'}</span></td>
                     <td style="font-size:11px;color:var(--text-muted)">${t.dueDate||'—'}</td>
                   </tr>`).join('')}
@@ -3862,7 +3862,7 @@ async function renderProgressReports() {
                     const uMTotal= monthTasks.filter(t=>isAssigned(t,u.id)).length;
                     const uPct   = uTotal ? Math.round(uDone/uTotal*100) : 0;
                     return `<tr>
-                      <td>${u.displayName||u.email}</td>
+                      <td>${escHtml(u.displayName||u.email)}</td>
                       <td>${uDone}/${uTotal}</td>
                       <td>${uMDone}/${uMTotal}</td>
                       <td><span class="badge ${uPct>=80?'badge-green':uPct>=50?'badge-orange':'badge-red'}">${uPct}%</span></td>
@@ -4109,7 +4109,7 @@ async function renderCompanyOverview(ct, canAdd) {
             ? `<img src="${photoURL}" class="co-president-photo" alt="President"/>`
             : `<div class="co-president-initials">${initials}</div>`
           }
-          <div class="co-president-name">${presidentName}</div>
+          <div class="co-president-name">${escHtml(presidentName)}</div>
           <div class="co-president-title">President<br>Barro Industries</div>
         </div>
         <div class="co-president-msg">
@@ -4221,9 +4221,9 @@ async function renderCompanyMemos(ct, canAdd) {
       return `<div class="co-doc-card" data-id="${m.id}">
         <div class="co-doc-icon" style="background:rgba(10,132,255,0.10)"><i data-lucide="file-text" style="width:18px;height:18px;stroke:#0A84FF"></i></div>
         <div class="co-doc-body">
-          <div class="co-doc-title">${m.title}</div>
-          <div class="co-doc-meta">From: ${m.from||'Management'} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'})}</div>
-          <div class="co-doc-preview">${(m.content||'').slice(0,120)}${m.content?.length>120?'…':''}</div>
+          <div class="co-doc-title">${escHtml(m.title)}</div>
+          <div class="co-doc-meta">From: ${escHtml(m.from||'Management')} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'})}</div>
+          <div class="co-doc-preview">${escHtml((m.content||'').slice(0,120))}${m.content?.length>120?'…':''}</div>
         </div>
         ${canAdd?`<button class="btn-icon co-del-btn" data-id="${m.id}" title="Delete"><i data-lucide="trash-2" style="width:14px;height:14px;stroke:var(--danger)"></i></button>`:''}
       </div>`;
@@ -4234,8 +4234,8 @@ async function renderCompanyMemos(ct, canAdd) {
         const m=memos.find(x=>x.id===card.dataset.id);
         const d=m.createdAt?.toDate?m.createdAt.toDate():new Date();
         openModal(m.title,`
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">From: ${m.from||'Management'} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}</div>
-          <p style="font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text-2)">${m.content||''}</p>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">From: ${escHtml(m.from||'Management')} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}</div>
+          <p style="font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text-2)">${escHtml(m.content||'')}</p>
           ${m.fileUrl?`<a href="${m.fileUrl}" target="_blank" class="btn-secondary" style="display:inline-block;margin-top:14px">📎 Open Attachment</a>`:''}
           ${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-memo-btn" data-id="${m.id}">Delete Memo</button>`:''}
         `);
@@ -4250,7 +4250,7 @@ async function renderCompanyMemos(ct, canAdd) {
   document.getElementById('add-memo-btn')?.addEventListener('click',()=>{
     openModal('New Memo',`
       <div class="form-group"><label>Memo Title</label><input id="memo-title" placeholder="e.g. Updated Leave Policy"/></div>
-      <div class="form-group"><label>From</label><input id="memo-from" placeholder="Management / HR / Finance" value="${currentUser?.displayName||'Management'}"/></div>
+      <div class="form-group"><label>From</label><input id="memo-from" placeholder="Management / HR / Finance" value="${escHtml(currentUser?.displayName||'Management')}"/></div>
       <div class="form-group"><label>Content</label><textarea id="memo-content" rows="8" placeholder="Write the memo here…"></textarea></div>
       <div id="memo-file-upload"></div>
     `,`<button class="btn-primary" id="save-memo-btn">Publish Memo</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -4284,15 +4284,15 @@ async function renderCompanyPolicies(ct, canAdd) {
     grid.innerHTML = policies.map(p=>`
       <div class="policy-card" data-id="${p.id}">
         <div class="policy-icon">${p.icon||'📄'}</div>
-        <div class="policy-title">${p.title}</div>
-        <div class="policy-desc">${p.description||''}</div>
+        <div class="policy-title">${escHtml(p.title)}</div>
+        <div class="policy-desc">${escHtml(p.description||'')}</div>
         ${p.fileUrl?`<a href="${p.fileUrl}" target="_blank" class="btn-link" style="font-size:12px;margin-top:6px;display:block">📎 View Document</a>`:''}
       </div>`).join('');
     grid.querySelectorAll('.policy-card').forEach(card=>{
       card.addEventListener('click',e=>{
         if(e.target.tagName==='A') return;
         const p=policies.find(x=>x.id===card.dataset.id);
-        openModal(p.title,`<p style="font-size:14px;line-height:1.7;white-space:pre-wrap;color:var(--text-2)">${p.content||'No content.'}</p>${p.fileUrl?`<a href="${p.fileUrl}" target="_blank" class="btn-secondary" style="display:inline-block;margin-top:14px">📎 Open File</a>`:''}${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-policy-btn" data-id="${p.id}">Delete</button>`:''}`);
+        openModal(p.title,`<p style="font-size:14px;line-height:1.7;white-space:pre-wrap;color:var(--text-2)">${escHtml(p.content||'No content.')}</p>${p.fileUrl?`<a href="${p.fileUrl}" target="_blank" class="btn-secondary" style="display:inline-block;margin-top:14px">📎 Open File</a>`:''}${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-policy-btn" data-id="${p.id}">Delete</button>`:''}`);
         document.getElementById('del-policy-btn')?.addEventListener('click',async e2=>{if(confirm('Delete?')){await db.collection('policies').doc(e2.currentTarget.dataset.id).delete();closeModal();renderCompanyPolicies(ct,canAdd);}});
       });
     });
@@ -4341,13 +4341,13 @@ async function renderCompanyDownloads(ct, canAdd) {
       const icon = catIcons[cat]||'folder';
       const color = catColors[cat]||'#9e9e9e';
       return `<div style="margin-bottom:20px">
-        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin-bottom:10px">${cat}</div>
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin-bottom:10px">${escHtml(cat)}</div>
         ${items.map(d=>`
           <a href="${d.fileUrl||'#'}" target="_blank" rel="noopener" class="co-dl-row" data-id="${d.id}">
             <div class="co-dl-icon" style="background:${color}18"><i data-lucide="${icon}" style="width:16px;height:16px;stroke:${color}"></i></div>
             <div class="co-dl-info">
-              <div class="co-dl-name">${d.title}</div>
-              <div class="co-dl-desc">${d.description||''}</div>
+              <div class="co-dl-name">${escHtml(d.title)}</div>
+              <div class="co-dl-desc">${escHtml(d.description||'')}</div>
             </div>
             <i data-lucide="download" style="width:16px;height:16px;stroke:var(--text-muted);flex-shrink:0"></i>
             ${canAdd?`<button class="btn-icon co-del-btn" data-id="${d.id}" style="margin-left:4px" title="Delete"><i data-lucide="trash-2" style="width:13px;height:13px;stroke:var(--danger)"></i></button>`:''}
@@ -4407,12 +4407,12 @@ async function renderCompanyHandbook(ct, canAdd) {
         <div class="handbook-item" data-idx="${i}">
           <button class="handbook-header">
             <div style="display:flex;align-items:center;gap:10px">
-              <div class="handbook-icon"><i data-lucide="${s.icon||'file-text'}" style="width:15px;height:15px;stroke:var(--gold)"></i></div>
-              <span>${s.title}</span>
+              <div class="handbook-icon"><i data-lucide="${escHtml(s.icon||'file-text')}" style="width:15px;height:15px;stroke:var(--gold)"></i></div>
+              <span>${escHtml(s.title)}</span>
             </div>
             <i data-lucide="chevron-down" class="handbook-chevron" style="width:16px;height:16px;stroke:var(--text-muted)"></i>
           </button>
-          <div class="handbook-body hidden"><pre class="handbook-text">${s.content||''}</pre></div>
+          <div class="handbook-body hidden"><pre class="handbook-text">${escHtml(s.content||'')}</pre></div>
         </div>
       `).join('')}
     </div>
@@ -4591,7 +4591,7 @@ async function renderAnalytics() {
         <tbody>${users.map(u=>{
           const done=tasks.filter(t=>(Array.isArray(t.assignedTo)?t.assignedTo.includes(u.id):t.assignedTo===u.id)&&['done','approved','archived'].includes(t.status)).length;
           const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);
-          return `<tr><td>${u.displayName||u.email||'—'}</td><td><span class="badge badge-blue">${ROLES[u.role]?.label||u.role||'—'}</span></td><td>${(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—'}</td><td>${done}</td><td>₱${fmt(net)}</td></tr>`;
+          return `<tr><td>${escHtml(u.displayName||u.email||'—')}</td><td><span class="badge badge-blue">${escHtml(ROLES[u.role]?.label||u.role||'—')}</span></td><td>${escHtml((Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—')}</td><td>${done}</td><td>₱${fmt(net)}</td></tr>`;
         }).join('')}</tbody>
       </table></div></div></div>
     `;
@@ -4627,7 +4627,7 @@ async function renderAnalytics() {
         <tbody>${salesQuotes.slice(0,20).map(q=>{
           const d=q.createdAt?.toDate?q.createdAt.toDate():new Date(q.createdAt||0);
           const statusColor={draft:'#636366',sent:'#0A84FF',accepted:'#30D158',rejected:'#FF453A'}[q.status]||'#636366';
-          return `<tr><td>${q.clientName||q.client||'—'}</td><td>₱${fmt(q.total||q.amount||0)}</td><td><span style="color:${statusColor};font-weight:600">${q.status||'draft'}</span></td><td>${d.toLocaleDateString()}</td></tr>`;
+          return `<tr><td>${escHtml(q.clientName||q.client||'—')}</td><td>₱${fmt(q.total||q.amount||0)}</td><td><span style="color:${statusColor};font-weight:600">${q.status||'draft'}</span></td><td>${d.toLocaleDateString()}</td></tr>`;
         }).join('')}</tbody>
       </table></div></div></div>
     `;
@@ -4664,7 +4664,7 @@ async function renderAnalytics() {
           const uTasks=mktTasks.filter(t=>Array.isArray(t.assignedTo)?t.assignedTo.includes(u.id):t.assignedTo===u.id);
           const uDone=uTasks.filter(t=>['done','approved','archived'].includes(t.status)).length;
           const uActive=uTasks.filter(t=>['todo','in-progress','review'].includes(t.status)).length;
-          return `<tr><td>${u.displayName||u.email||'—'}</td><td><span class="badge badge-blue">${ROLES[u.role]?.label||u.role}</span></td><td>${uDone}</td><td>${uActive}</td></tr>`;
+          return `<tr><td>${escHtml(u.displayName||u.email||'—')}</td><td><span class="badge badge-blue">${escHtml(ROLES[u.role]?.label||u.role)}</span></td><td>${uDone}</td><td>${uActive}</td></tr>`;
         }).join('')}</tbody>
       </table></div></div></div>
     `;
@@ -4698,7 +4698,7 @@ async function renderAnalytics() {
       </div>
       <div class="card"><div class="card-header"><h3>Payslips — This Month (${payslipsThisMonth.length})</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
         <thead><tr><th>Worker</th><th>Pay Period</th><th>Gross</th><th>Net</th><th>Prepared By</th></tr></thead>
-        <tbody>${payslipsThisMonth.slice(0,20).map(p=>`<tr><td>${p.workerName||'—'}</td><td>${p.periodLabel||p.payPeriod||'—'}</td><td>₱${fmt(p.grossPay||0)}</td><td>₱${fmt(p.netPay||0)}</td><td>${p.preparedBy||'—'}</td></tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">No payslips this month</td></tr>'}</tbody>
+        <tbody>${payslipsThisMonth.slice(0,20).map(p=>`<tr><td>${escHtml(p.workerName||'—')}</td><td>${escHtml(p.periodLabel||p.payPeriod||'—')}</td><td>₱${fmt(p.grossPay||0)}</td><td>₱${fmt(p.netPay||0)}</td><td>${escHtml(p.preparedBy||'—')}</td></tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">No payslips this month</td></tr>'}</tbody>
       </table></div></div></div>
     `;
     const cats=[...new Set(expenses.map(e=>e.category||'Other'))].slice(0,6);
@@ -4731,7 +4731,7 @@ async function renderAnalytics() {
         <tbody>${prodTasks.slice(0,20).map(t=>{
           const assignedNames=(Array.isArray(t.assignedTo)?t.assignedTo:[t.assignedTo]).map(uid=>users.find(u=>u.id===uid)?.displayName||'?').join(', ');
           const sc={todo:'#636366','in-progress':'#0A84FF',review:'#FF9F0A',done:'#30D158',approved:'#30D158',archived:'#636366'}[t.status]||'#636366';
-          return `<tr><td>${t.title||'—'}</td><td><span style="color:${sc};font-weight:600">${t.status||'—'}</span></td><td>${assignedNames||'—'}</td><td>${t.priority||'—'}</td></tr>`;
+          return `<tr><td>${escHtml(t.title||'—')}</td><td><span style="color:${sc};font-weight:600">${t.status||'—'}</span></td><td>${escHtml(assignedNames||'—')}</td><td>${t.priority||'—'}</td></tr>`;
         }).join('')}</tbody>
       </table></div></div></div>
     `;
@@ -4768,7 +4768,7 @@ async function renderAnalytics() {
         <tbody>${govBids.slice(0,20).map(b=>{
           const d=b.createdAt?.toDate?b.createdAt.toDate():new Date(b.createdAt||0);
           const sc={won:'#30D158',lost:'#FF453A',pending:'#FF9F0A',submitted:'#0A84FF'}[b.status]||'#636366';
-          return `<tr><td>${b.projectName||b.title||'—'}</td><td>${b.agency||'—'}</td><td>₱${fmt(b.bidAmount||b.contractAmount||0)}</td><td><span style="color:${sc};font-weight:600">${b.status||'pending'}</span></td><td>${d.toLocaleDateString()}</td></tr>`;
+          return `<tr><td>${escHtml(b.projectName||b.title||'—')}</td><td>${escHtml(b.agency||'—')}</td><td>₱${fmt(b.bidAmount||b.contractAmount||0)}</td><td><span style="color:${sc};font-weight:600">${b.status||'pending'}</span></td><td>${d.toLocaleDateString()}</td></tr>`;
         }).join('')}</tbody>
       </table></div>`:`<p style="color:var(--text-muted);padding:16px;text-align:center">No bidding records found. Add records to the <code>gov_biddings</code> collection in Firestore.</p>`}</div></div>
     `;
@@ -4831,12 +4831,12 @@ async function renderTeam() {
   document.getElementById('team-table').innerHTML=`<div class="card"><div class="table-wrap"><table class="data-table">
     <thead><tr><th>Employee</th><th>Status</th><th>Username</th><th>ID</th><th>Role</th><th>Departments</th><th>Base</th><th>Net</th><th></th></tr></thead>
     <tbody>${users.map(u=>{const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);const depts=(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';const pres=getPresence(u);return `<tr>
-      <td>${u.displayName||u.email}</td>
+      <td>${escHtml(u.displayName||u.email)}</td>
       <td><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)"><span style="width:8px;height:8px;border-radius:50%;background:${pres.dot==='green'?'#30D158':pres.dot==='orange'?'#FF9F0A':'#636366'};flex-shrink:0${pres.dot==='green'?';box-shadow:0 0 0 2px rgba(48,209,88,0.3)':''};display:inline-block"></span>${pres.label}</span></td>
-      <td>${u.username?`<code style="font-size:11px">${u.username}</code>`:'<span style="color:var(--text-muted);font-size:11px">email login</span>'}</td>
-      <td><code style="font-size:11px">${u.employeeId||'—'}</code></td>
-      <td><span class="badge badge-blue">${ROLES[u.role]?.label||u.role}</span></td>
-      <td>${depts}</td>
+      <td>${u.username?`<code style="font-size:11px">${escHtml(u.username)}</code>`:'<span style="color:var(--text-muted);font-size:11px">email login</span>'}</td>
+      <td><code style="font-size:11px">${escHtml(u.employeeId||'—')}</code></td>
+      <td><span class="badge badge-blue">${escHtml(ROLES[u.role]?.label||u.role)}</span></td>
+      <td>${escHtml(depts)}</td>
       <td>₱${formatNum(u.salary)}</td>
       <td><strong>₱${formatNum(net)}</strong></td>
       <td><button class="btn-icon edit-emp-btn" data-uid="${u.id}"><i data-lucide="pencil" style="width:14px;height:14px;stroke:currentColor"></i></button></td>
@@ -5021,10 +5021,10 @@ function openCreateWorkerModal() {
 
       // Show credentials to HR — only time the password is displayed in full
       openModal('✅ Worker Account Created', `
-        <p style="margin-bottom:12px">Hand these credentials to <strong>${name}</strong>:</p>
+        <p style="margin-bottom:12px">Hand these credentials to <strong>${escHtml(name)}</strong>:</p>
         <div style="background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:16px;font-family:monospace;font-size:15px;line-height:2">
-          <div>Username: <strong style="color:var(--primary-light)">${username}</strong></div>
-          <div>Password: <strong style="color:var(--primary-light)">${password}</strong></div>
+          <div>Username: <strong style="color:var(--primary-light)">${escHtml(username)}</strong></div>
+          <div>Password: <strong style="color:var(--primary-light)">${escHtml(password)}</strong></div>
         </div>
         <p style="font-size:12px;color:var(--text-muted);margin-top:10px">⚠️ Write this down now. The password won't be shown again in plain text.</p>
       `, `<button class="btn-primary" onclick="closeModal();renderTeam()">Done</button>`);
@@ -5043,12 +5043,12 @@ function openEditEmployeeModal(u) {
   openModal(`Edit: ${u.displayName||u.email}`,`
     ${u.username ? `
     <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <span style="font-size:13px">👷 Worker account — login: <strong style="color:var(--primary-light)">${u.username}</strong></span>
+      <span style="font-size:13px">👷 Worker account — login: <strong style="color:var(--primary-light)">${escHtml(u.username)}</strong></span>
       <button class="btn-secondary btn-sm" id="eu-reset-pw-btn" style="margin-left:auto">🔑 Reset Password</button>
     </div>` : ''}
-    <div class="form-group"><label>Display Name</label><input id="eu-name" value="${u.displayName||''}"/></div>
-    <div class="form-group"><label>Employee ID</label><input id="eu-eid" value="${u.employeeId||''}"/></div>
-    <div class="form-group"><label>Job Title</label><input id="eu-title" value="${u.title||''}"/></div>
+    <div class="form-group"><label>Display Name</label><input id="eu-name" value="${escHtml(u.displayName||'')}"/></div>
+    <div class="form-group"><label>Employee ID</label><input id="eu-eid" value="${escHtml(u.employeeId||'')}"/></div>
+    <div class="form-group"><label>Job Title</label><input id="eu-title" value="${escHtml(u.title||'')}"/></div>
     <div class="form-row">
       <div class="form-group"><label>Role</label><select id="eu-role">${Object.entries(ROLES).map(([k,v])=>`<option value="${k}" ${u.role===k?'selected':''}>${v.label}</option>`).join('')}</select></div>
       <div class="form-group"><label>Primary Dept</label><select id="eu-dept"><option value="">None</option>${Object.keys(DEPARTMENTS).map(k=>`<option value="${k}" ${curDepts[0]===k?'selected':''}>${k}</option>`).join('')}</select></div>
@@ -5082,11 +5082,11 @@ function openEditEmployeeModal(u) {
   document.getElementById('eu-reset-pw-btn')?.addEventListener('click', () => {
     const newPw = generatePassword(u.displayName||'worker');
     openModal('🔑 Reset Password', `
-      <p style="margin-bottom:10px">Set a new password for <strong>${u.displayName}</strong> (username: <code>${u.username}</code>).</p>
+      <p style="margin-bottom:10px">Set a new password for <strong>${escHtml(u.displayName)}</strong> (username: <code>${escHtml(u.username)}</code>).</p>
       <div class="form-group">
         <label>New Password</label>
         <div style="display:flex;gap:6px">
-          <input id="rp-newpw" value="${newPw}" style="flex:1" autocomplete="off"/>
+          <input id="rp-newpw" value="${escHtml(newPw)}" style="flex:1" autocomplete="off"/>
           <button type="button" class="btn-secondary btn-sm" id="rp-regen">🔄</button>
         </div>
       </div>
@@ -5119,10 +5119,10 @@ function openEditEmployeeModal(u) {
         await db.collection('users').doc(u.id).update({ hrPwToken: btoa(newPassword) });
 
         openModal('✅ Password Reset', `
-          <p style="margin-bottom:12px">New credentials for <strong>${u.displayName}</strong>:</p>
+          <p style="margin-bottom:12px">New credentials for <strong>${escHtml(u.displayName)}</strong>:</p>
           <div style="background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:16px;font-family:monospace;font-size:15px;line-height:2">
-            <div>Username: <strong style="color:var(--primary-light)">${u.username}</strong></div>
-            <div>Password: <strong style="color:var(--primary-light)">${newPassword}</strong></div>
+            <div>Username: <strong style="color:var(--primary-light)">${escHtml(u.username)}</strong></div>
+            <div>Password: <strong style="color:var(--primary-light)">${escHtml(newPassword)}</strong></div>
           </div>
           <p style="font-size:12px;color:var(--text-muted);margin-top:10px">⚠️ Write this down and hand it to the employee.</p>
         `, `<button class="btn-primary" onclick="closeModal()">Done</button>`);
@@ -5173,20 +5173,20 @@ function openProfileDrawer() {
     <div class="profile-hero">
       <div id="profile-photo-wrap" class="profile-avatar-wrap">
         ${u.photoUrl
-          ? `<img src="${u.photoUrl}" class="profile-avatar-img"/>`
+          ? `<img src="${escHtml(u.photoUrl)}" class="profile-avatar-img"/>`
           : `<span class="profile-avatar-initials">${(u.displayName||'?')[0].toUpperCase()}</span>`}
         <div class="profile-avatar-edit-badge"><i data-lucide="camera"></i></div>
       </div>
-      <div class="profile-hero-name">${u.displayName||'User'}</div>
-      <div class="profile-hero-role">${ROLES[u.role]?.label||u.role||'Employee'} · ${depts}</div>
-      ${u.employeeId?`<div class="profile-hero-id">${u.employeeId}</div>`:''}
+      <div class="profile-hero-name">${escHtml(u.displayName||'User')}</div>
+      <div class="profile-hero-role">${escHtml(ROLES[u.role]?.label||u.role||'Employee')} · ${escHtml(depts)}</div>
+      ${u.employeeId?`<div class="profile-hero-id">${escHtml(u.employeeId)}</div>`:''}
     </div>
 
     <!-- ── Edit name ── -->
     <div class="profile-section-label">DISPLAY NAME</div>
     <div class="profile-inset-card">
       <div class="profile-row-edit">
-        <input id="profile-name" class="profile-inline-input" value="${u.displayName||''}" placeholder="Your name"/>
+        <input id="profile-name" class="profile-inline-input" value="${escHtml(u.displayName||'')}" placeholder="Your name"/>
         <button class="btn-primary btn-sm" id="save-name-btn">Save</button>
       </div>
     </div>
@@ -5194,10 +5194,10 @@ function openProfileDrawer() {
     <!-- ── Info rows ── -->
     <div class="profile-section-label">ACCOUNT</div>
     <div class="profile-inset-card">
-      <div class="profile-info-row"><span class="pir-label">Email</span><span class="pir-value">${u.email||'—'}</span></div>
-      <div class="profile-info-row"><span class="pir-label">Employee ID</span><span class="pir-value pir-mono">${u.employeeId||'—'}</span></div>
-      <div class="profile-info-row"><span class="pir-label">Role</span><span class="pir-value">${ROLES[u.role]?.label||u.role||'—'}</span></div>
-      <div class="profile-info-row no-border"><span class="pir-label">Department</span><span class="pir-value">${depts}</span></div>
+      <div class="profile-info-row"><span class="pir-label">Email</span><span class="pir-value">${escHtml(u.email||'—')}</span></div>
+      <div class="profile-info-row"><span class="pir-label">Employee ID</span><span class="pir-value pir-mono">${escHtml(u.employeeId||'—')}</span></div>
+      <div class="profile-info-row"><span class="pir-label">Role</span><span class="pir-value">${escHtml(ROLES[u.role]?.label||u.role||'—')}</span></div>
+      <div class="profile-info-row no-border"><span class="pir-label">Department</span><span class="pir-value">${escHtml(depts)}</span></div>
     </div>
 
     <!-- ── Salary ── -->
@@ -5222,7 +5222,7 @@ function openProfileDrawer() {
         </div>
       </div>
       ${u.phone
-        ? `<div class="profile-info-row no-border"><span class="pir-label">Phone</span><span class="pir-value pir-phone">${u.phone}<button class="btn-secondary btn-sm" id="edit-phone-btn" style="margin-left:10px">Edit</button></span></div>`
+        ? `<div class="profile-info-row no-border"><span class="pir-label">Phone</span><span class="pir-value pir-phone">${escHtml(u.phone)}<button class="btn-secondary btn-sm" id="edit-phone-btn" style="margin-left:10px">Edit</button></span></div>`
         : `<div class="profile-info-row no-border">
             <div style="width:100%">
               <div class="pir-label" style="margin-bottom:8px">Phone Number</div>
@@ -5306,7 +5306,7 @@ function openProfileDrawer() {
   if (editPhoneBtn) {
     editPhoneBtn.addEventListener('click', () => {
       const wrap = editPhoneBtn.closest('div[style]');
-      if (wrap) wrap.innerHTML = `<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">📞 Phone Number</div><div style="display:flex;gap:8px"><input id="profile-phone" type="tel" value="${userProfile.phone||''}" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px"/><button class="btn-primary btn-sm" id="save-phone-btn2">Save</button></div>`;
+      if (wrap) wrap.innerHTML = `<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">📞 Phone Number</div><div style="display:flex;gap:8px"><input id="profile-phone" type="tel" value="${escHtml(userProfile.phone||'')}" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px"/><button class="btn-primary btn-sm" id="save-phone-btn2">Save</button></div>`;
       document.getElementById('save-phone-btn2')?.addEventListener('click', async () => {
         const phone = (document.getElementById('profile-phone')?.value || '').trim();
         if (!phone) return;
@@ -5451,10 +5451,10 @@ async function loadSuggestions() {
     return `
     <div style="padding:14px;background:var(--s2);border-radius:10px;margin-bottom:10px;border:1px solid var(--border)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--primary-light)">${s.category||'General'}</span>
+        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--primary-light)">${escHtml(s.category||'General')}</span>
         <span style="font-size:11px;color:var(--text-muted)">${ts}</span>
       </div>
-      <div style="font-size:14px;color:var(--text);line-height:1.55;white-space:pre-wrap">${s.text||''}</div>
+      <div style="font-size:14px;color:var(--text);line-height:1.55;white-space:pre-wrap">${escHtml(s.text||'')}</div>
       <button class="btn-secondary btn-sm sug-delete-btn" data-id="${d.id}" style="margin-top:8px;color:var(--danger);font-size:11px">Delete</button>
     </div>`;
   }).join('');

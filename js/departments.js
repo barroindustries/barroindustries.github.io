@@ -75,14 +75,14 @@ function normTask(data,id) {
 }
 function assigneeChips(t) {
   if (!t.assignedToNames?.length) return '';
-  const chips=t.assignedToNames.slice(0,3).map(n=>`<span style="font-size:11px;background:var(--primary-light);color:#fff;padding:2px 8px;border-radius:10px">${n}</span>`).join('');
+  const chips=t.assignedToNames.slice(0,3).map(n=>`<span style="font-size:11px;background:var(--primary-light);color:#fff;padding:2px 8px;border-radius:10px">${escHtml(n)}</span>`).join('');
   return chips+(t.assignedToNames.length>3?`<span style="font-size:11px;color:var(--text-muted)">+${t.assignedToNames.length-3}</span>`:'');
 }
 function taskCard(t) {
   const inactive=DONE_STATUSES.includes(t.status)||t.status==='archived';
   return `<div class="item-card priority-${t.priority||'medium'}${inactive?' status-done':''}" data-id="${t.id}">
     <div class="item-top">
-      <div class="item-title">${t.title}</div>
+      <div class="item-title">${escHtml(t.title)}</div>
       <div class="item-badges">
         <span class="badge ${priorityBadge(t.priority)}">${t.priority||'med'}</span>
         <span class="badge ${statusBadge(t.status)}">${statusLabel(t.status)}</span>
@@ -402,7 +402,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0">
       <button id="task-panel-back" style="background:none;border:none;color:var(--primary-light);font-size:22px;cursor:pointer;padding:0 4px;line-height:1">‹</button>
       <div style="flex:1;min-width:0">
-        <div style="font-size:15px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</div>
+        <div style="font-size:15px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.title)}</div>
         <div style="display:flex;gap:6px;margin-top:3px;flex-wrap:wrap">
           <span class="badge ${priorityBadge(t.priority)}" style="font-size:10px">${t.priority||'medium'}</span>
           <span class="badge ${statusBadge(t.status)}" style="font-size:10px">${statusLabel(t.status)}</span>
@@ -422,18 +422,18 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
       <div style="flex:0 0 auto;overflow-y:auto;max-height:42%;padding:16px;border-bottom:1px solid var(--border)" id="task-info-scroll">
 
         <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap">
-          ${t.assignedToNames?.length?`<span>👥 <strong>${t.assignedToNames.join(', ')}</strong></span>`:''}
+          ${t.assignedToNames?.length?`<span>👥 <strong>${escHtml(t.assignedToNames.join(', '))}</strong></span>`:''}
           ${t.dueDate?`<span>📅 Due: <strong style="color:${t.dueDate<new Date().toISOString().slice(0,10)?'var(--danger)':'inherit'}">${t.dueDate}</strong></span>`:''}
-          ${t.createdByName?`<span>🖊 By: ${t.createdByName}</span>`:''}
+          ${t.createdByName?`<span>🖊 By: ${escHtml(t.createdByName)}</span>`:''}
         </div>
 
-        ${t.description?`<p style="font-size:14px;line-height:1.6;margin-bottom:12px;white-space:pre-wrap;color:var(--text)">${t.description}</p>`:''}
+        ${t.description?`<p style="font-size:14px;line-height:1.6;margin-bottom:12px;white-space:pre-wrap;color:var(--text)">${escHtml(t.description)}</p>`:''}
 
         <!-- Current Standing -->
         <div style="background:rgba(255,159,10,0.08);border:1.5px solid rgba(255,159,10,0.28);border-radius:10px;padding:12px 14px;margin-bottom:12px">
           <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,159,10,0.9);margin-bottom:6px">📍 Current Standing</div>
           ${t.currentStanding
-            ? `<p style="font-size:13px;line-height:1.5;margin:0 0 ${canEdit?'10px':'0'};color:var(--text)">${t.currentStanding}</p>`
+            ? `<p style="font-size:13px;line-height:1.5;margin:0 0 ${canEdit?'10px':'0'};color:var(--text)">${escHtml(t.currentStanding)}</p>`
             : `<p style="font-size:12px;color:var(--text-muted);margin:0 0 ${canEdit?'10px':'0'}">No standing set yet.</p>`}
           ${canEdit?`<div style="display:flex;gap:6px">
             <input id="cs-input" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"
@@ -517,7 +517,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     db.collection('users').get().then(empSnap=>{
       const sel=document.getElementById('reassign-sel'); if(!sel)return;
       const emps=empSnap.docs.map(d=>({id:d.id,...d.data()})).filter(e=>!t.assignedTo.includes(e.id)).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
-      sel.innerHTML=`<option value="">— Select employee —</option>`+emps.map(e=>`<option value="${e.id}" data-name="${e.displayName||e.email}">${e.displayName||e.email}</option>`).join('');
+      sel.innerHTML=`<option value="">— Select employee —</option>`+emps.map(e=>`<option value="${e.id}" data-name="${escHtml(e.displayName||e.email)}">${escHtml(e.displayName||e.email)}</option>`).join('');
     });
   }
 
@@ -600,7 +600,7 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
 
   openModal('Edit Task', `
     <div class="form-group"><label>Title</label><input id="et-title" value="${(t.title||'').replace(/"/g,'&quot;')}"/></div>
-    <div class="form-group"><label>Description</label><textarea id="et-desc" rows="3">${t.description||''}</textarea></div>
+    <div class="form-group"><label>Description</label><textarea id="et-desc" rows="3">${escHtml(t.description||'')}</textarea></div>
     <div class="form-row">
       <div class="form-group"><label>Priority</label>
         <select id="et-priority">
@@ -622,11 +622,11 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
     ${isAdmin?`<div class="form-group">
       <label>Assignees (remove: click chip; add: select below)</label>
       <div id="assignee-chips" style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap">
-        ${t.assignedToNames.map((name,i)=>`<span class="badge badge-blue" style="cursor:pointer" data-uid="${t.assignedTo[i]}">${name} ✕</span>`).join('')}
+        ${t.assignedToNames.map((name,i)=>`<span class="badge badge-blue" style="cursor:pointer" data-uid="${t.assignedTo[i]}">${escHtml(name)} ✕</span>`).join('')}
       </div>
       <select id="et-add-assignee" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
         <option value="">— Add assignee —</option>
-        ${employees.filter(e=>!t.assignedTo.includes(e.id)).map(e=>`<option value="${e.id}" data-name="${e.displayName||e.email}">${e.displayName||e.email}</option>`).join('')}
+        ${employees.filter(e=>!t.assignedTo.includes(e.id)).map(e=>`<option value="${e.id}" data-name="${escHtml(e.displayName||e.email)}">${escHtml(e.displayName||e.email)}</option>`).join('')}
       </select>
     </div>`:''}
   `, `<button class="btn-primary" id="save-edit-btn">Save Changes</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -701,7 +701,7 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
       <label>Assign To (can add multiple)</label>
       <select id="t-assignee-sel" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
         <option value="">— Add assignee —</option>
-        ${employees.map(e=>`<option value="${e.id}" data-name="${e.displayName||e.email}">${e.displayName||e.email}${e.email?' ('+e.email+')':''}</option>`).join('')}
+        ${employees.map(e=>`<option value="${e.id}" data-name="${escHtml(e.displayName||e.email)}">${escHtml(e.displayName||e.email)}${e.email?' ('+escHtml(e.email)+')':''}</option>`).join('')}
       </select>
       <div id="new-assignee-chips" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"></div>
     </div>
@@ -786,12 +786,12 @@ async function loadSubsList(currentUser, currentRole, currentDept) {
   list.innerHTML = subs.map(s => `
     <div class="item-card" data-id="${s.id}">
       <div class="item-top">
-        <div class="item-title">${s.title}</div>
+        <div class="item-title">${escHtml(s.title)}</div>
         <span class="badge ${statusBadge(s.status)}">${s.status||'pending'}</span>
       </div>
       <div class="item-meta">
-        <span class="badge badge-gray">${s.type||'General'}</span>
-        ${s.submittedByName?`<span>👤 ${s.submittedByName}</span>`:''}
+        <span class="badge badge-gray">${escHtml(s.type||'General')}</span>
+        ${s.submittedByName?`<span>👤 ${escHtml(s.submittedByName)}</span>`:''}
         ${s.createdAt?`<span>📅 ${new Date(s.createdAt.toDate()).toLocaleDateString()}</span>`:''}
       </div>
     </div>
@@ -809,9 +809,9 @@ async function openSubDetail(subId, currentUser, currentRole) {
   openModal(s.title, `
     <div style="margin-bottom:10px">
       <span class="badge ${statusBadge(s.status)}">${s.status||'pending'}</span>
-      <span class="badge badge-gray" style="margin-left:6px">${s.type||'General'}</span>
+      <span class="badge badge-gray" style="margin-left:6px">${escHtml(s.type||'General')}</span>
     </div>
-    <p style="font-size:14px;line-height:1.6;margin-bottom:12px">${s.description||'No details.'}</p>
+    <p style="font-size:14px;line-height:1.6;margin-bottom:12px">${escHtml(s.description||'No details.')}</p>
     ${s.fileUrl?`<a href="${s.fileUrl}" target="_blank" class="btn-secondary" style="display:inline-flex;gap:6px;margin-bottom:14px">📎 View Attachment</a>`:''}
     ${isPrivileged?`<div style="display:flex;gap:8px;margin-bottom:14px">
       <button class="btn-success" id="approve-btn" data-id="${s.id}">✅ Approve</button>
@@ -945,11 +945,11 @@ function expenseTable(expenses, showActions) {
           <tbody>
             ${expenses.map(e => `
               <tr>
-                <td>${e.description}</td>
-                <td><span class="badge badge-gray">${e.category||'General'}</span></td>
+                <td>${escHtml(e.description)}</td>
+                <td><span class="badge badge-gray">${escHtml(e.category||'General')}</span></td>
                 <td>₱${fmt(e.amount)}</td>
                 <td>${e.date||'—'}</td>
-                <td>${e.submittedByName||'—'}</td>
+                <td>${escHtml(e.submittedByName||'—')}</td>
                 <td><span class="badge ${statusBadge(e.status)}">${e.status||'pending'}</span></td>
                 ${showActions?`<td>
                   ${e.status==='pending'?`<button class="btn-icon approve-expense" data-id="${e.id}">✅</button><button class="btn-icon reject-expense" data-id="${e.id}">❌</button>`:''}
@@ -1067,14 +1067,14 @@ window.renderComments = async function(collection, docId, containerId, currentUs
             const canDelete = canEdit || isAdmin;
             return `
             <div class="ms-row ${isMine?'ms-row-mine':'ms-row-theirs'}" data-cid="${c.id}">
-              ${!isMine ? `<div class="ms-avatar" title="${c.authorName||'User'}">${c.photoUrl?`<img src="${c.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(c.authorName||'U')}</div>` : ''}
+              ${!isMine ? `<div class="ms-avatar" title="${escHtml(c.authorName||'User')}">${c.photoUrl?`<img src="${c.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(c.authorName||'U')}</div>` : ''}
               <div class="ms-bubble-wrap">
-                ${!isMine ? `<div class="ms-name">${c.authorName||'User'}</div>` : ''}
+                ${!isMine ? `<div class="ms-name">${escHtml(c.authorName||'User')}</div>` : ''}
                 <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'}">
-                  ${c.text?`<div class="ms-text">${c.text.replace(/\n/g,'<br/>')}</div>`:''}
+                  ${c.text?`<div class="ms-text">${escHtml(c.text).replace(/\n/g,'<br/>')}</div>`:''}
                   ${c.fileUrl ? (isImage(c.fileUrl)
-                    ? `<div style="margin-top:${c.text?'6':'0'}px"><img src="${c.fileUrl}" alt="${c.fileName||'img'}" style="max-width:200px;max-height:160px;border-radius:8px;cursor:pointer" onclick="window.open('${c.fileUrl}','_blank')"/></div>`
-                    : `<a href="${c.fileUrl}" target="_blank" class="ms-file-chip">📎 ${c.fileName||'Attachment'}</a>`
+                    ? `<div style="margin-top:${c.text?'6':'0'}px"><img src="${c.fileUrl}" alt="${escHtml(c.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:8px;cursor:pointer" onclick="window.open('${c.fileUrl}','_blank')"/></div>`
+                    : `<a href="${c.fileUrl}" target="_blank" class="ms-file-chip">📎 ${escHtml(c.fileName||'Attachment')}</a>`
                   ) : ''}
                   <div class="ms-meta">
                     <span class="ms-time">${timeLabel(c.createdAt)}</span>
@@ -1085,7 +1085,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
                   ${canEdit?`<button class="ms-act-btn comment-edit-btn" data-id="${c.id}">✎</button>`:''}
                   ${canDelete?`<button class="ms-act-btn ms-del-btn comment-del-btn" data-id="${c.id}">🗑</button>`:''}
                 </div>` : ''}
-                ${isLast && seenBy.length ? `<div class="ms-seen">Seen by ${seenBy.map(r=>r.name.split(' ')[0]).join(', ')}</div>` : ''}
+                ${isLast && seenBy.length ? `<div class="ms-seen">Seen by ${escHtml(seenBy.map(r=>r.name.split(' ')[0]).join(', '))}</div>` : ''}
               </div>
               ${isMine ? `<div class="ms-avatar ms-avatar-mine" title="You">${userProfile?.photoUrl?`<img src="${userProfile.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(userProfile?.displayName||currentUser.email)}</div>` : ''}
             </div>`;
@@ -1366,9 +1366,9 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           <thead><tr><th>Month</th><th>Employee</th><th>Requested By</th><th>Reason</th><th></th></tr></thead>
           <tbody>${delReqs.map(r=>`<tr>
             <td>${r.month||'—'}</td>
-            <td>${r.userName||'—'}</td>
-            <td style="font-size:11px">${r.requestedByName||'—'}</td>
-            <td style="font-size:11px;color:var(--text-muted)">${r.reason||'—'}</td>
+            <td>${escHtml(r.userName||'—')}</td>
+            <td style="font-size:11px">${escHtml(r.requestedByName||'—')}</td>
+            <td style="font-size:11px;color:var(--text-muted)">${escHtml(r.reason||'—')}</td>
             <td style="white-space:nowrap">
               <button class="btn-primary btn-sm del-req-approve" data-req-id="${r.id}" data-hist-id="${r.historyId}" title="Approve deletion">✓ Approve</button>
               <button class="btn-secondary btn-sm del-req-deny" data-req-id="${r.id}" data-req-by="${r.requestedBy}" style="margin-left:4px" title="Deny">✕ Deny</button>
@@ -1385,7 +1385,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             <thead><tr><th>Month</th><th>Employee</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net Pay</th><th>Final Pay</th><th>Ledger</th>${canFinance?'<th></th>':''}</tr></thead>
             <tbody>${history.slice(0,50).map(h=>`<tr>
               <td>${h.month||'—'}</td>
-              <td>${h.userName||'—'}</td>
+              <td>${escHtml(h.userName||'—')}</td>
               <td>₱${fmt(h.salary)}</td>
               <td style="color:var(--success)">+₱${fmt(h.allowance)}</td>
               <td style="color:var(--danger)">-₱${fmt(h.deductions)}</td>
@@ -1396,7 +1396,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
                 <button class="btn-secondary btn-sm hist-edit-btn" data-id="${h.id}" title="Edit">✎</button>
                 ${pendingDelIds.has(h.id)
                   ? `<button class="btn-secondary btn-sm" style="margin-left:4px;opacity:0.6;cursor:default" disabled title="Awaiting president approval">⏳</button>`
-                  : `<button class="btn-danger btn-sm hist-del-btn" data-id="${h.id}" data-name="${h.userName||''}" data-month="${h.month||''}" title="${isPres?'Delete':'Request deletion'}" style="margin-left:4px">${isPres?'✕':'🗑'}</button>`
+                  : `<button class="btn-danger btn-sm hist-del-btn" data-id="${h.id}" data-name="${escHtml(h.userName||'')}" data-month="${h.month||''}" title="${isPres?'Delete':'Request deletion'}" style="margin-left:4px">${isPres?'✕':'🗑'}</button>`
                 }
               </td>`:''}
             </tr>`).join('')}</tbody>
@@ -1422,7 +1422,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             <div class="form-group"><label>Net Pay</label><input id="hpe-net" type="number" value="${rec.netPay||0}"/></div>
           </div>
           <div class="form-group"><label>Final Pay</label><input id="hpe-final" type="number" value="${rec.finalPay||0}"/></div>
-          <div class="form-group"><label>Notes (optional)</label><input id="hpe-notes" type="text" value="${rec.notes||''}" placeholder="e.g. 13th month included"/></div>
+          <div class="form-group"><label>Notes (optional)</label><input id="hpe-notes" type="text" value="${escHtml(rec.notes||'')}" placeholder="e.g. 13th month included"/></div>
         `, `<button class="btn-primary" id="save-hpe-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
         document.getElementById('save-hpe-btn').addEventListener('click', async () => {
@@ -1483,7 +1483,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         } else {
           // Finance requests president approval
           openModal('Request Payroll Record Deletion', `
-            <p style="margin-bottom:12px;color:var(--text-muted);font-size:13px">You are requesting deletion of the payroll record for <strong>${name}</strong> (${month}). The President must approve before it is deleted.</p>
+            <p style="margin-bottom:12px;color:var(--text-muted);font-size:13px">You are requesting deletion of the payroll record for <strong>${escHtml(name)}</strong> (${month}). The President must approve before it is deleted.</p>
             <div class="form-group"><label>Reason for deletion</label><input id="del-reason" placeholder="e.g. Duplicate entry, incorrect data…"/></div>
           `, `<button class="btn-primary" id="submit-del-req-btn">Submit for Approval</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
           document.getElementById('submit-del-req-btn').addEventListener('click', async () => {
@@ -1607,7 +1607,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             ${u.photoUrl?`<img src="${u.photoUrl}" style="width:100%;height:100%;object-fit:cover"/>`:((u.displayName||'?')[0])}
           </div>
         </td>
-        <td><strong>${u.displayName||u.email}</strong><div style="font-size:11px;color:var(--text-muted)">${u.title||ROLES[u.role]?.label||u.role}</div></td>
+        <td><strong>${escHtml(u.displayName||u.email)}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(u.title||ROLES[u.role]?.label||u.role)}</div></td>
         <td><code>${u.employeeId||'—'}</code></td>
         <td>${depts}</td>
         <td>₱${fmt(base)}</td>
@@ -1832,12 +1832,12 @@ async function renderTaxesTab(container, currentUser, currentRole) {
           `<div class="table-wrap"><table class="data-table">
             <thead><tr><th>Period</th><th>Type</th><th>Amount</th><th>Status</th><th>Due Date</th><th>Filed By</th><th></th></tr></thead>
             <tbody>${records.map(r=>`<tr>
-              <td>${r.period||'—'}</td>
-              <td><span class="badge badge-blue">${r.type||'BIR'}</span></td>
+              <td>${escHtml(r.period||'—')}</td>
+              <td><span class="badge badge-blue">${escHtml(r.type||'BIR')}</span></td>
               <td><strong>₱${fmt(r.amount)}</strong></td>
               <td><span class="badge ${r.status==='filed'?'badge-green':r.status==='paid'?'badge-blue':'badge-orange'}">${r.status||'pending'}</span></td>
               <td>${r.dueDate||'—'}</td>
-              <td>${r.filedBy||'—'}</td>
+              <td>${escHtml(r.filedBy||'—')}</td>
               <td>
                 <button class="btn-secondary btn-sm tax-edit-btn" data-id="${r.id}">✎</button>
                 ${r.fileUrl?`<a href="${r.fileUrl}" target="_blank" class="btn-secondary btn-sm">📎</a>`:''}
@@ -1930,13 +1930,13 @@ async function renderLedgerTab(container, currentUser, currentRole) {
             <thead><tr><th>Date</th><th>Description / Account</th><th>Category</th><th>Source</th><th>Debit</th><th>Credit</th><th>Ref #</th><th>By</th></tr></thead>
             <tbody>${entries.map(e=>`<tr>
               <td>${e.date||'—'}</td>
-              <td>${e.description||'—'}</td>
-              <td><span class="badge badge-blue">${e.category||'General'}</span></td>
-              <td style="font-size:11px">${e.source&&e.source!=='Finance'?`<span class="badge badge-gray">${e.source}</span>`:'<span style="color:var(--text-muted)">Finance</span>'}</td>
+              <td>${escHtml(e.description||'—')}</td>
+              <td><span class="badge badge-blue">${escHtml(e.category||'General')}</span></td>
+              <td style="font-size:11px">${e.source&&e.source!=='Finance'?`<span class="badge badge-gray">${escHtml(e.source)}</span>`:'<span style="color:var(--text-muted)">Finance</span>'}</td>
               <td style="color:var(--danger)">${e.type==='debit'?'₱'+fmt(e.amount):'-'}</td>
               <td style="color:var(--success)">${e.type==='credit'?'₱'+fmt(e.amount):'-'}</td>
-              <td><code>${e.refNumber||'—'}</code></td>
-              <td style="font-size:11px">${e.addedByName||'—'}</td>
+              <td><code>${escHtml(e.refNumber||'—')}</code></td>
+              <td style="font-size:11px">${escHtml(e.addedByName||'—')}</td>
             </tr>`).join('')}</tbody>
           </table></div>`}
       </div>
@@ -2007,14 +2007,14 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
           `<div class="table-wrap"><table class="data-table">
             <thead><tr><th>Reference</th><th>Date</th><th>Customer</th><th>Debit Cash</th><th>Debit Sales Discount</th><th>Credit A/R</th><th>Credit Sales Revenue</th><th>Credit Sundry (Acct)</th><th>Credit Sundry (Amount)</th></tr></thead>
             <tbody>${entries.map(e=>`<tr>
-              <td><code>${e.reference||'—'}</code></td>
+              <td><code>${escHtml(e.reference||'—')}</code></td>
               <td>${e.date||'—'}</td>
-              <td>${e.customer||'—'}</td>
+              <td>${escHtml(e.customer||'—')}</td>
               <td style="color:var(--success)">₱${fmt(e.debitCash)}</td>
               <td>${e.debitSalesDiscount?'₱'+fmt(e.debitSalesDiscount):'—'}</td>
               <td>${e.creditAR?'₱'+fmt(e.creditAR):'—'}</td>
               <td>${e.creditSalesRevenue?'₱'+fmt(e.creditSalesRevenue):'—'}</td>
-              <td>${e.creditSundryAcct||'—'}</td>
+              <td>${escHtml(e.creditSundryAcct||'—')}</td>
               <td>${e.creditSundryAmount?'₱'+fmt(e.creditSundryAmount):'—'}</td>
             </tr>`).join('')}</tbody>
           </table></div>`}
@@ -2088,14 +2088,14 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
           `<div class="table-wrap"><table class="data-table">
             <thead><tr><th>Reference</th><th>Date</th><th>Payee</th><th>Credit Cash</th><th>Debit COS–Direct Material</th><th>Debit Accounts Payable</th><th>Debit COS–Direct Labor</th><th>Debit Sundry (Acct)</th><th>Debit Sundry (Amount)</th></tr></thead>
             <tbody>${entries.map(e=>`<tr>
-              <td><code>${e.reference||'—'}</code></td>
+              <td><code>${escHtml(e.reference||'—')}</code></td>
               <td>${e.date||'—'}</td>
-              <td>${e.payee||'—'}</td>
+              <td>${escHtml(e.payee||'—')}</td>
               <td style="color:var(--danger)">₱${fmt(e.creditCash)}</td>
               <td>${e.debitMaterial?'₱'+fmt(e.debitMaterial):'—'}</td>
               <td>${e.debitAP?'₱'+fmt(e.debitAP):'—'}</td>
               <td>${e.debitLabor?'₱'+fmt(e.debitLabor):'—'}</td>
-              <td>${e.debitSundryAcct||'—'}</td>
+              <td>${escHtml(e.debitSundryAcct||'—')}</td>
               <td>${e.debitSundryAmount?'₱'+fmt(e.debitSundryAmount):'—'}</td>
             </tr>`).join('')}</tbody>
           </table></div>`}
@@ -2169,12 +2169,12 @@ async function renderRecordsTab(container, currentUser, currentRole) {
             <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>From/To</th><th>File</th><th>By</th></tr></thead>
             <tbody id="rec-tbody">${records.map(r=>`<tr>
               <td>${r.date||'—'}</td>
-              <td><span class="badge badge-blue">${r.type||'—'}</span></td>
-              <td>${r.description||'—'}</td>
+              <td><span class="badge badge-blue">${escHtml(r.type||'—')}</span></td>
+              <td>${escHtml(r.description||'—')}</td>
               <td>₱${fmt(r.amount)}</td>
-              <td>${r.party||'—'}</td>
+              <td>${escHtml(r.party||'—')}</td>
               <td>${r.fileUrl?`<a href="${r.fileUrl}" target="_blank" class="btn-secondary btn-sm">📎 View</a>`:'-'}</td>
-              <td style="font-size:11px">${r.encodedByName||'—'}</td>
+              <td style="font-size:11px">${escHtml(r.encodedByName||'—')}</td>
             </tr>`).join('')}</tbody>
           </table></div>`}
       </div>
@@ -2267,7 +2267,7 @@ async function renderFinanceCA(container, currentUser, currentRole) {
     list.innerHTML = records.map(a=>`
       <div class="ca-card" data-id="${a.id}">
         <div class="ca-card-header">
-          <div class="ca-card-name">${a.userName||'Unknown'} <span style="font-size:11px;color:var(--text-muted)">${a.employeeId||''}</span></div>
+          <div class="ca-card-name">${escHtml(a.userName||'Unknown')} <span style="font-size:11px;color:var(--text-muted)">${escHtml(a.employeeId||'')}</span></div>
           <span class="badge ${statusBadge(a.status)}">${a.status}</span>
         </div>
         <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--text-muted);margin-bottom:10px">
@@ -2276,14 +2276,14 @@ async function renderFinanceCA(container, currentUser, currentRole) {
           ${a.monthlyPayment?`<span>Monthly: <strong>₱${fmt(a.monthlyPayment)}</strong></span>`:''}
           <span>Date: ${a.date||'—'}</span>
         </div>
-        ${a.reason?`<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${a.reason}</div>`:''}
+        ${a.reason?`<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${escHtml(a.reason)}</div>`:''}
         ${a.status==='pending'&&isPrivileged?`
         <div style="display:flex;gap:8px">
-          <button class="btn-success btn-sm fin-ca-approve" data-id="${a.id}" data-uid="${a.userId}" data-amount="${a.amount}" data-name="${a.userName||''}">✓ Approve</button>
-          <button class="btn-danger btn-sm fin-ca-reject" data-id="${a.id}" data-uid="${a.userId}" data-name="${a.userName||''}">✗ Reject</button>
+          <button class="btn-success btn-sm fin-ca-approve" data-id="${a.id}" data-uid="${a.userId}" data-amount="${a.amount}" data-name="${escHtml(a.userName||'')}">✓ Approve</button>
+          <button class="btn-danger btn-sm fin-ca-reject" data-id="${a.id}" data-uid="${a.userId}" data-name="${escHtml(a.userName||'')}">✗ Reject</button>
         </div>`:''}
         ${a.status==='approved'&&(a.balance||0)>0&&isPrivileged?`
-        <button class="btn-secondary btn-sm fin-ca-pay" data-id="${a.id}" data-balance="${a.balance||0}" data-monthly="${a.monthlyPayment||0}" data-uid="${a.userId||''}" data-name="${a.userName||''}">💳 Record Payment</button>`:''}
+        <button class="btn-secondary btn-sm fin-ca-pay" data-id="${a.id}" data-balance="${a.balance||0}" data-monthly="${a.monthlyPayment||0}" data-uid="${a.userId||''}" data-name="${escHtml(a.userName||'')}">💳 Record Payment</button>`:''}
         ${isRealPresident()?`<button class="btn-secondary btn-sm fin-ca-del" data-id="${a.id}" style="color:var(--danger);margin-left:4px">🗑</button>`:''}
       </div>`).join('');
 
@@ -2384,10 +2384,10 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
           <thead><tr><th>Name</th><th>Job Title</th><th>Dept</th><th>Type</th><th>Daily Rate</th><th>CA Balance</th><th>Payroll</th><th>Status</th><th></th></tr></thead>
           <tbody>
             ${profiles.map(p=>`<tr>
-              <td style="font-weight:600">${p.name||'—'}</td>
-              <td>${p.jobTitle||'—'}</td>
-              <td><span class="badge badge-blue">${p.department||'—'}</span></td>
-              <td><span class="badge badge-purple">${p.employmentType||'—'}</span></td>
+              <td style="font-weight:600">${escHtml(p.name||'—')}</td>
+              <td>${escHtml(p.jobTitle||'—')}</td>
+              <td><span class="badge badge-blue">${escHtml(p.department||'—')}</span></td>
+              <td><span class="badge badge-purple">${escHtml(p.employmentType||'—')}</span></td>
               <td>₱${fmt(p.dailyRate||0)}</td>
               <td>${p.caBalance>0?`<span style="color:var(--danger)">₱${fmt(p.caBalance)}</span>`:'<span style="color:var(--text-muted)">—</span>'}</td>
               <td><span class="badge ${p.includeInPayroll!==false?'badge-green':'badge-gray'}">${p.includeInPayroll!==false?'Included':'Excluded'}</span></td>
@@ -2429,14 +2429,14 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
 
   openModal(`${isEdit?'Edit':'Add'} Worker Profile`, `
     <div class="form-row">
-      <div class="form-group"><label>Full Name *</label><input id="hrp-name" value="${profile?.name||''}"/></div>
-      <div class="form-group"><label>ID Number</label><input id="hrp-id" value="${profile?.idNumber||''}"/></div>
+      <div class="form-group"><label>Full Name *</label><input id="hrp-name" value="${escHtml(profile?.name||'')}"/></div>
+      <div class="form-group"><label>ID Number</label><input id="hrp-id" value="${escHtml(profile?.idNumber||'')}"/></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Job Title</label><input id="hrp-title" value="${profile?.jobTitle||''}"/></div>
+      <div class="form-group"><label>Job Title</label><input id="hrp-title" value="${escHtml(profile?.jobTitle||'')}"/></div>
       <div class="form-group"><label>Department</label><select id="hrp-dept">
         ${depts.map(d=>`<option value="${d}" ${profile?.department===d?'selected':''}>${d}</option>`).join('')}
-        <option value="${profile?.department||''}" ${!depts.includes(profile?.department||'')?'selected':''}>Other</option>
+        <option value="${escHtml(profile?.department||'')}" ${!depts.includes(profile?.department||'')?'selected':''}>Other</option>
       </select></div>
     </div>
     <div class="form-row">
@@ -2456,16 +2456,16 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       <div class="form-group"><label>Transport Allowance</label><input id="hrp-transport" type="number" value="${profile?.allowances?.transport||0}"/></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>SSS Number</label><input id="hrp-sss" value="${profile?.ssNum||''}"/></div>
-      <div class="form-group"><label>PhilHealth</label><input id="hrp-ph" value="${profile?.phNum||''}"/></div>
+      <div class="form-group"><label>SSS Number</label><input id="hrp-sss" value="${escHtml(profile?.ssNum||'')}"/></div>
+      <div class="form-group"><label>PhilHealth</label><input id="hrp-ph" value="${escHtml(profile?.phNum||'')}"/></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Pag-IBIG</label><input id="hrp-pib" value="${profile?.pagibigNum||''}"/></div>
-      <div class="form-group"><label>TIN</label><input id="hrp-tin" value="${profile?.tinNum||''}"/></div>
+      <div class="form-group"><label>Pag-IBIG</label><input id="hrp-pib" value="${escHtml(profile?.pagibigNum||'')}"/></div>
+      <div class="form-group"><label>TIN</label><input id="hrp-tin" value="${escHtml(profile?.tinNum||'')}"/></div>
     </div>
-    <div class="form-group"><label>Address</label><input id="hrp-addr" value="${profile?.address||''}"/></div>
+    <div class="form-group"><label>Address</label><input id="hrp-addr" value="${escHtml(profile?.address||'')}"/></div>
     <div class="form-row">
-      <div class="form-group"><label>Contact</label><input id="hrp-phone" value="${profile?.phone||''}"/></div>
+      <div class="form-group"><label>Contact</label><input id="hrp-phone" value="${escHtml(profile?.phone||'')}"/></div>
       <div class="form-group"><label>Status</label><select id="hrp-status">
         <option value="active" ${profile?.status!=='inactive'?'selected':''}>Active</option>
         <option value="inactive" ${profile?.status==='inactive'?'selected':''}>Inactive</option>
@@ -2535,7 +2535,7 @@ async function openPayslipHistory(currentUser, currentRole) {
     const nextStage = PAYSLIP_STAGES[stageIdx+1];
     const nextLabel = { verified:'✓ Verify', filed:'📁 File', submitted:'📤 Submit' }[nextStage];
     return `<tr>
-      <td style="font-weight:600">${p.workerName||'—'}</td>
+      <td style="font-weight:600">${escHtml(p.workerName||'—')}</td>
       <td style="font-size:12px">${p.payPeriodStart||''} – ${p.payPeriodEnd||''}</td>
       <td><strong>₱${fmt(p.netPay||0)}</strong></td>
       <td><span class="badge ${payslipStageBadge(status)}">${status}</span></td>
@@ -2679,7 +2679,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
       <label>Amount Already Paid (₱)</label><input id="ps-paid" type="number" value="0"/>
     </div>
     <div class="form-group">
-      <label>Prepared By</label><input id="ps-preparer" value="${currentUser?.displayName||''}"/>
+      <label>Prepared By</label><input id="ps-preparer" value="${escHtml(currentUser?.displayName||'')}"/>
     </div>
     <div class="form-group">
       <label>Attach Transfer Proof (optional)</label>
@@ -2875,7 +2875,7 @@ function buildPayslipHTML(d) {
 
   return `<!DOCTYPE html><html><head>
 <meta charset="UTF-8"/>
-<title>Payslip — ${d.workerName}</title>
+<title>Payslip — ${escHtml(d.workerName)}</title>
 <style>
   * { box-sizing:border-box; margin:0; padding:0; }
   body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #f0f0f0; }
@@ -2907,7 +2907,7 @@ function buildPayslipHTML(d) {
 </style>
 </head><body>
 <div class="export-bar">
-  <span style="font-weight:700">📄 Payslip — ${d.workerName}</span>
+  <span style="font-weight:700">📄 Payslip — ${escHtml(d.workerName)}</span>
   <button onclick="window.print()">🖨 Save as PDF / Print</button>
   <button onclick="downloadJPEG()">📷 Save as JPEG</button>
   ${d.proofUrl ? `<a href="${d.proofUrl}" target="_blank" style="color:#FFD60A;font-weight:600;margin-left:8px">📎 Transfer Proof</a>` : ''}
@@ -2919,7 +2919,7 @@ function buildPayslipHTML(d) {
   <div class="header-top">
     <img src="icons/barro-industries.png" class="company-logo" onerror="this.style.display='none'" alt=""/>
     <div>
-      <div class="company-name">${co.toUpperCase()}</div>
+      <div class="company-name">${escHtml(co.toUpperCase())}</div>
       <div class="company-sub">
         NEILBARRO STEEL &amp; METAL FABRICATION SERVICES<br/>
         PUROK 6, CARLATAN, 2500, CITY OF SAN FERNANDO, LA UNION, PHILIPPINES<br/>
@@ -2935,21 +2935,21 @@ function buildPayslipHTML(d) {
     <table>
       <tr>
         <td class="field-label" style="width:15%">Full Name</td>
-        <td class="value-cell" style="width:35%">${d.workerName||''}</td>
+        <td class="value-cell" style="width:35%">${escHtml(d.workerName||'')}</td>
         <td class="field-label" style="width:10%">TIN</td>
-        <td style="width:40%">${d.tinNum||''}</td>
+        <td style="width:40%">${escHtml(d.tinNum||'')}</td>
       </tr>
       <tr>
-        <td class="field-label">ID Number</td><td>${d.workerIdNum||''}</td>
-        <td class="field-label">PhilHealth</td><td>${d.phNum||''}</td>
+        <td class="field-label">ID Number</td><td>${escHtml(d.workerIdNum||'')}</td>
+        <td class="field-label">PhilHealth</td><td>${escHtml(d.phNum||'')}</td>
       </tr>
       <tr>
-        <td class="field-label">Job Title</td><td>${d.jobTitle||''}</td>
-        <td class="field-label">SSS</td><td>${d.ssNum||''}</td>
+        <td class="field-label">Job Title</td><td>${escHtml(d.jobTitle||'')}</td>
+        <td class="field-label">SSS</td><td>${escHtml(d.ssNum||'')}</td>
       </tr>
       <tr>
-        <td class="field-label">Department</td><td>${d.department||''}</td>
-        <td class="field-label">PAG IBIG</td><td>${d.pagibigNum||''}</td>
+        <td class="field-label">Department</td><td>${escHtml(d.department||'')}</td>
+        <td class="field-label">PAG IBIG</td><td>${escHtml(d.pagibigNum||'')}</td>
       </tr>
     </table>
 
@@ -3073,12 +3073,12 @@ function buildPayslipHTML(d) {
     <table style="margin-top:4px">
       <tr>
         <td style="padding:24px 10px 6px;text-align:center;width:33%">
-          <div style="border-top:1px solid #000;padding-top:4px">${d.workerName||''}</div>
+          <div style="border-top:1px solid #000;padding-top:4px">${escHtml(d.workerName||'')}</div>
           <div style="font-size:9px;color:#555">Acknowledged By</div>
         </td>
         <td style="padding:24px 10px 6px;width:34%"></td>
         <td style="padding:24px 10px 6px;text-align:center;width:33%">
-          <div style="border-top:1px solid #000;padding-top:4px">${d.preparedBy||''}</div>
+          <div style="border-top:1px solid #000;padding-top:4px">${escHtml(d.preparedBy||'')}</div>
           <div style="font-size:9px;color:#555">Prepared By</div>
         </td>
       </tr>
@@ -3145,8 +3145,8 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
             <thead><tr><th>Description</th><th>Amount</th><th>By</th><th>Status</th><th></th></tr></thead>
             <tbody>
               ${expenses.slice(0,10).map(e => `<tr>
-                <td>${e.description}</td><td>₱${fmt(e.amount)}</td>
-                <td>${e.submittedByName||'—'}</td>
+                <td>${escHtml(e.description)}</td><td>₱${fmt(e.amount)}</td>
+                <td>${escHtml(e.submittedByName||'—')}</td>
                 <td><span class="badge ${statusBadge(e.status)}">${e.status||'pending'}</span></td>
                 <td>${e.fileUrl?`<a href="${e.fileUrl}" target="_blank" class="btn-icon">📎</a>`:''}</td>
               </tr>`).join('')}
@@ -3305,16 +3305,16 @@ function renderBKQuoteList(container, currentUser, currentRole) {
     wrap.innerHTML = `<div class="item-list">${quotes.map(q=>`
       <div class="item-card bk-quote-item" data-id="${q.id}" style="cursor:pointer">
         <div class="item-top">
-          <div class="item-title">BK-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${q.clientName||'Unnamed'}</div>
+          <div class="item-title">BK-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${escHtml(q.clientName||'Unnamed')}</div>
           <span class="badge ${statusBadge(q.status)}">${q.status||'draft'}</span>
         </div>
         <div class="item-meta">
           <span>💰 ₱${fmt(q.total||0)}</span>
-          <span>📦 ${q.packageName||q.scope||'Custom'}</span>
-          <span>👤 ${q.agentName||'—'}</span>
+          <span>📦 ${escHtml(q.packageName||q.scope||'Custom')}</span>
+          <span>👤 ${escHtml(q.agentName||'—')}</span>
           ${q.createdAt?`<span>📅 ${new Date(q.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
         </div>
-        ${q.notes?`<div style="font-size:12px;color:var(--text-muted);margin-top:6px;white-space:pre-line">${q.notes.slice(0,80)}${q.notes.length>80?'…':''}</div>`:''}
+        ${q.notes?`<div style="font-size:12px;color:var(--text-muted);margin-top:6px;white-space:pre-line">${escHtml(q.notes.slice(0,80))}${q.notes.length>80?'…':''}</div>`:''}
       </div>`).join('')}</div>`;
 
     wrap.querySelectorAll('.bk-quote-item').forEach(item => {
@@ -3341,7 +3341,7 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
       <select data-i="${i}" data-f="category" style="padding:5px 6px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:12px">
         ${BK_CATEGORIES.map(c=>`<option ${c===l.category?'selected':''}>${c}</option>`).join('')}
       </select>
-      <input type="text" value="${l.description||''}" data-i="${i}" data-f="description" placeholder="Item description" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%"/>
+      <input type="text" value="${escHtml(l.description||'')}" data-i="${i}" data-f="description" placeholder="Item description" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%"/>
       <input type="number" value="${l.qty||1}" data-i="${i}" data-f="qty" min="1" style="padding:5px 6px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%"/>
       <select data-i="${i}" data-f="unit" style="padding:5px 4px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:11px">
         ${['pc','set','lm','sqm','hr','lot','unit'].map(u=>`<option ${u===l.unit?'selected':''}>${u}</option>`).join('')}
@@ -3352,11 +3352,11 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
 
   openModal(existing ? `Edit Quote BK-${existing.quoteNumber||''}` : '🍽️ New Barro Kitchens Quote', `
     <div class="form-row">
-      <div class="form-group"><label>Client Name</label><input id="bkq-client" value="${existing?.clientName||''}"/></div>
-      <div class="form-group"><label>Client Contact</label><input id="bkq-contact" value="${existing?.clientContact||''}"/></div>
+      <div class="form-group"><label>Client Name</label><input id="bkq-client" value="${escHtml(existing?.clientName||'')}"/></div>
+      <div class="form-group"><label>Client Contact</label><input id="bkq-contact" value="${escHtml(existing?.clientContact||'')}"/></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Client Address</label><input id="bkq-address" value="${existing?.clientAddress||''}"/></div>
+      <div class="form-group"><label>Client Address</label><input id="bkq-address" value="${escHtml(existing?.clientAddress||'')}"/></div>
       <div class="form-group"><label>Scope / Package</label>
         <select id="bkq-scope" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
           ${['Custom Quote','Basic Kitchen Package','Standard Kitchen Package','Premium Kitchen Package','Full Kitchen Remodel','Commercial Kitchen','Supply Only'].map(s=>`<option ${s===(existing?.scope||'Custom Quote')?'selected':''}>${s}</option>`).join('')}
@@ -3399,7 +3399,7 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
     <button class="btn-secondary btn-sm" id="bkq-add-line" style="margin-top:6px;margin-bottom:8px">+ Add Line</button>
     <div id="bkq-totals" class="quote-total" style="text-align:right;font-size:13px;line-height:1.8"></div>
     <hr class="divider"/>
-    <div class="form-group"><label>Notes / Terms</label><textarea id="bkq-notes" rows="3" placeholder="Payment terms, delivery notes, etc.">${existing?.notes||''}</textarea></div>
+    <div class="form-group"><label>Notes / Terms</label><textarea id="bkq-notes" rows="3" placeholder="Payment terms, delivery notes, etc.">${escHtml(existing?.notes||'')}</textarea></div>
   `, `
     <button class="btn-secondary" id="bkq-print-btn">🖨 Print / PDF</button>
     <button class="btn-primary" id="bkq-save-btn">💾 Save Quote</button>
@@ -3557,9 +3557,9 @@ function printBKQuote(lines, q) {
   </div>
   <div class="client-box">
     <div class="client-label">Quote For</div>
-    <div class="client-name">${q.clientName||'—'}</div>
-    ${q.clientContact?`<div style="font-size:12px;margin-top:2px;color:#555">${q.clientContact}</div>`:''}
-    ${q.clientAddress?`<div style="font-size:12px;margin-top:2px;color:#555">📍 ${q.clientAddress}</div>`:''}
+    <div class="client-name">${escHtml(q.clientName||'—')}</div>
+    ${q.clientContact?`<div style="font-size:12px;margin-top:2px;color:#555">${escHtml(q.clientContact)}</div>`:''}
+    ${q.clientAddress?`<div style="font-size:12px;margin-top:2px;color:#555">📍 ${escHtml(q.clientAddress)}</div>`:''}
   </div>
   <table>
     <thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th class="text-right">Unit Price</th><th class="text-right">Amount</th></tr></thead>
@@ -3567,9 +3567,9 @@ function printBKQuote(lines, q) {
     ${Object.entries(byCategory).map(([cat,catLines])=>`
       <tr class="cat-header"><td colspan="5">${cat}</td></tr>
       ${catLines.map(l=>`<tr>
-        <td>${l.description||'—'}</td>
+        <td>${escHtml(l.description||'—')}</td>
         <td>${l.qty}</td>
-        <td>${l.unit||'pc'}</td>
+        <td>${escHtml(l.unit||'pc')}</td>
         <td class="text-right">₱${fmt(l.price)}</td>
         <td class="text-right">₱${fmt((parseFloat(l.qty)||0)*(parseFloat(l.price)||0))}</td>
       </tr>`).join('')}
@@ -3582,7 +3582,7 @@ function printBKQuote(lines, q) {
     ${vatR>0?`<tr><td>VAT (${vatR}%)</td><td class="text-right">₱${fmt(after*vatR/100)}</td></tr>`:''}
     <tr class="grand"><td>TOTAL</td><td class="text-right">₱${fmt(grand)}</td></tr>
   </table>
-  ${q.notes?`<div class="notes"><strong>Notes / Terms:</strong><br>${q.notes}</div>`:''}
+  ${q.notes?`<div class="notes"><strong>Notes / Terms:</strong><br>${escHtml(q.notes)}</div>`:''}
   <div class="footer">Barro Kitchens · Barro Industries OPC · This quotation is valid until ${q.validUntil||'the stated date'}</div>
   <script>window.print();<\/script></body></html>`);
 }
@@ -3619,10 +3619,10 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
         : quotes.map(q=>`
         <div class="item-card" style="display:flex;align-items:center;gap:12px">
           <div style="flex:1">
-            <div class="item-title" style="font-size:13px">BK-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${q.clientName||'Unnamed'}</div>
+            <div class="item-title" style="font-size:13px">BK-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${escHtml(q.clientName||'Unnamed')}</div>
             <div class="item-meta" style="margin-top:4px">
-              <span>${q.scope||'Custom'}</span>
-              <span>${q.agentName||'—'}</span>
+              <span>${escHtml(q.scope||'Custom')}</span>
+              <span>${escHtml(q.agentName||'—')}</span>
               ${q.date?`<span>${q.date}</span>`:''}
             </div>
           </div>
@@ -3773,11 +3773,11 @@ async function renderProjects(container, currentUser, currentRole) {
         : projects.map(p => `
           <div class="item-card" data-id="${p.id}">
             <div class="item-top">
-              <div class="item-title">${p.name}</div>
+              <div class="item-title">${escHtml(p.name)}</div>
               <span class="badge ${statusBadge(p.status)}">${p.status||'active'}</span>
             </div>
             <div class="item-meta">
-              ${p.client?`<span>👤 ${p.client}</span>`:''}
+              ${p.client?`<span>👤 ${escHtml(p.client)}</span>`:''}
               ${p.dueDate?`<span>📅 ${p.dueDate}</span>`:''}
             </div>
           </div>`).join('')}
@@ -3889,12 +3889,12 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           ${tickets.filter(t=>t.status==='open').slice(0,5).map(t=>`
             <div class="item-card">
               <div class="item-top">
-                <div class="item-title">${t.title||'Untitled'}</div>
+                <div class="item-title">${escHtml(t.title||'Untitled')}</div>
                 <span class="badge ${t.priority==='high'?'badge-red':t.priority==='medium'?'badge-orange':'badge-gray'}">${t.priority||'low'}</span>
               </div>
               <div class="item-meta">
-                <span>${t.category||'General'}</span>
-                ${t.requestedBy?`<span>👤 ${t.requestedBy}</span>`:''}
+                <span>${escHtml(t.category||'General')}</span>
+                ${t.requestedBy?`<span>👤 ${escHtml(t.requestedBy)}</span>`:''}
                 ${t.createdAt?`<span>${new Date(t.createdAt.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric'})}</span>`:''}
               </div>
             </div>`).join('') || '<div class="empty-state" style="padding:16px"><div class="empty-icon">✅</div><p>No open tickets</p></div>'}
@@ -3926,14 +3926,14 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
       list.innerHTML = shown.map(t=>`
         <div class="item-card it-ticket-card" data-id="${t.id}" style="cursor:pointer">
           <div class="item-top">
-            <div class="item-title">${t.title||'Untitled'}</div>
+            <div class="item-title">${escHtml(t.title||'Untitled')}</div>
             <span class="badge ${t.status==='open'?'badge-orange':t.status==='in-progress'?'badge-blue':t.status==='resolved'?'badge-green':'badge-gray'}">${t.status||'open'}</span>
           </div>
           <div class="item-meta">
-            <span class="badge badge-blue" style="font-size:10px">${t.category||'General'}</span>
+            <span class="badge badge-blue" style="font-size:10px">${escHtml(t.category||'General')}</span>
             <span class="badge ${t.priority==='high'?'badge-red':t.priority==='medium'?'badge-orange':'badge-gray'}" style="font-size:10px">${t.priority||'low'} priority</span>
-            ${t.requestedBy?`<span>👤 ${t.requestedBy}</span>`:''}
-            ${t.assignedTo?`<span>🔧 ${t.assignedTo}</span>`:''}
+            ${t.requestedBy?`<span>👤 ${escHtml(t.requestedBy)}</span>`:''}
+            ${t.assignedTo?`<span>🔧 ${escHtml(t.assignedTo)}</span>`:''}
           </div>
         </div>`).join('');
       list.querySelectorAll('.it-ticket-card').forEach(card => {
@@ -3957,7 +3957,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           </div>
         </div>
         <div class="form-group"><label>Description</label><textarea id="it-t-desc" rows="4" placeholder="What's happening? Include any error messages."></textarea></div>
-        <div class="form-group"><label>Requested By</label><input id="it-t-req" value="${currentUser.displayName||''}"/></div>
+        <div class="form-group"><label>Requested By</label><input id="it-t-req" value="${escHtml(currentUser.displayName||'')}"/></div>
       `, `<button class="btn-primary" id="save-it-ticket-btn">Submit Ticket</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
       document.getElementById('save-it-ticket-btn').addEventListener('click', async () => {
         const title = document.getElementById('it-t-title').value.trim();
@@ -3995,10 +3995,10 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         <tbody id="it-asset-tbody">
           ${!assets.length?`<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px">No assets recorded</td></tr>`
             :assets.map(a=>`<tr>
-              <td>${a.name||'—'}</td>
-              <td>${a.type||'—'}</td>
-              <td><code style="font-size:11px">${a.serial||'—'}</code></td>
-              <td>${a.assignedTo||'—'}</td>
+              <td>${escHtml(a.name||'—')}</td>
+              <td>${escHtml(a.type||'—')}</td>
+              <td><code style="font-size:11px">${escHtml(a.serial||'—')}</code></td>
+              <td>${escHtml(a.assignedTo||'—')}</td>
               <td><span class="badge ${a.status==='active'?'badge-green':a.status==='maintenance'?'badge-orange':'badge-gray'}">${a.status||'active'}</span></td>
               <td>${a.purchasedDate||'—'}</td>
               ${canEdit?`<td><button class="btn-icon edit-asset-btn" data-id="${a.id}"><i data-lucide="pencil" style="width:14px;height:14px"></i></button></td>`:''}
@@ -4047,8 +4047,8 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           if (!asset) return;
           openModal('Edit Asset', `
             <div class="form-row">
-              <div class="form-group"><label>Asset Name</label><input id="ea-name" value="${asset.name||''}"/></div>
-              <div class="form-group"><label>Assigned To</label><input id="ea-assigned" value="${asset.assignedTo||''}"/></div>
+              <div class="form-group"><label>Asset Name</label><input id="ea-name" value="${escHtml(asset.name||'')}"/></div>
+              <div class="form-group"><label>Assigned To</label><input id="ea-assigned" value="${escHtml(asset.assignedTo||'')}"/></div>
             </div>
             <div class="form-group"><label>Status</label>
               <select id="ea-status">
@@ -4057,7 +4057,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
                 <option value="retired" ${asset.status==='retired'?'selected':''}>Retired</option>
               </select>
             </div>
-            <div class="form-group"><label>Notes</label><textarea id="ea-notes" rows="2">${asset.notes||''}</textarea></div>
+            <div class="form-group"><label>Notes</label><textarea id="ea-notes" rows="2">${escHtml(asset.notes||'')}</textarea></div>
           `, `<button class="btn-primary" id="upd-asset-btn">Update</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
           document.getElementById('upd-asset-btn').addEventListener('click', async () => {
             await db.collection('it_assets').doc(asset.id).update({
@@ -4093,10 +4093,10 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
               const isExp  = expiry && expiry < new Date();
               const isSoon = expiry && !isExp && (expiry - new Date()) < 30*24*3600*1000;
               return `<tr>
-                <td>${s.name||'—'}</td>
-                <td>${s.vendor||'—'}</td>
-                <td>${s.licenseType||'—'}</td>
-                <td><code style="font-size:10px">${s.licenseKey||'—'}</code></td>
+                <td>${escHtml(s.name||'—')}</td>
+                <td>${escHtml(s.vendor||'—')}</td>
+                <td>${escHtml(s.licenseType||'—')}</td>
+                <td><code style="font-size:10px">${escHtml(s.licenseKey||'—')}</code></td>
                 <td>${s.seats||'—'}</td>
                 <td style="color:${isExp?'var(--danger)':isSoon?'#FF9F0A':'inherit'}">${s.expiryDate||'—'}${isExp?' ⚠️':isSoon?' 🔔':''}</td>
                 <td><span class="badge ${s.status==='active'?'badge-green':s.status==='expired'?'badge-red':'badge-gray'}">${s.status||'active'}</span></td>
@@ -4158,13 +4158,13 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         <tbody>
           ${!records.length?`<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px">No access records</td></tr>`
             :records.map(r=>`<tr>
-              <td>${r.employee||'—'}</td>
-              <td>${r.system||'—'}</td>
-              <td><span class="badge badge-blue">${r.level||'Read'}</span></td>
+              <td>${escHtml(r.employee||'—')}</td>
+              <td>${escHtml(r.system||'—')}</td>
+              <td><span class="badge badge-blue">${escHtml(r.level||'Read')}</span></td>
               <td><span class="badge ${r.status==='active'?'badge-green':'badge-gray'}">${r.status||'active'}</span></td>
-              <td>${r.grantedBy||'—'}</td>
+              <td>${escHtml(r.grantedBy||'—')}</td>
               <td>${r.date||'—'}</td>
-              ${canEdit?`<td><button class="btn-sm btn-danger revoke-access-btn" data-id="${r.id}" data-emp="${r.employee||'this user'}" style="font-size:11px;padding:3px 8px">Revoke</button></td>`:''}
+              ${canEdit?`<td><button class="btn-sm btn-danger revoke-access-btn" data-id="${r.id}" data-emp="${escHtml(r.employee||'this user')}" style="font-size:11px;padding:3px 8px">Revoke</button></td>`:''}
             </tr>`).join('')}
         </tbody>
       </table></div></div>`;
@@ -4219,10 +4219,10 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           :notes.map(n=>`
             <div class="card">
               <div class="card-header">
-                <h3>🌐 ${n.title||'Untitled'}</h3>
-                <span class="badge badge-blue" style="font-size:10px">${n.type||'General'}</span>
+                <h3>🌐 ${escHtml(n.title||'Untitled')}</h3>
+                <span class="badge badge-blue" style="font-size:10px">${escHtml(n.type||'General')}</span>
               </div>
-              <div style="padding:0 16px 16px;font-size:13px;white-space:pre-wrap;color:var(--text)">${n.content||''}</div>
+              <div style="padding:0 16px 16px;font-size:13px;white-space:pre-wrap;color:var(--text)">${escHtml(n.content||'')}</div>
               ${n.updatedAt?`<div style="padding:0 16px 8px;font-size:11px;color:var(--text-muted)">Updated ${new Date(n.updatedAt.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'})}</div>`:''}
             </div>`).join('')}
       </div>`;
@@ -4266,10 +4266,10 @@ function openITTicketModal(ticket, currentUser, canEdit, onRefresh) {
       <div class="item-meta" style="gap:8px;margin-bottom:8px">
         <span class="badge ${ticket.status==='open'?'badge-orange':ticket.status==='in-progress'?'badge-blue':ticket.status==='resolved'?'badge-green':'badge-gray'}">${ticket.status||'open'}</span>
         <span class="badge ${ticket.priority==='high'?'badge-red':ticket.priority==='medium'?'badge-orange':'badge-gray'}">${ticket.priority||'low'} priority</span>
-        <span class="badge badge-blue" style="font-size:10px">${ticket.category||'General'}</span>
+        <span class="badge badge-blue" style="font-size:10px">${escHtml(ticket.category||'General')}</span>
       </div>
-      ${ticket.description?`<p style="font-size:13px;margin-bottom:12px;white-space:pre-wrap">${ticket.description}</p>`:''}
-      ${ticket.requestedBy?`<div style="font-size:12px;color:var(--text-muted)">Requested by: ${ticket.requestedBy}</div>`:''}
+      ${ticket.description?`<p style="font-size:13px;margin-bottom:12px;white-space:pre-wrap">${escHtml(ticket.description)}</p>`:''}
+      ${ticket.requestedBy?`<div style="font-size:12px;color:var(--text-muted)">Requested by: ${escHtml(ticket.requestedBy)}</div>`:''}
     </div>
     ${canEdit?`
       <div class="form-row" style="margin-top:12px">
@@ -4281,9 +4281,9 @@ function openITTicketModal(ticket, currentUser, canEdit, onRefresh) {
             <option value="closed" ${ticket.status==='closed'?'selected':''}>Closed</option>
           </select>
         </div>
-        <div class="form-group"><label>Assigned To (IT)</label><input id="it-t-assign" value="${ticket.assignedTo||''}"/></div>
+        <div class="form-group"><label>Assigned To (IT)</label><input id="it-t-assign" value="${escHtml(ticket.assignedTo||'')}"/></div>
       </div>
-      <div class="form-group"><label>Resolution Notes</label><textarea id="it-t-res" rows="3">${ticket.resolutionNotes||''}</textarea></div>
+      <div class="form-group"><label>Resolution Notes</label><textarea id="it-t-res" rows="3">${escHtml(ticket.resolutionNotes||'')}</textarea></div>
     `:'<p style="font-size:12px;color:var(--text-muted)">Only IT staff can update this ticket.</p>'}
   `, canEdit?`<button class="btn-primary" id="upd-ticket-btn">Update Ticket</button><button class="btn-secondary" onclick="closeModal()">Close</button>`
     :`<button class="btn-secondary" onclick="closeModal()">Close</button>`);
@@ -4417,7 +4417,7 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
             <div class="card-header" style="gap:10px">
               <div style="font-size:28px;flex-shrink:0">📁</div>
               <div style="flex:1;min-width:0">
-                <div style="font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${clientName}</div>
+                <div style="font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(clientName)}</div>
                 <div style="font-size:11px;color:var(--text-muted)">${qs.length} file${qs.length!==1?'s':''} · ₱${total.toLocaleString()} · Last: ${latestDate}</div>
               </div>
             </div>
@@ -4430,8 +4430,8 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
                   <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
                     <span style="font-size:18px">📄</span>
                     <div style="flex:1;min-width:0">
-                      <div style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${q.quoteNumber||q.id.slice(-8)}</div>
-                      <div style="font-size:11px;color:var(--text-muted)">${ts}${isPrivileged&&q.agentName?' · '+q.agentName:''}</div>
+                      <div style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(q.quoteNumber||q.id.slice(-8))}</div>
+                      <div style="font-size:11px;color:var(--text-muted)">${ts}${isPrivileged&&q.agentName?' · '+escHtml(q.agentName):''}</div>
                     </div>
                     <div style="text-align:right;flex-shrink:0">
                       <div style="font-size:12px;font-weight:700">₱${(q.total||q.grandTotal||0).toLocaleString()}</div>
@@ -4478,11 +4478,11 @@ async function renderBSDashboard(container, currentUser, currentRole) {
           `<div class="table-wrap"><table class="data-table">
             <thead><tr><th>Quote #</th><th>Client</th><th>Total</th><th>Status</th><th>Agent</th></tr></thead>
             <tbody>${quotes.slice(0,8).map(q=>`<tr>
-              <td><code>${q.quoteNumber||q.id.slice(-8)}</code></td>
-              <td>${q.clientName||'—'}</td>
+              <td><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code></td>
+              <td>${escHtml(q.clientName||'—')}</td>
               <td>₱${fmt(q.total)}</td>
               <td><span class="badge ${statusBadge(q.approvalStatus||q.status)}">${q.approvalStatus||q.status||'draft'}</span></td>
-              <td>${q.agentName||'—'}</td>
+              <td>${escHtml(q.agentName||'—')}</td>
             </tr>`).join('')}</tbody>
           </table></div>`}
       </div>
@@ -4804,9 +4804,9 @@ function renderBSQuoteBuilder(container, currentUser, currentRole) {
     const byCat = {};
     matches.forEach(p => { if(!byCat[p.cat]) byCat[p.cat]=[]; byCat[p.cat].push(p); });
     dd.innerHTML = Object.entries(byCat).map(([cat,prods])=>
-      `<div class="bs-sd-group">${cat}</div>` +
-      prods.map(p=>`<div class="bs-sd-item" data-code="${p.code}" data-name="${p.name}" data-unit="${p.unit}" data-rate="${p.baseRate}">
-        ${p.name} <span class="bs-sd-price">₱${p.baseRate.toLocaleString()}/${p.unit}</span></div>`).join('')
+      `<div class="bs-sd-group">${escHtml(cat)}</div>` +
+      prods.map(p=>`<div class="bs-sd-item" data-code="${escHtml(p.code)}" data-name="${escHtml(p.name)}" data-unit="${escHtml(p.unit)}" data-rate="${p.baseRate}">
+        ${escHtml(p.name)} <span class="bs-sd-price">₱${p.baseRate.toLocaleString()}/${escHtml(p.unit)}</span></div>`).join('')
     ).join('');
     dd.classList.add('open');
     dd.querySelectorAll('.bs-sd-item').forEach(item => {
@@ -4856,7 +4856,7 @@ function renderBSQuoteBuilder(container, currentUser, currentRole) {
     Object.entries(catGroups).forEach(([cat, lines]) => {
       // category header row
       const catTr = document.createElement('tr'); catTr.className='bs-cat-row';
-      catTr.innerHTML=`<td colspan="8">${cat}</td>`;
+      catTr.innerHTML=`<td colspan="8">${escHtml(cat)}</td>`;
       tbody.appendChild(catTr);
       let catSubtotal = 0;
       lines.forEach(line => {
@@ -4867,10 +4867,10 @@ function renderBSQuoteBuilder(container, currentUser, currentRole) {
         const dimStr = [line.w?`W${line.w}`:null, line.d?`D${line.d}`:null, line.h?`H${line.h}`:null].filter(Boolean).join(' × ');
         tr.innerHTML = `
           <td>${bsRowCount}</td>
-          <td><div contenteditable="true" class="bs-desc-edit" data-id="${line.id}">${line.name}</div>${line.notes?`<div style="font-size:11px;color:var(--text-muted);margin-top:1px" contenteditable="true">${line.notes}</div>`:''}</td>
+          <td><div contenteditable="true" class="bs-desc-edit" data-id="${line.id}">${escHtml(line.name)}</div>${line.notes?`<div style="font-size:11px;color:var(--text-muted);margin-top:1px" contenteditable="true">${escHtml(line.notes)}</div>`:''}</td>
           <td style="font-size:11px">${dimStr||'—'}</td>
           <td style="text-align:center"><input type="number" class="bs-qty-inp" value="${line.qty}" min="1" data-id="${line.id}" style="width:50px;text-align:center;border:1.5px solid var(--border);border-radius:4px;padding:3px;font-size:12px"/></td>
-          <td style="text-align:center">${line.unit}</td>
+          <td style="text-align:center">${escHtml(line.unit)}</td>
           <td style="text-align:right">₱${fmt(line.unitPrice)}</td>
           <td style="text-align:right">₱${fmt(line.amount)}</td>
           <td class="no-print"><button class="btn-icon" style="color:#c62828;font-size:15px" data-del="${line.id}">✕</button></td>
@@ -4887,7 +4887,7 @@ function renderBSQuoteBuilder(container, currentUser, currentRole) {
       });
       // subtotal row
       const stTr = document.createElement('tr'); stTr.className='bs-subtotal-row';
-      stTr.innerHTML=`<td colspan="6">Subtotal — ${cat}</td><td>₱${fmt(catSubtotal)}</td><td class="no-print"></td>`;
+      stTr.innerHTML=`<td colspan="6">Subtotal — ${escHtml(cat)}</td><td>₱${fmt(catSubtotal)}</td><td class="no-print"></td>`;
       tbody.appendChild(stTr);
     });
 
@@ -5069,19 +5069,19 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
           const badge = status==='filed'||status==='approved'?'badge-green':status==='pending_approval'||status==='pending_review'||status==='sent'?'badge-orange':status==='rejected'?'badge-red':'badge-gray';
           const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
           return `<tr>
-            <td><code>${q.quoteNumber||q.id.slice(-8)}</code></td>
-            <td><strong>${q.clientName||'—'}</strong><div style="font-size:11px;color:var(--text-muted)">${q.clientCompany||''}</div></td>
+            <td><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code></td>
+            <td><strong>${escHtml(q.clientName||'—')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(q.clientCompany||'')}</div></td>
             <td>₱${fmt(q.total||q.grandTotal||0)}</td>
-            <td>${q.agentName||q.createdByName||'—'}</td>
+            <td>${escHtml(q.agentName||q.createdByName||'—')}</td>
             <td>
               <span class="badge ${badge}">${status}</span>
               <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${ts}</div>
             </td>
             ${canSeeAll?`<td style="white-space:nowrap;display:flex;gap:6px">
               ${(status==='pending_approval'||status==='pending_review'||status==='sent')?`
-                <button class="btn-primary btn-sm bs-approve-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${q.clientName||''}" data-qno="${q.quoteNumber||''}">✅ Approve</button>
-                <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${q.clientName||''}" data-qno="${q.quoteNumber||''}">❌ Reject</button>
-                <button class="btn-secondary btn-sm bs-edit-return-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${q.clientName||''}" data-qno="${q.quoteNumber||''}">✎ Edit &amp; Return</button>
+                <button class="btn-primary btn-sm bs-approve-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">✅ Approve</button>
+                <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">❌ Reject</button>
+                <button class="btn-secondary btn-sm bs-edit-return-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">✎ Edit &amp; Return</button>
               `:(status==='filed'||status==='approved')?'<span style="color:var(--success);font-size:12px">✓ Filed</span>':'<span style="color:var(--danger);font-size:12px">Rejected</span>'}
             </td>`:''}
           </tr>`;
@@ -5163,13 +5163,13 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
           <input id="pres-company" type="text" value="${(q.clientCompany||'').replace(/"/g,'&quot;')}" style="width:100%"/>
         </div>
         <div class="form-group"><label>Scope / Description</label>
-          <textarea id="pres-scope" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical">${q.scope||q.description||''}</textarea>
+          <textarea id="pres-scope" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical">${escHtml(q.scope||q.description||'')}</textarea>
         </div>
         <div class="form-group"><label>Adjusted Total (₱)</label>
           <input id="pres-total" type="number" value="${q.total||q.grandTotal||0}" style="width:100%"/>
         </div>
         <div class="form-group"><label>President's Notes / Feedback</label>
-          <textarea id="pres-notes" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Optional notes for the submitter…">${q.presidentNotes||''}</textarea>
+          <textarea id="pres-notes" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Optional notes for the submitter…">${escHtml(q.presidentNotes||'')}</textarea>
         </div>
       `, `
         <button class="btn-success" id="pres-approve-edit-btn">✅ Save &amp; Approve</button>
@@ -5277,8 +5277,8 @@ async function renderBSClientData(container, currentUser, currentRole) {
             <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
               <div style="width:38px;height:38px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-weight:800;color:white;font-size:15px;flex-shrink:0">${(cl.name[0]||'?').toUpperCase()}</div>
               <div style="min-width:0">
-                <div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${cl.name}</div>
-                ${cl.company?`<div style="font-size:11px;color:var(--text-muted)">${cl.company}</div>`:''}
+                <div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(cl.name)}</div>
+                ${cl.company?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(cl.company)}</div>`:''}
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
@@ -5289,10 +5289,10 @@ async function renderBSClientData(container, currentUser, currentRole) {
           </div>
           <div class="card-body" style="display:none;padding-top:0">
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-bottom:12px;padding-top:10px;border-top:1px solid var(--border)">
-              ${cl.address?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">Address</div><div style="font-size:13px;margin-top:2px">${cl.address}</div></div>`:''}
-              ${cl.contact?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">Contact</div><div style="font-size:13px;margin-top:2px">${cl.contact}</div></div>`:''}
-              ${cl.email?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">Email</div><div style="font-size:13px;margin-top:2px">${cl.email}</div></div>`:''}
-              ${cl.tin?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">TIN</div><div style="font-size:13px;margin-top:2px">${cl.tin}</div></div>`:''}
+              ${cl.address?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">Address</div><div style="font-size:13px;margin-top:2px">${escHtml(cl.address)}</div></div>`:''}
+              ${cl.contact?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">Contact</div><div style="font-size:13px;margin-top:2px">${escHtml(cl.contact)}</div></div>`:''}
+              ${cl.email?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">Email</div><div style="font-size:13px;margin-top:2px">${escHtml(cl.email)}</div></div>`:''}
+              ${cl.tin?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">TIN</div><div style="font-size:13px;margin-top:2px">${escHtml(cl.tin)}</div></div>`:''}
             </div>
             <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px;margin-bottom:8px">Quotation History</div>
             <div class="table-wrap"><table class="data-table">
@@ -5302,11 +5302,11 @@ async function renderBSClientData(container, currentUser, currentRole) {
                 const status = q.status||q.approvalStatus||'draft';
                 const badge = status==='filed'||status==='approved'?'badge-green':status==='pending_approval'||status==='pending_review'||status==='sent'?'badge-orange':status==='rejected'?'badge-red':'badge-gray';
                 return `<tr>
-                  <td><code>${q.quoteNumber||q.id.slice(-8)}</code></td>
+                  <td><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code></td>
                   <td style="font-weight:600">₱${(q.total||q.grandTotal||0).toLocaleString()}</td>
                   <td><span class="badge ${badge}">${status}</span></td>
                   <td style="color:var(--text-muted);font-size:11px">${ts}</td>
-                  ${isPrivileged?`<td style="font-size:12px;color:var(--text-muted)">${q.agentName||q.createdByName||'—'}</td>`:''}
+                  ${isPrivileged?`<td style="font-size:12px;color:var(--text-muted)">${escHtml(q.agentName||q.createdByName||'—')}</td>`:''}
                 </tr>`;
               }).join('')}</tbody>
             </table></div>
@@ -5362,12 +5362,12 @@ function renderQuoteList(container, currentUser, currentRole, brand) {
     wrap.innerHTML = `<div class="item-list">${quotes.map(q => `
       <div class="item-card quote-item" data-id="${q.id}">
         <div class="item-top">
-          <div class="item-title">${brand==='brilliant-steel'?'BS':'Q'}-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${q.clientName||'Unnamed'}</div>
+          <div class="item-title">${brand==='brilliant-steel'?'BS':'Q'}-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${escHtml(q.clientName||'Unnamed')}</div>
           <span class="badge ${statusBadge(q.status)}">${q.status||'draft'}</span>
         </div>
         <div class="item-meta">
           <span>💰 ₱${fmt(q.total)}</span>
-          <span>👤 ${q.agentName||'—'}</span>
+          <span>👤 ${escHtml(q.agentName||'—')}</span>
           ${q.createdAt?`<span>📅 ${new Date(q.createdAt.toDate()).toLocaleDateString()}</span>`:''}
         </div>
       </div>`).join('')}</div>`;
@@ -5389,8 +5389,8 @@ function openQuoteEditor(currentUser, currentRole, brand, collection, existing, 
 
   openModal(existing ? `Edit Quote` : 'New Quote', `
     <div class="form-row">
-      <div class="form-group"><label>Client Name</label><input id="q-client" value="${existing?.clientName||''}"/></div>
-      <div class="form-group"><label>Client Email</label><input id="q-client-email" type="email" value="${existing?.clientEmail||''}"/></div>
+      <div class="form-group"><label>Client Name</label><input id="q-client" value="${escHtml(existing?.clientName||'')}"/></div>
+      <div class="form-group"><label>Client Email</label><input id="q-client-email" type="email" value="${escHtml(existing?.clientEmail||'')}"/></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>Quote Date</label><input id="q-date" type="date" value="${existing?.date||today()}"/></div>
@@ -5406,7 +5406,7 @@ function openQuoteEditor(currentUser, currentRole, brand, collection, existing, 
         <option>General</option>
       </select>
     </div>`:''}
-    <div class="form-group"><label>Notes</label><textarea id="q-notes" rows="2">${existing?.notes||''}</textarea></div>
+    <div class="form-group"><label>Notes</label><textarea id="q-notes" rows="2">${escHtml(existing?.notes||'')}</textarea></div>
     <hr class="divider"/>
     <div class="line-items-header"><span>Description</span><span>Qty</span><span>Unit Price</span><span></span></div>
     <div id="q-lines"></div>
@@ -5430,7 +5430,7 @@ function openQuoteEditor(currentUser, currentRole, brand, collection, existing, 
     const cont = document.getElementById('q-lines');
     cont.innerHTML = lines.map((l,i) => `
       <div class="line-item-row">
-        <input type="text" value="${l.description}" data-i="${i}" data-f="description" placeholder="Description"/>
+        <input type="text" value="${escHtml(l.description)}" data-i="${i}" data-f="description" placeholder="Description"/>
         <input type="number" value="${l.qty}" data-i="${i}" data-f="qty" min="1"/>
         <input type="number" value="${l.price}" data-i="${i}" data-f="price" min="0" step="0.01"/>
         <button class="btn-icon" data-rm="${i}">🗑</button>
@@ -5490,12 +5490,12 @@ function printQuote(lines, q) {
   <div class="logo">Barro Industries</div>
   <p style="margin:4px 0;font-size:12px;color:#666">Professional Kitchen, Steel & Engineering Solutions</p>
   <hr style="margin:14px 0;border:none;border-top:1px solid #eee"/>
-  <p><strong>Quote for:</strong> ${q?.clientName||'Client'} &nbsp;&nbsp; <strong>Date:</strong> ${q?.date||today()}</p>
+  <p><strong>Quote for:</strong> ${escHtml(q?.clientName||'Client')} &nbsp;&nbsp; <strong>Date:</strong> ${q?.date||today()}</p>
   <table><tr><th>Description</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr>
-  ${lines.map(l=>`<tr><td>${l.description}</td><td>${l.qty}</td><td>₱${fmt(l.price)}</td><td>₱${fmt(l.qty*l.price)}</td></tr>`).join('')}
+  ${lines.map(l=>`<tr><td>${escHtml(l.description)}</td><td>${l.qty}</td><td>₱${fmt(l.price)}</td><td>₱${fmt(l.qty*l.price)}</td></tr>`).join('')}
   </table>
   <div class="total">Total: ₱${fmt(total)}</div>
-  <div class="footer">Valid until: ${q?.validUntil||'N/A'} · ${q?.notes||''}</div>
+  <div class="footer">Valid until: ${q?.validUntil||'N/A'} · ${escHtml(q?.notes||'')}</div>
   <script>window.print();<\/script></body></html>`);
 }
 
@@ -5587,31 +5587,31 @@ window.renderApprovals = async function(currentUser) {
           ${allPending.map(item => `
           <div class="item-card pending-req-card" data-type="${item.type}" data-id="${item.id}" style="cursor:default">
             <div class="item-top">
-              <div class="item-title">${item.icon} ${item.name}</div>
+              <div class="item-title">${item.icon} ${escHtml(item.name)}</div>
               <span class="badge badge-warn">Pending</span>
             </div>
             <div class="item-meta" style="margin-top:4px">
-              <span class="badge badge-blue" style="font-size:10px">${item.label}</span>
-              ${item.detail?`<span style="font-size:12px;color:var(--text-muted)">${item.detail}</span>`:''}
+              <span class="badge badge-blue" style="font-size:10px">${escHtml(item.label)}</span>
+              ${item.detail?`<span style="font-size:12px;color:var(--text-muted)">${escHtml(item.detail)}</span>`:''}
               ${item.ts?`<span style="font-size:11px;color:var(--text-muted)">${new Date(item.ts.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>`:''}
             </div>
             <div style="display:flex;gap:8px;margin-top:10px" class="req-actions">
               ${item.type==='signup'?`
-                <button class="btn-success btn-sm sg-approve-btn" data-id="${item.id}" data-name="${item.name}" data-email="${item.email||''}" data-phone="${item.phone||''}">✓ Approve</button>
-                <button class="btn-danger btn-sm sg-reject-btn" data-id="${item.id}" data-name="${item.name}">✗ Reject</button>
+                <button class="btn-success btn-sm sg-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}" data-email="${escHtml(item.email||'')}" data-phone="${escHtml(item.phone||'')}">✓ Approve</button>
+                <button class="btn-danger btn-sm sg-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✗ Reject</button>
               `:item.type==='attendance'?`
-                <button class="btn-success btn-sm at-approve-btn" data-id="${item.id}" data-name="${item.name}">✓ Approve</button>
-                <button class="btn-danger btn-sm at-deny-btn" data-id="${item.id}" data-name="${item.name}">✗ Deny</button>
+                <button class="btn-success btn-sm at-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✓ Approve</button>
+                <button class="btn-danger btn-sm at-deny-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✗ Deny</button>
               `:item.type==='ca'?`
-                <button class="btn-success btn-sm ca-approve-btn" data-id="${item.id}" data-name="${item.name}" data-amount="${item.amount||0}" data-uid="${item.userId||''}">✓ Approve CA</button>
-                <button class="btn-danger btn-sm ca-reject-btn" data-id="${item.id}" data-name="${item.name}">✗ Reject</button>
+                <button class="btn-success btn-sm ca-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}" data-amount="${item.amount||0}" data-uid="${item.userId||''}">✓ Approve CA</button>
+                <button class="btn-danger btn-sm ca-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✗ Reject</button>
               `:item.type==='review-task'?`
                 <button class="btn-primary btn-sm rt-view-btn" data-id="${item.id}">👁 View Task</button>
-                <button class="btn-success btn-sm rt-approve-btn" data-id="${item.id}" data-name="${item.name}">✓ Approve</button>
-                <button class="btn-danger btn-sm rt-reject-btn" data-id="${item.id}" data-name="${item.name}">✗ Send Back</button>
+                <button class="btn-success btn-sm rt-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✓ Approve</button>
+                <button class="btn-danger btn-sm rt-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✗ Send Back</button>
               `:item.type==='finance-req'?`
-                <button class="btn-success btn-sm fr-approve-btn" data-id="${item.id}" data-hist-id="${item.historyId||''}" data-name="${item.userName||''}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">✓ Approve Deletion</button>
-                <button class="btn-danger btn-sm fr-deny-btn" data-id="${item.id}" data-name="${item.userName||''}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">✗ Deny</button>
+                <button class="btn-success btn-sm fr-approve-btn" data-id="${item.id}" data-hist-id="${item.historyId||''}" data-name="${escHtml(item.userName||'')}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">✓ Approve Deletion</button>
+                <button class="btn-danger btn-sm fr-deny-btn" data-id="${item.id}" data-name="${escHtml(item.userName||'')}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">✗ Deny</button>
               `:`
                 <button class="btn-success btn-sm sub-approve-btn" data-id="${item.id}">✓ Approve</button>
                 <button class="btn-danger btn-sm sub-reject-btn" data-id="${item.id}">✗ Reject</button>
@@ -5720,18 +5720,18 @@ window.renderApprovals = async function(currentUser) {
       const reqCard = (r, showActions) => `
         <div class="item-card" style="cursor:default">
           <div class="item-top">
-            <div class="item-title">🗑 Delete Payroll Record — ${r.userName||'?'} (${r.month||'?'})</div>
+            <div class="item-title">🗑 Delete Payroll Record — ${escHtml(r.userName||'?')} (${r.month||'?'})</div>
             <span class="badge ${r.status==='pending'?'badge-warn':r.status==='approved'?'badge-green':'badge-red'}">${r.status==='pending'?'Pending':r.status==='approved'?'Approved':'Denied'}</span>
           </div>
           <div class="item-meta" style="margin-top:4px;flex-wrap:wrap;gap:6px">
             <span class="badge badge-blue" style="font-size:10px">Payroll Delete</span>
-            <span style="font-size:12px;color:var(--text-muted)">Requested by: <strong>${r.requestedByName||'?'}</strong></span>
-            ${r.reason?`<span style="font-size:12px;color:var(--text-muted)">Reason: ${r.reason}</span>`:''}
+            <span style="font-size:12px;color:var(--text-muted)">Requested by: <strong>${escHtml(r.requestedByName||'?')}</strong></span>
+            ${r.reason?`<span style="font-size:12px;color:var(--text-muted)">Reason: ${escHtml(r.reason)}</span>`:''}
             ${r.createdAt?`<span style="font-size:11px;color:var(--text-muted)">${new Date(r.createdAt.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'})}</span>`:''}
           </div>
           ${showActions?`<div style="display:flex;gap:8px;margin-top:10px">
-            <button class="btn-success btn-sm fr-approve-btn" data-id="${r.id}" data-hist-id="${r.historyId||''}" data-name="${r.userName||''}" data-month="${r.month||''}" data-req-by="${r.requestedBy||''}">✓ Approve Deletion</button>
-            <button class="btn-danger btn-sm fr-deny-btn" data-id="${r.id}" data-name="${r.userName||''}" data-month="${r.month||''}" data-req-by="${r.requestedBy||''}">✗ Deny</button>
+            <button class="btn-success btn-sm fr-approve-btn" data-id="${r.id}" data-hist-id="${r.historyId||''}" data-name="${escHtml(r.userName||'')}" data-month="${r.month||''}" data-req-by="${r.requestedBy||''}">✓ Approve Deletion</button>
+            <button class="btn-danger btn-sm fr-deny-btn" data-id="${r.id}" data-name="${escHtml(r.userName||'')}" data-month="${r.month||''}" data-req-by="${r.requestedBy||''}">✗ Deny</button>
           </div>`:''}
         </div>`;
 
@@ -5778,18 +5778,18 @@ window.renderApprovals = async function(currentUser) {
           const ts    = t.lastModifiedAt||t.createdAt;
           return `<div class="item-card" style="cursor:default">
             <div class="item-top">
-              <div class="item-title">📋 ${t.title||'Untitled Task'}</div>
+              <div class="item-title">📋 ${escHtml(t.title||'Untitled Task')}</div>
               <span class="badge badge-warn">For Review</span>
             </div>
             <div class="item-meta" style="margin-top:4px;gap:6px">
-              ${dept?`<span class="badge badge-blue" style="font-size:10px">${dept}</span>`:''}
-              <span style="font-size:12px;color:var(--text-muted)">by ${names}</span>
+              ${dept?`<span class="badge badge-blue" style="font-size:10px">${escHtml(dept)}</span>`:''}
+              <span style="font-size:12px;color:var(--text-muted)">by ${escHtml(names)}</span>
               ${ts?`<span style="font-size:11px;color:var(--text-muted)">${new Date(ts.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric'})}</span>`:''}
             </div>
             <div style="display:flex;gap:8px;margin-top:10px">
               <button class="btn-primary btn-sm rt-view-btn" data-id="${t.id}">👁 View</button>
-              <button class="btn-success btn-sm rt-approve-btn" data-id="${t.id}" data-name="${t.title||'Task'}">✓ Approve</button>
-              <button class="btn-danger btn-sm rt-reject-btn" data-id="${t.id}" data-name="${t.title||'Task'}">✗ Send Back</button>
+              <button class="btn-success btn-sm rt-approve-btn" data-id="${t.id}" data-name="${escHtml(t.title||'Task')}">✓ Approve</button>
+              <button class="btn-danger btn-sm rt-reject-btn" data-id="${t.id}" data-name="${escHtml(t.title||'Task')}">✗ Send Back</button>
             </div>
           </div>`;
         }).join('')}
@@ -5825,19 +5825,19 @@ window.renderApprovals = async function(currentUser) {
           ${items.map(item=>`
           <div class="item-card" data-id="${item.id}">
             <div class="item-top">
-              <div class="item-title">👤 ${item.fullName||'Unknown'}</div>
+              <div class="item-title">👤 ${escHtml(item.fullName||'Unknown')}</div>
               <span class="badge ${item.status==='approved'?'badge-green':item.status==='rejected'?'badge-red':'badge-warn'}">${item.status||'pending'}</span>
             </div>
             <div class="item-meta">
-              <span>✉️ ${item.email||'—'}</span>
-              <span>📱 ${item.phone||'—'}</span>
+              <span>✉️ ${escHtml(item.email||'—')}</span>
+              <span>📱 ${escHtml(item.phone||'—')}</span>
               ${item.createdAt?`<span>📅 ${new Date(item.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
             </div>
-            ${item.generatedPassword?`<div style="font-size:12px;margin-top:8px;padding:8px 10px;background:rgba(48,209,88,.1);border:1px solid rgba(48,209,88,.3);border-radius:8px;font-family:monospace">🔑 Generated Password: <strong>${item.generatedPassword}</strong><br><span style="font-size:10px;color:var(--text-muted)">Create Firebase Auth user with this password</span></div>`:''}
+            ${item.generatedPassword?`<div style="font-size:12px;margin-top:8px;padding:8px 10px;background:rgba(48,209,88,.1);border:1px solid rgba(48,209,88,.3);border-radius:8px;font-family:monospace">🔑 Generated Password: <strong>${escHtml(item.generatedPassword)}</strong><br><span style="font-size:10px;color:var(--text-muted)">Create Firebase Auth user with this password</span></div>`:''}
             ${item.status==='pending'?`
             <div style="display:flex;gap:8px;margin-top:12px">
-              <button class="btn-success signup-approve" data-id="${item.id}" data-name="${item.fullName}" data-email="${item.email}" data-phone="${item.phone||''}">✓ Approve & Generate Password</button>
-              <button class="btn-danger signup-reject" data-id="${item.id}" data-name="${item.fullName}">✗ Reject</button>
+              <button class="btn-success signup-approve" data-id="${item.id}" data-name="${escHtml(item.fullName)}" data-email="${escHtml(item.email)}" data-phone="${escHtml(item.phone||'')}">✓ Approve & Generate Password</button>
+              <button class="btn-danger signup-reject" data-id="${item.id}" data-name="${escHtml(item.fullName)}">✗ Reject</button>
             </div>`:''}
           </div>`).join('')}
         </div>`;
@@ -5867,17 +5867,17 @@ window.renderApprovals = async function(currentUser) {
             approvedBy: currentUser.uid
           });
           openModal('✓ Approved — Action Required', `
-            <p style="margin-bottom:14px;font-size:14px">Profile created for <strong>${name}</strong>.</p>
+            <p style="margin-bottom:14px;font-size:14px">Profile created for <strong>${escHtml(name)}</strong>.</p>
             <div style="padding:14px;background:rgba(48,209,88,.1);border:1.5px solid rgba(48,209,88,.4);border-radius:10px;margin-bottom:14px">
               <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Generated Password</div>
-              <div style="font-size:22px;font-weight:800;font-family:monospace;letter-spacing:2px;color:var(--text)">${pwd}</div>
+              <div style="font-size:22px;font-weight:800;font-family:monospace;letter-spacing:2px;color:var(--text)">${escHtml(pwd)}</div>
             </div>
             <p style="font-size:13px;color:var(--text-muted)">Next steps:</p>
             <ol style="font-size:13px;color:var(--text-muted);line-height:2;padding-left:18px">
               <li>Go to <strong>Firebase Console → Authentication → Add User</strong></li>
-              <li>Email: <strong>${email}</strong></li>
-              <li>Password: <strong>${pwd}</strong></li>
-              <li>Share this password with ${name} via phone or message</li>
+              <li>Email: <strong>${escHtml(email)}</strong></li>
+              <li>Password: <strong>${escHtml(pwd)}</strong></li>
+              <li>Share this password with ${escHtml(name)} via phone or message</li>
               <li>They can change it after first login</li>
             </ol>
           `, `<button class="btn-primary" onclick="closeModal()">Done</button>`);
@@ -5915,7 +5915,7 @@ window.renderApprovals = async function(currentUser) {
           ${items.map(item=>`
           <div class="item-card" data-id="${item.id}">
             <div class="item-top">
-              <div class="item-title">⏰ ${item.userName||'Unknown'}</div>
+              <div class="item-title">⏰ ${escHtml(item.userName||'Unknown')}</div>
               <span class="badge ${item.status==='approved'?'badge-green':item.status==='denied'?'badge-red':'badge-warn'}">${item.status||'pending'}</span>
             </div>
             <div class="item-meta">
@@ -5925,8 +5925,8 @@ window.renderApprovals = async function(currentUser) {
             </div>
             ${item.status==='pending'?`
             <div style="display:flex;gap:8px;margin-top:12px">
-              <button class="btn-success ext-approve" data-id="${item.id}" data-uid="${item.uid}" data-name="${item.userName||''}">✓ Approve (6-hr)</button>
-              <button class="btn-danger ext-deny" data-id="${item.id}" data-uid="${item.uid}" data-name="${item.userName||''}">✗ Deny</button>
+              <button class="btn-success ext-approve" data-id="${item.id}" data-uid="${item.uid}" data-name="${escHtml(item.userName||'')}">✓ Approve (6-hr)</button>
+              <button class="btn-danger ext-deny" data-id="${item.id}" data-uid="${item.uid}" data-name="${escHtml(item.userName||'')}">✗ Deny</button>
             </div>`:''}
           </div>`).join('')}
         </div>
@@ -5981,7 +5981,7 @@ window.renderApprovals = async function(currentUser) {
           ${items.map(item=>`
           <div class="item-card" data-id="${item.id}">
             <div class="item-top">
-              <div class="item-title">💸 Cash Advance — ${item.userName||'Unknown'}</div>
+              <div class="item-title">💸 Cash Advance — ${escHtml(item.userName||'Unknown')}</div>
               <span class="badge ${statusBadge(item.status)}">${item.status||'pending'}</span>
             </div>
             <div class="item-meta">
@@ -5989,11 +5989,11 @@ window.renderApprovals = async function(currentUser) {
               <span>Date: ${item.date||'—'}</span>
               <span>Repay: ${item.repayDate||'—'}</span>
             </div>
-            ${item.reason?`<div style="font-size:12px;color:var(--text-muted);margin-top:6px;padding:8px 10px;background:var(--surface2);border-radius:6px">${item.reason}</div>`:''}
+            ${item.reason?`<div style="font-size:12px;color:var(--text-muted);margin-top:6px;padding:8px 10px;background:var(--surface2);border-radius:6px">${escHtml(item.reason)}</div>`:''}
             ${item.status==='pending'?`
             <div style="display:flex;gap:8px;margin-top:12px">
-              <button class="btn-success ca-approve" data-id="${item.id}" data-uid="${item.userId}" data-name="${item.userName}" data-amount="${item.amount}">Approve</button>
-              <button class="btn-danger ca-reject" data-id="${item.id}" data-uid="${item.userId}" data-name="${item.userName}">Reject</button>
+              <button class="btn-success ca-approve" data-id="${item.id}" data-uid="${item.userId}" data-name="${escHtml(item.userName)}" data-amount="${item.amount}">Approve</button>
+              <button class="btn-danger ca-reject" data-id="${item.id}" data-uid="${item.userId}" data-name="${escHtml(item.userName)}">Reject</button>
             </div>`:''}
           </div>`).join('')}
         </div>
@@ -6029,18 +6029,18 @@ window.renderApprovals = async function(currentUser) {
       wrap.innerHTML = `<div class="item-list">${items.map(item => `
         <div class="item-card" data-id="${item.id}">
           <div class="item-top">
-            <div class="item-title">${item.type==='bs_quote'?'Brilliant Steel Quote':'Quote'} — ${item.clientName||''}</div>
+            <div class="item-title">${item.type==='bs_quote'?'Brilliant Steel Quote':'Quote'} — ${escHtml(item.clientName||'')}</div>
             <span class="badge ${statusBadge(item.status)}">${item.status||'pending'}</span>
           </div>
           <div class="item-meta">
-            <span>${item.agentName||'—'}</span>
+            <span>${escHtml(item.agentName||'—')}</span>
             <span>₱${fmt(item.total)}</span>
             ${item.createdAt?`<span>${new Date(item.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
           </div>
           ${item.status==='pending'?`
           <div style="display:flex;gap:8px;margin-top:12px">
-            <button class="btn-success approve-approval" data-id="${item.id}" data-agent="${item.agentId}" data-client="${item.clientName}">Approve</button>
-            <button class="btn-danger reject-approval"  data-id="${item.id}" data-agent="${item.agentId}" data-client="${item.clientName}">Reject</button>
+            <button class="btn-success approve-approval" data-id="${item.id}" data-agent="${item.agentId}" data-client="${escHtml(item.clientName)}">Approve</button>
+            <button class="btn-danger reject-approval"  data-id="${item.id}" data-agent="${item.agentId}" data-client="${escHtml(item.clientName)}">Reject</button>
           </div>`:''}
         </div>`).join('')}</div>`;
 
@@ -6090,11 +6090,11 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
         ? `<div class="empty-state"><div class="empty-icon">👤</div><h4>No clients yet</h4></div>`
         : clients.map(cl => `
           <div class="item-card">
-            <div class="item-title">${cl.name}</div>
+            <div class="item-title">${escHtml(cl.name)}</div>
             <div class="item-meta">
-              ${cl.company?`<span>🏢 ${cl.company}</span>`:''}
-              ${cl.email?`<span>✉️ ${cl.email}</span>`:''}
-              ${cl.phone?`<span>📞 ${cl.phone}</span>`:''}
+              ${cl.company?`<span>🏢 ${escHtml(cl.company)}</span>`:''}
+              ${cl.email?`<span>✉️ ${escHtml(cl.email)}</span>`:''}
+              ${cl.phone?`<span>📞 ${escHtml(cl.phone)}</span>`:''}
             </div>
           </div>`).join('')}
     </div>
@@ -6145,8 +6145,8 @@ async function renderDocCollection(container, collection, title, currentUser, cu
         : docs.map(d => `
           <div class="policy-card">
             <div class="policy-icon">${opts.icon||'📄'}</div>
-            <div class="policy-title">${d.title}</div>
-            <div class="policy-desc">${d.description||''}</div>
+            <div class="policy-title">${escHtml(d.title)}</div>
+            <div class="policy-desc">${escHtml(d.description||'')}</div>
             ${d.fileUrl?`<a href="${d.fileUrl}" target="_blank" class="btn-link" style="font-size:12px;margin-top:8px;display:block">📎 Open File</a>`:''}
           </div>`).join('')}
     </div>
@@ -6206,7 +6206,7 @@ function bindFileCollection(id, currentUser, dept, subfolder) {
     filesDiv.innerHTML = files.map(f => `
       <div class="item-card" data-file-id="${f.id}">
         <div class="item-top">
-          <div class="item-title">📄 ${f.name}</div>
+          <div class="item-title">📄 ${escHtml(f.name)}</div>
           <div style="display:flex;gap:6px;align-items:center">
             ${f.url?`<a href="${f.url}" target="_blank" class="btn-primary btn-sm">Open</a>`:''}
             ${canDelete ? `<button class="btn-danger btn-sm file-delete-btn" data-id="${f.id}" data-name="${(f.name||'').replace(/"/g,'&quot;')}" style="font-size:11px">Delete</button>` : ''}
@@ -6214,7 +6214,7 @@ function bindFileCollection(id, currentUser, dept, subfolder) {
           </div>
         </div>
         <div class="item-meta">
-          <span>👤 ${f.uploadedByName||'—'}</span>
+          <span>👤 ${escHtml(f.uploadedByName||'—')}</span>
           ${f.createdAt?`<span>${new Date(f.createdAt.toDate()).toLocaleDateString()}</span>`:''}
           ${f.deleteRequested?`<span style="color:var(--danger);font-size:11px;font-weight:600">⏳ Delete requested</span>`:''}
         </div>
@@ -6331,7 +6331,7 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
                 const pct = i.budget>0?Math.min(Math.round(i.spent/i.budget*100),100):0;
                 const rem = i.budget-i.spent;
                 return `<tr>
-                  <td style="font-weight:600">${i.name}</td>
+                  <td style="font-weight:600">${escHtml(i.name)}</td>
                   <td>₱${fmt(i.budget)}</td>
                   <td style="color:var(--danger)">${canSeeSpend?'₱'+fmt(i.spent):'—'}</td>
                   <td style="color:${rem<0?'var(--danger)':'var(--success)'}">${canSeeSpend?'₱'+fmt(rem):'—'}</td>
@@ -6363,11 +6363,11 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
             <tbody>
               ${expenses.map(e=>`<tr>
                 <td style="font-size:12px">${e.date||'—'}</td>
-                <td style="font-size:12px">${e.description||'—'}</td>
-                <td style="font-size:11px;color:var(--text-muted)">${e.budgetLineName||'—'}</td>
+                <td style="font-size:12px">${escHtml(e.description||'—')}</td>
+                <td style="font-size:11px;color:var(--text-muted)">${escHtml(e.budgetLineName||'—')}</td>
                 <td><span class="badge ${e.type==='credit'?'badge-green':'badge-red'}">${e.type==='credit'?'Income':'Expense'}</span></td>
                 <td style="color:${e.type==='credit'?'var(--success)':'var(--danger)'};font-weight:600">₱${fmt(e.amount)}</td>
-                <td style="font-size:11px;color:var(--text-muted)">${e.addedByName||'—'}</td>
+                <td style="font-size:11px;color:var(--text-muted)">${escHtml(e.addedByName||'—')}</td>
               </tr>`).join('')}
             </tbody>
           </table></div>`}
@@ -6396,7 +6396,7 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
 
   // Log expense / income → writes to shared Finance ledger
   document.getElementById('log-expense-btn')?.addEventListener('click', () => {
-    const lineOptions = items.map(i=>`<option value="${i.id}" data-name="${i.name}">${i.name}</option>`).join('');
+    const lineOptions = items.map(i=>`<option value="${i.id}" data-name="${escHtml(i.name)}">${escHtml(i.name)}</option>`).join('');
     openModal('Log Expense / Income', `
       <div class="form-row">
         <div class="form-group"><label>Date</label><input id="exp-date" type="date" value="${today()}"/></div>
@@ -6501,9 +6501,9 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
     listEl.innerHTML = `<div class="table-wrap"><table class="data-table">
       <thead><tr><th>Name</th><th>Type</th><th>Uploaded By</th><th>Date</th><th></th></tr></thead>
       <tbody>${files.map(f=>`<tr>
-        <td><a href="${f.url}" target="_blank" style="color:var(--primary);font-weight:600">${f.name||'File'}</a></td>
-        <td>${f.fileType||'—'}</td>
-        <td>${f.uploaderName||'—'}</td>
+        <td><a href="${f.url}" target="_blank" style="color:var(--primary);font-weight:600">${escHtml(f.name||'File')}</a></td>
+        <td>${escHtml(f.fileType||'—')}</td>
+        <td>${escHtml(f.uploaderName||'—')}</td>
         <td style="font-size:11px;color:var(--text-muted)">${f.createdAt?new Date(f.createdAt.toDate()).toLocaleDateString('en-PH'):''}</td>
         <td><a href="${f.url}" target="_blank" class="btn-secondary btn-sm">⬇ Download</a></td>
       </tr>`).join('')}</tbody>
@@ -6558,11 +6558,11 @@ window.renderDocCollection = function(container, collection, title, currentUser,
     if (!docs.length) { list.innerHTML=`<div class="empty-state" style="padding:20px"><div class="empty-icon">${cfg?.icon||'📄'}</div><h4>No ${title} yet</h4></div>`; return; }
     list.innerHTML = `<div class="item-list">${docs.map(d=>`
       <div class="item-card">
-        <div class="item-top"><div class="item-title">${d.title||d.name||'Untitled'}</div>
+        <div class="item-top"><div class="item-title">${escHtml(d.title||d.name||'Untitled')}</div>
           <span class="badge ${statusBadge(d.status)}">${d.status||'active'}</span>
         </div>
         <div class="item-meta">
-          ${d.description?`<span>${d.description}</span>`:''}
+          ${d.description?`<span>${escHtml(d.description)}</span>`:''}
           ${d.fileUrl?`<a href="${d.fileUrl}" target="_blank" class="btn-link" style="font-size:11px">📎 View File</a>`:''}
           ${d.createdAt?`<span style="font-size:11px;color:var(--text-muted)">${new Date(d.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
         </div>

@@ -108,7 +108,7 @@ async function loadPosts(dept) {
         ${p.title ? `<div class="post-title">${escHtml(p.title)}</div>` : ''}
         <div class="post-body">${escHtml(p.content||'')}</div>
         ${p.imageUrl ? `<img src="${p.imageUrl}" class="post-image" onclick="window.open('${p.imageUrl}','_blank')"/>` : ''}
-        ${p.fileUrl ? `<a href="${p.fileUrl}" target="_blank" class="post-attachment">📎 ${p.fileName||'Attachment'}</a>` : ''}
+        ${p.fileUrl ? `<a href="${escHtml(p.fileUrl)}" target="_blank" class="post-attachment">📎 ${escHtml(p.fileName||'Attachment')}</a>` : ''}
         <div class="post-actions">
           ${p.status==='published' ? `
             <button class="post-heart-btn${hearted?' hearted':''}" data-id="${p.id}" title="${hearted?'Unlike':'Like'}">
@@ -197,7 +197,7 @@ async function loadPosts(dept) {
       ));
       document.getElementById('modal-body').innerHTML = `
         <div style="display:flex;flex-direction:column;gap:8px">
-          ${names.map(n=>`<div style="display:flex;align-items:center;gap:8px;font-size:14px"><span style="font-size:20px">❤️</span>${n}</div>`).join('')}
+          ${names.map(n=>`<div style="display:flex;align-items:center;gap:8px;font-size:14px"><span style="font-size:20px">❤️</span>${escHtml(n)}</div>`).join('')}
         </div>`;
     }));
 
@@ -335,7 +335,7 @@ window.renderTeamTab = async function() {
     openModal('✏️ Set Your Note', `
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Share a quick status — what you're working on, your mood, or a quick update. Visible to everyone.</p>
       <div class="form-group">
-        <input id="note-input" maxlength="60" placeholder="e.g. In a meeting until 3pm…" value="${current}"/>
+        <input id="note-input" maxlength="60" placeholder="e.g. In a meeting until 3pm…" value="${escHtml(current)}"/>
         <div style="font-size:11px;color:var(--text-muted);margin-top:4px;text-align:right"><span id="note-count">${current.length}</span>/60</div>
       </div>
     `, `<button class="btn-primary" id="save-note-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Clear Note</button>`);
@@ -421,14 +421,14 @@ function showCallingCard(u) {
   openModal(`📇 ${u.displayName||u.email}`, `
     <div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);border-radius:16px;padding:28px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px">
       ${u.photoUrl
-        ? `<img src="${u.photoUrl}" style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.3);margin-bottom:4px" alt=""/>`
-        : `<div style="width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:800;color:#fff;margin-bottom:4px">${initials}</div>`}
-      <div style="font-size:20px;font-weight:800;color:#fff;letter-spacing:.5px">${u.displayName||u.email}</div>
+        ? `<img src="${escHtml(u.photoUrl)}" style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.3);margin-bottom:4px" alt=""/>`
+        : `<div style="width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:800;color:#fff;margin-bottom:4px">${escHtml(initials)}</div>`}
+      <div style="font-size:20px;font-weight:800;color:#fff;letter-spacing:.5px">${escHtml(u.displayName||u.email)}</div>
       <div style="font-size:12px;color:rgba(255,255,255,0.7);font-weight:600;text-transform:uppercase;letter-spacing:.08em">${roleLabel}</div>
-      <div style="font-size:11px;color:rgba(255,255,255,0.5)">${depts}</div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.5)">${escHtml(depts)}</div>
       <div style="width:100%;height:1px;background:rgba(255,255,255,0.15);margin:8px 0"></div>
-      ${u.email?`<div style="font-size:13px;color:rgba(255,255,255,0.8)">✉️ ${u.email}</div>`:''}
-      ${u.phone?`<div style="font-size:13px;color:rgba(255,255,255,0.8)">📞 ${u.phone}</div>`:''}
+      ${u.email?`<div style="font-size:13px;color:rgba(255,255,255,0.8)">✉️ ${escHtml(u.email)}</div>`:''}
+      ${u.phone?`<div style="font-size:13px;color:rgba(255,255,255,0.8)">📞 ${escHtml(u.phone)}</div>`:''}
       ${u.employeeId?`<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;letter-spacing:.1em">${u.employeeId}</div>`:''}
       <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:6px;letter-spacing:.15em">BARRO INDUSTRIES</div>
     </div>
@@ -466,25 +466,25 @@ function renderTeamCards(users, currentUser) {
     <div class="team-member-card" data-uid="${u.id}">
       ${statusNote ? `
         <div class="team-note-bubble">
-          <span>${statusNote}</span>
+          <span>${escHtml(statusNote)}</span>
         </div>` : ''}
       <div class="team-member-avatar-wrap">
         <div class="team-member-avatar">
           ${u.photoUrl
-            ? `<img src="${u.photoUrl}" alt="${u.displayName||''}"/>`
-            : `<span>${initial}</span>`}
+            ? `<img src="${escHtml(u.photoUrl)}" alt="${escHtml(u.displayName||'')}"/>`
+            : `<span>${escHtml(initial)}</span>`}
         </div>
         <span class="team-online-dot ${isOnline?'team-online-dot--on':'team-online-dot--off'}" title="${isOnline?'Online':'Last active: '+lastActiveStr}"></span>
       </div>
-      <div class="team-member-name">${u.displayName||u.email}</div>
+      <div class="team-member-name">${escHtml(u.displayName||u.email)}</div>
       <div class="team-member-role" style="color:${badgeColor}">${roleLabel}${isMe?' · You':''}</div>
-      <div class="team-member-dept">${depts}</div>
+      <div class="team-member-dept">${escHtml(depts)}</div>
       ${isOnline
         ? `<div class="team-status-pill team-status-pill--on">● Online</div>`
         : lastSeenMs ? `<div class="team-status-pill">${lastActiveStr}</div>` : ''}
       <div class="team-card-actions">
         <button class="team-card-btn view-card-btn" data-uid="${u.id}" title="View calling card">📇</button>
-        ${!isMe ? `<button class="team-card-btn nudge-btn" data-uid="${u.id}" data-name="${(u.displayName||u.email).replace(/"/g,'&quot;')}" title="Nudge ${u.displayName||u.email}">👋</button>` : ''}
+        ${!isMe ? `<button class="team-card-btn nudge-btn" data-uid="${u.id}" data-name="${(u.displayName||u.email).replace(/"/g,'&quot;')}" title="Nudge ${escHtml(u.displayName||u.email)}">👋</button>` : ''}
       </div>
     </div>`;
   }).join('')}</div>`;
@@ -640,7 +640,7 @@ window.renderAttendancePage = async function() {
     const empList = usersSnap.docs.map(d=>({id:d.id,...d.data()}))
       .filter(u => u.role !== 'partner');
     const sel = document.getElementById('att-emp-select');
-    sel.innerHTML = empList.map(u=>`<option value="${u.id}">${u.displayName||u.email}</option>`).join('');
+    sel.innerHTML = empList.map(u=>`<option value="${u.id}">${escHtml(u.displayName||u.email)}</option>`).join('');
     sel.value = currentUser.uid;
     sel.addEventListener('change', () => {
       const picked = empList.find(u=>u.id===sel.value);
@@ -666,11 +666,11 @@ window.renderAttendancePage = async function() {
           <div class="table-wrap"><table class="data-table">
             <thead><tr><th>Employee</th><th>Date</th><th>Requested</th><th></th></tr></thead>
             <tbody>${requests.map(r=>`<tr>
-              <td><strong>${r.userName||'—'}</strong></td>
+              <td><strong>${escHtml(r.userName||'—')}</strong></td>
               <td>${r.date||'—'}</td>
               <td>${r.requestedAt ? new Date(r.requestedAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'}) : '—'}</td>
               <td style="white-space:nowrap">
-                <button class="btn-primary btn-sm ext-approve-btn" data-id="${r.id}" data-uid="${r.uid}" data-name="${r.userName||''}">✓ Approve</button>
+                <button class="btn-primary btn-sm ext-approve-btn" data-id="${r.id}" data-uid="${r.uid}" data-name="${escHtml(r.userName||'')}">✓ Approve</button>
                 <button class="btn-danger btn-sm ext-deny-btn" data-id="${r.id}" data-uid="${r.uid}" style="margin-left:4px">✕ Deny</button>
               </td>
             </tr>`).join('')}</tbody>
@@ -782,7 +782,7 @@ window.renderAttendancePage = async function() {
 
     const pct = workDays > 0 ? Math.round(((fullCount + halfCount*0.5)/workDays)*100) : 0;
     sumEl.innerHTML = `
-      <div class="card-header"><h3>Summary — ${label} · ${targetName}</h3></div>
+      <div class="card-header"><h3>Summary — ${label} · ${escHtml(targetName)}</h3></div>
       <div class="card-body">
         <div class="kpi-row" style="margin:0">
           <div class="kpi-card green"><div class="kpi-label">Present</div><div class="kpi-value">${fullCount}</div></div>
@@ -800,7 +800,7 @@ window.renderAttendancePage = async function() {
           const cur  = records[date];
           const curStatus = cur?.fullTime ? 'present' : cur?.loginTime ? 'half' : 'absent';
           openModal(`✎ Attendance — ${date}`, `
-            <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Employee: <strong>${targetName}</strong></p>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Employee: <strong>${escHtml(targetName)}</strong></p>
             <div class="form-group"><label>Status</label>
               <div style="display:flex;gap:8px;margin-top:4px">
                 <button class="att-status-opt ${curStatus==='present'?'att-opt-active':''}" data-val="present" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='present'?'#30d158':'var(--border)'};background:${curStatus==='present'?'rgba(48,209,88,.15)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">✓ Present</button>
@@ -809,7 +809,7 @@ window.renderAttendancePage = async function() {
               </div>
               <input type="hidden" id="att-status-sel" value="${curStatus}"/>
             </div>
-            <div class="form-group" style="margin-top:12px"><label>Note (optional)</label><input id="att-note" value="${cur?.note||''}" placeholder="e.g. sick leave, official business"/></div>
+            <div class="form-group" style="margin-top:12px"><label>Note (optional)</label><input id="att-note" value="${escHtml(cur?.note||'')}" placeholder="e.g. sick leave, official business"/></div>
             ${cur?.editedBy?`<p style="font-size:11px;color:var(--text-muted);margin-top:8px">Last edited by admin</p>`:''}
           `, `<button class="btn-primary" id="save-att-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
@@ -950,7 +950,7 @@ function renderCAEmployeeCards(advances, container) {
         <span style="background:${statusColor}1a;color:${statusColor};border:1px solid ${statusColor}44;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap">${statusLabel}</span>
       </div>
       <div class="ca-card-body">
-        <div class="ca-detail"><span>Reason</span><span>${a.reason||'&#x2014;'}</span></div>
+        <div class="ca-detail"><span>Reason</span><span>${a.reason?escHtml(a.reason):'&#x2014;'}</span></div>
         <div class="ca-detail"><span>Terms</span><span>${a.terms||1} month${(a.terms||1)>1?'s':''} &middot; ${a.interest||0}% interest/mo</span></div>
         <div class="ca-detail"><span>Monthly Payment</span><strong style="color:var(--primary-light)">&#8369;${fmtN(a.monthlyPayment)}</strong></div>
         <div class="ca-detail"><span>Total Payable</span><span>&#8369;${fmtN(totalPay)}</span></div>
@@ -1040,12 +1040,12 @@ function renderCAList(advances, container, isAdmin) {
     return `
     <div class="ca-card">
       <div class="ca-card-header">
-        ${isAdmin?`<div class="ca-card-name">${a.userName||'Employee'} <span style="font-size:11px;color:var(--text-muted)">${a.employeeId||''}</span>${a.private?'<span class="badge badge-red" style="font-size:10px;margin-left:4px">🔒 Private</span>':''}</div>`:''}
+        ${isAdmin?`<div class="ca-card-name">${escHtml(a.userName||'Employee')} <span style="font-size:11px;color:var(--text-muted)">${a.employeeId||''}</span>${a.private?'<span class="badge badge-red" style="font-size:10px;margin-left:4px">🔒 Private</span>':''}</div>`:''}
         <div class="ca-amount">₱${fmtN(a.amount)}</div>
         <span class="badge ${statusBadgeClass}">${a.status||'pending'}</span>
       </div>
       <div class="ca-card-body">
-        <div class="ca-detail"><span>Reason</span><span>${a.reason||'—'}</span></div>
+        <div class="ca-detail"><span>Reason</span><span>${a.reason?escHtml(a.reason):'—'}</span></div>
         <div class="ca-detail"><span>Terms</span><span>${terms} month${terms>1?'s':''}${interest?` · ${interest}% interest/mo`:''}</span></div>
         <div class="ca-detail"><span>Monthly Payment</span><span style="font-weight:700">₱${fmtN(monthly)}</span></div>
         <div class="ca-detail"><span>Total Payable</span><span>₱${fmtN(monthly*terms)}</span></div>
@@ -1227,7 +1227,7 @@ function fmtN(n) {
 function openPresidentCashAdvanceModal(users) {
   const employees = users.filter(u => u.role !== 'partner' && u.uid !== currentUser.uid);
   const empOptions = employees.map(u =>
-    `<option value="${u.id}">${u.displayName||u.email} (${u.role||'employee'})</option>`
+    `<option value="${u.id}">${escHtml(u.displayName||u.email)} (${u.role||'employee'})</option>`
   ).join('');
 
   openModal('Record Cash Advance for Employee', `
@@ -1382,19 +1382,19 @@ async function renderPresidentMessageCard() {
       <div class="card-body">
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
           <div style="width:54px;height:54px;border-radius:50%;overflow:hidden;background:var(--primary-light);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff">
-            ${pres.photoUrl?`<img src="${pres.photoUrl}" style="width:100%;height:100%;object-fit:cover"/>`:presName[0]}
+            ${pres.photoUrl?`<img src="${escHtml(pres.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:presName[0]}
           </div>
           <div>
             <div style="font-weight:700;font-size:15px">${presName}</div>
             <div style="font-size:12px;color:var(--text-muted)">President, Barro Industries OPC</div>
           </div>
         </div>
-        <blockquote style="font-size:14px;line-height:1.8;color:var(--text);border-left:3px solid var(--primary-light);padding-left:14px;margin:0;font-style:italic">${msgText}</blockquote>
+        <blockquote style="font-size:14px;line-height:1.8;color:var(--text);border-left:3px solid var(--primary-light);padding-left:14px;margin:0;font-style:italic">${escHtml(msgText)}</blockquote>
       </div>`;
     document.getElementById('edit-msg-btn')?.addEventListener('click', () => {
       openModal('Edit President Message', `
         <div class="form-group"><label>Message</label>
-          <textarea id="pres-msg-input" rows="6" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text);resize:vertical">${msgText}</textarea>
+          <textarea id="pres-msg-input" rows="6" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text);resize:vertical">${escHtml(msgText)}</textarea>
         </div>
       `, `<button class="btn-primary" id="save-pres-msg">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
       document.getElementById('save-pres-msg').addEventListener('click', async () => {
