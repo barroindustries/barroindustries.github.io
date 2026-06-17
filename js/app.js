@@ -932,13 +932,33 @@ function renderQuoteBuilderIframe() {
       <button class="btn-primary btn-sm" id="qb-return-edit">↩ Save edits &amp; Return to Partner</button>
       <button class="btn-success btn-sm" id="qb-approve-edit">✅ Save edits &amp; Approve</button>
     </div>` : '';
+  // On phones, drop the redundant "Quote Builder" heading (the builder shows its own
+  // header) and give the iframe nearly the full viewport between the app's top bar and
+  // bottom nav — without overlapping either. Desktop keeps the heading + roomier chrome.
+  const isMobile = !!(window.matchMedia && window.matchMedia('(max-width:700px)').matches);
+  const chrome = (reviewCtx ? (isMobile ? 70 : 60) : 0) + (isMobile ? 130 : 200);
   c.innerHTML = `
     ${reviewBanner}
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+    ${isMobile ? '' : `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
       <h2 style="font-size:16px;font-weight:800;color:var(--text)">🧮 Quote Builder${reviewCtx?' <span style="font-size:12px;font-weight:600;color:var(--warning,#ff9f0a)">(reviewing a partner quote)</span>':reopenState?' <span style="font-size:12px;font-weight:600;color:var(--text-muted)">(editing a copy)</span>':''}</h2>
-    </div>
+    </div>`}
     <iframe id="qb-frame" src="${qbSrc}" allow="print"
-      style="width:100%;height:calc(100dvh - ${reviewCtx?'250':'200'}px);min-height:460px;border:none;border-radius:12px;background:#f5f6fa"></iframe>`;
+      style="width:100%;height:calc(100dvh - ${chrome}px);min-height:${isMobile?'420':'460'}px;border:none;border-radius:${isMobile?'10':'12'}px;background:#f5f6fa"></iframe>`;
+  // On phones, size the iframe to fill exactly from its top to the viewport bottom so
+  // it's maximized without overflowing past the app's chrome. Re-fit on resize/rotate.
+  if (isMobile) {
+    const fitFrame = () => {
+      const f = document.getElementById('qb-frame'); if (!f || !f.isConnected) return;
+      const top = f.getBoundingClientRect().top;
+      f.style.height = Math.max(420, Math.round(window.innerHeight - top - 6)) + 'px';
+    };
+    if (window._qbFit) window.removeEventListener('resize', window._qbFit);
+    window._qbFit = fitFrame;
+    window.addEventListener('resize', fitFrame);
+    requestAnimationFrame(fitFrame); setTimeout(fitFrame, 250);
+  } else if (window._qbFit) {
+    window.removeEventListener('resize', window._qbFit); window._qbFit = null;
+  }
   if (reopenState) {
     const frame = document.getElementById('qb-frame');
     frame?.addEventListener('load', () => {

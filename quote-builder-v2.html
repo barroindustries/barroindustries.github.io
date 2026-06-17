@@ -19,7 +19,7 @@ body{font-family:var(--font);background:var(--gray-light);color:var(--text);font
 
 /* ── TOP BAR ── */
 .topbar{background:var(--dark-blue);color:white;display:flex;align-items:center;
-  justify-content:space-between;padding:0 18px;height:52px;position:relative;z-index:300;
+  justify-content:space-between;padding:0 18px;height:52px;position:sticky;top:0;z-index:300;
   box-shadow:0 2px 8px rgba(0,0,0,.3);gap:10px;flex-wrap:wrap;}
 .topbar-logo{font-size:16px;font-weight:700;}
 .topbar-logo span{color:var(--accent);}
@@ -242,14 +242,15 @@ tr:hover td{background:#fafbff;}
 
 /* ── MOBILE ── */
 @media(max-width:700px){
-  .topbar{height:auto;padding:7px 9px;gap:6px;flex-direction:column;align-items:stretch;}
-  .topbar>div:first-child{flex-wrap:wrap;gap:6px;align-items:stretch;}
-  .topbar-logo{font-size:14px;align-self:center;}
+  /* compact sticky bar so it stays pinned without eating the form space */
+  .topbar{height:auto;padding:5px 8px;gap:4px;flex-direction:column;align-items:stretch;}
+  .topbar>div:first-child{flex-wrap:wrap;gap:4px;align-items:stretch;}
+  .topbar-logo{font-size:12.5px;align-self:center;line-height:1.1;}
   .toggle-pills{flex:1 1 100%;display:flex;}
-  .toggle-pills button{padding:6px 6px;font-size:11px;flex:1;}
-  /* action buttons wrap into a tidy 2-up grid instead of a tall stack */
-  .topbar-right{display:grid;grid-template-columns:1fr 1fr;gap:5px;width:100%;}
-  .topbar-right .btn{padding:8px 6px;font-size:11.5px;min-height:38px;justify-content:center;width:100%;}
+  .toggle-pills button{padding:5px 6px;font-size:11px;flex:1;min-height:30px;}
+  /* action buttons in a tight 3-up grid instead of a tall 2-up stack */
+  .topbar-right{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;width:100%;}
+  .topbar-right .btn{padding:5px 4px;font-size:11px;min-height:32px;justify-content:center;width:100%;}
   .topbar-right .filed-badge{grid-column:1/-1;}
   .main{padding:10px 8px;}
   .section{padding:12px 14px;}
