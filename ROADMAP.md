@@ -1,6 +1,18 @@
 # Barro Industries Ops System — Roadmap & Handoff
 
-_Last updated: 2026-06-17 — current version **v9.4.49+**, cache `bi-ops-v33+` (auto-bumped on commit)._
+_Last updated: 2026-06-18 — current version **v10.0.0**, cache `bi-ops-v46`._
+
+### v10.0.0 UI/UX fix pass (done)
+- Quote builder topbar **unstuck** (scrolls away, not fixed); mobile verified (no page horizontal scroll; only the data table scrolls within its wrapper); desktop untouched.
+- **Quote filing SOP:** filed BK quotes now route to `bk_quotes` (were always going to `bs_quotes` → invisible in Sales→Quotations); re-file saves a new **version "(2)"**; filing **auto-extracts the client** into sales_clients/bs_clients. (Approval round-trip stays in bs_quotes for the president handler.)
+- **Notifications:** task-edit notifications now say *what* changed (due date→X, status→Y, priority, dept, assignees); fixed the **doubled icon** in the inbox (leading emoji stripped from title since the icon column shows it).
+- **Activity/presence:** ping `lastSeen` on visibilitychange/focus (browsers throttle background-tab timers); Team view reads presence with a short TTL.
+- **Task chat:** bubble `max-width:100%`+overflow-wrap so long messages can't force horizontal scroll.
+- **Dashboard calendar:** month nav, due-task event dots, click-a-day to see/open tasks.
+- **Themes:** added **Midnight** (deep-navy dark). Splash logo confirmed circular.
+- Version stepped to **v10.0.0** (major milestone).
+
+_Old header: v9.4.49+, cache bi-ops-v33+._
 This file is the running source of truth for what's done and what's left to make the app
 "fully functional to run the company remotely." Update it as work lands.
 
