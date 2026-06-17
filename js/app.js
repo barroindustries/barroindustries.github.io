@@ -944,13 +944,21 @@ function renderQuoteBuilderIframe() {
     </div>`}
     <iframe id="qb-frame" src="${qbSrc}" allow="print"
       style="width:100%;height:calc(100dvh - ${chrome}px);min-height:${isMobile?'420':'460'}px;border:none;border-radius:${isMobile?'10':'12'}px;background:#f5f6fa"></iframe>`;
-  // On phones, size the iframe to fill exactly from its top to the viewport bottom so
-  // it's maximized without overflowing past the app's chrome. Re-fit on resize/rotate.
+  // On phones, PIN the iframe (position:fixed) to fill from just below the app's top
+  // chrome to the bottom of the screen, edge-to-edge. The outer page no longer scrolls
+  // the builder out of view — only the builder's own content scrolls inside it.
   if (isMobile) {
     const fitFrame = () => {
       const f = document.getElementById('qb-frame'); if (!f || !f.isConnected) return;
-      const top = f.getBoundingClientRect().top;
-      f.style.height = Math.max(420, Math.round(window.innerHeight - top - 6)) + 'px';
+      // collapse to measure the top of its slot (page is at scroll 0 while pinned)
+      f.style.position = 'static'; f.style.height = '1px';
+      const top = Math.round(f.getBoundingClientRect().top + (window.scrollY||0));
+      // iframes are replaced elements — top/bottom:auto won't stretch them, so set an
+      // explicit height to fill from `top` to the bottom of the screen.
+      f.style.position = 'fixed'; f.style.top = top + 'px';
+      f.style.left = '0'; f.style.right = '0';
+      f.style.width = '100%'; f.style.height = (window.innerHeight - top) + 'px';
+      f.style.minHeight = '0'; f.style.borderRadius = '0'; f.style.zIndex = '5';
     };
     if (window._qbFit) window.removeEventListener('resize', window._qbFit);
     window._qbFit = fitFrame;

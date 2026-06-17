@@ -252,10 +252,14 @@ tr:hover td{background:#fafbff;}
   .topbar-right{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;width:100%;}
   .topbar-right .btn{padding:5px 4px;font-size:11px;min-height:32px;justify-content:center;width:100%;}
   .topbar-right .filed-badge{grid-column:1/-1;}
-  .main{padding:10px 8px;}
-  .section{padding:12px 14px;}
+  .main{padding:8px 7px;}
+  .section{padding:10px 12px;margin-bottom:8px;}
+  .sec-title{font-size:10px;margin-bottom:7px;}
+  /* tighter, smaller fields so the form isn't oversized on a phone */
+  label{font-size:10px;}
   .fg-grid{grid-template-columns:1fr;}
   .fg.full{grid-column:auto;}
+  .status-bar{font-size:11px;}
   .qno-row{flex-direction:column;align-items:stretch;gap:6px;}
   .qno-sep{display:none;}
   .qno-box{font-size:13px;padding:6px 10px;}
@@ -268,13 +272,17 @@ tr:hover td{background:#fafbff;}
   .totals-tbl{width:100%;min-width:0;}
   .terms-grid{grid-template-columns:1fr;}
   .sig-row{grid-template-columns:1fr;gap:14px;}
-  input,select,textarea{font-size:16px!important;}
   .del-btn{padding:6px 10px;font-size:18px;}
   .pricing-controls{flex-direction:column;align-items:stretch;gap:10px;}
   .pc-row{flex-wrap:wrap;}
   .pricing-controls select{flex:1;min-width:0;}
   .pay-tbl td,.pay-tbl th{font-size:12px;padding:6px 7px;}
   .lead-in{width:100%!important;}
+  /* trimmed input size so the form isn't oversized on a phone */
+  input,select,textarea{font-size:14px!important;padding:6px 8px!important;}
+  .toggle-pills button{font-size:10.5px;}
+  .reload-btn,.btn{font-size:11px;}
+  .qno-box{font-size:12px;padding:5px 9px;}
 }
 @media(max-width:420px){
   /* keep all actions visible (incl. Agent Copy) — they now sit in a 2-up grid */
