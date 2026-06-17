@@ -396,5 +396,36 @@ service cloud.firestore {
       allow create: if isAuth();
       allow update, delete: if isAuth() && isAdmin();
     }
+
+    // ── Client CRM (per brand) ─────────────────────────
+    // sales_clients (Barro/Sales), design_clients (Design), bs_clients
+    // (Brilliant Steel). Shared internal CRM — any signed-in staffer can read;
+    // sales/design/admin roles maintain the records.
+    match /sales_clients/{docId}  { allow read: if isAuth(); allow write: if isAuth(); }
+    match /design_clients/{docId} { allow read: if isAuth(); allow write: if isAuth(); }
+    match /bs_clients/{docId}      { allow read: if isAuth(); allow write: if isAuth(); }
+
+    // ── Dynamic / runtime-named collections ────────────
+    // The app creates per-scope and per-dept collections at runtime whose names
+    // are not known ahead of time, so they can't be matched by literal name:
+    //   files_<scope>  — uploaded documents (every Files tab, all depts)
+    //   budgets_<dept> — budget allocation lines (Budgeting screens)
+    // Firestore does NOT match collections by prefix, so cover each family with
+    // a single-segment wildcard guarded by coll.matches(...). This only grants
+    // access for those families; all explicitly-named collections above keep
+    // their own (stricter) rules via the permissive union of matching rules.
+    match /{coll}/{docId} {
+      // Files: readable by the team; you own what you upload; owner/admin edit or remove.
+      allow read:   if isAuth() && coll.matches('files_.*');
+      allow create: if isAuth() && coll.matches('files_.*')
+                    && request.resource.data.uploadedBy == request.auth.uid;
+      allow update, delete: if isAuth() && coll.matches('files_.*')
+                    && (resource.data.uploadedBy == request.auth.uid || isAdmin());
+    }
+    match /{coll}/{docId} {
+      // Budget lines: internal planning data, read/write by any signed-in staffer
+      // (the UI already gates the edit buttons to dept members + finance/admin).
+      allow read, write: if isAuth() && coll.matches('budgets_.*');
+    }
   }
 }

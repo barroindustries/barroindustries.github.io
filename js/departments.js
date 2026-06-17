@@ -3118,9 +3118,12 @@ async function downloadJPEG() {
 
 // ── Finance Overview ──────────────────────────────
 async function renderFinanceOverview(container, currentUser, currentRole) {
+  // These collection-wide reads are only permitted for finance/admin by the
+  // Firestore rules. A non-finance user who merely belongs to the Finance dept
+  // can open this tab, so degrade gracefully instead of crashing the screen.
   const [expSnap, salSnap] = await Promise.all([
-    db.collection('expenses').get(),
-    db.collection('users').get()
+    db.collection('expenses').get().catch(()=>({docs:[]})),
+    db.collection('users').get().catch(()=>({docs:[]}))
   ]);
   const expenses   = expSnap.docs.map(d => d.data());
   const users      = salSnap.docs.map(d => d.data());
@@ -3471,8 +3474,17 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
       await db.collection('bk_quotes').doc(existing.id).update(data);
       Notifs.showToast('Quote updated!');
     } else {
-      const count = (await db.collection('bk_quotes').get()).size;
-      data.quoteNumber = `BK${new Date().getFullYear().toString().slice(-2)}${String(count+1).padStart(4,'0')}`;
+      // A collection-wide count is only readable by finance/admin (rules); for
+      // other creators (e.g. agents) fall back to a collision-resistant
+      // time-based suffix so the quote still saves instead of silently failing.
+      let seq;
+      try {
+        const count = (await db.collection('bk_quotes').get()).size;
+        seq = String(count+1).padStart(4,'0');
+      } catch(e) {
+        seq = String(Date.now()).slice(-4);
+      }
+      data.quoteNumber = `BK${new Date().getFullYear().toString().slice(-2)}${seq}`;
       data.createdAt   = firebase.firestore.FieldValue.serverTimestamp();
       await db.collection('bk_quotes').add(data);
       Notifs.showToast('BK Quote saved!');
@@ -3805,10 +3817,18 @@ async function renderProjects(container, currentUser, currentRole) {
 window.renderIT = async function(currentUser, currentRole, subtab = 'Overview') {
   const c = deptContainer();
   const canEdit = canEditDept('IT');
+  // it_access / it_network are admin-read-only (Firestore rules). Hide those
+  // subtabs from non-admins so they don't see a misleadingly-empty table for
+  // records they simply aren't permitted to read.
+  const itAdmin = currentRole === 'president' || currentRole === 'manager';
+  const subtabs = itAdmin
+    ? ['Overview','IT Tickets','Assets','Software','Access Control','Network','Tasks']
+    : ['Overview','IT Tickets','Assets','Software','Tasks'];
+  if (!itAdmin && (subtab === 'Access Control' || subtab === 'Network')) subtab = 'Overview';
   c.innerHTML = `
     <div class="page-header"><h2>💻 IT Department</h2></div>
     <div class="subtab-bar" style="flex-wrap:wrap">
-      ${['Overview','IT Tickets','Assets','Software','Access Control','Network','Tasks'].map(s =>
+      ${subtabs.map(s =>
         `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
       ).join('')}
     </div>
@@ -6258,11 +6278,17 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
   // Allow: admins, finance, president, and members of this dept
   const isDeptMember = (window.currentDepts||[]).includes(dept);
   const canEdit = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance'||isDeptMember;
+  // The shared ledger (actual spend) is finance/admin-only per Firestore rules.
+  // Dept members who aren't finance can still see + edit budget allocations, but
+  // not the spend figures — show those as "—" rather than a misleading ₱0.
+  const canSeeSpend = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
 
   // Load budget lines + dept expenses from shared ledger
   const [budgetSnap, ledgerSnap] = await Promise.all([
     db.collection(collection).orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
-    db.collection('ledger').where('dept','==',dept).limit(100).get().catch(()=>({docs:[]}))
+    canSeeSpend
+      ? db.collection('ledger').where('dept','==',dept).limit(100).get().catch(()=>({docs:[]}))
+      : Promise.resolve({docs:[]})
   ]);
 
   const items    = budgetSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -6283,10 +6309,11 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
   container.innerHTML = `
     <div class="kpi-row" style="margin-bottom:14px">
       <div class="kpi-card"><div class="kpi-label">Total Budget</div><div class="kpi-value">₱${fmt(totalBudget)}</div></div>
-      <div class="kpi-card red"><div class="kpi-label">Total Spent</div><div class="kpi-value">₱${fmt(totalSpent)}</div></div>
-      <div class="kpi-card green"><div class="kpi-label">Remaining</div><div class="kpi-value">₱${fmt(totalBudget-totalSpent)}</div></div>
-      ${totalIncome>0?`<div class="kpi-card accent"><div class="kpi-label">Income</div><div class="kpi-value">₱${fmt(totalIncome)}</div></div>`:''}
+      <div class="kpi-card red"><div class="kpi-label">Total Spent</div><div class="kpi-value">${canSeeSpend?'₱'+fmt(totalSpent):'—'}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Remaining</div><div class="kpi-value">${canSeeSpend?'₱'+fmt(totalBudget-totalSpent):'—'}</div></div>
+      ${canSeeSpend&&totalIncome>0?`<div class="kpi-card accent"><div class="kpi-label">Income</div><div class="kpi-value">₱${fmt(totalIncome)}</div></div>`:''}
     </div>
+    ${!canSeeSpend?`<div style="font-size:11px;color:var(--text-muted);margin:-6px 0 12px;display:flex;align-items:center;gap:6px"><span>💡</span> Spend tracking is visible to Finance &amp; Management.</div>`:''}
     ${canEdit?`<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:12px">
       <button class="btn-secondary btn-sm" id="add-budget-line-btn">+ Budget Line</button>
       <button class="btn-primary btn-sm" id="log-expense-btn">📤 Log Expense / Income</button>
@@ -6306,15 +6333,15 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
                 return `<tr>
                   <td style="font-weight:600">${i.name}</td>
                   <td>₱${fmt(i.budget)}</td>
-                  <td style="color:var(--danger)">₱${fmt(i.spent)}</td>
-                  <td style="color:${rem<0?'var(--danger)':'var(--success)'}">₱${fmt(rem)}</td>
+                  <td style="color:var(--danger)">${canSeeSpend?'₱'+fmt(i.spent):'—'}</td>
+                  <td style="color:${rem<0?'var(--danger)':'var(--success)'}">${canSeeSpend?'₱'+fmt(rem):'—'}</td>
                   <td>
-                    <div style="display:flex;align-items:center;gap:6px;min-width:80px">
+                    ${canSeeSpend?`<div style="display:flex;align-items:center;gap:6px;min-width:80px">
                       <div style="flex:1;height:6px;background:var(--surface2);border-radius:3px">
                         <div style="width:${pct}%;height:100%;border-radius:3px;background:${pct>=90?'var(--danger)':pct>=70?'var(--warning,#ff9f0a)':'var(--primary-light)'}"></div>
                       </div>
                       <span style="font-size:11px;color:var(--text-muted);white-space:nowrap">${pct}%</span>
-                    </div>
+                    </div>`:'<span style="font-size:11px;color:var(--text-muted)">—</span>'}
                   </td>
                 </tr>`;
               }).join('')}
