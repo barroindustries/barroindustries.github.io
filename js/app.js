@@ -936,7 +936,6 @@ function renderQuoteBuilderIframe() {
     ${reviewBanner}
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
       <h2 style="font-size:16px;font-weight:800;color:var(--text)">🧮 Quote Builder${reviewCtx?' <span style="font-size:12px;font-weight:600;color:var(--warning,#ff9f0a)">(reviewing a partner quote)</span>':reopenState?' <span style="font-size:12px;font-weight:600;color:var(--text-muted)">(editing a copy)</span>':''}</h2>
-      <button class="btn-secondary btn-sm" onclick="document.getElementById('qb-frame')?.contentWindow?.print()">🖨 Print / PDF</button>
     </div>
     <iframe id="qb-frame" src="${qbSrc}" allow="print"
       style="width:100%;height:calc(100dvh - ${reviewCtx?'250':'200'}px);min-height:460px;border:none;border-radius:12px;background:#f5f6fa"></iframe>`;
