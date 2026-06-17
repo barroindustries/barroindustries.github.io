@@ -717,14 +717,11 @@ function getSidebarItems() {
     items.push({ icon:'trending-up',   label:'Progress Reports', page:'progress'                       });
     items.push({ icon:'users',         label:'Team Directory',   page:'team-directory',  section:true  });
     items.push({ icon:'calendar',      label:'Attendance',       page:'attendance'                     });
-    items.push({ icon:'palmtree',      label:'Leave',            page:'leave'                          });
     items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'                    });
-    items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
     items.push({ icon:'boxes',         label:'Inventory',        page:'inventory',       section:true, sectionLabel:'Operations' });
     items.push({ icon:'package',       label:'Product Database', page:'product-database', section:true, sectionLabel:'Catalog' });
     items.push({ icon:'scroll-text',   label:'Audit Log',        page:'audit-log',       section:true, sectionLabel:'Security' });
-    items.push({ icon:'book-open',     label:'SOPs',             page:'sops',            section:true, sectionLabel:'Resources' });
-    items.push({ icon:'help-circle',   label:'Help & Setup',     page:'help'             });
+    // (Leave, Company, SOPs, Help moved into the profile drawer's "More" section)
   } else if (partner) {
     // ── External Partner role ──
     items.push({ icon:'check-square', label:'My Tasks',      page:'tasks'            });
@@ -734,15 +731,12 @@ function getSidebarItems() {
     items.push({ icon:'book-open',    label:'Client Data',   page:'bs-clients'       });
     items.push({ icon:'users',        label:'Team',          page:'team-directory',   section:true, sectionLabel:'Directory' });
     items.push({ icon:'folder',       label:'Files',         page:'files'            });
-    items.push({ icon:'book-open',    label:'SOPs',          page:'sops',             section:true, sectionLabel:'Resources' });
-    items.push({ icon:'help-circle',  label:'Help',          page:'help'             });
   } else if (bsOnly) {
     // ── Partner — Brilliant Steel (ISOLATED) ──
     items.push({ icon:'calculator',  label:'Quote Builder', page:'bs-quote-builder' });
     items.push({ icon:'file-text',   label:'Quotations',    page:'bs-quotations'    });
     items.push({ icon:'book-open',   label:'Client Data',   page:'bs-clients'       });
     items.push({ icon:'folder',      label:'Files',         page:'bs-files'         });
-    items.push({ icon:'help-circle', label:'Help / Guide',  page:'help'             });
   } else {
     // ── Employee / Agent / Finance ──
     items.push({ icon:'search',       label:'Search',   page:'search' });
@@ -756,15 +750,10 @@ function getSidebarItems() {
     // Management section below
     items.push({ icon:'users',       label:'Team',             page:'team-directory',    section:true, sectionLabel:'Management' });
     items.push({ icon:'calendar',    label:'Attendance',       page:'attendance'                       });
-    items.push({ icon:'palmtree',    label:'Leave',            page:'leave'                            });
     items.push({ icon:'credit-card', label:'Personal Finance', page:'personal-finance'                 });
     items.push({ icon:'folder',      label:'Files',            page:'files'                            });
     items.push({ icon:'boxes',       label:'Inventory',        page:'inventory'                        });
-    if (currentRole !== 'agent') {
-      items.push({ icon:'building-2', label:'Company', page:'company' });
-    }
-    items.push({ icon:'book-open',   label:'SOPs',         page:'sops', section:true, sectionLabel:'Resources' });
-    items.push({ icon:'help-circle', label:'Help / Guide', page:'help' });
+    // (Leave, Company, SOPs, Help moved into the profile drawer's "More" section)
   }
   return items;
 }
@@ -5835,6 +5824,23 @@ function openProfileDrawer() {
            </div>`}
     </div>
 
+    <!-- ── More / Shortcuts (moved out of the main nav to declutter) ── -->
+    <div class="profile-section-label">MORE</div>
+    <div class="profile-inset-card" style="padding:4px 8px">
+      ${(() => {
+        const isAdm = (typeof isPresident==='function' && isPresident()) || currentRole==='manager';
+        const isPartnerU = (typeof isPartner==='function' && isPartner()) || (typeof isBrilliantOnly==='function' && isBrilliantOnly());
+        const links = [
+          { icon:'🌴', label:'Leave', page:'leave', hide: isPartnerU },
+          { icon:'📅', label:'Attendance', page:'attendance', hide: isPartnerU },
+          { icon:'📖', label:'SOPs', page:'sops' },
+          { icon:'🏢', label:'Company', page:'company', hide: !isAdm },
+          { icon:'❓', label:'Help & Guide', page:'help' },
+        ].filter(l => !l.hide);
+        return links.map(l=>`<button class="profile-shortcut-btn" data-page="${l.page}" style="display:flex;align-items:center;gap:12px;width:100%;background:none;border:none;border-bottom:1px solid var(--border);padding:13px 6px;cursor:pointer;color:var(--text);font-size:14px;text-align:left"><span style="font-size:18px;width:22px;text-align:center">${l.icon}</span>${l.label}</button>`).join('');
+      })()}
+    </div>
+
     <!-- ── Notification Settings ── -->
     <div class="profile-section-label">NOTIFICATIONS</div>
     <div class="profile-inset-card" id="notif-settings-card">
@@ -5938,6 +5944,7 @@ function openProfileDrawer() {
 
   document.getElementById('profile-close').onclick=closeProfileDrawer;
   overlay.addEventListener('click',closeProfileDrawer);
+  drawer.querySelectorAll('.profile-shortcut-btn').forEach(b => b.onclick = () => { closeProfileDrawer(); navigateTo(b.dataset.page); });
 }
 
 function closeProfileDrawer() {
