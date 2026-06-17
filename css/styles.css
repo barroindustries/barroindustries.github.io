@@ -2166,7 +2166,7 @@ body.sidebar-open .top-nav-strip { display: none !important; }
 
 @media (max-width: 420px) {
   .login-container { padding: 24px 16px 20px; }
-  .kpi-value { font-size: 20px; }
+  /* .kpi-value sizing handled in the max-width:480px block below (currency-safe clamp) */
   .kpi-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .kpi-card { padding: 14px 12px; }
   /* .bn-label hidden globally via pill nav styles */
@@ -2860,6 +2860,14 @@ html.light .team-member-card:hover, html.theme-pink .team-member-card:hover, htm
 /* ── Subtab bar responsive (scrolls horizontally, no wrapping needed) ── */
 @media (max-width: 480px) {
   .subtab-btn { padding: 7px 10px; font-size: 12px; }
+  /* KPI values must fit large peso figures in half-width cards without clipping
+     (finance/payroll KPIs can be 6-7 digits). Scale with viewport, cap at 20px. */
+  .kpi-value {
+    font-size: clamp(15px, 4.6vw, 20px);
+    letter-spacing: -0.3px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
 }
 
 /* ── Payroll table photo ────────────────────── */
