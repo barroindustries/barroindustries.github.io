@@ -1459,7 +1459,7 @@ async function renderPresidentDashboard() {
   try {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
     const todayStr = bizDate();
-    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap] = await Promise.all([
+    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap, ledgerSnap, invSnap] = await Promise.all([
       dbCachedGet('users',         () => db.collection('users').get(),                                    60000),
       dbCachedGet('tasks-all',     () => db.collection('tasks').get(),                                    30000),
       dbCachedGet('submissions',   () => db.collection('submissions').get(),                              30000),
@@ -1468,6 +1468,8 @@ async function renderPresidentDashboard() {
       safeGet(db.collection('cash_advances').where('status','==','pending')),
       safeGet(db.collection('attendance_extensions').where('status','==','pending')),
       safeGet(db.collection('signup_requests').where('status','==','pending')),
+      safeGet(db.collection('ledger')),
+      safeGet(db.collection('inventory_items')),
     ]);
 
     const users       = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -1489,6 +1491,14 @@ async function renderPresidentDashboard() {
 
     // Total payroll burn (sum of net pay of all employees)
     const payrollBurn = users.reduce((s,u)=>(s+(u.salary||0)+(u.allowance||0)-(u.deductions||0)),0);
+
+    // Month-to-date financials (ledger: credit = income, debit = expense) for remote oversight
+    const mtd = todayStr.slice(0,7);
+    const mtdLedger = ledgerSnap.docs.map(d=>d.data()).filter(e=>(e.date||'').slice(0,7)===mtd);
+    const mtdNet = mtdLedger.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0)
+                 - mtdLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+    // Inventory low-stock count
+    const lowStock = invSnap.docs.map(d=>d.data()).filter(i=>(i.reorderLevel||0)>0 && (i.qty||0)<=(i.reorderLevel||0)).length;
 
     // Sort open tasks: overdue first, then by priority (high→medium→low), then by dueDate
     const priorityOrder = { high:0, medium:1, low:2 };
@@ -1561,6 +1571,17 @@ async function renderPresidentDashboard() {
           <div class="kpi-icon-wrap" style="background:rgba(255,170,0,0.12)"><i data-lucide="banknote" style="stroke:#FFAA00;width:18px"></i></div>
           <div class="kpi-label">Monthly Payroll</div>
           <div class="kpi-value" style="font-size:15px">₱${formatNum(payrollBurn)}</div>
+        </div>
+        <div class="kpi-card ${mtdNet>=0?'green':'red'}" style="cursor:pointer" onclick="navigateTo('dept:Finance')">
+          <div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="line-chart" style="stroke:#30D158;width:18px"></i></div>
+          <div class="kpi-label">Net Income (MTD)</div>
+          <div class="kpi-value" style="font-size:15px;color:${mtdNet>=0?'var(--success)':'var(--danger)'}">₱${formatNum(mtdNet)}</div>
+        </div>
+        <div class="kpi-card ${lowStock>0?'red':''}" style="cursor:pointer" onclick="navigateTo('inventory')">
+          <div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="boxes" style="stroke:#FF453A;width:18px"></i></div>
+          <div class="kpi-label">Low Stock</div>
+          <div class="kpi-value">${lowStock}</div>
+          <div class="kpi-sub">${lowStock>0?'needs reorder':'all stocked'}</div>
         </div>
       </div>
 
