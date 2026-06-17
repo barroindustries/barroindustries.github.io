@@ -5765,7 +5765,7 @@ async function renderBSClientData(container, currentUser, currentRole) {
             </div>
             <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px;margin-bottom:8px">Quotation History</div>
             <div class="table-wrap"><table class="data-table">
-              <thead><tr><th>Quote #</th><th>Amount</th><th>Status</th><th>Date</th>${isPrivileged?'<th>By</th>':''}</tr></thead>
+              <thead><tr><th>Quote #</th><th>Amount</th><th>Status</th><th>Date</th>${isPrivileged?'<th>By</th>':''}<th></th></tr></thead>
               <tbody>${cl.quotes.map(q=>{
                 const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
                 const status = q.status||q.approvalStatus||'draft';
@@ -5776,6 +5776,7 @@ async function renderBSClientData(container, currentUser, currentRole) {
                   <td><span class="badge ${badge}">${status}</span></td>
                   <td style="color:var(--text-muted);font-size:11px">${ts}</td>
                   ${isPrivileged?`<td style="font-size:12px;color:var(--text-muted)">${escHtml(q.agentName||q.createdByName||'—')}</td>`:''}
+                  <td style="white-space:nowrap">${q.editableState?`<button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.reopenQuoteFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen &amp; Edit</button>`:'<span style="font-size:10px;color:var(--text-muted)">no snapshot</span>'}</td>
                 </tr>`;
               }).join('')}</tbody>
             </table></div>
