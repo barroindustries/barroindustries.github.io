@@ -97,8 +97,14 @@ Designed via a fan-out spec workflow, then implemented + adversarially reviewed 
    `audit_log` (append-only) written on key mutations — important for remote accountability.
 4. **Sales ↔ inventory ↔ costing integration.** When a quote is **accepted**, auto-create a `job_costs`
    entry; optionally a BOM that deducts `inventory_items` when a job is fulfilled. Today they're separate.
-5. **Low-stock + key-event push.** Inventory reorder is visual-only; send a push to admins when stock hits
-   reorder level. (Note owner's cost preference — batch/daily digest, not per-event.)
+   ⚠️ **Permission constraint to design around first:** `job_costs` read is finance/admin-only (margins),
+   and `bk_quotes` read is creator-or-admin only — so a *sales* user accepting a quote can neither read
+   `job_costs` (to dedup) nor would finance be able to read `bk_quotes` (to import). Cleanest path: split
+   `job_costs` rules (`create: non-partner`, `read/update/delete: finance/admin`) and write the entry keyed
+   by the quote id with `merge:true` (idempotent, preserves finance-entered costs), OR trigger it from a
+   Cloud Function on the bk_quotes status change (server-side, no client read friction). Not rushed
+   post-launch to avoid a hasty rules change.
+5. ✅ **Low-stock + key-event push.** DONE — `Notifs.checkLowStock` daily digest (see DONE section).
 
 ### Medium priority
 6. **Accounting depth.** Current Reports is a category-based P&L + VAT *estimate*. For real filing add a
