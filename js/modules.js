@@ -1458,7 +1458,8 @@ async function renderPresidentMessageCard() {
       ${low.length?`<div class="alert-banner alert-warn"><span>⚠️ <strong>${low.length} item${low.length>1?'s':''}</strong> at or below reorder level</span></div>`:''}
       <div class="subtab-bar" style="margin-bottom:10px">
         ${[['all','All'],['material','Raw Materials'],['product','Finished Goods']].map(([k,l])=>`<button class="subtab-btn inv-kind-chip ${kindFilter===k?'active':''}" data-kind="${k}">${l}</button>`).join('')}
-        ${ce?'<button class="btn-primary btn-sm" id="inv-add-btn" style="margin-left:auto">＋ Add Item</button>':''}
+        <button class="btn-secondary btn-sm" id="inv-csv" style="margin-left:auto">⬇ CSV</button>
+        ${ce?'<button class="btn-primary btn-sm" id="inv-add-btn">＋ Add Item</button>':''}
       </div>
       <div class="card"><div class="card-body" style="padding:0">
         ${!shown.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📦</div><h4>No items yet</h4></div>':
@@ -1483,6 +1484,10 @@ async function renderPresidentMessageCard() {
         </table></div>`}
       </div></div>`;
     el.querySelectorAll('.inv-kind-chip').forEach(b=>b.addEventListener('click',()=>renderStock(el,b.dataset.kind)));
+    document.getElementById('inv-csv')?.addEventListener('click',()=>window.exportCSV('inventory', shown, [
+      {key:'name',label:'Item'},{key:'kind',label:'Type',get:i=>(i.kind||'material')},{key:'category',label:'Category'},
+      {key:'qty',label:'On Hand',get:i=>i.qty||0},{key:'unit',label:'Unit'},{key:'reorderLevel',label:'Reorder',get:i=>i.reorderLevel||0},
+      {key:'unitCost',label:'Unit Cost',get:i=>i.unitCost||0},{key:'value',label:'Stock Value',get:i=>(i.qty||0)*(i.unitCost||0)},{key:'supplier',label:'Supplier'}]));
     if(ce){
       document.getElementById('inv-add-btn')?.addEventListener('click',()=>itemModal(null,()=>renderStock(el,kindFilter)));
       el.querySelectorAll('.inv-edit-btn').forEach(b=>b.addEventListener('click',()=>itemModal(items.find(i=>i.id===b.dataset.id),()=>renderStock(el,kindFilter))));
@@ -1565,7 +1570,7 @@ async function renderPresidentMessageCard() {
     el.innerHTML='<div class="loading-placeholder">Loading movements…</div>';
     const snap=await db.collection('stock_movements').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]}));
     const mv=snap.docs.map(d=>d.data());
-    el.innerHTML=`<div class="card"><div class="card-header"><h3>📋 Stock Movement Log</h3></div>
+    el.innerHTML=`<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3>📋 Stock Movement Log</h3>${mv.length?'<button class="btn-secondary btn-sm" id="mv-csv">⬇ CSV</button>':''}</div>
       <div class="card-body" style="padding:0">
       ${!mv.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📋</div><h4>No movements yet</h4></div>':
       `<div class="table-wrap"><table class="data-table">
@@ -1580,6 +1585,9 @@ async function renderPresidentMessageCard() {
           <td style="font-size:11px">${escHtml(m.byName||'—')}</td>
         </tr>`).join('')}</tbody></table></div>`}
       </div></div>`;
+    document.getElementById('mv-csv')?.addEventListener('click',()=>window.exportCSV('stock-movements', mv, [
+      {key:'date',label:'Date'},{key:'itemName',label:'Item'},{key:'type',label:'In/Out',get:m=>m.type==='in'?'IN':'OUT'},
+      {key:'qty',label:'Qty',get:m=>m.qty||0},{key:'project',label:'Project'},{key:'note',label:'Note'},{key:'byName',label:'By'}]));
   }
 
   async function renderJobs(el){
@@ -1588,8 +1596,9 @@ async function renderPresidentMessageCard() {
     const jobs=snap.docs.map(d=>({id:d.id,...d.data()}));
     const ce=isFinAdmin();
     el.innerHTML=`
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div style="font-size:12px;color:var(--text-muted)">Materials + labor vs revenue = margin per project</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="font-size:12px;color:var(--text-muted);flex:1">Materials + labor vs revenue = margin per project</div>
+        ${jobs.length?'<button class="btn-secondary btn-sm" id="jobs-csv">⬇ CSV</button>':''}
         ${ce?'<button class="btn-primary btn-sm" id="job-add-btn">＋ New Job</button>':''}
       </div>
       <div class="card"><div class="card-body" style="padding:0">
@@ -1604,6 +1613,11 @@ async function renderPresidentMessageCard() {
           ${ce?`<td><button class="btn-secondary btn-sm job-edit-btn" data-id="${j.id}" title="Edit">✎</button></td>`:''}
         </tr>`;}).join('')}</tbody></table></div>`}
       </div></div>`;
+    document.getElementById('jobs-csv')?.addEventListener('click',()=>window.exportCSV('job-costing', jobs, [
+      {key:'project',label:'Project'},{key:'quoteRef',label:'Quote Ref'},{key:'revenue',label:'Revenue',get:j=>j.revenue||0},
+      {key:'materialsCost',label:'Materials',get:j=>j.materialsCost||0},{key:'laborCost',label:'Labor',get:j=>j.laborCost||0},{key:'otherCost',label:'Other',get:j=>j.otherCost||0},
+      {key:'cost',label:'Total Cost',get:j=>(j.materialsCost||0)+(j.laborCost||0)+(j.otherCost||0)},
+      {key:'margin',label:'Margin',get:j=>(j.revenue||0)-((j.materialsCost||0)+(j.laborCost||0)+(j.otherCost||0))}]));
     if(ce){
       document.getElementById('job-add-btn')?.addEventListener('click',()=>jobModal(null,()=>renderJobs(el)));
       el.querySelectorAll('.job-edit-btn').forEach(b=>b.addEventListener('click',()=>jobModal(jobs.find(j=>j.id===b.dataset.id),()=>renderJobs(el))));
@@ -1725,7 +1739,7 @@ async function renderPresidentMessageCard() {
     const pending = reqs.filter(r=>r.status==='pending');
     const approved = reqs.filter(r=>r.status==='approved').length;
     c.innerHTML = `
-      <div class="page-header"><h2>🌴 Leave Management</h2><button class="btn-secondary btn-sm" id="my-leave-btn">My Leave</button></div>
+      <div class="page-header"><h2>🌴 Leave Management</h2><div style="display:flex;gap:8px"><button class="btn-secondary btn-sm" id="leave-csv">⬇ CSV</button><button class="btn-secondary btn-sm" id="my-leave-btn">My Leave</button></div></div>
       <div class="kpi-row" style="margin-bottom:14px">
         <div class="kpi-card ${pending.length?'accent':''}"><div class="kpi-label">Pending</div><div class="kpi-value">${pending.length}</div></div>
         <div class="kpi-card green"><div class="kpi-label">Approved</div><div class="kpi-value">${approved}</div></div>
@@ -1747,6 +1761,9 @@ async function renderPresidentMessageCard() {
           reqs.map(r=>leaveRow(r,true)).join('')}
       </div></div>`;
     document.getElementById('my-leave-btn').onclick = ()=>renderLeaveEmployee(c);
+    document.getElementById('leave-csv')?.addEventListener('click',()=>window.exportCSV('leave-requests', reqs, [
+      {key:'userName',label:'Employee'},{key:'type',label:'Type',get:r=>leaveType(r.type).label},{key:'days',label:'Days'},
+      {key:'startDate',label:'Start'},{key:'endDate',label:'End'},{key:'status',label:'Status'},{key:'reason',label:'Reason'}]));
     c.querySelectorAll('.lv-approve').forEach(b=>b.addEventListener('click',()=>approveLeave(reqs.find(r=>r.id===b.dataset.id),c)));
     c.querySelectorAll('.lv-reject').forEach(b=>b.addEventListener('click',()=>rejectLeave(reqs.find(r=>r.id===b.dataset.id),c)));
   }
@@ -1820,3 +1837,77 @@ async function renderPresidentMessageCard() {
   }
 })();
 
+
+// ═══════════════════════════════════════════════════
+//  GLOBAL SEARCH — across tasks, clients, inventory, products, quotes
+//  Internal staff only. Partners / Brilliant-Steel-only are gated out (some of
+//  these collections are partner-readable at the rules level, so the UI must
+//  explicitly exclude them — never rely on rules alone here).
+// ═══════════════════════════════════════════════════
+(function(){
+  const esc = s => (window.escHtml ? window.escHtml(s) : (s==null?'':String(s)));
+  const hit = (q, ...fields) => fields.some(f => (f||'').toString().toLowerCase().includes(q));
+
+  window.renderGlobalSearch = async function(initialQuery){
+    const c = document.getElementById('page-content');
+    if(!c) return;
+    const blocked = (typeof isPartner==='function' && isPartner()) || (typeof isBrilliantOnly==='function' && isBrilliantOnly());
+    if(blocked){ c.innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><h4>Search is not available for this account</h4></div>'; return; }
+
+    c.innerHTML = `
+      <div class="page-header"><h2>🔎 Search</h2></div>
+      <input id="gsearch-input" placeholder="Search tasks, clients, inventory, products, quotes…" value="${(initialQuery||'').replace(/"/g,'&quot;')}"
+        style="width:100%;padding:12px 14px;border:1.5px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);font-size:15px;margin-bottom:14px"/>
+      <div id="gsearch-results"><div class="empty-state" style="padding:30px"><div class="empty-icon">🔎</div><p>Type to search across the company.</p></div></div>`;
+    const input = document.getElementById('gsearch-input');
+    const out = document.getElementById('gsearch-results');
+
+    let sources = null;
+    async function load(){
+      if(sources) return sources;
+      const toArr = s => s.docs.map(d=>({id:d.id,...d.data()}));
+      const safe = p => p.then(toArr).catch(()=>[]);
+      const [tasks, quotes, sc, dc, bsc, inv, prod] = await Promise.all([
+        (typeof dbCachedGet==='function'?dbCachedGet('tasks-all',()=>db.collection('tasks').get(),30000):db.collection('tasks').get()).then(toArr).catch(()=>[]),
+        (typeof getAllQuotes==='function'?getAllQuotes():db.collection('bk_quotes').get()).then(toArr).catch(()=>[]),
+        safe(db.collection('sales_clients').get()),
+        safe(db.collection('design_clients').get()),
+        safe(db.collection('bs_clients').get()),
+        safe(db.collection('inventory_items').get()),
+        safe(db.collection('products').limit(1000).get()),
+      ]);
+      sources = { tasks, quotes,
+        clients: [...sc.map(x=>({...x,_brand:'sales'})), ...dc.map(x=>({...x,_brand:'design'})), ...bsc.map(x=>({...x,_brand:'bs'}))],
+        inv, prod };
+      return sources;
+    }
+
+    const rowItem = (icon,title,sub,onclick)=>`<div class="item-card" style="cursor:pointer;display:flex;align-items:center;gap:10px" onclick="${onclick}"><span style="font-size:18px">${icon}</span><div style="flex:1;min-width:0"><div style="font-weight:600;font-size:13px">${esc(title)}</div><div style="font-size:11px;color:var(--text-muted)">${esc(sub)}</div></div></div>`;
+    const groupHtml = (icon,title,rows,render)=> !rows.length ? '' :
+      `<div class="card" style="margin-bottom:12px"><div class="card-header"><h3>${icon} ${title} (${rows.length})</h3></div><div class="card-body" style="padding:0">${rows.slice(0,8).map(render).join('')}</div></div>`;
+
+    async function runSearch(qRaw){
+      const q = (qRaw||'').trim().toLowerCase();
+      if(!q){ out.innerHTML = '<div class="empty-state" style="padding:30px"><div class="empty-icon">🔎</div><p>Type to search across the company.</p></div>'; return; }
+      out.innerHTML = '<div class="loading-placeholder">Searching…</div>';
+      const S = await load();
+      const tasks   = S.tasks.filter(t=>hit(q,t.title,t.description,t.department));
+      const clients = S.clients.filter(x=>hit(q,x.name,x.company,x.email,x.phone));
+      const inv     = S.inv.filter(i=>hit(q,i.name,i.category,i.supplier));
+      const prod    = S.prod.filter(p=>hit(q,p.title,p.name,p.shortName,p.id,p.category));
+      const quotes  = S.quotes.filter(qt=>hit(q,qt.quoteNumber,qt.clientName,qt.status));
+      const total = tasks.length+clients.length+inv.length+prod.length+quotes.length;
+      if(!total){ out.innerHTML = `<div class="empty-state" style="padding:30px"><div class="empty-icon">🤷</div><h4>No results for "${esc(qRaw)}"</h4></div>`; return; }
+      out.innerHTML =
+        groupHtml('✅','Tasks',tasks,t=>rowItem('📋',t.title||'(untitled)',(t.department||'')+(t.status?' · '+t.status:''),`window.openTaskDetail&&window.openTaskDetail('${t.id}',window.currentUser,window.currentRole)`)) +
+        groupHtml('👤','Clients',clients,x=>rowItem('👤',x.name||x.company||'Client',(x.company||'')+(x.phone?' · '+x.phone:''),`navigateTo('${x._brand==='design'?'dept:Design':x._brand==='bs'?'bs-clients':'dept:Sales'}')`)) +
+        groupHtml('📦','Inventory',inv,i=>rowItem('📦',i.name||'(item)',(i.category||'')+' · '+(i.qty||0)+' '+(i.unit||''),`navigateTo('inventory')`)) +
+        groupHtml('🛒','Products',prod,p=>rowItem('🛒',p.title||p.name||p.id,(p.id||'')+(p.category?' · '+p.category:''),`navigateTo('product-database')`)) +
+        groupHtml('📄','Quotes',quotes,qt=>rowItem('📄',(qt.quoteNumber||'Quote')+(qt.clientName?' — '+qt.clientName:''),(qt.status||'draft'),`navigateTo('${(qt.quoteNumber||'').toString().toUpperCase().startsWith('BS')?'bs-quotations':'dept:Sales'}')`));
+    }
+
+    let _t; input.addEventListener('input',()=>{ clearTimeout(_t); _t=setTimeout(()=>runSearch(input.value),220); });
+    input.focus();
+    if(initialQuery) runSearch(initialQuery);
+  };
+})();

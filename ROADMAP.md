@@ -113,8 +113,8 @@ Designed via a fan-out spec workflow, then implemented + adversarially reviewed 
    per-client history timeline (quotes, deals, files).
 8. **HR depth.** 201 file / employee documents per person, onboarding checklist, structured performance-review cycle (KPI data exists but no review workflow).
 9. **Government Biddings.** PhilGEPS structured entry/import, per-bid document checklist, deadline reminders.
-10. **Exports.** CSV/PDF export across payroll, inventory, and finance reports; optional scheduled email digest to the president.
-11. **Global search.** Across tasks, clients, files, inventory.
+10. ✅ **Exports.** DONE — `window.exportCSV` (config.js; dependency-free, quote/comma/newline escaping, UTF-8 BOM, CSV-formula-injection guard that preserves numbers) + 10 "⬇ CSV" buttons: team/payroll, inventory, stock movements, job costs, ledger, expenses, audit log, leave, production orders, dept tasks. PDF stays on the existing print() paths (payslips, income statement, quotes). _Remaining: optional scheduled email digest._
+11. ✅ **Global search.** DONE — `renderGlobalSearch` page + topbar magnifier + sidebar item across tasks, clients (sales/design/bs), inventory, products, quotes; grouped clickable results, 220ms debounce, top-8/group. **Internal-only** — partners / Brilliant-Steel-only are gated out (UI hidden + early-return), since clients/products are partner-readable at the rules level. (Files search not included — files live in per-tab `files_*` collections; could be added.)
 
 ### Nice-to-have / hardening
 12. **Notification fan-out → Cloud Function** (reliability for >100 staff; deferred — low value at current size, adds cost).

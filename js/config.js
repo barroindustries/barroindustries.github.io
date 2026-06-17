@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '9.4.57';
+window.APP_VERSION = '9.4.58';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -229,4 +229,34 @@ window.logAudit = function(action, entity, entityId, details) {
       actorRole: window.currentRole || null,
     }).catch(() => {});  // swallow permission/network errors silently
   } catch (_) { /* never propagate */ }
+};
+
+// ── CSV export (dependency-free) ──────────────────
+// exportCSV('payroll', rows, [{key:'name',label:'Name'},{key:'net',label:'Net',get:r=>r.salary-r.deductions}])
+// rows: array of objects. columns: optional [{key,label,get?}] for order/labels/computed
+// values; omit to use the first row's keys. Triggers a client-side download.
+window.exportCSV = function(filename, rows, columns) {
+  if (!rows || !rows.length) { try { Notifs.showToast('Nothing to export', 'error'); } catch (_) {} return; }
+  const cols = (columns && columns.length) ? columns : Object.keys(rows[0]).map(k => ({ key: k, label: k }));
+  const cell = (v) => {
+    if (v == null) v = '';
+    v = String(typeof v === 'object' ? JSON.stringify(v) : v);
+    // CSV formula-injection guard: a TEXT cell starting with = + - @ can execute
+    // as a formula in Excel/Sheets. Prefix with a single quote to neutralize it —
+    // but leave plain numbers (incl. negative/decimal) untouched so they stay numeric.
+    if (!/^-?\d+(\.\d+)?$/.test(v) && /^[=+\-@\t\r]/.test(v)) v = "'" + v;
+    return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  };
+  const header = cols.map(c => cell(c.label)).join(',');
+  const body = rows.map(r => cols.map(c => cell(typeof c.get === 'function' ? c.get(r) : r[c.key])).join(',')).join('\r\n');
+  const csv = '﻿' + header + '\r\n' + body;  // UTF-8 BOM so Excel reads PHP ₱ + accents correctly
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = (typeof window.bizDate === 'function') ? window.bizDate() : new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = (filename.endsWith('.csv') ? filename.slice(0, -4) : filename) + '-' + stamp + '.csv';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  try { Notifs.showToast('Exported ' + a.download); } catch (_) {}
 };

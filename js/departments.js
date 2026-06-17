@@ -134,9 +134,10 @@ async function renderDeptTasks(container, deptName, currentUser, currentRole) {
 
     const canAdd = isAdmin;
     container.innerHTML = `
-      ${canAdd?`<div style="display:flex;justify-content:flex-end;margin-bottom:12px">
-        <button class="btn-primary btn-sm" id="dept-add-task-btn">+ New Task</button>
-      </div>`:''}
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
+        <button class="btn-secondary btn-sm" id="dept-tasks-csv">⬇ CSV</button>
+        ${canAdd?`<button class="btn-primary btn-sm" id="dept-add-task-btn">+ New Task</button>`:''}
+      </div>
       ${groups.map(g=>`
         <div style="margin-bottom:20px">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
@@ -149,6 +150,9 @@ async function renderDeptTasks(container, deptName, currentUser, currentRole) {
         </div>
       `).join('')}
     `;
+    container.querySelector('#dept-tasks-csv')?.addEventListener('click',()=>window.exportCSV(deptName+'-tasks', tasks, [
+      {key:'title',label:'Title'},{key:'status',label:'Status',get:t=>(typeof statusLabel==='function'?statusLabel(t.status):t.status)},
+      {key:'priority',label:'Priority'},{key:'department',label:'Department'},{key:'dueDate',label:'Due'},{key:'createdByName',label:'Created By'}]));
     container.querySelectorAll('.item-card').forEach(card=>
       card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole))
     );
@@ -1997,7 +2001,8 @@ async function renderLedgerTab(container, currentUser, currentRole) {
       <div class="kpi-card red"><div class="kpi-label">Total Debits</div><div class="kpi-value">₱${fmt(totalDebit)}</div></div>
       <div class="kpi-card ${balance>=0?'accent':'red'}"><div class="kpi-label">Balance</div><div class="kpi-value">₱${fmt(balance)}</div></div>
     </div>
-    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">
+      ${entries.length?'<button class="btn-secondary btn-sm" id="ledger-csv-btn">⬇ CSV</button>':''}
       <button class="btn-primary btn-sm" id="add-ledger-btn">+ New Entry</button>
     </div>
     <div class="card">
@@ -2019,6 +2024,12 @@ async function renderLedgerTab(container, currentUser, currentRole) {
       </div>
     </div>
   `;
+  document.getElementById('ledger-csv-btn')?.addEventListener('click', () => window.exportCSV('ledger', entries, [
+    {key:'date',label:'Date'},{key:'description',label:'Description'},{key:'category',label:'Category'},
+    {key:'source',label:'Source',get:e=>e.source||'Finance'},
+    {key:'debit',label:'Debit',get:e=>e.type==='debit'?(e.amount||0):''},
+    {key:'credit',label:'Credit',get:e=>e.type==='credit'?(e.amount||0):''},
+    {key:'refNumber',label:'Ref #'},{key:'addedByName',label:'By'}]));
   document.getElementById('add-ledger-btn').addEventListener('click', () => {
     openModal('New Ledger Entry', `
       <div class="form-row">
@@ -3215,7 +3226,7 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
       <div class="kpi-card accent"><div class="kpi-label">Pending Expenses</div><div class="kpi-value">₱${fmt(pendingExp)}</div></div>
     </div>
     <div class="card">
-      <div class="card-header"><h3>Recent Expenses</h3></div>
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3>Recent Expenses</h3>${expenses.length?'<button class="btn-secondary btn-sm" id="exp-csv-btn">⬇ CSV</button>':''}</div>
       <div class="card-body">
         <div class="table-wrap">
           <table class="data-table">
@@ -3233,6 +3244,9 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
       </div>
     </div>
   `;
+  document.getElementById('exp-csv-btn')?.addEventListener('click', () => window.exportCSV('expenses', expenses, [
+    {key:'date',label:'Date'},{key:'description',label:'Description'},{key:'category',label:'Category'},
+    {key:'amount',label:'Amount',get:e=>e.amount||0},{key:'submittedByName',label:'By'},{key:'status',label:'Status',get:e=>e.status||'pending'},{key:'fileUrl',label:'Receipt'}]));
 }
 
 // ══════════════════════════════════════════════════
@@ -6832,6 +6846,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
       <span style="font-size:12px;color:var(--text-muted);flex:1;min-width:180px">Pipeline: Queued → Cutting → Fab → Assembly → Finishing → QC → Ready → Delivered</span>
+      <button class="btn-secondary btn-sm" id="prod-csv" style="flex-shrink:0;white-space:nowrap">⬇ CSV</button>
       ${canEdit?'<button class="btn-primary btn-sm" id="prod-add-btn" style="flex-shrink:0;white-space:nowrap">＋ New Order</button>':''}
     </div>
     ${!active.length && !delivered.length ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">🏭</div><h4>No production orders yet</h4><p>Create a work order to track a job through the shop floor.</p></div>' : ''}
@@ -6852,6 +6867,9 @@ async function renderProdOrders(el, currentUser, currentRole) {
       </details>`:''}
   `;
 
+  document.getElementById('prod-csv')?.addEventListener('click', ()=>window.exportCSV('production-orders', orders, [
+    {key:'orderNo',label:'Order #'},{key:'title',label:'Product'},{key:'client',label:'Client'},{key:'qty',label:'Qty'},
+    {key:'stage',label:'Stage',get:o=>prodStage(o.stage).label},{key:'priority',label:'Priority'},{key:'team',label:'Team'},{key:'dueDate',label:'Due'},{key:'quoteRef',label:'Quote Ref'}]));
   if (canEdit) {
     document.getElementById('prod-add-btn')?.addEventListener('click', ()=>prodOrderModal(null, currentUser, currentRole, ()=>renderProdOrders(el, currentUser, currentRole)));
     el.querySelectorAll('.prod-edit').forEach(b=>b.addEventListener('click', (e)=>{

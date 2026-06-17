@@ -675,7 +675,12 @@ function _applyThemeIcon(theme) {
 }
 
 // ── Navigation ────────────────────────────────────
-function buildNav() { buildSidebarNav(); buildBottomNav(); buildTopNavStrip(); }
+function buildNav() {
+  buildSidebarNav(); buildBottomNav(); buildTopNavStrip();
+  // Global search is internal-only — show the topbar magnifier for everyone except partners / Brilliant-Steel-only
+  const gs = document.getElementById('global-search-btn');
+  if (gs) gs.style.display = (isPartner() || isBrilliantOnly()) ? 'none' : '';
+}
 
 function isPresident() { return currentRole === 'president'; }
 function isPartner() { return currentRole === 'partner'; }
@@ -692,6 +697,7 @@ function getSidebarItems() {
   if (pres) {
     // ── Admin / President Command Center ──
     items.push({ icon:'bar-chart-2',   label:'Analytics',        page:'analytics',       section:false });
+    items.push({ icon:'search',        label:'Search',           page:'search'                         });
     items.push({ icon:'check-square',  label:'Tasks',            page:'tasks'                          });
     items.push({ icon:'megaphone',     label:'Posts',            page:'posts'                          });
     items.push({ icon:'shield-check',  label:'Approvals',        page:'approvals',       section:true  });
@@ -726,6 +732,7 @@ function getSidebarItems() {
     items.push({ icon:'help-circle', label:'Help / Guide',  page:'help'             });
   } else {
     // ── Employee / Agent / Finance ──
+    items.push({ icon:'search',       label:'Search',   page:'search' });
     items.push({ icon:'check-square', label:'My Tasks', page:'tasks' });
     items.push({ icon:'megaphone',    label:'Posts',    page:'posts' });
     // Departments — appear ABOVE management section
@@ -1069,7 +1076,7 @@ async function renderAuditLog() {
   const fmtTs = ts => { try { return ts?.toDate ? ts.toDate().toLocaleString('en-PH',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'; } catch(_) { return '—'; } };
 
   c.innerHTML = `
-    <div class="page-header"><h2>📜 Audit Log</h2><span class="badge badge-gray">${entries.length} recent entr${entries.length===1?'y':'ies'}</span></div>
+    <div class="page-header"><h2>📜 Audit Log</h2><div style="display:flex;gap:8px;align-items:center"><span class="badge badge-gray">${entries.length} entr${entries.length===1?'y':'ies'}</span><button class="btn-secondary btn-sm" id="audit-csv">⬇ CSV</button></div></div>
     <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Append-only trail of changes to sensitive data (payroll, finance, inventory, products, production, deals, passwords). Newest first, last 500.</p>
     <div class="subtab-bar" style="flex-wrap:wrap;gap:8px;margin-bottom:12px">
       <select id="audit-entity" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">
@@ -1105,6 +1112,17 @@ async function renderAuditLog() {
   };
   document.getElementById('audit-entity')?.addEventListener('change', draw);
   document.getElementById('audit-action')?.addEventListener('change', draw);
+  document.getElementById('audit-csv')?.addEventListener('click', () => {
+    const fe = document.getElementById('audit-entity')?.value || 'all';
+    const fa = document.getElementById('audit-action')?.value || 'all';
+    const rows = entries.filter(e => (fe==='all'||e.entity===fe) && (fa==='all'||e.action===fa));
+    window.exportCSV('audit-log', rows, [
+      { key:'when', label:'When', get:e=>fmtTs(e.ts) },
+      { key:'actorName', label:'Who' }, { key:'actorRole', label:'Role' },
+      { key:'action', label:'Action' }, { key:'entity', label:'Entity' }, { key:'entityId', label:'Entity ID' },
+      { key:'details', label:'Details', get:e=>JSON.stringify(e.details||{}) },
+    ]);
+  });
   draw();
 }
 
@@ -1516,6 +1534,7 @@ function navigateTo(page) {
     case 'inventory':        window.renderInventory?.(); break;
     case 'product-database': isPresident() ? renderProductDatabase() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔒</div><h4>Access Denied</h4></div>`); break;
     case 'audit-log':        isPresident() ? renderAuditLog() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔒</div><h4>Access Denied</h4></div>`); break;
+    case 'search':           window.renderGlobalSearch?.(); break;
     default: c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><h4>Page not found</h4></div>`;
   }
 }
@@ -5369,6 +5388,7 @@ async function renderTeam() {
     <div class="page-header">
       <h2>👥 Team & Payroll</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-secondary btn-sm" id="team-csv-btn">⬇ CSV</button>
         <button class="btn-secondary btn-sm" id="add-worker-btn">👷 Create Worker Account</button>
         <button class="btn-primary btn-sm" id="add-emp-btn">+ Add Employee Profile</button>
         ${(isPresident()||currentDepts.includes('IT'))?`<button class="btn-danger btn-sm" id="force-logout-all-btn">🔴 Logout All</button>`:''}
@@ -5407,6 +5427,15 @@ async function renderTeam() {
   document.querySelectorAll('.edit-emp-btn').forEach(btn=>btn.addEventListener('click',()=>{const u=users.find(x=>x.id===btn.dataset.uid);if(u)openEditEmployeeModal(u);}));
   document.getElementById('add-emp-btn').addEventListener('click', openAddEmployeeModal);
   document.getElementById('add-worker-btn').addEventListener('click', openCreateWorkerModal);
+  document.getElementById('team-csv-btn')?.addEventListener('click', () => window.exportCSV('team-payroll', users, [
+    { key:'displayName', label:'Name', get:u=>u.displayName||u.email },
+    { key:'username', label:'Username' }, { key:'employeeId', label:'Employee ID' },
+    { key:'role', label:'Role', get:u=>ROLES[u.role]?.label||u.role },
+    { key:'departments', label:'Departments', get:u=>(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join('; ') },
+    { key:'salary', label:'Base', get:u=>u.salary||0 }, { key:'allowance', label:'Allowance', get:u=>u.allowance||0 },
+    { key:'deductions', label:'Deductions', get:u=>u.deductions||0 },
+    { key:'net', label:'Net', get:u=>(u.salary||0)+(u.allowance||0)-(u.deductions||0) },
+  ]));
   document.getElementById('force-logout-all-btn')?.addEventListener('click', async () => {
     if (!confirm('This will immediately sign out ALL active members. Continue?')) return;
     await db.collection('settings').doc('system').set({
