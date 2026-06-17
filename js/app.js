@@ -918,13 +918,22 @@ function renderQuoteBuilderIframe() {
   const partnerMode = (typeof isPartner === 'function' && isPartner()) ||
                       (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
   const qbSrc = 'quote-builder-v2.html' + (partnerMode ? '?portal=partner' : '');
+  // A "Reopen" action from the Quotations list stashes the quote's editable
+  // snapshot here — load it into the builder once the iframe is ready.
+  const reopenState = window._qbReopenState; window._qbReopenState = null;
   c.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
-      <h2 style="font-size:16px;font-weight:800;color:var(--text)">🧮 Quote Builder</h2>
+      <h2 style="font-size:16px;font-weight:800;color:var(--text)">🧮 Quote Builder${reopenState?' <span style="font-size:12px;font-weight:600;color:var(--text-muted)">(editing a copy)</span>':''}</h2>
       <button class="btn-secondary btn-sm" onclick="document.getElementById('qb-frame')?.contentWindow?.print()">🖨 Print / PDF</button>
     </div>
     <iframe id="qb-frame" src="${qbSrc}" allow="print"
       style="width:100%;height:calc(100dvh - 200px);min-height:460px;border:none;border-radius:12px;background:#f5f6fa"></iframe>`;
+  if (reopenState) {
+    const frame = document.getElementById('qb-frame');
+    frame?.addEventListener('load', () => {
+      setTimeout(() => { try { frame.contentWindow.postMessage({ type:'LOAD_QUOTE', payload:{ editableState: reopenState } }, '*'); } catch(_){} }, 450);
+    });
+  }
 }
 
 // ── Product Database (president only) ────────────

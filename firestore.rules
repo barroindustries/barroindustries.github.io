@@ -513,9 +513,11 @@ service cloud.firestore {
     // sales_clients (Barro/Sales), design_clients (Design), bs_clients
     // (Brilliant Steel). Shared internal CRM — any signed-in staffer can read;
     // sales/design/admin roles maintain the records.
-    match /sales_clients/{docId}  { allow read: if isAuth(); allow write: if isAuth(); }
-    match /design_clients/{docId} { allow read: if isAuth(); allow write: if isAuth(); }
-    match /bs_clients/{docId}      { allow read: if isAuth(); allow write: if isAuth(); }
+    // Read + create/update by any signed-in staff (also lets non-admins flag a
+    // delete request). Actual DELETE is admin-only — others must request approval.
+    match /sales_clients/{docId}  { allow read: if isAuth(); allow create, update: if isAuth(); allow delete: if isAuth() && isAdmin(); }
+    match /design_clients/{docId} { allow read: if isAuth(); allow create, update: if isAuth(); allow delete: if isAuth() && isAdmin(); }
+    match /bs_clients/{docId}      { allow read: if isAuth(); allow create, update: if isAuth(); allow delete: if isAuth() && isAdmin(); }
 
     // ── Dynamic / runtime-named collections ────────────
     // The app creates per-scope and per-dept collections at runtime whose names

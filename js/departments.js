@@ -3274,6 +3274,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
     { icon:'📝', label:'BK Quotes',      sub:'BK Quotes'      },
     { icon:'📊', label:'Quotations',     sub:'Quotations'     },
     { icon:'🤝', label:'Partner Quotes', sub:'Partner Quotes' },
+    { icon:'🗂', label:'Partner Files',  sub:'Partner Files'  },
     { icon:'👤', label:'Clients',        sub:'Clients'        },
     { icon:'📋', label:'Work Plans',     sub:'Work Plans'     },
     { icon:'📄', label:'Proposals',      sub:'Proposals'      },
@@ -3294,7 +3295,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
         </button>`).join('')}
     </div>
     <div class="subtab-bar">
-      ${['BK Quotes','Quotations','Partner Quotes','Clients','Work Plans','Proposals','Tasks'].map(s =>
+      ${['BK Quotes','Quotations','Partner Quotes','Partner Files','Clients','Work Plans','Proposals','Tasks'].map(s =>
         `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
       ).join('')}
     </div>
@@ -3349,6 +3350,10 @@ async function loadSalesContent(currentUser, currentRole, sub) {
       break;
     case 'Partner Quotes':
       renderSalesPartnerQuotes(content, currentUser, currentRole);
+      break;
+    case 'Partner Files':
+      content.innerHTML = `<div style="font-size:12px;color:var(--text-muted);background:rgba(10,132,255,.07);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:12px">🗂 Brilliant Steel partner files — visible to Sales for coordination.</div><div id="sales-partner-files"></div>`;
+      renderBSFiles(document.getElementById('sales-partner-files'), currentUser, currentRole);
       break;
     case 'Clients':
       await renderClientProfiles(content, currentUser, currentRole, 'barro');
@@ -5227,6 +5232,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
                 <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">❌ Reject</button>
                 <button class="btn-secondary btn-sm bs-edit-return-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">✎ Edit &amp; Return</button>
               `:''}
+              ${(status==='filed'||status==='approved')?`<button class="btn-secondary btn-sm bs-reopen-btn" data-id="${q.id}" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen</button>`:''}
               ${(status==='filed'||status==='approved')?`<button class="btn-success btn-sm bs-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-total="${q.total||q.grandTotal||0}" data-co="${escHtml(q.company||'BS')}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?'✓ Ordered':'🧾 Sales Order'}</button>`:''}
               ${canDeleteDirect
                 ? `<button class="btn-secondary btn-sm bs-del-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" style="color:var(--danger)">🗑 Delete</button>`
@@ -5415,6 +5421,19 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
         Notifs.showToast('Delete request sent to president');
         renderBSQuotationsSummary(container, currentUser, currentRole);
       } catch(ex){ Notifs.showToast('Request failed: '+(ex.message||ex.code),'error'); }
+    });
+  });
+  // Reopen a filed quote in the builder to edit — re-filing saves a new copy "(2)".
+  el.querySelectorAll('.bs-reopen-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      const id = e.currentTarget.dataset.id;
+      try {
+        const snap = await db.collection('bs_quotes').doc(id).get();
+        const q = snap.data() || {};
+        if (!q.editableState) { Notifs.showToast('No editable snapshot saved for this quote', 'error'); return; }
+        window._qbReopenState = q.editableState;   // picked up by renderQuoteBuilderIframe
+        navigateTo('bs-quote-builder');
+      } catch (ex) { Notifs.showToast('Could not reopen: '+(ex.message||ex.code), 'error'); }
     });
   });
   // Convert a won quote into a Sales Order (capture payment + receipt → finance)
@@ -6380,6 +6399,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
   const snap = await db.collection(collection).orderBy('createdAt','desc').get();
   const clients = snap.docs.map(d => ({id:d.id,...d.data()}));
   const canAdd = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='agent';
+  const canDeleteDirect = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
 
   container.innerHTML = `
     ${canAdd?`<div style="text-align:right;margin-bottom:12px"><button class="btn-primary btn-sm" id="add-client-btn">+ Add Client</button></div>`:''}
@@ -6387,16 +6407,36 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
       ${!clients.length
         ? `<div class="empty-state"><div class="empty-icon">👤</div><h4>No clients yet</h4></div>`
         : clients.map(cl => `
-          <div class="item-card">
-            <div class="item-title">${escHtml(cl.name)}</div>
-            <div class="item-meta">
-              ${cl.company?`<span>🏢 ${escHtml(cl.company)}</span>`:''}
-              ${cl.email?`<span>✉️ ${escHtml(cl.email)}</span>`:''}
-              ${cl.phone?`<span>📞 ${escHtml(cl.phone)}</span>`:''}
+          <div class="item-card" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+            <div style="flex:1;min-width:0">
+              <div class="item-title">${escHtml(cl.name)}${cl.deleteRequested?' <span class="badge badge-red" style="font-size:9px">🗑 del req</span>':''}</div>
+              <div class="item-meta">
+                ${cl.company?`<span>🏢 ${escHtml(cl.company)}</span>`:''}
+                ${cl.email?`<span>✉️ ${escHtml(cl.email)}</span>`:''}
+                ${cl.phone?`<span>📞 ${escHtml(cl.phone)}</span>`:''}
+                ${cl.lastQuoteNumber?`<span>📄 ${escHtml(cl.lastQuoteNumber)}</span>`:''}
+              </div>
             </div>
+            ${canDeleteDirect
+              ? `<button class="btn-secondary btn-sm cl-del-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="color:var(--danger);flex-shrink:0">🗑</button>`
+              : `<button class="btn-secondary btn-sm cl-delreq-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="flex-shrink:0" ${cl.deleteRequested?'disabled':''}>${cl.deleteRequested?'⏳ Requested':'🗑 Request'}</button>`}
           </div>`).join('')}
     </div>
   `;
+
+  container.querySelectorAll('.cl-del-btn').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm(`Delete client "${b.dataset.name}"? This cannot be undone.`)) return;
+    try { await db.collection(collection).doc(b.dataset.id).delete(); window.logAudit&&window.logAudit('delete','client',b.dataset.id,{name:b.dataset.name}); Notifs.showToast('Client deleted'); renderClientProfiles(container, currentUser, currentRole, brand); }
+    catch(ex){ Notifs.showToast('Delete failed','error'); }
+  }));
+  container.querySelectorAll('.cl-delreq-btn').forEach(b => b.addEventListener('click', async () => {
+    const reason = prompt('Reason for deleting this client folder? (sent to the president for approval)')||'';
+    try {
+      await db.collection(collection).doc(b.dataset.id).update({ deleteRequested:true, deleteReason:reason, deleteRequestedBy:currentUser.uid, deleteRequestedAt:firebase.firestore.FieldValue.serverTimestamp() });
+      await Notifs.sendToOwner({ title:'🗑 Client Delete Requested', body:`${userProfile?.displayName||currentUser.email} requests deleting client "${b.dataset.name}".${reason?' Reason: '+reason:''}`, icon:'🗑', type:'client_delete_request' });
+      Notifs.showToast('Delete request sent to president'); renderClientProfiles(container, currentUser, currentRole, brand);
+    } catch(ex){ Notifs.showToast('Request failed: '+(ex.message||ex.code),'error'); }
+  }));
 
   document.getElementById('add-client-btn')?.addEventListener('click', () => {
     openModal('Add Client', `
