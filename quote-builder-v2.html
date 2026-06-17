@@ -242,11 +242,15 @@ tr:hover td{background:#fafbff;}
 
 /* ── MOBILE ── */
 @media(max-width:700px){
-  .topbar{height:auto;padding:8px 12px;gap:8px;flex-direction:column;align-items:stretch;}
-  .topbar>div:first-child{flex-wrap:wrap;justify-content:space-between;}
-  .topbar-right{justify-content:flex-end;flex-wrap:wrap;gap:6px;}
-  .toggle-pills button{padding:5px 10px;font-size:11px;}
-  .btn{padding:8px 12px;font-size:12px;min-height:40px;}
+  .topbar{height:auto;padding:7px 9px;gap:6px;flex-direction:column;align-items:stretch;}
+  .topbar>div:first-child{flex-wrap:wrap;gap:6px;align-items:stretch;}
+  .topbar-logo{font-size:14px;align-self:center;}
+  .toggle-pills{flex:1 1 100%;display:flex;}
+  .toggle-pills button{padding:6px 6px;font-size:11px;flex:1;}
+  /* action buttons wrap into a tidy 2-up grid instead of a tall stack */
+  .topbar-right{display:grid;grid-template-columns:1fr 1fr;gap:5px;width:100%;}
+  .topbar-right .btn{padding:8px 6px;font-size:11.5px;min-height:38px;justify-content:center;width:100%;}
+  .topbar-right .filed-badge{grid-column:1/-1;}
   .main{padding:10px 8px;}
   .section{padding:12px 14px;}
   .fg-grid{grid-template-columns:1fr;}
@@ -272,7 +276,8 @@ tr:hover td{background:#fafbff;}
   .lead-in{width:100%!important;}
 }
 @media(max-width:420px){
-  .topbar-right .btn-outline:not(.btn-accent):not(#btnVerify):not(#btnPrint){display:none;}
+  /* keep all actions visible (incl. Agent Copy) — they now sit in a 2-up grid */
+  .topbar-right .btn{font-size:11px;padding:7px 4px;}
 }
 
 /* ── VERIFY / FILE MODAL ── */
@@ -768,14 +773,12 @@ tr:hover td{background:#fafbff;}
   <div id="paymentSummary" class="payment-summary"></div>
 </div>
 
-<!-- ── REMARKS & PAYMENT DETAILS ── -->
+<!-- ── REMARKS ── -->
 <div class="section" id="remarksSection">
-  <div class="sec-title">Remarks &amp; Payment Details</div>
+  <div class="sec-title">Remarks</div>
   <div class="fg-grid no-print">
     <div class="fg full"><label>Remarks / Special Notes to Client</label>
       <textarea id="remarks" rows="2" placeholder="e.g. This quotation includes free design consultation. Custom finishes available upon request." oninput="updateRemarksPrint()"></textarea></div>
-    <div class="fg full"><label>Payment / Bank Details (for deposit)</label>
-      <textarea id="bankDetails" rows="2" placeholder="Bank: BDO  |  Account Name: Barro Industries OPC  |  Account No.: 0000-0000-0000  |  GCash: 0927 683 6300" oninput="updateRemarksPrint()"></textarea></div>
   </div>
   <div class="print-only" id="remarksPrint"></div>
 </div>
@@ -817,6 +820,15 @@ tr:hover td{background:#fafbff;}
   <p style="font-size:11px;color:var(--gray-dark);margin:-4px 0 8px;">
     Materials &amp; per-unit labor pull from each product's <em>capital cost</em> in the database. Edit them in the President's Product Database.
   </p>
+
+  <!-- Per-item capital + labor breakdown -->
+  <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--gray-dark);margin-bottom:4px;">Capital &amp; Labor per Item</div>
+  <table class="labor-tbl" id="perItemTbl" style="margin-bottom:12px;">
+    <thead><tr><th>Item</th><th>Qty</th><th style="text-align:right;">Capital ₱</th><th style="text-align:right;">Labor ₱</th><th style="text-align:right;">Total ₱</th></tr></thead>
+    <tbody id="perItemBody"></tbody>
+    <tfoot><tr style="font-weight:700;background:#fff5e0;"><td colspan="2">Totals</td><td id="piMatTotal" style="text-align:right;">₱0</td><td id="piLabTotal" style="text-align:right;">₱0</td><td id="piGrand" style="text-align:right;">₱0</td></tr></tfoot>
+  </table>
+
   <table class="labor-tbl" id="marginTbl">
     <tbody>
       <tr><td>Materials cost (from DB)</td><td id="miMaterials" style="text-align:right;">₱0</td></tr>
@@ -857,14 +869,8 @@ tr:hover td{background:#fafbff;}
 <!-- ── AGENT COMMISSION BOX (agent copy print only) ── -->
 <div class="print-only agent-box" id="agentBox"></div>
 
-<!-- ── TRUST FOOTER (print only) ── -->
+<!-- ── FOOTER (print only) ── -->
 <div class="print-only print-footer" id="printFooter">
-  <div class="pf-trust">
-    <span class="pf-badge">✔ 12-Month Workmanship Warranty</span>
-    <span class="pf-badge">✔ Food-Grade SS304 Materials</span>
-    <span class="pf-badge">✔ BFP / DOH Compliant Builds</span>
-    <span class="pf-badge">✔ Nationwide Delivery &amp; Installation</span>
-  </div>
   <div class="pf-thanks" id="pfThanks"></div>
   <div class="pf-creds" id="pfCreds"></div>
 </div>
@@ -1019,8 +1025,7 @@ function applyPartnerMode(){
   const coBK=document.getElementById('coBK'); if(coBK) coBK.parentElement.style.display='none';
   // Remove the Admin (database) view button entirely
   document.getElementById('btnAdmin')?.remove();
-  // 'Agent Copy' is a sales-agent commission concept — not relevant to a 50/50 profit partner
-  document.getElementById('btnAgentPrint')?.remove();
+  // Agent Copy stays available to partners (restored per request).
   // If the Admin panel was open, fall back to client view
   if(typeof currentView!=='undefined' && currentView==='admin') setView('client');
 }
@@ -1816,6 +1821,17 @@ function computeMarginSummary(laborEst){
   }
   const materials=items.reduce((s,i)=>s+((i.capitalMaterials||0)*(i.qty||1)),0);
   const capLabor =items.reduce((s,i)=>s+((i.capitalLabor||0)*(i.qty||1)),0);
+  // Per-item capital + labor breakdown
+  const piBody=document.getElementById('perItemBody');
+  if(piBody){
+    piBody.innerHTML = items.length ? items.map(i=>{
+      const qty=i.qty||1, mat=(i.capitalMaterials||0)*qty, lab=(i.capitalLabor||0)*qty;
+      return `<tr><td style="font-size:12px;">${(i.name||'').replace(/</g,'&lt;')}</td><td style="text-align:center;">${qty}</td><td style="text-align:right;">${formatPeso(mat)}</td><td style="text-align:right;">${formatPeso(lab)}</td><td style="text-align:right;font-weight:600;">${formatPeso(mat+lab)}</td></tr>`;
+    }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--gray-dark);padding:8px;">Add items to see the capital &amp; labor breakdown.</td></tr>';
+    const pm=document.getElementById('piMatTotal'); if(pm) pm.textContent=formatPeso(materials);
+    const pl=document.getElementById('piLabTotal'); if(pl) pl.textContent=formatPeso(capLabor);
+    const pg=document.getElementById('piGrand'); if(pg) pg.textContent=formatPeso(materials+capLabor);
+  }
   const laborForCogs = laborEst>0 ? laborEst : capLabor;
   const cogs=materials+laborForCogs;
   const sell=(typeof computeTotals==='function') ? (computeTotals().net||0) : 0; // ex-VAT revenue
@@ -2151,38 +2167,9 @@ function loadFromStorage(){
       return;
     }catch(e){}
   }
-  try{
-    const sc_raw=localStorage.getItem('bkqb_client');
-    if(sc_raw){
-      const c=JSON.parse(sc_raw);
-      document.getElementById('clientName').value=c.clientName||'';
-      document.getElementById('clientCompany').value=c.clientCompany||'';
-      document.getElementById('clientAddress').value=c.clientAddress||'';
-      document.getElementById('clientPhone').value=c.clientPhone||'';
-      document.getElementById('clientEmail').value=c.clientEmail||'';
-      document.getElementById('salesperson').value=c.salesperson||'';
-      if(c.quoteDate) document.getElementById('quoteDate').value=c.quoteDate;
-      if(c.purpose) document.getElementById('purpose').value=c.purpose;
-      if(c.qnoLoc) document.getElementById('qnoLoc').value=c.qnoLoc;
-      if(c.qnoMethod) document.getElementById('qnoMethod').value=c.qnoMethod;
-      if(c.qnoSeq) document.getElementById('qnoSeq').value=c.qnoSeq;
-      if(c.currentCo) setCompany(c.currentCo);
-      if(c.qnoMode) setQnoMode(c.qnoMode);
-    }
-    const si=localStorage.getItem('bkqb_items');
-    const stc=localStorage.getItem('bkqb_terms_content');
-    const ste=localStorage.getItem('bkqb_terms_enabled');
-    const sst=localStorage.getItem('bkqb_status');
-    const spr=localStorage.getItem('bkqb_pricing');
-    const sfa=localStorage.getItem('bkqb_filedAt');
-    if(si) items=JSON.parse(si);
-    if(stc) termsContent=JSON.parse(stc);
-    if(ste) termsEnabled=JSON.parse(ste);
-    if(sst) quoteStatus=sst;
-    if(sfa) filedAt=sfa;
-    if(spr) applyPricingFields(JSON.parse(spr));
-    if(quoteStatus==='filed') document.getElementById('filedBadge').classList.add('show');
-  }catch(e){}
+  // Always open on a FRESH quote (no auto-restore of the last draft) — the
+  // builder is opened per-client, so starting clean avoids carrying over a
+  // previous client's quote. Shared-quote (#quote=) links are still honored above.
   renderItems();
   updatePrintHeader();
 }

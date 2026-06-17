@@ -918,28 +918,22 @@ function renderNotificationsPage() {
 
 // ── Quote Builder iframe ─────────────────────────
 function renderQuoteBuilderIframe() {
-  // Full-screen host so the builder gets the ENTIRE viewport — the app topbar,
-  // nav strip and the old in-page header are bypassed for maximum working space.
-  // Only two minimal floating controls (Back + PDF) sit over the iframe.
-  document.getElementById('qb-fullscreen')?.remove();
-  const host = document.createElement('div');
-  host.id = 'qb-fullscreen';
-  host.style.cssText = 'position:fixed;inset:0;z-index:5000;background:#f5f6fa;';
-  // Compact icon Back, top-right so it never covers the builder's own title /
-  // controls (which live top-left). The builder has its own Print/PDF/Share.
-  // Partners / Brilliant-Steel-only users get a locked-down builder:
-  // Brilliant Steel company only, no Admin (database) controls.
+  // Render the builder INSIDE the normal content area so the app's top bar and
+  // navigation stay visible (navigateTo replaces this when leaving the builder).
+  document.getElementById('qb-fullscreen')?.remove(); // remove any legacy overlay
+  const c = document.getElementById('page-content');
+  if (!c) return;
+  // Partners / Brilliant-Steel-only users get a locked-down builder (BS only, no Admin).
   const partnerMode = (typeof isPartner === 'function' && isPartner()) ||
                       (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
   const qbSrc = 'quote-builder-v2.html' + (partnerMode ? '?portal=partner' : '');
-  host.innerHTML = `
-    <iframe id="qb-frame" src="${qbSrc}"
-      style="position:absolute;inset:0;width:100%;height:100%;border:none;background:#f5f6fa"
-      allow="print"></iframe>
-    <button id="qb-back" title="Back to app" aria-label="Back to app"
-      style="position:absolute;top:calc(env(safe-area-inset-top,0px) + 10px);right:10px;z-index:2;display:flex;align-items:center;gap:6px;background:rgba(18,20,38,0.82);color:#fff;border:none;border-radius:999px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.35);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)">✕ Close</button>`;
-  document.body.appendChild(host);
-  document.getElementById('qb-back').onclick  = () => { host.remove(); navigateTo('dashboard'); };
+  c.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+      <h2 style="font-size:16px;font-weight:800;color:var(--text)">🧮 Quote Builder</h2>
+      <button class="btn-secondary btn-sm" onclick="document.getElementById('qb-frame')?.contentWindow?.print()">🖨 Print / PDF</button>
+    </div>
+    <iframe id="qb-frame" src="${qbSrc}" allow="print"
+      style="width:100%;height:calc(100dvh - 200px);min-height:460px;border:none;border-radius:12px;background:#f5f6fa"></iframe>`;
 }
 
 // ── Product Database (president only) ────────────
