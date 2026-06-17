@@ -4468,9 +4468,9 @@ function openITTicketModal(ticket, currentUser, canEdit, onRefresh) {
 //  BRILLIANT STEEL — Main Module (v3)
 // ══════════════════════════════════════════════════
 
-window.renderBrilliantSteel = async function(currentUser, currentRole, subtab = 'Dashboard') {
+window.renderBrilliantSteel = async function(currentUser, currentRole, subtab = 'Quotations Summary') {
   const c = deptContainer();
-  const tabs = ['Dashboard','Quote Builder','Quotations Summary','Client Data','Files'];
+  const tabs = ['Quote Builder','Quotations Summary','Client Data','Files'];
   c.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
       <span style="font-size:22px">⚙️</span>
@@ -4497,7 +4497,6 @@ window.renderBrilliantSteel = async function(currentUser, currentRole, subtab = 
 async function loadBSContent(currentUser, currentRole, sub) {
   const content = document.getElementById('bs-content');
   switch(sub) {
-    case 'Dashboard':          await renderBSDashboard(content, currentUser, currentRole); break;
     case 'Quote Builder':      navigateTo('bs-quote-builder'); break;
     case 'Quotations Summary': await renderBSQuotationsSummary(content, currentUser, currentRole); break;
     case 'Client Data':        await renderBSClientData(content, currentUser, currentRole); break;

@@ -1664,7 +1664,7 @@ async function renderDashboard() {
   } else if (isPartner()) {
     await renderPartnerDashboard();
   } else if (isBrilliantOnly()) {
-    renderBrilliantSteel(currentUser, currentRole, 'Dashboard');
+    renderBrilliantSteel(currentUser, currentRole, 'Quotations Summary');
   } else {
     await renderEmployeeDashboard();
   }
