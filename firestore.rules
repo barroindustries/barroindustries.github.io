@@ -13,6 +13,16 @@ service cloud.firestore {
     function isFinanceOrAdmin() { return getRole() in ['president', 'manager', 'finance']; }
     function isPresident()      { return getRole() == 'president'; }
 
+    // Member of the Finance DEPARTMENT (by string `department` or array `departments`),
+    // regardless of their role. Lets a Finance-dept staffer record sales income even if
+    // their role isn't the special 'finance' role.
+    function isFinanceDept() {
+      let u = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return u.get('department', '') == 'Finance' || u.get('departments', []).hasAny(['Finance']);
+    }
+    // Anyone allowed to operate the books: finance/admin role OR Finance-dept member.
+    function canFinance() { return isFinanceOrAdmin() || isFinanceDept(); }
+
     // True when a user-profile update leaves all privileged fields untouched.
     // Used so a non-admin can edit their own name/photo/phone but NOT promote
     // themselves (role) or change their own pay/department/employee ID.
@@ -365,13 +375,13 @@ service cloud.firestore {
 
     // ── Finance journals & records ─────────────────────
     match /ledger/{docId} {
-      allow read, write: if isAuth() && isFinanceOrAdmin();
+      allow read, write: if isAuth() && canFinance();
     }
     match /ledger_entries/{docId} {
-      allow read, write: if isAuth() && isFinanceOrAdmin();
+      allow read, write: if isAuth() && canFinance();
     }
     match /cash_receipt_journal/{docId} {
-      allow read, write: if isAuth() && isFinanceOrAdmin();
+      allow read, write: if isAuth() && canFinance();
     }
     match /cash_disbursement_journal/{docId} {
       allow read, write: if isAuth() && isFinanceOrAdmin();
@@ -494,7 +504,7 @@ service cloud.firestore {
         resource.data.createdBy == request.auth.uid || getRole() != 'partner'
       );
       allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
-      allow update: if isAuth() && isFinanceOrAdmin();
+      allow update: if isAuth() && canFinance();
       allow delete: if isAuth() && isPresident();
     }
 

@@ -5394,10 +5394,10 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
 // Finance/admin view of incoming sales orders — record income to the ledger.
 window.renderSalesOrders = async function(container){
   const c = container || deptContainer();
-  // Anyone non-partner can SEE the list (read rule), but recording posts to the
-  // ledger — which is finance/admin-only by Firestore rule — so the action buttons
-  // are gated to ledger-capable roles to avoid showing a button that would error.
-  const isFin = ['president','owner','manager','finance'].includes(currentRole);
+  // Anyone non-partner can SEE the list (read rule). Recording posts to the ledger,
+  // which is open to finance/admin roles OR Finance-DEPARTMENT staff (matching the
+  // canFinance() Firestore rule), so a Finance-dept member can register the sale.
+  const isFin = ['president','owner','manager','finance'].includes(currentRole) || (window.currentDepts||[]).includes('Finance');
   c.innerHTML='<div class="loading-placeholder">Loading sales orders…</div>';
   const snap = await db.collection('sales_orders').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
   const orders = snap.docs.map(d=>({id:d.id,...d.data()}));
@@ -5446,22 +5446,45 @@ window.renderSalesOrders = async function(container){
 // touched the ledger, so the Projects tab never reflected the money or the handoff.
 function openRecordSaleModal(o, container){
   const contract = o.contractAmount||0;
-  const defaultAmt = o.recordedAmount||o.paymentReceived||0;
-  openModal('💵 Record Sale — '+escHtml(o.clientName||''), `
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract <strong>₱${fmt(contract)}</strong> · ${escHtml(o.project||'')}${o.quoteNumber?' · '+escHtml(o.quoteNumber):''}</div>
+  const salesNoted = o.paymentReceived||0;
+  const defaultAmt = o.recordedAmount||salesNoted||0;
+  openModal('💵 Register Sale — '+escHtml(o.clientName||''), `
+    <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:10px 14px;font-size:12px">
+      <div style="font-weight:700;margin-bottom:6px">📋 Sales Order Terms</div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:3px 12px">
+        <span style="color:var(--text-muted)">Client / Project</span><span style="text-align:right">${escHtml(o.clientName||'')}${o.project?' · '+escHtml(o.project):''}</span>
+        <span style="color:var(--text-muted)">Quote</span><span style="text-align:right">${escHtml(o.quoteNumber||'—')}</span>
+        <span style="color:var(--text-muted)">Contract amount</span><span style="text-align:right;font-weight:700">₱${fmt(contract)}</span>
+        <span style="color:var(--text-muted)">Payment noted by Sales</span><span style="text-align:right">₱${fmt(salesNoted)} ${o.paymentMethod?'· '+escHtml(o.paymentMethod):''}</span>
+        ${o.notes?`<span style="color:var(--text-muted)">Terms / notes</span><span style="text-align:right">${escHtml(o.notes)}</span>`:''}
+        ${o.receiptUrl?`<span style="color:var(--text-muted)">Receipt</span><span style="text-align:right"><a href="${escHtml(o.receiptUrl)}" target="_blank">📎 View proof</a></span>`:''}
+      </div>
+    </div></div>
+    <div style="font-size:12px;font-weight:700;margin-bottom:6px">✅ Approve the collected amount</div>
     <div class="form-row">
-      <div class="form-group"><label>Amount Received (₱, VAT-incl.)</label><input id="rs-amount" type="number" step="0.01" min="0" value="${defaultAmt}"/></div>
+      <div class="form-group"><label>Approved collected (₱, VAT-incl.)</label><input id="rs-amount" type="number" step="0.01" min="0" value="${defaultAmt}"/>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Confirm what Finance actually received per the order terms.</div></div>
       <div class="form-group"><label>Method</label><select id="rs-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
         ${['Bank Transfer','GCash','Cash','Cheque','Other'].map(m=>`<option ${o.paymentMethod===m?'selected':''}>${m}</option>`).join('')}
       </select></div>
     </div>
     <div class="form-group"><label>OR / Reference No.</label><input id="rs-ref" placeholder="Official Receipt no."/></div>
+    <div class="card" style="margin:6px 0"><div class="card-body" style="padding:8px 14px;font-size:12px;display:grid;grid-template-columns:1fr auto;gap:2px 12px">
+      <span style="color:var(--text-muted)">Approving</span><span id="rs-appr" style="text-align:right;font-weight:700;color:var(--success)">₱${fmt(defaultAmt)}</span>
+      <span style="color:var(--text-muted)">Balance after this</span><span id="rs-bal" style="text-align:right;font-weight:700">₱${fmt(Math.max(0,contract-defaultAmt))}</span>
+    </div></div>
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px;cursor:pointer">
       <input type="checkbox" id="rs-prod" checked style="width:16px;height:16px"/> Transfer to Production now (start the job)
     </label>
     <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Posts income to the ledger (with VAT split), updates the project's collected balance, and notifies Production.</div>
     <div id="rs-err" class="error-msg hidden" style="margin-top:8px"></div>
-  `, `<button class="btn-primary" id="rs-save">Record + Post to Ledger</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  `, `<button class="btn-primary" id="rs-save">Approve &amp; Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  const recompute=()=>{
+    const a=parseFloat(document.getElementById('rs-amount').value)||0;
+    document.getElementById('rs-appr').textContent='₱'+fmt(a);
+    document.getElementById('rs-bal').textContent='₱'+fmt(Math.max(0,contract-a));
+  };
+  document.getElementById('rs-amount').addEventListener('input',recompute);
   document.getElementById('rs-save').addEventListener('click', async ()=>{
     const err=document.getElementById('rs-err');
     const amount=parseFloat(document.getElementById('rs-amount').value)||0;
