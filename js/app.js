@@ -6524,24 +6524,58 @@ window.addEventListener('message', async (e) => {
       createdAt:      firebase.firestore.FieldValue.serverTimestamp(),
     };
 
+    // Route by company so Barro Kitchens quotes land in bk_quotes (visible in the
+    // Sales → Quotations summary) and Brilliant Steel quotes in bs_quotes.
+    const coll = (data.company === 'BK') ? 'bk_quotes' : 'bs_quotes';
+
+    // Versioning: if THIS user re-files a quote with the same number, save a new
+    // version named "<quoteNo> (2)", "(3)"… instead of silently duplicating.
+    let version = 1;
+    try {
+      const mine = await db.collection(coll).where('createdBy','==',currentUser.uid).get();
+      version = mine.docs.filter(d => (d.data().quoteNumber||'') === data.quoteNumber).length + 1;
+    } catch(_) {}
+    data.version = version;
+    data.fileName = data.quoteNumber + (version > 1 ? ` (${version})` : '');
+
+    // Pull the client details out of the quote and upsert into the client book.
+    const upsertClient = async () => {
+      const clientColl = (data.company === 'BK') ? 'sales_clients' : 'bs_clients';
+      const name = (data.clientName||'').trim();
+      if (!name) return;
+      try {
+        const snap = await db.collection(clientColl).get().catch(()=>({docs:[]}));
+        const existing = snap.docs.find(d => ((d.data().name||'').trim().toLowerCase()) === name.toLowerCase());
+        const cdata = { name, company: data.clientCompany||'', phone: data.clientPhone||'', email: data.clientEmail||'',
+          address: data.clientAddress||'', lastQuoteNumber: data.quoteNumber, lastQuoteTotal: data.total||0,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+        if (existing) await db.collection(clientColl).doc(existing.id).set(cdata, { merge: true });
+        else { cdata.createdAt = firebase.firestore.FieldValue.serverTimestamp(); cdata.createdBy = currentUser.uid; await db.collection(clientColl).add(cdata); }
+      } catch(_) {}
+    };
+
     if (type === 'QUOTE_FILED') {
       data.status = 'filed';
       data.approvalStatus = 'filed';
       data.filedAt = firebase.firestore.FieldValue.serverTimestamp();
-      await db.collection('bs_quotes').add(data);
+      await db.collection(coll).add(data);
+      await upsertClient();
       // Notify president so they're aware of filed quotes
       await Notifs.sendToOwner({
         title: '📋 Quote Filed',
-        body: `${agentName} filed "${payload.quoteNumber}" for ${payload.clientName} — ₱${(payload.total||0).toLocaleString()}`,
+        body: `${agentName} filed "${data.fileName}" for ${payload.clientName} — ₱${(payload.total||0).toLocaleString()}`,
         icon: '📋', type: 'quote_filed'
       });
-      if (typeof Notifs?.showToast === 'function') Notifs.showToast('Quote saved to Firestore!');
+      if (typeof Notifs?.showToast === 'function') Notifs.showToast(`Quote filed${version>1?` as version ${version}`:''} + client saved!`);
     } else {
-      // QUOTE_APPROVAL_REQUESTED
+      // QUOTE_APPROVAL_REQUESTED — the president's approve/reject handler reads
+      // bs_quotes by id, so the approval round-trip always lives in bs_quotes
+      // (regardless of company) to keep that flow working unchanged.
       data.status = 'pending_approval';
       data.approvalStatus = 'pending_review';
       data.reviewRequestedAt = firebase.firestore.FieldValue.serverTimestamp();
       const docRef = await db.collection('bs_quotes').add(data);
+      await upsertClient();
       await db.collection('approval_requests').add({
         type: 'bs_quote',
         quoteId: docRef.id,
