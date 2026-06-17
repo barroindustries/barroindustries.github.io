@@ -26,6 +26,11 @@ This file is the running source of truth for what's done and what's left to make
 - **Tasks** — Production-dept task board (`renderDeptTasks`). **Files** — Production file collection.
 - Firestore rule for `production_orders` added (internal staff read/write, partners excluded, admin-only delete) and **deployed**. Verified end-to-end in the running app (render, KPIs, empty state, New Order modal).
 
+### Quote-file visibility — one-way partner↔sales (post-V10)
+- **Rules:** `bs_quotes` (partner) now readable by any internal/non-partner staffer (partners still see only their own); `bk_quotes` (Barro Kitchens / internal sales) explicitly excludes partners (creator-or-admin only). So **partner quotes are visible to Sales, but Sales quotes are NOT visible to partners.** Deployed.
+- **UI:** new read-only **Partner Quotes** subtab in the Sales portal (stat cards + list of Brilliant Steel quotes) so Sales staff can actually see them.
+- The two quote "files" are the existing separate collections `bs_quotes` (partner) and `bk_quotes` (sales).
+
 
 ### Critical fixes (production was broken at launch)
 - **Dashboard crash** — TDZ `ReferenceError` in `renderPresidentDashboard` (president + manager saw "Dashboard error"). Fixed.

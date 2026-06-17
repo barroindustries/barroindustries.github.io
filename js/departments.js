@@ -3242,11 +3242,12 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
   const c = deptContainer();
   const isPriv = ['president','owner','manager','finance'].includes(currentRole);
   const tools = [
-    { icon:'📝', label:'BK Quotes',     sub:'BK Quotes'  },
-    { icon:'📊', label:'Quotations',    sub:'Quotations' },
-    { icon:'👤', label:'Clients',       sub:'Clients'    },
-    { icon:'📋', label:'Work Plans',    sub:'Work Plans' },
-    { icon:'📄', label:'Proposals',     sub:'Proposals'  },
+    { icon:'📝', label:'BK Quotes',      sub:'BK Quotes'      },
+    { icon:'📊', label:'Quotations',     sub:'Quotations'     },
+    { icon:'🤝', label:'Partner Quotes', sub:'Partner Quotes' },
+    { icon:'👤', label:'Clients',        sub:'Clients'        },
+    { icon:'📋', label:'Work Plans',     sub:'Work Plans'     },
+    { icon:'📄', label:'Proposals',      sub:'Proposals'      },
   ];
   c.innerHTML = `
     <div class="page-header">
@@ -3264,7 +3265,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
         </button>`).join('')}
     </div>
     <div class="subtab-bar">
-      ${['BK Quotes','Quotations','Clients','Work Plans','Proposals','Tasks'].map(s =>
+      ${['BK Quotes','Quotations','Partner Quotes','Clients','Work Plans','Proposals','Tasks'].map(s =>
         `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
       ).join('')}
     </div>
@@ -3316,6 +3317,9 @@ async function loadSalesContent(currentUser, currentRole, sub) {
       break;
     case 'Quotations':
       renderBKQuotationsSummary(content, currentUser, currentRole);
+      break;
+    case 'Partner Quotes':
+      renderSalesPartnerQuotes(content, currentUser, currentRole);
       break;
     case 'Clients':
       await renderClientProfiles(content, currentUser, currentRole, 'barro');
@@ -3704,6 +3708,44 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
         </div>`).join('')}
     </div>
   `;
+}
+
+// ── Partner Quotes (read-only window into Brilliant Steel quotes) ──
+// One-way visibility: internal Sales can see partner quotes; partners never see
+// Barro Kitchens quotes. Backed by the bs_quotes read rule (non-partner staff).
+async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
+  container.innerHTML = '<div class="loading-placeholder">Loading partner quotes…</div>';
+  const snap = await db.collection('bs_quotes').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+  const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const total = quotes.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+  const accepted = quotes.filter(q=>['accepted','filed','approved'].includes(q.status));
+  container.innerHTML = `
+    <div style="font-size:12px;color:var(--text-muted);background:rgba(10,132,255,.07);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:14px">
+      🤝 Read-only view of <strong>Brilliant Steel</strong> partner quotes (50/50 collaborative projects). Sales can see these for coordination; partners cannot see Barro Kitchens quotes.
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:20px">
+      <div class="stat-card"><div class="stat-num">${quotes.length}</div><div class="stat-label">Partner Quotes</div></div>
+      <div class="stat-card"><div class="stat-num">₱${fmt(total)}</div><div class="stat-label">Total Value</div></div>
+      <div class="stat-card"><div class="stat-num">${accepted.length}</div><div class="stat-label">Accepted / Filed</div></div>
+    </div>
+    <div class="item-list">
+      ${!quotes.length
+        ? `<div class="empty-state"><div class="empty-icon">📋</div><h4>No partner quotes yet</h4><p>Brilliant Steel quotes will appear here as they're created.</p></div>`
+        : quotes.map(q=>`
+        <div class="item-card" style="display:flex;align-items:center;gap:12px">
+          <div style="flex:1;min-width:0">
+            <div class="item-title" style="font-size:13px">${escHtml(q.quoteNumber||q.id.slice(-6).toUpperCase())} — ${escHtml(q.clientName||'Unnamed')}</div>
+            <div class="item-meta" style="margin-top:4px">
+              <span>👤 ${escHtml(q.createdByName||q.agentName||'Partner')}</span>
+              ${q.date?`<span>${escHtml(q.date)}</span>`:''}
+            </div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-weight:700">₱${fmt(q.total||q.grandTotal||0)}</div>
+            <span class="badge ${statusBadge(q.status)}" style="margin-top:4px">${escHtml(q.status||'draft')}</span>
+          </div>
+        </div>`).join('')}
+    </div>`;
 }
 
 // ── BK Package Presets ───────────────────────────

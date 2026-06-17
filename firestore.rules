@@ -240,9 +240,12 @@ service cloud.firestore {
     }
 
     // ── BS Quotes (Brilliant Steel partner) ────────────
+    // One-way visibility: partner quotes ARE visible to internal staff (Sales,
+    // etc.) so they can coordinate; a partner only ever sees their OWN quotes.
+    // (The reverse — partner reading internal bk_quotes — is denied below.)
     match /bs_quotes/{docId} {
       allow read: if isAuth() && (
-        resource.data.createdBy == request.auth.uid || isAdmin()
+        resource.data.createdBy == request.auth.uid || getRole() != 'partner'
       );
       allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
       allow update: if isAuth() && (
@@ -251,13 +254,16 @@ service cloud.firestore {
       allow delete: if isAuth() && isAdmin();
     }
 
-    // ── BK Quotes ──────────────────────────────────────
+    // ── BK Quotes (Barro Kitchens / internal Sales) ────
+    // Internal sales quotes are NOT visible to external partners — only the
+    // creator or an admin may read. A partner has no bk_quotes of their own,
+    // so this collection is effectively invisible to them.
     match /bk_quotes/{docId} {
-      allow read: if isAuth() && (
+      allow read: if isAuth() && getRole() != 'partner' && (
         resource.data.createdBy == request.auth.uid || isAdmin()
       );
-      allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
-      allow update: if isAuth() && (
+      allow create: if isAuth() && getRole() != 'partner' && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuth() && getRole() != 'partner' && (
         resource.data.createdBy == request.auth.uid || isAdmin()
       );
       allow delete: if isAuth() && isAdmin();
