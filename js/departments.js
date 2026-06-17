@@ -6562,36 +6562,63 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
   const listEl = document.getElementById(`files-list-${containerId}`);
   const uploadBtn = document.getElementById(`upload-btn-${containerId}`);
   const collection = `files_${scope.toLowerCase().replace(/\s+/g,'_')}`;
+  let allFiles = [];
+  let activeFolder = 'All';
+
+  const renderList = () => {
+    const folders = [...new Set(allFiles.filter(f=>!f.archived).map(f=>f.folder||'General'))].sort();
+    const archivedCount = allFiles.filter(f=>f.archived).length;
+    const showing = activeFolder==='__archived__'
+      ? allFiles.filter(f=>f.archived)
+      : allFiles.filter(f=>!f.archived && (activeFolder==='All' || (f.folder||'General')===activeFolder));
+    const chipBar = `<div class="subtab-bar" style="margin-bottom:10px">
+      ${['All',...folders].map(c=>`<button class="subtab-btn file-folder-chip ${activeFolder===c?'active':''}" data-folder="${escHtml(c)}">📁 ${escHtml(c)}</button>`).join('')}
+      ${archivedCount?`<button class="subtab-btn file-folder-chip ${activeFolder==='__archived__'?'active':''}" data-folder="__archived__">🗄 Archived (${archivedCount})</button>`:''}
+    </div>`;
+    const rows = showing.length ? showing.map(f=>`<tr>
+        <td><a href="${escHtml(f.url)}" target="_blank" style="color:var(--primary);font-weight:600">${escHtml(f.name||'File')}</a></td>
+        <td><span class="badge badge-gray">${escHtml(f.folder||'General')}</span></td>
+        <td>${escHtml(f.uploaderName||'—')}</td>
+        <td style="font-size:11px;color:var(--text-muted)">${f.createdAt?new Date(f.createdAt.toDate()).toLocaleDateString('en-PH'):''}</td>
+        <td style="white-space:nowrap"><a href="${escHtml(f.url)}" target="_blank" class="btn-secondary btn-sm" title="Download">⬇</a>
+          <button class="btn-secondary btn-sm file-arch-btn" data-id="${f.id}" data-arch="${f.archived?'0':'1'}" title="${f.archived?'Restore':'Archive'}">${f.archived?'♻️':'🗄'}</button></td>
+      </tr>`).join('') : `<tr><td colspan="5"><div class="empty-state" style="padding:18px"><div class="empty-icon">📁</div><h4>No files here</h4></div></td></tr>`;
+    listEl.innerHTML = chipBar + `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Name</th><th>Folder</th><th>Uploaded By</th><th>Date</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+    listEl.querySelectorAll('.file-folder-chip').forEach(b=>b.addEventListener('click',()=>{ activeFolder=b.dataset.folder; renderList(); }));
+    listEl.querySelectorAll('.file-arch-btn').forEach(b=>b.addEventListener('click', async ()=>{
+      try {
+        await db.collection(collection).doc(b.dataset.id).update({ archived: b.dataset.arch==='1' });
+        const f = allFiles.find(x=>x.id===b.dataset.id); if (f) f.archived = b.dataset.arch==='1';
+        renderList();
+      } catch(e) { Notifs.showToast('Only the uploader or an admin can archive this file','error'); }
+    }));
+  };
 
   const loadFiles = async () => {
     listEl.innerHTML = '<div class="loading-placeholder">Loading…</div>';
     let snap;
-    if (filterUid) {
-      snap = await db.collection(collection).where('uploadedBy','==',filterUid).get();
-    } else {
-      snap = await db.collection(collection).where('department','==',dept).get();
-    }
-    const files = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-    if (!files.length) { listEl.innerHTML='<div class="empty-state" style="padding:20px"><div class="empty-icon">📁</div><h4>No files yet</h4></div>'; return; }
-    listEl.innerHTML = `<div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Name</th><th>Type</th><th>Uploaded By</th><th>Date</th><th></th></tr></thead>
-      <tbody>${files.map(f=>`<tr>
-        <td><a href="${f.url}" target="_blank" style="color:var(--primary);font-weight:600">${escHtml(f.name||'File')}</a></td>
-        <td>${escHtml(f.fileType||'—')}</td>
-        <td>${escHtml(f.uploaderName||'—')}</td>
-        <td style="font-size:11px;color:var(--text-muted)">${f.createdAt?new Date(f.createdAt.toDate()).toLocaleDateString('en-PH'):''}</td>
-        <td><a href="${f.url}" target="_blank" class="btn-secondary btn-sm">⬇ Download</a></td>
-      </tr>`).join('')}</tbody>
-    </table></div>`;
+    if (filterUid) snap = await db.collection(collection).where('uploadedBy','==',filterUid).get().catch(()=>({docs:[]}));
+    else           snap = await db.collection(collection).where('department','==',dept).get().catch(()=>({docs:[]}));
+    allFiles = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    if (!allFiles.length) { listEl.innerHTML='<div class="empty-state" style="padding:20px"><div class="empty-icon">📁</div><h4>No files yet</h4></div>'; return; }
+    renderList();
   };
 
   loadFiles();
 
   uploadBtn?.addEventListener('click', () => {
+    const existingFolders = [...new Set(allFiles.map(f=>f.folder||'General'))];
+    const prefill = (activeFolder!=='All' && activeFolder!=='__archived__') ? activeFolder : '';
     openModal('Upload File', `
       <div class="form-group"><label>File Name / Title</label><input id="fn-title" placeholder="Descriptive name"/></div>
       <div class="form-group"><label>File Type</label>
         <select id="fn-type"><option>Document</option><option>Image</option><option>Spreadsheet</option><option>PDF</option><option>Other</option></select>
+      </div>
+      <div class="form-group"><label>Folder</label>
+        <input id="fn-folder" list="fn-folder-list" placeholder="General" value="${escHtml(prefill)}"/>
+        <datalist id="fn-folder-list">${existingFolders.map(f=>`<option value="${escHtml(f)}"></option>`).join('')}</datalist>
       </div>
       <div id="fn-upload-area"></div>
     `, `<button class="btn-primary" id="save-fn-btn">Upload</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -6603,6 +6630,8 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
       await db.collection(collection).add({
         name: document.getElementById('fn-title').value.trim() || (uploadedFile?.name||'File'),
         fileType: document.getElementById('fn-type').value,
+        folder: document.getElementById('fn-folder').value.trim() || 'General',
+        archived: false,
         url: uploadedFile?.url || '',
         department: dept,
         scope,
