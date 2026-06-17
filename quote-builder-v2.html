@@ -561,7 +561,7 @@ tr:hover td{background:#fafbff;}
 <div class="section no-print">
   <div class="sec-title">Client Information</div>
   <div class="fg-grid">
-    <div class="fg full"><label>Client Name</label><input id="clientName" placeholder="Full name" oninput="updatePrintHeader();saveToStorage();"></div>
+    <div class="fg full"><label>Client Name</label><input id="clientName" placeholder="Full name" oninput="updatePrintHeader();saveToStorage();scheduleAutoCustRev();"></div>
     <div class="fg full"><label>Company / Business Name</label><input id="clientCompany" placeholder="Company name (if applicable)" oninput="updatePrintHeader();saveToStorage();"></div>
     <div class="fg full"><label>Project Address / Site</label><input id="clientAddress" placeholder="Full address" oninput="renderBillStrip();saveToStorage();"></div>
     <div class="fg"><label>Contact Number</label><input id="clientPhone" placeholder="+63…" oninput="renderBillStrip();saveToStorage();"></div>
@@ -1085,11 +1085,13 @@ function setCompany(co){
 
 function setView(v){
   currentView=v;
+  // Null-guarded: in partner mode the Admin button/panel are removed, so a bare
+  // .classList here used to throw and silently abort switching to Internal.
   ['client','internal','admin'].forEach(x=>{
-    document.getElementById('btn'+x.charAt(0).toUpperCase()+x.slice(1)).classList.toggle('active',v===x);
+    document.getElementById('btn'+x.charAt(0).toUpperCase()+x.slice(1))?.classList.toggle('active',v===x);
   });
-  document.getElementById('internalPanel').style.display=(v==='internal')?'block':'none';
-  document.getElementById('adminPanel').classList.toggle('open',v==='admin');
+  const ip=document.getElementById('internalPanel'); if(ip) ip.style.display=(v==='internal')?'block':'none';
+  document.getElementById('adminPanel')?.classList.toggle('open',v==='admin');
   if(v==='internal') buildLaborTable();
 }
 
@@ -1116,10 +1118,34 @@ function buildQuoteNo(){
   const d=document.getElementById('quoteDate').value||new Date().toISOString().split('T')[0];
   const dt=d.replace(/-/g,'').slice(2);
   const seq=String(document.getElementById('qnoSeq').value||1).padStart(3,'0');
-  const no=`${co}-${loc}-${mth}-${dt}-${seq}`;
+  const rev=(typeof _autoRev==='number' && _autoRev>0)?_autoRev:1;   // revision/copy for this client
+  const no=`${co}-${loc}-${mth}-${dt}-${seq}-R${rev}`;
   document.getElementById('qnoPreview').textContent=no;
   document.getElementById('quoteNo').value=no;
   updatePrintHeader();
+}
+
+// Auto customer# (Nth distinct customer today) + revision# (existing quotes for
+// this client + 1), cross-checked against MY quotes in this company's collection.
+let _autoCust=null, _autoRev=null, _autoCustTimer=null;
+function scheduleAutoCustRev(){ clearTimeout(_autoCustTimer); _autoCustTimer=setTimeout(autoComputeCustRev, 350); }
+async function autoComputeCustRev(){
+  if(qnoMode!=='auto') return;
+  if(typeof db==='undefined' || !(window.auth&&auth.currentUser)) return;
+  const name=(document.getElementById('clientName')?.value||'').trim().toLowerCase();
+  const coll=currentCo==='BK'?'bk_quotes':'bs_quotes';
+  const today=document.getElementById('quoteDate').value||new Date().toISOString().split('T')[0];
+  try{
+    const snap=await db.collection(coll).where('createdBy','==',auth.currentUser.uid).get().catch(()=>({docs:[]}));
+    const docs=snap.docs.map(d=>d.data());
+    const isToday=x=>{ if((x.quoteDate||x.date||'').slice(0,10)===today) return true; const t=x.createdAt&&x.createdAt.toDate?x.createdAt.toDate():null; return t && t.toISOString().slice(0,10)===today; };
+    const distinctToday=new Set(docs.filter(isToday).map(x=>(x.clientName||'').trim().toLowerCase()).filter(Boolean));
+    const newClientToday = name && !distinctToday.has(name);
+    _autoCust=Math.max(1, distinctToday.size + (newClientToday?1:0));
+    _autoRev = name ? (docs.filter(x=>(x.clientName||'').trim().toLowerCase()===name).length + 1) : 1;
+    const seqEl=document.getElementById('qnoSeq'); if(seqEl) seqEl.value=_autoCust;
+    buildQuoteNo();
+  }catch(e){ console.warn('[autoCustRev]',e); }
 }
 
 function updatePrintHeader(){
