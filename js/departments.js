@@ -5255,13 +5255,15 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
         }).join('')}</tbody>
       </table></div></div>`;
 
-  // ── Quote analytics: made vs successful ──
+  // ── Quote analytics ──
+  // Successful = quotes that became SALES ORDERS (have salesOrderId). Pipeline =
+  // overall amount of ALL quotes produced. Won = total of those converted to orders.
   const totalMade   = all.length;
-  const successful  = filed.length;                       // filed/approved = won
+  const wonQuotes   = all.filter(q=>q.salesOrderId);
+  const successful  = wonQuotes.length;
   const winRate     = totalMade ? Math.round(successful/totalMade*100) : 0;
-  const wonValue    = filed.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
-  const pipelineVal = all.filter(q=>!(q.status==='rejected'||q.approvalStatus==='rejected'))
-                         .reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+  const wonValue    = wonQuotes.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+  const pipelineVal = all.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
   const analytics = `
     <div class="card" style="margin-bottom:14px;border:1.5px solid var(--primary)">
       <div class="card-header"><h3>📊 Quote Analytics</h3></div>
@@ -6425,6 +6427,9 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
   const clients = snap.docs.map(d => ({id:d.id,...d.data()}));
   const canAdd = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='agent';
   const canDeleteDirect = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+  // Which quote collection + builder this client's quotes live in.
+  const quoteColl  = brand==='brilliant-steel' ? 'bs_quotes' : 'bk_quotes';
+  const builderNav = brand==='brilliant-steel' ? 'bs-quote-builder' : 'bk-quote-builder';
 
   container.innerHTML = `
     ${canAdd?`<div style="text-align:right;margin-bottom:12px"><button class="btn-primary btn-sm" id="add-client-btn">+ Add Client</button></div>`:''}
@@ -6432,7 +6437,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
       ${!clients.length
         ? `<div class="empty-state"><div class="empty-icon">👤</div><h4>No clients yet</h4></div>`
         : clients.map(cl => `
-          <div class="item-card" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+          <div class="item-card cl-card" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;cursor:pointer">
             <div style="flex:1;min-width:0">
               <div class="item-title">${escHtml(cl.name)}${cl.deleteRequested?' <span class="badge badge-red" style="font-size:9px">🗑 del req</span>':''}</div>
               <div class="item-meta">
@@ -6441,6 +6446,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
                 ${cl.phone?`<span>📞 ${escHtml(cl.phone)}</span>`:''}
                 ${cl.lastQuoteNumber?`<span>📄 ${escHtml(cl.lastQuoteNumber)}</span>`:''}
               </div>
+              <div style="font-size:11px;color:var(--primary);margin-top:4px">📄 View quotes / reopen →</div>
             </div>
             ${canDeleteDirect
               ? `<button class="btn-secondary btn-sm cl-del-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="color:var(--danger);flex-shrink:0">🗑</button>`
@@ -6448,6 +6454,13 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
           </div>`).join('')}
     </div>
   `;
+
+  // Open a client's quote history — reopen any filed quote into the builder.
+  container.querySelectorAll('.cl-card').forEach(card => card.addEventListener('click', async (e) => {
+    if (e.target.closest('.cl-del-btn, .cl-delreq-btn')) return; // let delete buttons act
+    const cl = clients.find(c=>c.id===card.dataset.id); if(!cl) return;
+    openClientQuotesModal(cl, quoteColl, builderNav);
+  }));
 
   container.querySelectorAll('.cl-del-btn').forEach(b => b.addEventListener('click', async () => {
     if (!confirm(`Delete client "${b.dataset.name}"? This cannot be undone.`)) return;
@@ -6489,6 +6502,55 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
       closeModal(); renderClientProfiles(container, currentUser, currentRole, brand);
     });
   });
+}
+
+// Show one client's quote history with a Reopen action per quote.
+async function openClientQuotesModal(cl, quoteColl, builderNav){
+  openModal(`📄 ${escHtml(cl.name||'Client')} — Quotes`, '<div class="loading-placeholder">Loading quotes…</div>',
+    `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  const body = document.getElementById('modal-body');
+  // A partner may only read their OWN bs_quotes, so the query must be scoped to
+  // them (an unscoped clientName query would be rejected by Firestore rules).
+  const role = window.currentRole||'';
+  const isPartnerU = role==='partner' || ((window.currentDepts||[]).length===1 && (window.currentDepts||[])[0]==='Brilliant Steel');
+  const myUid = auth.currentUser?.uid;
+  let docs = [];
+  try {
+    let q = db.collection(quoteColl).where('clientName','==',cl.name);
+    if (isPartnerU && myUid) q = q.where('createdBy','==',myUid);
+    const snap = await q.get();
+    docs = snap.docs.map(d=>({id:d.id,...d.data()}));
+  } catch(_) {}
+  if (!docs.length) {
+    // fallback: scan recent quotes and match the name client-side
+    try {
+      let q = db.collection(quoteColl);
+      if (isPartnerU && myUid) q = q.where('createdBy','==',myUid);
+      const snap = await q.orderBy('createdAt','desc').limit(200).get();
+      docs = snap.docs.map(d=>({id:d.id,...d.data()})).filter(q=>(q.clientName||'').trim().toLowerCase()===(cl.name||'').trim().toLowerCase());
+    } catch(_) {}
+  }
+  docs.sort((a,b)=>((b.createdAt?.seconds||0)-(a.createdAt?.seconds||0)));
+  if (!body) return;
+  if (!docs.length) { body.innerHTML = '<div class="empty-state" style="padding:24px"><div class="empty-icon">📄</div><p>No quotes recorded for this client yet.</p></div>'; return; }
+  const statusBadge = (q)=>{
+    const s = q.status||q.approvalStatus||'draft';
+    const map = { won:'badge-green', filed:'badge-blue', approved:'badge-green', pending_approval:'badge-amber', pending_review:'badge-amber', needs_revision:'badge-amber', rejected:'badge-red', sent:'badge-blue', draft:'badge-gray' };
+    return `<span class="badge ${map[s]||'badge-gray'}" style="font-size:9px">${escHtml(s)}</span>`;
+  };
+  body.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px">
+    ${docs.map(q=>`<div class="item-card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:13px;font-family:monospace">${escHtml(q.quoteNumber||q.id.slice(-8))}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">₱${fmt(q.total||q.grandTotal||0)} ${statusBadge(q)} ${q.salesOrderId?'<span class="badge badge-green" style="font-size:9px">→ Sales Order</span>':''} ${q.createdAt?'· '+new Date((q.createdAt.seconds||0)*1000).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):''}</div>
+      </div>
+      ${q.editableState?`<button class="btn-secondary btn-sm clq-reopen" data-id="${q.id}" style="flex-shrink:0">↻ Reopen</button>`:'<span style="font-size:10px;color:var(--text-muted);flex-shrink:0">no snapshot</span>'}
+    </div>`).join('')}
+  </div>`;
+  body.querySelectorAll('.clq-reopen').forEach(btn=>btn.addEventListener('click',()=>{
+    closeModal();
+    window.reopenQuoteFromDoc(quoteColl, btn.dataset.id, builderNav);
+  }));
 }
 
 // ══════════════════════════════════════════════════
@@ -6835,9 +6897,13 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
 window.renderFileCollection = function(title, containerId, currentRole) {
   return `
     <div class="card">
-      <div class="card-header">
+      <div class="card-header" style="flex-wrap:wrap;gap:6px">
         <h3>📁 ${title}</h3>
-        <button class="btn-primary btn-sm" id="upload-btn-${containerId}">+ Upload File</button>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn-secondary btn-sm" id="newfolder-btn-${containerId}">📁 New Folder</button>
+          <button class="btn-secondary btn-sm" id="addlink-btn-${containerId}">🔗 Add Link</button>
+          <button class="btn-primary btn-sm" id="upload-btn-${containerId}">+ Upload File</button>
+        </div>
       </div>
       <div class="card-body" id="files-list-${containerId}">
         <div class="loading-placeholder">Loading files…</div>
@@ -6849,30 +6915,41 @@ window.renderFileCollection = function(title, containerId, currentRole) {
 window.bindFileCollection = function(containerId, currentUser, dept, scope, filterUid) {
   const listEl = document.getElementById(`files-list-${containerId}`);
   const uploadBtn = document.getElementById(`upload-btn-${containerId}`);
+  const newFolderBtn = document.getElementById(`newfolder-btn-${containerId}`);
+  const addLinkBtn = document.getElementById(`addlink-btn-${containerId}`);
   const collection = `files_${scope.toLowerCase().replace(/\s+/g,'_')}`;
   let allFiles = [];
   let activeFolder = 'All';
 
   const renderList = () => {
-    const folders = [...new Set(allFiles.filter(f=>!f.archived).map(f=>f.folder||'General'))].sort();
-    const archivedCount = allFiles.filter(f=>f.archived).length;
+    // folder markers (empty folders) are tracked but never shown as rows
+    const markers = allFiles.filter(f=>f.isFolderMarker);
+    const realFiles = allFiles.filter(f=>!f.isFolderMarker);
+    const folders = [...new Set([
+      ...realFiles.filter(f=>!f.archived).map(f=>f.folder||'General'),
+      ...markers.map(m=>m.folder).filter(Boolean)
+    ])].sort();
+    const archivedCount = realFiles.filter(f=>f.archived).length;
     const showing = activeFolder==='__archived__'
-      ? allFiles.filter(f=>f.archived)
-      : allFiles.filter(f=>!f.archived && (activeFolder==='All' || (f.folder||'General')===activeFolder));
+      ? realFiles.filter(f=>f.archived)
+      : realFiles.filter(f=>!f.archived && (activeFolder==='All' || (f.folder||'General')===activeFolder));
     const chipBar = `<div class="subtab-bar" style="margin-bottom:10px">
       ${['All',...folders].map(c=>`<button class="subtab-btn file-folder-chip ${activeFolder===c?'active':''}" data-folder="${escHtml(c)}">📁 ${escHtml(c)}</button>`).join('')}
       ${archivedCount?`<button class="subtab-btn file-folder-chip ${activeFolder==='__archived__'?'active':''}" data-folder="__archived__">🗄 Archived (${archivedCount})</button>`:''}
     </div>`;
-    const rows = showing.length ? showing.map(f=>`<tr>
-        <td><a href="${escHtml(f.url)}" target="_blank" style="color:var(--primary);font-weight:600">${escHtml(f.name||'File')}</a></td>
+    const rows = showing.length ? showing.map(f=>{
+      const isLink = f.kind==='link';
+      return `<tr>
+        <td><a href="${escHtml(f.url)}" target="_blank" style="color:var(--primary);font-weight:600">${isLink?'🔗 ':'📄 '}${escHtml(f.name||'File')}</a>${f.description?`<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(f.description)}</div>`:''}</td>
         <td><span class="badge badge-gray">${escHtml(f.folder||'General')}</span></td>
         <td>${escHtml(f.uploaderName||'—')}</td>
         <td style="font-size:11px;color:var(--text-muted)">${f.createdAt?new Date(f.createdAt.toDate()).toLocaleDateString('en-PH'):''}</td>
-        <td style="white-space:nowrap"><a href="${escHtml(f.url)}" target="_blank" class="btn-secondary btn-sm" title="Download">⬇</a>
+        <td style="white-space:nowrap"><a href="${escHtml(f.url)}" target="_blank" class="btn-secondary btn-sm" title="${isLink?'Open link':'Download'}">${isLink?'↗':'⬇'}</a>
           <button class="btn-secondary btn-sm file-arch-btn" data-id="${f.id}" data-arch="${f.archived?'0':'1'}" title="${f.archived?'Restore':'Archive'}">${f.archived?'♻️':'🗄'}</button></td>
-      </tr>`).join('') : `<tr><td colspan="5"><div class="empty-state" style="padding:18px"><div class="empty-icon">📁</div><h4>No files here</h4></div></td></tr>`;
+      </tr>`;
+    }).join('') : `<tr><td colspan="5"><div class="empty-state" style="padding:18px"><div class="empty-icon">📁</div><h4>${activeFolder!=='All'&&activeFolder!=='__archived__'?'This folder is empty':'No files here'}</h4></div></td></tr>`;
     listEl.innerHTML = chipBar + `<div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Name</th><th>Folder</th><th>Uploaded By</th><th>Date</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Folder</th><th>Added By</th><th>Date</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
     listEl.querySelectorAll('.file-folder-chip').forEach(b=>b.addEventListener('click',()=>{ activeFolder=b.dataset.folder; renderList(); }));
     listEl.querySelectorAll('.file-arch-btn').forEach(b=>b.addEventListener('click', async ()=>{
@@ -6890,7 +6967,6 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
     if (filterUid) snap = await db.collection(collection).where('uploadedBy','==',filterUid).get().catch(()=>({docs:[]}));
     else           snap = await db.collection(collection).where('department','==',dept).get().catch(()=>({docs:[]}));
     allFiles = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-    if (!allFiles.length) { listEl.innerHTML='<div class="empty-state" style="padding:20px"><div class="empty-icon">📁</div><h4>No files yet</h4></div>'; return; }
     renderList();
   };
 
@@ -6925,6 +7001,62 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
         scope,
         uploadedBy: currentUser.uid,
         uploaderName,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      closeModal(); loadFiles();
+    });
+  });
+
+  // ── Create an (empty) folder ──────────────────────
+  newFolderBtn?.addEventListener('click', () => {
+    openModal('New Folder', `
+      <div class="form-group"><label>Folder Name</label><input id="nf-name" placeholder="e.g. Contracts, 2026 Projects"/></div>
+      <div style="font-size:11px;color:var(--text-muted)">Create a folder now, then upload files or add links into it.</div>
+    `, `<button class="btn-primary" id="save-nf-btn">Create Folder</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    document.getElementById('save-nf-btn').addEventListener('click', async () => {
+      const name = document.getElementById('nf-name').value.trim();
+      if (!name) { Notifs.showToast('Enter a folder name','error'); return; }
+      if (name==='__archived__') { Notifs.showToast('Reserved name','error'); return; }
+      const s = await db.collection('users').doc(currentUser.uid).get();
+      const uploaderName = s.exists ? s.data().displayName : currentUser.email;
+      await db.collection(collection).add({
+        isFolderMarker: true, folder: name, name: `📁 ${name}`,
+        archived: false, department: dept, scope,
+        uploadedBy: currentUser.uid, uploaderName,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      closeModal(); activeFolder = name; loadFiles();
+    });
+  });
+
+  // ── Attach a link (URL) with title + description ──
+  addLinkBtn?.addEventListener('click', () => {
+    const existingFolders = [...new Set(allFiles.map(f=>f.folder||'General'))];
+    const prefill = (activeFolder!=='All' && activeFolder!=='__archived__') ? activeFolder : '';
+    openModal('Add Link', `
+      <div class="form-group"><label>Title</label><input id="lk-title" placeholder="e.g. Google Drive folder, Spec sheet"/></div>
+      <div class="form-group"><label>URL</label><input id="lk-url" type="url" placeholder="https://…"/></div>
+      <div class="form-group"><label>Description</label><textarea id="lk-desc" rows="2" placeholder="Optional notes about this link"></textarea></div>
+      <div class="form-group"><label>Folder</label>
+        <input id="lk-folder" list="lk-folder-list" placeholder="General" value="${escHtml(prefill)}"/>
+        <datalist id="lk-folder-list">${existingFolders.map(f=>`<option value="${escHtml(f)}"></option>`).join('')}</datalist>
+      </div>
+      <div id="lk-err" class="error-msg hidden"></div>
+    `, `<button class="btn-primary" id="save-lk-btn">Add Link</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    document.getElementById('save-lk-btn').addEventListener('click', async () => {
+      const err = document.getElementById('lk-err');
+      const title = document.getElementById('lk-title').value.trim();
+      let url = document.getElementById('lk-url').value.trim();
+      if (!title) { err.textContent='Enter a title.'; err.classList.remove('hidden'); return; }
+      if (!url)   { err.textContent='Enter a URL.'; err.classList.remove('hidden'); return; }
+      if (!/^https?:\/\//i.test(url)) url = 'https://' + url;  // tolerate bare domains
+      const s = await db.collection('users').doc(currentUser.uid).get();
+      const uploaderName = s.exists ? s.data().displayName : currentUser.email;
+      await db.collection(collection).add({
+        kind: 'link', name: title, description: document.getElementById('lk-desc').value.trim(),
+        folder: document.getElementById('lk-folder').value.trim() || 'General',
+        archived: false, url, department: dept, scope,
+        uploadedBy: currentUser.uid, uploaderName,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       closeModal(); loadFiles();
@@ -7025,11 +7157,15 @@ async function createJobProject(d){
   const contract=parseFloat(d.total)||0;
   const company=d.co||'BS';
   const who=userProfile?.displayName||currentUser.email;
+  // For shared (BS) projects, remember the partner who originated the quote so
+  // their portal can read the project + compute their 50% expected earnings.
+  const partnerUid = (company==='BS') ? (d.partnerUid||d.createdBy||null) : null;
   const ref=await db.collection('job_projects').add({
     projectNo, company, name:((d.client||'Client')+' — '+(d.qno||'')).trim(),
     clientName:d.client||'', stage:'won',
     quoteId:d.id||null, quoteNumber:d.qno||'', quoteCollection: company==='BK'?'bk_quotes':'bs_quotes',
-    contractAmount:contract, amountCollected:0, arBalance:contract, vatRate:12,
+    contractAmount:contract, amountCollected:0, arBalance:contract, vatRate:12, capital:0,
+    partnerUid,
     split:{ isShared: company==='BS', barroPct:50, partnerPct:50 },
     documents:[{ type:'Quotation', ref:d.qno||'', at:new Date().toISOString(), by:who }],
     timeline:[{ at:new Date().toISOString(), event:'Project created — quote won', by:who }],
@@ -7047,7 +7183,7 @@ window.renderProjectLifecycle = async function(){
   const isPartnerU = currentRole==='partner' || (currentDepts||[]).length===1 && currentDepts[0]==='Brilliant Steel';
   const snap = await db.collection('job_projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
   let projects = snap.docs.map(d=>({id:d.id,...d.data()}));
-  if (isPartnerU) projects = projects.filter(p=>p.createdBy===currentUser.uid); // partners: own only
+  if (isPartnerU) projects = projects.filter(p=>p.createdBy===currentUser.uid || p.partnerUid===currentUser.uid); // partners: own + shared
   const active = projects.filter(p=>!['paid','cancelled'].includes(p.stage));
   const inProd = projects.filter(p=>p.stage==='in_production').length;
   const forDel = projects.filter(p=>p.stage==='for_delivery'||p.stage==='delivered').length;
@@ -7100,6 +7236,15 @@ function openProjectDetail(p){
       <div class="kpi-card green"><div class="kpi-label">Collected</div><div class="kpi-value" style="font-size:14px">₱${fmt(p.amountCollected||0)}</div></div>
       <div class="kpi-card ${(p.arBalance||0)>0?'warn':''}"><div class="kpi-label">Balance (AR)</div><div class="kpi-value" style="font-size:14px">₱${fmt(p.arBalance||0)}</div></div>
     </div>
+    <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:10px 14px">
+      <div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:12px">💰 Margin &amp; Split</strong>${(!isPartnerU && (canEditDept('Sales')||_isFinAdmin()))?`<button class="btn-secondary btn-sm" id="proj-margin-btn">Edit factors</button>`:''}</div>
+      <div style="font-size:12px;margin-top:6px;display:grid;grid-template-columns:1fr auto;gap:3px 12px">
+        <span style="color:var(--text-muted)">Contract</span><span style="text-align:right">₱${fmt(p.contractAmount||0)}</span>
+        <span style="color:var(--text-muted)">Capital (cost)</span><span style="text-align:right">₱${fmt(p.capital||0)}</span>
+        <span style="color:var(--text-muted)">Margin</span><span style="text-align:right;font-weight:700">₱${fmt((p.contractAmount||0)-(p.capital||0))}</span>
+        ${p.split?.isShared?`<span style="color:var(--text-muted)">Partner share (${p.split?.partnerPct||50}%)</span><span style="text-align:right;font-weight:700;color:var(--success)">₱${fmt(((p.contractAmount||0)-(p.capital||0))*((p.split?.partnerPct||50)/100))}</span>`:''}
+      </div>
+    </div></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">📄 Document Register</div>
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:0">
       ${(p.documents||[]).length?`<table class="data-table"><tbody>${(p.documents||[]).map(dc=>`<tr><td style="font-weight:600;font-size:12px">${escHtml(dc.type||'')}</td><td style="font-size:11px">${escHtml(dc.ref||'')}</td><td style="font-size:11px;color:var(--text-muted)">${dc.at?new Date(dc.at).toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''} · ${escHtml(dc.by||'')}</td></tr>`).join('')}</tbody></table>`:'<div style="padding:12px;font-size:12px;color:var(--text-muted)">No documents yet.</div>'}
@@ -7114,7 +7259,59 @@ function openProjectDetail(p){
     <button class="btn-secondary" onclick="closeModal()">Close</button>`);
   document.getElementById('proj-advance-btn')?.addEventListener('click',()=>advanceProjectStage(p, next.id));
   document.getElementById('proj-bill-btn')?.addEventListener('click',()=>openProjectBillingModal(p));
+  document.getElementById('proj-margin-btn')?.addEventListener('click',()=>openProjectMarginModal(p));
   document.getElementById('proj-job-btn')?.addEventListener('click',()=>{ closeModal(); prodOrderModal(null, currentUser, currentRole, ()=>window.renderProjectLifecycle&&window.renderProjectLifecycle(), p.id); });
+}
+
+// Edit the profit factors (capital cost + partner split %) on a project.
+// Gated to president / Sales / Finance per the user's request; partner cannot edit.
+function openProjectMarginModal(p){
+  const isShared = !!(p.split&&p.split.isShared);
+  const pct = (p.split&&typeof p.split.partnerPct==='number')?p.split.partnerPct:50;
+  openModal('💰 Edit Profit Factors — '+(escHtml(p.clientName||p.projectNo||'Project')), `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract value <strong>₱${fmt(p.contractAmount||0)}</strong>. Expected earnings = (Contract − Capital) × split%.</div>
+    <div class="form-group"><label>Capital / cost (₱)</label><input id="pm-capital" type="number" step="0.01" min="0" value="${p.capital||0}"/>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Total material + labor + overhead to produce this job.</div></div>
+    ${isShared?`<div class="form-group"><label>Partner split (%)</label><input id="pm-pct" type="number" step="1" min="0" max="100" value="${pct}"/>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Brilliant Steel's share of the margin (50/50 default). Barro keeps the rest.</div></div>`:''}
+    <div class="card" style="margin-top:6px"><div class="card-body" style="padding:10px 14px;font-size:12px;display:grid;grid-template-columns:1fr auto;gap:3px 12px">
+      <span style="color:var(--text-muted)">Margin</span><span id="pm-margin" style="text-align:right;font-weight:700">₱${fmt((p.contractAmount||0)-(p.capital||0))}</span>
+      ${isShared?`<span style="color:var(--text-muted)">Partner share</span><span id="pm-share" style="text-align:right;font-weight:700;color:var(--success)">₱${fmt(((p.contractAmount||0)-(p.capital||0))*(pct/100))}</span>
+      <span style="color:var(--text-muted)">Barro share</span><span id="pm-barro" style="text-align:right;font-weight:700">₱${fmt(((p.contractAmount||0)-(p.capital||0))*((100-pct)/100))}</span>`:''}
+    </div></div>
+    <div id="pm-err" class="error-msg hidden" style="margin-top:8px"></div>
+  `, `<button class="btn-primary" id="pm-save">Save Factors</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  const recompute=()=>{
+    const cap=parseFloat(document.getElementById('pm-capital').value)||0;
+    const margin=(p.contractAmount||0)-cap;
+    document.getElementById('pm-margin').textContent='₱'+fmt(margin);
+    if(isShared){
+      const pp=Math.max(0,Math.min(100,parseFloat(document.getElementById('pm-pct').value)||0));
+      document.getElementById('pm-share').textContent='₱'+fmt(margin*(pp/100));
+      document.getElementById('pm-barro').textContent='₱'+fmt(margin*((100-pp)/100));
+    }
+  };
+  document.getElementById('pm-capital').addEventListener('input',recompute);
+  document.getElementById('pm-pct')?.addEventListener('input',recompute);
+  document.getElementById('pm-save').addEventListener('click', async ()=>{
+    const err=document.getElementById('pm-err');
+    const cap=parseFloat(document.getElementById('pm-capital').value)||0;
+    if(cap<0){ err.textContent='Capital cannot be negative.'; err.classList.remove('hidden'); return; }
+    const who=userProfile?.displayName||currentUser.email;
+    const update={ capital:cap, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+      timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Profit factors updated (capital ₱${cap.toLocaleString()})`, by:who }) };
+    if(isShared){
+      let pp=Math.max(0,Math.min(100,parseFloat(document.getElementById('pm-pct').value)||0));
+      update['split.partnerPct']=pp; update['split.barroPct']=100-pp;
+    }
+    try{
+      await db.collection('job_projects').doc(p.id).update(update);
+      window.logAudit && window.logAudit('update','project',p.id,{ capital:cap, partnerPct:update['split.partnerPct'] });
+      // reflect locally so the reopened detail shows fresh numbers
+      p.capital=cap; if(isShared){ p.split=p.split||{}; p.split.partnerPct=update['split.partnerPct']; p.split.barroPct=update['split.barroPct']; }
+      closeModal(); Notifs.showToast('Profit factors saved'); window.renderProjectLifecycle&&window.renderProjectLifecycle();
+    }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+  });
 }
 
 async function advanceProjectStage(p, nextId){

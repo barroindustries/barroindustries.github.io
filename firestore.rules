@@ -496,7 +496,9 @@ service cloud.firestore {
     // ── Project lifecycle (the spine: quote→order→production→delivery→paid) ──
     // Internal staff read + manage all; a partner sees only their own BS projects.
     match /job_projects/{docId} {
-      allow read:   if isAuth() && (resource.data.createdBy == request.auth.uid || getRole() != 'partner');
+      // Partner sees projects they created OR shared projects originating from their quote.
+      // Partner may NOT edit profit factors — only the project owner / non-partner staff can update.
+      allow read:   if isAuth() && (resource.data.createdBy == request.auth.uid || resource.data.partnerUid == request.auth.uid || getRole() != 'partner');
       allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
       allow update: if isAuth() && (resource.data.createdBy == request.auth.uid || getRole() != 'partner');
       allow delete: if isAuth() && isAdmin();

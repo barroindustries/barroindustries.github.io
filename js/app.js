@@ -938,6 +938,19 @@ function renderQuoteBuilderIframe() {
   }
 }
 
+// Reopen a filed quote into the builder from anywhere (Quotations list, Client
+// data view, etc.). Loads the quote's editable snapshot and navigates to the
+// matching builder. Re-filing then saves a NEW versioned copy (per the SOP).
+window.reopenQuoteFromDoc = async function(collection, id, navTarget){
+  try {
+    const snap = await db.collection(collection).doc(id).get();
+    const q = snap.data() || {};
+    if (!q.editableState) { Notifs.showToast('No editable snapshot saved for this quote', 'error'); return; }
+    window._qbReopenState = q.editableState;
+    navigateTo(navTarget || (collection==='bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'));
+  } catch (ex) { Notifs.showToast('Could not reopen: '+(ex.message||ex.code), 'error'); }
+};
+
 // ── Product Database (president only) ────────────
 // Single source of truth for the quote builders. Seeded once from
 // products-database.json, then lives entirely in Firestore so president
@@ -1623,42 +1636,58 @@ async function renderPartnerDashboard() {
   liveDateTime('live-clock');
 
   try {
-    const [tasksSnap, quotesSnap, dealsSnap] = await Promise.all([
+    const [tasksSnap, quotesSnap, dealsSnap, projSnap] = await Promise.all([
       db.collection('tasks').where('assignedTo','array-contains',currentUser.uid).get()
         .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get()),
       db.collection('bs_quotes').where('createdBy','==',currentUser.uid).orderBy('createdAt','desc').limit(20).get()
         .catch(()=>({docs:[]})),
       db.collection('partner_deals').where('partnerUid','==',currentUser.uid).orderBy('createdAt','desc').get()
+        .catch(()=>({docs:[]})),
+      db.collection('job_projects').where('partnerUid','==',currentUser.uid).get()
         .catch(()=>({docs:[]}))
     ]);
 
     const tasks  = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
     const quotes = quotesSnap.docs.map(d=>({id:d.id,...d.data()}));
     const deals  = dealsSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const sharedProjects = projSnap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>p.stage!=='cancelled');
     const open   = tasks.filter(t=>!['done','approved','archived'].includes(t.status));
     const done   = tasks.filter(t=>['done','approved','archived'].includes(t.status));
     const totalQVal = quotes.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
     const todayStr  = bizDate();
 
-    // Earnings card
-    const activeDeals    = deals.filter(d=>d.status==='active');
-    const completedDeals = deals.filter(d=>d.status==='completed'||d.status==='paid');
-    const paidDeals      = deals.filter(d=>d.status==='paid');
-    const totalEarned    = completedDeals.reduce((s,d)=>s+(d.partnerShare||0),0);
-    const totalPaid      = paidDeals.reduce((s,d)=>s+(d.partnerShare||0),0);
-    const totalPending   = totalEarned - totalPaid;
+    // ── Earnings card — driven by the job_projects spine ──
+    // Expected earnings on a sales order = (contract − capital) × partner split %.
+    const partnerShare = (p)=>{
+      const pct = (p.split && typeof p.split.partnerPct==='number') ? p.split.partnerPct : 50;
+      return Math.max(0, (p.contractAmount||0) - (p.capital||0)) * (pct/100);
+    };
+    const activeProjects = sharedProjects.filter(p=>p.stage!=='paid');
+    const paidProjects   = sharedProjects.filter(p=>p.stage==='paid');
+    // legacy partner_deals are merged in so older records still show
+    const legacyEarned   = deals.filter(d=>d.status==='completed'||d.status==='paid').reduce((s,d)=>s+(d.partnerShare||0),0);
+    const legacyPaid     = deals.filter(d=>d.status==='paid').reduce((s,d)=>s+(d.partnerShare||0),0);
+    const expectedTotal  = sharedProjects.reduce((s,p)=>s+partnerShare(p),0) + (legacyEarned);
+    const realizedTotal  = paidProjects.reduce((s,p)=>s+partnerShare(p),0) + legacyPaid;
+    const pendingTotal   = Math.max(0, expectedTotal - realizedTotal);
     const el = document.getElementById('partner-earnings-card');
-    if (el) el.innerHTML = deals.length ? `
+    if (el) el.innerHTML = (sharedProjects.length||deals.length) ? `
       <div class="card" style="margin-bottom:14px;border:2px solid var(--primary)">
-        <div class="card-header"><h3>💰 My Earnings (50/50 Split)</h3></div>
+        <div class="card-header"><h3>💰 My Earnings (50/50 Split)</h3><span style="font-size:11px;color:var(--text-muted)">From sales orders</span></div>
         <div class="card-body">
           <div class="kpi-row" style="margin-bottom:12px">
-            <div class="kpi-card accent"><div class="kpi-label">Active Deals</div><div class="kpi-value">${activeDeals.length}</div></div>
-            <div class="kpi-card green"><div class="kpi-label">Total Earned</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalEarned)}</div></div>
-            <div class="kpi-card"><div class="kpi-label">Paid Out</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalPaid)}</div></div>
-            <div class="kpi-card" style="border-color:var(--warning)"><div class="kpi-label">Pending</div><div class="kpi-value" style="font-size:15px;color:var(--warning)">₱${fmt(totalPending)}</div></div>
+            <div class="kpi-card accent"><div class="kpi-label">Active Projects</div><div class="kpi-value">${activeProjects.length}</div></div>
+            <div class="kpi-card green"><div class="kpi-label">Expected Earnings</div><div class="kpi-value" style="font-size:15px">₱${fmt(expectedTotal)}</div></div>
+            <div class="kpi-card"><div class="kpi-label">Realized (Paid)</div><div class="kpi-value" style="font-size:15px">₱${fmt(realizedTotal)}</div></div>
+            <div class="kpi-card" style="border-color:var(--warning)"><div class="kpi-label">Pending</div><div class="kpi-value" style="font-size:15px;color:var(--warning)">₱${fmt(pendingTotal)}</div></div>
           </div>
-          <div style="font-size:12px;color:var(--text-muted);text-align:center">Your share = 50% of gross profit per closed deal</div>
+          ${sharedProjects.length?`<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
+            ${sharedProjects.slice(0,6).map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">
+              <div style="min-width:0;flex:1"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(p.clientName||p.projectNo||'Project')}</div><div style="color:var(--text-muted);font-size:11px">${escHtml(p.projectNo||'')} · ${p.stage==='paid'?'✅ paid':'in progress'}</div></div>
+              <div style="text-align:right;flex-shrink:0"><div style="font-weight:700;color:var(--success)">₱${fmt(partnerShare(p))}</div><div style="color:var(--text-muted);font-size:10px">of ₱${fmt(Math.max(0,(p.contractAmount||0)-(p.capital||0)))} margin</div></div>
+            </div>`).join('')}
+          </div>`:''}
+          <div style="font-size:12px;color:var(--text-muted);text-align:center">Your share = 50% of (contract − capital) per project. Factors are set by Barro.</div>
         </div>
       </div>` : '';
 
