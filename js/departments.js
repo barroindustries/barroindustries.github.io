@@ -668,7 +668,20 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
     if (isAdmin){update.assignedTo=curAssignees.map(a=>a.uid);update.assignedToNames=curAssignees.map(a=>a.name);}
     await db.collection('tasks').doc(taskId).update(update);
     const updatedTask={...t,assignedTo:update.assignedTo||t.assignedTo};
-    await notifyTaskInvolved(updatedTask,{title:'✏️ Task Updated',body:`"${title}" edited by ${actorName}`,icon:'✏️',type:'task_edited'},currentUser.uid);
+    // Build a SPECIFIC change summary so the notification says what actually changed
+    const changes=[];
+    if ((t.title||'')!==title) changes.push('renamed');
+    if ((t.status||'')!==update.status) changes.push(`status → ${statusLabel(update.status)}`);
+    if ((t.priority||'')!==update.priority) changes.push(`priority → ${update.priority}`);
+    if ((t.dueDate||'')!==(update.dueDate||'')) changes.push(`due date → ${update.dueDate||'none'}`);
+    if ((t.department||'')!==(update.department||'')) changes.push(`dept → ${update.department||'none'}`);
+    if ((t.description||'')!==update.description) changes.push('description updated');
+    if (isAdmin){
+      const oldA=(t.assignedTo||[]).slice().sort().join(','), newA=(update.assignedTo||[]).slice().sort().join(',');
+      if (oldA!==newA) changes.push('assignees changed');
+    }
+    const summary = changes.length ? changes.join(', ') : 'edited';
+    await notifyTaskInvolved(updatedTask,{title:'✏️ Task Updated',body:`"${title}" — ${summary} (by ${actorName})`,icon:'✏️',type:'task_edited',taskId},currentUser.uid);
     Notifs.showToast('Task updated!');
     closeModal(); renderTasks(currentUser,currentRole,update.department||t.department);
   });

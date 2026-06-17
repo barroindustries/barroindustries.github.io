@@ -98,15 +98,24 @@ window.Notifs = (() => {
     const NAV_TYPES = new Set(['task_assigned','task_status','task_message','task_comment','cash_advance','ca_approved','att_extension_approved','att_extension_denied','attendance','post','post_approval','approval_result','payroll','kpi_grade','self_assessment']);
     const isNavigable = n => n.taskId || NAV_TYPES.has(n.type) || n.type?.startsWith('task') || n.type?.startsWith('att');
 
+    // Many notifications set BOTH an icon AND a title that starts with the same
+    // emoji (e.g. icon '💸' + title '💸 New Expense') — which rendered the icon
+    // twice. Strip a leading emoji from the title (the emoji column shows it),
+    // and fall back to that emoji as the icon when none was set.
+    const LEAD_EMOJI = /^[\p{Extended_Pictographic}️‍♀♂]+\s*/u;
     list.innerHTML = items.map(n => {
       const nav = isNavigable(n);
       const hasActions = !n.read || nav;
+      const rawTitle = n.title || '';
+      const lead = (rawTitle.match(LEAD_EMOJI) || [''])[0].trim();
+      const titleText = rawTitle.replace(LEAD_EMOJI, '').trim() || rawTitle;
+      const icon = n.icon || lead || '🔔';
       return `
       <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${escHtml(n.id)}" data-type="${escHtml(n.type||'')}" data-task-id="${escHtml(n.taskId||'')}">
         <div class="notif-item-main">
-          <div class="notif-item-emoji">${escHtml(n.icon || '🔔')}</div>
+          <div class="notif-item-emoji">${escHtml(icon)}</div>
           <div class="notif-item-text">
-            <div class="notif-item-title">${escHtml(n.title)}</div>
+            <div class="notif-item-title">${escHtml(titleText)}</div>
             <div class="notif-item-body">${escHtml(n.body || '')}</div>
             <div class="notif-item-time">${timeAgo(n.createdAt)}</div>
           </div>

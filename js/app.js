@@ -83,11 +83,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── Presence Heartbeat ────────────────────────────
 let _presenceInterval = null;
+let _presenceVisHandler = null;
 function startPresenceHeartbeat(uid) {
   if (_presenceInterval) clearInterval(_presenceInterval);
-  const ping = () => db.collection('users').doc(uid).update({ lastSeen: firebase.firestore.FieldValue.serverTimestamp() }).catch(()=>{});
+  if (_presenceVisHandler) { document.removeEventListener('visibilitychange', _presenceVisHandler); window.removeEventListener('focus', _presenceVisHandler); }
+  let _lastPing = 0;
+  const ping = () => {
+    _lastPing = Date.now();
+    db.collection('users').doc(uid).update({ lastSeen: firebase.firestore.FieldValue.serverTimestamp() }).catch(()=>{});
+  };
   ping();
-  _presenceInterval = setInterval(ping, 60000); // every 60s
+  // Timer keeps it fresh while the tab is foregrounded; browsers throttle/pause
+  // setInterval in background tabs, so ALSO ping the moment the tab becomes
+  // visible or regains focus — that's when presence accuracy matters most.
+  _presenceVisHandler = () => { if (document.visibilityState === 'visible' && Date.now() - _lastPing > 15000) ping(); };
+  document.addEventListener('visibilitychange', _presenceVisHandler);
+  window.addEventListener('focus', _presenceVisHandler);
+  _presenceInterval = setInterval(() => { if (document.visibilityState === 'visible') ping(); }, 60000); // every 60s while visible
 }
 
 // ── Force Logout (president-triggered) ───────────
@@ -5395,7 +5407,9 @@ async function renderTeam() {
       </div>
     </div>
     <div id="team-table"><div class="loading-placeholder">Loading…</div></div>`;
-  const snap=await dbCachedGet('users', () => db.collection('users').get(), 60000);
+  // Short TTL here so the online/offline presence dots reflect "now", not a
+  // 60s-stale snapshot left by another screen.
+  const snap=await dbCachedGet('users', () => db.collection('users').get(), 8000);
   const users=snap.docs.map(d=>({id:d.id,...d.data()}));
   const now = Date.now();
   const onlineThresholdMs = 3 * 60 * 1000; // 3 min = online

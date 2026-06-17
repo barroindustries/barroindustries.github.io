@@ -3442,12 +3442,12 @@ html.light html.theme-grey .form-group select, html.theme-pink html.theme-grey .
   flex-shrink: 0;
 }
 .ms-avatar-mine { background: var(--primary); }
-.ms-bubble-wrap { display: flex; flex-direction: column; gap: 3px; }
+.ms-bubble-wrap { display: flex; flex-direction: column; gap: 3px; min-width: 0; max-width: 100%; }
 .ms-row-mine .ms-bubble-wrap { align-items: flex-end; }
 .ms-name { font-size: 10px; color: var(--text-muted); font-weight: 600; padding: 0 4px; }
 .ms-bubble {
   padding: 9px 13px; border-radius: 18px;
-  max-width: 400px; word-break: break-word;
+  max-width: 100%; word-break: break-word; overflow-wrap: anywhere;
 }
 .ms-bubble-mine {
   background: var(--primary); color: #fff;
