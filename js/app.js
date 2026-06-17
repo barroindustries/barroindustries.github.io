@@ -648,10 +648,11 @@ function friendlyError(code) {
 
 // ── Theme ─────────────────────────────────────────
 const THEMES = {
-  dark:  { label: 'Obsidian', cls: null },
-  light: { label: 'Aurora',   cls: 'light' },
-  pink:  { label: 'Astral',   cls: 'theme-pink' },
-  grey:  { label: 'Slate',    cls: 'theme-grey' },
+  dark:     { label: 'Obsidian', cls: null },
+  midnight: { label: 'Midnight', cls: 'theme-midnight' },
+  light:    { label: 'Aurora',   cls: 'light' },
+  pink:     { label: 'Astral',   cls: 'theme-pink' },
+  grey:     { label: 'Slate',    cls: 'theme-grey' },
 };
 
 function initTheme() {
@@ -673,7 +674,7 @@ function getTheme() {
 }
 
 function toggleTheme() {
-  const order = ['dark', 'light', 'pink', 'grey'];
+  const order = ['dark', 'midnight', 'light', 'pink', 'grey'];
   const next = order[(order.indexOf(getTheme()) + 1) % order.length];
   setTheme(next);
 }
@@ -5824,6 +5825,7 @@ function openProfileDrawer() {
         <span class="pir-label">Appearance</span>
         <div class="theme-picker" id="drawer-theme-picker">
           <button class="theme-swatch theme-swatch-dark"  data-theme="dark"  title="Obsidian"><span class="theme-swatch-dot"></span>Obsidian</button>
+          <button class="theme-swatch theme-swatch-midnight" data-theme="midnight" title="Midnight"><span class="theme-swatch-dot"></span>Midnight</button>
           <button class="theme-swatch theme-swatch-light" data-theme="light" title="Aurora"><span class="theme-swatch-dot"></span>Aurora</button>
           <button class="theme-swatch theme-swatch-pink"  data-theme="pink"  title="Astral"><span class="theme-swatch-dot"></span>Astral</button>
           <button class="theme-swatch theme-swatch-grey"  data-theme="grey"  title="Slate"><span class="theme-swatch-dot"></span>Slate</button>
@@ -5972,17 +5974,45 @@ document.addEventListener('DOMContentLoaded',()=>{
 });
 
 // ── Mini Calendar ─────────────────────────────────
-function renderMiniCal() {
+let _calMonthOffset = 0;
+async function renderMiniCal() {
   const el=document.getElementById('mini-cal'); if(!el) return;
-  const now=new Date();const year=now.getFullYear();const month=now.getMonth();
-  const firstDay=new Date(year,month,1).getDay();const days=new Date(year,month+1,0).getDate();
-  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  el.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-weight:700;font-size:14px"><span>${months[month]} ${year}</span></div>
+  // Open tasks with due dates → event dots on the calendar
+  let tasks=[];
+  try {
+    const snap=await (typeof dbCachedGet==='function' ? dbCachedGet('tasks-all',()=>db.collection('tasks').get(),30000) : db.collection('tasks').get());
+    tasks=snap.docs.map(d=>({id:d.id,...d.data()})).filter(t=>t.dueDate && !['done','approved','archived'].includes(t.status));
+  } catch(_) {}
+  const base=new Date(); base.setDate(1); base.setMonth(base.getMonth()+_calMonthOffset);
+  const year=base.getFullYear(), month=base.getMonth();
+  const firstDay=new Date(year,month,1).getDay(); const days=new Date(year,month+1,0).getDate();
+  const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const todayStr=(typeof bizDate==='function'?bizDate():new Date().toISOString().slice(0,10));
+  const pad=n=>String(n).padStart(2,'0');
+  const ym=`${year}-${pad(month+1)}`;
+  const byDay={};
+  tasks.forEach(t=>{ if((t.dueDate||'').slice(0,7)===ym){ const d=parseInt(t.dueDate.slice(8,10),10); (byDay[d]=byDay[d]||[]).push(t); } });
+  el.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-weight:700;font-size:14px">
+      <button class="cal-nav" data-dir="-1" style="background:none;border:none;color:var(--text);cursor:pointer;font-size:18px;line-height:1;padding:2px 10px;border-radius:8px">‹</button>
+      <span>${months[month]} ${year}</span>
+      <button class="cal-nav" data-dir="1" style="background:none;border:none;color:var(--text);cursor:pointer;font-size:18px;line-height:1;padding:2px 10px;border-radius:8px">›</button>
+    </div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center">
       ${['Su','Mo','Tu','We','Th','Fr','Sa'].map(d=>`<div style="font-size:10px;font-weight:700;color:var(--text-muted);padding:4px">${d}</div>`).join('')}
       ${Array(firstDay).fill('<div></div>').join('')}
-      ${Array.from({length:days},(_,i)=>{const day=i+1;const isToday=day===now.getDate();return `<div style="padding:5px 2px;border-radius:50%;font-size:12px;${isToday?'background:var(--primary);color:#fff;font-weight:700':''}">${day}</div>`;}).join('')}
-    </div>`;
+      ${Array.from({length:days},(_,i)=>{const day=i+1;const ds=`${ym}-${pad(day)}`;const isToday=ds===todayStr;const cnt=(byDay[day]||[]).length;
+        return `<div class="cal-day" data-date="${ds}" style="position:relative;padding:6px 2px;border-radius:10px;font-size:12px;cursor:${cnt?'pointer':'default'};${isToday?'background:var(--primary);color:#fff;font-weight:700':cnt?'background:var(--surface2)':''}">${day}${cnt?`<span style="position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:${isToday?'#fff':'var(--danger)'}"></span>`:''}</div>`;}).join('')}
+    </div>
+    <div id="cal-day-detail" style="margin-top:10px;font-size:12px;color:var(--text-muted);min-height:16px"></div>`;
+  el.querySelectorAll('.cal-nav').forEach(b=>b.addEventListener('click',()=>{ _calMonthOffset+=parseInt(b.dataset.dir,10); renderMiniCal(); }));
+  el.querySelectorAll('.cal-day').forEach(c=>c.addEventListener('click',()=>{
+    const day=parseInt(c.dataset.date.slice(8,10),10); const dayTasks=byDay[day]||[];
+    const det=document.getElementById('cal-day-detail'); if(!det) return;
+    det.innerHTML = dayTasks.length
+      ? `<div style="font-weight:700;color:var(--text);margin-bottom:3px">📅 ${c.dataset.date} — ${dayTasks.length} due</div>${dayTasks.slice(0,4).map(t=>`<div>• ${escHtml(t.title)}</div>`).join('')}<a style="color:var(--primary);cursor:pointer;font-weight:600" onclick="navigateTo('tasks')">View all tasks →</a>`
+      : '';
+  }));
 }
 
 // ── Helpers ───────────────────────────────────────
