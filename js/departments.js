@@ -5975,13 +5975,16 @@ function printQuote(lines, q) {
 window.renderApprovals = async function(currentUser) {
   const c = deptContainer();
   // Check pending counts for badges
-  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap, finReqSnap] = await Promise.all([
+  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap, finReqSnap, qApprSnap, delQSnap, delCSnap] = await Promise.all([
     db.collection('signup_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('attendance_extensions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('cash_advances').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('submissions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('tasks').where('status','==','review').get().catch(()=>({size:0,docs:[]})),
-    db.collection('payroll_delete_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]}))
+    db.collection('payroll_delete_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
+    db.collection('approval_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
+    db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
+    db.collection('bs_clients').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]}))
   ]);
   const pendingSignups = signupSnap.size || 0;
   const pendingExt     = extSnap.size || 0;
@@ -5989,7 +5992,9 @@ window.renderApprovals = async function(currentUser) {
   const pendingSubs    = subsSnap.size || 0;
   const pendingReview  = reviewTasksCountSnap.size || 0;
   const pendingFinReqs = finReqSnap.size || 0;
-  const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs + pendingReview + pendingFinReqs;
+  const pendingQApprovals = qApprSnap.size || 0;
+  const pendingDeletes    = (delQSnap.size || 0) + (delCSnap.size || 0);
+  const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs + pendingReview + pendingFinReqs + pendingQApprovals + pendingDeletes;
 
   c.innerHTML = `
     <div class="page-header"><h2>✅ Approvals</h2>${totalPending>0?`<span class="badge badge-red" style="font-size:13px">${totalPending} pending</span>`:''}</div>
@@ -6029,13 +6034,16 @@ window.renderApprovals = async function(currentUser) {
       // index per-collection. If that index isn't provisioned, the query is rejected and
       // silently swallowed by .catch(), making items vanish from "All Requests". We sort
       // client-side instead so a missing index can never hide pending items.
-      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2] = await Promise.all([
+      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, qApprSnap2, delQSnap2, delCSnap2] = await Promise.all([
         db.collection('signup_requests').where('status','==','pending').get().catch(e=>{console.error('signup_requests query failed',e);return {docs:[]};}),
         db.collection('attendance_extensions').where('status','==','pending').get().catch(e=>{console.error('attendance_extensions query failed',e);return {docs:[]};}),
         db.collection('cash_advances').where('status','==','pending').get().catch(e=>{console.error('cash_advances query failed',e);return {docs:[]};}),
         db.collection('submissions').where('status','==','pending').get().catch(e=>{console.error('submissions query failed',e);return {docs:[]};}),
         db.collection('tasks').where('status','==','review').get().catch(e=>{console.error('tasks query failed',e);return {docs:[]};}),
-        db.collection('payroll_delete_requests').where('status','==','pending').get().catch(e=>{console.error('payroll_delete_requests query failed',e);return {docs:[]};})
+        db.collection('payroll_delete_requests').where('status','==','pending').get().catch(e=>{console.error('payroll_delete_requests query failed',e);return {docs:[]};}),
+        db.collection('approval_requests').where('status','==','pending').get().catch(e=>{console.error('approval_requests query failed',e);return {docs:[]};}),
+        db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('bs_quotes delete query failed',e);return {docs:[]};}),
+        db.collection('bs_clients').where('deleteRequested','==',true).get().catch(e=>{console.error('bs_clients delete query failed',e);return {docs:[]};})
       ]);
 
       const allPending = [
@@ -6044,7 +6052,12 @@ window.renderApprovals = async function(currentUser) {
         ...caSnap2.docs.map(d=>({id:d.id,...d.data(),type:'ca',icon:'💸',label:'Cash Advance',name:d.data().userName||'Unknown',detail:`₱${fmt(d.data().amount||0)}`,ts:d.data().createdAt})),
         ...subSnap2.docs.map(d=>({id:d.id,...d.data(),type:'submission',icon:'📤',label:'Work Submission',name:d.data().userName||d.data().authorName||'Unknown',detail:d.data().title||'',ts:d.data().createdAt})),
         ...reviewTasksSnap.docs.map(d=>({id:d.id,...d.data(),type:'review-task',icon:'📋',label:'Task for Review',name:d.data().title||'Untitled Task',detail:(()=>{const uids=Array.isArray(d.data().assignedTo)?d.data().assignedTo:[d.data().assignedTo].filter(Boolean);return uids.length?'by '+d.data().assignedToNames?.join(', '):'';})(),ts:d.data().lastModifiedAt||d.data().createdAt})),
-        ...finReqSnap2.docs.map(d=>({id:d.id,...d.data(),type:'finance-req',icon:'💼',label:'Finance Request',name:`Delete: ${d.data().userName||'?'} (${d.data().month||'?'})`,detail:`by ${d.data().requestedByName||'?'} — ${d.data().reason||''}`,ts:d.data().createdAt}))
+        ...finReqSnap2.docs.map(d=>({id:d.id,...d.data(),type:'finance-req',icon:'💼',label:'Finance Request',name:`Delete: ${d.data().userName||'?'} (${d.data().month||'?'})`,detail:`by ${d.data().requestedByName||'?'} — ${d.data().reason||''}`,ts:d.data().createdAt})),
+        // Partner quote approvals (partner submitted a quote for the president to review/edit/return)
+        ...qApprSnap2.docs.map(d=>({id:d.id,...d.data(),type:'quote-approval',icon:'📤',label:'Quote Approval',name:`${d.data().quoteNumber||'Quote'} — ${d.data().clientName||''}`,detail:`${d.data().agentName||'Partner'} · ₱${fmt(d.data().total||0)}`,ts:d.data().createdAt})),
+        // Partner delete requests (quote + client folder) — president approves or denies
+        ...delQSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-quote',icon:'🗑',label:'Quote Delete Request',name:`Delete quote ${d.data().quoteNumber||d.id.slice(-6)}`,detail:`${d.data().clientName||''}${d.data().deleteReason?' — '+d.data().deleteReason:''}`,ts:d.data().deleteRequestedAt})),
+        ...delCSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-client',icon:'🗑',label:'Client Delete Request',name:`Delete client "${d.data().name||''}"`,detail:d.data().deleteReason||'',ts:d.data().deleteRequestedAt}))
       ].sort((a,b)=>(b.ts?.seconds||0)-(a.ts?.seconds||0));
 
       if (!allPending.length) {
@@ -6082,6 +6095,16 @@ window.renderApprovals = async function(currentUser) {
               `:item.type==='finance-req'?`
                 <button class="btn-success btn-sm fr-approve-btn" data-id="${item.id}" data-hist-id="${item.historyId||''}" data-name="${escHtml(item.userName||'')}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">✓ Approve Deletion</button>
                 <button class="btn-danger btn-sm fr-deny-btn" data-id="${item.id}" data-name="${escHtml(item.userName||'')}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">✗ Deny</button>
+              `:item.type==='quote-approval'?`
+                <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">📝 Open &amp; Edit</button>
+                <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">✓ Approve</button>
+                <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return to Partner</button>
+              `:item.type==='delete-quote'?`
+                <button class="btn-danger btn-sm dq-approve-btn" data-id="${item.id}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">✓ Approve Delete</button>
+                <button class="btn-secondary btn-sm dq-deny-btn" data-id="${item.id}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">✗ Deny</button>
+              `:item.type==='delete-client'?`
+                <button class="btn-danger btn-sm dc-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${item.deleteRequestedBy||''}">✓ Approve Delete</button>
+                <button class="btn-secondary btn-sm dc-deny-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${item.deleteRequestedBy||''}">✗ Deny</button>
               `:`
                 <button class="btn-success btn-sm sub-approve-btn" data-id="${item.id}">✓ Approve</button>
                 <button class="btn-danger btn-sm sub-reject-btn" data-id="${item.id}">✗ Reject</button>
@@ -6177,6 +6200,54 @@ window.renderApprovals = async function(currentUser) {
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'❌ Payroll Delete Denied', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record was denied by the President.`, icon:'❌', type:'payroll_delete_denied' }));
           Notifs.showToast('Request denied and requester notified.');
           loadApprovalsSub('all');
+      }));
+
+      // ── Partner quote approvals — open & edit, approve, or return to partner ──
+      wrap.querySelectorAll('.qa-review-btn').forEach(btn => onClickSafe(btn, () => {
+        openQuoteApprovalReview({ quoteId:btn.dataset.quote, agentId:btn.dataset.by, quoteNumber:btn.dataset.qno, clientName:btn.dataset.name }, ()=>loadApprovalsSub('all'));
+      }));
+      wrap.querySelectorAll('.qa-approve-btn').forEach(btn => onClickSafe(btn, async () => {
+        await approveQuoteApproval(btn.dataset.quote, btn.dataset.by, btn.dataset.qno, btn.dataset.name);
+        loadApprovalsSub('all');
+      }));
+      wrap.querySelectorAll('.qa-return-btn').forEach(btn => onClickSafe(btn, async () => {
+        const notes = prompt('Notes for the partner (what to revise)?')||'';
+        await returnQuoteToPartner(btn.dataset.quote, btn.dataset.by, btn.dataset.qno, btn.dataset.name, notes);
+        loadApprovalsSub('all');
+      }));
+
+      // ── Partner delete requests — approve (delete) or deny (clear flag) ──
+      wrap.querySelectorAll('.dq-approve-btn').forEach(btn => onClickSafe(btn, async () => {
+        if (!confirm(`Approve deletion of quote ${btn.dataset.qno}? This permanently removes it.`)) return;
+        try {
+          await db.collection('bs_quotes').doc(btn.dataset.id).delete();
+          window.logAudit && window.logAudit('delete','quote',btn.dataset.id,{ quoteNo:btn.dataset.qno, viaApproval:true });
+          if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'🗑 Quote Deletion Approved', body:`Your request to delete quote ${btn.dataset.qno} was approved.`, icon:'✅', type:'delete_approved' }));
+          Notifs.showToast('Quote deleted.'); loadApprovalsSub('all');
+        } catch(ex){ Notifs.showToast('Delete failed: '+(ex.message||ex.code),'error'); }
+      }));
+      wrap.querySelectorAll('.dq-deny-btn').forEach(btn => onClickSafe(btn, async () => {
+        try {
+          await db.collection('bs_quotes').doc(btn.dataset.id).update({ deleteRequested:firebase.firestore.FieldValue.delete(), deleteReason:firebase.firestore.FieldValue.delete() });
+          if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'Quote Deletion Denied', body:`Your request to delete quote ${btn.dataset.qno} was denied.`, icon:'❌', type:'delete_denied' }));
+          Notifs.showToast('Delete request denied.'); loadApprovalsSub('all');
+        } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+      }));
+      wrap.querySelectorAll('.dc-approve-btn').forEach(btn => onClickSafe(btn, async () => {
+        if (!confirm(`Approve deletion of client "${btn.dataset.name}"? This permanently removes the client folder.`)) return;
+        try {
+          await db.collection('bs_clients').doc(btn.dataset.id).delete();
+          window.logAudit && window.logAudit('delete','client',btn.dataset.id,{ name:btn.dataset.name, viaApproval:true });
+          if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'🗑 Client Deletion Approved', body:`Your request to delete client "${btn.dataset.name}" was approved.`, icon:'✅', type:'delete_approved' }));
+          Notifs.showToast('Client deleted.'); loadApprovalsSub('all');
+        } catch(ex){ Notifs.showToast('Delete failed: '+(ex.message||ex.code),'error'); }
+      }));
+      wrap.querySelectorAll('.dc-deny-btn').forEach(btn => onClickSafe(btn, async () => {
+        try {
+          await db.collection('bs_clients').doc(btn.dataset.id).update({ deleteRequested:firebase.firestore.FieldValue.delete(), deleteReason:firebase.firestore.FieldValue.delete() });
+          if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'Client Deletion Denied', body:`Your request to delete client "${btn.dataset.name}" was denied.`, icon:'❌', type:'delete_denied' }));
+          Notifs.showToast('Delete request denied.'); loadApprovalsSub('all');
+        } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
       }));
       return;
     }
@@ -6543,6 +6614,71 @@ window.renderApprovals = async function(currentUser) {
 
   loadApprovalsSub('all');
 };
+
+// ── Partner quote-approval helpers (shared by Approvals page) ──────────
+// Approve a partner-submitted quote: file it + resolve its approval request + notify.
+async function approveQuoteApproval(quoteId, agentId, qno, name){
+  if(!quoteId){ Notifs.showToast('Quote not found','error'); return; }
+  try{
+    await db.collection('bs_quotes').doc(quoteId).update({ status:'filed', approvalStatus:'approved', approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
+    await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'approved'}))));
+    if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${qno}" for ${name} was approved and filed.`, icon:'✅', type:'quote_approved' });
+    window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true });
+    Notifs.showToast('Quote approved and filed!');
+  }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+}
+// Return a partner quote for revision: mark needs_revision + notify the partner.
+async function returnQuoteToPartner(quoteId, agentId, qno, name, notes){
+  if(!quoteId){ Notifs.showToast('Quote not found','error'); return; }
+  try{
+    const upd={ status:'needs_revision', approvalStatus:'needs_revision', returnedAt:firebase.firestore.FieldValue.serverTimestamp(), returnedBy:currentUser.uid };
+    if(notes) upd.presidentNotes=notes;
+    await db.collection('bs_quotes').doc(quoteId).update(upd);
+    await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'returned'}))));
+    if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${qno}" for ${name} was reviewed and returned.${notes?' Notes: '+notes:''} Please revise and re-submit.`, icon:'✎', type:'quote_returned' });
+    window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true });
+    Notifs.showToast('Quote returned to partner.');
+  }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+}
+// Open the full review modal: open in builder, edit key fields, then approve/return.
+async function openQuoteApprovalReview(ctx, onDone){
+  const { quoteId, agentId, quoteNumber, clientName } = ctx;
+  if(!quoteId){ Notifs.showToast('Quote not found','error'); return; }
+  const snap = await db.collection('bs_quotes').doc(quoteId).get().catch(()=>null);
+  if(!snap || !snap.exists){ Notifs.showToast('Quote not found','error'); return; }
+  const q = snap.data();
+  const ta = 'width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical';
+  openModal(`📝 Review Quote — ${escHtml(quoteNumber||q.quoteNumber||'')}`, `
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Open the full quote in the builder to review/edit line items, or adjust the key fields below, then approve or return it to the partner.</p>
+    <button class="btn-secondary btn-sm" id="qar-open-builder" style="margin-bottom:14px">🔧 Open full quote in Builder</button>
+    <div class="form-group"><label>Client Name</label><input id="qar-client" value="${(q.clientName||'').replace(/"/g,'&quot;')}"/></div>
+    <div class="form-group"><label>Scope / Description</label><textarea id="qar-scope" rows="3" style="${ta}">${escHtml(q.scope||q.description||'')}</textarea></div>
+    <div class="form-group"><label>Adjusted Total (₱)</label><input id="qar-total" type="number" value="${q.total||q.grandTotal||0}"/></div>
+    <div class="form-group"><label>Notes for Partner</label><textarea id="qar-notes" rows="2" placeholder="What to revise, or why approved…" style="${ta}">${escHtml(q.presidentNotes||'')}</textarea></div>
+  `, `<button class="btn-success" id="qar-approve">✅ Save &amp; Approve</button><button class="btn-primary" id="qar-return">↩ Save &amp; Return to Partner</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  document.getElementById('qar-open-builder').addEventListener('click', ()=>{ closeModal(); window.reopenQuoteFromDoc('bs_quotes', quoteId, 'bs-quote-builder'); });
+  const getEdits = ()=>({ clientName:document.getElementById('qar-client').value.trim(), scope:document.getElementById('qar-scope').value.trim(), total:parseFloat(document.getElementById('qar-total').value)||q.total||0, presidentNotes:document.getElementById('qar-notes').value.trim(), editedByPresident:true, editedAt:firebase.firestore.FieldValue.serverTimestamp(), editedBy:currentUser.uid });
+  document.getElementById('qar-approve').addEventListener('click', async ()=>{
+    const e=getEdits();
+    try{
+      await db.collection('bs_quotes').doc(quoteId).update({ ...e, status:'filed', approvalStatus:'approved', approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
+      await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'approved'}))));
+      if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${quoteNumber}" for ${e.clientName||clientName} was approved and filed.`, icon:'✅', type:'quote_approved' });
+      window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true, edited:true });
+      closeModal(); Notifs.showToast('Quote edited, approved and filed!'); onDone&&onDone();
+    }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+  });
+  document.getElementById('qar-return').addEventListener('click', async ()=>{
+    const e=getEdits();
+    try{
+      await db.collection('bs_quotes').doc(quoteId).update({ ...e, status:'needs_revision', approvalStatus:'needs_revision', returnedAt:firebase.firestore.FieldValue.serverTimestamp(), returnedBy:currentUser.uid });
+      await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'returned'}))));
+      if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${quoteNumber}" for ${e.clientName||clientName} was reviewed and returned.${e.presidentNotes?' Notes: '+e.presidentNotes:''}`, icon:'✎', type:'quote_returned' });
+      window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true, edited:true });
+      closeModal(); Notifs.showToast('Quote updated and returned to partner.'); onDone&&onDone();
+    }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+  });
+}
 
 // ══════════════════════════════════════════════════
 //  SHARED: Client Profiles
