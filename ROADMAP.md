@@ -31,6 +31,11 @@ This file is the running source of truth for what's done and what's left to make
 - **UI:** new read-only **Partner Quotes** subtab in the Sales portal (stat cards + list of Brilliant Steel quotes) so Sales staff can actually see them.
 - The two quote "files" are the existing separate collections `bs_quotes` (partner) and `bk_quotes` (sales).
 
+### Internal control — cost & margin synced to DB (post-V10)
+- The builder's **Internal** view gained a **Cost & Margin** panel: Materials cost + Labor (estimated table, with the per-product labor capital shown as a fallback and explicitly *not* double-counted) → **COGS**, vs the ex-VAT quoted price → **Gross Margin (₱ + %)**, colour-coded.
+- Materials/labor figures pull from each product's `capitalMaterials` / `capitalLabor` **in the database** (editable on the President's Product Database page); line items now carry these values, and the V10 Firestore mapping fix means `laborHours` (for the labor auto-estimate) also flows from the DB. Verified end-to-end (BA-001 ×2: materials ₱12k, labor est ₱3.1k, COGS ₱15.1k, sell ₱32k, margin ₱16.9k / 53%).
+- **Still open (next):** a true Bill-of-Materials that computes `capitalMaterials` as Σ(qty × raw-material unit cost) live from `inventory_items`, so updating a steel price in Inventory re-prices every product. Today materials capital is a single editable figure per product.
+
 
 ### Critical fixes (production was broken at launch)
 - **Dashboard crash** — TDZ `ReferenceError` in `renderPresidentDashboard` (president + manager saw "Dashboard error"). Fixed.

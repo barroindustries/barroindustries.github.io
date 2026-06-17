@@ -812,6 +812,22 @@ tr:hover td{background:#fafbff;}
     <div id="timelineDetail" style="font-size:12px;color:var(--gray-dark);margin-top:4px;"></div>
   </div>
 
+  <!-- Cost of goods + margin (uses per-product Materials/Labor capital from the database) -->
+  <div class="sec-title" style="margin-top:14px;">💰 Cost &amp; Margin (Internal)</div>
+  <p style="font-size:11px;color:var(--gray-dark);margin:-4px 0 8px;">
+    Materials &amp; per-unit labor pull from each product's <em>capital cost</em> in the database. Edit them in the President's Product Database.
+  </p>
+  <table class="labor-tbl" id="marginTbl">
+    <tbody>
+      <tr><td>Materials cost (from DB)</td><td id="miMaterials" style="text-align:right;">₱0</td></tr>
+      <tr><td>Labor — estimated (table above)</td><td id="miLabor" style="text-align:right;">₱0</td></tr>
+      <tr><td>Labor — per-unit capital (from DB)</td><td id="miCapLabor" style="text-align:right;">₱0</td></tr>
+      <tr style="border-top:2px solid #f0c060;font-weight:700;"><td>Total Cost (COGS)</td><td id="miCogs" style="text-align:right;font-weight:700;">₱0</td></tr>
+      <tr><td>Quoted (ex-VAT)</td><td id="miSell" style="text-align:right;">₱0</td></tr>
+      <tr style="font-weight:700;"><td>Gross Margin</td><td id="miMargin" style="text-align:right;font-weight:700;">₱0</td></tr>
+    </tbody>
+  </table>
+
   <div style="margin-top:10px;font-size:12px;color:var(--orange);">
     ⚠️ This panel is hidden in the client view and in print mode.
   </div>
@@ -1420,6 +1436,8 @@ function addItemFromCalc(){
     amount:price*qty,
     leadTime:p.leadTime||'—',
     laborHours:p.laborHours||null,
+    capitalMaterials:p.capitalMaterials||0,
+    capitalLabor:p.capitalLabor||0,
     formulaType:p.formulaType,
   });
 
@@ -1544,6 +1562,7 @@ function renderTotals(){
   renderTimeline();
   renderPaymentSchedule(t.grand);
   updateDiPrint();
+  if(currentView==='internal') computeMarginSummary();
   saveToStorage();
 }
 
@@ -1783,6 +1802,33 @@ function computeLaborTotal(){
   });
   document.getElementById('laborTotal').textContent=formatPeso(total);
   computeTimeline();
+  computeMarginSummary(total);
+}
+
+// Internal cost/margin — uses per-product Materials/Labor capital synced from the
+// database. Labor is NOT double-counted: COGS uses the estimated labor table when
+// it has a value, otherwise the per-unit labor capital from the DB.
+function computeMarginSummary(laborEst){
+  const el=document.getElementById('miMaterials'); if(!el) return; // panel not present
+  if(typeof laborEst!=='number'){
+    const roles=DB.laborRoles||[]; laborEst=0;
+    roles.forEach(r=>{ const s=laborState[r.id]||{}; laborEst+=(s.days||0)*(s.people||1)*(s.rate||r.ratePerDay||0); });
+  }
+  const materials=items.reduce((s,i)=>s+((i.capitalMaterials||0)*(i.qty||1)),0);
+  const capLabor =items.reduce((s,i)=>s+((i.capitalLabor||0)*(i.qty||1)),0);
+  const laborForCogs = laborEst>0 ? laborEst : capLabor;
+  const cogs=materials+laborForCogs;
+  const sell=(typeof computeTotals==='function') ? (computeTotals().net||0) : 0; // ex-VAT revenue
+  const margin=sell-cogs;
+  const pct=sell>0 ? Math.round(margin/sell*100) : 0;
+  document.getElementById('miMaterials').textContent=formatPeso(materials);
+  document.getElementById('miLabor').textContent=formatPeso(laborEst);
+  document.getElementById('miCapLabor').textContent=formatPeso(capLabor)+(laborEst>0?' (not counted — using estimate)':' (used)');
+  document.getElementById('miCogs').textContent=formatPeso(cogs);
+  document.getElementById('miSell').textContent=formatPeso(sell);
+  const mEl=document.getElementById('miMargin');
+  mEl.textContent=formatPeso(margin)+(sell>0?`  (${pct}%)`:'');
+  mEl.style.color = margin>=0 ? '#1b7e3c' : '#c0392b';
 }
 
 function computeTimeline(){
