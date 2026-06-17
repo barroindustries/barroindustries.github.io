@@ -4277,6 +4277,17 @@ html.light .drawer-back-btn:hover, html.theme-pink .drawer-back-btn:hover, html.
 .notif-toggle-wrap input:checked + .notif-toggle-slider::before { transform: translateX(18px); }
 html.light .notif-toggle-slider, html.theme-pink .notif-toggle-slider, html.theme-grey .notif-toggle-slider { background: rgba(0,0,0,0.15); }
 
+/* ── Touch tap-targets — comfortable hit areas on phones/tablets ──────
+   Small icon/chip buttons measured under ~32px (hard to tap one-handed):
+   notification Unread/Open chips, team-directory 📇/👋 buttons, attendance ✎.
+   Scoped to coarse pointers so desktop density is untouched. */
+@media (hover: none) and (pointer: coarse) {
+  .notif-action-btn { min-height: 38px; padding: 9px 16px; }
+  .team-card-btn    { min-height: 38px; min-width: 40px; padding: 8px 12px; }
+  /* Attendance pencil lives in a small calendar cell — modest, cell-safe bump */
+  .att-edit-btn.att-edit-visible { font-size: 12px; padding: 3px 9px; line-height: 1.5; }
+}
+
 /* ── Light mode overrides ── */
 html.light .profile-inset-card, html.theme-pink .profile-inset-card, html.theme-grey .profile-inset-card { background: rgba(0,0,0,0.03); border-color: rgba(0,0,0,0.08); }
 html.light .profile-info-row, html.theme-pink .profile-info-row, html.theme-grey .profile-info-row { border-color: rgba(0,0,0,0.07); }
