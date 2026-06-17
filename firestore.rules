@@ -493,6 +493,15 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
+    // ── Project lifecycle (the spine: quote→order→production→delivery→paid) ──
+    // Internal staff read + manage all; a partner sees only their own BS projects.
+    match /job_projects/{docId} {
+      allow read:   if isAuth() && (resource.data.createdBy == request.auth.uid || getRole() != 'partner');
+      allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuth() && (resource.data.createdBy == request.auth.uid || getRole() != 'partner');
+      allow delete: if isAuth() && isAdmin();
+    }
+
     // ── Leave balances (remaining day counters per user) ─
     // Kept in their own collection (NOT on the users doc) so finance can set
     // balances without being granted broad write access to user profiles.

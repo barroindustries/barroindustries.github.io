@@ -3725,9 +3725,11 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
     <div class="item-list">
       ${!quotes.length
         ? `<div class="empty-state"><div class="empty-icon">📋</div><h4>No quotations yet</h4></div>`
-        : quotes.map(q=>`
-        <div class="item-card" style="display:flex;align-items:center;gap:12px">
-          <div style="flex:1">
+        : quotes.map(q=>{
+          const wonish = ['filed','accepted','won','approved'].includes(q.status);
+          return `
+        <div class="item-card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <div style="flex:1;min-width:160px">
             <div class="item-title" style="font-size:13px">BK-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${escHtml(q.clientName||'Unnamed')}</div>
             <div class="item-meta" style="margin-top:4px">
               <span>${escHtml(q.scope||'Custom')}</span>
@@ -3737,11 +3739,22 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
           </div>
           <div style="text-align:right">
             <div style="font-weight:700">₱${fmt(q.total||0)}</div>
-            <span class="badge ${statusBadge(q.status)}" style="margin-top:4px">${q.status||'draft'}</span>
+            <span class="badge ${statusBadge(q.status)}" style="margin-top:4px">${q.salesOrderId?'won':q.status||'draft'}</span>
           </div>
-        </div>`).join('')}
+          <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;justify-content:flex-end">
+            ${q.editableState?`<button class="btn-secondary btn-sm bk-reopen-btn" data-id="${q.id}">↻ Reopen</button>`:''}
+            ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-total="${q.total||0}" data-co="BK" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?'✓ Ordered':'🧾 Sales Order'}</button>`:''}
+          </div>
+        </div>`;}).join('')}
     </div>
   `;
+  container.querySelectorAll('.bk-so-btn').forEach(b=>b.addEventListener('click', e=>openSalesOrderModal(e.currentTarget.dataset, currentUser, currentRole, container)));
+  container.querySelectorAll('.bk-reopen-btn').forEach(b=>b.addEventListener('click', async e=>{
+    try { const s=await db.collection('bk_quotes').doc(e.currentTarget.dataset.id).get(); const qq=s.data()||{};
+      if(!qq.editableState){ Notifs.showToast('No editable snapshot','error'); return; }
+      window._qbReopenState=qq.editableState; navigateTo('bk-quote-builder');
+    } catch(ex){ Notifs.showToast('Reopen failed','error'); }
+  }));
 }
 
 // ── Partner Quotes (read-only window into Brilliant Steel quotes) ──
@@ -5323,8 +5336,11 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
     const project=document.getElementById('so-project').value.trim();
     if(!project){ err.textContent='Project is required.'; err.classList.remove('hidden'); return; }
     try{
+      // 1) create the master project (the spine that ties the whole job together)
+      const proj = await createJobProject({ ...d, total:contract });
+      // 2) sales order, linked to the project
       const ref=await db.collection('sales_orders').add({
-        quoteId:d.id, quoteNumber:d.qno||'', clientName:d.client||'', company:d.co||'BS',
+        projectId:proj.id, quoteId:d.id, quoteNumber:d.qno||'', clientName:d.client||'', company:d.co||'BS',
         project, contractAmount:contract, paymentReceived:paid,
         paymentMethod:document.getElementById('so-method').value,
         notes:document.getElementById('so-notes').value.trim(),
@@ -5332,13 +5348,22 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
         status:'pending', createdBy:currentUser.uid, createdByName:userProfile?.displayName||currentUser.email,
         createdAt:firebase.firestore.FieldValue.serverTimestamp()
       });
-      try{ await db.collection('bs_quotes').doc(d.id).update({salesOrderId:ref.id}); }catch(_){}
-      window.logAudit&&window.logAudit('create','sales_order',ref.id,{client:d.client, contract, paid});
+      // 3) stamp the back-links onto the quote IN THE CORRECT COLLECTION (BK or BS — was hardcoded to bs_quotes)
+      const qc = (d.co==='BK') ? 'bk_quotes' : 'bs_quotes';
+      try{ await db.collection(qc).doc(d.id).update({ salesOrderId:ref.id, projectId:proj.id, status:'won' }); }catch(_){}
+      // 4) record the Sales Order on the project's document register + link the SO id
+      try{ await db.collection('job_projects').doc(proj.id).update({ salesOrderId:ref.id,
+        documents:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order', ref:proj.projectNo, at:new Date().toISOString(), by:userProfile?.displayName||currentUser.email }) }); }catch(_){}
+      window.logAudit&&window.logAudit('create','sales_order',ref.id,{client:d.client, contract, paid, projectNo:proj.projectNo});
       const who=userProfile?.displayName||currentUser.email;
-      try{ await Notifs.sendToDept('Finance',{ title:'🧾 New Sales Order', body:`${who}: ${d.client} — ₱${contract.toLocaleString()} (₱${paid.toLocaleString()} received). Record income + verify receipt.`, icon:'🧾', type:'sales_order', link:'sales-orders' }); }catch(_){}
-      try{ await Notifs.sendToOwner({ title:'🧾 New Sales Order', body:`${d.client} — ₱${contract.toLocaleString()} closed by ${who}.`, icon:'🧾', type:'sales_order' }); }catch(_){}
-      closeModal(); Notifs.showToast('Sales order created — sent to Finance');
-      renderBSQuotationsSummary(container, currentUser, currentRole);
+      try{ await Notifs.sendToDept('Finance',{ title:'🧾 New Sales Order', body:`${who}: ${d.client} — ₱${contract.toLocaleString()} (₱${paid.toLocaleString()} received). Project ${proj.projectNo}. Record income + verify receipt.`, icon:'🧾', type:'sales_order', link:'sales-orders' }); }catch(_){}
+      try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${d.client} (${proj.projectNo}) won — create the production order when ready.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }); }catch(_){}
+      try{ await Notifs.sendToOwner({ title:'🤝 Quote won → Project '+proj.projectNo, body:`${d.client} — ₱${contract.toLocaleString()} closed by ${who}.`, icon:'🤝', type:'sales_order' }); }catch(_){}
+      closeModal(); Notifs.showToast('Sales order + project '+proj.projectNo+' created');
+      if (typeof container!=='undefined' && container) {
+        if (d.co==='BK') renderBKQuotationsSummary(container, currentUser, currentRole);
+        else renderBSQuotationsSummary(container, currentUser, currentRole);
+      }
     }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
   });
 }
@@ -5383,7 +5408,7 @@ window.renderSalesOrders = async function(){
       const amt=parseFloat(b.dataset.amt)||0;
       if(!confirm(`Record ₱${amt.toLocaleString()} from ${b.dataset.client} as income to the ledger?`)) return;
       try{
-        await db.collection('ledger').add({ date: today(), description:'Sales order — '+b.dataset.client, category:'Sales', type:'credit', amount:amt, source:'Finance', addedByName:userProfile?.displayName||currentUser.email, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+        await db.collection('ledger').add({ date: today(), description:'Sales order — '+b.dataset.client, category:'Sales Revenue', type:'credit', amount:amt, source:'Finance', addedByName:userProfile?.displayName||currentUser.email, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
         await db.collection('sales_orders').doc(b.dataset.id).update({status:'recorded', recordedAt:firebase.firestore.FieldValue.serverTimestamp()});
         window.logAudit&&window.logAudit('create','ledger',null,{source:'sales_order', amount:amt});
         Notifs.showToast('Income recorded to ledger');
@@ -6973,6 +6998,187 @@ const PROD_STAGES = [
 ];
 function prodStage(id){ return PROD_STAGES.find(s=>s.id===id) || PROD_STAGES[0]; }
 
+// ═══════════════════════════════════════════════════
+//  PROJECT LIFECYCLE — the spine tying quote → sales order → production →
+//  delivery → completion → billing/payment into ONE job_projects record.
+//  Every downstream doc references it via projectId. (Named job_projects to
+//  avoid the unrelated Design 'projects' board.)
+// ═══════════════════════════════════════════════════
+const JOB_STAGES = [
+  { id:'won',           label:'Won',           icon:'🤝', color:'#26a69a', dept:'Sales' },
+  { id:'in_production', label:'In Production', icon:'🏭', color:'#7e57c2', dept:'Production' },
+  { id:'for_delivery',  label:'For Delivery',  icon:'📦', color:'#26c6da', dept:'Production' },
+  { id:'delivered',     label:'Delivered',     icon:'🚚', color:'#42a5f5', dept:'Production' },
+  { id:'completed',     label:'Completed',     icon:'✅', color:'#66bb6a', dept:'Sales' },
+  { id:'paid',          label:'Paid / Closed', icon:'💰', color:'#43a047', dept:'Finance' },
+  { id:'cancelled',     label:'Cancelled',     icon:'✖️', color:'#ef5350', dept:'Sales' },
+];
+function jobStage(id){ return JOB_STAGES.find(s=>s.id===id) || JOB_STAGES[0]; }
+const _isFinAdmin = () => ['president','owner','manager','finance'].includes(window.currentRole) || (window.currentDepts||[]).includes('Finance');
+
+// Create the master project when a quote is won (called from the Sales Order flow).
+async function createJobProject(d){
+  let seq='001';
+  try { const cnt=(await db.collection('job_projects').get()).size; seq=String(cnt+1).padStart(3,'0'); } catch(_) { seq=String(Date.now()).slice(-3); }
+  const ym=(window.bizDate?window.bizDate():new Date().toISOString().slice(0,10)).slice(2,7).replace('-','');
+  const projectNo=`JP-${ym}-${seq}`;
+  const contract=parseFloat(d.total)||0;
+  const company=d.co||'BS';
+  const who=userProfile?.displayName||currentUser.email;
+  const ref=await db.collection('job_projects').add({
+    projectNo, company, name:((d.client||'Client')+' — '+(d.qno||'')).trim(),
+    clientName:d.client||'', stage:'won',
+    quoteId:d.id||null, quoteNumber:d.qno||'', quoteCollection: company==='BK'?'bk_quotes':'bs_quotes',
+    contractAmount:contract, amountCollected:0, arBalance:contract, vatRate:12,
+    split:{ isShared: company==='BS', barroPct:50, partnerPct:50 },
+    documents:[{ type:'Quotation', ref:d.qno||'', at:new Date().toISOString(), by:who }],
+    timeline:[{ at:new Date().toISOString(), event:'Project created — quote won', by:who }],
+    payments:[], productionOrderIds:[],
+    createdBy:currentUser.uid, createdByName:who,
+    createdAt:firebase.firestore.FieldValue.serverTimestamp(), updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+  });
+  window.logAudit && window.logAudit('create','project',ref.id,{ client:d.client, contract });
+  return { id:ref.id, projectNo };
+}
+
+window.renderProjectLifecycle = async function(){
+  const c = deptContainer(); if(!c) return;
+  c.innerHTML='<div class="loading-placeholder">Loading projects…</div>';
+  const isPartnerU = currentRole==='partner' || (currentDepts||[]).length===1 && currentDepts[0]==='Brilliant Steel';
+  const snap = await db.collection('job_projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+  let projects = snap.docs.map(d=>({id:d.id,...d.data()}));
+  if (isPartnerU) projects = projects.filter(p=>p.createdBy===currentUser.uid); // partners: own only
+  const active = projects.filter(p=>!['paid','cancelled'].includes(p.stage));
+  const inProd = projects.filter(p=>p.stage==='in_production').length;
+  const forDel = projects.filter(p=>p.stage==='for_delivery'||p.stage==='delivered').length;
+  const arTotal = projects.reduce((s,p)=>s+(p.arBalance||0),0);
+  const collected = projects.reduce((s,p)=>s+(p.amountCollected||0),0);
+  const byStage={}; active.forEach(p=>{ (byStage[p.stage]=byStage[p.stage]||[]).push(p); });
+  const done = projects.filter(p=>['paid','cancelled'].includes(p.stage));
+
+  const card = (p)=>{ const st=jobStage(p.stage); return `<div class="item-card proj-card" data-id="${p.id}" style="cursor:pointer;border-left:3px solid ${st.color}">
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:13px">${escHtml(p.clientName||p.name||'Project')}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · ${escHtml(p.quoteNumber||'')} · <span class="badge ${p.company==='BK'?'badge-orange':'badge-gray'}" style="font-size:9px">${p.company||''}</span>${p.split?.isShared?' <span class="badge badge-blue" style="font-size:9px">50/50</span>':''}</div>
+        <div style="font-size:11px;margin-top:3px">Contract ₱${fmt(p.contractAmount||0)} · <span style="color:${(p.arBalance||0)>0?'var(--warning)':'var(--success)'}">AR ₱${fmt(p.arBalance||0)}</span></div>
+      </div>
+      <span class="badge" style="background:${st.color};color:#fff;flex-shrink:0">${st.icon} ${st.label}</span>
+    </div></div>`; };
+
+  c.innerHTML = `
+    <div class="page-header"><h2>📈 Projects</h2><span style="font-size:12px;color:var(--text-muted)">Quote → Order → Production → Delivery → Paid</span></div>
+    <div class="kpi-row" style="margin-bottom:14px">
+      <div class="kpi-card"><div class="kpi-label">Active</div><div class="kpi-value">${active.length}</div></div>
+      <div class="kpi-card accent"><div class="kpi-label">In Production</div><div class="kpi-value">${inProd}</div></div>
+      <div class="kpi-card"><div class="kpi-label">For Delivery</div><div class="kpi-value">${forDel}</div></div>
+      <div class="kpi-card ${arTotal>0?'warn':''}"><div class="kpi-label">Receivables ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(arTotal)}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Collected ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(collected)}</div></div>
+    </div>
+    ${!projects.length?'<div class="empty-state" style="padding:30px"><div class="empty-icon">📈</div><h4>No projects yet</h4><p>A project is created when a quote is converted to a Sales Order.</p></div>':''}
+    ${JOB_STAGES.filter(s=>!['paid','cancelled'].includes(s.id) && (byStage[s.id]||[]).length).map(s=>`
+      <div class="card" style="margin-bottom:12px"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3 style="font-size:13px">${s.icon} ${s.label}</h3><span class="badge" style="background:${s.color};color:#fff">${(byStage[s.id]||[]).length}</span></div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:8px">${(byStage[s.id]||[]).map(card).join('')}</div></div>`).join('')}
+    ${done.length?`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">💰 Paid / Closed (${done.length})</summary><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${done.slice(0,30).map(card).join('')}</div></details>`:''}`;
+  c.querySelectorAll('.proj-card').forEach(el=>el.addEventListener('click',()=>openProjectDetail(projects.find(p=>p.id===el.dataset.id))));
+};
+
+function openProjectDetail(p){
+  if(!p) return;
+  const st=jobStage(p.stage);
+  const isPartnerU = currentRole==='partner' || (currentDepts||[]).length===1 && currentDepts[0]==='Brilliant Steel';
+  const ownerDept = st.dept;
+  const canAdvance = !isPartnerU && (canEditDept(ownerDept) || canEditDept('Sales'));
+  const idx = JOB_STAGES.findIndex(s=>s.id===p.stage);
+  const next = (p.stage==='paid'||p.stage==='cancelled') ? null : JOB_STAGES[Math.min(idx+1, JOB_STAGES.length-2)];
+  const stepper = JOB_STAGES.filter(s=>s.id!=='cancelled').map(s=>{const i=JOB_STAGES.findIndex(x=>x.id===s.id);const dn=i<idx,cur=s.id===p.stage;return `<span style="font-size:10px;padding:3px 7px;border-radius:10px;white-space:nowrap;${cur?`background:${s.color};color:#fff;font-weight:700`:dn?'background:var(--success);color:#fff':'background:var(--surface2);color:var(--text-muted)'}">${s.icon} ${s.label}</span>`;}).join('<span style="color:var(--text-muted)">›</span>');
+  openModal(`${st.icon} ${escHtml(p.clientName||p.name||'Project')}`, `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · Quote ${escHtml(p.quoteNumber||'')} · ${p.company||''}${p.split?.isShared?' · 50/50 split':''}</div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-bottom:12px">${stepper}</div>
+    <div class="kpi-row" style="margin-bottom:12px">
+      <div class="kpi-card"><div class="kpi-label">Contract</div><div class="kpi-value" style="font-size:14px">₱${fmt(p.contractAmount||0)}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Collected</div><div class="kpi-value" style="font-size:14px">₱${fmt(p.amountCollected||0)}</div></div>
+      <div class="kpi-card ${(p.arBalance||0)>0?'warn':''}"><div class="kpi-label">Balance (AR)</div><div class="kpi-value" style="font-size:14px">₱${fmt(p.arBalance||0)}</div></div>
+    </div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">📄 Document Register</div>
+    <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:0">
+      ${(p.documents||[]).length?`<table class="data-table"><tbody>${(p.documents||[]).map(dc=>`<tr><td style="font-weight:600;font-size:12px">${escHtml(dc.type||'')}</td><td style="font-size:11px">${escHtml(dc.ref||'')}</td><td style="font-size:11px;color:var(--text-muted)">${dc.at?new Date(dc.at).toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''} · ${escHtml(dc.by||'')}</td></tr>`).join('')}</tbody></table>`:'<div style="padding:12px;font-size:12px;color:var(--text-muted)">No documents yet.</div>'}
+    </div></div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">🕘 Timeline</div>
+    <div style="max-height:160px;overflow:auto;font-size:12px">${(p.timeline||[]).slice().reverse().map(t=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)"><strong>${escHtml(t.event||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${t.at?new Date(t.at).toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''} · ${escHtml(t.by||'')}</div></div>`).join('')||'<div style="color:var(--text-muted)">No activity yet.</div>'}</div>
+    <div id="proj-detail-err" class="error-msg hidden" style="margin-top:8px"></div>
+  `, `
+    ${_isFinAdmin()&&!isPartnerU?'<button class="btn-primary" id="proj-bill-btn">💵 Record Payment</button>':''}
+    ${!isPartnerU && (canEditDept('Production')||canEditDept('Sales')) && ['won','in_production'].includes(p.stage)?'<button class="btn-secondary" id="proj-job-btn">🏭 Job Order</button>':''}
+    ${canAdvance&&next?`<button class="btn-success" id="proj-advance-btn">Advance → ${next.label}</button>`:''}
+    <button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  document.getElementById('proj-advance-btn')?.addEventListener('click',()=>advanceProjectStage(p, next.id));
+  document.getElementById('proj-bill-btn')?.addEventListener('click',()=>openProjectBillingModal(p));
+  document.getElementById('proj-job-btn')?.addEventListener('click',()=>{ closeModal(); prodOrderModal(null, currentUser, currentRole, ()=>window.renderProjectLifecycle&&window.renderProjectLifecycle(), p.id); });
+}
+
+async function advanceProjectStage(p, nextId){
+  const who=userProfile?.displayName||currentUser.email;
+  const ns=jobStage(nextId);
+  try{
+    await db.collection('job_projects').doc(p.id).update({
+      stage:nextId, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+      timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Moved to '+ns.label, by:who })
+    });
+    // hand off to the owning department of the new stage
+    const dept=ns.dept;
+    try{ if(dept&&dept!=='Sales') await Notifs.sendToDept(dept,{ title:`📈 ${ns.label}: ${p.clientName||p.projectNo}`, body:`Project ${p.projectNo} is now "${ns.label}". Your team's action is needed.`, icon:ns.icon, type:'project_stage', link:'projects-lifecycle' }); }catch(_){}
+    if(nextId==='delivered') { try{ await Notifs.sendToDept('Finance',{ title:'📦 Ready to bill balance', body:`${p.clientName} (${p.projectNo}) delivered — collect balance ₱${fmt(p.arBalance||0)}.`, icon:'💵', type:'project_stage', link:'projects-lifecycle' }); }catch(_){} }
+    if(nextId==='paid') { try{ await Notifs.sendToOwner({ title:'💰 Project paid', body:`${p.clientName} (${p.projectNo}) fully collected.`, icon:'💰', type:'project_paid' }); }catch(_){} }
+    window.logAudit && window.logAudit('update','project',p.id,{ stage:nextId });
+    Notifs.showToast('Moved to '+ns.label); closeModal(); window.renderProjectLifecycle();
+  }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+}
+
+function openProjectBillingModal(p){
+  const bal=p.arBalance||0;
+  openModal('💵 Record Payment — '+(p.clientName||''), `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract ₱${fmt(p.contractAmount||0)} · Collected ₱${fmt(p.amountCollected||0)} · <strong>Balance ₱${fmt(bal)}</strong></div>
+    <div class="form-row">
+      <div class="form-group"><label>Payment Type</label><select id="pb-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Downpayment</option><option>Progress Billing</option><option>Final Balance</option></select></div>
+      <div class="form-group"><label>Amount (₱, VAT-incl.)</label><input id="pb-amount" type="number" step="0.01" value="${bal>0?bal:''}"/></div>
+    </div>
+    <div class="form-group"><label>Method</label><select id="pb-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Bank Transfer</option><option>GCash</option><option>Cash</option><option>Cheque</option></select></div>
+    <div class="form-group"><label>OR / Reference No.</label><input id="pb-ref" placeholder="Official Receipt no."/></div>
+    <div class="form-group"><label>Receipt (proof)</label><div id="pb-receipt-upload"></div></div>
+    <div id="pb-err" class="error-msg hidden"></div>
+  `, `<button class="btn-primary" id="pb-save">Record + Post to Ledger</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  let receipt=null;
+  if(window.Drive?.renderUploadArea) Drive.renderUploadArea('pb-receipt-upload',(r)=>{receipt=r;},{label:'Upload OR / proof',accept:'image/*,.pdf',dept:'Finance',subfolder:'Collections'});
+  document.getElementById('pb-save').addEventListener('click', async ()=>{
+    const err=document.getElementById('pb-err');
+    const amount=parseFloat(document.getElementById('pb-amount').value)||0;
+    if(amount<=0){ err.textContent='Enter an amount.'; err.classList.remove('hidden'); return; }
+    const vatRate=p.vatRate||12;
+    const net=+(amount/(1+vatRate/100)).toFixed(2);          // VAT-inclusive → net of VAT
+    const vatAmount=+(amount-net).toFixed(2);
+    const newCollected=(p.amountCollected||0)+amount;
+    const newAR=Math.max(0,(p.contractAmount||0)-newCollected);
+    const who=userProfile?.displayName||currentUser.email;
+    const type=document.getElementById('pb-type').value, method=document.getElementById('pb-method').value, orRef=document.getElementById('pb-ref').value.trim();
+    try{
+      // 1) post income credit to the ledger (category 'Sales Revenue' so it feeds the Output-VAT base)
+      const led=await db.collection('ledger').add({ date:today(), description:`Project ${p.projectNo} — ${p.clientName} (${type})`, category:'Sales Revenue', type:'credit', amount, vatAmount, source:'Finance', projectId:p.id, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+      // 2) update the project: payment, collected, AR, OR document, timeline
+      const payment={ type, amount, vatAmount, net, method, orRef, receiptUrl:receipt?.url||null, date:today(), by:who, ledgerId:led.id };
+      const update={ amountCollected:newCollected, arBalance:newAR, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+        payments:firebase.firestore.FieldValue.arrayUnion(payment),
+        documents:firebase.firestore.FieldValue.arrayUnion({ type:'Official Receipt', ref:orRef||('₱'+amount.toLocaleString()), at:new Date().toISOString(), by:who }),
+        timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Payment ₱${amount.toLocaleString()} (${type})`, by:who }) };
+      if(newAR<=0) update.stage='paid';
+      await db.collection('job_projects').doc(p.id).update(update);
+      window.logAudit && window.logAudit('create','payment',p.id,{ amount, type, projectNo:p.projectNo });
+      if(newAR<=0){ try{ await Notifs.sendToOwner({ title:'💰 Project fully paid', body:`${p.clientName} (${p.projectNo}) — ₱${(p.contractAmount||0).toLocaleString()} collected in full.`, icon:'💰', type:'project_paid' }); }catch(_){} }
+      closeModal(); Notifs.showToast('Payment recorded + posted to ledger'); window.renderProjectLifecycle();
+    }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+  });
+}
+
 window.renderProductionDept = async function(currentUser, currentRole, subtab = 'Orders') {
   const c = deptContainer();
   const subs = ['Orders','Materials','Tasks','Files'];
@@ -7095,6 +7301,13 @@ async function renderProdOrders(el, currentUser, currentRole) {
         await db.collection('production_orders').doc(o.id).update({
           stage: next.id, stageUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        // Keep the parent project's lifecycle stage in sync with production progress
+        if (o.projectId) {
+          const projStage = next.id==='delivered' ? 'delivered' : next.id==='ready' ? 'for_delivery' : 'in_production';
+          try { await db.collection('job_projects').doc(o.projectId).update({
+            stage: projStage, updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            timeline: firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Production: ${next.label}`, by:userProfile?.displayName||currentUser.email }) }); } catch(_) {}
+        }
         Notifs.showToast(`Moved to ${next.label}`);
         renderProdOrders(el, currentUser, currentRole);
       } catch(ex){ Notifs.showToast('Update failed','error'); b.disabled=false; }
@@ -7106,9 +7319,20 @@ async function renderProdOrders(el, currentUser, currentRole) {
   }));
 }
 
-function prodOrderModal(order, currentUser, currentRole, onSaved) {
+async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillProjectId) {
   const e = order || {};
+  // Load active projects so this work order can be linked to a job (the spine)
+  let projOpts = '<option value="">— None —</option>';
+  try {
+    const psnap = await db.collection('job_projects').get();
+    const projs = psnap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>!['paid','cancelled'].includes(p.stage)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    const selP = e.projectId || prefillProjectId || '';
+    projOpts += projs.map(p=>`<option value="${p.id}" data-client="${escHtml(p.clientName||'')}" ${selP===p.id?'selected':''}>${escHtml(p.projectNo||'')} — ${escHtml(p.clientName||p.name||'')}</option>`).join('');
+  } catch(_) {}
   openModal(order ? `Edit Order ${e.orderNo||''}` : '🏭 New Production Order', `
+    <div class="form-group"><label>Linked Project (job)</label>
+      <select id="po-project" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${projOpts}</select>
+    </div>
     <div class="form-group"><label>Product / Work Description</label><input id="po-title" value="${escHtml(e.title||'')}" placeholder="e.g. SS Baker's Worktable 1500mm ×4"/></div>
     <div class="form-row">
       <div class="form-group"><label>Client / Project</label><input id="po-client" value="${escHtml(e.client||'')}" placeholder="e.g. Gerry's Grill — Bulacan"/></div>
@@ -7139,10 +7363,13 @@ function prodOrderModal(order, currentUser, currentRole, onSaved) {
     const title = document.getElementById('po-title').value.trim();
     const err = document.getElementById('po-err');
     if(!title){ err.textContent='Product / work description is required.'; err.classList.remove('hidden'); return; }
+    const projSel = document.getElementById('po-project');
+    const projectId = projSel?.value || '';
     const data = {
       title, client: document.getElementById('po-client').value.trim(),
       qty: parseInt(document.getElementById('po-qty').value)||1,
       quoteRef: document.getElementById('po-quote').value.trim(),
+      projectId: projectId || null,
       team: document.getElementById('po-team').value.trim(),
       stage: document.getElementById('po-stage').value,
       priority: document.getElementById('po-priority').value,
@@ -7164,6 +7391,13 @@ function prodOrderModal(order, currentUser, currentRole, onSaved) {
         data.createdByName = userProfile?.displayName || currentUser.email || '';
         const _po = await db.collection('production_orders').add(data);
         window.logAudit&&window.logAudit('create','production_order',data.orderNo,{title:data.title,client:data.client||''});
+        // Link back to the project: register the order, move it into production, add to the doc register
+        if (projectId) { try { await db.collection('job_projects').doc(projectId).update({
+          stage:'in_production', updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+          productionOrderIds:firebase.firestore.FieldValue.arrayUnion(_po.id),
+          documents:firebase.firestore.FieldValue.arrayUnion({ type:'Job Order', ref:data.orderNo, at:new Date().toISOString(), by:data.createdByName }),
+          timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Production order '+data.orderNo+' created', by:data.createdByName }) }); } catch(_) {}
+        }
       }
       closeModal(); Notifs.showToast('Order saved'); onSaved && onSaved();
     } catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
