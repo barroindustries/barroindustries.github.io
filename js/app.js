@@ -699,6 +699,7 @@ function getSidebarItems() {
     items.push({ icon:'calendar',      label:'Attendance',       page:'attendance'                     });
     items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'                    });
     items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
+    items.push({ icon:'boxes',         label:'Inventory',        page:'inventory',       section:true, sectionLabel:'Operations' });
     items.push({ icon:'package',       label:'Product Database', page:'product-database', section:true, sectionLabel:'Catalog' });
     items.push({ icon:'book-open',     label:'SOPs',             page:'sops',            section:true, sectionLabel:'Resources' });
     items.push({ icon:'help-circle',   label:'Help & Setup',     page:'help'             });
@@ -734,6 +735,7 @@ function getSidebarItems() {
     items.push({ icon:'calendar',    label:'Attendance',       page:'attendance'                       });
     items.push({ icon:'credit-card', label:'Personal Finance', page:'personal-finance'                 });
     items.push({ icon:'folder',      label:'Files',            page:'files'                            });
+    items.push({ icon:'boxes',       label:'Inventory',        page:'inventory'                        });
     if (currentRole !== 'agent') {
       items.push({ icon:'building-2', label:'Company', page:'company' });
     }
@@ -1268,6 +1270,7 @@ function navigateTo(page) {
     case 'team-directory':   window.renderTeamTab?.(); break;
     case 'attendance':       window.renderAttendancePage?.(); break;
     case 'cash-advances':    window.renderCashAdvancePage?.(); break;
+    case 'inventory':        window.renderInventory?.(); break;
     case 'product-database': isPresident() ? renderProductDatabase() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔒</div><h4>Access Denied</h4></div>`); break;
     default: c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><h4>Page not found</h4></div>`;
   }

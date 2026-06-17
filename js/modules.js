@@ -1409,3 +1409,240 @@ async function renderPresidentMessageCard() {
   } catch(e) { card.style.display='none'; }
 }
 
+// ══════════════════════════════════════════════════
+//  INVENTORY — raw materials, finished goods, stock log, job costing
+// ══════════════════════════════════════════════════
+(function(){
+  const peso = n => '₱'+Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const num  = n => Number(n||0).toLocaleString('en-PH');
+  const canEditInv = () => currentRole !== 'partner';
+  const isFinAdmin = () => ['president','manager','finance'].includes(currentRole);
+
+  window.renderInventory = async function(sub='Stock'){
+    const c = document.getElementById('page-content');
+    const tabs = ['Stock','Movements'];
+    if (isFinAdmin()) tabs.push('Job Costing');
+    c.innerHTML = `
+      <div class="page-header"><h2>📦 Inventory</h2></div>
+      <div class="subtab-bar" style="flex-wrap:wrap;margin-bottom:12px">
+        ${tabs.map(s=>`<button class="subtab-btn ${s===sub?'active':''}" data-sub="${s}">${s}</button>`).join('')}
+      </div>
+      <div id="inv-content"><div class="loading-placeholder">Loading…</div></div>`;
+    loadInv(sub);
+    c.querySelectorAll('.subtab-btn').forEach(b=>b.addEventListener('click',()=>{
+      c.querySelectorAll('.subtab-btn').forEach(x=>x.classList.remove('active')); b.classList.add('active'); loadInv(b.dataset.sub);
+    }));
+  };
+
+  function loadInv(sub){
+    const el = document.getElementById('inv-content');
+    if (sub==='Movements')   return renderMovements(el);
+    if (sub==='Job Costing') return renderJobs(el);
+    return renderStock(el);
+  }
+
+  async function renderStock(el, kindFilter='all'){
+    el.innerHTML = '<div class="loading-placeholder">Loading stock…</div>';
+    const snap = await db.collection('inventory_items').orderBy('name').get().catch(()=>({docs:[]}));
+    const items = snap.docs.map(d=>({id:d.id,...d.data()}));
+    const shown = items.filter(i=> kindFilter==='all' || (i.kind||'material')===kindFilter);
+    const low = items.filter(i=>(i.reorderLevel||0)>0 && (i.qty||0) <= (i.reorderLevel||0));
+    const totalValue = items.reduce((s,i)=>s+((i.qty||0)*(i.unitCost||0)),0);
+    const ce = canEditInv();
+    el.innerHTML = `
+      <div class="kpi-row" style="margin-bottom:12px">
+        <div class="kpi-card"><div class="kpi-label">Items</div><div class="kpi-value">${items.length}</div></div>
+        <div class="kpi-card ${low.length?'red':''}"><div class="kpi-label">Low Stock</div><div class="kpi-value">${low.length}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Stock Value</div><div class="kpi-value">${peso(totalValue)}</div></div>
+      </div>
+      ${low.length?`<div class="alert-banner alert-warn"><span>⚠️ <strong>${low.length} item${low.length>1?'s':''}</strong> at or below reorder level</span></div>`:''}
+      <div class="subtab-bar" style="margin-bottom:10px">
+        ${[['all','All'],['material','Raw Materials'],['product','Finished Goods']].map(([k,l])=>`<button class="subtab-btn inv-kind-chip ${kindFilter===k?'active':''}" data-kind="${k}">${l}</button>`).join('')}
+        ${ce?'<button class="btn-primary btn-sm" id="inv-add-btn" style="margin-left:auto">＋ Add Item</button>':''}
+      </div>
+      <div class="card"><div class="card-body" style="padding:0">
+        ${!shown.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📦</div><h4>No items yet</h4></div>':
+        `<div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Item</th><th>Type</th><th>On Hand</th><th>Reorder</th><th>Unit Cost</th><th>Value</th><th>Supplier</th>${ce?'<th></th>':''}</tr></thead>
+          <tbody>${shown.map(i=>{
+            const lowItem=(i.reorderLevel||0)>0 && (i.qty||0)<=(i.reorderLevel||0);
+            return `<tr>
+              <td style="font-weight:600">${escHtml(i.name||'—')}${i.category?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(i.category)}</div>`:''}</td>
+              <td><span class="badge ${(i.kind||'material')==='product'?'badge-blue':'badge-gray'}">${(i.kind||'material')==='product'?'Finished':'Material'}</span></td>
+              <td style="font-weight:700;color:${lowItem?'var(--danger)':'inherit'}">${num(i.qty||0)} ${escHtml(i.unit||'')}${lowItem?' ⚠️':''}</td>
+              <td style="font-size:12px;color:var(--text-muted)">${num(i.reorderLevel||0)}</td>
+              <td>${peso(i.unitCost||0)}</td>
+              <td>${peso((i.qty||0)*(i.unitCost||0))}</td>
+              <td style="font-size:12px">${escHtml(i.supplier||'—')}</td>
+              ${ce?`<td style="white-space:nowrap">
+                <button class="btn-success btn-sm inv-in-btn" data-id="${i.id}" title="Stock In">＋</button>
+                <button class="btn-secondary btn-sm inv-out-btn" data-id="${i.id}" title="Stock Out">−</button>
+                <button class="btn-secondary btn-sm inv-edit-btn" data-id="${i.id}" title="Edit">✎</button>
+              </td>`:''}
+            </tr>`;}).join('')}</tbody>
+        </table></div>`}
+      </div></div>`;
+    el.querySelectorAll('.inv-kind-chip').forEach(b=>b.addEventListener('click',()=>renderStock(el,b.dataset.kind)));
+    if(ce){
+      document.getElementById('inv-add-btn')?.addEventListener('click',()=>itemModal(null,()=>renderStock(el,kindFilter)));
+      el.querySelectorAll('.inv-edit-btn').forEach(b=>b.addEventListener('click',()=>itemModal(items.find(i=>i.id===b.dataset.id),()=>renderStock(el,kindFilter))));
+      el.querySelectorAll('.inv-in-btn').forEach(b=>b.addEventListener('click',()=>moveModal(items.find(i=>i.id===b.dataset.id),'in',()=>renderStock(el,kindFilter))));
+      el.querySelectorAll('.inv-out-btn').forEach(b=>b.addEventListener('click',()=>moveModal(items.find(i=>i.id===b.dataset.id),'out',()=>renderStock(el,kindFilter))));
+    }
+  }
+
+  function itemModal(item, onSaved){
+    const e=item||{};
+    openModal(item?'Edit Item':'Add Inventory Item', `
+      <div class="form-group"><label>Name</label><input id="iv-name" value="${escHtml(e.name||'')}" placeholder="e.g. Stainless Sheet 4x8 ga.16"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Type</label><select id="iv-kind"><option value="material" ${e.kind!=='product'?'selected':''}>Raw Material</option><option value="product" ${e.kind==='product'?'selected':''}>Finished Good</option></select></div>
+        <div class="form-group"><label>Unit</label><input id="iv-unit" value="${escHtml(e.unit||'')}" placeholder="sheet / m / kg / pc"/></div>
+      </div>
+      <div class="form-group"><label>Category</label><input id="iv-cat" value="${escHtml(e.category||'')}" placeholder="e.g. Stainless, Fasteners, Cooking Equipment"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>On-hand Qty</label><input id="iv-qty" type="number" step="0.01" value="${e.qty||0}"/></div>
+        <div class="form-group"><label>Reorder Level</label><input id="iv-reorder" type="number" step="0.01" value="${e.reorderLevel||0}"/></div>
+      </div>
+      <div class="form-group"><label>Unit Cost (₱)</label><input id="iv-cost" type="number" step="0.01" value="${e.unitCost||0}"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Supplier</label><input id="iv-supplier" value="${escHtml(e.supplier||'')}"/></div>
+        <div class="form-group"><label>Supplier Contact</label><input id="iv-supcontact" value="${escHtml(e.supplierContact||'')}"/></div>
+      </div>
+      <div id="iv-err" class="error-msg hidden"></div>
+    `, `<button class="btn-primary" id="iv-save">Save</button>${item?'<button class="btn-danger" id="iv-del">Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    document.getElementById('iv-save').addEventListener('click', async ()=>{
+      const name=document.getElementById('iv-name').value.trim();
+      const err=document.getElementById('iv-err');
+      if(!name){ err.textContent='Name is required.'; err.classList.remove('hidden'); return; }
+      const data={ name, kind:document.getElementById('iv-kind').value,
+        unit:document.getElementById('iv-unit').value.trim(), category:document.getElementById('iv-cat').value.trim(),
+        qty:parseFloat(document.getElementById('iv-qty').value)||0, reorderLevel:parseFloat(document.getElementById('iv-reorder').value)||0,
+        unitCost:parseFloat(document.getElementById('iv-cost').value)||0,
+        supplier:document.getElementById('iv-supplier').value.trim(), supplierContact:document.getElementById('iv-supcontact').value.trim(),
+        updatedAt:firebase.firestore.FieldValue.serverTimestamp() };
+      try{
+        if(item) await db.collection('inventory_items').doc(item.id).update(data);
+        else { data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await db.collection('inventory_items').add(data); }
+        closeModal(); Notifs.showToast('Item saved'); onSaved&&onSaved();
+      }catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+    });
+    document.getElementById('iv-del')?.addEventListener('click', async ()=>{
+      if(!confirm('Delete this item?')) return;
+      try{ await db.collection('inventory_items').doc(item.id).delete(); closeModal(); Notifs.showToast('Item deleted'); onSaved&&onSaved(); }
+      catch(ex){ Notifs.showToast('Delete failed','error'); }
+    });
+  }
+
+  function moveModal(item, type, onSaved){
+    if(!item) return;
+    openModal((type==='in'?'➕ Stock In — ':'➖ Stock Out — ')+(item.name||''), `
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Current on-hand: <strong>${num(item.qty||0)} ${escHtml(item.unit||'')}</strong></div>
+      <div class="form-group"><label>Quantity to ${type==='in'?'add':'remove'}</label><input id="mv-qty" type="number" step="0.01" min="0"/></div>
+      ${type==='out'?`<div class="form-group"><label>Project / Job (optional)</label><input id="mv-project" placeholder="e.g. Gerry's Grill — Bulacan"/></div>`:''}
+      <div class="form-group"><label>Note (optional)</label><input id="mv-note" placeholder="PO #, reason, etc."/></div>
+      <div id="mv-err" class="error-msg hidden"></div>
+    `, `<button class="btn-primary" id="mv-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    document.getElementById('mv-save').addEventListener('click', async ()=>{
+      const qty=parseFloat(document.getElementById('mv-qty').value)||0;
+      const err=document.getElementById('mv-err');
+      if(qty<=0){ err.textContent='Enter a quantity greater than 0.'; err.classList.remove('hidden'); return; }
+      const delta = type==='in'? qty : -qty;
+      try{
+        await db.collection('inventory_items').doc(item.id).update({ qty: firebase.firestore.FieldValue.increment(delta), updatedAt:firebase.firestore.FieldValue.serverTimestamp() });
+        await db.collection('stock_movements').add({ itemId:item.id, itemName:item.name||'', type, qty,
+          project: type==='out'?(document.getElementById('mv-project')?.value.trim()||''):'',
+          note:document.getElementById('mv-note').value.trim(),
+          by:currentUser.uid, byName:userProfile?.displayName||currentUser.email,
+          date:bizDate(), createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+        closeModal(); Notifs.showToast('Stock updated'); onSaved&&onSaved();
+      }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+    });
+  }
+
+  async function renderMovements(el){
+    el.innerHTML='<div class="loading-placeholder">Loading movements…</div>';
+    const snap=await db.collection('stock_movements').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]}));
+    const mv=snap.docs.map(d=>d.data());
+    el.innerHTML=`<div class="card"><div class="card-header"><h3>📋 Stock Movement Log</h3></div>
+      <div class="card-body" style="padding:0">
+      ${!mv.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📋</div><h4>No movements yet</h4></div>':
+      `<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Date</th><th>Item</th><th>In/Out</th><th>Qty</th><th>Project</th><th>Note</th><th>By</th></tr></thead>
+        <tbody>${mv.map(m=>`<tr>
+          <td>${escHtml(m.date||'—')}</td>
+          <td style="font-weight:600">${escHtml(m.itemName||'—')}</td>
+          <td><span class="badge ${m.type==='in'?'badge-green':'badge-orange'}">${m.type==='in'?'IN':'OUT'}</span></td>
+          <td>${num(m.qty||0)}</td>
+          <td style="font-size:12px">${escHtml(m.project||'—')}</td>
+          <td style="font-size:12px">${escHtml(m.note||'—')}</td>
+          <td style="font-size:11px">${escHtml(m.byName||'—')}</td>
+        </tr>`).join('')}</tbody></table></div>`}
+      </div></div>`;
+  }
+
+  async function renderJobs(el){
+    el.innerHTML='<div class="loading-placeholder">Loading job costs…</div>';
+    const snap=await db.collection('job_costs').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]}));
+    const jobs=snap.docs.map(d=>({id:d.id,...d.data()}));
+    const ce=isFinAdmin();
+    el.innerHTML=`
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:12px;color:var(--text-muted)">Materials + labor vs revenue = margin per project</div>
+        ${ce?'<button class="btn-primary btn-sm" id="job-add-btn">＋ New Job</button>':''}
+      </div>
+      <div class="card"><div class="card-body" style="padding:0">
+      ${!jobs.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧮</div><h4>No job costs yet</h4></div>':
+      `<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Project</th><th>Revenue</th><th>Materials</th><th>Labor</th><th>Other</th><th>Cost</th><th>Margin</th>${ce?'<th></th>':''}</tr></thead>
+        <tbody>${jobs.map(j=>{const cost=(j.materialsCost||0)+(j.laborCost||0)+(j.otherCost||0);const margin=(j.revenue||0)-cost;const pct=j.revenue?Math.round(margin/j.revenue*100):0;return `<tr>
+          <td style="font-weight:600">${escHtml(j.project||'—')}${j.quoteRef?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(j.quoteRef)}</div>`:''}</td>
+          <td>${peso(j.revenue||0)}</td><td>${peso(j.materialsCost||0)}</td><td>${peso(j.laborCost||0)}</td><td>${peso(j.otherCost||0)}</td>
+          <td>${peso(cost)}</td>
+          <td style="font-weight:700;color:${margin>=0?'var(--success)':'var(--danger)'}">${peso(margin)}<div style="font-size:11px">${pct}%</div></td>
+          ${ce?`<td><button class="btn-secondary btn-sm job-edit-btn" data-id="${j.id}" title="Edit">✎</button></td>`:''}
+        </tr>`;}).join('')}</tbody></table></div>`}
+      </div></div>`;
+    if(ce){
+      document.getElementById('job-add-btn')?.addEventListener('click',()=>jobModal(null,()=>renderJobs(el)));
+      el.querySelectorAll('.job-edit-btn').forEach(b=>b.addEventListener('click',()=>jobModal(jobs.find(j=>j.id===b.dataset.id),()=>renderJobs(el))));
+    }
+  }
+
+  function jobModal(job, onSaved){
+    const e=job||{};
+    openModal(job?'Edit Job Cost':'New Job Cost', `
+      <div class="form-group"><label>Project / Client</label><input id="jb-project" value="${escHtml(e.project||'')}" placeholder="e.g. Gerry's Grill — Bulacan"/></div>
+      <div class="form-group"><label>Quote Ref (optional)</label><input id="jb-quote" value="${escHtml(e.quoteRef||'')}" placeholder="BK-LU-FB-..."/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Revenue (₱)</label><input id="jb-rev" type="number" step="0.01" value="${e.revenue||0}"/></div>
+        <div class="form-group"><label>Materials Cost (₱)</label><input id="jb-mat" type="number" step="0.01" value="${e.materialsCost||0}"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Labor Cost (₱)</label><input id="jb-lab" type="number" step="0.01" value="${e.laborCost||0}"/></div>
+        <div class="form-group"><label>Other Cost (₱)</label><input id="jb-oth" type="number" step="0.01" value="${e.otherCost||0}"/></div>
+      </div>
+      <div id="jb-err" class="error-msg hidden"></div>
+    `, `<button class="btn-primary" id="jb-save">Save</button>${job?'<button class="btn-danger" id="jb-del">Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    document.getElementById('jb-save').addEventListener('click', async ()=>{
+      const project=document.getElementById('jb-project').value.trim();
+      const err=document.getElementById('jb-err');
+      if(!project){ err.textContent='Project name is required.'; err.classList.remove('hidden'); return; }
+      const data={ project, quoteRef:document.getElementById('jb-quote').value.trim(),
+        revenue:parseFloat(document.getElementById('jb-rev').value)||0, materialsCost:parseFloat(document.getElementById('jb-mat').value)||0,
+        laborCost:parseFloat(document.getElementById('jb-lab').value)||0, otherCost:parseFloat(document.getElementById('jb-oth').value)||0,
+        updatedAt:firebase.firestore.FieldValue.serverTimestamp() };
+      try{
+        if(job) await db.collection('job_costs').doc(job.id).update(data);
+        else { data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await db.collection('job_costs').add(data); }
+        closeModal(); Notifs.showToast('Job cost saved'); onSaved&&onSaved();
+      }catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+    });
+    document.getElementById('jb-del')?.addEventListener('click', async ()=>{
+      if(!confirm('Delete this job cost?')) return;
+      try{ await db.collection('job_costs').doc(job.id).delete(); closeModal(); Notifs.showToast('Deleted'); onSaved&&onSaved(); }
+      catch(ex){ Notifs.showToast('Delete failed','error'); }
+    });
+  }
+})();
+

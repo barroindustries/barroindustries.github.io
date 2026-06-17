@@ -404,6 +404,24 @@ service cloud.firestore {
       allow write: if isAuth() && isAdmin();
     }
 
+    // ── Inventory (raw materials + finished goods) ─────
+    // Operational data for internal staff. Item costs are visible to staff;
+    // external partners are excluded from reading/writing.
+    match /inventory_items/{docId} {
+      allow read:  if isAuth() && getRole() != 'partner';
+      allow write: if isAuth() && getRole() != 'partner';
+    }
+    // Stock movement log — anyone internal can record in/out; only admins edit/delete history.
+    match /stock_movements/{docId} {
+      allow read:   if isAuth() && getRole() != 'partner';
+      allow create: if isAuth() && getRole() != 'partner';
+      allow update, delete: if isAuth() && isAdmin();
+    }
+    // Job costing carries revenue/margin per project — finance/admin only.
+    match /job_costs/{docId} {
+      allow read, write: if isAuth() && isFinanceOrAdmin();
+    }
+
     // ── Suggestions ────────────────────────────────────
     match /suggestions/{docId} {
       allow read: if isAuth() && isAdmin();
