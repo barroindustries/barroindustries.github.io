@@ -400,7 +400,7 @@ window.renderTeamTab = async function() {
             phone: document.getElementById('inv-phone').value.trim(),
             role:        document.getElementById('inv-role').value,
             departments: depts, department: depts[0]||'',
-            employeeId:  empId, salary:0, allowance:0, deductions:0,
+            employeeId:  empId,
             photoUrl:'', startDate: new Date().toISOString().slice(0,10),
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });

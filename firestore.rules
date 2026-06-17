@@ -152,6 +152,14 @@ service cloud.firestore {
       allow write: if isAuth() && isPresident();
     }
 
+    // ── Payroll (live pay: salary/allowance/deductions) ─
+    // Moved off the world-readable users doc so pay isn't visible to all staff.
+    // Each user may read their OWN pay; only finance/admin may read others or write.
+    match /payroll/{uid} {
+      allow read:  if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+      allow write: if isAuth() && isFinanceOrAdmin();
+    }
+
     // ── Salary history ─────────────────────────────────
     match /salary_history/{docId} {
       allow read: if isAuth() && (

@@ -356,7 +356,7 @@ async function loadUserProfile(user) {
         uid: user.uid, email: user.email,
         displayName: user.displayName || user.email.split('@')[0],
         role: 'employee', departments: [], title: '',
-        employeeId: empId, salary: 0, allowance: 0, deductions: 0,
+        employeeId: empId,
         photoUrl: '', startDate: new Date().toISOString().slice(0,10),
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
@@ -364,6 +364,12 @@ async function loadUserProfile(user) {
       snap = await db.collection('users').doc(user.uid).get();
     }
     userProfile  = { id: snap.id, ...snap.data() };
+    // Merge the user's OWN pay (salary/allowance/deductions) from the protected
+    // payroll/{uid} doc — pay no longer lives on the world-readable users doc.
+    try {
+      const paySnap = await db.collection('payroll').doc(user.uid).get();
+      if (paySnap.exists) userProfile = { ...userProfile, ...paySnap.data() };
+    } catch(e) { /* no own payroll doc yet → pay reads as 0 */ }
     currentRole  = userProfile.role || 'employee';
     // Support both old string 'department' and new array 'departments'
     if (Array.isArray(userProfile.departments) && userProfile.departments.length) {
@@ -3721,7 +3727,7 @@ async function renderProgressReports() {
   try {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return {docs:[],size:0}; } };
     const [usersSnap, tasksSnap, attSnap] = await Promise.all([
-      safeGet(db.collection('users')),
+      fetchUsersWithPayroll().catch(()=>({docs:[],size:0})),
       safeGet(db.collection('tasks')),
       safeGet(db.collection('attendance'))
     ]);
@@ -4521,7 +4527,7 @@ async function renderAnalytics() {
 
   // Fetch all data upfront
   const [usersSnap,tasksSnap,quotesSnap,subsSnap,expSnap,caSnap,payslipSnap,ledgerSnap,govSnap] = await Promise.all([
-    safeGet(db.collection('users')),
+    fetchUsersWithPayroll().catch(()=>({docs:[],size:0})),
     safeGet(db.collection('tasks')),
     getAllQuotes(),
     safeGet(db.collection('submissions')),
@@ -4880,18 +4886,21 @@ function openAddEmployeeModal() {
     const dept1=document.getElementById('emp-dept').value;
     const dept2=document.getElementById('emp-dept2').value;
     const depts=[dept1,dept2].filter(Boolean);
-    await db.collection('users').add({
+    const ref = await db.collection('users').add({
       displayName:document.getElementById('emp-name').value.trim(),
       email:document.getElementById('emp-email').value.trim(),
       employeeId:document.getElementById('emp-eid').value.trim(),
       role:document.getElementById('emp-role').value,
       departments:depts, department:depts[0]||'',
       title:document.getElementById('emp-title').value.trim(),
+      startDate:document.getElementById('emp-start').value,
+      createdAt:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    // Pay lives in the protected payroll/{uid} collection, keyed by the user doc id.
+    await db.collection('payroll').doc(ref.id).set({
       salary:parseFloat(document.getElementById('emp-salary').value)||0,
       allowance:parseFloat(document.getElementById('emp-allow').value)||0,
       deductions:parseFloat(document.getElementById('emp-deduct').value)||0,
-      startDate:document.getElementById('emp-start').value,
-      createdAt:firebase.firestore.FieldValue.serverTimestamp()
     });
     dbCacheInvalidate('users'); closeModal(); renderTeam();
   });
@@ -5009,12 +5018,14 @@ function openCreateWorkerModal() {
         email:       authEmail,        // fallback for any email display
         employeeId:  eid,
         role, department: dept, departments: dept ? [dept] : [],
-        title, salary, allowance: allow, deductions: 0,
+        title,
         startDate:   start,
         hrManagedAccount: true,
         createdBy:   currentUser.uid,
         createdAt:   firebase.firestore.FieldValue.serverTimestamp()
       });
+      // Pay → protected payroll/{uid} (keyed by Auth UID == users doc id).
+      await db.collection('payroll').doc(uid).set({ salary, allowance: allow, deductions: 0 });
 
       dbCacheInvalidate('users');
 
@@ -5070,10 +5081,13 @@ function openEditEmployeeModal(u) {
       title:document.getElementById('eu-title').value.trim(),
       role:document.getElementById('eu-role').value,
       departments:depts, department:depts[0]||'',
+    });
+    // Pay is stored in the protected payroll/{uid} collection (finance/admin write).
+    await db.collection('payroll').doc(u.id).set({
       salary:parseFloat(document.getElementById('eu-salary').value)||0,
       allowance:parseFloat(document.getElementById('eu-allow').value)||0,
       deductions:parseFloat(document.getElementById('eu-deduct').value)||0,
-    });
+    }, {merge:true});
     dbCacheInvalidate('users'); closeModal(); renderTeam();
   });
 

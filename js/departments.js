@@ -1316,7 +1316,7 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
 // ── Payroll Management ───────────────────────────
 async function renderPayrollManagement(container, currentUser, currentRole) {
   const [usersSnap, histSnap, delReqSnap] = await Promise.all([
-    db.collection('users').get(),
+    fetchUsersWithPayroll(),
     db.collection('salary_history').orderBy('month','desc').limit(200).get().catch(()=>({docs:[]})),
     db.collection('payroll_delete_requests').where('status','==','pending').get().catch(()=>({docs:[]}))
   ]);
@@ -1664,7 +1664,9 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         `, `<button class="btn-primary" id="save-ep-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
         document.getElementById('save-ep-btn').addEventListener('click', async () => {
-          await db.collection('users').doc(uid).update({
+          // All pay — base, allowance, and government deductions — lives in the
+          // protected payroll/{uid} doc (finance/admin write), not the users doc.
+          await db.collection('payroll').doc(uid).set({
             salary:     parseFloat(document.getElementById('ep-salary').value)||0,
             allowance:  parseFloat(document.getElementById('ep-allow').value)||0,
             deductions: parseFloat(document.getElementById('ep-deduct').value)||0,
@@ -1672,7 +1674,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             philhealth: parseFloat(document.getElementById('ep-ph').value)||0,
             pagibig:    parseFloat(document.getElementById('ep-pi').value)||0,
             tax:        parseFloat(document.getElementById('ep-tax').value)||0,
-          });
+          }, {merge:true});
 
           // Save / clear CA deduction override
           if (caBalance > 0) {
@@ -3123,7 +3125,7 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
   // can open this tab, so degrade gracefully instead of crashing the screen.
   const [expSnap, salSnap] = await Promise.all([
     db.collection('expenses').get().catch(()=>({docs:[]})),
-    db.collection('users').get().catch(()=>({docs:[]}))
+    fetchUsersWithPayroll().catch(()=>({docs:[]}))
   ]);
   const expenses   = expSnap.docs.map(d => d.data());
   const users      = salSnap.docs.map(d => d.data());
@@ -5625,7 +5627,7 @@ window.renderApprovals = async function(currentUser) {
           const pwd = generatePassword(btn.dataset.name);
           const empCount = (await db.collection('users').get().catch(()=>({size:0}))).size;
           const empId = `BI-${new Date().getFullYear()}-${String(empCount+1).padStart(3,'0')}`;
-          await db.collection('users').add({ displayName:btn.dataset.name, email:btn.dataset.email, phone:btn.dataset.phone, role:'employee', departments:[], employeeId:empId, salary:0, allowance:0, deductions:0, photoUrl:'', startDate:new Date().toISOString().slice(0,10), createdAt:firebase.firestore.FieldValue.serverTimestamp(), pendingPasswordSetup:true });
+          await db.collection('users').add({ displayName:btn.dataset.name, email:btn.dataset.email, phone:btn.dataset.phone, role:'employee', departments:[], employeeId:empId, photoUrl:'', startDate:new Date().toISOString().slice(0,10), createdAt:firebase.firestore.FieldValue.serverTimestamp(), pendingPasswordSetup:true });
           await db.collection('signup_requests').doc(btn.dataset.id).update({ status:'approved', generatedPassword:pwd, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
           Notifs.showToast(`${btn.dataset.name} approved! Password: ${pwd}`);
           loadApprovalsSub('all');
@@ -5855,7 +5857,7 @@ window.renderApprovals = async function(currentUser) {
           await db.collection('users').add({
             displayName: name, email, phone,
             role: 'employee', departments: [],
-            employeeId: empId, salary: 0, allowance: 0, deductions: 0,
+            employeeId: empId,
             photoUrl: '', startDate: new Date().toISOString().slice(0,10),
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             pendingPasswordSetup: true

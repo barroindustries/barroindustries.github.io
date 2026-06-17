@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '9.4.39';
+window.APP_VERSION = '9.4.40';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -151,12 +151,40 @@ window.BRILLIANT_BOTTOM_NAV = [
   { icon: 'book-open',  label: 'Clients', page: 'bs-clients'       }
 ];
 
+// ── Users + payroll merge ─────────────────────────
+// Pay fields (salary/allowance/deductions) live in a PROTECTED payroll/{uid}
+// collection (readable only by the owner or finance/admin) — NOT on the
+// world-readable users doc. This fetcher returns a users-snapshot-like object
+// ({docs:[{id,data()}], size, empty}) with pay merged in, so the ~70 existing
+// `u.salary` reads keep working unchanged. Non-admins get an empty payroll map
+// (their unfiltered payroll query is denied → .catch), so they never see others'
+// pay; a user's OWN pay is merged into userProfile separately at auth.
+window.fetchUsersWithPayroll = async function() {
+  const [uSnap, pSnap] = await Promise.all([
+    db.collection('users').get(),
+    db.collection('payroll').get().catch(() => ({ docs: [] }))
+  ]);
+  const pay = {};
+  pSnap.docs.forEach(d => { pay[d.id] = d.data(); });
+  const docs = uSnap.docs.map(d => {
+    const merged = { ...d.data(), ...(pay[d.id] || {}) };
+    return { id: d.id, data: () => merged };
+  });
+  return { docs, size: uSnap.size, empty: uSnap.empty };
+};
+
 // ── Firestore In-Memory Cache ─────────────────────
 // Prevents re-fetching the same collection on every navigation.
 // Usage: window.dbCachedGet('users', () => db.collection('users').get(), 30000)
 ;(function() {
   const _store = {};
   window.dbCachedGet = async function(key, fetcher, ttlMs = 30000) {
+    // The 'users' key must always carry merged pay data — and consistently,
+    // regardless of which call site populates the cache first — so force the
+    // payroll-aware fetcher here instead of trusting each call site's lambda.
+    if (key === 'users' && typeof window.fetchUsersWithPayroll === 'function') {
+      fetcher = window.fetchUsersWithPayroll;
+    }
     const entry = _store[key];
     if (entry && Date.now() - entry.ts < ttlMs) return entry.data;
     // Deduplicate concurrent requests for the same key
