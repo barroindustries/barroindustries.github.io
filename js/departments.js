@@ -1273,7 +1273,7 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
 window.renderFinance = async function(currentUser, currentRole, subtab = 'Overview') {
   const c = deptContainer();
   // Finance tools vs HR tools — visually separated
-  const finTabs = ['Overview','Reports','Ledger','Cash Receipts','Cash Disbursements','Purchasing','Records','Taxes','SSS / Gov','Tasks'];
+  const finTabs = ['Overview','Reports','Sales Orders','Ledger','Cash Receipts','Cash Disbursements','Purchasing','Inventory','Records','Taxes','SSS / Gov','Tasks'];
   const hrTabs  = ['Payroll','HR Profiles','Cash Advances'];
   const allTabs = [...finTabs, ...hrTabs];
   c.innerHTML = `
@@ -1312,6 +1312,8 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'Ledger':       await renderLedgerTab(content, currentUser, currentRole); break;
     case 'Cash Receipts':       await renderCashReceiptJournal(content, currentUser, currentRole); break;
     case 'Cash Disbursements':  await renderCashDisbursementJournal(content, currentUser, currentRole); break;
+    case 'Sales Orders':        await window.renderSalesOrders(content); break;
+    case 'Inventory':           await window.renderInventory(content, 'Stock'); break;
     case 'Records':      await renderRecordsTab(content, currentUser, currentRole); break;
     case 'Purchasing':
       await renderDocCollection(content, 'purchase_orders', 'Purchase Orders', currentUser, currentRole, { icon:'🛒', color:'#1b5e20', dept:'Finance' });
@@ -4468,7 +4470,7 @@ function openITTicketModal(ticket, currentUser, canEdit, onRefresh) {
 
 window.renderBrilliantSteel = async function(currentUser, currentRole, subtab = 'Dashboard') {
   const c = deptContainer();
-  const tabs = ['Dashboard','Quotations Summary','Client Data','Files'];
+  const tabs = ['Dashboard','Quote Builder','Quotations Summary','Client Data','Files'];
   c.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
       <span style="font-size:22px">⚙️</span>
@@ -4496,6 +4498,7 @@ async function loadBSContent(currentUser, currentRole, sub) {
   const content = document.getElementById('bs-content');
   switch(sub) {
     case 'Dashboard':          await renderBSDashboard(content, currentUser, currentRole); break;
+    case 'Quote Builder':      navigateTo('bs-quote-builder'); break;
     case 'Quotations Summary': await renderBSQuotationsSummary(content, currentUser, currentRole); break;
     case 'Client Data':        await renderBSClientData(content, currentUser, currentRole); break;
     case 'Files':              renderBSFiles(content, currentUser, currentRole); break;
@@ -4619,11 +4622,20 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
 }
 
 async function renderBSDashboard(container, currentUser, currentRole) {
-  const snap = await db.collection('bs_quotes').get();
+  const [snap, projSnap] = await Promise.all([
+    db.collection('bs_quotes').get(),
+    db.collection('job_projects').get().catch(()=>({docs:[]}))
+  ]);
   const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
   const total   = quotes.reduce((s,q)=>s+(q.total||0),0);
   const pending = quotes.filter(q=>q.approvalStatus==='pending_review').length;
   const approved= quotes.filter(q=>q.approvalStatus==='approved').length;
+  // 50/50 partner earnings, aggregated across ALL shared projects (company-wide view)
+  const shared = projSnap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>p.split&&p.split.isShared&&p.stage!=='cancelled');
+  const partnerShare = (p)=>{ const pct=(p.split&&typeof p.split.partnerPct==='number')?p.split.partnerPct:50; return Math.max(0,(p.contractAmount||0)-(p.capital||0))*(pct/100); };
+  const expected = shared.reduce((s,p)=>s+partnerShare(p),0);
+  const realized = shared.filter(p=>p.stage==='paid').reduce((s,p)=>s+partnerShare(p),0);
+  const pendingShare = Math.max(0, expected-realized);
   container.innerHTML = `
     <div class="kpi-row">
       <div class="kpi-card"><div class="kpi-label">Total Quotes</div><div class="kpi-value">${quotes.length}</div></div>
@@ -4631,6 +4643,15 @@ async function renderBSDashboard(container, currentUser, currentRole) {
       <div class="kpi-card warn"><div class="kpi-label">Pending Approval</div><div class="kpi-value">${pending}</div></div>
       <div class="kpi-card accent"><div class="kpi-label">Approved</div><div class="kpi-value">${approved}</div></div>
     </div>
+    ${shared.length?`<div class="card" style="margin-bottom:14px;border:2px solid var(--primary)">
+      <div class="card-header"><h3>💰 Partner Earnings (50/50 Split)</h3><span style="font-size:11px;color:var(--text-muted)">From sales orders</span></div>
+      <div class="card-body"><div class="kpi-row">
+        <div class="kpi-card accent"><div class="kpi-label">Shared Projects</div><div class="kpi-value">${shared.length}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Expected ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(expected)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Realized ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(realized)}</div></div>
+        <div class="kpi-card" style="border-color:var(--warning)"><div class="kpi-label">Pending ₱</div><div class="kpi-value" style="font-size:15px;color:var(--warning)">₱${fmt(pendingShare)}</div></div>
+      </div></div>
+    </div>`:''}
     <div class="card">
       <div class="card-header"><h3>Recent Quotes</h3><button class="btn-primary btn-sm" onclick="loadBSContent(window.__bsUser,window.__bsRole,'Quote Builder')">+ New Quote</button></div>
       <div class="card-body">
@@ -5371,22 +5392,25 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
 }
 
 // Finance/admin view of incoming sales orders — record income to the ledger.
-window.renderSalesOrders = async function(){
-  const c = deptContainer();
-  const isFin = ['president','owner','manager','finance'].includes(currentRole) || (window.currentDepts||[]).includes('Finance');
+window.renderSalesOrders = async function(container){
+  const c = container || deptContainer();
+  // Anyone non-partner can SEE the list (read rule), but recording posts to the
+  // ledger — which is finance/admin-only by Firestore rule — so the action buttons
+  // are gated to ledger-capable roles to avoid showing a button that would error.
+  const isFin = ['president','owner','manager','finance'].includes(currentRole);
   c.innerHTML='<div class="loading-placeholder">Loading sales orders…</div>';
   const snap = await db.collection('sales_orders').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
   const orders = snap.docs.map(d=>({id:d.id,...d.data()}));
   const pending = orders.filter(o=>o.status!=='recorded');
   const totalContract = orders.reduce((s,o)=>s+(o.contractAmount||0),0);
-  const totalPaid = orders.reduce((s,o)=>s+(o.paymentReceived||0),0);
+  const totalRecorded = orders.filter(o=>o.status==='recorded').reduce((s,o)=>s+(o.recordedAmount||o.paymentReceived||0),0);
   c.innerHTML = `
-    <div class="page-header"><h2>🧾 Sales Orders</h2></div>
+    <div class="page-header"><h2>🧾 Sales Orders</h2><span style="font-size:12px;color:var(--text-muted)">Record the sale &amp; payment, then hand off to Production</span></div>
     <div class="kpi-row" style="margin-bottom:14px">
       <div class="kpi-card"><div class="kpi-label">Orders</div><div class="kpi-value">${orders.length}</div></div>
       <div class="kpi-card warn"><div class="kpi-label">To Record</div><div class="kpi-value">${pending.length}</div></div>
       <div class="kpi-card green"><div class="kpi-label">Contract ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalContract)}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Received ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalPaid)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Recorded ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalRecorded)}</div></div>
     </div>
     <div class="card"><div class="card-body" style="padding:0">
     ${!orders.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧾</div><h4>No sales orders yet</h4><p>They appear here when a won quote is converted to a sales order.</p></div>':
@@ -5396,29 +5420,107 @@ window.renderSalesOrders = async function(){
         <td>${o.createdAt?.toDate?o.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''}</td>
         <td><strong>${escHtml(o.clientName||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(o.project||'')}${o.quoteNumber?' · '+escHtml(o.quoteNumber):''}</div></td>
         <td>₱${fmt(o.contractAmount||0)}</td>
-        <td>₱${fmt(o.paymentReceived||0)}</td>
+        <td>₱${fmt(o.recordedAmount||o.paymentReceived||0)}</td>
         <td style="font-size:12px">${escHtml(o.paymentMethod||'')}</td>
         <td>${o.receiptUrl?`<a href="${escHtml(o.receiptUrl)}" target="_blank" class="btn-icon">📎</a>`:'—'}</td>
         <td style="font-size:11px">${escHtml(o.createdByName||'')}</td>
-        <td><span class="badge ${o.status==='recorded'?'badge-green':'badge-orange'}">${escHtml(o.status||'pending')}</span></td>
-        ${isFin?`<td>${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}" data-amt="${o.paymentReceived||0}" data-client="${escHtml(o.clientName||'')}">Record Income</button>`:'✓'}</td>`:''}
+        <td><span class="badge ${o.status==='recorded'?'badge-green':'badge-orange'}">${escHtml(o.status||'pending')}</span>${o.sentToProduction?'<span class="badge badge-blue" style="font-size:9px;margin-left:4px">🏭 in production</span>':''}</td>
+        ${isFin?`<td>${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}">Record Sale</button>`:(!o.sentToProduction?`<button class="btn-secondary btn-sm so-prod-btn" data-id="${o.id}">🏭 To Production</button>`:'✓')}</td>`:''}
       </tr>`).join('')}</tbody>
     </table></div>`}
     </div></div>`;
   if(isFin){
-    c.querySelectorAll('.so-record-btn').forEach(b=>b.addEventListener('click', async ()=>{
-      const amt=parseFloat(b.dataset.amt)||0;
-      if(!confirm(`Record ₱${amt.toLocaleString()} from ${b.dataset.client} as income to the ledger?`)) return;
-      try{
-        await db.collection('ledger').add({ date: today(), description:'Sales order — '+b.dataset.client, category:'Sales Revenue', type:'credit', amount:amt, source:'Finance', addedByName:userProfile?.displayName||currentUser.email, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
-        await db.collection('sales_orders').doc(b.dataset.id).update({status:'recorded', recordedAt:firebase.firestore.FieldValue.serverTimestamp()});
-        window.logAudit&&window.logAudit('create','ledger',null,{source:'sales_order', amount:amt});
-        Notifs.showToast('Income recorded to ledger');
-        window.renderSalesOrders();
-      }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+    c.querySelectorAll('.so-record-btn').forEach(b=>b.addEventListener('click', ()=>{
+      const o = orders.find(x=>x.id===b.dataset.id); if(o) openRecordSaleModal(o, container);
+    }));
+    c.querySelectorAll('.so-prod-btn').forEach(b=>b.addEventListener('click', async ()=>{
+      const o = orders.find(x=>x.id===b.dataset.id); if(!o) return;
+      await transferOrderToProduction(o); window.renderSalesOrders(container);
     }));
   }
 };
+
+// Finance records the sale + received payment, posts it to the ledger AND syncs the
+// linked project's collected/AR, then optionally hands the job off to Production.
+// This is the single bridge that was missing — previously "Record Income" only
+// touched the ledger, so the Projects tab never reflected the money or the handoff.
+function openRecordSaleModal(o, container){
+  const contract = o.contractAmount||0;
+  const defaultAmt = o.recordedAmount||o.paymentReceived||0;
+  openModal('💵 Record Sale — '+escHtml(o.clientName||''), `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract <strong>₱${fmt(contract)}</strong> · ${escHtml(o.project||'')}${o.quoteNumber?' · '+escHtml(o.quoteNumber):''}</div>
+    <div class="form-row">
+      <div class="form-group"><label>Amount Received (₱, VAT-incl.)</label><input id="rs-amount" type="number" step="0.01" min="0" value="${defaultAmt}"/></div>
+      <div class="form-group"><label>Method</label><select id="rs-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+        ${['Bank Transfer','GCash','Cash','Cheque','Other'].map(m=>`<option ${o.paymentMethod===m?'selected':''}>${m}</option>`).join('')}
+      </select></div>
+    </div>
+    <div class="form-group"><label>OR / Reference No.</label><input id="rs-ref" placeholder="Official Receipt no."/></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px;cursor:pointer">
+      <input type="checkbox" id="rs-prod" checked style="width:16px;height:16px"/> Transfer to Production now (start the job)
+    </label>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Posts income to the ledger (with VAT split), updates the project's collected balance, and notifies Production.</div>
+    <div id="rs-err" class="error-msg hidden" style="margin-top:8px"></div>
+  `, `<button class="btn-primary" id="rs-save">Record + Post to Ledger</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  document.getElementById('rs-save').addEventListener('click', async ()=>{
+    const err=document.getElementById('rs-err');
+    const amount=parseFloat(document.getElementById('rs-amount').value)||0;
+    if(amount<0){ err.textContent='Amount cannot be negative.'; err.classList.remove('hidden'); return; }
+    const method=document.getElementById('rs-method').value, orRef=document.getElementById('rs-ref').value.trim();
+    const toProd=document.getElementById('rs-prod').checked;
+    const who=userProfile?.displayName||currentUser.email;
+    const vatRate=12, net=+(amount/(1+vatRate/100)).toFixed(2), vatAmount=+(amount-net).toFixed(2);
+    try{
+      // 1) ledger credit (Sales Revenue → feeds Output-VAT base)
+      let ledgerId=null;
+      if(amount>0){
+        const led=await db.collection('ledger').add({ date:today(), description:`Sales order — ${o.clientName}${o.quoteNumber?' ('+o.quoteNumber+')':''}`, category:'Sales Revenue', type:'credit', amount, vatAmount, source:'Finance', projectId:o.projectId||null, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+        ledgerId=led.id;
+      }
+      // 2) mark the sales order recorded
+      await db.collection('sales_orders').doc(o.id).update({ status:'recorded', recordedAmount:amount, recordedAt:firebase.firestore.FieldValue.serverTimestamp(), recordedBy:who });
+      // 3) sync the linked project's collected / AR so the Projects tab shows true values
+      if(o.projectId && amount>0){
+        try{
+          const ps=await db.collection('job_projects').doc(o.projectId).get();
+          if(ps.exists){
+            const p=ps.data();
+            const newCollected=(p.amountCollected||0)+amount;
+            const newAR=Math.max(0,(p.contractAmount||contract)-newCollected);
+            const upd={ amountCollected:newCollected, arBalance:newAR, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+              payments:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order Payment', amount, vatAmount, net, method, orRef, date:today(), by:who, ledgerId }),
+              documents:firebase.firestore.FieldValue.arrayUnion({ type:'Official Receipt', ref:orRef||('₱'+amount.toLocaleString()), at:new Date().toISOString(), by:who }),
+              timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Sale recorded ₱${amount.toLocaleString()} by Finance`, by:who }) };
+            if(newAR<=0) upd.stage='paid';
+            await db.collection('job_projects').doc(o.projectId).update(upd);
+          }
+        }catch(_){}
+      }
+      window.logAudit&&window.logAudit('create','ledger',ledgerId,{source:'sales_order', amount, client:o.clientName});
+      // 4) optional handoff to Production
+      if(toProd) await transferOrderToProduction({ ...o, status:'recorded' });
+      closeModal(); Notifs.showToast(toProd?'Sale recorded + sent to Production':'Sale recorded to ledger'); window.renderSalesOrders(container);
+    }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+  });
+}
+
+// Advance the linked project to In Production and notify the Production team.
+async function transferOrderToProduction(o){
+  const who=userProfile?.displayName||currentUser.email;
+  try{
+    if(o.projectId){
+      const ps=await db.collection('job_projects').doc(o.projectId).get();
+      const stage=ps.exists?ps.data().stage:null;
+      if(ps.exists && ['won'].includes(stage)){
+        await db.collection('job_projects').doc(o.projectId).update({ stage:'in_production', updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+          timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Moved to In Production (sale recorded)', by:who }) });
+      }
+    }
+    await db.collection('sales_orders').doc(o.id).update({ sentToProduction:true, sentToProductionAt:firebase.firestore.FieldValue.serverTimestamp() });
+    try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${o.clientName} — sale recorded by Finance. Create the production order.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }); }catch(_){}
+    window.logAudit&&window.logAudit('update','sales_order',o.id,{ sentToProduction:true });
+  }catch(ex){ Notifs.showToast('Transfer failed: '+(ex.message||ex.code),'error'); }
+}
 
 function bindQuoteActions(el, currentUser, currentRole, container) {
   // Direct delete (president/manager only — Firestore rules enforce isAdmin)
@@ -7187,8 +7289,10 @@ window.renderProjectLifecycle = async function(){
   const active = projects.filter(p=>!['paid','cancelled'].includes(p.stage));
   const inProd = projects.filter(p=>p.stage==='in_production').length;
   const forDel = projects.filter(p=>p.stage==='for_delivery'||p.stage==='delivered').length;
-  const arTotal = projects.reduce((s,p)=>s+(p.arBalance||0),0);
+  // AR is DERIVED (contract − collected) rather than the stored arBalance field, so
+  // the KPI is always correct even if a project's stored arBalance drifted.
   const collected = projects.reduce((s,p)=>s+(p.amountCollected||0),0);
+  const arTotal = projects.reduce((s,p)=>s+Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)),0);
   const byStage={}; active.forEach(p=>{ (byStage[p.stage]=byStage[p.stage]||[]).push(p); });
   const done = projects.filter(p=>['paid','cancelled'].includes(p.stage));
 
@@ -7197,7 +7301,7 @@ window.renderProjectLifecycle = async function(){
       <div style="flex:1;min-width:0">
         <div style="font-weight:700;font-size:13px">${escHtml(p.clientName||p.name||'Project')}</div>
         <div style="font-size:11px;color:var(--text-muted);margin-top:2px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · ${escHtml(p.quoteNumber||'')} · <span class="badge ${p.company==='BK'?'badge-orange':'badge-gray'}" style="font-size:9px">${p.company||''}</span>${p.split?.isShared?' <span class="badge badge-blue" style="font-size:9px">50/50</span>':''}</div>
-        <div style="font-size:11px;margin-top:3px">Contract ₱${fmt(p.contractAmount||0)} · <span style="color:${(p.arBalance||0)>0?'var(--warning)':'var(--success)'}">AR ₱${fmt(p.arBalance||0)}</span></div>
+        <div style="font-size:11px;margin-top:3px">Contract ₱${fmt(p.contractAmount||0)} · <span style="color:${Math.max(0,(p.contractAmount||0)-(p.amountCollected||0))>0?'var(--warning)':'var(--success)'}">AR ₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}</span></div>
       </div>
       <span class="badge" style="background:${st.color};color:#fff;flex-shrink:0">${st.icon} ${st.label}</span>
     </div></div>`; };
@@ -7234,7 +7338,7 @@ function openProjectDetail(p){
     <div class="kpi-row" style="margin-bottom:12px">
       <div class="kpi-card"><div class="kpi-label">Contract</div><div class="kpi-value" style="font-size:14px">₱${fmt(p.contractAmount||0)}</div></div>
       <div class="kpi-card green"><div class="kpi-label">Collected</div><div class="kpi-value" style="font-size:14px">₱${fmt(p.amountCollected||0)}</div></div>
-      <div class="kpi-card ${(p.arBalance||0)>0?'warn':''}"><div class="kpi-label">Balance (AR)</div><div class="kpi-value" style="font-size:14px">₱${fmt(p.arBalance||0)}</div></div>
+      <div class="kpi-card ${Math.max(0,(p.contractAmount||0)-(p.amountCollected||0))>0?'warn':''}"><div class="kpi-label">Balance (AR)</div><div class="kpi-value" style="font-size:14px">₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}</div></div>
     </div>
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:10px 14px">
       <div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:12px">💰 Margin &amp; Split</strong>${(!isPartnerU && (canEditDept('Sales')||_isFinAdmin()))?`<button class="btn-secondary btn-sm" id="proj-margin-btn">Edit factors</button>`:''}</div>
@@ -7378,7 +7482,7 @@ function openProjectBillingModal(p){
 
 window.renderProductionDept = async function(currentUser, currentRole, subtab = 'Orders') {
   const c = deptContainer();
-  const subs = ['Orders','Materials','Tasks','Files'];
+  const subs = ['Orders','Materials','Inventory','Tasks','Files'];
   c.innerHTML = `
     <div class="page-header">
       <div>
@@ -7403,6 +7507,7 @@ window.renderProductionDept = async function(currentUser, currentRole, subtab = 
 function loadProdContent(currentUser, currentRole, sub) {
   const el = document.getElementById('prod-content');
   if (sub==='Materials') return renderProdMaterials(el, currentRole);
+  if (sub==='Inventory') return window.renderInventory(el, 'Stock');
   if (sub==='Tasks')     return renderDeptTasks(el, 'Production', currentUser, currentRole);
   if (sub==='Files')   { el.innerHTML = renderFileCollection('Production Files', 'production-files', currentRole);
                          bindFileCollection('production-files', currentUser, 'Production', 'Files'); return; }

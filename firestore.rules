@@ -485,8 +485,13 @@ service cloud.firestore {
     // Anyone internal (incl. partners) can create an order for a project they
     // closed and read their own; finance/admin read all + update (post to books).
     match /sales_orders/{docId} {
+      // Internal operational doc: any non-partner staff may read (so a Finance-dept
+      // employee — role 'employee', not the special 'finance' role — can see them in
+      // the Sales Orders tab). An unfiltered list query was being denied for such
+      // users, which is why created orders "weren't reflecting". Partners only see
+      // their own. Finance/admin still gate create→record (update).
       allow read:   if isAuth() && (
-        resource.data.createdBy == request.auth.uid || isFinanceOrAdmin()
+        resource.data.createdBy == request.auth.uid || getRole() != 'partner'
       );
       allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
       allow update: if isAuth() && isFinanceOrAdmin();

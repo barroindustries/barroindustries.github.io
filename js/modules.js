@@ -1418,8 +1418,11 @@ async function renderPresidentMessageCard() {
   const canEditInv = () => currentRole !== 'partner';
   const isFinAdmin = () => ['president','manager','finance'].includes(currentRole);
 
-  window.renderInventory = async function(sub='Stock'){
-    const c = document.getElementById('page-content');
+  window.renderInventory = async function(container, sub='Stock'){
+    // container may be an element (embedded as a dept subtab) or omitted (full page).
+    const c = (container && container.nodeType) ? container
+            : (typeof container === 'string' ? document.getElementById(container)
+            : document.getElementById('page-content'));
     const tabs = ['Stock','Movements'];
     if (isFinAdmin()) tabs.push('Job Costing');
     c.innerHTML = `
