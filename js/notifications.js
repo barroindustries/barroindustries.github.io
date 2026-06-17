@@ -546,6 +546,28 @@ window.Notifs = (() => {
     });
   }
 
+  // ── Low-stock daily digest (admins only) ───────
+  // One batched notification per admin per day listing items at/below reorder
+  // level. Deduped by day (owner prefers a daily digest, not per-event spam).
+  async function checkLowStock(uid, role) {
+    if (!['president','manager','finance'].includes(role)) return; // only roles that read inventory
+    try {
+      const snap = await db.collection('inventory_items').get();
+      const low = snap.docs.map(d => d.data())
+        .filter(i => (i.reorderLevel||0) > 0 && (i.qty||0) <= (i.reorderLevel||0));
+      if (!low.length) return;
+      const names = low.slice(0,5).map(i => i.name).filter(Boolean).join(', ');
+      const more  = low.length > 5 ? ` +${low.length-5} more` : '';
+      const todayStr = window.bizDate();
+      await send(uid, {
+        title: `📦 ${low.length} item${low.length>1?'s':''} low on stock`,
+        body:  `At/below reorder level: ${names}${more}. Tap to review Inventory.`,
+        icon:  '📦', type: 'low_stock', link: 'inventory',
+        dedupKey: `lowstock-${uid}-${todayStr}`,
+      });
+    } catch (_) { /* inventory read denied / offline — skip silently */ }
+  }
+
   // ── Helpers ───────────────────────────────────
   function timeAgo(ts) {
     if (!ts) return '';
@@ -594,7 +616,7 @@ window.Notifs = (() => {
     backdrop?.addEventListener('click', closePanel);
   }
 
-  return { startListener, stopListener, send, sendToDept, sendToAll, sendToOwner, showToast, initPush, checkDeadlines, checkAttendanceReminder, initToggle, renderPage, markAllRead,
+  return { startListener, stopListener, send, sendToDept, sendToAll, sendToOwner, showToast, initPush, checkDeadlines, checkAttendanceReminder, checkLowStock, initToggle, renderPage, markAllRead,
     requestPushPermission: (uid) => {
       const vapidKey = window.FCM_CONFIG?.VAPID_KEY;
       if (!vapidKey || vapidKey === 'YOUR_VAPID_KEY_HERE') { showToast('Push notifications not configured yet.','error'); return; }

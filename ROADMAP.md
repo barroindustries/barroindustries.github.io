@@ -46,6 +46,9 @@ Designed via a fan-out spec workflow, then implemented + adversarially reviewed 
 - **Leave management.** `leave_requests` + `leave_balances/{uid}` collections. Employee "My Leave" (balance KPIs, request modal: 4 types, working-day calc excl. Sundays, client balance check) + finance/admin approve/reject (decrements balance, notifies). Rules: create shape-validated (`days` 1–366, `userName` string); **only finance/admin update** (employees can't tamper post-approval); president deletes. Balances in their own collection so finance writes them without broad `users` write.
 - All three deployed (`firestore.rules`) and verified in the running app (stubbed Firestore for the auth-gated paths). Sidebar: Leave (all roles), Audit Log (president, Security section).
 
+### Low-stock daily digest (post-V10)
+- `Notifs.checkLowStock(uid, role)` — admins (president/manager/finance) get **one batched notification per day** listing items at/below reorder level (deduped by `lowstock-{uid}-{date}`, matching the owner's batch/daily preference). Fires on app load alongside `checkDeadlines`/`checkAttendanceReminder`; links to Inventory. Verified (2-low-item digest, well-stocked excluded, non-admins skipped). _Note: client-triggered (fires when an admin opens the app); a scheduled Cloud Function would make it time-of-day guaranteed — deferred._
+
 
 ### Critical fixes (production was broken at launch)
 - **Dashboard crash** — TDZ `ReferenceError` in `renderPresidentDashboard` (president + manager saw "Dashboard error"). Fixed.
