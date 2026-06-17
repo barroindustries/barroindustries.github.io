@@ -6690,3 +6690,246 @@ window.renderDocCollection = function(container, collection, title, currentUser,
     });
   });
 };
+
+// ═══════════════════════════════════════════════════
+//  PRODUCTION DEPARTMENT — shop-floor work orders
+// ═══════════════════════════════════════════════════
+const PROD_STAGES = [
+  { id:'queued',    label:'Queued',      icon:'📋', color:'#78909c' },
+  { id:'cutting',   label:'Cutting',     icon:'✂️', color:'#5c6bc0' },
+  { id:'welding',   label:'Welding / Fab', icon:'🔧', color:'#7e57c2' },
+  { id:'assembly',  label:'Assembly',    icon:'🛠️', color:'#26a69a' },
+  { id:'finishing', label:'Finishing',   icon:'✨', color:'#26c6da' },
+  { id:'qc',        label:'QC',          icon:'🔍', color:'#ffa726' },
+  { id:'ready',     label:'Ready',       icon:'📦', color:'#66bb6a' },
+  { id:'delivered', label:'Delivered',   icon:'🚚', color:'#43a047' },
+];
+function prodStage(id){ return PROD_STAGES.find(s=>s.id===id) || PROD_STAGES[0]; }
+
+window.renderProductionDept = async function(currentUser, currentRole, subtab = 'Orders') {
+  const c = deptContainer();
+  const subs = ['Orders','Materials','Tasks','Files'];
+  c.innerHTML = `
+    <div class="page-header">
+      <div>
+        <h2>🏭 Production</h2>
+        <p style="font-size:12px;color:var(--text-muted);margin:2px 0 0">Shop-floor work orders, materials & output</p>
+      </div>
+    </div>
+    <div class="subtab-bar">
+      ${subs.map(s=>`<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`).join('')}
+    </div>
+    <div id="prod-content"><div class="loading-placeholder">Loading…</div></div>`;
+  loadProdContent(currentUser, currentRole, subtab);
+  c.querySelectorAll('.subtab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      c.querySelectorAll('.subtab-btn').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      loadProdContent(currentUser, currentRole, btn.dataset.sub);
+    });
+  });
+};
+
+function loadProdContent(currentUser, currentRole, sub) {
+  const el = document.getElementById('prod-content');
+  if (sub==='Materials') return renderProdMaterials(el, currentRole);
+  if (sub==='Tasks')     return renderDeptTasks(el, 'Production', currentUser, currentRole);
+  if (sub==='Files')   { el.innerHTML = renderFileCollection('Production Files', 'production-files', currentRole);
+                         bindFileCollection('production-files', currentUser, 'Production', 'Files'); return; }
+  return renderProdOrders(el, currentUser, currentRole);
+}
+
+async function renderProdOrders(el, currentUser, currentRole) {
+  const canEdit = canEditDept('Production');
+  el.innerHTML = '<div class="loading-placeholder">Loading orders…</div>';
+  const snap = await db.collection('production_orders').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+  const orders = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const active = orders.filter(o=>o.stage!=='delivered');
+  const todayStr = today();
+  const weekAhead = (()=>{ const d=new Date(); d.setDate(d.getDate()+7); return (window.bizDate?window.bizDate(d):d.toISOString().slice(0,10)); })();
+  const overdue = active.filter(o=>o.dueDate && o.dueDate < todayStr);
+  const dueSoon = active.filter(o=>o.dueDate && o.dueDate >= todayStr && o.dueDate <= weekAhead);
+
+  // Group active orders by stage (in pipeline order), delivered shown collapsed at end
+  const byStage = {};
+  active.forEach(o=>{ (byStage[o.stage||'queued'] ||= []).push(o); });
+  const delivered = orders.filter(o=>o.stage==='delivered');
+
+  const orderCard = (o)=>{
+    const od = o.dueDate && o.dueDate < todayStr && o.stage!=='delivered';
+    const pr = (o.priority||'medium');
+    return `<div class="item-card prod-order" data-id="${o.id}" style="cursor:pointer;border-left:3px solid ${prodStage(o.stage).color}">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:13px">${escHtml(o.title||'Untitled')} ${o.qty?`<span style="color:var(--text-muted);font-weight:500">×${escHtml(String(o.qty))}</span>`:''}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">
+            ${o.orderNo?`<span style="font-family:monospace">${escHtml(o.orderNo)}</span> · `:''}${escHtml(o.client||'—')}${o.quoteRef?` · ${escHtml(o.quoteRef)}`:''}
+          </div>
+          <div style="font-size:11px;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">
+            ${o.dueDate?`<span style="color:${od?'var(--danger)':'var(--text-muted)'}">📅 ${escHtml(o.dueDate)}${od?' ⚠️':''}</span>`:''}
+            ${o.team?`<span style="color:var(--text-muted)">👷 ${escHtml(o.team)}</span>`:''}
+            <span class="badge ${pr==='high'||pr==='urgent'?'badge-red':pr==='low'?'badge-green':'badge-orange'}" style="font-size:9px">${pr}</span>
+          </div>
+        </div>
+        ${canEdit?`<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
+          ${o.stage!=='delivered'?`<button class="btn-success btn-sm prod-advance" data-id="${o.id}">Advance →</button>`:''}
+          <button class="btn-secondary btn-sm prod-edit" data-id="${o.id}">Edit</button>
+        </div>`:''}
+      </div>
+    </div>`;
+  };
+
+  el.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:12px">
+      <div class="kpi-card"><div class="kpi-label">Active Orders</div><div class="kpi-value">${active.length}</div></div>
+      <div class="kpi-card ${dueSoon.length?'':''}" style="${dueSoon.length?'border-color:var(--warning)':''}"><div class="kpi-label">Due ≤7 days</div><div class="kpi-value" style="${dueSoon.length?'color:var(--warning)':''}">${dueSoon.length}</div></div>
+      <div class="kpi-card ${overdue.length?'red':''}"><div class="kpi-label">Overdue</div><div class="kpi-value">${overdue.length}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Delivered</div><div class="kpi-value">${delivered.length}</div></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <span style="font-size:12px;color:var(--text-muted);flex:1;min-width:180px">Pipeline: Queued → Cutting → Fab → Assembly → Finishing → QC → Ready → Delivered</span>
+      ${canEdit?'<button class="btn-primary btn-sm" id="prod-add-btn" style="flex-shrink:0;white-space:nowrap">＋ New Order</button>':''}
+    </div>
+    ${!active.length && !delivered.length ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">🏭</div><h4>No production orders yet</h4><p>Create a work order to track a job through the shop floor.</p></div>' : ''}
+    ${PROD_STAGES.filter(s=>s.id!=='delivered' && (byStage[s.id]||[]).length).map(s=>`
+      <div class="card" style="margin-bottom:12px">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+          <h3 style="font-size:13px">${s.icon} ${s.label}</h3>
+          <span class="badge" style="background:${s.color};color:#fff">${(byStage[s.id]||[]).length}</span>
+        </div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+          ${(byStage[s.id]||[]).map(orderCard).join('')}
+        </div>
+      </div>`).join('')}
+    ${delivered.length?`
+      <details style="margin-top:6px">
+        <summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">🚚 Delivered (${delivered.length})</summary>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${delivered.slice(0,30).map(orderCard).join('')}</div>
+      </details>`:''}
+  `;
+
+  if (canEdit) {
+    document.getElementById('prod-add-btn')?.addEventListener('click', ()=>prodOrderModal(null, currentUser, currentRole, ()=>renderProdOrders(el, currentUser, currentRole)));
+    el.querySelectorAll('.prod-edit').forEach(b=>b.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      prodOrderModal(orders.find(o=>o.id===b.dataset.id), currentUser, currentRole, ()=>renderProdOrders(el, currentUser, currentRole));
+    }));
+    el.querySelectorAll('.prod-advance').forEach(b=>b.addEventListener('click', async (e)=>{
+      e.stopPropagation();
+      const o = orders.find(x=>x.id===b.dataset.id); if(!o) return;
+      const idx = PROD_STAGES.findIndex(s=>s.id===(o.stage||'queued'));
+      const next = PROD_STAGES[Math.min(idx+1, PROD_STAGES.length-1)];
+      b.disabled = true;
+      try {
+        await db.collection('production_orders').doc(o.id).update({
+          stage: next.id, stageUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+        Notifs.showToast(`Moved to ${next.label}`);
+        renderProdOrders(el, currentUser, currentRole);
+      } catch(ex){ Notifs.showToast('Update failed','error'); b.disabled=false; }
+    }));
+  }
+  el.querySelectorAll('.prod-order').forEach(card=>card.addEventListener('click', ()=>{
+    if(!canEdit) return;
+    prodOrderModal(orders.find(o=>o.id===card.dataset.id), currentUser, currentRole, ()=>renderProdOrders(el, currentUser, currentRole));
+  }));
+}
+
+function prodOrderModal(order, currentUser, currentRole, onSaved) {
+  const e = order || {};
+  openModal(order ? `Edit Order ${e.orderNo||''}` : '🏭 New Production Order', `
+    <div class="form-group"><label>Product / Work Description</label><input id="po-title" value="${escHtml(e.title||'')}" placeholder="e.g. SS Baker's Worktable 1500mm ×4"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Client / Project</label><input id="po-client" value="${escHtml(e.client||'')}" placeholder="e.g. Gerry's Grill — Bulacan"/></div>
+      <div class="form-group" style="flex:0 0 90px"><label>Qty</label><input id="po-qty" type="number" min="1" value="${e.qty||1}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Linked Quote (optional)</label><input id="po-quote" value="${escHtml(e.quoteRef||'')}" placeholder="BK-LU-FB-…"/></div>
+      <div class="form-group"><label>Assigned Team</label><input id="po-team" value="${escHtml(e.team||'')}" placeholder="e.g. Fab Team A"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Stage</label>
+        <select id="po-stage" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          ${PROD_STAGES.map(s=>`<option value="${s.id}" ${ (e.stage||'queued')===s.id?'selected':''}>${s.icon} ${s.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Priority</label>
+        <select id="po-priority" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          ${['low','medium','high','urgent'].map(p=>`<option value="${p}" ${(e.priority||'medium')===p?'selected':''}>${p}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>Target Date</label><input id="po-due" type="date" value="${e.dueDate||''}"/></div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="po-notes" rows="2" placeholder="Materials, special instructions, etc.">${escHtml(e.notes||'')}</textarea></div>
+    <div id="po-err" class="error-msg hidden"></div>
+  `, `<button class="btn-primary" id="po-save">Save</button>${order?'<button class="btn-danger" id="po-del">Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  document.getElementById('po-save').addEventListener('click', async ()=>{
+    const title = document.getElementById('po-title').value.trim();
+    const err = document.getElementById('po-err');
+    if(!title){ err.textContent='Product / work description is required.'; err.classList.remove('hidden'); return; }
+    const data = {
+      title, client: document.getElementById('po-client').value.trim(),
+      qty: parseInt(document.getElementById('po-qty').value)||1,
+      quoteRef: document.getElementById('po-quote').value.trim(),
+      team: document.getElementById('po-team').value.trim(),
+      stage: document.getElementById('po-stage').value,
+      priority: document.getElementById('po-priority').value,
+      dueDate: document.getElementById('po-due').value,
+      notes: document.getElementById('po-notes').value.trim(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    };
+    try {
+      if(order){ await db.collection('production_orders').doc(order.id).update(data); }
+      else {
+        // order number PO-YYMM-### (best-effort sequential; falls back to time suffix)
+        let seq = '001';
+        try { const cnt = (await db.collection('production_orders').get()).size; seq = String(cnt+1).padStart(3,'0'); }
+        catch(_) { seq = String(Date.now()).slice(-3); }
+        const ym = (window.bizDate?window.bizDate():new Date().toISOString().slice(0,10)).slice(2,7).replace('-','');
+        data.orderNo = `PO-${ym}-${seq}`;
+        data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+        data.createdBy = currentUser.uid;
+        data.createdByName = userProfile?.displayName || currentUser.email || '';
+        await db.collection('production_orders').add(data);
+      }
+      closeModal(); Notifs.showToast('Order saved'); onSaved && onSaved();
+    } catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+  });
+  document.getElementById('po-del')?.addEventListener('click', async ()=>{
+    if(!confirm('Delete this production order?')) return;
+    try { await db.collection('production_orders').doc(order.id).delete(); closeModal(); Notifs.showToast('Deleted'); onSaved && onSaved(); }
+    catch(ex){ Notifs.showToast('Delete failed (admin only)','error'); }
+  });
+}
+
+async function renderProdMaterials(el, currentRole) {
+  el.innerHTML = '<div class="loading-placeholder">Loading materials…</div>';
+  const snap = await db.collection('inventory_items').orderBy('name').get().catch(()=>({docs:[]}));
+  const mats = snap.docs.map(d=>({id:d.id,...d.data()})).filter(i=>(i.kind||'material')==='material');
+  const low = mats.filter(i=>(i.reorderLevel||0)>0 && (i.qty||0) <= (i.reorderLevel||0));
+  el.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:12px">
+      <div class="kpi-card"><div class="kpi-label">Raw Materials</div><div class="kpi-value">${mats.length}</div></div>
+      <div class="kpi-card ${low.length?'red':''}"><div class="kpi-label">Low Stock</div><div class="kpi-value">${low.length}</div></div>
+    </div>
+    ${low.length?`<div class="alert-banner alert-warn"><span>⚠️ <strong>${low.length} material${low.length>1?'s':''}</strong> at or below reorder level — flag Purchasing.</span></div>`:''}
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+      <button class="btn-secondary btn-sm" onclick="navigateTo('inventory')">Open full Inventory →</button>
+    </div>
+    <div class="card"><div class="card-body" style="padding:0">
+      ${!mats.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📦</div><h4>No materials in inventory yet</h4><p>Add raw materials in the Inventory module.</p></div>':
+      `<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Material</th><th>On Hand</th><th>Reorder</th><th>Unit Cost</th><th>Supplier</th></tr></thead>
+        <tbody>${mats.map(i=>{
+          const lowItem=(i.reorderLevel||0)>0 && (i.qty||0)<=(i.reorderLevel||0);
+          return `<tr>
+            <td style="font-weight:600">${escHtml(i.name||'—')}${i.category?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(i.category)}</div>`:''}</td>
+            <td style="font-weight:700;color:${lowItem?'var(--danger)':'inherit'}">${Number(i.qty||0).toLocaleString('en-PH')} ${escHtml(i.unit||'')}${lowItem?' ⚠️':''}</td>
+            <td style="font-size:12px;color:var(--text-muted)">${Number(i.reorderLevel||0).toLocaleString('en-PH')}</td>
+            <td>₱${fmt(i.unitCost||0)}</td>
+            <td style="font-size:12px">${escHtml(i.supplier||'—')}</td>
+          </tr>`;}).join('')}</tbody>
+      </table></div>`}
+    </div></div>`;
+}

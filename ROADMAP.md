@@ -19,6 +19,13 @@ This file is the running source of truth for what's done and what's left to make
 - **Partner portal clarity** — added a 3-step "How your Brilliant Steel partner portal works" explainer on the partner dashboard (Build → Submit → Earn 50%), explicitly framing them as a **profit-sharing partner, not a commission agent**.
 - All V10 changes touch only already-ruled collections (`products`, `productMeta`) — no Firestore rules change needed.
 
+### Production department (new, post-V10)
+- New **Production** department (config + nav + router) with subtabs **Orders · Materials · Tasks · Files**.
+- **Orders** — shop-floor work-order pipeline on a new `production_orders` collection. Stages: Queued → Cutting → Welding/Fab → Assembly → Finishing → QC → Ready → Delivered. KPI row (active / due ≤7d / overdue / delivered), orders grouped by stage with one-tap **Advance →**, priority + due-date flags, auto order numbers (PO-YYMM-###), linked-quote + team fields. Full create/edit/delete modal.
+- **Materials** — reads `inventory_items` (raw materials), low-stock highlights, deep-link to full Inventory.
+- **Tasks** — Production-dept task board (`renderDeptTasks`). **Files** — Production file collection.
+- Firestore rule for `production_orders` added (internal staff read/write, partners excluded, admin-only delete) and **deployed**. Verified end-to-end in the running app (render, KPIs, empty state, New Order modal).
+
 
 ### Critical fixes (production was broken at launch)
 - **Dashboard crash** — TDZ `ReferenceError` in `renderPresidentDashboard` (president + manager saw "Dashboard error"). Fixed.

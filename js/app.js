@@ -2258,6 +2258,7 @@ function renderDeptModule(dept) {
     case 'Sales': renderSales(currentUser, currentRole); break;
     case 'IT':                         window.renderIT?.(currentUser, currentRole); break;
     case 'Design':                     renderDesign(currentUser, currentRole); break;
+    case 'Production':                 window.renderProductionDept?.(currentUser, currentRole); break;
     case 'Brilliant Steel':            renderBrilliantSteel(currentUser, currentRole); break;
     case 'Government Biddings':        renderGovBiddings(); break;
     case 'Partners':                   renderPartnersDept(); break;

@@ -422,6 +422,16 @@ service cloud.firestore {
       allow read, write: if isAuth() && isFinanceOrAdmin();
     }
 
+    // ── Production orders (shop-floor pipeline) ─────────
+    // Internal manufacturing/work-order data. Any signed-in internal staffer can
+    // read and advance an order through its stages; external partners excluded;
+    // only admins delete an order outright.
+    match /production_orders/{docId} {
+      allow read:           if isAuth() && getRole() != 'partner';
+      allow create, update: if isAuth() && getRole() != 'partner';
+      allow delete:         if isAuth() && isAdmin();
+    }
+
     // ── Suggestions ────────────────────────────────────
     match /suggestions/{docId} {
       allow read: if isAuth() && isAdmin();
