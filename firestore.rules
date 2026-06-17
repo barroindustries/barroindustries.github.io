@@ -481,6 +481,18 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
+    // ── Sales orders (won project → payment → finance) ──
+    // Anyone internal (incl. partners) can create an order for a project they
+    // closed and read their own; finance/admin read all + update (post to books).
+    match /sales_orders/{docId} {
+      allow read:   if isAuth() && (
+        resource.data.createdBy == request.auth.uid || isFinanceOrAdmin()
+      );
+      allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
+    }
+
     // ── Leave balances (remaining day counters per user) ─
     // Kept in their own collection (NOT on the users doc) so finance can set
     // balances without being granted broad write access to user profiles.

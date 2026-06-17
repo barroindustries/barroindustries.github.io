@@ -719,6 +719,7 @@ function getSidebarItems() {
     items.push({ icon:'calendar',      label:'Attendance',       page:'attendance'                     });
     items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'                    });
     items.push({ icon:'boxes',         label:'Inventory',        page:'inventory',       section:true, sectionLabel:'Operations' });
+    items.push({ icon:'receipt',       label:'Sales Orders',     page:'sales-orders'                   });
     items.push({ icon:'package',       label:'Product Database', page:'product-database', section:true, sectionLabel:'Catalog' });
     items.push({ icon:'scroll-text',   label:'Audit Log',        page:'audit-log',       section:true, sectionLabel:'Security' });
     // (Leave, Company, SOPs, Help moved into the profile drawer's "More" section)
@@ -753,6 +754,7 @@ function getSidebarItems() {
     items.push({ icon:'credit-card', label:'Personal Finance', page:'personal-finance'                 });
     items.push({ icon:'folder',      label:'Files',            page:'files'                            });
     items.push({ icon:'boxes',       label:'Inventory',        page:'inventory'                        });
+    if ((currentDepts||[]).includes('Finance') || currentRole==='finance') items.push({ icon:'receipt', label:'Sales Orders', page:'sales-orders' });
     // (Leave, Company, SOPs, Help moved into the profile drawer's "More" section)
   }
   return items;
@@ -1531,6 +1533,7 @@ function navigateTo(page) {
     case 'product-database': isPresident() ? renderProductDatabase() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔒</div><h4>Access Denied</h4></div>`); break;
     case 'audit-log':        isPresident() ? renderAuditLog() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔒</div><h4>Access Denied</h4></div>`); break;
     case 'search':           window.renderGlobalSearch?.(); break;
+    case 'sales-orders':     window.renderSalesOrders?.(); break;
     default: c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><h4>Page not found</h4></div>`;
   }
 }

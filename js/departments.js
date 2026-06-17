@@ -5227,6 +5227,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
                 <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">❌ Reject</button>
                 <button class="btn-secondary btn-sm bs-edit-return-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">✎ Edit &amp; Return</button>
               `:''}
+              ${(status==='filed'||status==='approved')?`<button class="btn-success btn-sm bs-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-total="${q.total||q.grandTotal||0}" data-co="${escHtml(q.company||'BS')}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?'✓ Ordered':'🧾 Sales Order'}</button>`:''}
               ${canDeleteDirect
                 ? `<button class="btn-secondary btn-sm bs-del-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" style="color:var(--danger)">🗑 Delete</button>`
                 : `<button class="btn-secondary btn-sm bs-delreq-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" ${q.deleteRequested?'disabled':''}>${q.deleteRequested?'⏳ Requested':'🗑 Request Delete'}</button>`}
@@ -5290,6 +5291,102 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
   bindQuoteActions(qsContent, currentUser, currentRole, container);
 }
 
+// Convert a won quote into a Sales Order: capture payment + receipt, route to Finance.
+async function openSalesOrderModal(d, currentUser, currentRole, container){
+  const total = parseFloat(d.total)||0;
+  openModal('🧾 Create Sales Order', `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Client <strong>${escHtml(d.client||'')}</strong> · Quote ${escHtml(d.qno||'')}</div>
+    <div class="form-group"><label>Project / Scope</label><input id="so-project" value="${escHtml((d.client||'')+' — '+(d.qno||''))}"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Contract Amount (₱)</label><input id="so-contract" type="number" step="0.01" value="${total}"/></div>
+      <div class="form-group"><label>Payment Received (₱)</label><input id="so-paid" type="number" step="0.01" placeholder="e.g. downpayment"/></div>
+    </div>
+    <div class="form-group"><label>Payment Method</label>
+      <select id="so-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Bank Transfer</option><option>GCash</option><option>Cash</option><option>Cheque</option><option>Other</option></select>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="so-notes" rows="2" placeholder="Payment ref #, schedule, etc."></textarea></div>
+    <div class="form-group"><label>Receipt / Proof of Payment</label><div id="so-receipt-upload"></div></div>
+    <div id="so-err" class="error-msg hidden"></div>
+  `, `<button class="btn-primary" id="so-save">Create &amp; Send to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  let receipt=null;
+  if(window.Drive?.renderUploadArea) Drive.renderUploadArea('so-receipt-upload',(r)=>{receipt=r;},{label:'Upload receipt (photo/PDF)',accept:'image/*,.pdf',dept:'Finance',subfolder:'SalesOrders'});
+  document.getElementById('so-save').addEventListener('click', async ()=>{
+    const err=document.getElementById('so-err');
+    const contract=parseFloat(document.getElementById('so-contract').value)||0;
+    const paid=parseFloat(document.getElementById('so-paid').value)||0;
+    const project=document.getElementById('so-project').value.trim();
+    if(!project){ err.textContent='Project is required.'; err.classList.remove('hidden'); return; }
+    try{
+      const ref=await db.collection('sales_orders').add({
+        quoteId:d.id, quoteNumber:d.qno||'', clientName:d.client||'', company:d.co||'BS',
+        project, contractAmount:contract, paymentReceived:paid,
+        paymentMethod:document.getElementById('so-method').value,
+        notes:document.getElementById('so-notes').value.trim(),
+        receiptUrl:receipt?.url||null, receiptName:receipt?.name||null,
+        status:'pending', createdBy:currentUser.uid, createdByName:userProfile?.displayName||currentUser.email,
+        createdAt:firebase.firestore.FieldValue.serverTimestamp()
+      });
+      try{ await db.collection('bs_quotes').doc(d.id).update({salesOrderId:ref.id}); }catch(_){}
+      window.logAudit&&window.logAudit('create','sales_order',ref.id,{client:d.client, contract, paid});
+      const who=userProfile?.displayName||currentUser.email;
+      try{ await Notifs.sendToDept('Finance',{ title:'🧾 New Sales Order', body:`${who}: ${d.client} — ₱${contract.toLocaleString()} (₱${paid.toLocaleString()} received). Record income + verify receipt.`, icon:'🧾', type:'sales_order', link:'sales-orders' }); }catch(_){}
+      try{ await Notifs.sendToOwner({ title:'🧾 New Sales Order', body:`${d.client} — ₱${contract.toLocaleString()} closed by ${who}.`, icon:'🧾', type:'sales_order' }); }catch(_){}
+      closeModal(); Notifs.showToast('Sales order created — sent to Finance');
+      renderBSQuotationsSummary(container, currentUser, currentRole);
+    }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+  });
+}
+
+// Finance/admin view of incoming sales orders — record income to the ledger.
+window.renderSalesOrders = async function(){
+  const c = deptContainer();
+  const isFin = ['president','owner','manager','finance'].includes(currentRole) || (window.currentDepts||[]).includes('Finance');
+  c.innerHTML='<div class="loading-placeholder">Loading sales orders…</div>';
+  const snap = await db.collection('sales_orders').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+  const orders = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const pending = orders.filter(o=>o.status!=='recorded');
+  const totalContract = orders.reduce((s,o)=>s+(o.contractAmount||0),0);
+  const totalPaid = orders.reduce((s,o)=>s+(o.paymentReceived||0),0);
+  c.innerHTML = `
+    <div class="page-header"><h2>🧾 Sales Orders</h2></div>
+    <div class="kpi-row" style="margin-bottom:14px">
+      <div class="kpi-card"><div class="kpi-label">Orders</div><div class="kpi-value">${orders.length}</div></div>
+      <div class="kpi-card warn"><div class="kpi-label">To Record</div><div class="kpi-value">${pending.length}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Contract ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalContract)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Received ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalPaid)}</div></div>
+    </div>
+    <div class="card"><div class="card-body" style="padding:0">
+    ${!orders.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧾</div><h4>No sales orders yet</h4><p>They appear here when a won quote is converted to a sales order.</p></div>':
+    `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Date</th><th>Client / Project</th><th>Contract</th><th>Received</th><th>Method</th><th>Receipt</th><th>By</th><th>Status</th>${isFin?'<th></th>':''}</tr></thead>
+      <tbody>${orders.map(o=>`<tr>
+        <td>${o.createdAt?.toDate?o.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''}</td>
+        <td><strong>${escHtml(o.clientName||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(o.project||'')}${o.quoteNumber?' · '+escHtml(o.quoteNumber):''}</div></td>
+        <td>₱${fmt(o.contractAmount||0)}</td>
+        <td>₱${fmt(o.paymentReceived||0)}</td>
+        <td style="font-size:12px">${escHtml(o.paymentMethod||'')}</td>
+        <td>${o.receiptUrl?`<a href="${escHtml(o.receiptUrl)}" target="_blank" class="btn-icon">📎</a>`:'—'}</td>
+        <td style="font-size:11px">${escHtml(o.createdByName||'')}</td>
+        <td><span class="badge ${o.status==='recorded'?'badge-green':'badge-orange'}">${escHtml(o.status||'pending')}</span></td>
+        ${isFin?`<td>${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}" data-amt="${o.paymentReceived||0}" data-client="${escHtml(o.clientName||'')}">Record Income</button>`:'✓'}</td>`:''}
+      </tr>`).join('')}</tbody>
+    </table></div>`}
+    </div></div>`;
+  if(isFin){
+    c.querySelectorAll('.so-record-btn').forEach(b=>b.addEventListener('click', async ()=>{
+      const amt=parseFloat(b.dataset.amt)||0;
+      if(!confirm(`Record ₱${amt.toLocaleString()} from ${b.dataset.client} as income to the ledger?`)) return;
+      try{
+        await db.collection('ledger').add({ date: today(), description:'Sales order — '+b.dataset.client, category:'Sales', type:'credit', amount:amt, source:'Finance', addedByName:userProfile?.displayName||currentUser.email, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+        await db.collection('sales_orders').doc(b.dataset.id).update({status:'recorded', recordedAt:firebase.firestore.FieldValue.serverTimestamp()});
+        window.logAudit&&window.logAudit('create','ledger',null,{source:'sales_order', amount:amt});
+        Notifs.showToast('Income recorded to ledger');
+        window.renderSalesOrders();
+      }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+    }));
+  }
+};
+
 function bindQuoteActions(el, currentUser, currentRole, container) {
   // Direct delete (president/manager only — Firestore rules enforce isAdmin)
   el.querySelectorAll('.bs-del-btn').forEach(btn => {
@@ -5319,6 +5416,10 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
         renderBSQuotationsSummary(container, currentUser, currentRole);
       } catch(ex){ Notifs.showToast('Request failed: '+(ex.message||ex.code),'error'); }
     });
+  });
+  // Convert a won quote into a Sales Order (capture payment + receipt → finance)
+  el.querySelectorAll('.bs-so-btn').forEach(btn => {
+    btn.addEventListener('click', e => openSalesOrderModal(e.currentTarget.dataset, currentUser, currentRole, container));
   });
   el.querySelectorAll('.bs-approve-btn').forEach(btn => {
     btn.addEventListener('click', async e => {
