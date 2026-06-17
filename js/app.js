@@ -1457,15 +1457,14 @@ async function renderPresidentDashboard() {
     const overdueTasks= openTasks.filter(t=>t.dueDate && t.dueDate < todayStr);
     const highPriority= openTasks.filter(t=>t.priority==='high').length;
     const pendingSubs = subsSnap.docs.filter(d=>d.data().status==='pending').length;
+    // Active pipeline = value of all non-rejected quotes (BK + BS), not the legacy `quotes` collection
+    const activeQuotes = quotesSnap.docs.map(d=>d.data()).filter(q=>q.status!=='rejected');
     const totalQuotes = activeQuotes.reduce((s,q)=>s+(q.total||0),0);
     const pendingApprovals = approvalsSnap.size;
     const pendingCA   = caSnap.size;
     const pendingExtensions = extSnap.size || 0;
     const pendingSignups = signupSnap.size || 0;
     const totalPending = pendingApprovals + pendingCA + pendingExtensions + pendingSubs + pendingSignups;
-
-    // Active pipeline = value of all non-rejected quotes (BK + BS), not the legacy `quotes` collection
-    const activeQuotes = quotesSnap.docs.map(d=>d.data()).filter(q=>q.status!=='rejected');
 
     // Total payroll burn (sum of net pay of all employees)
     const payrollBurn = users.reduce((s,u)=>(s+(u.salary||0)+(u.allowance||0)-(u.deductions||0)),0);

@@ -109,6 +109,23 @@ service cloud.firestore {
         (request.auth.uid in resource.data.assignedTo) || isAdmin()
       );
       allow delete: if isAuth() && isAdmin();
+
+      // In-app "messaging" thread on a task. Rules do NOT inherit to
+      // subcollections, so this needs explicit coverage — tasks are readable
+      // by all signed-in users, so their messages are too. Author owns their
+      // own message; admins can moderate.
+      match /comments/{commentId} {
+        allow read:   if isAuth();
+        allow create: if isAuth() && request.resource.data.authorId == request.auth.uid;
+        allow update, delete: if isAuth() && (
+          resource.data.authorId == request.auth.uid || isAdmin()
+        );
+      }
+      // Read receipts ("Seen by"). Each user writes only their own receipt.
+      match /readers/{readerUid} {
+        allow read:  if isAuth();
+        allow write: if isAuth() && isOwner(readerUid);
+      }
     }
 
     // ── KPI evaluations ────────────────────────────────
@@ -182,6 +199,23 @@ service cloud.firestore {
       allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
       allow update: if isAuth() && isAdmin();
       allow delete: if isAuth() && isAdmin();
+
+      // Submission message thread mirrors the parent's access (submitter ↔ admin).
+      // Rules don't inherit to subcollections, so we re-check the parent here.
+      match /comments/{commentId} {
+        function parentSub() {
+          return get(/databases/$(database)/documents/submissions/$(docId)).data;
+        }
+        allow read: if isAuth() && (
+          parentSub().createdBy == request.auth.uid || isAdmin()
+        );
+        allow create: if isAuth()
+          && request.resource.data.authorId == request.auth.uid
+          && (parentSub().createdBy == request.auth.uid || isAdmin());
+        allow update, delete: if isAuth() && (
+          resource.data.authorId == request.auth.uid || isAdmin()
+        );
+      }
     }
 
     // ── Quotes (internal) ──────────────────────────────
