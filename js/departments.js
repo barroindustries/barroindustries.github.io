@@ -1255,7 +1255,7 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
 window.renderFinance = async function(currentUser, currentRole, subtab = 'Overview') {
   const c = deptContainer();
   // Finance tools vs HR tools — visually separated
-  const finTabs = ['Overview','Ledger','Cash Receipts','Cash Disbursements','Purchasing','Records','Taxes','SSS / Gov','Tasks'];
+  const finTabs = ['Overview','Reports','Ledger','Cash Receipts','Cash Disbursements','Purchasing','Records','Taxes','SSS / Gov','Tasks'];
   const hrTabs  = ['Payroll','HR Profiles','Cash Advances'];
   const allTabs = [...finTabs, ...hrTabs];
   c.innerHTML = `
@@ -1288,6 +1288,7 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
   const content = document.getElementById('fin-content');
   switch(sub) {
     case 'Overview':     await renderFinanceOverview(content, currentUser, currentRole); break;
+    case 'Reports':      await renderFinancialReports(content, currentUser, currentRole); break;
     case 'Payroll':      await renderPayrollManagement(content, currentUser, currentRole); break;
     case 'Taxes':        await renderTaxesTab(content, currentUser, currentRole); break;
     case 'Ledger':       await renderLedgerTab(content, currentUser, currentRole); break;
@@ -1889,6 +1890,78 @@ async function renderTaxesTab(container, currentUser, currentRole) {
     });
   });
 }
+
+// ── Financial Reports (Income Statement + VAT/BIR reference) ─────
+// Computed from the ledger (type credit = income, debit = expense) + general
+// journal. Read-only summary for finance/admin; print-ready for filing.
+window.renderFinancialReports = async function(container, currentUser, currentRole, range='month') {
+  container.innerHTML = '<div class="loading-placeholder">Building report…</div>';
+  const [ledgerSnap, gjSnap] = await Promise.all([
+    db.collection('ledger').orderBy('date','desc').limit(3000).get().catch(()=>({docs:[]})),
+    db.collection('general_journal').orderBy('date','desc').limit(3000).get().catch(()=>({docs:[]}))
+  ]);
+  const led = ledgerSnap.docs.map(d=>d.data());
+  const gj  = gjSnap.docs.flatMap(d=>{ const e=d.data(); const rows=[];
+    if (e.debit)  rows.push({date:e.date, type:'debit',  amount:e.debit,  category:'Journal Entry'});
+    if (e.credit) rows.push({date:e.date, type:'credit', amount:e.credit, category:'Journal Entry'});
+    return rows; });
+  let all = [...led, ...gj];
+
+  const todayStr = bizDate(), yr = String(bizYear());
+  let label;
+  if (range==='month') { const m=todayStr.slice(0,7); all=all.filter(e=>(e.date||'').slice(0,7)===m); label='This Month — '+m; }
+  else if (range==='year') { all=all.filter(e=>(e.date||'').slice(0,4)===yr); label='Year to Date — '+yr; }
+  else { label='All Time'; }
+
+  const income  = all.filter(e=>e.type==='credit');
+  const expense = all.filter(e=>e.type==='debit');
+  const totIncome  = income.reduce((s,e)=>s+(e.amount||0),0);
+  const totExpense = expense.reduce((s,e)=>s+(e.amount||0),0);
+  const net = totIncome - totExpense;
+  const byCat = arr => { const m={}; arr.forEach(e=>{const k=e.category||'Other'; m[k]=(m[k]||0)+(e.amount||0);}); return Object.entries(m).sort((a,b)=>b[1]-a[1]); };
+  const incCats = byCat(income), expCats = byCat(expense);
+  const sales = income.filter(e=>(e.category||'')==='Sales Revenue').reduce((s,e)=>s+(e.amount||0),0);
+  const outputVat = sales * 0.12;            // VAT-exclusive assumption
+  const rangeBtn = (r,t)=>`<button class="subtab-btn ${range===r?'active':''}" onclick="renderFinancialReports(document.getElementById('fin-content'),window.currentUser,window.currentRole,'${r}')">${t}</button>`;
+
+  container.innerHTML = `
+    <div class="subtab-bar" style="margin-bottom:12px">${rangeBtn('month','This Month')}${rangeBtn('year','Year to Date')}${rangeBtn('all','All Time')}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-size:12px;color:var(--text-muted)">${label}</div>
+      <button class="btn-secondary btn-sm" onclick="window.print()">🖨 Print</button>
+    </div>
+    <div class="kpi-row" style="margin-bottom:14px">
+      <div class="kpi-card green"><div class="kpi-label">Total Income</div><div class="kpi-value">₱${fmt(totIncome)}</div></div>
+      <div class="kpi-card red"><div class="kpi-label">Total Expenses</div><div class="kpi-value">₱${fmt(totExpense)}</div></div>
+      <div class="kpi-card ${net>=0?'accent':'red'}"><div class="kpi-label">Net Income</div><div class="kpi-value">₱${fmt(net)}</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <div class="card-header"><h3>📈 Income Statement</h3></div>
+      <div class="card-body" style="padding:0"><div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Account / Category</th><th style="text-align:right">Amount</th></tr></thead>
+        <tbody>
+          <tr><td colspan="2" style="font-weight:800;color:var(--success);background:rgba(48,209,88,0.06)">INCOME</td></tr>
+          ${incCats.length?incCats.map(([k,v])=>`<tr><td style="padding-left:24px">${escHtml(k)}</td><td style="text-align:right">₱${fmt(v)}</td></tr>`).join(''):'<tr><td style="padding-left:24px;color:var(--text-muted)">No income recorded</td><td style="text-align:right">₱0.00</td></tr>'}
+          <tr><td style="font-weight:700">Total Income</td><td style="text-align:right;font-weight:700;color:var(--success)">₱${fmt(totIncome)}</td></tr>
+          <tr><td colspan="2" style="font-weight:800;color:var(--danger);background:rgba(255,69,58,0.06)">EXPENSES</td></tr>
+          ${expCats.length?expCats.map(([k,v])=>`<tr><td style="padding-left:24px">${escHtml(k)}</td><td style="text-align:right">₱${fmt(v)}</td></tr>`).join(''):'<tr><td style="padding-left:24px;color:var(--text-muted)">No expenses recorded</td><td style="text-align:right">₱0.00</td></tr>'}
+          <tr><td style="font-weight:700">Total Expenses</td><td style="text-align:right;font-weight:700;color:var(--danger)">₱${fmt(totExpense)}</td></tr>
+          <tr style="border-top:2px solid var(--border)"><td style="font-weight:800;font-size:14px">NET INCOME</td><td style="text-align:right;font-weight:800;font-size:14px;color:${net>=0?'var(--success)':'var(--danger)'}">₱${fmt(net)}</td></tr>
+        </tbody>
+      </table></div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h3>🧾 Tax / VAT Reference</h3></div>
+      <div class="card-body">
+        <div style="display:flex;justify-content:space-between;padding:6px 0"><span>Sales Revenue (VATable base)</span><strong>₱${fmt(sales)}</strong></div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border)"><span>Estimated Output VAT (12%)</span><strong>₱${fmt(outputVat)}</strong></div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5">⚠️ Estimate only — assumes VAT-exclusive sales and does not net input VAT on purchases. Confirm exact figures with your accountant before BIR filing. For official forms, attach BIR receipts via <em>Taxes</em>.</div>
+      </div>
+    </div>
+  `;
+};
 
 // ── Ledger Tab (includes merged General Journal entries) ─────
 async function renderLedgerTab(container, currentUser, currentRole) {

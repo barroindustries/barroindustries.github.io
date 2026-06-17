@@ -2860,14 +2860,8 @@ html.light .team-member-card:hover, html.theme-pink .team-member-card:hover, htm
 /* ── Subtab bar responsive (scrolls horizontally, no wrapping needed) ── */
 @media (max-width: 480px) {
   .subtab-btn { padding: 7px 10px; font-size: 12px; }
-  /* KPI values must fit large peso figures in half-width cards without clipping
-     (finance/payroll KPIs can be 6-7 digits). Scale with viewport, cap at 20px. */
-  .kpi-value {
-    font-size: clamp(15px, 4.6vw, 20px);
-    letter-spacing: -0.3px;
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-  }
+  /* .kpi-value currency-safe sizing is handled by the canonical clamp() rule
+     (search ".kpi-value" → "clamp"), which correctly wins by source order. */
 }
 
 /* ── Payroll table photo ────────────────────── */
@@ -3709,9 +3703,13 @@ html.light .ms-input, html.theme-pink .ms-input, html.theme-grey .ms-input { bac
 
 /* ── KPI cards — cleaner feel ── */
 .kpi-value {
-  font-size: 28px;
+  /* Responsive: 28px on desktop, scales down on phones so large peso figures
+     (6-7 digits) don't clip in half-width cards. tabular-nums keeps alignment. */
+  font-size: clamp(15px, 4.6vw, 28px);
   font-weight: 800;
-  letter-spacing: -0.8px;
+  letter-spacing: -0.6px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .kpi-label {
   font-size: 11px;
