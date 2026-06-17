@@ -1,12 +1,24 @@
 # Barro Industries Ops System — Roadmap & Handoff
 
-_Last updated: 2026-06-17 — current version **v9.4.48**, cache `bi-ops-v32`._
+_Last updated: 2026-06-17 — current version **v9.4.49+**, cache `bi-ops-v33+` (auto-bumped on commit)._
 This file is the running source of truth for what's done and what's left to make the app
 "fully functional to run the company remotely." Update it as work lands.
 
 ---
 
 ## ✅ DONE
+
+### V10 — Partner & Sales portal launch hardening (this push)
+- **Removed BK Packages** from Sales (subtab, quick-launch tool, and the package presets in the quote scope dropdown → replaced with One-Stop-Shop / Supply & Install / Supply Only / Fabrication Only / Custom).
+- **Baking category added** (9 categories now: cooking, prep & washing, refrigeration, **baking**, exhaust, fresh air, gas line, fire suppression, miscellaneous). 12 new SS304-specced baking products (BA-001…012) with size constants (rateW100/D100/H100), configurable spec options (gauge, tiers, drainboards…), `material` blocks (SS304 grade/gauge/finish), labor hours and lead times.
+- **Catalog → Firestore made additive.** New "⟳ Import new from catalog" button on the Product Database page adds any catalog items NOT already in Firestore (e.g. the Baking line) and merges new categories, **without** overwriting President edits. Seeder + import share one `catalogDocFromJson()` mapper that now carries specs/material/labor/leadtime/formula.
+- **Quote builder reads the rich fields from Firestore** (`specs`, `material`, `laborHours`, `leadTime`) — previously `specs` was hardcoded `[]`, so configurable options were lost. Baking tab added to the (hardcoded) category bar. Verified end-to-end: tab filters to 12 items, calc panel + size scaling + spec adders all render.
+- **Partner quote builder is Brilliant-Steel-only, no admin.** `?portal=partner` (set automatically for partner / Brilliant-only users) locks the company to Brilliant Steel, hides the company switcher, and removes the **Admin** (database) view and **Agent Copy** button. Internal cost view is kept (partner needs it for the 50/50).
+- **One-Stop-Shop branding** on Barro Kitchens quotes (print header subtitle: "Commercial Kitchen One-Stop-Shop • Design · Fabricate · Install").
+- **Print layout** — repeating column headers across pages (`thead{display:table-header-group}`) and no row/category-group splits (`page-break-inside:avoid`) for easier multi-page reading.
+- **Partner portal clarity** — added a 3-step "How your Brilliant Steel partner portal works" explainer on the partner dashboard (Build → Submit → Earn 50%), explicitly framing them as a **profit-sharing partner, not a commission agent**.
+- All V10 changes touch only already-ruled collections (`products`, `productMeta`) — no Firestore rules change needed.
+
 
 ### Critical fixes (production was broken at launch)
 - **Dashboard crash** — TDZ `ReferenceError` in `renderPresidentDashboard` (president + manager saw "Dashboard error"). Fixed.

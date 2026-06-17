@@ -36,6 +36,13 @@
       "icon": "\u2744\ufe0f"
     },
     {
+      "id": "baking",
+      "label": "Baking",
+      "code": "BA",
+      "color": "#D4A017",
+      "icon": "\ud83c\udf5e"
+    },
+    {
       "id": "exhaust_system",
       "label": "Exhaust System",
       "code": "EX",
@@ -3702,6 +3709,230 @@
       },
       "leadTime": "21-30 days",
       "notes": "Writing pad 500x330x120mm, backrest height 100mm. Government/school bid item.",
+      "unit": "pc"
+    },
+    {
+      "id": "BA-001",
+      "category": "baking",
+      "name": "SS Baker's Worktable",
+      "shortName": "Baker's Worktable",
+      "formulaType": "per_length",
+      "basePrice": 16000,
+      "defaultDimensions": { "W": 1500, "D": 700, "H": 850 },
+      "formula": { "baseLengthMm": 1500, "pricePerExtraMm": 9, "rateW100": 700, "rateD100": 550, "rateH100": 0 },
+      "material": { "grade": "SS304", "topGauge": "1.2mm", "bodyGauge": "0.9mm", "frame": "38mm SS square tube", "finish": "No.4 brushed" },
+      "specs": [
+        { "label": "Top Gauge", "options": ["1.2mm (std)", "1.5mm heavy-duty"], "default": "1.2mm (std)", "priceAdder": [0, 2500] },
+        { "label": "Undershelf", "options": ["None", "1 undershelf", "2 undershelves"], "default": "1 undershelf", "priceAdder": [-1800, 0, 1800] }
+      ],
+      "laborHours": { "fabrication": 7, "installation": 1, "teamSize": 2 },
+      "leadTime": "7-10 days",
+      "notes": "Full SS304. 1.2mm top, 0.9mm body, 38mm SS tubular legs with adjustable bullet feet. Marine-edge front, backsplash optional.",
+      "unit": "pc"
+    },
+    {
+      "id": "BA-002",
+      "category": "baking",
+      "name": "SS Dough Prep Table w/ Undershelf & Backsplash",
+      "shortName": "Dough Prep Table",
+      "formulaType": "per_length",
+      "basePrice": 18500,
+      "defaultDimensions": { "W": 1500, "D": 750, "H": 900 },
+      "formula": { "baseLengthMm": 1500, "pricePerExtraMm": 10, "rateW100": 800, "rateD100": 600, "rateH100": 0 },
+      "material": { "grade": "SS304", "topGauge": "1.2mm", "bodyGauge": "0.9mm", "frame": "38mm SS square tube", "finish": "No.4 brushed" },
+      "specs": [
+        { "label": "Backsplash", "options": ["100mm", "150mm", "None"], "default": "100mm", "priceAdder": [0, 600, -800] },
+        { "label": "Drawers", "options": ["None", "1 drawer", "2 drawers"], "default": "None", "priceAdder": [0, 3200, 6000] }
+      ],
+      "laborHours": { "fabrication": 9, "installation": 1, "teamSize": 2 },
+      "leadTime": "7-10 days",
+      "notes": "SS304 throughout. Integrated rear backsplash, full undershelf, reinforced top for kneading/rolling. Ideal for dough handling line.",
+      "unit": "pc"
+    },
+    {
+      "id": "BA-003",
+      "category": "baking",
+      "name": "SS Baking Tray / Pan Rack Trolley (15-Tier)",
+      "shortName": "Pan Rack Trolley 15T",
+      "formulaType": "configurable",
+      "basePrice": 12500,
+      "defaultDimensions": { "W": 470, "D": 650, "H": 1700 },
+      "formula": {},
+      "material": { "grade": "SS304", "bodyGauge": "1.0mm", "frame": "SS angle + round bar runners", "finish": "No.4 brushed", "casters": "4x 4-inch swivel, 2 with brake" },
+      "specs": [
+        { "label": "Tiers", "options": ["10-tier", "15-tier", "20-tier"], "default": "15-tier", "priceAdder": [-2500, 0, 3000] },
+        { "label": "Tray Size", "options": ["600x400", "450x650"], "default": "600x400", "priceAdder": [0, 0] }
+      ],
+      "laborHours": { "fabrication": 6, "installation": 0, "teamSize": 1 },
+      "leadTime": "7-10 days",
+      "notes": "SS304 mobile rack for baking sheets. Welded angle runners at 75mm pitch, heavy 4-inch casters (2 lockable). Knock-down option for shipping.",
+      "unit": "pc"
+    },
+    {
+      "id": "BA-004",
+      "category": "baking",
+      "name": "SS Double-Tier Bread Cooling Rack",
+      "shortName": "Bread Cooling Rack",
+      "formulaType": "per_length",
+      "basePrice": 14000,
+      "defaultDimensions": { "W": 1200, "D": 600, "H": 1500 },
+      "formula": { "baseLengthMm": 1200, "pricePerExtraMm": 8, "rateW100": 650, "rateD100": 450, "rateH100": 0 },
+      "material": { "grade": "SS304", "frame": "38mm SS square tube", "shelves": "SS wire / perforated", "finish": "No.4 brushed" },
+      "specs": [
+        { "label": "Shelf Type", "options": ["Wire shelf", "Perforated sheet"], "default": "Wire shelf", "priceAdder": [0, 1500] },
+        { "label": "Casters", "options": ["Adjustable feet", "Casters w/ brake"], "default": "Casters w/ brake", "priceAdder": [-900, 0] }
+      ],
+      "laborHours": { "fabrication": 7, "installation": 1, "teamSize": 2 },
+      "leadTime": "7-10 days",
+      "notes": "SS304 ventilated cooling rack for loaves and pastries. Open wire shelves for airflow, mobile on lockable casters.",
+      "unit": "pc"
+    },
+    {
+      "id": "BA-005",
+      "category": "baking",
+      "name": "SS Heavy-Duty Deck Oven Stand",
+      "shortName": "Deck Oven Stand",
+      "formulaType": "per_length",
+      "basePrice": 22000,
+      "defaultDimensions": { "W": 1300, "D": 1000, "H": 700 },
+      "formula": { "baseLengthMm": 1300, "pricePerExtraMm": 14, "rateW100": 1100, "rateD100": 800, "rateH100": 300 },
+      "material": { "grade": "SS304", "topGauge": "1.5mm", "frame": "50mm SS box tube", "finish": "No.4 brushed", "loadRating": "up to 600kg" },
+      "specs": [
+        { "label": "Proofer Slots", "options": ["None", "8-tray slot", "16-tray slot"], "default": "8-tray slot", "priceAdder": [-2000, 0, 3500] }
+      ],
+      "laborHours": { "fabrication": 12, "installation": 2, "teamSize": 2 },
+      "leadTime": "10-14 days",
+      "notes": "Reinforced SS304 stand for stacking deck ovens. 50mm box-tube frame, cross-braced, 1.5mm top. Integrated tray-slot proofer base optional.",
+      "unit": "pc"
+    },
+    {
+      "id": "BA-006",
+      "category": "baking",
+      "name": "SS Dough Proofing Cabinet (16-Tray, Insulated)",
+      "shortName": "Proofing Cabinet 16T",
+      "formulaType": "configurable",
+      "basePrice": 48000,
+      "defaultDimensions": { "W": 700, "D": 800, "H": 1850 },
+      "formula": {},
+      "material": { "grade": "SS304", "panel": "double-wall insulated", "bodyGauge": "0.9mm", "finish": "No.4 brushed", "controls": "humidity + thermostat" },
+      "specs": [
+        { "label": "Capacity", "options": ["16-tray", "24-tray (double door)"], "default": "16-tray", "priceAdder": [0, 22000] },
+        { "label": "Humidity", "options": ["Manual water tray", "Auto humidifier"], "default": "Manual water tray", "priceAdder": [0, 9500] }
+      ],
+      "laborHours": { "fabrication": 22, "installation": 2, "teamSize": 2 },
+      "leadTime": "14-21 days",
+      "notes": "Insulated SS304 proofer. Double-wall body, magnetic gasket door, thermostat + humidity tray, electric heating element. 600x400 tray pitch.",
+      "unit": "pc"
+    },
+    {
+      "id": "BA-007",
+      "category": "baking",
+      "name": "SS Mobile Flour / Ingredient Storage Bin",
+      "shortName": "Ingredient Bin",
+      "formulaType": "fixed",
+      "basePrice": 9500,
+      "defaultDimensions": { "W": 500, "D": 600, "H": 700 },
+      "formula": {},
+      "material": { "grade": "SS304", "bodyGauge": "1.0mm", "lid": "hinged SS", "finish": "No.4 brushed", "casters": "4x 3-inch swivel" },
+      "specs": [
+        { "label": "Capacity", "options": ["60L", "100L", "150L"], "default": "100L", "priceAdder": [-1500, 0, 2000] }
+      ],
+      "laborHours": { "fabrication": 5, "installation": 0, "teamSize": 1 },
+      "leadTime": "7-10 days",
+      "notes": "Food-grade SS304 mobile bin for flour/sugar. Hinged dust lid, sloped base for scooping, swivel casters. Optional graduated scoop.",
+      "unit": "pc"
+    },
+    {
+      "id": "BA-008",
+      "category": "baking",
+      "name": "SS304 Baking Sheet Pan (600 x 400)",
+      "shortName": "Baking Sheet Pan",
+      "formulaType": "fixed",
+      "basePrice": 850,
+      "defaultDimensions": { "W": 600, "D": 400, "H": 30 },
+      "formula": {},
+      "material": { "grade": "SS304", "gauge": "0.8mm", "edge": "rolled wire-reinforced", "finish": "No.4 brushed" },
+      "specs": [
+        { "label": "Gauge", "options": ["0.8mm", "1.0mm"], "default": "0.8mm", "priceAdder": [0, 180] },
+        { "label": "Perforation", "options": ["Solid", "Perforated"], "default": "Solid", "priceAdder": [0, 220] }
+      ],
+      "laborHours": { "fabrication": 1, "installation": 0, "teamSize": 1 },
+      "leadTime": "5-7 days",
+      "notes": "SS304 sheet/tray, 600x400mm GN-compatible. Rolled reinforced edges. Sold per piece; volume pricing for full-rack sets.",
+      "unit": "pc"
+    },
+    {
+      "id": "BA-009",
+      "category": "baking",
+      "name": "SS Spiral / Dough Mixer Stand & Worktable",
+      "shortName": "Mixer Stand & Table",
+      "formulaType": "per_length",
+      "basePrice": 17500,
+      "defaultDimensions": { "W": 1400, "D": 750, "H": 850 },
+      "formula": { "baseLengthMm": 1400, "pricePerExtraMm": 11, "rateW100": 850, "rateD100": 600, "rateH100": 0 },
+      "material": { "grade": "SS304", "topGauge": "1.5mm", "frame": "50mm SS box tube", "finish": "No.4 brushed", "loadRating": "reinforced for mixer" },
+      "specs": [
+        { "label": "Mixer Cutout", "options": ["No cutout", "Recessed mixer well"], "default": "No cutout", "priceAdder": [0, 3500] }
+      ],
+      "laborHours": { "fabrication": 10, "installation": 1, "teamSize": 2 },
+      "leadTime": "10-14 days",
+      "notes": "Reinforced SS304 worktable/stand for dough mixers. 1.5mm top, 50mm box frame, anti-vibration feet. Optional recessed mixer well.",
+      "unit": "pc"
+    },
+    {
+      "id": "BA-010",
+      "category": "baking",
+      "name": "SS Bread Slicing & Packing Table",
+      "shortName": "Slicing & Packing Table",
+      "formulaType": "per_length",
+      "basePrice": 19000,
+      "defaultDimensions": { "W": 1600, "D": 700, "H": 900 },
+      "formula": { "baseLengthMm": 1600, "pricePerExtraMm": 10, "rateW100": 800, "rateD100": 550, "rateH100": 0 },
+      "material": { "grade": "SS304", "topGauge": "1.2mm", "bodyGauge": "0.9mm", "frame": "38mm SS square tube", "finish": "No.4 brushed" },
+      "specs": [
+        { "label": "Overshelf", "options": ["None", "Single overshelf"], "default": "None", "priceAdder": [0, 3000] },
+        { "label": "Crumb Tray", "options": ["None", "Pull-out crumb tray"], "default": "Pull-out crumb tray", "priceAdder": [-1200, 0] }
+      ],
+      "laborHours": { "fabrication": 9, "installation": 1, "teamSize": 2 },
+      "leadTime": "7-10 days",
+      "notes": "SS304 finishing table for slicing and bagging. Pull-out crumb tray, undershelf, optional overshelf for packaging supplies.",
+      "unit": "pc"
+    },
+    {
+      "id": "BA-011",
+      "category": "baking",
+      "name": "SS Proofer-Retarder Cabinet (Twin-Door)",
+      "shortName": "Proofer-Retarder",
+      "formulaType": "fixed",
+      "basePrice": 65000,
+      "defaultDimensions": { "W": 1400, "D": 800, "H": 1950 },
+      "formula": {},
+      "material": { "grade": "SS304", "panel": "double-wall insulated", "bodyGauge": "0.9mm", "finish": "No.4 brushed", "controls": "digital temp + humidity, retard cycle" },
+      "specs": [
+        { "label": "Doors", "options": ["Twin solid door", "Twin glass door"], "default": "Twin solid door", "priceAdder": [0, 8000] }
+      ],
+      "laborHours": { "fabrication": 30, "installation": 3, "teamSize": 2 },
+      "leadTime": "21-30 days",
+      "notes": "Insulated SS304 proofer-retarder. Digital controls for retard then proof, twin doors, 2x 16-tray capacity. Refrigeration unit supplied by partner.",
+      "unit": "pc"
+    },
+    {
+      "id": "BA-012",
+      "category": "baking",
+      "name": "SS Pot & Pan Washing Sink — 2 Compartment (Bakery)",
+      "shortName": "Bakery Wash Sink 2C",
+      "formulaType": "per_length",
+      "basePrice": 24000,
+      "defaultDimensions": { "W": 1800, "D": 700, "H": 900 },
+      "formula": { "baseLengthMm": 1800, "pricePerExtraMm": 12, "rateW100": 900, "rateD100": 600, "rateH100": 0 },
+      "material": { "grade": "SS304", "topGauge": "1.2mm", "bodyGauge": "1.0mm", "bowlDepth": "350mm", "finish": "No.4 brushed" },
+      "specs": [
+        { "label": "Drainboards", "options": ["1 side", "Both sides"], "default": "1 side", "priceAdder": [0, 3500] },
+        { "label": "Faucet", "options": ["Gooseneck", "Pre-rinse spray"], "default": "Pre-rinse spray", "priceAdder": [0, 4500] }
+      ],
+      "laborHours": { "fabrication": 12, "installation": 2, "teamSize": 2 },
+      "leadTime": "10-14 days",
+      "notes": "Heavy SS304 2-compartment wash sink for trays/pans. 350mm deep bowls, integrated drainboard, undershelf, pre-rinse spray option.",
       "unit": "pc"
     }
   ],

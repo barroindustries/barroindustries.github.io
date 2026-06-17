@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '9.4.49';
+window.APP_VERSION = '9.4.50';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -78,7 +78,7 @@ window.DEPARTMENTS = {
   },
   'Sales': {
     key: 'Sales', icon: '🤝', color: '#e65100',
-    subtabs: ['BK Quotes', 'Quotations', 'BK Packages', 'Clients', 'Work Plans', 'Proposals'], navOrder: 3
+    subtabs: ['BK Quotes', 'Quotations', 'Clients', 'Work Plans', 'Proposals'], navOrder: 3
   },
   'Marketing': {
     key: 'Marketing', icon: '📢', color: '#880e4f',

@@ -903,8 +903,13 @@ function renderQuoteBuilderIframe() {
   host.style.cssText = 'position:fixed;inset:0;z-index:5000;background:#f5f6fa;';
   // Compact icon Back, top-right so it never covers the builder's own title /
   // controls (which live top-left). The builder has its own Print/PDF/Share.
+  // Partners / Brilliant-Steel-only users get a locked-down builder:
+  // Brilliant Steel company only, no Admin (database) controls.
+  const partnerMode = (typeof isPartner === 'function' && isPartner()) ||
+                      (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
+  const qbSrc = 'quote-builder-v2.html' + (partnerMode ? '?portal=partner' : '');
   host.innerHTML = `
-    <iframe id="qb-frame" src="quote-builder-v2.html"
+    <iframe id="qb-frame" src="${qbSrc}"
       style="position:absolute;inset:0;width:100%;height:100%;border:none;background:#f5f6fa"
       allow="print"></iframe>
     <button id="qb-back" title="Back to app" aria-label="Back to app"
@@ -924,31 +929,52 @@ function renderQuoteBuilderIframe() {
 // under a legacy schema — those are left untouched and just display via the
 // legacy-field fallback in normalizeProduct() below, migrating to the new
 // schema automatically the next time someone edits and saves them.
+// Build a Firestore product doc from a products-database.json entry. Carries the
+// rich fields (specs config, SS304 material, labor hours, lead time, formula) so
+// the quote builder can price + describe accurately. Material spec is folded into
+// the specifications string so it surfaces in the editor and on quotes.
+function catalogDocFromJson(p) {
+  const m = p.material || null;
+  const matLine = m ? ('Material: ' + [m.grade, m.topGauge && ('top ' + m.topGauge), m.bodyGauge && ('body ' + m.bodyGauge), m.finish].filter(Boolean).join(', ')) : '';
+  const specifications = [p.notes || '', matLine].filter(Boolean).join(' · ');
+  return {
+    title: p.name,
+    category: p.category,
+    unit: p.unit || 'unit',
+    basePrice: p.basePrice || 0,
+    measurement: p.defaultDimensions || {},
+    specifications,
+    material: m || null,
+    specs: Array.isArray(p.specs) ? p.specs : [],
+    laborHours: p.laborHours || null,
+    leadTime: p.leadTime || '',
+    capitalMaterials: 0,
+    capitalLabor: 0,
+    formulaType: p.formulaType || 'fixed',
+    formula: p.formula || {},
+  };
+}
+
+// Fetch + parse products-database.json (strips JS-style comments first).
+async function fetchCatalogFile() {
+  const r = await fetch('products-database.json?v=' + Date.now());
+  const text = await r.text();
+  const clean = text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  return JSON.parse(clean);
+}
+
 async function seedCatalogIfNeeded() {
   const metaSnap = await db.collection('productMeta').doc('config').get();
   if (metaSnap.exists) return;
   try {
-    const r = await fetch('products-database.json?v=' + Date.now());
-    const text = await r.text();
-    const clean = text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
-    const seedDb = JSON.parse(clean);
+    const seedDb = await fetchCatalogFile();
     const existing = await db.collection('products').limit(1000).get();
     const existingIds = new Set(existing.docs.map(d => d.id));
     const batch = db.batch();
     seedDb.products.forEach(p => {
       if (existingIds.has(p.id)) return; // never overwrite an existing doc
-      const ref = db.collection('products').doc(p.id);
-      batch.set(ref, {
-        title: p.name,
-        category: p.category,
-        unit: p.unit || 'unit',
-        basePrice: p.basePrice || 0,
-        measurement: p.defaultDimensions || {},
-        specifications: p.notes || '',
-        capitalMaterials: 0,
-        capitalLabor: 0,
-        formulaType: p.formulaType || 'fixed',
-        formula: p.formula || {},
+      batch.set(db.collection('products').doc(p.id), {
+        ...catalogDocFromJson(p),
         createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       });
     });
@@ -961,6 +987,42 @@ async function seedCatalogIfNeeded() {
   } catch (e) {
     console.warn('[products] seed from products-database.json failed', e);
   }
+}
+
+// Additive import — adds any catalog products NOT already in Firestore (by id)
+// and merges any new categories into productMeta. Never overwrites existing
+// product docs, so President edits are preserved. Returns # of products added.
+async function importNewCatalogItems() {
+  const fileDb = await fetchCatalogFile();
+  const [existing, metaSnap] = await Promise.all([
+    db.collection('products').limit(2000).get(),
+    db.collection('productMeta').doc('config').get(),
+  ]);
+  const existingIds = new Set(existing.docs.map(d => d.id));
+  const toAdd = (fileDb.products || []).filter(p => !existingIds.has(p.id));
+
+  // Merge categories (existing first, append any new ids from the file)
+  const meta = metaSnap.exists ? metaSnap.data() : {};
+  const cats = [...(meta.categories || [])];
+  const haveCat = new Set(cats.map(c => c.id));
+  (fileDb.categories || []).forEach(c => { if (!haveCat.has(c.id)) { cats.push(c); haveCat.add(c.id); } });
+
+  // Firestore batches cap at 500 writes — chunk to be safe.
+  for (let i = 0; i < toAdd.length; i += 400) {
+    const batch = db.batch();
+    toAdd.slice(i, i + 400).forEach(p => {
+      batch.set(db.collection('products').doc(p.id), {
+        ...catalogDocFromJson(p),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+    });
+    await batch.commit();
+  }
+  await db.collection('productMeta').doc('config').set(
+    { categories: cats, laborRoles: fileDb.laborRoles || meta.laborRoles || [], constants: { ...(meta.constants || {}), ...(fileDb.constants || {}) } },
+    { merge: true }
+  );
+  return toAdd.length;
 }
 
 function pdbCategoryLabel(catId, categories) {
@@ -1044,7 +1106,10 @@ async function renderProductDatabase() {
   c.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
       <h2 style="font-size:20px;font-weight:800;color:var(--text)">📦 Product Database</h2>
-      <button class="btn-primary btn-sm" id="pdb-add-btn">+ Add Product</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn-secondary btn-sm" id="pdb-import-btn" title="Add any new items from products-database.json (e.g. the Baking line). Never overwrites your edits.">⟳ Import new from catalog</button>
+        <button class="btn-primary btn-sm" id="pdb-add-btn">+ Add Product</button>
+      </div>
     </div>
 
     <div id="pdb-add-form" style="display:none" class="card" style="margin-bottom:16px">
@@ -1119,6 +1184,23 @@ async function renderProductDatabase() {
     document.getElementById('pdb-add-form').style.display = '';
     document.getElementById('pdb-add-btn').style.display = 'none';
     wireForm('pdb-f');
+  });
+
+  // Import any new catalog items (e.g. the Baking line) from products-database.json
+  document.getElementById('pdb-import-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('pdb-import-btn');
+    if (!confirm('Import any new products from the catalog file?\n\nThis ADDS items not already in your database (and merges new categories like Baking). It never overwrites or deletes your existing edits.')) return;
+    btn.disabled = true; btn.textContent = 'Importing…';
+    try {
+      const added = await importNewCatalogItems();
+      dbCacheInvalidate && dbCacheInvalidate('products');
+      Notifs.showToast(added ? `Imported ${added} new product${added !== 1 ? 's' : ''}` : 'Already up to date — nothing new to import', 'success');
+      renderProductDatabase();
+    } catch (e) {
+      console.warn('[products] import failed', e);
+      Notifs.showToast('Import failed — check connection and try again', 'error');
+      btn.disabled = false; btn.textContent = '⟳ Import new from catalog';
+    }
   });
   document.getElementById('pdb-cancel-btn').addEventListener('click', () => {
     renderProductDatabase();
@@ -1313,6 +1395,17 @@ async function renderPartnerDashboard() {
   c.innerHTML = `
     <div class="page-header"><h2>👋 Welcome, ${escHtml((u.displayName||'Partner').split(' ')[0])}!</h2></div>
     <div id="live-clock" class="live-clock-line"></div>
+    <div class="card" style="margin-bottom:14px;border:1.5px solid var(--primary);background:linear-gradient(135deg,rgba(10,132,255,.06),transparent)">
+      <div class="card-body">
+        <div style="font-size:14px;font-weight:800;margin-bottom:8px">🤝 How your Brilliant Steel partner portal works</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+          <div style="font-size:12px"><div style="font-size:18px">①</div><strong>Build a quote</strong><br><span style="color:var(--text-muted)">Use the Quote Builder — it's pre-set to Brilliant Steel pricing.</span></div>
+          <div style="font-size:12px"><div style="font-size:18px">②</div><strong>Submit for review</strong><br><span style="color:var(--text-muted)">Verify &amp; file your quote. Barro reviews and approves it with you.</span></div>
+          <div style="font-size:12px"><div style="font-size:18px">③</div><strong>Earn your 50%</strong><br><span style="color:var(--text-muted)">On every closed collaborative project, profit is split <strong>50/50</strong> — tracked below.</span></div>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:8px;border-top:1px solid var(--border);padding-top:8px">You're a profit-sharing partner — not a commission agent. This portal is just for our shared steel projects.</div>
+      </div>
+    </div>
     <div id="partner-kpi"></div>
     <div id="partner-earnings-card"></div>
     <div id="partner-cards-row" style="display:flex;flex-direction:column;gap:14px">

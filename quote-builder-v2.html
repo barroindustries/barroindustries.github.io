@@ -329,7 +329,10 @@ tr:hover td{background:#fafbff;}
   th{padding:3px 6px;font-size:8pt;background:#1E3A5F!important;color:#fff!important;}
   td{padding:2.5px 6px;font-size:8.5pt;}
   .items-table{table-layout:fixed!important;width:100%!important;}
-  .cat-row td{padding:2.5px 6px;font-size:7.5pt;background:#D6E4F0!important;color:#1E3A5F!important;}
+  /* repeat column headers on every printed page; keep rows + category groups intact */
+  thead{display:table-header-group;}
+  tr,.cat-row,.subtotal-row{page-break-inside:avoid;break-inside:avoid;}
+  .cat-row td{padding:2.5px 6px;font-size:7.5pt;background:#D6E4F0!important;color:#1E3A5F!important;font-weight:700;}
   .subtotal-row td{padding:2.5px 6px;font-size:8pt;background:#f0f4ff!important;}
   /* hide editable form controls — render values as plain text in print */
   .cell-num,.cell-unit,.lead-in{border:none!important;background:transparent!important;
@@ -571,6 +574,7 @@ tr:hover td{background:#fafbff;}
     <button class="cat-tab" onclick="filterCat('cooking_line',this)" id="tabCooking">🔥 Cooking Line</button>
     <button class="cat-tab" onclick="filterCat('prep_washing',this)" id="tabPrep">🧼 Prep &amp; Washing</button>
     <button class="cat-tab" onclick="filterCat('refrigeration',this)" id="tabRef">❄️ Refrigeration</button>
+    <button class="cat-tab" onclick="filterCat('baking',this)" id="tabBaking">🍞 Baking</button>
     <button class="cat-tab" onclick="filterCat('exhaust_system',this)" id="tabExhaust">💨 Exhaust</button>
     <button class="cat-tab" onclick="filterCat('fresh_air_system',this)" id="tabFreshAir">🌬️ Fresh Air</button>
     <button class="cat-tab" onclick="filterCat('gas_line',this)" id="tabGas">⛽ Gas Line</button>
@@ -876,7 +880,7 @@ tr:hover td{background:#fafbff;}
 //  COMPANY CONFIG
 // ═══════════════════════════════════════════════════════════════════
 const CO = {
-  BK:{name:'BARRO KITCHENS',sub:'by Barro Industries OPC',
+  BK:{name:'BARRO KITCHENS',sub:'Commercial Kitchen One-Stop-Shop  •  Design · Fabricate · Install  •  by Barro Industries OPC',
     addr:'La Union  |  Baguio City  |  Manila',contact:'09276836300  |  hello@barroindustries.com',
     sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'},nav:'BARRO <span>KITCHENS</span>',code:'BK',
     thanks:'Thank you for considering Barro Kitchens. We look forward to building a kitchen you can rely on for years.',
@@ -938,13 +942,14 @@ async function loadDatabase() {
           shortName: p.title || p.name || '',
           formulaType: p.formulaType || 'fixed',
           basePrice: p.basePrice ?? p.baseRate ?? 0,
-          defaultDimensions: p.measurement || {},
+          defaultDimensions: p.measurement || p.defaultDimensions || {},
           formula: p.formula || {},
-          specs: [],
+          specs: Array.isArray(p.specs) ? p.specs : [],
+          material: p.material || null,
           capitalMaterials: p.capitalMaterials || 0,
           capitalLabor: p.capitalLabor || 0,
-          laborHours: null,
-          leadTime: '',
+          laborHours: p.laborHours || null,
+          leadTime: p.leadTime || '',
           notes: p.specifications || p.notes || '',
           unit: p.unit || 'pc',
         };
@@ -990,11 +995,28 @@ function setStatus(type, msg){
 // ═══════════════════════════════════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════════════════════════════════
+// Partner portal mode (?portal=partner): Brilliant Steel only, no Admin controls.
+const PARTNER_MODE = new URLSearchParams(location.search).get('portal') === 'partner';
+function applyPartnerMode(){
+  if(!PARTNER_MODE) return;
+  // Lock company to Brilliant Steel and hide the company switcher
+  const coBK=document.getElementById('coBK'); if(coBK) coBK.parentElement.style.display='none';
+  // Remove the Admin (database) view button entirely
+  document.getElementById('btnAdmin')?.remove();
+  // 'Agent Copy' is a sales-agent commission concept — not relevant to a 50/50 profit partner
+  document.getElementById('btnAgentPrint')?.remove();
+  // If the Admin panel was open, fall back to client view
+  if(typeof currentView!=='undefined' && currentView==='admin') setView('client');
+}
+
 document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('quoteDate').value = new Date().toISOString().split('T')[0];
-  setCompany('BK');
+  setCompany(PARTNER_MODE ? 'BS' : 'BK');
+  applyPartnerMode();
   renderTerms();
   loadFromStorage();
+  // Partner portal is Brilliant Steel only — re-assert after restoring any saved draft.
+  if(PARTNER_MODE) setCompany('BS');
   // Default the project start basis to the quote date if not already set
   const ps=document.getElementById('projStart');
   if(ps && !ps.value) ps.value=document.getElementById('quoteDate').value;

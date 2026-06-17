@@ -3244,7 +3244,6 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
   const tools = [
     { icon:'📝', label:'BK Quotes',     sub:'BK Quotes'  },
     { icon:'📊', label:'Quotations',    sub:'Quotations' },
-    { icon:'📦', label:'BK Packages',   sub:'BK Packages'},
     { icon:'👤', label:'Clients',       sub:'Clients'    },
     { icon:'📋', label:'Work Plans',    sub:'Work Plans' },
     { icon:'📄', label:'Proposals',     sub:'Proposals'  },
@@ -3265,7 +3264,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
         </button>`).join('')}
     </div>
     <div class="subtab-bar">
-      ${['BK Quotes','Quotations','BK Packages','Clients','Work Plans','Proposals','Tasks'].map(s =>
+      ${['BK Quotes','Quotations','Clients','Work Plans','Proposals','Tasks'].map(s =>
         `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
       ).join('')}
     </div>
@@ -3317,9 +3316,6 @@ async function loadSalesContent(currentUser, currentRole, sub) {
       break;
     case 'Quotations':
       renderBKQuotationsSummary(content, currentUser, currentRole);
-      break;
-    case 'BK Packages':
-      renderBKPackages(content, currentUser, currentRole);
       break;
     case 'Clients':
       await renderClientProfiles(content, currentUser, currentRole, 'barro');
@@ -3432,9 +3428,9 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
     </div>
     <div class="form-row">
       <div class="form-group"><label>Client Address</label><input id="bkq-address" value="${escHtml(existing?.clientAddress||'')}"/></div>
-      <div class="form-group"><label>Scope / Package</label>
+      <div class="form-group"><label>Scope of Work</label>
         <select id="bkq-scope" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-          ${['Custom Quote','Basic Kitchen Package','Standard Kitchen Package','Premium Kitchen Package','Full Kitchen Remodel','Commercial Kitchen','Supply Only'].map(s=>`<option ${s===(existing?.scope||'Custom Quote')?'selected':''}>${s}</option>`).join('')}
+          ${['One-Stop-Shop (Design • Fabricate • Install)','Supply & Install','Supply Only','Fabrication Only','Custom Quote'].map(s=>`<option ${s===(existing?.scope||'One-Stop-Shop (Design • Fabricate • Install)')?'selected':''}>${s}</option>`).join('')}
         </select>
       </div>
     </div>
@@ -3627,7 +3623,7 @@ function printBKQuote(lines, q) {
       <div class="q-no">Quote ${q.quoteNumber}</div>
       <div>Date: ${q.date}</div>
       <div>Valid Until: ${q.validUntil||'—'}</div>
-      ${q.scope!=='Custom Quote'?`<div>Package: <strong>${q.scope}</strong></div>`:''}
+      ${q.scope&&q.scope!=='Custom Quote'?`<div>Scope: <strong>${escHtml(q.scope)}</strong></div>`:''}
     </div>
   </div>
   <div class="client-box">
