@@ -1087,7 +1087,13 @@ async function renderProductDatabase() {
     <div class="form-group" id="${prefix}-newcat-wrap" style="display:none"><label>New Category Name</label><input type="text" id="${prefix}-newcat" placeholder="Category name"></div>
     <div class="form-group"><label>Unit</label><input type="text" id="${prefix}-unit" placeholder="unit / sqm / lot" value="${escHtml(p.unit||'')}"></div>
     <div class="form-group"><label>Price (₱)</label><input type="number" id="${prefix}-price" placeholder="0.00" min="0" step="0.01" value="${p.basePrice||''}"></div>
-    <div class="form-group"><label>Capital — Materials (₱)</label><input type="number" id="${prefix}-capmat" placeholder="0.00" min="0" step="0.01" value="${p.capitalMaterials||''}"></div>
+    <div class="form-group"><label>Capital — Materials (₱)</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="number" id="${prefix}-capmat" placeholder="0.00" min="0" step="0.01" value="${p.capitalMaterials||''}" style="flex:1">
+        <button type="button" class="btn-secondary btn-sm pdb-bom-btn" data-prefix="${prefix}" data-bom="${encodeURIComponent(JSON.stringify(p.bom||[]))}" title="Build from raw-material prices in Inventory">🧮 BOM</button>
+      </div>
+      <div id="${prefix}-bom-note" style="font-size:11px;color:var(--text-muted);margin-top:3px">${(p.bom&&p.bom.length)?`${p.bom.length} material line(s) linked to inventory`:''}</div>
+    </div>
     <div class="form-group"><label>Capital — Labor (₱)</label><input type="number" id="${prefix}-caplab" placeholder="0.00" min="0" step="0.01" value="${p.capitalLabor||''}"></div>
     <div class="form-group"><label>Measurement — Width (mm)</label><input type="number" id="${prefix}-w" min="0" value="${p.measurement?.W||''}"></div>
     <div class="form-group"><label>Measurement — Depth (mm)</label><input type="number" id="${prefix}-d" min="0" value="${p.measurement?.D||''}"></div>
@@ -1206,6 +1212,9 @@ async function renderProductDatabase() {
     renderProductDatabase();
   });
 
+  // Bill-of-materials per open form (keyed by prefix), set when a BOM is applied.
+  const pdbBom = {};
+
   async function collectAndSaveProduct(existingId, prefix = 'pdb-f') {
     const title   = document.getElementById(`${prefix}-title`).value.trim();
     const code    = (document.getElementById(`${prefix}-code`).value.trim() || existingId || '').toUpperCase();
@@ -1228,13 +1237,92 @@ async function renderProductDatabase() {
       : formulaType === 'per_area' ? { pricePerSqm: coef }
       : {};
 
+    // Preserve / persist the bill-of-materials. Use the version applied this
+    // session if any, otherwise the one carried on the BOM button (original).
+    let bom = pdbBom[prefix];
+    if (bom === undefined) {
+      const btn = document.querySelector(`.pdb-bom-btn[data-prefix="${prefix}"]`);
+      try { bom = btn ? JSON.parse(decodeURIComponent(btn.dataset.bom || '[]')) : []; }
+      catch (_) { bom = []; }
+    }
+
     await db.collection('products').doc(code).set({
       title, category, unit, basePrice, capitalMaterials, capitalLabor,
-      measurement, specifications, formulaType, formula,
+      measurement, specifications, formulaType, formula, bom: bom || [],
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       ...(existingId ? {} : { createdAt: firebase.firestore.FieldValue.serverTimestamp() }),
     }, { merge: true });
     return true;
+  }
+
+  // ── Bill-of-Materials modal — compute Materials capital from Inventory ──
+  // Loads raw materials from inventory_items; each line = qty × live unit cost.
+  // Re-applying re-prices against current inventory, so a steel-price change in
+  // Inventory flows into the product's material cost the next time it's applied.
+  async function openBomModal(prefix, existingBom) {
+    const target = document.getElementById(`${prefix}-capmat`);
+    if (!target) return;
+    openModal('🧮 Materials from Inventory', '<div class="loading-placeholder" style="padding:24px">Loading raw materials…</div>',
+      '<button class="btn-primary" id="bom-apply">Apply to Materials Cost</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>');
+    const snap = await db.collection('inventory_items').orderBy('name').get().catch(() => ({ docs: [] }));
+    const mats = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(i => (i.kind || 'material') === 'material');
+    const qtyById = {};
+    (existingBom || []).forEach(l => { qtyById[l.itemId] = l.qty; });
+
+    const body = document.getElementById('modal-body') || document.querySelector('.modal-body');
+    if (!mats.length) {
+      if (body) body.innerHTML = `<div class="empty-state" style="padding:20px"><div class="empty-icon">📦</div><h4>No raw materials in Inventory</h4><p>Add raw materials (with unit cost) in the Inventory module first, then build a BOM here.</p></div>`;
+      return;
+    }
+    const rows = mats.map(m => `
+      <tr>
+        <td style="font-weight:600">${escHtml(m.name || '—')}<div style="font-size:11px;color:var(--text-muted)">₱${Number(m.unitCost||0).toLocaleString('en-PH',{minimumFractionDigits:2})} / ${escHtml(m.unit||'unit')}</div></td>
+        <td style="width:90px"><input type="number" min="0" step="0.01" class="bom-qty" data-id="${m.id}" data-cost="${m.unitCost||0}" data-name="${escHtml(m.name||'')}" data-unit="${escHtml(m.unit||'')}" value="${qtyById[m.id]||''}" placeholder="0" style="width:100%;padding:5px;text-align:center"></td>
+        <td class="bom-line-total" style="text-align:right;width:90px">₱0.00</td>
+      </tr>`).join('');
+    if (body) body.innerHTML = `
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Enter the quantity of each raw material used per unit. Line cost = qty × current Inventory unit price.</div>
+      <div class="table-wrap" style="max-height:46vh;overflow:auto"><table class="data-table">
+        <thead><tr><th>Material (unit price)</th><th>Qty</th><th style="text-align:right">Line ₱</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-weight:700;border-top:2px solid var(--border);padding-top:10px">
+        <span>Total Materials Cost</span><span id="bom-total" style="font-size:16px">₱0.00</span>
+      </div>`;
+
+    const recompute = () => {
+      let total = 0;
+      body.querySelectorAll('.bom-qty').forEach(inp => {
+        const q = parseFloat(inp.value) || 0;
+        const cost = parseFloat(inp.dataset.cost) || 0;
+        const line = q * cost;
+        total += line;
+        inp.closest('tr').querySelector('.bom-line-total').textContent = '₱' + line.toLocaleString('en-PH', { minimumFractionDigits: 2 });
+      });
+      const tEl = document.getElementById('bom-total');
+      if (tEl) tEl.textContent = '₱' + total.toLocaleString('en-PH', { minimumFractionDigits: 2 });
+      return total;
+    };
+    body.querySelectorAll('.bom-qty').forEach(inp => inp.addEventListener('input', recompute));
+    recompute();
+
+    document.getElementById('bom-apply').addEventListener('click', () => {
+      const lines = [];
+      let total = 0;
+      body.querySelectorAll('.bom-qty').forEach(inp => {
+        const q = parseFloat(inp.value) || 0;
+        if (q <= 0) return;
+        const cost = parseFloat(inp.dataset.cost) || 0;
+        total += q * cost;
+        lines.push({ itemId: inp.dataset.id, name: inp.dataset.name, unit: inp.dataset.unit, unitCost: cost, qty: q });
+      });
+      pdbBom[prefix] = lines;
+      target.value = total ? total.toFixed(2) : '';
+      const note = document.getElementById(`${prefix}-bom-note`);
+      if (note) note.textContent = lines.length ? `${lines.length} material line(s) linked to inventory · ₱${total.toLocaleString('en-PH',{minimumFractionDigits:2})}` : '';
+      closeModal();
+      Notifs.showToast('Materials cost computed from inventory', 'success');
+    });
   }
 
   document.getElementById('pdb-save-btn').addEventListener('click', async () => {
@@ -1249,6 +1337,14 @@ async function renderProductDatabase() {
 
   // Edit & Delete
   c.addEventListener('click', async e => {
+    // BUILD MATERIALS FROM INVENTORY (BOM)
+    if (e.target.classList.contains('pdb-bom-btn')) {
+      const prefix = e.target.dataset.prefix;
+      let bom = pdbBom[prefix];
+      if (bom === undefined) { try { bom = JSON.parse(decodeURIComponent(e.target.dataset.bom || '[]')); } catch (_) { bom = []; } }
+      openBomModal(prefix, bom);
+      return;
+    }
     // DELETE
     if (e.target.classList.contains('pdb-del-btn')) {
       const pid  = e.target.dataset.pid;

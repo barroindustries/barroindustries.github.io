@@ -34,7 +34,10 @@ This file is the running source of truth for what's done and what's left to make
 ### Internal control — cost & margin synced to DB (post-V10)
 - The builder's **Internal** view gained a **Cost & Margin** panel: Materials cost + Labor (estimated table, with the per-product labor capital shown as a fallback and explicitly *not* double-counted) → **COGS**, vs the ex-VAT quoted price → **Gross Margin (₱ + %)**, colour-coded.
 - Materials/labor figures pull from each product's `capitalMaterials` / `capitalLabor` **in the database** (editable on the President's Product Database page); line items now carry these values, and the V10 Firestore mapping fix means `laborHours` (for the labor auto-estimate) also flows from the DB. Verified end-to-end (BA-001 ×2: materials ₱12k, labor est ₱3.1k, COGS ₱15.1k, sell ₱32k, margin ₱16.9k / 53%).
-- **Still open (next):** a true Bill-of-Materials that computes `capitalMaterials` as Σ(qty × raw-material unit cost) live from `inventory_items`, so updating a steel price in Inventory re-prices every product. Today materials capital is a single editable figure per product.
+### Bill-of-Materials → Inventory price sync (post-V10)
+- The President's Product Database editor gained a **🧮 BOM** button beside Capital—Materials. It opens a modal listing **raw materials from `inventory_items`** with their live unit prices; enter qty-per-unit and it computes the material cost (Σ qty × unit price), writes it into the Materials-capital field, and stores the `bom` array on the product.
+- **Synced:** re-opening + re-applying the BOM re-prices against current Inventory unit costs — so a steel-price change in Inventory flows into the product's material cost (and therefore the Internal Cost & Margin panel). Verified end-to-end (2×₱3,500 sheet + 4×₱850 tube = ₱10,400 → auto-filled).
+- _Future polish:_ auto-recompute all products' `capitalMaterials` on an inventory price change (batch), rather than per-product re-apply.
 
 
 ### Critical fixes (production was broken at launch)
