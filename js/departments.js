@@ -4049,10 +4049,16 @@ async function loadDesignContent(currentUser, currentRole, sub) {
   }
 }
 
+// Sum of recorded payments on a project.
+function projectPaid(p) {
+  return (p.payments || []).reduce((s, x) => s + (Number(x.amount) || 0), 0);
+}
+
 async function renderProjects(container, currentUser, currentRole) {
   const snap = await db.collection('projects').orderBy('createdAt','desc').get();
   const projects = snap.docs.map(d => ({id:d.id,...d.data()}));
   const canAdd = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
+  const canBill = ['president','owner','manager','finance'].includes(currentRole) || canEditDept('Finance');
 
   container.innerHTML = `
     <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
@@ -4061,8 +4067,12 @@ async function renderProjects(container, currentUser, currentRole) {
     <div class="item-list">
       ${!projects.length
         ? `<div class="empty-state"><div class="empty-icon">🎨</div><h4>No projects yet</h4></div>`
-        : projects.map(p => `
-          <div class="item-card" data-id="${p.id}">
+        : projects.map(p => {
+          const contract = Number(p.contractAmount) || 0;
+          const paid     = projectPaid(p);
+          const balance  = contract - paid;
+          return `
+          <div class="item-card" data-id="${p.id}" style="cursor:pointer">
             <div class="item-top">
               <div class="item-title">${escHtml(p.name)}</div>
               <span class="badge ${statusBadge(p.status)}">${p.status||'active'}</span>
@@ -4071,9 +4081,21 @@ async function renderProjects(container, currentUser, currentRole) {
               ${p.client?`<span>👤 ${escHtml(p.client)}</span>`:''}
               ${p.dueDate?`<span>📅 ${p.dueDate}</span>`:''}
             </div>
-          </div>`).join('')}
+            ${contract>0?`<div class="item-meta" style="margin-top:6px">
+              <span>💰 Contract ₱${fmt(contract)}</span>
+              <span>✅ Paid ₱${fmt(paid)}</span>
+              <span style="font-weight:700;color:${balance>0.005?'#FF453A':'#30D158'}">${balance>0.005?`Balance ₱${fmt(balance)}`:'Fully Paid'}</span>
+            </div>`:''}
+          </div>`;}).join('')}
     </div>
   `;
+
+  container.querySelectorAll('.item-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const p = projects.find(x => x.id === card.dataset.id);
+      if (p) openProjectDetail(p, currentUser, currentRole, canBill);
+    });
+  });
 
   document.getElementById('add-project-btn')?.addEventListener('click', () => {
     openModal('New Project', `
@@ -4083,23 +4105,279 @@ async function renderProjects(container, currentUser, currentRole) {
         <div class="form-group"><label>Start Date</label><input id="proj-start" type="date" value="${today()}"/></div>
         <div class="form-group"><label>Due Date</label><input id="proj-due" type="date"/></div>
       </div>
+      <div class="form-group"><label>Contract Amount (₱)</label><input id="proj-contract" type="number" step="0.01" min="0" placeholder="Total project value (optional)"/></div>
       <div class="form-group"><label>Notes</label><textarea id="proj-notes" rows="3"></textarea></div>
     `, `<button class="btn-primary" id="save-proj-btn">Save Project</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
     document.getElementById('save-proj-btn').addEventListener('click', async () => {
       await db.collection('projects').add({
-        name:      document.getElementById('proj-name').value.trim(),
-        client:    document.getElementById('proj-client').value.trim(),
-        startDate: document.getElementById('proj-start').value,
-        dueDate:   document.getElementById('proj-due').value,
-        notes:     document.getElementById('proj-notes').value.trim(),
-        status:    'active',
-        createdBy: currentUser.uid,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        name:           document.getElementById('proj-name').value.trim(),
+        client:         document.getElementById('proj-client').value.trim(),
+        startDate:      document.getElementById('proj-start').value,
+        dueDate:        document.getElementById('proj-due').value,
+        contractAmount: parseFloat(document.getElementById('proj-contract').value) || 0,
+        notes:          document.getElementById('proj-notes').value.trim(),
+        status:         'active',
+        createdBy:      currentUser.uid,
+        createdAt:      firebase.firestore.FieldValue.serverTimestamp()
       });
       closeModal(); renderDesign(currentUser, currentRole, 'Projects');
     });
   });
+}
+
+// ── Project detail: financials, payments & billing invoice ──────────
+window.openProjectDetail = function(p, currentUser, currentRole, canBill) {
+  const contract = Number(p.contractAmount) || 0;
+  const paid     = projectPaid(p);
+  const balance  = contract - paid;
+  const payments = (p.payments || []).slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const invoices = (p.invoices || []).slice().reverse();
+
+  openModal(escHtml(p.name), `
+    <div class="item-meta" style="margin-bottom:12px">
+      ${p.client?`<span>👤 ${escHtml(p.client)}</span>`:''}
+      ${p.dueDate?`<span>📅 Due ${p.dueDate}</span>`:''}
+      <span class="badge ${statusBadge(p.status)}">${p.status||'active'}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">
+      <div class="kpi-card"><div class="kpi-label">Contract</div><div class="kpi-value" style="font-size:15px">₱${fmt(contract)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Paid</div><div class="kpi-value" style="font-size:15px;color:#30D158">₱${fmt(paid)}</div></div>
+      <div class="kpi-card ${balance>0.005?'warn':''}"><div class="kpi-label">Balance</div><div class="kpi-value" style="font-size:15px;color:${balance>0.005?'#FF453A':'#30D158'}">₱${fmt(balance)}</div></div>
+    </div>
+
+    <h4 style="margin:0 0 8px;font-size:13px">Payments</h4>
+    ${payments.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Method</th><th>Note</th><th style="text-align:right">Amount</th></tr></thead><tbody>
+      ${payments.map(x=>`<tr><td>${escHtml(x.date||'')}</td><td>${escHtml(x.method||'—')}</td><td>${escHtml(x.note||'')}</td><td style="text-align:right">₱${fmt(x.amount)}</td></tr>`).join('')}
+    </tbody></table></div>` : `<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">No payments recorded yet.</div>`}
+
+    <h4 style="margin:16px 0 8px;font-size:13px">Billing Invoices</h4>
+    ${invoices.length ? `<div class="item-list">${invoices.map(inv=>`
+      <div class="item-card" style="cursor:pointer" data-inv="${escHtml(inv.no)}">
+        <div class="item-top"><div class="item-title" style="font-size:13px">🧾 ${escHtml(inv.no)}</div><span>₱${fmt(inv.amount)}</span></div>
+        <div class="item-meta"><span>📅 ${escHtml(inv.date||'')}</span>${inv.due?`<span>Due ${escHtml(inv.due)}</span>`:''}<span>${escHtml(inv.desc||'')}</span></div>
+      </div>`).join('')}</div>` : `<div style="font-size:12px;color:var(--text-muted)">No invoices issued yet.</div>`}
+  `, `
+    ${canBill && contract>0 ? `<button class="btn-primary" id="proj-invoice-btn">🧾 Create Billing Invoice</button>` : ''}
+    ${canBill ? `<button class="btn-secondary" id="proj-payment-btn">+ Record Payment</button>` : ''}
+    <button class="btn-secondary" onclick="closeModal()">Close</button>
+  `);
+
+  // Re-open a previously issued invoice
+  document.querySelectorAll('#modal-body .item-card[data-inv]').forEach(card => {
+    card.addEventListener('click', () => {
+      const inv = (p.invoices || []).find(i => i.no === card.dataset.inv);
+      if (inv) openBillingInvoice(p, inv);
+    });
+  });
+
+  // Record a payment
+  document.getElementById('proj-payment-btn')?.addEventListener('click', () => {
+    openModal('Record Payment', `
+      <div class="form-group"><label>Amount (₱)</label><input id="pay-amt" type="number" step="0.01" min="0" placeholder="0.00"/></div>
+      <div class="form-group"><label>Date</label><input id="pay-date" type="date" value="${today()}"/></div>
+      <div class="form-group"><label>Method</label><input id="pay-method" placeholder="e.g. Bank transfer, Cash, Cheque"/></div>
+      <div class="form-group"><label>Reference / Note</label><input id="pay-note" placeholder="OR no., remarks"/></div>
+    `, `<button class="btn-primary" id="save-pay-btn">Save Payment</button><button class="btn-secondary" id="pay-back-btn">Cancel</button>`);
+    document.getElementById('pay-back-btn').addEventListener('click', () => openProjectDetail(p, currentUser, currentRole, canBill));
+    document.getElementById('save-pay-btn').addEventListener('click', async () => {
+      const amt = parseFloat(document.getElementById('pay-amt').value) || 0;
+      if (amt <= 0) { Notifs.showToast('Enter a valid amount','error'); return; }
+      const payment = {
+        amount: amt,
+        date:   document.getElementById('pay-date').value || today(),
+        method: document.getElementById('pay-method').value.trim(),
+        note:   document.getElementById('pay-note').value.trim(),
+        byName: currentUser.displayName || currentUser.email || '',
+        by:     currentUser.uid
+      };
+      const newPayments = [...(p.payments || []), payment];
+      try {
+        await db.collection('projects').doc(p.id).update({ payments: newPayments });
+        p.payments = newPayments;
+        Notifs.showToast('Payment recorded','success');
+        openProjectDetail(p, currentUser, currentRole, canBill);
+      } catch(e) { console.warn(e); Notifs.showToast('Could not save payment','error'); }
+    });
+  });
+
+  // Create a billing invoice for collection of balance
+  document.getElementById('proj-invoice-btn')?.addEventListener('click', () => {
+    const bal = (Number(p.contractAmount)||0) - projectPaid(p);
+    openModal('Billing Invoice — Collection of Balance', `
+      <div class="form-group"><label>Bill To</label><input id="inv-billto" value="${escHtml(p.client||'')}"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Invoice Date</label><input id="inv-date" type="date" value="${today()}"/></div>
+        <div class="form-group"><label>Due Date</label><input id="inv-due" type="date"/></div>
+      </div>
+      <div class="form-group"><label>Particulars</label><input id="inv-desc" value="Collection of outstanding balance"/></div>
+      <div class="form-group"><label>Amount to Collect (₱)</label><input id="inv-amt" type="number" step="0.01" min="0" value="${bal>0?bal.toFixed(2):'0.00'}"/></div>
+      <div class="form-group"><label>Notes / Payment Instructions</label><textarea id="inv-notes" rows="3">Kindly settle the amount due on or before the due date. Payable to NEILBARRO STEEL & METAL FABRICATION SERVICES.</textarea></div>
+    `, `<button class="btn-primary" id="gen-inv-btn">Generate Invoice</button><button class="btn-secondary" id="inv-back-btn">Cancel</button>`);
+    document.getElementById('inv-back-btn').addEventListener('click', () => openProjectDetail(p, currentUser, currentRole, canBill));
+    document.getElementById('gen-inv-btn').addEventListener('click', async () => {
+      const amt = parseFloat(document.getElementById('inv-amt').value) || 0;
+      if (amt <= 0) { Notifs.showToast('Enter a valid amount','error'); return; }
+      const contractC = Number(p.contractAmount) || 0;
+      const paidC     = projectPaid(p);
+      const seq = ((p.invoices || []).length + 1);
+      const inv = {
+        no:             'INV-' + today().replace(/-/g,'') + '-' + String(seq).padStart(3,'0'),
+        date:           document.getElementById('inv-date').value || today(),
+        due:            document.getElementById('inv-due').value || '',
+        billTo:         document.getElementById('inv-billto').value.trim(),
+        desc:           document.getElementById('inv-desc').value.trim(),
+        amount:         amt,
+        notes:          document.getElementById('inv-notes').value.trim(),
+        contractAmount: contractC,
+        paidToDate:     paidC,
+        balanceBefore:  contractC - paidC,
+        projectName:    p.name || '',
+        issuedBy:       currentUser.displayName || currentUser.email || '',
+        createdAt:      today()
+      };
+      const newInvoices = [...(p.invoices || []), inv];
+      try {
+        await db.collection('projects').doc(p.id).update({ invoices: newInvoices });
+        p.invoices = newInvoices;
+      } catch(e) { console.warn('Invoice not saved to project record:', e); }
+      openBillingInvoice(p, inv);
+    });
+  });
+};
+
+// Open a billing invoice in a printable window
+window.openBillingInvoice = function(p, inv) {
+  const html = buildBillingInvoiceHTML(p, inv);
+  const win = window.open('','_blank','width=900,height=700');
+  if (!win) { Notifs.showToast('Allow popups to view the invoice','error'); return; }
+  win.document.write(html);
+  win.document.close();
+};
+
+function buildBillingInvoiceHTML(p, inv) {
+  const f = n => (parseFloat(n)||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const fmtD = s => { if(!s) return '—'; const dt=new Date(s); return isNaN(dt.getTime())?s:dt.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}); };
+  const balanceAfter = (Number(inv.balanceBefore)||0) - (Number(inv.amount)||0);
+  const safeName = (inv.no||'invoice').replace(/[^a-zA-Z0-9-]/g,'');
+
+  return `<!DOCTYPE html><html><head>
+<meta charset="UTF-8"/>
+<title>Billing Invoice — ${escHtml(inv.no||'')}</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family: Arial, sans-serif; font-size: 11px; color:#000; background:#f0f0f0; }
+  .page { width:210mm; min-height:297mm; margin:0 auto; background:#fff; padding:14mm; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { border:1px solid #000; padding:5px 7px; vertical-align:middle; font-size:11px; }
+  .header-top { display:flex; align-items:center; gap:12px; margin-bottom:8px; }
+  .company-logo { width:64px; height:64px; object-fit:contain; border:2px solid #000; padding:2px; flex-shrink:0; }
+  .company-name { font-size:24px; font-weight:900; letter-spacing:1px; }
+  .company-sub { font-size:9px; line-height:1.6; }
+  .doc-title { background:#1a237e; color:#fff; text-align:center; font-size:18px; font-weight:800; letter-spacing:2px; padding:8px; margin:8px 0 12px; }
+  .meta-grid { display:flex; gap:12px; margin-bottom:12px; }
+  .meta-box { flex:1; border:1px solid #000; padding:8px 10px; font-size:11px; line-height:1.7; }
+  .meta-box .lbl { font-weight:700; text-transform:uppercase; font-size:9px; color:#333; }
+  .section-header { background:#1a237e; color:#fff; font-weight:700; font-size:11px; padding:5px 7px; text-transform:uppercase; letter-spacing:.05em; }
+  .number-cell { text-align:right; }
+  .muted-row td { background:#f5f5f5; }
+  .due-row td { font-weight:900; font-size:15px; background:#ffeb3b; color:#000; }
+  .notes-box { border:1px solid #000; border-top:none; padding:10px; font-size:10px; line-height:1.6; }
+  .export-bar { position:fixed; top:0; left:0; right:0; background:#1a237e; color:#fff; padding:10px 20px; display:flex; gap:10px; align-items:center; z-index:999; }
+  .export-bar button { background:#fff; color:#1a237e; border:none; padding:6px 16px; border-radius:6px; font-weight:700; font-size:12px; cursor:pointer; }
+  .export-bar button:hover { background:#e3f2fd; }
+  @media print {
+    .export-bar { display:none !important; }
+    body { background:#fff; }
+    .page { padding:10mm; }
+  }
+</style>
+</head><body>
+<div class="export-bar">
+  <span style="font-weight:700">🧾 Billing Invoice — ${escHtml(inv.no||'')}</span>
+  <button onclick="window.print()">🖨 Save as PDF / Print</button>
+  <button onclick="downloadJPEG()">📷 Save as JPEG</button>
+  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,0.15);color:#fff">✕ Close</button>
+</div>
+<div style="height:48px"></div>
+<div class="page" id="invoice-page">
+  <div class="header-top">
+    <img src="icons/barro-industries.png" class="company-logo" onerror="this.style.display='none'" alt=""/>
+    <div>
+      <div class="company-name">BARRO INDUSTRIES</div>
+      <div class="company-sub">
+        NEILBARRO STEEL &amp; METAL FABRICATION SERVICES<br/>
+        PUROK 6, CARLATAN, 2500, CITY OF SAN FERNANDO, LA UNION, PHILIPPINES<br/>
+        CONTACT: NEIL BARRO, 0927-683-6300<br/>
+        TIN: 951-145-613-000
+      </div>
+    </div>
+  </div>
+
+  <div class="doc-title">BILLING INVOICE</div>
+
+  <div class="meta-grid">
+    <div class="meta-box">
+      <div class="lbl">Bill To</div>
+      <div style="font-weight:700;font-size:13px">${escHtml(inv.billTo||'—')}</div>
+      ${inv.projectName?`<div style="font-size:10px;color:#333">Project: ${escHtml(inv.projectName)}</div>`:''}
+    </div>
+    <div class="meta-box">
+      <div><span class="lbl">Invoice No:</span> ${escHtml(inv.no||'')}</div>
+      <div><span class="lbl">Invoice Date:</span> ${fmtD(inv.date)}</div>
+      <div><span class="lbl">Due Date:</span> ${inv.due?fmtD(inv.due):'Upon receipt'}</div>
+    </div>
+  </div>
+
+  <div class="section-header">Account Summary</div>
+  <table>
+    <tr class="muted-row"><td style="width:70%">Total Contract Amount</td><td class="number-cell">₱${f(inv.contractAmount)}</td></tr>
+    <tr class="muted-row"><td>Less: Payments Received to Date</td><td class="number-cell">(₱${f(inv.paidToDate)})</td></tr>
+    <tr><td style="font-weight:700">Outstanding Balance</td><td class="number-cell" style="font-weight:700">₱${f(inv.balanceBefore)}</td></tr>
+  </table>
+
+  <div class="section-header" style="margin-top:12px">This Invoice</div>
+  <table>
+    <thead><tr><th style="width:70%">Particulars</th><th class="number-cell">Amount</th></tr></thead>
+    <tbody>
+      <tr><td>${escHtml(inv.desc||'Collection of outstanding balance')}</td><td class="number-cell">₱${f(inv.amount)}</td></tr>
+      <tr class="due-row"><td style="text-align:right">AMOUNT DUE</td><td class="number-cell">₱${f(inv.amount)}</td></tr>
+      <tr><td style="font-size:10px;color:#333">Remaining balance after this invoice is settled</td><td class="number-cell" style="font-size:10px;color:#333">₱${f(balanceAfter)}</td></tr>
+    </tbody>
+  </table>
+
+  ${inv.notes?`<div class="section-header" style="margin-top:12px">Notes</div><div class="notes-box">${escHtml(inv.notes)}</div>`:''}
+
+  <table style="margin-top:24px;border:none">
+    <tr>
+      <td style="border:none;padding:24px 10px 6px;text-align:center;width:50%">
+        <div style="border-top:1px solid #000;padding-top:4px">${escHtml(inv.issuedBy||'')}</div>
+        <div style="font-size:9px;color:#555">Issued By</div>
+      </td>
+      <td style="border:none;padding:24px 10px 6px;text-align:center;width:50%">
+        <div style="border-top:1px solid #000;padding-top:4px">&nbsp;</div>
+        <div style="font-size:9px;color:#555">Received By / Date</div>
+      </td>
+    </tr>
+  </table>
+</div>
+<script>
+async function downloadJPEG() {
+  const btn = document.querySelector('.export-bar button:nth-child(3)');
+  if(btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
+  if (!window.html2canvas) {
+    await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
+  }
+  const el = document.getElementById('invoice-page');
+  const canvas = await html2canvas(el, { scale:2, useCORS:true, backgroundColor:'#fff', logging:false });
+  const link = document.createElement('a');
+  link.download = '${safeName}.jpg';
+  link.href = canvas.toDataURL('image/jpeg', 0.95);
+  link.click();
+  if(btn) { btn.textContent = '📷 Save as JPEG'; btn.disabled = false; }
+}
+<\/script>
+</body></html>`;
 }
 
 // ══════════════════════════════════════════════════

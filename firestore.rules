@@ -348,8 +348,10 @@ service cloud.firestore {
     match /projects/{docId} {
       allow read: if isAuth();
       allow create: if isAuth();
+      // Creator/admin can edit anything; finance (role or Finance-dept) may also
+      // update so they can record payments & issue billing invoices for collection.
       allow update: if isAuth() && (
-        resource.data.createdBy == request.auth.uid || isAdmin()
+        resource.data.createdBy == request.auth.uid || isAdmin() || canFinance()
       );
       allow delete: if isAuth() && isAdmin();
     }
