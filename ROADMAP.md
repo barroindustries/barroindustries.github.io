@@ -1,6 +1,6 @@
 # Barro Industries Ops System — Roadmap & Handoff
 
-_Last updated: 2026-06-18 — current version **v10.0.0**, cache `bi-ops-v46`._
+_Last updated: 2026-06-23 — current version **v11.0.1**, cache `bi-ops-v73`._
 
 ### v10.0.0 UI/UX fix pass (done)
 - Quote builder topbar **unstuck** (scrolls away, not fixed); mobile verified (no page horizontal scroll; only the data table scrolls within its wrapper); desktop untouched.
@@ -20,7 +20,34 @@ This file is the running source of truth for what's done and what's left to make
 
 ## ✅ DONE
 
-### V10 — Partner & Sales portal launch hardening (this push)
+### V11 — Security hardening + efficiency pass (this push, ultracode)
+Orchestrated per-file (12 files, each diff adversarially verified); 3 blockers caught + fixed before deploy. App boot re-verified in the live preview (no console errors, all globals intact, Partner portal renders, dark default theme).
+**⚠️ Backend NOT live until `firebase deploy` is run** — `git push` ships only the frontend. Run `npx firebase-tools deploy --only firestore,storage` (rules + indexes + storage.rules) and `npx firebase-tools deploy --only functions`.
+
+**Security**
+- **`storage.rules` added** (new file) + wired into `firebase.json` — closes the open/test-mode Cloud Storage bucket. Auth required everywhere, owner-scoped `profile-photos/{uid}` writes, 15/25 MB size caps, deny-by-default catch-all. ⚠️ **Residual:** the general `{dept}/{subfolder}/{file}` path is auth-only (Storage rules can't read Firestore roles), so a signed-in partner can still read payslip transfer proofs — closing that needs **custom claims** (tracked follow-up; see gotchas).
+- **`firestore.rules`** — notification-inbox `create` constrained (anti-spoof/anti-spam: `hasOnly` allow-list incl. `taskId`, `read==false`, `createdAt==request.time`, title/body length caps); **null-safe `getRole()`** (`.data.get('role',null)` — no more deny-on-missing-field, per `firestore-rules-missing-field-throws`); **conservative partner read-lockdown** (`attendance_extensions`, `approval_requests`, `gov_biddings`, `sales_clients`, `design_clients`) — `bs_*` / `users` / `products` / `tasks` deliberately left readable so partner login/collaboration keeps working.
+- **`partner_deals` composite index** (`partnerUid` + `createdAt`) — fixes the silently-empty partner earnings dashboard.
+- **Cloud Function** clamps/validates the push payload (title/body/type length, drops malformed docs).
+- **Manila-time sweep** — replaced raw `toISOString()`/`getDay()`/`getMonth()` business-day logic with `bizDate()/bizDow()/bizYear()` across app/departments/modules; **fixes the payslip pay-period + attendance UTC-date bug** (was wrong for the first 8 h of each Manila day).
+- **Money safety** — cash-advance approve/pay and Design payment+invoice now run inside **Firestore transactions** with a `status==='pending'` re-read guard + amount confirmations (no double-approve / double-pay / orphaned invoice). Attendance "absent" now **soft-archives** (status flag) instead of deleting — preserves the audit trail payroll depends on.
+- **XSS** — Posts `imageUrl` moved off the inline `onclick` (http(s) allow-list + `addEventListener` + `escHtml`); IT ticket title escaped.
+
+**Efficiency**
+- **Service worker** — JS/CSS switched from stale-while-revalidate to **network-first**, so a `CACHE_VER` bump now lands on the *first* reload instead of the second; PRECACHE aligned to the real shell assets (`bi-logo.svg`, `favicon.png`).
+- **Dashboard reads cached** — `ledger`, `inventory_items`, and the pending-count badges (`approvals`/`ca`/`att-ext`/`signups`) now route through `dbCachedGet`; the `users` TTL was standardized; **cache invalidation wired on writes** (incl. the approvals / CA / attendance handlers, so badges don't keep showing actioned items for ~30 s).
+- **Auth-callback boot guard** — a token refresh no longer re-runs the full bootstrap and bounces the user back to the dashboard mid-task.
+
+**Workflows / UX**
+- **Government Biddings lifecycle** — was add-only; cards now open a detail/edit modal with field edits, **status change, bucket move** (PhilGEPS ↔ Active Bids ↔ Archive), and delete-with-confirm (gated by `canEditDept`). Backward-compatible — other `renderDocCollection` users unchanged.
+- **IT dead controls wired** — Software edit button (was inert), Network notes edit/delete (was add-only, so a typo'd credential was permanent).
+- **`partner` added to `ROLES`** (was undefined → blank badges); president identified by **role, not hardcoded email**.
+- **Dark default theme** (was light "Office", clashing with the dark splash/login/PWA chrome); **theme-aware toasts** with a green success state; **numeric keypads** (`inputmode`) on amount inputs; **a11y** — aria-labels on icon buttons, `aria-current` on active nav, `:focus-visible` rings, `prefers-reduced-motion`.
+
+**Decision:** tasks kept **admin-gated** (not broadened to `canEditDept`) to match the Firestore tasks `update` rule (assignee-or-admin) — avoids surfacing edit/reassign buttons the backend would reject.
+**Deferred:** CSS de-duplication (duplicate `.bottom-nav` / `.modal-box` blocks) — pure maintainability, high regression risk.
+
+### V10 — Partner & Sales portal launch hardening (V10 push)
 - **Removed BK Packages** from Sales (subtab, quick-launch tool, and the package presets in the quote scope dropdown → replaced with One-Stop-Shop / Supply & Install / Supply Only / Fabrication Only / Custom).
 - **Baking category added** (9 categories now: cooking, prep & washing, refrigeration, **baking**, exhaust, fresh air, gas line, fire suppression, miscellaneous). 12 new SS304-specced baking products (BA-001…012) with size constants (rateW100/D100/H100), configurable spec options (gauge, tiers, drainboards…), `material` blocks (SS304 grade/gauge/finish), labor hours and lead times.
 - **Catalog → Firestore made additive.** New "⟳ Import new from catalog" button on the Product Database page adds any catalog items NOT already in Firestore (e.g. the Baking line) and merges new categories, **without** overwriting President edits. Seeder + import share one `catalogDocFromJson()` mapper that now carries specs/material/labor/leadtime/formula.
@@ -124,7 +151,7 @@ Designed via a fan-out spec workflow, then implemented + adversarially reviewed 
 7. **CRM lifecycle.** Client list is flat. Add lead→prospect→won/lost stages, follow-up reminders, and a
    per-client history timeline (quotes, deals, files).
 8. **HR depth.** 201 file / employee documents per person, onboarding checklist, structured performance-review cycle (KPI data exists but no review workflow).
-9. **Government Biddings.** PhilGEPS structured entry/import, per-bid document checklist, deadline reminders.
+9. **Government Biddings.** ✅ In-app lifecycle shipped in V11 (detail/edit modal, status change, bucket move PhilGEPS↔Active↔Archive, delete). _Remaining:_ PhilGEPS structured entry/import, per-bid document checklist, deadline reminders.
 10. ✅ **Exports.** DONE — `window.exportCSV` (config.js; dependency-free, quote/comma/newline escaping, UTF-8 BOM, CSV-formula-injection guard that preserves numbers) + 10 "⬇ CSV" buttons: team/payroll, inventory, stock movements, job costs, ledger, expenses, audit log, leave, production orders, dept tasks. PDF stays on the existing print() paths (payslips, income statement, quotes). _Remaining: optional scheduled email digest._
 11. ✅ **Global search.** DONE — `renderGlobalSearch` page + topbar magnifier + sidebar item across tasks, clients (sales/design/bs), inventory, products, quotes; grouped clickable results, 220ms debounce, top-8/group. **Internal-only** — partners / Brilliant-Steel-only are gated out (UI hidden + early-return), since clients/products are partner-readable at the rules level. (Files search not included — files live in per-tab `files_*` collections; could be added.)
 
@@ -134,8 +161,10 @@ Designed via a fan-out spec workflow, then implemented + adversarially reviewed 
 14. **Marketing/Design modules** are still generic doc collections — add dept-specific KPIs/content.
 15. **Field ops** — photo capture for deliveries/site visits; GPS-stamped attendance (anti-spoof).
 16. **Client-side error logging** to Firestore for remote debugging/monitoring.
-17. **Performance at scale** — dashboards do several full-collection `.get()`s; add pagination + composite
-    indexes as data grows. Verify the monthly backup GitHub Action actually runs; document restore.
+17. **Performance at scale** — V11 cached the heavy dashboard reads (`ledger`/`inventory`/pending badges via
+    `dbCachedGet`, with write-invalidation) + switched the SW to network-first + added the `partner_deals`
+    index. _Remaining:_ pagination on the big collections as data grows; verify the monthly backup GitHub
+    Action actually runs; document restore.
 18. **Production role** — inventory write is currently "any non-partner." Consider a dedicated Production
     role and tighter inventory/item-definition vs. stock-movement permissions.
 
@@ -148,6 +177,8 @@ Designed via a fan-out spec workflow, then implemented + adversarially reviewed 
   before deploying rules. Unconstrained `.get()` on owner/admin-restricted collections fails for non-admins.
   (See memory `firestore-rules-collection-coverage`.)
 - **Pay lives in `payroll/{uid}`**, NOT users. Read via `fetchUsersWithPayroll()`; write to `payroll` (finance/admin). (memory `payroll-collection-architecture`)
+- **Cloud Storage rules can't read Firestore** (no role lookup). `storage.rules` (added V11) is auth + owner-scoped + size-capped only; true role/dept scoping of sensitive files (payslip transfer proofs, receipts) needs **custom claims** on the auth token. Residual gap after V11 — tracked follow-up.
+- **Storage deploys separately** — `storage.rules` ships via `firebase deploy --only storage` (now wired in `firebase.json`), NOT on `git push`. Same for `firestore.rules`/indexes (`--only firestore`) and `functions`.
 - **Manila time** — use `bizDate()/bizHour()/bizDow()`; never raw `toISOString()`/`getDay()`. (memory `manila-time-helpers`)
 - **Always `escHtml()`** user content before `innerHTML` (helper in modules.js).
 - **Rules propagation** takes ~10–60s after `firebase deploy --only firestore:rules` — a denied write right
