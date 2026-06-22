@@ -6,7 +6,9 @@ admin.initializeApp();
  * Fires whenever a notification doc is written to notifications/{uid}/items/{itemId}.
  * Looks up the user's FCM token and sends a device push.
  */
-exports.sendPushOnNotification = functions.firestore
+exports.sendPushOnNotification = functions
+  .region('asia-east1')
+  .firestore
   .document('notifications/{uid}/items/{itemId}')
   .onCreate(async (snap, context) => {
     const { uid } = context.params;
@@ -18,25 +20,25 @@ exports.sendPushOnNotification = functions.firestore
     if (!fcmToken) return null;
 
     const { itemId } = context.params;
+    // DATA-ONLY message — no top-level `notification` block.
+    //
+    // If a `notification` block is present, the FCM web SDK auto-displays a
+    // notification AND firebase-messaging-sw.js's onBackgroundMessage ALSO
+    // calls showNotification() → the same alert rendered twice per delivery.
+    // FCM is at-least-once, so redeliveries multiplied that into the
+    // "same notif up to 5x" the user was seeing on mobile. Sending data-only
+    // makes the service worker the single render path; it dedupes by notifId.
     const message = {
       token: fcmToken,
-      notification: {
-        title: title || 'Barro Industries',
-        body:  body  || 'You have a new notification.',
-      },
-      // Pass type + unique ID as data so the SW can use them
       data: {
+        title:   title || 'Barro Industries',
+        body:    body  || 'You have a new notification.',
         type:    type    || 'general',
-        notifId: itemId,               // unique per notification doc
+        notifId: itemId,               // unique per notification doc — SW dedupes on this
         uid:     uid,
       },
       webpush: {
-        notification: {
-          icon:     '/icons/icon-192.png',
-          badge:    '/icons/barro-logo.png',
-          tag:      itemId,            // unique → notifications stack, not replace
-          renotify: true,              // vibrate/sound even if same tag unlikely
-        },
+        headers: { Urgency: 'high' },
         fcmOptions: { link: '/' }
       }
     };
@@ -59,6 +61,101 @@ exports.sendPushOnNotification = functions.firestore
     }
     return null;
   });
+
+/**
+ * Fires whenever a new Firebase Auth account is created — including accounts
+ * added by hand in the Firebase Console → Authentication. Mirrors the
+ * first-sign-in bootstrap in loadUserProfile() (js/app.js) so a Firestore
+ * users/{uid} doc exists immediately, instead of only after the person logs in.
+ *
+ * Idempotent: the whole thing runs in a transaction that no-ops if the doc
+ * already exists, so it never clobbers the richer docs written by the in-app
+ * "Invite Team Member" / "Create Worker Account" flows (which create the Auth
+ * account and the users doc back-to-back). Firestore's optimistic transactions
+ * also detect a concurrent client write and retry, so there is no race.
+ *
+ * Signup-approval reconciliation: the approvals screen (js/departments.js)
+ * approves a signup by writing a PLACEHOLDER users doc with a random id and
+ * `pendingPasswordSetup: true` (no uid yet), then tells the admin to create the
+ * Auth account by hand. Without this, that console step would leave TWO docs
+ * for one person. So before falling back to a default doc, we look for a pending
+ * placeholder matching this email and "claim" it: copy its fields onto
+ * users/{uid} (reusing its already-allocated employeeId) and delete the orphan.
+ */
+exports.createUserDocOnAuthCreate = functions.auth.user().onCreate(async (user) => {
+  const db = admin.firestore();
+  const userRef    = db.collection('users').doc(user.uid);
+  const counterRef = db.collection('_counters').doc('employees');
+  const email = (user.email || '').trim();
+
+  try {
+    // Look for a pending placeholder doc for this email (single-field equality →
+    // no composite index needed; we filter the pending flag in code). Done
+    // outside the transaction; the ref is re-read inside it to stay consistent.
+    let pendingRef = null;
+    if (email) {
+      const matches = await db.collection('users')
+        .where('email', '==', email)
+        .limit(10)
+        .get();
+      const hit = matches.docs.find(d => d.id !== user.uid && d.data().pendingPasswordSetup === true);
+      if (hit) pendingRef = hit.ref;
+    }
+
+    await db.runTransaction(async (t) => {
+      const existing = await t.get(userRef);
+      if (existing.exists) {
+        // Real doc already created by an in-app flow. If a stale pending
+        // placeholder also exists, drop it so we don't leave a duplicate.
+        if (pendingRef) t.delete(pendingRef);
+        return;
+      }
+
+      // Path A — claim an approved signup placeholder (preserves role/depts/
+      // employeeId set at approval time; no counter burn).
+      if (pendingRef) {
+        const pendingSnap = await t.get(pendingRef);
+        if (pendingSnap.exists && pendingSnap.data().pendingPasswordSetup === true) {
+          const p = pendingSnap.data();
+          delete p.pendingPasswordSetup;
+          t.set(userRef, {
+            ...p,
+            uid: user.uid,
+            email: email || p.email || '',
+            createdAt: p.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+            claimedAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdVia: 'signup-approval'
+          });
+          t.delete(pendingRef);
+          return;
+        }
+      }
+
+      // Path B — brand-new account (e.g. added straight in the Auth console):
+      // mint a default employee profile with a fresh employee id.
+      const counter = await t.get(counterRef);
+      const next = (counter.exists ? counter.data().count : 0) + 1;
+      const empId = `BI-${new Date().getFullYear()}-${String(next).padStart(3, '0')}`;
+      t.set(counterRef, { count: next }, { merge: true });
+      t.set(userRef, {
+        uid: user.uid,
+        email,
+        displayName: user.displayName || (email ? email.split('@')[0] : 'New Employee'),
+        role: 'employee',
+        departments: [],
+        title: '',
+        employeeId: empId,
+        photoUrl: '',
+        startDate: new Date().toISOString().slice(0, 10),
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdVia: 'auth-trigger'
+      });
+    });
+  } catch (err) {
+    console.error('[createUserDocOnAuthCreate] failed for', user.uid, err);
+  }
+  return null;
+});
 
 /**
  * Callable: lets an admin/finance user reset an HR-managed worker's password
