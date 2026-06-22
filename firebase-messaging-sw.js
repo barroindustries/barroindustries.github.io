@@ -24,24 +24,46 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-// Handle background messages (app closed or in background tab)
+// Remembers notifIds shown in the last minute so an at-least-once redelivery
+// (or a Cloud Functions retry) of the SAME notification doesn't render again.
+// The SW stays alive across a burst of duplicate pushes (they arrive within
+// milliseconds), so this reliably collapses the "same notif up to 5x" case.
+const _shownNotifIds = new Set();
+
+// Handle background messages. Messages are now DATA-ONLY (see functions/index.js),
+// so this handler is the single place a notification is rendered — the FCM SDK
+// no longer auto-displays a second copy.
 messaging.onBackgroundMessage(payload => {
-  const { title, body, icon } = payload.notification || {};
   const data = payload.data || {};
-  const notifTitle = title || 'Barro Industries';
-  const notifBody  = body  || 'You have a new notification.';
+  const notifTitle = data.title || 'Barro Industries';
+  const notifBody  = data.body  || 'You have a new notification.';
+  const notifId    = data.notifId || '';
 
-  // Use unique notifId so each notification shows independently (not replace-on-same-tag)
-  const tag = data.notifId || (data.type + '-' + Date.now());
+  // Drop duplicate deliveries of the same notification doc.
+  if (notifId) {
+    if (_shownNotifIds.has(notifId)) return;
+    _shownNotifIds.add(notifId);
+    setTimeout(() => _shownNotifIds.delete(notifId), 60000);
+  }
 
-  self.registration.showNotification(notifTitle, {
-    body:    notifBody,
-    icon:    icon || '/icons/icon-192.png',
-    badge:   '/icons/barro-logo.png',
-    tag:     tag,
-    data:    data,
-    vibrate: [200, 100, 200],
-    actions: [{ action: 'open', title: 'Open App' }]
+  // Stable tag (one per notification doc) → even if a duplicate slips past the
+  // in-memory guard, the OS collapses it instead of stacking a second copy.
+  const tag = notifId || ('bi-' + (data.type || 'general'));
+
+  // Belt-and-suspenders: close any already-visible notification with this tag
+  // before showing, so a redelivery can never leave two on screen.
+  self.registration.getNotifications({ tag }).then(existing => {
+    existing.forEach(n => n.close());
+    self.registration.showNotification(notifTitle, {
+      body:     notifBody,
+      icon:     '/icons/icon-192.png',
+      badge:    '/icons/barro-logo.png',
+      tag:      tag,
+      renotify: false,
+      data:     data,
+      vibrate:  [200, 100, 200],
+      actions:  [{ action: 'open', title: 'Open App' }]
+    });
   });
 });
 

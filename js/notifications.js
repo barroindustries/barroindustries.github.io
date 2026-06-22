@@ -470,11 +470,17 @@ window.Notifs = (() => {
         await db.collection('users').doc(uid).update({ fcmToken: token });
         console.log('[FCM] Push token registered for', uid);
       }
-      // Show in-app toast for foreground messages
-      messaging.onMessage(payload => {
-        const { title, body } = payload.notification || {};
-        if (title) showToast(`${title}${body ? ': '+body : ''}`);
-      });
+      // Show in-app toast for foreground messages. Messages are data-only now
+      // (see functions/index.js), so read title/body from payload.data — and
+      // attach the handler only once so re-registration doesn't stack toasts.
+      if (!window._fcmOnMessageBound) {
+        window._fcmOnMessageBound = true;
+        messaging.onMessage(payload => {
+          const d = payload.data || payload.notification || {};
+          const { title, body } = d;
+          if (title) showToast(`${title}${body ? ': '+body : ''}`);
+        });
+      }
     } catch (err) {
       console.warn('[FCM] Push registration failed:', err);
     }
