@@ -2,11 +2,13 @@
 //  Barro Industries — Service Worker v16
 //  Strategy:
 //    • Install → pre-cache core app shell
-//    • Static assets (JS/CSS/icons) → Cache-first, update in background
+//    • Local JS/CSS → Network-first (so a CACHE_VER bump applies on the next load, not two loads later)
+//    • Images/fonts → Cache-first, update in background
+//    • CDN scripts → Cache-first (versioned URLs never change)
 //    • HTML / API → Network-first, cache as offline fallback
 // ═══════════════════════════════════════════════════════
 
-const CACHE_VER   = 'bi-ops-v72';
+const CACHE_VER   = 'bi-ops-v73';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -23,10 +25,11 @@ const PRECACHE = [
   '/js/departments.js',
   '/js/app.js',
   '/js/modules.js',
-  '/icons/barro-logo.png',
+  '/icons/bi-logo.svg',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
-  '/favicon.svg'
+  '/favicon.svg',
+  '/favicon.png'
 ];
 
 // External CDN scripts — cache aggressively (versioned URLs never change)
@@ -76,10 +79,16 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Local static assets (JS, CSS, fonts, images, icons) → Stale-while-revalidate
+  // Local same-origin static assets
   if (url.includes(self.location.origin)) {
     const ext = url.split('?')[0].split('.').pop().toLowerCase();
-    if (['js','css','png','jpg','jpeg','svg','webp','woff','woff2','ico'].includes(ext)) {
+    // JS/CSS → Network-first so a CACHE_VER bump takes effect on the next load (not two loads later)
+    if (['js','css'].includes(ext)) {
+      event.respondWith(networkFirst(event.request, STATIC));
+      return;
+    }
+    // Images/fonts → Cache-first, refresh in background
+    if (['png','jpg','jpeg','svg','webp','woff','woff2','ico'].includes(ext)) {
       event.respondWith(staleWhileRevalidate(event.request, STATIC));
       return;
     }

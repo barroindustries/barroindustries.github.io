@@ -12,15 +12,26 @@ function escHtml(str) {
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
+// ── URL allow-list — only return http(s) URLs, else '' ──
+// Blocks javascript:, data:, and other breakout vectors before a user-supplied
+// URL is used as a src/href or opened in a new tab.
+function safeHttpUrl(url) {
+  if (!url) return '';
+  try {
+    const u = new URL(String(url), window.location.origin);
+    return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : '';
+  } catch { return ''; }
+}
+
 // ── PRESIDENT UID (Neil Barro) ────────────────────
 // This controls whose photo/name shows in the president
 // message card in Company Overview.
 const PRESIDENT_UID = 'neilbarro870@gmail.com'; // fallback: match by email
 
+// Role-based president check — the role itself is the authority; an email match
+// is no longer required (roles are assigned/enforced by Firestore rules).
 function isRealPresident() {
-  return currentRole === 'president' &&
-    (userProfile?.email === 'neilbarro870@gmail.com' ||
-     userProfile?.uid   === PRESIDENT_UID);
+  return currentRole === 'president';
 }
 
 // ══════════════════════════════════════════════════
@@ -107,8 +118,8 @@ async function loadPosts(dept) {
         </div>
         ${p.title ? `<div class="post-title">${escHtml(p.title)}</div>` : ''}
         <div class="post-body">${escHtml(p.content||'')}</div>
-        ${p.imageUrl ? `<img src="${p.imageUrl}" class="post-image" onclick="window.open('${p.imageUrl}','_blank')"/>` : ''}
-        ${p.fileUrl ? `<a href="${escHtml(p.fileUrl)}" target="_blank" class="post-attachment">📎 ${escHtml(p.fileName||'Attachment')}</a>` : ''}
+        ${safeHttpUrl(p.imageUrl) ? `<img src="${escHtml(p.imageUrl)}" class="post-image" data-img="${escHtml(p.imageUrl)}" style="cursor:zoom-in"/>` : ''}
+        ${safeHttpUrl(p.fileUrl) ? `<a href="${escHtml(p.fileUrl)}" target="_blank" rel="noopener noreferrer" class="post-attachment">📎 ${escHtml(p.fileName||'Attachment')}</a>` : ''}
         <div class="post-actions">
           ${p.status==='published' ? `
             <button class="post-heart-btn${hearted?' hearted':''}" data-id="${p.id}" title="${hearted?'Unlike':'Like'}">
@@ -130,6 +141,13 @@ async function loadPosts(dept) {
       </div>`;
     }).join('');
     if (window.lucide) lucide.createIcons({nodes:[container]});
+
+    // Open post image in a new tab — URL validated to http(s) only, wired via
+    // addEventListener so the raw URL never lands in an inline onclick string.
+    container.querySelectorAll('.post-image[data-img]').forEach(img => img.addEventListener('click', () => {
+      const safe = safeHttpUrl(img.dataset.img);
+      if (safe) window.open(safe, '_blank', 'noopener,noreferrer');
+    }));
 
     container.querySelectorAll('.post-approve-btn').forEach(btn => btn.addEventListener('click', async e => {
       const id = e.target.dataset.id;
@@ -345,12 +363,14 @@ window.renderTeamTab = async function() {
     document.getElementById('save-note-btn').addEventListener('click', async () => {
       const note = document.getElementById('note-input').value.trim();
       await db.collection('users').doc(currentUser.uid).update({ statusNote: note });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users');
       closeModal(); Notifs.showToast('Note updated!');
       window.renderTeamTab();
     });
     // "Clear Note" = close and clear
     document.querySelector('#modal-footer .btn-secondary').onclick = async () => {
       await db.collection('users').doc(currentUser.uid).update({ statusNote: '' });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users');
       closeModal(); Notifs.showToast('Note cleared');
       window.renderTeamTab();
     };
@@ -392,7 +412,7 @@ window.renderTeamTab = async function() {
             const snap = await t.get(counterRef);
             const next = (snap.exists ? snap.data().count : 0) + 1;
             t.set(counterRef, { count: next }, { merge: true });
-            return `BI-${new Date().getFullYear()}-${String(next).padStart(3,'0')}`;
+            return `BI-${window.bizYear()}-${String(next).padStart(3,'0')}`;
           });
           await db.collection('users').doc(uid).set({
             uid, email,
@@ -401,10 +421,11 @@ window.renderTeamTab = async function() {
             role:        document.getElementById('inv-role').value,
             departments: depts, department: depts[0]||'',
             employeeId:  empId,
-            photoUrl:'', startDate: new Date().toISOString().slice(0,10),
+            photoUrl:'', startDate: window.bizDate(),
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
           });
           await auth.sendPasswordResetEmail(email);
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users');
           closeModal();
           Notifs.showToast(`Invite sent to ${email}!`);
           window.renderTeamTab();
@@ -507,7 +528,7 @@ function renderTeamCards(users, currentUser) {
         title: `👋 You've been nudged!`,
         body: `${senderName} is trying to get your attention. Check in when you can.`,
         icon: '👋', type: 'nudge',
-        dedupKey: `nudge-${uid}-${new Date().toISOString().slice(0,10)}-${currentUser?.uid}`
+        dedupKey: `nudge-${uid}-${window.bizDate()}-${currentUser?.uid}`
       });
       btn.textContent = '✅'; btn.title = 'Nudge sent!';
       Notifs.showToast(`Nudge sent to ${name}!`);
@@ -550,7 +571,9 @@ function getPHHolidays(year) {
   // National Heroes Day (last Monday of August)
   const aug = new Date(year, 7, 31);
   while (aug.getDay() !== 1) aug.setDate(aug.getDate()-1);
-  holidays[aug.toISOString().slice(0,10)] = { name:'National Heroes Day', type:'regular' };
+  // Format from local components — toISOString() would shift the day in +offset TZ.
+  const augStr = `${aug.getFullYear()}-${String(aug.getMonth()+1).padStart(2,'0')}-${String(aug.getDate()).padStart(2,'0')}`;
+  holidays[augStr] = { name:'National Heroes Day', type:'regular' };
 
   // Holy Week — Maundy Thursday (special), Good Friday (regular), Black Saturday (special)
   const holyWeek = {
@@ -603,7 +626,6 @@ function getPHHolidays(year) {
 window.renderAttendancePage = async function() {
   const c = document.getElementById('page-content');
   const pres = currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance';
-  const now  = new Date();
 
   c.innerHTML = `
     <div class="page-header">
@@ -630,8 +652,11 @@ window.renderAttendancePage = async function() {
 
   let targetUid = currentUser.uid;
   let targetName = userProfile.displayName || currentUser.email;
-  let viewYear  = now.getFullYear();
-  let viewMonth = now.getMonth();
+  // Anchor the default view month to Manila's current calendar month, not the
+  // device's — otherwise opening the page near midnight abroad shows the wrong month.
+  const bizToday = window.bizDate(); // "YYYY-MM-DD" in Manila
+  let viewYear  = parseInt(bizToday.slice(0,4), 10);
+  let viewMonth = parseInt(bizToday.slice(5,7), 10) - 1;
 
   if (pres) {
     const usersSnap = typeof dbCachedGet === 'function'
@@ -654,7 +679,10 @@ window.renderAttendancePage = async function() {
   async function loadExtensionRequests() {
     const extEl = document.getElementById('att-ext-requests');
     if (!extEl) return;
-    const todayStr = new Date().toISOString().slice(0,10);
+    // Approving/denying mutates attendance_extensions — keep the dashboard's
+    // cached pending count fresh.
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('att-ext-pending');
+    const todayStr = window.bizDate();
     const snap = await db.collection('attendance_extensions')
       .where('date','==',todayStr).where('status','==','pending').get().catch(()=>({docs:[]}));
     if (snap.docs.length === 0) { extEl.innerHTML = ''; return; }
@@ -691,7 +719,7 @@ window.renderAttendancePage = async function() {
         });
         await Notifs.send(btn.dataset.uid, {
           title: '✅ Attendance Extension Approved',
-          body:  `Your Time In extension is approved. You have until ${expiresAt.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})} to time in and complete notifications.`,
+          body:  `Your Time In extension is approved. You have until ${expiresAt.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',timeZone:window.BIZ_TZ})} to time in and complete notifications.`,
           icon: '✅', type: 'att_extension_approved'
         });
         Notifs.showToast(`Extension approved for ${btn.dataset.name||'employee'}`);
@@ -709,7 +737,7 @@ window.renderAttendancePage = async function() {
         });
         await Notifs.send(btn.dataset.uid, {
           title: '❌ Attendance Extension Denied',
-          body:  `Your extension request for ${new Date().toLocaleDateString('en-PH',{month:'short',day:'numeric'})} was not approved.`,
+          body:  `Your extension request for ${new Date().toLocaleDateString('en-PH',{month:'short',day:'numeric',timeZone:window.BIZ_TZ})} was not approved.`,
           icon: '❌', type: 'att_extension_denied'
         });
         Notifs.showToast('Extension denied');
@@ -727,17 +755,20 @@ window.renderAttendancePage = async function() {
     const label = new Date(viewYear, viewMonth).toLocaleString('en-PH',{month:'long',year:'numeric'});
     document.getElementById('att-month-label').textContent = label;
 
-    const monthStart = `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-01`;
-    const monthEnd   = new Date(viewYear, viewMonth+1, 0).toISOString().slice(0,10);
+    const daysInMonth = new Date(viewYear, viewMonth+1, 0).getDate();
+    const mm = String(viewMonth+1).padStart(2,'0');
+    const monthStart = `${viewYear}-${mm}-01`;
+    // Build the last-day string directly — toISOString() on a local midnight Date
+    // shifts back a day in +offset timezones (Manila +8) and broke the range query.
+    const monthEnd   = `${viewYear}-${mm}-${String(daysInMonth).padStart(2,'0')}`;
     const snap = await db.collection('attendance').doc(targetUid).collection('records')
       .where(firebase.firestore.FieldPath.documentId(),'>=',monthStart)
       .where(firebase.firestore.FieldPath.documentId(),'<=',monthEnd).get();
     const records = {};
     snap.docs.forEach(d => { records[d.id] = d.data(); });
 
-    const daysInMonth = new Date(viewYear, viewMonth+1, 0).getDate();
-    const firstDay    = new Date(viewYear, viewMonth, 1).getDay();
-    const todayStr    = new Date().toISOString().slice(0,10);
+    const firstDay    = window.bizDow(new Date(`${monthStart}T12:00:00`));
+    const todayStr    = window.bizDate();
     const canEdit     = pres;
     const phHolidays  = getPHHolidays(viewYear);
 
@@ -749,8 +780,10 @@ window.renderAttendancePage = async function() {
     let fullCount=0, halfCount=0, absentCount=0, workDays=0;
 
     for (let day=1; day<=daysInMonth; day++) {
-      const dateStr  = `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-      const dow      = new Date(dateStr).getDay();
+      const dateStr  = `${viewYear}-${mm}-${String(day).padStart(2,'0')}`;
+      // Anchor to noon Manila so the weekday is correct regardless of device TZ
+      // (new Date('YYYY-MM-DD') parses as UTC and shifted the day-of-week).
+      const dow      = window.bizDow(new Date(`${dateStr}T12:00:00`));
       const isSunday  = dow===0;
       const holiday   = phHolidays[dateStr];
       const isNoWork  = isSunday || !!holiday;
@@ -758,7 +791,10 @@ window.renderAttendancePage = async function() {
       const rec       = records[dateStr];
       let status = '';
       if (!isNoWork && isPast) {
-        if (rec?.fullTime || (typeof rec?.attendanceScore==='number' && rec?.attendanceScore>=1))
+        // An explicit soft-archived "absent" record (admin marked absent) counts as
+        // absent even for today — the record is preserved instead of being deleted.
+        if (rec?.status === 'absent')      { status='absent';  absentCount++; workDays++; }
+        else if (rec?.fullTime || (typeof rec?.attendanceScore==='number' && rec?.attendanceScore>=1))
                                            { status='present'; fullCount++; workDays++; }
         else if (rec?.loginTime || (typeof rec?.attendanceScore==='number' && rec?.attendanceScore>0))
                                            { status='half';    halfCount++; workDays++; }
@@ -832,15 +868,19 @@ window.renderAttendancePage = async function() {
             const status = document.getElementById('att-status-sel').value;
             const note   = document.getElementById('att-note').value.trim();
             const ref = db.collection('attendance').doc(targetUid).collection('records').doc(date);
+            const FV  = firebase.firestore.FieldValue;
             if (status==='present')
-              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:true,note,editedBy:currentUser.uid,editedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:true,status:'present',note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp()},{merge:true});
             else if (status==='half')
-              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:false,note,editedBy:currentUser.uid,editedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:false,status:'half',note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp()},{merge:true});
             else
-              await ref.delete();
+              // Soft-archive instead of deleting: preserve the audit trail payroll
+              // depends on. Clear time markers so downstream reads classify as absent.
+              await ref.set({date,uid:targetUid,status:'absent',fullTime:false,loginTime:FV.delete(),note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp()},{merge:true});
+            // Refresh in-memory copy so the calendar re-renders with the new state
+            renderAttMonth();
             closeModal();
             Notifs.showToast('Attendance updated!');
-            renderAttMonth();
           });
         });
       });
@@ -863,6 +903,9 @@ window.renderAttendancePage = async function() {
 
 window.renderCashAdvancePage = async function() {
   const c = document.getElementById('page-content');
+  // Approve/reject/payment/delete below mutate cash_advances — invalidate the
+  // dashboard's cached pending CA count so it doesn't show stale items.
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
   const pres = currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance';
 
   if (pres) {
@@ -1079,15 +1122,36 @@ function renderCAList(advances, container, isAdmin) {
 
   container.querySelectorAll('.ca-approve-btn').forEach(btn => btn.addEventListener('click', async e => {
     const id = e.target.dataset.id;
-    const snap = await db.collection('cash_advances').doc(id).get();
-    const a = snap.data();
-    await db.collection('cash_advances').doc(id).update({
-      status: 'approved',
-      approvedBy: currentUser.uid,
-      approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      balance: a.amount
-    });
-    await Notifs.send(a.userId, {title:'Cash Advance Approved', body:`Your ₱${fmtN(a.amount)} cash advance request was approved!`, icon:'✅', type:'cash_advance', dedupKey:`ca-approved-${id}`});
+    const ref = db.collection('cash_advances').doc(id);
+    const peek = await ref.get();
+    if (!peek.exists) { Notifs.showToast('Record no longer exists.','error'); window.renderCashAdvancePage(); return; }
+    const peekData = peek.data();
+    if (!confirm(`Approve this cash advance of ₱${fmtN(peekData.amount)} for ${peekData.userName||'this employee'}?`)) return;
+    btn.disabled = true;
+    let approvedData = null;
+    try {
+      // Transaction: re-read and assert still pending so a double-tap or a second
+      // admin cannot approve twice and corrupt the balance.
+      await db.runTransaction(async t => {
+        const fresh = await t.get(ref);
+        if (!fresh.exists) throw new Error('Record no longer exists.');
+        const a = fresh.data();
+        if (a.status !== 'pending') throw new Error('This request is no longer pending (already actioned).');
+        t.update(ref, {
+          status: 'approved',
+          approvedBy: currentUser.uid,
+          approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          balance: a.amount
+        });
+        approvedData = a;
+      });
+    } catch (err) {
+      btn.disabled = false;
+      Notifs.showToast(err.message || 'Could not approve.', 'error');
+      window.renderCashAdvancePage();
+      return;
+    }
+    await Notifs.send(approvedData.userId, {title:'Cash Advance Approved', body:`Your ₱${fmtN(approvedData.amount)} cash advance request was approved!`, icon:'✅', type:'cash_advance', dedupKey:`ca-approved-${id}`});
     Notifs.showToast('Approved!');
     window.renderCashAdvancePage();
   }));
@@ -1108,21 +1172,37 @@ function renderCAList(advances, container, isAdmin) {
     openModal('Record Payment', `
       <div class="ca-detail" style="margin-bottom:14px"><span>Balance:</span><strong>₱${fmtN(a.balance||0)}</strong></div>
       <div class="ca-detail" style="margin-bottom:14px"><span>Monthly due:</span><strong>₱${fmtN(a.monthlyPayment||0)}</strong></div>
-      <div class="form-group"><label>Amount Paid</label><input id="pay-amount" type="number" value="${a.monthlyPayment||0}" min="0" max="${a.balance||0}"/></div>
-      <div class="form-group"><label>Date</label><input id="pay-date" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
+      <div class="form-group"><label>Amount Paid</label><input id="pay-amount" type="number" inputmode="decimal" value="${a.monthlyPayment||0}" min="0" max="${a.balance||0}"/></div>
+      <div class="form-group"><label>Date</label><input id="pay-date" type="date" value="${window.bizDate()}"/></div>
     `, `<button class="btn-primary" id="save-payment-btn">Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     document.getElementById('save-payment-btn').addEventListener('click', async () => {
+      const saveBtn = document.getElementById('save-payment-btn');
       try {
         const paid = parseFloat(document.getElementById('pay-amount').value)||0;
-        const newBal = Math.max(0, (a.balance||0) - paid);
-        const payments = [...(a.payments||[]), {amount:paid, date:document.getElementById('pay-date').value, recordedBy:currentUser.uid}];
-        await db.collection('cash_advances').doc(id).update({
-          balance: newBal, payments,
-          status: newBal <= 0 ? 'paid' : 'approved'
+        const payDate = document.getElementById('pay-date').value;
+        if (paid <= 0) { Notifs.showToast('Enter a payment amount greater than ₱0.','error'); return; }
+        if (!confirm(`Record a payment of ₱${fmtN(paid)} against this cash advance?`)) return;
+        saveBtn.disabled = true;
+        const ref = db.collection('cash_advances').doc(id);
+        // Transaction: re-read balance/status so two admins or a double-tap can't
+        // record the same payment twice or overpay a stale balance.
+        const result = await db.runTransaction(async t => {
+          const fresh = await t.get(ref);
+          if (!fresh.exists) throw new Error('Record no longer exists.');
+          const cur = fresh.data();
+          if (cur.status !== 'approved' || (cur.balance||0) <= 0)
+            throw new Error('This cash advance has no outstanding balance (already paid or not approved).');
+          const newBal = Math.max(0, (cur.balance||0) - paid);
+          const payments = [...(cur.payments||[]), {amount:paid, date:payDate, recordedBy:currentUser.uid}];
+          t.update(ref, {
+            balance: newBal, payments,
+            status: newBal <= 0 ? 'paid' : 'approved'
+          });
+          return { newBal, userId: cur.userId };
         });
         // Notify the employee
-        const statusMsg = newBal <= 0 ? 'fully paid off 🎉' : `balance remaining: ₱${fmtN(newBal)}`;
-        await Notifs.send(a.userId, {
+        const statusMsg = result.newBal <= 0 ? 'fully paid off 🎉' : `balance remaining: ₱${fmtN(result.newBal)}`;
+        await Notifs.send(result.userId, {
           title: '💳 Cash Advance Payment Recorded',
           body: `₱${fmtN(paid)} payment was recorded on your cash advance. ${statusMsg.charAt(0).toUpperCase()+statusMsg.slice(1)}.`,
           icon: '💳', type: 'cash_advance'
@@ -1133,6 +1213,7 @@ function renderCAList(advances, container, isAdmin) {
         const activeBtn = document.querySelector('#ca-tabs [data-sub="active"]');
         if (activeBtn) activeBtn.click();
       } catch(err) {
+        if (saveBtn) saveBtn.disabled = false;
         Notifs.showToast('Error recording payment: ' + err.message, 'error');
       }
     });
@@ -1151,7 +1232,7 @@ function openCashAdvanceModal() {
   const RATE = 2; // 2% per month interest
   openModal('Request Cash Advance', `
     <div class="form-group"><label>Amount (max ₱50,000)</label>
-      <input id="ca-amt" type="number" min="100" max="50000" step="100" placeholder="0.00" oninput="updateCACalc()"/>
+      <input id="ca-amt" type="number" inputmode="decimal" min="100" max="50000" step="100" placeholder="0.00" oninput="updateCACalc()"/>
     </div>
     <div class="form-group"><label>Repayment Terms</label>
       <select id="ca-terms" onchange="updateCACalc()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
@@ -1163,7 +1244,7 @@ function openCashAdvanceModal() {
       </select>
     </div>
     <div id="ca-calc" class="ca-calc-box" style="display:none"></div>
-    <div class="form-group"><label>Date Needed</label><input id="ca-date" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
+    <div class="form-group"><label>Date Needed</label><input id="ca-date" type="date" value="${window.bizDate()}"/></div>
     <div class="form-group"><label>Reason / Purpose</label>
       <textarea id="ca-reason" rows="3" placeholder="e.g., Medical emergency, school fees…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea>
     </div>
@@ -1239,16 +1320,16 @@ function openPresidentCashAdvanceModal(users) {
       </select>
     </div>
     <div class="form-group"><label>Loan Amount (₱)</label>
-      <input id="pca-amount" type="number" min="1" step="0.01" placeholder="e.g. 65225"/>
+      <input id="pca-amount" type="number" inputmode="decimal" min="1" step="0.01" placeholder="e.g. 65225"/>
     </div>
     <div class="form-group"><label>Monthly Payment (₱)</label>
-      <input id="pca-monthly" type="number" min="1" step="0.01" placeholder="e.g. 5025"/>
+      <input id="pca-monthly" type="number" inputmode="decimal" min="1" step="0.01" placeholder="e.g. 5025"/>
     </div>
     <div class="form-group"><label>Terms (months)</label>
-      <input id="pca-terms" type="number" min="1" max="60" value="9"/>
+      <input id="pca-terms" type="number" inputmode="numeric" min="1" max="60" value="9"/>
     </div>
     <div class="form-group"><label>Date</label>
-      <input id="pca-date" type="date" value="${new Date().toISOString().slice(0,10)}"/>
+      <input id="pca-date" type="date" value="${window.bizDate()}"/>
     </div>
     <div class="form-group"><label>Purpose / Notes</label>
       <textarea id="pca-reason" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea>
@@ -1369,11 +1450,11 @@ async function renderPresidentMessageCard() {
     const snap = await db.collection('users').where('role','==','president').limit(1).get();
     if (snap.empty) { card.style.display='none'; return; }
     const pres = snap.docs[0].data();
-    // Only show if this is the actual Neil Barro account
-    if (pres.email !== 'neilbarro870@gmail.com') { card.style.display='none'; return; }
+    // The president-role query above is the authority; show the card for whoever
+    // holds the president role (no hardcoded email gate).
     const msg = await db.collection('president_message').doc('current').get();
     const msgText = msg.exists ? msg.data().message : 'Welcome to Barro Industries. Together, we build something great.';
-    const presName = 'Neil Barro'; // Always show as Neil Barro
+    const presName = pres.displayName || 'Neil Barro';
     card.innerHTML = `
       <div class="card-header">
         <h3>Message from the President</h3>
@@ -1382,10 +1463,10 @@ async function renderPresidentMessageCard() {
       <div class="card-body">
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
           <div style="width:54px;height:54px;border-radius:50%;overflow:hidden;background:var(--primary-light);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff">
-            ${pres.photoUrl?`<img src="${escHtml(pres.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:presName[0]}
+            ${pres.photoUrl?`<img src="${escHtml(pres.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:escHtml(presName[0]||'')}
           </div>
           <div>
-            <div style="font-weight:700;font-size:15px">${presName}</div>
+            <div style="font-weight:700;font-size:15px">${escHtml(presName)}</div>
             <div style="font-size:12px;color:var(--text-muted)">President, Barro Industries OPC</div>
           </div>
         </div>
@@ -1509,10 +1590,10 @@ async function renderPresidentMessageCard() {
       </div>
       <div class="form-group"><label>Category</label><input id="iv-cat" value="${escHtml(e.category||'')}" placeholder="e.g. Stainless, Fasteners, Cooking Equipment"/></div>
       <div class="form-row">
-        <div class="form-group"><label>On-hand Qty</label><input id="iv-qty" type="number" step="0.01" value="${e.qty||0}"/></div>
-        <div class="form-group"><label>Reorder Level</label><input id="iv-reorder" type="number" step="0.01" value="${e.reorderLevel||0}"/></div>
+        <div class="form-group"><label>On-hand Qty</label><input id="iv-qty" type="number" inputmode="decimal" step="0.01" value="${e.qty||0}"/></div>
+        <div class="form-group"><label>Reorder Level</label><input id="iv-reorder" type="number" inputmode="decimal" step="0.01" value="${e.reorderLevel||0}"/></div>
       </div>
-      <div class="form-group"><label>Unit Cost (₱)</label><input id="iv-cost" type="number" step="0.01" value="${e.unitCost||0}"/></div>
+      <div class="form-group"><label>Unit Cost (₱)</label><input id="iv-cost" type="number" inputmode="decimal" step="0.01" value="${e.unitCost||0}"/></div>
       <div class="form-row">
         <div class="form-group"><label>Supplier</label><input id="iv-supplier" value="${escHtml(e.supplier||'')}"/></div>
         <div class="form-group"><label>Supplier Contact</label><input id="iv-supcontact" value="${escHtml(e.supplierContact||'')}"/></div>
@@ -1546,7 +1627,7 @@ async function renderPresidentMessageCard() {
     if(!item) return;
     openModal((type==='in'?'➕ Stock In — ':'➖ Stock Out — ')+(item.name||''), `
       <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Current on-hand: <strong>${num(item.qty||0)} ${escHtml(item.unit||'')}</strong></div>
-      <div class="form-group"><label>Quantity to ${type==='in'?'add':'remove'}</label><input id="mv-qty" type="number" step="0.01" min="0"/></div>
+      <div class="form-group"><label>Quantity to ${type==='in'?'add':'remove'}</label><input id="mv-qty" type="number" inputmode="decimal" step="0.01" min="0"/></div>
       ${type==='out'?`<div class="form-group"><label>Project / Job (optional)</label><input id="mv-project" placeholder="e.g. Gerry's Grill — Bulacan"/></div>`:''}
       <div class="form-group"><label>Note (optional)</label><input id="mv-note" placeholder="PO #, reason, etc."/></div>
       <div id="mv-err" class="error-msg hidden"></div>
@@ -1633,12 +1714,12 @@ async function renderPresidentMessageCard() {
       <div class="form-group"><label>Project / Client</label><input id="jb-project" value="${escHtml(e.project||'')}" placeholder="e.g. Gerry's Grill — Bulacan"/></div>
       <div class="form-group"><label>Quote Ref (optional)</label><input id="jb-quote" value="${escHtml(e.quoteRef||'')}" placeholder="BK-LU-FB-..."/></div>
       <div class="form-row">
-        <div class="form-group"><label>Revenue (₱)</label><input id="jb-rev" type="number" step="0.01" value="${e.revenue||0}"/></div>
-        <div class="form-group"><label>Materials Cost (₱)</label><input id="jb-mat" type="number" step="0.01" value="${e.materialsCost||0}"/></div>
+        <div class="form-group"><label>Revenue (₱)</label><input id="jb-rev" type="number" inputmode="decimal" step="0.01" value="${e.revenue||0}"/></div>
+        <div class="form-group"><label>Materials Cost (₱)</label><input id="jb-mat" type="number" inputmode="decimal" step="0.01" value="${e.materialsCost||0}"/></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Labor Cost (₱)</label><input id="jb-lab" type="number" step="0.01" value="${e.laborCost||0}"/></div>
-        <div class="form-group"><label>Other Cost (₱)</label><input id="jb-oth" type="number" step="0.01" value="${e.otherCost||0}"/></div>
+        <div class="form-group"><label>Labor Cost (₱)</label><input id="jb-lab" type="number" inputmode="decimal" step="0.01" value="${e.laborCost||0}"/></div>
+        <div class="form-group"><label>Other Cost (₱)</label><input id="jb-oth" type="number" inputmode="decimal" step="0.01" value="${e.otherCost||0}"/></div>
       </div>
       <div id="jb-err" class="error-msg hidden"></div>
     `, `<button class="btn-primary" id="jb-save">Save</button>${job?'<button class="btn-danger" id="jb-del">Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);

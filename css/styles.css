@@ -117,6 +117,12 @@
   --bottom-nav-bg: rgba(7,7,16,0.90);
   --modal-bg:      rgba(13,13,26,0.92);
   --drawer-bg:     rgba(10,10,20,0.94);
+
+  /* ── Toast theming (consumed by notifications.js) ── */
+  --toast-success: #1E8E45;
+  --toast-error:   #D9362B;
+  --toast-info:    #2E6FD6;
+  --toast-text:    #FFFFFF;
 }
 
 /* ══════════════════════════════
@@ -912,7 +918,7 @@ html.light .handbook-text, html.theme-pink .handbook-text, html.theme-grey .hand
 .top-nav-item:active { background: var(--s2); }
 .top-nav-item .bn-icon { font-size: 18px; line-height: 1; transition: transform var(--t2); }
 .top-nav-item .bn-icon svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; display: block; }
-.top-nav-item .tn-label { font-size: 9px; font-weight: 600; }
+.top-nav-item .tn-label { font-size: 11px; font-weight: 600; }
 .top-nav-item.active { color: var(--pink); }
 .top-nav-item.active .bn-icon { transform: scale(1.12); filter: drop-shadow(0 0 4px var(--pink-glow)); }
 .top-nav-item .bn-badge,
@@ -2247,6 +2253,12 @@ html.light, html.theme-pink, html.theme-grey {
   --sh-pink: 0 4px 24px rgba(255,45,120,0.22);
   --sh-blue: 0 4px 24px rgba(10,132,255,0.18);
   --sh-gold: 0 4px 24px rgba(255,214,10,0.18);
+
+  /* Toast theming — slightly deeper hues read well on light surfaces */
+  --toast-success: #16A34A;
+  --toast-error:   #DC2626;
+  --toast-info:    #2563EB;
+  --toast-text:    #FFFFFF;
 }
 
 /* ══════════════════════════════════════════════════
@@ -3733,7 +3745,7 @@ html.light .ms-input, html.theme-pink .ms-input, html.theme-grey .ms-input { bac
   transition: color 160ms var(--ios-spring), background 160ms var(--ios-spring);
 }
 .top-nav-item .bn-icon { font-size: 20px; }
-.top-nav-item .tn-label { font-size: 10px; font-weight: 600; letter-spacing: -0.1px; }
+.top-nav-item .tn-label { font-size: 11px; font-weight: 600; letter-spacing: -0.1px; }
 .top-nav-item.active {
   color: var(--pink);
   background: rgba(255,45,120,0.10);
@@ -4185,7 +4197,7 @@ html.light .drawer-back-btn:hover, html.theme-pink .drawer-back-btn:hover, html.
   min-width: 0;
 }
 .top-nav-item .tn-label {
-  font-size: 9px;
+  font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4416,3 +4428,71 @@ html.light .profile-inset-card, html.theme-pink .profile-inset-card, html.theme-
 html.light .profile-info-row, html.theme-pink .profile-info-row, html.theme-grey .profile-info-row { border-color: rgba(0,0,0,0.07); }
 html.light .profile-section-label, html.theme-pink .profile-section-label, html.theme-grey .profile-section-label { color: rgba(0,0,0,0.40); }
 html.light .profile-hero-id, html.theme-pink .profile-hero-id, html.theme-grey .profile-hero-id { background: rgba(0,0,0,0.05); }
+
+/* ══════════════════════════════════════════════════
+   ACCESSIBILITY — keyboard focus visibility
+   :focus-visible only, so mouse clicks don't show a ring
+══════════════════════════════════════════════════ */
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+.nav-item:focus-visible,
+.bottom-nav-item:focus-visible,
+.top-nav-item:focus-visible,
+.modal-close:focus-visible,
+.menu-toggle:focus-visible,
+.icon-btn:focus-visible,
+.btn:focus-visible,
+.btn-primary:focus-visible,
+.btn-secondary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+/* Drop the default UA outline on mouse focus, keep keyboard ring above */
+a:focus:not(:focus-visible),
+button:focus:not(:focus-visible),
+[role="button"]:focus:not(:focus-visible),
+.nav-item:focus:not(:focus-visible),
+.bottom-nav-item:focus:not(:focus-visible),
+.top-nav-item:focus:not(:focus-visible),
+.modal-close:focus:not(:focus-visible),
+.menu-toggle:focus:not(:focus-visible),
+.icon-btn:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ══════════════════════════════════════════════════
+   REDUCED MOTION — neutralize decorative infinite anims
+   Keep functional transitions, just make them subtle
+══════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  /* Background drift / orbs */
+  body::before,
+  body::after,
+  .login-bg::before,
+  .login-bg::after {
+    animation: none !important;
+  }
+  /* Decorative infinite loops: gradient run, gold shine, pulse, float */
+  .btn-primary,
+  .id-card-shine,
+  [class*="float"],
+  [class*="pulse"] {
+    animation: none !important;
+    will-change: auto !important;
+  }
+  /* Any element animated with the decorative keyframes */
+  *,
+  *::before,
+  *::after {
+    animation-iteration-count: 1 !important;
+    animation-duration: 0.001ms !important;
+    transition-duration: var(--t1) !important;
+    scroll-behavior: auto !important;
+  }
+}

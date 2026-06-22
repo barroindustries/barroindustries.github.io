@@ -12,7 +12,21 @@ exports.sendPushOnNotification = functions
   .document('notifications/{uid}/items/{itemId}')
   .onCreate(async (snap, context) => {
     const { uid } = context.params;
-    const { title, body, type } = snap.data();
+    const raw = snap.data() || {};
+
+    // Defensive coercion/clamping: a forged or oversized notification doc
+    // must not spam users or push an oversized FCM payload. Coerce to strings,
+    // clamp to sane lengths, and treat an empty title+body as malformed.
+    const asStr = (v) => (v == null ? '' : String(v));
+    const title = asStr(raw.title).slice(0, 200);
+    const body  = asStr(raw.body).slice(0, 1000);
+    const type  = asStr(raw.type).slice(0, 64);
+
+    // Malformed doc (no real content) — nothing worth pushing.
+    if (!title.trim() && !body.trim()) {
+      console.warn('[FCM] Skipping malformed notification (empty title and body) for', uid);
+      return null;
+    }
 
     const userDoc = await admin.firestore().collection('users').doc(uid).get();
     if (!userDoc.exists) return null;
@@ -31,9 +45,9 @@ exports.sendPushOnNotification = functions
     const message = {
       token: fcmToken,
       data: {
-        title:   title || 'Barro Industries',
-        body:    body  || 'You have a new notification.',
-        type:    type    || 'general',
+        title:   title.trim() || 'Barro Industries',
+        body:    body.trim()  || 'You have a new notification.',
+        type:    type.trim()  || 'general',
         notifId: itemId,               // unique per notification doc — SW dedupes on this
         uid:     uid,
       },

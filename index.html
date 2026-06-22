@@ -144,7 +144,7 @@
           <label>Password</label>
           <div class="pw-wrap">
             <input type="password" id="password" placeholder="••••••••" required autocomplete="current-password"/>
-            <button type="button" class="pw-toggle" id="pw-toggle"><i data-lucide="eye"></i></button>
+            <button type="button" class="pw-toggle" id="pw-toggle" aria-label="Show password"><i data-lucide="eye" aria-hidden="true"></i></button>
           </div>
         </div>
         <label class="remember-row">
@@ -160,7 +160,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v10.0.22 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v11.0.1 · Barro Industries</div>
   </div>
 </div>
 
@@ -171,7 +171,7 @@
 
   <!-- Topbar -->
   <header class="topbar" id="topbar">
-    <button class="menu-toggle" id="menu-toggle">☰</button>
+    <button class="menu-toggle" id="menu-toggle" aria-label="Open menu"><span aria-hidden="true">☰</span></button>
     <div class="topbar-logo-area">
       <div class="topbar-logo-card">
         <img src="icons/bi-logo.svg" alt="BI" class="topbar-logo-img"
@@ -180,15 +180,15 @@
       </div>
       <div class="topbar-wordmark-stack">
         <span class="topbar-brand-main">Barro Industries</span>
-        <span class="topbar-brand-sub" id="topbar-version-str">Operations · v10.0.0</span>
+        <span class="topbar-brand-sub" id="topbar-version-str">Operations · v11.0.0</span>
       </div>
     </div>
     <div class="topbar-right">
       <button class="notif-btn" id="global-search-btn" aria-label="Search" style="display:none" onclick="navigateTo('search')">
         <i data-lucide="search"></i>
       </button>
-      <button class="notif-btn" id="notif-btn">
-        <i data-lucide="bell"></i>
+      <button class="notif-btn" id="notif-btn" aria-label="Notifications">
+        <i data-lucide="bell" aria-hidden="true"></i>
         <span class="notif-badge hidden" id="notif-badge">0</span>
       </button>
       <div class="topbar-avatar" id="topbar-avatar">?</div>
@@ -266,7 +266,7 @@
   <div id="modal-box" class="modal-box">
     <div class="modal-header">
       <h3 id="modal-title">Modal</h3>
-      <button class="modal-close" id="modal-close">✕</button>
+      <button class="modal-close" id="modal-close" aria-label="Close"><span aria-hidden="true">✕</span></button>
     </div>
     <div id="modal-body" class="modal-body"></div>
     <div id="modal-footer" class="modal-footer hidden"></div>

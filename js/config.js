@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '10.0.22';
+window.APP_VERSION = '11.0.1';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -118,7 +118,8 @@ window.ROLES = {
   manager:   { label: 'Manager',        badge: 'badge-purple', canSeeAll: false },
   employee:  { label: 'Employee',       badge: 'badge-gray',   canSeeAll: false },
   agent:     { label: 'Sales Agent',    badge: 'badge-orange', canSeeAll: false },
-  finance:   { label: 'Finance Staff',  badge: 'badge-green',  canSeeAll: false }
+  finance:   { label: 'Finance Staff',  badge: 'badge-green',  canSeeAll: false },
+  partner:   { label: 'Partner',        badge: 'badge-teal',   canSeeAll: false }
 };
 
 // ── Bottom Nav — Employee ────────────────────────

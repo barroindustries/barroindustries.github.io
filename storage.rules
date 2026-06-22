@@ -1,0 +1,100 @@
+rules_version = '2';
+
+// ═══════════════════════════════════════════════════════════════════
+//  BARRO INDUSTRIES — Cloud Storage Security Rules
+//
+//  SECURITY MODEL
+//  --------------
+//  • Deny by default. Nothing is readable or writable unless a rule
+//    below explicitly allows it.
+//  • Every read and write requires an authenticated user
+//    (request.auth != null). This alone closes the default/test-mode
+//    hole where the bucket was world-open to any authenticated user
+//    (or public). Receipts, payslip transfer proofs, and worker
+//    documents are no longer reachable without sign-in.
+//  • profile-photos/{uid} is owner-scoped: only the owning uid may
+//    write/delete their own photo; any signed-in user may read photos
+//    (they appear next to names throughout the app).
+//  • Size + content-type caps limit abuse: images <= 15MB, documents
+//    <= 25MB.
+//
+//  LIMITATION — NO ROLE SCOPING
+//  ----------------------------
+//  Cloud Storage rules CANNOT call get()/exists() against Firestore,
+//  so they cannot read a user's role/department (those live in
+//  users/{uid}.role). Finer role-based scoping (e.g. "only finance may
+//  read payslip transfer proofs") would require minting Firebase
+//  custom claims on the auth token (request.auth.token.role) from a
+//  Cloud Function and checking them here. Until then the model is:
+//  authenticated + owner-scoped (profile photos) + size/type limits.
+//
+//  PATHS IN USE (see js/drive.js, js/departments.js, js/app.js)
+//  ------------------------------------------------------------
+//    profile-photos/{uid}                       — uploadProfilePhoto
+//    {department}/{subfolder}/{ts}_{name}       — Drive.uploadFile
+//                                                 (receipts, payslip
+//                                                  transfer proofs,
+//                                                  worker docs, etc.)
+//    task-comments/{docId}/{ts}_{name}          — task comment files
+// ═══════════════════════════════════════════════════════════════════
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ── Shared helpers ───────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    // Image upload guard: must be an image and <= 15MB.
+    function isValidImage() {
+      return request.resource.size <= 15 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+    // Generic document/attachment guard: any type, <= 25MB.
+    function isValidDocument() {
+      return request.resource.size <= 25 * 1024 * 1024;
+    }
+
+    // ── Profile photos — owner-scoped writes ─────────
+    // Anyone signed in may read (avatars are shown app-wide);
+    // only the owning uid may upload/replace/delete their photo,
+    // and the upload must be a valid image.
+    match /profile-photos/{uid}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+        && request.auth.uid == uid
+        && (request.resource == null || isValidImage());
+    }
+    // Legacy flat path: profile-photos/{uid} (no trailing segment).
+    match /profile-photos/{uid} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+        && request.auth.uid == uid
+        && (request.resource == null || isValidImage());
+    }
+
+    // ── Task comment attachments ─────────────────────
+    // task-comments/{docId}/{ts}_{name}
+    match /task-comments/{docId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+        && (request.resource == null || isValidDocument());
+    }
+
+    // ── General department uploads ───────────────────
+    // {department}/{subfolder}/{ts}_{name} — receipts, payslip
+    // transfer proofs, worker documents. Top-level wildcard, so this
+    // MUST stay last and is intentionally broad (auth-required only).
+    // Excludes the dedicated paths above, which match more specifically.
+    match /{department}/{subfolder}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+        && (request.resource == null || isValidDocument());
+    }
+
+    // ── Deny everything else by default ──────────────
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

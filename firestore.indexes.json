@@ -72,6 +72,14 @@
         { "fieldPath": "payPeriodMonth", "order": "ASCENDING"  },
         { "fieldPath": "createdAt",      "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "partner_deals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "partnerUid", "order": "ASCENDING"  },
+        { "fieldPath": "createdAt",  "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -22,6 +22,10 @@ const ROLE_TYPE_MAP = {
 const LOGIN_TYPE_LABELS = { admin: 'Admin', employee: 'Employee', partner: 'Partner' };
 
 // ── Boot ──────────────────────────────────────────
+// Tracks the uid we've already run the full disruptive bootstrap for, so token
+// refreshes (which re-fire onAuthStateChanged for the SAME user) don't yank the
+// user back to the dashboard / rebuild nav mid-task.
+let _bootstrappedUid = null;
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   initLogin();
@@ -30,6 +34,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (user) {
       currentUser = user;
       await loadUserProfile(user);
+
+      // ── Idempotency guard ─────────────────────────
+      // Same signed-in user that is already bootstrapped (e.g. token refresh):
+      // refresh auth state but SKIP the disruptive re-bootstrap.
+      if (_bootstrappedUid === user.uid) {
+        return;
+      }
 
       // ── Login type gate ───────────────────────────
       // If user picked a login type, enforce it matches their actual role.
@@ -71,11 +82,15 @@ document.addEventListener('DOMContentLoaded', () => {
       startAutoLogout();
       startPresenceHeartbeat(user.uid);
       startForceLogoutListener(user.uid);
+      // Mark this uid as fully bootstrapped so subsequent token-refresh fires
+      // for the same user are treated as no-ops above.
+      _bootstrappedUid = user.uid;
       // Prompt for phone number if missing
       if (!userProfile.phone) {
         setTimeout(_promptPhoneNumber, 2000);
       }
     } else {
+      _bootstrappedUid = null;
       showLogin();
     }
   });
@@ -237,7 +252,7 @@ function showApp() {
   // Init Lucide icons for static topbar elements
   if (window.lucide) lucide.createIcons();
   // Apply correct theme toggle icon
-  _applyThemeIcon(localStorage.getItem('bi-theme') || 'office');
+  _applyThemeIcon(localStorage.getItem('bi-theme') || 'dark');
   // Reset any iOS zoom that happened during login input
   _resetViewportZoom();
   // Pull-to-refresh (init once)
@@ -363,17 +378,18 @@ async function loadUserProfile(user) {
         const c = await t.get(counterRef);
         const next = (c.exists ? c.data().count : 0) + 1;
         t.set(counterRef, { count: next }, { merge: true });
-        return `BI-${new Date().getFullYear()}-${String(next).padStart(3,'0')}`;
+        return `BI-${bizYear()}-${String(next).padStart(3,'0')}`;
       });
       const profile  = {
         uid: user.uid, email: user.email,
         displayName: user.displayName || user.email.split('@')[0],
         role: 'employee', departments: [], title: '',
         employeeId: empId,
-        photoUrl: '', startDate: new Date().toISOString().slice(0,10),
+        photoUrl: '', startDate: bizDate(),
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
       await db.collection('users').doc(user.uid).set(profile);
+      dbCacheInvalidate && dbCacheInvalidate('users');
       snap = await db.collection('users').doc(user.uid).get();
     }
     userProfile  = { id: snap.id, ...snap.data() };
@@ -657,11 +673,13 @@ const THEMES = {
 };
 
 function initTheme() {
-  setTheme(localStorage.getItem('bi-theme') || 'office', false);
+  // Default to the dark "Obsidian" theme (matches the splash/login/PWA chrome and
+  // the :root design system). Users who already picked a theme keep their choice.
+  setTheme(localStorage.getItem('bi-theme') || 'dark', false);
 }
 
 function setTheme(theme, persist = true) {
-  if (!THEMES[theme]) theme = 'office';
+  if (!THEMES[theme]) theme = 'dark';
   const html = document.documentElement;
   Object.values(THEMES).forEach(t => { if (t.cls) t.cls.split(' ').forEach(c => html.classList.remove(c)); });
   const cls = THEMES[theme].cls;
@@ -671,7 +689,7 @@ function setTheme(theme, persist = true) {
 }
 
 function getTheme() {
-  return localStorage.getItem('bi-theme') || 'office';
+  return localStorage.getItem('bi-theme') || 'dark';
 }
 
 function toggleTheme() {
@@ -693,7 +711,10 @@ function buildNav() {
   buildSidebarNav(); buildBottomNav(); buildTopNavStrip();
   // Global search is internal-only — show the topbar magnifier for everyone except partners / Brilliant-Steel-only
   const gs = document.getElementById('global-search-btn');
-  if (gs) gs.style.display = (isPartner() || isBrilliantOnly()) ? 'none' : '';
+  if (gs) { gs.style.display = (isPartner() || isBrilliantOnly()) ? 'none' : ''; gs.setAttribute('aria-label', 'Global search'); }
+  // a11y: label icon-only topbar nav controls.
+  document.getElementById('menu-toggle')?.setAttribute('aria-label', 'Open menu');
+  document.getElementById('theme-toggle-btn')?.setAttribute('aria-label', 'Toggle theme');
 }
 
 function isPresident() { return currentRole === 'president'; }
@@ -1029,6 +1050,8 @@ async function saveReviewedPartnerQuote(ctx, action) {
     await db.collection('approval_requests').where('quoteId','==',ctx.quoteId).get()
       .then(s => Promise.all(s.docs.map(d => d.ref.update({ status: action === 'approve' ? 'approved' : 'returned' }))))
       .catch(()=>{});
+    dbCacheInvalidate && dbCacheInvalidate('all-quotes');
+    dbCacheInvalidate && dbCacheInvalidate('approvals-pending');
     if (ctx.partnerUid) {
       await Notifs.send(ctx.partnerUid, action === 'approve'
         ? { title:'✅ Quote Approved!', body:`The president edited and approved "${ctx.quoteNumber}" for ${update.clientName}. It is now filed.`, icon:'✅', type:'quote_approved' }
@@ -1328,18 +1351,18 @@ async function renderProductDatabase() {
     </div>
     <div class="form-group" id="${prefix}-newcat-wrap" style="display:none"><label>New Category Name</label><input type="text" id="${prefix}-newcat" placeholder="Category name"></div>
     <div class="form-group"><label>Unit</label><input type="text" id="${prefix}-unit" placeholder="unit / sqm / lot" value="${escHtml(p.unit||'')}"></div>
-    <div class="form-group"><label>Price (₱)</label><input type="number" id="${prefix}-price" placeholder="0.00" min="0" step="0.01" value="${p.basePrice||''}"></div>
+    <div class="form-group"><label>Price (₱)</label><input type="number" inputmode="decimal" id="${prefix}-price" placeholder="0.00" min="0" step="0.01" value="${p.basePrice||''}"></div>
     <div class="form-group"><label>Capital — Materials (₱)</label>
       <div style="display:flex;gap:6px;align-items:center">
-        <input type="number" id="${prefix}-capmat" placeholder="0.00" min="0" step="0.01" value="${p.capitalMaterials||''}" style="flex:1">
+        <input type="number" inputmode="decimal" id="${prefix}-capmat" placeholder="0.00" min="0" step="0.01" value="${p.capitalMaterials||''}" style="flex:1">
         <button type="button" class="btn-secondary btn-sm pdb-bom-btn" data-prefix="${prefix}" data-bom="${encodeURIComponent(JSON.stringify(p.bom||[]))}" title="Build from raw-material prices in Inventory">🧮 BOM</button>
       </div>
       <div id="${prefix}-bom-note" style="font-size:11px;color:var(--text-muted);margin-top:3px">${(p.bom&&p.bom.length)?`${p.bom.length} material line(s) linked to inventory`:''}</div>
     </div>
-    <div class="form-group"><label>Capital — Labor (₱)</label><input type="number" id="${prefix}-caplab" placeholder="0.00" min="0" step="0.01" value="${p.capitalLabor||''}"></div>
-    <div class="form-group"><label>Measurement — Width (mm)</label><input type="number" id="${prefix}-w" min="0" value="${p.measurement?.W||''}"></div>
-    <div class="form-group"><label>Measurement — Depth (mm)</label><input type="number" id="${prefix}-d" min="0" value="${p.measurement?.D||''}"></div>
-    <div class="form-group"><label>Measurement — Height (mm)</label><input type="number" id="${prefix}-h" min="0" value="${p.measurement?.H||''}"></div>
+    <div class="form-group"><label>Capital — Labor (₱)</label><input type="number" inputmode="decimal" id="${prefix}-caplab" placeholder="0.00" min="0" step="0.01" value="${p.capitalLabor||''}"></div>
+    <div class="form-group"><label>Measurement — Width (mm)</label><input type="number" inputmode="numeric" id="${prefix}-w" min="0" value="${p.measurement?.W||''}"></div>
+    <div class="form-group"><label>Measurement — Depth (mm)</label><input type="number" inputmode="numeric" id="${prefix}-d" min="0" value="${p.measurement?.D||''}"></div>
+    <div class="form-group"><label>Measurement — Height (mm)</label><input type="number" inputmode="numeric" id="${prefix}-h" min="0" value="${p.measurement?.H||''}"></div>
     <div class="form-group"><label>Pricing Type</label>
       <select id="${prefix}-formula">
         <option value="fixed" ${p.formulaType==='fixed'||!p.formulaType?'selected':''}>Fixed price</option>
@@ -1347,7 +1370,7 @@ async function renderProductDatabase() {
         <option value="per_area" ${p.formulaType==='per_area'?'selected':''}>Scales by area (sqm)</option>
       </select>
     </div>
-    <div class="form-group" id="${prefix}-coef-wrap"><label id="${prefix}-coef-label">Price per extra mm (₱)</label><input type="number" id="${prefix}-coef" min="0" step="0.01" value="${p.formula?.pricePerExtraMm||p.formula?.pricePerSqm||''}"></div>
+    <div class="form-group" id="${prefix}-coef-wrap"><label id="${prefix}-coef-label">Price per extra mm (₱)</label><input type="number" inputmode="decimal" id="${prefix}-coef" min="0" step="0.01" value="${p.formula?.pricePerExtraMm||p.formula?.pricePerSqm||''}"></div>
     <div class="form-group" style="grid-column:1/-1"><label>Specifications</label><textarea id="${prefix}-specs" rows="2" placeholder="Material grade, thickness, finish, etc.">${escHtml(p.specifications||'')}</textarea></div>
   `;
 
@@ -1520,7 +1543,7 @@ async function renderProductDatabase() {
     const rows = mats.map(m => `
       <tr>
         <td style="font-weight:600">${escHtml(m.name || '—')}<div style="font-size:11px;color:var(--text-muted)">₱${Number(m.unitCost||0).toLocaleString('en-PH',{minimumFractionDigits:2})} / ${escHtml(m.unit||'unit')}</div></td>
-        <td style="width:90px"><input type="number" min="0" step="0.01" class="bom-qty" data-id="${m.id}" data-cost="${m.unitCost||0}" data-name="${escHtml(m.name||'')}" data-unit="${escHtml(m.unit||'')}" value="${qtyById[m.id]||''}" placeholder="0" style="width:100%;padding:5px;text-align:center"></td>
+        <td style="width:90px"><input type="number" inputmode="decimal" min="0" step="0.01" class="bom-qty" data-id="${m.id}" data-cost="${m.unitCost||0}" data-name="${escHtml(m.name||'')}" data-unit="${escHtml(m.unit||'')}" value="${qtyById[m.id]||''}" placeholder="0" style="width:100%;padding:5px;text-align:center"></td>
         <td class="bom-line-total" style="text-align:right;width:90px">₱0.00</td>
       </tr>`).join('');
     if (body) body.innerHTML = `
@@ -1705,7 +1728,11 @@ function navigateTo(page) {
 
 function setActiveNav(page) {
   document.querySelectorAll('.nav-item, .bottom-nav-item, .top-nav-item').forEach(el => {
-    el.classList.toggle('active', el.dataset.page === page);
+    const isActive = el.dataset.page === page;
+    el.classList.toggle('active', isActive);
+    // a11y: mark the active nav target for assistive tech.
+    if (isActive) el.setAttribute('aria-current', 'page');
+    else el.removeAttribute('aria-current');
   });
 }
 
@@ -1918,16 +1945,16 @@ async function renderPresidentDashboard() {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
     const todayStr = bizDate();
     const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap, ledgerSnap, invSnap] = await Promise.all([
-      dbCachedGet('users',         () => db.collection('users').get(),                                    60000),
+      dbCachedGet('users',         () => db.collection('users').get(),                                    30000),
       dbCachedGet('tasks-all',     () => db.collection('tasks').get(),                                    30000),
       dbCachedGet('submissions',   () => db.collection('submissions').get(),                              30000),
       dbCachedGet('all-quotes',    getAllQuotes,                                                          30000),
-      safeGet(db.collection('approval_requests').where('status','==','pending')),
-      safeGet(db.collection('cash_advances').where('status','==','pending')),
-      safeGet(db.collection('attendance_extensions').where('status','==','pending')),
-      safeGet(db.collection('signup_requests').where('status','==','pending')),
-      safeGet(db.collection('ledger')),
-      safeGet(db.collection('inventory_items')),
+      dbCachedGet('approvals-pending',   () => safeGet(db.collection('approval_requests').where('status','==','pending')),     30000),
+      dbCachedGet('ca-pending',          () => safeGet(db.collection('cash_advances').where('status','==','pending')),         30000),
+      dbCachedGet('att-ext-pending',     () => safeGet(db.collection('attendance_extensions').where('status','==','pending')), 30000),
+      dbCachedGet('signups-pending',     () => safeGet(db.collection('signup_requests').where('status','==','pending')),       30000),
+      dbCachedGet('ledger',              () => safeGet(db.collection('ledger')),                                                45000),
+      dbCachedGet('inventory_items',     () => safeGet(db.collection('inventory_items')),                                       45000),
     ]);
 
     const users       = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -2115,11 +2142,11 @@ async function renderManagerDashboard() {
     const todayStr = bizDate();
     const depts = currentDepts || [];
     const [usersSnap, tasksSnap, subsSnap, approvalsSnap, caSnap] = await Promise.all([
-      dbCachedGet('users',     () => db.collection('users').get(), 60000),
+      dbCachedGet('users',     () => db.collection('users').get(), 30000),
       dbCachedGet('tasks-all', () => db.collection('tasks').get(), 30000),
       dbCachedGet('submissions', () => db.collection('submissions').get(), 30000),
-      safeGet(db.collection('approval_requests').where('status','==','pending')),
-      safeGet(db.collection('cash_advances').where('status','==','pending')),
+      dbCachedGet('approvals-pending', () => safeGet(db.collection('approval_requests').where('status','==','pending')), 30000),
+      dbCachedGet('ca-pending',        () => safeGet(db.collection('cash_advances').where('status','==','pending')),     30000),
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const inDept = (u) => { const ud = Array.isArray(u.departments)?u.departments:(u.department?[u.department]:[]); return depts.some(d=>ud.includes(d)); };
@@ -2223,12 +2250,12 @@ async function renderFinanceDashboard() {
     const todayStr = bizDate();
     const mtd = todayStr.slice(0,7);
     const [usersSnap, ledgerSnap, expSnap, caSnap, invSnap, jobSnap] = await Promise.all([
-      dbCachedGet('users', fetchUsersWithPayroll, 60000),
-      safeGet(db.collection('ledger')),
-      safeGet(db.collection('expenses')),
-      safeGet(db.collection('cash_advances').where('status','==','pending')),
-      safeGet(db.collection('inventory_items')),
-      safeGet(db.collection('job_costs')),
+      dbCachedGet('users-payroll', fetchUsersWithPayroll, 30000),
+      dbCachedGet('ledger',          () => safeGet(db.collection('ledger')),                                            45000),
+      dbCachedGet('expenses',        () => safeGet(db.collection('expenses')),                                          45000),
+      dbCachedGet('ca-pending',      () => safeGet(db.collection('cash_advances').where('status','==','pending')),      30000),
+      dbCachedGet('inventory_items', () => safeGet(db.collection('inventory_items')),                                   45000),
+      dbCachedGet('job_costs',       () => safeGet(db.collection('job_costs')),                                         45000),
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const payrollGross = users.reduce((s,u)=>s+(u.salary||0)+(u.allowance||0),0);
@@ -2373,7 +2400,8 @@ async function renderEmployeeDashboard() {
     });
 
     // Monthly attendance for Current Standing card (fetched in Promise.all above)
-    const workDaysDash = countWorkDays(now.getFullYear(), now.getMonth(), now.getDate());
+    // Manila calendar Y/M/D (device-local clock can be off-by-one near UTC midnight).
+    const workDaysDash = countWorkDays(+todayStr.slice(0,4), +todayStr.slice(5,7)-1, +todayStr.slice(8,10));
     const attDaysFull = Math.round(monthAttScore * workDaysDash);
     const caBalance = recentCA.filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
 
@@ -2643,6 +2671,7 @@ async function renderEmployeeDashboard() {
           icon:  '⏰', type: 'att_extension',
           link:  'attendance'
         });
+        dbCacheInvalidate && dbCacheInvalidate('att-ext-pending');
         Notifs.showToast('Extension requested — waiting for president approval.');
         renderEmployeeDashboard();
       } catch(err) {
@@ -3100,8 +3129,8 @@ function _showAddDealModal(partners, onSaved) {
         <div><label class="form-label">Project Description</label><input class="form-input" id="dl-desc" placeholder="e.g. Full kitchen setup with exhaust system"/></div>
         <div><label class="form-label">Partner *</label><select class="form-input" id="dl-partner"><option value="">— Select Partner —</option>${partnerOpts}</select></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-          <div><label class="form-label">Total Contract Value (₱) *</label><input class="form-input" id="dl-contract" type="number" min="0" placeholder="0"/></div>
-          <div><label class="form-label">Project Cost to BI (₱) *</label><input class="form-input" id="dl-cost" type="number" min="0" placeholder="0"/></div>
+          <div><label class="form-label">Total Contract Value (₱) *</label><input class="form-input" id="dl-contract" type="number" inputmode="decimal" min="0" placeholder="0"/></div>
+          <div><label class="form-label">Project Cost to BI (₱) *</label><input class="form-input" id="dl-cost" type="number" inputmode="decimal" min="0" placeholder="0"/></div>
         </div>
         <div id="dl-calc" style="background:var(--surface-2);border-radius:10px;padding:12px;font-size:13px;display:none">
           <div style="display:flex;justify-content:space-between"><span>Gross Profit:</span><span id="dl-gross" style="font-weight:700;color:var(--success)">₱0</span></div>
@@ -3454,7 +3483,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     // Fetch users, all tasks, kpi_evals, and kpi_targets in parallel — single round trip
     // instead of up to 3 queries per user (N+1 fix).
     const [snap, tasksAllSnap, evalsSnap, kpiTargetsSnap] = await Promise.all([
-      dbCachedGet('users',       () => db.collection('users').get(),        60000),
+      dbCachedGet('users',       () => db.collection('users').get(),        30000),
       dbCachedGet('tasks-all',   () => db.collection('tasks').get(),        30000),
       dbCachedGet('kpi-evals',   () => db.collection('kpi_evals').get(),    60000),
       dbCachedGet('kpi-targets', () => db.collection('kpi_targets').get(),  60000),
@@ -3465,11 +3494,13 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     const evalsMap      = Object.fromEntries(evalsSnap.docs.map(d=>[d.id, d.data()]));
     const kpiTargetsMap = Object.fromEntries(kpiTargetsSnap.docs.map(d=>[d.id, d.data()]));
     const DONE_ST = ['done','approved','archived'];
-    const now2 = new Date();
-    const daysElapsed2 = countWorkDays(now2.getFullYear(), now2.getMonth(), now2.getDate());
-    const daysInMonth2 = countWorkDays(now2.getFullYear(), now2.getMonth(),
-                           new Date(now2.getFullYear(), now2.getMonth()+1, 0).getDate());
-    const defaultMonth2 = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
+    // Manila business-calendar period (avoid device-local off-by-one in payroll).
+    const _bz2 = bizDate();
+    const bz2Y = +_bz2.slice(0,4), bz2M = +_bz2.slice(5,7)-1, bz2D = +_bz2.slice(8,10);
+    const daysElapsed2 = countWorkDays(bz2Y, bz2M, bz2D);
+    const daysInMonth2 = countWorkDays(bz2Y, bz2M,
+                           new Date(bz2Y, bz2M+1, 0).getDate());
+    const defaultMonth2 = _bz2.slice(0,7);
     const userRows = await Promise.all(users.map(async u => {
       const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
       // KPI score — computed from bulk-fetched data, no extra Firestore reads
@@ -3514,8 +3545,8 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         </td>
       </tr>` };
     }));
-    const defaultMonth = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
-    const monthLabel = now2.toLocaleString('en-PH',{month:'long',year:'numeric'});
+    const defaultMonth = defaultMonth2;
+    const monthLabel = new Date(bz2Y, bz2M, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
     document.getElementById('pf-content').innerHTML = `
       <div class="card" style="margin-bottom:16px">
         <div class="card-header">
@@ -3538,7 +3569,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         openModal(`Grade: ${name}`, `
           <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Assign a performance grade for ${escHtml(name)} (1 = poor, 10 = outstanding). Improvement areas are visible to the employee.</p>
           <div class="form-group"><label>President Grade (1–10)</label>
-            <input id="pres-grade-input" type="number" min="1" max="10" step="1" value="${presgrade||''}" placeholder="e.g. 8"/>
+            <input id="pres-grade-input" type="number" inputmode="numeric" min="1" max="10" step="1" value="${presgrade||''}" placeholder="e.g. 8"/>
           </div>
           <div class="form-group"><label>General Notes (internal only)</label>
             <textarea id="pres-grade-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Internal remarks…">${escHtml(presnotes||'')}</textarea>
@@ -3601,7 +3632,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         const batch = db.batch();
         // Bulk-fetch users + tasks + kpi_targets to avoid N+1 reads in the loop below
         const [usersSnap2, tasksSn2, kpiTgtSn2] = await Promise.all([
-          dbCachedGet('users',       () => db.collection('users').get(),       60000),
+          dbCachedGet('users',       () => db.collection('users').get(),       30000),
           dbCachedGet('tasks-all',   () => db.collection('tasks').get(),       30000),
           dbCachedGet('kpi-targets', () => db.collection('kpi_targets').get(), 60000),
         ]);
@@ -3670,10 +3701,15 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   // Employee sees their own
   const u = userProfile;
   const net = (u.salary||0)+(u.allowance||0)-(u.deductions||0);
-  const now = new Date();
-  const daysElapsed  = countWorkDays(now.getFullYear(), now.getMonth(), now.getDate());
-  const daysInMonth  = countWorkDays(now.getFullYear(), now.getMonth(),
-                         new Date(now.getFullYear(), now.getMonth()+1, 0).getDate());
+  // Manila business-calendar Y/M/D — pay-period & day logic must NOT use the
+  // device-local clock (off-by-one near the UTC midnight boundary corrupts payroll).
+  const _bz = bizDate();                       // "YYYY-MM-DD" Manila
+  const bzYear  = parseInt(_bz.slice(0,4), 10);
+  const bzMonth = parseInt(_bz.slice(5,7), 10) - 1; // 0-indexed to match Date semantics
+  const bzDay   = parseInt(_bz.slice(8,10), 10);
+  const daysElapsed  = countWorkDays(bzYear, bzMonth, bzDay);
+  const daysInMonth  = countWorkDays(bzYear, bzMonth,
+                         new Date(bzYear, bzMonth+1, 0).getDate());
 
   const [kpi, att, cashAdvSnap, salaryHistSnap, evalSnap, myTasksSnap] = await Promise.all([
     getKpiScore(currentUser.uid),
@@ -3697,14 +3733,14 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   const selfGrade      = evalData.selfGrade ?? null;
   // presidentGrade: manual override first, then auto-averaged from task scores
   // Employees see only the averaged grade (presidentGradeFromTasks), and only on the 1st of the month
-  const isFirstOfMonth = now.getDate() === 1;
+  const isFirstOfMonth = bzDay === 1;
   const presGrade      = isFirstOfMonth ? (evalData.presidentGradeFromTasks ?? null) : null;
   const selfNotes      = evalData.selfNotes || '';
   const presidentImprovements = evalData.presidentImprovements || '';
-  const currentMonth   = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const currentMonth   = _bz.slice(0,7);
   const selfAssessMonth = evalData.selfAssessMonth || null;
   const selfDoneThisMonth = selfAssessMonth === currentMonth;
-  const isPayrollWindow = now.getDate() <= 7;
+  const isPayrollWindow = bzDay <= 7;
 
   const DONE_TASK_STATUSES_PR = ['done','approved','archived'];
   const myTasks  = myTasksSnap.docs.map(d=>d.data());
@@ -3720,11 +3756,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   const earnedSoFar   = computedMonth * (daysElapsed / daysInMonth); // prorated
 
   // YTD = completed months from salary history + current month earned so far
-  const thisYear  = now.getFullYear().toString();
+  const thisYear  = String(bzYear);
   const ytdHistory= salaryHistory.filter(h=>h.month?.startsWith(thisYear));
   const ytdPay    = ytdHistory.reduce((s,h)=>s+(h.finalPay||h.netPay||0),0) + earnedSoFar;
 
-  const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
+  const monthLabel = new Date(bzYear, bzMonth, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
   const kpiColor  = kpi>=0.8?'var(--success)':kpi>=0.6?'var(--warning)':'var(--danger)';
   const attColor  = att>=0.85?'var(--success)':att>=0.6?'var(--warning)':'var(--danger)';
 
@@ -3960,7 +3996,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       </p>
       <div class="form-group">
         <label>Self Grade (1–10) <span style="color:var(--danger)">*</span></label>
-        <input id="self-grade-input" type="number" min="1" max="10" step="1" value="${selfGrade!=null?selfGrade:''}" placeholder="e.g. 7"/>
+        <input id="self-grade-input" type="number" inputmode="numeric" min="1" max="10" step="1" value="${selfGrade!=null?selfGrade:''}" placeholder="e.g. 7"/>
       </div>
       <div class="form-group">
         <label>What did you accomplish this month? <span style="color:var(--danger)">*</span></label>
@@ -3998,8 +4034,8 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
 
   document.getElementById('req-advance-btn')?.addEventListener('click', () => {
     openModal('Request Cash Advance', `
-      <div class="form-group"><label>Amount Needed (₱)</label><input id="ca-amount" type="number" step="100" placeholder="0.00" min="0"/></div>
-      <div class="form-group"><label>Date Needed</label><input id="ca-date" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
+      <div class="form-group"><label>Amount Needed (₱)</label><input id="ca-amount" type="number" inputmode="decimal" step="100" placeholder="0.00" min="0"/></div>
+      <div class="form-group"><label>Date Needed</label><input id="ca-date" type="date" value="${bizDate()}"/></div>
       <div class="form-group"><label>Repayment Date</label><input id="ca-repay" type="date"/></div>
       <div class="form-group"><label>Reason / Purpose</label><textarea id="ca-reason" rows="3" placeholder="e.g., Medical emergency, family need…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea></div>
     `, `<button class="btn-primary" id="save-ca-btn">Submit Request</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -4015,6 +4051,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         status: 'pending',
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
+      dbCacheInvalidate && dbCacheInvalidate('ca-pending');
       await Notifs.sendToOwner({ title:'Cash Advance Request', body:`${name} requests ₱${formatNum(amount)} cash advance.`, icon:'💸', type:'cash_advance' });
       closeModal(); Notifs.showToast('Request submitted! Waiting for approval.');
       renderPersonalFinance(currentUser, currentRole);
@@ -4023,8 +4060,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
 
   // CA Deduction Override — employee requests how much to deduct this payroll
   document.getElementById('ca-deduct-req-btn')?.addEventListener('click', async () => {
-    const now2 = new Date();
-    const month = `${now2.getFullYear()}-${String(now2.getMonth()+1).padStart(2,'0')}`;
+    const month = bizDate().slice(0,7);   // Manila pay-period YYYY-MM
     const activeCA = cashAdvances.filter(a=>a.status==='approved'&&(a.balance||0)>0);
     if (!activeCA.length) { Notifs.showToast('No active cash advance balance.', 'error'); return; }
     const totalBal = activeCA.reduce((s,a)=>s+(a.balance||0),0);
@@ -4040,7 +4076,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       </p>
       <div class="form-group">
         <label>Deduction Amount (₱) — max ₱${formatNum(totalBal)}</label>
-        <input id="ca-override-amt" type="number" step="100" min="0" max="${totalBal}" value="${currentOverride||totalBal}" placeholder="${totalBal}"/>
+        <input id="ca-override-amt" type="number" inputmode="decimal" step="100" min="0" max="${totalBal}" value="${currentOverride||totalBal}" placeholder="${totalBal}"/>
       </div>
       <div class="form-group">
         <label>Reason / Note (optional)</label>
@@ -4165,9 +4201,11 @@ async function openEmpStandingsModal(uid, name, preloaded) {
   const body = document.getElementById('modal-body');
 
   try {
-    const now      = new Date();
-    const monthLabel = now.toLocaleString('en-PH', { month: 'long', year: 'numeric' });
-    const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+    // Manila business-calendar (attendance grid must match the employee's local day).
+    const _bz = bizDate();
+    const bzY = +_bz.slice(0,4), bzM = +_bz.slice(5,7)-1, bzD = +_bz.slice(8,10);
+    const monthLabel = new Date(bzY, bzM, 1).toLocaleString('en-PH', { month: 'long', year: 'numeric' });
+    const monthStart = `${_bz.slice(0,7)}-01`;
 
     const [attScore, caSnap, attRecSnap] = await Promise.all([
       getAttendanceScore(uid),
@@ -4190,12 +4228,12 @@ async function openEmpStandingsModal(uid, name, preloaded) {
     // Build attendance day grid
     const attRecords = {};
     attRecSnap.docs.forEach(d => { attRecords[d.id] = d.data(); });
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth()+1, 0).getDate();
+    const daysInMonth = new Date(bzY, bzM+1, 0).getDate();
     const dayBoxes = [];
-    for (let d = 1; d <= Math.min(now.getDate(), daysInMonth); d++) {
-      const ds = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    for (let d = 1; d <= Math.min(bzD, daysInMonth); d++) {
+      const ds = `${_bz.slice(0,7)}-${String(d).padStart(2,'0')}`;
       const rec = attRecords[ds];
-      const dow = new Date(ds).getDay(); // 0=Sun
+      const dow = new Date(ds + 'T12:00:00').getDay(); // 0=Sun (noon avoids TZ rollover)
       if (dow === 0) { dayBoxes.push(`<div class="att-day-box" style="background:rgba(100,100,100,0.15);border:1px solid rgba(100,100,100,0.2);opacity:0.5" title="${ds} — Sunday"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:10px">✗</span></div>`); continue; }
       const score = rec ? (typeof rec.attendanceScore === 'number' ? rec.attendanceScore : rec.fullTime ? 1.0 : rec.loginTime ? 0.5 : 0) : 0;
       const bg = score >= 1 ? 'rgba(48,209,88,0.18)' : score >= 0.5 ? 'rgba(255,160,64,0.18)' : 'rgba(255,68,68,0.12)';
@@ -4316,16 +4354,17 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
       const caBalance = caSnap.docs.map(d=>d.data()).filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
       const net = (preloaded.salary||0)+(preloaded.allowance||0)-(preloaded.deductions||0);
       const mult = kpi*0.7+att*0.3;
-      const now = new Date();
-      const daysElapsed = countWorkDays(now.getFullYear(), now.getMonth(), now.getDate());
-      const daysInMonth = countWorkDays(now.getFullYear(), now.getMonth(), new Date(now.getFullYear(),now.getMonth()+1,0).getDate());
+      const _bzS = bizDate();
+      const bzSY = +_bzS.slice(0,4), bzSM = +_bzS.slice(5,7)-1, bzSD = +_bzS.slice(8,10);
+      const daysElapsed = countWorkDays(bzSY, bzSM, bzSD);
+      const daysInMonth = countWorkDays(bzSY, bzSM, new Date(bzSY,bzSM+1,0).getDate());
       const earnedSoFar = net*mult*(daysElapsed/daysInMonth);
       const kpiPct = Math.round(kpi*100), attPct = Math.round(att*100);
       const kpiColor = kpiPct>=80?'var(--success)':kpiPct>=50?'var(--warning)':'var(--danger)';
       const attColor = attPct>=80?'var(--success)':attPct>=50?'var(--warning)':'var(--danger)';
       const dept = (Array.isArray(u.departments)&&u.departments.length?u.departments.join(', '):u.department)||'—';
       const role = u.role?(window.ROLES?.[u.role]?.label||u.role):'—';
-      const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
+      const monthLabel = new Date(bzSY, bzSM, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
       const selfGrade = evalD.selfGrade??null, presGrade = evalD.presidentGrade??evalD.presidentGradeFromTasks??null;
       content.innerHTML = `
         <div style="background:var(--surface2);border-radius:14px;padding:16px;margin-bottom:14px;display:flex;align-items:center;gap:14px">
@@ -4397,18 +4436,19 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
 
     } else if (tabName === 'attendance') {
       subtitle.textContent = 'Attendance';
-      const now = new Date();
-      const monthStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+      const _bzA = bizDate();
+      const bzAY = +_bzA.slice(0,4), bzAM = +_bzA.slice(5,7)-1, bzAD = +_bzA.slice(8,10);
+      const monthStart = `${_bzA.slice(0,7)}-01`;
       const snap = await db.collection('attendance').doc(uid).collection('records')
         .where(firebase.firestore.FieldPath.documentId(),'>=',monthStart).get().catch(()=>({docs:[]}));
       const recs = {}; snap.docs.forEach(d => { recs[d.id] = d.data(); });
-      const daysInMonth = new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
-      const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
+      const daysInMonth = new Date(bzAY,bzAM+1,0).getDate();
+      const monthLabel = new Date(bzAY, bzAM, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
       let full=0, half=0, absent=0;
       const boxes = [];
-      for (let d=1; d<=Math.min(now.getDate(),daysInMonth); d++) {
-        const ds = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-        const dow = new Date(ds).getDay();
+      for (let d=1; d<=Math.min(bzAD,daysInMonth); d++) {
+        const ds = `${_bzA.slice(0,7)}-${String(d).padStart(2,'0')}`;
+        const dow = new Date(ds + 'T12:00:00').getDay();
         if (dow===0) { boxes.push(`<div style="background:rgba(100,100,100,0.1);border:1px solid rgba(100,100,100,0.15);border-radius:5px;padding:3px 4px;text-align:center;min-width:28px;opacity:0.4"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:10px">—</span></div>`); continue; }
         const rec = recs[ds];
         const score = rec?(typeof rec.attendanceScore==='number'?rec.attendanceScore:rec.fullTime?1:rec.loginTime?0.5:0):0;
@@ -4439,10 +4479,13 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
 }
 
 async function printWorkerPayslip(uid, name, preloaded) {
-  const now = new Date();
-  const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
-  const daysElapsed = countWorkDays(now.getFullYear(), now.getMonth(), now.getDate());
-  const daysInMonth = countWorkDays(now.getFullYear(), now.getMonth(), new Date(now.getFullYear(),now.getMonth()+1,0).getDate());
+  const now = new Date();   // for "Generated" print timestamps only (audit/display)
+  // Pay period & workday denominator from Manila business calendar.
+  const _bzP = bizDate();
+  const bzPY = +_bzP.slice(0,4), bzPM = +_bzP.slice(5,7)-1, bzPD = +_bzP.slice(8,10);
+  const monthLabel = new Date(bzPY, bzPM, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
+  const daysElapsed = countWorkDays(bzPY, bzPM, bzPD);
+  const daysInMonth = countWorkDays(bzPY, bzPM, new Date(bzPY,bzPM+1,0).getDate());
   const [userSnap, kpi, att] = await Promise.all([
     db.collection('users').doc(uid).get().catch(()=>null),
     getKpiScore(uid), getAttendanceScore(uid)
@@ -4502,13 +4545,13 @@ async function renderProgressReports() {
     });
     tasks.forEach(t => { if (t.department && deptMap[t.department]) deptMap[t.department].tasks.push(t); });
 
-    // Current month filter
-    const now = new Date();
-    const monthStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-    const monthLabel = now.toLocaleString('en-PH',{month:'long',year:'numeric'});
+    // Current month filter (Manila business calendar on both sides of the compare)
+    const _bzPr = bizDate();
+    const monthStr = _bzPr.slice(0,7);
+    const monthLabel = new Date(+_bzPr.slice(0,4), +_bzPr.slice(5,7)-1, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
     const monthTasks = tasks.filter(t => {
       const ts = t.createdAt?.seconds ? new Date(t.createdAt.seconds*1000) : null;
-      return ts && `${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}` === monthStr;
+      return ts && bizDate(ts).slice(0,7) === monthStr;
     });
 
     // Helper to check assignedTo array
@@ -4574,7 +4617,7 @@ async function renderProgressReports() {
       // month-only stats for this dept
       const mTasks = data.tasks.filter(t => {
         const ts = t.createdAt?.seconds ? new Date(t.createdAt.seconds*1000) : null;
-        return ts && `${ts.getFullYear()}-${String(ts.getMonth()+1).padStart(2,'0')}` === monthStr;
+        return ts && bizDate(ts).slice(0,7) === monthStr;
       });
       const mDone = mTasks.filter(isDoneTask).length;
       const mPct  = mTasks.length ? Math.round(mDone/mTasks.length*100) : 0;
@@ -5303,12 +5346,12 @@ async function renderAnalytics() {
   const govBids=govSnap.docs.map(d=>({id:d.id,...d.data()}));
 
   const fmt=n=>isNaN(n)?'0':Number(n).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
-  const now=new Date(), thisMonth=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const thisMonth=bizDate().slice(0,7);   // Manila YYYY-MM
   const inMonth=(obj,field='createdAt')=>{
     const v=obj[field];
     if(!v) return false;
     const d=v.toDate?v.toDate():new Date(v);
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` === thisMonth;
+    return bizDate(d).slice(0,7) === thisMonth;
   };
 
   const SUBTABS = [
@@ -5394,9 +5437,10 @@ async function renderAnalytics() {
     `;
     const statuses=['draft','sent','accepted','rejected'];
     new Chart(document.getElementById('sq-chart'),{type:'bar',data:{labels:statuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:statuses.map(s=>salesQuotes.filter(q=>q.status===s).length),backgroundColor:['#636366','#0A84FF','#30D158','#FF453A']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
-    // last 6 months volume
+    // last 6 months volume — anchored to Manila current month
     const months=[],counts=[];
-    for(let i=5;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);months.push(d.toLocaleString('default',{month:'short'}));counts.push(salesQuotes.filter(q=>{const qd=q.createdAt?.toDate?q.createdAt.toDate():new Date(q.createdAt||0);return qd.getMonth()===d.getMonth()&&qd.getFullYear()===d.getFullYear();}).length);}
+    const _anchY=+thisMonth.slice(0,4), _anchM=+thisMonth.slice(5,7)-1;
+    for(let i=5;i>=0;i--){const d=new Date(_anchY,_anchM-i,1);months.push(d.toLocaleString('default',{month:'short'}));counts.push(salesQuotes.filter(q=>{const qd=q.createdAt?.toDate?q.createdAt.toDate():new Date(q.createdAt||0);return qd.getMonth()===d.getMonth()&&qd.getFullYear()===d.getFullYear();}).length);}
     new Chart(document.getElementById('sq2-chart'),{type:'line',data:{labels:months,datasets:[{label:'Quotes',data:counts,borderColor:'#0A84FF',backgroundColor:'#0A84FF22',fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
   };
 
@@ -5576,8 +5620,11 @@ async function renderTeam() {
     </div>
     <div id="team-table"><div class="loading-placeholder">Loading…</div></div>`;
   // Short TTL here so the online/offline presence dots reflect "now", not a
-  // 60s-stale snapshot left by another screen.
-  const snap=await dbCachedGet('users', () => db.collection('users').get(), 8000);
+  // stale snapshot left by another screen. Uses a DISTINCT key from the shared
+  // 'users' cache (standardized at 30s) so its 8s freshness is deterministic.
+  // Must use the payroll-aware fetcher so the Team table's Base/Allowance/Net
+  // columns and the CSV export carry merged pay (pay lives in payroll/{uid}).
+  const snap=await dbCachedGet('users-presence', fetchUsersWithPayroll, 8000);
   const users=snap.docs.map(d=>({id:d.id,...d.data()}));
   const now = Date.now();
   const onlineThresholdMs = 3 * 60 * 1000; // 3 min = online
@@ -5643,11 +5690,11 @@ function openAddEmployeeModal() {
     <div class="form-group"><label>Secondary Dept (if dual)</label><select id="emp-dept2"><option value="">None</option>${Object.keys(DEPARTMENTS).map(k=>`<option value="${k}">${k}</option>`).join('')}</select></div>
     <div class="form-group"><label>Job Title</label><input id="emp-title"/></div>
     <div class="form-row">
-      <div class="form-group"><label>Base Salary (₱)</label><input id="emp-salary" type="number" value="0"/></div>
-      <div class="form-group"><label>Allowance (₱)</label><input id="emp-allow" type="number" value="0"/></div>
+      <div class="form-group"><label>Base Salary (₱)</label><input id="emp-salary" type="number" inputmode="decimal" value="0"/></div>
+      <div class="form-group"><label>Allowance (₱)</label><input id="emp-allow" type="number" inputmode="decimal" value="0"/></div>
     </div>
-    <div class="form-group"><label>Deductions (₱)</label><input id="emp-deduct" type="number" value="0"/></div>
-    <div class="form-group"><label>Start Date</label><input id="emp-start" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
+    <div class="form-group"><label>Deductions (₱)</label><input id="emp-deduct" type="number" inputmode="decimal" value="0"/></div>
+    <div class="form-group"><label>Start Date</label><input id="emp-start" type="date" value="${bizDate()}"/></div>
   `,`<button class="btn-primary" id="save-emp-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   document.getElementById('save-emp-btn').addEventListener('click',async()=>{
     const dept1=document.getElementById('emp-dept').value;
@@ -5670,7 +5717,7 @@ function openAddEmployeeModal() {
       deductions:parseFloat(document.getElementById('emp-deduct').value)||0,
     });
     window.logAudit && window.logAudit('create','payroll',ref.id,{ salary:parseFloat(document.getElementById('emp-salary').value)||0 });
-    dbCacheInvalidate('users'); closeModal(); renderTeam();
+    dbCacheInvalidate('users'); dbCacheInvalidate('users-payroll'); dbCacheInvalidate('users-presence'); closeModal(); renderTeam();
   });
 }
 
@@ -5724,10 +5771,10 @@ function openCreateWorkerModal() {
     </div>
     <div class="form-group"><label>Job Title</label><input id="cw-title" placeholder="e.g. Machine Operator"/></div>
     <div class="form-row">
-      <div class="form-group"><label>Base Salary (₱)</label><input id="cw-salary" type="number" value="0"/></div>
-      <div class="form-group"><label>Allowance (₱)</label><input id="cw-allow" type="number" value="0"/></div>
+      <div class="form-group"><label>Base Salary (₱)</label><input id="cw-salary" type="number" inputmode="decimal" value="0"/></div>
+      <div class="form-group"><label>Allowance (₱)</label><input id="cw-allow" type="number" inputmode="decimal" value="0"/></div>
     </div>
-    <div class="form-group"><label>Start Date</label><input id="cw-start" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
+    <div class="form-group"><label>Start Date</label><input id="cw-start" type="date" value="${bizDate()}"/></div>
     <div id="cw-error" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="cw-save-btn">Create Account</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
@@ -5796,7 +5843,7 @@ function openCreateWorkerModal() {
       await db.collection('payroll').doc(uid).set({ salary, allowance: allow, deductions: 0 });
       window.logAudit && window.logAudit('create','payroll',uid,{ salary, allowance: allow });
 
-      dbCacheInvalidate('users');
+      dbCacheInvalidate('users'); dbCacheInvalidate('users-payroll'); dbCacheInvalidate('users-presence');
 
       // Show credentials to HR — only time the password is displayed in full
       openModal('✅ Worker Account Created', `
@@ -5834,10 +5881,10 @@ function openEditEmployeeModal(u) {
     </div>
     <div class="form-group"><label>Secondary Dept</label><select id="eu-dept2"><option value="">None</option>${Object.keys(DEPARTMENTS).map(k=>`<option value="${k}" ${curDepts[1]===k?'selected':''}>${k}</option>`).join('')}</select></div>
     <div class="form-row">
-      <div class="form-group"><label>Base Salary (₱)</label><input id="eu-salary" type="number" value="${u.salary||0}"/></div>
-      <div class="form-group"><label>Allowance (₱)</label><input id="eu-allow" type="number" value="${u.allowance||0}"/></div>
+      <div class="form-group"><label>Base Salary (₱)</label><input id="eu-salary" type="number" inputmode="decimal" value="${u.salary||0}"/></div>
+      <div class="form-group"><label>Allowance (₱)</label><input id="eu-allow" type="number" inputmode="decimal" value="${u.allowance||0}"/></div>
     </div>
-    <div class="form-group"><label>Deductions (₱)</label><input id="eu-deduct" type="number" value="${u.deductions||0}"/></div>
+    <div class="form-group"><label>Deductions (₱)</label><input id="eu-deduct" type="number" inputmode="decimal" value="${u.deductions||0}"/></div>
   `,`<button class="btn-primary" id="save-eu-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   document.getElementById('save-eu-btn').addEventListener('click',async()=>{
@@ -5858,7 +5905,7 @@ function openEditEmployeeModal(u) {
       deductions:parseFloat(document.getElementById('eu-deduct').value)||0,
     }, {merge:true});
     window.logAudit && window.logAudit('update','payroll',u.id,{ salary:parseFloat(document.getElementById('eu-salary').value)||0 });
-    dbCacheInvalidate('users'); closeModal(); renderTeam();
+    dbCacheInvalidate('users'); dbCacheInvalidate('users-payroll'); dbCacheInvalidate('users-presence'); closeModal(); renderTeam();
   });
 
   // Reset Password (worker accounts only)
@@ -6174,11 +6221,13 @@ async function renderMiniCal() {
       tasks=snap.docs.map(d=>({id:d.id,...d.data()})).filter(t=>t.dueDate && !['done','approved','archived'].includes(t.status));
     } catch(_) {}
   }
-  const base=new Date(); base.setDate(1); base.setMonth(base.getMonth()+_calMonthOffset);
+  const todayStr=(typeof bizDate==='function'?bizDate():new Date().toISOString().slice(0,10));
+  // Anchor the calendar to the Manila current month (+ user nav offset), so the
+  // grid doesn't jump a month near the UTC midnight boundary.
+  const base=new Date(+todayStr.slice(0,4), +todayStr.slice(5,7)-1, 1); base.setMonth(base.getMonth()+_calMonthOffset);
   const year=base.getFullYear(), month=base.getMonth();
   const firstDay=new Date(year,month,1).getDay(); const days=new Date(year,month+1,0).getDate();
   const months=['January','February','March','April','May','June','July','August','September','October','November','December'];
-  const todayStr=(typeof bizDate==='function'?bizDate():new Date().toISOString().slice(0,10));
   const pad=n=>String(n).padStart(2,'0');
   const ym=`${year}-${pad(month+1)}`;
   const byDay={};

@@ -225,9 +225,9 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
 
   if (sub === 'overdue' || sub === 'neardue') {
     wrap.innerHTML = '<div class="loading-placeholder">Loading…</div>';
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const in3Days  = new Date(); in3Days.setDate(in3Days.getDate() + 3);
-    const in3Str   = in3Days.toISOString().slice(0, 10);
+    const todayStr = today();
+    const in3d = new Date(); in3d.setDate(in3d.getDate() + 3);
+    const in3Str   = window.bizDate ? window.bizDate(in3d) : in3d.toISOString().slice(0, 10);
     const snap = await db.collection('tasks').get().catch(()=>({docs:[]}));
     let tasks = snap.docs.map(d=>normTask(d.data(),d.id)).filter(t=>!DONE_STATUSES.includes(t.status)&&t.status!=='archived');
     if (sub === 'overdue') {
@@ -376,6 +376,9 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   const snap = await db.collection('tasks').doc(taskId).get();
   if (!snap.exists) { Notifs.showToast('Task not found','error'); return; }
   const t       = normTask(snap.data(),snap.id);
+  // Task edit gating: admin roles only — this MUST match the Firestore tasks
+  // update rule (assignee-or-admin). Dept membership alone does NOT grant
+  // task edit/reassign/score (that would surface buttons the backend rejects).
   const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
   const isAssignee = t.assignedTo.includes(currentUser.uid);
   const isCreator  = t.createdBy===currentUser.uid;
@@ -427,7 +430,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
 
         <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap">
           ${t.assignedToNames?.length?`<span>👥 <strong>${escHtml(t.assignedToNames.join(', '))}</strong></span>`:''}
-          ${t.dueDate?`<span>📅 Due: <strong style="color:${t.dueDate<new Date().toISOString().slice(0,10)?'var(--danger)':'inherit'}">${t.dueDate}</strong></span>`:''}
+          ${t.dueDate?`<span>📅 Due: <strong style="color:${t.dueDate<today()?'var(--danger)':'inherit'}">${t.dueDate}</strong></span>`:''}
           ${t.createdByName?`<span>🖊 By: ${escHtml(t.createdByName)}</span>`:''}
         </div>
 
@@ -471,7 +474,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
         ${currentRole==='president'&&SCORE_STATUSES.includes(t.status)?`<div style="background:var(--surface2);border:1.5px solid var(--primary-light);border-radius:10px;padding:12px;margin-bottom:10px">
           <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--primary-light);margin-bottom:8px">🔒 President Score</div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input id="pres-score" type="number" min="1" max="10" step="0.5" value="${t.presidentScore||''}" placeholder="1–10" style="width:80px;padding:8px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text)"/>
+            <input id="pres-score" type="number" min="1" max="10" step="0.5" value="${t.presidentScore||''}" placeholder="1–10" style="width:80px;padding:8px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text)" inputmode="decimal"/>
             <span style="font-size:12px;color:var(--text-muted)">/ 10</span>
             <button class="btn-primary btn-sm" id="save-score-btn">Save</button>
           </div>
@@ -507,6 +510,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
       lastModifiedBy: currentUser.uid, lastModifiedByName: actorName,
       lastModifiedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     await notifyTaskInvolved(t, {
       title: '📍 Task Standing Updated',
       body: `"${t.title}" — ${val||'(cleared)'}`,
@@ -565,6 +569,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     const update={assignedTo:[...t.assignedTo,newUid],assignedToNames:[...t.assignedToNames,newName],lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()};
     if (note) update.description=(t.description||'')+`\n\n📝 ${actorName}: ${note}`;
     await db.collection('tasks').doc(taskId).update(update);
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     await Notifs.send(newUid,{title:'🎯 Task Assigned to You',body:`"${t.title}" assigned by ${actorName}${note?' — '+note:''}`,icon:'🎯',type:'task_designated',taskId});
     await Notifs.sendToOwner({title:'👥 Task Assignee Added',body:`${actorName} added ${newName} to "${t.title}"`,icon:'👥',type:'task_modified',taskId});
     Notifs.showToast(`${newName} added`);
@@ -575,6 +580,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     const score=parseFloat(document.getElementById('pres-score').value);
     if (!score||score<1||score>10) { Notifs.showToast('Enter 1–10','error'); return; }
     await db.collection('tasks').doc(taskId).update({presidentScore:score});
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     for (const uid of t.assignedTo) await recomputePresidentTaskScore(uid);
     Notifs.showToast('Score saved & KPI updated!');
     closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
@@ -593,6 +599,9 @@ async function recomputePresidentTaskScore(uid) {
 }
 
 async function openEditTaskModal(taskId, t, currentUser, currentRole) {
+  // Task edit gating: admin roles only — MUST match the Firestore tasks update
+  // rule (assignee-or-admin), so we don't render an assignment dropdown the
+  // backend will reject for a non-admin dept member.
   const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
   let employees=[];
   if (isAdmin) {
@@ -667,6 +676,7 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
     };
     if (isAdmin){update.assignedTo=curAssignees.map(a=>a.uid);update.assignedToNames=curAssignees.map(a=>a.name);}
     await db.collection('tasks').doc(taskId).update(update);
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     const updatedTask={...t,assignedTo:update.assignedTo||t.assignedTo};
     // Build a SPECIFIC change summary so the notification says what actually changed
     const changes=[];
@@ -985,7 +995,7 @@ function openAddExpenseModal(currentUser) {
   openModal('Add Expense / Receipt', `
     <div class="form-group"><label>Description</label><input id="e-desc" placeholder="What was this expense for?"/></div>
     <div class="form-row">
-      <div class="form-group"><label>Amount (₱)</label><input id="e-amount" type="number" step="0.01" placeholder="0.00"/></div>
+      <div class="form-group"><label>Amount (₱)</label><input id="e-amount" type="number" step="0.01" placeholder="0.00" inputmode="decimal"/></div>
       <div class="form-group"><label>Date</label><input id="e-date" type="date" value="${today()}"/></div>
     </div>
     <div class="form-group"><label>Category</label>
@@ -1350,8 +1360,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   const canFinance = isFinancePriv();
   const isPres     = isRealPresident(currentUser);
   const months    = [...new Set(history.map(h=>h.month))].sort().reverse();
-  const now       = new Date();
-  const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const thisMonth = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10)).slice(0,7); // Manila YYYY-MM
 
   container.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
@@ -1435,14 +1444,14 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         if (!rec) return;
         openModal(`Edit Payroll Record — ${rec.userName||'?'} (${rec.month||'?'})`, `
           <div class="form-row">
-            <div class="form-group"><label>Base Salary</label><input id="hpe-salary" type="number" value="${rec.salary||0}"/></div>
-            <div class="form-group"><label>Allowance</label><input id="hpe-allow" type="number" value="${rec.allowance||0}"/></div>
+            <div class="form-group"><label>Base Salary</label><input id="hpe-salary" type="number" value="${rec.salary||0}" inputmode="decimal"/></div>
+            <div class="form-group"><label>Allowance</label><input id="hpe-allow" type="number" value="${rec.allowance||0}" inputmode="decimal"/></div>
           </div>
           <div class="form-row">
-            <div class="form-group"><label>Deductions</label><input id="hpe-deduct" type="number" value="${rec.deductions||0}"/></div>
-            <div class="form-group"><label>Net Pay</label><input id="hpe-net" type="number" value="${rec.netPay||0}"/></div>
+            <div class="form-group"><label>Deductions</label><input id="hpe-deduct" type="number" value="${rec.deductions||0}" inputmode="decimal"/></div>
+            <div class="form-group"><label>Net Pay</label><input id="hpe-net" type="number" value="${rec.netPay||0}" inputmode="decimal"/></div>
           </div>
-          <div class="form-group"><label>Final Pay</label><input id="hpe-final" type="number" value="${rec.finalPay||0}"/></div>
+          <div class="form-group"><label>Final Pay</label><input id="hpe-final" type="number" value="${rec.finalPay||0}" inputmode="decimal"/></div>
           <div class="form-group"><label>Notes (optional)</label><input id="hpe-notes" type="text" value="${escHtml(rec.notes||'')}" placeholder="e.g. 13th month included"/></div>
         `, `<button class="btn-primary" id="save-hpe-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
@@ -1661,25 +1670,25 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 
         openModal(`Edit Payroll — ${emp.displayName}`, `
           <div class="form-row">
-            <div class="form-group"><label>Base Salary</label><input id="ep-salary" type="number" value="${emp.salary||0}"/></div>
-            <div class="form-group"><label>Allowance</label><input id="ep-allow" type="number" value="${emp.allowance||0}"/></div>
+            <div class="form-group"><label>Base Salary</label><input id="ep-salary" type="number" value="${emp.salary||0}" inputmode="decimal"/></div>
+            <div class="form-group"><label>Allowance</label><input id="ep-allow" type="number" value="${emp.allowance||0}" inputmode="decimal"/></div>
           </div>
           <div class="form-row">
-            <div class="form-group"><label>Other Deductions</label><input id="ep-deduct" type="number" value="${emp.deductions||0}"/></div>
-            <div class="form-group"><label>SSS</label><input id="ep-sss" type="number" value="${emp.sss||0}" placeholder="Auto-computed if 0"/></div>
+            <div class="form-group"><label>Other Deductions</label><input id="ep-deduct" type="number" value="${emp.deductions||0}" inputmode="decimal"/></div>
+            <div class="form-group"><label>SSS</label><input id="ep-sss" type="number" value="${emp.sss||0}" placeholder="Auto-computed if 0" inputmode="decimal"/></div>
           </div>
           <div class="form-row">
-            <div class="form-group"><label>PhilHealth</label><input id="ep-ph" type="number" value="${emp.philhealth||0}" placeholder="Auto-computed if 0"/></div>
-            <div class="form-group"><label>Pag-IBIG</label><input id="ep-pi" type="number" value="${emp.pagibig||0}"/></div>
+            <div class="form-group"><label>PhilHealth</label><input id="ep-ph" type="number" value="${emp.philhealth||0}" placeholder="Auto-computed if 0" inputmode="decimal"/></div>
+            <div class="form-group"><label>Pag-IBIG</label><input id="ep-pi" type="number" value="${emp.pagibig||0}" inputmode="decimal"/></div>
           </div>
-          <div class="form-group"><label>Tax</label><input id="ep-tax" type="number" value="${emp.tax||0}"/></div>
+          <div class="form-group"><label>Tax</label><input id="ep-tax" type="number" value="${emp.tax||0}" inputmode="decimal"/></div>
           ${caBalance > 0 ? `
           <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
             <label style="font-weight:600">💳 Cash Advance Deduction This Month</label>
             <div style="font-size:12px;color:var(--text-muted);margin:4px 0 8px">Outstanding balance: <strong>₱${fmt(caBalance)}</strong></div>
             <input id="ep-ca-deduct" type="number" min="0" max="${caBalance}" step="0.01"
               value="${caOverride}"
-              placeholder="Leave blank = deduct full ₱${fmt(caBalance)}"/>
+              placeholder="Leave blank = deduct full ₱${fmt(caBalance)}" inputmode="decimal"/>
             <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Enter a partial amount to defer the rest to next month. Clear field to revert to full balance.</div>
           </div>` : ''}
         `, `<button class="btn-primary" id="save-ep-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -1883,7 +1892,7 @@ async function renderTaxesTab(container, currentUser, currentRole) {
         </div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Amount (₱)</label><input id="tax-amount" type="number" step="0.01"/></div>
+        <div class="form-group"><label>Amount (₱)</label><input id="tax-amount" type="number" step="0.01" inputmode="decimal"/></div>
         <div class="form-group"><label>Due Date</label><input id="tax-due" type="date"/></div>
       </div>
       <div class="form-group"><label>Status</label>
@@ -2057,7 +2066,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
       </div>
       <div class="form-group"><label>Description / Account Title</label><input id="led-desc" placeholder="e.g. Client payment — ABC Corp, or Accumulated Depreciation"/></div>
       <div class="form-row">
-        <div class="form-group"><label>Amount (₱)</label><input id="led-amount" type="number" step="0.01"/></div>
+        <div class="form-group"><label>Amount (₱)</label><input id="led-amount" type="number" step="0.01" inputmode="decimal"/></div>
         <div class="form-group"><label>Category</label>
           <select id="led-cat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
             <option>Sales Revenue</option><option>Operating Expense</option><option>Payroll</option>
@@ -2133,16 +2142,16 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
       </div>
       <div class="form-group"><label>Customer</label><input id="crj-customer" placeholder="Customer name"/></div>
       <div class="form-row">
-        <div class="form-group"><label>Debit: Cash (₱)</label><input id="crj-cash" type="number" step="0.01" value="0"/></div>
-        <div class="form-group"><label>Debit: Sales Discount (₱)</label><input id="crj-discount" type="number" step="0.01" value="0"/></div>
+        <div class="form-group"><label>Debit: Cash (₱)</label><input id="crj-cash" type="number" step="0.01" value="0" inputmode="decimal"/></div>
+        <div class="form-group"><label>Debit: Sales Discount (₱)</label><input id="crj-discount" type="number" step="0.01" value="0" inputmode="decimal"/></div>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Credit: Accounts Receivable (₱)</label><input id="crj-ar" type="number" step="0.01" value="0"/></div>
-        <div class="form-group"><label>Credit: Sales Revenue (₱)</label><input id="crj-revenue" type="number" step="0.01" value="0"/></div>
+        <div class="form-group"><label>Credit: Accounts Receivable (₱)</label><input id="crj-ar" type="number" step="0.01" value="0" inputmode="decimal"/></div>
+        <div class="form-group"><label>Credit: Sales Revenue (₱)</label><input id="crj-revenue" type="number" step="0.01" value="0" inputmode="decimal"/></div>
       </div>
       <div class="form-row">
         <div class="form-group"><label>Credit: Sundry Account</label><input id="crj-sundry-acct" placeholder="e.g. Other Income"/></div>
-        <div class="form-group"><label>Credit: Sundry Amount (₱)</label><input id="crj-sundry-amt" type="number" step="0.01" value="0"/></div>
+        <div class="form-group"><label>Credit: Sundry Amount (₱)</label><input id="crj-sundry-amt" type="number" step="0.01" value="0" inputmode="decimal"/></div>
       </div>
     `, `<button class="btn-primary" id="save-crj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
@@ -2213,15 +2222,15 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
         <div class="form-group"><label>Date</label><input id="cdj-date" type="date" value="${today()}"/></div>
       </div>
       <div class="form-group"><label>Payee</label><input id="cdj-payee" placeholder="Payee name"/></div>
-      <div class="form-group"><label>Credit: Cash (₱)</label><input id="cdj-cash" type="number" step="0.01" value="0"/></div>
+      <div class="form-group"><label>Credit: Cash (₱)</label><input id="cdj-cash" type="number" step="0.01" value="0" inputmode="decimal"/></div>
       <div class="form-row">
-        <div class="form-group"><label>Debit: COS – Direct Material (₱)</label><input id="cdj-material" type="number" step="0.01" value="0"/></div>
-        <div class="form-group"><label>Debit: Accounts Payable (₱)</label><input id="cdj-ap" type="number" step="0.01" value="0"/></div>
+        <div class="form-group"><label>Debit: COS – Direct Material (₱)</label><input id="cdj-material" type="number" step="0.01" value="0" inputmode="decimal"/></div>
+        <div class="form-group"><label>Debit: Accounts Payable (₱)</label><input id="cdj-ap" type="number" step="0.01" value="0" inputmode="decimal"/></div>
       </div>
-      <div class="form-group"><label>Debit: COS – Direct Labor (₱)</label><input id="cdj-labor" type="number" step="0.01" value="0"/></div>
+      <div class="form-group"><label>Debit: COS – Direct Labor (₱)</label><input id="cdj-labor" type="number" step="0.01" value="0" inputmode="decimal"/></div>
       <div class="form-row">
         <div class="form-group"><label>Debit: Sundry Account</label><input id="cdj-sundry-acct" placeholder="e.g. Utilities Expense"/></div>
-        <div class="form-group"><label>Debit: Sundry Amount (₱)</label><input id="cdj-sundry-amt" type="number" step="0.01" value="0"/></div>
+        <div class="form-group"><label>Debit: Sundry Amount (₱)</label><input id="cdj-sundry-amt" type="number" step="0.01" value="0" inputmode="decimal"/></div>
       </div>
     `, `<button class="btn-primary" id="save-cdj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
@@ -2296,7 +2305,7 @@ async function renderRecordsTab(container, currentUser, currentRole) {
       </div>
       <div class="form-group"><label>Description</label><input id="rec-desc" placeholder="What is this for?"/></div>
       <div class="form-row">
-        <div class="form-group"><label>Amount (₱)</label><input id="rec-amount" type="number" step="0.01"/></div>
+        <div class="form-group"><label>Amount (₱)</label><input id="rec-amount" type="number" step="0.01" inputmode="decimal"/></div>
         <div class="form-group"><label>From / To</label><input id="rec-party" placeholder="Supplier, client, or payee"/></div>
       </div>
       <div class="form-group"><label>Notes</label><textarea id="rec-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"></textarea></div>
@@ -2408,8 +2417,8 @@ async function renderFinanceCA(container, currentUser, currentRole) {
       const {id,balance,monthly,uid,name}=e.currentTarget.dataset;
       openModal('Record Payment — '+name,`
         <div class="ca-detail" style="margin-bottom:12px"><span>Balance:</span><strong>₱${fmt(parseFloat(balance))}</strong></div>
-        <div class="form-group"><label>Amount Paid</label><input id="fin-pay-amt" type="number" value="${monthly}" min="0" max="${balance}"/></div>
-        <div class="form-group"><label>Date</label><input id="fin-pay-date" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
+        <div class="form-group"><label>Amount Paid</label><input id="fin-pay-amt" type="number" inputmode="decimal" value="${monthly}" min="0" max="${balance}"/></div>
+        <div class="form-group"><label>Date</label><input id="fin-pay-date" type="date" value="${today()}"/></div>
       `,`<button class="btn-primary" id="fin-pay-save">Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
       document.getElementById('fin-pay-save').addEventListener('click',async()=>{
         const paid=parseFloat(document.getElementById('fin-pay-amt').value)||0;
@@ -2459,7 +2468,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
   container.innerHTML = '<div class="loading-placeholder">Loading worker profiles…</div>';
 
   const now = new Date();
-  const monthStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const monthStr = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10)).slice(0,7); // Manila YYYY-MM
 
   const [profilesSnap, payslipsSnap] = await Promise.all([
     db.collection('worker_profiles').orderBy('name').get().catch(()=>({docs:[]})),
@@ -2551,16 +2560,16 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       </select></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Hourly Rate (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">used to compute pay</span></label><input id="hrp-hourly" type="number" step="0.01" value="${profile?.hourlyRate||(profile?.dailyRate?(profile.dailyRate/8).toFixed(2):0)}"/></div>
-      <div class="form-group"><label>Daily Rate (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">reference</span></label><input id="hrp-daily" type="number" value="${profile?.dailyRate||0}"/></div>
+      <div class="form-group"><label>Hourly Rate (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">used to compute pay</span></label><input id="hrp-hourly" type="number" inputmode="decimal" step="0.01" value="${profile?.hourlyRate||(profile?.dailyRate?(profile.dailyRate/8).toFixed(2):0)}"/></div>
+      <div class="form-group"><label>Daily Rate (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">reference</span></label><input id="hrp-daily" type="number" inputmode="decimal" value="${profile?.dailyRate||0}"/></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Food Allowance (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">auto-added per day &gt;4 hrs</span></label><input id="hrp-food" type="number" value="${profile?.foodAllowance||0}"/></div>
-      <div class="form-group"><label>Issued On</label><input id="hrp-issued" type="date" value="${profile?.issuedOn||new Date().toISOString().slice(0,10)}"/></div>
+      <div class="form-group"><label>Food Allowance (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">auto-added per day &gt;4 hrs</span></label><input id="hrp-food" type="number" inputmode="decimal" value="${profile?.foodAllowance||0}"/></div>
+      <div class="form-group"><label>Issued On</label><input id="hrp-issued" type="date" value="${profile?.issuedOn||today()}"/></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Transport Allowance</label><input id="hrp-transport" type="number" value="${profile?.allowances?.transport||0}"/></div>
-      <div class="form-group"><label>Meal Allowance <span style="font-size:9px;color:var(--text-muted);font-weight:400">fixed extra</span></label><input id="hrp-meal" type="number" value="${profile?.allowances?.meal||0}"/></div>
+      <div class="form-group"><label>Transport Allowance</label><input id="hrp-transport" type="number" inputmode="decimal" value="${profile?.allowances?.transport||0}"/></div>
+      <div class="form-group"><label>Meal Allowance <span style="font-size:9px;color:var(--text-muted);font-weight:400">fixed extra</span></label><input id="hrp-meal" type="number" inputmode="decimal" value="${profile?.allowances?.meal||0}"/></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>SSS Number</label><input id="hrp-sss" value="${escHtml(profile?.ssNum||'')}"/></div>
@@ -2579,7 +2588,7 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       </select></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Cash Advance Balance (₱)</label><input id="hrp-ca-balance" type="number" value="${profile?.caBalance||0}"/></div>
+      <div class="form-group"><label>Cash Advance Balance (₱)</label><input id="hrp-ca-balance" type="number" value="${profile?.caBalance||0}" inputmode="decimal"/></div>
       <div class="form-group" style="display:flex;align-items:center;padding-top:22px">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
           <input type="checkbox" id="hrp-include-payroll" ${profile?.includeInPayroll!==false?'checked':''} style="width:18px;height:18px"/>
@@ -2766,26 +2775,26 @@ function openPayslipEdit(ps, currentUser, onSave) {
   openModal(`✎ Edit Payslip — ${escHtml(ps.workerName||'')}`, `
     <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${ps.payPeriodStart||''} – ${ps.payPeriodEnd||''}</div>
     <div class="form-row">
-      <div class="form-group"><label>Rate / HR (₱)</label><input id="pe-rph" type="number" step="0.01" value="${r.ratePerHr||0}"/></div>
-      <div class="form-group"><label>Hours Worked</label><input id="pe-hrs" type="number" step="0.01" value="${r.hrsWorked||0}"/></div>
+      <div class="form-group"><label>Rate / HR (₱)</label><input id="pe-rph" type="number" step="0.01" value="${r.ratePerHr||0}" inputmode="decimal"/></div>
+      <div class="form-group"><label>Hours Worked</label><input id="pe-hrs" type="number" step="0.01" value="${r.hrsWorked||0}" inputmode="decimal"/></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Overtime Pay (₱)</label><input id="pe-ot" type="number" value="${ot.total||0}"/></div>
-      <div class="form-group"><label>Allowances total (₱)</label><input id="pe-allow" type="number" value="${al.total||0}"/></div>
+      <div class="form-group"><label>Overtime Pay (₱)</label><input id="pe-ot" type="number" value="${ot.total||0}" inputmode="decimal"/></div>
+      <div class="form-group"><label>Allowances total (₱)</label><input id="pe-allow" type="number" value="${al.total||0}" inputmode="decimal"/></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>SSS</label><input id="pe-sss" type="number" value="${g.sss||0}"/></div>
-      <div class="form-group"><label>PhilHealth</label><input id="pe-ph" type="number" value="${g.philhealth||0}"/></div>
+      <div class="form-group"><label>SSS</label><input id="pe-sss" type="number" value="${g.sss||0}" inputmode="decimal"/></div>
+      <div class="form-group"><label>PhilHealth</label><input id="pe-ph" type="number" value="${g.philhealth||0}" inputmode="decimal"/></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Pag-IBIG</label><input id="pe-pib" type="number" value="${g.pagibig||0}"/></div>
-      <div class="form-group"><label>Cash Advance</label><input id="pe-ca" type="number" value="${o.cashAdvance||0}"/></div>
+      <div class="form-group"><label>Pag-IBIG</label><input id="pe-pib" type="number" value="${g.pagibig||0}" inputmode="decimal"/></div>
+      <div class="form-group"><label>Cash Advance</label><input id="pe-ca" type="number" value="${o.cashAdvance||0}" inputmode="decimal"/></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Other / Loans</label><input id="pe-loans" type="number" value="${o.loans||0}"/></div>
-      <div class="form-group"><label>Taxes</label><input id="pe-tax" type="number" value="${o.taxes||0}"/></div>
+      <div class="form-group"><label>Other / Loans</label><input id="pe-loans" type="number" value="${o.loans||0}" inputmode="decimal"/></div>
+      <div class="form-group"><label>Taxes</label><input id="pe-tax" type="number" value="${o.taxes||0}" inputmode="decimal"/></div>
     </div>
-    <div class="form-group"><label>Amount Already Paid (₱)</label><input id="pe-paid" type="number" value="${ps.paid||0}"/></div>
+    <div class="form-group"><label>Amount Already Paid (₱)</label><input id="pe-paid" type="number" value="${ps.paid||0}" inputmode="decimal"/></div>
     <div id="pe-net" style="text-align:right;font-weight:800;font-size:14px;margin-top:6px">Net: ₱${fmt(ps.netPay||0)}</div>
   `, `<button class="btn-primary" id="pe-save-btn">Save Changes</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
@@ -2829,13 +2838,14 @@ function openPayslipEdit(ps, currentUser, onSave) {
 }
 
 function openPayslipGenerator(profile, currentUser, currentRole) {
-  const now = new Date();
-  // Weekly cycle: Mon–Sat, paid each Saturday
-  const dow = now.getDay();                         // 0 Sun .. 6 Sat
-  const sat = new Date(now); sat.setDate(now.getDate() + ((6 - dow + 7) % 7));
-  const mon = new Date(sat); mon.setDate(sat.getDate() - 5);
-  const periodStart = mon.toISOString().slice(0,10);
-  const periodEnd   = sat.toISOString().slice(0,10);
+  // Weekly cycle: Mon–Sat, paid each Saturday — anchored to Manila business calendar.
+  // (Raw new Date().getDay()/toISOString() lands on the wrong day for the first 8h of
+  //  each Manila day and corrupted pay periods.)
+  const todayISO = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
+  const dow = window.bizDow ? window.bizDow() : new Date().getDay();   // 0 Sun .. 6 Sat (Manila)
+  const addDays = (iso, n) => { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return window.bizDate ? window.bizDate(d) : d.toISOString().slice(0,10); };
+  const periodEnd   = addDays(todayISO, (6 - dow + 7) % 7);  // upcoming/this Saturday
+  const periodStart = addDays(periodEnd, -5);                // Monday of that pay week
 
   openModal(`📄 Generate Payslip — ${profile.name}`, `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
@@ -2871,45 +2881,45 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
       <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Earnings</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <div class="form-group" style="margin-bottom:6px"><label>Rate/HR <span style="font-size:9px;color:var(--text-muted);font-weight:400">× hours = pay</span></label><input id="ps-rph" type="number" step="0.01" value="${(profile.hourlyRate||(profile.dailyRate/8)||0).toFixed ? (profile.hourlyRate||(profile.dailyRate/8)||0).toFixed(2) : profile.hourlyRate||0}"/></div>
-        <div class="form-group" style="margin-bottom:6px"><label>Daily Rate <span style="font-size:9px;color:var(--text-muted);font-weight:400">ref</span></label><input id="ps-daily" type="number" value="${profile.dailyRate||0}"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>Rate/HR <span style="font-size:9px;color:var(--text-muted);font-weight:400">× hours = pay</span></label><input id="ps-rph" type="number" step="0.01" value="${(profile.hourlyRate||(profile.dailyRate/8)||0).toFixed ? (profile.hourlyRate||(profile.dailyRate/8)||0).toFixed(2) : profile.hourlyRate||0}" inputmode="decimal"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>Daily Rate <span style="font-size:9px;color:var(--text-muted);font-weight:400">ref</span></label><input id="ps-daily" type="number" value="${profile.dailyRate||0}" inputmode="decimal"/></div>
         <div class="form-group" style="margin-bottom:6px">
           <label>Hours Worked <span style="font-size:9px;color:var(--text-muted);font-weight:400">(auto, editable)</span></label>
-          <input id="ps-hrs" type="number" value="0"/>
+          <input id="ps-hrs" type="number" value="0" inputmode="decimal"/>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <div class="form-group" style="margin-bottom:6px"><label>OT Rate/HR <span style="font-size:9px;color:var(--text-muted);font-weight:400">(regular rate)</span></label><input id="ps-ot-rate" type="number" value="${(profile.dailyRate/8).toFixed(2)}"/></div>
-        <div class="form-group" style="margin-bottom:6px"><label>OT Hours</label><input id="ps-ot-hrs" type="number" value="0"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>OT Rate/HR <span style="font-size:9px;color:var(--text-muted);font-weight:400">(regular rate)</span></label><input id="ps-ot-rate" type="number" value="${(profile.dailyRate/8).toFixed(2)}" inputmode="decimal"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>OT Hours</label><input id="ps-ot-hrs" type="number" value="0" inputmode="decimal"/></div>
         <div></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <div class="form-group" style="margin-bottom:0"><label>Food Allow <span style="font-size:9px;color:var(--text-muted);font-weight:400">auto, &gt;4h/day</span></label><input id="ps-meal" type="number" value="${profile.allowances?.meal||0}"/></div>
-        <div class="form-group" style="margin-bottom:0"><label>Transport Allow</label><input id="ps-transport" type="number" value="${profile.allowances?.transport||0}"/></div>
-        <div class="form-group" style="margin-bottom:0"><label>Rent Allow</label><input id="ps-rent" type="number" value="0"/></div>
+        <div class="form-group" style="margin-bottom:0"><label>Food Allow <span style="font-size:9px;color:var(--text-muted);font-weight:400">auto, &gt;4h/day</span></label><input id="ps-meal" type="number" value="${profile.allowances?.meal||0}" inputmode="decimal"/></div>
+        <div class="form-group" style="margin-bottom:0"><label>Transport Allow</label><input id="ps-transport" type="number" value="${profile.allowances?.transport||0}" inputmode="decimal"/></div>
+        <div class="form-group" style="margin-bottom:0"><label>Rent Allow</label><input id="ps-rent" type="number" value="0" inputmode="decimal"/></div>
       </div>
     </div>
 
     <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
       <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Deductions</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <div class="form-group" style="margin-bottom:6px"><label>SSS</label><input id="ps-sss" type="number" value="0"/></div>
-        <div class="form-group" style="margin-bottom:6px"><label>PhilHealth</label><input id="ps-ph" type="number" value="0"/></div>
-        <div class="form-group" style="margin-bottom:6px"><label>Pag-IBIG</label><input id="ps-pib" type="number" value="0"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>SSS</label><input id="ps-sss" type="number" value="0" inputmode="decimal"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>PhilHealth</label><input id="ps-ph" type="number" value="0" inputmode="decimal"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>Pag-IBIG</label><input id="ps-pib" type="number" value="0" inputmode="decimal"/></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
         <div class="form-group" style="margin-bottom:0">
           <label>Cash Advance Deduction</label>
-          <input id="ps-ca" type="number" value="0"/>
+          <input id="ps-ca" type="number" value="0" inputmode="decimal"/>
           <div style="font-size:10px;color:var(--text-muted);margin-top:3px">Balance: ₱<span id="ps-ca-balance-display">${fmt(profile.caBalance||0)}</span> · Remaining after deduction: ₱<span id="ps-ca-remaining-display" style="font-weight:700">${fmt(profile.caBalance||0)}</span></div>
         </div>
-        <div class="form-group" style="margin-bottom:0"><label>Other Deduction (Loans, etc.)</label><input id="ps-loans" type="number" value="0"/></div>
-        <div class="form-group" style="margin-bottom:0"><label>Taxes</label><input id="ps-tax" type="number" value="0"/></div>
+        <div class="form-group" style="margin-bottom:0"><label>Other Deduction (Loans, etc.)</label><input id="ps-loans" type="number" value="0" inputmode="decimal"/></div>
+        <div class="form-group" style="margin-bottom:0"><label>Taxes</label><input id="ps-tax" type="number" value="0" inputmode="decimal"/></div>
       </div>
     </div>
 
     <div class="form-group">
-      <label>Amount Already Paid (₱)</label><input id="ps-paid" type="number" value="0"/>
+      <label>Amount Already Paid (₱)</label><input id="ps-paid" type="number" value="0" inputmode="decimal"/>
     </div>
     <div class="form-group">
       <label>Prepared By</label><input id="ps-preparer" value="${escHtml(currentUser?.displayName||'')}"/>
@@ -3579,11 +3589,11 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
         ${BK_CATEGORIES.map(c=>`<option ${c===l.category?'selected':''}>${c}</option>`).join('')}
       </select>
       <input type="text" value="${escHtml(l.description||'')}" data-i="${i}" data-f="description" placeholder="Item description" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%"/>
-      <input type="number" value="${l.qty||1}" data-i="${i}" data-f="qty" min="1" style="padding:5px 6px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%"/>
+      <input type="number" value="${l.qty||1}" data-i="${i}" data-f="qty" min="1" style="padding:5px 6px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%" inputmode="numeric"/>
       <select data-i="${i}" data-f="unit" style="padding:5px 4px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:11px">
         ${['pc','set','lm','sqm','hr','lot','unit'].map(u=>`<option ${u===l.unit?'selected':''}>${u}</option>`).join('')}
       </select>
-      <input type="number" value="${l.price||0}" data-i="${i}" data-f="price" min="0" step="0.01" placeholder="Unit price" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%"/>
+      <input type="number" value="${l.price||0}" data-i="${i}" data-f="price" min="0" step="0.01" placeholder="Unit price" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%" inputmode="decimal"/>
       <button class="btn-icon" data-rm="${i}" style="color:#ff453a;font-size:16px;padding:4px 7px">🗑</button>
     </div>`;
 
@@ -3612,7 +3622,7 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
         </select>
       </div>
       <div class="form-group" style="flex:0 0 140px"><label>Discount (₱)</label>
-        <input id="bkq-discount" type="number" min="0" value="${existing?.discount||0}" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"/>
+        <input id="bkq-discount" type="number" min="0" value="${existing?.discount||0}" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)" inputmode="decimal"/>
       </div>
       <div class="form-group"><label>Status</label>
         <select id="bkq-status" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
@@ -3684,6 +3694,9 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
 
   document.getElementById('bkq-save-btn').onclick = async () => {
     const grand = calcTotals();
+    const chosenStatus = document.getElementById('bkq-status')?.value;
+    if (chosenStatus === 'accepted' && existing?.status !== 'accepted'
+        && !confirm(`Mark this quote as ACCEPTED (₱${fmt(grand)})? This signals the client has agreed.`)) return;
     const sub    = lines.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.price)||0),0);
     const disc   = parseFloat(document.getElementById('bkq-discount')?.value||0)||0;
     const vatRate= parseFloat(document.getElementById('bkq-vat')?.value||0)||0;
@@ -3721,7 +3734,7 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
       } catch(e) {
         seq = String(Date.now()).slice(-4);
       }
-      data.quoteNumber = `BK${new Date().getFullYear().toString().slice(-2)}${seq}`;
+      data.quoteNumber = `BK${String(window.bizYear ? window.bizYear() : new Date().getFullYear()).slice(-2)}${seq}`;
       data.createdAt   = firebase.firestore.FieldValue.serverTimestamp();
       await db.collection('bk_quotes').add(data);
       Notifs.showToast('BK Quote saved!');
@@ -4105,7 +4118,7 @@ async function renderProjects(container, currentUser, currentRole) {
         <div class="form-group"><label>Start Date</label><input id="proj-start" type="date" value="${today()}"/></div>
         <div class="form-group"><label>Due Date</label><input id="proj-due" type="date"/></div>
       </div>
-      <div class="form-group"><label>Contract Amount (₱)</label><input id="proj-contract" type="number" step="0.01" min="0" placeholder="Total project value (optional)"/></div>
+      <div class="form-group"><label>Contract Amount (₱)</label><input id="proj-contract" type="number" step="0.01" min="0" placeholder="Total project value (optional)" inputmode="decimal"/></div>
       <div class="form-group"><label>Notes</label><textarea id="proj-notes" rows="3"></textarea></div>
     `, `<button class="btn-primary" id="save-proj-btn">Save Project</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
@@ -4174,7 +4187,7 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill) {
   // Record a payment
   document.getElementById('proj-payment-btn')?.addEventListener('click', () => {
     openModal('Record Payment', `
-      <div class="form-group"><label>Amount (₱)</label><input id="pay-amt" type="number" step="0.01" min="0" placeholder="0.00"/></div>
+      <div class="form-group"><label>Amount (₱)</label><input id="pay-amt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00"/></div>
       <div class="form-group"><label>Date</label><input id="pay-date" type="date" value="${today()}"/></div>
       <div class="form-group"><label>Method</label><input id="pay-method" placeholder="e.g. Bank transfer, Cash, Cheque"/></div>
       <div class="form-group"><label>Reference / Note</label><input id="pay-note" placeholder="OR no., remarks"/></div>
@@ -4191,10 +4204,20 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill) {
         byName: currentUser.displayName || currentUser.email || '',
         by:     currentUser.uid
       };
-      const newPayments = [...(p.payments || []), payment];
+      if (!confirm(`Record payment of ₱${fmt(amt)} for "${p.name}"? This updates the project balance.`)) return;
       try {
-        await db.collection('projects').doc(p.id).update({ payments: newPayments });
-        p.payments = newPayments;
+        // Atomic transaction: re-read the project's payments and append, so a concurrent
+        // edit isn't clobbered. Only mutate the in-memory object after the write succeeds.
+        const ref = db.collection('projects').doc(p.id);
+        const saved = await db.runTransaction(async tx => {
+          const doc  = await tx.get(ref);
+          const cur  = (doc.exists && Array.isArray(doc.data().payments)) ? doc.data().payments : [];
+          const next = [...cur, payment];
+          tx.update(ref, { payments: next });
+          return next;
+        });
+        p.payments = saved;
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects');
         Notifs.showToast('Payment recorded','success');
         openProjectDetail(p, currentUser, currentRole, canBill);
       } catch(e) { console.warn(e); Notifs.showToast('Could not save payment','error'); }
@@ -4211,7 +4234,7 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill) {
         <div class="form-group"><label>Due Date</label><input id="inv-due" type="date"/></div>
       </div>
       <div class="form-group"><label>Particulars</label><input id="inv-desc" value="Collection of outstanding balance"/></div>
-      <div class="form-group"><label>Amount to Collect (₱)</label><input id="inv-amt" type="number" step="0.01" min="0" value="${bal>0?bal.toFixed(2):'0.00'}"/></div>
+      <div class="form-group"><label>Amount to Collect (₱)</label><input id="inv-amt" type="number" inputmode="decimal" step="0.01" min="0" value="${bal>0?bal.toFixed(2):'0.00'}"/></div>
       <div class="form-group"><label>Notes / Payment Instructions</label><textarea id="inv-notes" rows="3">Kindly settle the amount due on or before the due date. Payable to NEILBARRO STEEL & METAL FABRICATION SERVICES.</textarea></div>
     `, `<button class="btn-primary" id="gen-inv-btn">Generate Invoice</button><button class="btn-secondary" id="inv-back-btn">Cancel</button>`);
     document.getElementById('inv-back-btn').addEventListener('click', () => openProjectDetail(p, currentUser, currentRole, canBill));
@@ -4236,11 +4259,24 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill) {
         issuedBy:       currentUser.displayName || currentUser.email || '',
         createdAt:      today()
       };
-      const newInvoices = [...(p.invoices || []), inv];
+      if (!confirm(`Generate billing invoice ${inv.no} for ₱${fmt(amt)} (${p.name||''})?`)) return;
       try {
-        await db.collection('projects').doc(p.id).update({ invoices: newInvoices });
-        p.invoices = newInvoices;
-      } catch(e) { console.warn('Invoice not saved to project record:', e); }
+        // Atomic append so the invoice list isn't clobbered by a concurrent edit.
+        const ref = db.collection('projects').doc(p.id);
+        const saved = await db.runTransaction(async tx => {
+          const doc  = await tx.get(ref);
+          const cur  = (doc.exists && Array.isArray(doc.data().invoices)) ? doc.data().invoices : [];
+          const next = [...cur, inv];
+          tx.update(ref, { invoices: next });
+          return next;
+        });
+        p.invoices = saved;
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects');
+      } catch(e) {
+        console.warn('Invoice not saved to project record:', e);
+        Notifs.showToast('Could not save invoice — not recorded','error');
+        return;
+      }
       openBillingInvoice(p, inv);
     });
   });
@@ -4684,7 +4720,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           <div class="form-group"><label>License Type</label>
             <select id="sw-ltype"><option>Subscription</option><option>Perpetual</option><option>Open Source</option><option>Trial</option><option>Volume</option></select>
           </div>
-          <div class="form-group"><label>Seats / Users</label><input id="sw-seats" type="number" placeholder="1"/></div>
+          <div class="form-group"><label>Seats / Users</label><input id="sw-seats" type="number" inputmode="numeric" placeholder="1"/></div>
         </div>
         <div class="form-group"><label>License Key / ID</label><input id="sw-key" placeholder="XXXX-XXXX-XXXX"/></div>
         <div class="form-row">
@@ -4708,6 +4744,60 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         closeModal(); loadITContent(currentUser, currentRole, 'Software', canEdit);
+      });
+    });
+    content.querySelectorAll('.edit-sw-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const sw = items.find(x=>x.id===btn.dataset.id);
+        if (!sw) return;
+        openModal('Edit Software / License', `
+          <div class="form-row">
+            <div class="form-group"><label>Software Name</label><input id="esw-name" value="${escHtml(sw.name||'')}"/></div>
+            <div class="form-group"><label>Vendor</label><input id="esw-vendor" value="${escHtml(sw.vendor||'')}"/></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>License Type</label>
+              <select id="esw-ltype">
+                ${['Subscription','Perpetual','Open Source','Trial','Volume'].map(t=>`<option ${sw.licenseType===t?'selected':''}>${t}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group"><label>Seats / Users</label><input id="esw-seats" type="number" inputmode="numeric" value="${sw.seats||1}"/></div>
+          </div>
+          <div class="form-group"><label>License Key / ID</label><input id="esw-key" value="${escHtml(sw.licenseKey||'')}"/></div>
+          <div class="form-row">
+            <div class="form-group"><label>Purchase Date</label><input id="esw-bought" type="date" value="${escHtml(sw.purchasedDate||'')}"/></div>
+            <div class="form-group"><label>Expiry Date</label><input id="esw-exp" type="date" value="${escHtml(sw.expiryDate||'')}"/></div>
+          </div>
+          <div class="form-group"><label>Status</label>
+            <select id="esw-status">
+              <option value="active" ${sw.status==='active'?'selected':''}>Active</option>
+              <option value="expired" ${sw.status==='expired'?'selected':''}>Expired</option>
+              <option value="retired" ${sw.status==='retired'?'selected':''}>Retired</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Notes</label><textarea id="esw-notes" rows="2">${escHtml(sw.notes||'')}</textarea></div>
+        `, `<button class="btn-primary" id="upd-sw-btn">Update</button><button class="btn-danger" id="del-sw-btn">Delete</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+        document.getElementById('upd-sw-btn').addEventListener('click', async () => {
+          const name = document.getElementById('esw-name').value.trim();
+          if (!name) { Notifs.showToast('Enter a name.','error'); return; }
+          await db.collection('it_software').doc(sw.id).update({
+            name, vendor: document.getElementById('esw-vendor').value.trim(),
+            licenseType: document.getElementById('esw-ltype').value,
+            seats: parseInt(document.getElementById('esw-seats').value)||1,
+            licenseKey: document.getElementById('esw-key').value.trim(),
+            purchasedDate: document.getElementById('esw-bought').value,
+            expiryDate: document.getElementById('esw-exp').value,
+            status: document.getElementById('esw-status').value,
+            notes: document.getElementById('esw-notes').value.trim(),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid
+          });
+          closeModal(); loadITContent(currentUser, currentRole, 'Software', canEdit);
+        });
+        document.getElementById('del-sw-btn').addEventListener('click', async () => {
+          if (!confirm(`Delete software record "${sw.name||''}"? This cannot be undone.`)) return;
+          await db.collection('it_software').doc(sw.id).delete();
+          closeModal(); loadITContent(currentUser, currentRole, 'Software', canEdit);
+        });
       });
     });
     if (window.lucide) lucide.createIcons({ nodes: [content] });
@@ -4779,6 +4869,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
   if (sub === 'Network') {
     const snap = await db.collection('it_network').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
     const notes = snap.docs.map(d=>({id:d.id,...d.data()}));
+    const NET_TYPES = ['WiFi','Router / Modem','IP Config','VPN','ISP Details','Server','General'];
     content.innerHTML = `
       <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
         ${canEdit?`<button class="btn-primary btn-sm" id="new-net-btn">+ Add Network Note</button>`:''}
@@ -4793,29 +4884,47 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
               </div>
               <div style="padding:0 16px 16px;font-size:13px;white-space:pre-wrap;color:var(--text)">${escHtml(n.content||'')}</div>
               ${n.updatedAt?`<div style="padding:0 16px 8px;font-size:11px;color:var(--text-muted)">Updated ${new Date(n.updatedAt.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'})}</div>`:''}
+              ${canEdit?`<div style="display:flex;gap:8px;padding:0 16px 14px">
+                <button class="btn-sm btn-secondary edit-net-btn" data-id="${n.id}" style="font-size:11px;padding:3px 10px">Edit</button>
+                <button class="btn-sm btn-danger del-net-btn" data-id="${n.id}" data-title="${escHtml(n.title||'this note')}" style="font-size:11px;padding:3px 10px">Delete</button>
+              </div>`:''}
             </div>`).join('')}
       </div>`;
-    document.getElementById('new-net-btn')?.addEventListener('click', () => {
-      openModal('Add Network Note', `
+    const netModal = (existing) => {
+      openModal(existing?'Edit Network Note':'Add Network Note', `
         <div class="form-row">
-          <div class="form-group"><label>Title</label><input id="net-title" placeholder="e.g. Office WiFi Credentials"/></div>
+          <div class="form-group"><label>Title</label><input id="net-title" value="${escHtml(existing?.title||'')}" placeholder="e.g. Office WiFi Credentials"/></div>
           <div class="form-group"><label>Type</label>
-            <select id="net-type"><option>WiFi</option><option>Router / Modem</option><option>IP Config</option><option>VPN</option><option>ISP Details</option><option>Server</option><option>General</option></select>
+            <select id="net-type">${NET_TYPES.map(t=>`<option ${existing?.type===t?'selected':''}>${t}</option>`).join('')}</select>
           </div>
         </div>
-        <div class="form-group"><label>Content / Notes</label><textarea id="net-content" rows="6" placeholder="SSID, passwords, IPs, ports, etc."></textarea></div>
+        <div class="form-group"><label>Content / Notes</label><textarea id="net-content" rows="6" placeholder="SSID, passwords, IPs, ports, etc.">${escHtml(existing?.content||'')}</textarea></div>
       `, `<button class="btn-primary" id="save-net-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
       document.getElementById('save-net-btn').addEventListener('click', async () => {
         const title = document.getElementById('net-title').value.trim();
         if (!title) { Notifs.showToast('Enter a title.','error'); return; }
-        await db.collection('it_network').add({
+        const payload = {
           title, type: document.getElementById('net-type').value,
           content: document.getElementById('net-content').value,
-          createdBy: currentUser.uid,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid
+        };
+        if (existing) {
+          await db.collection('it_network').doc(existing.id).update(payload);
+        } else {
+          await db.collection('it_network').add({ ...payload, createdBy: currentUser.uid, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+        }
         closeModal(); loadITContent(currentUser, currentRole, 'Network', canEdit);
+      });
+    };
+    document.getElementById('new-net-btn')?.addEventListener('click', () => netModal(null));
+    content.querySelectorAll('.edit-net-btn').forEach(btn => {
+      btn.addEventListener('click', () => { const n = notes.find(x=>x.id===btn.dataset.id); if (n) netModal(n); });
+    });
+    content.querySelectorAll('.del-net-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm(`Delete network note "${btn.dataset.title}"? This cannot be undone.`)) return;
+        await db.collection('it_network').doc(btn.dataset.id).delete();
+        loadITContent(currentUser, currentRole, 'Network', canEdit);
       });
     });
     return;
@@ -4830,7 +4939,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
 
 function openITTicketModal(ticket, currentUser, canEdit, onRefresh) {
   const isAssigned = canEdit || ticket.createdBy === currentUser.uid;
-  openModal(`🎫 ${ticket.title||'Ticket'}`, `
+  openModal(`🎫 ${escHtml(ticket.title||'Ticket')}`, `
     <div style="margin-bottom:12px">
       <div class="item-meta" style="gap:8px;margin-bottom:8px">
         <span class="badge ${ticket.status==='open'?'badge-orange':ticket.status==='in-progress'?'badge-blue':ticket.status==='resolved'?'badge-green':'badge-gray'}">${ticket.status||'open'}</span>
@@ -5176,7 +5285,7 @@ function renderBSQuoteBuilder(container, currentUser, currentRole) {
         <span style="padding-bottom:9px;font-size:16px;font-weight:700;color:var(--text-muted)">-</span>
         <div class="bs-fg"><label>Date</label><input type="date" id="bs-qno-date" style="max-width:165px"/></div>
         <span style="padding-bottom:9px;font-size:16px;font-weight:700;color:var(--text-muted)">-</span>
-        <div class="bs-fg"><label>Client #</label><input type="number" id="bs-qno-seq" value="1" min="1" max="999" style="max-width:70px;text-align:center"/></div>
+        <div class="bs-fg"><label>Client #</label><input type="number" id="bs-qno-seq" value="1" min="1" max="999" style="max-width:70px;text-align:center" inputmode="numeric"/></div>
         <span style="padding-bottom:9px;font-size:16px;font-weight:700;color:var(--text-muted)">→</span>
         <div class="bs-qno-box" id="bs-qno-preview">BS-LU-FB-YYMMDD-001</div>
       </div>
@@ -5218,12 +5327,12 @@ function renderBSQuoteBuilder(container, currentUser, currentRole) {
           </div>
           <input type="hidden" id="bs-selected-code"/>
         </div>
-        <div class="bs-fg"><label>W (mm)</label><input type="number" id="bs-dim-w" placeholder="—"/></div>
-        <div class="bs-fg"><label>D (mm)</label><input type="number" id="bs-dim-d" placeholder="—"/></div>
-        <div class="bs-fg"><label>H (mm)</label><input type="number" id="bs-dim-h" placeholder="—"/></div>
-        <div class="bs-fg"><label>Qty</label><input type="number" id="bs-dim-qty" value="1" min="1"/></div>
+        <div class="bs-fg"><label>W (mm)</label><input type="number" id="bs-dim-w" placeholder="—" inputmode="decimal"/></div>
+        <div class="bs-fg"><label>D (mm)</label><input type="number" id="bs-dim-d" placeholder="—" inputmode="decimal"/></div>
+        <div class="bs-fg"><label>H (mm)</label><input type="number" id="bs-dim-h" placeholder="—" inputmode="decimal"/></div>
+        <div class="bs-fg"><label>Qty</label><input type="number" id="bs-dim-qty" value="1" min="1" inputmode="numeric"/></div>
         <div class="bs-fg"><label>Unit Price (₱)</label>
-          <input type="number" id="bs-unit-price" placeholder="Auto" style="background:#fffbf0;border-color:#f0d080"/>
+          <input type="number" id="bs-unit-price" placeholder="Auto" style="background:#fffbf0;border-color:#f0d080" inputmode="decimal"/>
           <div id="bs-price-preview" style="font-size:10px;color:#37474f;font-weight:600;margin-top:2px"></div>
         </div>
         <div class="bs-fg"><label>&nbsp;</label><button class="btn-primary" id="bs-add-item-btn">+ Add</button></div>
@@ -5278,7 +5387,7 @@ function renderBSQuoteBuilder(container, currentUser, currentRole) {
             </select>
           </div>
           <div style="display:flex;align-items:center;gap:5px;font-size:12px">
-            DP %: <input type="number" id="bs-dp-pct-input" value="65" min="0" max="100" style="width:55px;padding:3px;font-size:12px"/>
+            DP %: <input type="number" id="bs-dp-pct-input" value="65" min="0" max="100" style="width:55px;padding:3px;font-size:12px" inputmode="decimal"/>
           </div>
         </div>
       </div>
@@ -5456,7 +5565,7 @@ function renderBSQuoteBuilder(container, currentUser, currentRole) {
           <td>${bsRowCount}</td>
           <td><div contenteditable="true" class="bs-desc-edit" data-id="${line.id}">${escHtml(line.name)}</div>${line.notes?`<div style="font-size:11px;color:var(--text-muted);margin-top:1px" contenteditable="true">${escHtml(line.notes)}</div>`:''}</td>
           <td style="font-size:11px">${dimStr||'—'}</td>
-          <td style="text-align:center"><input type="number" class="bs-qty-inp" value="${line.qty}" min="1" data-id="${line.id}" style="width:50px;text-align:center;border:1.5px solid var(--border);border-radius:4px;padding:3px;font-size:12px"/></td>
+          <td style="text-align:center"><input type="number" class="bs-qty-inp" value="${line.qty}" min="1" data-id="${line.id}" style="width:50px;text-align:center;border:1.5px solid var(--border);border-radius:4px;padding:3px;font-size:12px" inputmode="decimal"/></td>
           <td style="text-align:center">${escHtml(line.unit)}</td>
           <td style="text-align:right">₱${fmt(line.unitPrice)}</td>
           <td style="text-align:right">₱${fmt(line.amount)}</td>
@@ -5747,8 +5856,8 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Client <strong>${escHtml(d.client||'')}</strong> · Quote ${escHtml(d.qno||'')}</div>
     <div class="form-group"><label>Project / Scope</label><input id="so-project" value="${escHtml((d.client||'')+' — '+(d.qno||''))}"/></div>
     <div class="form-row">
-      <div class="form-group"><label>Contract Amount (₱)</label><input id="so-contract" type="number" step="0.01" value="${total}"/></div>
-      <div class="form-group"><label>Payment Received (₱)</label><input id="so-paid" type="number" step="0.01" placeholder="e.g. downpayment"/></div>
+      <div class="form-group"><label>Contract Amount (₱)</label><input id="so-contract" type="number" step="0.01" value="${total}" inputmode="decimal"/></div>
+      <div class="form-group"><label>Payment Received (₱)</label><input id="so-paid" type="number" step="0.01" placeholder="e.g. downpayment" inputmode="decimal"/></div>
     </div>
     <div class="form-group"><label>Payment Method</label>
       <select id="so-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Bank Transfer</option><option>GCash</option><option>Cash</option><option>Cheque</option><option>Other</option></select>
@@ -5869,7 +5978,7 @@ function openRecordSaleModal(o, container){
     </div></div>
     <div style="font-size:12px;font-weight:700;margin-bottom:6px">✅ Approve the collected amount</div>
     <div class="form-row">
-      <div class="form-group"><label>Approved collected (₱, VAT-incl.)</label><input id="rs-amount" type="number" step="0.01" min="0" value="${defaultAmt}"/>
+      <div class="form-group"><label>Approved collected (₱, VAT-incl.)</label><input id="rs-amount" type="number" step="0.01" min="0" value="${defaultAmt}" inputmode="decimal"/>
         <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Confirm what Finance actually received per the order terms.</div></div>
       <div class="form-group"><label>Method</label><select id="rs-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
         ${['Bank Transfer','GCash','Cash','Cheque','Other'].map(m=>`<option ${o.paymentMethod===m?'selected':''}>${m}</option>`).join('')}
@@ -6047,7 +6156,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
           <textarea id="pres-scope" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical">${escHtml(q.scope||q.description||'')}</textarea>
         </div>
         <div class="form-group"><label>Adjusted Total (₱)</label>
-          <input id="pres-total" type="number" value="${q.total||q.grandTotal||0}" style="width:100%"/>
+          <input id="pres-total" type="number" value="${q.total||q.grandTotal||0}" style="width:100%" inputmode="decimal"/>
         </div>
         <div class="form-group"><label>President's Notes / Feedback</label>
           <textarea id="pres-notes" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Optional notes for the submitter…">${escHtml(q.presidentNotes||'')}</textarea>
@@ -6313,8 +6422,8 @@ function openQuoteEditor(currentUser, currentRole, brand, collection, existing, 
     cont.innerHTML = lines.map((l,i) => `
       <div class="line-item-row">
         <input type="text" value="${escHtml(l.description)}" data-i="${i}" data-f="description" placeholder="Description"/>
-        <input type="number" value="${l.qty}" data-i="${i}" data-f="qty" min="1"/>
-        <input type="number" value="${l.price}" data-i="${i}" data-f="price" min="0" step="0.01"/>
+        <input type="number" value="${l.qty}" data-i="${i}" data-f="qty" min="1" inputmode="numeric"/>
+        <input type="number" value="${l.price}" data-i="${i}" data-f="price" min="0" step="0.01" inputmode="decimal"/>
         <button class="btn-icon" data-rm="${i}">🗑</button>
       </div>`).join('');
     cont.querySelectorAll('input').forEach(inp => {
@@ -6335,6 +6444,9 @@ function openQuoteEditor(currentUser, currentRole, brand, collection, existing, 
 
   document.getElementById('save-quote-btn').onclick = async () => {
     const total = lines.reduce((s,l) => s + l.qty*l.price, 0);
+    const chosenStatus = document.getElementById('q-status').value;
+    if (chosenStatus === 'accepted' && existing?.status !== 'accepted'
+        && !confirm(`Mark this quote as ACCEPTED (₱${fmt(total)})? This signals the client has agreed.`)) return;
     const s = await db.collection('users').doc(currentUser.uid).get();
     const agentName = s.exists ? s.data().displayName : currentUser.email;
     const data = {
@@ -6438,6 +6550,11 @@ window.renderApprovals = async function(currentUser) {
   const loadApprovalsSub = async (sub) => {
     const wrap = document.getElementById('approvals-content');
     if (!wrap) return;
+    // Acting here mutates signup_requests / attendance_extensions / cash_advances /
+    // approval_requests. Invalidate the dashboard's cached pending counts so badges
+    // and lists don't keep showing already-actioned items for up to the 30s TTL.
+    if (typeof dbCacheInvalidate === 'function')
+      ['signups-pending','att-ext-pending','ca-pending','approvals-pending'].forEach(k => dbCacheInvalidate(k));
     wrap.innerHTML = '<div class="loading-placeholder">Loading…</div>';
 
     if (sub === 'all') {
@@ -6529,8 +6646,8 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.sg-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           const pwd = generatePassword(btn.dataset.name);
           const empCount = (await db.collection('users').get().catch(()=>({size:0}))).size;
-          const empId = `BI-${new Date().getFullYear()}-${String(empCount+1).padStart(3,'0')}`;
-          await db.collection('users').add({ displayName:btn.dataset.name, email:btn.dataset.email, phone:btn.dataset.phone, role:'employee', departments:[], employeeId:empId, photoUrl:'', startDate:new Date().toISOString().slice(0,10), createdAt:firebase.firestore.FieldValue.serverTimestamp(), pendingPasswordSetup:true });
+          const empId = `BI-${window.bizYear ? window.bizYear() : new Date().getFullYear()}-${String(empCount+1).padStart(3,'0')}`;
+          await db.collection('users').add({ displayName:btn.dataset.name, email:btn.dataset.email, phone:btn.dataset.phone, role:'employee', departments:[], employeeId:empId, photoUrl:'', startDate:today(), createdAt:firebase.firestore.FieldValue.serverTimestamp(), pendingPasswordSetup:true });
           await db.collection('signup_requests').doc(btn.dataset.id).update({ status:'approved', generatedPassword:pwd, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
           Notifs.showToast(`${btn.dataset.name} approved! Password: ${pwd}`);
           loadApprovalsSub('all');
@@ -6751,12 +6868,14 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.rt-approve-btn').forEach(btn=>btn.addEventListener('click',async()=>{
         if (!confirm(`Approve "${btn.dataset.name}"?`)) return;
         await db.collection('tasks').doc(btn.dataset.id).update({status:'approved',approvedAt:firebase.firestore.FieldValue.serverTimestamp(),approvedBy:currentUser.uid});
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
         Notifs.showToast(`"${btn.dataset.name}" approved!`,'success');
         loadApprovalsSub('review-tasks');
       }));
       wrap.querySelectorAll('.rt-reject-btn').forEach(btn=>btn.addEventListener('click',async()=>{
         if (!confirm(`Send "${btn.dataset.name}" back for revision?`)) return;
         await db.collection('tasks').doc(btn.dataset.id).update({status:'in-progress',sentBackAt:firebase.firestore.FieldValue.serverTimestamp(),sentBackBy:currentUser.uid});
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
         Notifs.showToast(`"${btn.dataset.name}" sent back for revision.`,'info');
         loadApprovalsSub('review-tasks');
       }));
@@ -6804,12 +6923,12 @@ window.renderApprovals = async function(currentUser) {
           const pwd   = generatePassword(name);
           // Create Firestore user profile (no uid yet — president creates Firebase Auth manually)
           const empCount = (await db.collection('users').get().catch(()=>({size:0}))).size;
-          const empId    = `BI-${new Date().getFullYear()}-${String(empCount+1).padStart(3,'0')}`;
+          const empId    = `BI-${window.bizYear ? window.bizYear() : new Date().getFullYear()}-${String(empCount+1).padStart(3,'0')}`;
           await db.collection('users').add({
             displayName: name, email, phone,
             role: 'employee', departments: [],
             employeeId: empId,
-            photoUrl: '', startDate: new Date().toISOString().slice(0,10),
+            photoUrl: '', startDate: today(),
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             pendingPasswordSetup: true
           });
@@ -7066,7 +7185,7 @@ async function openQuoteApprovalReview(ctx, onDone){
     <button class="btn-secondary btn-sm" id="qar-open-builder" style="margin-bottom:14px" ${hasSnapshot?'':'disabled title="No editable snapshot for this quote"'}>🔧 Open full quote in Builder${hasSnapshot?'':' (no snapshot)'}</button>
     <div class="form-group"><label>Client Name</label><input id="qar-client" value="${(q.clientName||'').replace(/"/g,'&quot;')}"/></div>
     <div class="form-group"><label>Scope / Description</label><textarea id="qar-scope" rows="3" style="${ta}">${escHtml(q.scope||q.description||'')}</textarea></div>
-    <div class="form-group"><label>Adjusted Total (₱)</label><input id="qar-total" type="number" value="${q.total||q.grandTotal||0}"/></div>
+    <div class="form-group"><label>Adjusted Total (₱)</label><input id="qar-total" type="number" value="${q.total||q.grandTotal||0}" inputmode="decimal"/></div>
     <div class="form-group"><label>Notes for Partner</label><textarea id="qar-notes" rows="2" placeholder="What to revise, or why approved…" style="${ta}">${escHtml(q.presidentNotes||'')}</textarea></div>
   `, `<button class="btn-success" id="qar-approve">✅ Save &amp; Approve</button><button class="btn-primary" id="qar-return">↩ Save &amp; Return to Partner</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   if (hasSnapshot) document.getElementById('qar-open-builder').addEventListener('click', ()=>{
@@ -7487,7 +7606,7 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
   document.getElementById('add-budget-line-btn')?.addEventListener('click', () => {
     openModal('Add Budget Line', `
       <div class="form-group"><label>Item Name</label><input id="bg-name" placeholder="e.g. Social Media Ads"/></div>
-      <div class="form-group"><label>Allocated Budget (₱)</label><input id="bg-budget" type="number" step="0.01" min="0"/></div>
+      <div class="form-group"><label>Allocated Budget (₱)</label><input id="bg-budget" type="number" step="0.01" min="0" inputmode="decimal"/></div>
     `, `<button class="btn-primary" id="save-bg-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     document.getElementById('save-bg-btn').addEventListener('click', async () => {
       const name = document.getElementById('bg-name').value.trim();
@@ -7517,7 +7636,7 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
       </div>
       <div class="form-group"><label>Description</label><input id="exp-desc" placeholder="e.g. Facebook Ads payment"/></div>
       <div class="form-row">
-        <div class="form-group"><label>Amount (₱)</label><input id="exp-amount" type="number" step="0.01" min="0"/></div>
+        <div class="form-group"><label>Amount (₱)</label><input id="exp-amount" type="number" step="0.01" min="0" inputmode="decimal"/></div>
         <div class="form-group"><label>Budget Line</label>
           <select id="exp-line" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
             <option value="">— None / General —</option>
@@ -7751,6 +7870,16 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
 window.renderDocCollection = function(container, collection, title, currentUser, currentRole, cfg) {
   const canAdd = cfg?.dept ? canEditDept(cfg.dept)
     : (currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance');
+  // Government Biddings gets a full lifecycle (view/edit, status change, move between
+  // PhilGEPS / Active Bids / Archive buckets, delete). Other collections that share
+  // this renderer keep the original read-only-card behaviour.
+  const isGov = cfg?.dept === 'Government Biddings';
+  const canManageGov = isGov && canEditDept('Government Biddings');
+  const GOV_BUCKETS = [
+    { label:'PhilGEPS',    collection:'gov_philgeps' },
+    { label:'Active Bids', collection:'gov_active_bids' },
+    { label:'Archive',     collection:'gov_archive' },
+  ];
   container.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
       <div></div>
@@ -7764,17 +7893,85 @@ window.renderDocCollection = function(container, collection, title, currentUser,
     const list = document.getElementById(`doc-list-${collection}`);
     if (!docs.length) { list.innerHTML=`<div class="empty-state" style="padding:20px"><div class="empty-icon">${cfg?.icon||'📄'}</div><h4>No ${title} yet</h4></div>`; return; }
     list.innerHTML = `<div class="item-list">${docs.map(d=>`
-      <div class="item-card">
+      <div class="item-card"${isGov?` data-gov-id="${d.id}" style="cursor:pointer"`:''}>
         <div class="item-top"><div class="item-title">${escHtml(d.title||d.name||'Untitled')}</div>
           <span class="badge ${statusBadge(d.status)}">${d.status||'active'}</span>
         </div>
         <div class="item-meta">
           ${d.description?`<span>${escHtml(d.description)}</span>`:''}
-          ${d.fileUrl?`<a href="${d.fileUrl}" target="_blank" class="btn-link" style="font-size:11px">📎 View File</a>`:''}
+          ${d.fileUrl?`<a href="${d.fileUrl}" target="_blank" class="btn-link" style="font-size:11px" onclick="event.stopPropagation()">📎 View File</a>`:''}
           ${d.createdAt?`<span style="font-size:11px;color:var(--text-muted)">${new Date(d.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
         </div>
       </div>`).join('')}</div>`;
+    if (isGov) {
+      list.querySelectorAll('.item-card[data-gov-id]').forEach(card => {
+        card.addEventListener('click', () => {
+          const d = docs.find(x=>x.id===card.dataset.govId);
+          if (d) openGovBidDetail(d);
+        });
+      });
+    }
   };
+
+  // ── Gov bidding detail / edit / move / delete ───────────────────────
+  function openGovBidDetail(d) {
+    const GOV_STATUSES = ['active','submitted','won','lost','cancelled','archived'];
+    const body = canManageGov ? `
+      <div class="form-group"><label>Title</label><input id="gb-title" value="${escHtml(d.title||d.name||'')}"/></div>
+      <div class="form-group"><label>Description</label><textarea id="gb-desc" rows="3">${escHtml(d.description||'')}</textarea></div>
+      <div class="form-row">
+        <div class="form-group"><label>Status</label>
+          <select id="gb-status">${GOV_STATUSES.map(s=>`<option value="${s}" ${(d.status||'active')===s?'selected':''}>${s}</option>`).join('')}</select>
+        </div>
+        <div class="form-group"><label>Bucket</label>
+          <select id="gb-bucket">${GOV_BUCKETS.map(b=>`<option value="${b.collection}" ${b.collection===collection?'selected':''}>${b.label}</option>`).join('')}</select>
+        </div>
+      </div>
+      ${d.fileUrl?`<a href="${d.fileUrl}" target="_blank" class="btn-link" style="font-size:12px;display:block;margin-bottom:8px">📎 View File</a>`:''}
+    ` : `
+      <div style="margin-bottom:10px"><span class="badge ${statusBadge(d.status)}">${d.status||'active'}</span></div>
+      <p style="font-size:14px;line-height:1.6;margin-bottom:10px">${escHtml(d.description||'No details.')}</p>
+      ${d.fileUrl?`<a href="${d.fileUrl}" target="_blank" class="btn-link" style="font-size:12px;display:block">📎 View File</a>`:''}
+    `;
+    openModal(escHtml(d.title||d.name||'Bidding'), body,
+      canManageGov
+        ? `<button class="btn-primary" id="gb-save">Save</button><button class="btn-danger" id="gb-del">Delete</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`
+        : `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+
+    document.getElementById('gb-save')?.addEventListener('click', async () => {
+      const title = document.getElementById('gb-title').value.trim();
+      if (!title) { Notifs.showToast('Enter a title.','error'); return; }
+      const targetCol = document.getElementById('gb-bucket').value;
+      const payload = {
+        title,
+        description: document.getElementById('gb-desc').value.trim(),
+        status: document.getElementById('gb-status').value,
+        fileUrl: d.fileUrl||null,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid
+      };
+      if (targetCol !== collection) {
+        if (!confirm(`Move "${title}" to ${GOV_BUCKETS.find(b=>b.collection===targetCol)?.label||targetCol}?`)) return;
+        // Move = create in the target bucket + delete from current (atomic batch).
+        const { id:_omitId, ...rest } = d;
+        const batch = db.batch();
+        const newRef = db.collection(targetCol).doc();
+        batch.set(newRef, { ...rest, ...payload, addedBy: d.addedBy||currentUser.uid, createdAt: d.createdAt||firebase.firestore.FieldValue.serverTimestamp() });
+        batch.delete(db.collection(collection).doc(d.id));
+        await batch.commit();
+        Notifs.showToast('Bid moved.');
+      } else {
+        await db.collection(collection).doc(d.id).update(payload);
+        Notifs.showToast('Bid updated.');
+      }
+      closeModal(); loadDocs();
+    });
+    document.getElementById('gb-del')?.addEventListener('click', async () => {
+      if (!confirm(`Delete "${d.title||d.name||'this bid'}"? This cannot be undone.`)) return;
+      await db.collection(collection).doc(d.id).delete();
+      closeModal(); Notifs.showToast('Bid deleted.'); loadDocs();
+    });
+  }
+
   loadDocs();
   document.getElementById(`add-doc-btn-${collection}`)?.addEventListener('click', () => {
     openModal(`Add ${title}`, `
@@ -7955,9 +8152,9 @@ function openProjectMarginModal(p){
   const pct = (p.split&&typeof p.split.partnerPct==='number')?p.split.partnerPct:50;
   openModal('💰 Edit Profit Factors — '+(escHtml(p.clientName||p.projectNo||'Project')), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract value <strong>₱${fmt(p.contractAmount||0)}</strong>. Expected earnings = (Contract − Capital) × split%.</div>
-    <div class="form-group"><label>Capital / cost (₱)</label><input id="pm-capital" type="number" step="0.01" min="0" value="${p.capital||0}"/>
+    <div class="form-group"><label>Capital / cost (₱)</label><input id="pm-capital" type="number" step="0.01" min="0" value="${p.capital||0}" inputmode="decimal"/>
       <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Total material + labor + overhead to produce this job.</div></div>
-    ${isShared?`<div class="form-group"><label>Partner split (%)</label><input id="pm-pct" type="number" step="1" min="0" max="100" value="${pct}"/>
+    ${isShared?`<div class="form-group"><label>Partner split (%)</label><input id="pm-pct" type="number" step="1" min="0" max="100" value="${pct}" inputmode="decimal"/>
       <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Brilliant Steel's share of the margin (50/50 default). Barro keeps the rest.</div></div>`:''}
     <div class="card" style="margin-top:6px"><div class="card-body" style="padding:10px 14px;font-size:12px;display:grid;grid-template-columns:1fr auto;gap:3px 12px">
       <span style="color:var(--text-muted)">Margin</span><span id="pm-margin" style="text-align:right;font-weight:700">₱${fmt((p.contractAmount||0)-(p.capital||0))}</span>
@@ -8023,7 +8220,7 @@ function openProjectBillingModal(p){
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract ₱${fmt(p.contractAmount||0)} · Collected ₱${fmt(p.amountCollected||0)} · <strong>Balance ₱${fmt(bal)}</strong></div>
     <div class="form-row">
       <div class="form-group"><label>Payment Type</label><select id="pb-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Downpayment</option><option>Progress Billing</option><option>Final Balance</option></select></div>
-      <div class="form-group"><label>Amount (₱, VAT-incl.)</label><input id="pb-amount" type="number" step="0.01" value="${bal>0?bal:''}"/></div>
+      <div class="form-group"><label>Amount (₱, VAT-incl.)</label><input id="pb-amount" type="number" inputmode="decimal" step="0.01" value="${bal>0?bal:''}"/></div>
     </div>
     <div class="form-group"><label>Method</label><select id="pb-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Bank Transfer</option><option>GCash</option><option>Cash</option><option>Cheque</option></select></div>
     <div class="form-group"><label>OR / Reference No.</label><input id="pb-ref" placeholder="Official Receipt no."/></div>
@@ -8219,7 +8416,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
     <div class="form-group"><label>Product / Work Description</label><input id="po-title" value="${escHtml(e.title||'')}" placeholder="e.g. SS Baker's Worktable 1500mm ×4"/></div>
     <div class="form-row">
       <div class="form-group"><label>Client / Project</label><input id="po-client" value="${escHtml(e.client||'')}" placeholder="e.g. Gerry's Grill — Bulacan"/></div>
-      <div class="form-group" style="flex:0 0 90px"><label>Qty</label><input id="po-qty" type="number" min="1" value="${e.qty||1}"/></div>
+      <div class="form-group" style="flex:0 0 90px"><label>Qty</label><input id="po-qty" type="number" min="1" value="${e.qty||1}" inputmode="numeric"/></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>Linked Quote (optional)</label><input id="po-quote" value="${escHtml(e.quoteRef||'')}" placeholder="BK-LU-FB-…"/></div>

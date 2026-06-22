@@ -491,17 +491,39 @@ window.Notifs = (() => {
     const existing = document.getElementById('bi-toast');
     if (existing) existing.remove();
 
+    // Theme-aware colors via CSS custom properties (with safe fallbacks if unset).
+    const root = document.documentElement;
+    const cssVar = (name, fallback) => {
+      const v = getComputedStyle(root).getPropertyValue(name).trim();
+      return v || fallback;
+    };
+    const kind = type === 'success'
+      ? 'success'
+      : (type === 'error' || type === 'danger') ? 'error' : 'info';
+    const bg = {
+      success: cssVar('--toast-success', '#2e7d32'),
+      error:   cssVar('--toast-error',   '#c62828'),
+      info:    cssVar('--toast-info',    '#1a237e'),
+    }[kind];
+    const fg = cssVar('--toast-text', '#fff');
+    const affordance = kind === 'success' ? '✓ ' : '';
+
     const toast = document.createElement('div');
     toast.id = 'bi-toast';
+    // Mobile (no bottom-nav) gets a smaller offset; desktop reserves bottom-nav space.
+    const isMobile = window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
+    const bottom = isMobile
+      ? 'calc(16px + env(safe-area-inset-bottom,0px))'
+      : 'calc(16px + 52px + 16px + env(safe-area-inset-bottom,0px))';
     toast.style.cssText = `
-      position:fixed; bottom:calc(16px + 52px + 16px + env(safe-area-inset-bottom,0px)); left:50%; transform:translateX(-50%);
-      background:${type === 'error' ? '#c62828' : '#1a237e'};
-      color:#fff; padding:10px 20px; border-radius:30px;
+      position:fixed; bottom:${bottom}; left:50%; transform:translateX(-50%);
+      background:${bg};
+      color:${fg}; padding:10px 20px; border-radius:30px;
       font-size:13px; font-weight:600; z-index:9999;
       box-shadow:0 4px 20px rgba(0,0,0,0.3);
       animation:toastIn 0.3s ease; white-space:nowrap; max-width:90vw; overflow:hidden; text-overflow:ellipsis;
     `;
-    toast.textContent = message;
+    toast.textContent = affordance + message;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 3500);
   }
