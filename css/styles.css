@@ -2312,6 +2312,100 @@ html.light body::after {
   background: radial-gradient(circle, rgba(59,130,246,0.04) 0%, transparent 70%);
 }
 
+/* ══════════════════════════════════════════════════
+   OFFICE THEME — Microsoft Fluent (clean white, blue accent)
+   Extends the light theme (html gets both `light` + `theme-office`)
+══════════════════════════════════════════════════ */
+html.theme-office {
+  /* Neutral Fluent canvas */
+  --bg:       #FAF9F8;
+  --black:    #FAF9F8;
+  --black-2:  #FFFFFF;
+  --black-3:  #F3F2F1;
+
+  /* Surfaces — flat, low-contrast neutrals */
+  --s0:      rgba(0,0,0,0.015);
+  --s1:      rgba(0,0,0,0.03);
+  --s2:      rgba(0,0,0,0.06);
+  --s3:      rgba(0,0,0,0.09);
+  --glass:   rgba(255,255,255,0.85);
+  --glass-lt:rgba(0,0,0,0.03);
+  --surface: #FFFFFF;
+  --surface2:rgba(0,0,0,0.03);
+  --grad-card: none;
+
+  /* Crisp neutral borders */
+  --border:      #E1DFDD;
+  --border-glow: rgba(15,108,189,0.20);
+  --border-gold: rgba(15,108,189,0.20);
+
+  /* Microsoft brand blue — remap the pink/blue accents */
+  --pink:      #0F6CBD;
+  --pink-2:    #2886DE;
+  --pink-glow: rgba(15,108,189,0.18);
+  --blue:      #0F6CBD;
+  --blue-2:    #2886DE;
+  --blue-glow: rgba(15,108,189,0.18);
+  --primary:       #0F6CBD;
+  --primary-light: #2886DE;
+  --accent:        #0F6CBD;
+  --accent-light:  #2886DE;
+  --info:          #0F6CBD;
+
+  /* Fluent neutral text ramp */
+  --text:       #242424;
+  --text-2:     #424242;
+  --text-muted: #616161;
+  --text-light: #909090;
+  --text-inv:   #FFFFFF;
+
+  /* Sleeker corners (Fluent ~4px) */
+  --r-xs:  3px;
+  --r-sm:  4px;
+  --r:     6px;
+  --r-lg:  8px;
+  --r-xl:  10px;
+  --r-2xl: 12px;
+
+  /* Segoe UI — authentic Microsoft type */
+  --font:         'Segoe UI', -apple-system, system-ui, 'Inter', sans-serif;
+  --font-display: 'Segoe UI', -apple-system, system-ui, 'Inter', sans-serif;
+
+  /* Subtle Fluent depth shadows */
+  --sh-xs: 0 1px 2px rgba(0,0,0,0.07);
+  --sh-sm: 0 1px 3px rgba(0,0,0,0.10);
+  --sh:    0 2px 6px rgba(0,0,0,0.11);
+  --sh-md: 0 4px 12px rgba(0,0,0,0.12);
+  --sh-lg: 0 8px 24px rgba(0,0,0,0.14);
+  --sh-pink: 0 2px 8px rgba(15,108,189,0.18);
+  --sh-blue: 0 2px 8px rgba(15,108,189,0.18);
+  --sh-gold: 0 2px 8px rgba(15,108,189,0.18);
+
+  /* Flatten brand gradients to the single accent */
+  --grad-pk-bl: linear-gradient(135deg, #0F6CBD 0%, #2886DE 100%);
+  --grad-pink:  linear-gradient(135deg, #0F6CBD 0%, #2886DE 100%);
+  --grad-blue:  linear-gradient(135deg, #0F6CBD 0%, #2886DE 100%);
+  --grad-purple:linear-gradient(135deg, #0F6CBD 0%, #2886DE 100%);
+
+  /* Clean white/neutral chrome */
+  --topbar-bg:     rgba(255,255,255,0.92);
+  --sidebar-bg:    #F3F2F1;
+  --notif-bg:      #FFFFFF;
+  --login-card-bg: #FFFFFF;
+  --bottom-nav-bg: rgba(255,255,255,0.94);
+  --modal-bg:      #FFFFFF;
+  --drawer-bg:     #FAF9F8;
+}
+/* Flat, distraction-free background — no aurora orbs */
+html.theme-office body { background: #FAF9F8; }
+html.theme-office body::before,
+html.theme-office body::after { display: none; }
+/* Solid brand-blue topbar wordmark */
+html.theme-office .topbar-brand {
+  background: linear-gradient(90deg, #0F6CBD 0%, #2886DE 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+
 /* login orbs */
 html.light .login-bg::before, html.theme-pink .login-bg::before, html.theme-grey .login-bg::before { background: radial-gradient(circle, rgba(255,45,120,0.06) 0%, transparent 68%); }
 html.light .login-bg::after, html.theme-pink .login-bg::after, html.theme-grey .login-bg::after { background: radial-gradient(circle, rgba(10,132,255,0.05) 0%, transparent 68%); }
@@ -2554,7 +2648,7 @@ html.theme-grey .bottom-nav-item.active { color: var(--primary); }
 ══════════════════════════════════════════════════ */
 .theme-picker {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
 .theme-swatch {
@@ -2570,6 +2664,7 @@ html.theme-grey .bottom-nav-item.active { color: var(--primary); }
   width: 22px; height: 22px; border-radius: 50%;
   box-shadow: inset 0 0 0 1px rgba(0,0,0,0.10);
 }
+.theme-swatch-office .theme-swatch-dot { background: linear-gradient(135deg, #FFFFFF 0%, #0F6CBD 100%); }
 .theme-swatch-dark  .theme-swatch-dot { background: linear-gradient(135deg, #131325 0%, #070710 100%); }
 .theme-swatch-midnight .theme-swatch-dot { background: linear-gradient(135deg, #5EA0FF 0%, #0E1530 100%); }
 .theme-swatch-light .theme-swatch-dot { background: linear-gradient(135deg, #FFFFFF 0%, #3B82F6 100%); }

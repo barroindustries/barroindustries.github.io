@@ -436,6 +436,9 @@ tr:hover td{background:#fafbff;}
 <!-- Client billing strip (print) -->
 <div class="print-only bill-strip" id="billStrip"></div>
 
+<!-- Subject line (print) -->
+<div class="print-only" id="phSubject" style="display:none;font-size:10pt;color:#222;margin:6px 0 2px;"><strong>Subject:</strong> <span id="phSubjectVal"></span></div>
+
 <!-- ── DATA SOURCE STATUS ── -->
 <div class="section no-print" style="padding:12px 18px;">
   <div class="status-bar">
@@ -544,7 +547,7 @@ tr:hover td{background:#fafbff;}
       </select>
     </div>
     <div class="qno-sep">-</div>
-    <div class="fg"><label>Date</label><input type="date" id="quoteDate" oninput="buildQuoteNo()" style="max-width:165px;"></div>
+    <div class="fg"><label>Date</label><input type="date" id="quoteDate" oninput="onQuoteDateChange()" style="max-width:165px;"></div>
     <div class="qno-sep">-</div>
     <div class="fg"><label>Client #</label><input type="number" id="qnoSeq" value="1" min="1" max="999" style="max-width:70px;text-align:center;" oninput="buildQuoteNo()"></div>
     <div class="qno-sep" style="padding-bottom:0;align-self:flex-end;">→</div>
@@ -562,6 +565,12 @@ tr:hover td{background:#fafbff;}
         <option>Government / Bidding</option><option>Residential</option><option>Cafe / Coffee Shop</option>
         <option>Catering / Food Service</option><option>Other</option>
       </select>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;align-items:flex-end;margin-top:10px;flex-wrap:wrap;">
+    <div class="fg full" style="flex:1;">
+      <label>Subject <span style="color:var(--gray-dark);font-weight:400;text-transform:none;">(shown on the quotation)</span></label>
+      <input type="text" id="subject" placeholder="e.g. Supply &amp; installation of commercial kitchen equipment" oninput="updatePrintHeader();saveToStorage();">
     </div>
   </div>
 </div>
@@ -1141,6 +1150,35 @@ function buildQuoteNo(){
   updatePrintHeader();
 }
 
+// Date changed — in auto mode rebuild the whole number; in manual mode (e.g. a
+// reopened quote or a revision) just refresh the date segment of the existing
+// number so the user can update the quotation date without retyping it.
+function onQuoteDateChange(){
+  if(qnoMode==='auto'){ buildQuoteNo(); }
+  else { syncDateIntoQuoteNo(); }
+  updatePrintHeader();
+  saveToStorage();
+}
+
+// Replace the YYMMDD date segment inside a standard quote number with the
+// currently-selected date. No-op for non-standard / hand-typed numbers.
+function syncDateIntoQuoteNo(){
+  const qEl=document.getElementById('quoteNo'); if(!qEl) return;
+  const d=document.getElementById('quoteDate').value; if(!d) return;
+  const dt=d.replace(/-/g,'').slice(2);
+  const m=qEl.value.match(/^([A-Za-z]{2}-[A-Za-z]{2}-[A-Za-z]{2})-(\d{6})-(\d{3})(-R\d+)?$/);
+  if(m){ qEl.value=`${m[1]}-${dt}-${m[3]}${m[4]||''}`; }
+}
+
+// Bump the -Rn revision suffix (R1→R2…). Numbers without a suffix are treated
+// as the original (implicitly R1) so the first revision becomes -R2.
+function bumpRevisionNo(no){
+  if(!no) return no;
+  const m=String(no).match(/-R(\d+)\s*$/i);
+  if(m) return no.replace(/-R\d+\s*$/i, '-R'+(parseInt(m[1],10)+1));
+  return no+'-R2';
+}
+
 // Auto customer# (Nth distinct customer today) + revision# (existing quotes for
 // this client + 1), cross-checked against MY quotes in this company's collection.
 let _autoCust=null, _autoRev=null, _autoCustTimer=null;
@@ -1166,12 +1204,16 @@ async function autoComputeCustRev(){
 
 function updatePrintHeader(){
   const no=document.getElementById('quoteNo').value;
+  const pv=document.getElementById('qnoPreview'); if(pv&&no) pv.textContent=no;
   const d=document.getElementById('quoteDate').value;
   const sp=document.getElementById('salesperson').value;
   document.getElementById('phQuoteNo').textContent=no?'Quote No.: '+no:'';
   document.getElementById('phDate').textContent=d?'Date: '+fmtDate(new Date(d+'T12:00:00')):'';
   document.getElementById('phValid').textContent=d?'Valid Until: '+fmtDate(addDays(d,30)):'';
   document.getElementById('phSalesperson').textContent=sp?'Prepared by: '+sp:'';
+  const subj=document.getElementById('subject')?.value?.trim()||'';
+  const subjEl=document.getElementById('phSubject');
+  if(subjEl){ document.getElementById('phSubjectVal').textContent=subj; subjEl.style.display=subj?'block':'none'; }
   const cn=document.getElementById('clientName').value;
   document.getElementById('sigClientName').textContent=cn||'CLIENT NAME';
   renderBillStrip();
@@ -2116,6 +2158,7 @@ function shareQuote(){
     salesperson:document.getElementById('salesperson').value,
     quoteDate:document.getElementById('quoteDate').value,
     purpose:document.getElementById('purpose').value,
+    subject:document.getElementById('subject').value,
     termsContent,termsEnabled,currentCo,
     pricing:getPricingFields()
   };
@@ -2141,6 +2184,7 @@ function saveToStorage(){
       salesperson:document.getElementById('salesperson').value,
       quoteDate:document.getElementById('quoteDate').value,
       purpose:document.getElementById('purpose').value,
+      subject:document.getElementById('subject').value,
       quoteNo:document.getElementById('quoteNo').value,
       currentCo,qnoMode,
       qnoLoc:document.getElementById('qnoLoc').value,
@@ -2200,6 +2244,7 @@ function loadFromStorage(){
       document.getElementById('quoteDate').value=state.quoteDate||'';
       document.getElementById('salesperson').value=state.salesperson||'';
       document.getElementById('purpose').value=state.purpose||'Restaurant';
+      document.getElementById('subject').value=state.subject||'';
       termsContent=state.termsContent||{};
       termsEnabled=state.termsEnabled||{};
       if(state.currentCo) setCompany(state.currentCo);
@@ -2221,7 +2266,7 @@ function clearForm(){
   items=[];termsContent={};
   termsEnabled={tc_completion:true,tc_payment:true,tc_warranty:true,tc_scope:true,tc_validity:true,tc_site:true,tc_acceptance:true};
   laborState={};quoteStatus='draft';waiveFlags={};filedAt='';
-  ['clientName','clientCompany','clientAddress','clientPhone','clientEmail','salesperson'].forEach(id=>{
+  ['clientName','clientCompany','clientAddress','clientPhone','clientEmail','salesperson','subject'].forEach(id=>{
     const el=document.getElementById(id);if(el)el.value='';
   });
   const today=new Date().toISOString().split('T')[0];
@@ -2373,6 +2418,7 @@ function buildQuotePayload(){
     salesperson:   document.getElementById('salesperson')?.value||'',
     quoteDate:     document.getElementById('quoteDate')?.value||'',
     purpose:       document.getElementById('purpose')?.value||'',
+    subject:       document.getElementById('subject')?.value||'',
     pricing,
   };
 
@@ -2386,6 +2432,7 @@ function buildQuotePayload(){
     clientEmail:   document.getElementById('clientEmail')?.value?.trim()||'',
     salesperson:   document.getElementById('salesperson')?.value?.trim()||'',
     purpose:       document.getElementById('purpose')?.value||'',
+    subject:       document.getElementById('subject')?.value?.trim()||'',
     location:      document.getElementById('qnoLoc')?.value||'',
     leadSource:    document.getElementById('qnoMethod')?.value||'',
     quoteDate:     document.getElementById('quoteDate')?.value||'',
@@ -2425,8 +2472,9 @@ function buildQuotePayload(){
 }
 
 // Reload a previously-filed quotation for editing (called from parent app or hash)
-function loadEditableState(state){
+function loadEditableState(state, opts){
   if(!state) return;
+  opts=opts||{};
   try{
     items=state.items||[];
     termsContent=state.termsContent||{};
@@ -2434,16 +2482,29 @@ function loadEditableState(state){
     if(state.filedAt){ filedAt=state.filedAt; quoteStatus='filed'; }
     if(state.currentCo) setCompany(state.currentCo);
     if(state.quoteNo){setQnoMode('manual');document.getElementById('quoteNo').value=state.quoteNo;}
-    ['clientName','clientCompany','clientAddress','clientPhone','clientEmail','salesperson','quoteDate','purpose'].forEach(id=>{
+    ['clientName','clientCompany','clientAddress','clientPhone','clientEmail','salesperson','quoteDate','purpose','subject'].forEach(id=>{
       const el=document.getElementById(id);if(el&&state[id]!==undefined) el.value=state[id];
     });
     applyPricingFields(state.pricing);
+    // NEW REVISION: same client/items, but bump the -Rn suffix, reset to a fresh
+    // draft, and set today's date so the user just reviews & re-files.
+    if(opts.asRevision){
+      quoteStatus='draft'; filedAt='';
+      const today=new Date().toISOString().split('T')[0];
+      const dEl=document.getElementById('quoteDate'); if(dEl) dEl.value=today;
+      const qEl=document.getElementById('quoteNo');
+      if(qEl){ qEl.value=bumpRevisionNo(qEl.value); }
+      syncDateIntoQuoteNo();
+      const fb=document.getElementById('filedBadge'); if(fb){ fb.classList.remove('show'); fb.textContent='✓ FILED'; fb.style.background=''; }
+      updateFiledSig();
+      setStatus('online','🆕 New revision '+(qEl?qEl.value:'')+' — date set to today. Adjust as needed, then File.');
+    }
     renderTerms();renderItems();updatePrintHeader();
   }catch(e){console.warn('loadEditableState failed',e);}
 }
 window.addEventListener('message',ev=>{
   const d=ev.data||{};
-  if(d.type==='LOAD_QUOTE' && d.payload) loadEditableState(d.payload.editableState||d.payload);
+  if(d.type==='LOAD_QUOTE' && d.payload) loadEditableState(d.payload.editableState||d.payload, { asRevision: !!d.payload.asRevision });
   // Host (president review mode) asks for the current edited state to save it back
   // to the original quote without going through the File flow.
   if(d.type==='REQUEST_STATE'){ try{ window.parent.postMessage({ type:'QUOTE_STATE', payload: buildQuotePayload() }, '*'); }catch(e){} }

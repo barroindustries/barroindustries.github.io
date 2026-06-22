@@ -2551,12 +2551,16 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       </select></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Daily Rate (₱)</label><input id="hrp-daily" type="number" value="${profile?.dailyRate||0}"/></div>
+      <div class="form-group"><label>Hourly Rate (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">used to compute pay</span></label><input id="hrp-hourly" type="number" step="0.01" value="${profile?.hourlyRate||(profile?.dailyRate?(profile.dailyRate/8).toFixed(2):0)}"/></div>
+      <div class="form-group"><label>Daily Rate (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">reference</span></label><input id="hrp-daily" type="number" value="${profile?.dailyRate||0}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Food Allowance (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">auto-added per day &gt;4 hrs</span></label><input id="hrp-food" type="number" value="${profile?.foodAllowance||0}"/></div>
       <div class="form-group"><label>Issued On</label><input id="hrp-issued" type="date" value="${profile?.issuedOn||new Date().toISOString().slice(0,10)}"/></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Meal Allowance</label><input id="hrp-meal" type="number" value="${profile?.allowances?.meal||0}"/></div>
       <div class="form-group"><label>Transport Allowance</label><input id="hrp-transport" type="number" value="${profile?.allowances?.transport||0}"/></div>
+      <div class="form-group"><label>Meal Allowance <span style="font-size:9px;color:var(--text-muted);font-weight:400">fixed extra</span></label><input id="hrp-meal" type="number" value="${profile?.allowances?.meal||0}"/></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>SSS Number</label><input id="hrp-sss" value="${escHtml(profile?.ssNum||'')}"/></div>
@@ -2596,6 +2600,8 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       employmentType: document.getElementById('hrp-emptype').value,
       workType: document.getElementById('hrp-worktype').value,
       dailyRate: parseFloat(document.getElementById('hrp-daily').value)||0,
+      hourlyRate: parseFloat(document.getElementById('hrp-hourly').value)||0,
+      foodAllowance: parseFloat(document.getElementById('hrp-food').value)||0,
       issuedOn: document.getElementById('hrp-issued').value,
       allowances: {
         meal: parseFloat(document.getElementById('hrp-meal').value)||0,
@@ -2645,13 +2651,22 @@ async function openPayslipHistory(currentUser, currentRole) {
       <td style="white-space:nowrap">
         <button class="btn-secondary btn-sm ps-view-btn" data-id="${p.id}" style="font-size:11px">View</button>
         ${canAct && nextStage ? `<button class="btn-success btn-sm ps-advance-btn" data-id="${p.id}" data-next="${nextStage}" style="font-size:11px;margin-left:4px">${nextLabel}</button>` : ''}
-        ${canAct && status!=='draft' ? `<button class="btn-secondary btn-sm ps-override-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px" title="Manually set status">⚙ Override</button>` : ''}
+        ${canAct ? `<button class="btn-secondary btn-sm ps-edit-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px" title="Edit amounts">✎</button>` : ''}
+        ${canAct && status!=='draft' ? `<button class="btn-secondary btn-sm ps-override-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px" title="Manually set status">⚙</button>` : ''}
+        ${canAct ? `<button class="btn-danger btn-sm ps-del-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px" title="Delete">🗑</button>` : ''}
       </td>
     </tr>`;
   }).join('');
 
   const renderModal = () => {
-    openModal('📄 Payslip History', `
+    const totalNet = list.reduce((s,p)=>s+(p.netPay||0),0);
+    const filedCount = list.filter(p=>['filed','submitted'].includes(p.status)).length;
+    openModal('📄 Payslip Summary', `
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--text-muted)">
+        <span><strong style="color:var(--text)">${list.length}</strong> payslips</span>
+        <span><strong style="color:var(--text)">${filedCount}</strong> filed/submitted</span>
+        <span>Total net pay: <strong style="color:var(--success)">₱${fmt(totalNet)}</strong></span>
+      </div>
       <div class="table-wrap">
         <table class="data-table">
           <thead><tr><th>Worker</th><th>Period</th><th>Net Pay</th><th>Status</th><th></th></tr></thead>
@@ -2678,8 +2693,54 @@ async function openPayslipHistory(currentUser, currentRole) {
           [`${fieldPrefix}By`]: currentUser.uid,
           [`${fieldPrefix}At`]: firebase.firestore.FieldValue.serverTimestamp()
         });
+        // On Submit, post the payslip to the general ledger (Finance → Ledger)
+        if (next === 'submitted') {
+          const lref = `WPAY-${ps.id}`;
+          const exist = await db.collection('ledger').where('refNumber','==',lref).limit(1).get().catch(()=>({docs:[]}));
+          const entry = {
+            date:        ps.payDate || ps.payPeriodEnd || today(),
+            type:        'debit',
+            description: `Worker Payslip — ${ps.workerName||'?'} (${ps.payPeriodStart||''}–${ps.payPeriodEnd||''})`,
+            amount:      ps.netPay || 0,
+            category:    'Payroll Expense',
+            source:      'Finance',
+            refNumber:   lref,
+            addedBy:     currentUser.uid,
+            addedByName: window.userProfile?.displayName || currentUser.email,
+            createdAt:   firebase.firestore.FieldValue.serverTimestamp()
+          };
+          if (exist.docs.length) await exist.docs[0].ref.update({ amount: entry.amount, description: entry.description });
+          else await db.collection('ledger').add(entry);
+          Notifs.showToast('Submitted & posted to General Ledger.');
+        } else {
+          Notifs.showToast(`Payslip marked as ${next}.`);
+        }
         ps.status = next;
-        Notifs.showToast(`Payslip marked as ${next}.`);
+        renderModal();
+    }));
+    document.querySelectorAll('.ps-edit-btn').forEach(btn => onClickSafe(btn, () => {
+        const ps = list.find(p=>p.id===btn.dataset.id);
+        if (ps) openPayslipEdit(ps, currentUser, () => renderModal());
+    }));
+    document.querySelectorAll('.ps-del-btn').forEach(btn => onClickSafe(btn, async () => {
+        const ps = list.find(p=>p.id===btn.dataset.id);
+        if (!ps) return;
+        if (!confirm(`Delete ${ps.workerName}'s payslip (${ps.payPeriodStart} – ${ps.payPeriodEnd})? This cannot be undone.`)) return;
+        // Reverse the CA deduction back onto the worker's running balance
+        const ca = ps.deductions?.other?.cashAdvance || 0;
+        if (ca > 0 && ps.workerId) {
+          await db.collection('worker_profiles').doc(ps.workerId).update({
+            caBalance: firebase.firestore.FieldValue.increment(ca)
+          }).catch(()=>{});
+        }
+        // Remove the linked general-ledger entry if it was posted
+        const lref = `WPAY-${ps.id}`;
+        const lsnap = await db.collection('ledger').where('refNumber','==',lref).limit(1).get().catch(()=>({docs:[]}));
+        if (lsnap.docs.length) await lsnap.docs[0].ref.delete();
+        await db.collection('payslips').doc(ps.id).delete();
+        const idx = list.findIndex(p=>p.id===ps.id);
+        if (idx>=0) list.splice(idx,1);
+        Notifs.showToast('Payslip deleted.');
         renderModal();
     }));
     document.querySelectorAll('.ps-override-btn').forEach(btn => onClickSafe(btn, async () => {
@@ -2699,19 +2760,88 @@ async function openPayslipHistory(currentUser, currentRole) {
   renderModal();
 }
 
+// Compact edit of a filed payslip's amounts (recomputes net; keeps ledger in sync).
+function openPayslipEdit(ps, currentUser, onSave) {
+  const r = ps.regular||{}, ot = ps.overtime||{}, al = ps.allowances||{}, g = ps.deductions?.govt||{}, o = ps.deductions?.other||{};
+  openModal(`✎ Edit Payslip — ${escHtml(ps.workerName||'')}`, `
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${ps.payPeriodStart||''} – ${ps.payPeriodEnd||''}</div>
+    <div class="form-row">
+      <div class="form-group"><label>Rate / HR (₱)</label><input id="pe-rph" type="number" step="0.01" value="${r.ratePerHr||0}"/></div>
+      <div class="form-group"><label>Hours Worked</label><input id="pe-hrs" type="number" step="0.01" value="${r.hrsWorked||0}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Overtime Pay (₱)</label><input id="pe-ot" type="number" value="${ot.total||0}"/></div>
+      <div class="form-group"><label>Allowances total (₱)</label><input id="pe-allow" type="number" value="${al.total||0}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>SSS</label><input id="pe-sss" type="number" value="${g.sss||0}"/></div>
+      <div class="form-group"><label>PhilHealth</label><input id="pe-ph" type="number" value="${g.philhealth||0}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Pag-IBIG</label><input id="pe-pib" type="number" value="${g.pagibig||0}"/></div>
+      <div class="form-group"><label>Cash Advance</label><input id="pe-ca" type="number" value="${o.cashAdvance||0}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Other / Loans</label><input id="pe-loans" type="number" value="${o.loans||0}"/></div>
+      <div class="form-group"><label>Taxes</label><input id="pe-tax" type="number" value="${o.taxes||0}"/></div>
+    </div>
+    <div class="form-group"><label>Amount Already Paid (₱)</label><input id="pe-paid" type="number" value="${ps.paid||0}"/></div>
+    <div id="pe-net" style="text-align:right;font-weight:800;font-size:14px;margin-top:6px">Net: ₱${fmt(ps.netPay||0)}</div>
+  `, `<button class="btn-primary" id="pe-save-btn">Save Changes</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  const num = id => parseFloat(document.getElementById(id).value)||0;
+  const recompute = () => {
+    const gross = num('pe-rph')*num('pe-hrs') + num('pe-ot') + num('pe-allow');
+    const ded = num('pe-sss')+num('pe-ph')+num('pe-pib')+num('pe-ca')+num('pe-loans')+num('pe-tax');
+    document.getElementById('pe-net').textContent = 'Net: ₱'+fmt(gross - ded - num('pe-paid'));
+  };
+  ['pe-rph','pe-hrs','pe-ot','pe-allow','pe-sss','pe-ph','pe-pib','pe-ca','pe-loans','pe-tax','pe-paid']
+    .forEach(id => document.getElementById(id).addEventListener('input', recompute));
+
+  document.getElementById('pe-save-btn').addEventListener('click', async () => {
+    const rph=num('pe-rph'), hrs=num('pe-hrs'), otT=num('pe-ot'), alT=num('pe-allow');
+    const sss=num('pe-sss'), ph=num('pe-ph'), pib=num('pe-pib'), ca=num('pe-ca'), loans=num('pe-loans'), tax=num('pe-tax'), paid=num('pe-paid');
+    const reg = parseFloat((rph*hrs).toFixed(2));
+    const govTotal=sss+ph+pib, otherTotal=ca+loans+tax;
+    const grossPay = reg+otT+alT, totalDeductions = govTotal+otherTotal;
+    const totalPay = grossPay-totalDeductions, netPay = totalPay-paid;
+    await db.collection('payslips').doc(ps.id).update({
+      'regular.ratePerHr':rph, 'regular.hrsWorked':hrs, 'regular.dailyRate':parseFloat((rph*8).toFixed(2)), 'regular.total':reg,
+      'overtime.total':otT, 'allowances.total':alT, 'allowances.meal':alT,
+      'deductions.govt.sss':sss, 'deductions.govt.philhealth':ph, 'deductions.govt.pagibig':pib, 'deductions.govt.total':govTotal,
+      'deductions.other.cashAdvance':ca, 'deductions.other.loans':loans, 'deductions.other.taxes':tax, 'deductions.other.total':otherTotal,
+      grossPay, totalDeductions, totalPay, paid, netPay,
+      editedBy: currentUser.uid, editedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    // Keep the general-ledger entry in sync if it was already posted
+    const lsnap = await db.collection('ledger').where('refNumber','==',`WPAY-${ps.id}`).limit(1).get().catch(()=>({docs:[]}));
+    if (lsnap.docs.length) await lsnap.docs[0].ref.update({ amount: netPay });
+    // Mutate the in-memory copy so the summary reflects changes immediately
+    ps.regular   = {...(ps.regular||{}), ratePerHr:rph, hrsWorked:hrs, dailyRate:parseFloat((rph*8).toFixed(2)), total:reg};
+    ps.overtime  = {...(ps.overtime||{}), total:otT};
+    ps.allowances= {...(ps.allowances||{}), total:alT, meal:alT};
+    ps.deductions= { govt:{sss,philhealth:ph,pagibig:pib,total:govTotal}, other:{cashAdvance:ca,loans,taxes:tax,total:otherTotal} };
+    ps.grossPay=grossPay; ps.totalDeductions=totalDeductions; ps.totalPay=totalPay; ps.paid=paid; ps.netPay=netPay;
+    closeModal();
+    Notifs.showToast('Payslip updated.');
+    onSave && onSave();
+  });
+}
+
 function openPayslipGenerator(profile, currentUser, currentRole) {
   const now = new Date();
-  const todayStr = now.toISOString().slice(0,10);
-  // Compute default period: start of current week Mon
-  const dayOfWeek = now.getDay();
-  const monday = new Date(now); monday.setDate(now.getDate() - (dayOfWeek===0?6:dayOfWeek-1));
-  const periodStart = monday.toISOString().slice(0,10);
+  // Weekly cycle: Mon–Sat, paid each Saturday
+  const dow = now.getDay();                         // 0 Sun .. 6 Sat
+  const sat = new Date(now); sat.setDate(now.getDate() + ((6 - dow + 7) % 7));
+  const mon = new Date(sat); mon.setDate(sat.getDate() - 5);
+  const periodStart = mon.toISOString().slice(0,10);
+  const periodEnd   = sat.toISOString().slice(0,10);
 
   openModal(`📄 Generate Payslip — ${profile.name}`, `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
       <div class="form-group"><label>Pay Period Start</label><input id="ps-start" type="date" value="${periodStart}"/></div>
-      <div class="form-group"><label>Pay Period End</label><input id="ps-end" type="date" value="${todayStr}"/></div>
-      <div class="form-group"><label>Pay Date</label><input id="ps-date" type="date" value="${todayStr}"/></div>
+      <div class="form-group"><label>Pay Period End (Sat)</label><input id="ps-end" type="date" value="${periodEnd}"/></div>
+      <div class="form-group"><label>Pay Date</label><input id="ps-date" type="date" value="${periodEnd}"/></div>
       <div class="form-group"><label>Business / Company Name</label><input id="ps-company" value="Barro Kitchens"/></div>
     </div>
 
@@ -2741,8 +2871,8 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
       <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Earnings</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <div class="form-group" style="margin-bottom:6px"><label>Daily Rate</label><input id="ps-daily" type="number" value="${profile.dailyRate||0}"/></div>
-        <div class="form-group" style="margin-bottom:6px"><label>Rate/HR</label><input id="ps-rph" type="number" value="${(profile.dailyRate/8).toFixed(2)}"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>Rate/HR <span style="font-size:9px;color:var(--text-muted);font-weight:400">× hours = pay</span></label><input id="ps-rph" type="number" step="0.01" value="${(profile.hourlyRate||(profile.dailyRate/8)||0).toFixed ? (profile.hourlyRate||(profile.dailyRate/8)||0).toFixed(2) : profile.hourlyRate||0}"/></div>
+        <div class="form-group" style="margin-bottom:6px"><label>Daily Rate <span style="font-size:9px;color:var(--text-muted);font-weight:400">ref</span></label><input id="ps-daily" type="number" value="${profile.dailyRate||0}"/></div>
         <div class="form-group" style="margin-bottom:6px">
           <label>Hours Worked <span style="font-size:9px;color:var(--text-muted);font-weight:400">(auto, editable)</span></label>
           <input id="ps-hrs" type="number" value="0"/>
@@ -2754,7 +2884,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
         <div></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <div class="form-group" style="margin-bottom:0"><label>Meal Allow</label><input id="ps-meal" type="number" value="${profile.allowances?.meal||0}"/></div>
+        <div class="form-group" style="margin-bottom:0"><label>Food Allow <span style="font-size:9px;color:var(--text-muted);font-weight:400">auto, &gt;4h/day</span></label><input id="ps-meal" type="number" value="${profile.allowances?.meal||0}"/></div>
         <div class="form-group" style="margin-bottom:0"><label>Transport Allow</label><input id="ps-transport" type="number" value="${profile.allowances?.transport||0}"/></div>
         <div class="form-group" style="margin-bottom:0"><label>Rent Allow</label><input id="ps-rent" type="number" value="0"/></div>
       </div>
@@ -2801,8 +2931,10 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
   }
 
   // ── Auto-compute hours from daily time log (−1hr lunch if shift spans 12–1PM) ──
+  let foodEdited = false;
+  document.getElementById('ps-meal')?.addEventListener('input', () => { foodEdited = true; });
   const recomputeHours = () => {
-    let total = 0;
+    let total = 0, daysOver4 = 0;
     for (let i = 0; i < 7; i++) {
       const hrs = computeDayHours(
         document.getElementById(`ps-tin-${i}`)?.value,
@@ -2811,11 +2943,15 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
       const cell = document.getElementById(`ps-dayhrs-${i}`);
       if (cell) cell.textContent = hrs.toFixed(2);
       total += hrs;
+      if (hrs > 4) daysOver4++;
     }
     const totalEl = document.getElementById('ps-computed-total');
     if (totalEl) totalEl.textContent = total.toFixed(2);
     const hrsInput = document.getElementById('ps-hrs');
     if (hrsInput) hrsInput.value = total.toFixed(2);
+    // Food allowance: profile rate × number of days exceeding 4 hrs (unless manually overridden)
+    const foodInput = document.getElementById('ps-meal');
+    if (foodInput && !foodEdited) foodInput.value = ((profile.foodAllowance||0) * daysOver4).toFixed(2);
   };
   document.querySelectorAll('.ps-time-input').forEach(inp => inp.addEventListener('input', recomputeHours));
   recomputeHours();
@@ -2847,19 +2983,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     if (d.deductions.other.cashAdvance > 0) {
       await db.collection('worker_profiles').doc(profile.id).update({ caBalance: d.caBalanceAfter });
     }
-    // Log to ledger
-    await db.collection('ledger_entries').add({
-      type: 'payroll',
-      description: `Payslip — ${profile.name} (${d.payPeriodStart} to ${d.payPeriodEnd})`,
-      amount: d.netPay,
-      category: 'Payroll Expense',
-      workerId: profile.id,
-      workerName: profile.name,
-      payslipId: ref.id,
-      date: d.payDate,
-      createdBy: currentUser.uid,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
+    // Note: the general-ledger entry is posted when the payslip is "Submitted" (see openPayslipHistory).
     closeModal();
     Notifs.showToast('Payslip saved as draft! Verify and file it from Payslip History.');
     setTimeout(() => renderPayslipPreview({...d, id: ref.id}, true), 400);
@@ -2883,7 +3007,7 @@ function collectPayslipData(profile, currentUser) {
   const daily    = parseFloat(document.getElementById('ps-daily').value)||0;
   const rph      = parseFloat(document.getElementById('ps-rph').value)||0;
   const hrs      = parseFloat(document.getElementById('ps-hrs').value)||0;
-  const regTotal = parseFloat((daily * (hrs/8)).toFixed(2));
+  const regTotal = parseFloat((rph * hrs).toFixed(2));  // hourly rate × hours worked
   const otRate   = parseFloat(document.getElementById('ps-ot-rate').value)||0;
   const otHrs    = parseFloat(document.getElementById('ps-ot-hrs').value)||0;
   const otTotal  = parseFloat((otRate * otHrs).toFixed(2));
@@ -3194,8 +3318,10 @@ function buildPayslipHTML(d) {
       <tr>${(d.schedule||[]).map(s=>`<td style="text-align:center;font-size:8px">${s.timeIn&&s.timeOut?`${s.timeIn}–${s.timeOut}`:'REST'}</td>`).join('')}</tr>
       <tr>${(d.schedule||[]).map(s=>`<td style="text-align:center;font-size:9px;font-weight:700">${(s.hours||0).toFixed?s.hours.toFixed(2):s.hours} hrs</td>`).join('')}</tr>
     </table>
-    ${d.proofUrl ? `<div style="margin-top:8px;padding:6px;background:#f5f5f5;border:1px solid #ccc;border-radius:4px;font-size:10px">
-      📎 Transfer proof on file: <a href="${d.proofUrl}" target="_blank">${d.proofUrl}</a>
+    ${d.proofUrl ? `<div class="section-header" style="margin-top:8px">Transfer Confirmation</div>
+    <div style="border:1px solid #000;border-top:none;padding:8px;text-align:center;page-break-inside:avoid">
+      <img src="${d.proofUrl}" alt="Transfer confirmation" crossorigin="anonymous" style="max-width:100%;max-height:120mm;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"/>
+      <div style="display:none;font-size:10px;color:#555">Proof on file: <a href="${d.proofUrl}" target="_blank">${escHtml(d.proofUrl)}</a></div>
     </div>` : ''}
   </div>
 </div>
@@ -3745,6 +3871,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;justify-content:flex-end">
             ${q.editableState?`<button class="btn-secondary btn-sm bk-reopen-btn" data-id="${q.id}">↻ Reopen</button>`:''}
+            ${q.editableState?`<button class="btn-secondary btn-sm bk-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">⎘ New Revision</button>`:''}
             ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-total="${q.total||0}" data-co="BK" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?'✓ Ordered':'🧾 Sales Order'}</button>`:''}
           </div>
         </div>`;}).join('')}
@@ -3757,6 +3884,8 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       window._qbReopenState=qq.editableState; navigateTo('bk-quote-builder');
     } catch(ex){ Notifs.showToast('Reopen failed','error'); }
   }));
+  container.querySelectorAll('.bk-rev-btn').forEach(b=>b.addEventListener('click', e=>
+    window.newRevisionFromDoc('bk_quotes', e.currentTarget.dataset.id, 'bk-quote-builder')));
 }
 
 // ── Partner Quotes (read-only window into Brilliant Steel quotes) ──
@@ -5266,6 +5395,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
                 <button class="btn-secondary btn-sm bs-edit-return-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">✎ Edit &amp; Return</button>
               `:''}
               ${(status==='filed'||status==='approved')?`<button class="btn-secondary btn-sm bs-reopen-btn" data-id="${q.id}" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen</button>`:''}
+              ${(status==='filed'||status==='approved')&&q.editableState?`<button class="btn-secondary btn-sm bs-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">⎘ New Revision</button>`:''}
               ${(status==='filed'||status==='approved')?`<button class="btn-success btn-sm bs-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-total="${q.total||q.grandTotal||0}" data-co="${escHtml(q.company||'BS')}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?'✓ Ordered':'🧾 Sales Order'}</button>`:''}
               ${canDeleteDirect
                 ? `<button class="btn-secondary btn-sm bs-del-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" style="color:var(--danger)">🗑 Delete</button>`
@@ -5587,6 +5717,11 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
       } catch (ex) { Notifs.showToast('Could not reopen: '+(ex.message||ex.code), 'error'); }
     });
   });
+  // New revision (R2, R3…) of a filed quote — same client/items, today's date.
+  el.querySelectorAll('.bs-rev-btn').forEach(btn => {
+    btn.addEventListener('click', e =>
+      window.newRevisionFromDoc('bs_quotes', e.currentTarget.dataset.id, 'bs-quote-builder'));
+  });
   // Convert a won quote into a Sales Order (capture payment + receipt → finance)
   el.querySelectorAll('.bs-so-btn').forEach(btn => {
     btn.addEventListener('click', e => openSalesOrderModal(e.currentTarget.dataset, currentUser, currentRole, container));
@@ -5775,7 +5910,7 @@ async function renderBSClientData(container, currentUser, currentRole) {
                   <td><span class="badge ${badge}">${status}</span></td>
                   <td style="color:var(--text-muted);font-size:11px">${ts}</td>
                   ${isPrivileged?`<td style="font-size:12px;color:var(--text-muted)">${escHtml(q.agentName||q.createdByName||'—')}</td>`:''}
-                  <td style="white-space:nowrap">${q.editableState?`<button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.reopenQuoteFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen &amp; Edit</button>`:'<span style="font-size:10px;color:var(--text-muted)">no snapshot</span>'}</td>
+                  <td style="white-space:nowrap">${q.editableState?`<button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.reopenQuoteFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen &amp; Edit</button> <button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.newRevisionFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Start a new revision (R2, R3…) with today's date">⎘ New Revision</button>`:'<span style="font-size:10px;color:var(--text-muted)">no snapshot</span>'}</td>
                 </tr>`;
               }).join('')}</tbody>
             </table></div>
@@ -6810,12 +6945,16 @@ async function openClientQuotesModal(cl, quoteColl, builderNav){
         <div style="font-weight:700;font-size:13px;font-family:monospace">${escHtml(q.quoteNumber||q.id.slice(-8))}</div>
         <div style="font-size:11px;color:var(--text-muted);margin-top:2px">₱${fmt(q.total||q.grandTotal||0)} ${statusBadge(q)} ${q.salesOrderId?'<span class="badge badge-green" style="font-size:9px">→ Sales Order</span>':''} ${q.createdAt?'· '+new Date((q.createdAt.seconds||0)*1000).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):''}</div>
       </div>
-      ${q.editableState?`<button class="btn-secondary btn-sm clq-reopen" data-id="${q.id}" style="flex-shrink:0">↻ Reopen</button>`:'<span style="font-size:10px;color:var(--text-muted);flex-shrink:0">no snapshot</span>'}
+      ${q.editableState?`<div style="display:flex;gap:6px;flex-shrink:0"><button class="btn-secondary btn-sm clq-reopen" data-id="${q.id}">↻ Reopen</button><button class="btn-secondary btn-sm clq-rev" data-id="${q.id}" title="Start a new revision (R2, R3…) with today's date">⎘ New Revision</button></div>`:'<span style="font-size:10px;color:var(--text-muted);flex-shrink:0">no snapshot</span>'}
     </div>`).join('')}
   </div>`;
   body.querySelectorAll('.clq-reopen').forEach(btn=>btn.addEventListener('click',()=>{
     closeModal();
     window.reopenQuoteFromDoc(quoteColl, btn.dataset.id, builderNav);
+  }));
+  body.querySelectorAll('.clq-rev').forEach(btn=>btn.addEventListener('click',()=>{
+    closeModal();
+    window.newRevisionFromDoc(quoteColl, btn.dataset.id, builderNav);
   }));
 }
 

@@ -26,14 +26,21 @@ service cloud.firestore {
     // True when a user-profile update leaves all privileged fields untouched.
     // Used so a non-admin can edit their own name/photo/phone but NOT promote
     // themselves (role) or change their own pay/department/employee ID.
+    // NOTE: use .get(field, null) — directly reading a field that is absent on
+    // the document raises an error (which DENIES the rule). Worker/partner/older
+    // profiles legitimately lack some of these fields, so a direct read broke
+    // their routine self-updates (e.g. the lastSeen presence heartbeat). With
+    // .get(), an absent field compares null==null and is correctly "unchanged".
     function userPrivilegedFieldsUnchanged() {
-      return request.resource.data.role        == resource.data.role
-          && request.resource.data.salary      == resource.data.salary
-          && request.resource.data.allowance   == resource.data.allowance
-          && request.resource.data.deductions  == resource.data.deductions
-          && request.resource.data.department  == resource.data.department
-          && request.resource.data.departments == resource.data.departments
-          && request.resource.data.employeeId  == resource.data.employeeId;
+      let n = request.resource.data;
+      let o = resource.data;
+      return n.get('role', null)        == o.get('role', null)
+          && n.get('salary', null)      == o.get('salary', null)
+          && n.get('allowance', null)   == o.get('allowance', null)
+          && n.get('deductions', null)  == o.get('deductions', null)
+          && n.get('department', null)  == o.get('department', null)
+          && n.get('departments', null) == o.get('departments', null)
+          && n.get('employeeId', null)  == o.get('employeeId', null);
     }
 
     // ── Users ──────────────────────────────────────────

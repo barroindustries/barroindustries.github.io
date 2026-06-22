@@ -237,7 +237,7 @@ function showApp() {
   // Init Lucide icons for static topbar elements
   if (window.lucide) lucide.createIcons();
   // Apply correct theme toggle icon
-  _applyThemeIcon(localStorage.getItem('bi-theme') || 'dark');
+  _applyThemeIcon(localStorage.getItem('bi-theme') || 'office');
   // Reset any iOS zoom that happened during login input
   _resetViewportZoom();
   // Pull-to-refresh (init once)
@@ -439,7 +439,7 @@ function showPhotoPrompt() {
   banner.id = 'photo-prompt-banner';
   banner.style.cssText = `
     position:fixed;bottom:24px;right:24px;z-index:9999;
-    background:var(--surface2,#1e2433);border:1px solid var(--border,#2a3147);
+    background:var(--bg,#1e2433);border:1px solid var(--border,#2a3147);
     border-radius:16px;padding:18px 20px;width:290px;
     box-shadow:0 8px 32px rgba(0,0,0,0.35);
     display:flex;flex-direction:column;gap:12px;
@@ -648,6 +648,7 @@ function friendlyError(code) {
 
 // ── Theme ─────────────────────────────────────────
 const THEMES = {
+  office:   { label: 'Office',   cls: 'light theme-office' },
   dark:     { label: 'Obsidian', cls: null },
   midnight: { label: 'Midnight', cls: 'theme-midnight' },
   light:    { label: 'Aurora',   cls: 'light' },
@@ -656,25 +657,25 @@ const THEMES = {
 };
 
 function initTheme() {
-  setTheme(localStorage.getItem('bi-theme') || 'dark', false);
+  setTheme(localStorage.getItem('bi-theme') || 'office', false);
 }
 
 function setTheme(theme, persist = true) {
-  if (!THEMES[theme]) theme = 'dark';
+  if (!THEMES[theme]) theme = 'office';
   const html = document.documentElement;
-  Object.values(THEMES).forEach(t => { if (t.cls) html.classList.remove(t.cls); });
+  Object.values(THEMES).forEach(t => { if (t.cls) t.cls.split(' ').forEach(c => html.classList.remove(c)); });
   const cls = THEMES[theme].cls;
-  if (cls) html.classList.add(cls);
+  if (cls) cls.split(' ').forEach(c => html.classList.add(c));
   if (persist) localStorage.setItem('bi-theme', theme);
   _applyThemeIcon(theme);
 }
 
 function getTheme() {
-  return localStorage.getItem('bi-theme') || 'dark';
+  return localStorage.getItem('bi-theme') || 'office';
 }
 
 function toggleTheme() {
-  const order = ['dark', 'midnight', 'light', 'pink', 'grey'];
+  const order = ['office', 'dark', 'midnight', 'light', 'pink', 'grey'];
   const next = order[(order.indexOf(getTheme()) + 1) % order.length];
   setTheme(next);
 }
@@ -754,7 +755,7 @@ function getSidebarItems() {
     items.push({ icon:'calendar',    label:'Attendance',       page:'attendance'                       });
     items.push({ icon:'credit-card', label:'Personal Finance', page:'personal-finance'                 });
     items.push({ icon:'folder',      label:'Files',            page:'files'                            });
-    items.push({ icon:'boxes',       label:'Inventory',        page:'inventory'                        });
+    if ((currentDepts||[]).includes('Production')) items.push({ icon:'boxes', label:'Inventory', page:'inventory' });
     if ((currentDepts||[]).some(d=>['Sales','Production','Finance'].includes(d)) || currentRole==='finance') items.push({ icon:'trending-up', label:'Projects', page:'projects-lifecycle' });
     if ((currentDepts||[]).includes('Finance') || currentRole==='finance') items.push({ icon:'receipt', label:'Sales Orders', page:'sales-orders' });
     // (Leave, Company, SOPs, Help moved into the profile drawer's "More" section)
@@ -923,6 +924,7 @@ function renderQuoteBuilderIframe() {
   // A "Reopen" action from the Quotations list stashes the quote's editable
   // snapshot here — load it into the builder once the iframe is ready.
   const reopenState = window._qbReopenState; window._qbReopenState = null;
+  const reopenAsRevision = window._qbReopenAsRevision; window._qbReopenAsRevision = false;
   // President-review mode: editing a partner's quote to hand it back. The edits
   // are saved to the SAME (partner-owned) quote doc, not a new president copy.
   const reviewCtx = window._qbReviewContext; window._qbReviewContext = null;
@@ -940,7 +942,7 @@ function renderQuoteBuilderIframe() {
   c.innerHTML = `
     ${reviewBanner}
     ${isMobile ? '' : `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
-      <h2 style="font-size:16px;font-weight:800;color:var(--text)">🧮 Quote Builder${reviewCtx?' <span style="font-size:12px;font-weight:600;color:var(--warning,#ff9f0a)">(reviewing a partner quote)</span>':reopenState?' <span style="font-size:12px;font-weight:600;color:var(--text-muted)">(editing a copy)</span>':''}</h2>
+      <h2 style="font-size:16px;font-weight:800;color:var(--text)">🧮 Quote Builder${reviewCtx?' <span style="font-size:12px;font-weight:600;color:var(--warning,#ff9f0a)">(reviewing a partner quote)</span>':reopenState?` <span style="font-size:12px;font-weight:600;color:var(--text-muted)">(${reopenAsRevision?'new revision':'editing a copy'})</span>`:''}</h2>
     </div>`}
     <iframe id="qb-frame" src="${qbSrc}" allow="print"
       style="width:100%;height:calc(100dvh - ${chrome}px);min-height:${isMobile?'420':'460'}px;border:none;border-radius:${isMobile?'10':'12'}px;background:#f5f6fa"></iframe>`;
@@ -970,7 +972,7 @@ function renderQuoteBuilderIframe() {
   if (reopenState) {
     const frame = document.getElementById('qb-frame');
     frame?.addEventListener('load', () => {
-      setTimeout(() => { try { frame.contentWindow.postMessage({ type:'LOAD_QUOTE', payload:{ editableState: reopenState } }, '*'); } catch(_){} }, 450);
+      setTimeout(() => { try { frame.contentWindow.postMessage({ type:'LOAD_QUOTE', payload:{ editableState: reopenState, asRevision: reopenAsRevision } }, '*'); } catch(_){} }, 450);
     });
   }
   if (reviewCtx) {
@@ -1041,14 +1043,52 @@ async function saveReviewedPartnerQuote(ctx, action) {
 // Reopen a filed quote into the builder from anywhere (Quotations list, Client
 // data view, etc.). Loads the quote's editable snapshot and navigates to the
 // matching builder. Re-filing then saves a NEW versioned copy (per the SOP).
-window.reopenQuoteFromDoc = async function(collection, id, navTarget){
+window.reopenQuoteFromDoc = async function(collection, id, navTarget, opts){
   try {
     const snap = await db.collection(collection).doc(id).get();
     const q = snap.data() || {};
     if (!q.editableState) { Notifs.showToast('No editable snapshot saved for this quote', 'error'); return; }
     window._qbReopenState = q.editableState;
+    window._qbReopenAsRevision = !!(opts && opts.asRevision);
     navigateTo(navTarget || (collection==='bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'));
   } catch (ex) { Notifs.showToast('Could not reopen: '+(ex.message||ex.code), 'error'); }
+};
+// "New Revision" action. Opens the builder pre-filled with the client's LATEST
+// quote (latest items / pricing / terms — not necessarily the card that was
+// clicked), bumps the -Rn suffix from the highest revision on record, and resets
+// it to a fresh draft dated today so the user just tweaks and re-files.
+window.newRevisionFromDoc = async function(collection, id, navTarget){
+  try {
+    const snap = await db.collection(collection).doc(id).get();
+    const clicked = { id, ...(snap.data() || {}) };
+    const clientKey = (clicked.clientName || '').trim().toLowerCase();
+
+    // Gather every saved quote for this client so the revision continues from the
+    // most recent one. Reading the whole collection can fail for scoped roles
+    // (e.g. partners) — fall back to just the clicked quote in that case.
+    let pool = [clicked];
+    if (clientKey) {
+      try {
+        const all = await db.collection(collection).get();
+        const mine = all.docs.map(d => ({ id: d.id, ...d.data() }))
+          .filter(q => (q.clientName || '').trim().toLowerCase() === clientKey && q.editableState);
+        if (mine.length) pool = mine;
+      } catch(_) {}
+    }
+
+    const revOf = q => {
+      const m = String(q.quoteNumber || q.editableState?.quoteNo || '').match(/-R(\d+)\s*$/i);
+      return m ? parseInt(m[1], 10) : 1;
+    };
+    // Latest = highest revision number, tie-broken by most recent filing time.
+    pool.sort((a, b) => (revOf(b) - revOf(a)) || ((b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
+    const latest = pool.find(q => q.editableState) || clicked;
+
+    if (!latest.editableState) { Notifs.showToast('No editable snapshot saved for this quote', 'error'); return; }
+    window._qbReopenState = latest.editableState;
+    window._qbReopenAsRevision = true;
+    navigateTo(navTarget || (collection === 'bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'));
+  } catch (ex) { Notifs.showToast('Could not start revision: ' + (ex.message || ex.code), 'error'); }
 };
 
 // ── Product Database (president only) ────────────
@@ -5951,6 +5991,7 @@ function openProfileDrawer() {
       <div class="profile-info-row no-border" style="flex-direction:column;align-items:stretch;gap:10px">
         <span class="pir-label">Appearance</span>
         <div class="theme-picker" id="drawer-theme-picker">
+          <button class="theme-swatch theme-swatch-office" data-theme="office" title="Office"><span class="theme-swatch-dot"></span>Office</button>
           <button class="theme-swatch theme-swatch-dark"  data-theme="dark"  title="Obsidian"><span class="theme-swatch-dot"></span>Obsidian</button>
           <button class="theme-swatch theme-swatch-midnight" data-theme="midnight" title="Midnight"><span class="theme-swatch-dot"></span>Midnight</button>
           <button class="theme-swatch theme-swatch-light" data-theme="light" title="Aurora"><span class="theme-swatch-dot"></span>Aurora</button>
@@ -6122,12 +6163,17 @@ document.addEventListener('DOMContentLoaded',()=>{
 let _calMonthOffset = 0;
 async function renderMiniCal() {
   const el=document.getElementById('mini-cal'); if(!el) return;
-  // Open tasks with due dates → event dots on the calendar
+  // Open tasks with due dates → event dots on the calendar (only the current user's tasks)
   let tasks=[];
-  try {
-    const snap=await (typeof dbCachedGet==='function' ? dbCachedGet('tasks-all',()=>db.collection('tasks').get(),30000) : db.collection('tasks').get());
-    tasks=snap.docs.map(d=>({id:d.id,...d.data()})).filter(t=>t.dueDate && !['done','approved','archived'].includes(t.status));
-  } catch(_) {}
+  const uid=currentUser&&currentUser.uid;
+  if(uid){
+    try {
+      const fetcher=()=>db.collection('tasks').where('assignedTo','array-contains',uid).get()
+        .catch(()=>db.collection('tasks').where('assignedTo','==',uid).get());
+      const snap=await (typeof dbCachedGet==='function' ? dbCachedGet('tasks-cal-'+uid,fetcher,30000) : fetcher());
+      tasks=snap.docs.map(d=>({id:d.id,...d.data()})).filter(t=>t.dueDate && !['done','approved','archived'].includes(t.status));
+    } catch(_) {}
+  }
   const base=new Date(); base.setDate(1); base.setMonth(base.getMonth()+_calMonthOffset);
   const year=base.getFullYear(), month=base.getMonth();
   const firstDay=new Date(year,month,1).getDay(); const days=new Date(year,month+1,0).getDate();
@@ -6639,6 +6685,7 @@ window.addEventListener('message', async (e) => {
       clientEmail:    payload.clientEmail || '',
       salesperson:    payload.salesperson || agentName,
       purpose:        payload.purpose || '',
+      subject:        payload.subject || '',
       location:       payload.location || '',
       leadSource:     payload.leadSource || '',
       quoteDate:      payload.quoteDate || '',
