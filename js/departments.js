@@ -7239,6 +7239,11 @@ window.renderApprovals = async function(currentUser) {
       // Generic finance delete request approve/deny (from "all" view)
       wrap.querySelectorAll('.fdel-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!confirm(`Approve deletion of ${btn.dataset.label}? This permanently deletes it.`)) return;
+          btn.disabled = true;
+          // Guard: a stale click or a second President session must not re-run an
+          // already-resolved request (would double-apply a payslip's CA reversal).
+          const reqSnap = await db.collection('finance_delete_requests').doc(btn.dataset.id).get().catch(()=>null);
+          if (reqSnap && reqSnap.exists && reqSnap.data().status !== 'pending') { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
           if (btn.dataset.coll && btn.dataset.doc) await window.financeExecuteDelete(btn.dataset.coll, btn.dataset.doc);
           await db.collection('finance_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'✅ Delete Approved', body:`Your request to delete ${btn.dataset.label} was approved.`, icon:'✅', type:'finance_delete_approved' }));
@@ -7365,6 +7370,11 @@ window.renderApprovals = async function(currentUser) {
       }));
       wrap.querySelectorAll('.fdel-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!confirm(`Approve deletion of ${btn.dataset.label}? This permanently deletes it.`)) return;
+          btn.disabled = true;
+          // Guard: a stale click or a second President session must not re-run an
+          // already-resolved request (would double-apply a payslip's CA reversal).
+          const reqSnap = await db.collection('finance_delete_requests').doc(btn.dataset.id).get().catch(()=>null);
+          if (reqSnap && reqSnap.exists && reqSnap.data().status !== 'pending') { Notifs.showToast('Already handled.'); loadApprovalsSub('finance-requests'); return; }
           if (btn.dataset.coll && btn.dataset.doc) await window.financeExecuteDelete(btn.dataset.coll, btn.dataset.doc);
           await db.collection('finance_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'✅ Delete Approved', body:`Your request to delete ${btn.dataset.label} was approved.`, icon:'✅', type:'finance_delete_approved' }));
