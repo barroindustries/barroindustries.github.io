@@ -82,15 +82,20 @@ document.addEventListener('DOMContentLoaded', () => {
       startAutoLogout();
       startPresenceHeartbeat(user.uid);
       startForceLogoutListener(user.uid);
+      startClaimsListener(user.uid);
       // Mark this uid as fully bootstrapped so subsequent token-refresh fires
       // for the same user are treated as no-ops above.
       _bootstrappedUid = user.uid;
+      // Pull fresh custom claims onto the token if they're stale (the forced
+      // refresh re-fires onAuthStateChanged, now a no-op via _bootstrappedUid).
+      ensureClaimsFresh(user);
       // Prompt for phone number if missing
       if (!userProfile.phone) {
         setTimeout(_promptPhoneNumber, 2000);
       }
     } else {
       _bootstrappedUid = null;
+      stopClaimsListener();
       showLogin();
     }
   });
@@ -134,6 +139,61 @@ function startForceLogoutListener(uid) {
       Notifs.showToast('You have been signed out by an administrator.', 'info');
     }
   }, () => {});
+}
+
+// ── Custom-claims token refresh ───────────────────
+// Cloud Storage Security Rules gate sensitive folders (Finance/payslips,
+// receipts, department uploads) on request.auth.token.role / .departments,
+// which the syncUserClaims Cloud Function mints from users/{uid}. A token
+// issued before claims changed is stale, so we refresh it two ways:
+//   • ensureClaimsFresh — once per sign-in, force a refresh if the token's
+//     claims don't match the freshly-loaded profile (covers first-ever login
+//     and claims set/changed while the user was away).
+//   • startClaimsListener — a live listener on the user's own doc that
+//     force-refreshes whenever the function stamps claimsUpdatedAt (covers a
+//     role/department change made mid-session, e.g. removed from Finance).
+// A forced refresh re-fires onAuthStateChanged for the same uid, but that's
+// caught by the _bootstrappedUid guard, so the UI isn't disrupted.
+let _claimsCheckedUid = null;
+let _claimsUnsub = null;
+let _claimsBaselineStamp = null;
+
+async function ensureClaimsFresh(user) {
+  if (!user || _claimsCheckedUid === user.uid) return;   // once per sign-in → no refresh loop
+  _claimsCheckedUid = user.uid;
+  try {
+    const res = await user.getIdTokenResult();
+    const claimRole  = res.claims.role || '';
+    const claimDepts = Array.isArray(res.claims.departments)
+      ? [...res.claims.departments].sort().join('|') : '';
+    const profRole   = userProfile.role || '';
+    const profDepts  = (currentDepts || []).slice().sort().join('|');
+    if (claimRole !== profRole || claimDepts !== profDepts) {
+      await user.getIdToken(true);   // pull latest claims from the server (once)
+    }
+  } catch (e) { /* non-fatal — rules fall back to deny on sensitive folders */ }
+}
+
+function startClaimsListener(uid) {
+  if (_claimsUnsub) { _claimsUnsub(); _claimsUnsub = null; }
+  _claimsBaselineStamp = null;
+  _claimsUnsub = db.collection('users').doc(uid).onSnapshot(snap => {
+    if (!snap.exists) return;
+    const ts = snap.data().claimsUpdatedAt;
+    const ms = (ts && ts.toMillis) ? ts.toMillis() : 0;
+    // First snapshot just establishes a baseline (claims already on the token).
+    if (_claimsBaselineStamp === null) { _claimsBaselineStamp = ms; return; }
+    if (ms > _claimsBaselineStamp) {
+      _claimsBaselineStamp = ms;
+      if (auth.currentUser) auth.currentUser.getIdToken(true).catch(() => {});
+    }
+  }, () => {});
+}
+
+function stopClaimsListener() {
+  if (_claimsUnsub) { _claimsUnsub(); _claimsUnsub = null; }
+  _claimsCheckedUid = null;
+  _claimsBaselineStamp = null;
 }
 
 // ── Auto-Logout ───────────────────────────────────

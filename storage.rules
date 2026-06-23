@@ -7,65 +7,115 @@ rules_version = '2';
 //  --------------
 //  • Deny by default. Nothing is readable or writable unless a rule
 //    below explicitly allows it.
-//  • Every read and write requires an authenticated user
-//    (request.auth != null). This alone closes the default/test-mode
-//    hole where the bucket was world-open to any authenticated user
-//    (or public). Receipts, payslip transfer proofs, and worker
-//    documents are no longer reachable without sign-in.
-//  • profile-photos/{uid} is owner-scoped: only the owning uid may
-//    write/delete their own photo; any signed-in user may read photos
-//    (they appear next to names throughout the app).
-//  • Size + content-type caps limit abuse: images <= 15MB, documents
-//    <= 25MB.
+//  • Every read and write requires an authenticated user.
+//  • ROLE / DEPARTMENT SCOPING via custom claims. Storage rules cannot
+//    read Firestore, so the syncUserClaims Cloud Function mints each
+//    user's role + departments onto their Auth token. We read them here
+//    as request.auth.token.role / request.auth.token.departments:
+//      – Finance/payslips (transfer proofs)  → finance tier ONLY.
+//      – Other Finance/* (receipts, ledger, taxes, collections, …) →
+//        readable/modifiable by internal staff, NOT the external
+//        partner; overwrite/delete restricted to the finance tier so a
+//        non-finance staffer can file a receipt but can't tamper with
+//        or destroy existing financial files.
+//      – Other department folders → internal staff only (the external
+//        Brilliant Steel partner is excluded), with the partner still
+//        allowed into folders that ARE one of their own departments.
+//      – profile-photos stay owner-scoped; tasks/posts/General stay
+//        collaborative (company-wide).
 //
-//  LIMITATION — NO ROLE SCOPING
-//  ----------------------------
-//  Cloud Storage rules CANNOT call get()/exists() against Firestore,
-//  so they cannot read a user's role/department (those live in
-//  users/{uid}.role). Finer role-based scoping (e.g. "only finance may
-//  read payslip transfer proofs") would require minting Firebase
-//  custom claims on the auth token (request.auth.token.role) from a
-//  Cloud Function and checking them here. Until then the model is:
-//  authenticated + owner-scoped (profile photos) + size/type limits.
+//  WHY "internal (non-partner)" RATHER THAN STRICT PER-DEPT MEMBERSHIP
+//  ------------------------------------------------------------------
+//  Many first-path segments are NOT real department keys — "General"
+//  (All Company Files), Government-Biddings section titles, tasks,
+//  posts. A strict "members of that department only" gate would deny
+//  legitimate internal uploads/reads to those folders and break the
+//  app. The concrete threat closed here is the EXTERNAL partner role
+//  reading/overwriting/deleting internal (esp. financial) files, plus
+//  locking payslip transfer proofs to finance.
+//
+//  NOTE ON DOWNLOAD URLS: getDownloadURL() is a READ. After an upload
+//  the app immediately fetches the file's URL, so the uploader must
+//  retain read on that path. Expense receipts are uploaded by internal
+//  staff (non-partner) into Finance/* — covered by the "internal read"
+//  rule. Payslip proofs are uploaded only by finance — covered by the
+//  finance-tier rule. So no legitimate upload flow is broken.
 //
 //  PATHS IN USE (see js/drive.js, js/departments.js, js/app.js)
 //  ------------------------------------------------------------
 //    profile-photos/{uid}                       — uploadProfilePhoto
-//    {department}/{subfolder}/{ts}_{name}       — Drive.uploadFile
-//                                                 (receipts, payslip
-//                                                  transfer proofs,
-//                                                  worker docs, etc.)
-//    task-comments/{docId}/{ts}_{name}          — task comment files
+//    task-comments/{docId}/{file}               — task comment files
+//    Finance/payslips/{file}                    — payslip transfer proofs
+//    Finance/{Receipts|Taxes|Ledger|…}/{file}   — financial docs
+//    {department}/{subfolder}/{file}            — dept uploads, gov, Files
+//    tasks|posts|General/{subfolder}/{file}     — collaborative
 // ═══════════════════════════════════════════════════════════════════
 
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // ── Shared helpers ───────────────────────────────
+    // ── Auth + size helpers ──────────────────────────
     function isSignedIn() {
       return request.auth != null;
     }
-    // Image upload guard: must be an image and <= 15MB.
     function isValidImage() {
       return request.resource.size <= 15 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
-    // Generic document/attachment guard: any type, <= 25MB.
     function isValidDocument() {
       return request.resource.size <= 25 * 1024 * 1024;
     }
 
+    // ── Custom-claim accessors (minted by syncUserClaims) ──
+    // A missing custom claim reads as null on the token (it does NOT throw,
+    // unlike a missing Firestore field), so scalar comparisons are safe. The
+    // `departments` claim is a list — guard against null before `in`.
+    function claimRole() {
+      return request.auth.token.role;
+    }
+    function hasClaimDept(dept) {
+      return request.auth.token.departments != null
+        && dept in request.auth.token.departments;
+    }
+    function isAdminClaim() {
+      return claimRole() == 'president' || claimRole() == 'manager';
+    }
+    // Finance tier mirrors firestore.rules isFinanceOrAdmin() + Finance-dept.
+    function isFinanceClaim() {
+      return claimRole() == 'president'
+        || claimRole() == 'manager'
+        || claimRole() == 'finance'
+        || hasClaimDept('Finance');
+    }
+    function isPartnerClaim() {
+      return claimRole() == 'partner';
+    }
+    // A user may reach a department folder if they're an admin, or it's one of
+    // their own departments.
+    function isMemberOf(dept) {
+      return isAdminClaim() || hasClaimDept(dept);
+    }
+
+    // Top-level segments handled by their own dedicated rules below; the broad
+    // {department} rule must EXCLUDE them, because Firebase unions (ORs)
+    // overlapping matches — a broad allow would otherwise loosen the strict
+    // ones (e.g. let a non-finance user read Finance/payslips).
+    function isReservedTop(seg) {
+      return seg == 'Finance'
+        || seg == 'tasks' || seg == 'posts'
+        || seg == 'general' || seg == 'General'
+        || seg == 'profile-photos' || seg == 'task-comments';
+    }
+
     // ── Profile photos — owner-scoped writes ─────────
-    // Anyone signed in may read (avatars are shown app-wide);
-    // only the owning uid may upload/replace/delete their photo,
-    // and the upload must be a valid image.
+    // Anyone signed in may read (avatars appear app-wide); only the owning uid
+    // may upload/replace/delete, and uploads must be valid images.
     match /profile-photos/{uid}/{allPaths=**} {
       allow read: if isSignedIn();
       allow write: if isSignedIn()
         && request.auth.uid == uid
         && (request.resource == null || isValidImage());
     }
-    // Legacy flat path: profile-photos/{uid} (no trailing segment).
     match /profile-photos/{uid} {
       allow read: if isSignedIn();
       allow write: if isSignedIn()
@@ -73,23 +123,72 @@ service firebase.storage {
         && (request.resource == null || isValidImage());
     }
 
-    // ── Task comment attachments ─────────────────────
-    // task-comments/{docId}/{ts}_{name}
+    // ── Task comment attachments (collaborative) ─────
     match /task-comments/{docId}/{fileName} {
       allow read: if isSignedIn();
       allow write: if isSignedIn()
         && (request.resource == null || isValidDocument());
     }
 
-    // ── General department uploads ───────────────────
-    // {department}/{subfolder}/{ts}_{name} — receipts, payslip
-    // transfer proofs, worker documents. Top-level wildcard, so this
-    // MUST stay last and is intentionally broad (auth-required only).
-    // Excludes the dedicated paths above, which match more specifically.
-    match /{department}/{subfolder}/{fileName} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn()
+    // ── Finance / payslips — transfer proofs (crown jewels) ──
+    // Bank screenshots of worker pay. Finance tier only, for read AND write.
+    // Created exclusively by finance, so the post-upload getDownloadURL() the
+    // app performs is done by a user who already has read.
+    match /Finance/payslips/{fileName} {
+      allow read: if isSignedIn() && isFinanceClaim();
+      allow write: if isSignedIn() && isFinanceClaim()
         && (request.resource == null || isValidDocument());
+    }
+
+    // ── Finance / everything else (receipts, taxes, ledger, …) ──
+    // (subfolder != 'payslips' so this never loosens the rule above.)
+    //  • read  → internal staff (non-partner). Lets an employee retrieve the
+    //            URL of the receipt they just filed; blocks the partner.
+    //  • create (new object) → internal staff. Employees file expense receipts.
+    //  • overwrite/delete (existing object) → finance tier only — a non-finance
+    //    staffer can add a file but can't tamper with or destroy existing ones.
+    match /Finance/{subfolder}/{fileName} {
+      allow read: if isSignedIn() && subfolder != 'payslips' && !isPartnerClaim();
+      allow write: if isSignedIn() && subfolder != 'payslips' && !isPartnerClaim()
+        && (request.resource == null || isValidDocument())   // size cap on writes
+        && (resource == null || isFinanceClaim());           // overwrite/delete → finance
+    }
+
+    // ── Collaborative, company-wide folders ──────────
+    // Task/post attachments, the "All Company Files" tab (dept 'General') and
+    // generic support-document uploads — readable/writable by any signed-in
+    // user by design.
+    match /tasks/{subfolder}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (request.resource == null || isValidDocument());
+    }
+    match /posts/{subfolder}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (request.resource == null || isValidDocument());
+    }
+    match /general/{subfolder}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (request.resource == null || isValidDocument());
+    }
+    match /General/{subfolder}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (request.resource == null || isValidDocument());
+    }
+
+    // ── Other department folders ─────────────────────
+    // Sales, Marketing, Design, IT, Admin, Production, Brilliant Steel, plus
+    // gov-section-title and Files-tab folders. Internal staff get full
+    // cross-department access; the external partner is excluded UNLESS the
+    // folder is one of their own departments (e.g. their Brilliant Steel space).
+    // Reserved top-level segments are excluded so their stricter rules win.
+    match /{department}/{subfolder}/{fileName} {
+      allow read: if isSignedIn()
+        && !isReservedTop(department)
+        && (!isPartnerClaim() || isMemberOf(department));
+      allow write: if isSignedIn()
+        && !isReservedTop(department)
+        && (request.resource == null || isValidDocument())
+        && (!isPartnerClaim() || isMemberOf(department));
     }
 
     // ── Deny everything else by default ──────────────

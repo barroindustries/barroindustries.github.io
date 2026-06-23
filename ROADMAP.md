@@ -1,6 +1,6 @@
 # Barro Industries Ops System — Roadmap & Handoff
 
-_Last updated: 2026-06-23 — current version **v11.0.1**, cache `bi-ops-v73`._
+_Last updated: 2026-06-23 — **V11.1** (Cloud Storage custom-claims confidentiality close); base version **v11.0.1**, cache `bi-ops-v73` (both auto-bump on commit)._
 
 ### v10.0.0 UI/UX fix pass (done)
 - Quote builder topbar **unstuck** (scrolls away, not fixed); mobile verified (no page horizontal scroll; only the data table scrolls within its wrapper); desktop untouched.
@@ -20,12 +20,20 @@ This file is the running source of truth for what's done and what's left to make
 
 ## ✅ DONE
 
+### V11.1 — Cloud Storage confidentiality gap CLOSED (custom claims)
+Closes the residual flagged in V11: the general `{dept}/{subfolder}/{file}` Storage path was auth-only (Storage rules can't read Firestore roles), so any signed-in user — including the external Brilliant Steel **partner** — could read/overwrite/delete other departments' sensitive files (payslip transfer proofs, receipts).
+**⚠️ Backend NOT live until deployed** — run `firebase deploy --only functions,storage`, then **one-time** run `backfillUserClaims` (president, browser console) to stamp claims onto existing accounts.
+- **Custom claims** — new `syncUserClaims` Cloud Function (onWrite `users/{uid}`) mints `{role, departments}` onto the Auth token via the Admin SDK whenever role/departments change (skips no-op edits + approval placeholders; stamps `claimsUpdatedAt`, no trigger loop). New president-only `backfillUserClaims` callable claim-stamps every existing user (the trigger only covers post-deploy writes).
+- **Client token refresh** (`js/app.js`) — `ensureClaimsFresh()` forces one `getIdToken(true)` on sign-in if the token's claims are stale; `startClaimsListener()` force-refreshes live when `claimsUpdatedAt` bumps (role/dept change mid-session). Both no-op against the `_bootstrappedUid` guard so the UI isn't disrupted; cleaned up on logout.
+- **`storage.rules` now role/dept-scoped** via `request.auth.token.role` / `.departments`: `Finance/payslips` (transfer proofs) → **finance tier only** (read+write); other `Finance/*` → internal-staff read, **finance-only overwrite/delete** (employees can still *create* expense receipts — their post-upload `getDownloadURL()` is a read, and they're non-partner); other department folders → internal (non-partner) staff, partner allowed only into their own depts; `tasks`/`posts`/`General` stay collaborative, `profile-photos` owner-scoped. Reserved prefixes are excluded from the broad `{department}` match because **Firebase unions (ORs) overlapping rules** — a broad allow would otherwise re-open `Finance/payslips`.
+- **Gotcha:** Auth token claims read **null-safe** (a missing claim is `null`, not a throw — unlike Firestore field reads), so until the backfill runs the partner has no `role` claim and is treated as non-partner → **run the backfill promptly** after deploy. Verify via the Storage Rules Playground (`partner` claim → `get Finance/payslips/*` DENY; `finance` → ALLOW). See memory `storage-custom-claims`.
+
 ### V11 — Security hardening + efficiency pass (this push, ultracode)
 Orchestrated per-file (12 files, each diff adversarially verified); 3 blockers caught + fixed before deploy. App boot re-verified in the live preview (no console errors, all globals intact, Partner portal renders, dark default theme).
 **⚠️ Backend NOT live until `firebase deploy` is run** — `git push` ships only the frontend. Run `npx firebase-tools deploy --only firestore,storage` (rules + indexes + storage.rules) and `npx firebase-tools deploy --only functions`.
 
 **Security**
-- **`storage.rules` added** (new file) + wired into `firebase.json` — closes the open/test-mode Cloud Storage bucket. Auth required everywhere, owner-scoped `profile-photos/{uid}` writes, 15/25 MB size caps, deny-by-default catch-all. ⚠️ **Residual:** the general `{dept}/{subfolder}/{file}` path is auth-only (Storage rules can't read Firestore roles), so a signed-in partner can still read payslip transfer proofs — closing that needs **custom claims** (tracked follow-up; see gotchas).
+- **`storage.rules` added** (new file) + wired into `firebase.json` — closes the open/test-mode Cloud Storage bucket. Auth required everywhere, owner-scoped `profile-photos/{uid}` writes, 15/25 MB size caps, deny-by-default catch-all. ⚠️ **Residual (V11):** the general `{dept}/{subfolder}/{file}` path was auth-only (Storage rules can't read Firestore roles), so a signed-in partner could still read payslip transfer proofs. ✅ **CLOSED in V11.1** via custom claims — see the V11.1 section above.
 - **`firestore.rules`** — notification-inbox `create` constrained (anti-spoof/anti-spam: `hasOnly` allow-list incl. `taskId`, `read==false`, `createdAt==request.time`, title/body length caps); **null-safe `getRole()`** (`.data.get('role',null)` — no more deny-on-missing-field, per `firestore-rules-missing-field-throws`); **conservative partner read-lockdown** (`attendance_extensions`, `approval_requests`, `gov_biddings`, `sales_clients`, `design_clients`) — `bs_*` / `users` / `products` / `tasks` deliberately left readable so partner login/collaboration keeps working.
 - **`partner_deals` composite index** (`partnerUid` + `createdAt`) — fixes the silently-empty partner earnings dashboard.
 - **Cloud Function** clamps/validates the push payload (title/body/type length, drops malformed docs).
@@ -177,7 +185,7 @@ Designed via a fan-out spec workflow, then implemented + adversarially reviewed 
   before deploying rules. Unconstrained `.get()` on owner/admin-restricted collections fails for non-admins.
   (See memory `firestore-rules-collection-coverage`.)
 - **Pay lives in `payroll/{uid}`**, NOT users. Read via `fetchUsersWithPayroll()`; write to `payroll` (finance/admin). (memory `payroll-collection-architecture`)
-- **Cloud Storage rules can't read Firestore** (no role lookup). `storage.rules` (added V11) is auth + owner-scoped + size-capped only; true role/dept scoping of sensitive files (payslip transfer proofs, receipts) needs **custom claims** on the auth token. Residual gap after V11 — tracked follow-up.
+- **Cloud Storage rules can't read Firestore** (no role lookup). Role/dept scoping is carried by **Auth custom claims** (`request.auth.token.role` / `.departments`), minted by the `syncUserClaims` Cloud Function (V11.1). After deploying `functions,storage` you **must run `backfillUserClaims` once** (president) to stamp existing accounts; new logins refresh claims via `ensureClaimsFresh`/`startClaimsListener` in app.js. Token claims read **null-safe** (missing = null, not a throw). See memory `storage-custom-claims`.
 - **Storage deploys separately** — `storage.rules` ships via `firebase deploy --only storage` (now wired in `firebase.json`), NOT on `git push`. Same for `firestore.rules`/indexes (`--only firestore`) and `functions`.
 - **Manila time** — use `bizDate()/bizHour()/bizDow()`; never raw `toISOString()`/`getDay()`. (memory `manila-time-helpers`)
 - **Always `escHtml()`** user content before `innerHTML` (helper in modules.js).

@@ -213,3 +213,121 @@ exports.adminResetPassword = functions.https.onCall(async (data, context) => {
   await admin.auth().updateUser(targetUid, { password: newPassword });
   return { ok: true };
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+//  CUSTOM CLAIMS — carry role + departments onto the Firebase Auth token
+//
+//  Cloud Storage Security Rules CANNOT call get()/exists() against Firestore,
+//  so they can't read a user's role/department from users/{uid}. The only way
+//  to gate storage by role/dept is to mint those values as Firebase Auth custom
+//  claims (request.auth.token.role / .departments) and check them in
+//  storage.rules. These two functions keep the claims in sync with the users
+//  doc and let an admin backfill every existing account once.
+// ──────────────────────────────────────────────────────────────────────────
+
+// Departments can be stored as the array `departments` (current) or the legacy
+// string `department`. Normalize to a string array for the claim.
+function deptsOf(data) {
+  if (!data) return [];
+  if (Array.isArray(data.departments)) return data.departments.filter(d => typeof d === 'string');
+  if (typeof data.department === 'string' && data.department) return [data.department];
+  return [];
+}
+
+/**
+ * Mirror users/{uid}.role + .departments onto that user's Auth custom claims so
+ * storage.rules can scope sensitive folders (Finance/payslips, receipts) and
+ * department folders by request.auth.token.role / .departments.
+ *
+ * Fires on every users/{uid} write, but only re-mints claims when the
+ * claim-relevant fields actually changed (so routine profile edits — lastSeen
+ * heartbeat, photo, phone — don't burn Admin SDK calls). After updating claims
+ * it stamps `claimsUpdatedAt` so the owner's client can force an ID-token
+ * refresh (getIdToken(true)) and pick up the new claims without re-login.
+ *
+ * No infinite loop: stamping claimsUpdatedAt re-fires this trigger, but on that
+ * pass role/departments are unchanged, so it returns before writing again.
+ */
+exports.syncUserClaims = functions
+  .region('asia-east1')
+  .firestore
+  .document('users/{uid}')
+  .onWrite(async (change, context) => {
+    const { uid } = context.params;
+    const before = change.before.exists ? change.before.data() : null;
+    const after  = change.after.exists  ? change.after.data()  : null;
+
+    // Doc deleted — best-effort clear of claims (the Auth user may already be
+    // gone, in which case setCustomUserClaims throws; that's fine).
+    if (!after) {
+      try { await admin.auth().setCustomUserClaims(uid, null); }
+      catch (e) { /* auth user already removed — nothing to clear */ }
+      return null;
+    }
+
+    // Approval placeholders use a random doc id with no matching Auth account
+    // (see createUserDocOnAuthCreate). setCustomUserClaims would throw, and the
+    // real doc gets claims when the account is claimed — so skip placeholders.
+    if (after.pendingPasswordSetup === true) return null;
+
+    const role  = typeof after.role === 'string' ? after.role : '';
+    const depts = deptsOf(after);
+
+    // Only act when role/departments changed (or this is the first write).
+    if (before) {
+      const sameRole  = role === (typeof before.role === 'string' ? before.role : '');
+      const sameDepts = JSON.stringify([...depts].sort()) === JSON.stringify([...deptsOf(before)].sort());
+      if (sameRole && sameDepts) return null;
+    }
+
+    try {
+      await admin.auth().setCustomUserClaims(uid, { role, departments: depts });
+      // Signal the owner's client to refresh its ID token (picks up new claims
+      // live, no re-login). Unchanged role/departments on the re-fire → no loop.
+      await admin.firestore().collection('users').doc(uid).update({
+        claimsUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    } catch (err) {
+      // A users doc can legitimately exist with no Auth account yet (e.g. a
+      // worker profile created before the login account). Log, don't crash.
+      console.error('[syncUserClaims] failed for', uid, err.code || err.message);
+    }
+    return null;
+  });
+
+/**
+ * One-time backfill: stamp custom claims onto EVERY existing user (the onWrite
+ * trigger only covers docs written after deploy). President-only. Idempotent —
+ * safe to run repeatedly. Stamps claimsUpdatedAt so any signed-in client
+ * refreshes its token without re-login.
+ *
+ * Run once after deploy, signed in as president, e.g. from the browser console:
+ *   firebase.functions().httpsCallable('backfillUserClaims')().then(r => console.log(r.data));
+ */
+exports.backfillUserClaims = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'You must be signed in.');
+  }
+  const callerSnap = await admin.firestore().collection('users').doc(context.auth.uid).get();
+  if (!callerSnap.exists || callerSnap.data().role !== 'president') {
+    throw new functions.https.HttpsError('permission-denied', 'President only.');
+  }
+
+  const snap = await admin.firestore().collection('users').get();
+  let ok = 0, skipped = 0, failed = 0;
+  for (const doc of snap.docs) {
+    const d = doc.data();
+    if (d.pendingPasswordSetup === true) { skipped++; continue; }
+    const role  = typeof d.role === 'string' ? d.role : '';
+    const depts = deptsOf(d);
+    try {
+      await admin.auth().setCustomUserClaims(doc.id, { role, departments: depts });
+      await doc.ref.update({ claimsUpdatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      ok++;
+    } catch (e) {
+      // No Auth account for this users doc (worker profile, stale doc) — skip.
+      failed++;
+    }
+  }
+  return { total: snap.size, ok, skipped, failed };
+});
