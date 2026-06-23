@@ -15,8 +15,10 @@ let selectedLoginType = null; // 'admin' | 'employee' | 'partner' — set on log
 
 // Role → login type mapping
 const ROLE_TYPE_MAP = {
-  president: 'admin', owner: 'admin', manager: 'admin', secretary: 'admin', finance: 'admin',
-  employee:  'employee', agent: 'employee',
+  president: 'admin', owner: 'admin', manager: 'admin', secretary: 'admin',
+  // Finance (Accountant) is an employee-tier account everywhere else — employee
+  // dashboard, employee sidebar/bottom nav — so it logs in via the Employee portal.
+  employee:  'employee', agent: 'employee', finance: 'employee',
   partner:   'partner'
 };
 const LOGIN_TYPE_LABELS = { admin: 'Admin', employee: 'Employee', partner: 'Partner' };
@@ -833,8 +835,14 @@ function getSidebarItems() {
     items.push({ icon:'check-square', label:'My Tasks', page:'tasks' });
     items.push({ icon:'megaphone',    label:'Posts',    page:'posts' });
     items.push({ icon:'building-2',   label:'Company',  page:'company' });
-    // Departments — appear ABOVE management section
-    currentDepts.forEach((dept, i) => {
+    // Departments — appear ABOVE management section.
+    // The Accountant (finance role) always sees the Finance department even when she
+    // isn't explicitly assigned to it; Finance is her one department (Sales Orders,
+    // Payroll, Ledger, etc. all live inside the Finance hub as tabs).
+    const navDepts = (currentRole === 'finance' && !currentDepts.includes('Finance'))
+      ? ['Finance', ...currentDepts]
+      : currentDepts;
+    navDepts.forEach((dept, i) => {
       const cfg = DEPARTMENTS[dept];
       if (cfg) items.push({ icon: cfg.icon, label: dept, page: `dept:${dept}`, section: i === 0, sectionLabel: 'My Departments' });
     });

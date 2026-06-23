@@ -17,7 +17,10 @@ function priorityBadge(p) { return {high:'badge-red',medium:'badge-orange',low:'
 function canEditDept(dept) {
   const role = window.currentRole || '';
   // 'secretary' (Corporate Secretary) gets manager-level edit access across the company.
-  if (['president','owner','manager','secretary','finance'].includes(role)) return true;
+  if (['president','owner','manager','secretary'].includes(role)) return true;
+  // Accountant (finance role): full edit rights to the FINANCE department only — not
+  // other departments. Deletes still route through President approval (financeDelete).
+  if (role === 'finance') return dept === 'Finance';
   return (window.currentDepts || []).includes(dept);
 }
 // Shorthand for Finance-specific privilege (Payroll, HR Profiles, etc.)
