@@ -15,7 +15,7 @@ let selectedLoginType = null; // 'admin' | 'employee' | 'partner' — set on log
 
 // Role → login type mapping
 const ROLE_TYPE_MAP = {
-  president: 'admin', owner: 'admin', manager: 'admin', finance: 'admin',
+  president: 'admin', owner: 'admin', manager: 'admin', secretary: 'admin', finance: 'admin',
   employee:  'employee', agent: 'employee',
   partner:   'partner'
 };
@@ -782,7 +782,10 @@ function isPartner() { return currentRole === 'partner'; }
 function isBrilliantOnly() { return currentDepts.length === 1 && currentDepts[0] === 'Brilliant Steel'; }
 
 function getSidebarItems() {
-  const pres   = isPresident() || currentRole === 'manager';
+  // Admin command-center portal: President, Manager, and Corporate Secretary all
+  // get the company-wide oversight nav. President-only items (Audit Log, Product
+  // Database) are gated separately below.
+  const pres   = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
   const bsOnly = isBrilliantOnly();
   const partner = isPartner();
   const items  = [];
@@ -804,8 +807,12 @@ function getSidebarItems() {
     items.push({ icon:'boxes',         label:'Inventory',        page:'inventory',       section:true, sectionLabel:'Operations' });
     items.push({ icon:'trending-up',   label:'Projects',         page:'projects-lifecycle'             });
     items.push({ icon:'receipt',       label:'Sales Orders',     page:'sales-orders'                   });
-    items.push({ icon:'package',       label:'Product Database', page:'product-database', section:true, sectionLabel:'Catalog' });
-    items.push({ icon:'scroll-text',   label:'Audit Log',        page:'audit-log',       section:true, sectionLabel:'Security' });
+    // President-only — these pages access-deny non-presidents (see navigateTo),
+    // so don't show dead nav entries to managers / the corporate secretary.
+    if (isPresident()) {
+      items.push({ icon:'package',       label:'Product Database', page:'product-database', section:true, sectionLabel:'Catalog' });
+      items.push({ icon:'scroll-text',   label:'Audit Log',        page:'audit-log',       section:true, sectionLabel:'Security' });
+    }
     // (Leave, Company, SOPs, Help moved into the profile drawer's "More" section)
   } else if (partner) {
     // ── External Partner role ──
@@ -896,7 +903,8 @@ function buildBottomNav() {
 function buildTopNavStrip() {
   const strip = document.getElementById('top-nav-strip');
   if (!strip) return;
-  const items = isPresident() ? window.PRESIDENT_BOTTOM_NAV
+  const isAdminRole = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
+  const items = isAdminRole ? window.PRESIDENT_BOTTOM_NAV
     : isPartner() ? (window.PARTNER_BOTTOM_NAV || window.BOTTOM_NAV_ITEMS)
     : isBrilliantOnly() ? window.BRILLIANT_BOTTOM_NAV
     : window.BOTTOM_NAV_ITEMS;
@@ -1815,6 +1823,8 @@ async function getAllQuotes() {
 async function renderDashboard() {
   if (isPresident()) {
     await renderPresidentDashboard();
+  } else if (currentRole === 'secretary') {
+    await renderSecretaryDashboard();
   } else if (currentRole === 'manager') {
     await renderManagerDashboard();
   } else if (currentRole === 'finance') {
@@ -1937,6 +1947,7 @@ async function renderPartnerDashboard() {
                 <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
                 <div style="flex:1;min-width:0"><div class="task-feed-title">${escHtml(t.title)}</div>${t.dueDate?`<div class="task-feed-meta" style="color:${isOverdue?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</div>`:''}</div>
                 <span class="badge ${isOverdue?'badge-red':'badge-blue'}">${isOverdue?'Overdue':t.status||'open'}</span>
+                ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">📣 ${t.openFollowUpCount}</span>`:''}
               </div>`;
             }).join('')}
         </div>
@@ -2154,7 +2165,7 @@ async function renderPresidentDashboard() {
                         ${t.department?` · ${escHtml(t.department)}`:''}
                       </div>
                     </div>
-                    ${taskBadge(t)}
+                    ${taskBadge(t)}${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">📣 ${t.openFollowUpCount}</span>`:''}
                   </div>`;
                 }).join('')}
           </div>
@@ -2272,7 +2283,7 @@ async function renderManagerDashboard() {
               sortedOpen.slice(0,8).map(t=>{const ov=t.dueDate&&t.dueDate<todayStr;return `<div class="task-feed-item ${ov?'task-overdue':''}">
                 <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
                 <div style="flex:1;min-width:0"><div class="task-feed-title">${escHtml(t.title)}</div><div class="task-feed-meta">${assignedNames(t)}${t.dueDate?` · <span style="color:${ov?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</span>`:''}</div></div>
-                <span class="badge ${ov?'badge-red':'badge-blue'}">${ov?'Overdue':t.status||'open'}</span></div>`;}).join('')}
+                <span class="badge ${ov?'badge-red':'badge-blue'}">${ov?'Overdue':t.status||'open'}</span>${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">📣 ${t.openFollowUpCount}</span>`:''}</div>`;}).join('')}
           </div>
         </div>
         <div>
@@ -2292,6 +2303,93 @@ async function renderManagerDashboard() {
               <button class="quick-action-btn" onclick="navigateTo('tasks')"><i data-lucide="plus-circle"></i> New Task</button>
               <button class="quick-action-btn" onclick="navigateTo('approvals')"><i data-lucide="shield-check"></i> Approvals${deptPending?`<span class="badge badge-red" style="margin-left:auto">${deptPending}</span>`:''}</button>
               <button class="quick-action-btn" onclick="navigateTo('team-directory')"><i data-lucide="users"></i> Team Directory</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    liveDateTime('live-clock');
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
+  } catch(err) {
+    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
+  }
+}
+
+// ── CORPORATE SECRETARY DASHBOARD ─────────────────
+// Company-wide OVERSIGHT portal. The Corporate Secretary reviews everything across
+// the company (manager-level access, but org-wide rather than dept-scoped). Authority
+// is read/oversight only: the President approves every request, and deletions of key
+// records route through the President. So this surfaces the full pending-approvals
+// picture + governance shortcuts — and never any approve buttons.
+async function renderSecretaryDashboard() {
+  const c = document.getElementById('page-content');
+  c.innerHTML = '<div class="loading-placeholder">Loading dashboard…</div>';
+  try {
+    const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
+    const todayStr = bizDate();
+    const [usersSnap, tasksSnap, subsSnap, apprSnap, caSnap, extSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, reviewSnap] = await Promise.all([
+      dbCachedGet('users',       () => db.collection('users').get(), 30000),
+      dbCachedGet('tasks-all',   () => db.collection('tasks').get(), 30000),
+      dbCachedGet('submissions', () => db.collection('submissions').get(), 30000),
+      safeGet(db.collection('approval_requests').where('status','==','pending')),
+      safeGet(db.collection('cash_advances').where('status','==','pending')),
+      safeGet(db.collection('attendance_extensions').where('status','==','pending')),
+      safeGet(db.collection('signup_requests').where('status','==','pending')),
+      safeGet(db.collection('leave_requests').where('status','==','pending')),
+      safeGet(db.collection('finance_delete_requests').where('status','==','pending')),
+      safeGet(db.collection('payroll_delete_requests').where('status','==','pending')),
+      safeGet(db.collection('tasks').where('status','==','review')),
+    ]);
+    const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const allTasks = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const CLOSED = ['done','approved','archived'];
+    const openT = allTasks.filter(t=>!CLOSED.includes(t.status));
+    const overdueT = openT.filter(t=>t.dueDate && t.dueDate < todayStr);
+    const pendingSubs = subsSnap.docs.filter(d=>d.data().status==='pending').length;
+    const pendingDeletes = (finDelSnap.size||0) + (payDelSnap.size||0);
+    const totalPending = (apprSnap.size||0)+(caSnap.size||0)+(extSnap.size||0)+(signupSnap.size||0)+(leaveSnap.size||0)+(reviewSnap.size||0)+pendingSubs+pendingDeletes;
+    const activeStaff = users.filter(u=>u.role!=='partner').length;
+    const rows = [
+      ['Sign-ups', signupSnap.size||0, '👤'],
+      ['Cash Advances', caSnap.size||0, '💸'],
+      ['Leave Requests', leaveSnap.size||0, '🌴'],
+      ['Attendance Extensions', extSnap.size||0, '⏰'],
+      ['Work Submissions', pendingSubs, '📤'],
+      ['Tasks for Review', reviewSnap.size||0, '📋'],
+      ['Quote Approvals', apprSnap.size||0, '📝'],
+      ['Deletion Requests', pendingDeletes, '🗑'],
+    ].filter(r=>r[1]>0);
+
+    c.innerHTML = `
+      <div class="page-header"><h2>🗂 Corporate Secretary</h2><span class="badge badge-gold">Oversight</span></div>
+      <div id="live-clock" class="live-clock-line"></div>
+      <div class="alert-banner" style="cursor:default"><span>👁 <strong>Oversight role.</strong> You can review everything across the company. The President approves all requests, and deletions of key records require President approval.</span></div>
+      ${totalPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>📋 <strong>${totalPending} request${totalPending>1?'s':''}</strong> awaiting the President's approval — review the queue</span><span class="alert-chevron">›</span></div>`:''}
+      ${pendingDeletes?`<div class="alert-banner alert-danger" onclick="navigateTo('approvals')"><span>🗑 <strong>${pendingDeletes} deletion request${pendingDeletes>1?'s':''}</strong> pending President approval</span><span class="alert-chevron">›</span></div>`:''}
+      <div class="kpi-row">
+        <div class="kpi-card"><div class="kpi-icon-wrap" style="background:rgba(10,132,255,0.12)"><i data-lucide="users" style="stroke:#0A84FF;width:18px"></i></div><div class="kpi-label">People</div><div class="kpi-value">${activeStaff}</div></div>
+        <div class="kpi-card ${totalPending?'accent':''}" style="cursor:pointer" onclick="navigateTo('approvals')"><div class="kpi-icon-wrap" style="background:rgba(255,170,0,0.12)"><i data-lucide="shield-check" style="stroke:#FFAA00;width:18px"></i></div><div class="kpi-label">Pending Approvals</div><div class="kpi-value">${totalPending}</div></div>
+        <div class="kpi-card ${openT.length?'accent':''}"><div class="kpi-icon-wrap" style="background:rgba(155,168,255,0.12)"><i data-lucide="check-square" style="stroke:#9BA8FF;width:18px"></i></div><div class="kpi-label">Open Tasks</div><div class="kpi-value">${openT.length}</div></div>
+        <div class="kpi-card ${overdueT.length?'red':''}"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="alert-triangle" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Overdue</div><div class="kpi-value">${overdueT.length}</div></div>
+      </div>
+      <div class="dashboard-grid">
+        <div class="card">
+          <div class="card-header"><h3>Pending Approval Queue</h3><button class="btn-primary btn-sm" onclick="navigateTo('approvals')">Open Approvals</button></div>
+          <div class="card-body" style="padding:0">
+            ${!rows.length
+              ? '<div class="empty-state" style="padding:24px"><div class="empty-icon">✅</div><p>No pending requests — all clear.</p></div>'
+              : rows.map(([label,n,ic])=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)"><span style="font-size:16px">${ic}</span><span style="flex:1;font-size:13px">${label}</span><span class="badge badge-orange">${n}</span></div>`).join('')}
+          </div>
+        </div>
+        <div>
+          <div class="card"><div class="card-header"><h3>Corporate Records & Governance</h3></div>
+            <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+              <button class="quick-action-btn" onclick="navigateTo('approvals')"><i data-lucide="shield-check"></i> Approvals (oversight)${totalPending?`<span class="badge badge-red" style="margin-left:auto">${totalPending}</span>`:''}</button>
+              <button class="quick-action-btn" onclick="navigateTo('memos')"><i data-lucide="clipboard-check"></i> Memos & Resolutions</button>
+              <button class="quick-action-btn" onclick="navigateTo('dept:Admin')"><i data-lucide="building-2"></i> Admin — Policies & HR Docs</button>
+              <button class="quick-action-btn" onclick="navigateTo('team-directory')"><i data-lucide="users"></i> Team Directory</button>
+              <button class="quick-action-btn" onclick="navigateTo('departments')"><i data-lucide="layout-grid"></i> Departments</button>
+              <button class="quick-action-btn" onclick="navigateTo('attendance')"><i data-lucide="calendar"></i> Attendance</button>
+              <button class="quick-action-btn" onclick="navigateTo('progress')"><i data-lucide="trending-up"></i> Progress Reports</button>
             </div>
           </div>
         </div>
@@ -2653,6 +2751,7 @@ async function renderEmployeeDashboard() {
                       ${t.dueDate?`<div class="task-feed-meta" style="color:${isOverdue?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</div>`:''}
                     </div>
                     <span class="badge ${isOverdue?'badge-red':t.priority==='high'?'badge-red':'badge-blue'}">${isOverdue?'Overdue':t.priority||'open'}</span>
+                    ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">📣 ${t.openFollowUpCount}</span>`:''}
                   </div>`;
                 }).join('')}
           </div>
@@ -3076,6 +3175,7 @@ async function loadPartnersDeptTab(sub) {
                 <div style="flex:1;min-width:0"><div class="task-feed-title">${escHtml(t.title)}</div>
                 <div class="task-feed-meta">${t.dueDate?'Due '+t.dueDate:''}</div></div>
                 <span class="badge ${t.status==='done'||t.status==='approved'?'badge-green':t.status==='review'?'badge-orange':'badge-blue'}">${t.status||'open'}</span>
+                ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">📣 ${t.openFollowUpCount}</span>`:''}
               </div>`).join('')}
           </div>
         </div>
@@ -3097,6 +3197,7 @@ async function loadPartnersDeptTab(sub) {
                 <div class="task-feed-meta">${Array.isArray(t.assignedToNames)&&t.assignedToNames.length?'👥 '+escHtml(t.assignedToNames.join(', ')):''} ${t.dueDate?'· Due '+t.dueDate:''}</div>
               </div>
               <span class="badge ${t.status==='done'||t.status==='approved'?'badge-green':t.status==='review'?'badge-orange':t.status==='overdue'?'badge-red':'badge-blue'}">${t.status||'open'}</span>
+              ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">📣 ${t.openFollowUpCount}</span>`:''}
             </div>`).join('')}
           </div></div>`}
       `;
@@ -4579,7 +4680,7 @@ async function printWorkerPayslip(uid, name, preloaded) {
 
 // ── Progress Reports ──────────────────────────────
 async function renderProgressReports() {
-  if (!isPresident() && currentRole !== 'manager') {
+  if (!isPresident() && currentRole !== 'manager' && currentRole !== 'secretary') {
     document.getElementById('page-content').innerHTML = renderAccessDenied('Progress Reports');
     return;
   }
@@ -5137,93 +5238,16 @@ async function renderCompanyMemos(ct, canAdd) {
       });
     });
     list.querySelectorAll('.co-del-btn').forEach(btn=>{
-      btn.addEventListener('click',async e=>{e.stopPropagation();if(confirm('Delete this memo?')){await db.collection('memos').doc(btn.dataset.id).delete();renderCompanyMemos(ct,canAdd);}});
+      btn.addEventListener('click',async e=>{e.stopPropagation();if(confirm('Delete this memo?')){await window.deleteMemo(btn.dataset.id);renderCompanyMemos(ct,canAdd);}});
     });
     if(window.lucide) lucide.createIcons({nodes:[list]});
   }
 
-  // ── Detail modal: read memo + give / view conforme ──
+  // ── Detail modal — delegates to the standalone opener so the General Posts
+  // feed's memo mirror cards can open + acknowledge a memo from anywhere.
+  // Refresh this list after a conforme / delete. ──
   function openMemoDetail(m) {
-    if (!m) return;
-    const d = m.createdAt?.toDate ? m.createdAt.toDate() : new Date();
-    const cm = conformeMeta(m);
-    const names = m.recipientNames || {};
-    // Only render the attachment link if it resolves to a real http(s) URL —
-    // never trust the stored value as a raw href (blocks javascript:/data: XSS),
-    // matching the Posts feed guard.
-    const memoFile = (typeof safeHttpUrl==='function') ? safeHttpUrl(m.fileUrl) : (/^https?:\/\//i.test(m.fileUrl||'') ? m.fileUrl : '');
-
-    // Conforme block — the action for a tagged recipient, or the status note.
-    let conformeBlock = '';
-    if (cm.iAmRecipient) {
-      if (cm.iConformed) {
-        conformeBlock = `<div style="margin-top:16px;padding:12px 14px;border-radius:10px;background:rgba(52,199,89,0.10);border:1px solid rgba(52,199,89,0.35);font-size:13px;color:var(--text-2)">
-          ✓ You gave your conforme${conformeDate(cm.conformes[me])?` on <b>${conformeDate(cm.conformes[me])}</b>`:''}.</div>`;
-      } else {
-        conformeBlock = `<div style="margin-top:16px;padding:14px;border-radius:10px;background:rgba(255,159,10,0.08);border:1px solid rgba(255,159,10,0.35)">
-          <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-size:13px;line-height:1.5;color:var(--text)">
-            <input type="checkbox" id="memo-conforme-chk" style="margin-top:2px;width:18px;height:18px;flex-shrink:0;cursor:pointer"/>
-            <span><b>Conforme.</b> I have read and understood this memo and signify my agreement.</span>
-          </label>
-          <button class="btn-primary" id="memo-conforme-btn" disabled style="margin-top:12px;opacity:.55">Submit Conforme</button>
-        </div>`;
-      }
-    }
-
-    // Tracker — visible to admins / the author. Who has acknowledged, who's pending.
-    let trackerBlock = '';
-    if (canAdd && cm.total) {
-      const rows = cm.recips.map(uid => {
-        const nm = escHtml(names[uid] || uid);
-        const entry = cm.conformes[uid];
-        return entry
-          ? `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0"><span>${nm}</span><span style="color:var(--success,#34C759);white-space:nowrap">✓ ${escHtml(conformeDate(entry)||'Conformed')}</span></div>`
-          : `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0"><span>${nm}</span><span style="color:var(--text-muted);white-space:nowrap">Pending</span></div>`;
-      }).join('');
-      trackerBlock = `<hr class="divider"/>
-        <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px">Conforme tracker · ${cm.done}/${cm.total}</div>
-        ${rows}`;
-    }
-
-    openModal(m.title,`
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">From: ${escHtml(m.from||'Management')} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}</div>
-      <p style="font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text-2)">${escHtml(m.content||'')}</p>
-      ${memoFile?`<a href="${escHtml(memoFile)}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="display:inline-block;margin-top:14px">📎 Open Attachment</a>`:''}
-      ${conformeBlock}
-      ${trackerBlock}
-      ${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-memo-btn" data-id="${m.id}">Delete Memo</button>`:''}
-    `);
-
-    // Wire the conforme checkbox → enable submit → record acknowledgment.
-    const chk = document.getElementById('memo-conforme-chk');
-    const btn = document.getElementById('memo-conforme-btn');
-    if (chk && btn) {
-      chk.addEventListener('change', () => {
-        btn.disabled = !chk.checked;
-        btn.style.opacity = chk.checked ? '1' : '.55';
-      });
-      btn.addEventListener('click', async () => {
-        if (!chk.checked) return;
-        btn.disabled = true; btn.textContent = 'Submitting…';
-        const myName = userProfile?.displayName || currentUser?.email || 'Unknown';
-        try {
-          await db.collection('memos').doc(m.id).update({
-            ['conformes.'+me]: { at: firebase.firestore.FieldValue.serverTimestamp(), name: myName }
-          });
-          // Let the issuer know an acknowledgment came in (best-effort).
-          if (m.addedBy && m.addedBy !== me) {
-            try { await Notifs.send(m.addedBy, { title:'Conforme received', body:`${myName} acknowledged: ${m.title}`, icon:'✅', type:'memo' }); } catch(_) {}
-          }
-          Notifs.showToast('Conforme recorded — thank you.');
-          closeModal();
-          renderCompanyMemos(ct, canAdd);
-        } catch(err) {
-          btn.disabled = false; btn.textContent = 'Submit Conforme';
-          Notifs.showToast('Could not record conforme: '+err.message, 'error');
-        }
-      });
-    }
-    document.getElementById('del-memo-btn')?.addEventListener('click',async e2=>{if(confirm('Delete this memo?')){await db.collection('memos').doc(e2.currentTarget.dataset.id).delete();closeModal();renderCompanyMemos(ct,canAdd);}});
+    openMemoDetailModal(m, () => renderCompanyMemos(ct, canAdd));
   }
 
   // ── Create modal ──
@@ -5294,16 +5318,18 @@ async function renderCompanyMemos(ct, canAdd) {
     document.getElementById('save-memo-btn').addEventListener('click',async()=>{
       const title=document.getElementById('memo-title').value.trim();
       if(!title) { Notifs.showToast('Memo title required','error'); return; }
+      const from    = document.getElementById('memo-from').value.trim();
+      const content = document.getElementById('memo-content').value;
       const recipients = [...selected];
       const recipientNames = {};
       recipients.forEach(uid => { const p = people.find(x=>x.id===uid); recipientNames[uid] = p ? p.name : uid; });
       const saveBtn = document.getElementById('save-memo-btn');
       saveBtn.disabled = true; saveBtn.textContent = 'Publishing…';
       try {
-        await db.collection('memos').add({
+        const memoRef = await db.collection('memos').add({
           title,
-          from:    document.getElementById('memo-from').value.trim(),
-          content: document.getElementById('memo-content').value,
+          from,
+          content,
           fileUrl: uploadedFile?.url||null,
           recipients,
           recipientNames,
@@ -5312,6 +5338,28 @@ async function renderCompanyMemos(ct, canAdd) {
           addedBy: currentUser.uid,
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
+        // Surface the memo in the General Posts feed as a click-to-open mirror
+        // card so staff don't miss it on the separate Memos tab. Internal-only:
+        // partners only ever load the "Partners" feed sub-tab, never "General",
+        // so they never see this. The card links back to the memo (conforme is
+        // given there); tagged recipients are already notified below, so the
+        // mirror itself is silent — no all-staff broadcast.
+        try {
+          await db.collection('posts').add({
+            dept:        'General',
+            status:      'published',
+            kind:        'memo',
+            memoId:      memoRef.id,
+            title,
+            content:     (content || '').slice(0, 500),
+            authorId:    currentUser.uid,
+            authorName:  from || userProfile?.displayName || 'Management',
+            authorPhoto: null,
+            pinned:      false,
+            hearts:      [],
+            createdAt:   firebase.firestore.FieldValue.serverTimestamp()
+          });
+        } catch(_) {}
         // Notify each tagged recipient that their conforme is requested.
         if (recipients.length) {
           const issuer = userProfile?.displayName || 'Management';
@@ -5331,13 +5379,137 @@ async function renderCompanyMemos(ct, canAdd) {
   if(window.lucide) lucide.createIcons({nodes:[ct]});
 }
 
+// ── Memo detail modal (standalone) ────────────────
+// Self-contained so a memo can be opened + acknowledged from anywhere — the
+// Company → Memos list AND the General Posts feed's memo mirror cards. `onChange`
+// (optional) refreshes whatever view launched it after a conforme or delete.
+function openMemoDetailModal(m, onChange) {
+  if (!m) return;
+  const me = currentUser?.uid;
+  const canAdd = isPresident() || currentRole === 'manager';
+  const recips = Array.isArray(m.recipients) ? m.recipients : [];
+  const conformes = m.conformes || {};
+  const cm = {
+    recips, conformes,
+    total: recips.length,
+    done:  recips.filter(uid => conformes[uid]).length,
+    iAmRecipient: recips.includes(me),
+    iConformed:   !!conformes[me]
+  };
+  const conformeDate = (entry) => {
+    const dd = entry?.at?.toDate ? entry.at.toDate() : null;
+    return dd ? dd.toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'}) : '';
+  };
+  const d = m.createdAt?.toDate ? m.createdAt.toDate() : new Date();
+  const names = m.recipientNames || {};
+  // Only render the attachment link if it resolves to a real http(s) URL —
+  // never trust the stored value as a raw href (blocks javascript:/data: XSS).
+  const memoFile = (typeof safeHttpUrl==='function') ? safeHttpUrl(m.fileUrl) : (/^https?:\/\//i.test(m.fileUrl||'') ? m.fileUrl : '');
+
+  // Conforme block — the action for a tagged recipient, or the status note.
+  let conformeBlock = '';
+  if (cm.iAmRecipient) {
+    if (cm.iConformed) {
+      conformeBlock = `<div style="margin-top:16px;padding:12px 14px;border-radius:10px;background:rgba(52,199,89,0.10);border:1px solid rgba(52,199,89,0.35);font-size:13px;color:var(--text-2)">
+        ✓ You gave your conforme${conformeDate(cm.conformes[me])?` on <b>${conformeDate(cm.conformes[me])}</b>`:''}.</div>`;
+    } else {
+      conformeBlock = `<div style="margin-top:16px;padding:14px;border-radius:10px;background:rgba(255,159,10,0.08);border:1px solid rgba(255,159,10,0.35)">
+        <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-size:13px;line-height:1.5;color:var(--text)">
+          <input type="checkbox" id="memo-conforme-chk" style="margin-top:2px;width:18px;height:18px;flex-shrink:0;cursor:pointer"/>
+          <span><b>Conforme.</b> I have read and understood this memo and signify my agreement.</span>
+        </label>
+        <button class="btn-primary" id="memo-conforme-btn" disabled style="margin-top:12px;opacity:.55">Submit Conforme</button>
+      </div>`;
+    }
+  }
+
+  // Tracker — visible to admins / the author. Who has acknowledged, who's pending.
+  let trackerBlock = '';
+  if (canAdd && cm.total) {
+    const rows = cm.recips.map(uid => {
+      const nm = escHtml(names[uid] || uid);
+      const entry = cm.conformes[uid];
+      return entry
+        ? `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0"><span>${nm}</span><span style="color:var(--success,#34C759);white-space:nowrap">✓ ${escHtml(conformeDate(entry)||'Conformed')}</span></div>`
+        : `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0"><span>${nm}</span><span style="color:var(--text-muted);white-space:nowrap">Pending</span></div>`;
+    }).join('');
+    trackerBlock = `<hr class="divider"/>
+      <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px">Conforme tracker · ${cm.done}/${cm.total}</div>
+      ${rows}`;
+  }
+
+  openModal(m.title,`
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">From: ${escHtml(m.from||'Management')} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}</div>
+    <p style="font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text-2)">${escHtml(m.content||'')}</p>
+    ${memoFile?`<a href="${escHtml(memoFile)}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="display:inline-block;margin-top:14px">📎 Open Attachment</a>`:''}
+    ${conformeBlock}
+    ${trackerBlock}
+    ${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-memo-btn" data-id="${m.id}">Delete Memo</button>`:''}
+  `);
+
+  // Wire the conforme checkbox → enable submit → record acknowledgment.
+  const chk = document.getElementById('memo-conforme-chk');
+  const btn = document.getElementById('memo-conforme-btn');
+  if (chk && btn) {
+    chk.addEventListener('change', () => {
+      btn.disabled = !chk.checked;
+      btn.style.opacity = chk.checked ? '1' : '.55';
+    });
+    btn.addEventListener('click', async () => {
+      if (!chk.checked) return;
+      btn.disabled = true; btn.textContent = 'Submitting…';
+      const myName = userProfile?.displayName || currentUser?.email || 'Unknown';
+      try {
+        await db.collection('memos').doc(m.id).update({
+          ['conformes.'+me]: { at: firebase.firestore.FieldValue.serverTimestamp(), name: myName }
+        });
+        // Let the issuer know an acknowledgment came in (best-effort).
+        if (m.addedBy && m.addedBy !== me) {
+          try { await Notifs.send(m.addedBy, { title:'Conforme received', body:`${myName} acknowledged: ${m.title}`, icon:'✅', type:'memo' }); } catch(_) {}
+        }
+        Notifs.showToast('Conforme recorded — thank you.');
+        closeModal();
+        onChange?.();
+      } catch(err) {
+        btn.disabled = false; btn.textContent = 'Submit Conforme';
+        Notifs.showToast('Could not record conforme: '+err.message, 'error');
+      }
+    });
+  }
+  document.getElementById('del-memo-btn')?.addEventListener('click',async e2=>{if(confirm('Delete this memo?')){await window.deleteMemo(e2.currentTarget.dataset.id);closeModal();onChange?.();}});
+}
+window.openMemoDetailModal = openMemoDetailModal;
+
+// Open a memo by id (fetches the doc, then shows its detail modal). Entry point
+// for the General Posts feed's memo mirror cards.
+window.openMemoById = async function(memoId, onChange) {
+  if (!memoId) return;
+  try {
+    const doc = await db.collection('memos').doc(memoId).get();
+    if (!doc.exists) { Notifs.showToast('This memo is no longer available.', 'error'); onChange?.(); return; }
+    openMemoDetailModal({ id: doc.id, ...doc.data() }, onChange);
+  } catch(err) {
+    Notifs.showToast('Could not open memo: '+err.message, 'error');
+  }
+};
+
+// Delete a memo AND any General-feed mirror cards that point at it, so removing
+// a memo never leaves a dangling "memo no longer available" card in Posts.
+window.deleteMemo = async function(memoId) {
+  await db.collection('memos').doc(memoId).delete();
+  try {
+    const mir = await db.collection('posts').where('memoId','==',memoId).get();
+    await Promise.all(mir.docs.map(docu => docu.ref.delete()));
+  } catch(_) {}
+};
+
 // Standalone Memos route — renders the same memos UI into the full page so
 // notification deep-links and the sidebar item can reach it directly (not only
 // via the Company → Memos tab).
 async function renderMemosPage() {
   const c = document.getElementById('page-content');
   c.innerHTML = `<div class="page-header"><h2>📋 Memos</h2></div><div id="memos-page-host"></div>`;
-  renderCompanyMemos(document.getElementById('memos-page-host'), isPresident() || currentRole==='manager');
+  renderCompanyMemos(document.getElementById('memos-page-host'), isPresident() || currentRole==='manager' || currentRole==='secretary');
 }
 window.renderMemosPage = renderMemosPage;
 
@@ -5521,7 +5693,7 @@ async function renderCompanyHandbook(ct, canAdd) {
 
 // ── Departments ───────────────────────────────────
 async function renderDepartments() {
-  if (!isPresident() && currentRole !== 'manager') {
+  if (!isPresident() && currentRole !== 'manager' && currentRole !== 'secretary') {
     document.getElementById('page-content').innerHTML = renderAccessDenied('Departments');
     return;
   }
@@ -5589,22 +5761,26 @@ async function renderDepartments() {
 
 // ── Analytics ─────────────────────────────────────
 async function renderAnalytics() {
-  if(!isPresident()&&currentRole!=='manager'&&currentRole!=='finance'){document.getElementById('page-content').innerHTML=renderAccessDenied('Analytics');return;}
+  if(!isPresident()&&currentRole!=='manager'&&currentRole!=='secretary'&&currentRole!=='finance'){document.getElementById('page-content').innerHTML=renderAccessDenied('Analytics');return;}
   const c=document.getElementById('page-content');
   c.innerHTML='<div class="loading-placeholder">Loading analytics…</div>';
   const safeGet = async (q) => { try { return await q.get(); } catch(e) { return {docs:[],size:0}; } };
+  // Analytics re-reads the same heavy collections on every visit — cache 60s. Own 'an_' keys so we don't clash with other modules' caches.
+  const cg = (key,q,ttl=60000) => dbCachedGet(key, ()=>q.get(), ttl).catch(()=>({docs:[],size:0}));
 
   // Fetch all data upfront
-  const [usersSnap,tasksSnap,quotesSnap,subsSnap,expSnap,caSnap,payslipSnap,ledgerSnap,govSnap] = await Promise.all([
-    fetchUsersWithPayroll().catch(()=>({docs:[],size:0})),
-    safeGet(db.collection('tasks')),
-    getAllQuotes(),
-    safeGet(db.collection('submissions')),
-    safeGet(db.collection('expenses')),
-    safeGet(db.collection('cash_advances')),
-    safeGet(db.collection('payslips')),
-    safeGet(db.collection('ledger_entries')),
-    safeGet(db.collection('gov_biddings').orderBy('createdAt','desc')).catch(()=>({docs:[]})),
+  const [usersSnap,tasksSnap,quotesSnap,subsSnap,expSnap,caSnap,payslipSnap,ledgerSnap,govSnap,jpSnap,jcSnap] = await Promise.all([
+    dbCachedGet('users', fetchUsersWithPayroll, 60000).catch(()=>({docs:[],size:0})),
+    cg('an_tasks', db.collection('tasks')),
+    dbCachedGet('an_quotes', getAllQuotes, 60000).catch(()=>({docs:[]})),
+    cg('an_subs', db.collection('submissions')),
+    cg('an_expenses', db.collection('expenses')),
+    cg('an_cas', db.collection('cash_advances')),
+    cg('an_payslips', db.collection('payslips')),
+    cg('an_ledger', db.collection('ledger_entries')),
+    cg('an_gov', db.collection('gov_biddings').orderBy('createdAt','desc')),
+    cg('an_jobprojects', db.collection('job_projects')),
+    cg('an_jobcosts', db.collection('job_costs')),
   ]);
   const users=usersSnap.docs.map(d=>({id:d.id,...d.data()}));
   const tasks=tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -5615,6 +5791,8 @@ async function renderAnalytics() {
   const payslips=payslipSnap.docs.map(d=>({id:d.id,...d.data()}));
   const ledger=ledgerSnap.docs.map(d=>({id:d.id,...d.data()}));
   const govBids=govSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const jobProjects=jpSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const jobCosts=jcSnap.docs.map(d=>({id:d.id,...d.data()}));
 
   const fmt=n=>isNaN(n)?'0':Number(n).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
   const thisMonth=bizDate().slice(0,7);   // Manila YYYY-MM
@@ -5623,6 +5801,25 @@ async function renderAnalytics() {
     if(!v) return false;
     const d=v.toDate?v.toDate():new Date(v);
     return bizDate(d).slice(0,7) === thisMonth;
+  };
+
+  // ── Period helpers (month-over-month) ───────────────
+  const _ty=+thisMonth.slice(0,4), _tm=+thisMonth.slice(5,7);
+  const lastMonth = _tm===1 ? `${_ty-1}-12` : `${_ty}-${String(_tm-1).padStart(2,'0')}`;
+  const ymOf = (v)=>{ if(!v) return ''; if(typeof v==='string') return v.slice(0,7); const d=v.toDate?v.toDate():new Date(v); return bizDate(d).slice(0,7); };
+  // last 6 calendar months, oldest→newest, anchored to Manila current month
+  const months6=[]; for(let i=5;i>=0;i--){ const d=new Date(_ty,_tm-1-i,1); months6.push({ym:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,label:d.toLocaleString('default',{month:'short'})}); }
+  const sum=(arr,f)=>arr.reduce((s,x)=>s+(+f(x)||0),0);
+  // delta badge — arrow shows direction, colour shows good/bad (goodUp=false ⇒ up is bad, e.g. expenses)
+  const delta=(cur,prev,goodUp=true)=>{
+    cur=+cur||0; prev=+prev||0;
+    if(cur===0&&prev===0) return `<span style="font-size:11px;color:#8e8e93">— vs last mo</span>`;
+    const dir=cur>prev?1:cur<prev?-1:0;
+    const pct=prev===0?100:Math.round((cur-prev)/Math.abs(prev)*100);
+    const good=dir===0?null:((dir>0)===goodUp);
+    const col=good===null?'#8e8e93':good?'#30D158':'#FF453A';
+    const arrow=dir>0?'▲':dir<0?'▼':'—';
+    return `<span style="font-size:11px;font-weight:600;color:${col}">${arrow} ${Math.abs(pct)}%</span> <span style="font-size:11px;color:#8e8e93">vs last mo</span>`;
   };
 
   const SUBTABS = [
@@ -5643,23 +5840,56 @@ async function renderAnalytics() {
   `;
 
   const renderOverview = () => {
-    const totalPayroll=users.reduce((s,u)=>s+(u.salary||0)+(u.allowance||0)-(u.deductions||0),0);
-    const won=quotes.filter(q=>q.status==='accepted').reduce((s,q)=>s+(q.total||0),0);
-    const totalExp=expenses.filter(e=>e.status==='approved').reduce((s,e)=>s+(e.amount||0),0);
-    const doneTasks=tasks.filter(t=>['done','approved','archived'].includes(t.status));
-    const taskRate=tasks.length?Math.round(doneTasks.length/tasks.length*100):0;
+    // ── Cash flow (canonical source = ledger_entries) ──
+    const ledIn  = ym => sum(ledger.filter(l=>l.type==='credit'&&(l.date||'').slice(0,7)===ym), l=>l.amount);
+    const ledOut = ym => sum(ledger.filter(l=>(l.type==='debit'||l.type==='payslip')&&(l.date||'').slice(0,7)===ym), l=>l.amount);
+    // sales-based revenue fallback for months where the ledger is still sparse (accepted quotes by createdAt month)
+    const wonQuotesMonth = ym => sum(quotes.filter(q=>q.status==='accepted'&&ymOf(q.createdAt)===ym), q=>q.total);
+    const revMTD  = ledIn(thisMonth) || wonQuotesMonth(thisMonth);
+    const revPrev = ledIn(lastMonth) || wonQuotesMonth(lastMonth);
+    const netMTD  = revMTD - ledOut(thisMonth), netPrev = revPrev - ledOut(lastMonth);
+    // ── Profitability (job_costs) ──
+    const jcRev  = sum(jobCosts, j=>j.revenue);
+    const jcCost = sum(jobCosts, j=>(+j.materialsCost||0)+(+j.laborCost||0)+(+j.otherCost||0));
+    const grossProfit = jcRev - jcCost;
+    const grossMargin = jcRev>0 ? Math.round(grossProfit/jcRev*100) : null;
+    // ── Receivables (open job_projects) ──
+    const arOf = p => p.arBalance!=null ? (+p.arBalance||0) : ((+p.contractAmount||0)-(+p.amountCollected||0));
+    const openProjects = jobProjects.filter(p=>p.stage!=='paid'&&p.stage!=='cancelled');
+    const receivables = sum(openProjects, arOf);
+    // ── Payroll efficiency ──
+    const totalPayroll = sum(users, u=>(+u.salary||0)+(+u.allowance||0)-(+u.deductions||0));
+    const payrollPct = revMTD>0 ? Math.round(totalPayroll/revMTD*100) : null;
+    // ── Top clients by signed contract (fallback: accepted quotes) ──
+    const clientRev={};
+    jobProjects.filter(p=>p.stage!=='cancelled').forEach(p=>{const k=p.clientName||'—';clientRev[k]=(clientRev[k]||0)+(+p.contractAmount||0);});
+    if(!Object.keys(clientRev).length) quotes.filter(q=>q.status==='accepted').forEach(q=>{const k=q.clientName||q.client||'—';clientRev[k]=(clientRev[k]||0)+(+q.total||0);});
+    const topClients=Object.entries(clientRev).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]).slice(0,8);
+    const clientTotal=topClients.reduce((s,e)=>s+e[1],0)||1;
+
     const wrap=document.getElementById('analytics-content');
     wrap.innerHTML=`
       <div class="kpi-row" style="margin-top:16px">
-        <div class="kpi-card"><div class="kpi-label">Team Size</div><div class="kpi-value">${users.length}</div></div>
-        <div class="kpi-card accent"><div class="kpi-label">Monthly Payroll</div><div class="kpi-value">₱${fmt(totalPayroll)}</div></div>
-        <div class="kpi-card green"><div class="kpi-label">Revenue Won</div><div class="kpi-value">₱${fmt(won)}</div></div>
-        <div class="kpi-card warn"><div class="kpi-label">Approved Expenses</div><div class="kpi-value">₱${fmt(totalExp)}</div></div>
-        <div class="kpi-card"><div class="kpi-label">Task Completion</div><div class="kpi-value">${taskRate}%</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Revenue (MTD)</div><div class="kpi-value">₱${fmt(revMTD)}</div><div style="margin-top:4px">${delta(revMTD,revPrev,true)}</div></div>
+        <div class="kpi-card ${netMTD>=0?'green':'warn'}"><div class="kpi-label">Net Cash (MTD)</div><div class="kpi-value">₱${fmt(netMTD)}</div><div style="margin-top:4px">${delta(netMTD,netPrev,true)}</div></div>
+        <div class="kpi-card accent"><div class="kpi-label">Gross Margin</div><div class="kpi-value">${grossMargin==null?'—':grossMargin+'%'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${grossMargin==null?'add job costs':'₱'+fmt(grossProfit)+' profit'}</div></div>
+        <div class="kpi-card warn"><div class="kpi-label">Receivables</div><div class="kpi-value">₱${fmt(receivables)}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${openProjects.length} open job${openProjects.length===1?'':'s'}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Payroll % of Revenue</div><div class="kpi-value">${payrollPct==null?'—':payrollPct+'%'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">₱${fmt(totalPayroll)}/mo</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-bottom:16px">
+        <div class="card"><div class="card-header"><h3>Cash Flow — last 6 months</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="bh-cash-chart"></canvas></div></div></div>
+        <div class="card"><div class="card-header"><h3>Revenue vs Cost</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="bh-margin-chart"></canvas></div></div></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-        <div class="card"><div class="card-header"><h3>Quote Pipeline</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="q-chart"></canvas></div></div></div>
-        <div class="card"><div class="card-header"><h3>Submissions</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="s-chart"></canvas></div></div></div>
+        <div class="card"><div class="card-header"><h3>Top Clients by Revenue</h3></div><div class="card-body">${topClients.length?topClients.map(([name,val])=>`
+          <div style="margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px"><span>${escHtml(name)}</span><span style="font-weight:600">₱${fmt(val)}</span></div>
+            <div style="height:6px;background:#ffffff14;border-radius:3px;overflow:hidden"><div style="height:100%;width:${Math.round(val/clientTotal*100)}%;background:#0A84FF"></div></div>
+          </div>`).join(''):`<p style="color:var(--text-muted);text-align:center;padding:12px">No client revenue yet</p>`}</div></div>
+        <div class="card"><div class="card-header"><h3>Receivables — Open Jobs</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Client</th><th>Stage</th><th>Outstanding</th></tr></thead>
+          <tbody>${openProjects.length?openProjects.slice().sort((a,b)=>arOf(b)-arOf(a)).slice(0,10).map(p=>`<tr><td>${escHtml(p.clientName||p.name||'—')}</td><td><span class="badge badge-blue">${escHtml((p.stage||'—').replace(/_/g,' '))}</span></td><td>₱${fmt(arOf(p))}</td></tr>`).join(''):`<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">No open jobs</td></tr>`}</tbody>
+        </table></div></div></div>
       </div>
       <div class="card"><div class="card-header"><h3>Team Performance</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
         <thead><tr><th>Name</th><th>Role</th><th>Dept</th><th>Tasks Done</th><th>Net Pay</th></tr></thead>
@@ -5670,8 +5900,13 @@ async function renderAnalytics() {
         }).join('')}</tbody>
       </table></div></div></div>
     `;
-    new Chart(document.getElementById('q-chart'),{type:'bar',data:{labels:['Draft','Sent','Accepted','Rejected'],datasets:[{data:['draft','sent','accepted','rejected'].map(s=>quotes.filter(q=>q.status===s).length),backgroundColor:['#636366','#0A84FF','#30D158','#FF453A']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
-    new Chart(document.getElementById('s-chart'),{type:'doughnut',data:{labels:['Pending','Approved','Rejected'],datasets:[{data:[subs.filter(s=>!s.status||s.status==='pending').length,subs.filter(s=>s.status==='approved').length,subs.filter(s=>s.status==='rejected').length],backgroundColor:['#FF9F0A','#30D158','#FF453A'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
+    // Cash in vs cash out, 6-month trend
+    new Chart(document.getElementById('bh-cash-chart'),{type:'bar',data:{labels:months6.map(m=>m.label),datasets:[
+      {label:'Cash In',data:months6.map(m=>ledIn(m.ym)||wonQuotesMonth(m.ym)),backgroundColor:'#30D158'},
+      {label:'Cash Out',data:months6.map(m=>ledOut(m.ym)),backgroundColor:'#FF453A'},
+    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
+    // Gross profit vs cost (profitability)
+    new Chart(document.getElementById('bh-margin-chart'),{type:'doughnut',data:{labels:['Gross Profit','Cost'],datasets:[{data:[Math.max(grossProfit,0),jcCost],backgroundColor:['#30D158','#636366'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}},tooltip:{callbacks:{label:c=>` ${c.label}: ₱${fmt(c.parsed)}`}}}}});
   };
 
   const renderSales = () => {
@@ -5684,12 +5919,16 @@ async function renderAnalytics() {
     const salesSubs=subs.filter(s=>s.department==='Sales'||s.type?.includes('sales'));
     const salesTasks=tasks.filter(t=>t.department==='Sales'||t.category==='Sales');
     const doneSalesTasks=salesTasks.filter(t=>['done','approved','archived'].includes(t.status));
+    const wonMTD=sum(salesQuotes.filter(q=>q.status==='accepted'&&ymOf(q.createdAt)===thisMonth),q=>q.total);
+    const wonPrev=sum(salesQuotes.filter(q=>q.status==='accepted'&&ymOf(q.createdAt)===lastMonth),q=>q.total);
+    const avgDeal=wonCount?won2/wonCount:0;
     const wrap=document.getElementById('analytics-content');
     wrap.innerHTML=`
       <div class="kpi-row" style="margin-top:16px">
-        <div class="kpi-card green"><div class="kpi-label">Revenue Won</div><div class="kpi-value">₱${fmt(won2)}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Revenue Won</div><div class="kpi-value">₱${fmt(won2)}</div><div style="margin-top:4px">${delta(wonMTD,wonPrev,true)}</div></div>
         <div class="kpi-card accent"><div class="kpi-label">Pipeline Value</div><div class="kpi-value">₱${fmt(pipeline)}</div></div>
-        <div class="kpi-card"><div class="kpi-label">Win Rate</div><div class="kpi-value">${winRate}%</div></div>
+        <div class="kpi-card"><div class="kpi-label">Win Rate</div><div class="kpi-value">${winRate}%</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${wonCount}W / ${lostCount}L</div></div>
+        <div class="kpi-card"><div class="kpi-label">Avg Deal Size</div><div class="kpi-value">₱${fmt(avgDeal)}</div></div>
         <div class="kpi-card warn"><div class="kpi-label">Total Quotes</div><div class="kpi-value">${salesQuotes.length}</div></div>
         <div class="kpi-card"><div class="kpi-label">Tasks Done</div><div class="kpi-value">${doneSalesTasks.length}/${salesTasks.length}</div></div>
       </div>
@@ -5721,13 +5960,17 @@ async function renderAnalytics() {
     const mktSubs=subs.filter(s=>s.department==='Marketing');
     const mktExp=expenses.filter(e=>e.department==='Marketing'&&e.status==='approved').reduce((s,e)=>s+(e.amount||0),0);
     const mktUsers=users.filter(u=>(Array.isArray(u.departments)?u.departments:u.department?[u.department]:[]).includes('Marketing'));
+    const doneMktMTD=mktTasks.filter(t=>['done','approved','archived'].includes(t.status)&&ymOf(t.createdAt)===thisMonth).length;
+    const doneMktPrev=mktTasks.filter(t=>['done','approved','archived'].includes(t.status)&&ymOf(t.createdAt)===lastMonth).length;
+    const costPerTask=doneMkt.length?mktExp/doneMkt.length:0;
     const wrap=document.getElementById('analytics-content');
     wrap.innerHTML=`
       <div class="kpi-row" style="margin-top:16px">
         <div class="kpi-card"><div class="kpi-label">Team Members</div><div class="kpi-value">${mktUsers.length}</div></div>
         <div class="kpi-card accent"><div class="kpi-label">Tasks</div><div class="kpi-value">${mktTasks.length}</div></div>
-        <div class="kpi-card green"><div class="kpi-label">Completed</div><div class="kpi-value">${doneMkt.length}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Completed</div><div class="kpi-value">${doneMkt.length}</div><div style="margin-top:4px">${delta(doneMktMTD,doneMktPrev,true)}</div></div>
         <div class="kpi-card warn"><div class="kpi-label">Budget Used</div><div class="kpi-value">₱${fmt(mktExp)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Cost / Completed Task</div><div class="kpi-value">₱${fmt(costPerTask)}</div></div>
         <div class="kpi-card"><div class="kpi-label">Submissions</div><div class="kpi-value">${mktSubs.length}</div></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
@@ -5759,10 +6002,16 @@ async function renderAnalytics() {
     const totalExp=expenses.filter(e=>e.status==='approved').reduce((s,e)=>s+(e.amount||0),0);
     const expThisMonth=expenses.filter(e=>e.status==='approved'&&inMonth(e)).reduce((s,e)=>s+(e.amount||0),0);
     const payslipsThisMonth=payslips.filter(p=>inMonth(p));
+    const finIn = ym => sum(ledger.filter(l=>l.type==='credit'&&(l.date||'').slice(0,7)===ym),l=>l.amount);
+    const finOut= ym => sum(ledger.filter(l=>(l.type==='debit'||l.type==='payslip')&&(l.date||'').slice(0,7)===ym),l=>l.amount);
+    const netMTD=finIn(thisMonth)-finOut(thisMonth), netPrev=finIn(lastMonth)-finOut(lastMonth);
+    const payrollPct=finIn(thisMonth)>0?Math.round(totalPayroll/finIn(thisMonth)*100):null;
     const wrap=document.getElementById('analytics-content');
     wrap.innerHTML=`
       <div class="kpi-row" style="margin-top:16px">
         <div class="kpi-card accent"><div class="kpi-label">Total Payroll (Est.)</div><div class="kpi-value">₱${fmt(totalPayroll)}</div></div>
+        <div class="kpi-card ${netMTD>=0?'green':'warn'}"><div class="kpi-label">Net Income (MTD)</div><div class="kpi-value">₱${fmt(netMTD)}</div><div style="margin-top:4px">${delta(netMTD,netPrev,true)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Payroll % of Revenue</div><div class="kpi-value">${payrollPct==null?'—':payrollPct+'%'}</div></div>
         <div class="kpi-card green"><div class="kpi-label">Disbursed This Month</div><div class="kpi-value">₱${fmt(disbursedThisMonth)}</div></div>
         <div class="kpi-card warn"><div class="kpi-label">CA Outstanding</div><div class="kpi-value">₱${fmt(caTotal)}</div></div>
         <div class="kpi-card"><div class="kpi-label">CA Pending</div><div class="kpi-value">${caPending}</div></div>
@@ -5772,6 +6021,7 @@ async function renderAnalytics() {
         <div class="card"><div class="card-header"><h3>Expense Categories</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="fin-exp-chart"></canvas></div></div></div>
         <div class="card"><div class="card-header"><h3>Cash Advance Status</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="fin-ca-chart"></canvas></div></div></div>
       </div>
+      <div class="card" style="margin-bottom:16px"><div class="card-header"><h3>Net Income — last 6 months</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="fin-net-chart"></canvas></div></div></div>
       <div class="card"><div class="card-header"><h3>Payslips — This Month (${payslipsThisMonth.length})</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
         <thead><tr><th>Worker</th><th>Pay Period</th><th>Gross</th><th>Net</th><th>Prepared By</th></tr></thead>
         <tbody>${payslipsThisMonth.slice(0,20).map(p=>`<tr><td>${escHtml(p.workerName||'—')}</td><td>${escHtml(p.periodLabel||p.payPeriod||'—')}</td><td>₱${fmt(p.grossPay||0)}</td><td>₱${fmt(p.netPay||0)}</td><td>${escHtml(p.preparedBy||'—')}</td></tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">No payslips this month</td></tr>'}</tbody>
@@ -5781,6 +6031,7 @@ async function renderAnalytics() {
     const catAmts=cats.map(cat=>expenses.filter(e=>e.category===cat&&e.status==='approved').reduce((s,e)=>s+(e.amount||0),0));
     new Chart(document.getElementById('fin-exp-chart'),{type:'bar',data:{labels:cats,datasets:[{data:catAmts,backgroundColor:'#0A84FF'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb',font:{size:10}},grid:{display:false}}}}});
     new Chart(document.getElementById('fin-ca-chart'),{type:'doughnut',data:{labels:['Approved','Pending','Rejected'],datasets:[{data:[cas.filter(a=>a.status==='approved').length,cas.filter(a=>a.status==='pending').length,cas.filter(a=>a.status==='rejected').length],backgroundColor:['#30D158','#FF9F0A','#FF453A'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
+    new Chart(document.getElementById('fin-net-chart'),{type:'line',data:{labels:months6.map(m=>m.label),datasets:[{label:'Net Income',data:months6.map(m=>finIn(m.ym)-finOut(m.ym)),borderColor:'#30D158',backgroundColor:'#30D15822',fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
   };
 
   const renderProduction = () => {
@@ -5788,14 +6039,16 @@ async function renderAnalytics() {
     const doneProd=prodTasks.filter(t=>['done','approved','archived'].includes(t.status));
     const prodUsers=users.filter(u=>(Array.isArray(u.departments)?u.departments:u.department?[u.department]:[]).includes('Production'));
     const prodSubs=subs.filter(s=>s.department==='Production');
-    const prodDoneMonth=prodTasks.filter(t=>['done','approved','archived'].includes(t.status)&&inMonth(t,'updatedAt'));
+    const prodOverdue=prodTasks.filter(t=>!['done','approved','archived'].includes(t.status)&&t.dueDate&&t.dueDate<bizDate());
+    const onTimeRate=(doneProd.length+prodOverdue.length)>0?Math.round(doneProd.length/(doneProd.length+prodOverdue.length)*100):100;
     const wrap=document.getElementById('analytics-content');
     wrap.innerHTML=`
       <div class="kpi-row" style="margin-top:16px">
         <div class="kpi-card"><div class="kpi-label">Team Size</div><div class="kpi-value">${prodUsers.length}</div></div>
         <div class="kpi-card accent"><div class="kpi-label">Total Tasks</div><div class="kpi-value">${prodTasks.length}</div></div>
         <div class="kpi-card green"><div class="kpi-label">Completed</div><div class="kpi-value">${doneProd.length}</div></div>
-        <div class="kpi-card warn"><div class="kpi-label">Done This Month</div><div class="kpi-value">${prodDoneMonth.length}</div></div>
+        <div class="kpi-card ${onTimeRate>=80?'green':'warn'}"><div class="kpi-label">On-Time Rate</div><div class="kpi-value">${onTimeRate}%</div></div>
+        <div class="kpi-card warn"><div class="kpi-label">Overdue</div><div class="kpi-value">${prodOverdue.length}</div></div>
         <div class="kpi-card"><div class="kpi-label">Submissions</div><div class="kpi-value">${prodSubs.length}</div></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
@@ -5824,14 +6077,18 @@ async function renderAnalytics() {
     const totalWon=wonBids.reduce((s,b)=>s+(b.contractAmount||b.bidAmount||0),0);
     const totalBid=govBids.reduce((s,b)=>s+(b.bidAmount||b.contractAmount||0),0);
     const winRate=wonBids.length+lostBids.length>0?Math.round(wonBids.length/(wonBids.length+lostBids.length)*100):0;
+    const avgContract=wonBids.length?totalWon/wonBids.length:0;
+    const bidsMTD=govBids.filter(b=>ymOf(b.createdAt)===thisMonth).length;
+    const bidsPrev=govBids.filter(b=>ymOf(b.createdAt)===lastMonth).length;
     // fallback if govBids is empty — show from tasks tagged as gov
     const govTasks=tasks.filter(t=>t.department==='Government Biddings'||t.category==='Government'||t.category==='Gov Biddings');
     const wrap=document.getElementById('analytics-content');
     wrap.innerHTML=`
       <div class="kpi-row" style="margin-top:16px">
         <div class="kpi-card green"><div class="kpi-label">Contracts Won</div><div class="kpi-value">₱${fmt(totalWon)}</div></div>
-        <div class="kpi-card accent"><div class="kpi-label">Total Bids</div><div class="kpi-value">${govBids.length}</div></div>
-        <div class="kpi-card"><div class="kpi-label">Win Rate</div><div class="kpi-value">${winRate}%</div></div>
+        <div class="kpi-card accent"><div class="kpi-label">Total Bids</div><div class="kpi-value">${govBids.length}</div><div style="margin-top:4px">${delta(bidsMTD,bidsPrev,true)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Win Rate</div><div class="kpi-value">${winRate}%</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${wonBids.length}W / ${lostBids.length}L</div></div>
+        <div class="kpi-card"><div class="kpi-label">Avg Contract</div><div class="kpi-value">₱${fmt(avgContract)}</div></div>
         <div class="kpi-card warn"><div class="kpi-label">Pending / Submitted</div><div class="kpi-value">${pendingBids.length}</div></div>
         <div class="kpi-card"><div class="kpi-label">Gov Tasks</div><div class="kpi-value">${govTasks.length}</div></div>
       </div>
@@ -5867,6 +6124,7 @@ async function renderAnalytics() {
     btn.addEventListener('click',()=>{
       document.querySelectorAll('#analytics-subtabs .subtab-btn').forEach(b=>b.classList.remove('active'));
       btn.classList.add('active');
+      if(window.Chart) document.getElementById('analytics-content')?.querySelectorAll('canvas').forEach(cv=>{const ex=Chart.getChart(cv);if(ex)ex.destroy();});
       TAB_RENDERERS[btn.dataset.tab]?.();
     });
   });

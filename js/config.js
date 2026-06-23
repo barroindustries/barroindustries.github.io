@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '11.0.5';
+window.APP_VERSION = '11.0.6';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -113,13 +113,18 @@ window.DEPARTMENTS = {
 };
 
 // ── Role Definitions ─────────────────────────────
+// `secretary` (Corporate Secretary) is an admin-portal oversight role: manager-level
+// access to oversee the whole company, but the Approvals page is VIEW-ONLY for them
+// (only the President approves), and deletions of key records route through the
+// President's approval just like every other non-president role.
 window.ROLES = {
-  president: { label: 'President',      badge: 'badge-blue',   canSeeAll: true  },
-  manager:   { label: 'Manager',        badge: 'badge-purple', canSeeAll: false },
-  employee:  { label: 'Employee',       badge: 'badge-gray',   canSeeAll: false },
-  agent:     { label: 'Sales Agent',    badge: 'badge-orange', canSeeAll: false },
-  finance:   { label: 'Finance Staff',  badge: 'badge-green',  canSeeAll: false },
-  partner:   { label: 'Partner',        badge: 'badge-teal',   canSeeAll: false }
+  president: { label: 'President',           badge: 'badge-blue',   canSeeAll: true  },
+  manager:   { label: 'Manager',             badge: 'badge-purple', canSeeAll: false },
+  secretary: { label: 'Corporate Secretary', badge: 'badge-gold',   canSeeAll: true  },
+  employee:  { label: 'Employee',            badge: 'badge-gray',   canSeeAll: false },
+  agent:     { label: 'Sales Agent',         badge: 'badge-orange', canSeeAll: false },
+  finance:   { label: 'Accountant',          badge: 'badge-green',  canSeeAll: false },
+  partner:   { label: 'Partner',             badge: 'badge-teal',   canSeeAll: false }
 };
 
 // ── Bottom Nav — Employee ────────────────────────

@@ -14,8 +14,12 @@ service cloud.firestore {
     function getRole() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', null);
     }
-    function isAdmin()          { return getRole() in ['president', 'manager']; }
-    function isFinanceOrAdmin() { return getRole() in ['president', 'manager', 'finance']; }
+    // 'secretary' (Corporate Secretary) is an admin-portal oversight role with
+    // manager-level access. It is intentionally NOT in isPresident(), so deletions of
+    // key records (finance, payroll, ledger — all gated on isPresident below) still
+    // require the President's approval, exactly as for managers.
+    function isAdmin()          { return getRole() in ['president', 'manager', 'secretary']; }
+    function isFinanceOrAdmin() { return getRole() in ['president', 'manager', 'secretary', 'finance']; }
     function isPresident()      { return getRole() == 'president'; }
 
     // Member of the Finance DEPARTMENT (by string `department` or array `departments`),
@@ -27,6 +31,15 @@ service cloud.firestore {
     }
     // Anyone allowed to operate the books: finance/admin role OR Finance-dept member.
     function canFinance() { return isFinanceOrAdmin() || isFinanceDept(); }
+
+    // Member of the Design DEPARTMENT (by string `department` or array `departments`).
+    // Same null-safe pattern as isFinanceDept(). Gates Design drawings + project edits.
+    function isDesignDept() {
+      let u = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return u.get('department', '') == 'Design' || u.get('departments', []).hasAny(['Design']);
+    }
+    // Anyone allowed to manage Design work: admin role OR Design-dept member.
+    function canDesign() { return isAdmin() || isDesignDept(); }
 
     // True when a user-profile update leaves all privileged fields untouched.
     // Used so a non-admin can edit their own name/photo/phone but NOT promote
@@ -143,9 +156,17 @@ service cloud.firestore {
     // ── Tasks ──────────────────────────────────────────
     match /tasks/{taskId} {
       allow read: if isAuth();
-      allow create: if isAuth() && isAdmin();
+      // Admins create any task. Design-dept members may create Design tasks only
+      // (so designers can delegate project work) — scoped strictly to department=='Design'.
+      allow create: if isAuth() && (
+        isAdmin() || (isDesignDept() && request.resource.data.get('department', '') == 'Design')
+      );
+      // Assignees update their own tasks; admins AND finance manage any task
+      // (status, reassignment, follow-up requests). Uses isFinanceOrAdmin() so the
+      // client's task controls — which treat finance as an editor — actually land
+      // (finance is the books/ops editor: "finance can edit everything").
       allow update: if isAuth() && (
-        (request.auth.uid in resource.data.assignedTo) || isAdmin()
+        (request.auth.uid in resource.data.assignedTo) || isFinanceOrAdmin()
       );
       allow delete: if isAuth() && isAdmin();
 
@@ -409,8 +430,28 @@ service cloud.firestore {
       allow create: if isAuth();
       // Creator/admin can edit anything; finance (role or Finance-dept) may also
       // update so they can record payments & issue billing invoices for collection.
+      // Design-dept members may edit too (team/drawings-link/status). .get() is
+      // null-safe for older docs whose createdBy field is absent.
       allow update: if isAuth() && (
-        resource.data.createdBy == request.auth.uid || isAdmin() || canFinance()
+        resource.data.get('createdBy', '') == request.auth.uid || isAdmin() || canFinance() || canDesign()
+      );
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    // ── Design drawings (flat, projectId-scoped; full revision control) ──
+    // DWG/PDF/2D/3D drawings attached to a Design project. Top-level collection
+    // (not a subcollection) so the cross-project Drawings dashboard is a simple
+    // query. Rules do NOT cascade, so this needs its own block. All field reads
+    // are .get(field, default) — a bare read of an absent field DENIES the rule.
+    match /design_drawings/{docId} {
+      allow read:   if isAuth();
+      allow create: if isAuth() && canDesign()
+                    && request.resource.data.get('createdBy', '') == request.auth.uid;
+      // Creator, assigned designer, Design-dept member, or admin may edit.
+      allow update: if isAuth() && (
+           resource.data.get('createdBy', '')  == request.auth.uid
+        || resource.data.get('assignedTo', '') == request.auth.uid
+        || canDesign()
       );
       allow delete: if isAuth() && isAdmin();
     }

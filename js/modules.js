@@ -105,6 +105,32 @@ async function loadPosts(dept) {
       const isOwn = p.authorId === currentUser.uid;
       const hearts = p.hearts || [];
       const hearted = hearts.includes(currentUser.uid);
+      // Memo mirror cards: internal announcements surfaced into the General feed.
+      // They open the memo (with conforme) instead of behaving like a normal post.
+      // Partners never load the General tab, so these stay internal-only.
+      if (p.kind === 'memo' && p.memoId) {
+        return `
+        <div class="post-card post-memo-card" data-id="${p.id}" data-memo-id="${escHtml(p.memoId)}" style="cursor:pointer;border-left:3px solid var(--primary,#0A84FF)">
+          <div class="post-header">
+            <div class="post-avatar" style="background:rgba(10,132,255,0.12)">📋</div>
+            <div class="post-meta">
+              <div class="post-author">${escHtml(p.authorName||'Management')}</div>
+              <div class="post-time">${escHtml(ts)} · Memo</div>
+            </div>
+            ${p.pinned ? '<span class="badge badge-blue">📌 Pinned</span>' : ''}
+            <span class="badge badge-blue">📋 Memo</span>
+          </div>
+          ${p.title ? `<div class="post-title">${escHtml(p.title)}</div>` : ''}
+          <div class="post-body">${escHtml((p.content||'').slice(0,200))}${(p.content||'').length>200?'…':''}</div>
+          <div class="post-actions">
+            <button class="btn-primary btn-sm post-memo-open" data-memo-id="${escHtml(p.memoId)}">📋 Read &amp; Conforme</button>
+            <div style="display:flex;gap:6px;margin-left:auto">
+              ${(canApprove || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="color:var(--danger)">Delete</button>` : ''}
+              ${canApprove ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':'📌 Pin'}</button>` : ''}
+            </div>
+          </div>
+        </div>`;
+      }
       return `
       <div class="post-card" data-id="${p.id}">
         <div class="post-header">
@@ -243,6 +269,18 @@ async function loadPosts(dept) {
         Notifs.showToast('Post updated!');
         loadPosts(dept);
       });
+    }));
+
+    // Memo mirror cards → open the memo detail (conforme is given there). Reload
+    // the feed afterward so a fresh conforme/delete is reflected.
+    const reloadFeed = () => loadPosts(dept);
+    container.querySelectorAll('.post-memo-open').forEach(btn => btn.addEventListener('click', e => {
+      e.stopPropagation();
+      window.openMemoById?.(btn.dataset.memoId, reloadFeed);
+    }));
+    container.querySelectorAll('.post-memo-card').forEach(card => card.addEventListener('click', e => {
+      if (e.target.closest('button') || e.target.closest('a')) return;
+      window.openMemoById?.(card.dataset.memoId, reloadFeed);
     }));
   } catch(err) {
     container.innerHTML = `<div class="empty-state"><p>Error: ${err.message}</p></div>`;
@@ -1919,6 +1957,34 @@ async function renderPresidentMessageCard() {
       Notifs.showToast('Leave rejected'); window.renderLeavePage(c);
     }catch(ex){ Notifs.showToast('Reject failed','error'); }
   }
+
+  // Exposed so the President's Approvals page (renderApprovals in departments.js) can
+  // action leave from the unified queue, reusing the same balance-debit + notify logic
+  // as the Leave Management screen. They do the DB work and return; the caller refreshes.
+  window.approveLeaveRequest = async function(id){
+    const s = await db.collection('leave_requests').doc(id).get();
+    if(!s.exists) throw new Error('Leave request not found');
+    const r = { id:s.id, ...s.data() };
+    await db.collection('leave_requests').doc(r.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+    const lt = leaveType(r.type);
+    if(lt.drawsBalance){
+      const bal = await getBalance(r.userId);
+      const newBal = Math.max(0,(bal[r.type]||0)-(r.days||0));
+      await db.collection('leave_balances').doc(r.userId).set({ [r.type]:newBal, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+    }
+    window.logAudit && window.logAudit('approve','leave',r.id,{ user:r.userName, type:r.type, days:r.days });
+    try{ Notifs.send(r.userId, { title:'Leave Approved ✅', body:`Your ${r.days}-day ${lt.label} (${r.startDate}→${r.endDate}) was approved.`, icon:'✅', type:'leave', dedupKey:`leave-ok-${r.id}` }); }catch(_){}
+    return r;
+  };
+  window.rejectLeaveRequest = async function(id, reason){
+    const s = await db.collection('leave_requests').doc(id).get();
+    if(!s.exists) throw new Error('Leave request not found');
+    const r = { id:s.id, ...s.data() };
+    await db.collection('leave_requests').doc(r.id).update({ status:'rejected', approvedBy:currentUser.uid, rejectedReason:reason||'', approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+    window.logAudit && window.logAudit('reject','leave',r.id,{ user:r.userName, type:r.type });
+    try{ Notifs.send(r.userId, { title:'Leave Rejected', body:`Your ${leaveType(r.type).label} request was not approved.${reason?' Reason: '+reason:''}`, icon:'❌', type:'leave', dedupKey:`leave-no-${r.id}` }); }catch(_){}
+    return r;
+  };
 })();
 
 

@@ -16,7 +16,8 @@ function priorityBadge(p) { return {high:'badge-red',medium:'badge-orange',low:'
 // can manage their own content regardless of their system role.
 function canEditDept(dept) {
   const role = window.currentRole || '';
-  if (['president','owner','manager','finance'].includes(role)) return true;
+  // 'secretary' (Corporate Secretary) gets manager-level edit access across the company.
+  if (['president','owner','manager','secretary','finance'].includes(role)) return true;
   return (window.currentDepts || []).includes(dept);
 }
 // Shorthand for Finance-specific privilege (Payroll, HR Profiles, etc.)
@@ -202,6 +203,53 @@ function fuTime(ts){
     return d.toLocaleString('en-PH',{timeZone:'Asia/Manila',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
   }catch(e){ return ''; }
 }
+// Inner HTML of the "Follow-up Requests" card. Pure (no DOM lookups / no handlers)
+// so the task panel can re-render it in place after each request/addressed action.
+// flags: { isAdmin, isAssignee, isCreator }. Returns '' when the viewer shouldn't
+// see the card at all.
+function followUpCardInner(t, flags){
+  const isAdmin=flags.isAdmin, isAssignee=flags.isAssignee, isCreator=flags.isCreator;
+  const fus=(t.followUps||[]).slice().sort((a,b)=>((b.at&&b.at.seconds)||0)-((a.at&&a.at.seconds)||0));
+  const openFu=fus.filter(f=>f.status!=='addressed').length;
+  if(!(isAdmin||isAssignee||isCreator||fus.length)) return '';
+  return `
+    <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted)">📣 Follow-up Requests</div>
+        ${openFu?`<span class="badge badge-orange" style="font-size:10px">${openFu} pending</span>`:''}
+      </div>
+      ${fus.length ? `<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:${isAdmin?'10px':'0'}">
+        ${fus.map(fu=>{
+          const pending=fu.status!=='addressed';
+          return `<div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ${pending?'var(--warning,#ff9f0a)':'var(--success,#34c759)'};border-radius:8px;padding:8px 10px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">
+              <span class="badge ${pending?'badge-orange':'badge-green'}" style="font-size:9px">${pending?'PENDING':'ADDRESSED'}</span>
+              <span style="font-size:11px;color:var(--text-muted)">${escHtml(fu.byName||'')}${fuTime(fu.at)?' · '+fuTime(fu.at):''}</span>
+            </div>
+            <div style="font-size:13px;color:var(--text);line-height:1.4;white-space:pre-wrap">${escHtml(fu.message||'Update requested')}</div>
+            ${!pending&&fu.addressedByName?`<div style="font-size:11px;color:var(--success,#34c759);margin-top:4px">✓ ${escHtml(fu.addressedByName)}${fuTime(fu.addressedAt)?' · '+fuTime(fu.addressedAt):''}</div>`:''}
+            ${pending&&(isAdmin||isAssignee)?`<button class="btn-success btn-sm fu-addr-btn" data-fu="${escHtml(fu.id||'')}" style="margin-top:6px">✓ Mark addressed</button>`:''}
+          </div>`;
+        }).join('')}
+      </div>` : `<div style="font-size:12px;color:var(--text-muted);margin-bottom:${isAdmin?'10px':'0'}">No follow-ups yet.</div>`}
+      ${isAdmin?`<div style="display:flex;gap:6px">
+        <input id="fu-input" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)" placeholder="Ask the assignee for an update…"/>
+        <button class="btn-primary btn-sm" id="fu-request-btn">📣 Request</button>
+      </div>`:''}
+    </div>`;
+}
+// Sync the 📣 follow-up badge on any matching task card in the current list view,
+// so the list reflects a new count immediately after an action (no full re-render).
+function updateCardFollowUpBadge(taskId, count){
+  document.querySelectorAll(`.item-card[data-id="${taskId}"] .item-badges`).forEach(badges=>{
+    const existing=badges.querySelector('.fu-card-badge');
+    if(count>0){
+      const label=`📣 ${count} follow-up${count>1?'s':''}`;
+      if(existing) existing.textContent=label;
+      else { const s=document.createElement('span'); s.className='badge badge-orange fu-card-badge'; s.textContent=label; badges.appendChild(s); }
+    } else if(existing){ existing.remove(); }
+  });
+}
 function assigneeChips(t) {
   if (!t.assignedToNames?.length) return '';
   const chips=t.assignedToNames.slice(0,3).map(n=>`<span style="font-size:11px;background:var(--primary-light);color:#fff;padding:2px 8px;border-radius:10px">${escHtml(n)}</span>`).join('');
@@ -215,7 +263,7 @@ function taskCard(t) {
       <div class="item-badges">
         <span class="badge ${priorityBadge(t.priority)}">${t.priority||'med'}</span>
         <span class="badge ${statusBadge(t.status)}">${statusLabel(t.status)}</span>
-        ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange">📣 ${t.openFollowUpCount} follow-up${t.openFollowUpCount>1?'s':''}</span>`:''}
+        ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange fu-card-badge">📣 ${t.openFollowUpCount} follow-up${t.openFollowUpCount>1?'s':''}</span>`:''}
       </div>
     </div>
     <div class="item-meta" style="gap:6px;flex-wrap:wrap">
@@ -506,9 +554,10 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   const snap = await db.collection('tasks').doc(taskId).get();
   if (!snap.exists) { Notifs.showToast('Task not found','error'); return; }
   const t       = normTask(snap.data(),snap.id);
-  // Task edit gating: admin roles only — this MUST match the Firestore tasks
-  // update rule (assignee-or-admin). Dept membership alone does NOT grant
-  // task edit/reassign/score (that would surface buttons the backend rejects).
+  // Task edit gating: admin/finance roles — this MUST match the Firestore tasks
+  // update rule (assignee-or-finance-or-admin → isFinanceOrAdmin()). Dept
+  // membership alone does NOT grant task edit/reassign/score/follow-up (that would
+  // surface buttons the backend rejects). 'owner' is legacy/unused in ROLES.
   const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
   const isAssignee = t.assignedTo.includes(currentUser.uid);
   const isCreator  = t.createdBy===currentUser.uid;
@@ -517,36 +566,10 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   const allowedStatuses = isAdmin?TASK_STATUSES:TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value));
 
   // Follow-up requests — admin asks the assignee(s) for an update; assignees (or
-  // admins) mark them addressed. Visible to anyone involved so the request lands.
-  const fus = (t.followUps||[]).slice().sort((a,b)=>((b.at&&b.at.seconds)||0)-((a.at&&a.at.seconds)||0));
-  const openFu = fus.filter(f=>f.status!=='addressed').length;
-  const showFollowUps = isAdmin || isAssignee || isCreator || fus.length;
-  const followUpSectionHtml = showFollowUps ? `
-    <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted)">📣 Follow-up Requests</div>
-        ${openFu?`<span class="badge badge-orange" style="font-size:10px">${openFu} pending</span>`:''}
-      </div>
-      ${fus.length ? `<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:${isAdmin?'10px':'0'}">
-        ${fus.map(fu=>{
-          const pending=fu.status!=='addressed';
-          return `<div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ${pending?'var(--warning,#ff9f0a)':'var(--success,#34c759)'};border-radius:8px;padding:8px 10px">
-            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">
-              <span class="badge ${pending?'badge-orange':'badge-green'}" style="font-size:9px">${pending?'PENDING':'ADDRESSED'}</span>
-              <span style="font-size:11px;color:var(--text-muted)">${escHtml(fu.byName||'')}${fuTime(fu.at)?' · '+fuTime(fu.at):''}</span>
-            </div>
-            <div style="font-size:13px;color:var(--text);line-height:1.4;white-space:pre-wrap">${escHtml(fu.message||'Update requested')}</div>
-            ${!pending&&fu.addressedByName?`<div style="font-size:11px;color:var(--success,#34c759);margin-top:4px">✓ ${escHtml(fu.addressedByName)}${fuTime(fu.addressedAt)?' · '+fuTime(fu.addressedAt):''}</div>`:''}
-            ${pending&&(isAdmin||isAssignee)?`<button class="btn-success btn-sm fu-addr-btn" data-fu="${escHtml(fu.id||'')}" style="margin-top:6px">✓ Mark addressed</button>`:''}
-          </div>`;
-        }).join('')}
-      </div>` : `<div style="font-size:12px;color:var(--text-muted);margin-bottom:${isAdmin?'10px':'0'}">No follow-ups yet.</div>`}
-      ${isAdmin?`<div style="display:flex;gap:6px">
-        <input id="fu-input" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)" placeholder="Ask the assignee for an update…"/>
-        <button class="btn-primary btn-sm" id="fu-request-btn">📣 Request</button>
-      </div>`:''}
-    </div>
-  ` : '';
+  // admins) mark them addressed. Wrapped in #fu-section so the panel can refresh it
+  // in place after each action (no full teardown). HTML built by followUpCardInner.
+  const fuFlags = { isAdmin, isAssignee, isCreator };
+  const followUpSectionHtml = `<div id="fu-section">${followUpCardInner(t, fuFlags)}</div>`;
 
   // Remove existing panel
   document.getElementById('task-fullscreen-panel')?.remove();
@@ -748,53 +771,87 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 
-  // Follow-up request (admin → assignee) ───────────
-  document.getElementById('fu-request-btn')?.addEventListener('click', async()=>{
+  // Follow-up requests — re-render the #fu-section in place after each action
+  // (no panel teardown) and keep the list-card badge in sync.
+  async function reloadFollowUps(){
+    try{
+      const fresh=await db.collection('tasks').doc(taskId).get();
+      if(fresh.exists){ const ft=normTask(fresh.data(),taskId); t.followUps=ft.followUps; t.openFollowUpCount=ft.openFollowUpCount; }
+    }catch(e){ console.warn('[followups] reload failed',e); }
+    const sec=document.getElementById('fu-section');
+    if(sec){ sec.innerHTML=followUpCardInner(t,fuFlags); bindFollowUps(); }
+    updateCardFollowUpBadge(taskId, t.openFollowUpCount||0);
+  }
+
+  // Admin → assignee: record a follow-up request. Re-fetches first so a concurrent
+  // follow-up isn't clobbered, and notifies against the freshest assignee set.
+  async function onRequestFollowUp(){
     const input=document.getElementById('fu-input');
     const msg=(input?.value||'').trim();
-    const uSnap=await db.collection('users').doc(currentUser.uid).get();
-    const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
-    const entry={
-      id:'fu_'+Date.now()+'_'+Math.floor(Math.random()*1e6),
-      message:msg||'Please provide an update.',
-      byUid:currentUser.uid, byName:actorName,
-      at:firebase.firestore.Timestamp.now(), status:'pending'
-    };
-    const followUps=[...(t.followUps||[]),entry];
-    await db.collection('tasks').doc(taskId).update({
-      followUps,
-      openFollowUpCount: followUps.filter(f=>f.status!=='addressed').length,
-      lastFollowUpAt: firebase.firestore.FieldValue.serverTimestamp(),
-      lastFollowUpByName: actorName,
-      lastModifiedAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('tasks-all');
-    await notifyTaskInvolved(t,{title:'📣 Follow-up Requested',body:`"${t.title}" — ${actorName}: ${entry.message}`,icon:'📣',type:'task_followup',taskId},currentUser.uid);
-    Notifs.showToast('Follow-up sent');
-    closeTaskPanel(); openTaskDetail(taskId,currentUser,currentRole);
-  });
-
-  // Mark a follow-up addressed (assignee or admin) ──
-  panel.querySelectorAll('.fu-addr-btn').forEach(btn=>btn.addEventListener('click', async()=>{
-    const fuId=btn.dataset.fu;
-    const uSnap=await db.collection('users').doc(currentUser.uid).get();
-    const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
-    // Re-fetch so a concurrent follow-up added meanwhile isn't clobbered
-    const fresh=await db.collection('tasks').doc(taskId).get();
-    const arr=(fresh.exists?(fresh.data().followUps||[]):[]).map(f=>f.id===fuId?{...f,status:'addressed',addressedByUid:currentUser.uid,addressedByName:actorName,addressedAt:firebase.firestore.Timestamp.now()}:f);
-    const target=arr.find(f=>f.id===fuId);
-    await db.collection('tasks').doc(taskId).update({
-      followUps:arr,
-      openFollowUpCount:arr.filter(f=>f.status!=='addressed').length,
-      lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()
-    });
-    if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('tasks-all');
-    if (target&&target.byUid&&target.byUid!==currentUser.uid) {
-      await Notifs.send(target.byUid,{title:'✅ Follow-up Addressed',body:`${actorName} addressed your follow-up on "${t.title}"`,icon:'✅',type:'task_followup_done',taskId});
+    const btn=document.getElementById('fu-request-btn'); if(btn) btn.disabled=true;
+    try{
+      const uSnap=await db.collection('users').doc(currentUser.uid).get();
+      const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
+      const entry={
+        id:db.collection('tasks').doc().id, // collision-free auto-id (join key for "addressed")
+        message:msg||'Please provide an update.',
+        byUid:currentUser.uid, byName:actorName,
+        at:firebase.firestore.Timestamp.now(), status:'pending'
+      };
+      const fresh=await db.collection('tasks').doc(taskId).get();
+      const ft=fresh.exists?normTask(fresh.data(),taskId):t;
+      const followUps=[...(ft.followUps||[]),entry];
+      await db.collection('tasks').doc(taskId).update({
+        followUps,
+        openFollowUpCount: followUps.filter(f=>f.status!=='addressed').length,
+        lastFollowUpAt: firebase.firestore.FieldValue.serverTimestamp(),
+        lastFollowUpByName: actorName,
+        lastModifiedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('tasks-all');
+      await notifyTaskInvolved(ft,{title:'📣 Follow-up Requested',body:`"${ft.title}" — ${actorName}: ${entry.message}`,icon:'📣',type:'task_followup',taskId},currentUser.uid);
+      if(input) input.value='';
+      Notifs.showToast('Follow-up sent');
+      await reloadFollowUps();
+    }catch(e){
+      console.error('[followups] request failed',e);
+      Notifs.showToast('Could not send follow-up','error');
+      if(btn) btn.disabled=false;
     }
-    Notifs.showToast('Marked addressed');
-    closeTaskPanel(); openTaskDetail(taskId,currentUser,currentRole);
-  }));
+  }
+
+  // Assignee or admin: mark a follow-up addressed. Re-fetches so a concurrent
+  // follow-up isn't clobbered; pings the requester + owner audit on resolution.
+  async function onAddressFollowUp(fuId){
+    try{
+      const uSnap=await db.collection('users').doc(currentUser.uid).get();
+      const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
+      const fresh=await db.collection('tasks').doc(taskId).get();
+      const arr=(fresh.exists?(fresh.data().followUps||[]):[]).map(f=>f.id===fuId?{...f,status:'addressed',addressedByUid:currentUser.uid,addressedByName:actorName,addressedAt:firebase.firestore.Timestamp.now()}:f);
+      const target=arr.find(f=>f.id===fuId);
+      await db.collection('tasks').doc(taskId).update({
+        followUps:arr,
+        openFollowUpCount:arr.filter(f=>f.status!=='addressed').length,
+        lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()
+      });
+      if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('tasks-all');
+      if (target&&target.byUid&&target.byUid!==currentUser.uid) {
+        await Notifs.send(target.byUid,{title:'✅ Follow-up Addressed',body:`${actorName} addressed your follow-up on "${t.title}"`,icon:'✅',type:'task_followup_done',taskId});
+      }
+      await Notifs.sendToOwner({title:'✅ Follow-up Addressed',body:`${actorName} addressed a follow-up on "${t.title}"`,icon:'✅',type:'task_followup_done',taskId});
+      Notifs.showToast('Marked addressed');
+      await reloadFollowUps();
+    }catch(e){
+      console.error('[followups] mark-addressed failed',e);
+      Notifs.showToast('Could not update follow-up','error');
+    }
+  }
+
+  function bindFollowUps(){
+    document.getElementById('fu-request-btn')?.addEventListener('click', onRequestFollowUp);
+    document.querySelectorAll('#fu-section .fu-addr-btn').forEach(b=>b.addEventListener('click', ()=>onAddressFollowUp(b.dataset.fu)));
+  }
+  bindFollowUps();
 
   document.getElementById('save-score-btn')?.addEventListener('click', async()=>{
     const score=parseFloat(document.getElementById('pres-score').value);
@@ -7047,8 +7104,17 @@ function printQuote(lines, q) {
 // ══════════════════════════════════════════════════
 window.renderApprovals = async function(currentUser) {
   const c = deptContainer();
+  // ── Approval authority (oversight model) ──────────────────────────────
+  // President + Manager can act on routine requests; the Corporate Secretary is
+  // VIEW-ONLY (oversight). Approving a DELETE of a key record is President-only —
+  // the same boundary firestore.rules enforces (delete → president). canAct hides
+  // routine action buttons for the secretary; canDelete hides delete-approval
+  // buttons for everyone but the President.
+  const _role     = window.currentRole || '';
+  const canAct    = _role === 'president' || _role === 'manager';
+  const canDelete = (typeof isRealPresident === 'function') ? isRealPresident() : (_role === 'president');
   // Check pending counts for badges
-  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap, finReqSnap, finDelSnap, qApprSnap, delQSnap, delCSnap] = await Promise.all([
+  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap, finReqSnap, finDelSnap, qApprSnap, delQSnap, delCSnap, leaveSnap] = await Promise.all([
     db.collection('signup_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('attendance_extensions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('cash_advances').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
@@ -7058,7 +7124,8 @@ window.renderApprovals = async function(currentUser) {
     db.collection('finance_delete_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('approval_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
-    db.collection('bs_clients').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]}))
+    db.collection('bs_clients').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
+    db.collection('leave_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]}))
   ]);
   const pendingSignups = signupSnap.size || 0;
   const pendingExt     = extSnap.size || 0;
@@ -7068,10 +7135,13 @@ window.renderApprovals = async function(currentUser) {
   const pendingFinReqs = (finReqSnap.size || 0) + (finDelSnap.size || 0);
   const pendingQApprovals = qApprSnap.size || 0;
   const pendingDeletes    = (delQSnap.size || 0) + (delCSnap.size || 0);
-  const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs + pendingReview + pendingFinReqs + pendingQApprovals + pendingDeletes;
+  const pendingLeave      = leaveSnap.size || 0;
+  const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs + pendingReview + pendingFinReqs + pendingQApprovals + pendingDeletes + pendingLeave;
 
   c.innerHTML = `
     <div class="page-header"><h2>✅ Approvals</h2>${totalPending>0?`<span class="badge badge-red" style="font-size:13px">${totalPending} pending</span>`:''}</div>
+    ${!canAct?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>👁 <strong>Oversight view.</strong> You can review every request here, but only the President approves.</span></div>`
+      :!canDelete?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>ℹ️ Deletion of key records requires <strong>President</strong> approval.</span></div>`:''}
     <div class="subtab-bar" style="flex-wrap:wrap">
       <button class="subtab-btn active" data-sub="all">
         📋 All Requests${totalPending>0?` <span class="nav-badge">${totalPending}</span>`:''}
@@ -7089,6 +7159,9 @@ window.renderApprovals = async function(currentUser) {
       <button class="subtab-btn" data-sub="quote-files">📁 Quote Files</button>
       <button class="subtab-btn" data-sub="ca">
         Cash Advances${pendingCA>0?` <span class="nav-badge">${pendingCA}</span>`:''}
+      </button>
+      <button class="subtab-btn" data-sub="leave">
+        🌴 Leave${pendingLeave>0?` <span class="nav-badge">${pendingLeave}</span>`:''}
       </button>
       <button class="subtab-btn" data-sub="finance-requests">
         💼 Finance Requests${pendingFinReqs>0?` <span class="nav-badge">${pendingFinReqs}</span>`:''}
@@ -7113,7 +7186,7 @@ window.renderApprovals = async function(currentUser) {
       // index per-collection. If that index isn't provisioned, the query is rejected and
       // silently swallowed by .catch(), making items vanish from "All Requests". We sort
       // client-side instead so a missing index can never hide pending items.
-      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delCSnap2] = await Promise.all([
+      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delCSnap2, leaveSnap2] = await Promise.all([
         db.collection('signup_requests').where('status','==','pending').get().catch(e=>{console.error('signup_requests query failed',e);return {docs:[]};}),
         db.collection('attendance_extensions').where('status','==','pending').get().catch(e=>{console.error('attendance_extensions query failed',e);return {docs:[]};}),
         db.collection('cash_advances').where('status','==','pending').get().catch(e=>{console.error('cash_advances query failed',e);return {docs:[]};}),
@@ -7123,7 +7196,8 @@ window.renderApprovals = async function(currentUser) {
         db.collection('finance_delete_requests').where('status','==','pending').get().catch(e=>{console.error('finance_delete_requests query failed',e);return {docs:[]};}),
         db.collection('approval_requests').where('status','==','pending').get().catch(e=>{console.error('approval_requests query failed',e);return {docs:[]};}),
         db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('bs_quotes delete query failed',e);return {docs:[]};}),
-        db.collection('bs_clients').where('deleteRequested','==',true).get().catch(e=>{console.error('bs_clients delete query failed',e);return {docs:[]};})
+        db.collection('bs_clients').where('deleteRequested','==',true).get().catch(e=>{console.error('bs_clients delete query failed',e);return {docs:[]};}),
+        db.collection('leave_requests').where('status','==','pending').get().catch(e=>{console.error('leave_requests query failed',e);return {docs:[]};})
       ]);
 
       const allPending = [
@@ -7138,7 +7212,9 @@ window.renderApprovals = async function(currentUser) {
         ...qApprSnap2.docs.map(d=>({id:d.id,...d.data(),type:'quote-approval',icon:'📤',label:'Quote Approval',name:`${d.data().quoteNumber||'Quote'} — ${d.data().clientName||''}`,detail:`${d.data().agentName||'Partner'} · ₱${fmt(d.data().total||0)}`,ts:d.data().createdAt})),
         // Partner delete requests (quote + client folder) — president approves or denies
         ...delQSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-quote',icon:'🗑',label:'Quote Delete Request',name:`Delete quote ${d.data().quoteNumber||d.id.slice(-6)}`,detail:`${d.data().clientName||''}${d.data().deleteReason?' — '+d.data().deleteReason:''}`,ts:d.data().deleteRequestedAt})),
-        ...delCSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-client',icon:'🗑',label:'Client Delete Request',name:`Delete client "${d.data().name||''}"`,detail:d.data().deleteReason||'',ts:d.data().deleteRequestedAt}))
+        ...delCSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-client',icon:'🗑',label:'Client Delete Request',name:`Delete client "${d.data().name||''}"`,detail:d.data().deleteReason||'',ts:d.data().deleteRequestedAt})),
+        // Leave requests — surfaced here so every request type funnels through this page.
+        ...leaveSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'leave',icon:'🌴',label:'Leave Request',name:x.userName||'Employee',detail:`${x.days||0}d ${x.type||'leave'} · ${x.startDate||''}→${x.endDate||''}${x.reason?' — '+x.reason:''}`,ts:x.createdAt};})
       ].sort((a,b)=>(b.ts?.seconds||0)-(a.ts?.seconds||0));
 
       if (!allPending.length) {
@@ -7160,7 +7236,7 @@ window.renderApprovals = async function(currentUser) {
               ${item.ts?`<span style="font-size:11px;color:var(--text-muted)">${new Date(item.ts.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>`:''}
             </div>
             <div style="display:flex;gap:8px;margin-top:10px" class="req-actions">
-              ${item.type==='signup'?`
+              ${ ( ['finance-req','finance-del','delete-quote','delete-client'].includes(item.type) ? canDelete : canAct ) ? (item.type==='signup'?`
                 <button class="btn-success btn-sm sg-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}" data-email="${escHtml(item.email||'')}" data-phone="${escHtml(item.phone||'')}">✓ Approve</button>
                 <button class="btn-danger btn-sm sg-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✗ Reject</button>
               `:item.type==='attendance'?`
@@ -7189,10 +7265,13 @@ window.renderApprovals = async function(currentUser) {
               `:item.type==='delete-client'?`
                 <button class="btn-danger btn-sm dc-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${item.deleteRequestedBy||''}">✓ Approve Delete</button>
                 <button class="btn-secondary btn-sm dc-deny-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${item.deleteRequestedBy||''}">✗ Deny</button>
+              `:item.type==='leave'?`
+                <button class="btn-success btn-sm lv-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}">✓ Approve</button>
+                <button class="btn-danger btn-sm lv-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}">✗ Reject</button>
               `:`
                 <button class="btn-success btn-sm sub-approve-btn" data-id="${item.id}">✓ Approve</button>
                 <button class="btn-danger btn-sm sub-reject-btn" data-id="${item.id}">✗ Reject</button>
-              `}
+              `) : `<span class="badge badge-gray" style="font-size:11px">🔒 ${['finance-req','finance-del','delete-quote','delete-client'].includes(item.type)?'President approval required':'President / Manager approves'}</span>`}
             </div>
           </div>`).join('')}
         </div>`;
@@ -7354,6 +7433,20 @@ window.renderApprovals = async function(currentUser) {
           Notifs.showToast('Delete request denied.'); loadApprovalsSub('all');
         } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
       }));
+
+      // Leave approve/reject — uses the helpers exposed by modules.js so leave
+      // balances are debited consistently with the Leave Management screen.
+      wrap.querySelectorAll('.lv-approve-btn').forEach(btn => onClickSafe(btn, async () => {
+        await window.approveLeaveRequest(btn.dataset.id);
+        Notifs.showToast(`Leave approved for ${btn.dataset.name}`);
+        loadApprovalsSub('all');
+      }));
+      wrap.querySelectorAll('.lv-reject-btn').forEach(btn => onClickSafe(btn, async () => {
+        const reason = prompt('Reason for rejection (optional):')||'';
+        await window.rejectLeaveRequest(btn.dataset.id, reason);
+        Notifs.showToast(`Leave rejected for ${btn.dataset.name}`);
+        loadApprovalsSub('all');
+      }));
       return;
     }
 
@@ -7396,7 +7489,7 @@ window.renderApprovals = async function(currentUser) {
         ${!pending.length && !resolved.length ? '<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">💼</div><h4>No finance requests</h4></div>' : ''}
         ${pending.length ? `<h4 style="margin:0 0 10px;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Pending (${pending.length})</h4>
           <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
-            ${pending.map(r=>reqCard(r,true)).join('')}
+            ${pending.map(r=>reqCard(r,canDelete)).join('')}
           </div>` : ''}
         ${resolved.length ? `<h4 style="margin:0 0 10px;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">History</h4>
           <div style="display:flex;flex-direction:column;gap:10px">
@@ -7440,6 +7533,47 @@ window.renderApprovals = async function(currentUser) {
       return;
     }
 
+    if (sub === 'leave') {
+      const snap = await db.collection('leave_requests').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]}));
+      const reqs = snap.docs.map(d=>({id:d.id,...d.data()}));
+      const pending = reqs.filter(r=>r.status==='pending');
+      const resolved = reqs.filter(r=>r.status!=='pending');
+      const card = (r, showActions) => `
+        <div class="item-card" style="cursor:default">
+          <div class="item-top">
+            <div class="item-title">🌴 ${escHtml(r.userName||'Employee')}</div>
+            <span class="badge ${r.status==='pending'?'badge-warn':r.status==='approved'?'badge-green':'badge-red'}">${r.status==='pending'?'Pending':r.status==='approved'?'Approved':'Rejected'}</span>
+          </div>
+          <div class="item-meta" style="margin-top:4px;flex-wrap:wrap;gap:6px">
+            <span class="badge badge-blue" style="font-size:10px">${escHtml(r.type||'leave')}</span>
+            <span style="font-size:12px;color:var(--text-muted)">${r.days||0} day${(r.days||0)!==1?'s':''} · ${escHtml(r.startDate||'')} → ${escHtml(r.endDate||'')}</span>
+            ${r.reason?`<span style="font-size:12px;color:var(--text-muted)">${escHtml(r.reason)}</span>`:''}
+          </div>
+          ${showActions?`<div style="display:flex;gap:8px;margin-top:10px">
+            <button class="btn-success btn-sm lv-approve-btn" data-id="${r.id}" data-name="${escHtml(r.userName||'')}">✓ Approve</button>
+            <button class="btn-danger btn-sm lv-reject-btn" data-id="${r.id}" data-name="${escHtml(r.userName||'')}">✗ Reject</button>
+          </div>`:''}
+        </div>`;
+      wrap.innerHTML = `
+        ${!pending.length && !resolved.length ? '<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">🌴</div><h4>No leave requests</h4></div>' : ''}
+        ${pending.length?`<h4 style="margin:0 0 10px;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Pending (${pending.length})</h4>
+          <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">${pending.map(r=>card(r,canAct)).join('')}</div>`:''}
+        ${resolved.length?`<h4 style="margin:0 0 10px;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">History</h4>
+          <div style="display:flex;flex-direction:column;gap:10px">${resolved.slice(0,20).map(r=>card(r,false)).join('')}</div>`:''}`;
+      wrap.querySelectorAll('.lv-approve-btn').forEach(btn => onClickSafe(btn, async () => {
+        await window.approveLeaveRequest(btn.dataset.id);
+        Notifs.showToast(`Leave approved for ${btn.dataset.name}`);
+        loadApprovalsSub('leave');
+      }));
+      wrap.querySelectorAll('.lv-reject-btn').forEach(btn => onClickSafe(btn, async () => {
+        const reason = prompt('Reason for rejection (optional):')||'';
+        await window.rejectLeaveRequest(btn.dataset.id, reason);
+        Notifs.showToast(`Leave rejected for ${btn.dataset.name}`);
+        loadApprovalsSub('leave');
+      }));
+      return;
+    }
+
     if (sub === 'review-tasks') {
       const snap = await db.collection('tasks').where('status','==','review').orderBy('lastModifiedAt','desc').get().catch(()=>({docs:[]}));
       const tasks = snap.docs.map(d=>({id:d.id,...d.data()}));
@@ -7464,8 +7598,8 @@ window.renderApprovals = async function(currentUser) {
             </div>
             <div style="display:flex;gap:8px;margin-top:10px">
               <button class="btn-primary btn-sm rt-view-btn" data-id="${t.id}">👁 View</button>
-              <button class="btn-success btn-sm rt-approve-btn" data-id="${t.id}" data-name="${escHtml(t.title||'Task')}">✓ Approve</button>
-              <button class="btn-danger btn-sm rt-reject-btn" data-id="${t.id}" data-name="${escHtml(t.title||'Task')}">✗ Send Back</button>
+              ${canAct?`<button class="btn-success btn-sm rt-approve-btn" data-id="${t.id}" data-name="${escHtml(t.title||'Task')}">✓ Approve</button>
+              <button class="btn-danger btn-sm rt-reject-btn" data-id="${t.id}" data-name="${escHtml(t.title||'Task')}">✗ Send Back</button>`:''}
             </div>
           </div>`;
         }).join('')}
@@ -7512,7 +7646,7 @@ window.renderApprovals = async function(currentUser) {
               ${item.createdAt?`<span>📅 ${new Date(item.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
             </div>
             ${item.generatedPassword?`<div style="font-size:12px;margin-top:8px;padding:8px 10px;background:rgba(48,209,88,.1);border:1px solid rgba(48,209,88,.3);border-radius:8px;font-family:monospace">🔑 Generated Password: <strong>${escHtml(item.generatedPassword)}</strong><br><span style="font-size:10px;color:var(--text-muted)">Create Firebase Auth user with this password</span></div>`:''}
-            ${item.status==='pending'?`
+            ${(item.status==='pending'&&canAct)?`
             <div style="display:flex;gap:8px;margin-top:12px">
               <button class="btn-success signup-approve" data-id="${item.id}" data-name="${escHtml(item.fullName)}" data-email="${escHtml(item.email)}" data-phone="${escHtml(item.phone||'')}">✓ Approve & Generate Password</button>
               <button class="btn-danger signup-reject" data-id="${item.id}" data-name="${escHtml(item.fullName)}">✗ Reject</button>
@@ -7601,7 +7735,7 @@ window.renderApprovals = async function(currentUser) {
               ${item.requestedAt?`<span>Requested: ${new Date(item.requestedAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})}</span>`:''}
               ${item.status==='approved'&&item.expiresAt?`<span>Expires: ${new Date(item.expiresAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})}</span>`:''}
             </div>
-            ${item.status==='pending'?`
+            ${(item.status==='pending'&&canAct)?`
             <div style="display:flex;gap:8px;margin-top:12px">
               <button class="btn-success ext-approve" data-id="${item.id}" data-uid="${item.uid}" data-name="${escHtml(item.userName||'')}">✓ Approve (6-hr)</button>
               <button class="btn-danger ext-deny" data-id="${item.id}" data-uid="${item.uid}" data-name="${escHtml(item.userName||'')}">✗ Deny</button>
@@ -7668,7 +7802,7 @@ window.renderApprovals = async function(currentUser) {
               <span>Repay: ${item.repayDate||'—'}</span>
             </div>
             ${item.reason?`<div style="font-size:12px;color:var(--text-muted);margin-top:6px;padding:8px 10px;background:var(--surface2);border-radius:6px">${escHtml(item.reason)}</div>`:''}
-            ${item.status==='pending'?`
+            ${(item.status==='pending'&&canAct)?`
             <div style="display:flex;gap:8px;margin-top:12px">
               <button class="btn-success ca-approve" data-id="${item.id}" data-uid="${item.userId}" data-name="${escHtml(item.userName)}" data-amount="${item.amount}">Approve</button>
               <button class="btn-danger ca-reject" data-id="${item.id}" data-uid="${item.userId}" data-name="${escHtml(item.userName)}">Reject</button>
@@ -7715,7 +7849,7 @@ window.renderApprovals = async function(currentUser) {
             <span>₱${fmt(item.total)}</span>
             ${item.createdAt?`<span>${new Date(item.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
           </div>
-          ${item.status==='pending'?`
+          ${(item.status==='pending'&&canAct)?`
           <div style="display:flex;gap:8px;margin-top:12px">
             <button class="btn-success approve-approval" data-id="${item.id}" data-agent="${item.agentId}" data-client="${escHtml(item.clientName)}">Approve</button>
             <button class="btn-danger reject-approval"  data-id="${item.id}" data-agent="${item.agentId}" data-client="${escHtml(item.clientName)}">Reject</button>
@@ -8977,7 +9111,7 @@ function openJobBillingInvoiceModal(p){
 
 window.renderProductionDept = async function(currentUser, currentRole, subtab = 'Orders') {
   const c = deptContainer();
-  const subs = ['Orders','Materials','Inventory','Tasks','Files'];
+  const subs = ['Orders','Materials','Inventory','Count Form','Tasks','Files'];
   c.innerHTML = `
     <div class="page-header">
       <div>
@@ -9003,6 +9137,7 @@ function loadProdContent(currentUser, currentRole, sub) {
   const el = document.getElementById('prod-content');
   if (sub==='Materials') return renderProdMaterials(el, currentRole);
   if (sub==='Inventory') return window.renderInventory(el, 'Stock');
+  if (sub==='Count Form') return renderProdInventoryForm(el, currentRole);
   if (sub==='Tasks')     return renderDeptTasks(el, 'Production', currentUser, currentRole);
   if (sub==='Files')   { el.innerHTML = renderFileCollection('Production Files', 'production-files', currentRole);
                          bindFileCollection('production-files', currentUser, 'Production', 'Files'); return; }
@@ -9243,6 +9378,227 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
     try { await db.collection('production_orders').doc(order.id).delete(); window.logAudit&&window.logAudit('delete','production_order',order.id,{orderNo:order.orderNo||''}); closeModal(); Notifs.showToast('Deleted'); onSaved && onSaved(); }
     catch(ex){ Notifs.showToast('Delete failed (admin only)','error'); }
   });
+}
+
+// ── Inventory Count Form — editable, printable physical stock-take sheet ──
+// Pre-fills one row per inventory_items doc (with its system on-hand qty) and
+// lets the team key the physical count → live variance + remarks on screen,
+// then print a clean A4 form (filled, or blank to count by hand). Entries
+// autosave to localStorage so a long count survives a refresh or subtab switch.
+// No Firestore writes — this is a working/print document, not a stock mutation.
+const PROD_COUNT_DRAFT_KEY = 'bi-prod-count-draft';
+function loadCountDraft(){ try { return JSON.parse(localStorage.getItem(PROD_COUNT_DRAFT_KEY) || '{}') || {}; } catch(e){ return {}; } }
+function saveCountDraft(d){ try { localStorage.setItem(PROD_COUNT_DRAFT_KEY, JSON.stringify(d)); } catch(e){} }
+
+async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
+  el.innerHTML = '<div class="loading-placeholder">Loading items…</div>';
+  const snap = await db.collection('inventory_items').orderBy('name').get().catch(()=>({docs:[]}));
+  const items = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const shown = items.filter(i=> kindFilter==='all' || (i.kind||'material')===kindFilter);
+
+  const draft  = loadCountDraft();
+  draft.header = draft.header || {};
+  draft.counts = draft.counts || {};
+  draft.extras = Array.isArray(draft.extras) ? draft.extras : [];
+  const h = draft.header, counts = draft.counts;
+  const todayStr = (window.bizDate ? window.bizDate() : today());
+  if (!h.formNo)        h.formNo = 'IC-' + todayStr.replace(/-/g,'');
+  if (h.date == null)   h.date = todayStr;
+  if (h.countedBy==null)h.countedBy = (typeof userProfile!=='undefined' && userProfile?.displayName) || currentUser?.email || '';
+  saveCountDraft(draft);
+
+  const varOf = (sys, phys) => (phys==='' || phys==null || isNaN(parseFloat(phys))) ? null : (parseFloat(phys) - Number(sys||0));
+  const varHtml = v => v==null ? '<span style="color:var(--text-muted)">—</span>'
+    : `<span style="font-weight:700;color:${v===0?'var(--success)':v<0?'var(--danger)':'var(--warning)'}">${v>0?'+':''}${Number(v).toLocaleString('en-PH')}</span>`;
+  const counted = shown.filter(i=>{ const c=counts[i.id]; return c && c.physical!=='' && c.physical!=null; }).length;
+  const withVar = shown.filter(i=>{ const c=counts[i.id]; const v=c?varOf(i.qty,c.physical):null; return v!=null && v!==0; }).length;
+
+  const inEl = (cls,id,val,ph='',type='text') =>
+    `<input class="${cls}" data-id="${id}" type="${type}" ${type==='number'?'inputmode="decimal" step="any"':''} value="${escHtml(val==null?'':val)}" placeholder="${ph}" style="width:100%;padding:5px 7px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"/>`;
+
+  el.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:12px">
+      <div class="kpi-card"><div class="kpi-label">Items</div><div class="kpi-value">${shown.length}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Counted</div><div class="kpi-value">${counted}</div></div>
+      <div class="kpi-card ${withVar?'red':''}"><div class="kpi-label">With Variance</div><div class="kpi-value">${withVar}</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:12px"><div class="card-body">
+      <div class="form-row">
+        <div class="form-group"><label>Form No.</label><input id="cf-formno" value="${escHtml(h.formNo)}"/></div>
+        <div class="form-group"><label>Count Date</label><input id="cf-date" type="date" value="${escHtml(h.date||'')}"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Warehouse / Location</label><input id="cf-loc" value="${escHtml(h.location||'')}" placeholder="e.g. Main Warehouse — Bulacan"/></div>
+        <div class="form-group"><label>Counted By</label><input id="cf-by" value="${escHtml(h.countedBy||'')}"/></div>
+      </div>
+      <div class="form-group"><label>Verified By</label><input id="cf-verified" value="${escHtml(h.verifiedBy||'')}" placeholder="Supervisor / checker"/></div>
+    </div></div>
+
+    <div class="subtab-bar" style="margin-bottom:10px;flex-wrap:wrap;gap:6px">
+      ${[['all','All'],['material','Raw Materials'],['product','Finished Goods']].map(([k,l])=>`<button class="subtab-btn cf-kind-chip ${kindFilter===k?'active':''}" data-kind="${k}">${l}</button>`).join('')}
+      <button class="btn-secondary btn-sm" id="cf-clear" style="margin-left:auto">↺ Clear</button>
+      <button class="btn-secondary btn-sm" id="cf-addrow">＋ Blank row</button>
+      <button class="btn-primary btn-sm" id="cf-print">🖨 Print / PDF</button>
+    </div>
+
+    <div class="card"><div class="card-body" style="padding:0">
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr>
+          <th style="width:32px">#</th><th>Item</th><th>Unit</th>
+          <th style="text-align:right">System Qty</th><th style="width:120px">Physical Count</th>
+          <th style="text-align:right;width:90px">Variance</th><th style="width:24%">Remarks</th>
+        </tr></thead>
+        <tbody>
+          ${!shown.length && !draft.extras.length ? `<tr><td colspan="7"><div class="empty-state" style="padding:24px"><div class="empty-icon">📦</div><h4>No items in inventory</h4><p>Add items in the Inventory module, or use “＋ Blank row” for a write-in sheet.</p></div></td></tr>` :
+          shown.map((i,idx)=>{
+            const c = counts[i.id] || {};
+            return `<tr>
+              <td style="color:var(--text-muted)">${idx+1}</td>
+              <td style="font-weight:600">${escHtml(i.name||'—')}${i.category?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(i.category)}</div>`:''}</td>
+              <td style="font-size:12px">${escHtml(i.unit||'')}</td>
+              <td style="text-align:right;font-weight:600">${Number(i.qty||0).toLocaleString('en-PH')}</td>
+              <td>${inEl('cf-pc',i.id,c.physical,'',  'number')}</td>
+              <td style="text-align:right"><span class="cf-var" data-id="${i.id}">${varHtml(varOf(i.qty,c.physical))}</span></td>
+              <td>${inEl('cf-rm',i.id,c.remarks||'','note')}</td>
+            </tr>`;
+          }).join('')}
+          ${draft.extras.map((r,ei)=>`<tr>
+              <td style="color:var(--text-muted)">${shown.length+ei+1}</td>
+              <td>${inEl('cf-ex-name',ei,r.name||'','Item name')}</td>
+              <td>${inEl('cf-ex-unit',ei,r.unit||'','unit')}</td>
+              <td style="text-align:right;color:var(--text-muted)">—</td>
+              <td>${inEl('cf-ex-pc',ei,r.physical||'','','number')}</td>
+              <td style="text-align:right;color:var(--text-muted)">—</td>
+              <td>${inEl('cf-ex-rm',ei,r.remarks||'','note')}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div></div>
+    <p style="font-size:11px;color:var(--text-muted);margin-top:8px">Entries autosave on this device. “Print / PDF” opens a clean A4 form with whatever you’ve entered — print it blank to count by hand, or fill it in first.</p>`;
+
+  const persist = () => saveCountDraft(draft);
+  const hb = (id,key)=>{ const n=document.getElementById(id); n && n.addEventListener('input',()=>{ draft.header[key]=n.value; persist(); }); };
+  hb('cf-formno','formNo'); hb('cf-date','date'); hb('cf-loc','location'); hb('cf-by','countedBy'); hb('cf-verified','verifiedBy');
+
+  el.querySelectorAll('.cf-pc').forEach(n=>n.addEventListener('input',()=>{
+    const id=n.dataset.id; (draft.counts[id] ||= {}).physical = n.value; persist();
+    const item = shown.find(x=>x.id===id), cell = el.querySelector(`.cf-var[data-id="${id}"]`);
+    if (cell && item) cell.innerHTML = varHtml(varOf(item.qty, n.value));
+  }));
+  el.querySelectorAll('.cf-rm').forEach(n=>n.addEventListener('input',()=>{ (draft.counts[n.dataset.id] ||= {}).remarks = n.value; persist(); }));
+
+  const exBind=(cls,key)=>el.querySelectorAll(cls).forEach(n=>n.addEventListener('input',()=>{ (draft.extras[n.dataset.id] ||= {})[key]=n.value; persist(); }));
+  exBind('.cf-ex-name','name'); exBind('.cf-ex-unit','unit'); exBind('.cf-ex-pc','physical'); exBind('.cf-ex-rm','remarks');
+
+  el.querySelectorAll('.cf-kind-chip').forEach(b=>b.addEventListener('click',()=>renderProdInventoryForm(el,currentRole,b.dataset.kind)));
+  document.getElementById('cf-addrow')?.addEventListener('click',()=>{ draft.extras.push({}); persist(); renderProdInventoryForm(el,currentRole,kindFilter); });
+  document.getElementById('cf-clear')?.addEventListener('click',()=>{
+    if(!confirm('Clear all counts, remarks and header fields on this form?')) return;
+    localStorage.removeItem(PROD_COUNT_DRAFT_KEY); Notifs.showToast('Form cleared'); renderProdInventoryForm(el,currentRole,kindFilter);
+  });
+  document.getElementById('cf-print')?.addEventListener('click',()=>openInventoryCountForm(shown, loadCountDraft(), kindFilter));
+}
+
+// Open the filled (or blank) inventory count form in a clean, printable window.
+function openInventoryCountForm(items, draft, kindFilter){
+  const h = draft.header||{}, counts = draft.counts||{}, extras = Array.isArray(draft.extras)?draft.extras:[];
+  const e = s => escHtml(s);
+  const num = n => Number(n||0).toLocaleString('en-PH');
+  const fmtDate = s => { if(!s) return ''; const dt=new Date(s+'T00:00:00'); return isNaN(dt.getTime())?s:dt.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}); };
+  const kindLabel = kindFilter==='material'?'Raw Materials':kindFilter==='product'?'Finished Goods':'All Items';
+  const varCell = (sys,phys)=>{ if(phys===''||phys==null||isNaN(parseFloat(phys))) return ''; const v=parseFloat(phys)-Number(sys||0); return (v>0?'+':'')+num(v); };
+  const logoUrl = location.origin + location.pathname.replace(/[^/]*$/,'') + 'icons/barro-industries.png';
+
+  const rows = items.map((i,idx)=>{ const c=counts[i.id]||{}; return `<tr>
+      <td class="c">${idx+1}</td>
+      <td>${e(i.name||'')}${i.category?`<div class="sub">${e(i.category)}</div>`:''}</td>
+      <td class="c">${e(i.unit||'')}</td>
+      <td class="r">${num(i.qty||0)}</td>
+      <td class="r b">${c.physical!=null&&c.physical!==''?num(c.physical):''}</td>
+      <td class="r">${varCell(i.qty,c.physical)}</td>
+      <td>${e(c.remarks||'')}</td></tr>`; }).join('');
+  const extraRows = extras.map((r,ei)=>`<tr>
+      <td class="c">${items.length+ei+1}</td>
+      <td>${e(r.name||'')}</td>
+      <td class="c">${e(r.unit||'')}</td>
+      <td class="r">—</td>
+      <td class="r b">${r.physical!=null&&r.physical!==''?num(r.physical):''}</td>
+      <td class="r"></td>
+      <td>${e(r.remarks||'')}</td></tr>`).join('');
+  const filled = items.length + extras.length;
+  const pad = filled < 12 ? 12 - filled : 2;
+  let blanks=''; for(let k=0;k<pad;k++) blanks += `<tr class="blank"><td class="c">${filled+k+1}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>Inventory Count Form — ${e(h.formNo||'')}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background:#e8e8e8}
+  .page{width:297mm;min-height:210mm;margin:0 auto;background:#fff;padding:12mm}
+  .htop{display:flex;align-items:center;gap:12px;border-bottom:3px solid #1a237e;padding-bottom:10px;margin-bottom:10px}
+  .logo{width:58px;height:58px;object-fit:contain;flex-shrink:0}
+  .cname{font-size:22px;font-weight:900;letter-spacing:.5px;color:#1a237e}
+  .csub{font-size:10px;color:#555;margin-top:2px}
+  .title{margin-left:auto;text-align:right}
+  .title .t{display:inline-block;background:#1a237e;color:#fff;font-size:13px;font-weight:800;letter-spacing:1px;padding:5px 12px;border-radius:4px;text-transform:uppercase}
+  .title .scope{font-size:10px;color:#666;margin-top:5px}
+  .meta{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
+  .mbox{border:1px solid #999;border-radius:5px;padding:6px 9px}
+  .mbox .l{font-size:8px;text-transform:uppercase;letter-spacing:.5px;color:#888;font-weight:700}
+  .mbox .v{font-size:12px;font-weight:700;margin-top:2px;min-height:15px}
+  table{width:100%;border-collapse:collapse}
+  th,td{border:1px solid #444;padding:5px 7px;font-size:11px;vertical-align:top}
+  th{background:#1a237e;color:#fff;font-size:9px;text-transform:uppercase;letter-spacing:.04em}
+  td.c{text-align:center}td.r{text-align:right}td.b{font-weight:700}
+  td .sub{font-size:9px;color:#777}
+  tr.blank td{height:22px}
+  .sign{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:34px}
+  .sline{border-top:1px solid #000;padding-top:5px;text-align:center;font-size:10px;color:#444}
+  .foot{margin-top:18px;border-top:1px solid #ddd;padding-top:8px;font-size:9px;color:#999;text-align:center}
+  .bar{position:fixed;top:0;left:0;right:0;background:#1a237e;color:#fff;padding:9px 18px;display:flex;gap:10px;align-items:center;z-index:99}
+  .bar button{background:#fff;color:#1a237e;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
+  @page{size:A4 landscape;margin:8mm}
+  @media print{ .bar,.barpad{display:none!important} body{background:#fff} .page{padding:0;width:auto;min-height:0} }
+</style></head><body>
+<div class="bar">
+  <span style="font-weight:700">📋 Inventory Count Form — ${e(h.formNo||'')}</span>
+  <button onclick="window.print()">🖨 Print / Save as PDF</button>
+  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">✕ Close</button>
+</div>
+<div class="barpad" style="height:46px"></div>
+<div class="page">
+  <div class="htop">
+    <img src="${logoUrl}" class="logo" onerror="this.style.display='none'" alt=""/>
+    <div><div class="cname">BARRO INDUSTRIES</div><div class="csub">Physical Inventory Count Form</div></div>
+    <div class="title"><div class="t">Inventory Count</div><div class="scope">${e(kindLabel)}</div></div>
+  </div>
+  <div class="meta">
+    <div class="mbox"><div class="l">Form No.</div><div class="v">${e(h.formNo||'')}</div></div>
+    <div class="mbox"><div class="l">Count Date</div><div class="v">${e(fmtDate(h.date))}</div></div>
+    <div class="mbox"><div class="l">Warehouse / Location</div><div class="v">${e(h.location||'')}</div></div>
+    <div class="mbox"><div class="l">Counted By</div><div class="v">${e(h.countedBy||'')}</div></div>
+  </div>
+  <table>
+    <thead><tr>
+      <th style="width:30px">#</th><th>Item / Description</th><th style="width:60px">Unit</th>
+      <th style="width:80px">System Qty</th><th style="width:90px">Physical Count</th>
+      <th style="width:70px">Variance</th><th style="width:24%">Remarks</th>
+    </tr></thead>
+    <tbody>${rows}${extraRows}${blanks}</tbody>
+  </table>
+  <div class="sign">
+    <div class="sline">Counted by${h.countedBy?` — ${e(h.countedBy)}`:''}</div>
+    <div class="sline">Verified by${h.verifiedBy?` — ${e(h.verifiedBy)}`:''}</div>
+    <div class="sline">Approved by</div>
+  </div>
+  <div class="foot">Barro Industries Operations System · Generated ${new Date().toLocaleString('en-PH')} · Physical count supersedes system quantity upon approval.</div>
+</div>
+</body></html>`;
+
+  const win = window.open('','_blank','width=1000,height=720');
+  if(!win){ Notifs.showToast('Allow pop-ups to open the printable form','error'); return; }
+  win.document.write(html); win.document.close();
 }
 
 async function renderProdMaterials(el, currentRole) {
