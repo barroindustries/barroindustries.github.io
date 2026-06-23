@@ -113,17 +113,30 @@ function nameFor(obj, key, url) {
 // ── Mirror one file to Drive ────────────────────────────────────────────────
 async function mirror(url, filename, folderId, stats) {
   console.log(`    ↳ ${filename}`);
+
+  // 1) Download from Firebase Storage. A 403/404 here means the source object
+  //    was deleted or its token rotated — expected drift, NOT a sync failure,
+  //    so it must not turn the whole nightly run red.
+  let buffer, mime;
   try {
     const res = await fetch(url, { timeout: 60000 });
-    if (!res.ok) throw new Error(`HTTP ${res.status} downloading file`);
-    const buffer = await res.buffer();
-    const mime   = res.headers.get('content-type') || 'application/octet-stream';
-    const link   = await uploadBuffer(drive, buffer, filename, mime, folderId);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    buffer = await res.buffer();
+    mime   = res.headers.get('content-type') || 'application/octet-stream';
+  } catch (err) {
+    console.warn(`      ⤵ skipped — source unfetchable (${err.message})`);
+    stats.unfetchable++;
+    return null;
+  }
+
+  // 2) Upload to Drive. Failures here ARE real (quota / permission / config).
+  try {
+    const link = await uploadBuffer(drive, buffer, filename, mime, folderId);
     stats.synced++;
     console.log(`      ✓ ${link}`);
     return link;
   } catch (err) {
-    console.error(`      ✗ ${err.message}`);
+    console.error(`      ✗ upload failed: ${err.message}`);
     stats.errors++;
     return null;
   }
@@ -205,7 +218,7 @@ async function processCollection(colRef, name, parentFolderId, depth, stats) {
 
 // ── Main ───────────────────────────────────────────────────────────────────
 async function main() {
-  const stats     = { synced: 0, errors: 0 };
+  const stats     = { synced: 0, errors: 0, unfetchable: 0 };
   const startedAt = Date.now();
   console.log(`\n🚀 Barro Industries — Daily File Sync`);
 
@@ -226,11 +239,13 @@ async function main() {
   const duration = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(`\n${'─'.repeat(50)}`);
   console.log(`✅ Daily file sync complete`);
-  console.log(`   Synced : ${stats.synced} files`);
-  console.log(`   Errors : ${stats.errors}`);
-  console.log(`   Time   : ${duration}s`);
+  console.log(`   Synced      : ${stats.synced} files`);
+  console.log(`   Unfetchable : ${stats.unfetchable} (stale/deleted source — skipped)`);
+  console.log(`   Errors      : ${stats.errors} (Drive upload failures)`);
+  console.log(`   Time        : ${duration}s`);
   console.log(`${'─'.repeat(50)}\n`);
 
+  // Only real Drive failures fail the run; unfetchable sources are expected drift.
   process.exit(stats.errors > 0 ? 1 : 0);
 }
 
