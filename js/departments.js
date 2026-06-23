@@ -4025,6 +4025,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
     { icon:'👤', label:'Clients',        sub:'Clients'        },
     { icon:'📋', label:'Work Plans',     sub:'Work Plans'     },
     { icon:'📄', label:'Proposals',      sub:'Proposals'      },
+    { icon:'📖', label:'SOP',            sub:'SOP'            },
   ];
   c.innerHTML = `
     <div class="page-header">
@@ -4042,7 +4043,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
         </button>`).join('')}
     </div>
     <div class="subtab-bar">
-      ${['BK Quotes','Quotations','Partner Quotes','Partner Files','Clients','Work Plans','Proposals','Tasks'].map(s =>
+      ${['BK Quotes','Quotations','Partner Quotes','Partner Files','Clients','Work Plans','Proposals','SOP','Tasks'].map(s =>
         `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
       ).join('')}
     </div>
@@ -4112,9 +4113,322 @@ async function loadSalesContent(currentUser, currentRole, sub) {
       content.innerHTML = renderFileCollection('Proposals', 'sales-props', currentRole);
       bindFileCollection('sales-props', currentUser, 'Sales', 'Proposals');
       break;
+    case 'SOP':
+      renderSalesSOP(content);
+      break;
     case 'Tasks':
       await renderDeptTasks(content, 'Sales', currentUser, currentRole);
       break;
+  }
+}
+
+// ── Sales SOP — Inquiry → Sales Order ─────────────
+// Editable playbook. Persisted to settings/sales_sop (President-only write per
+// firestore.rules → settings); falls back to DEFAULT_SALES_SOP when no doc exists.
+// Body text supports lightweight **bold** markup; everything is escaped first.
+const SALES_SOP_ORANGE = '#e65100';
+const DEFAULT_SALES_SOP = {
+  intro: "The standard end-to-end process every Sales staff and agent follows. Each step shows who owns it and which tab to use. Follow the steps in order — don't skip review or confirmation.",
+  steps: [
+    { short:'Inquiry', title:'Inquiry Received', owner:'Sales Agent / Sales Staff', tab:'Clients',
+      desc:'Capture every incoming inquiry the moment it arrives — walk-in, phone, email, Facebook / Messenger, website, or referral.',
+      actions:[
+        'Greet the customer and acknowledge the inquiry within the day.',
+        'Log the lead in **Sales → Clients**: name, contact number, email, source, and what they are asking for.',
+        'Note the product line of interest — Barro Kitchen build, appliances, or steel.'
+      ], out:'New client / lead record created.' },
+    { short:'Qualify', title:'Qualify the Inquiry', owner:'Sales Agent / Sales Staff', tab:'Clients',
+      desc:'Understand the requirement before spending time on a quote.',
+      actions:[
+        'Confirm scope: standard product, or custom design & build?',
+        'Identify budget range, target timeline, and the decision-maker.',
+        'Flag delivery location (affects freight / installation).',
+        'Disqualify or park leads that are not a real fit — keep the pipeline clean.'
+      ], out:'Qualified requirement with clear scope.' },
+    { short:'Site Visit', title:'Site Visit & Measurement', owner:'Sales + Design', tab:'Clients · Work Plans',
+      desc:'For custom kitchen builds or fabricated steel — gather exact requirements on site. Skip for off-the-shelf items.',
+      actions:[
+        'Schedule the visit; take measurements, photos, and the customer brief.',
+        'Coordinate with **Design** for drawings / layout where a design is required.',
+        'Record findings as a Work Plan in **Sales → Work Plans**.'
+      ], out:'Site data & design brief ready for pricing.' },
+    { short:'Quote', title:'Prepare the Quotation', owner:'Sales Agent / Sales Staff', tab:'BK Quotes · Quote Builder',
+      desc:'Build the priced quotation using the system, not a manual computation.',
+      actions:[
+        'Use **Sales → BK Quotes** (Quote Builder) to price products, materials, labor, delivery, and installation.',
+        'Apply correct unit prices, quantities, and any approved discounts.',
+        'State validity period and payment terms (e.g. 50% down payment, balance before delivery).'
+      ], out:'Draft quotation saved.' },
+    { short:'Approve', title:'Internal Review & Approval', owner:'Sales Manager / Finance', tab:'Quotations',
+      desc:'No quotation leaves the company without a margin check.',
+      actions:[
+        'Manager / Finance reviews pricing, margin, discounts, and terms in **Sales → Quotations**.',
+        'Correct any error or under-priced line before it reaches the client.',
+        'Approve the quotation to release it.'
+      ], out:'Approved quotation, cleared to send.' },
+    { short:'Send', title:'Send Quotation to Client', owner:'Sales Agent / Sales Staff', tab:'Quotations',
+      desc:'Deliver the approved quote and record that it went out.',
+      actions:[
+        'Export the quotation to PDF and send via the agreed channel.',
+        'Mark the quotation as **Sent** in **Sales → Quotations** with the date.',
+        'Confirm the client received it.'
+      ], out:'Quotation sent and logged.' },
+    { short:'Follow-up', title:'Follow-up & Negotiation', owner:'Sales Agent / Sales Staff', tab:'Quotations',
+      desc:'Most deals are won in the follow-up. Stay on it.',
+      actions:[
+        'Follow up within 2–3 working days of sending.',
+        'Handle questions, revisions, and price / term negotiation.',
+        'Re-route any revised pricing back through review (Step 5) before re-sending.',
+        'Keep the quotation status current (Sent → Negotiating → Won / Lost).'
+      ], out:'Clear client decision.' },
+    { short:'Confirm', title:'Client Confirmation & Down Payment', owner:'Sales + Finance', tab:'Quotations',
+      desc:'A verbal "yes" is not an order. Secure the commitment.',
+      actions:[
+        'Obtain written confirmation: signed quotation, contract, or Purchase Order.',
+        'Collect the agreed down payment.',
+        '**Finance** verifies the payment before the order is created.'
+      ], out:'Confirmed, paid order — ready to convert.' },
+    { short:'Sales Order', title:'Create the Sales Order', owner:'Sales Agent / Sales Staff', tab:'Sales Orders',
+      desc:'Convert the won quotation into a formal Sales Order in the system.',
+      actions:[
+        'Open **Sales Orders** and create the order from the agreed quotation.',
+        'Record final items, quantities, total amount, agreed delivery date, and payment terms.',
+        'Attach the signed quote / PO and proof of down payment.'
+      ], out:'Sales Order recorded in the system.' },
+    { short:'Production', title:'Handoff to Production / Fulfillment', owner:'Sales → Production', tab:'Sales Orders · Production',
+      desc:'Close the loop — hand the order to the team that builds and delivers it.',
+      actions:[
+        'Transfer the Sales Order to **Production** from the Sales Orders tab.',
+        'Notify Design / Production and confirm the schedule.',
+        'Keep the client updated on production and delivery status.'
+      ], out:'Order in production. Sales cycle complete.' },
+  ],
+  rules: [
+    'Log **every** inquiry — an unlogged lead is a lost lead.',
+    'No quotation goes out without internal review & approval (Step 5).',
+    'No Sales Order is created without written confirmation and verified down payment (Step 8).',
+    'Keep quotation & order status current so the pipeline reflects reality.',
+    'Respond within the day; follow up within 2–3 working days.'
+  ]
+};
+
+// Escape, then apply tiny **bold** markup. Safe for President-entered content.
+function sopFmt(s){ return (window.escHtml?escHtml(s):String(s==null?'':s)).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>'); }
+function sopFmtDate(ts){
+  try{
+    const d = ts && ts.toDate ? ts.toDate()
+      : (ts instanceof Date ? ts
+      : (ts && ts.seconds ? new Date(ts.seconds*1000)
+      : (typeof ts==='string' ? new Date(ts) : null)));
+    return d ? d.toLocaleDateString('en-PH',{timeZone:'Asia/Manila',year:'numeric',month:'short',day:'numeric'}) : '';
+  }catch(_){ return ''; }
+}
+
+async function renderSalesSOP(container) {
+  container.innerHTML = '<div class="loading-placeholder">Loading SOP…</div>';
+  let data = null;
+  try {
+    const doc = await db.collection('settings').doc('sales_sop').get();
+    if (doc.exists) data = doc.data();
+  } catch(_){}
+  if (!data || !Array.isArray(data.steps) || !data.steps.length) data = DEFAULT_SALES_SOP;
+  window._salesSopData = data;
+  renderSalesSOPView(container, data);
+}
+
+function renderSalesSOPView(container, data) {
+  const O = SALES_SOP_ORANGE;
+  const steps = Array.isArray(data.steps) ? data.steps : [];
+  const rules = Array.isArray(data.rules) ? data.rules : [];
+  const canEdit = (typeof isPresident==='function' && isPresident());
+  const updated = data.updatedAt
+    ? `<div style="margin-top:8px;font-size:11px;color:var(--text-muted)">Updated ${sopFmtDate(data.updatedAt)}${data.updatedBy?(' · '+escHtml(data.updatedBy)):''}</div>`
+    : '';
+
+  container.innerHTML = `
+    <div style="background:linear-gradient(135deg,rgba(230,81,0,.14),rgba(230,81,0,.04));border:1px solid rgba(230,81,0,.35);border-radius:14px;padding:16px 18px;margin-bottom:16px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:24px">📖</span>
+          <h3 style="margin:0;font-size:17px;color:var(--text)">Sales SOP — Inquiry to Sales Order</h3>
+        </div>
+        ${canEdit?`<button class="btn-secondary btn-sm" id="sop-edit-btn" style="flex-shrink:0">✏️ Edit SOP</button>`:''}
+      </div>
+      <p style="margin:0;font-size:12.5px;color:var(--text-muted);line-height:1.6">${sopFmt(data.intro||'')}</p>
+      ${updated}
+    </div>
+
+    <!-- At-a-glance pipeline -->
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:20px;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:12px">
+      ${steps.map((s,i)=>`
+        <span style="display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:5px 11px;font-size:11px;font-weight:700;color:var(--text)">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:${O};color:#fff;font-size:10px">${i+1}</span>
+          ${escHtml(s.short||s.title||'')}
+        </span>
+        ${i<steps.length-1?`<span style="color:${O};font-weight:800">›</span>`:''}
+      `).join('')}
+    </div>
+
+    <!-- Steps -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      ${steps.map((s,i)=>`
+        <div style="display:flex;gap:14px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;border-left:4px solid ${O}">
+          <div style="flex-shrink:0;width:38px;height:38px;border-radius:50%;background:${O};color:#fff;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:800">${i+1}</div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:4px">
+              <h4 style="margin:0;font-size:15px;color:var(--text)">${escHtml(s.title||'')}</h4>
+              ${s.owner?`<span style="font-size:10.5px;font-weight:700;color:${O};background:rgba(230,81,0,.12);border:1px solid rgba(230,81,0,.3);border-radius:999px;padding:2px 9px">👤 ${escHtml(s.owner)}</span>`:''}
+              ${s.tab?`<span style="font-size:10.5px;font-weight:700;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:2px 9px">📍 ${escHtml(s.tab)}</span>`:''}
+            </div>
+            ${s.desc?`<p style="margin:0 0 8px;font-size:12.5px;color:var(--text-muted);line-height:1.55">${sopFmt(s.desc)}</p>`:''}
+            ${(Array.isArray(s.actions)&&s.actions.length)?`<ul style="margin:0 0 10px;padding-left:18px;font-size:12.5px;color:var(--text);line-height:1.7">
+              ${s.actions.map(a=>`<li>${sopFmt(a)}</li>`).join('')}
+            </ul>`:''}
+            ${s.out?`<div style="font-size:11.5px;color:var(--success);font-weight:700;background:rgba(48,209,88,.1);border-radius:8px;padding:6px 10px;display:inline-block">✓ Output: ${sopFmt(s.out)}</div>`:''}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+
+    ${rules.length?`<!-- Golden rules -->
+    <div style="margin-top:18px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px">
+      <h4 style="margin:0 0 10px;font-size:14px;color:var(--text)">⭐ Golden Rules</h4>
+      <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--text);line-height:1.8">
+        ${rules.map(r=>`<li>${sopFmt(r)}</li>`).join('')}
+      </ul>
+    </div>`:''}
+
+    <p style="text-align:center;font-size:11px;color:var(--text-muted);margin:16px 0 4px">
+      Barro Industries · Sales Department · Standard Operating Procedure
+    </p>
+  `;
+
+  if (canEdit) document.getElementById('sop-edit-btn')?.addEventListener('click', () => renderSalesSOPEditor(container, data));
+}
+
+// ── SOP editor (President only) ───────────────────
+function renderSalesSOPEditor(container, data) {
+  // Deep-clone into a working draft so Cancel discards unsaved edits.
+  window._salesSopDraft = {
+    intro: data.intro || '',
+    steps: (data.steps || []).map(s => ({
+      short:s.short||'', title:s.title||'', owner:s.owner||'', tab:s.tab||'',
+      desc:s.desc||'', actions:Array.isArray(s.actions)?s.actions.slice():[], out:s.out||''
+    })),
+    rules: Array.isArray(data.rules) ? data.rules.slice() : []
+  };
+  drawSalesSOPEditor(container);
+}
+
+function drawSalesSOPEditor(container) {
+  const d = window._salesSopDraft;
+  const O = SALES_SOP_ORANGE;
+  const fld = 'width:100%;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box;font-family:inherit';
+  const lbl = 'display:block;font-size:10.5px;font-weight:700;color:var(--text-muted);margin:8px 0 3px;text-transform:uppercase;letter-spacing:.04em';
+
+  const stepCard = (s,i) => `
+    <div class="sop-step-edit" data-si="${i}" style="background:var(--surface);border:1px solid var(--border);border-left:4px solid ${O};border-radius:12px;padding:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <span style="font-weight:800;color:${O};font-size:13px">Step ${i+1}</span>
+        <span style="display:flex;gap:5px">
+          <button class="btn-secondary btn-sm sop-mv-up" data-i="${i}" title="Move up" ${i===0?'disabled':''}>↑</button>
+          <button class="btn-secondary btn-sm sop-mv-down" data-i="${i}" title="Move down" ${i===d.steps.length-1?'disabled':''}>↓</button>
+          <button class="btn-secondary btn-sm sop-rm-step" data-i="${i}" title="Remove step" style="color:#ff6b6b">🗑</button>
+        </span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><label style="${lbl}">Title</label><input data-f="title" value="${escHtml(s.title)}" style="${fld}"/></div>
+        <div><label style="${lbl}">Pipeline label (short)</label><input data-f="short" value="${escHtml(s.short)}" placeholder="e.g. Quote" style="${fld}"/></div>
+        <div><label style="${lbl}">Owner / Role</label><input data-f="owner" value="${escHtml(s.owner)}" style="${fld}"/></div>
+        <div><label style="${lbl}">System tab</label><input data-f="tab" value="${escHtml(s.tab)}" style="${fld}"/></div>
+      </div>
+      <label style="${lbl}">Description</label>
+      <textarea data-f="desc" rows="2" style="${fld};resize:vertical">${escHtml(s.desc)}</textarea>
+      <label style="${lbl}">Actions (one per line)</label>
+      <textarea data-f="actions" rows="3" style="${fld};resize:vertical">${escHtml((s.actions||[]).join('\n'))}</textarea>
+      <label style="${lbl}">Output</label>
+      <input data-f="out" value="${escHtml(s.out)}" style="${fld}"/>
+    </div>`;
+
+  container.innerHTML = `
+    <div style="background:rgba(230,81,0,.08);border:1px solid rgba(230,81,0,.3);border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--text-muted)">
+      ✏️ <b style="color:var(--text)">Editing Sales SOP.</b> Changes are visible to everyone once saved. Use <code>**bold**</code> for emphasis.
+    </div>
+
+    <label style="${lbl}">Intro</label>
+    <textarea id="sop-intro" rows="3" style="${fld};resize:vertical">${escHtml(d.intro)}</textarea>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px">
+      <h4 style="margin:0;font-size:14px;color:var(--text)">Steps (${d.steps.length})</h4>
+      <button class="btn-secondary btn-sm" id="sop-add-step">+ Add step</button>
+    </div>
+    <div id="sop-steps-edit" style="display:flex;flex-direction:column;gap:12px">
+      ${d.steps.map((s,i)=>stepCard(s,i)).join('')}
+    </div>
+
+    <label style="${lbl};margin-top:18px">Golden Rules (one per line)</label>
+    <textarea id="sop-rules" rows="6" style="${fld};resize:vertical">${escHtml((d.rules||[]).join('\n'))}</textarea>
+
+    <div style="display:flex;gap:8px;margin-top:18px;position:sticky;bottom:0;background:var(--bg);padding:10px 0">
+      <button class="btn-primary btn-sm" id="sop-save">💾 Save SOP</button>
+      <button class="btn-secondary btn-sm" id="sop-cancel">Cancel</button>
+    </div>
+  `;
+
+  document.getElementById('sop-add-step')?.addEventListener('click', () => {
+    salesSopGatherDOM();
+    d.steps.push({ short:'', title:'New Step', owner:'', tab:'', desc:'', actions:[], out:'' });
+    drawSalesSOPEditor(container);
+  });
+  document.getElementById('sop-save')?.addEventListener('click', () => salesSopSave(container));
+  document.getElementById('sop-cancel')?.addEventListener('click', () => renderSalesSOPView(container, window._salesSopData || DEFAULT_SALES_SOP));
+  container.querySelectorAll('.sop-rm-step').forEach(b => b.addEventListener('click', () => {
+    salesSopGatherDOM(); d.steps.splice(+b.dataset.i, 1); drawSalesSOPEditor(container);
+  }));
+  container.querySelectorAll('.sop-mv-up').forEach(b => b.addEventListener('click', () => {
+    salesSopGatherDOM(); const i=+b.dataset.i; if(i>0){ const t=d.steps[i-1]; d.steps[i-1]=d.steps[i]; d.steps[i]=t; } drawSalesSOPEditor(container);
+  }));
+  container.querySelectorAll('.sop-mv-down').forEach(b => b.addEventListener('click', () => {
+    salesSopGatherDOM(); const i=+b.dataset.i; if(i<d.steps.length-1){ const t=d.steps[i+1]; d.steps[i+1]=d.steps[i]; d.steps[i]=t; } drawSalesSOPEditor(container);
+  }));
+}
+
+// Read the editor inputs back into the working draft (preserves edits across redraws).
+function salesSopGatherDOM() {
+  const d = window._salesSopDraft; if (!d) return;
+  const introEl = document.getElementById('sop-intro'); if (introEl) d.intro = introEl.value;
+  const rulesEl = document.getElementById('sop-rules'); if (rulesEl) d.rules = rulesEl.value.split('\n').map(x=>x.trim()).filter(Boolean);
+  document.querySelectorAll('.sop-step-edit').forEach(card => {
+    const i = +card.dataset.si; const st = d.steps[i]; if (!st) return;
+    card.querySelectorAll('[data-f]').forEach(inp => {
+      const f = inp.dataset.f;
+      if (f === 'actions') st.actions = inp.value.split('\n').map(x=>x.trim()).filter(Boolean);
+      else st[f] = inp.value;
+    });
+  });
+}
+
+async function salesSopSave(container) {
+  salesSopGatherDOM();
+  const d = window._salesSopDraft;
+  // Drop fully-empty steps.
+  d.steps = (d.steps||[]).filter(s => (s.title||'').trim() || (s.desc||'').trim() || (s.actions||[]).length);
+  const btn = document.getElementById('sop-save');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    await db.collection('settings').doc('sales_sop').set({
+      intro: d.intro||'', steps: d.steps, rules: d.rules||[],
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: (typeof currentUser!=='undefined' && currentUser && currentUser.email) || ''
+    }, { merge:true });
+    const fresh = { intro:d.intro||'', steps:d.steps, rules:d.rules||[],
+      updatedAt: new Date(), updatedBy: (typeof currentUser!=='undefined' && currentUser && currentUser.email) || '' };
+    window._salesSopData = fresh;
+    window.Notifs?.showToast?.('SOP saved');
+    renderSalesSOPView(container, fresh);
+  } catch(e) {
+    window.Notifs?.showToast?.('Save failed — ' + (e?.message||e));
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Save SOP'; }
   }
 }
 
