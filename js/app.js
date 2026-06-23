@@ -798,7 +798,7 @@ function getSidebarItems() {
     items.push({ icon:'search',        label:'Search',           page:'search'                         });
     items.push({ icon:'check-square',  label:'Tasks',            page:'tasks'                          });
     items.push({ icon:'megaphone',     label:'Posts',            page:'posts'                          });
-    items.push({ icon:'clipboard-check', label:'Memos',          page:'memos'                          });
+    items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
     items.push({ icon:'shield-check',  label:'Approvals',        page:'approvals',       section:true  });
     items.push({ icon:'trending-up',   label:'Progress Reports', page:'progress'                       });
     items.push({ icon:'users',         label:'Team Directory',   page:'team-directory',  section:true  });
@@ -813,7 +813,7 @@ function getSidebarItems() {
       items.push({ icon:'package',       label:'Product Database', page:'product-database', section:true, sectionLabel:'Catalog' });
       items.push({ icon:'scroll-text',   label:'Audit Log',        page:'audit-log',       section:true, sectionLabel:'Security' });
     }
-    // (Leave, Company, SOPs, Help moved into the profile drawer's "More" section)
+    // (Leave, SOPs, Help moved into the profile drawer's "More" section)
   } else if (partner) {
     // ── External Partner role ──
     items.push({ icon:'check-square', label:'My Tasks',      page:'tasks'            });
@@ -834,7 +834,7 @@ function getSidebarItems() {
     items.push({ icon:'search',       label:'Search',   page:'search' });
     items.push({ icon:'check-square', label:'My Tasks', page:'tasks' });
     items.push({ icon:'megaphone',    label:'Posts',    page:'posts' });
-    items.push({ icon:'clipboard-check', label:'Memos', page:'memos' });
+    items.push({ icon:'building-2',   label:'Company',  page:'company' });
     // Departments — appear ABOVE management section
     currentDepts.forEach((dept, i) => {
       const cfg = DEPARTMENTS[dept];
@@ -848,7 +848,7 @@ function getSidebarItems() {
     if ((currentDepts||[]).includes('Production')) items.push({ icon:'boxes', label:'Inventory', page:'inventory' });
     if ((currentDepts||[]).some(d=>['Sales','Production','Finance'].includes(d)) || currentRole==='finance') items.push({ icon:'trending-up', label:'Projects', page:'projects-lifecycle' });
     if ((currentDepts||[]).includes('Finance') || currentRole==='finance') items.push({ icon:'receipt', label:'Sales Orders', page:'sales-orders' });
-    // (Leave, Company, SOPs, Help moved into the profile drawer's "More" section)
+    // (Leave, SOPs, Help moved into the profile drawer's "More" section)
   }
   return items;
 }
@@ -6589,13 +6589,11 @@ function openProfileDrawer() {
     <div class="profile-section-label">MORE</div>
     <div class="profile-inset-card" style="padding:4px 8px">
       ${(() => {
-        const isAdm = (typeof isPresident==='function' && isPresident()) || currentRole==='manager';
         const isPartnerU = (typeof isPartner==='function' && isPartner()) || (typeof isBrilliantOnly==='function' && isBrilliantOnly());
         const links = [
           { icon:'🌴', label:'Leave', page:'leave', hide: isPartnerU },
           { icon:'📅', label:'Attendance', page:'attendance', hide: isPartnerU },
           { icon:'📖', label:'SOPs', page:'sops' },
-          { icon:'🏢', label:'Company', page:'company', hide: !isAdm },
           { icon:'❓', label:'Help & Guide', page:'help' },
         ].filter(l => !l.hide);
         return links.map(l=>`<button class="profile-shortcut-btn" data-page="${l.page}" style="display:flex;align-items:center;gap:12px;width:100%;background:none;border:none;border-bottom:1px solid var(--border);padding:13px 6px;cursor:pointer;color:var(--text);font-size:14px;text-align:left"><span style="font-size:18px;width:22px;text-align:center">${l.icon}</span>${l.label}</button>`).join('');
