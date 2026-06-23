@@ -795,7 +795,6 @@ function getSidebarItems() {
   if (pres) {
     // ── Admin / President Command Center ──
     items.push({ icon:'bar-chart-2',   label:'Analytics',        page:'analytics',       section:false });
-    items.push({ icon:'search',        label:'Search',           page:'search'                         });
     items.push({ icon:'check-square',  label:'Tasks',            page:'tasks'                          });
     items.push({ icon:'megaphone',     label:'Posts',            page:'posts'                          });
     items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
@@ -831,7 +830,6 @@ function getSidebarItems() {
     items.push({ icon:'folder',      label:'Files',         page:'bs-files'         });
   } else {
     // ── Employee / Agent / Finance ──
-    items.push({ icon:'search',       label:'Search',   page:'search' });
     items.push({ icon:'check-square', label:'My Tasks', page:'tasks' });
     items.push({ icon:'megaphone',    label:'Posts',    page:'posts' });
     items.push({ icon:'building-2',   label:'Company',  page:'company' });
