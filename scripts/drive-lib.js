@@ -36,8 +36,34 @@ function requireEnv(name) {
   return v;
 }
 
-// ── Init Drive + return the service-account email (what to share with) ───────
+// ── Init Drive — two supported auth modes ────────────────────────────────────
+//
+//  OAuth user credentials (preferred for a personal @gmail.com):
+//    set GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET / GOOGLE_OAUTH_REFRESH_TOKEN.
+//    Files are owned by the real user, using their ~15 GB Drive quota — so a
+//    plain My-Drive folder works and there is no service-account quota wall.
+//    (Generate the refresh token once with: node scripts/get-drive-token.js)
+//
+//  Service account (only works with a Shared Drive — needs Google Workspace):
+//    set GOOGLE_SERVICE_ACCOUNT. A service account has no My-Drive quota, so
+//    the destination MUST be inside a Shared Drive the SA can write to.
+//
+//  OAuth wins if a refresh token is present; otherwise we fall back to the SA.
 function initDrive() {
+  const refreshToken = (process.env.GOOGLE_OAUTH_REFRESH_TOKEN || '').trim();
+
+  if (refreshToken) {
+    const clientId     = requireEnv('GOOGLE_OAUTH_CLIENT_ID');
+    const clientSecret = requireEnv('GOOGLE_OAUTH_CLIENT_SECRET');
+    const oauth2 = new google.auth.OAuth2(clientId, clientSecret);
+    oauth2.setCredentials({ refresh_token: refreshToken });
+    return {
+      drive: google.drive({ version: 'v3', auth: oauth2 }),
+      authMode: 'oauth',
+      ownerLabel: 'OAuth user account (uses that user\'s Drive quota)',
+    };
+  }
+
   const raw = requireEnv('GOOGLE_SERVICE_ACCOUNT');
   let creds;
   try {
@@ -53,15 +79,18 @@ function initDrive() {
   });
   return {
     drive: google.drive({ version: 'v3', auth }),
-    serviceAccountEmail: creds.client_email || '(unknown — check the JSON)',
+    authMode: 'service_account',
+    ownerLabel: creds.client_email || '(unknown — check the JSON)',
   };
 }
 
 // ── Preflight: prove we can actually write to the root folder ────────────────
 // Exits the process (code 2) with a precise fix if anything is wrong.
-async function preflight(drive, rootFolderId, saEmail) {
+async function preflight(drive, rootFolderId, authMode, ownerLabel) {
+  const isOAuth = authMode === 'oauth';
   console.log(`\n🔧 Drive preflight`);
-  console.log(`   Service account : ${saEmail}`);
+  console.log(`   Auth mode       : ${isOAuth ? 'OAuth user credentials ✅' : 'service account'}`);
+  console.log(`   Uploading as    : ${ownerLabel}`);
   console.log(`   DRIVE_FOLDER_ID : ${rootFolderId}`);
 
   // A bare folder ID has no slash/scheme/space. A pasted URL or quoted value is the usual mistake.
@@ -94,31 +123,40 @@ async function preflight(drive, rootFolderId, saEmail) {
     console.log(`   ✓ Folder reachable: "${f.name}" ${isShared ? '(Shared Drive ✅)' : '(personal My Drive ⚠️)'}`);
 
     if (f.capabilities && f.capabilities.canAddChildren === false) {
-      console.error(`\n❌ The service account can SEE "${f.name}" but cannot ADD files to it.`);
-      console.error(`   → Share the folder with ${saEmail}`);
-      console.error(`     and set its access to "Editor" (My Drive) / "Content manager" (Shared Drive).`);
+      console.error(`\n❌ Can SEE "${f.name}" but cannot ADD files to it.`);
+      if (isOAuth) {
+        console.error(`   → Sign in for the refresh token as a user who can edit this folder.`);
+      } else {
+        console.error(`   → Share the folder with ${ownerLabel}`);
+        console.error(`     and set its access to "Editor" (My Drive) / "Content manager" (Shared Drive).`);
+      }
       process.exit(2);
     }
 
-    if (!isShared) {
+    // The My-Drive quota wall only applies to service accounts. OAuth uploads
+    // as a real user, so a personal My-Drive folder is perfectly fine.
+    if (!isShared && !isOAuth) {
       console.warn(`\n⚠️  "${f.name}" is in a personal My Drive, not a Shared Drive.`);
       console.warn(`   Service accounts have NO My-Drive storage quota, so file uploads may fail with`);
-      console.warn(`   "Service Accounts do not have storage quota." If you see that below, the fix is:`);
-      console.warn(`     1. Create a Shared Drive in Google Drive.`);
-      console.warn(`     2. Add ${saEmail} as a "Content manager".`);
-      console.warn(`     3. Point DRIVE_FOLDER_ID at a folder inside that Shared Drive.`);
+      console.warn(`   "Service Accounts do not have storage quota." If you see that below, either:`);
+      console.warn(`     • switch to OAuth (set GOOGLE_OAUTH_* secrets — works on a personal Gmail), or`);
+      console.warn(`     • move the folder into a Shared Drive (needs Google Workspace) and add`);
+      console.warn(`       ${ownerLabel} as a "Content manager".`);
     }
 
     return { isShared, name: f.name };
   } catch (e) {
     const code = e.code || (e.response && e.response.status) || '?';
     console.error(`\n❌ Drive cannot open folder id "${rootFolderId}" (HTTP ${code}): ${e.message}`);
-    console.error(`   The three usual causes:`);
-    console.error(`   1) Not shared with the service account →`);
-    console.error(`      open the folder in Drive → Share → add ${saEmail} as Editor / Content manager.`);
-    console.error(`   2) Wrong id → DRIVE_FOLDER_ID must be the bare id after /folders/ in the URL.`);
-    console.error(`   3) Shared Drive but the service account isn't a member →`);
-    console.error(`      add ${saEmail} to the Shared Drive itself, then share the folder.`);
+    if (isOAuth) {
+      console.error(`   → Check DRIVE_FOLDER_ID is the bare id (after /folders/) and that the`);
+      console.error(`     account you authorised can open that folder.`);
+    } else {
+      console.error(`   The usual causes:`);
+      console.error(`   1) Not shared with the service account → Drive → Share → add ${ownerLabel}.`);
+      console.error(`   2) Wrong id → DRIVE_FOLDER_ID must be the bare id after /folders/ in the URL.`);
+      console.error(`   3) Shared Drive but the SA isn't a member → add ${ownerLabel} to the Shared Drive.`);
+    }
     process.exit(2);
   }
 }

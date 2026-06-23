@@ -50,8 +50,8 @@ admin.initializeApp({
 });
 const db = admin.firestore();
 
-// ── Init Google Drive (Shared-Drive aware; see drive-lib.js) ─────────────────
-const { drive, serviceAccountEmail } = initDrive();
+// ── Init Google Drive (OAuth- or Shared-Drive-aware; see drive-lib.js) ───────
+const { drive, authMode, ownerLabel } = initDrive();
 const ROOT_FOLDER_ID = requireEnv('DRIVE_FOLDER_ID');
 
 // ── Drive helpers (thin wrappers around the shared, Shared-Drive-safe lib) ───
@@ -273,7 +273,7 @@ async function main() {
   console.log(`   Range    : ${start.toISOString()} → ${end.toISOString()}\n`);
 
   // Fail loud with an exact fix if the Drive destination is misconfigured.
-  await preflight(drive, ROOT_FOLDER_ID, serviceAccountEmail);
+  await preflight(drive, ROOT_FOLDER_ID, authMode, ownerLabel);
 
   // Ensure folder structure: BI-Operations / Monthly Backups / YYYY-MM
   const backupRoot  = await ensureFolder('Monthly Backups', ROOT_FOLDER_ID);

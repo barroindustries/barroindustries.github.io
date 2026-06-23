@@ -55,7 +55,7 @@ admin.initializeApp({
 const db = admin.firestore();
 
 // ── Init Drive ────────────────────────────────────────────────────────────────
-const { drive, serviceAccountEmail } = initDrive();
+const { drive, authMode, ownerLabel } = initDrive();
 const ROOT_FOLDER_ID = requireEnv('DRIVE_FOLDER_ID');
 
 // ── Folder naming ──────────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ async function main() {
   console.log(`\n🚀 Barro Industries — Daily File Sync`);
 
   // Fail loud with an exact fix if the Drive destination is misconfigured.
-  await preflight(drive, ROOT_FOLDER_ID, serviceAccountEmail);
+  await preflight(drive, ROOT_FOLDER_ID, authMode, ownerLabel);
 
   const filesRoot = await ensureFolder(drive, 'Files', ROOT_FOLDER_ID);
 
