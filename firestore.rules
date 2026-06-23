@@ -215,6 +215,16 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
+    // ── Salary raises (audit log of pay increases) ─────
+    // Finance/admin grant & manage; the affected app-user may read their own.
+    match /salary_raises/{docId} {
+      allow read: if isAuth() && (
+        resource.data.subjectId == request.auth.uid || isFinanceOrAdmin()
+      );
+      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
+    }
+
     // ── Payroll CA overrides ───────────────────────────
     match /payroll_ca_overrides/{docId} {
       allow read: if isAuth() && (

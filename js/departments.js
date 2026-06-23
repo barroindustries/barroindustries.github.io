@@ -2006,6 +2006,25 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       </tr>`;
     }).join('');
 
+    tbody.querySelectorAll('.raise-emp-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const emp = employees.find(u=>u.id===btn.dataset.uid);
+        if (!emp) return;
+        openSalaryRaiseModal({
+          subjectType: 'payroll',
+          subjectId:   emp.id,
+          subjectName: emp.displayName || emp.email,
+          fieldLabel:  'Base Salary',
+          current:     emp.salary || 0,
+          applyRaise:  async (nv) => {
+            // Base salary lives in the protected payroll/{uid} doc, not the users doc.
+            await db.collection('payroll').doc(emp.id).set({ salary: nv }, { merge:true });
+            emp.salary = nv; // keep in-memory row fresh for the reload below
+          }
+        }, currentUser, () => loadPayrollTable(month));
+      });
+    });
+
     tbody.querySelectorAll('.edit-emp-pay-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         const uid        = btn.dataset.uid;
@@ -2075,6 +2094,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 
   loadPayrollTable(thisMonth);
   document.getElementById('pr-month-sel').addEventListener('change', e => loadPayrollTable(e.target.value));
+  document.getElementById('raise-history-btn')?.addEventListener('click', () => openRaiseHistory());
 
   document.getElementById('gen-payroll-btn').addEventListener('click', async () => {
     const month = document.getElementById('pr-month-sel').value;
@@ -2971,6 +2991,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
     ${isPriv?`<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
       <button class="btn-primary btn-sm" id="hrp-add-btn">+ Add Worker Profile</button>
       <button class="btn-secondary btn-sm" id="hrp-payslip-history-btn">📄 All Payslips</button>
+      <button class="btn-secondary btn-sm" id="hrp-raise-history-btn">💸 Raise History</button>
     </div>`:''}
     <div class="card">
       <div class="card-header"><h3>👷 Worker Profiles</h3></div>
@@ -2990,6 +3011,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
               <td><span class="badge ${p.status==='active'?'badge-green':'badge-gray'}">${p.status||'active'}</span></td>
               <td style="white-space:nowrap">
                 <button class="btn-primary btn-sm hrp-gen-btn" data-id="${p.id}" style="margin-right:4px">📄 Payslip</button>
+                ${isPriv?`<button class="btn-secondary btn-sm hrp-raise-btn" data-id="${p.id}" title="Give raise" style="margin-right:4px">💸 Raise</button>`:''}
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-edit-btn" data-id="${p.id}">✎ Edit</button>`:''}
                 ${isPriv?`<button class="btn-danger btn-sm hrp-del-btn" data-id="${p.id}" data-label="${escHtml(p.name||p.id.slice(-5))}" style="margin-left:4px">🗑</button>`:''}
               </td>
@@ -3004,6 +3026,34 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
   if (isPriv) {
     document.getElementById('hrp-add-btn')?.addEventListener('click', () => openHRProfileForm(null, currentUser, currentRole, ()=>renderFinanceHRProfiles(container,currentUser,currentRole)));
     document.getElementById('hrp-payslip-history-btn')?.addEventListener('click', () => openPayslipHistory(currentUser, currentRole));
+    document.getElementById('hrp-raise-history-btn')?.addEventListener('click', () => openRaiseHistory());
+
+    container.querySelectorAll('.hrp-raise-btn').forEach(btn => {
+      const profile = profiles.find(p=>p.id===btn.dataset.id);
+      btn.addEventListener('click', () => {
+        if (!profile) return;
+        const curDaily = profile.dailyRate || 0;
+        openSalaryRaiseModal({
+          subjectType: 'worker_profile',
+          subjectId:   profile.id,
+          subjectName: profile.name || 'Worker',
+          fieldLabel:  'Daily Rate',
+          current:     curDaily,
+          applyRaise:  async (nv) => {
+            // Scale hourly by the same ratio so any custom daily↔hourly relationship
+            // is preserved; fall back to nv/8 when there's no prior daily rate.
+            const newHourly = curDaily > 0
+              ? +(((profile.hourlyRate||0) * (nv / curDaily))).toFixed(2)
+              : +(nv / 8).toFixed(2);
+            await db.collection('worker_profiles').doc(profile.id).update({
+              dailyRate: nv,
+              hourlyRate: newHourly,
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          }
+        }, currentUser, () => renderFinanceHRProfiles(container,currentUser,currentRole));
+      });
+    });
 
     container.querySelectorAll('.hrp-edit-btn').forEach(btn => {
       const profile = profiles.find(p=>p.id===btn.dataset.id);
