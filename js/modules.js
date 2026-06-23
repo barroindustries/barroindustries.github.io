@@ -341,11 +341,15 @@ window.renderTeamTab = async function() {
   const c = document.getElementById('page-content');
   const pres = currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance';
   const viewingAsPartner = typeof isPartner === 'function' && isPartner();
+  // Employee of the Month is a Barro Industries-only recognition: hidden from the
+  // external partner (Brilliant Steel) view, and only the President can set it.
+  const canManageEom = currentRole === 'president' && !viewingAsPartner;
   c.innerHTML = `
     <div class="page-header">
       <h2>👥 Team</h2>
       ${pres && !viewingAsPartner ? '<button class="btn-primary btn-sm" id="invite-user-btn">+ Invite Member</button>' : ''}
     </div>
+    ${!viewingAsPartner ? '<div id="eom-banner"></div>' : ''}
     <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
       <input id="team-search" placeholder="Search name, role or department…" class="ms-input" style="max-width:320px"/>
       <button class="btn-secondary btn-sm" id="set-note-btn" style="white-space:nowrap">✏️ Set My Note</button>
@@ -373,6 +377,8 @@ window.renderTeamTab = async function() {
     });
 
   renderTeamCards(users, currentUser);
+
+  if (!viewingAsPartner) renderEomBanner(users, canManageEom);
 
   document.getElementById('team-search').addEventListener('input', e => {
     const q = e.target.value.toLowerCase();
@@ -472,6 +478,141 @@ window.renderTeamTab = async function() {
     });
   }
 };
+
+// ── Employee of the Month (Barro Industries only) ─────────────────────
+// Stored as a single doc settings/employeeOfMonth (rules: read=any auth,
+// write/delete=President only). Snapshots name/photo/role at award time so it
+// survives profile changes, but prefers live user data when still on the team.
+function eomMonthLabel(ym) {
+  if (!ym || !/^\d{4}-\d{2}$/.test(ym)) return '';
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' });
+}
+
+async function renderEomBanner(users, canManage) {
+  const host = document.getElementById('eom-banner');
+  if (!host) return;
+  let eom = null;
+  try {
+    const doc = await db.collection('settings').doc('employeeOfMonth').get();
+    eom = doc.exists ? doc.data() : null;
+  } catch (e) { /* read failure → render nothing (or the empty prompt for President) */ }
+
+  if (!eom || !eom.uid) {
+    host.innerHTML = canManage ? `
+      <div class="eom-banner eom-banner--empty">
+        <div class="eom-empty-icon">🏆</div>
+        <div class="eom-empty-text">
+          <strong>Employee of the Month</strong>
+          <span>Recognise a standout Barro Industries team member.</span>
+        </div>
+        <button class="btn-primary btn-sm" id="eom-set-btn">Set Awardee</button>
+      </div>` : '';
+    document.getElementById('eom-set-btn')?.addEventListener('click', () => openEomModal(users, eom));
+    return;
+  }
+
+  // Prefer live profile (fresher photo/name) but fall back to the stored snapshot.
+  const live = users.find(u => u.id === eom.uid);
+  const name = live?.displayName || eom.displayName || eom.email || 'Team member';
+  const photoUrl = live?.photoUrl || eom.photoUrl || '';
+  const role = live?.role || eom.role;
+  const roleLabel = window.ROLES?.[role]?.label || role || 'Employee';
+  const deptsArr = live
+    ? (Array.isArray(live.departments) && live.departments.length ? live.departments : (live.department ? [live.department] : []))
+    : (eom.departments || []);
+  const depts = deptsArr.join(' · ') || 'Barro Industries';
+  const initials = (name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+
+  host.innerHTML = `
+    <div class="eom-banner">
+      <div class="eom-ribbon">🏆 Employee of the Month${eom.month ? ` · ${escHtml(eomMonthLabel(eom.month))}` : ''}</div>
+      <div class="eom-body">
+        <div class="eom-avatar">
+          ${photoUrl ? `<img src="${escHtml(photoUrl)}" alt="${escHtml(name)}"/>` : `<span>${escHtml(initials)}</span>`}
+        </div>
+        <div class="eom-info">
+          <div class="eom-name">${escHtml(name)}</div>
+          <div class="eom-role">${escHtml(roleLabel)} · ${escHtml(depts)}</div>
+          ${eom.reason ? `<div class="eom-reason">“${escHtml(eom.reason)}”</div>` : ''}
+        </div>
+        ${canManage ? `<button class="eom-edit-btn" id="eom-set-btn" title="Change awardee">✏️</button>` : ''}
+      </div>
+    </div>`;
+  document.getElementById('eom-set-btn')?.addEventListener('click', () => openEomModal(users, eom));
+}
+
+function openEomModal(users, current) {
+  // Candidates: internal Barro Industries staff only — exclude external partners
+  // and Brilliant Steel-only members (the award is Barro Industries-specific).
+  const candidates = users
+    .filter(u => u.role !== 'partner'
+      && !(Array.isArray(u.departments) && u.departments.length === 1 && u.departments[0] === 'Brilliant Steel'))
+    .sort((a, b) => (a.displayName || a.email || '').localeCompare(b.displayName || b.email || ''));
+
+  const curUid = current?.uid || '';
+  const curReason = current?.reason || '';
+  openModal('🏆 Employee of the Month', `
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Recognise an outstanding Barro Industries team member. Shown to everyone on the Team page.</p>
+    <div class="form-group">
+      <label>Awardee</label>
+      <select id="eom-user" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+        <option value="">— Select a team member —</option>
+        ${candidates.map(u => `<option value="${u.id}" ${u.id === curUid ? 'selected' : ''}>${escHtml(u.displayName || u.email)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Citation <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
+      <textarea id="eom-reason" maxlength="160" rows="2" placeholder="e.g. Outstanding dedication on the Q2 production rollout." style="width:100%;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);resize:vertical;font-family:inherit">${escHtml(curReason)}</textarea>
+    </div>
+  `, `<button class="btn-primary" id="eom-save-btn">Save</button>${curUid ? '<button class="btn-secondary" id="eom-clear-btn">Clear Award</button>' : '<button class="btn-secondary" onclick="closeModal()">Cancel</button>'}`);
+
+  document.getElementById('eom-save-btn').addEventListener('click', async () => {
+    const uid = document.getElementById('eom-user').value;
+    if (!uid) { Notifs.showToast('Select a team member.', 'error'); return; }
+    const u = users.find(x => x.id === uid);
+    if (!u) { Notifs.showToast('User not found.', 'error'); return; }
+    const reason = document.getElementById('eom-reason').value.trim();
+    const month = window.bizDate().slice(0, 7);
+    try {
+      await db.collection('settings').doc('employeeOfMonth').set({
+        uid,
+        displayName: u.displayName || u.email || '',
+        email: u.email || '',
+        photoUrl: u.photoUrl || '',
+        role: u.role || 'employee',
+        departments: Array.isArray(u.departments) && u.departments.length ? u.departments : (u.department ? [u.department] : []),
+        reason,
+        month,
+        setBy: currentUser.uid,
+        setByName: window.userProfile?.displayName || currentUser?.displayName || '',
+        setAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      closeModal();
+      Notifs.showToast(`${u.displayName || u.email} is Employee of the Month! 🏆`);
+      // Congratulate the awardee (skip if the President named themselves).
+      if (uid !== currentUser.uid && Notifs?.send) {
+        Notifs.send(uid, {
+          title: '🏆 Employee of the Month!',
+          body: `Congratulations! You've been named Barro Industries Employee of the Month for ${eomMonthLabel(month)}.`,
+          icon: '🏆', type: 'award',
+          dedupKey: `eom-${uid}-${month}`
+        });
+      }
+      window.renderTeamTab();
+    } catch (err) { Notifs.showToast('Error: ' + err.message, 'error'); }
+  });
+
+  document.getElementById('eom-clear-btn')?.addEventListener('click', async () => {
+    if (!confirm('Clear the current Employee of the Month?')) return;
+    try {
+      await db.collection('settings').doc('employeeOfMonth').delete();
+      closeModal();
+      Notifs.showToast('Award cleared.');
+      window.renderTeamTab();
+    } catch (err) { Notifs.showToast('Error: ' + err.message, 'error'); }
+  });
+}
 
 function showCallingCard(u) {
   const roleLabel = window.ROLES?.[u.role]?.label || u.role || 'Employee';

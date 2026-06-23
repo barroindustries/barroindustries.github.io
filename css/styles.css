@@ -2923,6 +2923,50 @@ html.light .topbar-brand-sub, html.theme-pink .topbar-brand-sub, html.theme-grey
 html.light .team-member-card, html.theme-pink .team-member-card, html.theme-grey .team-member-card { background: rgba(255,255,255,0.7); border-color: rgba(0,0,0,0.1); }
 html.light .team-member-card:hover, html.theme-pink .team-member-card:hover, html.theme-grey .team-member-card:hover { border-color: var(--primary); }
 
+/* ── Employee of the Month (Barro Industries) ── */
+.eom-banner {
+  position: relative;
+  border-radius: 20px;
+  margin-bottom: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(255,196,0,0.35);
+  background: linear-gradient(135deg, rgba(255,196,0,0.16) 0%, rgba(255,138,0,0.10) 45%, rgba(255,255,255,0.04) 100%);
+  backdrop-filter: var(--glass-blur-sm, blur(16px) saturate(140%));
+  -webkit-backdrop-filter: var(--glass-blur-sm, blur(16px) saturate(140%));
+  box-shadow: 0 10px 30px rgba(255,170,0,0.12);
+}
+.eom-ribbon {
+  font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  color: #FFB800; padding: 11px 16px 0;
+}
+.eom-body { display: flex; align-items: center; gap: 14px; padding: 8px 16px 16px; }
+.eom-avatar {
+  flex: 0 0 auto;
+  width: 62px; height: 62px; border-radius: 50%;
+  background: linear-gradient(135deg, #FFB800 0%, #FF8A00 100%);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 800; color: #fff; overflow: hidden;
+  border: 2.5px solid rgba(255,196,0,0.5);
+  box-shadow: 0 6px 18px rgba(255,138,0,0.35);
+}
+.eom-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+.eom-info { flex: 1 1 auto; min-width: 0; }
+.eom-name { font-size: 17px; font-weight: 800; color: var(--text); line-height: 1.2; }
+.eom-role { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-top: 3px; }
+.eom-reason { font-size: 12.5px; color: var(--text); opacity: .85; font-style: italic; margin-top: 6px; line-height: 1.4; }
+.eom-edit-btn {
+  flex: 0 0 auto; align-self: flex-start;
+  background: rgba(255,255,255,0.1); border: 1px solid var(--glass-border, rgba(255,255,255,0.15));
+  border-radius: 8px; padding: 5px 9px; cursor: pointer; font-size: 13px; line-height: 1;
+  transition: background .15s;
+}
+.eom-edit-btn:hover { background: rgba(255,196,0,0.25); }
+.eom-banner--empty { display: flex; align-items: center; gap: 14px; padding: 16px; }
+.eom-empty-icon { font-size: 28px; flex: 0 0 auto; }
+.eom-empty-text { flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
+.eom-empty-text strong { font-size: 14px; color: var(--text); }
+.eom-empty-text span { font-size: 12px; color: var(--text-muted); }
+
 /* ── Attendance Calendar ────────────────────── */
 .att-cal-grid {
   display: grid;
