@@ -5,300 +5,228 @@
  * Runs via GitHub Actions every day at 12:00 AM Philippine Time (UTC+8).
  *
  * What it does:
- *   - Scans all Firestore collections for Firebase Storage file URLs
- *   - Downloads each new file and uploads it to Google Drive
- *   - Stores files in organized subfolders:
+ *   - Walks EVERY Firestore collection (and one level of subcollections),
+ *     finding any Firebase Storage URL anywhere in a document — at the root,
+ *     inside a field object, or inside an array (e.g. task attachments,
+ *     drawing revisions, payment receipts).
+ *   - Downloads each not-yet-synced file and uploads it to Google Drive,
+ *     organised into one subfolder per collection:
  *
- *   BI-Operations/
- *   └── Files/
- *       ├── Tasks/
- *       ├── Task Messages/
- *       ├── Posts/
- *       ├── Submissions/
- *       ├── Resources/
- *       ├── Memos/
- *       └── Quotes/
+ *       BI-Operations/
+ *       └── Files/
+ *           ├── Tasks/          ├── Submissions/   ├── Quotes/
+ *           ├── Task Messages/  ├── Posts/         ├── Memos/
+ *           ├── Resources/      ├── Drawings/      ├── Receipts/
+ *           ├── Payslips/       ├── Policies/      ├── Sales Orders/
+ *           ├── Project Payments/  └── Dept Files/  ...
  *
- *   - Updates each Firestore doc with driveUrl so it won't re-sync
+ *   - Writes the Drive link back next to the original URL so it never
+ *     re-syncs and the app can link straight to the Drive copy. The companion
+ *     key follows the existing convention:
+ *         url        → driveUrl
+ *         fileUrl    → driveFileUrl
+ *         imageUrl   → driveImageUrl     (etc.)
+ *
+ * Because it walks generically, NEW file features are covered automatically —
+ * no need to hand-register every collection (which is what previously left
+ * drawings, receipts, payslips and dept files un-synced).
  *
  * Required GitHub Secrets:
  *   FIREBASE_SERVICE_ACCOUNT  — Firebase Admin SDK JSON (stringified)
  *   GOOGLE_SERVICE_ACCOUNT    — Google Drive service account JSON (stringified)
  *   DRIVE_FOLDER_ID           — Google Drive root folder ID (BI-Operations)
- *   FIREBASE_PROJECT_ID       — e.g. barro-industries
  *   FIREBASE_STORAGE_BUCKET   — e.g. barro-industries.firebasestorage.app
  */
 
 'use strict';
 
-const admin       = require('firebase-admin');
-const { google }  = require('googleapis');
-const { Readable } = require('stream');
-const fetch       = require('node-fetch');
+const admin   = require('firebase-admin');
+const fetch   = require('node-fetch');
+const {
+  requireEnv, initDrive, preflight, ensureFolder, uploadBuffer,
+} = require('./drive-lib');
 
-// ── Init Firebase ──────────────────────────────────────────────────────────
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-
+// ── Init Firebase ────────────────────────────────────────────────────────────
+const serviceAccount = JSON.parse(requireEnv('FIREBASE_SERVICE_ACCOUNT'));
 admin.initializeApp({
   credential:    admin.credential.cert(serviceAccount),
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+  storageBucket: requireEnv('FIREBASE_STORAGE_BUCKET'),
 });
+const db = admin.firestore();
 
-const db     = admin.firestore();
-const bucket = admin.storage().bucket();
+// ── Init Drive ────────────────────────────────────────────────────────────────
+const { drive, serviceAccountEmail } = initDrive();
+const ROOT_FOLDER_ID = requireEnv('DRIVE_FOLDER_ID');
 
-// ── Init Google Drive ──────────────────────────────────────────────────────
-const driveAuth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT),
-  scopes: ['https://www.googleapis.com/auth/drive'],
-});
-const drive = google.drive({ version: 'v3', auth: driveAuth });
-
-const ROOT_FOLDER_ID = process.env.DRIVE_FOLDER_ID;
-
-// Cache folder IDs to avoid repeated Drive API lookups
-const folderCache = {};
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-async function ensureFolder(name, parentId) {
-  const key = `${parentId}::${name}`;
-  if (folderCache[key]) return folderCache[key];
-
-  const res = await drive.files.list({
-    q: `name='${name}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`,
-    fields: 'files(id)',
-  });
-  if (res.data.files.length > 0) {
-    folderCache[key] = res.data.files[0].id;
-    return folderCache[key];
-  }
-  const folder = await drive.files.create({
-    requestBody: { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] },
-    fields: 'id',
-  });
-  folderCache[key] = folder.data.id;
-  return folderCache[key];
+// ── Folder naming ──────────────────────────────────────────────────────────────
+// Friendly Drive subfolder names. Anything not listed falls back sensibly.
+const LABELS = {
+  tasks: 'Tasks', 'task-comments': 'Task Messages',
+  submissions: 'Submissions',
+  quotes: 'Quotes', bk_quotes: 'Quotes', bs_quotes: 'Quotes',
+  posts: 'Posts', memos: 'Memos', resources: 'Resources',
+  design_drawings: 'Drawings',
+  expenses: 'Receipts', payslips: 'Payslips', policies: 'Policies',
+  sales_orders: 'Sales Orders', job_projects: 'Project Payments',
+  job_costs: 'Project Payments', partner_deals: 'Partner Deals',
+};
+function titleCase(s) {
+  return s.replace(/[_-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+function labelFor(name) {
+  if (LABELS[name]) return LABELS[name];
+  if (name.startsWith('files_'))   return 'Dept Files';
+  if (name.startsWith('budgets_')) return null;   // budgets hold no files
+  return titleCase(name);
 }
 
-async function makePublic(fileId) {
+// Big / high-churn / file-less collections we never need to scan for uploads.
+const EXCLUDE = new Set([
+  'audit_log', 'attendance', 'notifications', 'presence', 'sessions',
+  'products', 'productMeta', 'inventory_items',
+]);
+
+// ── File detection + companion-key convention ───────────────────────────────
+function isFirebaseUrl(v) {
+  return typeof v === 'string' && v.includes('firebasestorage.googleapis.com');
+}
+// url → driveUrl ;  fileUrl → driveFileUrl ;  imageUrl → driveImageUrl ; …
+function companionKey(key) {
+  if (key === 'url') return 'driveUrl';
+  if (/url$/i.test(key)) return 'drive' + key.charAt(0).toUpperCase() + key.slice(1);
+  return 'drive_' + key;
+}
+// Recover the original filename from a Firebase download URL (…/o/<path>?…),
+// stripping the "<timestamp>_" prefix the uploader adds.
+function deriveName(url) {
   try {
-    await drive.permissions.create({
-      fileId,
-      requestBody: { role: 'reader', type: 'anyone' },
-    });
-  } catch (_) { /* non-fatal */ }
+    const enc  = url.split('/o/')[1].split('?')[0];
+    const base = decodeURIComponent(enc).split('/').pop();
+    return base.replace(/^\d{10,}_/, '') || 'file';
+  } catch (_) { return 'file'; }
+}
+function nameFor(obj, key, url) {
+  const sibling = obj[key.replace(/url$/i, 'Name')] || obj[key.replace(/url$/i, 'name')];
+  return sibling || obj.name || obj.fileName || deriveName(url);
 }
 
-async function downloadFile(url) {
-  const res = await fetch(url, { timeout: 30000 });
-  if (!res.ok) throw new Error(`HTTP ${res.status} downloading ${url}`);
-  const buffer = await res.buffer();
-  const contentType = res.headers.get('content-type') || 'application/octet-stream';
-  return { buffer, contentType };
-}
-
-function isFirebaseUrl(url) {
-  return url && typeof url === 'string' && url.includes('firebasestorage.googleapis.com');
-}
-
-async function uploadFile(buffer, filename, mimeType, subfolderId) {
-  const stream = Readable.from(buffer);
-  const res = await drive.files.create({
-    requestBody: { name: filename, parents: [subfolderId] },
-    media:       { mimeType: mimeType || 'application/octet-stream', body: stream },
-    fields:      'id,webViewLink',
-  });
-  await makePublic(res.data.id);
-  return res.data.webViewLink;
-}
-
-// ── Ensure top-level "Files" folder exists ─────────────────────────────────
-let FILES_FOLDER_ID = null;
-async function getFilesFolder() {
-  if (!FILES_FOLDER_ID) {
-    FILES_FOLDER_ID = await ensureFolder('Files', ROOT_FOLDER_ID);
-  }
-  return FILES_FOLDER_ID;
-}
-
-async function getFolderForCollection(collectionLabel) {
-  const parent = await getFilesFolder();
-  return ensureFolder(collectionLabel, parent);
-}
-
-// ── Sync a single file object ──────────────────────────────────────────────
-async function syncFileObject(fileObj, collectionLabel, stats) {
-  if (!fileObj || !isFirebaseUrl(fileObj.url) || fileObj.driveUrl) return null;
-
-  const filename = fileObj.name || 'file';
-  console.log(`    ↳ Syncing: ${filename}`);
-
+// ── Mirror one file to Drive ────────────────────────────────────────────────
+async function mirror(url, filename, folderId, stats) {
+  console.log(`    ↳ ${filename}`);
   try {
-    const { buffer, contentType } = await downloadFile(fileObj.url);
-    const folderId = await getFolderForCollection(collectionLabel);
-    const driveUrl = await uploadFile(buffer, filename, contentType, folderId);
+    const res = await fetch(url, { timeout: 60000 });
+    if (!res.ok) throw new Error(`HTTP ${res.status} downloading file`);
+    const buffer = await res.buffer();
+    const mime   = res.headers.get('content-type') || 'application/octet-stream';
+    const link   = await uploadBuffer(drive, buffer, filename, mime, folderId);
     stats.synced++;
-    console.log(`      ✓ ${driveUrl}`);
-    return driveUrl;
+    console.log(`      ✓ ${link}`);
+    return link;
   } catch (err) {
-    console.error(`      ✗ Failed: ${err.message}`);
+    console.error(`      ✗ ${err.message}`);
     stats.errors++;
     return null;
   }
 }
 
-// ── Collection definitions ─────────────────────────────────────────────────
-//
-//  type: 'doc'        — whole document is a file record (url field on root)
-//  type: 'field'      — single file object at data[fileField]
-//  type: 'array'      — array of file objects at data[fileField]
-//  type: 'subcol'     — must scan subcollections (task-comments)
+// ── Recursively mirror every Firebase URL inside a value (mutates in place) ──
+// Returns true if anything was added.
+async function walk(node, folderId, stats) {
+  let changed = false;
 
-const COLLECTIONS = [
-  {
-    name:   'resources',
-    label:  'Resources',
-    type:   'doc',        // whole doc: has .url, .name fields
-  },
-  {
-    name:      'memos',
-    label:     'Memos',
-    type:      'field',
-    fileField: 'attachment',
-  },
-  {
-    name:      'tasks',
-    label:     'Tasks',
-    type:      'array',
-    fileField: 'attachments',
-  },
-  {
-    name:      'submissions',
-    label:     'Submissions',
-    type:      'array',
-    fileField: 'attachments',
-  },
-  {
-    name:      'quotes',
-    label:     'Quotes',
-    type:      'array',
-    fileField: 'attachments',
-  },
-  {
-    name:      'posts',
-    label:     'Posts',
-    type:      'post',    // posts have imageUrl + fileUrl directly
-  },
-];
+  if (Array.isArray(node)) {
+    for (const el of node) {
+      if (el && typeof el === 'object') changed = await walk(el, folderId, stats) || changed;
+    }
+    return changed;
+  }
+  if (!node || typeof node !== 'object') return false;
 
-// ── Sync posts (imageUrl / fileUrl directly on doc) ────────────────────────
-async function syncPostDoc(doc, stats) {
+  // 1) Mirror file URLs found directly on this object's keys.
+  for (const [k, v] of Object.entries(node)) {
+    if (!isFirebaseUrl(v)) continue;
+    const comp = companionKey(k);
+    if (node[comp]) continue;                       // already synced
+    const link = await mirror(v, nameFor(node, k, v), folderId, stats);
+    if (link) { node[comp] = link; changed = true; }
+  }
+  // 2) Recurse into nested objects / arrays.
+  for (const v of Object.values(node)) {
+    if (v && typeof v === 'object') changed = await walk(v, folderId, stats) || changed;
+  }
+  return changed;
+}
+
+// ── Process one document ─────────────────────────────────────────────────────
+async function processDoc(doc, folderId, stats) {
   const data    = doc.data();
   const updates = {};
 
-  if (isFirebaseUrl(data.imageUrl) && !data.driveImageUrl) {
-    const fObj = { url: data.imageUrl, name: `post-${doc.id}-image` };
-    const driveUrl = await syncFileObject(fObj, 'Posts', stats);
-    if (driveUrl) updates.driveImageUrl = driveUrl;
+  for (const [k, v] of Object.entries(data)) {
+    if (isFirebaseUrl(v)) {
+      const comp = companionKey(k);
+      if (data[comp]) continue;
+      const link = await mirror(v, nameFor(data, k, v), folderId, stats);
+      if (link) updates[comp] = link;
+    } else if (v && typeof v === 'object') {
+      if (await walk(v, folderId, stats)) updates[k] = v;   // rewrite whole field
+    }
   }
-  if (isFirebaseUrl(data.fileUrl) && !data.driveFileUrl) {
-    const fObj = { url: data.fileUrl, name: data.fileName || `post-${doc.id}-file` };
-    const driveUrl = await syncFileObject(fObj, 'Posts', stats);
-    if (driveUrl) updates.driveFileUrl = driveUrl;
-  }
+
   if (Object.keys(updates).length) await doc.ref.update(updates);
 }
 
-// ── Sync task-comments subcollection ──────────────────────────────────────
-// Fetches all task subcollections in parallel instead of sequentially.
-async function syncTaskComments(stats) {
-  console.log('\n📁 Scanning subcollection: task-comments');
-  const tasksSnap = await db.collection('tasks').get();
-  console.log(`   ${tasksSnap.size} tasks to scan`);
+// ── Process a collection (and, depth permitting, its subcollections) ─────────
+async function processCollection(colRef, name, parentFolderId, depth, stats) {
+  const label = labelFor(name);
+  if (label === null) return;                         // explicitly file-less
 
-  await Promise.all(tasksSnap.docs.map(async taskDoc => {
-    const commentsSnap = await taskDoc.ref.collection('task-comments').get();
-    await Promise.all(commentsSnap.docs.map(async commentDoc => {
-      const data = commentDoc.data();
-      if (isFirebaseUrl(data.fileUrl) && !data.driveFileUrl) {
-        const fObj = { url: data.fileUrl, name: data.fileName || `comment-${commentDoc.id}` };
-        const driveUrl = await syncFileObject(fObj, 'Task Messages', stats);
-        if (driveUrl) await commentDoc.ref.update({ driveFileUrl: driveUrl });
+  const snap = await colRef.get();
+  if (snap.empty) return;
+  console.log(`\n📁 ${name} — ${snap.size} docs`);
+
+  let folderId = null;   // created lazily, only when a file is actually found
+  for (const doc of snap.docs) {
+    if (!folderId) folderId = await ensureFolder(drive, label, parentFolderId);
+    try {
+      await processDoc(doc, folderId, stats);
+    } catch (err) {
+      console.error(`  ❌ ${name}/${doc.id}: ${err.message}`);
+      stats.errors++;
+    }
+    if (depth > 0) {
+      const subs = await doc.ref.listCollections();
+      for (const sub of subs) {
+        await processCollection(sub, sub.id, parentFolderId, depth - 1, stats);
       }
-    }));
-  }));
+    }
+  }
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────
 async function main() {
-  const stats = { synced: 0, errors: 0, skipped: 0 };
-  const startedAt = new Date().toISOString();
+  const stats     = { synced: 0, errors: 0 };
+  const startedAt = Date.now();
   console.log(`\n🚀 Barro Industries — Daily File Sync`);
-  console.log(`   Started: ${startedAt}\n`);
 
-  // Process top-level collections
-  for (const col of COLLECTIONS) {
-    console.log(`\n📁 Scanning: ${col.name}`);
-    const snapshot = await db.collection(col.name).get();
-    console.log(`   ${snapshot.size} documents`);
+  // Fail loud with an exact fix if the Drive destination is misconfigured.
+  await preflight(drive, ROOT_FOLDER_ID, serviceAccountEmail);
 
-    for (const doc of snapshot.docs) {
-      const data = doc.data();
+  const filesRoot = await ensureFolder(drive, 'Files', ROOT_FOLDER_ID);
 
-      try {
-        if (col.type === 'doc') {
-          // Whole document is a file record
-          if (isFirebaseUrl(data.url) && !data.driveUrl) {
-            const fObj = { url: data.url, name: data.name || doc.id };
-            const driveUrl = await syncFileObject(fObj, col.label, stats);
-            if (driveUrl) await doc.ref.update({ driveUrl });
-          } else stats.skipped++;
+  // Discover every root collection automatically.
+  const collections = await db.listCollections();
+  console.log(`\n📚 ${collections.length} root collections discovered`);
 
-        } else if (col.type === 'field') {
-          // Single file object field
-          const fileObj = data[col.fileField];
-          if (fileObj && isFirebaseUrl(fileObj.url) && !fileObj.driveUrl) {
-            const driveUrl = await syncFileObject(fileObj, col.label, stats);
-            if (driveUrl) {
-              await doc.ref.update({ [col.fileField]: { ...fileObj, driveUrl } });
-            }
-          } else stats.skipped++;
-
-        } else if (col.type === 'array') {
-          // Array of file objects
-          const arr = data[col.fileField];
-          if (!Array.isArray(arr)) { stats.skipped++; continue; }
-          const updated = [...arr];
-          let changed = false;
-          for (let i = 0; i < updated.length; i++) {
-            const f = updated[i];
-            if (isFirebaseUrl(f.url) && !f.driveUrl) {
-              const driveUrl = await syncFileObject(f, col.label, stats);
-              if (driveUrl) { updated[i] = { ...f, driveUrl }; changed = true; }
-            } else stats.skipped++;
-          }
-          if (changed) await doc.ref.update({ [col.fileField]: updated });
-
-        } else if (col.type === 'post') {
-          await syncPostDoc(doc, stats);
-        }
-
-      } catch (err) {
-        console.error(`  ❌ ${col.name}/${doc.id}: ${err.message}`);
-        stats.errors++;
-      }
-    }
+  for (const col of collections) {
+    if (EXCLUDE.has(col.id)) continue;
+    await processCollection(col, col.id, filesRoot, 1, stats);
   }
 
-  // Sync task-comments subcollection
-  await syncTaskComments(stats);
-
-  const duration = ((Date.now() - new Date(startedAt).getTime()) / 1000).toFixed(1);
+  const duration = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(`\n${'─'.repeat(50)}`);
   console.log(`✅ Daily file sync complete`);
   console.log(`   Synced : ${stats.synced} files`);
-  console.log(`   Skipped: ${stats.skipped} (already synced)`);
   console.log(`   Errors : ${stats.errors}`);
   console.log(`   Time   : ${duration}s`);
   console.log(`${'─'.repeat(50)}\n`);

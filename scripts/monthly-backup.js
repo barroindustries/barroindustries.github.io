@@ -37,62 +37,28 @@
 
 'use strict';
 
-const admin      = require('firebase-admin');
-const { google } = require('googleapis');
-const { Readable } = require('stream');
+const admin = require('firebase-admin');
+const {
+  requireEnv, initDrive, preflight, ensureFolder: ensureFolderRaw, uploadBuffer,
+} = require('./drive-lib');
 
 // ── Init Firebase ──────────────────────────────────────────────────────────
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+const serviceAccount = JSON.parse(requireEnv('FIREBASE_SERVICE_ACCOUNT'));
 admin.initializeApp({
   credential:    admin.credential.cert(serviceAccount),
-  storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+  storageBucket: requireEnv('FIREBASE_STORAGE_BUCKET'),
 });
 const db = admin.firestore();
 
-// ── Init Google Drive ──────────────────────────────────────────────────────
-const driveAuth = new google.auth.GoogleAuth({
-  credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT),
-  scopes: ['https://www.googleapis.com/auth/drive'],
-});
-const drive = google.drive({ version: 'v3', auth: driveAuth });
-const ROOT_FOLDER_ID = process.env.DRIVE_FOLDER_ID;
-const folderCache = {};
+// ── Init Google Drive (Shared-Drive aware; see drive-lib.js) ─────────────────
+const { drive, serviceAccountEmail } = initDrive();
+const ROOT_FOLDER_ID = requireEnv('DRIVE_FOLDER_ID');
 
-// ── Drive helpers ──────────────────────────────────────────────────────────
-
-async function ensureFolder(name, parentId) {
-  const key = `${parentId}::${name}`;
-  if (folderCache[key]) return folderCache[key];
-  const res = await drive.files.list({
-    q: `name='${name}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`,
-    fields: 'files(id)',
-  });
-  if (res.data.files.length > 0) {
-    folderCache[key] = res.data.files[0].id;
-    return folderCache[key];
-  }
-  const folder = await drive.files.create({
-    requestBody: { name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] },
-    fields: 'id',
-  });
-  folderCache[key] = folder.data.id;
-  return folderCache[key];
-}
+// ── Drive helpers (thin wrappers around the shared, Shared-Drive-safe lib) ───
+const ensureFolder = (name, parentId) => ensureFolderRaw(drive, name, parentId);
 
 async function uploadText(content, filename, mimeType, folderId) {
-  const buffer = Buffer.from(content, 'utf-8');
-  const stream = Readable.from(buffer);
-  const res = await drive.files.create({
-    requestBody: { name: filename, parents: [folderId] },
-    media:       { mimeType: mimeType || 'text/plain', body: stream },
-    fields:      'id,webViewLink',
-  });
-  // Make readable by anyone with the link
-  await drive.permissions.create({
-    fileId: res.data.id,
-    requestBody: { role: 'reader', type: 'anyone' },
-  }).catch(() => {});
-  return res.data.webViewLink;
+  return uploadBuffer(drive, Buffer.from(content, 'utf-8'), filename, mimeType || 'text/plain', folderId);
 }
 
 // ── Data helpers ──────────────────────────────────────────────────────────
@@ -305,6 +271,9 @@ async function main() {
   console.log(`\n🗄️  Barro Industries — Monthly Backup`);
   console.log(`   Backing up: ${label}`);
   console.log(`   Range    : ${start.toISOString()} → ${end.toISOString()}\n`);
+
+  // Fail loud with an exact fix if the Drive destination is misconfigured.
+  await preflight(drive, ROOT_FOLDER_ID, serviceAccountEmail);
 
   // Ensure folder structure: BI-Operations / Monthly Backups / YYYY-MM
   const backupRoot  = await ensureFolder('Monthly Backups', ROOT_FOLDER_ID);
