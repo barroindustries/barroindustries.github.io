@@ -77,6 +77,8 @@ window.Notifs = (() => {
       if (typeof navigateTo === 'function') navigateTo('attendance');
     } else if (type === 'post' || type === 'post_approval') {
       if (typeof navigateTo === 'function') navigateTo('posts');
+    } else if (type === 'memo') {
+      if (typeof navigateTo === 'function') navigateTo('memos');
     } else if (type === 'approval_result') {
       if (typeof navigateTo === 'function') navigateTo('approvals');
     } else if (type === 'payroll' || type === 'kpi_grade' || type === 'self_assessment') {
@@ -95,7 +97,7 @@ window.Notifs = (() => {
     const unreadCount = items.filter(n => !n.read).length;
     _updatePanelHint(unreadCount, items.length);
 
-    const NAV_TYPES = new Set(['task_assigned','task_status','task_message','task_comment','cash_advance','ca_approved','att_extension_approved','att_extension_denied','attendance','post','post_approval','approval_result','payroll','kpi_grade','self_assessment']);
+    const NAV_TYPES = new Set(['task_assigned','task_status','task_message','task_comment','cash_advance','ca_approved','att_extension_approved','att_extension_denied','attendance','post','post_approval','memo','approval_result','payroll','kpi_grade','self_assessment']);
     const isNavigable = n => n.taskId || NAV_TYPES.has(n.type) || n.type?.startsWith('task') || n.type?.startsWith('att');
 
     // Many notifications set BOTH an icon AND a title that starts with the same

@@ -202,7 +202,8 @@ service cloud.firestore {
     // Each user may read their OWN pay; only finance/admin may read others or write.
     match /payroll/{uid} {
       allow read:  if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
-      allow write: if isAuth() && isFinanceOrAdmin();
+      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
     }
 
     // ── Salary history ─────────────────────────────────
@@ -241,7 +242,8 @@ service cloud.firestore {
         (resource.data.createdBy == request.auth.uid
           && request.resource.data.status == resource.data.status)
       );
-      allow delete: if isAuth() && isFinanceOrAdmin();
+      // Delete is President-only — finance staff request it via the approval flow.
+      allow delete: if isAuth() && isPresident();
     }
 
     // ── Submissions ────────────────────────────────────
@@ -364,8 +366,31 @@ service cloud.firestore {
       allow write: if isAuth() && isAdmin();
     }
     match /memos/{docId} {
-      allow read: if isAuth();
-      allow write: if isAuth() && isAdmin();
+      allow read:   if isAuth();
+      allow create: if isAuth() && isAdmin();
+      allow delete: if isAuth() && isAdmin();
+      // Admins edit freely. A tagged recipient may update ONLY to record their
+      // own conforme, and the entry is locked to a trustworthy, server-stamped,
+      // write-once record so it can stand as a real acknowledgment:
+      //   • only the `conformes` map may change, and within it only their own uid;
+      //   • write-once — an existing conforme can't be re-written by the recipient
+      //     (only an admin could correct it);
+      //   • the entry must be exactly {at, name} with `at` == the server time
+      //     (a client-supplied/back-dated Date won't equal request.time → rejected)
+      //     and `name` a bounded string — so the timestamp and shape can't be forged.
+      allow update: if isAuth() && (
+        isAdmin() || (
+          (request.auth.uid in resource.data.get('recipients', []))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['conformes'])
+          && request.resource.data.conformes.diff(resource.data.get('conformes', {}))
+               .affectedKeys().hasOnly([request.auth.uid])
+          && !(request.auth.uid in resource.data.get('conformes', {}))
+          && request.resource.data.conformes[request.auth.uid].keys().hasOnly(['at','name'])
+          && request.resource.data.conformes[request.auth.uid].at == request.time
+          && request.resource.data.conformes[request.auth.uid].name is string
+          && request.resource.data.conformes[request.auth.uid].name.size() <= 200
+        )
+      );
     }
 
     // ── Projects ───────────────────────────────────────
@@ -407,26 +432,60 @@ service cloud.firestore {
     }
 
     // ── Finance journals & records ─────────────────────
+    // Finance may create + edit every line. DELETE is President-only: finance
+    // staff file a finance_delete_requests doc that the President approves in the
+    // Approvals tab (the actual delete then runs in the President's context). This
+    // mirrors the existing salary_history / cash_advances delete gate.
     match /ledger/{docId} {
-      allow read, write: if isAuth() && canFinance();
+      allow read: if isAuth() && canFinance();
+      allow create, update: if isAuth() && canFinance();
+      allow delete: if isAuth() && isPresident();
     }
     match /ledger_entries/{docId} {
-      allow read, write: if isAuth() && canFinance();
+      allow read: if isAuth() && canFinance();
+      allow create, update: if isAuth() && canFinance();
+      allow delete: if isAuth() && isPresident();
     }
     match /cash_receipt_journal/{docId} {
-      allow read, write: if isAuth() && canFinance();
+      allow read: if isAuth() && canFinance();
+      allow create, update: if isAuth() && canFinance();
+      allow delete: if isAuth() && isPresident();
     }
     match /cash_disbursement_journal/{docId} {
-      allow read, write: if isAuth() && isFinanceOrAdmin();
+      allow read: if isAuth() && isFinanceOrAdmin();
+      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
     }
     match /general_journal/{docId} {
-      allow read, write: if isAuth() && isFinanceOrAdmin();
+      allow read: if isAuth() && isFinanceOrAdmin();
+      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
     }
     match /finance_records/{docId} {
-      allow read, write: if isAuth() && isFinanceOrAdmin();
+      allow read: if isAuth() && isFinanceOrAdmin();
+      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
     }
     match /tax_records/{docId} {
-      allow read, write: if isAuth() && isFinanceOrAdmin();
+      allow read: if isAuth() && isFinanceOrAdmin();
+      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
+    }
+    // Purchase orders (Finance → Purchasing tab). Finance dept members maintain;
+    // only the President deletes (via the approval flow).
+    match /purchase_orders/{docId} {
+      allow read: if isAuth() && canFinance();
+      allow create, update: if isAuth() && canFinance();
+      allow delete: if isAuth() && isPresident();
+    }
+
+    // ── Finance delete requests ────────────────────────
+    // Finance staff file a request to delete any finance record; the President
+    // approves/denies it (and performs the real delete) in the Approvals tab.
+    match /finance_delete_requests/{docId} {
+      allow read: if isAuth() && canFinance();
+      allow create: if isAuth() && canFinance();
+      allow update, delete: if isAuth() && isPresident();
     }
 
     // ── Payslips & Worker profiles (Brilliant Steel) ───
@@ -434,11 +493,13 @@ service cloud.firestore {
       allow read: if isAuth() && (
         resource.data.userId == request.auth.uid || isFinanceOrAdmin()
       );
-      allow write: if isAuth() && isFinanceOrAdmin();
+      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
     }
     match /worker_profiles/{docId} {
       allow read: if isAuth() && isFinanceOrAdmin();
-      allow write: if isAuth() && isFinanceOrAdmin();
+      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
     }
 
     // ── Government biddings ────────────────────────────

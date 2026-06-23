@@ -41,6 +41,124 @@ async function safeNotify(fn) {
   catch (e) { console.warn('[notification failed, action itself still succeeded]', e); }
 }
 
+// ════════════════════════════════════════════════════════════════
+//  FINANCE — edit anything, delete only with President approval
+//  Finance staff may edit every finance record. Deletes are gated:
+//  the President deletes immediately; everyone else files a request the
+//  President approves in the Approvals tab. The same rule is enforced in
+//  firestore.rules (delete → president only), so the gate can't be bypassed
+//  from the client. All finance delete buttons route through financeDelete().
+// ════════════════════════════════════════════════════════════════
+
+// Cascade cleanup that must accompany the ACTUAL delete of certain finance
+// docs (their linked ledger entries / CA balances). Runs in the deleter's
+// context — always the President — so these ledger writes are permitted.
+async function financeDeleteCascade(collection, docId) {
+  let d = null;
+  try { const s = await db.collection(collection).doc(docId).get(); d = s.exists ? s.data() : null; } catch(_) {}
+  if (!d) return;
+  if (collection === 'salary_history') {
+    const ref = `PAY-${d.month}-${d.userId||''}`;
+    const ls = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
+    if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
+  } else if (collection === 'payslips') {
+    const ca = d.deductions?.other?.cashAdvance || 0;
+    if (ca > 0 && d.workerId) await db.collection('worker_profiles').doc(d.workerId).update({ caBalance: firebase.firestore.FieldValue.increment(ca) }).catch(()=>{});
+    const ls = await db.collection('ledger').where('refNumber','==',`WPAY-${docId}`).limit(1).get().catch(()=>({docs:[]}));
+    if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
+  }
+}
+
+// Perform the real delete (cascade first, then the doc). Used by the President's
+// direct delete AND by the Approvals screen when a request is approved.
+window.financeExecuteDelete = async function(collection, docId) {
+  await financeDeleteCascade(collection, docId);
+  await db.collection(collection).doc(docId).delete();
+};
+
+// President → delete now (with confirm). Anyone else → file a delete request for
+// the President to approve. `label` is a human description of the record.
+// Resolves to 'deleted' | 'requested' | 'cancelled'. onDone(outcome) optional.
+window.financeDelete = function(opts) {
+  const { collection, docId, label } = opts;
+  const onDone = opts.onDone || (()=>{});
+  const u = window.currentUser || (typeof auth !== 'undefined' && auth.currentUser) || {};
+  return new Promise((resolve) => {
+    if (typeof isRealPresident === 'function' && isRealPresident()) {
+      if (!confirm(`Delete ${label}? This cannot be undone.`)) { resolve('cancelled'); return; }
+      window.financeExecuteDelete(collection, docId)
+        .then(() => { Notifs.showToast('Deleted.'); onDone('deleted'); resolve('deleted'); })
+        .catch(e => { Notifs.showToast('Delete failed: '+(e.message||e),'error'); resolve('cancelled'); });
+      return;
+    }
+    openModal('Request Deletion — President Approval', `
+      <p style="margin-bottom:12px;color:var(--text-muted);font-size:13px">Deleting <strong>${escHtml(label)}</strong> needs the President's approval. The record stays until it's approved.</p>
+      <div class="form-group"><label>Reason for deletion</label><input id="fdr-reason" placeholder="e.g. Duplicate entry, wrong amount…"/></div>
+    `, `<button class="btn-primary" id="fdr-submit">Submit for Approval</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    const submitBtn = document.getElementById('fdr-submit');
+    submitBtn && submitBtn.addEventListener('click', async () => {
+      const reason = (document.getElementById('fdr-reason').value||'').trim();
+      if (!reason) { Notifs.showToast('Please enter a reason.','error'); return; }
+      try {
+        await db.collection('finance_delete_requests').add({
+          collection, docId, label, reason,
+          requestedBy:     u.uid || '',
+          requestedByName: window.userProfile?.displayName || u.email || 'Finance',
+          status:          'pending',
+          createdAt:       firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await safeNotify(() => Notifs.sendToOwner({
+          title: '🗑 Finance Delete Request',
+          body:  `${window.userProfile?.displayName || u.email || 'Finance'} requested deletion of ${label}. Reason: ${reason}`,
+          icon: '🗑', type: 'finance_delete_request'
+        }));
+        closeModal();
+        Notifs.showToast('Deletion request sent to the President for approval.');
+        onDone('requested'); resolve('requested');
+      } catch(e) {
+        Notifs.showToast('Could not send request: '+(e.message||e),'error');
+      }
+    });
+  });
+};
+
+// Generic edit modal for simple finance records. `fields` describe the form:
+//   { key, label, type:'text'|'number'|'date'|'select'|'textarea', options?, full? }
+// On save it .update()s the doc with the typed values + an edit audit stamp.
+window.financeEditModal = function({ collection, docId, title, fields, onSaved }) {
+  const u = window.currentUser || (typeof auth !== 'undefined' && auth.currentUser) || {};
+  const selStyle = 'padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)';
+  const taStyle  = 'width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)';
+  const fieldHtml = f => {
+    const v = f.value == null ? '' : f.value;
+    if (f.type === 'select')   return `<div class="form-group"><label>${f.label}</label><select id="fe-${f.key}" style="${selStyle}">${(f.options||[]).map(o=>`<option ${String(o)===String(v)?'selected':''}>${escHtml(o)}</option>`).join('')}</select></div>`;
+    if (f.type === 'textarea') return `<div class="form-group"><label>${f.label}</label><textarea id="fe-${f.key}" rows="2" style="${taStyle}">${escHtml(v)}</textarea></div>`;
+    const t = f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text';
+    return `<div class="form-group"><label>${f.label}</label><input id="fe-${f.key}" type="${t}" ${f.type==='number'?'step="0.01" inputmode="decimal"':''} value="${escHtml(v)}"/></div>`;
+  };
+  // Pack into 2-up rows, except fields flagged full:true which get their own row.
+  let body = '', buf = [];
+  const flush = () => { if (!buf.length) return; body += buf.length===2 ? `<div class="form-row">${buf.join('')}</div>` : buf[0]; buf = []; };
+  fields.forEach(f => { if (f.full) { flush(); body += fieldHtml(f); } else { buf.push(fieldHtml(f)); if (buf.length===2) flush(); } });
+  flush();
+  openModal('Edit '+title, body, `<button class="btn-primary" id="fe-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  document.getElementById('fe-save').addEventListener('click', async () => {
+    const upd = {};
+    fields.forEach(f => {
+      const el = document.getElementById('fe-'+f.key);
+      if (!el) return;
+      upd[f.key] = f.type === 'number' ? (parseFloat(el.value)||0) : (typeof el.value === 'string' ? el.value.trim() : el.value);
+    });
+    upd.editedBy     = u.uid || '';
+    upd.editedByName = window.userProfile?.displayName || u.email || '';
+    upd.editedAt     = firebase.firestore.FieldValue.serverTimestamp();
+    try {
+      await db.collection(collection).doc(docId).update(upd);
+      closeModal(); Notifs.showToast('Updated.'); onSaved && onSaved();
+    } catch(e) { Notifs.showToast('Update failed: '+(e.message||e),'error'); }
+  });
+};
+
 // ── Task Status System ─────────────────────────────
 const TASK_STATUSES = [
   { value:'backlog',      label:'Backlog',               badge:'badge-gray'   },
@@ -71,7 +189,18 @@ function normTask(data,id) {
   const t={id,...data};
   if (!Array.isArray(t.assignedTo))      t.assignedTo      = t.assignedTo     ?[t.assignedTo]     :[];
   if (!Array.isArray(t.assignedToNames)) t.assignedToNames = t.assignedToName ?[t.assignedToName] :[];
+  if (!Array.isArray(t.followUps))       t.followUps       = [];
+  if (typeof t.openFollowUpCount!=='number') t.openFollowUpCount = t.followUps.filter(f=>f&&f.status!=='addressed').length;
   return t;
+}
+// Format a follow-up timestamp in Manila time (display only). Stored values are
+// Firestore Timestamps (absolute instants), so en-PH + Asia/Manila is safe here.
+function fuTime(ts){
+  try{
+    const d = ts && ts.toDate ? ts.toDate() : (ts && ts.seconds ? new Date(ts.seconds*1000) : null);
+    if(!d) return '';
+    return d.toLocaleString('en-PH',{timeZone:'Asia/Manila',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+  }catch(e){ return ''; }
 }
 function assigneeChips(t) {
   if (!t.assignedToNames?.length) return '';
@@ -86,6 +215,7 @@ function taskCard(t) {
       <div class="item-badges">
         <span class="badge ${priorityBadge(t.priority)}">${t.priority||'med'}</span>
         <span class="badge ${statusBadge(t.status)}">${statusLabel(t.status)}</span>
+        ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange">📣 ${t.openFollowUpCount} follow-up${t.openFollowUpCount>1?'s':''}</span>`:''}
       </div>
     </div>
     <div class="item-meta" style="gap:6px;flex-wrap:wrap">
@@ -386,6 +516,38 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   const canSubmit  = isAssignee&&!['submitted','review','approved','on-hold','archived'].includes(t.status);
   const allowedStatuses = isAdmin?TASK_STATUSES:TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value));
 
+  // Follow-up requests — admin asks the assignee(s) for an update; assignees (or
+  // admins) mark them addressed. Visible to anyone involved so the request lands.
+  const fus = (t.followUps||[]).slice().sort((a,b)=>((b.at&&b.at.seconds)||0)-((a.at&&a.at.seconds)||0));
+  const openFu = fus.filter(f=>f.status!=='addressed').length;
+  const showFollowUps = isAdmin || isAssignee || isCreator || fus.length;
+  const followUpSectionHtml = showFollowUps ? `
+    <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted)">📣 Follow-up Requests</div>
+        ${openFu?`<span class="badge badge-orange" style="font-size:10px">${openFu} pending</span>`:''}
+      </div>
+      ${fus.length ? `<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:${isAdmin?'10px':'0'}">
+        ${fus.map(fu=>{
+          const pending=fu.status!=='addressed';
+          return `<div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ${pending?'var(--warning,#ff9f0a)':'var(--success,#34c759)'};border-radius:8px;padding:8px 10px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap">
+              <span class="badge ${pending?'badge-orange':'badge-green'}" style="font-size:9px">${pending?'PENDING':'ADDRESSED'}</span>
+              <span style="font-size:11px;color:var(--text-muted)">${escHtml(fu.byName||'')}${fuTime(fu.at)?' · '+fuTime(fu.at):''}</span>
+            </div>
+            <div style="font-size:13px;color:var(--text);line-height:1.4;white-space:pre-wrap">${escHtml(fu.message||'Update requested')}</div>
+            ${!pending&&fu.addressedByName?`<div style="font-size:11px;color:var(--success,#34c759);margin-top:4px">✓ ${escHtml(fu.addressedByName)}${fuTime(fu.addressedAt)?' · '+fuTime(fu.addressedAt):''}</div>`:''}
+            ${pending&&(isAdmin||isAssignee)?`<button class="btn-success btn-sm fu-addr-btn" data-fu="${escHtml(fu.id||'')}" style="margin-top:6px">✓ Mark addressed</button>`:''}
+          </div>`;
+        }).join('')}
+      </div>` : `<div style="font-size:12px;color:var(--text-muted);margin-bottom:${isAdmin?'10px':'0'}">No follow-ups yet.</div>`}
+      ${isAdmin?`<div style="display:flex;gap:6px">
+        <input id="fu-input" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)" placeholder="Ask the assignee for an update…"/>
+        <button class="btn-primary btn-sm" id="fu-request-btn">📣 Request</button>
+      </div>`:''}
+    </div>
+  ` : '';
+
   // Remove existing panel
   document.getElementById('task-fullscreen-panel')?.remove();
 
@@ -436,6 +598,14 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
 
         ${t.description?`<p style="font-size:14px;line-height:1.6;margin-bottom:12px;white-space:pre-wrap;color:var(--text)">${escHtml(t.description)}</p>`:''}
 
+        ${Array.isArray(t.attachments)&&t.attachments.length?`
+        <div style="margin-bottom:12px">
+          <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);margin-bottom:6px">📎 Attachments</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${t.attachments.map(a=>{const isLink=a&&(a.source==='link'||a.kind==='link');const url=a&&(a.driveUrl||a.url)||'';return url?`<a href="${escHtml(url)}" target="_blank" rel="noopener" class="file-chip">${isLink?'🔗':'📎'} <span>${escHtml(a.name||(isLink?'Link':'File'))}</span></a>`:'';}).join('')}
+          </div>
+        </div>`:''}
+
         <!-- Current Standing -->
         <div style="background:rgba(255,159,10,0.08);border:1.5px solid rgba(255,159,10,0.28);border-radius:10px;padding:12px 14px;margin-bottom:12px">
           <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,159,10,0.9);margin-bottom:6px">📍 Current Standing</div>
@@ -470,6 +640,8 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
           </div>
           <input id="task-instruction" placeholder="Note for assignee (optional)…" style="width:100%;margin-top:8px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"/>
         </div>`:''}
+
+        ${followUpSectionHtml}
 
         ${currentRole==='president'&&SCORE_STATUSES.includes(t.status)?`<div style="background:var(--surface2);border:1.5px solid var(--primary-light);border-radius:10px;padding:12px;margin-bottom:10px">
           <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--primary-light);margin-bottom:8px">🔒 President Score</div>
@@ -575,6 +747,54 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     Notifs.showToast(`${newName} added`);
     closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
+
+  // Follow-up request (admin → assignee) ───────────
+  document.getElementById('fu-request-btn')?.addEventListener('click', async()=>{
+    const input=document.getElementById('fu-input');
+    const msg=(input?.value||'').trim();
+    const uSnap=await db.collection('users').doc(currentUser.uid).get();
+    const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
+    const entry={
+      id:'fu_'+Date.now()+'_'+Math.floor(Math.random()*1e6),
+      message:msg||'Please provide an update.',
+      byUid:currentUser.uid, byName:actorName,
+      at:firebase.firestore.Timestamp.now(), status:'pending'
+    };
+    const followUps=[...(t.followUps||[]),entry];
+    await db.collection('tasks').doc(taskId).update({
+      followUps,
+      openFollowUpCount: followUps.filter(f=>f.status!=='addressed').length,
+      lastFollowUpAt: firebase.firestore.FieldValue.serverTimestamp(),
+      lastFollowUpByName: actorName,
+      lastModifiedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('tasks-all');
+    await notifyTaskInvolved(t,{title:'📣 Follow-up Requested',body:`"${t.title}" — ${actorName}: ${entry.message}`,icon:'📣',type:'task_followup',taskId},currentUser.uid);
+    Notifs.showToast('Follow-up sent');
+    closeTaskPanel(); openTaskDetail(taskId,currentUser,currentRole);
+  });
+
+  // Mark a follow-up addressed (assignee or admin) ──
+  panel.querySelectorAll('.fu-addr-btn').forEach(btn=>btn.addEventListener('click', async()=>{
+    const fuId=btn.dataset.fu;
+    const uSnap=await db.collection('users').doc(currentUser.uid).get();
+    const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
+    // Re-fetch so a concurrent follow-up added meanwhile isn't clobbered
+    const fresh=await db.collection('tasks').doc(taskId).get();
+    const arr=(fresh.exists?(fresh.data().followUps||[]):[]).map(f=>f.id===fuId?{...f,status:'addressed',addressedByUid:currentUser.uid,addressedByName:actorName,addressedAt:firebase.firestore.Timestamp.now()}:f);
+    const target=arr.find(f=>f.id===fuId);
+    await db.collection('tasks').doc(taskId).update({
+      followUps:arr,
+      openFollowUpCount:arr.filter(f=>f.status!=='addressed').length,
+      lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('tasks-all');
+    if (target&&target.byUid&&target.byUid!==currentUser.uid) {
+      await Notifs.send(target.byUid,{title:'✅ Follow-up Addressed',body:`${actorName} addressed your follow-up on "${t.title}"`,icon:'✅',type:'task_followup_done',taskId});
+    }
+    Notifs.showToast('Marked addressed');
+    closeTaskPanel(); openTaskDetail(taskId,currentUser,currentRole);
+  }));
 
   document.getElementById('save-score-btn')?.addEventListener('click', async()=>{
     const score=parseFloat(document.getElementById('pres-score').value);
@@ -738,8 +958,8 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
     <div id="task-attach-area"></div>
   `, `<button class="btn-primary" id="create-task-btn">Create Task</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
-  let taskAttachment=null;
-  Drive.renderUploadArea('task-attach-area',r=>{taskAttachment=r;},{label:'📎 Attach file',dept:'tasks',subfolder:'attachments'});
+  let taskAttachments=[];
+  Drive.renderUploadArea('task-attach-area',r=>{taskAttachments.push(r);},{label:'📎 Attach file or link',dept:'tasks',subfolder:'attachments'});
 
   let newAssignees=[];
   document.getElementById('t-assignee-sel').addEventListener('change',e=>{
@@ -768,7 +988,7 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
       department:document.getElementById('t-dept').value,
       assignedTo:newAssignees.map(a=>a.uid),
       assignedToNames:newAssignees.map(a=>a.name),
-      attachments:taskAttachment?[taskAttachment]:[],
+      attachments:taskAttachments,
       createdBy:currentUser.uid,createdByName:creatorName,
       createdAt:firebase.firestore.FieldValue.serverTimestamp()
     });
@@ -839,7 +1059,7 @@ async function openSubDetail(subId, currentUser, currentRole) {
       <span class="badge badge-gray" style="margin-left:6px">${escHtml(s.type||'General')}</span>
     </div>
     <p style="font-size:14px;line-height:1.6;margin-bottom:12px">${escHtml(s.description||'No details.')}</p>
-    ${s.fileUrl?`<a href="${s.fileUrl}" target="_blank" class="btn-secondary" style="display:inline-flex;gap:6px;margin-bottom:14px">📎 View Attachment</a>`:''}
+    ${s.fileUrl?`<a href="${escHtml(s.fileUrl)}" target="_blank" rel="noopener" class="btn-secondary" style="display:inline-flex;gap:6px;margin-bottom:14px">${s.fileSource==='link'?'🔗':'📎'} ${escHtml(s.fileName||(s.fileSource==='link'?'Open Link':'View Attachment'))}</a>`:''}
     ${isPrivileged?`<div style="display:flex;gap:8px;margin-bottom:14px">
       <button class="btn-success" id="approve-btn" data-id="${s.id}">✅ Approve</button>
       <button class="btn-danger" id="reject-btn" data-id="${s.id}">❌ Reject</button>
@@ -876,7 +1096,7 @@ function openAddSubModal(currentUser) {
   `, `<button class="btn-primary" id="create-sub-btn">Submit</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   let uploadedFile = null;
-  Drive.renderUploadArea('sub-file-upload', (result) => { uploadedFile = result; }, { label:'Attach supporting document (optional)', accept:'*' });
+  Drive.renderUploadArea('sub-file-upload', (result) => { uploadedFile = result; }, { label:'Attach a file or link (optional)', accept:'*' });
 
   document.getElementById('create-sub-btn').addEventListener('click', async () => {
     const snap = await db.collection('users').doc(currentUser.uid).get();
@@ -890,6 +1110,7 @@ function openAddSubModal(currentUser) {
       submittedByName: name,
       fileUrl:         uploadedFile?.url || null,
       fileName:        uploadedFile?.name || null,
+      fileSource:      uploadedFile?.source || null,
       createdAt:       firebase.firestore.FieldValue.serverTimestamp()
     });
     // Notify owner
@@ -1100,9 +1321,9 @@ window.renderComments = async function(collection, docId, containerId, currentUs
                 ${!isMine ? `<div class="ms-name">${escHtml(c.authorName||'User')}</div>` : ''}
                 <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'}">
                   ${c.text?`<div class="ms-text">${escHtml(c.text).replace(/\n/g,'<br/>')}</div>`:''}
-                  ${c.fileUrl ? (isImage(c.fileUrl)
+                  ${c.fileUrl ? (c.fileSource!=='link' && isImage(c.fileUrl)
                     ? `<div style="margin-top:${c.text?'6':'0'}px"><img src="${c.fileUrl}" alt="${escHtml(c.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:8px;cursor:pointer" onclick="window.open('${c.fileUrl}','_blank')"/></div>`
-                    : `<a href="${c.fileUrl}" target="_blank" class="ms-file-chip">📎 ${escHtml(c.fileName||'Attachment')}</a>`
+                    : `<a href="${escHtml(c.fileUrl)}" target="_blank" rel="noopener" class="ms-file-chip">${c.fileSource==='link'?'🔗':'📎'} ${escHtml(c.fileName||'Attachment')}</a>`
                   ) : ''}
                   <div class="ms-meta">
                     <span class="ms-time">${timeLabel(c.createdAt)}</span>
@@ -1123,6 +1344,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
       <div class="messenger-input-row">
         <label for="comment-file-${docId}" class="ms-attach-btn" title="Attach file">📎</label>
         <input type="file" id="comment-file-${docId}" style="display:none" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"/>
+        <button type="button" class="ms-attach-btn" id="comment-link-${docId}" title="Attach link">🔗</button>
         <input id="comment-in-${docId}" class="ms-input" placeholder="Type a message…"/>
         <button class="ms-send-btn" id="comment-send-${docId}">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
@@ -1136,10 +1358,24 @@ window.renderComments = async function(collection, docId, containerId, currentUs
   if (body) body.scrollTop = body.scrollHeight;
 
   // File attach preview
+  let pendingLink = null;
   document.getElementById(`comment-file-${docId}`)?.addEventListener('change', e => {
     const f = e.target.files?.[0];
+    if (f) pendingLink = null;   // a file replaces a pending link
     const prev = document.getElementById(`ms-file-preview-${docId}`);
     if (prev) prev.textContent = f ? `📎 ${f.name}` : '';
+  });
+
+  // Link attach
+  document.getElementById(`comment-link-${docId}`)?.addEventListener('click', () => {
+    let url = (prompt('Paste a link to attach:') || '').trim();
+    if (!url) return;
+    if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+    pendingLink = url;
+    const fileInp = document.getElementById(`comment-file-${docId}`);
+    if (fileInp) fileInp.value = '';   // a link replaces a pending file
+    const prev = document.getElementById(`ms-file-preview-${docId}`);
+    if (prev) prev.textContent = `🔗 ${url}`;
   });
 
   // Edit message
@@ -1170,14 +1406,14 @@ window.renderComments = async function(collection, docId, containerId, currentUs
     const fileInp = document.getElementById(`comment-file-${docId}`);
     const text    = input.value.trim();
     const file    = fileInp?.files?.[0];
-    if (!text && !file) return;
+    if (!text && !file && !pendingLink) return;
 
     const sendBtn = document.getElementById(`comment-send-${docId}`);
     if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = '.5'; }
 
     const myName = userProfile?.displayName || currentUser.email;
 
-    let fileUrl = null, fileName = null;
+    let fileUrl = null, fileName = null, fileSource = null;
     if (file) {
       try {
         const path = `task-comments/${docId}/${Date.now()}_${file.name}`;
@@ -1190,11 +1426,15 @@ window.renderComments = async function(collection, docId, containerId, currentUs
         if(sendBtn){sendBtn.disabled=false;sendBtn.style.opacity='1';}
         return;
       }
+    } else if (pendingLink) {
+      fileUrl = pendingLink;
+      try { fileName = new URL(pendingLink).hostname.replace(/^www\./,''); } catch(_) { fileName = pendingLink; }
+      fileSource = 'link';
     }
 
     await db.collection(collection).doc(docId).collection('comments').add({
       text: text||'', authorId: currentUser.uid, authorName: myName,
-      fileUrl: fileUrl||null, fileName: fileName||null,
+      fileUrl: fileUrl||null, fileName: fileName||null, fileSource: fileSource||null,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
 
@@ -1206,7 +1446,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
           const task = taskSnap.data();
           const involved = new Set([...(task.assignedTo||[]), task.createdBy].filter(Boolean));
           involved.delete(currentUser.uid);
-          const preview = text ? (text.length>60?text.slice(0,60)+'…':text) : `📎 ${fileName||'File'}`;
+          const preview = text ? (text.length>60?text.slice(0,60)+'…':text) : `${fileSource==='link'?'🔗':'📎'} ${fileName||'File'}`;
           for (const uid of involved) {
             await Notifs.send(uid, {
               title: `💬 New message on "${task.title}"`,
@@ -1220,6 +1460,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
 
     input.value = '';
     if (fileInp) fileInp.value = '';
+    pendingLink = null;
     const prev = document.getElementById(`ms-file-preview-${docId}`);
     if (prev) prev.textContent = '';
     renderComments(collection, docId, containerId, currentUser);
@@ -1326,7 +1567,7 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'Inventory':           await window.renderInventory(content, 'Stock'); break;
     case 'Records':      await renderRecordsTab(content, currentUser, currentRole); break;
     case 'Purchasing':
-      await renderDocCollection(content, 'purchase_orders', 'Purchase Orders', currentUser, currentRole, { icon:'🛒', color:'#1b5e20', dept:'Finance' });
+      await renderDocCollection(content, 'purchase_orders', 'Purchase Orders', currentUser, currentRole, { icon:'🛒', color:'#1b5e20', dept:'Finance', editable:true });
       break;
     case 'SSS / Gov':
       content.innerHTML = renderFileCollection('SSS & Government Documents', 'fin-sss', currentRole);
@@ -1342,6 +1583,109 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
       await renderDeptTasks(content, 'Finance', currentUser, currentRole);
       break;
   }
+}
+
+// ── Salary Raise (shared by Payroll + HR Profiles) ─
+// Applies a raise immediately and logs it to salary_raises (old→new, %, effective
+// date, reason, who granted it). Finance/admin only; an affected app-user can read
+// their own raise records (firestore.rules mirrors the salary_history gate).
+function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel, current, applyRaise }, currentUser, onDone) {
+  const cur = parseFloat(current) || 0;
+  openModal(`💸 Give Raise — ${escHtml(subjectName||'')}`, `
+    <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
+      Current ${escHtml(fieldLabel)}: <strong style="color:var(--text)">₱${fmt(cur)}</strong>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>New ${escHtml(fieldLabel)} (₱) *</label>
+        <input id="raise-new" type="number" inputmode="decimal" step="0.01" min="0" value="${cur}"/></div>
+      <div class="form-group"><label>Quick increase</label>
+        <div style="display:flex;gap:6px">
+          <input id="raise-amt" type="number" inputmode="decimal" placeholder="+ ₱" style="flex:1;min-width:0"/>
+          <input id="raise-pct" type="number" inputmode="decimal" placeholder="+ %" style="width:64px"/>
+        </div>
+      </div>
+    </div>
+    <div id="raise-preview" style="font-size:13px;font-weight:700;margin:-2px 0 12px;min-height:18px"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Effective Date</label><input id="raise-eff" type="date" value="${today()}"/></div>
+      <div class="form-group"><label>Reason / Notes</label><input id="raise-reason" placeholder="e.g. Annual increase, promotion"/></div>
+    </div>
+  `, `<button class="btn-primary" id="raise-save-btn">Apply Raise</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  const newInp = document.getElementById('raise-new');
+  const amtInp = document.getElementById('raise-amt');
+  const pctInp = document.getElementById('raise-pct');
+  const prev   = document.getElementById('raise-preview');
+  const refresh = () => {
+    const nv = parseFloat(newInp.value) || 0;
+    const diff = nv - cur;
+    const pct = cur > 0 ? (diff / cur * 100) : null;
+    if (!diff) { prev.textContent = ''; return; }
+    prev.style.color = diff > 0 ? 'var(--success)' : 'var(--danger)';
+    prev.textContent = `${diff > 0 ? '▲ +' : '▼ '}₱${fmt(Math.abs(diff))}${pct!=null?`  (${pct>=0?'+':''}${pct.toFixed(1)}%)`:''}`;
+  };
+  amtInp.addEventListener('input', () => { if (amtInp.value !== '') { newInp.value = (cur + (parseFloat(amtInp.value)||0)).toFixed(2); pctInp.value = ''; } refresh(); });
+  pctInp.addEventListener('input', () => { if (pctInp.value !== '') { newInp.value = (cur * (1 + (parseFloat(pctInp.value)||0)/100)).toFixed(2); amtInp.value = ''; } refresh(); });
+  newInp.addEventListener('input', () => { amtInp.value = ''; pctInp.value = ''; refresh(); });
+
+  document.getElementById('raise-save-btn').addEventListener('click', async () => {
+    const nv = parseFloat(newInp.value) || 0;
+    if (nv <= 0)    { Notifs.showToast('Enter a valid new amount','error'); return; }
+    if (nv === cur) { Notifs.showToast('New amount is unchanged','error'); return; }
+    const reason = document.getElementById('raise-reason').value.trim();
+    const eff    = document.getElementById('raise-eff').value || today();
+    const btn = document.getElementById('raise-save-btn');
+    btn.disabled = true; btn.textContent = 'Applying…';
+    try {
+      await applyRaise(nv);
+      await db.collection('salary_raises').add({
+        subjectType, subjectId, subjectName: subjectName || '',
+        field: fieldLabel,
+        oldAmount: cur, newAmount: nv,
+        changeAmount: +(nv - cur).toFixed(2),
+        changePct: cur > 0 ? +((nv - cur) / cur * 100).toFixed(2) : null,
+        effectiveDate: eff,
+        reason,
+        grantedBy: currentUser.uid,
+        grantedByName: window.userProfile?.displayName || currentUser.email || '',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      window.logAudit && window.logAudit('raise', subjectType, subjectId, { from: cur, to: nv });
+      closeModal();
+      Notifs.showToast(`Raise applied: ₱${fmt(cur)} → ₱${fmt(nv)}`);
+      onDone && onDone();
+    } catch (e) {
+      console.error('raise failed', e);
+      btn.disabled = false; btn.textContent = 'Apply Raise';
+      Notifs.showToast('Failed to apply raise','error');
+    }
+  });
+}
+
+// Read-only log of past raises (finance/admin). Optionally filter to one subject.
+async function openRaiseHistory(opts = {}) {
+  const snap = await db.collection('salary_raises').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]}));
+  let list = snap.docs.map(d=>({id:d.id,...d.data()}));
+  if (opts.subjectId) list = list.filter(r => r.subjectId === opts.subjectId);
+  const rows = !list.length
+    ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">💸</div><p>No salary raises recorded yet.</p></div>'
+    : `<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Effective</th><th>Employee</th><th>Type</th><th>Old → New</th><th>Change</th><th>Reason</th><th>By</th></tr></thead>
+        <tbody>${list.map(r=>{
+          const up = (r.changeAmount||0) >= 0;
+          return `<tr>
+            <td style="white-space:nowrap;font-size:12px">${escHtml(r.effectiveDate||'—')}</td>
+            <td style="font-weight:600">${escHtml(r.subjectName||'—')}</td>
+            <td><span class="badge ${r.subjectType==='payroll'?'badge-blue':'badge-purple'}">${r.subjectType==='payroll'?'Payroll':'Worker'}</span></td>
+            <td style="white-space:nowrap">₱${fmt(r.oldAmount||0)} → <strong>₱${fmt(r.newAmount||0)}</strong></td>
+            <td style="white-space:nowrap;color:${up?'var(--success)':'var(--danger)'};font-weight:700">${up?'+':''}₱${fmt(r.changeAmount||0)}${r.changePct!=null?` (${r.changePct>=0?'+':''}${r.changePct}%)`:''}</td>
+            <td style="font-size:12px">${escHtml(r.reason||'—')}</td>
+            <td style="font-size:12px;color:var(--text-muted)">${escHtml(r.grantedByName||'—')}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>`;
+  openModal(`💸 Salary Raise History${opts.subjectName?` — ${escHtml(opts.subjectName)}`:''}`, rows,
+    `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
 }
 
 // ── Payroll Management ───────────────────────────
@@ -1370,6 +1714,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       </select>
       <div style="display:flex;gap:8px">
         <button class="btn-primary btn-sm" id="gen-payroll-btn">Generate Payroll</button>
+        <button class="btn-secondary btn-sm" id="raise-history-btn">💸 Raise History</button>
         <button class="btn-secondary btn-sm" id="print-payroll-btn">🖨 Print All</button>
       </div>
     </div>
@@ -1655,6 +2000,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             data-ca-balance="${caBalance}"
             data-ca-override="${hasOverride ? _caOverrideByUser[u.id].amount : ''}"
             title="Edit">✎</button>
+          ${canFinance ? `<button class="btn-secondary btn-sm raise-emp-btn" data-uid="${u.id}" title="Give raise">💸</button>` : ''}
           <button class="btn-secondary btn-sm print-slip-btn" data-uid="${u.id}" title="Payslip">🖨</button>
         </td>
       </tr>`;
@@ -1855,6 +2201,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 async function renderTaxesTab(container, currentUser, currentRole) {
   const snap = await db.collection('tax_records').orderBy('createdAt','desc').limit(50).get().catch(()=>({docs:[]}));
   const records = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const isPriv = isFinancePriv();
   container.innerHTML = `
     <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
       <button class="btn-primary btn-sm" id="add-tax-btn">+ Add Tax Record</button>
@@ -1871,9 +2218,10 @@ async function renderTaxesTab(container, currentUser, currentRole) {
               <td><span class="badge ${r.status==='filed'?'badge-green':r.status==='paid'?'badge-blue':'badge-orange'}">${r.status||'pending'}</span></td>
               <td>${r.dueDate||'—'}</td>
               <td>${escHtml(r.filedBy||'—')}</td>
-              <td>
-                <button class="btn-secondary btn-sm tax-edit-btn" data-id="${r.id}">✎</button>
-                ${r.fileUrl?`<a href="${r.fileUrl}" target="_blank" class="btn-secondary btn-sm">📎</a>`:''}
+              <td style="white-space:nowrap">
+                ${isPriv?`<button class="btn-secondary btn-sm tax-edit-btn" data-id="${r.id}">✎</button>`:''}
+                ${isPriv?`<button class="btn-danger btn-sm tax-del-btn" data-id="${r.id}" data-label="${escHtml((r.type||'Tax')+' — '+(r.period||r.id.slice(-5)))}" style="margin-left:4px">🗑</button>`:''}
+                ${r.fileUrl?`<a href="${r.fileUrl}" target="_blank" class="btn-secondary btn-sm" style="margin-left:4px">📎</a>`:''}
               </td>
             </tr>`).join('')}</tbody>
           </table></div>`}
@@ -1919,6 +2267,23 @@ async function renderTaxesTab(container, currentUser, currentRole) {
       renderTaxesTab(container, currentUser, currentRole);
     });
   });
+
+  // Edit (finance) / Delete (President approval)
+  if (isPriv) {
+    container.querySelectorAll('.tax-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+      const r = records.find(x=>x.id===btn.dataset.id); if (!r) return;
+      window.financeEditModal({ collection:'tax_records', docId:r.id, title:'Tax Record', onSaved:()=>renderTaxesTab(container,currentUser,currentRole), fields:[
+        { key:'period', label:'Period', type:'text', value:r.period },
+        { key:'type',   label:'Type',   type:'select', value:r.type, options:['BIR - Quarterly','BIR - Annual ITR','VAT','Withholding Tax','Percentage Tax'] },
+        { key:'amount', label:'Amount (₱)', type:'number', value:r.amount },
+        { key:'dueDate',label:'Due Date', type:'date', value:r.dueDate },
+        { key:'status', label:'Status', type:'select', value:r.status||'pending', options:['pending','filed','paid'] }
+      ]});
+    }));
+    container.querySelectorAll('.tax-del-btn').forEach(btn => btn.addEventListener('click', () => {
+      window.financeDelete({ collection:'tax_records', docId:btn.dataset.id, label:`tax record "${btn.dataset.label}"`, onDone:()=>renderTaxesTab(container,currentUser,currentRole) });
+    }));
+  }
 }
 
 // ── Financial Reports (Income Statement + VAT/BIR reference) ─────
@@ -2018,6 +2383,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
   const totalDebit  = entries.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
   const totalCredit = entries.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0);
   const balance     = totalCredit - totalDebit;
+  const canFin      = isFinancePriv();
 
   container.innerHTML = `
     <div class="kpi-row">
@@ -2033,7 +2399,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
       <div class="card-body" style="padding:0">
         ${!entries.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📒</div><h4>No ledger entries yet</h4></div>':
           `<div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Date</th><th>Description / Account</th><th>Category</th><th>Source</th><th>Debit</th><th>Credit</th><th>Ref #</th><th>By</th></tr></thead>
+            <thead><tr><th>Date</th><th>Description / Account</th><th>Category</th><th>Source</th><th>Debit</th><th>Credit</th><th>Ref #</th><th>By</th>${canFin?'<th></th>':''}</tr></thead>
             <tbody>${entries.map(e=>`<tr>
               <td>${e.date||'—'}</td>
               <td>${escHtml(e.description||'—')}</td>
@@ -2043,6 +2409,10 @@ async function renderLedgerTab(container, currentUser, currentRole) {
               <td style="color:var(--success)">${e.type==='credit'?'₱'+fmt(e.amount):'-'}</td>
               <td><code>${escHtml(e.refNumber||'—')}</code></td>
               <td style="font-size:11px">${escHtml(e.addedByName||'—')}</td>
+              ${canFin?`<td style="white-space:nowrap">
+                <button class="btn-secondary btn-sm led-edit-btn" data-id="${e.id}" data-src="${e._src}">✎</button>
+                <button class="btn-danger btn-sm led-del-btn" data-id="${e.id}" data-src="${e._src}" data-label="${escHtml((e.description||'entry')+' — ₱'+fmt(e.amount))}" style="margin-left:4px">🗑</button>
+              </td>`:''}
             </tr>`).join('')}</tbody>
           </table></div>`}
       </div>
@@ -2097,6 +2467,37 @@ async function renderLedgerTab(container, currentUser, currentRole) {
       renderLedgerTab(container, currentUser, currentRole);
     });
   });
+
+  // Edit (finance) / Delete (President approval) — a row is either a Finance
+  // ledger entry or one leg of a General-Journal entry (data-src tells which).
+  if (canFin) {
+    const redo = () => renderLedgerTab(container, currentUser, currentRole);
+    container.querySelectorAll('.led-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+      const e = entries.find(x=>x.id===btn.dataset.id && x._src===btn.dataset.src); if (!e) return;
+      if (btn.dataset.src === 'journal') {
+        window.financeEditModal({ collection:'general_journal', docId:e.id, title:'Journal Entry', onSaved:redo, fields:[
+          { key:'date', label:'Date', type:'date', value:e.date },
+          { key:'accountTitle', label:'Account Title', type:'text', value:e.accountTitle||e.description, full:true },
+          { key:'debit',  label:'Debit (₱)',  type:'number', value:e.debit||0 },
+          { key:'credit', label:'Credit (₱)', type:'number', value:e.credit||0 },
+          { key:'reference', label:'Reference', type:'text', value:e.reference||e.refNumber, full:true }
+        ]});
+      } else {
+        window.financeEditModal({ collection:'ledger', docId:e.id, title:'Ledger Entry', onSaved:redo, fields:[
+          { key:'date', label:'Date', type:'date', value:e.date },
+          { key:'type', label:'Type', type:'select', value:e.type, options:['credit','debit'] },
+          { key:'description', label:'Description / Account', type:'text', value:e.description, full:true },
+          { key:'amount', label:'Amount (₱)', type:'number', value:e.amount },
+          { key:'category', label:'Category', type:'select', value:e.category||'Other', options:['Sales Revenue','Operating Expense','Payroll','Tax','Materials','Utilities','Journal Entry (Non-cash)','Other'] },
+          { key:'refNumber', label:'Reference Number', type:'text', value:e.refNumber, full:true }
+        ]});
+      }
+    }));
+    container.querySelectorAll('.led-del-btn').forEach(btn => btn.addEventListener('click', () => {
+      const coll = btn.dataset.src === 'journal' ? 'general_journal' : 'ledger';
+      window.financeDelete({ collection:coll, docId:btn.dataset.id, label:`ledger entry "${btn.dataset.label}"`, onDone:redo });
+    }));
+  }
 }
 
 // ── Cash Receipt Journal (for cash-based receipts only) ──
@@ -2104,6 +2505,7 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
   const snap = await db.collection('cash_receipt_journal').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]}));
   const entries = snap.docs.map(d=>({id:d.id,...d.data()}));
   const totalCash = entries.reduce((s,e)=>s+(e.debitCash||0),0);
+  const isPriv = isFinancePriv();
 
   container.innerHTML = `
     <div class="kpi-row">
@@ -2117,7 +2519,7 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
       <div class="card-body" style="padding:0">
         ${!entries.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧾</div><h4>No cash receipt entries yet</h4></div>':
           `<div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Reference</th><th>Date</th><th>Customer</th><th>Debit Cash</th><th>Debit Sales Discount</th><th>Credit A/R</th><th>Credit Sales Revenue</th><th>Credit Sundry (Acct)</th><th>Credit Sundry (Amount)</th></tr></thead>
+            <thead><tr><th>Reference</th><th>Date</th><th>Customer</th><th>Debit Cash</th><th>Debit Sales Discount</th><th>Credit A/R</th><th>Credit Sales Revenue</th><th>Credit Sundry (Acct)</th><th>Credit Sundry (Amount)</th>${isPriv?'<th></th>':''}</tr></thead>
             <tbody>${entries.map(e=>`<tr>
               <td><code>${escHtml(e.reference||'—')}</code></td>
               <td>${e.date||'—'}</td>
@@ -2128,6 +2530,10 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
               <td>${e.creditSalesRevenue?'₱'+fmt(e.creditSalesRevenue):'—'}</td>
               <td>${escHtml(e.creditSundryAcct||'—')}</td>
               <td>${e.creditSundryAmount?'₱'+fmt(e.creditSundryAmount):'—'}</td>
+              ${isPriv?`<td style="white-space:nowrap">
+                <button class="btn-secondary btn-sm crj-edit-btn" data-id="${e.id}">✎</button>
+                <button class="btn-danger btn-sm crj-del-btn" data-id="${e.id}" data-label="${escHtml((e.customer||'receipt')+' — ₱'+fmt(e.debitCash))}" style="margin-left:4px">🗑</button>
+              </td>`:''}
             </tr>`).join('')}</tbody>
           </table></div>`}
       </div>
@@ -2178,6 +2584,27 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
       renderCashReceiptJournal(container, currentUser, currentRole);
     });
   });
+
+  if (isPriv) {
+    const redo = () => renderCashReceiptJournal(container, currentUser, currentRole);
+    container.querySelectorAll('.crj-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+      const e = entries.find(x=>x.id===btn.dataset.id); if (!e) return;
+      window.financeEditModal({ collection:'cash_receipt_journal', docId:e.id, title:'Cash Receipt', onSaved:redo, fields:[
+        { key:'reference', label:'Reference', type:'text', value:e.reference },
+        { key:'date', label:'Date', type:'date', value:e.date },
+        { key:'customer', label:'Customer', type:'text', value:e.customer, full:true },
+        { key:'debitCash', label:'Debit: Cash (₱)', type:'number', value:e.debitCash },
+        { key:'debitSalesDiscount', label:'Debit: Sales Discount (₱)', type:'number', value:e.debitSalesDiscount },
+        { key:'creditAR', label:'Credit: A/R (₱)', type:'number', value:e.creditAR },
+        { key:'creditSalesRevenue', label:'Credit: Sales Revenue (₱)', type:'number', value:e.creditSalesRevenue },
+        { key:'creditSundryAcct', label:'Credit: Sundry Account', type:'text', value:e.creditSundryAcct },
+        { key:'creditSundryAmount', label:'Credit: Sundry Amount (₱)', type:'number', value:e.creditSundryAmount }
+      ]});
+    }));
+    container.querySelectorAll('.crj-del-btn').forEach(btn => btn.addEventListener('click', () => {
+      window.financeDelete({ collection:'cash_receipt_journal', docId:btn.dataset.id, label:`cash receipt "${btn.dataset.label}"`, onDone:redo });
+    }));
+  }
 }
 
 // ── Cash Disbursement Journal (for cash-based expenses only) ──
@@ -2185,6 +2612,7 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
   const snap = await db.collection('cash_disbursement_journal').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]}));
   const entries = snap.docs.map(d=>({id:d.id,...d.data()}));
   const totalCash = entries.reduce((s,e)=>s+(e.creditCash||0),0);
+  const isPriv = isFinancePriv();
 
   container.innerHTML = `
     <div class="kpi-row">
@@ -2198,7 +2626,7 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
       <div class="card-body" style="padding:0">
         ${!entries.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧾</div><h4>No cash disbursement entries yet</h4></div>':
           `<div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Reference</th><th>Date</th><th>Payee</th><th>Credit Cash</th><th>Debit COS–Direct Material</th><th>Debit Accounts Payable</th><th>Debit COS–Direct Labor</th><th>Debit Sundry (Acct)</th><th>Debit Sundry (Amount)</th></tr></thead>
+            <thead><tr><th>Reference</th><th>Date</th><th>Payee</th><th>Credit Cash</th><th>Debit COS–Direct Material</th><th>Debit Accounts Payable</th><th>Debit COS–Direct Labor</th><th>Debit Sundry (Acct)</th><th>Debit Sundry (Amount)</th>${isPriv?'<th></th>':''}</tr></thead>
             <tbody>${entries.map(e=>`<tr>
               <td><code>${escHtml(e.reference||'—')}</code></td>
               <td>${e.date||'—'}</td>
@@ -2209,6 +2637,10 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
               <td>${e.debitLabor?'₱'+fmt(e.debitLabor):'—'}</td>
               <td>${escHtml(e.debitSundryAcct||'—')}</td>
               <td>${e.debitSundryAmount?'₱'+fmt(e.debitSundryAmount):'—'}</td>
+              ${isPriv?`<td style="white-space:nowrap">
+                <button class="btn-secondary btn-sm cdj-edit-btn" data-id="${e.id}">✎</button>
+                <button class="btn-danger btn-sm cdj-del-btn" data-id="${e.id}" data-label="${escHtml((e.payee||'disbursement')+' — ₱'+fmt(e.creditCash))}" style="margin-left:4px">🗑</button>
+              </td>`:''}
             </tr>`).join('')}</tbody>
           </table></div>`}
       </div>
@@ -2257,12 +2689,34 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
       renderCashDisbursementJournal(container, currentUser, currentRole);
     });
   });
+
+  if (isPriv) {
+    const redo = () => renderCashDisbursementJournal(container, currentUser, currentRole);
+    container.querySelectorAll('.cdj-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+      const e = entries.find(x=>x.id===btn.dataset.id); if (!e) return;
+      window.financeEditModal({ collection:'cash_disbursement_journal', docId:e.id, title:'Cash Disbursement', onSaved:redo, fields:[
+        { key:'reference', label:'Reference', type:'text', value:e.reference },
+        { key:'date', label:'Date', type:'date', value:e.date },
+        { key:'payee', label:'Payee', type:'text', value:e.payee, full:true },
+        { key:'creditCash', label:'Credit: Cash (₱)', type:'number', value:e.creditCash },
+        { key:'debitMaterial', label:'Debit: COS – Direct Material (₱)', type:'number', value:e.debitMaterial },
+        { key:'debitAP', label:'Debit: Accounts Payable (₱)', type:'number', value:e.debitAP },
+        { key:'debitLabor', label:'Debit: COS – Direct Labor (₱)', type:'number', value:e.debitLabor },
+        { key:'debitSundryAcct', label:'Debit: Sundry Account', type:'text', value:e.debitSundryAcct },
+        { key:'debitSundryAmount', label:'Debit: Sundry Amount (₱)', type:'number', value:e.debitSundryAmount }
+      ]});
+    }));
+    container.querySelectorAll('.cdj-del-btn').forEach(btn => btn.addEventListener('click', () => {
+      window.financeDelete({ collection:'cash_disbursement_journal', docId:btn.dataset.id, label:`cash disbursement "${btn.dataset.label}"`, onDone:redo });
+    }));
+  }
 }
 
 // ── Records & Receipts Tab ──────────────────────
 async function renderRecordsTab(container, currentUser, currentRole) {
   const snap = await db.collection('finance_records').orderBy('createdAt','desc').limit(100).get().catch(()=>({docs:[]}));
   const records = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const isPriv = isFinancePriv();
   container.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
       <div style="display:flex;gap:8px">
@@ -2278,7 +2732,7 @@ async function renderRecordsTab(container, currentUser, currentRole) {
       <div class="card-body" style="padding:0">
         ${!records.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧾</div><h4>No records yet</h4></div>':
           `<div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>From/To</th><th>File</th><th>By</th></tr></thead>
+            <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>From/To</th><th>File</th><th>By</th>${isPriv?'<th></th>':''}</tr></thead>
             <tbody id="rec-tbody">${records.map(r=>`<tr>
               <td>${r.date||'—'}</td>
               <td><span class="badge badge-blue">${escHtml(r.type||'—')}</span></td>
@@ -2287,6 +2741,10 @@ async function renderRecordsTab(container, currentUser, currentRole) {
               <td>${escHtml(r.party||'—')}</td>
               <td>${r.fileUrl?`<a href="${r.fileUrl}" target="_blank" class="btn-secondary btn-sm">📎 View</a>`:'-'}</td>
               <td style="font-size:11px">${escHtml(r.encodedByName||'—')}</td>
+              ${isPriv?`<td style="white-space:nowrap">
+                <button class="btn-secondary btn-sm rec-edit-btn" data-id="${r.id}">✎</button>
+                <button class="btn-danger btn-sm rec-del-btn" data-id="${r.id}" data-label="${escHtml((r.type||'record')+' — '+(r.description||r.id.slice(-5)))}" style="margin-left:4px">🗑</button>
+              </td>`:''}
             </tr>`).join('')}</tbody>
           </table></div>`}
       </div>
@@ -2330,6 +2788,24 @@ async function renderRecordsTab(container, currentUser, currentRole) {
       renderRecordsTab(container, currentUser, currentRole);
     });
   });
+
+  if (isPriv) {
+    const redo = () => renderRecordsTab(container, currentUser, currentRole);
+    container.querySelectorAll('.rec-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+      const r = records.find(x=>x.id===btn.dataset.id); if (!r) return;
+      window.financeEditModal({ collection:'finance_records', docId:r.id, title:'Record', onSaved:redo, fields:[
+        { key:'date', label:'Date', type:'date', value:r.date },
+        { key:'type', label:'Type', type:'select', value:r.type, options:['Receipt','Invoice','Official Receipt','Voucher','Contract','Other'] },
+        { key:'description', label:'Description', type:'text', value:r.description, full:true },
+        { key:'amount', label:'Amount (₱)', type:'number', value:r.amount },
+        { key:'party', label:'From / To', type:'text', value:r.party },
+        { key:'notes', label:'Notes', type:'textarea', value:r.notes, full:true }
+      ]});
+    }));
+    container.querySelectorAll('.rec-del-btn').forEach(btn => btn.addEventListener('click', () => {
+      window.financeDelete({ collection:'finance_records', docId:btn.dataset.id, label:`record "${btn.dataset.label}"`, onDone:redo });
+    }));
+  }
 
   // ── Accounting Documents (file archive) ──────────────
   const acctSection = document.createElement('div');
@@ -2396,7 +2872,8 @@ async function renderFinanceCA(container, currentUser, currentRole) {
         </div>`:''}
         ${a.status==='approved'&&(a.balance||0)>0&&isPrivileged?`
         <button class="btn-secondary btn-sm fin-ca-pay" data-id="${a.id}" data-balance="${a.balance||0}" data-monthly="${a.monthlyPayment||0}" data-uid="${a.userId||''}" data-name="${escHtml(a.userName||'')}">💳 Record Payment</button>`:''}
-        ${isRealPresident()?`<button class="btn-secondary btn-sm fin-ca-del" data-id="${a.id}" style="color:var(--danger);margin-left:4px">🗑</button>`:''}
+        ${isPrivileged?`<button class="btn-secondary btn-sm fin-ca-edit" data-id="${a.id}" style="margin-left:4px" title="Edit">✎</button>`:''}
+        ${isPrivileged?`<button class="btn-secondary btn-sm fin-ca-del" data-id="${a.id}" data-label="${escHtml((a.userName||'CA')+' — ₱'+fmt(a.amount))}" style="color:var(--danger);margin-left:4px" title="${isRealPresident()?'Delete':'Request deletion'}">🗑</button>`:''}
       </div>`).join('');
 
     list.querySelectorAll('.fin-ca-approve').forEach(btn=>btn.addEventListener('click',async e=>{
@@ -2433,11 +2910,18 @@ async function renderFinanceCA(container, currentUser, currentRole) {
         renderFinanceCA(container,currentUser,currentRole);
       });
     }));
-    list.querySelectorAll('.fin-ca-del').forEach(btn=>btn.addEventListener('click',async e=>{
-      if(!confirm('Delete this record permanently?'))return;
-      await db.collection('cash_advances').doc(btn.dataset.id).delete();
-      Notifs.showToast('Deleted.');
-      renderFinanceCA(container,currentUser,currentRole);
+    list.querySelectorAll('.fin-ca-edit').forEach(btn=>btn.addEventListener('click',()=>{
+      const a = records.find(x=>x.id===btn.dataset.id) || all.find(x=>x.id===btn.dataset.id);
+      if(!a) return;
+      window.financeEditModal({ collection:'cash_advances', docId:a.id, title:'Cash Advance', onSaved:()=>renderFinanceCA(container,currentUser,currentRole), fields:[
+        { key:'amount', label:'Amount (₱)', type:'number', value:a.amount },
+        { key:'monthlyPayment', label:'Monthly Payment (₱)', type:'number', value:a.monthlyPayment },
+        { key:'date', label:'Date', type:'date', value:a.date },
+        { key:'reason', label:'Reason', type:'textarea', value:a.reason, full:true }
+      ]});
+    }));
+    list.querySelectorAll('.fin-ca-del').forEach(btn=>btn.addEventListener('click',()=>{
+      window.financeDelete({ collection:'cash_advances', docId:btn.dataset.id, label:`cash advance "${btn.dataset.label}"`, onDone:()=>renderFinanceCA(container,currentUser,currentRole) });
     }));
   };
 
@@ -2507,6 +2991,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
               <td style="white-space:nowrap">
                 <button class="btn-primary btn-sm hrp-gen-btn" data-id="${p.id}" style="margin-right:4px">📄 Payslip</button>
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-edit-btn" data-id="${p.id}">✎ Edit</button>`:''}
+                ${isPriv?`<button class="btn-danger btn-sm hrp-del-btn" data-id="${p.id}" data-label="${escHtml(p.name||p.id.slice(-5))}" style="margin-left:4px">🗑</button>`:''}
               </td>
             </tr>`).join('')}
           </tbody>
@@ -2524,6 +3009,9 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
       const profile = profiles.find(p=>p.id===btn.dataset.id);
       btn.addEventListener('click', () => openHRProfileForm(profile, currentUser, currentRole, ()=>renderFinanceHRProfiles(container,currentUser,currentRole)));
     });
+    container.querySelectorAll('.hrp-del-btn').forEach(btn => btn.addEventListener('click', () => {
+      window.financeDelete({ collection:'worker_profiles', docId:btn.dataset.id, label:`worker profile "${btn.dataset.label}"`, onDone:()=>renderFinanceHRProfiles(container,currentUser,currentRole) });
+    }));
   }
 
   // Generate payslip
@@ -2734,23 +3222,17 @@ async function openPayslipHistory(currentUser, currentRole) {
     document.querySelectorAll('.ps-del-btn').forEach(btn => onClickSafe(btn, async () => {
         const ps = list.find(p=>p.id===btn.dataset.id);
         if (!ps) return;
-        if (!confirm(`Delete ${ps.workerName}'s payslip (${ps.payPeriodStart} – ${ps.payPeriodEnd})? This cannot be undone.`)) return;
-        // Reverse the CA deduction back onto the worker's running balance
-        const ca = ps.deductions?.other?.cashAdvance || 0;
-        if (ca > 0 && ps.workerId) {
-          await db.collection('worker_profiles').doc(ps.workerId).update({
-            caBalance: firebase.firestore.FieldValue.increment(ca)
-          }).catch(()=>{});
+        // President deletes immediately; finance staff file a request. The CA
+        // reversal + linked ledger cleanup run centrally in financeDeleteCascade.
+        const outcome = await window.financeDelete({
+          collection:'payslips', docId:ps.id,
+          label:`payslip — ${ps.workerName||'?'} (${ps.payPeriodStart||''} – ${ps.payPeriodEnd||''})`
+        });
+        if (outcome === 'deleted') {
+          const idx = list.findIndex(p=>p.id===ps.id);
+          if (idx>=0) list.splice(idx,1);
+          renderModal();
         }
-        // Remove the linked general-ledger entry if it was posted
-        const lref = `WPAY-${ps.id}`;
-        const lsnap = await db.collection('ledger').where('refNumber','==',lref).limit(1).get().catch(()=>({docs:[]}));
-        if (lsnap.docs.length) await lsnap.docs[0].ref.delete();
-        await db.collection('payslips').doc(ps.id).delete();
-        const idx = list.findIndex(p=>p.id===ps.id);
-        if (idx>=0) list.splice(idx,1);
-        Notifs.showToast('Payslip deleted.');
-        renderModal();
     }));
     document.querySelectorAll('.ps-override-btn').forEach(btn => onClickSafe(btn, async () => {
         const ps = list.find(p=>p.id===btn.dataset.id);
@@ -3364,8 +3846,9 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
     db.collection('expenses').get().catch(()=>({docs:[]})),
     fetchUsersWithPayroll().catch(()=>({docs:[]}))
   ]);
-  const expenses   = expSnap.docs.map(d => d.data());
+  const expenses   = expSnap.docs.map(d => ({id:d.id,...d.data()}));
   const users      = salSnap.docs.map(d => d.data());
+  const isPriv     = isFinancePriv();
   const totalExp   = expenses.reduce((s,e) => s + (e.amount||0), 0);
   const pendingExp = expenses.filter(e => e.status==='pending').reduce((s,e) => s + (e.amount||0), 0);
   const payroll    = users.reduce((s,u) => s + (u.salary||0) + (u.allowance||0) - (u.deductions||0), 0);
@@ -3387,7 +3870,7 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
                 <td>${escHtml(e.description)}</td><td>₱${fmt(e.amount)}</td>
                 <td>${escHtml(e.submittedByName||'—')}</td>
                 <td><span class="badge ${statusBadge(e.status)}">${e.status||'pending'}</span></td>
-                <td>${e.fileUrl?`<a href="${e.fileUrl}" target="_blank" class="btn-icon">📎</a>`:''}</td>
+                <td style="white-space:nowrap">${e.fileUrl?`<a href="${e.fileUrl}" target="_blank" class="btn-icon">📎</a>`:''}${isPriv?`<button class="btn-secondary btn-sm exp-edit-btn" data-id="${e.id}" style="margin-left:4px">✎</button><button class="btn-danger btn-sm exp-del-btn" data-id="${e.id}" data-label="${escHtml(e.description||e.id.slice(-5))}" style="margin-left:4px">🗑</button>`:''}</td>
               </tr>`).join('')}
             </tbody>
           </table>
@@ -3398,6 +3881,22 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
   document.getElementById('exp-csv-btn')?.addEventListener('click', () => window.exportCSV('expenses', expenses, [
     {key:'date',label:'Date'},{key:'description',label:'Description'},{key:'category',label:'Category'},
     {key:'amount',label:'Amount',get:e=>e.amount||0},{key:'submittedByName',label:'By'},{key:'status',label:'Status',get:e=>e.status||'pending'},{key:'fileUrl',label:'Receipt'}]));
+
+  if (isPriv) {
+    const redo = () => renderFinanceOverview(container, currentUser, currentRole);
+    container.querySelectorAll('.exp-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+      const e = expenses.find(x=>x.id===btn.dataset.id); if (!e) return;
+      window.financeEditModal({ collection:'expenses', docId:e.id, title:'Expense', onSaved:redo, fields:[
+        { key:'description', label:'Description', type:'text', value:e.description, full:true },
+        { key:'amount', label:'Amount (₱)', type:'number', value:e.amount },
+        { key:'category', label:'Category', type:'text', value:e.category },
+        { key:'status', label:'Status', type:'select', value:e.status||'pending', options:['pending','approved','rejected','paid'] }
+      ]});
+    }));
+    container.querySelectorAll('.exp-del-btn').forEach(btn => btn.addEventListener('click', () => {
+      window.financeDelete({ collection:'expenses', docId:btn.dataset.id, label:`expense "${btn.dataset.label}"`, onDone:redo });
+    }));
+  }
 }
 
 // ══════════════════════════════════════════════════
@@ -6499,13 +6998,14 @@ function printQuote(lines, q) {
 window.renderApprovals = async function(currentUser) {
   const c = deptContainer();
   // Check pending counts for badges
-  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap, finReqSnap, qApprSnap, delQSnap, delCSnap] = await Promise.all([
+  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap, finReqSnap, finDelSnap, qApprSnap, delQSnap, delCSnap] = await Promise.all([
     db.collection('signup_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('attendance_extensions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('cash_advances').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('submissions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('tasks').where('status','==','review').get().catch(()=>({size:0,docs:[]})),
     db.collection('payroll_delete_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
+    db.collection('finance_delete_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('approval_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
     db.collection('bs_clients').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]}))
@@ -6515,7 +7015,7 @@ window.renderApprovals = async function(currentUser) {
   const pendingCA      = caSnap.size || 0;
   const pendingSubs    = subsSnap.size || 0;
   const pendingReview  = reviewTasksCountSnap.size || 0;
-  const pendingFinReqs = finReqSnap.size || 0;
+  const pendingFinReqs = (finReqSnap.size || 0) + (finDelSnap.size || 0);
   const pendingQApprovals = qApprSnap.size || 0;
   const pendingDeletes    = (delQSnap.size || 0) + (delCSnap.size || 0);
   const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs + pendingReview + pendingFinReqs + pendingQApprovals + pendingDeletes;
@@ -6563,13 +7063,14 @@ window.renderApprovals = async function(currentUser) {
       // index per-collection. If that index isn't provisioned, the query is rejected and
       // silently swallowed by .catch(), making items vanish from "All Requests". We sort
       // client-side instead so a missing index can never hide pending items.
-      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, qApprSnap2, delQSnap2, delCSnap2] = await Promise.all([
+      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delCSnap2] = await Promise.all([
         db.collection('signup_requests').where('status','==','pending').get().catch(e=>{console.error('signup_requests query failed',e);return {docs:[]};}),
         db.collection('attendance_extensions').where('status','==','pending').get().catch(e=>{console.error('attendance_extensions query failed',e);return {docs:[]};}),
         db.collection('cash_advances').where('status','==','pending').get().catch(e=>{console.error('cash_advances query failed',e);return {docs:[]};}),
         db.collection('submissions').where('status','==','pending').get().catch(e=>{console.error('submissions query failed',e);return {docs:[]};}),
         db.collection('tasks').where('status','==','review').get().catch(e=>{console.error('tasks query failed',e);return {docs:[]};}),
         db.collection('payroll_delete_requests').where('status','==','pending').get().catch(e=>{console.error('payroll_delete_requests query failed',e);return {docs:[]};}),
+        db.collection('finance_delete_requests').where('status','==','pending').get().catch(e=>{console.error('finance_delete_requests query failed',e);return {docs:[]};}),
         db.collection('approval_requests').where('status','==','pending').get().catch(e=>{console.error('approval_requests query failed',e);return {docs:[]};}),
         db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('bs_quotes delete query failed',e);return {docs:[]};}),
         db.collection('bs_clients').where('deleteRequested','==',true).get().catch(e=>{console.error('bs_clients delete query failed',e);return {docs:[]};})
@@ -6582,6 +7083,7 @@ window.renderApprovals = async function(currentUser) {
         ...subSnap2.docs.map(d=>({id:d.id,...d.data(),type:'submission',icon:'📤',label:'Work Submission',name:d.data().userName||d.data().authorName||'Unknown',detail:d.data().title||'',ts:d.data().createdAt})),
         ...reviewTasksSnap.docs.map(d=>({id:d.id,...d.data(),type:'review-task',icon:'📋',label:'Task for Review',name:d.data().title||'Untitled Task',detail:(()=>{const uids=Array.isArray(d.data().assignedTo)?d.data().assignedTo:[d.data().assignedTo].filter(Boolean);return uids.length?'by '+d.data().assignedToNames?.join(', '):'';})(),ts:d.data().lastModifiedAt||d.data().createdAt})),
         ...finReqSnap2.docs.map(d=>({id:d.id,...d.data(),type:'finance-req',icon:'💼',label:'Finance Request',name:`Delete: ${d.data().userName||'?'} (${d.data().month||'?'})`,detail:`by ${d.data().requestedByName||'?'} — ${d.data().reason||''}`,ts:d.data().createdAt})),
+        ...finDelSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'finance-del',icon:'🗑',label:'Finance Delete',name:`Delete: ${x.label||'record'}`,detail:`by ${x.requestedByName||'?'}${x.reason?' — '+x.reason:''}`,ts:x.createdAt,recLabel:x.label};}),
         // Partner quote approvals (partner submitted a quote for the president to review/edit/return)
         ...qApprSnap2.docs.map(d=>({id:d.id,...d.data(),type:'quote-approval',icon:'📤',label:'Quote Approval',name:`${d.data().quoteNumber||'Quote'} — ${d.data().clientName||''}`,detail:`${d.data().agentName||'Partner'} · ₱${fmt(d.data().total||0)}`,ts:d.data().createdAt})),
         // Partner delete requests (quote + client folder) — president approves or denies
@@ -6624,6 +7126,9 @@ window.renderApprovals = async function(currentUser) {
               `:item.type==='finance-req'?`
                 <button class="btn-success btn-sm fr-approve-btn" data-id="${item.id}" data-hist-id="${item.historyId||''}" data-name="${escHtml(item.userName||'')}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">✓ Approve Deletion</button>
                 <button class="btn-danger btn-sm fr-deny-btn" data-id="${item.id}" data-name="${escHtml(item.userName||'')}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">✗ Deny</button>
+              `:item.type==='finance-del'?`
+                <button class="btn-success btn-sm fdel-approve-btn" data-id="${item.id}" data-coll="${escHtml(item.collection||'')}" data-doc="${escHtml(item.docId||'')}" data-label="${escHtml(item.recLabel||'record')}" data-req-by="${item.requestedBy||''}">✓ Approve Deletion</button>
+                <button class="btn-danger btn-sm fdel-deny-btn" data-id="${item.id}" data-label="${escHtml(item.recLabel||'record')}" data-req-by="${item.requestedBy||''}">✗ Deny</button>
               `:item.type==='quote-approval'?`
                 <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">📝 Open &amp; Edit</button>
                 <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">✓ Approve</button>
@@ -6731,6 +7236,22 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('all');
       }));
 
+      // Generic finance delete request approve/deny (from "all" view)
+      wrap.querySelectorAll('.fdel-approve-btn').forEach(btn => onClickSafe(btn, async () => {
+          if (!confirm(`Approve deletion of ${btn.dataset.label}? This permanently deletes it.`)) return;
+          if (btn.dataset.coll && btn.dataset.doc) await window.financeExecuteDelete(btn.dataset.coll, btn.dataset.doc);
+          await db.collection('finance_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'✅ Delete Approved', body:`Your request to delete ${btn.dataset.label} was approved.`, icon:'✅', type:'finance_delete_approved' }));
+          Notifs.showToast('Deleted and requester notified.');
+          loadApprovalsSub('all');
+      }));
+      wrap.querySelectorAll('.fdel-deny-btn').forEach(btn => onClickSafe(btn, async () => {
+          await db.collection('finance_delete_requests').doc(btn.dataset.id).update({ status:'denied', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'❌ Delete Denied', body:`Your request to delete ${btn.dataset.label} was denied by the President.`, icon:'❌', type:'finance_delete_denied' }));
+          Notifs.showToast('Request denied and requester notified.');
+          loadApprovalsSub('all');
+      }));
+
       // ── Partner quote approvals — open & edit, approve, or return to partner ──
       wrap.querySelectorAll('.qa-review-btn').forEach(btn => onClickSafe(btn, () => {
         openQuoteApprovalReview({ quoteId:btn.dataset.quote, agentId:btn.dataset.by, quoteNumber:btn.dataset.qno, clientName:btn.dataset.name }, ()=>loadApprovalsSub('all'));
@@ -6782,27 +7303,38 @@ window.renderApprovals = async function(currentUser) {
     }
 
     if (sub === 'finance-requests') {
-      const snap = await db.collection('payroll_delete_requests').orderBy('createdAt','desc').limit(100).get().catch(e=>{console.error('payroll_delete_requests query failed',e);return {docs:[]};});
-      const reqs = snap.docs.map(d=>({id:d.id,...d.data()}));
+      const [psnap, fsnap] = await Promise.all([
+        db.collection('payroll_delete_requests').orderBy('createdAt','desc').limit(100).get().catch(e=>{console.error('payroll_delete_requests query failed',e);return {docs:[]};}),
+        db.collection('finance_delete_requests').orderBy('createdAt','desc').limit(100).get().catch(e=>{console.error('finance_delete_requests query failed',e);return {docs:[]};})
+      ]);
+      const reqs = [
+        ...psnap.docs.map(d=>({id:d.id,kind:'payroll',...d.data()})),
+        ...fsnap.docs.map(d=>({id:d.id,kind:'finance',...d.data()}))
+      ].sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
       const pending = reqs.filter(r=>r.status==='pending');
       const resolved = reqs.filter(r=>r.status!=='pending');
 
+      const titleOf = r => r.kind==='payroll'
+        ? `🗑 Delete Payroll Record — ${escHtml(r.userName||'?')} (${r.month||'?'})`
+        : `🗑 Delete — ${escHtml(r.label||'record')}`;
+      const actionsOf = r => r.kind==='payroll'
+        ? `<button class="btn-success btn-sm fr-approve-btn" data-id="${r.id}" data-hist-id="${r.historyId||''}" data-name="${escHtml(r.userName||'')}" data-month="${r.month||''}" data-req-by="${r.requestedBy||''}">✓ Approve Deletion</button>
+           <button class="btn-danger btn-sm fr-deny-btn" data-id="${r.id}" data-name="${escHtml(r.userName||'')}" data-month="${r.month||''}" data-req-by="${r.requestedBy||''}">✗ Deny</button>`
+        : `<button class="btn-success btn-sm fdel-approve-btn" data-id="${r.id}" data-coll="${escHtml(r.collection||'')}" data-doc="${escHtml(r.docId||'')}" data-label="${escHtml(r.label||'record')}" data-req-by="${r.requestedBy||''}">✓ Approve Deletion</button>
+           <button class="btn-danger btn-sm fdel-deny-btn" data-id="${r.id}" data-label="${escHtml(r.label||'record')}" data-req-by="${r.requestedBy||''}">✗ Deny</button>`;
       const reqCard = (r, showActions) => `
         <div class="item-card" style="cursor:default">
           <div class="item-top">
-            <div class="item-title">🗑 Delete Payroll Record — ${escHtml(r.userName||'?')} (${r.month||'?'})</div>
+            <div class="item-title">${titleOf(r)}</div>
             <span class="badge ${r.status==='pending'?'badge-warn':r.status==='approved'?'badge-green':'badge-red'}">${r.status==='pending'?'Pending':r.status==='approved'?'Approved':'Denied'}</span>
           </div>
           <div class="item-meta" style="margin-top:4px;flex-wrap:wrap;gap:6px">
-            <span class="badge badge-blue" style="font-size:10px">Payroll Delete</span>
+            <span class="badge badge-blue" style="font-size:10px">${r.kind==='payroll'?'Payroll Delete':'Finance Delete'}</span>
             <span style="font-size:12px;color:var(--text-muted)">Requested by: <strong>${escHtml(r.requestedByName||'?')}</strong></span>
             ${r.reason?`<span style="font-size:12px;color:var(--text-muted)">Reason: ${escHtml(r.reason)}</span>`:''}
             ${r.createdAt?`<span style="font-size:11px;color:var(--text-muted)">${new Date(r.createdAt.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'})}</span>`:''}
           </div>
-          ${showActions?`<div style="display:flex;gap:8px;margin-top:10px">
-            <button class="btn-success btn-sm fr-approve-btn" data-id="${r.id}" data-hist-id="${r.historyId||''}" data-name="${escHtml(r.userName||'')}" data-month="${r.month||''}" data-req-by="${r.requestedBy||''}">✓ Approve Deletion</button>
-            <button class="btn-danger btn-sm fr-deny-btn" data-id="${r.id}" data-name="${escHtml(r.userName||'')}" data-month="${r.month||''}" data-req-by="${r.requestedBy||''}">✗ Deny</button>
-          </div>`:''}
+          ${showActions?`<div style="display:flex;gap:8px;margin-top:10px">${actionsOf(r)}</div>`:''}
         </div>`;
 
       wrap.innerHTML = `
@@ -6829,6 +7361,20 @@ window.renderApprovals = async function(currentUser) {
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'denied', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'❌ Payroll Delete Denied', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record was denied.`, icon:'❌', type:'payroll_delete_denied' }));
           Notifs.showToast('Request denied.');
+          loadApprovalsSub('finance-requests');
+      }));
+      wrap.querySelectorAll('.fdel-approve-btn').forEach(btn => onClickSafe(btn, async () => {
+          if (!confirm(`Approve deletion of ${btn.dataset.label}? This permanently deletes it.`)) return;
+          if (btn.dataset.coll && btn.dataset.doc) await window.financeExecuteDelete(btn.dataset.coll, btn.dataset.doc);
+          await db.collection('finance_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'✅ Delete Approved', body:`Your request to delete ${btn.dataset.label} was approved.`, icon:'✅', type:'finance_delete_approved' }));
+          Notifs.showToast('Deleted and requester notified.');
+          loadApprovalsSub('finance-requests');
+      }));
+      wrap.querySelectorAll('.fdel-deny-btn').forEach(btn => onClickSafe(btn, async () => {
+          await db.collection('finance_delete_requests').doc(btn.dataset.id).update({ status:'denied', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'❌ Delete Denied', body:`Your request to delete ${btn.dataset.label} was denied by the President.`, icon:'❌', type:'finance_delete_denied' }));
+          Notifs.showToast('Request denied and requester notified.');
           loadApprovalsSub('finance-requests');
       }));
       return;
@@ -7375,6 +7921,10 @@ async function renderDocCollection(container, collection, title, currentUser, cu
             <div class="policy-title">${escHtml(d.title)}</div>
             <div class="policy-desc">${escHtml(d.description||'')}</div>
             ${d.fileUrl?`<a href="${d.fileUrl}" target="_blank" class="btn-link" style="font-size:12px;margin-top:8px;display:block">📎 Open File</a>`:''}
+            ${opts.editable&&canAdd?`<div style="display:flex;gap:6px;margin-top:10px">
+              <button class="btn-secondary btn-sm doc-edit-btn" data-id="${d.id}">✎ Edit</button>
+              <button class="btn-danger btn-sm doc-del-btn" data-id="${d.id}" data-label="${escHtml(d.title||'item')}">🗑</button>
+            </div>`:''}
           </div>`).join('')}
     </div>
   `;
@@ -7401,6 +7951,29 @@ async function renderDocCollection(container, collection, title, currentUser, cu
       closeModal(); renderDocCollection(container, collection, title, currentUser, currentRole, opts);
     });
   });
+
+  // Opt-in edit/delete (currently used by Finance → Purchasing). Deletes in a
+  // Finance collection route through President approval; others delete directly.
+  if (opts.editable && canAdd) {
+    const redo = () => renderDocCollection(container, collection, title, currentUser, currentRole, opts);
+    const singular = title.replace(/s$/,'');
+    document.querySelectorAll('.doc-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+      const d = docs.find(x=>x.id===btn.dataset.id); if (!d) return;
+      window.financeEditModal({ collection, docId:d.id, title:singular, onSaved:redo, fields:[
+        { key:'title', label:'Title', type:'text', value:d.title, full:true },
+        { key:'description', label:'Description', type:'textarea', value:d.description, full:true }
+      ]});
+    }));
+    document.querySelectorAll('.doc-del-btn').forEach(btn => btn.addEventListener('click', async () => {
+      if (opts.dept === 'Finance') {
+        window.financeDelete({ collection, docId:btn.dataset.id, label:`${singular.toLowerCase()} "${btn.dataset.label}"`, onDone:redo });
+      } else {
+        if (!confirm(`Delete "${btn.dataset.label}"? This cannot be undone.`)) return;
+        try { await db.collection(collection).doc(btn.dataset.id).delete(); Notifs.showToast('Deleted.'); redo(); }
+        catch(e) { Notifs.showToast('Delete failed: '+(e.message||e),'error'); }
+      }
+    }));
+  }
 }
 
 // ══════════════════════════════════════════════════
@@ -8098,10 +8671,13 @@ window.renderProjectLifecycle = async function(){
       <div class="card" style="margin-bottom:12px"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3 style="font-size:13px">${s.icon} ${s.label}</h3><span class="badge" style="background:${s.color};color:#fff">${(byStage[s.id]||[]).length}</span></div>
         <div class="card-body" style="display:flex;flex-direction:column;gap:8px">${(byStage[s.id]||[]).map(card).join('')}</div></div>`).join('')}
     ${done.length?`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">💰 Paid / Closed (${done.length})</summary><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${done.slice(0,30).map(card).join('')}</div></details>`:''}`;
-  c.querySelectorAll('.proj-card').forEach(el=>el.addEventListener('click',()=>openProjectDetail(projects.find(p=>p.id===el.dataset.id))));
+  c.querySelectorAll('.proj-card').forEach(el=>el.addEventListener('click',()=>openJobProjectDetail(projects.find(p=>p.id===el.dataset.id))));
 };
 
-function openProjectDetail(p){
+// NOTE: named openJobProjectDetail (not openProjectDetail) deliberately. The Design
+// board defines window.openProjectDetail; in this shared global script a bare
+// `openProjectDetail` would resolve to that Design modal and shadow this one.
+function openJobProjectDetail(p){
   if(!p) return;
   const st=jobStage(p.stage);
   const isPartnerU = currentRole==='partner' || (currentDepts||[]).length===1 && currentDepts[0]==='Brilliant Steel';
@@ -8131,18 +8707,32 @@ function openProjectDetail(p){
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:0">
       ${(p.documents||[]).length?`<table class="data-table"><tbody>${(p.documents||[]).map(dc=>`<tr><td style="font-weight:600;font-size:12px">${escHtml(dc.type||'')}</td><td style="font-size:11px">${escHtml(dc.ref||'')}</td><td style="font-size:11px;color:var(--text-muted)">${dc.at?new Date(dc.at).toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''} · ${escHtml(dc.by||'')}</td></tr>`).join('')}</tbody></table>`:'<div style="padding:12px;font-size:12px;color:var(--text-muted)">No documents yet.</div>'}
     </div></div>
+    ${(p.invoices||[]).length?`
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">🧾 Billing Invoices</div>
+    <div class="item-list" style="margin-bottom:10px">${(p.invoices||[]).slice().reverse().map(inv=>`
+      <div class="item-card jinv-card" style="cursor:pointer" data-inv="${escHtml(inv.no)}">
+        <div class="item-top"><div class="item-title" style="font-size:13px">🧾 ${escHtml(inv.no)}</div><span>₱${fmt(inv.amount)}</span></div>
+        <div class="item-meta"><span>📅 ${escHtml(inv.date||'')}</span>${inv.due?`<span>Due ${escHtml(inv.due)}</span>`:''}${inv.desc?`<span>${escHtml(inv.desc)}</span>`:''}</div>
+      </div>`).join('')}</div>`:''}
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">🕘 Timeline</div>
     <div style="max-height:160px;overflow:auto;font-size:12px">${(p.timeline||[]).slice().reverse().map(t=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)"><strong>${escHtml(t.event||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${t.at?new Date(t.at).toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''} · ${escHtml(t.by||'')}</div></div>`).join('')||'<div style="color:var(--text-muted)">No activity yet.</div>'}</div>
     <div id="proj-detail-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `
     ${_isFinAdmin()&&!isPartnerU?'<button class="btn-primary" id="proj-bill-btn">💵 Record Payment</button>':''}
+    ${_isFinAdmin()&&!isPartnerU&&(Number(p.contractAmount)||0)>0?'<button class="btn-secondary" id="proj-invoice-btn">🧾 Billing Invoice</button>':''}
     ${!isPartnerU && (canEditDept('Production')||canEditDept('Sales')) && ['won','in_production'].includes(p.stage)?'<button class="btn-secondary" id="proj-job-btn">🏭 Job Order</button>':''}
     ${canAdvance&&next?`<button class="btn-success" id="proj-advance-btn">Advance → ${next.label}</button>`:''}
     <button class="btn-secondary" onclick="closeModal()">Close</button>`);
   document.getElementById('proj-advance-btn')?.addEventListener('click',()=>advanceProjectStage(p, next.id));
   document.getElementById('proj-bill-btn')?.addEventListener('click',()=>openProjectBillingModal(p));
+  document.getElementById('proj-invoice-btn')?.addEventListener('click',()=>openJobBillingInvoiceModal(p));
   document.getElementById('proj-margin-btn')?.addEventListener('click',()=>openProjectMarginModal(p));
   document.getElementById('proj-job-btn')?.addEventListener('click',()=>{ closeModal(); prodOrderModal(null, currentUser, currentRole, ()=>window.renderProjectLifecycle&&window.renderProjectLifecycle(), p.id); });
+  // Re-open a previously issued billing invoice (printable)
+  document.querySelectorAll('#modal-body .jinv-card').forEach(card=>card.addEventListener('click',()=>{
+    const inv=(p.invoices||[]).find(i=>i.no===card.dataset.inv);
+    if(inv) window.openBillingInvoice(p, inv);
+  }));
 }
 
 // Edit the profit factors (capital cost + partner split %) on a project.
@@ -8254,6 +8844,73 @@ function openProjectBillingModal(p){
       window.logAudit && window.logAudit('create','payment',p.id,{ amount, type, projectNo:p.projectNo });
       if(newAR<=0){ try{ await Notifs.sendToOwner({ title:'💰 Project fully paid', body:`${p.clientName} (${p.projectNo}) — ₱${(p.contractAmount||0).toLocaleString()} collected in full.`, icon:'💰', type:'project_paid' }); }catch(_){} }
       closeModal(); Notifs.showToast('Payment recorded + posted to ledger'); window.renderProjectLifecycle();
+    }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+  });
+}
+
+// Finance issues a printable billing invoice against a job_projects record (the
+// sales-record spine). Issuing an invoice only documents what's owed — it does NOT
+// move money (that's "Record Payment"), so AR/Collected are untouched here.
+function openJobBillingInvoiceModal(p){
+  const contract = Number(p.contractAmount)||0;
+  const paid     = Number(p.amountCollected)||0;
+  const bal      = Math.max(0, contract - paid);
+  openModal('🧾 Billing Invoice — '+escHtml(p.clientName||''), `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract ₱${fmt(contract)} · Collected ₱${fmt(paid)} · <strong>Balance ₱${fmt(bal)}</strong></div>
+    <div class="form-group"><label>Bill To</label><input id="jinv-billto" value="${escHtml(p.clientName||'')}"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Invoice Date</label><input id="jinv-date" type="date" value="${today()}"/></div>
+      <div class="form-group"><label>Due Date</label><input id="jinv-due" type="date"/></div>
+    </div>
+    <div class="form-group"><label>Particulars</label><input id="jinv-desc" value="Collection of outstanding balance"/></div>
+    <div class="form-group"><label>Amount to Collect (₱)</label><input id="jinv-amt" type="number" inputmode="decimal" step="0.01" min="0" value="${bal>0?bal.toFixed(2):'0.00'}"/></div>
+    <div class="form-group"><label>Notes / Payment Instructions</label><textarea id="jinv-notes" rows="3">Kindly settle the amount due on or before the due date. Payable to NEILBARRO STEEL & METAL FABRICATION SERVICES.</textarea></div>
+    <div id="jinv-err" class="error-msg hidden" style="margin-top:8px"></div>
+  `, `<button class="btn-primary" id="jinv-gen">Generate Invoice</button><button class="btn-secondary" id="jinv-back">Cancel</button>`);
+  document.getElementById('jinv-back').addEventListener('click', ()=>openJobProjectDetail(p));
+  document.getElementById('jinv-gen').addEventListener('click', async ()=>{
+    const err=document.getElementById('jinv-err');
+    const amt=parseFloat(document.getElementById('jinv-amt').value)||0;
+    if(amt<=0){ err.textContent='Enter a valid amount.'; err.classList.remove('hidden'); return; }
+    const seq=((p.invoices||[]).length+1);
+    const who=userProfile?.displayName||currentUser.email||'';
+    const inv={
+      no:             'INV-'+today().replace(/-/g,'')+'-'+String(seq).padStart(3,'0'),
+      date:           document.getElementById('jinv-date').value||today(),
+      due:            document.getElementById('jinv-due').value||'',
+      billTo:         document.getElementById('jinv-billto').value.trim(),
+      desc:           document.getElementById('jinv-desc').value.trim(),
+      amount:         amt,
+      notes:          document.getElementById('jinv-notes').value.trim(),
+      contractAmount: contract,
+      paidToDate:     paid,
+      balanceBefore:  bal,
+      projectName:    p.name||p.projectNo||'',
+      projectNo:      p.projectNo||'',
+      issuedBy:       who,
+      createdAt:      today()
+    };
+    if(!confirm(`Generate billing invoice ${inv.no} for ₱${fmt(amt)} (${p.clientName||''})?`)) return;
+    try{
+      // Atomic append so a concurrent edit can't clobber the invoice list.
+      const ref=db.collection('job_projects').doc(p.id);
+      const saved=await db.runTransaction(async tx=>{
+        const doc=await tx.get(ref);
+        const cur=(doc.exists && Array.isArray(doc.data().invoices))?doc.data().invoices:[];
+        const next=[...cur, inv];
+        tx.update(ref, {
+          invoices:next,
+          documents:firebase.firestore.FieldValue.arrayUnion({ type:'Billing Invoice', ref:inv.no, at:new Date().toISOString(), by:who }),
+          timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Billing invoice ${inv.no} issued (₱${amt.toLocaleString()})`, by:who }),
+          updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+        });
+        return next;
+      });
+      p.invoices=saved;
+      window.logAudit && window.logAudit('create','invoice',p.id,{ no:inv.no, amount:amt, projectNo:p.projectNo });
+      closeModal();
+      Notifs.showToast('Billing invoice generated','success');
+      window.openBillingInvoice(p, inv);
     }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
   });
 }

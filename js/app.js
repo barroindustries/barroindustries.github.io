@@ -795,6 +795,7 @@ function getSidebarItems() {
     items.push({ icon:'search',        label:'Search',           page:'search'                         });
     items.push({ icon:'check-square',  label:'Tasks',            page:'tasks'                          });
     items.push({ icon:'megaphone',     label:'Posts',            page:'posts'                          });
+    items.push({ icon:'clipboard-check', label:'Memos',          page:'memos'                          });
     items.push({ icon:'shield-check',  label:'Approvals',        page:'approvals',       section:true  });
     items.push({ icon:'trending-up',   label:'Progress Reports', page:'progress'                       });
     items.push({ icon:'users',         label:'Team Directory',   page:'team-directory',  section:true  });
@@ -826,6 +827,7 @@ function getSidebarItems() {
     items.push({ icon:'search',       label:'Search',   page:'search' });
     items.push({ icon:'check-square', label:'My Tasks', page:'tasks' });
     items.push({ icon:'megaphone',    label:'Posts',    page:'posts' });
+    items.push({ icon:'clipboard-check', label:'Memos', page:'memos' });
     // Departments — appear ABOVE management section
     currentDepts.forEach((dept, i) => {
       const cfg = DEPARTMENTS[dept];
@@ -1772,6 +1774,7 @@ function navigateTo(page) {
     case 'sops':             renderSOPs(); break;
     // ── New modules ──
     case 'posts':            window.renderPosts?.(); break;
+    case 'memos':            window.renderMemosPage?.(); break;
     case 'team-directory':   window.renderTeamTab?.(); break;
     case 'attendance':       window.renderAttendancePage?.(); break;
     case 'cash-advances':    window.renderCashAdvancePage?.(); break;
@@ -4799,7 +4802,7 @@ async function renderCompany() {
     c.querySelectorAll('.subtab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
     const ct = document.getElementById('company-tab-content');
     if (tab==='overview')        renderCompanyOverview(ct, canAdd);
-    else if (tab==='memos')      renderCompanyMemos(ct, canAdd);
+    else if (tab==='memos')      renderCompanyMemos(ct, isPresident() || currentRole==='manager'); // memos: managers are admins per firestore.rules + sidebar
     else if (tab==='policies')   renderCompanyPolicies(ct, canAdd);
     else if (tab==='downloads')  renderCompanyDownloads(ct, canAdd);
     else if (tab==='handbook')   renderCompanyHandbook(ct, canAdd);
@@ -5066,6 +5069,13 @@ async function renderCompanyOverview(ct, canAdd) {
 }
 
 // ── Company: Memos ────────────────────────────────
+// Memos support optional "conforme" — tagged recipients must tick an
+// acknowledgment ("I have read and agree") which is recorded with a timestamp.
+// Storage on each memo doc:
+//   recipients:     [uid, …]          — who must conforme
+//   recipientNames: { uid: name }     — cached names for the tracker
+//   conformes:      { uid: {at, name} }  — who has acknowledged + when
+// A tagged recipient can write ONLY their own conformes[uid] entry (firestore.rules).
 async function renderCompanyMemos(ct, canAdd) {
   ct.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
@@ -5074,18 +5084,46 @@ async function renderCompanyMemos(ct, canAdd) {
     </div>
     <div id="memos-list"><div class="loading-placeholder">Loading…</div></div>
   `;
+  const me = currentUser?.uid;
   const snap = await db.collection('memos').orderBy('createdAt','desc').get();
   const memos = snap.docs.map(d=>({id:d.id,...d.data()}));
   const list = document.getElementById('memos-list');
+
+  // Derive conforme state for a memo relative to the current user.
+  const conformeMeta = (m) => {
+    const recips = Array.isArray(m.recipients) ? m.recipients : [];
+    const conformes = m.conformes || {};
+    return {
+      recips, conformes,
+      total: recips.length,
+      done:  recips.filter(uid => conformes[uid]).length,
+      iAmRecipient: recips.includes(me),
+      iConformed:   !!conformes[me]
+    };
+  };
+  const conformeDate = (entry) => {
+    const d = entry?.at?.toDate ? entry.at.toDate() : null;
+    return d ? d.toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'}) : '';
+  };
+  // Status chip shown on a memo card.
+  const statusChip = (m) => {
+    const cm = conformeMeta(m);
+    if (cm.iAmRecipient && !cm.iConformed) return `<span class="badge badge-orange" style="white-space:nowrap">⚠ Conforme needed</span>`;
+    if (cm.iAmRecipient && cm.iConformed)  return `<span class="badge badge-green" style="white-space:nowrap">✓ Conformed</span>`;
+    if (canAdd && cm.total)                return `<span class="badge ${cm.done>=cm.total?'badge-green':'badge-blue'}" style="white-space:nowrap">${cm.done}/${cm.total} conformed</span>`;
+    return '';
+  };
+
   if (!memos.length) {
     list.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><h4>No memos yet</h4><p>Management memos will appear here.</p></div>`;
   } else {
     list.innerHTML = memos.map(m=>{
       const d = m.createdAt?.toDate ? m.createdAt.toDate() : new Date();
+      const chip = statusChip(m);
       return `<div class="co-doc-card" data-id="${m.id}">
         <div class="co-doc-icon" style="background:rgba(10,132,255,0.10)"><i data-lucide="file-text" style="width:18px;height:18px;stroke:#0A84FF"></i></div>
         <div class="co-doc-body">
-          <div class="co-doc-title">${escHtml(m.title)}</div>
+          <div class="co-doc-title">${escHtml(m.title)} ${chip}</div>
           <div class="co-doc-meta">From: ${escHtml(m.from||'Management')} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'})}</div>
           <div class="co-doc-preview">${escHtml((m.content||'').slice(0,120))}${m.content?.length>120?'…':''}</div>
         </div>
@@ -5095,15 +5133,7 @@ async function renderCompanyMemos(ct, canAdd) {
     list.querySelectorAll('.co-doc-card').forEach(card=>{
       card.addEventListener('click', e=>{
         if(e.target.closest('.co-del-btn')) return;
-        const m=memos.find(x=>x.id===card.dataset.id);
-        const d=m.createdAt?.toDate?m.createdAt.toDate():new Date();
-        openModal(m.title,`
-          <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">From: ${escHtml(m.from||'Management')} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}</div>
-          <p style="font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text-2)">${escHtml(m.content||'')}</p>
-          ${m.fileUrl?`<a href="${m.fileUrl}" target="_blank" class="btn-secondary" style="display:inline-block;margin-top:14px">📎 Open Attachment</a>`:''}
-          ${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-memo-btn" data-id="${m.id}">Delete Memo</button>`:''}
-        `);
-        document.getElementById('del-memo-btn')?.addEventListener('click',async e2=>{if(confirm('Delete this memo?')){await db.collection('memos').doc(e2.currentTarget.dataset.id).delete();closeModal();renderCompanyMemos(ct,canAdd);}});
+        openMemoDetail(memos.find(x=>x.id===card.dataset.id));
       });
     });
     list.querySelectorAll('.co-del-btn').forEach(btn=>{
@@ -5111,24 +5141,205 @@ async function renderCompanyMemos(ct, canAdd) {
     });
     if(window.lucide) lucide.createIcons({nodes:[list]});
   }
+
+  // ── Detail modal: read memo + give / view conforme ──
+  function openMemoDetail(m) {
+    if (!m) return;
+    const d = m.createdAt?.toDate ? m.createdAt.toDate() : new Date();
+    const cm = conformeMeta(m);
+    const names = m.recipientNames || {};
+    // Only render the attachment link if it resolves to a real http(s) URL —
+    // never trust the stored value as a raw href (blocks javascript:/data: XSS),
+    // matching the Posts feed guard.
+    const memoFile = (typeof safeHttpUrl==='function') ? safeHttpUrl(m.fileUrl) : (/^https?:\/\//i.test(m.fileUrl||'') ? m.fileUrl : '');
+
+    // Conforme block — the action for a tagged recipient, or the status note.
+    let conformeBlock = '';
+    if (cm.iAmRecipient) {
+      if (cm.iConformed) {
+        conformeBlock = `<div style="margin-top:16px;padding:12px 14px;border-radius:10px;background:rgba(52,199,89,0.10);border:1px solid rgba(52,199,89,0.35);font-size:13px;color:var(--text-2)">
+          ✓ You gave your conforme${conformeDate(cm.conformes[me])?` on <b>${conformeDate(cm.conformes[me])}</b>`:''}.</div>`;
+      } else {
+        conformeBlock = `<div style="margin-top:16px;padding:14px;border-radius:10px;background:rgba(255,159,10,0.08);border:1px solid rgba(255,159,10,0.35)">
+          <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-size:13px;line-height:1.5;color:var(--text)">
+            <input type="checkbox" id="memo-conforme-chk" style="margin-top:2px;width:18px;height:18px;flex-shrink:0;cursor:pointer"/>
+            <span><b>Conforme.</b> I have read and understood this memo and signify my agreement.</span>
+          </label>
+          <button class="btn-primary" id="memo-conforme-btn" disabled style="margin-top:12px;opacity:.55">Submit Conforme</button>
+        </div>`;
+      }
+    }
+
+    // Tracker — visible to admins / the author. Who has acknowledged, who's pending.
+    let trackerBlock = '';
+    if (canAdd && cm.total) {
+      const rows = cm.recips.map(uid => {
+        const nm = escHtml(names[uid] || uid);
+        const entry = cm.conformes[uid];
+        return entry
+          ? `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0"><span>${nm}</span><span style="color:var(--success,#34C759);white-space:nowrap">✓ ${escHtml(conformeDate(entry)||'Conformed')}</span></div>`
+          : `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0"><span>${nm}</span><span style="color:var(--text-muted);white-space:nowrap">Pending</span></div>`;
+      }).join('');
+      trackerBlock = `<hr class="divider"/>
+        <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px">Conforme tracker · ${cm.done}/${cm.total}</div>
+        ${rows}`;
+    }
+
+    openModal(m.title,`
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">From: ${escHtml(m.from||'Management')} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}</div>
+      <p style="font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text-2)">${escHtml(m.content||'')}</p>
+      ${memoFile?`<a href="${escHtml(memoFile)}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="display:inline-block;margin-top:14px">📎 Open Attachment</a>`:''}
+      ${conformeBlock}
+      ${trackerBlock}
+      ${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-memo-btn" data-id="${m.id}">Delete Memo</button>`:''}
+    `);
+
+    // Wire the conforme checkbox → enable submit → record acknowledgment.
+    const chk = document.getElementById('memo-conforme-chk');
+    const btn = document.getElementById('memo-conforme-btn');
+    if (chk && btn) {
+      chk.addEventListener('change', () => {
+        btn.disabled = !chk.checked;
+        btn.style.opacity = chk.checked ? '1' : '.55';
+      });
+      btn.addEventListener('click', async () => {
+        if (!chk.checked) return;
+        btn.disabled = true; btn.textContent = 'Submitting…';
+        const myName = userProfile?.displayName || currentUser?.email || 'Unknown';
+        try {
+          await db.collection('memos').doc(m.id).update({
+            ['conformes.'+me]: { at: firebase.firestore.FieldValue.serverTimestamp(), name: myName }
+          });
+          // Let the issuer know an acknowledgment came in (best-effort).
+          if (m.addedBy && m.addedBy !== me) {
+            try { await Notifs.send(m.addedBy, { title:'Conforme received', body:`${myName} acknowledged: ${m.title}`, icon:'✅', type:'memo' }); } catch(_) {}
+          }
+          Notifs.showToast('Conforme recorded — thank you.');
+          closeModal();
+          renderCompanyMemos(ct, canAdd);
+        } catch(err) {
+          btn.disabled = false; btn.textContent = 'Submit Conforme';
+          Notifs.showToast('Could not record conforme: '+err.message, 'error');
+        }
+      });
+    }
+    document.getElementById('del-memo-btn')?.addEventListener('click',async e2=>{if(confirm('Delete this memo?')){await db.collection('memos').doc(e2.currentTarget.dataset.id).delete();closeModal();renderCompanyMemos(ct,canAdd);}});
+  }
+
+  // ── Create modal ──
   document.getElementById('add-memo-btn')?.addEventListener('click',()=>{
     openModal('New Memo',`
       <div class="form-group"><label>Memo Title</label><input id="memo-title" placeholder="e.g. Updated Leave Policy"/></div>
       <div class="form-group"><label>From</label><input id="memo-from" placeholder="Management / HR / Finance" value="${escHtml(currentUser?.displayName||'Management')}"/></div>
-      <div class="form-group"><label>Content</label><textarea id="memo-content" rows="8" placeholder="Write the memo here…"></textarea></div>
+      <div class="form-group"><label>Content</label><textarea id="memo-content" rows="7" placeholder="Write the memo here…"></textarea></div>
+      <div class="form-group">
+        <label>Require Conforme From <span style="font-weight:400;color:var(--text-muted)">(tag people)</span></label>
+        <input id="memo-recip-search" placeholder="Search name…" style="margin-bottom:6px"/>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span id="memo-recip-count" style="font-size:11px;color:var(--text-muted)">No one tagged</span>
+          <button type="button" class="btn-link" id="memo-recip-toggle" style="font-size:11px;background:none;border:none;color:var(--primary,#0A84FF);cursor:pointer;padding:0">Select all</button>
+        </div>
+        <div id="memo-recip-list" style="max-height:190px;overflow:auto;border:1.5px solid var(--border);border-radius:8px;padding:6px;background:var(--surface)"><div class="loading-placeholder" style="padding:10px">Loading people…</div></div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Tagged people get a notification and must tick “I agree (Conforme)”. Leave empty for an information-only memo.</div>
+      </div>
       <div id="memo-file-upload"></div>
     `,`<button class="btn-primary" id="save-memo-btn">Publish Memo</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
     let uploadedFile=null;
     Drive.renderUploadArea('memo-file-upload',r=>{uploadedFile=r;},{label:'Attach document (optional)',dept:'Admin',subfolder:'Memos'});
+
+    // Populate the recipient picker.
+    const selected = new Set();
+    let people = [];
+    const listEl  = document.getElementById('memo-recip-list');
+    const countEl = document.getElementById('memo-recip-count');
+    const updateCount = () => { countEl.textContent = selected.size ? `${selected.size} tagged — must give conforme` : 'No one tagged'; };
+    const paintList = (filter='') => {
+      const q = filter.trim().toLowerCase();
+      const rows = people.filter(u => !q || (u.name||'').toLowerCase().includes(q) || (u.role||'').toLowerCase().includes(q));
+      listEl.innerHTML = rows.length ? rows.map(u => `
+        <label style="display:flex;gap:9px;align-items:center;padding:6px 4px;font-size:13px;cursor:pointer;border-radius:6px">
+          <input type="checkbox" class="memo-recip-chk" data-uid="${u.id}" ${selected.has(u.id)?'checked':''} style="width:16px;height:16px;cursor:pointer"/>
+          <span>${escHtml(u.name)} <span style="color:var(--text-muted);font-size:11px">· ${escHtml(u.role||'')}</span></span>
+        </label>`).join('') : `<div style="font-size:12px;color:var(--text-muted);padding:8px">No matches</div>`;
+      listEl.querySelectorAll('.memo-recip-chk').forEach(chk => chk.addEventListener('change', () => {
+        if (chk.checked) selected.add(chk.dataset.uid); else selected.delete(chk.dataset.uid);
+        updateCount();
+      }));
+    };
+    (async () => {
+      try {
+        const snap = typeof dbCachedGet==='function'
+          ? await dbCachedGet('users', () => db.collection('users').get(), 60000)
+          : await db.collection('users').get();
+        people = snap.docs.map(d=>({id:d.id, ...d.data()}))
+          // Internal staff only — external partners and Brilliant-Steel-only users
+          // have no Memos nav entry, so don't tag them for conforme here.
+          .filter(u => u.id !== me && u.role !== 'partner'
+            && !(Array.isArray(u.departments) && u.departments.length===1 && u.departments[0]==='Brilliant Steel'))
+          .map(u => ({ id:u.id, name:u.displayName||u.email||'Unknown', role:(window.ROLES?.[u.role]?.label)||u.role||'' }))
+          .sort((a,b)=>a.name.localeCompare(b.name));
+        paintList();
+      } catch(err) { listEl.innerHTML = `<div style="font-size:12px;color:var(--danger);padding:8px">Could not load people: ${escHtml(err.message)}</div>`; }
+    })();
+    document.getElementById('memo-recip-search').addEventListener('input', e => paintList(e.target.value));
+    document.getElementById('memo-recip-toggle').addEventListener('click', () => {
+      const visible = people.filter(u => { const q=document.getElementById('memo-recip-search').value.trim().toLowerCase(); return !q || (u.name||'').toLowerCase().includes(q) || (u.role||'').toLowerCase().includes(q); });
+      const allOn = visible.length && visible.every(u => selected.has(u.id));
+      visible.forEach(u => allOn ? selected.delete(u.id) : selected.add(u.id));
+      updateCount();
+      paintList(document.getElementById('memo-recip-search').value);
+    });
+
     document.getElementById('save-memo-btn').addEventListener('click',async()=>{
       const title=document.getElementById('memo-title').value.trim();
-      if(!title) return;
-      await db.collection('memos').add({title,from:document.getElementById('memo-from').value.trim(),content:document.getElementById('memo-content').value,fileUrl:uploadedFile?.url||null,addedBy:currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
-      closeModal(); renderCompanyMemos(ct,canAdd);
+      if(!title) { Notifs.showToast('Memo title required','error'); return; }
+      const recipients = [...selected];
+      const recipientNames = {};
+      recipients.forEach(uid => { const p = people.find(x=>x.id===uid); recipientNames[uid] = p ? p.name : uid; });
+      const saveBtn = document.getElementById('save-memo-btn');
+      saveBtn.disabled = true; saveBtn.textContent = 'Publishing…';
+      try {
+        await db.collection('memos').add({
+          title,
+          from:    document.getElementById('memo-from').value.trim(),
+          content: document.getElementById('memo-content').value,
+          fileUrl: uploadedFile?.url||null,
+          recipients,
+          recipientNames,
+          requireConforme: recipients.length>0,
+          conformes: {},
+          addedBy: currentUser.uid,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        // Notify each tagged recipient that their conforme is requested.
+        if (recipients.length) {
+          const issuer = userProfile?.displayName || 'Management';
+          await Promise.all(recipients.map(uid =>
+            Notifs.send(uid, { title:'📋 Memo needs your conforme', body:`${issuer}: ${title}`, icon:'📋', type:'memo' }).catch(()=>{})
+          ));
+        }
+        closeModal();
+        Notifs.showToast(recipients.length ? `Memo published — ${recipients.length} tagged for conforme.` : 'Memo published.');
+        renderCompanyMemos(ct,canAdd);
+      } catch(err) {
+        saveBtn.disabled = false; saveBtn.textContent = 'Publish Memo';
+        Notifs.showToast('Could not publish: '+err.message, 'error');
+      }
     });
   });
   if(window.lucide) lucide.createIcons({nodes:[ct]});
 }
+
+// Standalone Memos route — renders the same memos UI into the full page so
+// notification deep-links and the sidebar item can reach it directly (not only
+// via the Company → Memos tab).
+async function renderMemosPage() {
+  const c = document.getElementById('page-content');
+  c.innerHTML = `<div class="page-header"><h2>📋 Memos</h2></div><div id="memos-page-host"></div>`;
+  renderCompanyMemos(document.getElementById('memos-page-host'), isPresident() || currentRole==='manager');
+}
+window.renderMemosPage = renderMemosPage;
 
 // ── Company: Policies ─────────────────────────────
 async function renderCompanyPolicies(ct, canAdd) {

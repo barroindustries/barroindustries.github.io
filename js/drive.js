@@ -66,20 +66,33 @@ window.Drive = (() => {
     return fileObj.driveUrl || fileObj.url || null;
   }
 
+  // ── Is this attachment a link (vs an uploaded file)? ──
+  function _isLink(fileObj) {
+    return !!fileObj && (fileObj.source === 'link' || fileObj.kind === 'link');
+  }
+
+  // ── HTML escape (link labels are user-typed) ──────
+  function _esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g,
+      c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
   // ── Source label ───────────────────────────────────
   function sourceLabel(fileObj) {
     if (!fileObj) return 'Cloud';
+    if (_isLink(fileObj)) return 'Link';
     return fileObj.driveUrl ? 'Drive' : 'Cloud';
   }
 
   // ── Source icon ────────────────────────────────────
   function sourceIcon(fileObj) {
+    if (_isLink(fileObj)) return 'link-2';
     return fileObj?.driveUrl ? 'hard-drive' : 'cloud';
   }
 
   // ── Render Upload Area ─────────────────────────────
   function renderUploadArea(containerId, onUpload, {
-    accept = '*', label = 'Attach File', dept = 'General', subfolder = '', multiple = false
+    accept = '*', label = 'Attach File', dept = 'General', subfolder = '', multiple = false, allowLinks = true
   } = {}) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -99,6 +112,22 @@ window.Drive = (() => {
         <input type="file" id="file-input-${containerId}" accept="${accept}"
                style="display:none" ${multiple ? 'multiple' : ''}/>
       </label>
+      ${allowLinks ? `
+      <div class="upload-link-bar" style="margin-top:8px">
+        <button type="button" class="btn-secondary btn-sm" id="addlink-toggle-${containerId}"
+                style="display:inline-flex;align-items:center;gap:6px">🔗 Attach a link instead</button>
+        <div id="addlink-form-${containerId}" class="hidden"
+             style="margin-top:8px;display:flex;flex-direction:column;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px">
+          <input id="addlink-url-${containerId}" type="url" placeholder="https://…  (Drive, Sheets, Figma, YouTube…)"
+                 style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"/>
+          <input id="addlink-name-${containerId}" placeholder="Label (optional, e.g. Spec sheet)"
+                 style="padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"/>
+          <div style="display:flex;gap:8px">
+            <button type="button" class="btn-primary btn-sm" id="addlink-save-${containerId}">Add link</button>
+            <button type="button" class="btn-secondary btn-sm" id="addlink-cancel-${containerId}">Cancel</button>
+          </div>
+        </div>
+      </div>` : ''}
       <div id="upload-progress-${containerId}" class="upload-progress hidden">
         <div class="upload-bar-track"><div class="upload-bar-fill" id="upload-bar-${containerId}"></div></div>
         <p class="upload-status" id="upload-status-${containerId}">Uploading…</p>
@@ -115,6 +144,23 @@ window.Drive = (() => {
     const status   = document.getElementById(`upload-status-${containerId}`);
     const fileList = document.getElementById(`uploaded-files-${containerId}`);
 
+    // Append a chip for a successfully attached file or link
+    const addChip = (result) => {
+      const link = _isLink(result);
+      const chip = document.createElement('a');
+      chip.href      = resolveUrl(result) || '#';
+      chip.target    = '_blank';
+      chip.rel       = 'noopener';
+      chip.className = 'file-chip';
+      chip.innerHTML = `
+        <i data-lucide="${link ? 'link-2' : _fileIcon(result.name || '')}" style="width:13px;height:13px;stroke:currentColor;flex-shrink:0"></i>
+        <span>${_esc(result.name || (link ? 'Link' : 'File'))}</span>
+        <span class="file-chip-src">${sourceLabel(result)}</span>
+      `;
+      fileList.appendChild(chip);
+      if (window.lucide) lucide.createIcons({ nodes: [chip] });
+    };
+
     const handleFile = async (file) => {
       progress.classList.remove('hidden');
       bar.style.width = '20%';
@@ -124,21 +170,7 @@ window.Drive = (() => {
         const result = await uploadFile(file, dept, subfolder);
         bar.style.width = '100%';
         status.textContent = `✅ ${file.name} uploaded`;
-
-        const url = resolveUrl(result);
-        const chip = document.createElement('a');
-        chip.href      = url;
-        chip.target    = '_blank';
-        chip.rel       = 'noopener';
-        chip.className = 'file-chip';
-        chip.innerHTML = `
-          <i data-lucide="${_fileIcon(file.name)}" style="width:13px;height:13px;stroke:currentColor;flex-shrink:0"></i>
-          <span>${file.name}</span>
-          <span class="file-chip-src">${sourceLabel(result)}</span>
-        `;
-        fileList.appendChild(chip);
-        if (window.lucide) lucide.createIcons({ nodes: [chip] });
-
+        addChip(result);
         if (onUpload) onUpload(result, file);
         setTimeout(() => { progress.classList.add('hidden'); bar.style.width = '0%'; }, 2000);
       } catch (err) {
@@ -162,6 +194,41 @@ window.Drive = (() => {
       e.preventDefault(); lbl.classList.remove('drag-over');
       handleFiles(e.dataTransfer.files);
     });
+
+    // ── Link attachment ──────────────────────────────
+    if (allowLinks) {
+      const toggle   = document.getElementById(`addlink-toggle-${containerId}`);
+      const form     = document.getElementById(`addlink-form-${containerId}`);
+      const urlIn    = document.getElementById(`addlink-url-${containerId}`);
+      const nameIn   = document.getElementById(`addlink-name-${containerId}`);
+      const saveBtn  = document.getElementById(`addlink-save-${containerId}`);
+      const cancelBtn= document.getElementById(`addlink-cancel-${containerId}`);
+
+      toggle?.addEventListener('click', () => {
+        form.classList.toggle('hidden');
+        if (!form.classList.contains('hidden')) urlIn.focus();
+      });
+      cancelBtn?.addEventListener('click', () => {
+        form.classList.add('hidden'); urlIn.value = ''; nameIn.value = '';
+      });
+
+      const saveLink = () => {
+        let url = (urlIn.value || '').trim();
+        if (!url) { urlIn.focus(); return; }
+        if (!/^https?:\/\//i.test(url)) url = 'https://' + url;   // tolerate bare domains
+        let host = '';
+        try { host = new URL(url).hostname.replace(/^www\./, ''); } catch (_) {}
+        const name = (nameIn.value || '').trim() || host || url;
+        const result = { id: null, name, url, driveUrl: null, source: 'link', kind: 'link', folder: null };
+        addChip(result);
+        if (onUpload) onUpload(result, null);
+        urlIn.value = ''; nameIn.value = ''; form.classList.add('hidden');
+      };
+      saveBtn?.addEventListener('click', saveLink);
+      [urlIn, nameIn].forEach(el => el?.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); saveLink(); }
+      }));
+    }
   }
 
   // ── File icon helper ──────────────────────────────
