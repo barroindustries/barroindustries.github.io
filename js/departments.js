@@ -4637,7 +4637,7 @@ window.renderDesign = async function(currentUser, currentRole, subtab = 'Project
   c.innerHTML = `
     <div class="page-header"><h2>🎨 Design</h2></div>
     <div class="subtab-bar">
-      ${['Projects','Clients','Product Designs','References','Tasks'].map(s =>
+      ${['Projects','Drawings','Clients','Product Designs','References','Tasks'].map(s =>
         `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
       ).join('')}
     </div>
@@ -4653,6 +4653,7 @@ async function loadDesignContent(currentUser, currentRole, sub) {
   const content = document.getElementById('design-content');
   switch(sub) {
     case 'Projects':    await renderProjects(content, currentUser, currentRole); break;
+    case 'Drawings':    await renderDrawingsDashboard(content, currentUser, currentRole); break;
     case 'Clients':     await renderClientProfiles(content, currentUser, currentRole, 'design'); break;
     case 'Product Designs':
       content.innerHTML = renderFileCollection('Product Designs', 'design-files', currentRole);
@@ -4745,45 +4746,139 @@ async function renderProjects(container, currentUser, currentRole) {
   });
 }
 
-// ── Project detail: financials, payments & billing invoice ──────────
-window.openProjectDetail = function(p, currentUser, currentRole, canBill) {
+// ══════════════════════════════════════════════════
+//  DESIGN — drawings (DWG/PDF/2D/3D) with revision control
+// ══════════════════════════════════════════════════
+const DRAWING_TYPES = ['DWG','PDF','Drawing','3D','Render'];
+const DRAWING_STATUSES = [
+  { id:'draft',      label:'Draft',      badge:'badge-gray'   },
+  { id:'for_review', label:'For Review', badge:'badge-orange' },
+  { id:'approved',   label:'Approved',   badge:'badge-blue'   },
+  { id:'released',   label:'Released',   badge:'badge-green'  },
+  { id:'superseded', label:'Superseded', badge:'badge-gray'   },
+];
+function drawingStatus(id){ return DRAWING_STATUSES.find(s=>s.id===id) || DRAWING_STATUSES[0]; }
+function nextRev(letter){ return letter ? String.fromCharCode((''+letter).toUpperCase().charCodeAt(0)+1) : 'A'; }
+function drawingTypeIcon(t){ return ({DWG:'📐',PDF:'📄',Drawing:'✏️','3D':'🧊',Render:'🖼'})[t] || '📄'; }
+// Forward status transitions offered in the drawing detail (manager-gated).
+function drawingTransitions(status){
+  switch(status){
+    case 'draft':      return [{to:'for_review',label:'Submit for Review',cls:'btn-primary'}];
+    case 'for_review': return [{to:'approved',label:'✅ Approve',cls:'btn-success'},{to:'draft',label:'Back to Draft',cls:'btn-secondary'}];
+    case 'approved':   return [{to:'released',label:'🚀 Release',cls:'btn-success'},{to:'for_review',label:'Back to Review',cls:'btn-secondary'}];
+    case 'released':   return [{to:'superseded',label:'Supersede',cls:'btn-secondary'}];
+    case 'superseded': return [{to:'draft',label:'Reactivate',cls:'btn-secondary'}];
+    default:           return [];
+  }
+}
+function drawingCard(d){
+  const st = drawingStatus(d.status);
+  return `<div class="item-card" data-dwg="${d.id}" style="cursor:pointer">
+    <div class="item-top">
+      <div class="item-title">${drawingTypeIcon(d.type)} ${escHtml(d.title||'Untitled')}${d.drawingNo?` <span style="font-size:11px;color:var(--text-muted)">${escHtml(d.drawingNo)}</span>`:''}</div>
+      <div class="item-badges"><span class="badge badge-gray">Rev ${escHtml(d.currentRev||'A')}</span><span class="badge ${st.badge}">${st.label}</span></div>
+    </div>
+    <div class="item-meta" style="gap:6px;flex-wrap:wrap">
+      <span>${escHtml(d.type||'File')}</span>
+      ${d.projectName?`<span>🗂 ${escHtml(d.projectName)}</span>`:''}
+      ${d.assignedToName?`<span>👤 ${escHtml(d.assignedToName)}</span>`:''}
+      ${d.fileName?`<span>📎 ${escHtml(d.fileName)}</span>`:''}
+    </div>
+  </div>`;
+}
+
+// ══════════════════════════════════════════════════
+//  Project detail — tabbed hub (Overview / Drawings / Tasks / Financials / Activity)
+//  Same global name + signature as before (renderProjects calls it with 4 args);
+//  the optional 5th arg lets sub-modals re-open onto a specific tab.
+//  NOTE: deliberately distinct from openJobProjectDetail (job_projects lifecycle).
+// ══════════════════════════════════════════════════
+window.openProjectDetail = function(p, currentUser, currentRole, canBill, initialTab) {
+  initialTab = initialTab || 'Overview';
+  const tabs = ['Overview','Drawings','Tasks','Financials','Activity'];
+  openModal(escHtml(p.name||'Project'), `
+    <div class="item-meta" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <span class="badge ${statusBadge(p.status)}">${escHtml(p.status||'active')}</span>
+      ${p.client?`<span>👤 ${escHtml(p.client)}</span>`:''}
+      ${p.dueDate?`<span>📅 Due ${escHtml(p.dueDate)}</span>`:''}
+      ${p.jobProjectNo?`<span class="badge badge-blue" title="Linked job project">🔗 ${escHtml(p.jobProjectNo)}</span>`:''}
+    </div>
+    <div class="subtab-bar" id="pd-tabs" style="margin-bottom:12px">
+      ${tabs.map(t=>`<button class="subtab-btn ${t===initialTab?'active':''}" data-pd="${t}">${t}</button>`).join('')}
+    </div>
+    <div id="pd-tab-body"><div class="loading-placeholder">Loading…</div></div>
+  `, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+
+  const showTab = (t) => {
+    document.querySelectorAll('#pd-tabs .subtab-btn').forEach(b=>b.classList.toggle('active', b.dataset.pd===t));
+    const host = document.getElementById('pd-tab-body');
+    if (!host) return;
+    if      (t==='Overview')   renderProjOverview(host, p, currentUser, currentRole, canBill);
+    else if (t==='Drawings')   renderProjectDrawings(host, p, currentUser, currentRole, canBill);
+    else if (t==='Tasks')      renderProjectTasks(host, p, currentUser, currentRole, canBill);
+    else if (t==='Financials') renderProjFinancials(host, p, currentUser, currentRole, canBill);
+    else if (t==='Activity')   renderProjActivity(host, p, currentUser, currentRole);
+  };
+  document.querySelectorAll('#pd-tabs .subtab-btn').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.pd)));
+  showTab(initialTab);
+};
+
+// ── Overview tab ──
+function renderProjOverview(host, p, currentUser, currentRole, canBill){
+  const canManage = canEditDept('Design');
+  const team = p.teamNames || [];
+  host.innerHTML = `
+    <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:12px 14px;font-size:13px;display:grid;grid-template-columns:auto 1fr;gap:6px 12px">
+      <span style="color:var(--text-muted)">Client</span><span>${p.client?escHtml(p.client):'<span style="color:var(--text-muted)">—</span>'}</span>
+      <span style="color:var(--text-muted)">Status</span><span><span class="badge ${statusBadge(p.status)}">${escHtml(p.status||'active')}</span></span>
+      <span style="color:var(--text-muted)">Start</span><span>${escHtml(p.startDate||'—')}</span>
+      <span style="color:var(--text-muted)">Due</span><span>${escHtml(p.dueDate||'—')}</span>
+      <span style="color:var(--text-muted)">Design Lead</span><span>${p.designLeadName?escHtml(p.designLeadName):'<span style="color:var(--text-muted)">Unassigned</span>'}</span>
+      <span style="color:var(--text-muted)">Job Project</span><span>${p.jobProjectNo?`<span class="badge badge-blue">🔗 ${escHtml(p.jobProjectNo)}</span>`:'<span style="color:var(--text-muted)">Not linked</span>'}</span>
+    </div></div>
+    <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:12px 14px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">👥 Team</div>
+      ${team.length?`<div style="display:flex;gap:6px;flex-wrap:wrap">${team.map(n=>`<span class="badge badge-blue">${escHtml(n)}</span>`).join('')}</div>`:'<div style="font-size:12px;color:var(--text-muted)">No members delegated yet.</div>'}
+    </div></div>
+    ${p.notes?`<div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:12px 14px;font-size:13px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">📝 Notes</div>${escHtml(p.notes)}</div></div>`:''}
+    ${canManage?`<button class="btn-primary btn-sm" id="proj-edit-btn">✏️ Edit / Link / Delegate</button>`:''}
+  `;
+  document.getElementById('proj-edit-btn')?.addEventListener('click',()=>openProjectEditModal(p, currentUser, currentRole, canBill));
+}
+
+// ── Financials tab (logic lifted verbatim from the original project detail) ──
+function renderProjFinancials(host, p, currentUser, currentRole, canBill){
   const contract = Number(p.contractAmount) || 0;
   const paid     = projectPaid(p);
   const balance  = contract - paid;
   const payments = (p.payments || []).slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''));
   const invoices = (p.invoices || []).slice().reverse();
+  const reopen   = () => openProjectDetail(p, currentUser, currentRole, canBill, 'Financials');
 
-  openModal(escHtml(p.name), `
-    <div class="item-meta" style="margin-bottom:12px">
-      ${p.client?`<span>👤 ${escHtml(p.client)}</span>`:''}
-      ${p.dueDate?`<span>📅 Due ${p.dueDate}</span>`:''}
-      <span class="badge ${statusBadge(p.status)}">${p.status||'active'}</span>
+  host.innerHTML = `
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      ${canBill && contract>0 ? `<button class="btn-primary btn-sm" id="proj-invoice-btn">🧾 Create Billing Invoice</button>` : ''}
+      ${canBill ? `<button class="btn-secondary btn-sm" id="proj-payment-btn">+ Record Payment</button>` : ''}
     </div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">
       <div class="kpi-card"><div class="kpi-label">Contract</div><div class="kpi-value" style="font-size:15px">₱${fmt(contract)}</div></div>
       <div class="kpi-card"><div class="kpi-label">Paid</div><div class="kpi-value" style="font-size:15px;color:#30D158">₱${fmt(paid)}</div></div>
       <div class="kpi-card ${balance>0.005?'warn':''}"><div class="kpi-label">Balance</div><div class="kpi-value" style="font-size:15px;color:${balance>0.005?'#FF453A':'#30D158'}">₱${fmt(balance)}</div></div>
     </div>
-
     <h4 style="margin:0 0 8px;font-size:13px">Payments</h4>
     ${payments.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Method</th><th>Note</th><th style="text-align:right">Amount</th></tr></thead><tbody>
       ${payments.map(x=>`<tr><td>${escHtml(x.date||'')}</td><td>${escHtml(x.method||'—')}</td><td>${escHtml(x.note||'')}</td><td style="text-align:right">₱${fmt(x.amount)}</td></tr>`).join('')}
     </tbody></table></div>` : `<div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">No payments recorded yet.</div>`}
-
     <h4 style="margin:16px 0 8px;font-size:13px">Billing Invoices</h4>
     ${invoices.length ? `<div class="item-list">${invoices.map(inv=>`
       <div class="item-card" style="cursor:pointer" data-inv="${escHtml(inv.no)}">
         <div class="item-top"><div class="item-title" style="font-size:13px">🧾 ${escHtml(inv.no)}</div><span>₱${fmt(inv.amount)}</span></div>
         <div class="item-meta"><span>📅 ${escHtml(inv.date||'')}</span>${inv.due?`<span>Due ${escHtml(inv.due)}</span>`:''}<span>${escHtml(inv.desc||'')}</span></div>
       </div>`).join('')}</div>` : `<div style="font-size:12px;color:var(--text-muted)">No invoices issued yet.</div>`}
-  `, `
-    ${canBill && contract>0 ? `<button class="btn-primary" id="proj-invoice-btn">🧾 Create Billing Invoice</button>` : ''}
-    ${canBill ? `<button class="btn-secondary" id="proj-payment-btn">+ Record Payment</button>` : ''}
-    <button class="btn-secondary" onclick="closeModal()">Close</button>
-  `);
+  `;
 
-  // Re-open a previously issued invoice
-  document.querySelectorAll('#modal-body .item-card[data-inv]').forEach(card => {
+  // Re-open a previously issued invoice (printable)
+  host.querySelectorAll('.item-card[data-inv]').forEach(card => {
     card.addEventListener('click', () => {
       const inv = (p.invoices || []).find(i => i.no === card.dataset.inv);
       if (inv) openBillingInvoice(p, inv);
@@ -4798,7 +4893,7 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill) {
       <div class="form-group"><label>Method</label><input id="pay-method" placeholder="e.g. Bank transfer, Cash, Cheque"/></div>
       <div class="form-group"><label>Reference / Note</label><input id="pay-note" placeholder="OR no., remarks"/></div>
     `, `<button class="btn-primary" id="save-pay-btn">Save Payment</button><button class="btn-secondary" id="pay-back-btn">Cancel</button>`);
-    document.getElementById('pay-back-btn').addEventListener('click', () => openProjectDetail(p, currentUser, currentRole, canBill));
+    document.getElementById('pay-back-btn').addEventListener('click', reopen);
     document.getElementById('save-pay-btn').addEventListener('click', async () => {
       const amt = parseFloat(document.getElementById('pay-amt').value) || 0;
       if (amt <= 0) { Notifs.showToast('Enter a valid amount','error'); return; }
@@ -4812,8 +4907,6 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill) {
       };
       if (!confirm(`Record payment of ₱${fmt(amt)} for "${p.name}"? This updates the project balance.`)) return;
       try {
-        // Atomic transaction: re-read the project's payments and append, so a concurrent
-        // edit isn't clobbered. Only mutate the in-memory object after the write succeeds.
         const ref = db.collection('projects').doc(p.id);
         const saved = await db.runTransaction(async tx => {
           const doc  = await tx.get(ref);
@@ -4825,7 +4918,7 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill) {
         p.payments = saved;
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects');
         Notifs.showToast('Payment recorded','success');
-        openProjectDetail(p, currentUser, currentRole, canBill);
+        reopen();
       } catch(e) { console.warn(e); Notifs.showToast('Could not save payment','error'); }
     });
   });
@@ -4843,7 +4936,7 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill) {
       <div class="form-group"><label>Amount to Collect (₱)</label><input id="inv-amt" type="number" inputmode="decimal" step="0.01" min="0" value="${bal>0?bal.toFixed(2):'0.00'}"/></div>
       <div class="form-group"><label>Notes / Payment Instructions</label><textarea id="inv-notes" rows="3">Kindly settle the amount due on or before the due date. Payable to NEILBARRO STEEL & METAL FABRICATION SERVICES.</textarea></div>
     `, `<button class="btn-primary" id="gen-inv-btn">Generate Invoice</button><button class="btn-secondary" id="inv-back-btn">Cancel</button>`);
-    document.getElementById('inv-back-btn').addEventListener('click', () => openProjectDetail(p, currentUser, currentRole, canBill));
+    document.getElementById('inv-back-btn').addEventListener('click', reopen);
     document.getElementById('gen-inv-btn').addEventListener('click', async () => {
       const amt = parseFloat(document.getElementById('inv-amt').value) || 0;
       if (amt <= 0) { Notifs.showToast('Enter a valid amount','error'); return; }
@@ -4867,7 +4960,6 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill) {
       };
       if (!confirm(`Generate billing invoice ${inv.no} for ₱${fmt(amt)} (${p.name||''})?`)) return;
       try {
-        // Atomic append so the invoice list isn't clobbered by a concurrent edit.
         const ref = db.collection('projects').doc(p.id);
         const saved = await db.runTransaction(async tx => {
           const doc  = await tx.get(ref);
@@ -4886,7 +4978,491 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill) {
       openBillingInvoice(p, inv);
     });
   });
-};
+}
+
+// ── Tasks tab — design tasks scoped to this project ──
+async function renderProjectTasks(host, p, currentUser, currentRole, canBill){
+  host.innerHTML = '<div class="loading-placeholder">Loading tasks…</div>';
+  const canManage = canEditDept('Design');
+  let tasks = [];
+  try {
+    const snap = await db.collection('tasks').where('projectId','==',p.id).get();
+    tasks = snap.docs.map(d=>({id:d.id,...d.data()}));
+  } catch(e){ console.warn('project tasks load failed', e); }
+  tasks.sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+  host.innerHTML = `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+      ${canManage?`<button class="btn-primary btn-sm" id="proj-add-task-btn">+ Delegate Task</button>`:''}
+    </div>
+    ${tasks.length?`<div class="item-list">${tasks.map(taskCard).join('')}</div>`:'<div class="empty-state" style="padding:20px"><div class="empty-icon">📋</div><h4>No tasks for this project</h4></div>'}
+  `;
+  host.querySelectorAll('.item-card[data-id]').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id, currentUser, currentRole)));
+  document.getElementById('proj-add-task-btn')?.addEventListener('click',()=>openAddProjectTaskModal(p, currentUser, currentRole, canBill));
+}
+
+// ── Activity tab — merged project + drawing timeline ──
+async function renderProjActivity(host, p, currentUser, currentRole){
+  host.innerHTML = '<div class="loading-placeholder">Loading activity…</div>';
+  const events = [];
+  (p.payments||[]).forEach(x=>events.push({at:x.date||'', html:`💵 Payment <strong>₱${fmt(x.amount)}</strong>`, by:x.byName||''}));
+  (p.invoices||[]).forEach(x=>events.push({at:x.date||x.createdAt||'', html:`🧾 Invoice ${escHtml(x.no||'')} <strong>₱${fmt(x.amount)}</strong>`, by:x.issuedBy||''}));
+  try {
+    const snap = await db.collection('design_drawings').where('projectId','==',p.id).get();
+    snap.docs.forEach(d=>{ const dr=d.data(); (dr.activity||[]).forEach(a=>events.push({at:a.at||'', html:`📐 ${escHtml(dr.title||'Drawing')}: ${escHtml(a.event||'')}`, by:a.byName||''})); });
+  } catch(e){ console.warn(e); }
+  events.sort((a,b)=>(''+(b.at)).localeCompare(''+(a.at)));
+  host.innerHTML = events.length
+    ? `<div style="font-size:12px">${events.map(e=>`<div style="padding:6px 0;border-bottom:1px solid var(--border)"><div>${e.html}</div><div style="font-size:11px;color:var(--text-muted)">${(''+(e.at||'')).slice(0,16).replace('T',' ')}${e.by?' · '+escHtml(e.by):''}</div></div>`).join('')}</div>`
+    : '<div class="empty-state" style="padding:20px"><div class="empty-icon">🕘</div><h4>No activity yet</h4></div>';
+}
+
+// ── Edit project: rename, status, client link, team delegation, job-project link ──
+async function openProjectEditModal(p, currentUser, currentRole, canBill){
+  const [uSnap, cSnap, jSnap] = await Promise.all([
+    db.collection('users').get().catch(()=>({docs:[]})),
+    db.collection('design_clients').get().catch(()=>({docs:[]})),
+    db.collection('job_projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+  ]);
+  const users   = uSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+  const clients = cSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const jobs    = jSnap.docs.map(d=>({id:d.id,...d.data()}));
+  let team = (p.team||[]).map((uid,i)=>({uid, name:(p.teamNames||[])[i]||uid}));
+
+  openModal('Edit Project', `
+    <div class="form-group"><label>Project Name</label><input id="pe-name" value="${escHtml(p.name||'')}"/></div>
+    <div class="form-group"><label>Client (link to Design CRM)</label>
+      <select id="pe-client"><option value="">— None / free text —</option>
+        ${clients.map(c=>`<option value="${c.id}" data-name="${escHtml(c.name||c.company||'')}" ${p.clientId===c.id?'selected':''}>${escHtml(c.name||c.company||'Client')}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group"><label>Client name (display)</label><input id="pe-clientname" value="${escHtml(p.client||'')}" placeholder="Shown on cards & invoices"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Start Date</label><input id="pe-start" type="date" value="${escHtml(p.startDate||'')}"/></div>
+      <div class="form-group"><label>Due Date</label><input id="pe-due" type="date" value="${escHtml(p.dueDate||'')}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Status</label>
+        <select id="pe-status">${['active','on-hold','completed','cancelled'].map(s=>`<option value="${s}" ${(p.status||'active')===s?'selected':''}>${s}</option>`).join('')}</select>
+      </div>
+      <div class="form-group"><label>Contract (₱)</label><input id="pe-contract" type="number" step="0.01" min="0" value="${Number(p.contractAmount)||0}" inputmode="decimal"/></div>
+    </div>
+    <div class="form-group"><label>Design Lead</label>
+      <select id="pe-lead"><option value="">— Unassigned —</option>
+        ${users.map(u=>`<option value="${u.id}" data-name="${escHtml(u.displayName||u.email)}" ${p.designLead===u.id?'selected':''}>${escHtml(u.displayName||u.email)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group"><label>Team (delegate — add multiple)</label>
+      <select id="pe-team-sel"><option value="">— Add member —</option>
+        ${users.map(u=>`<option value="${u.id}" data-name="${escHtml(u.displayName||u.email)}">${escHtml(u.displayName||u.email)}</option>`).join('')}
+      </select>
+      <div id="pe-team-chips" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"></div>
+    </div>
+    <div class="form-group"><label>Link to Job Project (Sales/Production lifecycle)</label>
+      <select id="pe-job"><option value="">— Not linked —</option>
+        ${jobs.map(j=>`<option value="${j.id}" data-no="${escHtml(j.projectNo||'')}" ${p.jobProjectId===j.id?'selected':''}>${escHtml((j.projectNo||'')+' — '+(j.clientName||j.name||''))}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="pe-notes" rows="3">${escHtml(p.notes||'')}</textarea></div>
+  `, `<button class="btn-primary" id="pe-save-btn">Save</button><button class="btn-secondary" id="pe-cancel-btn">Cancel</button>`);
+
+  document.getElementById('pe-cancel-btn').addEventListener('click',()=>openProjectDetail(p, currentUser, currentRole, canBill, 'Overview'));
+
+  const renderChips = () => {
+    const wrap = document.getElementById('pe-team-chips');
+    wrap.innerHTML = team.map(a=>`<span class="badge badge-blue team-chip" data-uid="${a.uid}" style="cursor:pointer">${escHtml(a.name)} ✕</span>`).join('');
+    wrap.querySelectorAll('.team-chip').forEach(ch=>ch.addEventListener('click',()=>{ team=team.filter(x=>x.uid!==ch.dataset.uid); renderChips(); }));
+  };
+  renderChips();
+  document.getElementById('pe-team-sel').addEventListener('change',e=>{
+    const uid=e.target.value, name=e.target.options[e.target.selectedIndex]?.dataset.name||'';
+    if (uid && !team.some(a=>a.uid===uid)) team.push({uid,name});
+    e.target.value=''; renderChips();
+  });
+
+  document.getElementById('pe-save-btn').addEventListener('click', async () => {
+    const prevTeam = new Set(p.team||[]);
+    const prevJob  = p.jobProjectId || null;
+    const clientSel = document.getElementById('pe-client');
+    const leadSel   = document.getElementById('pe-lead');
+    const jobSel    = document.getElementById('pe-job');
+    const clientId  = clientSel.value || null;
+    const clientNameSel = clientSel.options[clientSel.selectedIndex]?.dataset.name || '';
+    const update = {
+      name:           document.getElementById('pe-name').value.trim() || p.name || 'Project',
+      client:         document.getElementById('pe-clientname').value.trim() || clientNameSel || '',
+      clientId,
+      startDate:      document.getElementById('pe-start').value,
+      dueDate:        document.getElementById('pe-due').value,
+      status:         document.getElementById('pe-status').value,
+      contractAmount: parseFloat(document.getElementById('pe-contract').value) || 0,
+      notes:          document.getElementById('pe-notes').value.trim(),
+      designLead:     leadSel.value || null,
+      designLeadName: leadSel.value ? (leadSel.options[leadSel.selectedIndex]?.dataset.name || null) : null,
+      team:           team.map(a=>a.uid),
+      teamNames:      team.map(a=>a.name),
+      jobProjectId:   jobSel.value || null,
+      jobProjectNo:   jobSel.value ? (jobSel.options[jobSel.selectedIndex]?.dataset.no || null) : null,
+      updatedAt:      firebase.firestore.FieldValue.serverTimestamp(),
+    };
+    try {
+      await db.collection('projects').doc(p.id).update(update);
+      Object.assign(p, update);
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects');
+      const who = window.userProfile?.displayName || currentUser.email || '';
+      // notify newly delegated team members
+      for (const a of team) {
+        if (!prevTeam.has(a.uid) && a.uid!==currentUser.uid) {
+          try { await Notifs.send(a.uid,{title:'🎨 Added to a Design project',body:`You're on "${update.name}"`,icon:'🎨',type:'project_team',dedupKey:`projteam-${p.id}-${a.uid}`}); } catch(_){}
+        }
+      }
+      // notify Finance when a job-project link is newly set
+      if (update.jobProjectId && update.jobProjectId!==prevJob) {
+        try { await Notifs.sendToDept('Finance',{title:'🔗 Design project linked',body:`"${update.name}" linked to job ${update.jobProjectNo||''}`,icon:'🔗',type:'project_link'}); } catch(_){}
+      }
+      Notifs.showToast('Project saved','success');
+    } catch(e){ console.warn(e); Notifs.showToast('Could not save project','error'); return; }
+    openProjectDetail(p, currentUser, currentRole, canBill, 'Overview');
+  });
+}
+
+// ── Per-project Drawings ──
+async function renderProjectDrawings(host, p, currentUser, currentRole, canBill){
+  host.innerHTML = '<div class="loading-placeholder">Loading drawings…</div>';
+  const canManage = canEditDept('Design');
+  let drawings = [];
+  try {
+    const snap = await db.collection('design_drawings').where('projectId','==',p.id).get();
+    drawings = snap.docs.map(d=>({id:d.id,...d.data()}));
+  } catch(e){ console.warn('drawings load failed', e); }
+  const order = DRAWING_STATUSES.map(s=>s.id);
+  drawings.sort((a,b)=>(order.indexOf(a.status)-order.indexOf(b.status)) || (''+(a.title||'')).localeCompare(''+(b.title||'')));
+  host.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <span style="font-size:12px;color:var(--text-muted)">${drawings.length} drawing${drawings.length===1?'':'s'}</span>
+      ${canManage?`<button class="btn-primary btn-sm" id="proj-add-dwg-btn">+ New Drawing</button>`:''}
+    </div>
+    ${drawings.length?`<div class="item-list">${drawings.map(drawingCard).join('')}</div>`:'<div class="empty-state" style="padding:20px"><div class="empty-icon">📐</div><h4>No drawings yet</h4><p>Attach DWG, PDF or drawings to this project.</p></div>'}
+  `;
+  host.querySelectorAll('.item-card[data-dwg]').forEach(card=>card.addEventListener('click',()=>{
+    const d = drawings.find(x=>x.id===card.dataset.dwg);
+    if (d) openDrawingDetail(d, p, currentUser, currentRole, canBill);
+  }));
+  document.getElementById('proj-add-dwg-btn')?.addEventListener('click',()=>openDrawingCreateModal(p, currentUser, currentRole, canBill));
+}
+
+async function openDrawingCreateModal(project, currentUser, currentRole, canBill){
+  const uSnap = await db.collection('users').get().catch(()=>({docs:[]}));
+  const users = uSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+  openModal('New Drawing', `
+    <div class="form-group"><label>Title</label><input id="dw-title" placeholder="e.g. Ground Floor Plan"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Drawing No.</label><input id="dw-no" placeholder="e.g. A-101 (optional)"/></div>
+      <div class="form-group"><label>Type</label><select id="dw-type">${DRAWING_TYPES.map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label>Assign Designer</label>
+      <select id="dw-assignee"><option value="">— Unassigned —</option>
+        ${users.map(u=>`<option value="${u.id}" data-name="${escHtml(u.displayName||u.email)}">${escHtml(u.displayName||u.email)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group"><label>Notes (Rev A)</label><textarea id="dw-note" rows="2" placeholder="What this drawing covers / initial notes"></textarea></div>
+    <div class="form-group"><label>File (DWG / PDF / drawing)</label><div id="dw-file"></div></div>
+  `, `<button class="btn-primary" id="dw-save-btn">Create Drawing</button><button class="btn-secondary" id="dw-cancel-btn">Cancel</button>`);
+  let uploaded = null;
+  Drive.renderUploadArea('dw-file', r=>{ uploaded=r; }, {label:'Upload DWG/PDF/drawing', dept:'Design', subfolder:'Drawings'});
+  document.getElementById('dw-cancel-btn').addEventListener('click',()=>openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings'));
+  document.getElementById('dw-save-btn').addEventListener('click', async () => {
+    const title = document.getElementById('dw-title').value.trim();
+    if (!title){ Notifs.showToast('Enter a drawing title','error'); return; }
+    const asel = document.getElementById('dw-assignee');
+    const assignedTo = asel.value || null;
+    const assignedToName = asel.value ? (asel.options[asel.selectedIndex]?.dataset.name || null) : null;
+    const note = document.getElementById('dw-note').value.trim();
+    const who = window.userProfile?.displayName || currentUser.email || '';
+    const nowIso = new Date().toISOString();
+    const rev0 = { rev:'A', status:'draft', fileUrl:uploaded?.url||null, fileName:uploaded?.name||null, driveUrl:uploaded?.driveUrl||null, note, by:currentUser.uid, byName:who, at:nowIso };
+    try {
+      const ref = await db.collection('design_drawings').add({
+        projectId: project.id, projectName: project.name||'',
+        title, drawingNo: document.getElementById('dw-no').value.trim(),
+        type: document.getElementById('dw-type').value,
+        status:'draft', currentRev:'A',
+        fileUrl:uploaded?.url||null, fileName:uploaded?.name||null, driveUrl:uploaded?.driveUrl||null, fileSource:uploaded?.source||(uploaded?'firebase':null),
+        assignedTo, assignedToName, reviewer:null, reviewerName:null, approver:null, approverName:null, approvedAt:null,
+        revisions:[rev0],
+        activity:[{ at:nowIso, event:'Drawing created (Rev A)', by:currentUser.uid, byName:who }],
+        createdBy: currentUser.uid, createdByName: who,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      if (assignedTo && assignedTo!==currentUser.uid) {
+        try { await Notifs.send(assignedTo,{title:'🎨 Drawing assigned',body:`"${title}" — ${project.name||''}`,icon:'🎨',type:'drawing_assigned',dedupKey:`dwg-assign-${ref.id}`}); } catch(_){}
+      }
+      window.logAudit && window.logAudit('create','design_drawing',ref.id,{project:project.name, title});
+      Notifs.showToast('Drawing created','success');
+    } catch(e){ console.warn(e); Notifs.showToast('Could not create drawing','error'); return; }
+    openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings');
+  });
+}
+
+function openDrawingDetail(d, project, currentUser, currentRole, canBill){
+  const st = drawingStatus(d.status);
+  const canManage = canEditDept('Design');
+  const revs = (d.revisions||[]).slice().reverse();
+  const acts = (d.activity||[]).slice().reverse();
+  const fileLink = d.fileUrl
+    ? `<a href="${escHtml(d.driveUrl||d.fileUrl)}" target="_blank" class="btn-secondary btn-sm">⬇ ${escHtml(d.fileName||'Open file')}</a>`
+    : '<span style="font-size:12px;color:var(--text-muted)">No file attached</span>';
+  const trans = canManage ? drawingTransitions(d.status) : [];
+  openModal(`${drawingTypeIcon(d.type)} ${escHtml(d.title||'Drawing')}`, `
+    <div class="item-meta" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <span class="badge badge-gray">Rev ${escHtml(d.currentRev||'A')}</span>
+      <span class="badge ${st.badge}">${st.label}</span>
+      <span>${escHtml(d.type||'')}</span>
+      ${d.drawingNo?`<span>🔖 ${escHtml(d.drawingNo)}</span>`:''}
+    </div>
+    <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:12px 14px;font-size:13px;display:grid;grid-template-columns:auto 1fr;gap:6px 12px">
+      <span style="color:var(--text-muted)">Project</span><span>${escHtml(d.projectName||project?.name||'')}</span>
+      <span style="color:var(--text-muted)">Designer</span><span>${d.assignedToName?escHtml(d.assignedToName):'<span style="color:var(--text-muted)">Unassigned</span>'}</span>
+      <span style="color:var(--text-muted)">Approved by</span><span>${d.approverName?escHtml(d.approverName):'<span style="color:var(--text-muted)">—</span>'}</span>
+      <span style="color:var(--text-muted)">Current file</span><span>${fileLink}</span>
+    </div></div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">📑 Revision History</div>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Rev</th><th>Status</th><th>Note</th><th>By</th><th>Date</th><th>File</th></tr></thead><tbody>
+      ${revs.length?revs.map(r=>`<tr><td><strong>${escHtml(r.rev||'')}</strong></td><td>${escHtml(drawingStatus(r.status).label)}</td><td style="font-size:11px">${escHtml(r.note||'')}</td><td style="font-size:11px">${escHtml(r.byName||'')}</td><td style="font-size:11px;color:var(--text-muted)">${(''+(r.at||'')).slice(0,10)}</td><td>${r.fileUrl?`<a href="${escHtml(r.driveUrl||r.fileUrl)}" target="_blank">⬇</a>`:'—'}</td></tr>`).join(''):'<tr><td colspan="6" style="font-size:12px;color:var(--text-muted)">No revisions.</td></tr>'}
+    </tbody></table></div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:12px 0 4px">🕘 Activity</div>
+    <div style="max-height:150px;overflow:auto;font-size:12px">${acts.length?acts.map(a=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)"><strong>${escHtml(a.event||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${(''+(a.at||'')).slice(0,16).replace('T',' ')} · ${escHtml(a.byName||'')}</div></div>`).join(''):'<div style="color:var(--text-muted)">No activity.</div>'}</div>
+  `, `
+    ${canManage?`<button class="btn-secondary btn-sm" id="dwg-rev-btn">+ New Revision</button>`:''}
+    ${canManage?`<button class="btn-secondary btn-sm" id="dwg-edit-btn">✏️ Edit</button>`:''}
+    ${trans.map(t=>`<button class="${t.cls} btn-sm dwg-trans-btn" data-to="${t.to}">${t.label}</button>`).join('')}
+    <button class="btn-secondary" id="dwg-back-btn">Back</button>
+  `);
+  document.getElementById('dwg-back-btn').addEventListener('click',()=>openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings'));
+  document.getElementById('dwg-rev-btn')?.addEventListener('click',()=>openDrawingRevisionModal(d, project, currentUser, currentRole, canBill));
+  document.getElementById('dwg-edit-btn')?.addEventListener('click',()=>openDrawingEditModal(d, project, currentUser, currentRole, canBill));
+  document.querySelectorAll('.dwg-trans-btn').forEach(b=>b.addEventListener('click',()=>changeDrawingStatus(d, b.dataset.to, project, currentUser, currentRole, canBill)));
+}
+
+async function changeDrawingStatus(d, to, project, currentUser, currentRole, canBill){
+  const who = window.userProfile?.displayName || currentUser.email || '';
+  const nowIso = new Date().toISOString();
+  const st = drawingStatus(to);
+  const actEntry = { at:nowIso, event:`Status → ${st.label} (Rev ${d.currentRev||'A'})`, by:currentUser.uid, byName:who };
+  const update = {
+    status: to,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    activity: firebase.firestore.FieldValue.arrayUnion(actEntry),
+  };
+  if (to==='approved') { update.approver=currentUser.uid; update.approverName=who; update.approvedAt=firebase.firestore.FieldValue.serverTimestamp(); }
+  try {
+    await db.collection('design_drawings').doc(d.id).update(update);
+    d.status = to;
+    d.activity = [...(d.activity||[]), actEntry];
+    if (to==='approved'){ d.approver=currentUser.uid; d.approverName=who; }
+  } catch(e){ console.warn(e); Notifs.showToast('Could not update status','error'); return; }
+  // Cross-department side effects — best-effort; never block the status change.
+  try {
+    if (to==='approved' && d.assignedTo && d.assignedTo!==currentUser.uid) {
+      await Notifs.send(d.assignedTo,{title:'✅ Drawing approved',body:`"${d.title}" was approved`,icon:'✅',type:'drawing_approved',dedupKey:`dwg-appr-${d.id}-${d.currentRev}`});
+    }
+    if (to==='released') {
+      await Notifs.sendToDept('Production',{title:'📐 Drawing released',body:`"${d.title}" (${project?.name||d.projectName||''}) is released for production`,icon:'📐',type:'drawing_released'});
+      if (project?.jobProjectId) {
+        await db.collection('job_projects').doc(project.jobProjectId).update({
+          documents: firebase.firestore.FieldValue.arrayUnion({ type:'Drawing', ref:`${d.title} Rev ${d.currentRev||'A'}`, at:nowIso, by:who }),
+          timeline:  firebase.firestore.FieldValue.arrayUnion({ at:nowIso, event:`Drawing released: ${d.title} Rev ${d.currentRev||'A'}`, by:who }),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+    }
+  } catch(e){ console.warn('drawing release side-effect failed', e); }
+  Notifs.showToast(`Drawing → ${st.label}`,'success');
+  openDrawingDetail(d, project, currentUser, currentRole, canBill);
+}
+
+function openDrawingRevisionModal(d, project, currentUser, currentRole, canBill){
+  const newRev = nextRev(d.currentRev||'A');
+  openModal(`New Revision — Rev ${newRev}`, `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Cutting <strong>Rev ${escHtml(newRev)}</strong> of "${escHtml(d.title||'')}". The drawing returns to <strong>Draft</strong> for re-review.</div>
+    <div class="form-group"><label>Change Note</label><textarea id="rv-note" rows="3" placeholder="What changed in this revision"></textarea></div>
+    <div class="form-group"><label>Updated File (optional)</label><div id="rv-file"></div></div>
+  `, `<button class="btn-primary" id="rv-save-btn">Save Rev ${newRev}</button><button class="btn-secondary" id="rv-cancel-btn">Cancel</button>`);
+  let uploaded = null;
+  Drive.renderUploadArea('rv-file', r=>{ uploaded=r; }, {label:'Upload updated DWG/PDF', dept:'Design', subfolder:'Drawings'});
+  document.getElementById('rv-cancel-btn').addEventListener('click',()=>openDrawingDetail(d, project, currentUser, currentRole, canBill));
+  document.getElementById('rv-save-btn').addEventListener('click', async () => {
+    const note = document.getElementById('rv-note').value.trim();
+    const who = window.userProfile?.displayName || currentUser.email || '';
+    const nowIso = new Date().toISOString();
+    const fileUrl  = uploaded?.url || d.fileUrl || null;
+    const fileName = uploaded?.name || d.fileName || null;
+    const driveUrl = uploaded ? (uploaded.driveUrl||null) : (d.driveUrl||null);
+    const revEntry = { rev:newRev, status:'draft', fileUrl, fileName, driveUrl, note, by:currentUser.uid, byName:who, at:nowIso };
+    const actEntry = { at:nowIso, event:`Rev ${newRev} created`, by:currentUser.uid, byName:who };
+    try {
+      await db.collection('design_drawings').doc(d.id).update({
+        currentRev:newRev, status:'draft',
+        fileUrl, fileName, driveUrl, fileSource: uploaded?.source || d.fileSource || null,
+        approver:null, approverName:null, approvedAt:null,
+        revisions: firebase.firestore.FieldValue.arrayUnion(revEntry),
+        activity:  firebase.firestore.FieldValue.arrayUnion(actEntry),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      Object.assign(d, { currentRev:newRev, status:'draft', fileUrl, fileName, driveUrl, approver:null, approverName:null });
+      d.revisions = [...(d.revisions||[]), revEntry];
+      d.activity  = [...(d.activity||[]), actEntry];
+      Notifs.showToast(`Rev ${newRev} saved`,'success');
+    } catch(e){ console.warn(e); Notifs.showToast('Could not save revision','error'); return; }
+    openDrawingDetail(d, project, currentUser, currentRole, canBill);
+  });
+}
+
+async function openDrawingEditModal(d, project, currentUser, currentRole, canBill){
+  const uSnap = await db.collection('users').get().catch(()=>({docs:[]}));
+  const users = uSnap.docs.map(u=>({id:u.id,...u.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+  openModal('Edit Drawing', `
+    <div class="form-group"><label>Title</label><input id="de-title" value="${escHtml(d.title||'')}"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Drawing No.</label><input id="de-no" value="${escHtml(d.drawingNo||'')}"/></div>
+      <div class="form-group"><label>Type</label><select id="de-type">${DRAWING_TYPES.map(t=>`<option value="${t}" ${d.type===t?'selected':''}>${t}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label>Assign Designer</label>
+      <select id="de-assignee"><option value="">— Unassigned —</option>
+        ${users.map(u=>`<option value="${u.id}" data-name="${escHtml(u.displayName||u.email)}" ${d.assignedTo===u.id?'selected':''}>${escHtml(u.displayName||u.email)}</option>`).join('')}
+      </select>
+    </div>
+  `, `<button class="btn-primary" id="de-save-btn">Save</button><button class="btn-secondary" id="de-cancel-btn">Cancel</button>`);
+  document.getElementById('de-cancel-btn').addEventListener('click',()=>openDrawingDetail(d, project, currentUser, currentRole, canBill));
+  document.getElementById('de-save-btn').addEventListener('click', async () => {
+    const asel = document.getElementById('de-assignee');
+    const assignedTo = asel.value || null;
+    const assignedToName = asel.value ? (asel.options[asel.selectedIndex]?.dataset.name || null) : null;
+    const prevAssignee = d.assignedTo || null;
+    const who = window.userProfile?.displayName || currentUser.email || '';
+    const update = {
+      title:     document.getElementById('de-title').value.trim() || d.title,
+      drawingNo: document.getElementById('de-no').value.trim(),
+      type:      document.getElementById('de-type').value,
+      assignedTo, assignedToName,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    };
+    try {
+      await db.collection('design_drawings').doc(d.id).update(update);
+      Object.assign(d, update);
+      if (assignedTo && assignedTo!==prevAssignee && assignedTo!==currentUser.uid) {
+        try { await Notifs.send(assignedTo,{title:'🎨 Drawing assigned',body:`"${update.title}" — ${project?.name||''}`,icon:'🎨',type:'drawing_assigned',dedupKey:`dwg-reassign-${d.id}-${assignedTo}`}); } catch(_){}
+      }
+      Notifs.showToast('Drawing saved','success');
+    } catch(e){ console.warn(e); Notifs.showToast('Could not save','error'); return; }
+    openDrawingDetail(d, project, currentUser, currentRole, canBill);
+  });
+}
+
+// Delegate a Design task scoped to a project (writes department:'Design' + projectId).
+async function openAddProjectTaskModal(project, currentUser, currentRole, canBill){
+  const uSnap = await db.collection('users').get().catch(()=>({docs:[]}));
+  const users = uSnap.docs.map(u=>({id:u.id,...u.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+  openModal('Delegate Task — '+escHtml(project.name||''), `
+    <div class="form-group"><label>Title</label><input id="pt-title" placeholder="Task name"/></div>
+    <div class="form-group"><label>Description</label><textarea id="pt-desc" rows="2"></textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label>Priority</label><select id="pt-priority"><option value="low">🟢 Low</option><option value="medium" selected>🟡 Medium</option><option value="high">🔴 High</option><option value="urgent">🚨 Urgent</option></select></div>
+      <div class="form-group"><label>Due Date</label><input id="pt-due" type="date" value="${today()}"/></div>
+    </div>
+    <div class="form-group"><label>Assign To (add multiple)</label>
+      <select id="pt-assignee-sel"><option value="">— Add assignee —</option>${users.map(u=>`<option value="${u.id}" data-name="${escHtml(u.displayName||u.email)}">${escHtml(u.displayName||u.email)}</option>`).join('')}</select>
+      <div id="pt-chips" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"></div>
+    </div>
+  `, `<button class="btn-primary" id="pt-save-btn">Create Task</button><button class="btn-secondary" id="pt-cancel-btn">Cancel</button>`);
+  document.getElementById('pt-cancel-btn').addEventListener('click',()=>openProjectDetail(project, currentUser, currentRole, canBill, 'Tasks'));
+  let picks = [];
+  const renderPicks = () => {
+    const wrap = document.getElementById('pt-chips');
+    wrap.innerHTML = picks.map(a=>`<span class="badge badge-blue pt-chip" data-uid="${a.uid}" style="cursor:pointer">${escHtml(a.name)} ✕</span>`).join('');
+    wrap.querySelectorAll('.pt-chip').forEach(ch=>ch.addEventListener('click',()=>{ picks=picks.filter(x=>x.uid!==ch.dataset.uid); renderPicks(); }));
+  };
+  document.getElementById('pt-assignee-sel').addEventListener('change',e=>{
+    const uid=e.target.value, name=e.target.options[e.target.selectedIndex]?.dataset.name||'';
+    if (uid && !picks.some(a=>a.uid===uid)) picks.push({uid,name});
+    e.target.value=''; renderPicks();
+  });
+  document.getElementById('pt-save-btn').addEventListener('click', async () => {
+    const title = document.getElementById('pt-title').value.trim();
+    if (!title){ Notifs.showToast('Enter a task title','error'); return; }
+    const who = window.userProfile?.displayName || currentUser.email || '';
+    try {
+      const ref = await db.collection('tasks').add({
+        title, description: document.getElementById('pt-desc').value.trim(),
+        priority: document.getElementById('pt-priority').value, status:'backlog',
+        dueDate: document.getElementById('pt-due').value,
+        department:'Design', projectId:project.id, projectName:project.name||'',
+        assignedTo:picks.map(a=>a.uid), assignedToNames:picks.map(a=>a.name),
+        createdBy:currentUser.uid, createdByName:who,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      for (const a of picks) {
+        if (a.uid!==currentUser.uid) {
+          try { await Notifs.send(a.uid,{title:'📌 New Task Assigned',body:`"${title}" — ${project.name||''}`,icon:'📌',type:'task_assigned',taskId:ref.id,dedupKey:`task-assigned-${ref.id}-${a.uid}`}); } catch(_){}
+        }
+      }
+      try { await Notifs.sendToOwner({title:'📌 New Task Created',body:`${who} created "${title}"`,icon:'📌',type:'task_created',dedupKey:`task-created-${ref.id}`}); } catch(_){}
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
+      Notifs.showToast('Task created','success');
+    } catch(e){ console.warn(e); Notifs.showToast('Could not create task','error'); return; }
+    openProjectDetail(project, currentUser, currentRole, canBill, 'Tasks');
+  });
+}
+
+// ── Cross-project Drawings dashboard (Design subtab) ──
+async function renderDrawingsDashboard(container, currentUser, currentRole){
+  container.innerHTML = '<div class="loading-placeholder">Loading drawings…</div>';
+  let drawings = [];
+  try {
+    const snap = await db.collection('design_drawings').orderBy('createdAt','desc').get();
+    drawings = snap.docs.map(d=>({id:d.id,...d.data()}));
+  } catch(e){ console.warn('drawings dashboard load failed', e); }
+  const projMap = {};
+  try { const ps = await db.collection('projects').get(); ps.docs.forEach(d=>projMap[d.id]={id:d.id,...d.data()}); } catch(_){}
+  const counts = {}; DRAWING_STATUSES.forEach(s=>counts[s.id]=0);
+  drawings.forEach(d=>{ if (counts[d.status]!=null) counts[d.status]++; });
+  const designers = [...new Set(drawings.map(d=>d.assignedToName).filter(Boolean))].sort();
+  const projects  = [...new Set(drawings.map(d=>d.projectName).filter(Boolean))].sort();
+  let fStatus='All', fDesigner='All', fProject='All';
+  const selStyle = 'padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px';
+
+  const renderList = () => {
+    const showing = drawings.filter(d=>
+      (fStatus==='All'||d.status===fStatus) &&
+      (fDesigner==='All'||d.assignedToName===fDesigner) &&
+      (fProject==='All'||d.projectName===fProject)
+    );
+    const listEl = document.getElementById('dwg-dash-list');
+    listEl.innerHTML = showing.length
+      ? `<div class="item-list">${showing.map(drawingCard).join('')}</div>`
+      : '<div class="empty-state" style="padding:20px"><div class="empty-icon">📐</div><h4>No drawings match</h4></div>';
+    listEl.querySelectorAll('.item-card[data-dwg]').forEach(card=>card.addEventListener('click',()=>{
+      const d = drawings.find(x=>x.id===card.dataset.dwg);
+      if (d) openDrawingDetail(d, projMap[d.projectId] || {id:d.projectId, name:d.projectName}, currentUser, currentRole, false);
+    }));
+  };
+
+  container.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:12px">
+      ${DRAWING_STATUSES.map(s=>`<div class="kpi-card"><div class="kpi-label">${s.label}</div><div class="kpi-value">${counts[s.id]||0}</div></div>`).join('')}
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <select id="dwg-f-status" style="${selStyle}"><option value="All">All statuses</option>${DRAWING_STATUSES.map(s=>`<option value="${s.id}">${s.label}</option>`).join('')}</select>
+      <select id="dwg-f-designer" style="${selStyle}"><option value="All">All designers</option>${designers.map(n=>`<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('')}</select>
+      <select id="dwg-f-project" style="${selStyle}"><option value="All">All projects</option>${projects.map(n=>`<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('')}</select>
+    </div>
+    <div id="dwg-dash-list"></div>
+  `;
+  document.getElementById('dwg-f-status').addEventListener('change',e=>{ fStatus=e.target.value; renderList(); });
+  document.getElementById('dwg-f-designer').addEventListener('change',e=>{ fDesigner=e.target.value; renderList(); });
+  document.getElementById('dwg-f-project').addEventListener('change',e=>{ fProject=e.target.value; renderList(); });
+  renderList();
+}
 
 // Open a billing invoice in a printable window
 window.openBillingInvoice = function(p, inv) {
