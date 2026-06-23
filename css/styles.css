@@ -2954,6 +2954,7 @@ html.light .team-member-card:hover, html.theme-pink .team-member-card:hover, htm
 .eom-name { font-size: 17px; font-weight: 800; color: var(--text); line-height: 1.2; }
 .eom-role { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-top: 3px; }
 .eom-reason { font-size: 12.5px; color: var(--text); opacity: .85; font-style: italic; margin-top: 6px; line-height: 1.4; }
+.eom-auto-tag { font-size: 10.5px; font-weight: 600; color: var(--text-muted); margin-top: 6px; opacity: .9; }
 .eom-edit-btn {
   flex: 0 0 auto; align-self: flex-start;
   background: rgba(255,255,255,0.1); border: 1px solid var(--glass-border, rgba(255,255,255,0.15));

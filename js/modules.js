@@ -489,44 +489,100 @@ function eomMonthLabel(ym) {
   return new Date(y, m - 1, 1).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' });
 }
 
+// The award is now SYSTEM-CHOSEN, not manually picked: each eligible team member
+// is scored from task KPI (50%), attendance (40%) and performance grade (10%),
+// and the top scorer is the Employee of the Month.
+//
+// Why the President's session does the computing: per firestore.rules, regular
+// employees can't read other people's attendance (isOwner || isFinanceOrAdmin),
+// and only the President can write settings/*. So the President's Team page
+// computes the live standings and persists the winner to settings/employeeOfMonth;
+// everyone else just reads that one doc (cheap, and consistent for all viewers).
 async function renderEomBanner(users, canManage) {
   const host = document.getElementById('eom-banner');
   if (!host) return;
+  const month = window.bizDate().slice(0, 7);
+
+  // ── President: compute live standings and persist the winner ──
+  if (canManage) {
+    let standings = [];
+    try { standings = await computeEomStandings(users); } catch (e) { standings = []; }
+    const winner = standings[0] || null;
+
+    if (!winner) {
+      host.innerHTML = `
+        <div class="eom-banner eom-banner--empty">
+          <div class="eom-empty-icon">🏆</div>
+          <div class="eom-empty-text">
+            <strong>Employee of the Month</strong>
+            <span>Auto-selected from KPI &amp; attendance. Standings appear once the team logs activity this month.</span>
+          </div>
+          <button class="btn-secondary btn-sm" id="eom-standings-btn">📊 Standings</button>
+        </div>`;
+      document.getElementById('eom-standings-btn')?.addEventListener('click', () => openEomStandingsModal(standings, month));
+      return;
+    }
+
+    // Persist the computed winner (only when it actually changed) so non-admins
+    // read a fresh, identical result. Preserve announcedMonth within the same
+    // month; reset it when the month rolls over (a new month isn't announced yet).
+    try {
+      const ref = db.collection('settings').doc('employeeOfMonth');
+      const curSnap = await ref.get();
+      const cur = curSnap.exists ? curSnap.data() : {};
+      const sameMonth = cur.month === month;
+      const changed = cur.uid !== winner.uid || !sameMonth
+        || Math.round((cur.score || 0) * 1000) !== Math.round(winner.score * 1000);
+      winner.announcedMonth = sameMonth ? (cur.announcedMonth || null) : null;
+      if (changed) {
+        await ref.set({
+          uid: winner.uid,
+          displayName: winner.displayName, email: winner.email,
+          photoUrl: winner.photoUrl, role: winner.role, departments: winner.departments,
+          reason: winner.citation, month,
+          auto: true, score: winner.score, kpiPct: winner.taskPct, attPct: winner.attPct,
+          grade: winner.grade ?? null,
+          announcedMonth: winner.announcedMonth,
+          computedBy: currentUser.uid,
+          computedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      }
+    } catch (e) { /* persist failure is non-fatal — still render the live result */ }
+
+    renderEomCard(host, winner, users, true, standings, month);
+    return;
+  }
+
+  // ── Everyone else: read the persisted winner (1 doc) ──
   let eom = null;
   try {
     const doc = await db.collection('settings').doc('employeeOfMonth').get();
     eom = doc.exists ? doc.data() : null;
-  } catch (e) { /* read failure → render nothing (or the empty prompt for President) */ }
+  } catch (e) { /* read failure → render nothing */ }
+  if (!eom || !eom.uid) { host.innerHTML = ''; return; }
+  renderEomCard(host, eom, users, false, null, eom.month);
+}
 
-  if (!eom || !eom.uid) {
-    host.innerHTML = canManage ? `
-      <div class="eom-banner eom-banner--empty">
-        <div class="eom-empty-icon">🏆</div>
-        <div class="eom-empty-text">
-          <strong>Employee of the Month</strong>
-          <span>Recognise a standout Barro Industries team member.</span>
-        </div>
-        <button class="btn-primary btn-sm" id="eom-set-btn">Set Awardee</button>
-      </div>` : '';
-    document.getElementById('eom-set-btn')?.addEventListener('click', () => openEomModal(users, eom));
-    return;
-  }
-
-  // Prefer live profile (fresher photo/name) but fall back to the stored snapshot.
-  const live = users.find(u => u.id === eom.uid);
-  const name = live?.displayName || eom.displayName || eom.email || 'Team member';
-  const photoUrl = live?.photoUrl || eom.photoUrl || '';
-  const role = live?.role || eom.role;
+// Render the gold winner card. `data` is either a freshly computed standing or
+// the persisted settings doc — both carry uid/name/photo/role/departments plus
+// the metric percentages used for the auto-citation.
+function renderEomCard(host, data, users, canManage, standings, month) {
+  const live = users.find(u => u.id === data.uid);
+  const name = live?.displayName || data.displayName || data.email || 'Team member';
+  const photoUrl = live?.photoUrl || data.photoUrl || '';
+  const role = live?.role || data.role;
   const roleLabel = window.ROLES?.[role]?.label || role || 'Employee';
   const deptsArr = live
     ? (Array.isArray(live.departments) && live.departments.length ? live.departments : (live.department ? [live.department] : []))
-    : (eom.departments || []);
+    : (data.departments || []);
   const depts = deptsArr.join(' · ') || 'Barro Industries';
   const initials = (name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  const attPct = data.attPct, kpiPct = data.kpiPct ?? data.taskPct;
+  const metrics = (attPct != null && kpiPct != null) ? ` · ${attPct}% att · ${kpiPct}% KPI` : '';
 
   host.innerHTML = `
     <div class="eom-banner">
-      <div class="eom-ribbon">🏆 Employee of the Month${eom.month ? ` · ${escHtml(eomMonthLabel(eom.month))}` : ''}</div>
+      <div class="eom-ribbon">🏆 Employee of the Month${data.month ? ` · ${escHtml(eomMonthLabel(data.month))}` : ''}</div>
       <div class="eom-body">
         <div class="eom-avatar">
           ${photoUrl ? `<img src="${escHtml(photoUrl)}" alt="${escHtml(name)}"/>` : `<span>${escHtml(initials)}</span>`}
@@ -534,82 +590,148 @@ async function renderEomBanner(users, canManage) {
         <div class="eom-info">
           <div class="eom-name">${escHtml(name)}</div>
           <div class="eom-role">${escHtml(roleLabel)} · ${escHtml(depts)}</div>
-          ${eom.reason ? `<div class="eom-reason">“${escHtml(eom.reason)}”</div>` : ''}
+          ${data.reason ? `<div class="eom-reason">${escHtml(data.reason)}</div>` : ''}
+          <div class="eom-auto-tag">⚙️ Auto-selected by performance${metrics}</div>
         </div>
-        ${canManage ? `<button class="eom-edit-btn" id="eom-set-btn" title="Change awardee">✏️</button>` : ''}
+        ${canManage ? `<button class="eom-edit-btn" id="eom-standings-btn" title="View standings">📊</button>` : ''}
       </div>
     </div>`;
-  document.getElementById('eom-set-btn')?.addEventListener('click', () => openEomModal(users, eom));
+  if (canManage) document.getElementById('eom-standings-btn')?.addEventListener('click', () => openEomStandingsModal(standings, month));
 }
 
-function openEomModal(users, current) {
-  // Candidates: internal Barro Industries staff only — exclude external partners
-  // and Brilliant Steel-only members (the award is Barro Industries-specific).
-  const candidates = users
-    .filter(u => u.role !== 'partner'
-      && !(Array.isArray(u.departments) && u.departments.length === 1 && u.departments[0] === 'Brilliant Steel'))
-    .sort((a, b) => (a.displayName || a.email || '').localeCompare(b.displayName || b.email || ''));
+// Score every eligible team member for the current month and return them ranked
+// (highest first). Eligible = internal Barro Industries staff who have logged at
+// least one attendance day this month — excludes the President (who runs the
+// award), external partners, and Brilliant Steel-only members.
+//
+// score = 0.50·taskKPI + 0.40·attendance + 0.10·grade  (each component 0–1)
+//   taskKPI    = completed / assigned tasks  (neutral 0.5 when none assigned)
+//   attendance = attendance points / workdays elapsed this month
+//   grade      = President grade /10  (neutral 0.5 when ungraded)
+async function computeEomStandings(users) {
+  const todayStr = window.bizDate();
+  const y = +todayStr.slice(0, 4), m = +todayStr.slice(5, 7) - 1, d = +todayStr.slice(8, 10);
+  const monthStart = `${todayStr.slice(0, 7)}-01`;
+  const workDaysElapsed = (typeof countWorkDays === 'function') ? countWorkDays(y, m, d) : Math.max(1, d);
 
-  const curUid = current?.uid || '';
-  const curReason = current?.reason || '';
-  openModal('🏆 Employee of the Month', `
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Recognise an outstanding Barro Industries team member. Shown to everyone on the Team page.</p>
-    <div class="form-group">
-      <label>Awardee</label>
-      <select id="eom-user" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-        <option value="">— Select a team member —</option>
-        ${candidates.map(u => `<option value="${u.id}" ${u.id === curUid ? 'selected' : ''}>${escHtml(u.displayName || u.email)}</option>`).join('')}
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Citation <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
-      <textarea id="eom-reason" maxlength="160" rows="2" placeholder="e.g. Outstanding dedication on the Q2 production rollout." style="width:100%;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);resize:vertical;font-family:inherit">${escHtml(curReason)}</textarea>
-    </div>
-  `, `<button class="btn-primary" id="eom-save-btn">Save</button>${curUid ? '<button class="btn-secondary" id="eom-clear-btn">Clear Award</button>' : '<button class="btn-secondary" onclick="closeModal()">Cancel</button>'}`);
+  const candidates = users.filter(u =>
+    u.role !== 'partner' && u.role !== 'president'
+    && !(Array.isArray(u.departments) && u.departments.length === 1 && u.departments[0] === 'Brilliant Steel'));
+  if (!candidates.length) return [];
 
-  document.getElementById('eom-save-btn').addEventListener('click', async () => {
-    const uid = document.getElementById('eom-user').value;
-    if (!uid) { Notifs.showToast('Select a team member.', 'error'); return; }
-    const u = users.find(x => x.id === uid);
-    if (!u) { Notifs.showToast('User not found.', 'error'); return; }
-    const reason = document.getElementById('eom-reason').value.trim();
-    const month = window.bizDate().slice(0, 7);
+  // Load all tasks + grades once (shared across candidates), then read each
+  // candidate's attendance in parallel.
+  const tasksGet = (typeof dbCachedGet === 'function')
+    ? dbCachedGet('tasks', () => db.collection('tasks').get(), 60000)
+    : db.collection('tasks').get();
+  const evalsGet = (typeof dbCachedGet === 'function')
+    ? dbCachedGet('kpi-evals', () => db.collection('kpi_evals').get(), 60000)
+    : db.collection('kpi_evals').get();
+  const [taskSnap, evalSnap] = await Promise.all([
+    tasksGet.catch(() => ({ docs: [] })),
+    evalsGet.catch(() => ({ docs: [] }))
+  ]);
+  const allTasks = taskSnap.docs.map(t => t.data());
+  const evals = {}; evalSnap.docs.forEach(e => { evals[e.id] = e.data(); });
+  const DONE = ['done', 'approved', 'archived'];
+  const isAssigned = (t, uid) => Array.isArray(t.assignedTo) ? t.assignedTo.includes(uid) : t.assignedTo === uid;
+  const recScore = r => (typeof r.attendanceScore === 'number') ? r.attendanceScore : (r.fullTime ? 1 : (r.loginTime ? 0.5 : 0));
+
+  const rows = await Promise.all(candidates.map(async u => {
+    const uid = u.id;
+    let attScore = 0, attDays = 0;
     try {
-      await db.collection('settings').doc('employeeOfMonth').set({
-        uid,
-        displayName: u.displayName || u.email || '',
-        email: u.email || '',
-        photoUrl: u.photoUrl || '',
-        role: u.role || 'employee',
-        departments: Array.isArray(u.departments) && u.departments.length ? u.departments : (u.department ? [u.department] : []),
-        reason,
-        month,
-        setBy: currentUser.uid,
-        setByName: window.userProfile?.displayName || currentUser?.displayName || '',
-        setAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      closeModal();
-      Notifs.showToast(`${u.displayName || u.email} is Employee of the Month! 🏆`);
-      // Congratulate the awardee (skip if the President named themselves).
-      if (uid !== currentUser.uid && Notifs?.send) {
-        Notifs.send(uid, {
+      const snap = await db.collection('attendance').doc(uid).collection('records')
+        .where(firebase.firestore.FieldPath.documentId(), '>=', monthStart)
+        .where(firebase.firestore.FieldPath.documentId(), '<=', todayStr).get();
+      attDays = snap.size;
+      const total = snap.docs.reduce((s, doc) => s + recScore(doc.data()), 0);
+      attScore = Math.min(1, total / workDaysElapsed);
+    } catch (e) { attScore = 0; attDays = 0; }
+
+    const mine = allTasks.filter(t => isAssigned(t, uid));
+    const doneTasks = mine.filter(t => DONE.includes(t.status)).length;
+    const taskScore = mine.length ? Math.min(1, doneTasks / mine.length) : 0.5;
+
+    const ev = evals[uid] || {};
+    const grade = (typeof ev.presidentGrade === 'number') ? ev.presidentGrade
+      : (typeof ev.presidentGradeFromTasks === 'number') ? ev.presidentGradeFromTasks : null;
+    const gradeNorm = grade != null ? Math.min(1, grade / 10) : 0.5;
+
+    const score = 0.5 * taskScore + 0.4 * attScore + 0.1 * gradeNorm;
+    return {
+      uid, displayName: u.displayName || u.email || '', email: u.email || '',
+      photoUrl: u.photoUrl || '', role: u.role || 'employee',
+      departments: Array.isArray(u.departments) && u.departments.length ? u.departments : (u.department ? [u.department] : []),
+      attScore, attDays, attPct: Math.round(attScore * 100),
+      taskScore, doneTasks, totalTasks: mine.length, taskPct: Math.round(taskScore * 100),
+      grade, score, citation: ''
+    };
+  }));
+
+  const eligible = rows.filter(r => r.attDays >= 1);
+  eligible.sort((a, b) =>
+    b.score - a.score || b.attScore - a.attScore || b.taskScore - a.taskScore
+    || (a.displayName || '').localeCompare(b.displayName || ''));
+  eligible.forEach(r => {
+    r.citation = `Top performer this month — ${r.attPct}% attendance · ${r.taskPct}% task KPI`
+      + (r.doneTasks > 0 ? ` · ${r.doneTasks} task${r.doneTasks !== 1 ? 's' : ''} done` : '') + '.';
+  });
+  return eligible;
+}
+
+// President-only: show the ranked leaderboard behind the auto-selection, with an
+// option to announce (notify) the current winner. The system chooses the person;
+// announcing is an explicit, one-tap action so the congrats fires when intended.
+function openEomStandingsModal(standings, month) {
+  if (!standings || !standings.length) {
+    openModal('📊 Employee of the Month — Standings',
+      `<div class="empty-state" style="padding:30px"><div class="empty-icon">📊</div><p>No eligible team members have logged attendance yet this month.</p></div>`,
+      `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    return;
+  }
+  const winner = standings[0];
+  const rows = standings.map((s, i) => {
+    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+    const initials = (s.displayName || s.email || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;background:${i === 0 ? 'rgba(255,196,0,0.1)' : 'var(--surface2,rgba(255,255,255,0.04))'};margin-bottom:8px;border:1px solid ${i === 0 ? 'rgba(255,196,0,0.35)' : 'transparent'}">
+      <div style="font-size:18px;width:28px;text-align:center;flex:0 0 auto">${medal}</div>
+      <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--primary-light));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px;flex:0 0 auto;overflow:hidden">${s.photoUrl ? `<img src="${escHtml(s.photoUrl)}" style="width:100%;height:100%;object-fit:cover" alt=""/>` : escHtml(initials)}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(s.displayName || s.email)}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${s.attPct}% att · ${s.taskPct}% KPI${s.grade != null ? ` · grade ${s.grade}/10` : ''}</div>
+      </div>
+      <div style="text-align:right;flex:0 0 auto">
+        <div style="font-size:16px;font-weight:800;color:${i === 0 ? '#FFB800' : 'var(--text)'}">${Math.round(s.score * 100)}</div>
+        <div style="font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">score</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const alreadyAnnounced = winner.announcedMonth === month;
+  const firstName = (winner.displayName || winner.email || 'Winner').split(' ')[0];
+  const footer = alreadyAnnounced
+    ? `<button class="btn-secondary" disabled style="opacity:.6">✓ Announced</button><button class="btn-secondary" onclick="closeModal()">Close</button>`
+    : `<button class="btn-primary" id="eom-announce-btn">📣 Announce ${escHtml(firstName)}</button><button class="btn-secondary" onclick="closeModal()">Close</button>`;
+
+  openModal('📊 Employee of the Month — Standings', `
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">System-ranked by task KPI (50%), attendance (40%) and performance grade (10%) — updated live for ${escHtml(eomMonthLabel(month) || 'this month')}.</p>
+    <div>${rows}</div>
+  `, footer);
+
+  document.getElementById('eom-announce-btn')?.addEventListener('click', async () => {
+    try {
+      await db.collection('settings').doc('employeeOfMonth').set({ announcedMonth: month }, { merge: true });
+      if (winner.uid !== currentUser.uid && Notifs?.send) {
+        Notifs.send(winner.uid, {
           title: '🏆 Employee of the Month!',
           body: `Congratulations! You've been named Barro Industries Employee of the Month for ${eomMonthLabel(month)}.`,
           icon: '🏆', type: 'award',
-          dedupKey: `eom-${uid}-${month}`
+          dedupKey: `eom-${winner.uid}-${month}`
         });
       }
-      window.renderTeamTab();
-    } catch (err) { Notifs.showToast('Error: ' + err.message, 'error'); }
-  });
-
-  document.getElementById('eom-clear-btn')?.addEventListener('click', async () => {
-    if (!confirm('Clear the current Employee of the Month?')) return;
-    try {
-      await db.collection('settings').doc('employeeOfMonth').delete();
       closeModal();
-      Notifs.showToast('Award cleared.');
-      window.renderTeamTab();
+      Notifs.showToast(`Announced ${winner.displayName || winner.email} to the team! 🏆`);
     } catch (err) { Notifs.showToast('Error: ' + err.message, 'error'); }
   });
 }
