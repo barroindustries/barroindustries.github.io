@@ -269,13 +269,22 @@ window.Notifs = (() => {
   }
 
   // ── Send to department ────────────────────────
-  async function sendToDept(department, notifData) {
+  async function sendToDept(department, notifData, opts = {}) {
     const [snap1, snap2] = await Promise.all([
       db.collection('users').where('department', '==', department).get().catch(()=>({docs:[]})),
       db.collection('users').where('departments', 'array-contains', department).get().catch(()=>({docs:[]}))
     ]);
     const seen = new Set();
     const allDocs = [...snap1.docs, ...snap2.docs].filter(d => { if (seen.has(d.id)) return false; seen.add(d.id); return true; });
+    // No user is assigned to this department — the alert would otherwise vanish.
+    // For critical handoffs (opts.fallbackToOwner), route it to the owner/president
+    // instead so e.g. a job sent to Production with no Production user is never lost.
+    if (!allDocs.length) {
+      if (opts.fallbackToOwner) {
+        await sendToOwner({ ...notifData, body: `[no ${department} user assigned] ${notifData.body || ''}`.slice(0, 2000) });
+      }
+      return;
+    }
     // Use batch writes — avoids per-user dedupKey read + stays under Firestore write limits
     const docs = allDocs.slice();
     while (docs.length) {

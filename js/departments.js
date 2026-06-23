@@ -5896,7 +5896,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
       window.logAudit&&window.logAudit('create','sales_order',ref.id,{client:d.client, contract, paid, projectNo:proj.projectNo});
       const who=userProfile?.displayName||currentUser.email;
       try{ await Notifs.sendToDept('Finance',{ title:'🧾 New Sales Order', body:`${who}: ${d.client} — ₱${contract.toLocaleString()} (₱${paid.toLocaleString()} received). Project ${proj.projectNo}. Record income + verify receipt.`, icon:'🧾', type:'sales_order', link:'sales-orders' }); }catch(_){}
-      try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${d.client} (${proj.projectNo}) won — create the production order when ready.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }); }catch(_){}
+      try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${d.client} (${proj.projectNo}) won — create the production order when ready.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
       try{ await Notifs.sendToOwner({ title:'🤝 Quote won → Project '+proj.projectNo, body:`${d.client} — ₱${contract.toLocaleString()} closed by ${who}.`, icon:'🤝', type:'sales_order' }); }catch(_){}
       closeModal(); Notifs.showToast('Sales order + project '+proj.projectNo+' created');
       if (typeof container!=='undefined' && container) {
@@ -6056,7 +6056,7 @@ async function transferOrderToProduction(o){
       }
     }
     await db.collection('sales_orders').doc(o.id).update({ sentToProduction:true, sentToProductionAt:firebase.firestore.FieldValue.serverTimestamp() });
-    try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${o.clientName} — sale recorded by Finance. Create the production order.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }); }catch(_){}
+    try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${o.clientName} — sale recorded by Finance. Create the production order.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
     window.logAudit&&window.logAudit('update','sales_order',o.id,{ sentToProduction:true });
   }catch(ex){ Notifs.showToast('Transfer failed: '+(ex.message||ex.code),'error'); }
 }
@@ -8206,7 +8206,7 @@ async function advanceProjectStage(p, nextId){
     });
     // hand off to the owning department of the new stage
     const dept=ns.dept;
-    try{ if(dept&&dept!=='Sales') await Notifs.sendToDept(dept,{ title:`📈 ${ns.label}: ${p.clientName||p.projectNo}`, body:`Project ${p.projectNo} is now "${ns.label}". Your team's action is needed.`, icon:ns.icon, type:'project_stage', link:'projects-lifecycle' }); }catch(_){}
+    try{ if(dept&&dept!=='Sales') await Notifs.sendToDept(dept,{ title:`📈 ${ns.label}: ${p.clientName||p.projectNo}`, body:`Project ${p.projectNo} is now "${ns.label}". Your team's action is needed.`, icon:ns.icon, type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
     if(nextId==='delivered') { try{ await Notifs.sendToDept('Finance',{ title:'📦 Ready to bill balance', body:`${p.clientName} (${p.projectNo}) delivered — collect balance ₱${fmt(p.arBalance||0)}.`, icon:'💵', type:'project_stage', link:'projects-lifecycle' }); }catch(_){} }
     if(nextId==='paid') { try{ await Notifs.sendToOwner({ title:'💰 Project paid', body:`${p.clientName} (${p.projectNo}) fully collected.`, icon:'💰', type:'project_paid' }); }catch(_){} }
     window.logAudit && window.logAudit('update','project',p.id,{ stage:nextId });
@@ -8295,8 +8295,18 @@ function loadProdContent(currentUser, currentRole, sub) {
 async function renderProdOrders(el, currentUser, currentRole) {
   const canEdit = canEditDept('Production');
   el.innerHTML = '<div class="loading-placeholder">Loading orders…</div>';
-  const snap = await db.collection('production_orders').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+  const [snap, projSnap] = await Promise.all([
+    db.collection('production_orders').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+    db.collection('job_projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]}))
+  ]);
   const orders = snap.docs.map(d=>({id:d.id,...d.data()}));
+  // Incoming jobs = won / in-production projects that don't yet have a work order.
+  // These are sales already handed to Production (via the Sales Order flow) but
+  // never turned into a shop-floor order — they previously lived ONLY in the
+  // Projects lifecycle, so the Production team never saw them here and reported
+  // "not receiving orders". Surface them so they can start a work order in one tap.
+  const incoming = projSnap.docs.map(d=>({id:d.id,...d.data()}))
+    .filter(p=>['won','in_production'].includes(p.stage) && !(Array.isArray(p.productionOrderIds) && p.productionOrderIds.length));
   const active = orders.filter(o=>o.stage!=='delivered');
   const todayStr = today();
   const weekAhead = (()=>{ const d=new Date(); d.setDate(d.getDate()+7); return (window.bizDate?window.bizDate(d):d.toISOString().slice(0,10)); })();
@@ -8334,6 +8344,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
 
   el.innerHTML = `
     <div class="kpi-row" style="margin-bottom:12px">
+      <div class="kpi-card" style="${incoming.length?'border-color:var(--warning)':''}"><div class="kpi-label">Incoming</div><div class="kpi-value" style="${incoming.length?'color:var(--warning)':''}">${incoming.length}</div></div>
       <div class="kpi-card"><div class="kpi-label">Active Orders</div><div class="kpi-value">${active.length}</div></div>
       <div class="kpi-card ${dueSoon.length?'':''}" style="${dueSoon.length?'border-color:var(--warning)':''}"><div class="kpi-label">Due ≤7 days</div><div class="kpi-value" style="${dueSoon.length?'color:var(--warning)':''}">${dueSoon.length}</div></div>
       <div class="kpi-card ${overdue.length?'red':''}"><div class="kpi-label">Overdue</div><div class="kpi-value">${overdue.length}</div></div>
@@ -8344,7 +8355,26 @@ async function renderProdOrders(el, currentUser, currentRole) {
       <button class="btn-secondary btn-sm" id="prod-csv" style="flex-shrink:0;white-space:nowrap">⬇ CSV</button>
       ${canEdit?'<button class="btn-primary btn-sm" id="prod-add-btn" style="flex-shrink:0;white-space:nowrap">＋ New Order</button>':''}
     </div>
-    ${!active.length && !delivered.length ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">🏭</div><h4>No production orders yet</h4><p>Create a work order to track a job through the shop floor.</p></div>' : ''}
+    ${incoming.length?`
+      <div class="card" style="margin-bottom:12px;border:1.5px solid var(--warning)">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+          <h3 style="font-size:13px">📥 Incoming jobs — needs a work order</h3>
+          <span class="badge badge-orange">${incoming.length}</span>
+        </div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+          ${incoming.map(p=>`<div class="item-card" style="border-left:3px solid var(--warning)">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+              <div style="flex:1;min-width:0">
+                <div style="font-weight:700;font-size:13px">${escHtml(p.clientName||p.name||'Project')}</div>
+                <div style="font-size:11px;color:var(--text-muted);margin-top:2px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span>${p.quoteNumber?` · ${escHtml(p.quoteNumber)}`:''} · <span class="badge ${p.stage==='in_production'?'badge-blue':'badge-green'}" style="font-size:9px">${escHtml(jobStage(p.stage).label)}</span></div>
+                <div style="font-size:11px;margin-top:3px;color:var(--text-muted)">Contract ₱${fmt(p.contractAmount||0)}</div>
+              </div>
+              ${canEdit?`<button class="btn-primary btn-sm prod-start" data-id="${p.id}" style="flex-shrink:0;white-space:nowrap">＋ Start work order</button>`:''}
+            </div>
+          </div>`).join('')}
+        </div>
+      </div>`:''}
+    ${!active.length && !delivered.length && !incoming.length ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">🏭</div><h4>No production orders yet</h4><p>Create a work order to track a job through the shop floor.</p></div>' : ''}
     ${PROD_STAGES.filter(s=>s.id!=='delivered' && (byStage[s.id]||[]).length).map(s=>`
       <div class="card" style="margin-bottom:12px">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
@@ -8367,6 +8397,10 @@ async function renderProdOrders(el, currentUser, currentRole) {
     {key:'stage',label:'Stage',get:o=>prodStage(o.stage).label},{key:'priority',label:'Priority'},{key:'team',label:'Team'},{key:'dueDate',label:'Due'},{key:'quoteRef',label:'Quote Ref'}]));
   if (canEdit) {
     document.getElementById('prod-add-btn')?.addEventListener('click', ()=>prodOrderModal(null, currentUser, currentRole, ()=>renderProdOrders(el, currentUser, currentRole)));
+    el.querySelectorAll('.prod-start').forEach(b=>b.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      prodOrderModal(null, currentUser, currentRole, ()=>renderProdOrders(el, currentUser, currentRole), b.dataset.id);
+    }));
     el.querySelectorAll('.prod-edit').forEach(b=>b.addEventListener('click', (e)=>{
       e.stopPropagation();
       prodOrderModal(orders.find(o=>o.id===b.dataset.id), currentUser, currentRole, ()=>renderProdOrders(el, currentUser, currentRole));
@@ -8402,24 +8436,29 @@ async function renderProdOrders(el, currentUser, currentRole) {
 async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillProjectId) {
   const e = order || {};
   // Load active projects so this work order can be linked to a job (the spine)
+  let projs = [];
   let projOpts = '<option value="">— None —</option>';
   try {
     const psnap = await db.collection('job_projects').get();
-    const projs = psnap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>!['paid','cancelled'].includes(p.stage)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    projs = psnap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>!['paid','cancelled'].includes(p.stage)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     const selP = e.projectId || prefillProjectId || '';
     projOpts += projs.map(p=>`<option value="${p.id}" data-client="${escHtml(p.clientName||'')}" ${selP===p.id?'selected':''}>${escHtml(p.projectNo||'')} — ${escHtml(p.clientName||p.name||'')}</option>`).join('');
   } catch(_) {}
+  // Starting a work order from an incoming job: prefill client + quote from the project.
+  const pf = (!order && prefillProjectId) ? projs.find(p=>p.id===prefillProjectId) : null;
+  const dfClient = e.client || pf?.clientName || '';
+  const dfQuote  = e.quoteRef || pf?.quoteNumber || '';
   openModal(order ? `Edit Order ${e.orderNo||''}` : '🏭 New Production Order', `
     <div class="form-group"><label>Linked Project (job)</label>
       <select id="po-project" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${projOpts}</select>
     </div>
     <div class="form-group"><label>Product / Work Description</label><input id="po-title" value="${escHtml(e.title||'')}" placeholder="e.g. SS Baker's Worktable 1500mm ×4"/></div>
     <div class="form-row">
-      <div class="form-group"><label>Client / Project</label><input id="po-client" value="${escHtml(e.client||'')}" placeholder="e.g. Gerry's Grill — Bulacan"/></div>
+      <div class="form-group"><label>Client / Project</label><input id="po-client" value="${escHtml(dfClient)}" placeholder="e.g. Gerry's Grill — Bulacan"/></div>
       <div class="form-group" style="flex:0 0 90px"><label>Qty</label><input id="po-qty" type="number" min="1" value="${e.qty||1}" inputmode="numeric"/></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Linked Quote (optional)</label><input id="po-quote" value="${escHtml(e.quoteRef||'')}" placeholder="BK-LU-FB-…"/></div>
+      <div class="form-group"><label>Linked Quote (optional)</label><input id="po-quote" value="${escHtml(dfQuote)}" placeholder="BK-LU-FB-…"/></div>
       <div class="form-group"><label>Assigned Team</label><input id="po-team" value="${escHtml(e.team||'')}" placeholder="e.g. Fab Team A"/></div>
     </div>
     <div class="form-row">
