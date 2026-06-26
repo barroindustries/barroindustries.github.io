@@ -2407,8 +2407,27 @@ async function renderSecretaryDashboard() {
   }
 }
 
+// ── Finance period filter (shared by Finance Dashboard + Analytics) ──
+// Periods: 'month' = current Manila month · 'ytd' = since Jan 1 of the current
+// year · 'all' = all time. dateStr may be 'YYYY-MM-DD' or 'YYYY-MM'.
+window.FIN_PERIOD_TABS = [['month','This Month'],['ytd','Since Jan 1'],['all','All Time']];
+window.finPeriodMatch = function(dateStr, period) {
+  const ss = String(dateStr||''); if (!ss) return false;
+  if (period === 'all') return true;
+  if (period === 'ytd') return ss.slice(0,4) === String(bizYear());
+  return ss.slice(0,7) === bizDate().slice(0,7);   // 'month'
+};
+window.finPeriodLabel = function(period){ return ({month:'This Month', ytd:'YTD '+bizYear(), all:'All Time'})[period] || 'This Month'; };
+// onclickJs: a JS expression string in which '%P%' is replaced by each period key.
+window.finPeriodBar = function(active, onclickJs) {
+  return '<div class="subtab-bar" style="margin-bottom:12px">' +
+    window.FIN_PERIOD_TABS.map(([k,l]) =>
+      `<button class="subtab-btn ${active===k?'active':''}" onclick="${onclickJs.replace(/%P%/g,k)}">${l}</button>`
+    ).join('') + '</div>';
+};
+
 // ── FINANCE DASHBOARD ─────────────────────────────
-// Money oversight: MTD income/expense/net, payroll, expense-by-category, pending payables.
+// Money oversight: income/expense/net (selectable period), payroll, expense-by-category, pending payables.
 async function renderFinanceDashboard() {
   const c = document.getElementById('page-content');
   c.innerHTML = '<div class="loading-placeholder">Loading dashboard…</div>';
@@ -2416,6 +2435,8 @@ async function renderFinanceDashboard() {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
     const todayStr = bizDate();
     const mtd = todayStr.slice(0,7);
+    const period = window._FIN_DASH_PERIOD || 'month';
+    const plabel = finPeriodLabel(period);
     const [usersSnap, ledgerSnap, expSnap, caSnap, invSnap, jobSnap] = await Promise.all([
       dbCachedGet('users-payroll', fetchUsersWithPayroll, 30000),
       dbCachedGet('ledger',          () => safeGet(db.collection('ledger')),                                            45000),
@@ -2430,16 +2451,16 @@ async function renderFinanceDashboard() {
     const payrollNet = payrollGross - payrollDeduct;
 
     const ledger = ledgerSnap.docs.map(d=>d.data());
-    const mtdLedger = ledger.filter(e=>(e.date||'').slice(0,7)===mtd);
-    const mtdIncome  = mtdLedger.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0);
-    const mtdExpense = mtdLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+    const periodLedger = ledger.filter(e=>finPeriodMatch(e.date, period));
+    const mtdIncome  = periodLedger.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0);
+    const mtdExpense = periodLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
     const mtdNet = mtdIncome - mtdExpense;
 
     const expenses = expSnap.docs.map(d=>({id:d.id,...d.data()}));
     const pendingExp = expenses.filter(e=>e.status==='pending');
     const pendingExpTotal = pendingExp.reduce((s,e)=>s+(e.amount||0),0);
     // Expense by category (this month, approved + pending)
-    const monthExp = expenses.filter(e=>(e.date||'').slice(0,7)===mtd);
+    const monthExp = expenses.filter(e=>finPeriodMatch(e.date, period));
     const byCat = {};
     monthExp.forEach(e=>{ const k=e.category||'Other'; byCat[k]=(byCat[k]||0)+(e.amount||0); });
     const catRows = Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
@@ -2453,18 +2474,19 @@ async function renderFinanceDashboard() {
     c.innerHTML = `
       <div class="page-header"><h2>Finance Dashboard</h2><span class="badge badge-green">${ROLES[currentRole]?.label||'Finance'}</span></div>
       <div id="live-clock" class="live-clock-line"></div>
+      ${finPeriodBar(period, "window._FIN_DASH_PERIOD='%P%';renderFinanceDashboard()")}
       ${pendingExp.length?`<div class="alert-banner alert-warn" onclick="navigateTo('cash-advances')"><span>💸 <strong>${pendingExp.length} expense${pendingExp.length>1?'s':''}</strong> awaiting approval · ₱${formatNum(pendingExpTotal)}</span><span class="alert-chevron">›</span></div>`:''}
       <div class="kpi-row">
-        <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="trending-up" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Income (MTD)</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdIncome)}</div></div>
-        <div class="kpi-card red"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="trending-down" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Expense (MTD)</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdExpense)}</div></div>
-        <div class="kpi-card ${mtdNet>=0?'green':'red'}"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="line-chart" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Net Income (MTD)</div><div class="kpi-value" style="font-size:15px;color:${mtdNet>=0?'var(--success)':'var(--danger)'}">₱${formatNum(mtdNet)}</div></div>
+        <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="trending-up" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Income (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdIncome)}</div></div>
+        <div class="kpi-card red"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="trending-down" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Expense (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdExpense)}</div></div>
+        <div class="kpi-card ${mtdNet>=0?'green':'red'}"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="line-chart" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Net Income (${plabel})</div><div class="kpi-value" style="font-size:15px;color:${mtdNet>=0?'var(--success)':'var(--danger)'}">₱${formatNum(mtdNet)}</div></div>
         <div class="kpi-card warn"><div class="kpi-icon-wrap" style="background:rgba(255,170,0,0.12)"><i data-lucide="banknote" style="stroke:#FFAA00;width:18px"></i></div><div class="kpi-label">Monthly Payroll</div><div class="kpi-value" style="font-size:15px">₱${formatNum(payrollNet)}</div><div class="kpi-sub">${users.length} staff</div></div>
         <div class="kpi-card ${pendingExpTotal>0?'accent':''}" style="cursor:pointer" onclick="navigateTo('cash-advances')"><div class="kpi-icon-wrap" style="background:rgba(155,168,255,0.12)"><i data-lucide="receipt" style="stroke:#9BA8FF;width:18px"></i></div><div class="kpi-label">Payables (pending)</div><div class="kpi-value" style="font-size:15px">₱${formatNum(pendingExpTotal)}</div></div>
         <div class="kpi-card ${lowStock>0?'red':''}" style="cursor:pointer" onclick="navigateTo('inventory')"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="boxes" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Low Stock</div><div class="kpi-value">${lowStock}</div></div>
       </div>
       <div class="dashboard-grid">
         <div class="card">
-          <div class="card-header"><h3>Expenses by Category (this month)</h3><button class="btn-primary btn-sm" onclick="navigateTo('dept:Finance')">Finance</button></div>
+          <div class="card-header"><h3>Expenses by Category (${plabel})</h3><button class="btn-primary btn-sm" onclick="navigateTo('dept:Finance')">Finance</button></div>
           <div class="card-body">
             ${!catRows.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📊</div><p>No expenses recorded this month</p></div>':
               catRows.map(([k,v])=>`<div style="margin-bottom:10px">
@@ -5855,14 +5877,20 @@ async function renderAnalytics() {
   `;
 
   const renderOverview = () => {
+    const anPeriod = window._AN_PERIOD || 'month';
+    const anPlabel = finPeriodLabel(anPeriod);
     // ── Cash flow (canonical source = ledger) ──
     const ledIn  = ym => sum(ledger.filter(l=>l.type==='credit'&&(l.date||'').slice(0,7)===ym), l=>l.amount);
     const ledOut = ym => sum(ledger.filter(l=>(l.type==='debit'||l.type==='payslip')&&(l.date||'').slice(0,7)===ym), l=>l.amount);
     // sales-based revenue fallback for months where the ledger is still sparse (accepted quotes by createdAt month)
     const wonQuotesMonth = ym => sum(quotes.filter(q=>q.status==='accepted'&&ymOf(q.createdAt)===ym), q=>q.total);
-    const revMTD  = ledIn(thisMonth) || wonQuotesMonth(thisMonth);
+    // period-aware totals (This Month / Since Jan 1 / All Time)
+    const ledInP  = sum(ledger.filter(l=>l.type==='credit'&&finPeriodMatch(l.date,anPeriod)), l=>l.amount);
+    const ledOutP = sum(ledger.filter(l=>(l.type==='debit'||l.type==='payslip')&&finPeriodMatch(l.date,anPeriod)), l=>l.amount);
+    const wonQuotesP = sum(quotes.filter(q=>q.status==='accepted'&&finPeriodMatch(ymOf(q.createdAt),anPeriod)), q=>q.total);
+    const revMTD  = ledInP || wonQuotesP;
     const revPrev = ledIn(lastMonth) || wonQuotesMonth(lastMonth);
-    const netMTD  = revMTD - ledOut(thisMonth), netPrev = revPrev - ledOut(lastMonth);
+    const netMTD  = revMTD - ledOutP, netPrev = revPrev - ledOut(lastMonth);
     // ── Profitability (job_costs) ──
     const jcRev  = sum(jobCosts, j=>j.revenue);
     const jcCost = sum(jobCosts, j=>(+j.materialsCost||0)+(+j.laborCost||0)+(+j.otherCost||0));
@@ -5883,10 +5911,12 @@ async function renderAnalytics() {
     const clientTotal=topClients.reduce((s,e)=>s+e[1],0)||1;
 
     const wrap=document.getElementById('analytics-content');
+    const _anDelta = (cur,prev) => anPeriod==='month' ? delta(cur,prev,true) : `<span style="font-size:11px;color:#8e8e93">${anPlabel}</span>`;
     wrap.innerHTML=`
+      ${finPeriodBar(anPeriod, "window._AN_PERIOD='%P%';window._anRenderOverview&&window._anRenderOverview()")}
       <div class="kpi-row" style="margin-top:16px">
-        <div class="kpi-card green"><div class="kpi-label">Revenue (MTD)</div><div class="kpi-value">₱${fmt(revMTD)}</div><div style="margin-top:4px">${delta(revMTD,revPrev,true)}</div></div>
-        <div class="kpi-card ${netMTD>=0?'green':'warn'}"><div class="kpi-label">Net Cash (MTD)</div><div class="kpi-value">₱${fmt(netMTD)}</div><div style="margin-top:4px">${delta(netMTD,netPrev,true)}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Revenue (${anPlabel})</div><div class="kpi-value">₱${fmt(revMTD)}</div><div style="margin-top:4px">${_anDelta(revMTD,revPrev)}</div></div>
+        <div class="kpi-card ${netMTD>=0?'green':'warn'}"><div class="kpi-label">Net Cash (${anPlabel})</div><div class="kpi-value">₱${fmt(netMTD)}</div><div style="margin-top:4px">${_anDelta(netMTD,netPrev)}</div></div>
         <div class="kpi-card accent"><div class="kpi-label">Gross Margin</div><div class="kpi-value">${grossMargin==null?'—':grossMargin+'%'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${grossMargin==null?'add job costs':'₱'+fmt(grossProfit)+' profit'}</div></div>
         <div class="kpi-card warn"><div class="kpi-label">Receivables</div><div class="kpi-value">₱${fmt(receivables)}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${openProjects.length} open job${openProjects.length===1?'':'s'}</div></div>
         <div class="kpi-card"><div class="kpi-label">Payroll % of Revenue</div><div class="kpi-value">${payrollPct==null?'—':payrollPct+'%'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">₱${fmt(totalPayroll)}/mo</div></div>
@@ -5923,6 +5953,7 @@ async function renderAnalytics() {
     // Gross profit vs cost (profitability)
     new Chart(document.getElementById('bh-margin-chart'),{type:'doughnut',data:{labels:['Gross Profit','Cost'],datasets:[{data:[Math.max(grossProfit,0),jcCost],backgroundColor:['#30D158','#636366'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}},tooltip:{callbacks:{label:c=>` ${c.label}: ₱${fmt(c.parsed)}`}}}}});
   };
+  window._anRenderOverview = renderOverview;
 
   const renderSales = () => {
     const salesQuotes=quotes.filter(q=>q.department==='Sales'||q.type==='sales'||!q.department);
