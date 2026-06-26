@@ -4035,6 +4035,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
   const c = deptContainer();
   const isPriv = ['president','owner','manager','finance'].includes(currentRole);
   const tools = [
+    { icon:'⚡', label:'Quick Estimate', sub:'Quick Estimate' },
     { icon:'📝', label:'BK Quotes',      sub:'BK Quotes'      },
     { icon:'📊', label:'Quotations',     sub:'Quotations'     },
     { icon:'🤝', label:'Partner Quotes', sub:'Partner Quotes' },
@@ -4060,7 +4061,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
         </button>`).join('')}
     </div>
     <div class="subtab-bar">
-      ${['BK Quotes','Quotations','Partner Quotes','Partner Files','Clients','Work Plans','Proposals','SOP','Tasks'].map(s =>
+      ${['Quick Estimate','BK Quotes','Quotations','Partner Quotes','Partner Files','Clients','Work Plans','Proposals','SOP','Tasks'].map(s =>
         `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
       ).join('')}
     </div>
@@ -4099,6 +4100,9 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
 async function loadSalesContent(currentUser, currentRole, sub) {
   const content = document.getElementById('sales-content');
   switch(sub) {
+    case 'Quick Estimate':
+      renderQuickEstimate(content, currentUser, currentRole);
+      break;
     case 'BK Quotes':
       // Full standalone quote builder (iframe)
       content.innerHTML = `
@@ -4137,6 +4141,318 @@ async function loadSalesContent(currentUser, currentRole, sub) {
       await renderDeptTasks(content, 'Sales', currentUser, currentRole);
       break;
   }
+}
+
+// ══════════════════════════════════════════════════
+//  SALES — QUICK ESTIMATE
+//  Fast price-check calculator over the SAME products-database.json the full
+//  Quote Builder uses. Add many lines, see a live total, then (optionally)
+//  hand the whole basket off to the Quote Builder as a formal quotation draft.
+//  Pricing mirrors quote-builder-v2.html computePrice() so estimates match.
+// ══════════════════════════════════════════════════
+const qePeso = n => '₱' + Math.round(Number(n) || 0).toLocaleString('en-PH');
+const qeNum  = (v, d) => { const n = parseFloat(v); return isFinite(n) ? n : d; };
+window._qeItems = window._qeItems || [];   // basket persists within the session
+
+async function qeLoadDB() {
+  if (window._qeDB) return window._qeDB;
+  try {
+    const r = await fetch('products-database.json?v=' + Date.now());
+    window._qeDB = await r.json();
+  } catch (e) {
+    console.warn('Quick Estimate: products DB load failed', e);
+    window._qeDB = { categories: [], products: [], constants: {} };
+  }
+  return window._qeDB;
+}
+
+// Unit price for product `p` given the chosen dims/specs — faithful port of the
+// Quote Builder's computePrice() so the two tools never disagree on a number.
+function qeUnitPrice(p, ctx) {
+  if (!p) return 0;
+  ctx = ctx || {};
+  const consts  = (window._qeDB && window._qeDB.constants) || {};
+  const matMult = consts.materialPriceIndexMultiplier || 1.0;
+  const dd = p.defaultDimensions || {};
+  let price = p.basePrice || 0;
+
+  if (p.formulaType === 'per_length' && p.formula) {
+    const W = qeNum(ctx.W, dd.W != null ? dd.W : 900);
+    const base = p.formula.baseLengthMm || 900;
+    const ppm = p.formula.pricePerExtraMm || 0;
+    price = (p.basePrice || 0) + Math.max(0, W - base) * ppm;
+  } else if (p.formulaType === 'per_area' && p.formula) {
+    const W = qeNum(ctx.W, dd.W != null ? dd.W : 1000);
+    const H = qeNum(ctx.H, dd.H != null ? dd.H : 1000);
+    price = ((W * H) / 1e6) * (p.formula.pricePerSqm || 0);
+  } else if (p.formulaType === 'per_run' && p.formula) {
+    const runs = qeNum(ctx.runs, 1) || 1;
+    price = (p.formula.pricePerRun || p.basePrice || 0) * runs;
+  }
+
+  price *= matMult;
+
+  if (p.specs && p.specs.length && Array.isArray(ctx.specIdx)) {
+    p.specs.forEach((s, i) => {
+      const oi = parseInt(ctx.specIdx[i] || 0);
+      const adder = (s.priceAdder && s.priceAdder[oi]) ? s.priceAdder[oi] : 0;
+      price += adder;
+    });
+  }
+  return Math.max(0, Math.round(price));
+}
+
+// Read the current picker form into a {W,H,runs,specIdx} context object
+function qeReadCtx(p) {
+  const ctx = { specIdx: [] };
+  const w = document.getElementById('qe-dim-W'); if (w) ctx.W = w.value;
+  const h = document.getElementById('qe-dim-H'); if (h) ctx.H = h.value;
+  const r = document.getElementById('qe-dim-runs'); if (r) ctx.runs = r.value;
+  if (p && p.specs) p.specs.forEach((s, i) => {
+    const sel = document.getElementById('qe-spec-' + i);
+    ctx.specIdx[i] = sel ? parseInt(sel.value || 0) : 0;
+  });
+  return ctx;
+}
+
+function qeSelectedProduct() {
+  const sel = document.getElementById('qe-product');
+  if (!sel || !sel.value) return null;
+  return (window._qeDB.products || []).find(p => p.id === sel.value) || null;
+}
+
+// Dimension / spec inputs shown depend on the selected product's formula
+function qeRenderDims() {
+  const box = document.getElementById('qe-dims');
+  const p = qeSelectedProduct();
+  if (!box) return;
+  if (!p) { box.innerHTML = ''; return; }
+  const dd = p.defaultDimensions || {};
+  let html = '';
+  const inputStyle = 'width:90px;padding:7px 9px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px';
+  const wrap = (label, inner) => `<div style="display:flex;flex-direction:column;gap:3px"><label style="font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.03em">${label}</label>${inner}</div>`;
+
+  if (p.formulaType === 'per_length') {
+    html += wrap('Width (mm)', `<input type="number" id="qe-dim-W" value="${dd.W != null ? dd.W : 900}" oninput="qePreview()" style="${inputStyle}">`);
+  } else if (p.formulaType === 'per_area') {
+    html += wrap('Width (mm)', `<input type="number" id="qe-dim-W" value="${dd.W != null ? dd.W : 1000}" oninput="qePreview()" style="${inputStyle}">`);
+    html += wrap('Height (mm)', `<input type="number" id="qe-dim-H" value="${dd.H != null ? dd.H : 1000}" oninput="qePreview()" style="${inputStyle}">`);
+  } else if (p.formulaType === 'per_run') {
+    html += wrap('Runs / sections', `<input type="number" id="qe-dim-runs" value="1" min="1" oninput="qePreview()" style="${inputStyle}">`);
+  }
+  if (p.specs && p.specs.length) {
+    p.specs.forEach((s, i) => {
+      const opts = (s.options || []).map((o, oi) => `<option value="${oi}">${escHtml(o)}</option>`).join('');
+      html += wrap(escHtml(s.label || ('Option ' + (i + 1))), `<select id="qe-spec-${i}" onchange="qePreview()" style="${inputStyle};width:auto;min-width:120px">${opts}</select>`);
+    });
+  }
+  if (p.formulaType === 'configurable') {
+    html += `<div style="align-self:flex-end;font-size:10px;color:var(--text-muted);max-width:180px">Configurable item — base price shown; fine-tune in the full builder.</div>`;
+  }
+  box.innerHTML = html;
+}
+
+// Live unit-price preview for the product currently in the picker
+function qePreview() {
+  const p = qeSelectedProduct();
+  const out = document.getElementById('qe-unit-price');
+  const lead = document.getElementById('qe-lead');
+  if (!out) return;
+  if (!p) { out.textContent = '₱0'; if (lead) lead.textContent = ''; return; }
+  const unit = qeUnitPrice(p, qeReadCtx(p));
+  out.textContent = qePeso(unit);
+  if (lead) lead.textContent = p.leadTime ? ('Lead time: ' + p.leadTime) : '';
+}
+
+function qeOnProductChange() { qeRenderDims(); qePreview(); }
+
+function qeAddItem() {
+  const p = qeSelectedProduct();
+  if (!p) { Notifs.showToast('Pick a product first', 'info'); return; }
+  const ctx = qeReadCtx(p);
+  const qty = Math.max(1, parseInt(document.getElementById('qe-qty').value || 1));
+  const unitPrice = qeUnitPrice(p, ctx);
+
+  // dims display string + spec snapshot (matches the builder's line-item shape
+  // so the formal-quote handoff loads cleanly)
+  const dimParts = [];
+  if (ctx.W != null && document.getElementById('qe-dim-W')) dimParts.push('W' + qeNum(ctx.W, 0));
+  if (ctx.H != null && document.getElementById('qe-dim-H')) dimParts.push('H' + qeNum(ctx.H, 0));
+  if (ctx.runs != null && document.getElementById('qe-dim-runs')) dimParts.push(qeNum(ctx.runs, 1) + ' run(s)');
+  const specSnapshot = [];
+  if (p.specs) p.specs.forEach((s, i) => specSnapshot.push({ label: s.label, value: (s.options || [])[ctx.specIdx[i] || 0] || '' }));
+  const specStr = specSnapshot.map(s => s.value).filter(Boolean).join(', ');
+
+  window._qeItems.push({
+    id: p.id, category: p.category, name: p.name,
+    dims: dimParts.join(' × '),
+    specs: specSnapshot, specStr,
+    qty, unit: p.unit || 'pc',
+    unitPrice, amount: unitPrice * qty,
+    leadTime: p.leadTime || '—',
+    laborHours: p.laborHours || null,
+    capitalMaterials: p.capitalMaterials || 0,
+    capitalLabor: p.capitalLabor || 0,
+    formulaType: p.formulaType,
+  });
+  qeRenderItems();
+}
+
+function qeRemoveItem(i) { window._qeItems.splice(i, 1); qeRenderItems(); }
+function qeSetQty(i, v) {
+  const it = window._qeItems[i]; if (!it) return;
+  it.qty = Math.max(1, parseInt(v || 1));
+  it.amount = it.unitPrice * it.qty;
+  qeRenderItems();
+}
+function qeClearAll() {
+  if (!window._qeItems.length) return;
+  if (!confirm('Clear all items from this estimate?')) return;
+  window._qeItems = []; qeRenderItems();
+}
+
+function qeRenderItems() {
+  const wrap = document.getElementById('qe-items');
+  if (!wrap) return;
+  const items = window._qeItems;
+  if (!items.length) {
+    wrap.innerHTML = `<div style="text-align:center;padding:28px 12px;color:var(--text-muted);font-size:13px;border:1.5px dashed var(--border);border-radius:12px">No items yet — pick a product above and tap <strong>Add to estimate</strong>.</div>`;
+    qeRenderTotals(); return;
+  }
+  const rows = items.map((it, i) => `
+    <tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 6px">
+        <div style="font-weight:700;font-size:12.5px;color:var(--text)">${escHtml(it.name)}</div>
+        <div style="font-size:10.5px;color:var(--text-muted)">${escHtml([it.dims, it.specStr].filter(Boolean).join(' · ') || it.unit)}</div>
+      </td>
+      <td style="padding:8px 6px;text-align:right;white-space:nowrap">${qePeso(it.unitPrice)}</td>
+      <td style="padding:8px 6px;text-align:center">
+        <input type="number" min="1" value="${it.qty}" onchange="qeSetQty(${i}, this.value)"
+          style="width:54px;padding:5px 6px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:12px;text-align:center">
+      </td>
+      <td style="padding:8px 6px;text-align:right;font-weight:700;white-space:nowrap">${qePeso(it.amount)}</td>
+      <td style="padding:8px 2px;text-align:center">
+        <button onclick="qeRemoveItem(${i})" title="Remove" style="background:none;border:none;cursor:pointer;color:var(--danger,#e53935);font-size:15px;line-height:1">✕</button>
+      </td>
+    </tr>`).join('');
+  wrap.innerHTML = `
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr style="border-bottom:2px solid var(--border);font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">
+        <th style="padding:6px;text-align:left">Item</th>
+        <th style="padding:6px;text-align:right">Unit ₱</th>
+        <th style="padding:6px;text-align:center">Qty</th>
+        <th style="padding:6px;text-align:right">Amount</th>
+        <th style="padding:6px"></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  qeRenderTotals();
+}
+
+function qeRenderTotals() {
+  const box = document.getElementById('qe-totals');
+  if (!box) return;
+  const items = window._qeItems;
+  const subtotal = items.reduce((s, it) => s + (it.amount || 0), 0);
+  const vatRate = ((window._qeDB && window._qeDB.constants && window._qeDB.constants.vat) || 0.12);
+  const showVat = !!(document.getElementById('qe-vat') && document.getElementById('qe-vat').checked);
+  const vatAmt = showVat ? subtotal * vatRate : 0;
+  const grand = subtotal + vatAmt;
+  const count = items.reduce((s, it) => s + (it.qty || 0), 0);
+  box.innerHTML = `
+    <div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-muted);margin-bottom:4px"><span>Subtotal (${count} pc${count===1?'':'s'}, ${items.length} line${items.length===1?'':'s'})</span><span>${qePeso(subtotal)}</span></div>
+    ${showVat ? `<div style="display:flex;justify-content:space-between;font-size:13px;color:var(--text-muted);margin-bottom:4px"><span>VAT (${Math.round(vatRate*100)}%)</span><span>${qePeso(vatAmt)}</span></div>` : ''}
+    <div style="display:flex;justify-content:space-between;font-size:18px;font-weight:800;color:var(--text);border-top:1.5px solid var(--border);padding-top:8px;margin-top:4px"><span>Total</span><span>${qePeso(grand)}</span></div>`;
+}
+
+// Hand the whole basket to the full Quote Builder as a fresh draft. Uses the
+// same _qbReopenState mechanism the Quotations "Reopen" action uses.
+function qeCreateFormalQuote() {
+  if (!window._qeItems.length) { Notifs.showToast('Add at least one item first', 'info'); return; }
+  const client = (document.getElementById('qe-client') || {}).value || '';
+  window._qbReopenState = {
+    currentCo: 'BK',
+    clientName: client.trim(),
+    items: window._qeItems.map(it => ({ ...it })),
+  };
+  window._qbReopenAsRevision = false;
+  Notifs.showToast('Opening Quote Builder with your ' + window._qeItems.length + ' item(s)…', 'success');
+  navigateTo('bk-quote-builder');
+}
+
+async function renderQuickEstimate(container, currentUser, currentRole) {
+  container.innerHTML = `<div class="loading-placeholder">Loading products…</div>`;
+  const db = await qeLoadDB();
+  const cats = db.categories || [];
+  const products = (db.products || []).slice();
+
+  // group products under category optgroups
+  const byCat = {};
+  products.forEach(p => { (byCat[p.category] = byCat[p.category] || []).push(p); });
+  const catLabel = id => { const c = cats.find(x => x.id === id); return c ? `${c.icon || ''} ${c.label}` : id; };
+  const optgroups = Object.keys(byCat).map(cid => `
+    <optgroup label="${escHtml(catLabel(cid))}">
+      ${byCat[cid].map(p => `<option value="${p.id}">${escHtml(p.shortName || p.name)}</option>`).join('')}
+    </optgroup>`).join('');
+
+  const ctrlStyle = 'padding:9px 11px;border:1.5px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-size:13px';
+
+  container.innerHTML = `
+    <div style="font-size:12px;color:var(--text-muted);background:rgba(230,81,0,.07);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:14px">
+      ⚡ <strong>Quick Estimate</strong> — check & total prices fast using the live product database. Add as many items as you like, then create a formal quotation when the client is ready.
+    </div>
+
+    <!-- Picker -->
+    <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:14px;margin-bottom:14px">
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end">
+        <div style="display:flex;flex-direction:column;gap:3px;flex:1;min-width:200px">
+          <label style="font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.03em">Product</label>
+          <select id="qe-product" onchange="qeOnProductChange()" style="${ctrlStyle}">
+            <option value="">— Select a product —</option>
+            ${optgroups}
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:3px">
+          <label style="font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.03em">Qty</label>
+          <input type="number" id="qe-qty" value="1" min="1" style="${ctrlStyle};width:70px">
+        </div>
+      </div>
+      <div id="qe-dims" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px"></div>
+      <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+        <div>
+          <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Unit price</div>
+          <div id="qe-unit-price" style="font-size:22px;font-weight:800;color:var(--primary,#e65100)">₱0</div>
+          <div id="qe-lead" style="font-size:10.5px;color:var(--text-muted)"></div>
+        </div>
+        <button class="btn-primary" onclick="qeAddItem()" style="padding:11px 20px;font-weight:700">＋ Add to estimate</button>
+      </div>
+    </div>
+
+    <!-- Basket -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <h3 style="font-size:14px;font-weight:800;color:var(--text);margin:0">Estimate Items</h3>
+      <button onclick="qeClearAll()" class="btn-secondary btn-sm">Clear all</button>
+    </div>
+    <div id="qe-items" style="margin-bottom:14px"></div>
+
+    <!-- Totals -->
+    <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:14px;margin-bottom:14px">
+      <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--text);margin-bottom:10px;cursor:pointer">
+        <input type="checkbox" id="qe-vat" onchange="qeRenderTotals()"> Add VAT (12%)
+      </label>
+      <div id="qe-totals"></div>
+    </div>
+
+    <!-- Client + handoff -->
+    <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:14px">
+      <label style="font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.03em">Client name (optional — carried into the quote)</label>
+      <input type="text" id="qe-client" placeholder="e.g. Juan Dela Cruz / ABC Restaurant" style="${ctrlStyle};width:100%;margin:5px 0 12px;box-sizing:border-box">
+      <button class="btn-primary" onclick="qeCreateFormalQuote()" style="width:100%;padding:13px;font-weight:800;font-size:14px">📄 Create Formal Quotation →</button>
+      <p style="font-size:11px;color:var(--text-muted);margin:8px 0 0;text-align:center">Opens the full Quote Builder pre-filled with these items, where you can refine, file, and export a PDF.</p>
+    </div>
+  `;
+
+  qeRenderItems();   // render any items already in the session basket
 }
 
 // ── Sales SOP — Inquiry → Sales Order ─────────────
