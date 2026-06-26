@@ -1585,7 +1585,7 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
 window.renderFinance = async function(currentUser, currentRole, subtab = 'Overview') {
   const c = deptContainer();
   // Finance tools vs HR tools — visually separated
-  const finTabs = ['Overview','Reports','Sales Orders','Ledger','Cash Receipts','Cash Disbursements','Purchasing','Inventory','Records','Taxes','SSS / Gov','Tasks'];
+  const finTabs = ['Overview','Reports','Sales Orders','Ledger','Cash Receipts','Cash Disbursements','Purchases','Inventory','Records','Taxes','SSS / Gov','Tasks'];
   const hrTabs  = ['Payroll','HR Profiles','Cash Advances'];
   const allTabs = [...finTabs, ...hrTabs];
   c.innerHTML = `
@@ -1627,8 +1627,11 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'Sales Orders':        await window.renderSalesOrders(content); break;
     case 'Inventory':           await window.renderInventory(content, 'Stock'); break;
     case 'Records':      await renderRecordsTab(content, currentUser, currentRole); break;
-    case 'Purchasing':
-      await renderDocCollection(content, 'purchase_orders', 'Purchase Orders', currentUser, currentRole, { icon:'🛒', color:'#1b5e20', dept:'Finance', editable:true });
+    case 'Purchases':
+      // View-only window into the Purchasing department's purchase requests.
+      // Purchasing creates RFQs → prices → converts to Purchase Requests; Finance
+      // sees the committed purchases here but cannot edit them (write-gated in rules).
+      await renderPurchaseRequests(content, currentUser, currentRole, { viewOnly:true, financeView:true });
       break;
     case 'SSS / Gov':
       content.innerHTML = renderFileCollection('SSS & Government Documents', 'fin-sss', currentRole);
@@ -10561,4 +10564,298 @@ async function renderProdMaterials(el, currentRole) {
           </tr>`;}).join('')}</tbody>
       </table></div>`}
     </div></div>`;
+}
+
+// ══════════════════════════════════════════════════
+//  PURCHASING DEPARTMENT
+//  Flow: create a Request for Quotation (RFQ) → enter supplier prices →
+//  convert it into a Purchase Request (PR). Both stages live in ONE
+//  collection (purchase_requisitions) keyed by `stage` ('rfq' | 'pr') so the
+//  conversion preserves the line items + history. Finance gets a read-only
+//  window into the committed purchase requests (Finance → Purchases tab).
+// ══════════════════════════════════════════════════
+function purchTotal(items) {
+  return (items || []).reduce((s, it) =>
+    s + (it.unitPrice != null ? (Number(it.unitPrice) || 0) * (Number(it.qty) || 0) : 0), 0);
+}
+
+window.renderPurchasing = async function(currentUser, currentRole, subtab = 'Request for Quotation') {
+  const c = deptContainer();
+  const tabs = ['Request for Quotation', 'Purchase Requests', 'Tasks'];
+  c.innerHTML = `
+    <div class="page-header"><h2>🛒 Purchasing</h2></div>
+    <div class="subtab-bar" style="flex-wrap:wrap;margin-bottom:12px">
+      ${tabs.map(s => `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`).join('')}
+    </div>
+    <div id="purch-content"><div class="loading-placeholder">Loading…</div></div>
+  `;
+  loadPurchasingContent(currentUser, currentRole, subtab);
+  c.querySelectorAll('.subtab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadPurchasingContent(currentUser, currentRole, btn.dataset.sub);
+    });
+  });
+};
+
+async function loadPurchasingContent(currentUser, currentRole, sub) {
+  const content = document.getElementById('purch-content');
+  try {
+    if (sub === 'Tasks') return await renderDeptTasks(content, 'Purchasing', currentUser, currentRole);
+    if (sub === 'Purchase Requests') return await renderPurchaseRequests(content, currentUser, currentRole);
+    return await renderRFQs(content, currentUser, currentRole);
+  } catch (e) {
+    console.error('Purchasing load error', e);
+    content.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Couldn't load</h4><p>${escHtml(e.message||String(e))}</p></div>`;
+  }
+}
+
+// ── RFQ list (stage === 'rfq') ────────────────────
+async function renderRFQs(content, currentUser, currentRole) {
+  const canEdit = canEditDept('Purchasing');
+  const snap = await db.collection('purchase_requisitions').orderBy('createdAt','desc').get();
+  const rfqs = snap.docs.map(d => ({ id:d.id, ...d.data() })).filter(d => (d.stage||'rfq') === 'rfq');
+
+  content.innerHTML = `
+    ${canEdit ? `<div style="text-align:right;margin-bottom:8px"><button class="btn-primary btn-sm" id="new-rfq-btn">+ New RFQ</button></div>` : ''}
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Create a Request for Quotation, enter the supplier's prices, then convert it into a Purchase Request.</p>
+    ${!rfqs.length
+      ? `<div class="empty-state"><div class="empty-icon">📋</div><h4>No open RFQs</h4><p>Create one to request supplier pricing.</p></div>`
+      : rfqs.map(r => purchRfqCard(r, canEdit)).join('')}
+  `;
+  if (canEdit) {
+    document.getElementById('new-rfq-btn')?.addEventListener('click', () =>
+      openRfqModal(currentUser, () => renderRFQs(content, currentUser, currentRole)));
+    rfqs.forEach(r => bindRfqCard(r, currentUser, currentRole, content));
+  }
+}
+
+function purchRfqCard(r, canEdit) {
+  const items = r.items || [];
+  return `
+  <div class="card" data-rfq="${r.id}" style="margin-bottom:12px"><div class="card-body">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+      <div>
+        <div style="font-weight:700">${escHtml(r.title || 'Untitled RFQ')}</div>
+        <div style="font-size:12px;color:var(--text-muted)">${escHtml(r.rfqNo || '')} · Supplier: ${escHtml(r.supplier || '—')}</div>
+        <div style="font-size:12px;color:var(--text-muted)">Requesting: ${escHtml(r.requestingDept || '—')}${r.neededBy ? ` · Needed by ${escHtml(r.neededBy)}` : ''}</div>
+      </div>
+      ${canEdit ? `<button class="btn-danger btn-sm rfq-del" data-id="${r.id}" data-label="${escHtml(r.title || 'RFQ')}">🗑</button>` : ''}
+    </div>
+    ${r.notes ? `<div style="font-size:12px;margin-top:6px">${escHtml(r.notes)}</div>` : ''}
+    <div class="table-wrap" style="margin-top:10px"><table class="data-table">
+      <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th style="width:120px">Unit Price ₱</th><th style="text-align:right">Line Total</th></tr></thead>
+      <tbody>
+        ${items.map((it, i) => `<tr>
+          <td>${escHtml(it.desc || '—')}</td>
+          <td>${Number(it.qty || 0)}</td>
+          <td>${escHtml(it.unit || '')}</td>
+          <td>${canEdit
+            ? `<input type="number" inputmode="decimal" step="0.01" min="0" class="rfq-price" data-i="${i}" value="${it.unitPrice != null ? it.unitPrice : ''}" style="width:100%" placeholder="—"/>`
+            : (it.unitPrice != null ? fmt(it.unitPrice) : '—')}</td>
+          <td style="text-align:right" class="rfq-line" data-i="${i}">${it.unitPrice != null ? '₱' + fmt((it.unitPrice || 0) * (it.qty || 0)) : '—'}</td>
+        </tr>`).join('')}
+      </tbody>
+      <tfoot><tr><td colspan="4" style="text-align:right;font-weight:700">Total</td><td style="text-align:right;font-weight:700" class="rfq-total">₱${fmt(purchTotal(items))}</td></tr></tfoot>
+    </table></div>
+    ${canEdit ? `<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
+      <button class="btn-secondary btn-sm rfq-save" data-id="${r.id}">Save Prices</button>
+      <button class="btn-primary btn-sm rfq-convert" data-id="${r.id}">Convert to Purchase Request →</button>
+    </div>` : ''}
+  </div></div>`;
+}
+
+function bindRfqCard(r, currentUser, currentRole, content) {
+  const cardEl = content.querySelector(`.card[data-rfq="${r.id}"]`);
+  if (!cardEl) return;
+  const items = (r.items || []).map(x => ({ ...x }));
+
+  const recalc = () => {
+    let total = 0;
+    cardEl.querySelectorAll('.rfq-price').forEach(inp => {
+      const i = +inp.dataset.i;
+      const price = inp.value === '' ? null : (parseFloat(inp.value) || 0);
+      items[i].unitPrice = price;
+      const lineEl = cardEl.querySelector(`.rfq-line[data-i="${i}"]`);
+      const lt = price != null ? price * (Number(items[i].qty) || 0) : null;
+      if (lineEl) lineEl.textContent = lt != null ? '₱' + fmt(lt) : '—';
+      if (lt != null) total += lt;
+    });
+    const tEl = cardEl.querySelector('.rfq-total');
+    if (tEl) tEl.textContent = '₱' + fmt(total);
+  };
+  cardEl.querySelectorAll('.rfq-price').forEach(inp => inp.addEventListener('input', recalc));
+
+  cardEl.querySelector('.rfq-save')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget; btn.disabled = true;
+    try {
+      recalc();
+      await db.collection('purchase_requisitions').doc(r.id).update({
+        items, total: purchTotal(items),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      Notifs.showToast('Prices saved.');
+    } catch (err) { Notifs.showToast('Save failed: ' + (err.message || err), 'error'); }
+    finally { btn.disabled = false; }
+  });
+
+  cardEl.querySelector('.rfq-convert')?.addEventListener('click', async (e) => {
+    recalc();
+    if (!items.length || items.some(it => it.unitPrice == null || isNaN(it.unitPrice))) {
+      Notifs.showToast('Enter a price for every item before converting.', 'error');
+      return;
+    }
+    const btn = e.currentTarget; btn.disabled = true;
+    try {
+      const prNo = (r.rfqNo || '').replace(/^RFQ/, 'PR') || ('PR-' + today());
+      await db.collection('purchase_requisitions').doc(r.id).update({
+        items, total: purchTotal(items), stage: 'pr', status: 'pending', prNo,
+        convertedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        convertedBy: currentUser.uid,
+        convertedByName: window.userProfile?.displayName || currentUser.email
+      });
+      Notifs.showToast('Converted to Purchase Request ✓');
+      renderRFQs(content, currentUser, currentRole);
+    } catch (err) { Notifs.showToast('Convert failed: ' + (err.message || err), 'error'); btn.disabled = false; }
+  });
+
+  cardEl.querySelector('.rfq-del')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    if (!confirm(`Delete RFQ "${btn.dataset.label}"? This cannot be undone.`)) return;
+    try {
+      await db.collection('purchase_requisitions').doc(btn.dataset.id).delete();
+      Notifs.showToast('Deleted.');
+      renderRFQs(content, currentUser, currentRole);
+    } catch (err) { Notifs.showToast('Delete failed: ' + (err.message || err), 'error'); }
+  });
+}
+
+function openRfqModal(currentUser, onDone) {
+  const deptOpts = Object.keys(window.DEPARTMENTS || {})
+    .filter(k => k !== 'Brilliant Steel' && k !== 'Partners')
+    .map(k => `<option>${escHtml(k)}</option>`).join('');
+  openModal('🛒 New Request for Quotation', `
+    <div class="form-row">
+      <div class="form-group"><label>Title / Purpose *</label><input id="rfq-title" placeholder="e.g. Steel sheets for Job #123"/></div>
+      <div class="form-group"><label>Supplier</label><input id="rfq-supplier" placeholder="Supplier name (optional)"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Requesting Department</label><select id="rfq-dept">${deptOpts}</select></div>
+      <div class="form-group"><label>Needed By</label><input id="rfq-needed" type="date"/></div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="rfq-notes" rows="2" placeholder="Optional"></textarea></div>
+    <label style="font-size:12px;font-weight:700;display:block;margin-bottom:4px">Items</label>
+    <div id="rfq-items"></div>
+    <button class="btn-secondary btn-sm" id="rfq-add-item" type="button" style="margin-top:6px">+ Add item</button>
+  `, `<button class="btn-primary" id="rfq-save">Create RFQ</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  const itemsWrap = document.getElementById('rfq-items');
+  const addRow = (desc = '', qty = '', unit = '') => {
+    const row = document.createElement('div');
+    row.className = 'rfq-item-row';
+    row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px';
+    row.innerHTML = `
+      <input class="ri-desc" placeholder="Item description" value="${escHtml(desc)}" style="flex:2;min-width:0"/>
+      <input class="ri-qty" type="number" inputmode="decimal" min="0" placeholder="Qty" value="${qty}" style="flex:0 0 60px;width:60px"/>
+      <input class="ri-unit" placeholder="Unit" value="${escHtml(unit)}" style="flex:0 0 64px;width:64px"/>
+      <button class="btn-danger btn-sm ri-del" type="button" title="Remove">✕</button>`;
+    row.querySelector('.ri-del').addEventListener('click', () => row.remove());
+    itemsWrap.appendChild(row);
+  };
+  addRow(); addRow();
+  document.getElementById('rfq-add-item').addEventListener('click', () => addRow());
+
+  document.getElementById('rfq-save').addEventListener('click', async () => {
+    const title = document.getElementById('rfq-title').value.trim();
+    if (!title) { Notifs.showToast('Enter a title.', 'error'); return; }
+    const items = [...itemsWrap.querySelectorAll('.rfq-item-row')].map(row => ({
+      desc: row.querySelector('.ri-desc').value.trim(),
+      qty: parseFloat(row.querySelector('.ri-qty').value) || 0,
+      unit: row.querySelector('.ri-unit').value.trim(),
+      unitPrice: null
+    })).filter(it => it.desc);
+    if (!items.length) { Notifs.showToast('Add at least one item.', 'error'); return; }
+    const btn = document.getElementById('rfq-save'); btn.disabled = true;
+    try {
+      const yr = window.bizYear ? window.bizYear() : new Date().getFullYear();
+      const rfqNo = `RFQ-${yr}-${String(Date.now()).slice(-4)}`;
+      await db.collection('purchase_requisitions').add({
+        rfqNo, title,
+        supplier: document.getElementById('rfq-supplier').value.trim(),
+        requestingDept: document.getElementById('rfq-dept').value,
+        neededBy: document.getElementById('rfq-needed').value,
+        notes: document.getElementById('rfq-notes').value.trim(),
+        items, stage: 'rfq', total: 0, status: 'quoting',
+        createdBy: currentUser.uid,
+        createdByName: window.userProfile?.displayName || currentUser.email,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      closeModal();
+      Notifs.showToast('RFQ created.');
+      onDone && onDone();
+    } catch (err) { Notifs.showToast('Create failed: ' + (err.message || err), 'error'); btn.disabled = false; }
+  });
+}
+
+// ── Purchase Request list (stage === 'pr') ────────
+// Shared by the Purchasing dept (editable status) and the Finance → Purchases
+// tab (opts.viewOnly hides controls; Firestore rules also block Finance writes).
+const PURCH_STAT = {
+  pending:  { label: 'Pending',  badge: 'badge-orange' },
+  ordered:  { label: 'Ordered',  badge: 'badge-blue' },
+  received: { label: 'Received', badge: 'badge-green' }
+};
+
+async function renderPurchaseRequests(content, currentUser, currentRole, opts = {}) {
+  const canEdit = !opts.viewOnly && canEditDept('Purchasing');
+  const snap = await db.collection('purchase_requisitions').orderBy('createdAt','desc').get();
+  const prs = snap.docs.map(d => ({ id:d.id, ...d.data() })).filter(d => d.stage === 'pr');
+
+  content.innerHTML = `
+    ${opts.financeView ? `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Purchase requests raised by the Purchasing department (view-only).</p>` : ''}
+    ${!prs.length
+      ? `<div class="empty-state"><div class="empty-icon">🧾</div><h4>No purchase requests yet</h4><p>${canEdit ? 'Convert a priced RFQ into a purchase request.' : 'None have been raised yet.'}</p></div>`
+      : prs.map(p => {
+        const st = PURCH_STAT[p.status || 'pending'] || PURCH_STAT.pending;
+        return `<div class="card" data-pr="${p.id}" style="margin-bottom:12px"><div class="card-body">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div>
+              <div style="font-weight:700">${escHtml(p.title || 'Purchase Request')}</div>
+              <div style="font-size:12px;color:var(--text-muted)">${escHtml(p.prNo || p.rfqNo || '')} · Supplier: ${escHtml(p.supplier || '—')}</div>
+              <div style="font-size:12px;color:var(--text-muted)">Requesting: ${escHtml(p.requestingDept || '—')}${p.neededBy ? ` · Needed by ${escHtml(p.neededBy)}` : ''}</div>
+            </div>
+            <span class="badge ${st.badge}">${st.label}</span>
+          </div>
+          <div class="table-wrap" style="margin-top:10px"><table class="data-table">
+            <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Line Total</th></tr></thead>
+            <tbody>${(p.items || []).map(it => `<tr>
+              <td>${escHtml(it.desc || '—')}</td>
+              <td>${Number(it.qty || 0)}</td>
+              <td>${escHtml(it.unit || '')}</td>
+              <td style="text-align:right">₱${fmt(it.unitPrice || 0)}</td>
+              <td style="text-align:right">₱${fmt((it.unitPrice || 0) * (it.qty || 0))}</td>
+            </tr>`).join('')}</tbody>
+            <tfoot><tr><td colspan="4" style="text-align:right;font-weight:700">Total</td><td style="text-align:right;font-weight:700">₱${fmt(p.total != null ? p.total : purchTotal(p.items))}</td></tr></tfoot>
+          </table></div>
+          ${p.notes ? `<div style="font-size:12px;margin-top:6px;color:var(--text-muted)">${escHtml(p.notes)}</div>` : ''}
+          ${canEdit ? `<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
+            ${p.status !== 'ordered' && p.status !== 'received' ? `<button class="btn-secondary btn-sm pr-stat" data-id="${p.id}" data-stat="ordered">Mark Ordered</button>` : ''}
+            ${p.status !== 'received' ? `<button class="btn-primary btn-sm pr-stat" data-id="${p.id}" data-stat="received">Mark Received</button>` : ''}
+          </div>` : ''}
+        </div></div>`;
+      }).join('')}
+  `;
+
+  if (canEdit) content.querySelectorAll('.pr-stat').forEach(btn => btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      await db.collection('purchase_requisitions').doc(btn.dataset.id).update({
+        status: btn.dataset.stat,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      Notifs.showToast('Status updated.');
+      renderPurchaseRequests(content, currentUser, currentRole, opts);
+    } catch (err) { Notifs.showToast('Update failed: ' + (err.message || err), 'error'); btn.disabled = false; }
+  }));
 }

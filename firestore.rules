@@ -41,6 +41,14 @@ service cloud.firestore {
     // Anyone allowed to manage Design work: admin role OR Design-dept member.
     function canDesign() { return isAdmin() || isDesignDept(); }
 
+    // Member of the Purchasing DEPARTMENT (by string `department` or array `departments`).
+    function isPurchasingDept() {
+      let u = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return u.get('department', '') == 'Purchasing' || u.get('departments', []).hasAny(['Purchasing']);
+    }
+    // Anyone allowed to manage Purchasing work: admin role OR Purchasing-dept member.
+    function canPurchasing() { return isAdmin() || isPurchasingDept(); }
+
     // True when a user-profile update leaves all privileged fields untouched.
     // Used so a non-admin can edit their own name/photo/phone but NOT promote
     // themselves (role) or change their own pay/department/employee ID.
@@ -545,12 +553,23 @@ service cloud.firestore {
       allow create, update: if isAuth() && isFinanceOrAdmin();
       allow delete: if isAuth() && isPresident();
     }
-    // Purchase orders (Finance → Purchasing tab). Finance dept members maintain;
-    // only the President deletes (via the approval flow).
+    // Purchase orders (legacy Finance → Purchasing tab). Finance dept members
+    // maintain; only the President deletes (via the approval flow).
     match /purchase_orders/{docId} {
       allow read: if isAuth() && canFinance();
       allow create, update: if isAuth() && canFinance();
       allow delete: if isAuth() && isPresident();
+    }
+
+    // Purchase requisitions — the Purchasing department's RFQ → Purchase Request
+    // flow (stage: 'rfq' | 'pr'). Purchasing dept maintains them; Finance gets
+    // read access to see committed purchases. Draft RFQs are freely deletable by
+    // Purchasing; once converted to a PR, only the President may delete.
+    match /purchase_requisitions/{docId} {
+      allow read: if isAuth() && (canPurchasing() || canFinance());
+      allow create, update: if isAuth() && canPurchasing();
+      allow delete: if isAuth() && (isPresident()
+        || (canPurchasing() && resource.data.get('stage', 'rfq') == 'rfq'));
     }
 
     // ── Finance delete requests ────────────────────────

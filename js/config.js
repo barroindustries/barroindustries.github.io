@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '11.0.18';
+window.APP_VERSION = '11.0.19';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -74,7 +74,7 @@ window.DEPARTMENTS = {
   },
   'Finance': {
     key: 'Finance', icon: '💰', color: '#1b5e20',
-    subtabs: ['Overview', 'Accounting', 'Purchasing', 'SSS / Gov'], navOrder: 2
+    subtabs: ['Overview', 'Accounting', 'Purchases', 'SSS / Gov'], navOrder: 2
   },
   'Sales': {
     key: 'Sales', icon: '🤝', color: '#e65100',
@@ -99,6 +99,10 @@ window.DEPARTMENTS = {
   'Production': {
     key: 'Production', icon: '🏭', color: '#5d4037',
     subtabs: ['Orders', 'Materials', 'Tasks', 'Files'], navOrder: 7
+  },
+  'Purchasing': {
+    key: 'Purchasing', icon: '🛒', color: '#00695c',
+    subtabs: ['Request for Quotation', 'Purchase Requests', 'Tasks'], navOrder: 8
   },
   'Brilliant Steel': {
     key: 'Brilliant Steel', icon: '⚙️', color: '#37474f',
