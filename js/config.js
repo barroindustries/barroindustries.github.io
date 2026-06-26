@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '11.0.19';
+window.APP_VERSION = '11.0.20';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -149,12 +149,22 @@ window.PRESIDENT_BOTTOM_NAV = [
   { icon: 'shield-check', label: 'Approve', page: 'approvals'      }
 ];
 
-// ── Bottom Nav — External Partner ────────────────
+// ── Bottom Nav — External Partner (Brilliant Steel) ─
 window.PARTNER_BOTTOM_NAV = [
   { icon: 'home',         label: 'Home',    page: 'dashboard'        },
   { icon: 'check-square', label: 'Tasks',   page: 'tasks'            },
   { icon: 'calculator',   label: 'Quotes',  page: 'bs-quote-builder' },
   { icon: 'file-text',    label: 'Summary', page: 'bs-quotations'    }
+];
+
+// ── Bottom Nav — Generic Partner (any company) ──────
+// Company-branded partner doing projects with Barro Industries: their affiliated
+// projects + ability to generate quotes. No Brilliant-Steel client book.
+window.PARTNER_GENERIC_BOTTOM_NAV = [
+  { icon: 'home',         label: 'Home',     page: 'dashboard'        },
+  { icon: 'briefcase',    label: 'Projects', page: 'partner-projects' },
+  { icon: 'calculator',   label: 'Quotes',   page: 'bs-quote-builder' },
+  { icon: 'check-square', label: 'Tasks',    page: 'tasks'            }
 ];
 
 // ── Bottom Nav — Partner (Brilliant Steel) ───────

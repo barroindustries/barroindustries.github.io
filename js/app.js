@@ -782,6 +782,16 @@ function buildNav() {
 function isPresident() { return currentRole === 'president'; }
 function isPartner() { return currentRole === 'partner'; }
 function isBrilliantOnly() { return currentDepts.length === 1 && currentDepts[0] === 'Brilliant Steel'; }
+// A Brilliant Steel partner gets the BS-locked portal (their pricing, client book,
+// 50/50 split). A generic partner is any other company doing projects WITH Barro —
+// they get a company-branded portal: their affiliated projects + quote generation.
+function isBrilliantPartner() { return isPartner() && currentDepts.includes('Brilliant Steel'); }
+function isGenericPartner()   { return isPartner() && !currentDepts.includes('Brilliant Steel'); }
+// Display name of the partner's own company (set by the President on the user doc).
+function partnerCompanyName() {
+  return (window.userProfile && userProfile.company) ||
+         (currentDepts.includes('Brilliant Steel') ? 'Brilliant Steel' : 'Partner');
+}
 
 function getSidebarItems() {
   // Admin command-center portal: President, Manager, and Corporate Secretary all
@@ -815,8 +825,17 @@ function getSidebarItems() {
       items.push({ icon:'scroll-text',   label:'Audit Log',        page:'audit-log',       section:true, sectionLabel:'Security' });
     }
     // (Leave, SOPs, Help moved into the profile drawer's "More" section)
+  } else if (partner && isGenericPartner()) {
+    // ── Generic external partner (any company) ──
+    items.push({ icon:'briefcase',    label:'My Projects',   page:'partner-projects' });
+    items.push({ icon:'check-square', label:'My Tasks',      page:'tasks'            });
+    items.push({ icon:'megaphone',    label:'Posts',         page:'posts'            });
+    items.push({ icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' });
+    items.push({ icon:'file-text',    label:'Quotations',    page:'bs-quotations'    });
+    items.push({ icon:'users',        label:'Team',          page:'team-directory',   section:true, sectionLabel:'Directory' });
+    items.push({ icon:'folder',       label:'Files',         page:'files'            });
   } else if (partner) {
-    // ── External Partner role ──
+    // ── External Partner role (Brilliant Steel) ──
     items.push({ icon:'check-square', label:'My Tasks',      page:'tasks'            });
     items.push({ icon:'megaphone',    label:'Posts',         page:'posts'            });
     items.push({ icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' });
@@ -911,6 +930,7 @@ function buildTopNavStrip() {
   if (!strip) return;
   const isAdminRole = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
   const items = isAdminRole ? window.PRESIDENT_BOTTOM_NAV
+    : isGenericPartner() ? (window.PARTNER_GENERIC_BOTTOM_NAV || window.BOTTOM_NAV_ITEMS)
     : isPartner() ? (window.PARTNER_BOTTOM_NAV || window.BOTTOM_NAV_ITEMS)
     : isBrilliantOnly() ? window.BRILLIANT_BOTTOM_NAV
     : window.BOTTOM_NAV_ITEMS;
@@ -1014,10 +1034,22 @@ function renderQuoteBuilderIframe() {
   document.getElementById('qb-fullscreen')?.remove(); // remove any legacy overlay
   const c = document.getElementById('page-content');
   if (!c) return;
-  // Partners / Brilliant-Steel-only users get a locked-down builder (BS only, no Admin).
+  // Partners / Brilliant-Steel-only users get a locked-down builder (no Admin/labor).
+  // BS partners stay locked to Brilliant Steel pricing; a generic company partner
+  // gets a builder branded to THEIR company with a Barro Kitchens header toggle.
   const partnerMode = (typeof isPartner === 'function' && isPartner()) ||
                       (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
-  const qbSrc = 'quote-builder-v2.html' + (partnerMode ? '?portal=partner' : '');
+  let qbSrc = 'quote-builder-v2.html' + (partnerMode ? '?portal=partner' : '');
+  if (typeof isGenericPartner === 'function' && isGenericPartner()) {
+    const p = window.userProfile || {};
+    const qs = new URLSearchParams({
+      portal: 'partner',
+      pcoName: (p.company || 'Partner'),
+      pcoContact: (p.phone || ''),
+      pcoSig: (p.displayName || '')
+    });
+    qbSrc = 'quote-builder-v2.html?' + qs.toString();
+  }
   // A "Reopen" action from the Quotations list stashes the quote's editable
   // snapshot here — load it into the builder once the iframe is ready.
   const reopenState = window._qbReopenState; window._qbReopenState = null;
@@ -1779,6 +1811,7 @@ function navigateTo(page) {
     case 'progress':         renderProgressReports(); break;
     case 'bs-quote-builder': renderQuoteBuilderIframe(); break;
     case 'bk-quote-builder': renderQuoteBuilderIframe(); break;
+    case 'partner-projects': renderPartnerProjects(); break;
     case 'notifications':    renderNotificationsPage(); break;
     case 'bs-quotations':    renderBrilliantSteel(currentUser, currentRole, 'Quotations Summary'); break;
     case 'bs-clients':       renderBrilliantSteel(currentUser, currentRole, 'Client Data'); break;
@@ -1844,12 +1877,113 @@ async function renderDashboard() {
   }
 }
 
+// ── Partner — Project Details ────────────────────────────────────────
+// Read-only view of the projects Barro Industries has tagged to this partner
+// (job_projects.partnerUid). Generic partners use this in place of the BS
+// client book. Shows scope, stage, contract value, the partner's share & timeline.
+const PARTNER_STAGE = {
+  quote:       { label:'Quoting',        cls:'badge-gray'   },
+  order:       { label:'Order Confirmed',cls:'badge-blue'   },
+  in_production:{ label:'In Production', cls:'badge-orange' },
+  production:  { label:'In Production',  cls:'badge-orange' },
+  delivery:    { label:'For Delivery',   cls:'badge-purple' },
+  delivered:   { label:'Delivered',      cls:'badge-teal'   },
+  paid:        { label:'Completed · Paid',cls:'badge-green'  },
+  cancelled:   { label:'Cancelled',      cls:'badge-red'    }
+};
+async function renderPartnerProjects() {
+  const c = document.getElementById('page-content');
+  const co = partnerCompanyName();
+  const uid = currentUser.uid;
+  c.innerHTML = `
+    <div class="page-header"><h2>💼 My Projects</h2></div>
+    <div style="font-size:12px;color:var(--text-muted);margin:-6px 0 12px;font-weight:600">Projects Barro Industries is running with ${escHtml(co)}</div>
+    <div id="partner-projects-body"><div class="loading-placeholder">Loading projects…</div></div>
+  `;
+  try {
+    const [projSnap, dealSnap] = await Promise.all([
+      db.collection('job_projects').where('partnerUid','==',uid).get().catch(()=>({docs:[]})),
+      db.collection('partner_deals').where('partnerUid','==',uid).get().catch(()=>({docs:[]}))
+    ]);
+    // Normalise both sources into one shape so legacy deals still appear.
+    const projects = projSnap.docs.map(d=>({ id:d.id, _src:'project', ...d.data() }));
+    const deals = dealSnap.docs.map(d=>{
+      const x = d.data();
+      return { id:d.id, _src:'deal', clientName:x.clientName, projectNo:x.id,
+        stage:(x.status==='paid'?'paid':x.status==='completed'?'delivered':'order'),
+        contractAmount:x.totalContractValue, capital:x.costAmount,
+        split:{ partnerPct:50 }, notes:x.projectDescription||x.notes,
+        createdAt:x.createdAt };
+    });
+    const all = [...projects, ...deals].sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    const share = (p)=>{
+      const pct = (p.split && typeof p.split.partnerPct==='number') ? p.split.partnerPct : 50;
+      return Math.max(0, (p.contractAmount||0)-(p.capital||0)) * (pct/100);
+    };
+    const body = document.getElementById('partner-projects-body');
+    if (!body) return;
+    if (!all.length) {
+      body.innerHTML = `<div class="empty-state" style="padding:40px 16px"><div class="empty-icon">💼</div>
+        <p>No projects yet</p>
+        <p style="font-size:12px;color:var(--text-muted)">Barro Industries will tag projects to ${escHtml(co)} here as they come in.</p></div>`;
+      return;
+    }
+    const active = all.filter(p=>p.stage!=='cancelled' && p.stage!=='paid');
+    const totalShare = all.filter(p=>p.stage!=='cancelled').reduce((s,p)=>s+share(p),0);
+    body.innerHTML = `
+      <div class="kpi-row" style="margin-bottom:14px">
+        <div class="kpi-card accent"><div class="kpi-label">Active</div><div class="kpi-value">${active.length}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Total Projects</div><div class="kpi-value">${all.filter(p=>p.stage!=='cancelled').length}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Your Share (est.)</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalShare)}</div></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        ${all.map(p=>{
+          const st = PARTNER_STAGE[p.stage] || { label:(p.stage||'Active'), cls:'badge-gray' };
+          const pct = (p.split && typeof p.split.partnerPct==='number') ? p.split.partnerPct : 50;
+          const margin = Math.max(0,(p.contractAmount||0)-(p.capital||0));
+          return `<div class="card"><div class="card-body">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px">
+              <div style="min-width:0">
+                <div style="font-weight:800;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(p.clientName||p.projectNo||'Project')}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${escHtml(p.projectNo||'')}</div>
+              </div>
+              <span class="badge ${st.cls}" style="flex-shrink:0">${st.label}</span>
+            </div>
+            ${p.notes?`<div style="font-size:12px;color:var(--text-secondary,var(--text-muted));margin-bottom:8px">${escHtml(p.notes)}</div>`:''}
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:12px;border-top:1px solid var(--border);padding-top:8px">
+              <div><div style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">Contract</div><div style="font-weight:700">₱${fmt(p.contractAmount||0)}</div></div>
+              <div><div style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">Margin</div><div style="font-weight:700">₱${fmt(margin)}</div></div>
+              <div><div style="color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.3px">Your Share (${pct}%)</div><div style="font-weight:700;color:var(--success)">₱${fmt(share(p))}</div></div>
+            </div>
+          </div></div>`;
+        }).join('')}
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:14px">Figures are set by Barro Industries. Contact us for any project questions.</div>
+    `;
+  } catch(e) {
+    const body = document.getElementById('partner-projects-body');
+    if (body) body.innerHTML = `<div class="empty-state" style="padding:30px"><p>Couldn't load projects.</p><p style="font-size:12px;color:var(--text-muted)">${escHtml(e.message||'')}</p></div>`;
+  }
+}
+
 async function renderPartnerDashboard() {
   const c = document.getElementById('page-content');
   const u = userProfile;
-  c.innerHTML = `
-    <div class="page-header"><h2>👋 Welcome, ${escHtml((u.displayName||'Partner').split(' ')[0])}!</h2></div>
-    <div id="live-clock" class="live-clock-line"></div>
+  const co = partnerCompanyName();
+  const genericP = isGenericPartner();
+  // Brilliant Steel partners see the 50/50 steel-project walkthrough; a generic
+  // company partner sees a neutral, company-branded intro.
+  const introCard = genericP ? `
+    <div class="card" style="margin-bottom:14px;border:1.5px solid var(--primary);background:linear-gradient(135deg,rgba(10,132,255,.06),transparent)">
+      <div class="card-body">
+        <div style="font-size:14px;font-weight:800;margin-bottom:8px">🤝 ${escHtml(co)} × Barro Industries — partner portal</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+          <div style="font-size:12px"><div style="font-size:18px">①</div><strong>Track your projects</strong><br><span style="color:var(--text-muted)">See every project Barro Industries is running with ${escHtml(co)} — status, scope &amp; timeline.</span></div>
+          <div style="font-size:12px"><div style="font-size:18px">②</div><strong>Build a quote</strong><br><span style="color:var(--text-muted)">Generate quotes under <strong>${escHtml(co)}</strong> or Barro Kitchens branding.</span></div>
+          <div style="font-size:12px"><div style="font-size:18px">③</div><strong>Stay in sync</strong><br><span style="color:var(--text-muted)">Tasks, files &amp; updates for our shared work — all in one place.</span></div>
+        </div>
+      </div>
+    </div>` : `
     <div class="card" style="margin-bottom:14px;border:1.5px solid var(--primary);background:linear-gradient(135deg,rgba(10,132,255,.06),transparent)">
       <div class="card-body">
         <div style="font-size:14px;font-weight:800;margin-bottom:8px">🤝 How your Brilliant Steel partner portal works</div>
@@ -1860,7 +1994,12 @@ async function renderPartnerDashboard() {
         </div>
         <div style="font-size:11px;color:var(--text-muted);margin-top:8px;border-top:1px solid var(--border);padding-top:8px">You're a profit-sharing partner — not a commission agent. This portal is just for our shared steel projects.</div>
       </div>
-    </div>
+    </div>`;
+  c.innerHTML = `
+    <div class="page-header"><h2>👋 Welcome, ${escHtml((u.displayName||'Partner').split(' ')[0])}!</h2></div>
+    ${genericP ? `<div style="font-size:12px;color:var(--text-muted);margin:-6px 0 10px;font-weight:600">${escHtml(co)} · Partner</div>` : ''}
+    <div id="live-clock" class="live-clock-line"></div>
+    ${introCard}
     <div id="partner-kpi"></div>
     <div id="partner-earnings-card"></div>
     <div id="partner-cards-row" style="display:flex;flex-direction:column;gap:14px">
@@ -1874,9 +2013,11 @@ async function renderPartnerDashboard() {
       <button class="btn-secondary" onclick="navigateTo('bs-quotations')" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:14px;font-size:12px;font-weight:700">
         <span style="font-size:24px">📄</span>Quotations
       </button>
-      <button class="btn-secondary" onclick="navigateTo('bs-clients')" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:14px;font-size:12px;font-weight:700">
+      ${genericP ? `<button class="btn-secondary" onclick="navigateTo('partner-projects')" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:14px;font-size:12px;font-weight:700">
+        <span style="font-size:24px">💼</span>Projects
+      </button>` : `<button class="btn-secondary" onclick="navigateTo('bs-clients')" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:14px;font-size:12px;font-weight:700">
         <span style="font-size:24px">📋</span>Clients
-      </button>
+      </button>`}
     </div>
   `;
   liveDateTime('live-clock');

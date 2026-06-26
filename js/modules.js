@@ -432,12 +432,22 @@ window.renderTeamTab = async function() {
             ${Object.entries(window.ROLES||{}).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}
           </select>
         </div>
+        <div class="form-group" id="inv-company-group" style="display:none"><label>Company <span style="font-weight:400;color:var(--text-muted)">(partner's own company)</span></label>
+          <input id="inv-company" placeholder="e.g. Brilliant Steel Corporation"/>
+        </div>
         <div class="form-group"><label>Department(s)</label>
           <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:4px">
             ${Object.keys(window.DEPARTMENTS||{}).map(d=>`<label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" class="inv-dept-cb" value="${d}"/>${d}</label>`).join('')}
           </div>
         </div>
       `, `<button class="btn-primary" id="save-inv-btn">Send Invite</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      // Company field is only relevant for the Partner role — reveal it when picked.
+      const invRole = document.getElementById('inv-role');
+      const syncCompany = () => {
+        const g = document.getElementById('inv-company-group');
+        if (g) g.style.display = (invRole.value === 'partner') ? 'block' : 'none';
+      };
+      invRole?.addEventListener('change', syncCompany); syncCompany();
       document.getElementById('save-inv-btn').addEventListener('click', async () => {
         const email = document.getElementById('inv-email').value.trim();
         if (!email) { Notifs.showToast('Enter an email.','error'); return; }
@@ -463,6 +473,7 @@ window.renderTeamTab = async function() {
             displayName: document.getElementById('inv-name').value.trim() || email.split('@')[0],
             phone: document.getElementById('inv-phone').value.trim(),
             role:        document.getElementById('inv-role').value,
+            company:     document.getElementById('inv-company')?.value.trim() || '',
             departments: depts, department: depts[0]||'',
             employeeId:  empId,
             photoUrl:'', startDate: window.bizDate(),

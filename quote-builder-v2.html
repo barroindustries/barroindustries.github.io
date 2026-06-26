@@ -1038,12 +1038,35 @@ function setStatus(type, msg){
 // ═══════════════════════════════════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════════════════════════════════
-// Partner portal mode (?portal=partner): Brilliant Steel only, no Admin controls.
+// Partner portal mode (?portal=partner): no Admin/labor controls.
 const PARTNER_MODE = new URLSearchParams(location.search).get('portal') === 'partner';
+// Generic company partner: builder is branded to THEIR company (pcoName) with a
+// Barro Kitchens header toggle, instead of being locked to Brilliant Steel.
+const _PQ = new URLSearchParams(location.search);
+const PARTNER_CO_NAME = (_PQ.get('pcoName') || '').trim();
+const GENERIC_PARTNER = PARTNER_MODE && !!PARTNER_CO_NAME && PARTNER_CO_NAME !== 'Partner';
+if (GENERIC_PARTNER) {
+  CO.PT = {
+    name: PARTNER_CO_NAME.toUpperCase(),
+    sub: 'In partnership with Barro Industries',
+    addr: '', contact: _PQ.get('pcoContact') || '',
+    sig: { name: (_PQ.get('pcoSig')||'').toUpperCase(), title: 'Authorized Representative, ' + PARTNER_CO_NAME },
+    nav: PARTNER_CO_NAME.toUpperCase(), code: 'PT',
+    thanks: 'Thank you for considering ' + PARTNER_CO_NAME + '. We look forward to working with you.',
+    creds: PARTNER_CO_NAME + '  •  In partnership with Barro Industries OPC'
+  };
+}
 function applyPartnerMode(){
   if(!PARTNER_MODE) return;
-  // Lock company to Brilliant Steel and hide the company switcher
-  const coBK=document.getElementById('coBK'); if(coBK) coBK.parentElement.style.display='none';
+  if(GENERIC_PARTNER){
+    // Keep BOTH header options: re-label the BS pill as the partner's own company,
+    // leave Barro Kitchens available so they can quote under either brand.
+    const coBS=document.getElementById('coBS');
+    if(coBS){ coBS.textContent='🏢 '+CO.PT.name; coBS.setAttribute('onclick',"setCompany('PT')"); }
+  } else {
+    // Brilliant Steel partner: lock company to BS and hide the company switcher.
+    const coBK=document.getElementById('coBK'); if(coBK) coBK.parentElement.style.display='none';
+  }
   // Remove the Admin (database) view button entirely
   document.getElementById('btnAdmin')?.remove();
   // Hide the internal Labor & Timeline estimate (Barro's staffing/day-rates) from
@@ -1057,12 +1080,12 @@ function applyPartnerMode(){
 
 document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById('quoteDate').value = new Date().toISOString().split('T')[0];
-  setCompany(PARTNER_MODE ? 'BS' : 'BK');
+  setCompany(GENERIC_PARTNER ? 'PT' : (PARTNER_MODE ? 'BS' : 'BK'));
   applyPartnerMode();
   renderTerms();
   loadFromStorage();
-  // Partner portal is Brilliant Steel only — re-assert after restoring any saved draft.
-  if(PARTNER_MODE) setCompany('BS');
+  // Re-assert the partner's locked/default company after restoring any saved draft.
+  if(PARTNER_MODE) setCompany(GENERIC_PARTNER ? 'PT' : 'BS');
   // Default the project start basis to the quote date if not already set
   const ps=document.getElementById('projStart');
   if(ps && !ps.value) ps.value=document.getElementById('quoteDate').value;
@@ -1094,7 +1117,8 @@ function setCompany(co){
   currentCo=co;
   const c=CO[co];
   document.getElementById('coBK').classList.toggle('active',co==='BK');
-  document.getElementById('coBS').classList.toggle('active',co==='BS');
+  // In generic-partner mode the BS pill represents the partner's own company (PT).
+  document.getElementById('coBS').classList.toggle('active',co==='BS'||co==='PT');
   document.getElementById('navLogo').innerHTML=c.nav;
   document.getElementById('qnoCo').value=c.code;
   document.getElementById('phName').textContent=c.name;
