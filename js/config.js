@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '11.0.16';
+window.APP_VERSION = '11.0.17';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -250,7 +250,7 @@ window.exportCSV = function(filename, rows, columns) {
     // CSV formula-injection guard: a TEXT cell starting with = + - @ can execute
     // as a formula in Excel/Sheets. Prefix with a single quote to neutralize it —
     // but leave plain numbers (incl. negative/decimal) untouched so they stay numeric.
-    if (!/^-?\d+(\.\d+)?$/.test(v) && /^[=+\-@\t\r]/.test(v)) v = "'" + v;
+    if (!/^-?\d+(\.\d+)?$/.test(v) && /^[\s]*[=+\-@\t\r]/.test(v)) v = "'" + v;
     return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
   };
   const header = cols.map(c => cell(c.label)).join(',');

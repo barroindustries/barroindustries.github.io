@@ -754,6 +754,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   document.getElementById('del-task-btn')?.addEventListener('click', async()=>{
     if (!confirm('Delete this task?')) return;
     await db.collection('tasks').doc(taskId).delete();
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 
@@ -1261,7 +1262,7 @@ function expenseTable(expenses, showActions) {
                 <td><span class="badge ${statusBadge(e.status)}">${e.status||'pending'}</span></td>
                 ${showActions?`<td>
                   ${e.status==='pending'?`<button class="btn-icon approve-expense" data-id="${e.id}">✅</button><button class="btn-icon reject-expense" data-id="${e.id}">❌</button>`:''}
-                  ${e.fileUrl?`<a href="${e.fileUrl}" target="_blank" class="btn-icon">📎</a>`:''}
+                  ${e.fileUrl?`<a href="${safeHttpUrl(e.fileUrl)}" target="_blank" class="btn-icon">📎</a>`:''}
                 </td>`:''}
               </tr>
             `).join('')}
@@ -1382,8 +1383,8 @@ window.renderComments = async function(collection, docId, containerId, currentUs
                 <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'}">
                   ${c.text?`<div class="ms-text">${escHtml(c.text).replace(/\n/g,'<br/>')}</div>`:''}
                   ${c.fileUrl ? (c.fileSource!=='link' && isImage(c.fileUrl)
-                    ? `<div style="margin-top:${c.text?'6':'0'}px"><img src="${c.fileUrl}" alt="${escHtml(c.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:8px;cursor:pointer" onclick="window.open('${c.fileUrl}','_blank')"/></div>`
-                    : `<a href="${escHtml(c.fileUrl)}" target="_blank" rel="noopener" class="ms-file-chip">${c.fileSource==='link'?'🔗':'📎'} ${escHtml(c.fileName||'Attachment')}</a>`
+                    ? `<div style="margin-top:${c.text?'6':'0'}px"><img src="${safeHttpUrl(c.fileUrl)}" alt="${escHtml(c.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:8px;cursor:pointer" onclick="window.open('${safeHttpUrl(c.fileUrl)}','_blank')"/></div>`
+                    : `<a href="${safeHttpUrl(c.fileUrl)}" target="_blank" rel="noopener" class="ms-file-chip">${c.fileSource==='link'?'🔗':'📎'} ${escHtml(c.fileName||'Attachment')}</a>`
                   ) : ''}
                   <div class="ms-meta">
                     <span class="ms-time">${timeLabel(c.createdAt)}</span>
@@ -1957,7 +1958,17 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           const histId = btn.dataset.histId;
           const req    = delReqs.find(r => r.id === reqId);
           if (!confirm(`Approve deletion of ${req?.userName||'?'} (${req?.month||'?'}) payroll record?`)) return;
+          btn.disabled = true;
+          // Guard against re-running an already-resolved request.
+          const _chk = await db.collection('payroll_delete_requests').doc(reqId).get().catch(()=>null);
+          if (_chk && _chk.exists && _chk.data().status !== 'pending') { Notifs.showToast('Already handled.'); loadFinanceContent(currentUser, currentRole, 'Payroll'); return; }
           await db.collection('salary_history').doc(histId).delete();
+          // Remove the matching per-employee ledger debit so financials don't stay overstated.
+          const _uid2 = (histId||'').split('_')[0], _mo2 = req?.month || (histId||'').split('_')[1];
+          if (_uid2 && _mo2) {
+            const _ls2 = await db.collection('ledger').where('refNumber','==',`PAY-${_mo2}-${_uid2}`).limit(1).get().catch(()=>({docs:[]}));
+            if (_ls2.docs.length) await _ls2.docs[0].ref.delete().catch(()=>{});
+          }
           await db.collection('payroll_delete_requests').doc(reqId).update({ status:'approved', resolvedAt: firebase.firestore.FieldValue.serverTimestamp() });
           if (req?.requestedBy) {
             await Notifs.send(req.requestedBy, {
@@ -2160,6 +2171,13 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     const month = document.getElementById('pr-month-sel').value;
     if (!confirm(`Generate and save payroll for ${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}?`)) return;
 
+    // Was this month already generated? salary_history + ledger writes below are
+    // idempotent (keyed by month), but the cash-advance deduction is NOT — re-running
+    // must never deduct an employee's CA balance a second time.
+    const _genSnap = await db.collection('salary_history').where('month','==',month).limit(1).get().catch(()=>({docs:[]}));
+    const alreadyGenerated = _genSnap.docs.length > 0;
+    if (alreadyGenerated && !confirm('Payroll for this month was already generated. Re-generating refreshes the salary records and ledger but will NOT deduct cash advances again. Continue?')) return;
+
     // 1. Write salary_history
     const batch = db.batch();
     for (const u of employees) {
@@ -2217,31 +2235,18 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         await db.collection('ledger').add(entry);
       }
     }
-    // Also write/update the aggregate summary entry
-    if (totalNetPay > 0) {
-      const aggRef  = `PAY-${month}`;
-      const aggSnap = await db.collection('ledger').where('refNumber','==',aggRef).limit(1).get().catch(()=>({docs:[]}));
-      const aggEntry = {
-        date:        month + '-01',
-        type:        'debit',
-        description: `Payroll Total — ${monthLabel} (${employees.length} employees)`,
-        amount:      totalNetPay,
-        category:    'Payroll',
-        source:      'Finance',
-        refNumber:   aggRef,
-        addedBy:     currentUser.uid,
-        addedByName: window.userProfile?.displayName || currentUser.email,
-        createdAt:   firebase.firestore.FieldValue.serverTimestamp()
-      };
-      if (aggSnap.docs.length) {
-        await aggSnap.docs[0].ref.update({ amount: totalNetPay, description: aggEntry.description });
-      } else {
-        await db.collection('ledger').add(aggEntry);
-      }
-    }
+    // NOTE: we intentionally do NOT write an aggregate `PAY-{month}` ledger entry.
+    // The per-employee debits above already sum to the full payroll; an aggregate on
+    // top of them double-counts payroll in every view that sums debits (Finance
+    // dashboard, Financial Reports, Analytics). Remove any aggregate left by old code.
+    void totalNetPay;
+    const _oldAgg = await db.collection('ledger').where('refNumber','==',`PAY-${month}`).limit(1).get().catch(()=>({docs:[]}));
+    if (_oldAgg.docs.length) await _oldAgg.docs[0].ref.delete().catch(()=>{});
 
-    // 4. Apply CA deductions to actual cash_advance balances
-    for (const u of employees) {
+    // 4. Apply CA deductions to actual cash_advance balances — ONLY on the first
+    //    generation for this month (these balance writes are NOT idempotent, so
+    //    re-running would deduct the same cash advance again).
+    if (!alreadyGenerated) for (const u of employees) {
       const caBalance = _caByUser[u.id]||0;
       if (caBalance <= 0) continue;
       const hasOvr    = _caOverrideByUser[u.id] !== undefined;
@@ -2301,7 +2306,7 @@ async function renderTaxesTab(container, currentUser, currentRole) {
               <td style="white-space:nowrap">
                 ${isPriv?`<button class="btn-secondary btn-sm tax-edit-btn" data-id="${r.id}">✎</button>`:''}
                 ${isPriv?`<button class="btn-danger btn-sm tax-del-btn" data-id="${r.id}" data-label="${escHtml((r.type||'Tax')+' — '+(r.period||r.id.slice(-5)))}" style="margin-left:4px">🗑</button>`:''}
-                ${r.fileUrl?`<a href="${r.fileUrl}" target="_blank" class="btn-secondary btn-sm" style="margin-left:4px">📎</a>`:''}
+                ${r.fileUrl?`<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm" style="margin-left:4px">📎</a>`:''}
               </td>
             </tr>`).join('')}</tbody>
           </table></div>`}
@@ -2819,7 +2824,7 @@ async function renderRecordsTab(container, currentUser, currentRole) {
               <td>${escHtml(r.description||'—')}</td>
               <td>₱${fmt(r.amount)}</td>
               <td>${escHtml(r.party||'—')}</td>
-              <td>${r.fileUrl?`<a href="${r.fileUrl}" target="_blank" class="btn-secondary btn-sm">📎 View</a>`:'-'}</td>
+              <td>${r.fileUrl?`<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm">📎 View</a>`:'-'}</td>
               <td style="font-size:11px">${escHtml(r.encodedByName||'—')}</td>
               ${isPriv?`<td style="white-space:nowrap">
                 <button class="btn-secondary btn-sm rec-edit-btn" data-id="${r.id}">✎</button>
@@ -3417,6 +3422,15 @@ function openPayslipEdit(ps, currentUser, onSave) {
     // Keep the general-ledger entry in sync if it was already posted
     const lsnap = await db.collection('ledger').where('refNumber','==',`WPAY-${ps.id}`).limit(1).get().catch(()=>({docs:[]}));
     if (lsnap.docs.length) await lsnap.docs[0].ref.update({ amount: netPay });
+    // Reconcile the worker's running CA balance for any change in the cash-advance
+    // deduction. Creation deducted the original CA from caBalance, and delete reverses
+    // whatever is current (financeDeleteCascade), so an edit that doesn't adjust by the
+    // delta leaves the running balance permanently wrong.
+    const _oldCa = ps.deductions?.other?.cashAdvance || 0;
+    if (ca !== _oldCa && ps.workerId) {
+      await db.collection('worker_profiles').doc(ps.workerId)
+        .update({ caBalance: firebase.firestore.FieldValue.increment(_oldCa - ca) }).catch(()=>{});
+    }
     // Mutate the in-memory copy so the summary reflects changes immediately
     ps.regular   = {...(ps.regular||{}), ratePerHr:rph, hrsWorked:hrs, dailyRate:parseFloat((rph*8).toFixed(2)), total:reg};
     ps.overtime  = {...(ps.overtime||{}), total:otT};
@@ -3739,7 +3753,7 @@ function buildPayslipHTML(d) {
   <span style="font-weight:700">📄 Payslip — ${escHtml(d.workerName)}</span>
   <button onclick="window.print()">🖨 Save as PDF / Print</button>
   <button onclick="downloadJPEG()">📷 Save as JPEG</button>
-  ${d.proofUrl ? `<a href="${d.proofUrl}" target="_blank" style="color:#FFD60A;font-weight:600;margin-left:8px">📎 Transfer Proof</a>` : ''}
+  ${d.proofUrl ? `<a href="${safeHttpUrl(d.proofUrl)}" target="_blank" style="color:#FFD60A;font-weight:600;margin-left:8px">📎 Transfer Proof</a>` : ''}
   <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,0.15);color:#fff">✕ Close</button>
 </div>
 <div style="height:48px"></div>
@@ -3922,8 +3936,8 @@ function buildPayslipHTML(d) {
     </table>
     ${d.proofUrl ? `<div class="section-header" style="margin-top:8px">Transfer Confirmation</div>
     <div style="border:1px solid #000;border-top:none;padding:8px;text-align:center;page-break-inside:avoid">
-      <img src="${d.proofUrl}" alt="Transfer confirmation" crossorigin="anonymous" style="max-width:100%;max-height:120mm;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"/>
-      <div style="display:none;font-size:10px;color:#555">Proof on file: <a href="${d.proofUrl}" target="_blank">${escHtml(d.proofUrl)}</a></div>
+      <img src="${safeHttpUrl(d.proofUrl)}" alt="Transfer confirmation" crossorigin="anonymous" style="max-width:100%;max-height:120mm;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"/>
+      <div style="display:none;font-size:10px;color:#555">Proof on file: <a href="${safeHttpUrl(d.proofUrl)}" target="_blank">${escHtml(d.proofUrl)}</a></div>
     </div>` : ''}
   </div>
 </div>
@@ -3980,7 +3994,7 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
                 <td>${escHtml(e.description)}</td><td>₱${fmt(e.amount)}</td>
                 <td>${escHtml(e.submittedByName||'—')}</td>
                 <td><span class="badge ${statusBadge(e.status)}">${e.status||'pending'}</span></td>
-                <td style="white-space:nowrap">${e.fileUrl?`<a href="${e.fileUrl}" target="_blank" class="btn-icon">📎</a>`:''}${isPriv?`<button class="btn-secondary btn-sm exp-edit-btn" data-id="${e.id}" style="margin-left:4px">✎</button><button class="btn-danger btn-sm exp-del-btn" data-id="${e.id}" data-label="${escHtml(e.description||e.id.slice(-5))}" style="margin-left:4px">🗑</button>`:''}</td>
+                <td style="white-space:nowrap">${e.fileUrl?`<a href="${safeHttpUrl(e.fileUrl)}" target="_blank" class="btn-icon">📎</a>`:''}${isPriv?`<button class="btn-secondary btn-sm exp-edit-btn" data-id="${e.id}" style="margin-left:4px">✎</button><button class="btn-danger btn-sm exp-del-btn" data-id="${e.id}" data-label="${escHtml(e.description||e.id.slice(-5))}" style="margin-left:4px">🗑</button>`:''}</td>
               </tr>`).join('')}
             </tbody>
           </table>
@@ -8245,7 +8259,19 @@ window.renderApprovals = async function(currentUser) {
       // Finance request approve/deny (from "all" view)
       wrap.querySelectorAll('.fr-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!confirm(`Approve deletion of ${btn.dataset.name} (${btn.dataset.month}) payroll record?`)) return;
-          if (btn.dataset.histId) await db.collection('salary_history').doc(btn.dataset.histId).delete();
+          btn.disabled = true;
+          // Guard against a stale click / second President session re-running an already-resolved request.
+          const _req = await db.collection('payroll_delete_requests').doc(btn.dataset.id).get().catch(()=>null);
+          if (_req && _req.exists && _req.data().status !== 'pending') { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
+          if (btn.dataset.histId) {
+            await db.collection('salary_history').doc(btn.dataset.histId).delete();
+            // Remove the matching per-employee ledger debit so financials don't stay overstated.
+            const _uid = (btn.dataset.histId||'').split('_')[0];
+            if (_uid && btn.dataset.month) {
+              const _ls = await db.collection('ledger').where('refNumber','==',`PAY-${btn.dataset.month}-${_uid}`).limit(1).get().catch(()=>({docs:[]}));
+              if (_ls.docs.length) await _ls.docs[0].ref.delete().catch(()=>{});
+            }
+          }
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'✅ Payroll Delete Approved', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record has been approved.`, icon:'✅', type:'payroll_delete_approved' }));
           Notifs.showToast('Record deleted and requester notified.');
@@ -8392,7 +8418,19 @@ window.renderApprovals = async function(currentUser) {
 
       wrap.querySelectorAll('.fr-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!confirm(`Approve deletion of ${btn.dataset.name} (${btn.dataset.month}) payroll record?`)) return;
-          if (btn.dataset.histId) await db.collection('salary_history').doc(btn.dataset.histId).delete();
+          btn.disabled = true;
+          // Guard against a stale click / second President session re-running an already-resolved request.
+          const _req = await db.collection('payroll_delete_requests').doc(btn.dataset.id).get().catch(()=>null);
+          if (_req && _req.exists && _req.data().status !== 'pending') { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
+          if (btn.dataset.histId) {
+            await db.collection('salary_history').doc(btn.dataset.histId).delete();
+            // Remove the matching per-employee ledger debit so financials don't stay overstated.
+            const _uid = (btn.dataset.histId||'').split('_')[0];
+            if (_uid && btn.dataset.month) {
+              const _ls = await db.collection('ledger').where('refNumber','==',`PAY-${btn.dataset.month}-${_uid}`).limit(1).get().catch(()=>({docs:[]}));
+              if (_ls.docs.length) await _ls.docs[0].ref.delete().catch(()=>{});
+            }
+          }
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'✅ Payroll Delete Approved', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record has been approved.`, icon:'✅', type:'payroll_delete_approved' }));
           Notifs.showToast('Record deleted and requester notified.');
@@ -9007,7 +9045,7 @@ async function renderDocCollection(container, collection, title, currentUser, cu
             <div class="policy-icon">${opts.icon||'📄'}</div>
             <div class="policy-title">${escHtml(d.title)}</div>
             <div class="policy-desc">${escHtml(d.description||'')}</div>
-            ${d.fileUrl?`<a href="${d.fileUrl}" target="_blank" class="btn-link" style="font-size:12px;margin-top:8px;display:block">📎 Open File</a>`:''}
+            ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:12px;margin-top:8px;display:block">📎 Open File</a>`:''}
             ${opts.editable&&canAdd?`<div style="display:flex;gap:6px;margin-top:10px">
               <button class="btn-secondary btn-sm doc-edit-btn" data-id="${d.id}">✎ Edit</button>
               <button class="btn-danger btn-sm doc-del-btn" data-id="${d.id}" data-label="${escHtml(d.title||'item')}">🗑</button>
@@ -9095,7 +9133,7 @@ function bindFileCollection(id, currentUser, dept, subfolder) {
         <div class="item-top">
           <div class="item-title">📄 ${escHtml(f.name)}</div>
           <div style="display:flex;gap:6px;align-items:center">
-            ${f.url?`<a href="${f.url}" target="_blank" class="btn-primary btn-sm">Open</a>`:''}
+            ${f.url?`<a href="${safeHttpUrl(f.url)}" target="_blank" class="btn-primary btn-sm">Open</a>`:''}
             ${canDelete ? `<button class="btn-danger btn-sm file-delete-btn" data-id="${f.id}" data-name="${(f.name||'').replace(/"/g,'&quot;')}" style="font-size:11px">Delete</button>` : ''}
             ${canRequestDelete ? `<button class="btn-secondary btn-sm file-req-delete-btn" data-id="${f.id}" data-name="${(f.name||'').replace(/"/g,'&quot;')}" style="font-size:11px;color:var(--danger)">Request Delete</button>` : ''}
           </div>
@@ -9559,7 +9597,7 @@ window.renderDocCollection = function(container, collection, title, currentUser,
         </div>
         <div class="item-meta">
           ${d.description?`<span>${escHtml(d.description)}</span>`:''}
-          ${d.fileUrl?`<a href="${d.fileUrl}" target="_blank" class="btn-link" style="font-size:11px" onclick="event.stopPropagation()">📎 View File</a>`:''}
+          ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:11px" onclick="event.stopPropagation()">📎 View File</a>`:''}
           ${d.createdAt?`<span style="font-size:11px;color:var(--text-muted)">${new Date(d.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
         </div>
       </div>`).join('')}</div>`;
@@ -9587,11 +9625,11 @@ window.renderDocCollection = function(container, collection, title, currentUser,
           <select id="gb-bucket">${GOV_BUCKETS.map(b=>`<option value="${b.collection}" ${b.collection===collection?'selected':''}>${b.label}</option>`).join('')}</select>
         </div>
       </div>
-      ${d.fileUrl?`<a href="${d.fileUrl}" target="_blank" class="btn-link" style="font-size:12px;display:block;margin-bottom:8px">📎 View File</a>`:''}
+      ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:12px;display:block;margin-bottom:8px">📎 View File</a>`:''}
     ` : `
       <div style="margin-bottom:10px"><span class="badge ${statusBadge(d.status)}">${d.status||'active'}</span></div>
       <p style="font-size:14px;line-height:1.6;margin-bottom:10px">${escHtml(d.description||'No details.')}</p>
-      ${d.fileUrl?`<a href="${d.fileUrl}" target="_blank" class="btn-link" style="font-size:12px;display:block">📎 View File</a>`:''}
+      ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:12px;display:block">📎 View File</a>`:''}
     `;
     openModal(escHtml(d.title||d.name||'Bidding'), body,
       canManageGov

@@ -248,7 +248,7 @@ window.Notifs = (() => {
   }
 
   // ── Send notification ─────────────────────────
-  async function send(targetUid, { title, body, icon = '🔔', type = 'general', link = null, dedupKey = null } = {}) {
+  async function send(targetUid, { title, body, icon = '🔔', type = 'general', link = null, dedupKey = null, taskId = null } = {}) {
     // If a dedupKey is provided, skip if a notif with that key already exists today
     if (dedupKey) {
       // Single-field query — no composite index required
@@ -260,7 +260,8 @@ window.Notifs = (() => {
       title, body, icon, type, link,
       read:      false,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-      ...(dedupKey ? { dedupKey } : {})
+      ...(dedupKey ? { dedupKey } : {}),
+      ...(taskId ? { taskId } : {})
     };
     await db.collection('notifications').doc(targetUid).collection('items').add(data);
 

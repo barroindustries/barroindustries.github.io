@@ -66,7 +66,16 @@ service cloud.firestore {
       allow read: if isAuth();
       // Self-signup creates its own doc as 'employee'; admins create staff/worker docs.
       allow create: if isAuth() && (
-        isAdmin() || (isOwner(uid) && request.resource.data.role == 'employee')
+        isAdmin() || (
+          isOwner(uid)
+          && request.resource.data.role == 'employee'
+          // Self-signup must not self-assign into a privileged department:
+          // Finance/Design membership grants dept-scoped write access via
+          // isFinanceDept()/isDesignDept() (and Storage claims via syncUserClaims).
+          && request.resource.data.get('department', '') != 'Finance'
+          && request.resource.data.get('department', '') != 'Design'
+          && !request.resource.data.get('departments', []).hasAny(['Finance','Design'])
+        )
       );
       // Owner-first short-circuit: routine self-updates (name/photo/phone/lastSeen)
       // need no role lookup. Privileged fields are frozen unless an admin makes the change.
@@ -190,8 +199,22 @@ service cloud.firestore {
 
     // ── KPI evaluations ────────────────────────────────
     match /kpi_evals/{uid} {
-      allow read: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
-      allow write: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+      // The president's grade lives in the SAME doc as the employee's self-
+      // assessment. The owner may write their self-assessment but must NOT be able
+      // to forge/inflate the president's grade — freeze the president-* fields for
+      // non-admins. Only finance/admin (and the president) may write them.
+      function presFieldsUntouchedOnUpdate() {
+        return !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['presidentGrade','presidentNotes','presidentImprovements','presidentUpdatedAt','presidentGradeFromTasks','presidentScoreTaskCount']);
+      }
+      function presFieldsAbsentOnCreate() {
+        return !request.resource.data.keys()
+          .hasAny(['presidentGrade','presidentNotes','presidentImprovements','presidentUpdatedAt','presidentGradeFromTasks','presidentScoreTaskCount']);
+      }
+      allow read:   if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+      allow create: if isAuth() && (isFinanceOrAdmin() || (isOwner(uid) && presFieldsAbsentOnCreate()));
+      allow update: if isAuth() && (isFinanceOrAdmin() || (isOwner(uid) && presFieldsUntouchedOnUpdate()));
+      allow delete: if isAuth() && isFinanceOrAdmin();
     }
 
     // ── KPI targets ────────────────────────────────────
@@ -293,11 +316,11 @@ service cloud.firestore {
           return get(/databases/$(database)/documents/submissions/$(docId)).data;
         }
         allow read: if isAuth() && (
-          parentSub().createdBy == request.auth.uid || isAdmin()
+          parentSub().get('createdBy','') == request.auth.uid || isAdmin()
         );
         allow create: if isAuth()
           && request.resource.data.authorId == request.auth.uid
-          && (parentSub().createdBy == request.auth.uid || isAdmin());
+          && (parentSub().get('createdBy','') == request.auth.uid || isAdmin());
         allow update, delete: if isAuth() && (
           resource.data.authorId == request.auth.uid || isAdmin()
         );

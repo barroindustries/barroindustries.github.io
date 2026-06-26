@@ -1083,7 +1083,7 @@ function requestBuilderState(frame, timeoutMs = 4000) {
   return new Promise((resolve, reject) => {
     if (!frame || !frame.contentWindow) return reject(new Error('Builder not ready'));
     const to = setTimeout(() => { window.removeEventListener('message', h); reject(new Error('Builder did not respond')); }, timeoutMs);
-    function h(ev) { if (ev.data && ev.data.type === 'QUOTE_STATE') { clearTimeout(to); window.removeEventListener('message', h); resolve(ev.data.payload || {}); } }
+    function h(ev) { if (ev.origin !== window.location.origin) return; if (ev.data && ev.data.type === 'QUOTE_STATE') { clearTimeout(to); window.removeEventListener('message', h); resolve(ev.data.payload || {}); } }
     window.addEventListener('message', h);
     try { frame.contentWindow.postMessage({ type: 'REQUEST_STATE' }, '*'); } catch (e) { clearTimeout(to); window.removeEventListener('message', h); reject(e); }
   });
@@ -3837,20 +3837,29 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
           });
         }
         await batch.commit();
-        // Also write payroll total to ledger so finance analytics picks it up
+        // Post per-employee debit entries to the canonical `ledger` collection,
+        // keyed by the same PAY-{month}-{uid} refNumber the Finance → Payroll tab uses,
+        // so BOTH payroll paths converge on one idempotent representation that the
+        // Finance, President and Analytics dashboards all read. (Previously this wrote a
+        // single aggregate to the orphaned `ledger_entries` collection that no dashboard
+        // except Analytics read — a split-brain.) Upsert = re-runnable.
         const monthLabel2 = new Date(month+'-02').toLocaleString('en-PH',{month:'long',year:'numeric'});
-        const totalPayroll2 = empPayloads.reduce((s, { net2 }) => s + net2, 0);
-        await db.collection('ledger_entries').add({
-          type: 'payslip', description: `Payroll — ${monthLabel2}`,
-          amount: totalPayroll2, dept: 'Payroll',
-          date: month + '-01',
-          payPeriod: month, periodLabel: monthLabel2,
-          preparedBy: currentUser.displayName || currentUser.email,
-          grossPay: totalPayroll2, netPay: totalPayroll2,
-          workerName: 'All Employees',
-          recordedBy: currentUser.uid,
-          createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
+        for (const { doc, u2, net2, kpi2, att2 } of empPayloads) {
+          const amt2  = +((net2 * (kpi2*0.7 + att2*0.3)) || 0);   // KPI/attendance-weighted final pay
+          const lref2 = `PAY-${month}-${doc.id}`;
+          const ex2   = await db.collection('ledger').where('refNumber','==',lref2).limit(1).get().catch(()=>({docs:[]}));
+          const entry2 = {
+            date: month + '-01', type: 'debit',
+            description: `Payslip — ${u2.displayName||u2.email} (${monthLabel2})`,
+            amount: amt2, category: 'Payroll Expense', source: 'Finance',
+            refNumber: lref2,
+            addedBy: currentUser.uid,
+            addedByName: currentUser.displayName || currentUser.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          };
+          if (ex2.docs.length) await ex2.docs[0].ref.update({ amount: amt2, description: entry2.description });
+          else await db.collection('ledger').add(entry2);
+        }
         // Notify all employees in parallel
         await Promise.all(empPayloads.map(({ doc }) =>
           Notifs.send(doc.id, {
@@ -5783,7 +5792,7 @@ async function renderAnalytics() {
     cg('an_expenses', db.collection('expenses')),
     cg('an_cas', db.collection('cash_advances')),
     cg('an_payslips', db.collection('payslips')),
-    cg('an_ledger', db.collection('ledger_entries')),
+    cg('an_ledger', db.collection('ledger')),
     cg('an_gov', db.collection('gov_biddings').orderBy('createdAt','desc')),
     cg('an_jobprojects', db.collection('job_projects')),
     cg('an_jobcosts', db.collection('job_costs')),
@@ -5846,7 +5855,7 @@ async function renderAnalytics() {
   `;
 
   const renderOverview = () => {
-    // ── Cash flow (canonical source = ledger_entries) ──
+    // ── Cash flow (canonical source = ledger) ──
     const ledIn  = ym => sum(ledger.filter(l=>l.type==='credit'&&(l.date||'').slice(0,7)===ym), l=>l.amount);
     const ledOut = ym => sum(ledger.filter(l=>(l.type==='debit'||l.type==='payslip')&&(l.date||'').slice(0,7)===ym), l=>l.amount);
     // sales-based revenue fallback for months where the ledger is still sparse (accepted quotes by createdAt month)
@@ -6882,7 +6891,7 @@ function renderHelp() {
   const bsOnly   = isBrilliantOnly();
   const extPartner = isPartner(); // external partner role
   const isAnyPartner = bsOnly || extPartner;
-  const pres     = isPresident() || currentRole === 'manager';
+  const pres     = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
   const section  = isAnyPartner ? 'partner' : pres ? 'admin' : 'employee';
 
   const sections = {
@@ -7251,6 +7260,7 @@ function renderHelpPartner() {
 
 // ── Quote Builder iframe → Firestore bridge ───────
 window.addEventListener('message', async (e) => {
+  if (e.origin !== window.location.origin) return;  // only trust our own quote-builder iframe — never act on forged cross-origin messages
   const { type, payload } = e.data || {};
   if (!payload || !currentUser || !db) return;
   if (type !== 'QUOTE_FILED' && type !== 'QUOTE_APPROVAL_REQUESTED') return;
