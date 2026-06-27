@@ -5223,6 +5223,7 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
       </div>
     </div>
     <hr class="divider"/>
+    <div class="table-wrap"><div style="min-width:420px">
     <div style="display:grid;grid-template-columns:130px 1fr 60px 60px 100px 34px;gap:5px;margin-bottom:6px">
       <div style="font-size:11px;font-weight:700;color:var(--text-muted)">CATEGORY</div>
       <div style="font-size:11px;font-weight:700;color:var(--text-muted)">DESCRIPTION</div>
@@ -5232,6 +5233,7 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
       <div></div>
     </div>
     <div id="bkq-lines"></div>
+    </div></div>
     <button class="btn-secondary btn-sm" id="bkq-add-line" style="margin-top:6px;margin-bottom:8px">+ Add Line</button>
     <div id="bkq-totals" class="quote-total" style="text-align:right;font-size:13px;line-height:1.8"></div>
     <hr class="divider"/>
@@ -7387,6 +7389,7 @@ function renderBSQuoteBuilder(container, currentUser, currentRole) {
   .bs-qno-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;}
   .bs-qno-box{background:#cfd8dc;border-radius:7px;padding:8px 14px;font-size:15px;font-weight:800;color:#1a237e;letter-spacing:.8px;white-space:nowrap;align-self:flex-end;}
   .bs-add-panel{display:grid;grid-template-columns:2fr 70px 70px 70px 80px 120px auto;gap:8px;align-items:end;background:#eceff1;border-radius:9px;padding:12px 14px;margin-bottom:10px;}
+  @media (max-width:640px){ .bs-add-panel{grid-template-columns:1fr 1fr;} .bs-add-panel>*:first-child{grid-column:1/-1;} }
   .bs-search-wrap{position:relative;}
   .bs-search-dropdown{position:absolute;top:calc(100% + 2px);left:0;right:0;background:var(--surface);border:1.5px solid #37474f;border-radius:7px;z-index:400;max-height:260px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.15);display:none;}
   .bs-search-dropdown.open{display:block;}
@@ -7960,7 +7963,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
               <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${ts}</div>
             </td>
             <td style="white-space:nowrap;display:flex;gap:6px;flex-wrap:wrap">
-              ${canSeeAll&&(status==='pending_approval'||status==='pending_review'||status==='sent')?`
+              ${isPrivileged&&(status==='pending_approval'||status==='pending_review'||status==='sent')?`
                 <button class="btn-primary btn-sm bs-approve-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">✅ Approve</button>
                 <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">❌ Reject</button>
                 <button class="btn-secondary btn-sm bs-edit-return-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">✎ Edit &amp; Return</button>
