@@ -11690,6 +11690,24 @@ const PURCH_STAT = {
   received: { label: 'Received', badge: 'badge-green' }
 };
 
+// Export all purchase requests (one row per PR) to CSV for records / finance.
+window.exportPurchasesCSV = function() {
+  const prs = window._purchPRs || [];
+  const tot = p => p.total != null ? p.total : (typeof purchTotal === 'function' ? purchTotal(p.items) : 0);
+  const dt = p => p.convertedAt?.toDate ? window.bizDate(p.convertedAt.toDate()) : (p.createdAt?.toDate ? window.bizDate(p.createdAt.toDate()) : '');
+  window.exportCSV('purchase-requests', prs, [
+    { key:'prNo', label:'PO No', get:p=>p.prNo||p.rfqNo||'' },
+    { key:'date', label:'Date', get:dt },
+    { key:'supplier', label:'Supplier', get:p=>p.supplier||'' },
+    { key:'title', label:'Title', get:p=>p.title||'' },
+    { key:'requestingDept', label:'Requesting Dept', get:p=>p.requestingDept||'' },
+    { key:'status', label:'Status', get:p=>p.status||'pending' },
+    { key:'total', label:'Total', get:tot },
+    { key:'submittedToFinance', label:'Sent to Finance', get:p=>p.submittedToFinance?'yes':'no' },
+    { key:'recordedToFinance', label:'Recorded', get:p=>p.recordedToFinance?'yes':'no' }
+  ]);
+};
+
 async function renderPurchaseRequests(content, currentUser, currentRole, opts = {}) {
   const canEdit = !opts.viewOnly && canEditDept('Purchasing');
   const canRecord = !!opts.financeView && isFinancePriv(); // Finance/admin may post to the books
@@ -11706,7 +11724,9 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
   const bySupplier = {}; prs.forEach(p=>{ const k=(p.supplier||'—').trim()||'—'; bySupplier[k]=(bySupplier[k]||0)+totOf(p); });
   const topSup = Object.entries(bySupplier).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const supMax = topSup.reduce((m,[,v])=>Math.max(m,v),0)||1;
+  window._purchPRs = prs; // for CSV export
   const summary = prs.length ? `
+    <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="btn-secondary btn-sm" onclick="window.exportPurchasesCSV()" title="Export all purchase requests to CSV">⬇ CSV</button></div>
     <div class="kpi-row" style="margin-bottom:10px">
       <div class="kpi-card"><div class="kpi-label">Purchase Requests</div><div class="kpi-value">${prs.length}</div></div>
       <div class="kpi-card warn"><div class="kpi-label">Open (not received)</div><div class="kpi-value" style="font-size:15px">₱${fmt(openSpend)}</div></div>
