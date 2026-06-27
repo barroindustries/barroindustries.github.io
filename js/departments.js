@@ -1355,6 +1355,8 @@ async function postCDJToLedger(cdjId, e) {
     date: e.date || today(), type: 'debit',
     description: `Disbursement — ${e.payee||''}${e.reference?` (${e.reference})`:''}`,
     amount: expense, category, refNumber: ref, source: 'Cash Disbursement',
+    // input VAT (reclaimable) carried through for the Net VAT Payable computation
+    inputVat: e.vatAmount || 0,
     addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
@@ -2561,6 +2563,10 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
     if (e.vatAmount != null) return s + e.vatAmount;
     const amt = e.amount||0; return s + (amt - amt/1.12);
   }, 0);
+  // Input VAT = reclaimable VAT on VATable purchases/disbursements (stored as
+  // inputVat on the expense ledger rows). Net VAT Payable = output − input.
+  const inputVat = expense.reduce((s,e)=>s+(e.inputVat||0),0);
+  const netVat = outputVat - inputVat;
   const rangeBtn = (r,t)=>`<button class="subtab-btn ${range===r?'active':''}" onclick="renderFinancialReports(document.getElementById('fin-content'),window.currentUser,window.currentRole,'${r}')">${t}</button>`;
 
   container.innerHTML = `
@@ -2598,8 +2604,10 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
       <div class="card-header"><h3>🧾 Tax / VAT Reference</h3></div>
       <div class="card-body">
         <div style="display:flex;justify-content:space-between;padding:6px 0"><span>Sales Revenue (recorded total)</span><strong>₱${fmt(sales)}</strong></div>
-        <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border)"><span>Output VAT (per sale's VAT treatment)</span><strong>₱${fmt(outputVat)}</strong></div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5">Output VAT is summed from each sale's recorded VAT (inclusive / exclusive / exempt) — not a flat estimate. Input VAT on purchases is not yet netted here. Confirm with your accountant before BIR filing; attach official BIR forms via <em>Taxes</em>.</div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border)"><span>Output VAT (on sales)</span><strong>₱${fmt(outputVat)}</strong></div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border)"><span>Less: Input VAT (on purchases)</span><strong style="color:var(--success)">−₱${fmt(inputVat)}</strong></div>
+        <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid var(--border);font-weight:800"><span>Net VAT ${netVat>=0?'Payable':'Creditable'}</span><strong style="color:${netVat>=0?'var(--danger)':'var(--success)'}">₱${fmt(Math.abs(netVat))}</strong></div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5">Output VAT is summed per sale's VAT treatment (inclusive / exclusive / exempt); input VAT from VATable purchases is netted off. Confirm with your accountant before BIR filing; attach official BIR forms via <em>Taxes</em>.</div>
       </div>
     </div>
   `;
@@ -2914,6 +2922,12 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
         <div class="form-group"><label>Debit: Sundry Account</label><input id="cdj-sundry-acct" placeholder="e.g. Utilities Expense"/></div>
         <div class="form-group"><label>Debit: Sundry Amount (₱)</label><input id="cdj-sundry-amt" type="number" step="0.01" value="0" inputmode="decimal"/></div>
       </div>
+      <div class="form-group"><label>Input VAT</label>
+        <select id="cdj-vat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          <option value="inclusive" selected>VATable — 12% input VAT in the cash amount (claimable)</option>
+          <option value="exempt">No input VAT (exempt / non-VAT)</option>
+        </select>
+      </div>
     `, `<button class="btn-primary" id="save-cdj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
     document.getElementById('save-cdj-btn').addEventListener('click', async () => {
@@ -2921,6 +2935,10 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
       const creditCash = parseFloat(document.getElementById('cdj-cash').value)||0;
       if (!payee) { Notifs.showToast('Enter a payee name.','error'); return; }
       if (!creditCash) { Notifs.showToast('Enter the cash amount disbursed.','error'); return; }
+      const _cdjExpenseBase = (parseFloat(document.getElementById('cdj-material').value)||0)
+        + (parseFloat(document.getElementById('cdj-labor').value)||0)
+        + (parseFloat(document.getElementById('cdj-sundry-amt').value)||0);
+      const _cdjInputVat = document.getElementById('cdj-vat').value === 'exempt' ? 0 : window.vatSplit(_cdjExpenseBase,'inclusive').vat;
       const cdjData = {
         reference:         document.getElementById('cdj-ref').value.trim(),
         date:              document.getElementById('cdj-date').value,
@@ -2931,6 +2949,7 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
         debitLabor:        parseFloat(document.getElementById('cdj-labor').value)||0,
         debitSundryAcct:   document.getElementById('cdj-sundry-acct').value.trim(),
         debitSundryAmount: parseFloat(document.getElementById('cdj-sundry-amt').value)||0,
+        vatAmount: _cdjInputVat, vatTreatment: document.getElementById('cdj-vat').value,
         addedBy:    currentUser.uid,
         addedByName: window.userProfile?.displayName || currentUser.email,
         createdAt:  firebase.firestore.FieldValue.serverTimestamp()
@@ -11509,12 +11528,27 @@ function recordPurchaseDisbursement(p, currentUser, onDone) {
       </select></div>
     </div>
     <div class="form-group" id="rec-sundry-wrap" style="display:none"><label>Sundry Account Name</label><input id="rec-sundry" placeholder="e.g. Office Supplies Expense"/></div>
+    <div class="form-group"><label>Input VAT</label>
+      <select id="rec-vat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+        <option value="inclusive" selected>VATable — 12% input VAT in the amount (claimable)</option>
+        <option value="exempt">No input VAT (exempt / non-VAT supplier)</option>
+      </select>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px"><span id="rec-vat-preview"></span></div>
+    </div>
   `, `<button class="btn-primary" id="rec-save">Post Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   const acctSel = document.getElementById('rec-acct');
   acctSel.addEventListener('change', () => {
     document.getElementById('rec-sundry-wrap').style.display = acctSel.value === 'sundry' ? '' : 'none';
   });
+  const recVatPreview = () => {
+    const amt = parseFloat(document.getElementById('rec-amt').value) || 0;
+    const vat = document.getElementById('rec-vat').value === 'exempt' ? 0 : window.vatSplit(amt,'inclusive').vat;
+    document.getElementById('rec-vat-preview').textContent = vat > 0 ? `Input VAT ₱${fmt(vat)} reclaimable` : 'No input VAT';
+  };
+  document.getElementById('rec-amt').addEventListener('input', recVatPreview);
+  document.getElementById('rec-vat').addEventListener('change', recVatPreview);
+  recVatPreview();
 
   document.getElementById('rec-save').addEventListener('click', async () => {
     const reference = document.getElementById('rec-ref').value.trim();
@@ -11529,6 +11563,8 @@ function recordPurchaseDisbursement(p, currentUser, onDone) {
         const dupe = await db.collection('cash_disbursement_journal').where('reference', '==', reference).limit(1).get().catch(() => ({ empty: true }));
         if (!dupe.empty && !confirm(`A disbursement with reference "${reference}" already exists. Post another?`)) { saveBtn.disabled = false; return; }
       }
+      const vatTreatment = document.getElementById('rec-vat').value;
+      const inputVat = vatTreatment === 'exempt' ? 0 : window.vatSplit(amt,'inclusive').vat;
       const cdjData = {
         reference, date: document.getElementById('rec-date').value, payee,
         creditCash: amt,
@@ -11537,6 +11573,7 @@ function recordPurchaseDisbursement(p, currentUser, onDone) {
         debitLabor:        0,
         debitSundryAcct:   acct === 'sundry' ? document.getElementById('rec-sundry').value.trim() : '',
         debitSundryAmount: acct === 'sundry' ? amt : 0,
+        vatAmount: inputVat, vatTreatment,
         purchaseRef:       p.id,
         addedBy: currentUser.uid,
         addedByName: window.userProfile?.displayName || currentUser.email,
