@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SOP editor harness</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <style> body{background:#0f1117;padding:20px;max-width:820px;margin:0 auto;} </style>
+</head>
+<body>
+  <div id="sales-content"></div>
+  <script>
+    // ---- stubs so departments.js runtime calls work without Firebase/login ----
+    window.escHtml = function(s){ return (s==null?'':String(s)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
+    window.isPresident = function(){ return true; };           // show the Edit button
+    window.currentUser = { email:'neilbarro870@gmail.com' };
+    let _saved = null;
+    window.db = {
+      collection(){ return { doc(){ return {
+        get(){ return Promise.resolve({ exists:false }); },          // no stored doc → default seed
+        set(data){ _saved = data; console.log('SAVED →', JSON.stringify({intro:data.intro, steps:data.steps.length, rules:data.rules.length})); return Promise.resolve(); }
+      }; } }; }
+    };
+    window.firebase = { firestore: { FieldValue: { serverTimestamp(){ return new Date(); } } } };
+    window.Notifs = { showToast(m){ console.log('TOAST →', m); } };
+  </script>
+  <script src="js/departments.js"></script>
+  <script> renderSalesSOP(document.getElementById('sales-content')); </script>
+</body>
+</html>

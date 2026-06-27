@@ -619,6 +619,16 @@ tr:hover td{background:#fafbff;}
   <!-- Calculator panel (shown after selecting product) -->
   <div class="calc-panel" id="calcPanel">
     <div class="calc-title" id="calcTitle">⚙ Configure Item</div>
+    <div class="fg" id="measureUnitRow" style="max-width:200px;margin-bottom:8px;display:none;">
+      <label>Measurement unit</label>
+      <select id="measureUnit" onchange="onMeasureUnitChange()">
+        <option value="mm">Millimeters (mm)</option>
+        <option value="cm">Centimeters (cm)</option>
+        <option value="m">Meters (m)</option>
+        <option value="in">Inches (in)</option>
+        <option value="ft">Feet (ft)</option>
+      </select>
+    </div>
     <div class="calc-grid" id="calcInputs"></div>
     <div id="specGroups"></div>
     <div class="calc-price-row">
@@ -941,6 +951,64 @@ let items=[], currentView='client', currentCo='BK', qnoMode='auto';
 let currentCatFilter='all', focusedSearchIdx=-1;
 let DB={products:[],categories:[],laborRoles:[],constants:{}};
 let selectedProduct=null;
+// Measurement unit handling — all dimensions are stored/priced in mm internally.
+// Imperial units (in/ft) display as fractions to the nearest 1/16".
+let measureUnit='mm';
+let dimsMm={}, runsVal=1;
+function fmtNum(v,dec){ const n=parseFloat(Number(v).toFixed(dec)); return n.toString(); }
+function gcdInt(a,b){ return b?gcdInt(b,a%b):a; }
+// inches → "35 7/16" / "35" / "7/16" (nearest 1/16)
+function inchToFracStr(inch){
+  let s=Math.round(inch*16), whole=Math.floor(s/16), rem=s-whole*16;
+  if(rem===0) return `${whole}`;
+  const g=gcdInt(rem,16);
+  return whole? `${whole} ${rem/g}/${16/g}` : `${rem/g}/${16/g}`;
+}
+// "35 7/16" / "35-7/16" / "7/16" / "35.5" → inches
+function strToInch(str){
+  str=String(str).trim().replace(/["]/g,'').replace(/in\b/i,'').replace('-',' ').trim();
+  if(!str) return 0;
+  let m=str.match(/^(\d+(?:\.\d+)?)\s+(\d+)\/(\d+)$/);
+  if(m) return parseFloat(m[1])+(+m[2])/(+m[3]);
+  m=str.match(/^(\d+)\/(\d+)$/);
+  if(m) return (+m[1])/(+m[2]);
+  const v=parseFloat(str); return isNaN(v)?0:v;
+}
+const mmToInchStr = mm => inchToFracStr(mm/25.4);
+const inchStrToMm = str => strToInch(str)*25.4;
+// mm → "2' 11 7/16\""
+function mmToFeetStr(mm){
+  let s=Math.round(mm/25.4*16);            // total sixteenths of an inch
+  let feet=Math.floor(s/192); s-=feet*192;
+  let inchWhole=Math.floor(s/16), rem=s-inchWhole*16;
+  let inchPart;
+  if(rem===0) inchPart=`${inchWhole}"`;
+  else { const g=gcdInt(rem,16); inchPart=inchWhole?`${inchWhole} ${rem/g}/${16/g}"`:`${rem/g}/${16/g}"`; }
+  return `${feet}' ${inchPart}`;
+}
+// "2' 11 7/16\"" / "2'" / "30" (bare number = feet) → mm
+function feetStrToMm(str){
+  str=String(str).trim();
+  const fm=str.match(/^\s*(\d+(?:\.\d+)?)\s*'/);
+  if(fm){
+    const feet=parseFloat(fm[1]);
+    const rest=str.slice(fm[0].length).trim();
+    return (feet*12 + (rest?strToInch(rest):0))*25.4;
+  }
+  // No feet mark: a fraction or " means inches; a plain number means feet.
+  if(/[\/"]/.test(str)) return strToInch(str)*25.4;
+  const v=parseFloat(str); return isNaN(v)?0:v*304.8;
+}
+const MEASURE_UNITS={
+  mm:{f:1,dec:0,step:10,min:10},
+  cm:{f:10,dec:1,step:1,min:1},
+  m :{f:1000,dec:3,step:0.1,min:0.1},
+  in:{text:true, toStr:mmToInchStr, toMm:inchStrToMm, suffix:'"', ph:'e.g. 35 7/16'},
+  ft:{text:true, toStr:mmToFeetStr, toMm:feetStrToMm, suffix:'', ph:`e.g. 2' 11 7/16"`},
+};
+function dispVal(mm){ const u=MEASURE_UNITS[measureUnit]; return u.text? u.toStr(mm) : fmtNum(mm/u.f,u.dec); }
+function valToMm(str){ const u=MEASURE_UNITS[measureUnit]; return u.text? u.toMm(str) : parseFloat(str||0)*u.f; }
+function attrEsc(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;'); }
 let termsContent={}, termsEnabled={
   tc_completion:true,tc_payment:true,tc_warranty:true,
   tc_scope:true,tc_validity:true,tc_site:true,tc_acceptance:true
@@ -1371,41 +1439,23 @@ function buildCalcPanel(p){
   document.getElementById('calcUnit').value=p.unit||'pc';
   document.getElementById('calcQty').value=1;
 
-  // Dimension inputs based on formula type
-  let inputsHtml='';
+  // Seed dimension values (always held in mm); the UI converts to the chosen unit.
+  dimsMm={}; runsVal=1;
+  const dd=p.defaultDimensions||{};
   if(p.formulaType==='per_length'){
-    const dW=p.defaultDimensions.W||900;
-    inputsHtml+=`<div class="fg"><label>Width / Length (mm)</label>
-      <input type="number" id="cW" value="${dW}" min="100" step="10" oninput="recomputePrice()"></div>`;
-    if(p.defaultDimensions.D){
-      inputsHtml+=`<div class="fg"><label>Depth (mm)</label>
-        <input type="number" id="cD" value="${p.defaultDimensions.D}" min="100" step="10" oninput="recomputePrice()"></div>`;
-    }
-    if(p.defaultDimensions.H){
-      inputsHtml+=`<div class="fg"><label>Height (mm)</label>
-        <input type="number" id="cH" value="${p.defaultDimensions.H}" min="100" step="10" oninput="recomputePrice()"></div>`;
-    }
+    dimsMm.W=dd.W||900;
+    if(dd.D) dimsMm.D=dd.D;
+    if(dd.H) dimsMm.H=dd.H;
   } else if(p.formulaType==='per_area'){
-    const dW=p.defaultDimensions.W||1000;
-    const dH=p.defaultDimensions.H||1000;
-    inputsHtml+=`<div class="fg"><label>Width (mm)</label>
-      <input type="number" id="cW" value="${dW}" min="100" step="10" oninput="recomputePrice()"></div>`;
-    inputsHtml+=`<div class="fg"><label>Height (mm)</label>
-      <input type="number" id="cH" value="${dH}" min="100" step="10" oninput="recomputePrice()"></div>`;
-  } else if(p.formulaType==='per_run'){
-    inputsHtml+=`<div class="fg"><label>Number of Runs</label>
-      <input type="number" id="cRuns" value="1" min="1" step="1" oninput="recomputePrice()"></div>`;
-  } else {
-    // Fixed — show default dimensions read-only
-    if(p.defaultDimensions&&Object.keys(p.defaultDimensions).length){
-      ['W','D','H'].forEach(k=>{
-        if(p.defaultDimensions[k])
-          inputsHtml+=`<div class="fg"><label>${k==='W'?'Width':k==='D'?'Depth':'Height'} (mm)</label>
-            <input type="number" id="c${k}" value="${p.defaultDimensions[k]}" min="100" step="10" oninput="recomputePrice()"></div>`;
-      });
-    }
+    dimsMm.W=dd.W||1000;
+    dimsMm.H=dd.H||1000;
+  } else if(p.formulaType!=='per_run'){
+    ['W','D','H'].forEach(k=>{ if(dd[k]) dimsMm[k]=dd[k]; });
   }
-  document.getElementById('calcInputs').innerHTML=inputsHtml;
+  renderDimInputs(p);
+  // The measurement-unit switch only applies when there are real dimensions.
+  document.getElementById('measureUnitRow').style.display=
+    (p.formulaType==='per_run'||!Object.keys(dimsMm).length)?'none':'';
 
   // Spec selectors
   let specsHtml='';
@@ -1429,6 +1479,45 @@ function buildCalcPanel(p){
   recomputePrice();
 }
 
+// Build the dimension inputs for the current product in the chosen measurement unit.
+function renderDimInputs(p){
+  const u=MEASURE_UNITS[measureUnit];
+  const lab=measureUnit;
+  const fld=(id,labelText,mm)=> u.text
+    ? `<div class="fg"><label>${labelText} (${lab})</label>
+        <input type="text" id="${id}" value="${attrEsc(dispVal(mm))}" placeholder="${attrEsc(u.ph)}" oninput="onDimInput('${id}')"></div>`
+    : `<div class="fg"><label>${labelText} (${lab})</label>
+        <input type="number" id="${id}" value="${dispVal(mm)}" min="${u.min}" step="${u.step}" oninput="onDimInput('${id}')"></div>`;
+  let html='';
+  if(p.formulaType==='per_length'){
+    html+=fld('cW','Width / Length',dimsMm.W);
+    if('D' in dimsMm) html+=fld('cD','Depth',dimsMm.D);
+    if('H' in dimsMm) html+=fld('cH','Height',dimsMm.H);
+  } else if(p.formulaType==='per_area'){
+    html+=fld('cW','Width',dimsMm.W);
+    html+=fld('cH','Height',dimsMm.H);
+  } else if(p.formulaType==='per_run'){
+    html+=`<div class="fg"><label>Number of Runs</label>
+      <input type="number" id="cRuns" value="${runsVal}" min="1" step="1" oninput="onDimInput('cRuns')"></div>`;
+  } else {
+    ['W','D','H'].forEach(k=>{ if(k in dimsMm) html+=fld('c'+k, k==='W'?'Width':k==='D'?'Depth':'Height', dimsMm[k]); });
+  }
+  document.getElementById('calcInputs').innerHTML=html;
+}
+
+function onDimInput(id){
+  const el=document.getElementById(id); if(!el) return;
+  if(id==='cRuns'){ runsVal=parseFloat(el.value||1); recomputePrice(); return; }
+  dimsMm[id.slice(1)]=valToMm(el.value);
+  recomputePrice();
+}
+
+function onMeasureUnitChange(){
+  measureUnit=document.getElementById('measureUnit').value;
+  if(selectedProduct) renderDimInputs(selectedProduct);
+  recomputePrice();
+}
+
 function computePrice(p){
   if(!p) return 0;
   let price = p.basePrice||0;
@@ -1436,18 +1525,18 @@ function computePrice(p){
   const matMult = consts.materialPriceIndexMultiplier||1.0;
 
   if(p.formulaType==='per_length' && p.formula){
-    const W = parseFloat(document.getElementById('cW')?.value||p.defaultDimensions.W||900);
+    const W = dimsMm.W ?? p.defaultDimensions.W ?? 900;
     const base = p.formula.baseLengthMm||900;
     const ppm = p.formula.pricePerExtraMm||0;
     const extra = Math.max(0, W-base);
     price = p.basePrice + extra*ppm;
   } else if(p.formulaType==='per_area' && p.formula){
-    const W = parseFloat(document.getElementById('cW')?.value||p.defaultDimensions.W||1000);
-    const H = parseFloat(document.getElementById('cH')?.value||p.defaultDimensions.H||1000);
+    const W = dimsMm.W ?? p.defaultDimensions.W ?? 1000;
+    const H = dimsMm.H ?? p.defaultDimensions.H ?? 1000;
     const sqm = (W*H)/1e6;
     price = sqm * (p.formula.pricePerSqm||0);
   } else if(p.formulaType==='per_run' && p.formula){
-    const runs = parseFloat(document.getElementById('cRuns')?.value||1);
+    const runs = runsVal||1;
     price = (p.formula.pricePerRun||p.basePrice) * runs;
   }
 
@@ -1478,15 +1567,15 @@ function recomputePrice(){
   // Formula hint
   let hint='';
   if(p.formulaType==='per_length'&&p.formula){
-    const W=parseFloat(document.getElementById('cW')?.value||p.defaultDimensions.W||900);
+    const W=dimsMm.W ?? p.defaultDimensions.W ?? 900;
     const extra=Math.max(0,W-(p.formula.baseLengthMm||900));
-    hint=`Base ₱${p.basePrice.toLocaleString()} + ${extra}mm × ₱${p.formula.pricePerExtraMm}/mm`;
+    hint=`Base ₱${p.basePrice.toLocaleString()} + ${fmtNum(extra,0)}mm × ₱${p.formula.pricePerExtraMm}/mm`;
   } else if(p.formulaType==='per_area'&&p.formula){
-    const W=parseFloat(document.getElementById('cW')?.value||1000);
-    const H=parseFloat(document.getElementById('cH')?.value||1000);
+    const W=dimsMm.W ?? 1000;
+    const H=dimsMm.H ?? 1000;
     hint=`${(W/1000).toFixed(2)}m × ${(H/1000).toFixed(2)}m = ${((W*H)/1e6).toFixed(3)} sqm × ₱${(p.formula.pricePerSqm||0).toLocaleString()}/sqm`;
   } else if(p.formulaType==='per_run'&&p.formula){
-    const runs=parseFloat(document.getElementById('cRuns')?.value||1);
+    const runs=runsVal||1;
     hint=`${runs} run(s) × ₱${(p.formula.pricePerRun||p.basePrice).toLocaleString()} per run`;
   }
   document.getElementById('calcHint').textContent=hint;
@@ -1498,17 +1587,12 @@ function dismissCalc(){
 }
 
 function getDimString(p){
-  const types={'per_length':'cW','per_area':'cW','fixed':'cW'};
-  const W=document.getElementById('cW')?.value;
-  const D=document.getElementById('cD')?.value;
-  const H=document.getElementById('cH')?.value;
-  const runs=document.getElementById('cRuns')?.value;
-  if(p.formulaType==='per_run') return runs?`${runs} run(s)`:'';
+  if(p.formulaType==='per_run') return runsVal?`${runsVal} run(s)`:'';
+  const u=MEASURE_UNITS[measureUnit];
   const parts=[];
-  if(W) parts.push(`W${W}`);
-  if(D) parts.push(`D${D}`);
-  if(H) parts.push(`H${H}`);
-  return parts.join(' × ')+(parts.length?' mm':'');
+  ['W','D','H'].forEach(k=>{ if(k in dimsMm) parts.push(`${k}${dispVal(dimsMm[k])}${u.text?(u.suffix||''):''}`); });
+  if(!parts.length) return '';
+  return parts.join(' × ')+(u.text?'':' '+measureUnit);
 }
 
 function getSpecString(p){
