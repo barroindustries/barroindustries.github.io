@@ -1770,10 +1770,32 @@ async function renderProductDatabase() {
 }
 
 // ── Navigate ──────────────────────────────────────
+// Top-bar back button — shows only when there's somewhere to go back to.
+function updateNavBackBtn() {
+  const b = document.getElementById('nav-back-btn');
+  if (b) b.style.display = (window._navHistory && window._navHistory.length) ? '' : 'none';
+}
+window.navBack = function() {
+  window._navHistory = window._navHistory || [];
+  const prev = window._navHistory.pop();
+  if (prev) { window._navGoingBack = true; try { navigateTo(prev); } finally { window._navGoingBack = false; } }
+  updateNavBackBtn();
+};
+
 function navigateTo(page) {
+  // Maintain a lightweight nav history for the top-bar back button (additive,
+  // never throws). Skip pushes during a back-navigation so we don't loop.
+  try {
+    if (!window._navGoingBack && window.currentPage && window.currentPage !== page) {
+      window._navHistory = window._navHistory || [];
+      window._navHistory.push(window.currentPage);
+      if (window._navHistory.length > 25) window._navHistory.shift();
+    }
+  } catch (_) {}
   currentPage = page;
   window.currentPage = page;
   setActiveNav(page);
+  updateNavBackBtn();
   // Close task fullscreen panel if open
   if (typeof window.closeTaskPanel === 'function') window.closeTaskPanel();
   // Tear down the full-screen quote builder when navigating anywhere except back into it
