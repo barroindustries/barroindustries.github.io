@@ -2600,10 +2600,10 @@ async function renderFinanceDashboard() {
     const expenses = expSnap.docs.map(d=>({id:d.id,...d.data()}));
     const pendingExp = expenses.filter(e=>e.status==='pending');
     const pendingExpTotal = pendingExp.reduce((s,e)=>s+(e.amount||0),0);
-    // Expense by category (this month, approved + pending)
-    const monthExp = expenses.filter(e=>finPeriodMatch(e.date, period));
+    // Expense by category — from the LEDGER (single source of truth), so it always
+    // reconciles with the Expense KPI above (payroll, COS, disbursements, approved expenses).
     const byCat = {};
-    monthExp.forEach(e=>{ const k=e.category||'Other'; byCat[k]=(byCat[k]||0)+(e.amount||0); });
+    periodLedger.filter(e=>e.type==='debit').forEach(e=>{ const k=e.category||'Other'; byCat[k]=(byCat[k]||0)+(e.amount||0); });
     const catRows = Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
     const catMax = catRows.reduce((m,[,v])=>Math.max(m,v),0)||1;
     const monthExpTotal = catRows.reduce((s,[,v])=>s+v,0);
@@ -2621,7 +2621,7 @@ async function renderFinanceDashboard() {
         <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="trending-up" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Income (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdIncome)}</div></div>
         <div class="kpi-card red"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="trending-down" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Expense (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdExpense)}</div></div>
         <div class="kpi-card ${mtdNet>=0?'green':'red'}"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="line-chart" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Net Income (${plabel})</div><div class="kpi-value" style="font-size:15px;color:${mtdNet>=0?'var(--success)':'var(--danger)'}">₱${formatNum(mtdNet)}</div></div>
-        <div class="kpi-card warn"><div class="kpi-icon-wrap" style="background:rgba(255,170,0,0.12)"><i data-lucide="banknote" style="stroke:#FFAA00;width:18px"></i></div><div class="kpi-label">Monthly Payroll</div><div class="kpi-value" style="font-size:15px">₱${formatNum(payrollNet)}</div><div class="kpi-sub">${users.length} staff</div></div>
+        <div class="kpi-card warn"><div class="kpi-icon-wrap" style="background:rgba(255,170,0,0.12)"><i data-lucide="banknote" style="stroke:#FFAA00;width:18px"></i></div><div class="kpi-label">Payroll (run-rate)</div><div class="kpi-value" style="font-size:15px">₱${formatNum(payrollNet)}</div><div class="kpi-sub">${users.length} staff · already in Expense</div></div>
         <div class="kpi-card ${pendingExpTotal>0?'accent':''}" style="cursor:pointer" onclick="navigateTo('cash-advances')"><div class="kpi-icon-wrap" style="background:rgba(155,168,255,0.12)"><i data-lucide="receipt" style="stroke:#9BA8FF;width:18px"></i></div><div class="kpi-label">Payables (pending)</div><div class="kpi-value" style="font-size:15px">₱${formatNum(pendingExpTotal)}</div></div>
         <div class="kpi-card ${lowStock>0?'red':''}" style="cursor:pointer" onclick="navigateTo('inventory')"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="boxes" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Low Stock</div><div class="kpi-value">${lowStock}</div></div>
       </div>
@@ -6188,8 +6188,11 @@ async function renderAnalytics() {
     const disbursedThisMonth=ledger.filter(l=>l.type==='payslip'&&inMonth(l)).reduce((s,l)=>s+(l.amount||0),0);
     const caTotal=cas.filter(a=>a.status==='approved').reduce((s,a)=>s+(a.amount||0),0);
     const caPending=cas.filter(a=>a.status==='pending').length;
-    const totalExp=expenses.filter(e=>e.status==='approved').reduce((s,e)=>s+(e.amount||0),0);
-    const expThisMonth=expenses.filter(e=>e.status==='approved'&&inMonth(e)).reduce((s,e)=>s+(e.amount||0),0);
+    // Expenses come from the ledger (single source of truth) — approved expenses,
+    // payroll, COS and disbursements are all posted there.
+    const ledDebits=ledger.filter(l=>l.type==='debit');
+    const totalExp=ledDebits.reduce((s,l)=>s+(l.amount||0),0);
+    const expThisMonth=ledDebits.filter(l=>inMonth(l)).reduce((s,l)=>s+(l.amount||0),0);
     const payslipsThisMonth=payslips.filter(p=>inMonth(p));
     const finIn = ym => sum(ledger.filter(l=>l.type==='credit'&&(l.date||'').slice(0,7)===ym),l=>l.amount);
     const finOut= ym => sum(ledger.filter(l=>(l.type==='debit'||l.type==='payslip')&&(l.date||'').slice(0,7)===ym),l=>l.amount);
@@ -6216,8 +6219,8 @@ async function renderAnalytics() {
         <tbody>${payslipsThisMonth.slice(0,20).map(p=>`<tr><td>${escHtml(p.workerName||'—')}</td><td>${escHtml(p.periodLabel||p.payPeriod||'—')}</td><td>₱${fmt(p.grossPay||0)}</td><td>₱${fmt(p.netPay||0)}</td><td>${escHtml(p.preparedBy||'—')}</td></tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">No payslips this month</td></tr>'}</tbody>
       </table></div></div></div>
     `;
-    const cats=[...new Set(expenses.map(e=>e.category||'Other'))].slice(0,6);
-    const catAmts=cats.map(cat=>expenses.filter(e=>e.category===cat&&e.status==='approved').reduce((s,e)=>s+(e.amount||0),0));
+    const cats=[...new Set(ledDebits.map(l=>l.category||'Other'))].slice(0,6);
+    const catAmts=cats.map(cat=>ledDebits.filter(l=>(l.category||'Other')===cat).reduce((s,l)=>s+(l.amount||0),0));
     new Chart(document.getElementById('fin-exp-chart'),{type:'bar',data:{labels:cats,datasets:[{data:catAmts,backgroundColor:'#0A84FF'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb',font:{size:10}},grid:{display:false}}}}});
     new Chart(document.getElementById('fin-ca-chart'),{type:'doughnut',data:{labels:['Approved','Pending','Rejected'],datasets:[{data:[cas.filter(a=>a.status==='approved').length,cas.filter(a=>a.status==='pending').length,cas.filter(a=>a.status==='rejected').length],backgroundColor:['#30D158','#FF9F0A','#FF453A'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
     new Chart(document.getElementById('fin-net-chart'),{type:'line',data:{labels:months6.map(m=>m.label),datasets:[{label:'Net Income',data:months6.map(m=>finIn(m.ym)-finOut(m.ym)),borderColor:'#30D158',backgroundColor:'#30D15822',fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});

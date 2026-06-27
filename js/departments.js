@@ -82,6 +82,13 @@ async function financeDeleteCascade(collection, docId) {
     if (ca > 0 && d.workerId) await db.collection('worker_profiles').doc(d.workerId).update({ caBalance: firebase.firestore.FieldValue.increment(ca) }).catch(()=>{});
     const ls = await db.collection('ledger').where('refNumber','==',`WPAY-${docId}`).limit(1).get().catch(()=>({docs:[]}));
     if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
+  } else if (collection === 'cash_receipt_journal' || collection === 'cash_disbursement_journal' || collection === 'expenses') {
+    // Remove the mirrored ledger row (CRJ-/CDJ-/EXP-<id>) so deleting the source
+    // entry doesn't leave the books overstated.
+    const prefix = collection === 'cash_receipt_journal' ? 'CRJ' : collection === 'cash_disbursement_journal' ? 'CDJ' : 'EXP';
+    const ls = await db.collection('ledger').where('refNumber','==',`${prefix}-${docId}`).limit(1).get().catch(()=>({docs:[]}));
+    if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
   }
 }
 
@@ -1237,10 +1244,12 @@ async function loadCashContent(currentUser, currentRole, sub) {
     const expenses = snap.docs.map(d => ({id:d.id,...d.data()})).sort((a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     if (!expenses.length) { content.innerHTML = `<div class="empty-state"><div class="empty-icon">💸</div><h4>No expenses yet</h4></div>`; return; }
     content.innerHTML = expenseTable(expenses, isPrivileged);
+    bindExpenseActions(content, currentUser, currentRole, sub);
   } else if (sub === 'all-expenses') {
     const snap = await db.collection('expenses').get();
     const expenses = snap.docs.map(d => ({id:d.id,...d.data()})).sort((a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     content.innerHTML = expenseTable(expenses, true);
+    bindExpenseActions(content, currentUser, currentRole, sub);
   } else if (sub === 'summary') {
     const snap = await db.collection('expenses').get();
     const expenses = snap.docs.map(d => d.data());
@@ -1283,6 +1292,129 @@ function expenseTable(expenses, showActions) {
       </div>
     </div>
   `;
+}
+
+// Post an approved expense into the ledger as a debit (idempotent, keyed EXP-<id>).
+// Shared by the approve action and the one-time backfill. Returns true if it posted.
+async function postExpenseToLedger(expId, e) {
+  const ref = `EXP-${expId}`;
+  const existing = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
+  if (existing.docs.length) return false;
+  await db.collection('ledger').add({
+    date:        e.date || today(),
+    type:        'debit',
+    description: `Expense — ${e.description||''}${e.submittedByName?` (${e.submittedByName})`:''}`,
+    amount:      e.amount || 0,
+    category:    e.category || 'General Expense',
+    refNumber:   ref,
+    source:      'Expense',
+    addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
+    createdAt:   firebase.firestore.FieldValue.serverTimestamp()
+  });
+  if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('ledger'); dbCacheInvalidate('expenses'); }
+  return true;
+}
+
+// New income from a cash receipt = Sales Revenue + Sundry income. AR collections
+// are EXCLUDED — that money was already booked as income when the sale was recorded.
+function crjLedgerIncome(e) { return (e.creditSalesRevenue||0) + (e.creditSundryAmount||0); }
+async function postCRJToLedger(crjId, e) {
+  const ref = `CRJ-${crjId}`;
+  const existing = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
+  if (existing.docs.length) return false;
+  const income = crjLedgerIncome(e);
+  if (income <= 0) return false; // pure A/R collection — already counted at sale time
+  await db.collection('ledger').add({
+    date: e.date || today(), type: 'credit',
+    description: `Cash receipt — ${e.customer||''}${e.reference?` (${e.reference})`:''}`,
+    amount: income,
+    category: (e.creditSalesRevenue||0) >= (e.creditSundryAmount||0) ? 'Sales Revenue' : (e.creditSundryAcct||'Other Income'),
+    refNumber: ref, source: 'Cash Receipt',
+    addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+  return true;
+}
+
+// New expense from a disbursement = Material + Labor + Sundry. A/P settlements are
+// EXCLUDED — that cost was already expensed when the payable was incurred.
+function cdjLedgerExpense(e) { return (e.debitMaterial||0) + (e.debitLabor||0) + (e.debitSundryAmount||0); }
+async function postCDJToLedger(cdjId, e) {
+  const ref = `CDJ-${cdjId}`;
+  const existing = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
+  if (existing.docs.length) return false;
+  const expense = cdjLedgerExpense(e);
+  if (expense <= 0) return false; // pure A/P settlement — already expensed when incurred
+  let category;
+  const mat = e.debitMaterial||0, lab = e.debitLabor||0, sun = e.debitSundryAmount||0;
+  if (mat >= lab && mat >= sun) category = 'COS – Direct Material';
+  else if (lab >= sun) category = 'COS – Direct Labor';
+  else category = e.debitSundryAcct || 'Other Expense';
+  await db.collection('ledger').add({
+    date: e.date || today(), type: 'debit',
+    description: `Disbursement — ${e.payee||''}${e.reference?` (${e.reference})`:''}`,
+    amount: expense, category, refNumber: ref, source: 'Cash Disbursement',
+    addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+  return true;
+}
+
+// One-time (re-runnable) backfill: post existing approved expenses + all cash
+// receipt / disbursement journal entries into the ledger so the books are complete
+// before reports switch to ledger-only. Idempotent — each post* helper skips rows
+// already mirrored (keyed by EXP-/CRJ-/CDJ-<id>), so running twice is harmless.
+window.backfillLedgerFromJournals = async function() {
+  const [expSnap, crjSnap, cdjSnap] = await Promise.all([
+    db.collection('expenses').where('status','==','approved').get().catch(()=>({docs:[]})),
+    db.collection('cash_receipt_journal').get().catch(()=>({docs:[]})),
+    db.collection('cash_disbursement_journal').get().catch(()=>({docs:[]}))
+  ]);
+  let exp=0, crj=0, cdj=0;
+  for (const d of expSnap.docs) { if (await postExpenseToLedger(d.id, d.data()).catch(()=>false)) exp++; }
+  for (const d of crjSnap.docs) { if (await postCRJToLedger(d.id, d.data()).catch(()=>false)) crj++; }
+  for (const d of cdjSnap.docs) { if (await postCDJToLedger(d.id, d.data()).catch(()=>false)) cdj++; }
+  if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('ledger'); dbCacheInvalidate('expenses'); }
+  return { exp, crj, cdj };
+};
+
+window.runLedgerBackfill = async function() {
+  if (!confirm('Sync approved expenses and the cash receipt / disbursement journals into the ledger?\n\nSafe to run repeatedly — already-synced entries are skipped.')) return;
+  Notifs.showToast('Syncing journals to ledger…');
+  try {
+    const r = await window.backfillLedgerFromJournals();
+    Notifs.showToast(`Synced ✓ ${r.exp} expenses, ${r.crj} receipts, ${r.cdj} disbursements posted.`);
+    const el = document.getElementById('fin-content');
+    if (el) window.renderFinancialReports(el, window.currentUser, window.currentRole, 'all');
+  } catch (e) { Notifs.showToast('Sync failed: ' + (e.message||e), 'error'); }
+};
+
+// Wire the approve / reject buttons in the expense table (previously unbound — the
+// buttons did nothing). Approving posts the expense to the ledger.
+function bindExpenseActions(content, currentUser, currentRole, sub) {
+  content.querySelectorAll('.approve-expense').forEach(btn => btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      const id = btn.dataset.id;
+      const snap = await db.collection('expenses').doc(id).get();
+      const e = snap.exists ? snap.data() : null;
+      if (e && e.status === 'approved') { Notifs.showToast('Already approved.'); return; }
+      await db.collection('expenses').doc(id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+      if (e) await postExpenseToLedger(id, e);
+      Notifs.showToast('Expense approved & posted to ledger ✓');
+      loadCashContent(currentUser, currentRole, sub);
+    } catch (err) { Notifs.showToast('Approve failed: ' + (err.message||err), 'error'); btn.disabled = false; }
+  }));
+  content.querySelectorAll('.reject-expense').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('Reject this expense?')) return;
+    try {
+      await db.collection('expenses').doc(btn.dataset.id).update({ status:'rejected', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+      Notifs.showToast('Expense rejected.');
+      loadCashContent(currentUser, currentRole, sub);
+    } catch (err) { Notifs.showToast('Reject failed: ' + (err.message||err), 'error'); }
+  }));
 }
 
 function openAddExpenseModal(currentUser) {
@@ -2435,7 +2567,10 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
     <div class="subtab-bar" style="margin-bottom:12px">${rangeBtn('month','This Month')}${rangeBtn('year','Year to Date')}${rangeBtn('all','All Time')}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div style="font-size:12px;color:var(--text-muted)">${label}</div>
-      <button class="btn-secondary btn-sm" onclick="window.print()">🖨 Print</button>
+      <div style="display:flex;gap:6px">
+        ${isFinancePriv()?`<button class="btn-secondary btn-sm" onclick="window.runLedgerBackfill()" title="Post approved expenses + cash journals into the ledger">🔄 Sync to ledger</button>`:''}
+        <button class="btn-secondary btn-sm" onclick="window.print()">🖨 Print</button>
+      </div>
     </div>
     <div class="kpi-row" style="margin-bottom:14px">
       <div class="kpi-card green"><div class="kpi-label">Total Income</div><div class="kpi-value">₱${fmt(totIncome)}</div></div>
@@ -2679,7 +2814,7 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
       const debitCash = parseFloat(document.getElementById('crj-cash').value)||0;
       if (!customer) { Notifs.showToast('Enter a customer name.','error'); return; }
       if (!debitCash) { Notifs.showToast('Enter the cash amount received.','error'); return; }
-      await db.collection('cash_receipt_journal').add({
+      const crjData = {
         reference:           document.getElementById('crj-ref').value.trim(),
         date:                document.getElementById('crj-date').value,
         customer,
@@ -2692,7 +2827,9 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
         addedBy:    currentUser.uid,
         addedByName: window.userProfile?.displayName || currentUser.email,
         createdAt:  firebase.firestore.FieldValue.serverTimestamp()
-      });
+      };
+      const crjDoc = await db.collection('cash_receipt_journal').add(crjData);
+      await postCRJToLedger(crjDoc.id, crjData); // mirror new income into the ledger
       closeModal(); Notifs.showToast('Cash receipt entry saved!');
       renderCashReceiptJournal(container, currentUser, currentRole);
     });
@@ -2784,7 +2921,7 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
       const creditCash = parseFloat(document.getElementById('cdj-cash').value)||0;
       if (!payee) { Notifs.showToast('Enter a payee name.','error'); return; }
       if (!creditCash) { Notifs.showToast('Enter the cash amount disbursed.','error'); return; }
-      await db.collection('cash_disbursement_journal').add({
+      const cdjData = {
         reference:         document.getElementById('cdj-ref').value.trim(),
         date:              document.getElementById('cdj-date').value,
         payee,
@@ -2797,7 +2934,9 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
         addedBy:    currentUser.uid,
         addedByName: window.userProfile?.displayName || currentUser.email,
         createdAt:  firebase.firestore.FieldValue.serverTimestamp()
-      });
+      };
+      const cdjDoc = await db.collection('cash_disbursement_journal').add(cdjData);
+      await postCDJToLedger(cdjDoc.id, cdjData); // mirror the expense into the ledger
       closeModal(); Notifs.showToast('Cash disbursement entry saved!');
       renderCashDisbursementJournal(container, currentUser, currentRole);
     });
@@ -3995,21 +4134,24 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
   // These collection-wide reads are only permitted for finance/admin by the
   // Firestore rules. A non-finance user who merely belongs to the Finance dept
   // can open this tab, so degrade gracefully instead of crashing the screen.
-  const [expSnap, salSnap] = await Promise.all([
+  // Totals come from the LEDGER (single source of truth). The expenses collection
+  // is still read for the pending-approval queue + the recent-expenses list, but it
+  // no longer feeds the headline totals (approved expenses are posted to the ledger).
+  const [expSnap, ledSnap] = await Promise.all([
     db.collection('expenses').get().catch(()=>({docs:[]})),
-    fetchUsersWithPayroll().catch(()=>({docs:[]}))
+    db.collection('ledger').get().catch(()=>({docs:[]}))
   ]);
   const expenses   = expSnap.docs.map(d => ({id:d.id,...d.data()}));
-  const users      = salSnap.docs.map(d => d.data());
+  const ledger     = ledSnap.docs.map(d => d.data());
   const isPriv     = isFinancePriv();
-  const totalExp   = expenses.reduce((s,e) => s + (e.amount||0), 0);
+  const ledIncome  = ledger.filter(e => e.type==='credit').reduce((s,e) => s + (e.amount||0), 0);
+  const ledExpense = ledger.filter(e => e.type==='debit').reduce((s,e) => s + (e.amount||0), 0);
   const pendingExp = expenses.filter(e => e.status==='pending').reduce((s,e) => s + (e.amount||0), 0);
-  const payroll    = users.reduce((s,u) => s + (u.salary||0) + (u.allowance||0) - (u.deductions||0), 0);
 
   container.innerHTML = `
     <div class="kpi-row">
-      <div class="kpi-card"><div class="kpi-label">Monthly Payroll</div><div class="kpi-value">₱${fmt(payroll)}</div></div>
-      <div class="kpi-card warn"><div class="kpi-label">Total Expenses</div><div class="kpi-value">₱${fmt(totalExp)}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Total Income</div><div class="kpi-value">₱${fmt(ledIncome)}</div></div>
+      <div class="kpi-card warn"><div class="kpi-label">Total Expenses</div><div class="kpi-value">₱${fmt(ledExpense)}</div></div>
       <div class="kpi-card accent"><div class="kpi-label">Pending Expenses</div><div class="kpi-value">₱${fmt(pendingExp)}</div></div>
     </div>
     <div class="card">
@@ -11387,7 +11529,7 @@ function recordPurchaseDisbursement(p, currentUser, onDone) {
         const dupe = await db.collection('cash_disbursement_journal').where('reference', '==', reference).limit(1).get().catch(() => ({ empty: true }));
         if (!dupe.empty && !confirm(`A disbursement with reference "${reference}" already exists. Post another?`)) { saveBtn.disabled = false; return; }
       }
-      const cdjRef = await db.collection('cash_disbursement_journal').add({
+      const cdjData = {
         reference, date: document.getElementById('rec-date').value, payee,
         creditCash: amt,
         debitMaterial:     acct === 'material' ? amt : 0,
@@ -11399,7 +11541,9 @@ function recordPurchaseDisbursement(p, currentUser, onDone) {
         addedBy: currentUser.uid,
         addedByName: window.userProfile?.displayName || currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
+      };
+      const cdjRef = await db.collection('cash_disbursement_journal').add(cdjData);
+      await postCDJToLedger(cdjRef.id, cdjData); // also mirror into the ledger (unless pure A/P)
       // Stamp the purchase as recorded so it can't be silently double-posted.
       // (Rules let Finance write only these bookkeeping fields.)
       await db.collection('purchase_requisitions').doc(p.id).update({
