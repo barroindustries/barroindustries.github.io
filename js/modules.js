@@ -198,8 +198,9 @@ async function loadPosts(dept) {
       loadPosts(dept);
     }));
     container.querySelectorAll('.post-pin-btn').forEach(btn => btn.addEventListener('click', async e => {
-      const id = e.target.dataset.id;
-      const snap = await db.collection('posts').doc(id).get();
+      const id = e.currentTarget.dataset.id;
+      const snap = await db.collection('posts').doc(id).get().catch(()=>null);
+      if (!snap || !snap.exists) { Notifs.showToast('Post no longer exists.','error'); loadPosts(dept); return; }
       await db.collection('posts').doc(id).update({pinned: !snap.data().pinned});
       loadPosts(dept);
     }));
@@ -222,12 +223,19 @@ async function loadPosts(dept) {
       btn.classList.add('heart-pop');
       btn.addEventListener('animationend', () => btn.classList.remove('heart-pop'), { once: true });
 
-      // Persist to Firestore
+      // Persist to Firestore (revert the optimistic UI if the write fails)
       const uid = currentUser.uid;
       const op = isHearted
         ? firebase.firestore.FieldValue.arrayRemove(uid)
         : firebase.firestore.FieldValue.arrayUnion(uid);
-      await db.collection('posts').doc(id).update({ hearts: op });
+      try {
+        await db.collection('posts').doc(id).update({ hearts: op });
+      } catch (err) {
+        btn.classList.toggle('hearted', isHearted);
+        if (countEl) { countEl.textContent = currentCount; countEl.style.display = currentCount > 0 ? '' : 'none'; }
+        if (svg) { svg.setAttribute('fill', isHearted ? '#FF6B2B' : 'none'); svg.setAttribute('stroke', isHearted ? '#FF6B2B' : 'currentColor'); }
+        Notifs.showToast('Could not save your like.', 'error');
+      }
     }));
 
     // Show likers list
@@ -1323,8 +1331,8 @@ function renderCAEmployeeCards(advances, container) {
         ${payments.length?`
         <div style="margin-top:14px">
           <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:8px">Payment History</div>
-          <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
-            <table style="width:100%;border-collapse:collapse">
+          <div class="table-wrap" style="border:1px solid var(--border);border-radius:8px">
+            <table style="width:100%;border-collapse:collapse;min-width:280px">
               <thead><tr style="background:var(--s2)">
                 <th style="padding:6px 8px;font-size:11px;color:var(--text-muted);text-align:left;font-weight:600">#</th>
                 <th style="padding:6px 8px;font-size:11px;color:var(--text-muted);text-align:left;font-weight:600">Date</th>
@@ -1471,8 +1479,10 @@ function renderCAList(advances, container, isAdmin) {
   }));
 
   container.querySelectorAll('.ca-reject-btn').forEach(btn => btn.addEventListener('click', async e => {
-    const id = e.target.dataset.id;
-    const snap = await db.collection('cash_advances').doc(id).get();
+    const id = e.currentTarget.dataset.id;
+    e.currentTarget.disabled = true;
+    const snap = await db.collection('cash_advances').doc(id).get().catch(()=>null);
+    if (!snap || !snap.exists) { Notifs.showToast('Record no longer exists.','error'); window.renderCashAdvancePage(); return; }
     await db.collection('cash_advances').doc(id).update({status:'rejected'});
     await Notifs.send(snap.data().userId, {title:'Cash Advance Rejected', body:'Your cash advance request was not approved.', icon:'❌', type:'cash_advance', dedupKey:`ca-rejected-${id}`});
     Notifs.showToast('Rejected.');
@@ -1480,8 +1490,9 @@ function renderCAList(advances, container, isAdmin) {
   }));
 
   container.querySelectorAll('.ca-payment-btn').forEach(btn => btn.addEventListener('click', async e => {
-    const id = e.target.dataset.id;
-    const snap = await db.collection('cash_advances').doc(id).get();
+    const id = e.currentTarget.dataset.id;
+    const snap = await db.collection('cash_advances').doc(id).get().catch(()=>null);
+    if (!snap || !snap.exists) { Notifs.showToast('Record no longer exists.','error'); window.renderCashAdvancePage(); return; }
     const a = snap.data();
     openModal('Record Payment', `
       <div class="ca-detail" style="margin-bottom:14px"><span>Balance:</span><strong>₱${fmtN(a.balance||0)}</strong></div>

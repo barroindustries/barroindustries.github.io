@@ -5278,7 +5278,7 @@ async function renderCompanyOverview(ct, canAdd) {
       <div class="co-president-card">
         <div class="co-president-left">
           ${photoURL
-            ? `<img src="${photoURL}" class="co-president-photo" alt="President"/>`
+            ? `<img src="${escHtml(photoURL)}" class="co-president-photo" alt="President"/>`
             : `<div class="co-president-initials">${initials}</div>`
           }
           <div class="co-president-name">${escHtml(presidentName)}</div>

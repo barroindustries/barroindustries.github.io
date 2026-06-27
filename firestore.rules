@@ -118,7 +118,12 @@ service cloud.firestore {
     match /posts/{postId} {
       allow read: if isAuth();
       allow create: if isAuth();
-      allow update: if isAuth() && (resource.data.authorId == request.auth.uid || isAdmin());
+      // Author/admin may edit anything. Anyone may toggle their OWN like — an update
+      // that changes ONLY the `hearts` field (so likes persist for normal users).
+      allow update: if isAuth() && (
+        resource.data.authorId == request.auth.uid || isAdmin()
+        || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hearts'])
+      );
       allow delete: if isAuth() && (resource.data.authorId == request.auth.uid || isAdmin());
     }
 
@@ -201,7 +206,9 @@ service cloud.firestore {
       allow update: if isAuth() && (
         (request.auth.uid in resource.data.assignedTo) || isFinanceOrAdmin()
       );
-      allow delete: if isAuth() && isAdmin();
+      // Admins delete any task; a creator may delete the task they made (the UI
+      // already offers it to the creator, so this stops a silent permission fail).
+      allow delete: if isAuth() && (isAdmin() || resource.data.get('createdBy', '') == request.auth.uid);
 
       // In-app "messaging" thread on a task. Rules do NOT inherit to
       // subcollections, so this needs explicit coverage — tasks are readable
