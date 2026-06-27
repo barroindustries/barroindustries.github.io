@@ -2420,8 +2420,15 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
   const net = totIncome - totExpense;
   const byCat = arr => { const m={}; arr.forEach(e=>{const k=e.category||'Other'; m[k]=(m[k]||0)+(e.amount||0);}); return Object.entries(m).sort((a,b)=>b[1]-a[1]); };
   const incCats = byCat(income), expCats = byCat(expense);
-  const sales = income.filter(e=>(e.category||'')==='Sales Revenue').reduce((s,e)=>s+(e.amount||0),0);
-  const outputVat = sales * 0.12;            // VAT-exclusive assumption
+  const salesRows = income.filter(e=>(e.category||'')==='Sales Revenue');
+  const sales = salesRows.reduce((s,e)=>s+(e.amount||0),0);
+  // Output VAT = sum of each sale's stored vatAmount (respects its per-entry VAT
+  // treatment: inclusive / exclusive / exempt). Legacy rows with no vatAmount fall
+  // back to the VAT-inclusive split (amount − amount/1.12).
+  const outputVat = salesRows.reduce((s,e)=>{
+    if (e.vatAmount != null) return s + e.vatAmount;
+    const amt = e.amount||0; return s + (amt - amt/1.12);
+  }, 0);
   const rangeBtn = (r,t)=>`<button class="subtab-btn ${range===r?'active':''}" onclick="renderFinancialReports(document.getElementById('fin-content'),window.currentUser,window.currentRole,'${r}')">${t}</button>`;
 
   container.innerHTML = `
@@ -2455,9 +2462,9 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
     <div class="card">
       <div class="card-header"><h3>🧾 Tax / VAT Reference</h3></div>
       <div class="card-body">
-        <div style="display:flex;justify-content:space-between;padding:6px 0"><span>Sales Revenue (VATable base)</span><strong>₱${fmt(sales)}</strong></div>
-        <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border)"><span>Estimated Output VAT (12%)</span><strong>₱${fmt(outputVat)}</strong></div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5">⚠️ Estimate only — assumes VAT-exclusive sales and does not net input VAT on purchases. Confirm exact figures with your accountant before BIR filing. For official forms, attach BIR receipts via <em>Taxes</em>.</div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0"><span>Sales Revenue (recorded total)</span><strong>₱${fmt(sales)}</strong></div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border)"><span>Output VAT (per sale's VAT treatment)</span><strong>₱${fmt(outputVat)}</strong></div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:10px;line-height:1.5">Output VAT is summed from each sale's recorded VAT (inclusive / exclusive / exempt) — not a flat estimate. Input VAT on purchases is not yet netted here. Confirm with your accountant before BIR filing; attach official BIR forms via <em>Taxes</em>.</div>
       </div>
     </div>
   `;
@@ -7821,6 +7828,26 @@ window.renderSalesOrders = async function(container){
   }
 };
 
+// Split an entered amount into {recorded, net, vat} for a given VAT treatment.
+// `recorded` is what hits the ledger + project balance (the cash figure); `net`
+// is revenue net of VAT; `vat` is the output VAT. Used by the sale + project
+// billing flows so each sale's VAT is stored per-entry (it varies by quote).
+//   inclusive → the amount already contains 12% VAT
+//   exclusive → 12% is added on top of the amount
+//   exempt    → zero-rated / VAT-exempt, no VAT
+window.vatSplit = function(entered, treatment) {
+  const a = +entered || 0;
+  if (treatment === 'exclusive') {
+    const vat = +(a * 0.12).toFixed(2);
+    return { recorded: +(a + vat).toFixed(2), net: +a.toFixed(2), vat };
+  }
+  if (treatment === 'exempt') {
+    return { recorded: +a.toFixed(2), net: +a.toFixed(2), vat: 0 };
+  }
+  const net = +(a / 1.12).toFixed(2); // inclusive (default)
+  return { recorded: +a.toFixed(2), net, vat: +(a - net).toFixed(2) };
+};
+
 // Finance records the sale + received payment, posts it to the ledger AND syncs the
 // linked project's collected/AR, then optionally hands the job off to Production.
 // This is the single bridge that was missing — previously "Record Income" only
@@ -7843,15 +7870,27 @@ function openRecordSaleModal(o, container){
     </div></div>
     <div style="font-size:12px;font-weight:700;margin-bottom:6px">✅ Approve the collected amount</div>
     <div class="form-row">
-      <div class="form-group"><label>Approved collected (₱, VAT-incl.)</label><input id="rs-amount" type="number" step="0.01" min="0" value="${defaultAmt}" inputmode="decimal"/>
+      <div class="form-group"><label>Approved collected (₱)</label><input id="rs-amount" type="number" step="0.01" min="0" value="${defaultAmt}" inputmode="decimal"/>
         <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Confirm what Finance actually received per the order terms.</div></div>
       <div class="form-group"><label>Method</label><select id="rs-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
         ${['Bank Transfer','GCash','Cash','Cheque','Other'].map(m=>`<option ${o.paymentMethod===m?'selected':''}>${m}</option>`).join('')}
       </select></div>
     </div>
-    <div class="form-group"><label>OR / Reference No.</label><input id="rs-ref" placeholder="Official Receipt no."/></div>
+    <div class="form-row">
+      <div class="form-group"><label>VAT treatment</label>
+        <select id="rs-vat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          <option value="inclusive" selected>VAT-inclusive — 12% already in the amount</option>
+          <option value="exclusive">VAT-exclusive — add 12% on top</option>
+          <option value="exempt">VAT-exempt / Zero-rated — no VAT</option>
+        </select>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Pick what the quote/sales order specified — it varies per deal.</div>
+      </div>
+      <div class="form-group"><label>OR / Reference No.</label><input id="rs-ref" placeholder="Official Receipt no."/></div>
+    </div>
     <div class="card" style="margin:6px 0"><div class="card-body" style="padding:8px 14px;font-size:12px;display:grid;grid-template-columns:1fr auto;gap:2px 12px">
-      <span style="color:var(--text-muted)">Approving</span><span id="rs-appr" style="text-align:right;font-weight:700;color:var(--success)">₱${fmt(defaultAmt)}</span>
+      <span style="color:var(--text-muted)">Recorded total (to ledger &amp; project)</span><span id="rs-appr" style="text-align:right;font-weight:700;color:var(--success)">₱${fmt(defaultAmt)}</span>
+      <span style="color:var(--text-muted)">Net of VAT</span><span id="rs-net" style="text-align:right">₱${fmt(+(defaultAmt/1.12).toFixed(2))}</span>
+      <span style="color:var(--text-muted)">Output VAT (12%)</span><span id="rs-vatamt" style="text-align:right">₱${fmt(+(defaultAmt-defaultAmt/1.12).toFixed(2))}</span>
       <span style="color:var(--text-muted)">Balance after this</span><span id="rs-bal" style="text-align:right;font-weight:700">₱${fmt(Math.max(0,contract-defaultAmt))}</span>
     </div></div>
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px;cursor:pointer">
@@ -7861,20 +7900,27 @@ function openRecordSaleModal(o, container){
     <div id="rs-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="rs-save">Approve &amp; Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   const recompute=()=>{
-    const a=parseFloat(document.getElementById('rs-amount').value)||0;
-    document.getElementById('rs-appr').textContent='₱'+fmt(a);
-    document.getElementById('rs-bal').textContent='₱'+fmt(Math.max(0,contract-a));
+    const entered=parseFloat(document.getElementById('rs-amount').value)||0;
+    const t=document.getElementById('rs-vat').value;
+    const { recorded, net, vat }=window.vatSplit(entered,t);
+    document.getElementById('rs-appr').textContent='₱'+fmt(recorded);
+    document.getElementById('rs-net').textContent='₱'+fmt(net);
+    document.getElementById('rs-vatamt').textContent='₱'+fmt(vat);
+    document.getElementById('rs-bal').textContent='₱'+fmt(Math.max(0,contract-recorded));
   };
   document.getElementById('rs-amount').addEventListener('input',recompute);
+  document.getElementById('rs-vat').addEventListener('change',recompute);
   document.getElementById('rs-save').addEventListener('click', async ()=>{
     const err=document.getElementById('rs-err');
     const saveBtn=document.getElementById('rs-save');
-    const amount=parseFloat(document.getElementById('rs-amount').value)||0;
-    if(amount<0){ err.textContent='Amount cannot be negative.'; err.classList.remove('hidden'); return; }
+    const entered=parseFloat(document.getElementById('rs-amount').value)||0;
+    if(entered<0){ err.textContent='Amount cannot be negative.'; err.classList.remove('hidden'); return; }
     const method=document.getElementById('rs-method').value, orRef=document.getElementById('rs-ref').value.trim();
     const toProd=document.getElementById('rs-prod').checked;
     const who=userProfile?.displayName||currentUser.email;
-    const vatRate=12, net=+(amount/(1+vatRate/100)).toFixed(2), vatAmount=+(amount-net).toFixed(2);
+    const vatTreatment=document.getElementById('rs-vat').value;
+    // `amount` = recorded total (the cash figure that hits the ledger + project balance)
+    const { recorded:amount, net, vat:vatAmount }=window.vatSplit(entered,vatTreatment);
     saveBtn.disabled=true; // guard against double-click double-posting
     try{
       // Idempotency: one Sales-Revenue credit per sales order. If this order was
@@ -7885,7 +7931,7 @@ function openRecordSaleModal(o, container){
       // 1) ledger credit (Sales Revenue → feeds Output-VAT base)
       let ledgerId=null;
       if(amount>0){
-        const led=await db.collection('ledger').add({ date:today(), description:`Sales order — ${o.clientName}${o.quoteNumber?' ('+o.quoteNumber+')':''}`, category:'Sales Revenue', type:'credit', amount, vatAmount, refNumber:ledgerRef, source:'Finance', projectId:o.projectId||null, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+        const led=await db.collection('ledger').add({ date:today(), description:`Sales order — ${o.clientName}${o.quoteNumber?' ('+o.quoteNumber+')':''}`, category:'Sales Revenue', type:'credit', amount, net, vatAmount, vatTreatment, refNumber:ledgerRef, source:'Finance', projectId:o.projectId||null, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
         ledgerId=led.id;
         if(typeof dbCacheInvalidate==='function') dbCacheInvalidate('ledger');
       }
@@ -10289,23 +10335,44 @@ function openProjectBillingModal(p){
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract ₱${fmt(p.contractAmount||0)} · Collected ₱${fmt(p.amountCollected||0)} · <strong>Balance ₱${fmt(bal)}</strong></div>
     <div class="form-row">
       <div class="form-group"><label>Payment Type</label><select id="pb-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Downpayment</option><option>Progress Billing</option><option>Final Balance</option></select></div>
-      <div class="form-group"><label>Amount (₱, VAT-incl.)</label><input id="pb-amount" type="number" inputmode="decimal" step="0.01" value="${bal>0?bal:''}"/></div>
+      <div class="form-group"><label>Amount (₱)</label><input id="pb-amount" type="number" inputmode="decimal" step="0.01" value="${bal>0?bal:''}"/></div>
     </div>
-    <div class="form-group"><label>Method</label><select id="pb-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Bank Transfer</option><option>GCash</option><option>Cash</option><option>Cheque</option></select></div>
+    <div class="form-row">
+      <div class="form-group"><label>VAT treatment</label>
+        <select id="pb-vat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          <option value="inclusive" selected>VAT-inclusive — 12% already in the amount</option>
+          <option value="exclusive">VAT-exclusive — add 12% on top</option>
+          <option value="exempt">VAT-exempt / Zero-rated — no VAT</option>
+        </select></div>
+      <div class="form-group"><label>Method</label><select id="pb-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Bank Transfer</option><option>GCash</option><option>Cash</option><option>Cheque</option></select></div>
+    </div>
+    <div class="card" style="margin:6px 0"><div class="card-body" style="padding:8px 14px;font-size:12px;display:grid;grid-template-columns:1fr auto;gap:2px 12px">
+      <span style="color:var(--text-muted)">Recorded total</span><span id="pb-rec" style="text-align:right;font-weight:700;color:var(--success)">₱0.00</span>
+      <span style="color:var(--text-muted)">Net of VAT</span><span id="pb-net" style="text-align:right">₱0.00</span>
+      <span style="color:var(--text-muted)">Output VAT</span><span id="pb-vatamt" style="text-align:right">₱0.00</span>
+    </div></div>
     <div class="form-group"><label>OR / Reference No.</label><input id="pb-ref" placeholder="Official Receipt no."/></div>
     <div class="form-group"><label>Receipt (proof)</label><div id="pb-receipt-upload"></div></div>
     <div id="pb-err" class="error-msg hidden"></div>
   `, `<button class="btn-primary" id="pb-save">Record + Post to Ledger</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   let receipt=null;
   if(window.Drive?.renderUploadArea) Drive.renderUploadArea('pb-receipt-upload',(r)=>{receipt=r;},{label:'Upload OR / proof',accept:'image/*,.pdf',dept:'Finance',subfolder:'Collections'});
+  const pbRecompute=()=>{
+    const { recorded, net, vat }=window.vatSplit(parseFloat(document.getElementById('pb-amount').value)||0, document.getElementById('pb-vat').value);
+    document.getElementById('pb-rec').textContent='₱'+fmt(recorded);
+    document.getElementById('pb-net').textContent='₱'+fmt(net);
+    document.getElementById('pb-vatamt').textContent='₱'+fmt(vat);
+  };
+  document.getElementById('pb-amount').addEventListener('input',pbRecompute);
+  document.getElementById('pb-vat').addEventListener('change',pbRecompute);
+  pbRecompute();
   document.getElementById('pb-save').addEventListener('click', async ()=>{
     const err=document.getElementById('pb-err');
     const saveBtn=document.getElementById('pb-save');
-    const amount=parseFloat(document.getElementById('pb-amount').value)||0;
-    if(amount<=0){ err.textContent='Enter an amount.'; err.classList.remove('hidden'); return; }
-    const vatRate=p.vatRate||12;
-    const net=+(amount/(1+vatRate/100)).toFixed(2);          // VAT-inclusive → net of VAT
-    const vatAmount=+(amount-net).toFixed(2);
+    const entered=parseFloat(document.getElementById('pb-amount').value)||0;
+    if(entered<=0){ err.textContent='Enter an amount.'; err.classList.remove('hidden'); return; }
+    const vatTreatment=document.getElementById('pb-vat').value;
+    const { recorded:amount, net, vat:vatAmount }=window.vatSplit(entered,vatTreatment);
     const newCollected=(p.amountCollected||0)+amount;
     const newAR=Math.max(0,(p.contractAmount||0)-newCollected);
     const who=userProfile?.displayName||currentUser.email;
@@ -10313,7 +10380,7 @@ function openProjectBillingModal(p){
     saveBtn.disabled=true; // guard against double-click double-posting (payments are legitimately multiple)
     try{
       // 1) post income credit to the ledger (category 'Sales Revenue' so it feeds the Output-VAT base)
-      const led=await db.collection('ledger').add({ date:today(), description:`Project ${p.projectNo} — ${p.clientName} (${type})`, category:'Sales Revenue', type:'credit', amount, vatAmount, refNumber:`PROJ-${p.id}-${Date.now()}`, source:'Finance', projectId:p.id, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+      const led=await db.collection('ledger').add({ date:today(), description:`Project ${p.projectNo} — ${p.clientName} (${type})`, category:'Sales Revenue', type:'credit', amount, net, vatAmount, vatTreatment, refNumber:`PROJ-${p.id}-${Date.now()}`, source:'Finance', projectId:p.id, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
       if(typeof dbCacheInvalidate==='function') dbCacheInvalidate('ledger');
       // 2) update the project: payment, collected, AR, OR document, timeline
       const payment={ type, amount, vatAmount, net, method, orRef, receiptUrl:receipt?.url||null, date:today(), by:who, ledgerId:led.id };
