@@ -1445,6 +1445,49 @@ async function postCDJToLedger(cdjId, e) {
   return true;
 }
 
+// Re-sync the mirrored ledger row after a source doc (expense / CRJ / CDJ) is
+// EDITED, so the ledger never drifts from the journal. Updates the amount/type/
+// category in place, creates the row if it should now exist, or deletes it if the
+// entry no longer qualifies (e.g. expense un-approved, or income/expense → 0).
+async function resyncLedgerForSource(collection, docId) {
+  try {
+    const snap = await db.collection(collection).doc(docId).get();
+    if (!snap.exists) return;
+    const e = snap.data();
+    let ref, type, amount, category, description, inputVat = null;
+    if (collection === 'expenses') {
+      ref = `EXP-${docId}`;
+      if (e.status !== 'approved') { await _deleteLedgerByRef(ref); return; }
+      type = 'debit'; amount = e.amount || 0; category = e.category || 'General Expense';
+      description = `Expense — ${e.description || ''}${e.submittedByName ? ` (${e.submittedByName})` : ''}`;
+    } else if (collection === 'cash_receipt_journal') {
+      ref = `CRJ-${docId}`; type = 'credit'; amount = crjLedgerIncome(e);
+      category = (e.creditSalesRevenue || 0) >= (e.creditSundryAmount || 0) ? 'Sales Revenue' : (e.creditSundryAcct || 'Other Income');
+      description = `Cash receipt — ${e.customer || ''}${e.reference ? ` (${e.reference})` : ''}`;
+      if (amount <= 0) { await _deleteLedgerByRef(ref); return; }
+    } else if (collection === 'cash_disbursement_journal') {
+      ref = `CDJ-${docId}`; type = 'debit'; amount = cdjLedgerExpense(e);
+      const mat = e.debitMaterial || 0, lab = e.debitLabor || 0, sun = e.debitSundryAmount || 0;
+      category = (mat >= lab && mat >= sun) ? 'COS – Direct Material' : (lab >= sun ? 'COS – Direct Labor' : (e.debitSundryAcct || 'Other Expense'));
+      description = `Disbursement — ${e.payee || ''}${e.reference ? ` (${e.reference})` : ''}`;
+      inputVat = e.vatAmount || 0;
+      if (amount <= 0) { await _deleteLedgerByRef(ref); return; }
+    } else return;
+    const existing = await db.collection('ledger').where('refNumber', '==', ref).limit(1).get().catch(() => ({ docs: [] }));
+    const patch = { amount, type, category, description };
+    if (inputVat != null) patch.inputVat = inputVat;
+    if (existing.docs.length) await existing.docs[0].ref.update(patch);
+    else if (collection === 'expenses') await postExpenseToLedger(docId, e);
+    else if (collection === 'cash_receipt_journal') await postCRJToLedger(docId, e);
+    else await postCDJToLedger(docId, e);
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+  } catch (err) { console.warn('[ledger resync]', err?.message || err); }
+}
+async function _deleteLedgerByRef(ref) {
+  const ls = await db.collection('ledger').where('refNumber', '==', ref).limit(1).get().catch(() => ({ docs: [] }));
+  if (ls.docs.length) { await ls.docs[0].ref.delete().catch(() => {}); if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger'); }
+}
+
 // One-time (re-runnable) backfill: post existing approved expenses + all cash
 // receipt / disbursement journal entries into the ledger so the books are complete
 // before reports switch to ledger-only. Idempotent — each post* helper skips rows
@@ -2928,7 +2971,7 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
     const redo = () => renderCashReceiptJournal(container, currentUser, currentRole);
     container.querySelectorAll('.crj-edit-btn').forEach(btn => btn.addEventListener('click', () => {
       const e = entries.find(x=>x.id===btn.dataset.id); if (!e) return;
-      window.financeEditModal({ collection:'cash_receipt_journal', docId:e.id, title:'Cash Receipt', onSaved:redo, fields:[
+      window.financeEditModal({ collection:'cash_receipt_journal', docId:e.id, title:'Cash Receipt', onSaved:()=>{ resyncLedgerForSource('cash_receipt_journal', e.id).then(redo); }, fields:[
         { key:'reference', label:'Reference', type:'text', value:e.reference },
         { key:'date', label:'Date', type:'date', value:e.date },
         { key:'customer', label:'Customer', type:'text', value:e.customer, full:true },
@@ -3016,10 +3059,11 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
       const creditCash = parseFloat(document.getElementById('cdj-cash').value)||0;
       if (!payee) { Notifs.showToast('Enter a payee name.','error'); return; }
       if (!creditCash) { Notifs.showToast('Enter the cash amount disbursed.','error'); return; }
-      const _cdjExpenseBase = (parseFloat(document.getElementById('cdj-material').value)||0)
-        + (parseFloat(document.getElementById('cdj-labor').value)||0)
+      // Input VAT only applies to VATable purchases (material + sundry). Direct labor
+      // carries no input VAT, so it's excluded from the VAT base.
+      const _cdjVatBase = (parseFloat(document.getElementById('cdj-material').value)||0)
         + (parseFloat(document.getElementById('cdj-sundry-amt').value)||0);
-      const _cdjInputVat = document.getElementById('cdj-vat').value === 'exempt' ? 0 : window.vatSplit(_cdjExpenseBase,'inclusive').vat;
+      const _cdjInputVat = document.getElementById('cdj-vat').value === 'exempt' ? 0 : window.vatSplit(_cdjVatBase,'inclusive').vat;
       const cdjData = {
         reference:         document.getElementById('cdj-ref').value.trim(),
         date:              document.getElementById('cdj-date').value,
@@ -3046,7 +3090,7 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
     const redo = () => renderCashDisbursementJournal(container, currentUser, currentRole);
     container.querySelectorAll('.cdj-edit-btn').forEach(btn => btn.addEventListener('click', () => {
       const e = entries.find(x=>x.id===btn.dataset.id); if (!e) return;
-      window.financeEditModal({ collection:'cash_disbursement_journal', docId:e.id, title:'Cash Disbursement', onSaved:redo, fields:[
+      window.financeEditModal({ collection:'cash_disbursement_journal', docId:e.id, title:'Cash Disbursement', onSaved:()=>{ resyncLedgerForSource('cash_disbursement_journal', e.id).then(redo); }, fields:[
         { key:'reference', label:'Reference', type:'text', value:e.reference },
         { key:'date', label:'Date', type:'date', value:e.date },
         { key:'payee', label:'Payee', type:'text', value:e.payee, full:true },
@@ -4281,7 +4325,7 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
     const redo = () => renderFinanceOverview(container, currentUser, currentRole);
     container.querySelectorAll('.exp-edit-btn').forEach(btn => btn.addEventListener('click', () => {
       const e = expenses.find(x=>x.id===btn.dataset.id); if (!e) return;
-      window.financeEditModal({ collection:'expenses', docId:e.id, title:'Expense', onSaved:redo, fields:[
+      window.financeEditModal({ collection:'expenses', docId:e.id, title:'Expense', onSaved:()=>{ resyncLedgerForSource('expenses', e.id).then(redo); }, fields:[
         { key:'description', label:'Description', type:'text', value:e.description, full:true },
         { key:'amount', label:'Amount (₱)', type:'number', value:e.amount },
         { key:'category', label:'Category', type:'text', value:e.category },
@@ -8168,6 +8212,9 @@ function openRecordSaleModal(o, container){
     const vatTreatment=document.getElementById('rs-vat').value;
     // `amount` = recorded total (the cash figure that hits the ledger + project balance)
     const { recorded:amount, net, vat:vatAmount }=window.vatSplit(entered,vatTreatment);
+    // Guard the common foot-gun: entering the VAT-inclusive contract price as
+    // "exclusive" grosses it up 12% over the contract → phantom over-collection.
+    if(contract>0 && amount > contract + 0.5 && !confirm(`Recorded total ₱${fmt(amount)} exceeds the contract ₱${fmt(contract)} (VAT-${vatTreatment}). Record anyway?`)){ return; }
     saveBtn.disabled=true; // guard against double-click double-posting
     try{
       // Idempotency: one Sales-Revenue credit per sales order. If this order was
@@ -11736,7 +11783,9 @@ async function receivePurchaseIntoInventory(p) {
       qty: firebase.firestore.FieldValue.increment(Number(it.qty)||0),
       lastReceivedAt: firebase.firestore.FieldValue.serverTimestamp()
     };
-    if (it.unitPrice != null) upd.unitCost = Number(it.unitPrice)||0; // latest purchase cost
+    // Refresh to the latest purchase cost, but only for a real positive price —
+    // never let a blank/zero line wipe the stored unit cost.
+    if (it.unitPrice != null && (Number(it.unitPrice)||0) > 0) upd.unitCost = Number(it.unitPrice);
     if (p.supplier && !(hit.data().supplier||'').trim()) upd.supplier = p.supplier;
     batch.update(hit.ref, upd);
     matched++;

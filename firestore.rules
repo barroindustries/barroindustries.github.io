@@ -527,14 +527,19 @@ service cloud.firestore {
     // mirrors the existing salary_history / cash_advances delete gate.
     match /ledger/{docId} {
       allow read: if isAuth() && canFinance();
-      // Finance/admin post anything. Production may ALSO post its own material COS
-      // (scoped to category + source) so consuming a job's materials books the cost
-      // even when done by a non-finance production user. Update/delete stay restricted.
+      // Finance/admin post anything. Production may ALSO post its own material COS,
+      // but tightly fenced: a positive DEBIT only, fixed category + source, and a
+      // POCOS-* reference — so a production user can't forge revenue (credit), a
+      // negative, or an arbitrary entry. Update/delete stay finance/president.
       allow create: if isAuth() && (
         canFinance()
         || (canProduction()
             && request.resource.data.get('category', '') == 'COS – Direct Material'
-            && request.resource.data.get('source', '') == 'Production')
+            && request.resource.data.get('source', '') == 'Production'
+            && request.resource.data.get('type', '') == 'debit'
+            && request.resource.data.get('amount', 0) is number
+            && request.resource.data.get('amount', 0) > 0
+            && request.resource.data.get('refNumber', '').matches('POCOS-.*'))
       );
       allow update: if isAuth() && canFinance();
       allow delete: if isAuth() && isPresident();

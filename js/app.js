@@ -6191,8 +6191,10 @@ async function renderAnalytics() {
 
   const renderFinanceAnalytics = () => {
     const totalPayroll=users.reduce((s,u)=>s+(u.salary||0)+(u.allowance||0)-(u.deductions||0),0);
-    const disbursed=ledger.filter(l=>l.type==='payslip').reduce((s,l)=>s+(l.amount||0),0);
-    const disbursedThisMonth=ledger.filter(l=>l.type==='payslip'&&inMonth(l)).reduce((s,l)=>s+(l.amount||0),0);
+    // Payroll is posted as type:'debit' category:'Payroll Expense' (no type:'payslip' exists).
+    const _isPayroll=l=>l.category==='Payroll Expense';
+    const disbursed=ledger.filter(_isPayroll).reduce((s,l)=>s+(l.amount||0),0);
+    const disbursedThisMonth=ledger.filter(l=>_isPayroll(l)&&inMonth(l)).reduce((s,l)=>s+(l.amount||0),0);
     const caTotal=cas.filter(a=>a.status==='approved').reduce((s,a)=>s+(a.amount||0),0);
     const caPending=cas.filter(a=>a.status==='pending').length;
     // Expenses come from the ledger (single source of truth) — approved expenses,
