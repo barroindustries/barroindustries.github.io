@@ -11694,7 +11694,32 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
   const snap = await db.collection('purchase_requisitions').orderBy('createdAt','desc').get();
   const prs = snap.docs.map(d => ({ id:d.id, ...d.data() })).filter(d => d.stage === 'pr');
 
+  // ── Spend summary ──
+  const totOf = p => p.total != null ? p.total : purchTotal(p.items);
+  const totalSpend = prs.reduce((s,p)=>s+totOf(p),0);
+  const openSpend = prs.filter(p=>p.status!=='received').reduce((s,p)=>s+totOf(p),0);
+  const ym = (window.bizDate?window.bizDate():new Date().toISOString().slice(0,10)).slice(0,7);
+  const dateOf = p => (p.convertedAt?.toDate ? window.bizDate(p.convertedAt.toDate()) : (p.createdAt?.toDate ? window.bizDate(p.createdAt.toDate()) : ''));
+  const monthSpend = prs.filter(p=>dateOf(p).slice(0,7)===ym).reduce((s,p)=>s+totOf(p),0);
+  const bySupplier = {}; prs.forEach(p=>{ const k=(p.supplier||'—').trim()||'—'; bySupplier[k]=(bySupplier[k]||0)+totOf(p); });
+  const topSup = Object.entries(bySupplier).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const supMax = topSup.reduce((m,[,v])=>Math.max(m,v),0)||1;
+  const summary = prs.length ? `
+    <div class="kpi-row" style="margin-bottom:10px">
+      <div class="kpi-card"><div class="kpi-label">Purchase Requests</div><div class="kpi-value">${prs.length}</div></div>
+      <div class="kpi-card warn"><div class="kpi-label">Open (not received)</div><div class="kpi-value" style="font-size:15px">₱${fmt(openSpend)}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">This Month</div><div class="kpi-value" style="font-size:15px">₱${fmt(monthSpend)}</div></div>
+      <div class="kpi-card accent"><div class="kpi-label">Total Committed</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalSpend)}</div></div>
+    </div>
+    ${topSup.length?`<div class="card" style="margin-bottom:12px"><div class="card-header"><h3 style="font-size:13px">Top Suppliers by Spend</h3></div><div class="card-body">
+      ${topSup.map(([k,v])=>`<div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span>${escHtml(k)}</span><span style="font-weight:700">₱${fmt(v)}</span></div>
+        <div style="height:7px;background:var(--surface2);border-radius:4px;overflow:hidden"><div style="height:100%;width:${Math.round(v/supMax*100)}%;background:var(--primary);border-radius:4px"></div></div>
+      </div>`).join('')}
+    </div></div>`:''}` : '';
+
   content.innerHTML = `
+    ${summary}
     ${opts.financeView ? `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Purchases raised by the Purchasing department. Use <strong>Record as Disbursement</strong> to post one into the Cash Disbursement Journal.</p>` : ''}
     ${!prs.length
       ? `<div class="empty-state"><div class="empty-icon">🧾</div><h4>No purchase requests yet</h4><p>${canEdit ? 'Convert a priced RFQ into a purchase request.' : 'None have been raised yet.'}</p></div>`
