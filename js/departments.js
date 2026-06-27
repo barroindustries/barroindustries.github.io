@@ -2649,6 +2649,23 @@ async function renderTaxesTab(container, currentUser, currentRole) {
   }
 }
 
+// Export the currently-shown report period's ledger rows to CSV (accountant/BIR).
+window.exportFinReportCSV = function() {
+  const rows = window._finReportRows || [];
+  const slug = (window._finReportLabel || 'ledger').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+  window.exportCSV('ledger-' + slug, rows, [
+    { key:'date', label:'Date' },
+    { key:'type', label:'Type' },
+    { key:'category', label:'Category' },
+    { key:'description', label:'Description' },
+    { key:'refNumber', label:'Reference', get:r=>r.refNumber||'' },
+    { key:'amount', label:'Amount', get:r=>r.amount||0 },
+    { key:'vatAmount', label:'Output VAT', get:r=>r.vatAmount||0 },
+    { key:'inputVat', label:'Input VAT', get:r=>r.inputVat||0 },
+    { key:'source', label:'Source', get:r=>r.source||'' }
+  ]);
+};
+
 // ── Financial Reports (Income Statement + VAT/BIR reference) ─────
 // Computed from the ledger (type credit = income, debit = expense) + general
 // journal. Read-only summary for finance/admin; print-ready for filing.
@@ -2670,6 +2687,9 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
   if (range==='month') { const m=todayStr.slice(0,7); all=all.filter(e=>(e.date||'').slice(0,7)===m); label='This Month — '+m; }
   else if (range==='year') { all=all.filter(e=>(e.date||'').slice(0,4)===yr); label='Year to Date — '+yr; }
   else { label='All Time'; }
+  // Stash the period's rows so the CSV export button (inline onclick) can reach them.
+  window._finReportRows = all.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  window._finReportLabel = label;
 
   const income  = all.filter(e=>e.type==='credit');
   const expense = all.filter(e=>e.type==='debit');
@@ -2699,6 +2719,7 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
       <div style="font-size:12px;color:var(--text-muted)">${label}</div>
       <div style="display:flex;gap:6px">
         ${isFinancePriv()?`<button class="btn-secondary btn-sm" onclick="window.runLedgerBackfill()" title="Post approved expenses + cash journals into the ledger">🔄 Sync to ledger</button>`:''}
+        <button class="btn-secondary btn-sm" onclick="window.exportFinReportCSV()" title="Export this period's ledger to CSV">⬇ CSV</button>
         <button class="btn-secondary btn-sm" onclick="window.print()">🖨 Print</button>
       </div>
     </div>
