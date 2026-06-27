@@ -1453,7 +1453,9 @@ function renderCAList(advances, container, isAdmin) {
           status: 'approved',
           approvedBy: currentUser.uid,
           approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          balance: a.amount
+          // Repayable balance = Total Payable (principal + interest when charged),
+          // falling back to principal for legacy records / interest-free advances.
+          balance: (a.totalPayable != null ? a.totalPayable : a.amount)
         });
         approvedData = a;
       });
@@ -1555,6 +1557,10 @@ function openCashAdvanceModal() {
         <option value="12">12 months</option>
       </select>
     </div>
+    <div class="form-group" style="display:flex;align-items:center;gap:8px">
+      <input id="ca-interest-on" type="checkbox" checked onchange="updateCACalc()" style="width:auto;margin:0"/>
+      <label for="ca-interest-on" style="margin:0;cursor:pointer">Charge ${RATE}%/month interest</label>
+    </div>
     <div id="ca-calc" class="ca-calc-box" style="display:none"></div>
     <div class="form-group"><label>Date Needed</label><input id="ca-date" type="date" value="${window.bizDate()}"/></div>
     <div class="form-group"><label>Reason / Purpose</label>
@@ -1568,13 +1574,14 @@ function openCashAdvanceModal() {
     const calc  = document.getElementById('ca-calc');
     if (!calc) return;
     if (!amt) { calc.style.display='none'; return; }
-    const total   = amt * Math.pow(1 + RATE/100, terms);
+    const interestOn = document.getElementById('ca-interest-on')?.checked !== false;
+    const total   = interestOn ? amt * Math.pow(1 + RATE/100, terms) : amt;
     const monthly = total / terms;
     const interest= total - amt;
     calc.style.display = 'block';
     calc.innerHTML = `
       <div class="ca-detail"><span>Principal</span><span>₱${fmtN(amt)}</span></div>
-      <div class="ca-detail"><span>Interest (${RATE}%/mo × ${terms}mo)</span><span style="color:var(--danger)">+₱${fmtN(interest)}</span></div>
+      ${interestOn ? `<div class="ca-detail"><span>Interest (${RATE}%/mo × ${terms}mo)</span><span style="color:var(--danger)">+₱${fmtN(interest)}</span></div>` : `<div class="ca-detail"><span>Interest</span><span style="color:var(--text-muted)">None (interest-free)</span></div>`}
       <div class="ca-detail"><span>Total Payable</span><span style="font-weight:700">₱${fmtN(total)}</span></div>
       <div class="ca-detail" style="border-top:1.5px solid var(--border);padding-top:8px;margin-top:4px">
         <span>Monthly Payment</span><span style="font-weight:800;font-size:16px;color:var(--primary-light)">₱${fmtN(monthly)}</span>
@@ -1586,7 +1593,8 @@ function openCashAdvanceModal() {
     if (!amt||amt<100) { Notifs.showToast('Enter a valid amount (min ₱100).','error'); return; }
     if (amt>50000)     { Notifs.showToast('Maximum cash advance is ₱50,000.','error'); return; }
     const terms   = parseInt(document.getElementById('ca-terms').value)||1;
-    const total   = amt * Math.pow(1 + RATE/100, terms);
+    const interestOn = document.getElementById('ca-interest-on')?.checked !== false;
+    const total   = interestOn ? amt * Math.pow(1 + RATE/100, terms) : amt;
     const monthly = total / terms;
     const name    = userProfile.displayName || currentUser.email;
     await db.collection('cash_advances').add({
@@ -1595,7 +1603,8 @@ function openCashAdvanceModal() {
       employeeId:     userProfile.employeeId || currentUser.uid,
       amount:         amt,
       terms,
-      interest:       RATE,
+      interest:       interestOn ? RATE : 0,
+      interestCharged: interestOn,
       totalPayable:   Math.round(total*100)/100,
       monthlyPayment: Math.round(monthly*100)/100,
       balance:        0,
@@ -1665,6 +1674,11 @@ function openPresidentCashAdvanceModal(users) {
     if (!amount) { Notifs.showToast('Enter a valid amount.','error'); return; }
 
     const emp = employees.find(u => u.id === uid);
+    // Total to repay = monthly × terms (President sets these directly, so any
+    // interest is baked into the monthly figure). Balance starts at the full
+    // payable so the whole plan is collected — falls back to principal if no
+    // monthly was entered.
+    const totalPay = monthly > 0 ? Math.round(monthly * terms * 100) / 100 : amount;
     await db.collection('cash_advances').add({
       userId:         uid,
       userName:       emp?.displayName || emp?.email || uid,
@@ -1673,8 +1687,8 @@ function openPresidentCashAdvanceModal(users) {
       terms,
       interest:       0,
       monthlyPayment: monthly,
-      totalPayable:   monthly * terms,
-      balance:        amount,
+      totalPayable:   totalPay,
+      balance:        totalPay,
       date,
       reason,
       status:         'approved',

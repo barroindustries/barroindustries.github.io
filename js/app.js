@@ -4024,6 +4024,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
           if (ex2.docs.length) await ex2.docs[0].ref.update({ amount: amt2, description: entry2.description });
           else await db.collection('ledger').add(entry2);
         }
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
         // Notify all employees in parallel
         await Promise.all(empPayloads.map(({ doc }) =>
           Notifs.send(doc.id, {

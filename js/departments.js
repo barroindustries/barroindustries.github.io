@@ -65,6 +65,18 @@ async function financeDeleteCascade(collection, docId) {
     const ref = `PAY-${d.month}-${d.userId||''}`;
     const ls = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
     if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
+    // Restore any cash-advance balances this payroll run deducted, so deleting the
+    // run doesn't leave an employee's loan wrongly marked paid.
+    if (Array.isArray(d.caDeductions)) {
+      for (const cd of d.caDeductions) {
+        if (cd && cd.caId && cd.amount > 0) {
+          await db.collection('cash_advances').doc(cd.caId).update({
+            balance: firebase.firestore.FieldValue.increment(cd.amount),
+            status: 'active', paidAt: firebase.firestore.FieldValue.delete()
+          }).catch(()=>{});
+        }
+      }
+    }
   } else if (collection === 'payslips') {
     const ca = d.deductions?.other?.cashAdvance || 0;
     if (ca > 0 && d.workerId) await db.collection('worker_profiles').doc(d.workerId).update({ caBalance: firebase.firestore.FieldValue.increment(ca) }).catch(()=>{});
@@ -1307,6 +1319,7 @@ function openAddExpenseModal(currentUser) {
       fileName:        uploadedFile?.name||null,
       createdAt:       firebase.firestore.FieldValue.serverTimestamp()
     });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('expenses');
     window.logAudit && window.logAudit('create','expense',null,{ amount:parseFloat(document.getElementById('e-amount').value)||0, description:document.getElementById('e-desc').value.trim() });
     await Notifs.sendToOwner({ title:'💸 New Expense Submitted', body:`${name} submitted an expense of ₱${document.getElementById('e-amount').value}`, icon:'💸', type:'expense_new' });
     closeModal();
@@ -1897,6 +1910,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           } else if (ledgerSnap.docs.length) {
             await ledgerSnap.docs[0].ref.update({ amount: finalPay });
           }
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
           closeModal();
           Notifs.showToast('Payroll record updated!');
           loadFinanceContent(currentUser, currentRole, 'Payroll');
@@ -1913,10 +1927,10 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 
         if (isPres) {
           if (!confirm(`Delete payroll record for ${name||'?'} (${month||'?'})? This cannot be undone.`)) return;
-          await db.collection('salary_history').doc(hid).delete();
-          // Remove matching ledger entry if any
-          const lSnap = await db.collection('ledger').where('refNumber','==',`PAY-${month}-${hid.split('_')[0]}`).limit(1).get().catch(()=>({docs:[]}));
-          if (lSnap.docs.length) await lSnap.docs[0].ref.delete();
+          // Cascade handles the linked PAY- ledger entry AND restores any cash-advance
+          // balances this run deducted (reads the doc's own fields — no fragile split).
+          await window.financeExecuteDelete('salary_history', hid);
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
           Notifs.showToast('Record deleted');
           loadFinanceContent(currentUser, currentRole, 'Payroll');
         } else {
@@ -1965,13 +1979,9 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           // Guard against re-running an already-resolved request.
           const _chk = await db.collection('payroll_delete_requests').doc(reqId).get().catch(()=>null);
           if (_chk && _chk.exists && _chk.data().status !== 'pending') { Notifs.showToast('Already handled.'); loadFinanceContent(currentUser, currentRole, 'Payroll'); return; }
-          await db.collection('salary_history').doc(histId).delete();
-          // Remove the matching per-employee ledger debit so financials don't stay overstated.
-          const _uid2 = (histId||'').split('_')[0], _mo2 = req?.month || (histId||'').split('_')[1];
-          if (_uid2 && _mo2) {
-            const _ls2 = await db.collection('ledger').where('refNumber','==',`PAY-${_mo2}-${_uid2}`).limit(1).get().catch(()=>({docs:[]}));
-            if (_ls2.docs.length) await _ls2.docs[0].ref.delete().catch(()=>{});
-          }
+          // Cascade removes the PAY- ledger debit and restores deducted cash advances.
+          await window.financeExecuteDelete('salary_history', histId);
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
           await db.collection('payroll_delete_requests').doc(reqId).update({ status:'approved', resolvedAt: firebase.firestore.FieldValue.serverTimestamp() });
           if (req?.requestedBy) {
             await Notifs.send(req.requestedBy, {
@@ -2259,6 +2269,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       let remaining = deductAmt;
       const caDocs  = _caDocsByUser[u.id] || [];
       const caBatch = db.batch();
+      const caDeductions = []; // per-advance split, stored so a payroll delete can reverse it
       for (const caDoc of caDocs) {
         if (remaining <= 0) break;
         const docBal   = caDoc.balance||0;
@@ -2268,9 +2279,14 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           balance: newBal,
           ...(newBal <= 0 ? { status:'paid', paidAt:firebase.firestore.FieldValue.serverTimestamp() } : {})
         });
+        if (toDeduct > 0) caDeductions.push({ caId: caDoc.id, amount: toDeduct });
         remaining -= toDeduct;
       }
       await caBatch.commit();
+      // Record which advances were debited so financeDeleteCascade can restore them
+      // if this payroll run is later deleted.
+      if (caDeductions.length) await db.collection('salary_history').doc(`${u.id}_${month}`)
+        .set({ caDeductions }, { merge:true }).catch(()=>{});
 
       // Notify employee about CA deduction
       await Notifs.send(u.id, {
@@ -2280,6 +2296,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       });
     }
 
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
     Notifs.showToast('Payroll generated!');
     loadFinanceContent(currentUser, currentRole, 'Payroll');
   });
@@ -2551,6 +2568,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
         addedByName:userProfile?.displayName||currentUser.email,
         createdAt:  firebase.firestore.FieldValue.serverTimestamp()
       });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
       closeModal(); Notifs.showToast('Ledger entry saved!');
       renderLedgerTab(container, currentUser, currentRole);
     });
@@ -3326,6 +3344,7 @@ async function openPayslipHistory(currentUser, currentRole) {
           };
           if (exist.docs.length) await exist.docs[0].ref.update({ amount: entry.amount, description: entry.description });
           else await db.collection('ledger').add(entry);
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
           Notifs.showToast('Submitted & posted to General Ledger.');
         } else {
           Notifs.showToast(`Payslip marked as ${next}.`);
@@ -5567,6 +5586,20 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
         });
         p.payments = saved;
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects');
+        // Post the income to the Finance ledger so Design collections aren't invisible
+        // to the books. Best-effort: if the biller is a non-finance Design member who
+        // can't write the ledger (rules), the payment is still recorded on the project.
+        try {
+          const vatRate = 12, net = +(amt/(1+vatRate/100)).toFixed(2), vatAmount = +(amt-net).toFixed(2);
+          await db.collection('ledger').add({
+            date: payment.date, description: `Design project — ${p.name||p.id}${payment.note?' ('+payment.note+')':''}`,
+            category: 'Sales Revenue', type: 'credit', amount: amt, vatAmount,
+            refNumber: `DPROJ-${p.id}-${Date.now()}`, source: 'Design', projectId: p.id,
+            addedByName: window.userProfile?.displayName || currentUser.email,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+        } catch (ledErr) { console.warn('[design payment] ledger post skipped:', ledErr?.message||ledErr); }
         Notifs.showToast('Payment recorded','success');
         reopen();
       } catch(e) { console.warn(e); Notifs.showToast('Could not save payment','error'); }
@@ -7835,18 +7868,26 @@ function openRecordSaleModal(o, container){
   document.getElementById('rs-amount').addEventListener('input',recompute);
   document.getElementById('rs-save').addEventListener('click', async ()=>{
     const err=document.getElementById('rs-err');
+    const saveBtn=document.getElementById('rs-save');
     const amount=parseFloat(document.getElementById('rs-amount').value)||0;
     if(amount<0){ err.textContent='Amount cannot be negative.'; err.classList.remove('hidden'); return; }
     const method=document.getElementById('rs-method').value, orRef=document.getElementById('rs-ref').value.trim();
     const toProd=document.getElementById('rs-prod').checked;
     const who=userProfile?.displayName||currentUser.email;
     const vatRate=12, net=+(amount/(1+vatRate/100)).toFixed(2), vatAmount=+(amount-net).toFixed(2);
+    saveBtn.disabled=true; // guard against double-click double-posting
     try{
+      // Idempotency: one Sales-Revenue credit per sales order. If this order was
+      // already recorded (ledger row keyed by SO-<id> exists), don't post again.
+      const ledgerRef=`SO-${o.id}`;
+      const dupe=await db.collection('ledger').where('refNumber','==',ledgerRef).limit(1).get().catch(()=>({empty:true}));
+      if(!dupe.empty){ closeModal(); Notifs.showToast('This sales order was already recorded.','error'); window.renderSalesOrders(container); return; }
       // 1) ledger credit (Sales Revenue → feeds Output-VAT base)
       let ledgerId=null;
       if(amount>0){
-        const led=await db.collection('ledger').add({ date:today(), description:`Sales order — ${o.clientName}${o.quoteNumber?' ('+o.quoteNumber+')':''}`, category:'Sales Revenue', type:'credit', amount, vatAmount, source:'Finance', projectId:o.projectId||null, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+        const led=await db.collection('ledger').add({ date:today(), description:`Sales order — ${o.clientName}${o.quoteNumber?' ('+o.quoteNumber+')':''}`, category:'Sales Revenue', type:'credit', amount, vatAmount, refNumber:ledgerRef, source:'Finance', projectId:o.projectId||null, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
         ledgerId=led.id;
+        if(typeof dbCacheInvalidate==='function') dbCacheInvalidate('ledger');
       }
       // 2) mark the sales order recorded
       await db.collection('sales_orders').doc(o.id).update({ status:'recorded', recordedAmount:amount, recordedAt:firebase.firestore.FieldValue.serverTimestamp(), recordedBy:who });
@@ -7871,7 +7912,7 @@ function openRecordSaleModal(o, container){
       // 4) optional handoff to Production
       if(toProd) await transferOrderToProduction({ ...o, status:'recorded' });
       closeModal(); Notifs.showToast(toProd?'Sale recorded + sent to Production':'Sale recorded to ledger'); window.renderSalesOrders(container);
-    }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+    }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); saveBtn.disabled=false; }
   });
 }
 
@@ -8583,13 +8624,9 @@ window.renderApprovals = async function(currentUser) {
           const _req = await db.collection('payroll_delete_requests').doc(btn.dataset.id).get().catch(()=>null);
           if (_req && _req.exists && _req.data().status !== 'pending') { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
           if (btn.dataset.histId) {
-            await db.collection('salary_history').doc(btn.dataset.histId).delete();
-            // Remove the matching per-employee ledger debit so financials don't stay overstated.
-            const _uid = (btn.dataset.histId||'').split('_')[0];
-            if (_uid && btn.dataset.month) {
-              const _ls = await db.collection('ledger').where('refNumber','==',`PAY-${btn.dataset.month}-${_uid}`).limit(1).get().catch(()=>({docs:[]}));
-              if (_ls.docs.length) await _ls.docs[0].ref.delete().catch(()=>{});
-            }
+            // Cascade removes the PAY- ledger debit and restores deducted cash advances.
+            await window.financeExecuteDelete('salary_history', btn.dataset.histId);
+            if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
           }
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'✅ Payroll Delete Approved', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record has been approved.`, icon:'✅', type:'payroll_delete_approved' }));
@@ -8742,13 +8779,9 @@ window.renderApprovals = async function(currentUser) {
           const _req = await db.collection('payroll_delete_requests').doc(btn.dataset.id).get().catch(()=>null);
           if (_req && _req.exists && _req.data().status !== 'pending') { Notifs.showToast('Already handled.'); loadApprovalsSub('all'); return; }
           if (btn.dataset.histId) {
-            await db.collection('salary_history').doc(btn.dataset.histId).delete();
-            // Remove the matching per-employee ledger debit so financials don't stay overstated.
-            const _uid = (btn.dataset.histId||'').split('_')[0];
-            if (_uid && btn.dataset.month) {
-              const _ls = await db.collection('ledger').where('refNumber','==',`PAY-${btn.dataset.month}-${_uid}`).limit(1).get().catch(()=>({docs:[]}));
-              if (_ls.docs.length) await _ls.docs[0].ref.delete().catch(()=>{});
-            }
+            // Cascade removes the PAY- ledger debit and restores deducted cash advances.
+            await window.financeExecuteDelete('salary_history', btn.dataset.histId);
+            if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
           }
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'✅ Payroll Delete Approved', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record has been approved.`, icon:'✅', type:'payroll_delete_approved' }));
@@ -9695,6 +9728,8 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
         createdAt:     firebase.firestore.FieldValue.serverTimestamp()
       });
 
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+
       // Notify finance dept
       await Notifs.sendToDept('Finance', {
         title: `💸 ${dept} logged a ${type==='debit'?'expense':'income'}`,
@@ -10265,6 +10300,7 @@ function openProjectBillingModal(p){
   if(window.Drive?.renderUploadArea) Drive.renderUploadArea('pb-receipt-upload',(r)=>{receipt=r;},{label:'Upload OR / proof',accept:'image/*,.pdf',dept:'Finance',subfolder:'Collections'});
   document.getElementById('pb-save').addEventListener('click', async ()=>{
     const err=document.getElementById('pb-err');
+    const saveBtn=document.getElementById('pb-save');
     const amount=parseFloat(document.getElementById('pb-amount').value)||0;
     if(amount<=0){ err.textContent='Enter an amount.'; err.classList.remove('hidden'); return; }
     const vatRate=p.vatRate||12;
@@ -10274,9 +10310,11 @@ function openProjectBillingModal(p){
     const newAR=Math.max(0,(p.contractAmount||0)-newCollected);
     const who=userProfile?.displayName||currentUser.email;
     const type=document.getElementById('pb-type').value, method=document.getElementById('pb-method').value, orRef=document.getElementById('pb-ref').value.trim();
+    saveBtn.disabled=true; // guard against double-click double-posting (payments are legitimately multiple)
     try{
       // 1) post income credit to the ledger (category 'Sales Revenue' so it feeds the Output-VAT base)
-      const led=await db.collection('ledger').add({ date:today(), description:`Project ${p.projectNo} — ${p.clientName} (${type})`, category:'Sales Revenue', type:'credit', amount, vatAmount, source:'Finance', projectId:p.id, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+      const led=await db.collection('ledger').add({ date:today(), description:`Project ${p.projectNo} — ${p.clientName} (${type})`, category:'Sales Revenue', type:'credit', amount, vatAmount, refNumber:`PROJ-${p.id}-${Date.now()}`, source:'Finance', projectId:p.id, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+      if(typeof dbCacheInvalidate==='function') dbCacheInvalidate('ledger');
       // 2) update the project: payment, collected, AR, OR document, timeline
       const payment={ type, amount, vatAmount, net, method, orRef, receiptUrl:receipt?.url||null, date:today(), by:who, ledgerId:led.id };
       const update={ amountCollected:newCollected, arBalance:newAR, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
@@ -10288,7 +10326,7 @@ function openProjectBillingModal(p){
       window.logAudit && window.logAudit('create','payment',p.id,{ amount, type, projectNo:p.projectNo });
       if(newAR<=0){ try{ await Notifs.sendToOwner({ title:'💰 Project fully paid', body:`${p.clientName} (${p.projectNo}) — ₱${(p.contractAmount||0).toLocaleString()} collected in full.`, icon:'💰', type:'project_paid' }); }catch(_){} }
       closeModal(); Notifs.showToast('Payment recorded + posted to ledger'); window.renderProjectLifecycle();
-    }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+    }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); saveBtn.disabled=false; }
   });
 }
 
@@ -11128,11 +11166,12 @@ const PURCH_STAT = {
 
 async function renderPurchaseRequests(content, currentUser, currentRole, opts = {}) {
   const canEdit = !opts.viewOnly && canEditDept('Purchasing');
+  const canRecord = !!opts.financeView && isFinancePriv(); // Finance/admin may post to the books
   const snap = await db.collection('purchase_requisitions').orderBy('createdAt','desc').get();
   const prs = snap.docs.map(d => ({ id:d.id, ...d.data() })).filter(d => d.stage === 'pr');
 
   content.innerHTML = `
-    ${opts.financeView ? `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Purchase requests raised by the Purchasing department (view-only).</p>` : ''}
+    ${opts.financeView ? `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Purchases raised by the Purchasing department. Use <strong>Record as Disbursement</strong> to post one into the Cash Disbursement Journal.</p>` : ''}
     ${!prs.length
       ? `<div class="empty-state"><div class="empty-icon">🧾</div><h4>No purchase requests yet</h4><p>${canEdit ? 'Convert a priced RFQ into a purchase request.' : 'None have been raised yet.'}</p></div>`
       : prs.map(p => {
@@ -11145,7 +11184,10 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
               <div style="font-size:12px;color:var(--text-muted)">Requesting: ${escHtml(p.requestingDept || '—')}${p.neededBy ? ` · Needed by ${escHtml(p.neededBy)}` : ''}</div>
               ${p.deliverTo ? `<div style="font-size:12px;color:var(--text-muted)">Deliver to: ${escHtml(p.deliverTo)}</div>` : ''}
             </div>
-            <span class="badge ${st.badge}">${st.label}</span>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+              <span class="badge ${st.badge}">${st.label}</span>
+              ${p.submittedToFinance ? `<span class="badge badge-green" style="font-size:9px">🧾 Sent to Finance</span>` : ''}
+            </div>
           </div>
           <div class="table-wrap" style="margin-top:10px"><table class="data-table">
             <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Line Total</th></tr></thead>
@@ -11159,12 +11201,16 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
             <tfoot><tr><td colspan="4" style="text-align:right;font-weight:700">Total</td><td style="text-align:right;font-weight:700">₱${fmt(p.total != null ? p.total : purchTotal(p.items))}</td></tr></tfoot>
           </table></div>
           ${p.notes ? `<div style="font-size:12px;margin-top:6px;color:var(--text-muted)">${escHtml(p.notes)}</div>` : ''}
+          ${p.submittedToFinance && p.submittedToFinanceByName ? `<div style="font-size:11px;margin-top:6px;color:var(--success,#1b8a3a)">🧾 Submitted to Finance by ${escHtml(p.submittedToFinanceByName)}${p.submittedToFinanceAt && p.submittedToFinanceAt.toDate ? ` · ${p.submittedToFinanceAt.toDate().toLocaleDateString('en-PH')}` : ''}</div>` : ''}
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
             <button class="btn-secondary btn-sm pr-print" data-id="${p.id}">🖨 Print PO</button>
             ${canEdit ? `
               ${p.status !== 'ordered' && p.status !== 'received' ? `<button class="btn-secondary btn-sm pr-stat" data-id="${p.id}" data-stat="ordered">Mark Ordered</button>` : ''}
               ${p.status !== 'received' ? `<button class="btn-primary btn-sm pr-stat" data-id="${p.id}" data-stat="received">Mark Received</button>` : ''}
+              ${(p.status === 'ordered' || p.status === 'received') && !p.submittedToFinance ? `<button class="btn-primary btn-sm pr-submit-fin" data-id="${p.id}">📩 Submit to Finance</button>` : ''}
             ` : ''}
+            ${canRecord && !p.recordedToFinance ? `<button class="btn-primary btn-sm pr-record" data-id="${p.id}">🧾 Record as Disbursement</button>` : ''}
+            ${p.recordedToFinance ? `<span style="font-size:11px;color:var(--success,#1b8a3a);align-self:center">✓ Recorded in journal</span>` : ''}
           </div>
         </div></div>`;
       }).join('')}
@@ -11173,6 +11219,36 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
   content.querySelectorAll('.pr-print').forEach(btn => btn.addEventListener('click', () => {
     const p = prs.find(x => x.id === btn.dataset.id);
     if (p) printPurchaseOrder(p);
+  }));
+
+  const redo = () => renderPurchaseRequests(content, currentUser, currentRole, opts);
+
+  // Purchasing → hand the completed purchase to Finance for recordkeeping.
+  if (canEdit) content.querySelectorAll('.pr-submit-fin').forEach(btn => btn.addEventListener('click', async () => {
+    const p = prs.find(x => x.id === btn.dataset.id); if (!p) return;
+    if (!confirm(`Submit "${p.title || p.prNo}" (₱${fmt(p.total != null ? p.total : purchTotal(p.items))}) to Finance for recordkeeping?`)) return;
+    btn.disabled = true;
+    try {
+      await db.collection('purchase_requisitions').doc(p.id).update({
+        submittedToFinance: true,
+        submittedToFinanceAt: firebase.firestore.FieldValue.serverTimestamp(),
+        submittedToFinanceBy: currentUser.uid,
+        submittedToFinanceByName: window.userProfile?.displayName || currentUser.email
+      });
+      await notifyFinanceTeam({
+        title: '🧾 Purchase for Recordkeeping',
+        body: `${p.prNo || p.rfqNo || 'A purchase'} — ${p.supplier || 'supplier'} · ₱${fmt(p.total != null ? p.total : purchTotal(p.items))}. See Finance → Purchases.`,
+        icon: '🧾', type: 'purchase_submitted', dedupKey: `pr-fin-${p.id}`
+      });
+      Notifs.showToast('Submitted to Finance ✓');
+      redo();
+    } catch (err) { Notifs.showToast('Submit failed: ' + (err.message || err), 'error'); btn.disabled = false; }
+  }));
+
+  // Finance → post the purchase into the cash disbursement journal.
+  if (canRecord) content.querySelectorAll('.pr-record').forEach(btn => btn.addEventListener('click', () => {
+    const p = prs.find(x => x.id === btn.dataset.id); if (!p) return;
+    recordPurchaseDisbursement(p, currentUser, redo);
   }));
 
   if (canEdit) content.querySelectorAll('.pr-stat').forEach(btn => btn.addEventListener('click', async () => {
@@ -11186,6 +11262,92 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
       renderPurchaseRequests(content, currentUser, currentRole, opts);
     } catch (err) { Notifs.showToast('Update failed: ' + (err.message || err), 'error'); btn.disabled = false; }
   }));
+}
+
+// Notify the Finance team (Finance-dept members + Accountant role) and the
+// President/owner. De-duplicated by uid so nobody is double-pinged.
+async function notifyFinanceTeam(data) {
+  const uids = new Set();
+  const snaps = await Promise.all([
+    db.collection('users').where('department', '==', 'Finance').get().catch(() => ({ docs: [] })),
+    db.collection('users').where('departments', 'array-contains', 'Finance').get().catch(() => ({ docs: [] })),
+    db.collection('users').where('role', '==', 'finance').get().catch(() => ({ docs: [] }))
+  ]);
+  snaps.forEach(s => s.docs.forEach(d => uids.add(d.id)));
+  await Promise.all([...uids].map(uid => safeNotify(() => Notifs.send(uid, data))));
+  await safeNotify(() => Notifs.sendToOwner(data));
+}
+
+// Finance posts a submitted purchase into the cash disbursement journal.
+// Pre-fills from the purchase request; the PR's PO number becomes the reference
+// so a double-entry is easy to spot.
+function recordPurchaseDisbursement(p, currentUser, onDone) {
+  const total = p.total != null ? p.total : purchTotal(p.items);
+  const ref = p.prNo || p.rfqNo || '';
+  openModal('🧾 Record Purchase — Cash Disbursement', `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Posting <strong>${escHtml(p.title || ref)}</strong> to the Cash Disbursement Journal.</div>
+    <div class="form-row">
+      <div class="form-group"><label>Reference</label><input id="rec-ref" value="${escHtml(ref)}"/></div>
+      <div class="form-group"><label>Date</label><input id="rec-date" type="date" value="${today()}"/></div>
+    </div>
+    <div class="form-group"><label>Payee / Supplier</label><input id="rec-payee" value="${escHtml(p.supplier || '')}"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Amount — Credit: Cash (₱)</label><input id="rec-amt" type="number" step="0.01" inputmode="decimal" value="${total}"/></div>
+      <div class="form-group"><label>Debit Account</label><select id="rec-acct">
+        <option value="material">COS – Direct Material</option>
+        <option value="ap">Accounts Payable</option>
+        <option value="sundry">Sundry / Other</option>
+      </select></div>
+    </div>
+    <div class="form-group" id="rec-sundry-wrap" style="display:none"><label>Sundry Account Name</label><input id="rec-sundry" placeholder="e.g. Office Supplies Expense"/></div>
+  `, `<button class="btn-primary" id="rec-save">Post Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  const acctSel = document.getElementById('rec-acct');
+  acctSel.addEventListener('change', () => {
+    document.getElementById('rec-sundry-wrap').style.display = acctSel.value === 'sundry' ? '' : 'none';
+  });
+
+  document.getElementById('rec-save').addEventListener('click', async () => {
+    const reference = document.getElementById('rec-ref').value.trim();
+    const payee = document.getElementById('rec-payee').value.trim();
+    const amt = parseFloat(document.getElementById('rec-amt').value) || 0;
+    const acct = acctSel.value;
+    if (!payee) { Notifs.showToast('Enter a payee.', 'error'); return; }
+    if (!amt) { Notifs.showToast('Enter the amount.', 'error'); return; }
+    const saveBtn = document.getElementById('rec-save'); saveBtn.disabled = true;
+    try {
+      if (reference) {
+        const dupe = await db.collection('cash_disbursement_journal').where('reference', '==', reference).limit(1).get().catch(() => ({ empty: true }));
+        if (!dupe.empty && !confirm(`A disbursement with reference "${reference}" already exists. Post another?`)) { saveBtn.disabled = false; return; }
+      }
+      const cdjRef = await db.collection('cash_disbursement_journal').add({
+        reference, date: document.getElementById('rec-date').value, payee,
+        creditCash: amt,
+        debitMaterial:     acct === 'material' ? amt : 0,
+        debitAP:           acct === 'ap' ? amt : 0,
+        debitLabor:        0,
+        debitSundryAcct:   acct === 'sundry' ? document.getElementById('rec-sundry').value.trim() : '',
+        debitSundryAmount: acct === 'sundry' ? amt : 0,
+        purchaseRef:       p.id,
+        addedBy: currentUser.uid,
+        addedByName: window.userProfile?.displayName || currentUser.email,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      // Stamp the purchase as recorded so it can't be silently double-posted.
+      // (Rules let Finance write only these bookkeeping fields.)
+      await db.collection('purchase_requisitions').doc(p.id).update({
+        recordedToFinance: true,
+        recordedToFinanceAt: firebase.firestore.FieldValue.serverTimestamp(),
+        recordedBy: currentUser.uid,
+        recordedByName: window.userProfile?.displayName || currentUser.email,
+        cdjEntryId: cdjRef.id
+      }).catch(() => {}); // journal post already succeeded — don't fail the action on the flag write
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+      closeModal();
+      Notifs.showToast('Posted to Cash Disbursement Journal ✓');
+      onDone && onDone();
+    } catch (err) { Notifs.showToast('Post failed: ' + (err.message || err), 'error'); saveBtn.disabled = false; }
+  });
 }
 
 // ── Printable Purchase Order (forward to supplier) ────────────────

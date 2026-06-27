@@ -534,23 +534,23 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
     match /cash_disbursement_journal/{docId} {
-      allow read: if isAuth() && isFinanceOrAdmin();
-      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow read: if isAuth() && canFinance();
+      allow create, update: if isAuth() && canFinance();
       allow delete: if isAuth() && isPresident();
     }
     match /general_journal/{docId} {
-      allow read: if isAuth() && isFinanceOrAdmin();
-      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow read: if isAuth() && canFinance();
+      allow create, update: if isAuth() && canFinance();
       allow delete: if isAuth() && isPresident();
     }
     match /finance_records/{docId} {
-      allow read: if isAuth() && isFinanceOrAdmin();
-      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow read: if isAuth() && canFinance();
+      allow create, update: if isAuth() && canFinance();
       allow delete: if isAuth() && isPresident();
     }
     match /tax_records/{docId} {
-      allow read: if isAuth() && isFinanceOrAdmin();
-      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow read: if isAuth() && canFinance();
+      allow create, update: if isAuth() && canFinance();
       allow delete: if isAuth() && isPresident();
     }
     // Purchase orders (legacy Finance → Purchasing tab). Finance dept members
@@ -567,7 +567,15 @@ service cloud.firestore {
     // Purchasing; once converted to a PR, only the President may delete.
     match /purchase_requisitions/{docId} {
       allow read: if isAuth() && (canPurchasing() || canFinance());
-      allow create, update: if isAuth() && canPurchasing();
+      allow create: if isAuth() && canPurchasing();
+      // Purchasing edits the requisition freely. Finance may ONLY stamp the
+      // bookkeeping fields (mark a purchase as recorded into the journal) so a
+      // purchase can't be double-posted — not rewrite items/prices.
+      allow update: if isAuth() && (
+        canPurchasing()
+        || (canFinance() && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['recordedToFinance','recordedToFinanceAt','recordedBy','recordedByName','cdjEntryId']))
+      );
       allow delete: if isAuth() && (isPresident()
         || (canPurchasing() && resource.data.get('stage', 'rfq') == 'rfq'));
     }
