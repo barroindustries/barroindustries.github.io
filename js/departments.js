@@ -10910,6 +10910,57 @@ async function renderProdOrders(el, currentUser, currentRole) {
   }));
 }
 
+// Consume a production order's materials: decrement inventory stock, post COS to
+// the ledger (idempotent, keyed POCOS-<id>), add the cost to the linked job's
+// capital (for margin), and flag the order. Stock + flag commit atomically.
+async function consumeProductionMaterials(order) {
+  const mats = (order.materials || []).filter(m => m.itemId && (Number(m.qty) || 0) > 0);
+  if (!mats.length) return { ok: false, reason: 'No materials listed.' };
+  if (order.materialsConsumed) return { ok: false, reason: 'Already consumed.' };
+  // Resolve current unit costs from inventory
+  const snaps = await Promise.all(mats.map(m => db.collection('inventory_items').doc(m.itemId).get().catch(() => null)));
+  let cos = 0;
+  const batch = db.batch();
+  mats.forEach((m, i) => {
+    const s = snaps[i];
+    const unitCost = (s && s.exists) ? (Number(s.data().unitCost) || 0) : (Number(m.unitCost) || 0);
+    cos += unitCost * (Number(m.qty) || 0);
+    if (s && s.exists) batch.update(db.collection('inventory_items').doc(m.itemId), { qty: firebase.firestore.FieldValue.increment(-(Number(m.qty) || 0)) });
+  });
+  batch.update(db.collection('production_orders').doc(order.id), {
+    materialsConsumed: true,
+    materialsConsumedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    materialsCost: cos
+  });
+  await batch.commit(); // stock + flag atomic — can't double-decrement
+  // Post COS to the ledger, idempotent by ref. Best-effort: the ledger is
+  // finance-write-gated, so a plain Production employee can't post it — stock is
+  // still deducted and materialsCost is recorded on the order for finance to see.
+  const ref = `POCOS-${order.id}`;
+  let cosPosted = false;
+  if (cos > 0) {
+    try {
+      const existing = await db.collection('ledger').where('refNumber', '==', ref).limit(1).get().catch(() => ({ docs: [] }));
+      if (!existing.docs.length) {
+        await db.collection('ledger').add({
+          date: today(), type: 'debit',
+          description: `COS — ${order.title || order.orderNo || ''}${order.client ? ` (${order.client})` : ''}`,
+          category: 'COS – Direct Material', amount: cos, refNumber: ref, source: 'Production',
+          projectId: order.projectId || null,
+          addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      }
+      cosPosted = true;
+    } catch (ledErr) { console.warn('[production COS] ledger post skipped (needs finance rights):', ledErr?.message || ledErr); }
+  }
+  // Roll the material cost into the linked job's capital so margin reflects it
+  if (order.projectId && cos > 0) await db.collection('job_projects').doc(order.projectId)
+    .update({ capital: firebase.firestore.FieldValue.increment(cos) }).catch(() => {});
+  if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('ledger'); dbCacheInvalidate('inventory_items'); dbCacheInvalidate('projects-unified'); }
+  return { ok: true, cos, count: mats.length, cosPosted };
+}
+
 async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillProjectId) {
   const e = order || {};
   // Load active projects so this work order can be linked to a job (the spine)
@@ -10921,6 +10972,13 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
     const selP = e.projectId || prefillProjectId || '';
     projOpts += projs.map(p=>`<option value="${p.id}" data-client="${escHtml(p.clientName||'')}" ${selP===p.id?'selected':''}>${escHtml(p.projectNo||'')} — ${escHtml(p.clientName||p.name||'')}</option>`).join('');
   } catch(_) {}
+  // Load raw materials for the consumption picker
+  let invItems = [];
+  try {
+    const isnap = await db.collection('inventory_items').get();
+    invItems = isnap.docs.map(d=>({id:d.id,...d.data()})).filter(i=>(i.kind||'material')==='material').sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  } catch(_) {}
+  const matItemOpts = (sel='') => '<option value="">— Select material —</option>' + invItems.map(i=>`<option value="${i.id}" data-name="${escHtml(i.name||'')}" data-cost="${Number(i.unitCost)||0}" ${sel===i.id?'selected':''}>${escHtml(i.name||'')} (${Number(i.qty||0).toLocaleString('en-PH')} ${escHtml(i.unit||'')} @ ₱${fmt(i.unitCost||0)})</option>`).join('');
   // Starting a work order from an incoming job: prefill client + quote from the project.
   const pf = (!order && prefillProjectId) ? projs.find(p=>p.id===prefillProjectId) : null;
   const dfClient = e.client || pf?.clientName || '';
@@ -10951,9 +11009,55 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
       </div>
       <div class="form-group"><label>Target Date</label><input id="po-due" type="date" value="${e.dueDate||''}"/></div>
     </div>
-    <div class="form-group"><label>Notes</label><textarea id="po-notes" rows="2" placeholder="Materials, special instructions, etc.">${escHtml(e.notes||'')}</textarea></div>
+    <div class="form-group"><label>Notes</label><textarea id="po-notes" rows="2" placeholder="Special instructions, etc.">${escHtml(e.notes||'')}</textarea></div>
+    <label style="font-size:12px;font-weight:700;display:block;margin:8px 0 4px">Materials consumed ${e.materialsConsumed?'<span style="color:var(--success);font-weight:600">· ✓ consumed</span>':'(optional)'}</label>
+    <div id="po-mats"></div>
+    ${e.materialsConsumed
+      ? `<div style="font-size:11px;color:var(--success);margin-top:6px">✓ Stock deducted · COS ₱${fmt(e.materialsCost||0)} posted to ledger.</div>`
+      : `<button class="btn-secondary btn-sm" id="po-add-mat" type="button" style="margin-top:6px">+ Add material</button>
+         ${order?`<button class="btn-primary btn-sm" id="po-consume" type="button" style="margin-top:6px;margin-left:6px">📦 Consume → stock & COS</button>`:'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Save the order first, then reopen to consume materials.</div>'}`}
     <div id="po-err" class="error-msg hidden"></div>
   `, `<button class="btn-primary" id="po-save">Save</button>${order?'<button class="btn-danger" id="po-del">Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  // Materials editor (dynamic rows)
+  const matsWrap = document.getElementById('po-mats');
+  const consumed = !!e.materialsConsumed;
+  const addMatRow = (itemId='', qty='') => {
+    if (!matsWrap) return;
+    const row = document.createElement('div');
+    row.className = 'po-mat-row';
+    row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center';
+    row.innerHTML = `
+      <select class="pm-item" ${consumed?'disabled':''} style="flex:1;min-width:0;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">${matItemOpts(itemId)}</select>
+      <input class="pm-qty" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Qty" value="${qty}" ${consumed?'disabled':''} style="flex:0 0 70px;width:70px"/>
+      ${consumed?'':'<button class="btn-danger btn-sm pm-del" type="button">✕</button>'}`;
+    row.querySelector('.pm-del')?.addEventListener('click', ()=>row.remove());
+    matsWrap.appendChild(row);
+  };
+  (e.materials||[]).forEach(m=>addMatRow(m.itemId, m.qty));
+  if (!consumed && !(e.materials||[]).length) addMatRow();
+  document.getElementById('po-add-mat')?.addEventListener('click', ()=>addMatRow());
+
+  const collectMaterials = () => [...matsWrap.querySelectorAll('.po-mat-row')].map(r=>{
+    const sel = r.querySelector('.pm-item'); const opt = sel.options[sel.selectedIndex];
+    return { itemId: sel.value, name: opt?.dataset.name||'', unitCost: parseFloat(opt?.dataset.cost||0)||0, qty: parseFloat(r.querySelector('.pm-qty').value)||0 };
+  }).filter(m=>m.itemId && m.qty>0);
+
+  document.getElementById('po-consume')?.addEventListener('click', async ()=>{
+    const materials = collectMaterials();
+    if (!materials.length) { Notifs.showToast('Add at least one material with a quantity.','error'); return; }
+    if (!confirm(`Consume these materials? This deducts stock and posts COS to the ledger (one-time).`)) return;
+    const btn = document.getElementById('po-consume'); btn.disabled = true;
+    try {
+      await db.collection('production_orders').doc(order.id).update({ materials });
+      const res = await consumeProductionMaterials({ ...e, id: order.id, materials });
+      if (res.ok) Notifs.showToast(res.cosPosted
+        ? `Consumed ${res.count} material${res.count>1?'s':''} · COS ₱${fmt(res.cos)} posted to ledger.`
+        : `Stock deducted (COS ₱${fmt(res.cos)} recorded; ask Finance to post it to the ledger).`);
+      else Notifs.showToast(res.reason||'Nothing to consume.','error');
+      closeModal(); onSaved && onSaved();
+    } catch(ex){ Notifs.showToast('Consume failed: '+(ex.message||ex),'error'); btn.disabled=false; }
+  });
 
   document.getElementById('po-save').addEventListener('click', async ()=>{
     const title = document.getElementById('po-title').value.trim();
@@ -10973,6 +11077,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
       notes: document.getElementById('po-notes').value.trim(),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     };
+    if (!e.materialsConsumed) data.materials = collectMaterials(); // lock once consumed
     try {
       if(order){ await db.collection('production_orders').doc(order.id).update(data); window.logAudit&&window.logAudit('update','production_order',order.id,{title:data.title,stage:data.stage}); }
       else {
