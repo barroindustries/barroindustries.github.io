@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '11.0.38';
+window.APP_VERSION = '11.0.39';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -151,10 +151,10 @@ window.PRESIDENT_BOTTOM_NAV = [
 
 // ── Bottom Nav — External Partner (Brilliant Steel) ─
 window.PARTNER_BOTTOM_NAV = [
-  { icon: 'home',         label: 'Home',    page: 'dashboard'        },
-  { icon: 'check-square', label: 'Tasks',   page: 'tasks'            },
-  { icon: 'calculator',   label: 'Quotes',  page: 'bs-quote-builder' },
-  { icon: 'file-text',    label: 'Summary', page: 'bs-quotations'    }
+  { icon: 'home',         label: 'Home',     page: 'dashboard'        },
+  { icon: 'briefcase',    label: 'Projects', page: 'partner-projects' },
+  { icon: 'calculator',   label: 'Quotes',   page: 'bs-quote-builder' },
+  { icon: 'file-text',    label: 'Summary',  page: 'bs-quotations'    }
 ];
 
 // ── Bottom Nav — Generic Partner (any company) ──────
@@ -169,10 +169,11 @@ window.PARTNER_GENERIC_BOTTOM_NAV = [
 
 // ── Bottom Nav — Partner (Brilliant Steel) ───────
 window.BRILLIANT_BOTTOM_NAV = [
-  { icon: 'home',       label: 'Home',    page: 'dashboard'        },
-  { icon: 'calculator', label: 'Quotes',  page: 'bs-quote-builder' },
-  { icon: 'file-text',  label: 'Summary', page: 'bs-quotations'    },
-  { icon: 'book-open',  label: 'Clients', page: 'bs-clients'       }
+  { icon: 'home',       label: 'Home',     page: 'dashboard'        },
+  { icon: 'briefcase',  label: 'Projects', page: 'partner-projects' },
+  { icon: 'calculator', label: 'Quotes',   page: 'bs-quote-builder' },
+  { icon: 'file-text',  label: 'Summary',  page: 'bs-quotations'    },
+  { icon: 'book-open',  label: 'Clients',  page: 'bs-clients'       }
 ];
 
 // ── Users + payroll merge ─────────────────────────

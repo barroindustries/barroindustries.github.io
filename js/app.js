@@ -838,6 +838,7 @@ function getSidebarItems() {
     // ── External Partner role (Brilliant Steel) ──
     items.push({ icon:'check-square', label:'My Tasks',      page:'tasks'            });
     items.push({ icon:'megaphone',    label:'Posts',         page:'posts'            });
+    items.push({ icon:'briefcase',    label:'My Projects',   page:'partner-projects' });
     items.push({ icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' });
     items.push({ icon:'file-text',    label:'Quotations',    page:'bs-quotations'    });
     items.push({ icon:'book-open',    label:'Client Data',   page:'bs-clients'       });
@@ -845,6 +846,7 @@ function getSidebarItems() {
     items.push({ icon:'folder',       label:'Files',         page:'files'            });
   } else if (bsOnly) {
     // ── Partner — Brilliant Steel (ISOLATED) ──
+    items.push({ icon:'briefcase',   label:'My Projects',   page:'partner-projects' });
     items.push({ icon:'calculator',  label:'Quote Builder', page:'bs-quote-builder' });
     items.push({ icon:'file-text',   label:'Quotations',    page:'bs-quotations'    });
     items.push({ icon:'book-open',   label:'Client Data',   page:'bs-clients'       });

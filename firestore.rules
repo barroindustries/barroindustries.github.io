@@ -56,6 +56,15 @@ service cloud.firestore {
     }
     function canProduction() { return isAdmin() || isProductionDept(); }
 
+    // Generic department membership (null-safe), and "admin OR member of dept D".
+    // Used by the per-department document collections (work plans, marketing plans,
+    // gov bidding buckets, IT assets/software, etc.).
+    function inDept(d) {
+      let u = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return u.get('department', '') == d || u.get('departments', []).hasAny([d]);
+    }
+    function canDept(d) { return isAdmin() || inDept(d); }
+
     // True when a user-profile update leaves all privileged fields untouched.
     // Used so a non-admin can edit their own name/photo/phone but NOT promote
     // themselves (role) or change their own pay/department/employee ID.
@@ -503,21 +512,50 @@ service cloud.firestore {
       );
       allow delete: if isAuth() && isAdmin();
     }
+    // IT assets/software: IT-dept members manage them (UI gates on canEditDept('IT')).
     match /it_assets/{docId} {
       allow read: if isAuth();
-      allow write: if isAuth() && isAdmin();
+      allow write: if isAuth() && canDept('IT');
     }
     match /it_software/{docId} {
       allow read: if isAuth();
-      allow write: if isAuth() && isAdmin();
+      allow write: if isAuth() && canDept('IT');
     }
     match /it_access/{docId} {
-      allow read: if isAuth() && isAdmin();
-      allow write: if isAuth() && isAdmin();
+      allow read: if isAuth() && (isAdmin() || inDept('IT'));
+      allow write: if isAuth() && (isAdmin() || inDept('IT'));
     }
     match /it_network/{docId} {
-      allow read: if isAuth() && isAdmin();
-      allow write: if isAuth() && isAdmin();
+      allow read: if isAuth() && (isAdmin() || inDept('IT'));
+      allow write: if isAuth() && (isAdmin() || inDept('IT'));
+    }
+
+    // ── Per-department document collections (renderDocCollection) ───────
+    // These were unruled → silent permission-denied (blank screens). Internal
+    // staff read; the owning department (or an admin) writes. Partners excluded.
+    match /work_plans/{docId} {
+      allow read: if isAuth() && getRole() != 'partner';
+      allow write: if isAuth() && canDept('Sales');
+    }
+    match /marketing_plans/{docId} {
+      allow read: if isAuth() && getRole() != 'partner';
+      allow write: if isAuth() && canDept('Marketing');
+    }
+    match /marketing_proposals/{docId} {
+      allow read: if isAuth() && getRole() != 'partner';
+      allow write: if isAuth() && canDept('Marketing');
+    }
+    match /gov_philgeps/{docId} {
+      allow read: if isAuth() && getRole() != 'partner';
+      allow write: if isAuth() && canDept('Government Biddings');
+    }
+    match /gov_active_bids/{docId} {
+      allow read: if isAuth() && getRole() != 'partner';
+      allow write: if isAuth() && canDept('Government Biddings');
+    }
+    match /gov_archive/{docId} {
+      allow read: if isAuth() && getRole() != 'partner';
+      allow write: if isAuth() && canDept('Government Biddings');
     }
 
     // ── Finance journals & records ─────────────────────
