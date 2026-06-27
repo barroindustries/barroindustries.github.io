@@ -46,6 +46,87 @@ async function safeNotify(fn) {
 }
 
 // ════════════════════════════════════════════════════════════════
+//  PROJECTS — unified read layer over the two physical collections
+//  `job_projects` (Sales/Production lifecycle) and `projects` (Design board)
+//  stay SEPARATE on disk (different security models + schemas), but views that
+//  need "all projects" read them through one normalized shape here. Writes still
+//  go through each collection's own functions. No destructive migration.
+// ════════════════════════════════════════════════════════════════
+window.Projects = (function() {
+  function sumPayments(d) { return (d.payments || []).reduce((s, x) => s + (Number(x.amount) || 0), 0); }
+  // Canonical shape: {id, kind, no, name, clientName, contractAmount, collected,
+  // arBalance, stage, payments, invoices, jobProjectId, partnerUid, createdAt, raw}
+  function normalize(doc, kind) {
+    const d = doc.data ? doc.data() : doc;
+    const id = doc.id || d.id;
+    const contract  = Number(d.contractAmount) || 0;
+    const collected = (kind === 'job' && d.amountCollected != null) ? Number(d.amountCollected) : sumPayments(d);
+    const arBalance = (kind === 'job' && d.arBalance != null) ? Number(d.arBalance) : Math.max(0, contract - collected);
+    return {
+      id, kind,
+      no:        kind === 'job' ? (d.projectNo || '') : (d.no || ''),
+      name:      d.name || d.clientName || '(untitled)',
+      clientName: d.clientName || d.client || '',
+      contractAmount: contract, collected, arBalance,
+      stage:     kind === 'job' ? (d.stage || '') : (d.status || ''),
+      payments:  d.payments || [], invoices: d.invoices || [],
+      jobProjectId: d.jobProjectId || null,
+      partnerUid: d.partnerUid || null,
+      createdAt: d.createdAt || null,
+      raw: d
+    };
+  }
+  // listAll(scope): scope.partner skips the internal Design board; scope.partnerUid
+  // filters job projects to that partner (mirrors the job_projects rule).
+  async function listAll(scope) {
+    scope = scope || {};
+    const fetch = async () => {
+      const jobSnap = await db.collection('job_projects').get().catch(() => ({ docs: [] }));
+      const desSnap = scope.partner ? { docs: [] } : await db.collection('projects').get().catch(() => ({ docs: [] }));
+      let jobs = jobSnap.docs.map(d => normalize(d, 'job'));
+      if (scope.partnerUid) jobs = jobs.filter(j => j.partnerUid === scope.partnerUid);
+      const designs = desSnap.docs.map(d => normalize(d, 'design'));
+      return [...jobs, ...designs];
+    };
+    // Only the internal full list is cached (key invalidated on any project write);
+    // partner-scoped reads bypass the cache to avoid leaking across scopes.
+    if (scope.partner || scope.partnerUid) return fetch();
+    return (typeof dbCachedGet === 'function') ? dbCachedGet('projects-unified', fetch, 30000) : fetch();
+  }
+  return { normalize, listAll, sumPayments };
+})();
+
+// One-time (re-runnable) tag of existing docs with a `kind` field so the two
+// collections are queryable/identifiable. Idempotent — skips docs already tagged.
+window.backfillProjectKind = async function() {
+  const [jp, pr] = await Promise.all([
+    db.collection('job_projects').get().catch(() => ({ docs: [] })),
+    db.collection('projects').get().catch(() => ({ docs: [] }))
+  ]);
+  const tagMissing = async (docs, kind) => {
+    let n = 0, pending = [];
+    for (const d of docs) {
+      if (d.data().kind) continue;
+      pending.push(d.ref); n++;
+      if (pending.length === 400) { const b = db.batch(); pending.forEach(r => b.update(r, { kind })); await b.commit(); pending = []; }
+    }
+    if (pending.length) { const b = db.batch(); pending.forEach(r => b.update(r, { kind })); await b.commit(); }
+    return n;
+  };
+  const jobs = await tagMissing(jp.docs, 'job');
+  const designs = await tagMissing(pr.docs, 'design');
+  return { jobs, designs, tagged: jobs + designs };
+};
+
+window.runProjectKindBackfill = async function() {
+  if (!confirm('Tag existing projects with their kind (job / design)?\n\nSafe to run repeatedly — already-tagged projects are skipped.')) return;
+  try {
+    const r = await window.backfillProjectKind();
+    Notifs.showToast(`Tagged ✓ ${r.jobs} job + ${r.designs} design projects.`);
+  } catch (e) { Notifs.showToast('Tagging failed: ' + (e.message || e), 'error'); }
+};
+
+// ════════════════════════════════════════════════════════════════
 //  FINANCE — edit anything, delete only with President approval
 //  Finance staff may edit every finance record. Deletes are gated:
 //  the President deletes immediately; everyone else files a request the
@@ -5753,20 +5834,25 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
           return next;
         });
         p.payments = saved;
-        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects');
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects-unified');
         // Post the income to the Finance ledger so Design collections aren't invisible
         // to the books. Best-effort: if the biller is a non-finance Design member who
         // can't write the ledger (rules), the payment is still recorded on the project.
         try {
           const vatRate = 12, net = +(amt/(1+vatRate/100)).toFixed(2), vatAmount = +(amt-net).toFixed(2);
-          await db.collection('ledger').add({
-            date: payment.date, description: `Design project — ${p.name||p.id}${payment.note?' ('+payment.note+')':''}`,
-            category: 'Sales Revenue', type: 'credit', amount: amt, vatAmount,
-            refNumber: `DPROJ-${p.id}-${Date.now()}`, source: 'Design', projectId: p.id,
-            addedByName: window.userProfile?.displayName || currentUser.email,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+          // Deterministic ref (project id + payment index) → idempotent on retry/backfill.
+          const dref = `DPROJ-${p.id}-${Math.max(0, saved.length - 1)}`;
+          const dDupe = await db.collection('ledger').where('refNumber','==',dref).limit(1).get().catch(()=>({empty:true}));
+          if (dDupe.empty) {
+            await db.collection('ledger').add({
+              date: payment.date, description: `Design project — ${p.name||p.id}${payment.note?' ('+payment.note+')':''}`,
+              category: 'Sales Revenue', type: 'credit', amount: amt, net, vatAmount,
+              refNumber: dref, source: 'Design', projectId: p.id,
+              addedByName: window.userProfile?.displayName || currentUser.email,
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+          }
         } catch (ledErr) { console.warn('[design payment] ledger post skipped:', ledErr?.message||ledErr); }
         Notifs.showToast('Payment recorded','success');
         reopen();
@@ -5820,7 +5906,7 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
           return next;
         });
         p.invoices = saved;
-        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects');
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects-unified');
       } catch(e) {
         console.warn('Invoice not saved to project record:', e);
         Notifs.showToast('Could not save invoice — not recorded','error');
@@ -5958,7 +6044,7 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
     try {
       await db.collection('projects').doc(p.id).update(update);
       Object.assign(p, update);
-      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects');
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects-unified');
       const who = window.userProfile?.displayName || currentUser.email || '';
       // notify newly delegated team members
       for (const a of team) {
@@ -10323,6 +10409,14 @@ window.renderProjectLifecycle = async function(){
   const snap = await db.collection('job_projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
   let projects = snap.docs.map(d=>({id:d.id,...d.data()}));
   if (isPartnerU) projects = projects.filter(p=>p.createdBy===currentUser.uid || p.partnerUid===currentUser.uid); // partners: own + shared
+  // Design-board projects (separate collection) shown read-only below, so this page
+  // is the single place to see ALL projects. Partners never see the internal board.
+  let designList = [];
+  if (!isPartnerU) {
+    const dsnap = await db.collection('projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+    designList = dsnap.docs.map(d=>window.Projects.normalize(d,'design'));
+  }
+  const canTagProjects = ['president','owner','manager','secretary'].includes(currentRole);
   const active = projects.filter(p=>!['paid','cancelled'].includes(p.stage));
   const inProd = projects.filter(p=>p.stage==='in_production').length;
   const forDel = projects.filter(p=>p.stage==='for_delivery'||p.stage==='delivered').length;
@@ -10344,7 +10438,7 @@ window.renderProjectLifecycle = async function(){
     </div></div>`; };
 
   c.innerHTML = `
-    <div class="page-header"><h2>📈 Projects</h2><span style="font-size:12px;color:var(--text-muted)">Quote → Order → Production → Delivery → Paid</span></div>
+    <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2>📈 Projects</h2><div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:var(--text-muted)">Quote → Order → Production → Delivery → Paid</span>${canTagProjects?`<button class="btn-secondary btn-sm" onclick="window.runProjectKindBackfill()" title="Tag projects with kind (job/design)">🔖 Tag</button>`:''}</div></div>
     <div class="kpi-row" style="margin-bottom:14px">
       <div class="kpi-card"><div class="kpi-label">Active</div><div class="kpi-value">${active.length}</div></div>
       <div class="kpi-card accent"><div class="kpi-label">In Production</div><div class="kpi-value">${inProd}</div></div>
@@ -10356,7 +10450,18 @@ window.renderProjectLifecycle = async function(){
     ${JOB_STAGES.filter(s=>!['paid','cancelled'].includes(s.id) && (byStage[s.id]||[]).length).map(s=>`
       <div class="card" style="margin-bottom:12px"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3 style="font-size:13px">${s.icon} ${s.label}</h3><span class="badge" style="background:${s.color};color:#fff">${(byStage[s.id]||[]).length}</span></div>
         <div class="card-body" style="display:flex;flex-direction:column;gap:8px">${(byStage[s.id]||[]).map(card).join('')}</div></div>`).join('')}
-    ${done.length?`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">💰 Paid / Closed (${done.length})</summary><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${done.slice(0,30).map(card).join('')}</div></details>`:''}`;
+    ${done.length?`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">💰 Paid / Closed (${done.length})</summary><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${done.slice(0,30).map(card).join('')}</div></details>`:''}
+    ${designList.length?`<details style="margin-top:10px" open><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">🎨 Design Projects (${designList.length})</summary>
+      <div style="font-size:11px;color:var(--text-muted);margin:2px 0 8px">From the Design board — manage in Design → Projects.</div>
+      <div style="display:flex;flex-direction:column;gap:8px">${designList.map(d=>`<div class="item-card" style="border-left:3px solid #4a148c">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:700;font-size:13px">${escHtml(d.name||'Design project')}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(d.clientName||'—')}${d.stage?` · ${escHtml(d.stage)}`:''}</div>
+            <div style="font-size:11px;margin-top:3px">Contract ₱${fmt(d.contractAmount)} · Collected ₱${fmt(d.collected)} · <span style="color:${d.arBalance>0?'var(--warning)':'var(--success)'}">AR ₱${fmt(d.arBalance)}</span></div>
+          </div>
+          <span class="badge badge-purple" style="font-size:9px;flex-shrink:0">DESIGN</span>
+        </div></div>`).join('')}</div></details>`:''}`;
   c.querySelectorAll('.proj-card').forEach(el=>el.addEventListener('click',()=>openJobProjectDetail(projects.find(p=>p.id===el.dataset.id))));
 };
 
@@ -10541,7 +10646,11 @@ function openProjectBillingModal(p){
     saveBtn.disabled=true; // guard against double-click double-posting (payments are legitimately multiple)
     try{
       // 1) post income credit to the ledger (category 'Sales Revenue' so it feeds the Output-VAT base)
-      const led=await db.collection('ledger').add({ date:today(), description:`Project ${p.projectNo} — ${p.clientName} (${type})`, category:'Sales Revenue', type:'credit', amount, net, vatAmount, vatTreatment, refNumber:`PROJ-${p.id}-${Date.now()}`, source:'Finance', projectId:p.id, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+      // Deterministic ref (project id + payment index) so a retry/backfill can't duplicate it.
+      const projLedgerRef=`PROJ-${p.id}-${(p.payments?.length||0)}`;
+      const projDupe=await db.collection('ledger').where('refNumber','==',projLedgerRef).limit(1).get().catch(()=>({empty:true}));
+      if(!projDupe.empty){ closeModal(); Notifs.showToast('This payment was already posted.','error'); window.renderProjectLifecycle(); return; }
+      const led=await db.collection('ledger').add({ date:today(), description:`Project ${p.projectNo} — ${p.clientName} (${type})`, category:'Sales Revenue', type:'credit', amount, net, vatAmount, vatTreatment, refNumber:projLedgerRef, source:'Finance', projectId:p.id, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
       if(typeof dbCacheInvalidate==='function') dbCacheInvalidate('ledger');
       // 2) update the project: payment, collected, AR, OR document, timeline
       const payment={ type, amount, vatAmount, net, method, orRef, receiptUrl:receipt?.url||null, date:today(), by:who, ledgerId:led.id };
