@@ -10956,6 +10956,7 @@ function purchRfqCard(r, canEdit) {
         <div style="font-weight:700">${escHtml(r.title || 'Untitled RFQ')}</div>
         <div style="font-size:12px;color:var(--text-muted)">${escHtml(r.rfqNo || '')} · Supplier: ${escHtml(r.supplier || '—')}</div>
         <div style="font-size:12px;color:var(--text-muted)">Requesting: ${escHtml(r.requestingDept || '—')}${r.neededBy ? ` · Needed by ${escHtml(r.neededBy)}` : ''}</div>
+        ${r.deliverTo ? `<div style="font-size:12px;color:var(--text-muted)">Deliver to: ${escHtml(r.deliverTo)}</div>` : ''}
       </div>
       ${canEdit ? `<button class="btn-danger btn-sm rfq-del" data-id="${r.id}" data-label="${escHtml(r.title || 'RFQ')}">🗑</button>` : ''}
     </div>
@@ -11060,6 +11061,7 @@ function openRfqModal(currentUser, onDone) {
       <div class="form-group"><label>Requesting Department</label><select id="rfq-dept">${deptOpts}</select></div>
       <div class="form-group"><label>Needed By</label><input id="rfq-needed" type="date"/></div>
     </div>
+    <div class="form-group"><label>Deliver To (address / site)</label><input id="rfq-deliver" placeholder="e.g. Barro Industries — La Union Plant, Brgy. …"/></div>
     <div class="form-group"><label>Notes</label><textarea id="rfq-notes" rows="2" placeholder="Optional"></textarea></div>
     <label style="font-size:12px;font-weight:700;display:block;margin-bottom:4px">Items</label>
     <div id="rfq-items"></div>
@@ -11101,6 +11103,7 @@ function openRfqModal(currentUser, onDone) {
         supplier: document.getElementById('rfq-supplier').value.trim(),
         requestingDept: document.getElementById('rfq-dept').value,
         neededBy: document.getElementById('rfq-needed').value,
+        deliverTo: document.getElementById('rfq-deliver').value.trim(),
         notes: document.getElementById('rfq-notes').value.trim(),
         items, stage: 'rfq', total: 0, status: 'quoting',
         createdBy: currentUser.uid,
@@ -11140,6 +11143,7 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
               <div style="font-weight:700">${escHtml(p.title || 'Purchase Request')}</div>
               <div style="font-size:12px;color:var(--text-muted)">${escHtml(p.prNo || p.rfqNo || '')} · Supplier: ${escHtml(p.supplier || '—')}</div>
               <div style="font-size:12px;color:var(--text-muted)">Requesting: ${escHtml(p.requestingDept || '—')}${p.neededBy ? ` · Needed by ${escHtml(p.neededBy)}` : ''}</div>
+              ${p.deliverTo ? `<div style="font-size:12px;color:var(--text-muted)">Deliver to: ${escHtml(p.deliverTo)}</div>` : ''}
             </div>
             <span class="badge ${st.badge}">${st.label}</span>
           </div>
@@ -11155,13 +11159,21 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
             <tfoot><tr><td colspan="4" style="text-align:right;font-weight:700">Total</td><td style="text-align:right;font-weight:700">₱${fmt(p.total != null ? p.total : purchTotal(p.items))}</td></tr></tfoot>
           </table></div>
           ${p.notes ? `<div style="font-size:12px;margin-top:6px;color:var(--text-muted)">${escHtml(p.notes)}</div>` : ''}
-          ${canEdit ? `<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
-            ${p.status !== 'ordered' && p.status !== 'received' ? `<button class="btn-secondary btn-sm pr-stat" data-id="${p.id}" data-stat="ordered">Mark Ordered</button>` : ''}
-            ${p.status !== 'received' ? `<button class="btn-primary btn-sm pr-stat" data-id="${p.id}" data-stat="received">Mark Received</button>` : ''}
-          </div>` : ''}
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
+            <button class="btn-secondary btn-sm pr-print" data-id="${p.id}">🖨 Print PO</button>
+            ${canEdit ? `
+              ${p.status !== 'ordered' && p.status !== 'received' ? `<button class="btn-secondary btn-sm pr-stat" data-id="${p.id}" data-stat="ordered">Mark Ordered</button>` : ''}
+              ${p.status !== 'received' ? `<button class="btn-primary btn-sm pr-stat" data-id="${p.id}" data-stat="received">Mark Received</button>` : ''}
+            ` : ''}
+          </div>
         </div></div>`;
       }).join('')}
   `;
+
+  content.querySelectorAll('.pr-print').forEach(btn => btn.addEventListener('click', () => {
+    const p = prs.find(x => x.id === btn.dataset.id);
+    if (p) printPurchaseOrder(p);
+  }));
 
   if (canEdit) content.querySelectorAll('.pr-stat').forEach(btn => btn.addEventListener('click', async () => {
     btn.disabled = true;
@@ -11174,4 +11186,125 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
       renderPurchaseRequests(content, currentUser, currentRole, opts);
     } catch (err) { Notifs.showToast('Update failed: ' + (err.message || err), 'error'); btn.disabled = false; }
   }));
+}
+
+// ── Printable Purchase Order (forward to supplier) ────────────────
+// Opens a clean, branded PO document in a new window — same navy letterhead
+// look as the quote builder / inventory count form. Print or "Save as PDF"
+// from the browser dialog to email to the supplier.
+function printPurchaseOrder(p) {
+  const e = s => escHtml(s == null ? '' : String(s));
+  const items = p.items || [];
+  const total = p.total != null ? p.total : purchTotal(items);
+  const issued = p.convertedAt && p.convertedAt.toDate ? p.convertedAt.toDate() : new Date();
+  const issuedStr = issued.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
+  const logoUrl = location.origin + location.pathname.replace(/[^/]*$/, '') + 'icons/barro-industries.png';
+  const preparedBy = p.convertedByName || p.createdByName || '';
+
+  const rows = items.map((it, i) => `<tr>
+      <td class="c">${i + 1}</td>
+      <td>${e(it.desc || '—')}</td>
+      <td class="c">${Number(it.qty || 0).toLocaleString('en-PH')}</td>
+      <td class="c">${e(it.unit || '')}</td>
+      <td class="r">₱${fmt(it.unitPrice || 0)}</td>
+      <td class="r b">₱${fmt((it.unitPrice || 0) * (it.qty || 0))}</td>
+    </tr>`).join('');
+  const filled = items.length;
+  let blanks = ''; for (let k = filled; k < Math.max(filled + 1, 6); k++) blanks += `<tr class="blank"><td class="c">${k + 1}</td><td></td><td></td><td></td><td></td><td></td></tr>`;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>Purchase Order — ${e(p.prNo || p.rfqNo || '')}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background:#e8e8e8}
+  .page{width:210mm;min-height:297mm;margin:0 auto;background:#fff;padding:14mm}
+  .htop{display:flex;align-items:center;gap:12px;border-bottom:3px solid #1E3A5F;padding-bottom:10px;margin-bottom:12px}
+  .logo{width:58px;height:58px;object-fit:contain;flex-shrink:0}
+  .cname{font-size:22px;font-weight:900;letter-spacing:.5px;color:#1E3A5F}
+  .csub{font-size:9px;color:#555;margin-top:3px;line-height:1.5}
+  .title{margin-left:auto;text-align:right}
+  .title .t{display:inline-block;background:#1E3A5F;color:#fff;font-size:14px;font-weight:800;letter-spacing:1px;padding:6px 14px;border-radius:4px;text-transform:uppercase}
+  .title .no{font-size:12px;font-weight:800;color:#333;margin-top:6px}
+  .title .dt{font-size:10px;color:#666;margin-top:2px}
+  .parties{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+  .pbox{border:1px solid #999;border-radius:6px;padding:8px 11px}
+  .pbox .l{font-size:8px;text-transform:uppercase;letter-spacing:.6px;color:#1E3A5F;font-weight:800;margin-bottom:3px}
+  .pbox .v{font-size:12px;font-weight:700;min-height:15px}
+  .pbox .s{font-size:10px;color:#555;font-weight:400;margin-top:2px;line-height:1.45}
+  table{width:100%;border-collapse:collapse;margin-bottom:10px}
+  th,td{border:1px solid #444;padding:5px 7px;font-size:11px;vertical-align:top}
+  th{background:#1E3A5F;color:#fff;font-size:9px;text-transform:uppercase;letter-spacing:.04em}
+  td.c{text-align:center}td.r{text-align:right}td.b{font-weight:700}
+  tr.blank td{height:22px}
+  tfoot td{font-weight:700;background:#f0f4ff}
+  .note{font-size:10px;color:#444;margin:4px 0 10px;line-height:1.5}
+  .note b{color:#1E3A5F}
+  .terms{border:1px solid #DDE2EC;background:#F5F6FA;border-radius:6px;padding:9px 12px;margin-bottom:14px}
+  .terms h4{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:#1E3A5F;margin-bottom:4px}
+  .terms p{font-size:9.5px;color:#444;line-height:1.5}
+  .sign{display:grid;grid-template-columns:1fr 1fr;gap:36px;margin-top:34px}
+  .sline{border-top:1px solid #000;padding-top:5px;text-align:center;font-size:10px;color:#444}
+  .sline b{display:block;font-size:11px;color:#000}
+  .foot{margin-top:18px;border-top:1px solid #ddd;padding-top:8px;font-size:9px;color:#999;text-align:center}
+  .bar{position:fixed;top:0;left:0;right:0;background:#1E3A5F;color:#fff;padding:9px 18px;display:flex;gap:10px;align-items:center;z-index:99}
+  .bar button{background:#fff;color:#1E3A5F;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
+  @page{size:A4 portrait;margin:9mm}
+  @media print{ .bar,.barpad{display:none!important} body{background:#fff} .page{padding:0;width:auto;min-height:0} }
+</style></head><body>
+<div class="bar">
+  <span style="font-weight:700">🛒 Purchase Order — ${e(p.prNo || p.rfqNo || '')}</span>
+  <button onclick="window.print()">🖨 Print / Save as PDF</button>
+  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">✕ Close</button>
+</div>
+<div class="barpad" style="height:46px"></div>
+<div class="page">
+  <div class="htop">
+    <img src="${logoUrl}" class="logo" onerror="this.style.display='none'" alt=""/>
+    <div>
+      <div class="cname">BARRO INDUSTRIES</div>
+      <div class="csub">Barro Industries OPC · DTI / BIR Registered<br>hello@barroindustries.com · 0927 683 6300 · La Union | Baguio | Manila</div>
+    </div>
+    <div class="title">
+      <div class="t">Purchase Order</div>
+      <div class="no">${e(p.prNo || p.rfqNo || '')}</div>
+      <div class="dt">Date: ${e(issuedStr)}${p.neededBy ? `<br>Needed by: ${e(p.neededBy)}` : ''}</div>
+    </div>
+  </div>
+  <div class="parties">
+    <div class="pbox">
+      <div class="l">Supplier / Vendor</div>
+      <div class="v">${e(p.supplier || '—')}</div>
+      <div class="s">${e(p.title || '')}</div>
+    </div>
+    <div class="pbox">
+      <div class="l">Deliver To</div>
+      <div class="v">${e(p.deliverTo || 'Barro Industries OPC')}</div>
+      <div class="s">Attn: ${e(p.requestingDept || 'Purchasing')} Department</div>
+    </div>
+  </div>
+  <table>
+    <thead><tr>
+      <th style="width:32px">#</th><th>Item / Description</th>
+      <th style="width:60px">Qty</th><th style="width:64px">Unit</th>
+      <th style="width:100px">Unit Price</th><th style="width:110px">Line Total</th>
+    </tr></thead>
+    <tbody>${rows}${blanks}</tbody>
+    <tfoot><tr><td colspan="5" class="r">TOTAL (PHP)</td><td class="r">₱${fmt(total)}</td></tr></tfoot>
+  </table>
+  ${p.notes ? `<div class="note"><b>Notes:</b> ${e(p.notes)}</div>` : ''}
+  <div class="terms">
+    <h4>Terms &amp; Conditions</h4>
+    <p>Please supply the items listed above at the agreed prices. Reference this PO number on your delivery receipt and invoice. Deliver to the address above on or before the date indicated. Any discrepancy in quantity, price, or specification must be confirmed in writing before fulfilment.</p>
+  </div>
+  <div class="sign">
+    <div class="sline"><b>${e(preparedBy)}</b>Prepared by — Purchasing</div>
+    <div class="sline"><b>NEIL BARRO</b>Approved by — President, Barro Industries OPC</div>
+  </div>
+  <div class="foot">Barro Industries Operations System · Generated ${new Date().toLocaleString('en-PH')}</div>
+</div>
+</body></html>`;
+
+  const win = window.open('', '_blank', 'width=900,height=720');
+  if (!win) { Notifs.showToast('Allow pop-ups to open the printable PO', 'error'); return; }
+  win.document.write(html); win.document.close();
 }
