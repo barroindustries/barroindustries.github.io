@@ -11461,7 +11461,7 @@ async function renderRFQs(content, currentUser, currentRole) {
   const rfqs = snap.docs.map(d => ({ id:d.id, ...d.data() })).filter(d => (d.stage||'rfq') === 'rfq');
 
   content.innerHTML = `
-    ${canEdit ? `<div style="text-align:right;margin-bottom:8px"><button class="btn-primary btn-sm" id="new-rfq-btn">+ New RFQ</button></div>` : ''}
+    ${canEdit ? `<div style="display:flex;gap:6px;justify-content:flex-end;margin-bottom:8px;flex-wrap:wrap"><button class="btn-secondary btn-sm" id="rfq-lowstock-btn">📉 From low stock</button><button class="btn-primary btn-sm" id="new-rfq-btn">+ New RFQ</button></div>` : ''}
     <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Create a Request for Quotation, enter the supplier's prices, then convert it into a Purchase Request.</p>
     ${!rfqs.length
       ? `<div class="empty-state"><div class="empty-icon">📋</div><h4>No open RFQs</h4><p>Create one to request supplier pricing.</p></div>`
@@ -11470,6 +11470,18 @@ async function renderRFQs(content, currentUser, currentRole) {
   if (canEdit) {
     document.getElementById('new-rfq-btn')?.addEventListener('click', () =>
       openRfqModal(currentUser, () => renderRFQs(content, currentUser, currentRole)));
+    document.getElementById('rfq-lowstock-btn')?.addEventListener('click', async () => {
+      const isnap = await db.collection('inventory_items').get().catch(() => ({ docs: [] }));
+      const low = isnap.docs.map(d => d.data())
+        .filter(i => (i.kind || 'material') === 'material' && (i.reorderLevel || 0) > 0 && (i.qty || 0) <= (i.reorderLevel || 0));
+      if (!low.length) { Notifs.showToast('No materials are at or below reorder level. 👍'); return; }
+      // Suggested order qty brings stock up to ~2× the reorder level.
+      const items = low.map(i => ({ desc: i.name || '', qty: Math.max(Math.round((i.reorderLevel || 0) * 2 - (i.qty || 0)), i.reorderLevel || 0), unit: i.unit || '' }));
+      openRfqModal(currentUser, () => renderRFQs(content, currentUser, currentRole), {
+        title: `Reorder — ${low.length} low-stock material${low.length > 1 ? 's' : ''}`,
+        items
+      });
+    });
     rfqs.forEach(r => bindRfqCard(r, currentUser, currentRole, content));
   }
 }
@@ -11575,13 +11587,14 @@ function bindRfqCard(r, currentUser, currentRole, content) {
   });
 }
 
-function openRfqModal(currentUser, onDone) {
+function openRfqModal(currentUser, onDone, prefill) {
+  prefill = prefill || {};
   const deptOpts = Object.keys(window.DEPARTMENTS || {})
     .filter(k => k !== 'Brilliant Steel' && k !== 'Partners')
     .map(k => `<option>${escHtml(k)}</option>`).join('');
   openModal('🛒 New Request for Quotation', `
     <div class="form-row">
-      <div class="form-group"><label>Title / Purpose *</label><input id="rfq-title" placeholder="e.g. Steel sheets for Job #123"/></div>
+      <div class="form-group"><label>Title / Purpose *</label><input id="rfq-title" value="${escHtml(prefill.title||'')}" placeholder="e.g. Steel sheets for Job #123"/></div>
       <div class="form-group"><label>Supplier</label><input id="rfq-supplier" placeholder="Supplier name (optional)"/></div>
     </div>
     <div class="form-row">
@@ -11608,7 +11621,8 @@ function openRfqModal(currentUser, onDone) {
     row.querySelector('.ri-del').addEventListener('click', () => row.remove());
     itemsWrap.appendChild(row);
   };
-  addRow(); addRow();
+  if (Array.isArray(prefill.items) && prefill.items.length) prefill.items.forEach(it => addRow(it.desc, it.qty, it.unit));
+  else { addRow(); addRow(); }
   document.getElementById('rfq-add-item').addEventListener('click', () => addRow());
 
   document.getElementById('rfq-save').addEventListener('click', async () => {
