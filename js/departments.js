@@ -11404,9 +11404,11 @@ async function renderProdMaterials(el, currentRole) {
   const snap = await db.collection('inventory_items').orderBy('name').get().catch(()=>({docs:[]}));
   const mats = snap.docs.map(d=>({id:d.id,...d.data()})).filter(i=>(i.kind||'material')==='material');
   const low = mats.filter(i=>(i.reorderLevel||0)>0 && (i.qty||0) <= (i.reorderLevel||0));
+  const stockValue = mats.reduce((s,i)=>s+(Number(i.qty)||0)*(Number(i.unitCost)||0),0);
   el.innerHTML = `
     <div class="kpi-row" style="margin-bottom:12px">
       <div class="kpi-card"><div class="kpi-label">Raw Materials</div><div class="kpi-value">${mats.length}</div></div>
+      <div class="kpi-card accent"><div class="kpi-label">Stock Value</div><div class="kpi-value" style="font-size:15px">₱${fmt(stockValue)}</div></div>
       <div class="kpi-card ${low.length?'red':''}"><div class="kpi-label">Low Stock</div><div class="kpi-value">${low.length}</div></div>
     </div>
     ${low.length?`<div class="alert-banner alert-warn"><span>⚠️ <strong>${low.length} material${low.length>1?'s':''}</strong> at or below reorder level — flag Purchasing.</span></div>`:''}

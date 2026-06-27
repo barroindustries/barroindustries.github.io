@@ -599,7 +599,10 @@ window.Notifs = (() => {
   // One batched notification per admin per day listing items at/below reorder
   // level. Deduped by day (owner prefers a daily digest, not per-event spam).
   async function checkLowStock(uid, role) {
-    if (!['president','manager','finance'].includes(role)) return; // only roles that read inventory
+    // Admins who read inventory get a daily digest; Purchasing-dept members get one
+    // too (so they can raise an RFQ), with a tailored link + hint.
+    const isPurchasing = (window.currentDepts || []).includes('Purchasing');
+    if (!['president','manager','finance'].includes(role) && !isPurchasing) return;
     try {
       const snap = await db.collection('inventory_items').get();
       const low = snap.docs.map(d => d.data())
@@ -610,8 +613,10 @@ window.Notifs = (() => {
       const todayStr = window.bizDate();
       await send(uid, {
         title: `📦 ${low.length} item${low.length>1?'s':''} low on stock`,
-        body:  `At/below reorder level: ${names}${more}. Tap to review Inventory.`,
-        icon:  '📦', type: 'low_stock', link: 'inventory',
+        body:  isPurchasing
+          ? `At/below reorder level: ${names}${more}. Open Purchasing → RFQ → “From low stock”.`
+          : `At/below reorder level: ${names}${more}. Tap to review Inventory.`,
+        icon:  '📦', type: 'low_stock', link: isPurchasing ? 'dept:Purchasing' : 'inventory',
         dedupKey: `lowstock-${uid}-${todayStr}`,
       });
     } catch (_) { /* inventory read denied / offline — skip silently */ }
