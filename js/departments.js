@@ -11482,14 +11482,56 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
   if (canEdit) content.querySelectorAll('.pr-stat').forEach(btn => btn.addEventListener('click', async () => {
     btn.disabled = true;
     try {
+      const p = prs.find(x => x.id === btn.dataset.id);
       await db.collection('purchase_requisitions').doc(btn.dataset.id).update({
         status: btn.dataset.stat,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
-      Notifs.showToast('Status updated.');
+      // On receive, auto-match the purchased lines into inventory by name (once).
+      if (btn.dataset.stat === 'received' && p && !p.receivedToInventory) {
+        const res = await receivePurchaseIntoInventory(p).catch(e => { console.warn('[receive→inventory]', e); return null; });
+        if (res) {
+          await db.collection('purchase_requisitions').doc(p.id).update({ receivedToInventory: true }).catch(()=>{});
+          Notifs.showToast(res.matched
+            ? `Received. ${res.matched} item${res.matched>1?'s':''} added to inventory${res.unmatched.length?`; ${res.unmatched.length} not matched`:''}.`
+            : 'Received. No inventory items matched by name.');
+        } else { Notifs.showToast('Status updated.'); }
+      } else {
+        Notifs.showToast('Status updated.');
+      }
       renderPurchaseRequests(content, currentUser, currentRole, opts);
     } catch (err) { Notifs.showToast('Update failed: ' + (err.message || err), 'error'); btn.disabled = false; }
   }));
+}
+
+// Auto-match a received purchase's line items into inventory by name (case-insensitive,
+// trimmed). Matched items get qty incremented + unit cost refreshed to the purchase
+// price + supplier filled if blank. Unmatched lines are returned so the user is told.
+async function receivePurchaseIntoInventory(p) {
+  const items = (p.items || []).filter(it => it.desc && (Number(it.qty)||0) > 0);
+  if (!items.length) return { matched: 0, unmatched: [] };
+  const snap = await db.collection('inventory_items').get();
+  const byName = {};
+  snap.docs.forEach(d => { const n = (d.data().name||'').trim().toLowerCase(); if (n) byName[n] = d; });
+  const batch = db.batch();
+  let matched = 0; const unmatched = [];
+  items.forEach(it => {
+    const hit = byName[(it.desc||'').trim().toLowerCase()];
+    if (!hit) { unmatched.push(it.desc); return; }
+    const upd = {
+      qty: firebase.firestore.FieldValue.increment(Number(it.qty)||0),
+      lastReceivedAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    if (it.unitPrice != null) upd.unitCost = Number(it.unitPrice)||0; // latest purchase cost
+    if (p.supplier && !(hit.data().supplier||'').trim()) upd.supplier = p.supplier;
+    batch.update(hit.ref, upd);
+    matched++;
+  });
+  if (matched) {
+    await batch.commit();
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
+  }
+  return { matched, unmatched };
 }
 
 // Notify the Finance team (Finance-dept members + Accountant role) and the
