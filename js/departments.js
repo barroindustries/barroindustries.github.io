@@ -11720,14 +11720,25 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
       </div>`).join('')}
     </div></div>`:''}` : '';
 
+  const filterBar = prs.length > 3 ? `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+      <div class="subtab-bar" style="margin:0">
+        ${['all','pending','ordered','received'].map(s=>`<button class="subtab-btn pr-filter ${s==='all'?'active':''}" data-f="${s}">${s==='all'?'All':PURCH_STAT[s].label}</button>`).join('')}
+      </div>
+      <input id="pr-search" placeholder="Search supplier / title / PO#" style="flex:1;min-width:140px;padding:7px 11px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)"/>
+    </div>` : '';
+
   content.innerHTML = `
     ${summary}
     ${opts.financeView ? `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Purchases raised by the Purchasing department. Use <strong>Record as Disbursement</strong> to post one into the Cash Disbursement Journal.</p>` : ''}
+    ${filterBar}
+    <div id="pr-empty-note" style="display:none;font-size:12px;color:var(--text-muted);padding:12px">No purchase requests match.</div>
     ${!prs.length
       ? `<div class="empty-state"><div class="empty-icon">🧾</div><h4>No purchase requests yet</h4><p>${canEdit ? 'Convert a priced RFQ into a purchase request.' : 'None have been raised yet.'}</p></div>`
       : prs.map(p => {
         const st = PURCH_STAT[p.status || 'pending'] || PURCH_STAT.pending;
-        return `<div class="card" data-pr="${p.id}" style="margin-bottom:12px"><div class="card-body">
+        const searchStr = ((p.title||'')+' '+(p.supplier||'')+' '+(p.prNo||p.rfqNo||'')+' '+(p.requestingDept||'')).toLowerCase().replace(/"/g,'');
+        return `<div class="card pr-row" data-pr="${p.id}" data-status="${p.status||'pending'}" data-search="${escHtml(searchStr)}" style="margin-bottom:12px"><div class="card-body">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
             <div>
               <div style="font-weight:700">${escHtml(p.title || 'Purchase Request')}</div>
@@ -11771,6 +11782,27 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
     const p = prs.find(x => x.id === btn.dataset.id);
     if (p) printPurchaseOrder(p);
   }));
+
+  // ── Filter + search (client-side show/hide) ──
+  let _prFilter = 'all';
+  const applyPrFilter = () => {
+    const q = (content.querySelector('#pr-search')?.value || '').trim().toLowerCase();
+    let shown = 0;
+    content.querySelectorAll('.pr-row').forEach(row => {
+      const okStatus = _prFilter === 'all' || (row.dataset.status || 'pending') === _prFilter;
+      const okSearch = !q || (row.dataset.search || '').includes(q);
+      const vis = okStatus && okSearch;
+      row.style.display = vis ? '' : 'none';
+      if (vis) shown++;
+    });
+    const note = content.querySelector('#pr-empty-note');
+    if (note) note.style.display = shown ? 'none' : '';
+  };
+  content.querySelectorAll('.pr-filter').forEach(btn => btn.addEventListener('click', () => {
+    content.querySelectorAll('.pr-filter').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active'); _prFilter = btn.dataset.f; applyPrFilter();
+  }));
+  content.querySelector('#pr-search')?.addEventListener('input', applyPrFilter);
 
   const redo = () => renderPurchaseRequests(content, currentUser, currentRole, opts);
 
