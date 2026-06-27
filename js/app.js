@@ -5949,7 +5949,7 @@ async function renderAnalytics() {
   const cg = (key,q,ttl=60000) => dbCachedGet(key, ()=>q.get(), ttl).catch(()=>({docs:[],size:0}));
 
   // Fetch all data upfront
-  const [usersSnap,tasksSnap,quotesSnap,subsSnap,expSnap,caSnap,payslipSnap,ledgerSnap,govSnap,jpSnap,jcSnap] = await Promise.all([
+  const [usersSnap,tasksSnap,quotesSnap,subsSnap,expSnap,caSnap,payslipSnap,ledgerSnap,govSnap,jpSnap,jcSnap,dpSnap] = await Promise.all([
     dbCachedGet('users', fetchUsersWithPayroll, 60000).catch(()=>({docs:[],size:0})),
     cg('an_tasks', db.collection('tasks')),
     dbCachedGet('an_quotes', getAllQuotes, 60000).catch(()=>({docs:[]})),
@@ -5961,6 +5961,7 @@ async function renderAnalytics() {
     cg('an_gov', db.collection('gov_biddings').orderBy('createdAt','desc')),
     cg('an_jobprojects', db.collection('job_projects')),
     cg('an_jobcosts', db.collection('job_costs')),
+    cg('an_designprojects', db.collection('projects')),
   ]);
   const users=usersSnap.docs.map(d=>({id:d.id,...d.data()}));
   const tasks=tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -5972,6 +5973,12 @@ async function renderAnalytics() {
   const ledger=ledgerSnap.docs.map(d=>({id:d.id,...d.data()}));
   const govBids=govSnap.docs.map(d=>({id:d.id,...d.data()}));
   const jobProjects=jpSnap.docs.map(d=>({id:d.id,...d.data()}));
+  // Unified project list (job_projects + Design board) via the canonical shape, so
+  // receivables / top-clients reflect ALL projects, not just sales-driven jobs.
+  const designProjects=(dpSnap?.docs||[]).map(d=>({id:d.id,...d.data()}));
+  const allProjects = (window.Projects && window.Projects.normalize)
+    ? [...jobProjects.map(p=>window.Projects.normalize(p,'job')), ...designProjects.map(p=>window.Projects.normalize(p,'design'))]
+    : jobProjects.map(p=>({...p, arBalance:(p.arBalance!=null?p.arBalance:(+p.contractAmount||0)-(+p.amountCollected||0)), contractAmount:+p.contractAmount||0, stage:p.stage}));
   const jobCosts=jcSnap.docs.map(d=>({id:d.id,...d.data()}));
 
   const fmt=n=>isNaN(n)?'0':Number(n).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -6039,16 +6046,16 @@ async function renderAnalytics() {
     const jcCost = sum(jobCosts, j=>(+j.materialsCost||0)+(+j.laborCost||0)+(+j.otherCost||0));
     const grossProfit = jcRev - jcCost;
     const grossMargin = jcRev>0 ? Math.round(grossProfit/jcRev*100) : null;
-    // ── Receivables (open job_projects) ──
-    const arOf = p => p.arBalance!=null ? (+p.arBalance||0) : ((+p.contractAmount||0)-(+p.amountCollected||0));
-    const openProjects = jobProjects.filter(p=>p.stage!=='paid'&&p.stage!=='cancelled');
+    // ── Receivables (open projects — job + design, via unified shape) ──
+    const arOf = p => +p.arBalance||0; // normalized shape already derives arBalance
+    const openProjects = allProjects.filter(p=>!['paid','cancelled','completed'].includes(p.stage));
     const receivables = sum(openProjects, arOf);
     // ── Payroll efficiency ──
     const totalPayroll = sum(users, u=>(+u.salary||0)+(+u.allowance||0)-(+u.deductions||0));
     const payrollPct = revMTD>0 ? Math.round(totalPayroll/revMTD*100) : null;
     // ── Top clients by signed contract (fallback: accepted quotes) ──
     const clientRev={};
-    jobProjects.filter(p=>p.stage!=='cancelled').forEach(p=>{const k=p.clientName||'—';clientRev[k]=(clientRev[k]||0)+(+p.contractAmount||0);});
+    allProjects.filter(p=>p.stage!=='cancelled').forEach(p=>{const k=p.clientName||'—';clientRev[k]=(clientRev[k]||0)+(+p.contractAmount||0);});
     if(!Object.keys(clientRev).length) quotes.filter(q=>q.status==='accepted').forEach(q=>{const k=q.clientName||q.client||'—';clientRev[k]=(clientRev[k]||0)+(+q.total||0);});
     const topClients=Object.entries(clientRev).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]).slice(0,8);
     const clientTotal=topClients.reduce((s,e)=>s+e[1],0)||1;
