@@ -4603,7 +4603,7 @@ function qeAddItem() {
   const p = qeSelectedProduct();
   if (!p) { Notifs.showToast('Pick a product first', 'info'); return; }
   const ctx = qeReadCtx(p);
-  const qty = Math.max(1, parseInt(document.getElementById('qe-qty').value || 1));
+  const qty = Math.max(1, parseInt(document.getElementById('qe-qty')?.value || 1));
   const unitPrice = qeUnitPrice(p, ctx);
 
   // dims display string + spec snapshot (matches the builder's line-item shape
@@ -4669,7 +4669,7 @@ function qeRenderItems() {
       </td>
     </tr>`).join('');
   wrap.innerHTML = `
-    <table style="width:100%;border-collapse:collapse">
+    <div class="table-wrap"><table style="width:100%;border-collapse:collapse;min-width:340px">
       <thead><tr style="border-bottom:2px solid var(--border);font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">
         <th style="padding:6px;text-align:left">Item</th>
         <th style="padding:6px;text-align:right">Unit ₱</th>
@@ -4678,7 +4678,7 @@ function qeRenderItems() {
         <th style="padding:6px"></th>
       </tr></thead>
       <tbody>${rows}</tbody>
-    </table>`;
+    </table></div>`;
   qeRenderTotals();
 }
 
@@ -9743,7 +9743,7 @@ async function openClientQuotesModal(cl, quoteColl, builderNav){
 //  SHARED: Generic Document Collection
 // ══════════════════════════════════════════════════
 async function renderDocCollection(container, collection, title, currentUser, currentRole, opts = {}) {
-  const snap = await db.collection(collection).orderBy('createdAt','desc').get();
+  const snap = await db.collection(collection).orderBy('createdAt','desc').get().catch(() => ({ docs: [] }));
   const docs = snap.docs.map(d => ({id:d.id,...d.data()}));
   const canAdd = opts.dept ? canEditDept(opts.dept)
     : (currentRole==='owner'||currentRole==='manager'||currentRole==='president'||currentRole==='finance');
@@ -10301,7 +10301,7 @@ window.renderDocCollection = function(container, collection, title, currentUser,
     <div id="doc-list-${collection}"><div class="loading-placeholder">Loading…</div></div>
   `;
   const loadDocs = async () => {
-    const snap = await db.collection(collection).get();
+    const snap = await db.collection(collection).get().catch(() => ({ docs: [] }));
     const docs = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     const list = document.getElementById(`doc-list-${collection}`);
     if (!docs.length) { list.innerHTML=`<div class="empty-state" style="padding:20px"><div class="empty-icon">${cfg?.icon||'📄'}</div><h4>No ${title} yet</h4></div>`; return; }
@@ -10960,12 +10960,22 @@ async function renderProdOrders(el, currentUser, currentRole) {
         await db.collection('production_orders').doc(o.id).update({
           stage: next.id, stageUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-        // Keep the parent project's lifecycle stage in sync with production progress
+        // Keep the parent project's lifecycle stage in sync with production progress —
+        // but only move it FORWARD. Never regress a job that's already further along
+        // (e.g. delivered/paid) just because an early production sub-stage advanced.
         if (o.projectId) {
           const projStage = next.id==='delivered' ? 'delivered' : next.id==='ready' ? 'for_delivery' : 'in_production';
-          try { await db.collection('job_projects').doc(o.projectId).update({
-            stage: projStage, updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            timeline: firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Production: ${next.label}`, by:userProfile?.displayName||currentUser.email }) }); } catch(_) {}
+          try {
+            const jdoc = await db.collection('job_projects').doc(o.projectId).get();
+            const cur = jdoc.exists ? jdoc.data().stage : null;
+            const ord = s => JOB_STAGES.findIndex(x => x.id === s);
+            const evt = { at:new Date().toISOString(), event:`Production: ${next.label}`, by:userProfile?.displayName||currentUser.email };
+            const advance = cur !== 'paid' && cur !== 'cancelled' && ord(projStage) > ord(cur);
+            await db.collection('job_projects').doc(o.projectId).update({
+              ...(advance ? { stage: projStage } : {}),
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+              timeline: firebase.firestore.FieldValue.arrayUnion(evt) });
+          } catch(_) {}
         }
         Notifs.showToast(`Moved to ${next.label}`);
         renderProdOrders(el, currentUser, currentRole);
