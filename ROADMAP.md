@@ -1,6 +1,31 @@
 # Barro Industries Ops System — Roadmap & Handoff
 
-_Last updated: 2026-06-30 — base version **v11.0.46**, cache `bi-ops-v131` (both auto-bump on commit). See **"SESSION 2026-06-30"** + **"🎯 NEXT UP"** below for the latest work and the next-session plan._
+_Last updated: 2026-07-01 — base version **v11.0.51**, cache `bi-ops-v136` (both auto-bump on commit). See **"SESSION 2026-07-01"** below for the latest work. The previous **"SESSION 2026-06-30"** + **"🎯 NEXT UP"** backlog is retained below for history._
+
+---
+
+## 🆕 SESSION 2026-07-01 — NEXT-UP backlog sweep (v11.0.47 → v11.0.51)
+
+Worked the whole **🎯 NEXT UP** backlog. **⚠️ Not yet pushed/deployed at time of writing** — commits are local; `git push` ships the app, and `firestore.rules` needs a separate `firebase deploy --only firestore:rules` (a NEW `pay_runs` rule was added).
+
+**Shared foundation** — `window.chipTabs(items, activeKey, opts)` + `window.bindChipTabs(scope, onSelect)` (config.js) render a wrapping **chip subtab bar with count pills** (`.chip-tabs`/`.chip-tab`/`.chip-count` in styles.css) to replace long horizontal `.subtab-bar`s. `window.sopPanel(title, steps, opts)` renders a collapsible in-app **"How this works"** SOP card. Reused everywhere below.
+
+**① Approvals — declutter + Grading + secretary tiers.** Subtab bar → filter **chips with live counts**, defaulting to All Requests. New President **Grading** chip surfaces unscored completed tasks (`presidentScore`) + self-assessments awaiting a KPI grade (`kpi_evals` selfGrade→presidentGrade), with inline score/grade actions. **Secretary two-tier model** (`APPROVAL_CAPS` map in `renderApprovals`): secretary may act on minor items (sign-ups, attendance, leave, submissions, task reviews); money/delete items show **"Request President approval"** (escalation ping).
+
+**② Quotations — declutter + per-customer + delete-with-approval.** Sales: the 9-card tool grid + 10-item subtab bar collapsed into one **chip bar**. BK Quotations gained a **By Customer** grouped/collapsible view. New `window.requestQuoteDelete()` routes quote deletes through approval (admins/finance → `financeDelete`; non-admin creators → `deleteRequested` flag). Approvals delete-quote handling is now **collection-aware** (`bs_quotes` + `bk_quotes`).
+
+**③ Payroll & HR — SAFE additive scaffolding (live-math untouched).** New **Compute → Verify → Disburse** pay-run workflow: a `pay_runs/{YYYY-MM}` doc + status strip on the Payroll screen + grace-period reminder (finalize by the 5th); "Generate Payroll" → **"Compute Payroll"** stamps the state. New **`payClass`** (Regular monthly vs Production weekly) in the Edit Payroll modal. **HR is now its own department** (`renderHR` hub: People & Roles, Payroll, Worker Payslips, Leave, Attendance + SOP). `firestore.rules`: added `pay_runs` (finance/admin r+w, President delete). **DEFERRED (needs supervised real-data testing):** unifying the two compute paths into one + automating weekly Production attendance-based pay — see NEXT UP item below.
+
+**④ Better inventory.** Stock view: search + category filter, materials-vs-finished **valuation split**, shown-value footer, **per-item movement history** modal, a **Reorder via RFQ** shortcut, and manual on-hand edits now log an **`adjust`** stock movement. Movements log gained type filter + search + ADJ badge.
+
+**⑤ Cross-cutting declutter + SOPs.** Converted the dept subtab bars to **chips** and added **SOP panels** in Finance (15 tabs → chips, most cluttered), IT, Design, Marketing, Production, Purchasing (Sales/Inventory/Approvals already done).
+
+**Still open after this session:**
+- **Payroll compute unification + weekly Production automation** (deferred, live money — build behind the shipped `pay_runs` workflow with real data).
+- Apply the chip/SOP pattern to the few remaining screens (Admin, Partners dept, Government Biddings doc collections).
+- The medium/long-tail items in the prior **🔜 NOT YET DONE** list (accounting depth, CRM lifecycle, HR depth, etc.).
+
+**Deploy checklist for this session:** `git push origin master` (app) **+** `~/.npm-global/bin/firebase deploy --only firestore:rules` (the new `pay_runs` rule — until then the pay-run strip degrades gracefully to "draft" and Verify/Disburse writes are denied).
 
 ### v10.0.0 UI/UX fix pass (done)
 - Quote builder topbar **unstuck** (scrolls away, not fixed); mobile verified (no page horizontal scroll; only the data table scrolls within its wrapper); desktop untouched.
