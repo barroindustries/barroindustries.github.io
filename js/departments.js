@@ -2056,6 +2056,49 @@ async function openRaiseHistory(opts = {}) {
 }
 
 // ── Payroll Management ───────────────────────────
+// ── HR department hub ──────────────────────────────────────────────────
+// Brings the people-side of the company into one place: role/department
+// assignment, the monthly payroll run, weekly worker payslips, leave, and
+// attendance. Each card opens the existing screen (no duplicated logic).
+// Sensitive — management & finance only.
+window.renderHR = async function(currentUser, currentRole){
+  const c = deptContainer();
+  const role = window.currentRole || currentRole || '';
+  if (!['president','manager','secretary','finance'].includes(role)) {
+    c.innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><h4>HR is management &amp; finance only</h4></div>';
+    return;
+  }
+  const cards = [
+    { icon:'👥', title:'People & Roles', desc:'Assign roles, departments & employee class', go:()=>navigateTo('team-directory') },
+    { icon:'💰', title:'Payroll',        desc:'Monthly run — Compute → Verify → Disburse', go:()=>window.renderFinance(currentUser, currentRole, 'Payroll') },
+    { icon:'👷', title:'Worker Payslips',desc:'Weekly Production payslips & profiles',      go:()=>window.renderFinance(currentUser, currentRole, 'HR Profiles') },
+    { icon:'🌴', title:'Leave',          desc:'Requests, approvals & balances',             go:()=>window.renderLeavePage && window.renderLeavePage() },
+    { icon:'🕐', title:'Attendance',     desc:'Daily attendance & time-extension requests', go:()=>navigateTo('attendance') },
+  ];
+  c.innerHTML = `
+    <div class="page-header"><h2>👥 Human Resources</h2></div>
+    ${window.sopPanel('How HR works', [
+      'People & Roles — set each person’s role, department(s) and employee class (Regular monthly vs Production weekly).',
+      'Payroll — run the monthly cycle: Compute the figures, Verify them, then mark Disbursed once salaries are released (finalize by the 5th).',
+      'Worker Payslips — generate weekly payslips for Production workers (hourly attendance, fixed weekly rate).',
+      'Leave — employees request leave; finance/admin approve and balances update automatically.',
+      'Attendance — review daily attendance and approve time-in extension requests.'
+    ])}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">
+      ${cards.map((card,i)=>`
+        <button class="hr-card" data-i="${i}" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:16px;background:var(--surface);border:1.5px solid var(--border);border-radius:14px;cursor:pointer;transition:border-color .15s,background .15s">
+          <span style="font-size:26px">${card.icon}</span>
+          <strong style="font-size:14px">${card.title}</strong>
+          <span style="font-size:12px;color:var(--text-muted)">${card.desc}</span>
+        </button>`).join('')}
+    </div>`;
+  c.querySelectorAll('.hr-card').forEach(b=>{
+    b.addEventListener('click', ()=>cards[+b.dataset.i].go());
+    b.addEventListener('mouseenter', ()=>{ b.style.borderColor='var(--primary-light)'; b.style.background='var(--surface2)'; });
+    b.addEventListener('mouseleave', ()=>{ b.style.borderColor='var(--border)'; b.style.background='var(--surface)'; });
+  });
+};
+
 async function renderPayrollManagement(container, currentUser, currentRole) {
   const [usersSnap, histSnap, delReqSnap] = await Promise.all([
     fetchUsersWithPayroll(),
@@ -2080,11 +2123,12 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         ${months.filter(m=>m!==thisMonth).map(m=>`<option value="${m}">${new Date(m+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}</option>`).join('')}
       </select>
       <div style="display:flex;gap:8px">
-        <button class="btn-primary btn-sm" id="gen-payroll-btn">Generate Payroll</button>
+        <button class="btn-primary btn-sm" id="gen-payroll-btn">Compute Payroll</button>
         <button class="btn-secondary btn-sm" id="raise-history-btn">💸 Raise History</button>
         <button class="btn-secondary btn-sm" id="print-payroll-btn">🖨 Print All</button>
       </div>
     </div>
+    <div id="pay-run-strip" style="margin-bottom:14px"></div>
     <div class="card">
       <div class="card-body" style="padding:0">
         <div class="table-wrap">
@@ -2407,9 +2451,17 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         const caOverride = btn.dataset.caOverride; // '' means no override
         if (!emp) return;
 
+        const _payClass = emp.payClass==='production' ? 'production' : 'regular';
         openModal(`Edit Payroll — ${emp.displayName}`, `
+          <div class="form-group"><label>Employee Class</label>
+            <select id="ep-class" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+              <option value="regular" ${_payClass==='regular'?'selected':''}>Regular — monthly (KPI + attendance)</option>
+              <option value="production" ${_payClass==='production'?'selected':''}>Production — weekly, fixed rate (hourly attendance, 8-hr day)</option>
+            </select>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Regular staff are paid monthly here; Production workers are paid weekly via the Payslip generator.</div>
+          </div>
           <div class="form-row">
-            <div class="form-group"><label>Base Salary</label><input id="ep-salary" type="number" value="${emp.salary||0}" inputmode="decimal"/></div>
+            <div class="form-group"><label>${_payClass==='production'?'Weekly Rate':'Base Salary'}</label><input id="ep-salary" type="number" value="${emp.salary||0}" inputmode="decimal"/></div>
             <div class="form-group"><label>Allowance</label><input id="ep-allow" type="number" value="${emp.allowance||0}" inputmode="decimal"/></div>
           </div>
           <div class="form-row">
@@ -2436,6 +2488,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           // All pay — base, allowance, and government deductions — lives in the
           // protected payroll/{uid} doc (finance/admin write), not the users doc.
           await db.collection('payroll').doc(uid).set({
+            payClass:   document.getElementById('ep-class')?.value === 'production' ? 'production' : 'regular',
             salary:     parseFloat(document.getElementById('ep-salary').value)||0,
             allowance:  parseFloat(document.getElementById('ep-allow').value)||0,
             deductions: parseFloat(document.getElementById('ep-deduct').value)||0,
@@ -2444,6 +2497,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             pagibig:    parseFloat(document.getElementById('ep-pi').value)||0,
             tax:        parseFloat(document.getElementById('ep-tax').value)||0,
           }, {merge:true});
+          if (emp) emp.payClass = document.getElementById('ep-class')?.value === 'production' ? 'production' : 'regular';
           window.logAudit && window.logAudit('update','payroll',uid,{ salary:parseFloat(document.getElementById('ep-salary').value)||0 });
 
           // Save / clear CA deduction override
@@ -2466,8 +2520,56 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     });
   }
 
+  // ── Pay-run workflow: Compute → Verify → Disburse (per month) ──────────
+  // Explicit, auditable states wrapping the existing salary computation (which
+  // is unchanged). A pay_runs/{YYYY-MM} doc tracks the state + who/when. Compute
+  // = the Generate button; Verify = finance/admin sign-off; Disburse = President
+  // marks salaries actually released. Grace period: finalize by the 5th.
+  const PR_STATES = ['draft','computed','verified','disbursed'];
+  const PR_LABEL  = { draft:'Draft', computed:'Computed', verified:'Verified', disbursed:'Disbursed' };
+  async function loadPayRunStrip(month){
+    const wrap = document.getElementById('pay-run-strip'); if(!wrap) return;
+    const doc  = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+    const data = (doc && doc.exists) ? doc.data() : {};
+    const state = PR_STATES.includes(data.state) ? data.state : 'draft';
+    const idx   = PR_STATES.indexOf(state);
+    const day   = parseInt((window.bizDate?window.bizDate():'0000-00-00').slice(8,10),10) || 0;
+    const isCurrent = month === thisMonth;
+    const grace = (isCurrent && idx < 2)
+      ? `Finalize this run by the <strong>5th</strong>${day>5?` — <span style="color:var(--danger)">overdue (day ${day})</span>`:` (today is day ${day})`}.`
+      : '';
+    wrap.innerHTML = `
+      <div class="card"><div class="card-body" style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          ${PR_STATES.map((s,i)=>`<span class="badge ${i<idx?'badge-blue':i===idx?'badge-green':'badge-gray'}" style="font-size:11px">${i<=idx?'✓ ':''}${PR_LABEL[s]}</span>${i<PR_STATES.length-1?'<span style="color:var(--text-muted)">→</span>':''}`).join('')}
+          <span style="flex:1"></span>
+          ${data.totalNet!=null?`<span style="font-size:12px;color:var(--text-muted)">Net ₱${fmt(data.totalNet)} · ${data.employeeCount||0} staff</span>`:''}
+        </div>
+        ${grace?`<div style="font-size:12px;color:var(--text-muted)">⏳ ${grace}</div>`:''}
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          ${(canFinance && state==='computed')?`<button class="btn-secondary btn-sm" id="pr-verify-btn">✓ Mark Verified</button>`:''}
+          ${(isPres && state==='verified')?`<button class="btn-primary btn-sm" id="pr-disburse-btn">💵 Mark Disbursed</button>`:''}
+          ${state==='draft'?`<span style="font-size:12px;color:var(--text-muted)">Use <strong>Compute Payroll</strong> to start this month's run.</span>`:''}
+          ${state==='disbursed'&&data.disbursedAt?`<span style="font-size:12px;color:var(--success)">💵 Disbursed${data.disbursedByName?` by ${escHtml(data.disbursedByName)}`:''}</span>`:''}
+        </div>
+      </div></div>`;
+    document.getElementById('pr-verify-btn')?.addEventListener('click', async ()=>{
+      if(!confirm(`Mark ${month} payroll as VERIFIED? This confirms the computed amounts have been checked.`)) return;
+      await db.collection('pay_runs').doc(month).set({ state:'verified', verifiedBy:currentUser.uid, verifiedByName:window.userProfile?.displayName||currentUser.email, verifiedAt:firebase.firestore.FieldValue.serverTimestamp() },{merge:true});
+      window.logAudit && window.logAudit('update','pay_run',month,{state:'verified'});
+      Notifs.showToast('Payroll marked verified.'); loadPayRunStrip(month);
+    });
+    document.getElementById('pr-disburse-btn')?.addEventListener('click', async ()=>{
+      if(!confirm(`Mark ${month} payroll as DISBURSED? Do this only once salaries have actually been released.`)) return;
+      await db.collection('pay_runs').doc(month).set({ state:'disbursed', disbursedBy:currentUser.uid, disbursedByName:window.userProfile?.displayName||currentUser.email, disbursedAt:firebase.firestore.FieldValue.serverTimestamp() },{merge:true});
+      window.logAudit && window.logAudit('update','pay_run',month,{state:'disbursed'});
+      Notifs.showToast('Payroll marked disbursed.'); loadPayRunStrip(month);
+    });
+  }
+
   loadPayrollTable(thisMonth);
-  document.getElementById('pr-month-sel').addEventListener('change', e => loadPayrollTable(e.target.value));
+  loadPayRunStrip(thisMonth);
+  document.getElementById('pr-month-sel').addEventListener('change', e => { loadPayrollTable(e.target.value); loadPayRunStrip(e.target.value); });
   document.getElementById('raise-history-btn')?.addEventListener('click', () => openRaiseHistory());
 
   document.getElementById('gen-payroll-btn').addEventListener('click', async () => {
@@ -2587,7 +2689,21 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     }
 
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
-    Notifs.showToast('Payroll generated!');
+
+    // Stamp the pay-run state to 'computed' (governance metadata only — does not
+    // touch the salary math above). Verify/Disburse advance it from the strip.
+    const _runNet = employees.reduce((s,u)=>{
+      const caAdv=(_caOverrideByUser[u.id]?.amount ?? _caByUser[u.id])||0;
+      return s + ((u.salary||0)+(u.allowance||0)-((u.deductions||0)+(u.sss||0)+(u.philhealth||0)+(u.pagibig||0)+(u.tax||0))-caAdv);
+    },0);
+    await db.collection('pay_runs').doc(month).set({
+      month, state:'computed', employeeCount: employees.length, totalNet: _runNet,
+      computedBy: currentUser.uid, computedByName: window.userProfile?.displayName||currentUser.email,
+      computedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, {merge:true}).catch(()=>{});
+    window.logAudit && window.logAudit('update','pay_run',month,{state:'computed',net:_runNet});
+
+    Notifs.showToast('Payroll computed!');
     loadFinanceContent(currentUser, currentRole, 'Payroll');
   });
 }

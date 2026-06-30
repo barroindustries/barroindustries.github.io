@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '11.0.49';
+window.APP_VERSION = '11.0.50';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -75,6 +75,10 @@ window.DEPARTMENTS = {
   'Finance': {
     key: 'Finance', icon: '💰', color: '#1b5e20',
     subtabs: ['Overview', 'Accounting', 'Purchases', 'SSS / Gov'], navOrder: 2
+  },
+  'HR': {
+    key: 'HR', icon: '👥', color: '#ad1457',
+    subtabs: ['People & Roles', 'Payroll', 'Worker Payslips', 'Leave', 'Attendance'], navOrder: 2
   },
   'Sales': {
     key: 'Sales', icon: '🤝', color: '#e65100',
@@ -328,4 +332,19 @@ window.bindChipTabs = function(scope, onSelect) {
       try { onSelect(btn.dataset.chip, btn); } catch (e) { /* swallow */ }
     });
   });
+};
+
+// ── In-app SOP panel (collapsible "How this works") ───────
+// A consistent, dismissible explainer for each department/screen, so the
+// workflow is documented where the work happens. Returns an HTML string.
+//   container.innerHTML = window.sopPanel('How Sales works', ['Build a quote…','File it…'], {open:false});
+window.sopPanel = function(title, steps, opts) {
+  opts = opts || {};
+  var esc = window.escHtml || function(s){ return String(s == null ? '' : s); };
+  return '<details class="sop-panel"' + (opts.open ? ' open' : '') +
+    ' style="background:var(--s1,rgba(255,255,255,0.04));border:1px solid var(--border);border-radius:12px;padding:10px 14px;margin-bottom:16px">' +
+    '<summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--text)">📖 ' + esc(title || 'How this works') + '</summary>' +
+    '<ol style="margin:8px 0 2px;padding-left:18px;font-size:13px;color:var(--text-muted);line-height:1.9">' +
+    (steps || []).map(function(s){ return '<li>' + esc(s) + '</li>'; }).join('') +
+    '</ol></details>';
 };

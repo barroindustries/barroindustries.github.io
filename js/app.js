@@ -813,6 +813,7 @@ function getSidebarItems() {
     items.push({ icon:'shield-check',  label:'Approvals',        page:'approvals',       section:true  });
     items.push({ icon:'trending-up',   label:'Progress Reports', page:'progress'                       });
     items.push({ icon:'users',         label:'Team Directory',   page:'team-directory',  section:true  });
+    items.push({ icon:'user-cog',      label:'HR',               page:'dept:HR'                        });
     items.push({ icon:'calendar',      label:'Attendance',       page:'attendance'                     });
     items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'                    });
     items.push({ icon:'boxes',         label:'Inventory',        page:'inventory',       section:true, sectionLabel:'Operations' });
@@ -3203,6 +3204,7 @@ function renderDeptModule(dept) {
   switch(dept) {
     case 'Marketing':                  renderMarketing(currentUser, currentRole); break;
     case 'Finance':                    renderFinance(currentUser, currentRole); break;
+    case 'HR':                         window.renderHR?.(currentUser, currentRole); break;
     case 'Sales': renderSales(currentUser, currentRole); break;
     case 'IT':                         window.renderIT?.(currentUser, currentRole); break;
     case 'Design':                     renderDesign(currentUser, currentRole); break;

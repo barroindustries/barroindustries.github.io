@@ -315,6 +315,15 @@ service cloud.firestore {
       allow update, delete: if isAuth() && isPresident();
     }
 
+    // ── Pay runs (Compute → Verify → Disburse workflow state per month) ──
+    // Doc id = YYYY-MM. Governance metadata only (no raw pay). Finance/admin
+    // read & write; the President prunes.
+    match /pay_runs/{month} {
+      allow read:   if isAuth() && isFinanceOrAdmin();
+      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
+    }
+
     // ── Expenses ───────────────────────────────────────
     match /expenses/{docId} {
       allow read: if isAuth() && (
