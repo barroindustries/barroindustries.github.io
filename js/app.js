@@ -504,11 +504,53 @@ function applyUserUI() {
   const sd = document.getElementById('sidebar-user-dept');
   if (sd) sd.textContent = currentDepts.join(' · ') || '';
 
-  // Prompt for profile photo once per session if missing
-  if (!userProfile.photoUrl && !sessionStorage.getItem('photo-prompt-shown')) {
-    sessionStorage.setItem('photo-prompt-shown', '1');
-    setTimeout(showPhotoPrompt, 1200);
+  // Profile photo is MANDATORY for non-partners — it's required to issue the
+  // Barro Industries company ID. External partners are exempt (no company ID).
+  // Show a blocking gate until a photo is set; it's idempotent + self-guards.
+  if (!userProfile.photoUrl && currentRole && currentRole !== 'partner') {
+    setTimeout(requireProfilePhoto, 800);
   }
+}
+
+// Blocking gate: a non-partner with no profile photo must upload one before
+// using the app, because the digital company ID can't be generated without it.
+function requireProfilePhoto() {
+  if (!userProfile || userProfile.photoUrl) return;       // already set
+  if (currentRole === 'partner' || !currentRole) return;  // partners exempt
+  if (document.getElementById('req-photo-overlay')) return;
+  const ov = document.createElement('div');
+  ov.id = 'req-photo-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(8,11,20,0.92);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.innerHTML = `
+    <div style="max-width:380px;width:100%;background:var(--surface,#1e2433);border:1px solid var(--border);border-radius:18px;padding:26px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.5)">
+      <div style="width:84px;height:84px;border-radius:50%;background:var(--surface2,#252b3b);display:flex;align-items:center;justify-content:center;font-size:40px;margin:0 auto 14px">📷</div>
+      <h3 style="margin:0 0 8px;font-size:18px;color:var(--text)">Profile photo required</h3>
+      <p style="font-size:13px;color:var(--text-muted);line-height:1.6;margin:0 0 18px">A clear photo of yourself is needed to generate your <strong>Barro Industries company ID</strong>. Please upload one to continue.</p>
+      <button id="req-photo-btn" class="btn-primary" style="width:100%">📤 Upload Photo</button>
+      <div id="req-photo-status" style="font-size:12px;color:var(--text-muted);margin-top:10px"></div>
+    </div>`;
+  document.body.appendChild(ov);
+  document.getElementById('req-photo-btn').onclick = () => {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'image/*';
+    input.onchange = async e => {
+      const file = e.target.files[0]; if (!file) return;
+      const st = document.getElementById('req-photo-status');
+      if (st) st.textContent = 'Uploading…';
+      try {
+        const url = await Drive.uploadProfilePhoto(file, currentUser.uid);
+        await db.collection('users').doc(currentUser.uid).update({ photoUrl: url });
+        userProfile.photoUrl = url;
+        applyUserUI();
+        ov.remove();
+        Notifs.showToast('Photo saved — your company ID is ready!');
+      } catch (err) {
+        if (st) st.textContent = 'Upload failed — please try again.';
+        else Notifs.showToast('Upload failed','error');
+      }
+    };
+    input.click();
+  };
 }
 
 function showPhotoPrompt() {
