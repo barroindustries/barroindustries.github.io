@@ -1,6 +1,6 @@
 # Barro Industries Ops System — Roadmap & Handoff
 
-_Last updated: 2026-06-23 — **V11.1** (Cloud Storage custom-claims confidentiality close); base version **v11.0.1**, cache `bi-ops-v73` (both auto-bump on commit)._
+_Last updated: 2026-06-30 — base version **v11.0.46**, cache `bi-ops-v131` (both auto-bump on commit). See **"SESSION 2026-06-30"** + **"🎯 NEXT UP"** below for the latest work and the next-session plan._
 
 ### v10.0.0 UI/UX fix pass (done)
 - Quote builder topbar **unstuck** (scrolls away, not fixed); mobile verified (no page horizontal scroll; only the data table scrolls within its wrapper); desktop untouched.
@@ -15,6 +15,82 @@ _Last updated: 2026-06-23 — **V11.1** (Cloud Storage custom-claims confidentia
 _Old header: v9.4.49+, cache bi-ops-v33+._
 This file is the running source of truth for what's done and what's left to make the app
 "fully functional to run the company remotely." Update it as work lands.
+
+---
+
+## 🛠 HOW TO WORK ON THIS (read first, every session)
+
+- **Architecture:** vanilla-JS PWA, no build step. Logic in `js/app.js` (~6k lines: auth, router `navigateTo`, dashboard, approvals, nav), `js/departments.js` (~12k lines: every department screen + finance + projects + purchasing + production), `js/modules.js` (Posts, Team, Attendance, Cash Advance), `js/config.js` (version, `DEPARTMENTS`, `ROLES`, nav arrays, `dbCachedGet`). Everything talks through `window.*` globals; **load order in `index.html` is load-bearing.**
+- **Deploy:** `git push origin master` → GitHub Pages (auto). Rules are NOT shipped by push — run `~/.npm-global/bin/firebase deploy --only firestore:rules` separately. Version + SW cache auto-bump on commit (pre-commit hook); never hand-edit them.
+- **Verify before every commit:** `node --check js/<file>.js`; start the preview (`launch.json` name `app`, port 3838) and confirm **no console errors** — globals like `window.vatSplit`, `window.Projects` are testable pre-login via `preview_eval`. The app is login-gated so most screens need auth to click through.
+- **Firestore-rules trap (bit us repeatedly):** every collection the client reads needs an explicit `match` block; an unfiltered `.get()` against a per-doc read rule is DENIED for non-admins → blank screen. Always `.catch(()=>({docs:[]}))` on list reads, and add a rule for any NEW collection. Helpers: `inDept(d)/canDept(d)`, `canFinance()`, `canPurchasing()`, `canProduction()`, `isAdmin()` (= president/manager/secretary).
+- **Two one-time buttons to run in the live app after deploy:** Finance → Reports → **🔄 Sync to ledger** (backfills existing expenses + cash journals); Projects → **🔖 Tag** (tags projects with kind). Both idempotent.
+
+---
+
+## 🆕 SESSION 2026-06-30 — what shipped (v11.0.18 → v11.0.46)
+
+**Purchasing department (new)** — RFQ → enter prices → convert to Purchase Request → print branded PO → submit to Finance. Materials auto-match to inventory on receive. `purchase_requisitions` collection (`stage: rfq|pr`). "From low stock" RFQ pre-fill. Removed the old editable Purchasing tab from Finance; Finance now has a read-only **Purchases** tab.
+
+**Finance = single source of truth (the ledger).**
+- Per-sale **VAT treatment** (inclusive / exclusive / exempt) via `window.vatSplit`; each sale stores net+vatAmount+vatTreatment. Reports show **Output VAT − Input VAT = Net VAT Payable**.
+- Approved **expenses post to the ledger** (`EXP-<id>`); the approve/reject buttons were dead — now wired.
+- **Cash receipt/disbursement journals mirror into the ledger** (`CRJ-`/`CDJ-<id>`; only new revenue / real expense, excluding A/R collections & A/P settlements). Delete-cascade removes the mirrored row. Editing a journal re-syncs its ledger row (`resyncLedgerForSource`).
+- **Reports / Overview / Dashboard / Analytics read the ledger only**; one-time backfill button seeds existing data.
+- **Idempotency:** sales/project/COS ledger posts use deterministic refs (`SO-`/`PROJ-`/`DPROJ-`/`POCOS-<id>-<index>`) + existence checks.
+
+**Production → COS / inventory** — production orders take a materials list; "Consume → stock & COS" deducts inventory + posts `COS – Direct Material` (idempotent, best-effort; Production-dept can post its own COS via a tightly-scoped ledger rule). Rolls cost into the job's `capital` for margin.
+
+**Projects unified** — `window.Projects.normalize()/listAll()` presents `job_projects` (sales/production) + `projects` (Design) as one shape WITHOUT a destructive merge (different security models). Analytics receivables/top-clients now include both. Projects page shows a read-only "Design Projects" section. Partner-aware.
+
+**Partner portal** — Brilliant Steel + generic partners get a **My Projects** page (`renderPartnerProjects`, filters `job_projects` by `partnerUid`).
+
+**Navigation** — global top-bar **‹ Back button** (25-deep history, `navBack`/`updateNavBackBtn` in app.js).
+
+**Mobile** — 40px subtab tap targets; wrapped many wide tables (`.table-wrap`); BK quote editor + BS add-panel made responsive.
+
+**Bug-fix sweeps (3 review passes)** — fixed: finance-journal rule mismatches (`isFinanceOrAdmin`→`canFinance`), unruled dept collections (Gov/Work-Plans/Marketing → blank screens), IT writes, **post likes silently denied** (hearts-only rule diff), **task-delete** by creator, CA reject/payment crash guards, president-photo XSS, manual-CDJ input-VAT base (excluded labor), inventory unit-cost zero-wipe, dead "Disbursed" KPI. Memory `finance-reporting-open-items` + `firestore-rules-collection-coverage` updated.
+
+**Backups (critical fix)** — the monthly Firestore backup had **never run** and covered only 9 of 35+ collections; the daily file sync had been failing 5 days. Root cause: **Node 22** breaks Google's OAuth token exchange (`ERR_STREAM_PREMATURE_CLOSE`). Fixed by pinning both workflows to **Node 20** + expanding `scripts/monthly-backup.js` to back up ALL business collections (books/payroll/quotes/projects/purchasing/inventory). Both now green; first backup captured real data (114 payslips, ledger, payroll…) with 0 errors. **Drive file names** are now descriptive: `<date>_<client/supplier/project>_<id6>__<originalName>` for easy manual tracking. (Memory `drive-sync-config` updated — remember to add new collections to the backup EXPORTS list.)
+
+**Still open (product decisions, in `finance-reporting-open-items`):** none blocking — the audit is functionally closed.
+
+---
+
+## 🎯 NEXT UP — backlog for the next session (requested 2026-06-30)
+
+> These are the user's priorities. Each item lists the intent + where to work. Treat "fewer subtabs / less clutter" as a cross-cutting theme — prefer **filter chips/tags** over long subtab bars.
+
+### 1. Approvals — President "Grading" subtab + declutter the tab
+- **Add a Grading view**: surface items awaiting the President's **grade/score** (e.g. completed tasks with no `presidentScore`/`presidentGrade`, KPI self-assessments awaiting president grade). Today grading happens scattered around; consolidate it into Approvals.
+- **UI/UX:** the Approvals page (`renderApprovals` in `js/departments.js`, ~line 8700+) has too many subtabs (sign-ups, attendance, cash advances, submissions, review-tasks, finance requests, finance deletes, quote approvals, leave, payroll deletes). **Convert the subtab bar into filter chips/tags with counts**, defaulting to a unified "All Requests" list (that aggregated view already exists ~line 8830). Add "Grading" as one of the chips.
+- Files: `js/departments.js` `renderApprovals` + the per-type loaders/handlers.
+
+### 2. Secretary portal — act on minor approvals, escalate major ones
+- Secretary (`secretary` role) is currently `isAdmin`-tier but Approvals is **view-only** for them. Change to a **two-tier** model: secretary may **approve "minor" items** (attendance extensions, leave, sign-ups, work submissions, review-tasks) but **major decisions escalate to the President** (finance records/deletes, payroll, cash advances above a threshold, anything money-moving).
+- Implement: in `renderApprovals`, the action gate currently is `canAct` (excludes secretary). Introduce a per-approval-type capability map; secretary gets the minor set, president keeps all. For major items secretary sees a **"Request President approval"** action instead of approve.
+- Rules already permit secretary writes (in `isAdmin()`); this is mostly a UI-gating + UX change. Respect the existing design note in `config.js` ROLES (secretary = oversight).
+
+### 3. Payroll & HR overhaul (the big one — do this carefully, it's live money)
+- **Unify the payroll system.** Today it's fragmented across `payroll`, `salary_history`, `payslips`, and TWO computation paths (a known inconsistency — see `payroll-collection-architecture` memory). Pick ONE source of truth and one compute path.
+- **Workflow with grace period:** monthly payroll = **Compute → Verify → Disburse**, with the **final-computation deadline on the 5th** of each month (the President may be delayed / apply considerations before finalizing). Model explicit states (`draft/computed/verified/disbursed`) per pay run.
+- **Two employee classes (keep it SIMPLE):**
+  - **Regular** — monthly, pay driven by **KPI + attendance**.
+  - **Production** — **weekly**, **fixed weekly** rate, **attendance computed hourly** with a standard **8-hr day**.
+- **Payslip:** add a **"Compute for payroll"** action that assembles: base/compute → **attendance** → **additionals** → **deductions** (incl. **cash-advance optional amount with the computed running balance**). Make the payslip clearer.
+- **HR becomes its own department** (add to `DEPARTMENTS` in `config.js`, nav, rules). **HR sets employee roles** (the role/department assignment UI moves under HR, not buried in Team/admin).
+- Pay data lives in `payroll/{uid}` (protected) per `payroll-collection-architecture` — keep that, just rationalize the compute. Files: `js/departments.js` (`renderPayrollManagement`, payslip generation, the two generators), `js/config.js`, `firestore.rules`. **Re-read the payroll memories before starting.**
+
+### 4. Quotations — fewer subtabs, per-customer view, delete-with-approval
+- **Lessen subtabs** in the Sales → Quotations area. Add a **per-customer grouped view** (collapse quotes under each client). Allow **deleting a quote record with admin approval** (route through an approval like `financeDelete`, not a hard delete).
+- Files: `js/departments.js` `renderSales` (Quotations tab) + `renderBSQuotationsSummary` (~line 7927) + the quote delete handlers (`bk_quotes`/`bs_quotes`).
+
+### 5. Full-scale declutter + per-department SOP/workflows
+- The system is **too cluttered — too many subtabs, hard to navigate, SOP unclear.** Do a **per-department pass**: reduce subtab count, convert dense subtab bars to chips/tags, and **document the SOP/workflow for each department** (ideally surfaced in-app, e.g. each department gets a short "How this works" panel). Establish a reusable chip/tag subtab pattern and apply it consistently (Finance has the most tabs; Sales, IT, Design next).
+- This is cross-cutting UX. Consider a shared helper for "chip-style subtabs with counts."
+
+### 6. Better inventory
+- Improve the inventory module: **valuation totals** (Σ qty×unitCost), low-stock → RFQ (partially built — "From low stock" exists in Purchasing), **categories/filtering**, a **stock-movements log** (currently `stock_movements` has a rule but little usage), reorder management, and clearer in/out history. Files: `js/departments.js` `renderInventory` / `renderProdMaterials`, `inventory_items` + `stock_movements`.
 
 ---
 
