@@ -1845,14 +1845,10 @@ async function renderPresidentMessageCard() {
     if (isFinAdmin()) tabs.push('Job Costing');
     c.innerHTML = `
       <div class="page-header"><h2>📦 Inventory</h2></div>
-      <div class="subtab-bar" style="flex-wrap:wrap;margin-bottom:12px">
-        ${tabs.map(s=>`<button class="subtab-btn ${s===sub?'active':''}" data-sub="${s}">${s}</button>`).join('')}
-      </div>
+      ${window.chipTabs(tabs.map(s=>({key:s,label:s})), sub, {cls:'inv-tabs'})}
       <div id="inv-content"><div class="loading-placeholder">Loading…</div></div>`;
     loadInv(sub);
-    c.querySelectorAll('.subtab-btn').forEach(b=>b.addEventListener('click',()=>{
-      c.querySelectorAll('.subtab-btn').forEach(x=>x.classList.remove('active')); b.classList.add('active'); loadInv(b.dataset.sub);
-    }));
+    window.bindChipTabs(c.querySelector('.inv-tabs'), (key)=>loadInv(key));
   };
 
   function loadInv(sub){
@@ -1862,30 +1858,50 @@ async function renderPresidentMessageCard() {
     return renderStock(el);
   }
 
-  async function renderStock(el, kindFilter='all'){
+  async function renderStock(el){
     el.innerHTML = '<div class="loading-placeholder">Loading stock…</div>';
     const snap = await db.collection('inventory_items').orderBy('name').get().catch(()=>({docs:[]}));
     const items = snap.docs.map(d=>({id:d.id,...d.data()}));
-    const shown = items.filter(i=> kindFilter==='all' || (i.kind||'material')===kindFilter);
+    const ce = canEditInv();
     const low = items.filter(i=>(i.reorderLevel||0)>0 && (i.qty||0) <= (i.reorderLevel||0));
     const totalValue = items.reduce((s,i)=>s+((i.qty||0)*(i.unitCost||0)),0);
-    const ce = canEditInv();
+    const matValue  = items.filter(i=>(i.kind||'material')!=='product').reduce((s,i)=>s+((i.qty||0)*(i.unitCost||0)),0);
+    const prodValue = totalValue - matValue;
+    const cats = Array.from(new Set(items.map(i=>(i.category||'').trim()).filter(Boolean))).sort();
+    let kindFilter='all', catFilter='all', search='';
+
     el.innerHTML = `
       <div class="kpi-row" style="margin-bottom:12px">
         <div class="kpi-card"><div class="kpi-label">Items</div><div class="kpi-value">${items.length}</div></div>
         <div class="kpi-card ${low.length?'red':''}"><div class="kpi-label">Low Stock</div><div class="kpi-value">${low.length}</div></div>
         <div class="kpi-card green"><div class="kpi-label">Stock Value</div><div class="kpi-value">${peso(totalValue)}</div></div>
       </div>
-      ${low.length?`<div class="alert-banner alert-warn"><span>⚠️ <strong>${low.length} item${low.length>1?'s':''}</strong> at or below reorder level</span></div>`:''}
-      <div class="subtab-bar" style="margin-bottom:10px">
-        ${[['all','All'],['material','Raw Materials'],['product','Finished Goods']].map(([k,l])=>`<button class="subtab-btn inv-kind-chip ${kindFilter===k?'active':''}" data-kind="${k}">${l}</button>`).join('')}
-        <button class="btn-secondary btn-sm" id="inv-csv" style="margin-left:auto">⬇ CSV</button>
+      <div style="font-size:12px;color:var(--text-muted);margin:0 2px 10px">Materials ${peso(matValue)} · Finished goods ${peso(prodValue)}</div>
+      ${low.length?`<div class="alert-banner alert-warn" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>⚠️ <strong>${low.length} item${low.length>1?'s':''}</strong> at or below reorder level</span>${ce?`<button class="btn-secondary btn-sm" id="inv-reorder-btn" title="Open Purchasing to raise an RFQ for low-stock materials">📉 Reorder via RFQ</button>`:''}</div>`:''}
+      ${window.chipTabs([{key:'all',label:'All'},{key:'material',label:'Raw Materials'},{key:'product',label:'Finished Goods'}],'all',{cls:'inv-kind'})}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <input id="inv-search" placeholder="🔎 Search item, supplier, category…" style="flex:1;min-width:160px;padding:8px 12px;border:1.5px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-size:13px"/>
+        ${cats.length?`<select id="inv-cat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-size:13px"><option value="all">All categories</option>${cats.map(c=>`<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('')}</select>`:''}
+        <button class="btn-secondary btn-sm" id="inv-csv">⬇ CSV</button>
         ${ce?'<button class="btn-primary btn-sm" id="inv-add-btn">＋ Add Item</button>':''}
       </div>
-      <div class="card"><div class="card-body" style="padding:0">
-        ${!shown.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📦</div><h4>No items yet</h4></div>':
+      <div class="card"><div class="card-body" style="padding:0"><div id="inv-table"></div></div></div>`;
+
+    const filtered = () => items.filter(i=>{
+      if (kindFilter!=='all' && (i.kind||'material')!==kindFilter) return false;
+      if (catFilter!=='all' && (i.category||'').trim()!==catFilter) return false;
+      if (search){ const s=search.toLowerCase(); if(!((i.name||'').toLowerCase().includes(s)||(i.supplier||'').toLowerCase().includes(s)||(i.category||'').toLowerCase().includes(s))) return false; }
+      return true;
+    });
+
+    const renderTable = () => {
+      const shown = filtered();
+      const shownValue = shown.reduce((s,i)=>s+((i.qty||0)*(i.unitCost||0)),0);
+      const tbl = document.getElementById('inv-table');
+      if (!tbl) return;
+      tbl.innerHTML = !shown.length ? '<div class="empty-state" style="padding:24px"><div class="empty-icon">📦</div><h4>No items match</h4></div>' :
         `<div class="table-wrap"><table class="data-table">
-          <thead><tr><th>Item</th><th>Type</th><th>On Hand</th><th>Reorder</th><th>Unit Cost</th><th>Value</th><th>Supplier</th>${ce?'<th></th>':''}</tr></thead>
+          <thead><tr><th>Item</th><th>Type</th><th>On Hand</th><th>Reorder</th><th>Unit Cost</th><th>Value</th><th>Supplier</th><th></th></tr></thead>
           <tbody>${shown.map(i=>{
             const lowItem=(i.reorderLevel||0)>0 && (i.qty||0)<=(i.reorderLevel||0);
             return `<tr>
@@ -1896,25 +1912,55 @@ async function renderPresidentMessageCard() {
               <td>${peso(i.unitCost||0)}</td>
               <td>${peso((i.qty||0)*(i.unitCost||0))}</td>
               <td style="font-size:12px">${escHtml(i.supplier||'—')}</td>
-              ${ce?`<td style="white-space:nowrap">
-                <button class="btn-success btn-sm inv-in-btn" data-id="${i.id}" title="Stock In">＋</button>
+              <td style="white-space:nowrap">
+                <button class="btn-secondary btn-sm inv-hist-btn" data-id="${i.id}" title="Movement history">📜</button>
+                ${ce?`<button class="btn-success btn-sm inv-in-btn" data-id="${i.id}" title="Stock In">＋</button>
                 <button class="btn-secondary btn-sm inv-out-btn" data-id="${i.id}" title="Stock Out">−</button>
-                <button class="btn-secondary btn-sm inv-edit-btn" data-id="${i.id}" title="Edit">✎</button>
-              </td>`:''}
+                <button class="btn-secondary btn-sm inv-edit-btn" data-id="${i.id}" title="Edit">✎</button>`:''}
+              </td>
             </tr>`;}).join('')}</tbody>
-        </table></div>`}
-      </div></div>`;
-    el.querySelectorAll('.inv-kind-chip').forEach(b=>b.addEventListener('click',()=>renderStock(el,b.dataset.kind)));
-    document.getElementById('inv-csv')?.addEventListener('click',()=>window.exportCSV('inventory', shown, [
+          <tfoot><tr><td colspan="5" style="text-align:right;font-weight:700;color:var(--text-muted)">Shown value</td><td style="font-weight:700">${peso(shownValue)}</td><td colspan="2"></td></tr></tfoot>
+        </table></div>`;
+      // Row actions
+      tbl.querySelectorAll('.inv-hist-btn').forEach(b=>b.addEventListener('click',()=>itemHistoryModal(items.find(i=>i.id===b.dataset.id))));
+      if(ce){
+        tbl.querySelectorAll('.inv-edit-btn').forEach(b=>b.addEventListener('click',()=>itemModal(items.find(i=>i.id===b.dataset.id),()=>renderStock(el))));
+        tbl.querySelectorAll('.inv-in-btn').forEach(b=>b.addEventListener('click',()=>moveModal(items.find(i=>i.id===b.dataset.id),'in',()=>renderStock(el))));
+        tbl.querySelectorAll('.inv-out-btn').forEach(b=>b.addEventListener('click',()=>moveModal(items.find(i=>i.id===b.dataset.id),'out',()=>renderStock(el))));
+      }
+    };
+
+    window.bindChipTabs(el.querySelector('.inv-kind'), (key)=>{ kindFilter=key; renderTable(); });
+    let _t; document.getElementById('inv-search')?.addEventListener('input', e=>{ clearTimeout(_t); const v=e.target.value; _t=setTimeout(()=>{ search=v.trim(); renderTable(); },180); });
+    document.getElementById('inv-cat')?.addEventListener('change', e=>{ catFilter=e.target.value; renderTable(); });
+    document.getElementById('inv-reorder-btn')?.addEventListener('click', ()=>{ try{ Notifs.showToast('Opening Purchasing — use “From low stock” to raise an RFQ.'); }catch(_){} navigateTo('dept:Purchasing'); });
+    document.getElementById('inv-csv')?.addEventListener('click',()=>window.exportCSV('inventory', filtered(), [
       {key:'name',label:'Item'},{key:'kind',label:'Type',get:i=>(i.kind||'material')},{key:'category',label:'Category'},
       {key:'qty',label:'On Hand',get:i=>i.qty||0},{key:'unit',label:'Unit'},{key:'reorderLevel',label:'Reorder',get:i=>i.reorderLevel||0},
       {key:'unitCost',label:'Unit Cost',get:i=>i.unitCost||0},{key:'value',label:'Stock Value',get:i=>(i.qty||0)*(i.unitCost||0)},{key:'supplier',label:'Supplier'}]));
-    if(ce){
-      document.getElementById('inv-add-btn')?.addEventListener('click',()=>itemModal(null,()=>renderStock(el,kindFilter)));
-      el.querySelectorAll('.inv-edit-btn').forEach(b=>b.addEventListener('click',()=>itemModal(items.find(i=>i.id===b.dataset.id),()=>renderStock(el,kindFilter))));
-      el.querySelectorAll('.inv-in-btn').forEach(b=>b.addEventListener('click',()=>moveModal(items.find(i=>i.id===b.dataset.id),'in',()=>renderStock(el,kindFilter))));
-      el.querySelectorAll('.inv-out-btn').forEach(b=>b.addEventListener('click',()=>moveModal(items.find(i=>i.id===b.dataset.id),'out',()=>renderStock(el,kindFilter))));
-    }
+    if(ce) document.getElementById('inv-add-btn')?.addEventListener('click',()=>itemModal(null,()=>renderStock(el)));
+    renderTable();
+  }
+
+  // Per-item movement history — equality query (no composite index), sorted client-side.
+  async function itemHistoryModal(item){
+    if(!item) return;
+    openModal('📜 '+(item.name||'Item')+' — Movement History', '<div class="loading-placeholder">Loading…</div>',
+      `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    const snap = await db.collection('stock_movements').where('itemId','==',item.id).get().catch(()=>({docs:[]}));
+    const mv = snap.docs.map(d=>d.data()).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    const body = document.getElementById('modal-body');
+    const html = !mv.length ? '<div class="empty-state" style="padding:18px"><div class="empty-icon">📋</div><h4>No movements recorded</h4></div>' :
+      `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">On-hand now: <strong>${num(item.qty||0)} ${escHtml(item.unit||'')}</strong></div>
+       <div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Project / Note</th><th>By</th></tr></thead>
+       <tbody>${mv.map(m=>`<tr>
+         <td style="font-size:12px">${escHtml(m.date||'—')}</td>
+         <td><span class="badge ${m.type==='in'?'badge-green':m.type==='adjust'?'badge-blue':'badge-orange'}">${m.type==='in'?'IN':m.type==='adjust'?'ADJ':'OUT'}</span></td>
+         <td>${num(m.qty||0)}</td>
+         <td style="font-size:12px">${escHtml(m.project||m.note||'—')}</td>
+         <td style="font-size:11px">${escHtml(m.byName||'—')}</td>
+       </tr>`).join('')}</tbody></table></div>`;
+    if (body) body.innerHTML = html;
   }
 
   function itemModal(item, onSaved){
@@ -1948,7 +1994,19 @@ async function renderPresidentMessageCard() {
         supplier:document.getElementById('iv-supplier').value.trim(), supplierContact:document.getElementById('iv-supcontact').value.trim(),
         updatedAt:firebase.firestore.FieldValue.serverTimestamp() };
       try{
-        if(item){ await db.collection('inventory_items').doc(item.id).update(data); window.logAudit&&window.logAudit('update','inventory_item',item.id,{name,qty:data.qty}); }
+        if(item){
+          const oldQty = item.qty||0;
+          await db.collection('inventory_items').doc(item.id).update(data);
+          window.logAudit&&window.logAudit('update','inventory_item',item.id,{name,qty:data.qty});
+          // A manual on-hand edit changes stock without a Stock In/Out — log an
+          // 'adjust' movement so the history reflects every quantity change.
+          if (Math.abs((data.qty||0) - oldQty) > 1e-9) {
+            await db.collection('stock_movements').add({ itemId:item.id, itemName:name, type:'adjust',
+              qty:Math.abs((data.qty||0)-oldQty), project:'', note:`Manual edit ${num(oldQty)} → ${num(data.qty||0)}`,
+              by:currentUser.uid, byName:userProfile?.displayName||currentUser.email,
+              date:bizDate(), createdAt:firebase.firestore.FieldValue.serverTimestamp() }).catch(()=>{});
+          }
+        }
         else { data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); const _r=await db.collection('inventory_items').add(data); window.logAudit&&window.logAudit('create','inventory_item',_r.id,{name,qty:data.qty}); }
         closeModal(); Notifs.showToast('Item saved'); onSaved&&onSaved();
       }catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
@@ -1991,23 +2049,42 @@ async function renderPresidentMessageCard() {
     el.innerHTML='<div class="loading-placeholder">Loading movements…</div>';
     const snap=await db.collection('stock_movements').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]}));
     const mv=snap.docs.map(d=>d.data());
+    const typeBadge = t => t==='in'?'<span class="badge badge-green">IN</span>':t==='adjust'?'<span class="badge badge-blue">ADJ</span>':'<span class="badge badge-orange">OUT</span>';
+    let typeFilter='all', search='';
     el.innerHTML=`<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3>📋 Stock Movement Log</h3>${mv.length?'<button class="btn-secondary btn-sm" id="mv-csv">⬇ CSV</button>':''}</div>
-      <div class="card-body" style="padding:0">
-      ${!mv.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📋</div><h4>No movements yet</h4></div>':
-      `<div class="table-wrap"><table class="data-table">
-        <thead><tr><th>Date</th><th>Item</th><th>In/Out</th><th>Qty</th><th>Project</th><th>Note</th><th>By</th></tr></thead>
-        <tbody>${mv.map(m=>`<tr>
-          <td>${escHtml(m.date||'—')}</td>
-          <td style="font-weight:600">${escHtml(m.itemName||'—')}</td>
-          <td><span class="badge ${m.type==='in'?'badge-green':'badge-orange'}">${m.type==='in'?'IN':'OUT'}</span></td>
-          <td>${num(m.qty||0)}</td>
-          <td style="font-size:12px">${escHtml(m.project||'—')}</td>
-          <td style="font-size:12px">${escHtml(m.note||'—')}</td>
-          <td style="font-size:11px">${escHtml(m.byName||'—')}</td>
-        </tr>`).join('')}</tbody></table></div>`}
+      <div class="card-body">
+      ${!mv.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📋</div><h4>No movements yet</h4></div>':`
+      ${window.chipTabs([{key:'all',label:'All'},{key:'in',label:'In'},{key:'out',label:'Out'},{key:'adjust',label:'Adjust'}],'all',{cls:'mv-type'})}
+      <input id="mv-search" placeholder="🔎 Search item, project, note…" style="width:100%;padding:8px 12px;border:1.5px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-size:13px;margin-bottom:10px"/>
+      <div id="mv-table"></div>`}
       </div></div>`;
-    document.getElementById('mv-csv')?.addEventListener('click',()=>window.exportCSV('stock-movements', mv, [
-      {key:'date',label:'Date'},{key:'itemName',label:'Item'},{key:'type',label:'In/Out',get:m=>m.type==='in'?'IN':'OUT'},
+    const filtered = () => mv.filter(m=>{
+      if (typeFilter!=='all' && (m.type||'out')!==typeFilter) return false;
+      if (search){ const s=search.toLowerCase(); if(!((m.itemName||'').toLowerCase().includes(s)||(m.project||'').toLowerCase().includes(s)||(m.note||'').toLowerCase().includes(s))) return false; }
+      return true;
+    });
+    const renderRows = () => {
+      const rows = filtered(); const tbl=document.getElementById('mv-table'); if(!tbl) return;
+      tbl.innerHTML = !rows.length ? '<div class="empty-state" style="padding:18px"><div class="empty-icon">🔎</div><h4>No movements match</h4></div>' :
+        `<div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Date</th><th>Item</th><th>Type</th><th>Qty</th><th>Project</th><th>Note</th><th>By</th></tr></thead>
+          <tbody>${rows.map(m=>`<tr>
+            <td style="font-size:12px">${escHtml(m.date||'—')}</td>
+            <td style="font-weight:600">${escHtml(m.itemName||'—')}</td>
+            <td>${typeBadge(m.type)}</td>
+            <td>${num(m.qty||0)}</td>
+            <td style="font-size:12px">${escHtml(m.project||'—')}</td>
+            <td style="font-size:12px">${escHtml(m.note||'—')}</td>
+            <td style="font-size:11px">${escHtml(m.byName||'—')}</td>
+          </tr>`).join('')}</tbody></table></div>`;
+    };
+    if (mv.length){
+      window.bindChipTabs(el.querySelector('.mv-type'), (key)=>{ typeFilter=key; renderRows(); });
+      let _t; document.getElementById('mv-search')?.addEventListener('input', e=>{ clearTimeout(_t); const v=e.target.value; _t=setTimeout(()=>{ search=v.trim(); renderRows(); },180); });
+      renderRows();
+    }
+    document.getElementById('mv-csv')?.addEventListener('click',()=>window.exportCSV('stock-movements', filtered(), [
+      {key:'date',label:'Date'},{key:'itemName',label:'Item'},{key:'type',label:'Type',get:m=>m.type==='in'?'IN':m.type==='adjust'?'ADJ':'OUT'},
       {key:'qty',label:'Qty',get:m=>m.qty||0},{key:'project',label:'Project'},{key:'note',label:'Note'},{key:'byName',label:'By'}]));
   }
 

@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '11.0.48';
+window.APP_VERSION = '11.0.49';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -118,9 +118,13 @@ window.DEPARTMENTS = {
 
 // ── Role Definitions ─────────────────────────────
 // `secretary` (Corporate Secretary) is an admin-portal oversight role: manager-level
-// access to oversee the whole company, but the Approvals page is VIEW-ONLY for them
-// (only the President approves), and deletions of key records route through the
-// President's approval just like every other non-president role.
+// access to oversee the whole company. In Approvals the secretary uses a TWO-TIER
+// model — they may approve MINOR everyday items (sign-ups, attendance, leave, work
+// submissions, task reviews) but MAJOR / money-moving items (cash advances, quote
+// approvals, payroll & finance deletes, quote/client deletions) escalate to the
+// President via a "Request President approval" action. (See APPROVAL_CAPS in
+// renderApprovals.) Deletions of key records still route through the President's
+// approval just like every other non-president role.
 window.ROLES = {
   president: { label: 'President',           badge: 'badge-blue',   canSeeAll: true  },
   manager:   { label: 'Manager',             badge: 'badge-purple', canSeeAll: false },
