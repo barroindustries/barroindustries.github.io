@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '11.0.53';
+window.APP_VERSION = '11.0.54';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -332,6 +332,21 @@ window.bindChipTabs = function(scope, onSelect) {
       try { onSelect(btn.dataset.chip, btn); } catch (e) { /* swallow */ }
     });
   });
+};
+
+// ── Month-over-month growth indicator (shared analytics) ──
+// Returns a small coloured "▲ 12% vs last mo" span. goodUp=false flips the
+// colour logic (e.g. expenses going UP is bad). prev<=0 with cur>0 shows a hint.
+window.momDelta = function(cur, prev, goodUp) {
+  goodUp = goodUp !== false;
+  cur = Number(cur) || 0; prev = Number(prev) || 0;
+  if (!prev) return cur ? '<span style="font-size:11px;color:var(--text-muted)">— no prior month</span>' : '';
+  var pct = Math.round(((cur - prev) / Math.abs(prev)) * 100);
+  if (pct === 0) return '<span style="font-size:11px;color:var(--text-muted)">→ 0% vs last mo</span>';
+  var up = pct > 0;
+  var color = (up === goodUp) ? 'var(--success,#30D158)' : 'var(--danger,#e5484d)';
+  return '<span style="font-size:11px;font-weight:700;color:' + color + '">' + (up ? '▲' : '▼') + ' ' +
+    Math.abs(pct) + '% <span style="font-weight:400;color:var(--text-muted)">vs last mo</span></span>';
 };
 
 // ── In-app SOP panel (collapsible "How this works") ───────

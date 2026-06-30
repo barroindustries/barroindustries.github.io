@@ -1917,12 +1917,17 @@ function setActiveNav(page) {
 // legacy `quotes` collection into one {docs:[...]} shape, so dashboards and
 // analytics reflect where quotes are actually saved (bk_quotes / bs_quotes).
 async function getAllQuotes() {
-  const [bk, bs, legacy] = await Promise.all([
-    db.collection('bk_quotes').get().catch(()=>({docs:[]})),
-    db.collection('bs_quotes').get().catch(()=>({docs:[]})),
-    db.collection('quotes').get().catch(()=>({docs:[]}))
-  ]);
-  return { docs: [...bk.docs, ...bs.docs, ...legacy.docs] };
+  // Self-cache under the shared 'all-quotes' key so every caller (dashboard,
+  // analytics, partner activity) reuses one snapshot instead of re-reading three
+  // collections each. Invalidated on quote writes via dbCacheInvalidate('all-quotes').
+  return dbCachedGet('all-quotes', async () => {
+    const [bk, bs, legacy] = await Promise.all([
+      db.collection('bk_quotes').get().catch(()=>({docs:[]})),
+      db.collection('bs_quotes').get().catch(()=>({docs:[]})),
+      db.collection('quotes').get().catch(()=>({docs:[]}))
+    ]);
+    return { docs: [...bk.docs, ...bs.docs, ...legacy.docs] };
+  }, 30000);
 }
 
 // ── DASHBOARD ─────────────────────────────────────
@@ -2267,9 +2272,15 @@ async function renderPresidentDashboard() {
 
     // Month-to-date financials (ledger: credit = income, debit = expense) for remote oversight
     const mtd = todayStr.slice(0,7);
-    const mtdLedger = ledgerSnap.docs.map(d=>d.data()).filter(e=>(e.date||'').slice(0,7)===mtd);
+    const _allLedger = ledgerSnap.docs.map(d=>d.data());
+    const mtdLedger = _allLedger.filter(e=>(e.date||'').slice(0,7)===mtd);
     const mtdNet = mtdLedger.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0)
                  - mtdLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+    // Previous calendar month net — for a month-over-month growth indicator.
+    const _pm = (()=>{ const [yy,mm]=mtd.split('-').map(Number); return mm===1?`${yy-1}-12`:`${yy}-${String(mm-1).padStart(2,'0')}`; })();
+    const prevLedger = _allLedger.filter(e=>(e.date||'').slice(0,7)===_pm);
+    const prevNet = prevLedger.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0)
+                  - prevLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
     // Inventory low-stock count
     const lowStock = invSnap.docs.map(d=>d.data()).filter(i=>(i.reorderLevel||0)>0 && (i.qty||0)<=(i.reorderLevel||0)).length;
 
@@ -2349,6 +2360,7 @@ async function renderPresidentDashboard() {
           <div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="line-chart" style="stroke:#30D158;width:18px"></i></div>
           <div class="kpi-label">Net Income (MTD)</div>
           <div class="kpi-value" style="font-size:15px;color:${mtdNet>=0?'var(--success)':'var(--danger)'}">₱${formatNum(mtdNet)}</div>
+          <div style="margin-top:3px">${window.momDelta ? window.momDelta(mtdNet, prevNet, true) : ''}</div>
         </div>
         <div class="kpi-card ${lowStock>0?'red':''}" style="cursor:pointer" onclick="navigateTo('inventory')">
           <div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="boxes" style="stroke:#FF453A;width:18px"></i></div>
@@ -6088,9 +6100,7 @@ async function renderAnalytics() {
 
   c.innerHTML=`
     <div class="page-header"><h2>📊 Analytics & Performance</h2></div>
-    <div class="subtab-bar" id="analytics-subtabs">
-      ${SUBTABS.map((t,i)=>`<button class="subtab-btn${i===0?' active':''}" data-tab="${t.id}">${t.label}</button>`).join('')}
-    </div>
+    ${window.chipTabs(SUBTABS.map(t=>({key:t.id,label:t.label})), 'overview', {cls:'an-subtabs'})}
     <div id="analytics-content"></div>
   `;
 
@@ -6389,13 +6399,10 @@ async function renderAnalytics() {
   };
 
   // Wire subtab clicks
-  document.getElementById('analytics-subtabs').querySelectorAll('.subtab-btn').forEach(btn=>{
-    btn.addEventListener('click',()=>{
-      document.querySelectorAll('#analytics-subtabs .subtab-btn').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      if(window.Chart) document.getElementById('analytics-content')?.querySelectorAll('canvas').forEach(cv=>{const ex=Chart.getChart(cv);if(ex)ex.destroy();});
-      TAB_RENDERERS[btn.dataset.tab]?.();
-    });
+  window.bindChipTabs(c.querySelector('.an-subtabs'), (key)=>{
+    // Destroy existing charts before swapping tabs so Chart.js doesn't leak canvases.
+    if(window.Chart) document.getElementById('analytics-content')?.querySelectorAll('canvas').forEach(cv=>{const ex=Chart.getChart(cv);if(ex)ex.destroy();});
+    TAB_RENDERERS[key]?.();
   });
 
   // Load initial tab

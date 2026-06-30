@@ -1018,7 +1018,7 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
   const isAdmin = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
   let employees=[];
   if (isAdmin) {
-    const empSnap = await db.collection('users').get();
+    const empSnap = await dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]}));
     employees = empSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
   }
   const deptOptions = Object.keys(window.DEPARTMENTS||{}).map(k=>`<option value="${k}"${t.department===k?' selected':''}>${k}</option>`).join('');
@@ -1111,7 +1111,7 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
 }
 
 async function openAddTaskModal(currentUser, currentRole, defaultDept) {
-  const empSnap  = await db.collection('users').get();
+  const empSnap  = await dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]}));
   const employees= empSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
   const deptOptions = Object.keys(window.DEPARTMENTS||{}).map(k=>`<option value="${k}"${k===defaultDept?' selected':''}>${k}</option>`).join('');
 
