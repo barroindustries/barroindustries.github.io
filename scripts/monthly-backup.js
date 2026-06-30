@@ -171,6 +171,58 @@ const EXPORTS = [
     dateField:  'createdAt',
     csvFields:  ['id','category','text','createdAt'],
   },
+
+  // ── Finance / books (full snapshot each run — these are the company's records) ──
+  { name:'ledger',                    filename:'ledger',                    dateField:null },
+  { name:'general_journal',           filename:'general_journal',           dateField:null },
+  { name:'cash_receipt_journal',      filename:'cash_receipt_journal',      dateField:null },
+  { name:'cash_disbursement_journal', filename:'cash_disbursement_journal', dateField:null },
+  { name:'finance_records',           filename:'finance_records',           dateField:null },
+  { name:'tax_records',               filename:'tax_records',               dateField:null },
+  { name:'expenses',                  filename:'expenses',                  dateField:null },
+  { name:'finance_delete_requests',   filename:'finance_delete_requests',   dateField:null },
+
+  // ── Payroll / HR ──
+  { name:'payroll',                   filename:'payroll',                   dateField:null },
+  { name:'payslips',                  filename:'payslips',                  dateField:null },
+  { name:'worker_profiles',           filename:'worker_profiles',           dateField:null },
+  { name:'salary_raises',             filename:'salary_raises',             dateField:null },
+  { name:'leave_balances',            filename:'leave_balances',            dateField:null },
+  { name:'leave_requests',            filename:'leave_requests',            dateField:null },
+
+  // ── Sales / quotes / clients ──
+  { name:'bk_quotes',                 filename:'bk_quotes',                 dateField:null },
+  { name:'bs_quotes',                 filename:'bs_quotes',                 dateField:null },
+  { name:'sales_clients',             filename:'sales_clients',             dateField:null },
+  { name:'work_plans',                filename:'work_plans',                dateField:null },
+  { name:'submissions',               filename:'submissions',               dateField:null },
+
+  // ── Projects (job lifecycle + design board) ──
+  { name:'job_projects',              filename:'job_projects',              dateField:null },
+  { name:'projects',                  filename:'projects',                  dateField:null },
+
+  // ── Purchasing ──
+  { name:'purchase_requisitions',     filename:'purchase_requisitions',     dateField:null },
+  { name:'purchase_orders',           filename:'purchase_orders',           dateField:null },
+
+  // ── Production / inventory ──
+  { name:'production_orders',         filename:'production_orders',         dateField:null },
+  { name:'inventory_items',           filename:'inventory_items',           dateField:null },
+  { name:'stock_movements',           filename:'stock_movements',           dateField:null },
+  { name:'job_costs',                 filename:'job_costs',                 dateField:null },
+
+  // ── Design / Government / Marketing ──
+  { name:'design_clients',            filename:'design_clients',            dateField:null },
+  { name:'design_drawings',           filename:'design_drawings',           dateField:null },
+  { name:'gov_philgeps',              filename:'gov_philgeps',              dateField:null },
+  { name:'gov_active_bids',           filename:'gov_active_bids',           dateField:null },
+  { name:'gov_archive',               filename:'gov_archive',               dateField:null },
+  { name:'marketing_plans',           filename:'marketing_plans',           dateField:null },
+  { name:'marketing_proposals',       filename:'marketing_proposals',       dateField:null },
+
+  // ── Partners ──
+  { name:'partner_deals',             filename:'partner_deals',             dateField:null },
+  { name:'bs_clients',                filename:'bs_clients',                dateField:null },
 ];
 
 // ── Fetch attendance subcollections: attendance/{uid}/records/{date} ────────
