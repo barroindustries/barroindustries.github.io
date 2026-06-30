@@ -1772,6 +1772,38 @@ body.sidebar-open .top-nav-strip { display: none !important; }
 }
 .subtab-btn:hover:not(.active) { background: rgba(255,255,255,0.06); color: var(--text); }
 
+/* ── Chip-style subtabs (declutter pattern) ──────────────
+   Wraps to multiple rows instead of horizontal-scrolling, with an
+   optional count pill. Use window.chipTabs()/bindChipTabs() (config.js). */
+.chip-tabs {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px;
+}
+.chip-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 13px; border-radius: 999px;
+  border: 1px solid var(--border); background: rgba(255,255,255,0.04);
+  font-size: 13px; font-weight: 500; color: var(--text-muted);
+  cursor: pointer; white-space: nowrap; min-height: 34px;
+  transition: background var(--t2), color var(--t2), border-color var(--t2), box-shadow var(--t2);
+}
+.chip-tab:hover:not(.active) { background: rgba(255,255,255,0.07); color: var(--text); }
+.chip-tab.active {
+  background: var(--grad-pk-bl); background-size: 200% 200%;
+  color: #fff; font-weight: 600; border-color: transparent;
+  box-shadow: 0 2px 12px rgba(155,168,255,0.35);
+  animation: gradRun 5s ease infinite; will-change: background-position;
+}
+.chip-count {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; line-height: 1;
+  background: rgba(255,255,255,0.12); color: var(--text-muted);
+}
+.chip-tab.active .chip-count { background: rgba(255,255,255,0.28); color: #fff; }
+.chip-count.on { background: var(--danger, #e5484d); color: #fff; }
+.chip-tab.active .chip-count.on { background: rgba(255,255,255,0.3); color: #fff; }
+@media (max-width:600px){ .chip-tab { min-height: 38px; } }
+
 /* ══════════════════════════════
    ITEM LISTS
 ══════════════════════════════ */

@@ -226,6 +226,38 @@ window.financeDelete = function(opts) {
   });
 };
 
+// Delete a quote record WITH APPROVAL (never a silent hard delete). Roles that
+// can file a finance delete request (president/manager/secretary/finance) route
+// through financeDelete (President deletes now; others file a request the
+// President approves in Approvals → Finance Requests). A non-admin quote CREATOR
+// can't write finance_delete_requests, so they flag their own quote
+// (deleteRequested) which the President actions in Approvals → All Requests.
+// collection is 'bk_quotes' or 'bs_quotes'.
+window.requestQuoteDelete = function(collection, docId, label, createdBy, onDone) {
+  onDone = onDone || (()=>{});
+  const role = window.currentRole || '';
+  const u = window.currentUser || (typeof auth !== 'undefined' && auth.currentUser) || {};
+  if (['president','manager','secretary','finance'].includes(role)) {
+    return window.financeDelete({ collection, docId, label, onDone });
+  }
+  if (createdBy && u.uid === createdBy) {
+    const reason = (prompt('Reason for deleting this quote? (sent to the President for approval)') || '').trim();
+    return db.collection(collection).doc(docId).update({
+      deleteRequested: true, deleteReason: reason,
+      deleteRequestedBy: u.uid, deleteRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }).then(async () => {
+      await safeNotify(() => Notifs.sendToOwner({
+        title: '🗑 Quote Delete Requested',
+        body: `${(window.userProfile && window.userProfile.displayName) || u.email || 'A user'} requests deleting ${label}.${reason?' Reason: '+reason:''}`,
+        icon: '🗑', type: 'quote_delete_request'
+      }));
+      Notifs.showToast('Delete request sent to the President.'); onDone('requested');
+    }).catch(e => Notifs.showToast('Request failed: '+(e.message||e),'error'));
+  }
+  Notifs.showToast('You can only request deletion of your own quotes.', 'error');
+  return Promise.resolve('denied');
+};
+
 // Generic edit modal for simple finance records. `fields` describe the form:
 //   { key, label, type:'text'|'number'|'date'|'select'|'textarea', options?, full? }
 // On save it .update()s the doc with the typed values + an edit audit stamp.
@@ -4366,18 +4398,9 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
   window._bkCurrentUser = currentUser;
   window._bkCurrentRole = currentRole;
   const c = deptContainer();
-  const isPriv = ['president','owner','manager','finance'].includes(currentRole);
-  const tools = [
-    { icon:'⚡', label:'Quick Estimate', sub:'Quick Estimate' },
-    { icon:'📝', label:'BK Quotes',      sub:'BK Quotes'      },
-    { icon:'📊', label:'Quotations',     sub:'Quotations'     },
-    { icon:'🤝', label:'Partner Quotes', sub:'Partner Quotes' },
-    { icon:'🗂', label:'Partner Files',  sub:'Partner Files'  },
-    { icon:'👤', label:'Clients',        sub:'Clients'        },
-    { icon:'📋', label:'Work Plans',     sub:'Work Plans'     },
-    { icon:'📄', label:'Proposals',      sub:'Proposals'      },
-    { icon:'📖', label:'SOP',            sub:'SOP'            },
-  ];
+  // Single compact chip bar replaces the old 9-card tool grid + long subtab bar
+  // (declutter pass). Chips wrap to rows instead of horizontal-scrolling.
+  const salesTabs = ['Quick Estimate','BK Quotes','Quotations','Partner Quotes','Partner Files','Clients','Work Plans','Proposals','SOP','Tasks'];
   c.innerHTML = `
     <div class="page-header">
       <div>
@@ -4385,49 +4408,11 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
         <p style="font-size:12px;color:var(--text-muted);margin:2px 0 0">One-stop kitchen design & build</p>
       </div>
     </div>
-    <!-- Work Tools Quick Launch -->
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">
-      ${tools.map(t=>`
-        <button class="sales-tool-btn" data-sub="${t.sub}" style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;background:var(--surface);border:1.5px solid var(--border);border-radius:14px;cursor:pointer;transition:all 0.18s;font-size:11px;font-weight:700;color:var(--text);letter-spacing:.02em">
-          <span style="font-size:22px">${t.icon}</span>
-          ${t.label}
-        </button>`).join('')}
-    </div>
-    <div class="subtab-bar">
-      ${['Quick Estimate','BK Quotes','Quotations','Partner Quotes','Partner Files','Clients','Work Plans','Proposals','SOP','Tasks'].map(s =>
-        `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
-      ).join('')}
-    </div>
+    ${window.chipTabs(salesTabs.map(s=>({key:s,label:s})), subtab)}
     <div id="sales-content"><div class="loading-placeholder">Loading…</div></div>
   `;
   loadSalesContent(currentUser, currentRole, subtab);
-
-  // Tool button clicks jump to that subtab
-  c.querySelectorAll('.sales-tool-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
-      c.querySelector(`.subtab-btn[data-sub="${btn.dataset.sub}"]`)?.classList.add('active');
-      loadSalesContent(currentUser, currentRole, btn.dataset.sub);
-      // Scroll to content
-      document.getElementById('sales-content')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-    btn.addEventListener('mouseenter', () => {
-      btn.style.borderColor = 'var(--primary-light)';
-      btn.style.background  = 'var(--surface2)';
-    });
-    btn.addEventListener('mouseleave', () => {
-      btn.style.borderColor = 'var(--border)';
-      btn.style.background  = 'var(--surface)';
-    });
-  });
-
-  c.querySelectorAll('.subtab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      loadSalesContent(currentUser, currentRole, btn.dataset.sub);
-    });
-  });
+  window.bindChipTabs(c, (key) => loadSalesContent(currentUser, currentRole, key));
 };
 
 async function loadSalesContent(currentUser, currentRole, sub) {
@@ -5431,6 +5416,7 @@ function printBKQuote(lines, q) {
 // ── BK Quotations Summary ────────────────────────
 async function renderBKQuotationsSummary(container, currentUser, currentRole) {
   const isPrivileged = ['president','manager','finance'].includes(currentRole);
+  const isAdmin = ['president','manager','secretary'].includes(currentRole);
   container.innerHTML = '<div class="loading-placeholder">Loading…</div>';
   const q = isPrivileged
     ? db.collection('bk_quotes').orderBy('createdAt','desc')
@@ -5444,6 +5430,35 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
   const sent       = quotes.filter(q=>q.status==='sent').length;
   const draft      = quotes.filter(q=>q.status==='draft').length;
 
+  // Single quote card — reused by both the flat list and the by-customer view.
+  const quoteCard = (q) => {
+    const wonish = ['filed','accepted','won','approved'].includes(q.status);
+    const canDel = isAdmin || currentRole==='finance' || q.createdBy===currentUser.uid;
+    const label  = `BK quote ${q.quoteNumber||q.id.slice(-6).toUpperCase()} (${q.clientName||'Unnamed'})`;
+    return `
+      <div class="item-card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:160px">
+          <div class="item-title" style="font-size:13px">BK-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${escHtml(q.clientName||'Unnamed')}</div>
+          <div class="item-meta" style="margin-top:4px">
+            <span>${escHtml(q.scope||'Custom')}</span>
+            <span>${escHtml(q.agentName||'—')}</span>
+            ${q.date?`<span>${q.date}</span>`:''}
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-weight:700">₱${fmt(q.total||0)}</div>
+          <span class="badge ${statusBadge(q.status)}" style="margin-top:4px">${q.salesOrderId?'won':q.status||'draft'}</span>
+          ${q.deleteRequested?`<span class="badge badge-red" style="font-size:10px;margin-left:4px">🗑 del req</span>`:''}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;justify-content:flex-end">
+          ${q.editableState?`<button class="btn-secondary btn-sm bk-reopen-btn" data-id="${q.id}">↻ Reopen</button>`:''}
+          ${q.editableState?`<button class="btn-secondary btn-sm bk-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">⎘ New Revision</button>`:''}
+          ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-total="${q.total||0}" data-co="BK" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?'✓ Ordered':'🧾 Sales Order'}</button>`:''}
+          ${(canDel && !q.deleteRequested)?`<button class="btn-secondary btn-sm bk-del-btn" data-id="${q.id}" data-label="${escHtml(label)}" data-by="${q.createdBy||''}">🗑 Delete</button>`:''}
+        </div>
+      </div>`;
+  };
+
   container.innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:20px">
       <div class="stat-card"><div class="stat-num">${quotes.length}</div><div class="stat-label">Total Quotes</div></div>
@@ -5453,43 +5468,54 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       <div class="stat-card"><div class="stat-num">${sent}</div><div class="stat-label">Sent</div></div>
       <div class="stat-card"><div class="stat-num">${draft}</div><div class="stat-label">Drafts</div></div>
     </div>
-    <h4 style="font-weight:700;margin-bottom:10px">All Quotations</h4>
-    <div class="item-list">
-      ${!quotes.length
-        ? `<div class="empty-state"><div class="empty-icon">📋</div><h4>No quotations yet</h4></div>`
-        : quotes.map(q=>{
-          const wonish = ['filed','accepted','won','approved'].includes(q.status);
-          return `
-        <div class="item-card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-          <div style="flex:1;min-width:160px">
-            <div class="item-title" style="font-size:13px">BK-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${escHtml(q.clientName||'Unnamed')}</div>
-            <div class="item-meta" style="margin-top:4px">
-              <span>${escHtml(q.scope||'Custom')}</span>
-              <span>${escHtml(q.agentName||'—')}</span>
-              ${q.date?`<span>${q.date}</span>`:''}
-            </div>
-          </div>
-          <div style="text-align:right">
-            <div style="font-weight:700">₱${fmt(q.total||0)}</div>
-            <span class="badge ${statusBadge(q.status)}" style="margin-top:4px">${q.salesOrderId?'won':q.status||'draft'}</span>
-          </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;justify-content:flex-end">
-            ${q.editableState?`<button class="btn-secondary btn-sm bk-reopen-btn" data-id="${q.id}">↻ Reopen</button>`:''}
-            ${q.editableState?`<button class="btn-secondary btn-sm bk-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">⎘ New Revision</button>`:''}
-            ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-total="${q.total||0}" data-co="BK" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?'✓ Ordered':'🧾 Sales Order'}</button>`:''}
-          </div>
-        </div>`;}).join('')}
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <h4 style="font-weight:700;margin:0">All Quotations</h4>
+      ${window.chipTabs([{key:'list',label:'List'},{key:'customer',label:'By Customer'}],'list',{cls:'bkq-view'})}
     </div>
+    <div id="bkq-body"></div>
   `;
-  container.querySelectorAll('.bk-so-btn').forEach(b=>b.addEventListener('click', e=>openSalesOrderModal(e.currentTarget.dataset, currentUser, currentRole, container)));
-  container.querySelectorAll('.bk-reopen-btn').forEach(b=>b.addEventListener('click', async e=>{
-    try { const s=await db.collection('bk_quotes').doc(e.currentTarget.dataset.id).get(); const qq=s.data()||{};
-      if(!qq.editableState){ Notifs.showToast('No editable snapshot','error'); return; }
-      window._qbReopenState=qq.editableState; navigateTo('bk-quote-builder');
-    } catch(ex){ Notifs.showToast('Reopen failed','error'); }
-  }));
-  container.querySelectorAll('.bk-rev-btn').forEach(b=>b.addEventListener('click', e=>
-    window.newRevisionFromDoc('bk_quotes', e.currentTarget.dataset.id, 'bk-quote-builder')));
+
+  const bindCardActions = () => {
+    container.querySelectorAll('.bk-so-btn').forEach(b=>b.addEventListener('click', e=>openSalesOrderModal(e.currentTarget.dataset, currentUser, currentRole, container)));
+    container.querySelectorAll('.bk-reopen-btn').forEach(b=>b.addEventListener('click', async e=>{
+      try { const s=await db.collection('bk_quotes').doc(e.currentTarget.dataset.id).get(); const qq=s.data()||{};
+        if(!qq.editableState){ Notifs.showToast('No editable snapshot','error'); return; }
+        window._qbReopenState=qq.editableState; navigateTo('bk-quote-builder');
+      } catch(ex){ Notifs.showToast('Reopen failed','error'); }
+    }));
+    container.querySelectorAll('.bk-rev-btn').forEach(b=>b.addEventListener('click', e=>
+      window.newRevisionFromDoc('bk_quotes', e.currentTarget.dataset.id, 'bk-quote-builder')));
+    container.querySelectorAll('.bk-del-btn').forEach(b=>b.addEventListener('click', e=>{
+      const d=e.currentTarget.dataset;
+      window.requestQuoteDelete('bk_quotes', d.id, d.label, d.by, ()=>renderBKQuotationsSummary(container, currentUser, currentRole));
+    }));
+  };
+
+  const renderBody = (view) => {
+    const body = container.querySelector('#bkq-body');
+    if (!body) return;
+    if (!quotes.length) { body.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><h4>No quotations yet</h4></div>`; return; }
+    if (view === 'customer') {
+      const groups = {};
+      quotes.forEach(q=>{ const k=((q.clientName||'').trim())||'Unnamed'; (groups[k]=groups[k]||[]).push(q); });
+      body.innerHTML = Object.keys(groups).sort((a,b)=>a.localeCompare(b)).map(name=>{
+        const gq=groups[name]; const gt=gq.reduce((s,x)=>s+(x.total||0),0);
+        return `<details open style="background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:8px 12px;margin-bottom:10px">
+          <summary style="cursor:pointer;font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px">
+            <span style="flex:1">${escHtml(name)} <span class="badge badge-gray" style="font-size:10px">${gq.length}</span></span>
+            <span style="font-weight:700;color:var(--text-muted)">₱${fmt(gt)}</span>
+          </summary>
+          <div class="item-list" style="margin-top:8px">${gq.map(quoteCard).join('')}</div>
+        </details>`;
+      }).join('');
+    } else {
+      body.innerHTML = `<div class="item-list">${quotes.map(quoteCard).join('')}</div>`;
+    }
+    bindCardActions();
+  };
+
+  window.bindChipTabs(container.querySelector('.bkq-view'), (key)=>renderBody(key));
+  renderBody('list');
 }
 
 // ── Partner Quotes (read-only window into Brilliant Steel quotes) ──
@@ -8742,10 +8768,44 @@ window.renderApprovals = async function(currentUser) {
   // routine action buttons for the secretary; canDelete hides delete-approval
   // buttons for everyone but the President.
   const _role     = window.currentRole || '';
-  const canAct    = _role === 'president' || _role === 'manager';
-  const canDelete = (typeof isRealPresident === 'function') ? isRealPresident() : (_role === 'president');
+  // ── Per-approval-type capability map (two-tier oversight) ───────────────
+  // The Corporate Secretary may act on MINOR, non-money items (sign-ups,
+  // attendance, work submissions, review-tasks, leave). MAJOR / money-moving
+  // items (cash advances, quote approvals, payroll & finance deletes, quote /
+  // client deletions) stay President-only (manager keeps the routine set).
+  // For major items the secretary sees a "Request President approval" action
+  // instead of approve/deny. Mirrors firestore.rules (delete → president).
+  const APPROVAL_CAPS = {
+    'signup':         ['president','manager','secretary'],
+    'attendance':     ['president','manager','secretary'],
+    'submission':     ['president','manager','secretary'],
+    'review-task':    ['president','manager','secretary'],
+    'leave':          ['president','manager','secretary'],
+    'ca':             ['president','manager'],
+    'quote-approval': ['president','manager'],
+    'finance-req':    ['president'],
+    'finance-del':    ['president'],
+    'delete-quote':   ['president'],
+    'delete-client':  ['president'],
+  };
+  const canActOn   = (type) => (APPROVAL_CAPS[type] || ['president','manager']).includes(_role);
+  const canEscalate = (type) => _role === 'secretary' && !canActOn(type);
+  const canAct     = _role === 'president' || _role === 'manager';
+  const canDelete  = (typeof isRealPresident === 'function') ? isRealPresident() : (_role === 'president');
+  const _showGrading = (_role === 'president' || _role === 'manager');
+  // Secretary escalation: ping the President to review a major item.
+  const requestPresidentApproval = async (label) => {
+    try {
+      await Notifs.sendToOwner({
+        title: '🙋 Approval Requested',
+        body: `${(window.userProfile && window.userProfile.displayName) || 'The Corporate Secretary'} asks you to review: ${label}.`,
+        icon: '🙋', type: 'approval_result'
+      });
+      Notifs.showToast('Sent to the President for approval.');
+    } catch (e) { Notifs.showToast('Could not send request', 'error'); }
+  };
   // Check pending counts for badges
-  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap, finReqSnap, finDelSnap, qApprSnap, delQSnap, delCSnap, leaveSnap] = await Promise.all([
+  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap, finReqSnap, finDelSnap, qApprSnap, delQSnap, delBKQSnap, delCSnap, leaveSnap] = await Promise.all([
     db.collection('signup_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('attendance_extensions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('cash_advances').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
@@ -8755,6 +8815,7 @@ window.renderApprovals = async function(currentUser) {
     db.collection('finance_delete_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('approval_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
+    db.collection('bk_quotes').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
     db.collection('bs_clients').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
     db.collection('leave_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]}))
   ]);
@@ -8765,39 +8826,46 @@ window.renderApprovals = async function(currentUser) {
   const pendingReview  = reviewTasksCountSnap.size || 0;
   const pendingFinReqs = (finReqSnap.size || 0) + (finDelSnap.size || 0);
   const pendingQApprovals = qApprSnap.size || 0;
-  const pendingDeletes    = (delQSnap.size || 0) + (delCSnap.size || 0);
+  const pendingDeletes    = (delQSnap.size || 0) + (delBKQSnap.size || 0) + (delCSnap.size || 0);
   const pendingLeave      = leaveSnap.size || 0;
   const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs + pendingReview + pendingFinReqs + pendingQApprovals + pendingDeletes + pendingLeave;
 
+  // ── Grading queue count (President's grading subtab) ──────────────────
+  // Completed/approved tasks awaiting a presidentScore + employees whose
+  // monthly self-assessment awaits a president grade. Only fetched for the
+  // roles that can see the Grading chip, to keep the page load lean.
+  let pendingGrading = 0;
+  if (_showGrading) {
+    try {
+      const [gtSnap, geSnap] = await Promise.all([
+        db.collection('tasks').where('status','in',['approved','completed','done']).get().catch(()=>({docs:[]})),
+        db.collection('kpi_evals').get().catch(()=>({docs:[]}))
+      ]);
+      const ungradedTasks = gtSnap.docs.filter(d=>typeof d.data().presidentScore !== 'number').length;
+      const ungradedKpi   = geSnap.docs.filter(d=>{const x=d.data();return x.selfGrade!=null && x.presidentGrade==null;}).length;
+      pendingGrading = ungradedTasks + ungradedKpi;
+    } catch(_){}
+  }
+
+  const approvalChips = [
+    { key:'all',              label:'All Requests',     icon:'📋', count: totalPending },
+    _showGrading ? { key:'grading', label:'Grading',    icon:'⭐', count: pendingGrading } : null,
+    { key:'review-tasks',     label:'Tasks for Review',            count: pendingReview },
+    { key:'signups',          label:'Sign-ups',                    count: pendingSignups },
+    { key:'attendance',       label:'Attendance',                  count: pendingExt },
+    { key:'leave',            label:'Leave',            icon:'🌴', count: pendingLeave },
+    { key:'ca',               label:'Cash Advances',               count: pendingCA },
+    { key:'roa',              label:'Quote / ROA',                 count: pendingQApprovals },
+    { key:'quote-files',      label:'Quote Files',      icon:'📁' },
+    { key:'finance-requests', label:'Finance Requests', icon:'💼', count: pendingFinReqs },
+  ].filter(Boolean);
+
   c.innerHTML = `
     <div class="page-header"><h2>✅ Approvals</h2>${totalPending>0?`<span class="badge badge-red" style="font-size:13px">${totalPending} pending</span>`:''}</div>
-    ${!canAct?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>👁 <strong>Oversight view.</strong> You can review every request here, but only the President approves.</span></div>`
+    ${_role==='secretary'?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>👁 <strong>Secretary oversight.</strong> You can approve everyday items (sign-ups, attendance, leave, submissions, task reviews); money-moving and deletion requests go to the President.</span></div>`
+      :!canAct?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>👁 <strong>Oversight view.</strong> You can review every request here, but only the President approves.</span></div>`
       :!canDelete?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>ℹ️ Deletion of key records requires <strong>President</strong> approval.</span></div>`:''}
-    <div class="subtab-bar" style="flex-wrap:wrap">
-      <button class="subtab-btn active" data-sub="all">
-        📋 All Requests${totalPending>0?` <span class="nav-badge">${totalPending}</span>`:''}
-      </button>
-      <button class="subtab-btn" data-sub="review-tasks">
-        Tasks for Review${pendingReview>0?` <span class="nav-badge">${pendingReview}</span>`:''}
-      </button>
-      <button class="subtab-btn" data-sub="signups">
-        Sign-ups${pendingSignups>0?` <span class="nav-badge">${pendingSignups}</span>`:''}
-      </button>
-      <button class="subtab-btn" data-sub="attendance">
-        Attendance${pendingExt>0?` <span class="nav-badge">${pendingExt}</span>`:''}
-      </button>
-      <button class="subtab-btn" data-sub="roa">Quote / ROA</button>
-      <button class="subtab-btn" data-sub="quote-files">📁 Quote Files</button>
-      <button class="subtab-btn" data-sub="ca">
-        Cash Advances${pendingCA>0?` <span class="nav-badge">${pendingCA}</span>`:''}
-      </button>
-      <button class="subtab-btn" data-sub="leave">
-        🌴 Leave${pendingLeave>0?` <span class="nav-badge">${pendingLeave}</span>`:''}
-      </button>
-      <button class="subtab-btn" data-sub="finance-requests">
-        💼 Finance Requests${pendingFinReqs>0?` <span class="nav-badge">${pendingFinReqs}</span>`:''}
-      </button>
-    </div>
+    ${window.chipTabs(approvalChips, 'all')}
     <div id="approvals-content"><div class="loading-placeholder">Loading…</div></div>
   `;
 
@@ -8817,7 +8885,7 @@ window.renderApprovals = async function(currentUser) {
       // index per-collection. If that index isn't provisioned, the query is rejected and
       // silently swallowed by .catch(), making items vanish from "All Requests". We sort
       // client-side instead so a missing index can never hide pending items.
-      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delCSnap2, leaveSnap2] = await Promise.all([
+      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2] = await Promise.all([
         db.collection('signup_requests').where('status','==','pending').get().catch(e=>{console.error('signup_requests query failed',e);return {docs:[]};}),
         db.collection('attendance_extensions').where('status','==','pending').get().catch(e=>{console.error('attendance_extensions query failed',e);return {docs:[]};}),
         db.collection('cash_advances').where('status','==','pending').get().catch(e=>{console.error('cash_advances query failed',e);return {docs:[]};}),
@@ -8827,6 +8895,7 @@ window.renderApprovals = async function(currentUser) {
         db.collection('finance_delete_requests').where('status','==','pending').get().catch(e=>{console.error('finance_delete_requests query failed',e);return {docs:[]};}),
         db.collection('approval_requests').where('status','==','pending').get().catch(e=>{console.error('approval_requests query failed',e);return {docs:[]};}),
         db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('bs_quotes delete query failed',e);return {docs:[]};}),
+        db.collection('bk_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('bk_quotes delete query failed',e);return {docs:[]};}),
         db.collection('bs_clients').where('deleteRequested','==',true).get().catch(e=>{console.error('bs_clients delete query failed',e);return {docs:[]};}),
         db.collection('leave_requests').where('status','==','pending').get().catch(e=>{console.error('leave_requests query failed',e);return {docs:[]};})
       ]);
@@ -8841,8 +8910,9 @@ window.renderApprovals = async function(currentUser) {
         ...finDelSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'finance-del',icon:'🗑',label:'Finance Delete',name:`Delete: ${x.label||'record'}`,detail:`by ${x.requestedByName||'?'}${x.reason?' — '+x.reason:''}`,ts:x.createdAt,recLabel:x.label};}),
         // Partner quote approvals (partner submitted a quote for the president to review/edit/return)
         ...qApprSnap2.docs.map(d=>({id:d.id,...d.data(),type:'quote-approval',icon:'📤',label:'Quote Approval',name:`${d.data().quoteNumber||'Quote'} — ${d.data().clientName||''}`,detail:`${d.data().agentName||'Partner'} · ₱${fmt(d.data().total||0)}`,ts:d.data().createdAt})),
-        // Partner delete requests (quote + client folder) — president approves or denies
-        ...delQSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-quote',icon:'🗑',label:'Quote Delete Request',name:`Delete quote ${d.data().quoteNumber||d.id.slice(-6)}`,detail:`${d.data().clientName||''}${d.data().deleteReason?' — '+d.data().deleteReason:''}`,ts:d.data().deleteRequestedAt})),
+        // Quote delete requests (partner bs_quotes + internal bk_quotes + client folder) — president approves or denies
+        ...delQSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-quote',coll:'bs_quotes',icon:'🗑',label:'Quote Delete Request',name:`Delete quote ${d.data().quoteNumber||d.id.slice(-6)}`,detail:`${d.data().clientName||''}${d.data().deleteReason?' — '+d.data().deleteReason:''}`,ts:d.data().deleteRequestedAt})),
+        ...delBKQSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-quote',coll:'bk_quotes',icon:'🗑',label:'BK Quote Delete Request',name:`Delete BK quote ${d.data().quoteNumber||d.id.slice(-6)}`,detail:`${d.data().clientName||''}${d.data().deleteReason?' — '+d.data().deleteReason:''}`,ts:d.data().deleteRequestedAt})),
         ...delCSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-client',icon:'🗑',label:'Client Delete Request',name:`Delete client "${d.data().name||''}"`,detail:d.data().deleteReason||'',ts:d.data().deleteRequestedAt})),
         // Leave requests — surfaced here so every request type funnels through this page.
         ...leaveSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'leave',icon:'🌴',label:'Leave Request',name:x.userName||'Employee',detail:`${x.days||0}d ${x.type||'leave'} · ${x.startDate||''}→${x.endDate||''}${x.reason?' — '+x.reason:''}`,ts:x.createdAt};})
@@ -8867,7 +8937,7 @@ window.renderApprovals = async function(currentUser) {
               ${item.ts?`<span style="font-size:11px;color:var(--text-muted)">${new Date(item.ts.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>`:''}
             </div>
             <div style="display:flex;gap:8px;margin-top:10px" class="req-actions">
-              ${ ( ['finance-req','finance-del','delete-quote','delete-client'].includes(item.type) ? canDelete : canAct ) ? (item.type==='signup'?`
+              ${ canActOn(item.type) ? (item.type==='signup'?`
                 <button class="btn-success btn-sm sg-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}" data-email="${escHtml(item.email||'')}" data-phone="${escHtml(item.phone||'')}">✓ Approve</button>
                 <button class="btn-danger btn-sm sg-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✗ Reject</button>
               `:item.type==='attendance'?`
@@ -8891,8 +8961,8 @@ window.renderApprovals = async function(currentUser) {
                 <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">✓ Approve</button>
                 <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return to Partner</button>
               `:item.type==='delete-quote'?`
-                <button class="btn-danger btn-sm dq-approve-btn" data-id="${item.id}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">✓ Approve Delete</button>
-                <button class="btn-secondary btn-sm dq-deny-btn" data-id="${item.id}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">✗ Deny</button>
+                <button class="btn-danger btn-sm dq-approve-btn" data-id="${item.id}" data-coll="${item.coll||'bs_quotes'}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">✓ Approve Delete</button>
+                <button class="btn-secondary btn-sm dq-deny-btn" data-id="${item.id}" data-coll="${item.coll||'bs_quotes'}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">✗ Deny</button>
               `:item.type==='delete-client'?`
                 <button class="btn-danger btn-sm dc-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${item.deleteRequestedBy||''}">✓ Approve Delete</button>
                 <button class="btn-secondary btn-sm dc-deny-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${item.deleteRequestedBy||''}">✗ Deny</button>
@@ -8902,7 +8972,9 @@ window.renderApprovals = async function(currentUser) {
               `:`
                 <button class="btn-success btn-sm sub-approve-btn" data-id="${item.id}">✓ Approve</button>
                 <button class="btn-danger btn-sm sub-reject-btn" data-id="${item.id}">✗ Reject</button>
-              `) : `<span class="badge badge-gray" style="font-size:11px">🔒 ${['finance-req','finance-del','delete-quote','delete-client'].includes(item.type)?'President approval required':'President / Manager approves'}</span>`}
+              `) : ( canEscalate(item.type)
+                ? `<button class="btn-secondary btn-sm esc-btn" data-label="${escHtml(item.label+' — '+item.name)}">🙋 Request President approval</button>`
+                : `<span class="badge badge-gray" style="font-size:11px">🔒 ${['finance-req','finance-del','delete-quote','delete-client'].includes(item.type)?'President approval required':'President / Manager approves'}</span>`)}
             </div>
           </div>`).join('')}
         </div>`;
@@ -9039,19 +9111,22 @@ window.renderApprovals = async function(currentUser) {
         loadApprovalsSub('all');
       }));
 
-      // ── Partner delete requests — approve (delete) or deny (clear flag) ──
+      // ── Quote delete requests — approve (delete) or deny (clear flag) ──
+      // Collection-aware: bs_quotes (partner) and bk_quotes (internal Sales).
       wrap.querySelectorAll('.dq-approve-btn').forEach(btn => onClickSafe(btn, async () => {
         if (!confirm(`Approve deletion of quote ${btn.dataset.qno}? This permanently removes it.`)) return;
+        const coll = btn.dataset.coll || 'bs_quotes';
         try {
-          await db.collection('bs_quotes').doc(btn.dataset.id).delete();
-          window.logAudit && window.logAudit('delete','quote',btn.dataset.id,{ quoteNo:btn.dataset.qno, viaApproval:true });
+          await db.collection(coll).doc(btn.dataset.id).delete();
+          window.logAudit && window.logAudit('delete','quote',btn.dataset.id,{ quoteNo:btn.dataset.qno, coll, viaApproval:true });
           if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'🗑 Quote Deletion Approved', body:`Your request to delete quote ${btn.dataset.qno} was approved.`, icon:'✅', type:'delete_approved' }));
           Notifs.showToast('Quote deleted.'); loadApprovalsSub('all');
         } catch(ex){ Notifs.showToast('Delete failed: '+(ex.message||ex.code),'error'); }
       }));
       wrap.querySelectorAll('.dq-deny-btn').forEach(btn => onClickSafe(btn, async () => {
+        const coll = btn.dataset.coll || 'bs_quotes';
         try {
-          await db.collection('bs_quotes').doc(btn.dataset.id).update({ deleteRequested:firebase.firestore.FieldValue.delete(), deleteReason:firebase.firestore.FieldValue.delete() });
+          await db.collection(coll).doc(btn.dataset.id).update({ deleteRequested:firebase.firestore.FieldValue.delete(), deleteReason:firebase.firestore.FieldValue.delete() });
           if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'Quote Deletion Denied', body:`Your request to delete quote ${btn.dataset.qno} was denied.`, icon:'❌', type:'delete_denied' }));
           Notifs.showToast('Delete request denied.'); loadApprovalsSub('all');
         } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
@@ -9085,6 +9160,104 @@ window.renderApprovals = async function(currentUser) {
         await window.rejectLeaveRequest(btn.dataset.id, reason);
         Notifs.showToast(`Leave rejected for ${btn.dataset.name}`);
         loadApprovalsSub('all');
+      }));
+
+      // Secretary escalation — ping the President to review a major item.
+      wrap.querySelectorAll('.esc-btn').forEach(btn => onClickSafe(btn, async () => {
+        btn.disabled = true;
+        await requestPresidentApproval(btn.dataset.label || 'a request');
+      }));
+      return;
+    }
+
+    if (sub === 'grading') {
+      // ── President's grading queue ──────────────────────────────────────
+      // Two things await the President's grade, consolidated here:
+      //  1. Completed/approved tasks with no presidentScore (quality 1–10).
+      //  2. Employees whose monthly self-assessment (selfGrade) awaits the
+      //     president's KPI grade (presidentGrade).
+      if (!_showGrading) { wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><h4>Grading is President / Manager only</h4></div>'; return; }
+      const [taskSnap, evalSnap, usersSnap] = await Promise.all([
+        db.collection('tasks').where('status','in',['approved','completed','done']).get().catch(()=>({docs:[]})),
+        db.collection('kpi_evals').get().catch(()=>({docs:[]})),
+        dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]}))
+      ]);
+      const userName = {};
+      (usersSnap.docs||[]).forEach(d=>{ const u=d.data(); userName[d.id] = u.displayName || u.email || 'Employee'; });
+      const ungradedTasks = (taskSnap.docs||[])
+        .map(d=>({id:d.id,...d.data()}))
+        .filter(t=>typeof t.presidentScore !== 'number')
+        .sort((a,b)=>((b.approvedAt||b.lastModifiedAt)?.seconds||0)-((a.approvedAt||a.lastModifiedAt)?.seconds||0));
+      const ungradedKpi = (evalSnap.docs||[])
+        .map(d=>({uid:d.id,...d.data()}))
+        .filter(e=>e.selfGrade!=null && e.presidentGrade==null);
+
+      if (!ungradedTasks.length && !ungradedKpi.length) {
+        wrap.innerHTML = '<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">⭐</div><h4>Nothing to grade</h4><p>All completed tasks are scored and every self-assessment is graded.</p></div>';
+        return;
+      }
+      const canGrade = (_role === 'president'); // KPI grade write is President's call
+      wrap.innerHTML = `
+        ${ungradedKpi.length?`
+        <h4 style="margin:4px 0 8px;font-size:14px">📊 Self-assessments awaiting your grade (${ungradedKpi.length})</h4>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
+          ${ungradedKpi.map(e=>`
+            <div class="item-card" style="cursor:default">
+              <div class="item-top">
+                <div class="item-title">📊 ${escHtml(userName[e.uid]||'Employee')}</div>
+                <span class="badge badge-warn">Self: ${escHtml(e.selfGrade)}/10</span>
+              </div>
+              <div class="item-meta" style="margin-top:4px">
+                ${e.selfNotes?`<span style="font-size:12px;color:var(--text-muted)">${escHtml(e.selfNotes)}</span>`:'<span style="font-size:12px;color:var(--text-muted)">No notes</span>'}
+              </div>
+              ${canGrade?`<div style="margin-top:10px"><button class="btn-primary btn-sm grade-kpi-btn" data-uid="${e.uid}" data-name="${escHtml(userName[e.uid]||'Employee')}">⭐ Grade</button></div>`:''}
+            </div>`).join('')}
+        </div>`:''}
+        ${ungradedTasks.length?`
+        <h4 style="margin:4px 0 8px;font-size:14px">📋 Completed tasks awaiting a score (${ungradedTasks.length})</h4>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${ungradedTasks.map(t=>{
+            const names = (t.assignedToNames||[]).join(', ') || 'Unassigned';
+            return `<div class="item-card" style="cursor:default">
+              <div class="item-top">
+                <div class="item-title">📋 ${escHtml(t.title||'Untitled Task')}</div>
+                <span class="badge badge-gray">Unscored</span>
+              </div>
+              <div class="item-meta" style="margin-top:4px;gap:6px">
+                ${t.department?`<span class="badge badge-blue" style="font-size:10px">${escHtml(t.department)}</span>`:''}
+                <span style="font-size:12px;color:var(--text-muted)">by ${escHtml(names)}</span>
+              </div>
+              <div style="margin-top:10px"><button class="btn-primary btn-sm grade-task-btn" data-id="${t.id}">⭐ Open &amp; Score</button></div>
+            </div>`;
+          }).join('')}
+        </div>`:''}`;
+
+      wrap.querySelectorAll('.grade-task-btn').forEach(btn=>btn.addEventListener('click',()=>openTaskDetail(btn.dataset.id, currentUser, _role)));
+      wrap.querySelectorAll('.grade-kpi-btn').forEach(btn=>btn.addEventListener('click',()=>{
+        const { uid, name } = btn.dataset;
+        openModal(`⭐ Grade: ${name}`, `
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Assign a performance grade for ${escHtml(name)} (1 = poor, 10 = outstanding). Development areas are shown to the employee.</p>
+          <div class="form-group"><label>President Grade (1–10)</label>
+            <input id="ap-grade-input" type="number" inputmode="numeric" min="1" max="10" step="1" placeholder="e.g. 8"/></div>
+          <div class="form-group"><label>General Notes (internal only)</label>
+            <textarea id="ap-grade-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Internal remarks…"></textarea></div>
+          <div class="form-group"><label>📝 Development Areas <span style="font-size:11px;color:var(--primary-light)">(shown to employee)</span></label>
+            <textarea id="ap-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="What should this employee focus on improving?"></textarea></div>
+        `, `<button class="btn-primary" id="ap-save-grade-btn">Save Grade</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+        document.getElementById('ap-save-grade-btn')?.addEventListener('click', async ()=>{
+          const grade   = parseInt(document.getElementById('ap-grade-input').value);
+          const notes   = document.getElementById('ap-grade-notes').value.trim();
+          const improve = document.getElementById('ap-improve-input').value.trim();
+          if (!grade || grade < 1 || grade > 10) { Notifs.showToast('Enter 1–10.','error'); return; }
+          await db.collection('kpi_evals').doc(uid).set({
+            presidentGrade: grade, presidentNotes: notes, presidentImprovements: improve,
+            presidentId: currentUser.uid, presidentUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('kpi-evals');
+          await safeNotify(()=>Notifs.send(uid, { title:'📊 KPI Grade Updated', body: improve?`The president graded your performance: ${grade}/10. See your Personal Finance page for development areas.`:`The president graded your performance: ${grade}/10.`, icon:'📊', type:'kpi_grade' }));
+          closeModal(); Notifs.showToast(`Grade ${grade}/10 saved for ${name}.`);
+          loadApprovalsSub('grading');
+        });
       }));
       return;
     }
@@ -9245,7 +9418,7 @@ window.renderApprovals = async function(currentUser) {
             </div>
             <div style="display:flex;gap:8px;margin-top:10px">
               <button class="btn-primary btn-sm rt-view-btn" data-id="${t.id}">👁 View</button>
-              ${canAct?`<button class="btn-success btn-sm rt-approve-btn" data-id="${t.id}" data-name="${escHtml(t.title||'Task')}">✓ Approve</button>
+              ${canActOn('review-task')?`<button class="btn-success btn-sm rt-approve-btn" data-id="${t.id}" data-name="${escHtml(t.title||'Task')}">✓ Approve</button>
               <button class="btn-danger btn-sm rt-reject-btn" data-id="${t.id}" data-name="${escHtml(t.title||'Task')}">✗ Send Back</button>`:''}
             </div>
           </div>`;
@@ -9293,7 +9466,7 @@ window.renderApprovals = async function(currentUser) {
               ${item.createdAt?`<span>📅 ${new Date(item.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
             </div>
             ${item.generatedPassword?`<div style="font-size:12px;margin-top:8px;padding:8px 10px;background:rgba(48,209,88,.1);border:1px solid rgba(48,209,88,.3);border-radius:8px;font-family:monospace">🔑 Generated Password: <strong>${escHtml(item.generatedPassword)}</strong><br><span style="font-size:10px;color:var(--text-muted)">Create Firebase Auth user with this password</span></div>`:''}
-            ${(item.status==='pending'&&canAct)?`
+            ${(item.status==='pending'&&canActOn('signup'))?`
             <div style="display:flex;gap:8px;margin-top:12px">
               <button class="btn-success signup-approve" data-id="${item.id}" data-name="${escHtml(item.fullName)}" data-email="${escHtml(item.email)}" data-phone="${escHtml(item.phone||'')}">✓ Approve & Generate Password</button>
               <button class="btn-danger signup-reject" data-id="${item.id}" data-name="${escHtml(item.fullName)}">✗ Reject</button>
@@ -9382,7 +9555,7 @@ window.renderApprovals = async function(currentUser) {
               ${item.requestedAt?`<span>Requested: ${new Date(item.requestedAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})}</span>`:''}
               ${item.status==='approved'&&item.expiresAt?`<span>Expires: ${new Date(item.expiresAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})}</span>`:''}
             </div>
-            ${(item.status==='pending'&&canAct)?`
+            ${(item.status==='pending'&&canActOn('attendance'))?`
             <div style="display:flex;gap:8px;margin-top:12px">
               <button class="btn-success ext-approve" data-id="${item.id}" data-uid="${item.uid}" data-name="${escHtml(item.userName||'')}">✓ Approve (6-hr)</button>
               <button class="btn-danger ext-deny" data-id="${item.id}" data-uid="${item.uid}" data-name="${escHtml(item.userName||'')}">✗ Deny</button>
@@ -9449,7 +9622,7 @@ window.renderApprovals = async function(currentUser) {
               <span>Repay: ${item.repayDate||'—'}</span>
             </div>
             ${item.reason?`<div style="font-size:12px;color:var(--text-muted);margin-top:6px;padding:8px 10px;background:var(--surface2);border-radius:6px">${escHtml(item.reason)}</div>`:''}
-            ${(item.status==='pending'&&canAct)?`
+            ${(item.status==='pending'&&canActOn('ca'))?`
             <div style="display:flex;gap:8px;margin-top:12px">
               <button class="btn-success ca-approve" data-id="${item.id}" data-uid="${item.userId}" data-name="${escHtml(item.userName)}" data-amount="${item.amount}">Approve</button>
               <button class="btn-danger ca-reject" data-id="${item.id}" data-uid="${item.userId}" data-name="${escHtml(item.userName)}">Reject</button>
@@ -9496,7 +9669,7 @@ window.renderApprovals = async function(currentUser) {
             <span>₱${fmt(item.total)}</span>
             ${item.createdAt?`<span>${new Date(item.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
           </div>
-          ${(item.status==='pending'&&canAct)?`
+          ${(item.status==='pending'&&canActOn('quote-approval'))?`
           <div style="display:flex;gap:8px;margin-top:12px">
             <button class="btn-success approve-approval" data-id="${item.id}" data-agent="${item.agentId}" data-client="${escHtml(item.clientName)}">Approve</button>
             <button class="btn-danger reject-approval"  data-id="${item.id}" data-agent="${item.agentId}" data-client="${escHtml(item.clientName)}">Reject</button>
@@ -9522,13 +9695,7 @@ window.renderApprovals = async function(currentUser) {
     }
   };
 
-  c.querySelectorAll('.subtab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      c.querySelectorAll('.subtab-btn').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      loadApprovalsSub(btn.dataset.sub);
-    });
-  });
+  window.bindChipTabs(c, (key) => loadApprovalsSub(key));
 
   loadApprovalsSub('all');
 };

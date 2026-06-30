@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '11.0.47';
+window.APP_VERSION = '11.0.48';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -280,4 +280,48 @@ window.exportCSV = function(filename, rows, columns) {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   try { Notifs.showToast('Exported ' + a.download); } catch (_) {}
+};
+
+// ── Chip-style subtabs (shared declutter helper) ──────────
+// Renders a wrapping chip bar with optional count pills, and wires the clicks.
+// Replaces the old horizontally-scrolling .subtab-bar where we want fewer,
+// clearer filters. Visual: css .chip-tabs / .chip-tab / .chip-count.
+//
+//   container.innerHTML = window.chipTabs([
+//     { key:'all',   label:'All Requests', count: 5, icon:'📋' },
+//     { key:'leave', label:'Leave',        count: 2 },
+//   ], 'all');
+//   window.bindChipTabs(container, (key) => loadSub(key));
+//
+// items: [{ key, label, count?, icon?, hidden? }]  — count omitted = no pill;
+//   count>0 renders a red "on" pill, count===0 a muted pill, count==null none.
+// activeKey: the key to mark active. opts.cls: extra class on the wrapper.
+window.chipTabs = function(items, activeKey, opts) {
+  opts = opts || {};
+  var esc = window.escHtml || function(s){ return String(s == null ? '' : s); };
+  var html = (items || []).filter(function(it){ return it && !it.hidden; }).map(function(it) {
+    var active = it.key === activeKey;
+    var pill = '';
+    if (it.count != null && it.count !== '') {
+      var on = (Number(it.count) > 0) ? ' on' : '';
+      pill = '<span class="chip-count' + on + '">' + esc(it.count) + '</span>';
+    }
+    return '<button type="button" class="chip-tab' + (active ? ' active' : '') +
+      '" data-chip="' + esc(it.key) + '">' +
+      (it.icon ? esc(it.icon) + ' ' : '') + esc(it.label) + pill + '</button>';
+  }).join('');
+  return '<div class="chip-tabs' + (opts.cls ? ' ' + opts.cls : '') + '">' + html + '</div>';
+};
+
+// Wire chip clicks within `scope` (an element). Calls onSelect(key, btn) and
+// manages the .active class. Safe to call repeatedly after re-rendering chips.
+window.bindChipTabs = function(scope, onSelect) {
+  if (!scope) return;
+  scope.querySelectorAll('.chip-tab').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      scope.querySelectorAll('.chip-tab').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      try { onSelect(btn.dataset.chip, btn); } catch (e) { /* swallow */ }
+    });
+  });
 };
