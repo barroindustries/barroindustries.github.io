@@ -110,6 +110,45 @@ function nameFor(obj, key, url) {
   return sibling || obj.name || obj.fileName || deriveName(url);
 }
 
+// ── Descriptive, collision-free naming for easy manual tracking in Drive ─────
+// Every file is named "<date>_<context>_<id6>__<originalName>" so that, browsing
+// Drive by eye, you immediately see WHEN it's from, WHO/WHAT it's about, and it
+// can never silently collide with another "receipt.pdf" / "IMG_1234.jpg".
+function slug(s, max = 28) {
+  return String(s || '')
+    .normalize('NFKD').replace(/[^\w .-]+/g, ' ')
+    .replace(/\s+/g, ' ').trim().replace(/ /g, '-')
+    .slice(0, max).replace(/[-.]+$/, '');
+}
+function pickDate(d) {
+  d = d || {};
+  const c = d.date || d.createdAt || d.uploadedAt || d.requestedAt || d.generatedAt;
+  if (!c) return '';
+  try {
+    if (typeof c === 'string') return c.slice(0, 10);
+    if (c.toDate) return c.toDate().toISOString().slice(0, 10);
+    if (c._seconds != null) return new Date(c._seconds * 1000).toISOString().slice(0, 10);
+    if (c.seconds  != null) return new Date(c.seconds  * 1000).toISOString().slice(0, 10);
+  } catch (_) {}
+  return '';
+}
+function pickContext(d) {
+  d = d || {};
+  return d.clientName || d.customer || d.payee || d.projectNo || d.quoteNumber
+      || d.title || d.name || d.reference || d.uploadedByName || d.submittedByName || '';
+}
+function buildPrefix(docId, data) {
+  const parts = [];
+  const dt = pickDate(data);          if (dt)  parts.push(dt);
+  const ctx = slug(pickContext(data)); if (ctx) parts.push(ctx);
+  parts.push(String(docId || '').slice(-6) || 'x');   // always unique-ish tail
+  return parts.join('_');
+}
+function withPrefix(prefix, base) {
+  if (!prefix) return base;
+  return base.startsWith(prefix + '__') ? base : `${prefix}__${base}`;
+}
+
 // ── Mirror one file to Drive ────────────────────────────────────────────────
 async function mirror(url, filename, folderId, stats) {
   console.log(`    ↳ ${filename}`);
@@ -144,12 +183,12 @@ async function mirror(url, filename, folderId, stats) {
 
 // ── Recursively mirror every Firebase URL inside a value (mutates in place) ──
 // Returns true if anything was added.
-async function walk(node, folderId, stats) {
+async function walk(node, folderId, stats, prefix) {
   let changed = false;
 
   if (Array.isArray(node)) {
     for (const el of node) {
-      if (el && typeof el === 'object') changed = await walk(el, folderId, stats) || changed;
+      if (el && typeof el === 'object') changed = await walk(el, folderId, stats, prefix) || changed;
     }
     return changed;
   }
@@ -160,12 +199,12 @@ async function walk(node, folderId, stats) {
     if (!isFirebaseUrl(v)) continue;
     const comp = companionKey(k);
     if (node[comp]) continue;                       // already synced
-    const link = await mirror(v, nameFor(node, k, v), folderId, stats);
+    const link = await mirror(v, withPrefix(prefix, nameFor(node, k, v)), folderId, stats);
     if (link) { node[comp] = link; changed = true; }
   }
   // 2) Recurse into nested objects / arrays.
   for (const v of Object.values(node)) {
-    if (v && typeof v === 'object') changed = await walk(v, folderId, stats) || changed;
+    if (v && typeof v === 'object') changed = await walk(v, folderId, stats, prefix) || changed;
   }
   return changed;
 }
@@ -174,15 +213,16 @@ async function walk(node, folderId, stats) {
 async function processDoc(doc, folderId, stats) {
   const data    = doc.data();
   const updates = {};
+  const prefix  = buildPrefix(doc.id, data);   // descriptive name for every file in this doc
 
   for (const [k, v] of Object.entries(data)) {
     if (isFirebaseUrl(v)) {
       const comp = companionKey(k);
       if (data[comp]) continue;
-      const link = await mirror(v, nameFor(data, k, v), folderId, stats);
+      const link = await mirror(v, withPrefix(prefix, nameFor(data, k, v)), folderId, stats);
       if (link) updates[comp] = link;
     } else if (v && typeof v === 'object') {
-      if (await walk(v, folderId, stats)) updates[k] = v;   // rewrite whole field
+      if (await walk(v, folderId, stats, prefix)) updates[k] = v;   // rewrite whole field
     }
   }
 
