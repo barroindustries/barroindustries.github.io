@@ -1843,17 +1843,16 @@ window.renderMarketing = async function(currentUser, currentRole, subtab = 'Adve
   const c = deptContainer();
   c.innerHTML = `
     <div class="page-header"><h2>📢 Marketing</h2></div>
-    <div class="subtab-bar">
-      ${['Advertising','Marketing Designs','Plan','Budgeting','Proposals','Tasks'].map(s =>
-        `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
-      ).join('')}
-    </div>
+    ${window.sopPanel('How Marketing works', [
+      'Advertising and Marketing Designs hold the creative asset libraries.',
+      'Plan and Budgeting cover campaign planning and spend; Proposals stores pitches.',
+      'Tasks is the department board.'
+    ])}
+    ${window.chipTabs(['Advertising','Marketing Designs','Plan','Budgeting','Proposals','Tasks'].map(s=>({key:s,label:s})), subtab)}
     <div id="mkt-content"><div class="loading-placeholder">Loading…</div></div>
   `;
   loadMarketingContent(currentUser, currentRole, subtab);
-  c.querySelectorAll('.subtab-btn').forEach(btn => {
-    btn.addEventListener('click', () => { c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); loadMarketingContent(currentUser, currentRole, btn.dataset.sub); });
-  });
+  window.bindChipTabs(c, (key) => loadMarketingContent(currentUser, currentRole, key));
 };
 
 async function loadMarketingContent(currentUser, currentRole, sub) {
@@ -1893,28 +1892,20 @@ window.renderFinance = async function(currentUser, currentRole, subtab = 'Overvi
   const allTabs = [...finTabs, ...hrTabs];
   c.innerHTML = `
     <div class="page-header"><h2>💰 Finance & HR</h2></div>
+    ${window.sopPanel('How Finance works', [
+      'The ledger is the single source of truth — approved expenses, cash journals and payroll all post into it automatically.',
+      'Record income/expense via the Accounting, Cash Receipts and Cash Disbursements tabs; Reports reads the ledger for the P&L and VAT.',
+      'Payroll runs through Compute → Verify → Disburse; HR Profiles handles weekly worker payslips.',
+      'Deleting any finance record needs President approval (the 🗑 button files a request).'
+    ])}
     <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--text-muted);padding:0 4px 4px;text-transform:uppercase">Finance</div>
-    <div class="subtab-bar" style="flex-wrap:wrap;margin-bottom:4px">
-      ${finTabs.map(s =>
-        `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
-      ).join('')}
-    </div>
+    ${window.chipTabs(finTabs.map(s=>({key:s,label:s})), subtab)}
     <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--text-muted);padding:4px 4px;text-transform:uppercase">HR</div>
-    <div class="subtab-bar" style="flex-wrap:wrap;margin-bottom:12px">
-      ${hrTabs.map(s =>
-        `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
-      ).join('')}
-    </div>
+    ${window.chipTabs(hrTabs.map(s=>({key:s,label:s})), subtab)}
     <div id="fin-content"><div class="loading-placeholder">Loading…</div></div>
   `;
   loadFinanceContent(currentUser, currentRole, subtab);
-  c.querySelectorAll('.subtab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      loadFinanceContent(currentUser, currentRole, btn.dataset.sub);
-    });
-  });
+  window.bindChipTabs(c, (key) => loadFinanceContent(currentUser, currentRole, key));
 };
 
 async function loadFinanceContent(currentUser, currentRole, sub) {
@@ -5763,17 +5754,16 @@ window.renderDesign = async function(currentUser, currentRole, subtab = 'Project
   const c = deptContainer();
   c.innerHTML = `
     <div class="page-header"><h2>🎨 Design</h2></div>
-    <div class="subtab-bar">
-      ${['Projects','Drawings','Clients','Product Designs','References','Tasks'].map(s =>
-        `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
-      ).join('')}
-    </div>
+    ${window.sopPanel('How Design works', [
+      'Projects tracks each design job; Drawings holds the working files.',
+      'Clients keeps the design client book; Product Designs and References are the asset libraries.',
+      'Tasks is the department board for design work in progress.'
+    ])}
+    ${window.chipTabs(['Projects','Drawings','Clients','Product Designs','References','Tasks'].map(s=>({key:s,label:s})), subtab)}
     <div id="design-content"><div class="loading-placeholder">Loading…</div></div>
   `;
   loadDesignContent(currentUser, currentRole, subtab);
-  c.querySelectorAll('.subtab-btn').forEach(btn => {
-    btn.addEventListener('click', () => { c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active')); btn.classList.add('active'); loadDesignContent(currentUser, currentRole, btn.dataset.sub); });
-  });
+  window.bindChipTabs(c, (key) => loadDesignContent(currentUser, currentRole, key));
 };
 
 async function loadDesignContent(currentUser, currentRole, sub) {
@@ -6760,21 +6750,16 @@ window.renderIT = async function(currentUser, currentRole, subtab = 'Overview') 
   if (!itAdmin && (subtab === 'Access Control' || subtab === 'Network')) subtab = 'Overview';
   c.innerHTML = `
     <div class="page-header"><h2>💻 IT Department</h2></div>
-    <div class="subtab-bar" style="flex-wrap:wrap">
-      ${subtabs.map(s =>
-        `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`
-      ).join('')}
-    </div>
+    ${window.sopPanel('How IT works', [
+      'Staff raise issues in IT Tickets; IT works them to resolution.',
+      'Assets and Software track company hardware and licences.',
+      'Access Control and Network hold credentials/config — admin-only.'
+    ])}
+    ${window.chipTabs(subtabs.map(s=>({key:s,label:s})), subtab)}
     <div id="it-content"><div class="loading-placeholder">Loading…</div></div>
   `;
   loadITContent(currentUser, currentRole, subtab, canEdit);
-  c.querySelectorAll('.subtab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      loadITContent(currentUser, currentRole, btn.dataset.sub, canEdit);
-    });
-  });
+  window.bindChipTabs(c, (key) => loadITContent(currentUser, currentRole, key, canEdit));
 };
 
 async function loadITContent(currentUser, currentRole, sub, canEdit) {
@@ -11098,18 +11083,15 @@ window.renderProductionDept = async function(currentUser, currentRole, subtab = 
         <p style="font-size:12px;color:var(--text-muted);margin:2px 0 0">Shop-floor work orders, materials & output</p>
       </div>
     </div>
-    <div class="subtab-bar">
-      ${subs.map(s=>`<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`).join('')}
-    </div>
+    ${window.sopPanel('How Production works', [
+      'Orders is the shop-floor pipeline: Queued → Cutting → Welding → Assembly → Finishing → QC → Ready → Delivered.',
+      'Materials and Inventory track raw stock; "Consume → stock & COS" deducts inventory and posts material cost.',
+      'Count Form records physical counts; Tasks and Files hold the department board and documents.'
+    ])}
+    ${window.chipTabs(subs.map(s=>({key:s,label:s})), subtab)}
     <div id="prod-content"><div class="loading-placeholder">Loading…</div></div>`;
   loadProdContent(currentUser, currentRole, subtab);
-  c.querySelectorAll('.subtab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      c.querySelectorAll('.subtab-btn').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      loadProdContent(currentUser, currentRole, btn.dataset.sub);
-    });
-  });
+  window.bindChipTabs(c, (key) => loadProdContent(currentUser, currentRole, key));
 };
 
 function loadProdContent(currentUser, currentRole, sub) {
@@ -11746,19 +11728,16 @@ window.renderPurchasing = async function(currentUser, currentRole, subtab = 'Req
   const tabs = ['Request for Quotation', 'Purchase Requests', 'Tasks'];
   c.innerHTML = `
     <div class="page-header"><h2>🛒 Purchasing</h2></div>
-    <div class="subtab-bar" style="flex-wrap:wrap;margin-bottom:12px">
-      ${tabs.map(s => `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`).join('')}
-    </div>
+    ${window.sopPanel('How Purchasing works', [
+      'Raise a Request for Quotation (or pre-fill one "From low stock"); enter supplier prices.',
+      'Convert the RFQ to a Purchase Request, print the branded PO, and submit it to Finance.',
+      'Received materials auto-match to Inventory on receive.'
+    ])}
+    ${window.chipTabs(tabs.map(s=>({key:s,label:s})), subtab)}
     <div id="purch-content"><div class="loading-placeholder">Loading…</div></div>
   `;
   loadPurchasingContent(currentUser, currentRole, subtab);
-  c.querySelectorAll('.subtab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      loadPurchasingContent(currentUser, currentRole, btn.dataset.sub);
-    });
-  });
+  window.bindChipTabs(c, (key) => loadPurchasingContent(currentUser, currentRole, key));
 };
 
 async function loadPurchasingContent(currentUser, currentRole, sub) {
