@@ -9894,87 +9894,139 @@ async function openQuoteApprovalReview(ctx, onDone){
 // ══════════════════════════════════════════════════
 //  SHARED: Client Profiles
 // ══════════════════════════════════════════════════
+// CRM lifecycle stages (shared by all three client CRMs).
+const CRM_STAGES = [
+  { key:'lead',     label:'Lead',     color:'#8e8e93',               icon:'🌱' },
+  { key:'prospect', label:'Prospect', color:'#FFAA00',               icon:'🔥' },
+  { key:'won',      label:'Won',      color:'var(--success,#30D158)', icon:'✅' },
+  { key:'lost',     label:'Lost',     color:'var(--danger,#e5484d)',  icon:'✖️' },
+];
+function crmStageOf(cl){ return ['lead','prospect','won','lost'].includes(cl && cl.stage) ? cl.stage : 'lead'; }
+function crmStageMeta(k){ return CRM_STAGES.find(s=>s.key===k) || CRM_STAGES[0]; }
+
 async function renderClientProfiles(container, currentUser, currentRole, brand) {
   const collection = brand === 'brilliant-steel' ? 'bs_clients' : (brand === 'design' ? 'design_clients' : 'sales_clients');
-  const snap = await db.collection(collection).orderBy('createdAt','desc').get();
+  const snap = await db.collection(collection).orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
   const clients = snap.docs.map(d => ({id:d.id,...d.data()}));
   const canAdd = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='agent';
   const canDeleteDirect = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
-  // Which quote collection + builder this client's quotes live in.
   const quoteColl  = brand==='brilliant-steel' ? 'bs_quotes' : 'bk_quotes';
   const builderNav = brand==='brilliant-steel' ? 'bs-quote-builder' : 'bk-quote-builder';
+  const today = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10));
+
+  const counts = { all: clients.length, lead:0, prospect:0, won:0, lost:0 };
+  clients.forEach(c=>counts[crmStageOf(c)]++);
+  const isOpen = c => { const s=crmStageOf(c); return s!=='won' && s!=='lost'; };
+  const dueFollowups = clients.filter(c=>c.followUpDate && c.followUpDate <= today && isOpen(c)).length;
+  let stageFilter = 'all';
+
+  const chips = [{key:'all',label:'All',count:counts.all}, ...CRM_STAGES.map(s=>({key:s.key,label:s.label,icon:s.icon,count:counts[s.key]}))];
 
   container.innerHTML = `
-    ${canAdd?`<div style="text-align:right;margin-bottom:12px"><button class="btn-primary btn-sm" id="add-client-btn">+ Add Client</button></div>`:''}
-    <div class="item-list">
-      ${!clients.length
-        ? `<div class="empty-state"><div class="empty-icon">👤</div><h4>No clients yet</h4></div>`
-        : clients.map(cl => `
-          <div class="item-card cl-card" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;cursor:pointer">
-            <div style="flex:1;min-width:0">
-              <div class="item-title">${escHtml(cl.name)}${cl.deleteRequested?' <span class="badge badge-red" style="font-size:9px">🗑 del req</span>':''}</div>
-              <div class="item-meta">
-                ${cl.company?`<span>🏢 ${escHtml(cl.company)}</span>`:''}
-                ${cl.email?`<span>✉️ ${escHtml(cl.email)}</span>`:''}
-                ${cl.phone?`<span>📞 ${escHtml(cl.phone)}</span>`:''}
-                ${cl.lastQuoteNumber?`<span>📄 ${escHtml(cl.lastQuoteNumber)}</span>`:''}
-              </div>
-              <div style="font-size:11px;color:var(--primary);margin-top:4px">📄 View quotes / reopen →</div>
-            </div>
-            ${canDeleteDirect
-              ? `<button class="btn-secondary btn-sm cl-del-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="color:var(--danger);flex-shrink:0">🗑</button>`
-              : `<button class="btn-secondary btn-sm cl-delreq-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="flex-shrink:0" ${cl.deleteRequested?'disabled':''}>${cl.deleteRequested?'⏳ Requested':'🗑 Request'}</button>`}
-          </div>`).join('')}
+    ${dueFollowups?`<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>⏰ <strong>${dueFollowups}</strong> follow-up${dueFollowups>1?'s':''} due</span></div>`:''}
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      ${window.chipTabs(chips, 'all', {cls:'cl-stage-tabs'})}
+      ${canAdd?`<button class="btn-primary btn-sm" id="add-client-btn">+ Add Client</button>`:''}
     </div>
+    <div id="cl-list"></div>
   `;
 
-  // Open a client's quote history — reopen any filed quote into the builder.
-  container.querySelectorAll('.cl-card').forEach(card => card.addEventListener('click', async (e) => {
-    if (e.target.closest('.cl-del-btn, .cl-delreq-btn')) return; // let delete buttons act
-    const cl = clients.find(c=>c.id===card.dataset.id); if(!cl) return;
-    openClientQuotesModal(cl, quoteColl, builderNav);
-  }));
-
-  container.querySelectorAll('.cl-del-btn').forEach(b => b.addEventListener('click', async () => {
-    if (!confirm(`Delete client "${b.dataset.name}"? This cannot be undone.`)) return;
-    try { await db.collection(collection).doc(b.dataset.id).delete(); window.logAudit&&window.logAudit('delete','client',b.dataset.id,{name:b.dataset.name}); Notifs.showToast('Client deleted'); renderClientProfiles(container, currentUser, currentRole, brand); }
-    catch(ex){ Notifs.showToast('Delete failed','error'); }
-  }));
-  container.querySelectorAll('.cl-delreq-btn').forEach(b => b.addEventListener('click', async () => {
-    const reason = prompt('Reason for deleting this client folder? (sent to the president for approval)')||'';
-    try {
-      await db.collection(collection).doc(b.dataset.id).update({ deleteRequested:true, deleteReason:reason, deleteRequestedBy:currentUser.uid, deleteRequestedAt:firebase.firestore.FieldValue.serverTimestamp() });
-      await Notifs.sendToOwner({ title:'🗑 Client Delete Requested', body:`${userProfile?.displayName||currentUser.email} requests deleting client "${b.dataset.name}".${reason?' Reason: '+reason:''}`, icon:'🗑', type:'client_delete_request' });
-      Notifs.showToast('Delete request sent to president'); renderClientProfiles(container, currentUser, currentRole, brand);
-    } catch(ex){ Notifs.showToast('Request failed: '+(ex.message||ex.code),'error'); }
-  }));
-
-  document.getElementById('add-client-btn')?.addEventListener('click', () => {
-    openModal('Add Client', `
-      <div class="form-group"><label>Name</label><input id="cl-name" placeholder="Client full name"/></div>
-      <div class="form-group"><label>Company</label><input id="cl-company" placeholder="Company name"/></div>
-      <div class="form-row">
-        <div class="form-group"><label>Email</label><input id="cl-email" type="email"/></div>
-        <div class="form-group"><label>Phone</label><input id="cl-phone" type="tel"/></div>
+  const clientCard = cl => {
+    const st = crmStageMeta(crmStageOf(cl));
+    const fu = cl.followUpDate || '';
+    const fuOverdue = fu && fu <= today && isOpen(cl);
+    return `<div class="item-card cl-card" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;cursor:pointer">
+      <div style="flex:1;min-width:0">
+        <div class="item-title">${escHtml(cl.name)} <span class="badge" style="font-size:9px;background:${st.color};color:#fff">${st.icon} ${st.label}</span>${cl.deleteRequested?' <span class="badge badge-red" style="font-size:9px">🗑 del req</span>':''}</div>
+        <div class="item-meta">
+          ${cl.company?`<span>🏢 ${escHtml(cl.company)}</span>`:''}
+          ${cl.email?`<span>✉️ ${escHtml(cl.email)}</span>`:''}
+          ${cl.phone?`<span>📞 ${escHtml(cl.phone)}</span>`:''}
+          ${cl.lastQuoteNumber?`<span>📄 ${escHtml(cl.lastQuoteNumber)}</span>`:''}
+          ${fu?`<span style="color:${fuOverdue?'var(--danger)':'var(--text-muted)'}">⏰ ${escHtml(fu)}${fuOverdue?' · due':''}</span>`:''}
+        </div>
+        <div style="font-size:11px;color:var(--primary);margin-top:4px">📄 View quotes / reopen →</div>
       </div>
-      <div class="form-group"><label>Address</label><textarea id="cl-address" rows="2"></textarea></div>
-      <div class="form-group"><label>Notes</label><textarea id="cl-notes" rows="2"></textarea></div>
-    `, `<button class="btn-primary" id="save-client-btn">Save Client</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
+        ${canAdd?`<button class="btn-secondary btn-sm cl-edit-btn" data-id="${cl.id}" title="Edit / set stage">✎</button>`:''}
+        ${canDeleteDirect
+          ? `<button class="btn-secondary btn-sm cl-del-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="color:var(--danger)">🗑</button>`
+          : `<button class="btn-secondary btn-sm cl-delreq-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" ${cl.deleteRequested?'disabled':''}>${cl.deleteRequested?'⏳':'🗑'}</button>`}
+      </div>
+    </div>`;
+  };
 
+  const openClientEditor = (cl) => {
+    const e = cl || {};
+    openModal(cl?'Edit Client':'Add Client', `
+      <div class="form-group"><label>Name</label><input id="cl-name" value="${escHtml(e.name||'')}" placeholder="Client full name"/></div>
+      <div class="form-group"><label>Company</label><input id="cl-company" value="${escHtml(e.company||'')}" placeholder="Company name"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Email</label><input id="cl-email" type="email" value="${escHtml(e.email||'')}"/></div>
+        <div class="form-group"><label>Phone</label><input id="cl-phone" type="tel" value="${escHtml(e.phone||'')}"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Stage</label><select id="cl-stage" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${CRM_STAGES.map(s=>`<option value="${s.key}" ${crmStageOf(e)===s.key?'selected':''}>${s.icon} ${s.label}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Follow-up date</label><input id="cl-followup" type="date" value="${escHtml(e.followUpDate||'')}"/></div>
+      </div>
+      <div class="form-group"><label>Address</label><textarea id="cl-address" rows="2">${escHtml(e.address||'')}</textarea></div>
+      <div class="form-group"><label>Notes</label><textarea id="cl-notes" rows="2">${escHtml(e.notes||'')}</textarea></div>
+    `, `<button class="btn-primary" id="save-client-btn">${cl?'Save':'Save Client'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     document.getElementById('save-client-btn').addEventListener('click', async () => {
-      await db.collection(collection).add({
-        name:      document.getElementById('cl-name').value.trim(),
-        company:   document.getElementById('cl-company').value.trim(),
-        email:     document.getElementById('cl-email').value.trim(),
-        phone:     document.getElementById('cl-phone').value.trim(),
-        address:   document.getElementById('cl-address').value.trim(),
-        notes:     document.getElementById('cl-notes').value.trim(),
-        addedBy:   currentUser.uid,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      closeModal(); renderClientProfiles(container, currentUser, currentRole, brand);
+      const name = document.getElementById('cl-name').value.trim();
+      if (!name) { Notifs.showToast('Name is required.','error'); return; }
+      const data = {
+        name, company: document.getElementById('cl-company').value.trim(),
+        email: document.getElementById('cl-email').value.trim(),
+        phone: document.getElementById('cl-phone').value.trim(),
+        address: document.getElementById('cl-address').value.trim(),
+        notes: document.getElementById('cl-notes').value.trim(),
+        stage: document.getElementById('cl-stage').value,
+        followUpDate: document.getElementById('cl-followup').value || '',
+        lastContact: today,
+      };
+      try {
+        if (cl) { await db.collection(collection).doc(cl.id).update(data); window.logAudit&&window.logAudit('update','client',cl.id,{name,stage:data.stage}); }
+        else { data.addedBy=currentUser.uid; data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await db.collection(collection).add(data); }
+        closeModal(); Notifs.showToast('Client saved'); renderClientProfiles(container, currentUser, currentRole, brand);
+      } catch(ex){ Notifs.showToast('Save failed: '+(ex.message||ex.code),'error'); }
     });
-  });
+  };
+
+  const bindCards = () => {
+    container.querySelectorAll('.cl-card').forEach(card => card.addEventListener('click', (e) => {
+      if (e.target.closest('.cl-del-btn, .cl-delreq-btn, .cl-edit-btn')) return;
+      const cl = clients.find(c=>c.id===card.dataset.id); if(!cl) return;
+      openClientQuotesModal(cl, quoteColl, builderNav);
+    }));
+    container.querySelectorAll('.cl-edit-btn').forEach(b => b.addEventListener('click', () => openClientEditor(clients.find(c=>c.id===b.dataset.id))));
+    container.querySelectorAll('.cl-del-btn').forEach(b => b.addEventListener('click', async () => {
+      if (!confirm(`Delete client "${b.dataset.name}"? This cannot be undone.`)) return;
+      try { await db.collection(collection).doc(b.dataset.id).delete(); window.logAudit&&window.logAudit('delete','client',b.dataset.id,{name:b.dataset.name}); Notifs.showToast('Client deleted'); renderClientProfiles(container, currentUser, currentRole, brand); }
+      catch(ex){ Notifs.showToast('Delete failed','error'); }
+    }));
+    container.querySelectorAll('.cl-delreq-btn').forEach(b => b.addEventListener('click', async () => {
+      const reason = prompt('Reason for deleting this client folder? (sent to the president for approval)')||'';
+      try {
+        await db.collection(collection).doc(b.dataset.id).update({ deleteRequested:true, deleteReason:reason, deleteRequestedBy:currentUser.uid, deleteRequestedAt:firebase.firestore.FieldValue.serverTimestamp() });
+        await Notifs.sendToOwner({ title:'🗑 Client Delete Requested', body:`${userProfile?.displayName||currentUser.email} requests deleting client "${b.dataset.name}".${reason?' Reason: '+reason:''}`, icon:'🗑', type:'client_delete_request' });
+        Notifs.showToast('Delete request sent to president'); renderClientProfiles(container, currentUser, currentRole, brand);
+      } catch(ex){ Notifs.showToast('Request failed: '+(ex.message||ex.code),'error'); }
+    }));
+  };
+
+  const renderList = () => {
+    const shown = stageFilter==='all' ? clients : clients.filter(c=>crmStageOf(c)===stageFilter);
+    const el = document.getElementById('cl-list'); if(!el) return;
+    el.innerHTML = !shown.length
+      ? `<div class="empty-state"><div class="empty-icon">👤</div><h4>No clients${stageFilter!=='all'?' in this stage':' yet'}</h4></div>`
+      : `<div class="item-list">${shown.map(clientCard).join('')}</div>`;
+    bindCards();
+  };
+
+  window.bindChipTabs(container.querySelector('.cl-stage-tabs'), (key)=>{ stageFilter=key; renderList(); });
+  document.getElementById('add-client-btn')?.addEventListener('click', ()=>openClientEditor(null));
+  renderList();
 }
 
 // Show one client's quote history with a Reopen action per quote.
