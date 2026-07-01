@@ -10031,7 +10031,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
 
 // Show one client's quote history with a Reopen action per quote.
 async function openClientQuotesModal(cl, quoteColl, builderNav){
-  openModal(`📄 ${escHtml(cl.name||'Client')} — Quotes`, '<div class="loading-placeholder">Loading quotes…</div>',
+  openModal(`👤 ${escHtml(cl.name||'Client')}`, '<div class="loading-placeholder">Loading client…</div>',
     `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
   const body = document.getElementById('modal-body');
   // A partner may only read their OWN bs_quotes, so the query must be scoped to
@@ -10057,21 +10057,58 @@ async function openClientQuotesModal(cl, quoteColl, builderNav){
   }
   docs.sort((a,b)=>((b.createdAt?.seconds||0)-(a.createdAt?.seconds||0)));
   if (!body) return;
-  if (!docs.length) { body.innerHTML = '<div class="empty-state" style="padding:24px"><div class="empty-icon">📄</div><p>No quotes recorded for this client yet.</p></div>'; return; }
+  const toMs = v => { if(!v) return 0; if (typeof v==='string'){ const t=Date.parse(v); return isNaN(t)?0:t; } if (v.seconds) return v.seconds*1000; if (v.toDate){ try{return v.toDate().getTime();}catch(_){return 0;} } return 0; };
+  const fmtD = ms => ms ? new Date(ms).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}) : '';
   const statusBadge = (q)=>{
     const s = q.status||q.approvalStatus||'draft';
     const map = { won:'badge-green', filed:'badge-blue', approved:'badge-green', pending_approval:'badge-amber', pending_review:'badge-amber', needs_revision:'badge-amber', rejected:'badge-red', sent:'badge-blue', draft:'badge-gray' };
     return `<span class="badge ${map[s]||'badge-gray'}" style="font-size:9px">${escHtml(s)}</span>`;
   };
-  body.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px">
-    ${docs.map(q=>`<div class="item-card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:700;font-size:13px;font-family:monospace">${escHtml(q.quoteNumber||q.id.slice(-8))}</div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:2px">₱${fmt(q.total||q.grandTotal||0)} ${statusBadge(q)} ${q.salesOrderId?'<span class="badge badge-green" style="font-size:9px">→ Sales Order</span>':''} ${q.createdAt?'· '+new Date((q.createdAt.seconds||0)*1000).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):''}</div>
+  const st = (typeof crmStageMeta==='function') ? crmStageMeta(crmStageOf(cl)) : {icon:'',label:'',color:'#8e8e93'};
+  const today = (window.bizDate?window.bizDate():new Date().toISOString().slice(0,10));
+  const fuOverdue = cl.followUpDate && cl.followUpDate<=today && crmStageOf(cl)!=='won' && crmStageOf(cl)!=='lost';
+  const totalQuoted = docs.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+  const wonVal = docs.filter(q=>q.salesOrderId||['won','filed','approved','accepted'].includes(q.status)).reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+  // Activity timeline — built from client fields + quotes (no extra reads).
+  const events = [];
+  if (cl.createdAt)   events.push({ ts:toMs(cl.createdAt),   icon:'➕', text:'Client added' });
+  if (cl.lastContact) events.push({ ts:toMs(cl.lastContact), icon:'📞', text:'Contact logged' });
+  docs.forEach(q=>{ const num=escHtml(q.quoteNumber||q.id.slice(-8)); events.push({ ts:toMs(q.createdAt), icon:'📄', text:`Quote ${num} · ₱${fmt(q.total||q.grandTotal||0)} · ${escHtml(q.status||q.approvalStatus||'draft')}` }); if (q.salesOrderId) events.push({ ts:toMs(q.wonAt||q.approvedAt||q.createdAt), icon:'✅', text:`Quote ${num} → Sales Order` }); });
+  events.sort((a,b)=>b.ts-a.ts);
+  body.innerHTML = `
+    <div class="item-card" style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <span class="badge" style="font-size:10px;background:${st.color};color:#fff">${st.icon} ${st.label}</span>
+        ${cl.company?`<span style="font-size:12px;color:var(--text-muted)">🏢 ${escHtml(cl.company)}</span>`:''}
       </div>
-      ${q.editableState?`<div style="display:flex;gap:6px;flex-shrink:0"><button class="btn-secondary btn-sm clq-reopen" data-id="${q.id}">↻ Reopen</button><button class="btn-secondary btn-sm clq-rev" data-id="${q.id}" title="Start a new revision (R2, R3…) with today's date">⎘ New Revision</button></div>`:'<span style="font-size:10px;color:var(--text-muted);flex-shrink:0">no snapshot</span>'}
-    </div>`).join('')}
-  </div>`;
+      <div class="item-meta">
+        ${cl.email?`<span>✉️ ${escHtml(cl.email)}</span>`:''}
+        ${cl.phone?`<span>📞 ${escHtml(cl.phone)}</span>`:''}
+        ${cl.address?`<span>📍 ${escHtml(cl.address)}</span>`:''}
+      </div>
+      ${cl.followUpDate?`<div style="font-size:12px;margin-top:6px;color:${fuOverdue?'var(--danger)':'var(--text-muted)'}">⏰ Follow-up: <strong>${escHtml(cl.followUpDate)}</strong>${fuOverdue?' · due':''}</div>`:''}
+      ${cl.notes?`<div style="font-size:12px;color:var(--text-muted);margin-top:6px">📝 ${escHtml(cl.notes)}</div>`:''}
+      <div style="display:flex;gap:14px;margin-top:8px;font-size:12px;border-top:1px solid var(--border);padding-top:8px;flex-wrap:wrap">
+        <span>Quotes: <strong>${docs.length}</strong></span>
+        <span>Quoted: <strong>₱${fmt(totalQuoted)}</strong></span>
+        <span>Won: <strong style="color:var(--success)">₱${fmt(wonVal)}</strong></span>
+      </div>
+    </div>
+    ${events.length?`<h4 style="font-size:13px;margin:0 0 6px">🕓 Activity</h4>
+    <div style="border-left:2px solid var(--border);margin:0 0 14px 6px;padding-left:12px;display:flex;flex-direction:column;gap:8px">
+      ${events.map(e=>`<div style="display:flex;gap:8px;align-items:baseline"><span style="flex-shrink:0">${e.icon}</span><span style="font-size:12px;flex:1">${e.text}</span><span style="font-size:11px;color:var(--text-muted);flex-shrink:0">${fmtD(e.ts)}</span></div>`).join('')}
+    </div>`:''}
+    <h4 style="font-size:13px;margin:0 0 6px">📄 Quotes (${docs.length})</h4>
+    ${!docs.length?'<div class="empty-state" style="padding:18px"><p>No quotes recorded for this client yet.</p></div>':`<div style="display:flex;flex-direction:column;gap:8px">
+      ${docs.map(q=>`<div class="item-card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:700;font-size:13px;font-family:monospace">${escHtml(q.quoteNumber||q.id.slice(-8))}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">₱${fmt(q.total||q.grandTotal||0)} ${statusBadge(q)} ${q.salesOrderId?'<span class="badge badge-green" style="font-size:9px">→ Sales Order</span>':''} ${q.createdAt?'· '+fmtD(toMs(q.createdAt)):''}</div>
+        </div>
+        ${q.editableState?`<div style="display:flex;gap:6px;flex-shrink:0"><button class="btn-secondary btn-sm clq-reopen" data-id="${q.id}">↻ Reopen</button><button class="btn-secondary btn-sm clq-rev" data-id="${q.id}" title="Start a new revision (R2, R3…) with today's date">⎘ New Revision</button></div>`:'<span style="font-size:10px;color:var(--text-muted);flex-shrink:0">no snapshot</span>'}
+      </div>`).join('')}
+    </div>`}
+  `;
   body.querySelectorAll('.clq-reopen').forEach(btn=>btn.addEventListener('click',()=>{
     closeModal();
     window.reopenQuoteFromDoc(quoteColl, btn.dataset.id, builderNav);
