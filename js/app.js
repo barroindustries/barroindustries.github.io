@@ -3893,14 +3893,17 @@ function renderGovBiddings() {
   const c = document.getElementById('page-content');
   c.innerHTML = `
     <div class="page-header"><h2>🏛️ Government Biddings</h2></div>
-    <div class="subtab-bar">
-      ${['PhilGEPS','Active Bids','Archive'].map(s=>`<button class="subtab-btn ${s==='PhilGEPS'?'active':''}" data-sub="${s}">${s}</button>`).join('')}
-    </div>
+    ${window.sopPanel('How Government Biddings works', [
+      'PhilGEPS holds the posted opportunities you are tracking.',
+      'Move a live one to Active Bids while you prepare and submit the documents.',
+      'Won or closed bids move to Archive for the record.'
+    ])}
+    ${window.chipTabs(['PhilGEPS','Active Bids','Archive'].map(s=>({key:s,label:s})), 'PhilGEPS', {cls:'gov-tabs'})}
     <div id="gov-content"></div>
   `;
   const loadGov = sub => renderDocCollection(document.getElementById('gov-content'), `gov_${sub.toLowerCase().replace(/\s+/g,'_')}`, sub, currentUser, currentRole, {icon:'🏛️', dept:'Government Biddings'});
   loadGov('PhilGEPS');
-  c.querySelectorAll('.subtab-btn').forEach(btn => btn.addEventListener('click', () => { c.querySelectorAll('.subtab-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); loadGov(btn.dataset.sub); }));
+  window.bindChipTabs(c.querySelector('.gov-tabs'), (key)=>loadGov(key));
 }
 
 function renderGenericDept(dept) {
@@ -3914,13 +3917,11 @@ function renderGenericDept(dept) {
 window.renderFiles = async function(currentUser, currentRole) {
   const c = document.getElementById('page-content');
   const dept = currentDepts[0] || 'General';
+  const fileTabs = [{key:'My Files',label:'My Files'},{key:'Department',label:'Department Files'}];
+  if (isPresident()||currentRole==='manager') fileTabs.push({key:'All',label:'All Files'});
   c.innerHTML = `
     <div class="page-header"><h2>📁 Files</h2></div>
-    <div class="subtab-bar">
-      <button class="subtab-btn active" data-sub="My Files">My Files</button>
-      <button class="subtab-btn" data-sub="Department">Department Files</button>
-      ${isPresident()||currentRole==='manager'?'<button class="subtab-btn" data-sub="All">All Files</button>':''}
-    </div>
+    ${window.chipTabs(fileTabs, 'My Files', {cls:'files-tabs'})}
     <div id="files-content"></div>
   `;
   const loadFiles = (sub) => {
@@ -3937,7 +3938,7 @@ window.renderFiles = async function(currentUser, currentRole) {
     }
   };
   loadFiles('My Files');
-  c.querySelectorAll('.subtab-btn').forEach(btn => btn.addEventListener('click', () => { c.querySelectorAll('.subtab-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); loadFiles(btn.dataset.sub); }));
+  window.bindChipTabs(c.querySelector('.files-tabs'), (key)=>loadFiles(key));
 };
 
 // ── Personal Finance ──────────────────────────────
