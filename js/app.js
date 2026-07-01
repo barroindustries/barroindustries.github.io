@@ -6086,7 +6086,7 @@ async function renderAnalytics() {
   const cg = (key,q,ttl=60000) => dbCachedGet(key, ()=>q.get(), ttl).catch(()=>({docs:[],size:0}));
 
   // Fetch all data upfront
-  const [usersSnap,tasksSnap,quotesSnap,subsSnap,expSnap,caSnap,payslipSnap,ledgerSnap,govSnap,jpSnap,jcSnap,dpSnap] = await Promise.all([
+  const [usersSnap,tasksSnap,quotesSnap,subsSnap,expSnap,caSnap,payslipSnap,ledgerSnap,govSnap,jpSnap,jcSnap,dpSnap,clientsSnap] = await Promise.all([
     dbCachedGet('users', fetchUsersWithPayroll, 60000).catch(()=>({docs:[],size:0})),
     cg('an_tasks', db.collection('tasks')),
     dbCachedGet('an_quotes', getAllQuotes, 60000).catch(()=>({docs:[]})),
@@ -6099,10 +6099,12 @@ async function renderAnalytics() {
     cg('an_jobprojects', db.collection('job_projects')),
     cg('an_jobcosts', db.collection('job_costs')),
     cg('an_designprojects', db.collection('projects')),
+    cg('an_salesclients', db.collection('sales_clients')),
   ]);
   const users=usersSnap.docs.map(d=>({id:d.id,...d.data()}));
   const tasks=tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
   const quotes=quotesSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const salesClients=(clientsSnap.docs||[]).map(d=>d.data());
   const subs=subsSnap.docs.map(d=>({id:d.id,...d.data()}));
   const expenses=expSnap.docs.map(d=>({id:d.id,...d.data()}));
   const cas=caSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -6253,6 +6255,13 @@ async function renderAnalytics() {
     const wonMTD=sum(salesQuotes.filter(q=>q.status==='accepted'&&ymOf(q.createdAt)===thisMonth),q=>q.total);
     const wonPrev=sum(salesQuotes.filter(q=>q.status==='accepted'&&ymOf(q.createdAt)===lastMonth),q=>q.total);
     const avgDeal=wonCount?won2/wonCount:0;
+    // CRM pipeline — clients by lifecycle stage (from the sales_clients CRM).
+    const CRMP=[['lead','Lead','#8e8e93','🌱'],['prospect','Prospect','#FFAA00','🔥'],['won','Won','#30D158','✅'],['lost','Lost','#FF453A','✖️']];
+    const stageCount={lead:0,prospect:0,won:0,lost:0};
+    salesClients.forEach(cl=>{ const s=['lead','prospect','won','lost'].includes(cl.stage)?cl.stage:'lead'; stageCount[s]++; });
+    const clTotal=salesClients.length;
+    const _anToday=(window.bizDate?window.bizDate():new Date().toISOString().slice(0,10));
+    const dueFu=salesClients.filter(cl=>cl.followUpDate&&cl.followUpDate<=_anToday&&!['won','lost'].includes(cl.stage)).length;
     const wrap=document.getElementById('analytics-content');
     wrap.innerHTML=`
       <div class="kpi-row" style="margin-top:16px">
@@ -6263,6 +6272,12 @@ async function renderAnalytics() {
         <div class="kpi-card warn"><div class="kpi-label">Total Quotes</div><div class="kpi-value">${salesQuotes.length}</div></div>
         <div class="kpi-card"><div class="kpi-label">Tasks Done</div><div class="kpi-value">${doneSalesTasks.length}/${salesTasks.length}</div></div>
       </div>
+      ${clTotal?`<div class="card" style="margin-bottom:16px">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3>CRM Pipeline</h3><span style="font-size:12px;color:var(--text-muted)">${clTotal} client${clTotal===1?'':'s'}${dueFu?` · <span style="color:var(--danger)">${dueFu} follow-up${dueFu>1?'s':''} due</span>`:''}</span></div>
+        <div class="card-body"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px">
+          ${CRMP.map(([k,l,col,ic])=>`<div style="background:var(--surface2);border-radius:10px;padding:10px 12px"><div style="font-size:11px;color:var(--text-muted)">${ic} ${l}</div><div style="font-size:18px;font-weight:800;color:${col}">${stageCount[k]}</div><div style="font-size:10px;color:var(--text-muted)">${clTotal?Math.round(stageCount[k]/clTotal*100):0}%</div></div>`).join('')}
+        </div></div>
+      </div>`:''}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
         <div class="card"><div class="card-header"><h3>Quote Status Breakdown</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="sq-chart"></canvas></div></div></div>
         <div class="card"><div class="card-header"><h3>Monthly Quote Volume</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="sq2-chart"></canvas></div></div></div>
