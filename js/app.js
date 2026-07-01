@@ -2688,6 +2688,10 @@ async function renderFinanceDashboard() {
     const aging = { cur:0, d3160:0, d6190:0, d90:0 };
     openAR.forEach(p=>{ const d=_daysSince(p.createdAt); const a=p.arBalance||0; if(d<=30)aging.cur+=a; else if(d<=60)aging.d3160+=a; else if(d<=90)aging.d6190+=a; else aging.d90+=a; });
     const arTotal = aging.cur+aging.d3160+aging.d6190+aging.d90;
+    // Per-client rollup for the collections drill-down (oldest first = chase first).
+    const _arByClient = {};
+    openAR.forEach(p=>{ const k=(String(p.clientName||'').trim())||'(no client)'; const g=_arByClient[k]||(_arByClient[k]={client:k,total:0,oldest:0,count:0}); g.total+=p.arBalance||0; const d=_daysSince(p.createdAt); if(d>g.oldest)g.oldest=d; g.count++; });
+    const arClients = Object.values(_arByClient).sort((a,b)=>(b.oldest-a.oldest)||(b.total-a.total));
 
     const expenses = expSnap.docs.map(d=>({id:d.id,...d.data()}));
     const pendingExp = expenses.filter(e=>e.status==='pending');
@@ -2718,7 +2722,7 @@ async function renderFinanceDashboard() {
         <div class="kpi-card ${lowStock>0?'red':''}" style="cursor:pointer" onclick="navigateTo('inventory')"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="boxes" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Low Stock</div><div class="kpi-value">${lowStock}</div></div>
       </div>
       <div class="card" style="margin-bottom:16px">
-        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3>📥 Receivables Aging <span style="font-size:11px;color:var(--text-muted);font-weight:400">· by project age</span></h3><span style="font-weight:800">₱${formatNum(arTotal)}</span></div>
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3>📥 Receivables Aging <span style="font-size:11px;color:var(--text-muted);font-weight:400">· by project age</span></h3><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:800">₱${formatNum(arTotal)}</span>${arTotal>0?'<button class="btn-secondary btn-sm" id="ar-drill-btn">By client ›</button>':''}</div></div>
         <div class="card-body">
           ${arTotal===0?'<div class="empty-state" style="padding:16px"><p>No open receivables 🎉</p></div>':`
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px">
@@ -2763,6 +2767,25 @@ async function renderFinanceDashboard() {
       </div>`;
     liveDateTime('live-clock');
     if (window.lucide) lucide.createIcons({ nodes: [c] });
+    // Receivables drill-down — clients sorted by oldest debt (chase the top first).
+    document.getElementById('ar-drill-btn')?.addEventListener('click', () => {
+      const ageCol = d => d>90?'var(--danger)':d>60?'#FF9500':d>30?'#FFAA00':'var(--text-muted)';
+      const rows = arClients.map(g=>`<tr>
+        <td style="font-weight:600">${escHtml(g.client)}</td>
+        <td style="text-align:right;font-weight:700">₱${formatNum(g.total)}</td>
+        <td style="text-align:center;color:${ageCol(g.oldest)};font-weight:600">${g.oldest}d</td>
+        <td style="text-align:center">${g.count}</td>
+      </tr>`).join('');
+      openModal('📥 Receivables by Client', `
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Open project balances, oldest first — chase the top of the list. Total <strong>₱${formatNum(arTotal)}</strong> across ${arClients.length} client${arClients.length===1?'':'s'}.</div>
+        <div class="table-wrap" style="max-height:52vh;overflow:auto"><table class="data-table">
+          <thead><tr><th>Client</th><th style="text-align:right">Outstanding</th><th style="text-align:center">Oldest</th><th style="text-align:center">Projects</th></tr></thead>
+          <tbody>${rows||'<tr><td colspan="4">No open receivables</td></tr>'}</tbody>
+        </table></div>`,
+        `<button class="btn-secondary" id="ar-csv-btn">⬇ CSV</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+      document.getElementById('ar-csv-btn')?.addEventListener('click', ()=>window.exportCSV('receivables-by-client', arClients, [
+        {key:'client',label:'Client'},{key:'total',label:'Outstanding',get:g=>g.total},{key:'oldest',label:'Oldest (days)',get:g=>g.oldest},{key:'count',label:'Open Projects',get:g=>g.count}]));
+    });
   } catch(err) {
     document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
   }
@@ -3309,23 +3332,17 @@ async function renderPartnersDept() {
     <div class="page-header">
       <h2>🤝 Partners</h2>
     </div>
-    <div class="subtab-bar" id="partners-dept-tabs">
-      <button class="subtab-btn active" data-sub="overview">Overview</button>
-      <button class="subtab-btn" data-sub="deals">💰 Deals</button>
-      <button class="subtab-btn" data-sub="tasks">Tasks</button>
-      <button class="subtab-btn" data-sub="quotes">Quotes</button>
-      <button class="subtab-btn" data-sub="quote-builder">Quote Builder</button>
-      <button class="subtab-btn" data-sub="activity">Activity</button>
-    </div>
+    ${window.chipTabs([
+      {key:'overview',label:'Overview'},
+      {key:'deals',label:'Deals',icon:'💰'},
+      {key:'tasks',label:'Tasks'},
+      {key:'quotes',label:'Quotes'},
+      {key:'quote-builder',label:'Quote Builder'},
+      {key:'activity',label:'Activity'},
+    ], 'overview', {cls:'partners-dept-tabs'})}
     <div id="partners-dept-content"><div class="loading-placeholder">Loading…</div></div>
   `;
-  c.querySelectorAll('#partners-dept-tabs .subtab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      c.querySelectorAll('#partners-dept-tabs .subtab-btn').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      loadPartnersDeptTab(btn.dataset.sub);
-    });
-  });
+  window.bindChipTabs(c.querySelector('.partners-dept-tabs'), (key)=>loadPartnersDeptTab(key));
   loadPartnersDeptTab('overview');
 }
 
@@ -5177,18 +5194,17 @@ async function renderCompany() {
   const canAdd = isPresident();
   c.innerHTML = `
     <div class="page-header"><h2>🏢 Company</h2></div>
-    <div class="subtab-bar" id="company-tabs" style="flex-wrap:wrap">
-      <button class="subtab-btn active" data-tab="overview">Overview</button>
-      <button class="subtab-btn" data-tab="memos">Memos</button>
-      <button class="subtab-btn" data-tab="policies">Policies</button>
-      <button class="subtab-btn" data-tab="downloads">Downloads</button>
-      <button class="subtab-btn" data-tab="handbook">Handbook</button>
-      <button class="subtab-btn" data-tab="bi-ops">BI Ops System</button>
-    </div>
+    ${window.chipTabs([
+      {key:'overview',label:'Overview'},
+      {key:'memos',label:'Memos'},
+      {key:'policies',label:'Policies'},
+      {key:'downloads',label:'Downloads'},
+      {key:'handbook',label:'Handbook'},
+      {key:'bi-ops',label:'BI Ops System'},
+    ], 'overview', {cls:'company-tabs'})}
     <div id="company-tab-content"></div>
   `;
   function switchCompanyTab(tab) {
-    c.querySelectorAll('.subtab-btn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
     const ct = document.getElementById('company-tab-content');
     if (tab==='overview')        renderCompanyOverview(ct, canAdd);
     else if (tab==='memos')      renderCompanyMemos(ct, isPresident() || currentRole==='manager'); // memos: managers are admins per firestore.rules + sidebar
@@ -5197,7 +5213,7 @@ async function renderCompany() {
     else if (tab==='handbook')   renderCompanyHandbook(ct, canAdd);
     else if (tab==='bi-ops')     renderCompanyBiOps(ct);
   }
-  c.querySelectorAll('.subtab-btn').forEach(b=>b.addEventListener('click',()=>switchCompanyTab(b.dataset.tab)));
+  window.bindChipTabs(c.querySelector('.company-tabs'), (key)=>switchCompanyTab(key));
   switchCompanyTab('overview');
 }
 
