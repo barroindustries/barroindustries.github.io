@@ -2237,7 +2237,7 @@ async function renderPresidentDashboard() {
   try {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
     const todayStr = bizDate();
-    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap, ledgerSnap, invSnap] = await Promise.all([
+    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap, ledgerSnap, invSnap, projList] = await Promise.all([
       dbCachedGet('users',         () => db.collection('users').get(),                                    30000),
       dbCachedGet('tasks-all',     () => db.collection('tasks').get(),                                    30000),
       dbCachedGet('submissions',   () => db.collection('submissions').get(),                              30000),
@@ -2248,6 +2248,7 @@ async function renderPresidentDashboard() {
       dbCachedGet('signups-pending',     () => safeGet(db.collection('signup_requests').where('status','==','pending')),       30000),
       dbCachedGet('ledger',              () => safeGet(db.collection('ledger')),                                                45000),
       dbCachedGet('inventory_items',     () => safeGet(db.collection('inventory_items')),                                       45000),
+      (window.Projects && window.Projects.listAll ? window.Projects.listAll() : Promise.resolve([])).catch(()=>[]),
     ]);
 
     const users       = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -2283,6 +2284,11 @@ async function renderPresidentDashboard() {
                   - prevLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
     // Inventory low-stock count
     const lowStock = invSnap.docs.map(d=>d.data()).filter(i=>(i.reorderLevel||0)>0 && (i.qty||0)<=(i.reorderLevel||0)).length;
+    // Receivables outstanding (+ 90+ day overdue) — owner cash-flow visibility.
+    const _dS = ts => { try { const t = ts && ts.toDate ? ts.toDate() : (ts && ts.seconds ? new Date(ts.seconds*1000) : null); return t?Math.floor((Date.now()-t.getTime())/86400000):0; } catch(_) { return 0; } };
+    const _openAR = (projList||[]).filter(p=>(p.arBalance||0)>0 && !['paid','cancelled','lost'].includes(String(p.stage||'').toLowerCase()));
+    const arOutstanding = _openAR.reduce((s,p)=>s+(p.arBalance||0),0);
+    const arOverdue = _openAR.filter(p=>_dS(p.createdAt)>90).reduce((s,p)=>s+(p.arBalance||0),0);
 
     // Sort open tasks: overdue first, then by priority (high→medium→low), then by dueDate
     const priorityOrder = { high:0, medium:1, low:2 };
@@ -2361,6 +2367,12 @@ async function renderPresidentDashboard() {
           <div class="kpi-label">Net Income (MTD)</div>
           <div class="kpi-value" style="font-size:15px;color:${mtdNet>=0?'var(--success)':'var(--danger)'}">₱${formatNum(mtdNet)}</div>
           <div style="margin-top:3px">${window.momDelta ? window.momDelta(mtdNet, prevNet, true) : ''}</div>
+        </div>
+        <div class="kpi-card ${arOverdue>0?'red':''}" style="cursor:pointer" onclick="navigateTo('dept:Finance')">
+          <div class="kpi-icon-wrap" style="background:rgba(155,168,255,0.12)"><i data-lucide="hand-coins" style="stroke:#9BA8FF;width:18px"></i></div>
+          <div class="kpi-label">A/R Outstanding</div>
+          <div class="kpi-value" style="font-size:15px">₱${formatNum(arOutstanding)}</div>
+          ${arOverdue>0?`<div class="kpi-sub" style="color:var(--danger)">₱${formatNum(arOverdue)} overdue 90+d</div>`:''}
         </div>
         <div class="kpi-card ${lowStock>0?'red':''}" style="cursor:pointer" onclick="navigateTo('inventory')">
           <div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="boxes" style="stroke:#FF453A;width:18px"></i></div>
