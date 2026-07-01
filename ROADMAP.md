@@ -257,8 +257,7 @@ Designed via a fan-out spec workflow, then implemented + adversarially reviewed 
 ### Medium priority
 6. **Accounting depth.** Current Reports is a category-based P&L + VAT *estimate*. For real filing add a
    chart of accounts, balance sheet, cash-flow, bank reconciliation, and BIR form generation (2550M/Q, 1601C, alphalist).
-7. **CRM lifecycle.** Client list is flat. Add lead→prospect→won/lost stages, follow-up reminders, and a
-   per-client history timeline (quotes, deals, files).
+7. **CRM lifecycle.** ✅ Mostly done (2026-07-01, v11.0.59) — clients now have **lead→prospect→won/lost stages** (colour-coded badges + stage filter chips with counts), **follow-up dates** with an overdue "N follow-ups due" nudge, and a **client edit** path (was create/delete-only). `CRM_STAGES` + `crmStageOf()` in departments.js; additive `stage`/`followUpDate`/`lastContact` fields (no rules change). _Remaining:_ a per-client history **timeline** (quotes + deals + files in one view), and rolling the stage into the Sales analytics win-rate.
 8. **HR depth.** 201 file / employee documents per person, onboarding checklist, structured performance-review cycle (KPI data exists but no review workflow).
 9. **Government Biddings.** ✅ In-app lifecycle shipped in V11 (detail/edit modal, status change, bucket move PhilGEPS↔Active↔Archive, delete). _Remaining:_ PhilGEPS structured entry/import, per-bid document checklist, deadline reminders.
 10. ✅ **Exports.** DONE — `window.exportCSV` (config.js; dependency-free, quote/comma/newline escaping, UTF-8 BOM, CSV-formula-injection guard that preserves numbers) + 10 "⬇ CSV" buttons: team/payroll, inventory, stock movements, job costs, ledger, expenses, audit log, leave, production orders, dept tasks. PDF stays on the existing print() paths (payslips, income statement, quotes). _Remaining: optional scheduled email digest._
