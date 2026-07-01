@@ -2657,13 +2657,14 @@ async function renderFinanceDashboard() {
     const mtd = todayStr.slice(0,7);
     const period = window._FIN_DASH_PERIOD || 'month';
     const plabel = finPeriodLabel(period);
-    const [usersSnap, ledgerSnap, expSnap, caSnap, invSnap, jobSnap] = await Promise.all([
+    const [usersSnap, ledgerSnap, expSnap, caSnap, invSnap, jobSnap, projList] = await Promise.all([
       dbCachedGet('users-payroll', fetchUsersWithPayroll, 30000),
       dbCachedGet('ledger',          () => safeGet(db.collection('ledger')),                                            45000),
       dbCachedGet('expenses',        () => safeGet(db.collection('expenses')),                                          45000),
       dbCachedGet('ca-pending',      () => safeGet(db.collection('cash_advances').where('status','==','pending')),      30000),
       dbCachedGet('inventory_items', () => safeGet(db.collection('inventory_items')),                                   45000),
       dbCachedGet('job_costs',       () => safeGet(db.collection('job_costs')),                                         45000),
+      (window.Projects && window.Projects.listAll ? window.Projects.listAll() : Promise.resolve([])).catch(()=>[]),
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const payrollGross = users.reduce((s,u)=>s+(u.salary||0)+(u.allowance||0),0);
@@ -2675,6 +2676,18 @@ async function renderFinanceDashboard() {
     const mtdIncome  = periodLedger.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0);
     const mtdExpense = periodLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
     const mtdNet = mtdIncome - mtdExpense;
+    // Previous calendar month net — for a month-over-month indicator on the net card.
+    const _pm = (()=>{ const [yy,mm]=mtd.split('-').map(Number); return mm===1?`${yy-1}-12`:`${yy}-${String(mm-1).padStart(2,'0')}`; })();
+    const _prevL = ledger.filter(e=>(e.date||'').slice(0,7)===_pm);
+    const prevNet = _prevL.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0)
+                  - _prevL.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+
+    // ── Receivables aging (open project AR by project age) ──
+    const _daysSince = ts => { try { const t = ts && ts.toDate ? ts.toDate() : (ts && ts.seconds ? new Date(ts.seconds*1000) : null); return t ? Math.floor((Date.now()-t.getTime())/86400000) : 0; } catch(_) { return 0; } };
+    const openAR = (projList||[]).filter(p=>(p.arBalance||0)>0 && !['paid','cancelled','lost'].includes(String(p.stage||'').toLowerCase()));
+    const aging = { cur:0, d3160:0, d6190:0, d90:0 };
+    openAR.forEach(p=>{ const d=_daysSince(p.createdAt); const a=p.arBalance||0; if(d<=30)aging.cur+=a; else if(d<=60)aging.d3160+=a; else if(d<=90)aging.d6190+=a; else aging.d90+=a; });
+    const arTotal = aging.cur+aging.d3160+aging.d6190+aging.d90;
 
     const expenses = expSnap.docs.map(d=>({id:d.id,...d.data()}));
     const pendingExp = expenses.filter(e=>e.status==='pending');
@@ -2699,10 +2712,25 @@ async function renderFinanceDashboard() {
       <div class="kpi-row">
         <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="trending-up" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Income (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdIncome)}</div></div>
         <div class="kpi-card red"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="trending-down" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Expense (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdExpense)}</div></div>
-        <div class="kpi-card ${mtdNet>=0?'green':'red'}"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="line-chart" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Net Income (${plabel})</div><div class="kpi-value" style="font-size:15px;color:${mtdNet>=0?'var(--success)':'var(--danger)'}">₱${formatNum(mtdNet)}</div></div>
+        <div class="kpi-card ${mtdNet>=0?'green':'red'}"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="line-chart" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Net Income (${plabel})</div><div class="kpi-value" style="font-size:15px;color:${mtdNet>=0?'var(--success)':'var(--danger)'}">₱${formatNum(mtdNet)}</div>${period==='month'&&window.momDelta?`<div style="margin-top:2px">${window.momDelta(mtdNet, prevNet, true)}</div>`:''}</div>
         <div class="kpi-card warn"><div class="kpi-icon-wrap" style="background:rgba(255,170,0,0.12)"><i data-lucide="banknote" style="stroke:#FFAA00;width:18px"></i></div><div class="kpi-label">Payroll (run-rate)</div><div class="kpi-value" style="font-size:15px">₱${formatNum(payrollNet)}</div><div class="kpi-sub">${users.length} staff · already in Expense</div></div>
         <div class="kpi-card ${pendingExpTotal>0?'accent':''}" style="cursor:pointer" onclick="navigateTo('cash-advances')"><div class="kpi-icon-wrap" style="background:rgba(155,168,255,0.12)"><i data-lucide="receipt" style="stroke:#9BA8FF;width:18px"></i></div><div class="kpi-label">Payables (pending)</div><div class="kpi-value" style="font-size:15px">₱${formatNum(pendingExpTotal)}</div></div>
         <div class="kpi-card ${lowStock>0?'red':''}" style="cursor:pointer" onclick="navigateTo('inventory')"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="boxes" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Low Stock</div><div class="kpi-value">${lowStock}</div></div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3>📥 Receivables Aging <span style="font-size:11px;color:var(--text-muted);font-weight:400">· by project age</span></h3><span style="font-weight:800">₱${formatNum(arTotal)}</span></div>
+        <div class="card-body">
+          ${arTotal===0?'<div class="empty-state" style="padding:16px"><p>No open receivables 🎉</p></div>':`
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px">
+            ${[['Current ≤30d',aging.cur,'var(--success)'],['31–60d',aging.d3160,'#FFAA00'],['61–90d',aging.d6190,'#FF9500'],['90+ d',aging.d90,'var(--danger)']].map(([lbl,val,col])=>`
+              <div style="background:var(--surface2);border-radius:10px;padding:10px 12px">
+                <div style="font-size:11px;color:var(--text-muted)">${lbl}</div>
+                <div style="font-size:15px;font-weight:800;color:${col}">₱${formatNum(val)}</div>
+                <div style="font-size:10px;color:var(--text-muted)">${arTotal?Math.round(val/arTotal*100):0}%</div>
+              </div>`).join('')}
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:10px">${openAR.length} open project${openAR.length===1?'':'s'} with a balance. Chase the <strong style="color:var(--danger)">90+ day</strong> bucket first.</div>`}
+        </div>
       </div>
       <div class="dashboard-grid">
         <div class="card">

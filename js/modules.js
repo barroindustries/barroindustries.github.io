@@ -2008,12 +2008,13 @@ async function renderPresidentMessageCard() {
           }
         }
         else { data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); const _r=await db.collection('inventory_items').add(data); window.logAudit&&window.logAudit('create','inventory_item',_r.id,{name,qty:data.qty}); }
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
         closeModal(); Notifs.showToast('Item saved'); onSaved&&onSaved();
       }catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
     });
     document.getElementById('iv-del')?.addEventListener('click', async ()=>{
       if(!confirm('Delete this item?')) return;
-      try{ await db.collection('inventory_items').doc(item.id).delete(); window.logAudit&&window.logAudit('delete','inventory_item',item.id,{name:item.name||''}); closeModal(); Notifs.showToast('Item deleted'); onSaved&&onSaved(); }
+      try{ await db.collection('inventory_items').doc(item.id).delete(); window.logAudit&&window.logAudit('delete','inventory_item',item.id,{name:item.name||''}); if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items'); closeModal(); Notifs.showToast('Item deleted'); onSaved&&onSaved(); }
       catch(ex){ Notifs.showToast('Delete failed','error'); }
     });
   }
@@ -2040,6 +2041,7 @@ async function renderPresidentMessageCard() {
           by:currentUser.uid, byName:userProfile?.displayName||currentUser.email,
           date:bizDate(), createdAt:firebase.firestore.FieldValue.serverTimestamp() });
         window.logAudit&&window.logAudit('create','stock_movement',item.id,{itemName:item.name||'',type,qty,delta});
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
         closeModal(); Notifs.showToast('Stock updated'); onSaved&&onSaved();
       }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
     });

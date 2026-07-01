@@ -2604,6 +2604,20 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     // 2. Auto-write per-employee ledger debit entries (Payroll Expense)
     const monthLabel = new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'});
     let totalNetPay = 0;
+    // Pre-fetch this month's existing payroll ledger rows in ONE range query
+    // (refNumber = PAY-<month>-<uid>) instead of a per-employee existence check.
+    // Same upsert result; the range covers exactly the PAY-<month>-* refs so no
+    // duplicate is possible. If the prefetch fails we fall back to the original
+    // per-employee query below, so there is no new duplicate risk.
+    const _payLedgerByRef = {};
+    let _prefetchOK = true;
+    try {
+      const _exSnap = await db.collection('ledger')
+        .where('refNumber','>=',`PAY-${month}-`)
+        .where('refNumber','<', `PAY-${month}-` + String.fromCharCode(0xf8ff))
+        .get();
+      _exSnap.docs.forEach(d => { const r = d.data().refNumber; if (r) _payLedgerByRef[r] = d.ref; });
+    } catch(_) { _prefetchOK = false; }
     for (const u of employees) {
       const base   = u.salary||0, allow = u.allowance||0;
       const caAdv  = (_caOverrideByUser[u.id]?.amount ?? _caByUser[u.id]) || 0;
@@ -2611,8 +2625,14 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       const empNet = base + allow - deduct - caAdv;
       totalNetPay += empNet;
       const ledgerRef = `PAY-${month}-${u.id}`;
-      // Upsert so re-generating the same month doesn't duplicate
-      const existing = await db.collection('ledger').where('refNumber','==',ledgerRef).limit(1).get().catch(()=>({docs:[]}));
+      // Upsert so re-generating the same month doesn't duplicate.
+      let existingRef = null;
+      if (_prefetchOK) {
+        existingRef = _payLedgerByRef[ledgerRef] || null;
+      } else {
+        const _ex = await db.collection('ledger').where('refNumber','==',ledgerRef).limit(1).get().catch(()=>({docs:[]}));
+        existingRef = _ex.docs.length ? _ex.docs[0].ref : null;
+      }
       const entry = {
         date:        month + '-01',
         type:        'debit',
@@ -11313,7 +11333,9 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
   let projs = [];
   let projOpts = '<option value="">— None —</option>';
   try {
-    const psnap = await db.collection('job_projects').get();
+    // Dropdown population only (the actual stock deduction on consume uses atomic
+    // increment()), so a short cache is safe and saves a full read per modal open.
+    const psnap = await dbCachedGet('job_projects', ()=>db.collection('job_projects').get(), 30000);
     projs = psnap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>!['paid','cancelled'].includes(p.stage)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     const selP = e.projectId || prefillProjectId || '';
     projOpts += projs.map(p=>`<option value="${p.id}" data-client="${escHtml(p.clientName||'')}" ${selP===p.id?'selected':''}>${escHtml(p.projectNo||'')} — ${escHtml(p.clientName||p.name||'')}</option>`).join('');
@@ -11321,7 +11343,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
   // Load raw materials for the consumption picker
   let invItems = [];
   try {
-    const isnap = await db.collection('inventory_items').get();
+    const isnap = await dbCachedGet('inventory_items', ()=>db.collection('inventory_items').get(), 30000);
     invItems = isnap.docs.map(d=>({id:d.id,...d.data()})).filter(i=>(i.kind||'material')==='material').sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   } catch(_) {}
   const matItemOpts = (sel='') => '<option value="">— Select material —</option>' + invItems.map(i=>`<option value="${i.id}" data-name="${escHtml(i.name||'')}" data-cost="${Number(i.unitCost)||0}" ${sel===i.id?'selected':''}>${escHtml(i.name||'')} (${Number(i.qty||0).toLocaleString('en-PH')} ${escHtml(i.unit||'')} @ ₱${fmt(i.unitCost||0)})</option>`).join('');
