@@ -5503,7 +5503,7 @@ async function renderCompanyMemos(ct, canAdd) {
     <div id="memos-list"><div class="loading-placeholder">Loading…</div></div>
   `;
   const me = currentUser?.uid;
-  const snap = await db.collection('memos').orderBy('createdAt','desc').get();
+  const snap = await db.collection('memos').orderBy('createdAt','desc').get().catch(()=>({docs:[],empty:true}));
   const memos = snap.docs.map(d=>({id:d.id,...d.data()}));
   const list = document.getElementById('memos-list');
 
@@ -5839,7 +5839,7 @@ async function renderCompanyPolicies(ct, canAdd) {
     </div>
     <div class="policy-grid" id="policy-grid"><div class="loading-placeholder">Loading…</div></div>
   `;
-  const snap = await db.collection('policies').orderBy('createdAt','desc').get();
+  const snap = await db.collection('policies').orderBy('createdAt','desc').get().catch(()=>({docs:[],empty:true}));
   const policies = snap.docs.map(d=>({id:d.id,...d.data()}));
   const grid = document.getElementById('policy-grid');
   if (!policies.length) {
@@ -5888,7 +5888,7 @@ async function renderCompanyDownloads(ct, canAdd) {
     </div>
     <div id="downloads-list"><div class="loading-placeholder">Loading…</div></div>
   `;
-  const snap = await db.collection('resources').orderBy('createdAt','desc').get();
+  const snap = await db.collection('resources').orderBy('createdAt','desc').get().catch(()=>({docs:[],empty:true}));
   const docs = snap.docs.map(d=>({id:d.id,...d.data()}));
   const list = document.getElementById('downloads-list');
 
@@ -6287,7 +6287,7 @@ async function renderAnalytics() {
         <tbody>${salesQuotes.slice(0,20).map(q=>{
           const d=q.createdAt?.toDate?q.createdAt.toDate():new Date(q.createdAt||0);
           const statusColor={draft:'#636366',sent:'#0A84FF',accepted:'#30D158',rejected:'#FF453A'}[q.status]||'#636366';
-          return `<tr><td>${escHtml(q.clientName||q.client||'—')}</td><td>₱${fmt(q.total||q.amount||0)}</td><td><span style="color:${statusColor};font-weight:600">${q.status||'draft'}</span></td><td>${d.toLocaleDateString()}</td></tr>`;
+          return `<tr><td>${escHtml(q.clientName||q.client||'—')}</td><td>₱${fmt(q.total||q.amount||0)}</td><td><span style="color:${statusColor};font-weight:600">${q.status||'draft'}</span></td><td>${d.toLocaleDateString('en-PH')}</td></tr>`;
         }).join('')}</tbody>
       </table></div></div></div>
     `;
@@ -6452,7 +6452,7 @@ async function renderAnalytics() {
         <tbody>${govBids.slice(0,20).map(b=>{
           const d=b.createdAt?.toDate?b.createdAt.toDate():new Date(b.createdAt||0);
           const sc={won:'#30D158',lost:'#FF453A',pending:'#FF9F0A',submitted:'#0A84FF'}[b.status]||'#636366';
-          return `<tr><td>${escHtml(b.projectName||b.title||'—')}</td><td>${escHtml(b.agency||'—')}</td><td>₱${fmt(b.bidAmount||b.contractAmount||0)}</td><td><span style="color:${sc};font-weight:600">${b.status||'pending'}</span></td><td>${d.toLocaleDateString()}</td></tr>`;
+          return `<tr><td>${escHtml(b.projectName||b.title||'—')}</td><td>${escHtml(b.agency||'—')}</td><td>₱${fmt(b.bidAmount||b.contractAmount||0)}</td><td><span style="color:${sc};font-weight:600">${b.status||'pending'}</span></td><td>${d.toLocaleDateString('en-PH')}</td></tr>`;
         }).join('')}</tbody>
       </table></div>`:`<p style="color:var(--text-muted);padding:16px;text-align:center">No bidding records found. Add records to the <code>gov_biddings</code> collection in Firestore.</p>`}</div></div>
     `;
@@ -7196,7 +7196,7 @@ async function renderSuggestionBox(wrap) {
 async function loadSuggestions() {
   const list = document.getElementById('sug-list');
   if (!list) return;
-  const snap = await db.collection('suggestions').orderBy('createdAt','desc').limit(50).get();
+  const snap = await db.collection('suggestions').orderBy('createdAt','desc').limit(50).get().catch(()=>({docs:[],empty:true}));
   if (snap.empty) { list.innerHTML = '<div class="empty-state" style="padding:24px 0">No suggestions yet.</div>'; return; }
   list.innerHTML = snap.docs.map(d => {
     const s = d.data();

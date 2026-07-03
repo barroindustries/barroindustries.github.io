@@ -1232,7 +1232,7 @@ async function loadSubsList(currentUser, currentRole, currentDept) {
       <div class="item-meta">
         <span class="badge badge-gray">${escHtml(s.type||'General')}</span>
         ${s.submittedByName?`<span>👤 ${escHtml(s.submittedByName)}</span>`:''}
-        ${s.createdAt?`<span>📅 ${new Date(s.createdAt.toDate()).toLocaleDateString()}</span>`:''}
+        ${s.createdAt?`<span>📅 ${new Date(s.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
       </div>
     </div>
   `).join('');
@@ -5812,7 +5812,7 @@ function projectPaid(p) {
 }
 
 async function renderProjects(container, currentUser, currentRole) {
-  const snap = await db.collection('projects').orderBy('createdAt','desc').get();
+  const snap = await db.collection('projects').orderBy('createdAt','desc').get().catch(()=>({docs:[],empty:true}));
   const projects = snap.docs.map(d => ({id:d.id,...d.data()}));
   const canAdd = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
   const canBill = ['president','owner','manager','finance'].includes(currentRole) || canEditDept('Finance');
@@ -8743,7 +8743,7 @@ function renderQuoteList(container, currentUser, currentRole, brand) {
         <div class="item-meta">
           <span>💰 ₱${fmt(q.total)}</span>
           <span>👤 ${escHtml(q.agentName||'—')}</span>
-          ${q.createdAt?`<span>📅 ${new Date(q.createdAt.toDate()).toLocaleDateString()}</span>`:''}
+          ${q.createdAt?`<span>📅 ${new Date(q.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
         </div>
       </div>`).join('')}</div>`;
     wrap.querySelectorAll('.quote-item').forEach(item => {
@@ -10233,7 +10233,7 @@ function bindFileCollection(id, currentUser, dept, subfolder) {
         </div>
         <div class="item-meta">
           <span>👤 ${escHtml(f.uploadedByName||'—')}</span>
-          ${f.createdAt?`<span>${new Date(f.createdAt.toDate()).toLocaleDateString()}</span>`:''}
+          ${f.createdAt?`<span>${new Date(f.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
           ${f.deleteRequested?`<span style="color:var(--danger);font-size:11px;font-weight:600">⏳ Delete requested</span>`:''}
         </div>
       </div>`).join('');
