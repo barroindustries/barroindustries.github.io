@@ -2096,7 +2096,17 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     db.collection('salary_history').orderBy('month','desc').limit(200).get().catch(()=>({docs:[]})),
     db.collection('payroll_delete_requests').where('status','==','pending').get().catch(()=>({docs:[]}))
   ]);
-  const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>u.role!=='partner');
+  // Exclude ALL external partners from the monthly run — they are not Barro
+  // payroll. A partner can present as role 'partner', a Brilliant-Steel-only
+  // member (the partner company), OR a user titled "Partner" whose role is still
+  // 'employee'/'agent' (which is why the old role-only filter let them through).
+  const isExternalPartner = (u) => {
+    if (u.role === 'partner') return true;
+    if (typeof u.title === 'string' && u.title.trim().toLowerCase() === 'partner') return true;
+    const depts = Array.isArray(u.departments) ? u.departments : (u.department ? [u.department] : []);
+    return depts.length === 1 && depts[0] === 'Brilliant Steel';
+  };
+  const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>!isExternalPartner(u));
   // Production-class staff are paid WEEKLY via Worker Payslips (HR → Payslips),
   // NOT in the monthly run. Excluding them here is the single-source fix that
   // stops a production worker being paid both weekly AND monthly (double pay).
