@@ -3689,6 +3689,14 @@ html.light .item-card, html.theme-pink .item-card, html.theme-grey .item-card { 
 html.light .subtab-bar, html.theme-pink .subtab-bar, html.theme-grey .subtab-bar { background: rgba(0,0,0,0.04);       border-color: rgba(0,0,0,0.08); }
 html.light .login-role-card, html.theme-pink .login-role-card, html.theme-grey .login-role-card { background: rgba(255,255,255,0.55); border-color: rgba(0,0,0,0.08); }
 html.light .btn-secondary, html.theme-pink .btn-secondary, html.theme-grey .btn-secondary { background: rgba(0,0,0,0.04);       border-color: rgba(0,0,0,0.10); }
+/* Tinted action buttons: the dark-theme light-green / light-red text is
+   unreadable on a pale tint in light mode — use darker, WCAG-legible ink. */
+html.light .btn-success, html.theme-pink .btn-success, html.theme-grey .btn-success { background: rgba(16,124,65,0.10); color: #0E6B33; border-color: rgba(16,124,65,0.32); }
+html.light .btn-success:hover, html.theme-pink .btn-success:hover, html.theme-grey .btn-success:hover { background: rgba(16,124,65,0.18); }
+html.light .btn-danger, html.theme-pink .btn-danger, html.theme-grey .btn-danger { background: rgba(200,32,26,0.09); color: #B42318; border-color: rgba(200,32,26,0.30); }
+html.light .btn-danger:hover, html.theme-pink .btn-danger:hover, html.theme-grey .btn-danger:hover { background: rgba(200,32,26,0.16); }
+/* btn-link on light: light-blue is too faint on white — use the brand accent. */
+html.light .btn-link, html.theme-pink .btn-link, html.theme-grey .btn-link { color: var(--primary); }
 html.light .quick-action-btn, html.theme-pink .quick-action-btn, html.theme-grey .quick-action-btn { background: rgba(255,255,255,0.55); border-color: rgba(0,0,0,0.09); }
 html.light .dept-card, html.theme-pink .dept-card, html.theme-grey .dept-card { background: rgba(255,255,255,0.55); border-color: rgba(0,0,0,0.08); }
 html.light .policy-card, html.theme-pink .policy-card, html.theme-grey .policy-card { background: rgba(255,255,255,0.55); border-color: rgba(0,0,0,0.08); }
