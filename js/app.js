@@ -314,7 +314,7 @@ function showApp() {
   // Init Lucide icons for static topbar elements
   if (window.lucide) lucide.createIcons();
   // Apply correct theme toggle icon
-  _applyThemeIcon(localStorage.getItem('bi-theme') || 'dark');
+  _applyThemeIcon(localStorage.getItem('bi-theme') || 'office');
   // Reset any iOS zoom that happened during login input
   _resetViewportZoom();
   // Pull-to-refresh (init once)
@@ -777,13 +777,13 @@ const THEMES = {
 };
 
 function initTheme() {
-  // Default to the dark "Obsidian" theme (matches the splash/login/PWA chrome and
-  // the :root design system). Users who already picked a theme keep their choice.
-  setTheme(localStorage.getItem('bi-theme') || 'dark', false);
+  // Default to the light "Office" (Fluent) theme — clean white, office-friendly.
+  // Users who already picked a theme keep their choice.
+  setTheme(localStorage.getItem('bi-theme') || 'office', false);
 }
 
 function setTheme(theme, persist = true) {
-  if (!THEMES[theme]) theme = 'dark';
+  if (!THEMES[theme]) theme = 'office';
   const html = document.documentElement;
   Object.values(THEMES).forEach(t => { if (t.cls) t.cls.split(' ').forEach(c => html.classList.remove(c)); });
   const cls = THEMES[theme].cls;
@@ -793,7 +793,7 @@ function setTheme(theme, persist = true) {
 }
 
 function getTheme() {
-  return localStorage.getItem('bi-theme') || 'dark';
+  return localStorage.getItem('bi-theme') || 'office';
 }
 
 function toggleTheme() {
@@ -1883,7 +1883,7 @@ function navigateTo(page) {
     case 'bs-quotations':    renderBrilliantSteel(currentUser, currentRole, 'Quotations Summary'); break;
     case 'bs-clients':       renderBrilliantSteel(currentUser, currentRole, 'Client Data'); break;
     case 'bs-files':         renderBrilliantSteel(currentUser, currentRole, 'Files'); break;
-    case 'bk-quotations':    window.renderSales?.(currentUser, currentRole, 'Quotations'); break;
+    case 'bk-quotations':    window.renderSales?.(currentUser, currentRole, 'Quotes'); break;
     case 'help':             renderHelp(); break;
     case 'sops':             renderSOPs(); break;
     // ── New modules ──
@@ -7063,12 +7063,19 @@ function closeProfileDrawer() {
 }
 
 // ── Modal ─────────────────────────────────────────
-window.openModal=function(title,bodyHTML,footerHTML=''){
+// opts.size: 'wide' (~920px) or 'full' (up to 1200px / 94dvh) for content-heavy
+// popups so they don't render as a cramped small dialog. Default stays compact.
+window.openModal=function(title,bodyHTML,footerHTML='',opts){
+  opts = opts || {};
   document.getElementById('modal-title').textContent=title;
   document.getElementById('modal-body').innerHTML=bodyHTML;
   const footer=document.getElementById('modal-footer');
   footer.innerHTML=footerHTML;
   footer.classList.toggle('hidden',!footerHTML);
+  const box=document.getElementById('modal-box');
+  if(box){ box.classList.remove('modal-wide','modal-full');
+    if(opts.size==='wide') box.classList.add('modal-wide');
+    else if(opts.size==='full') box.classList.add('modal-full'); }
   document.getElementById('modal-overlay').classList.remove('hidden');
   document.getElementById('modal-overlay').classList.add('active');
 };

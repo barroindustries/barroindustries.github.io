@@ -4,6 +4,25 @@ _Last updated: 2026-07-01 — base version **v11.0.51**, cache `bi-ops-v136` (bo
 
 ---
 
+## 🆕 SESSION 2026-07-08b — KPI 5th-gate, payroll safety, roomier modals, client order-tracking link
+
+- **Employee of the Month → revealed & awarded on the 5th.** `renderEomBanner`/`computeEomStandings` (modules.js) now score a **completed** month, not a live running total: from the 5th we show **last month's** finalised winner, before the 5th the month before (matches the payroll "finalise by the 5th" cutoff). New `ymShift()` helper; `computeEomStandings(users, monthStr)` scores the whole past month (attendance range = full month, workdays = whole month). Standings modal + citation reworded ("Final standings for June 2026 · revealed & awarded on the 5th").
+- **Payroll — safe cleanup (no salary-math change).** Production-class staff (`payClass==='production'`) are **excluded from the monthly run** (they're paid weekly via Worker Payslips) — closes the double-pay hole where a production worker appeared in both. A note on the Payroll screen explains the exclusion + count. (Deeper unification still deferred per the NEXT-UP note.)
+- **Roomier popups.** `openModal(title, body, footer, {size})` gains `wide` (~920px) / `full` (≤1200px) sizes + default bumped 560→620px (styles.css). Applied `full` to the payslip generator and `wide` to Create Sales Order / Edit Payroll / Edit Payslip / EOM standings — the most cramped forms.
+- **🆕 Public client order-tracking link.** New `track.html` (standalone, light Office theme, mobile-first) reads `order_tracking/{token}?t=…` and shows a client-safe status timeline (Confirmed → Production → QC → Ready → Delivered) + order details + payment/balance — **no login**. Token = unguessable Firestore auto-id. New `order_tracking` rule: **public `get`, `list:false`**, internal (non-partner) create/update, admin delete. Generated on Sales-Order creation (downpayment) in `openSalesOrderModal`, stamped onto the order + job_project, surfaced via a copy-link modal (`showOrderTrackModal`). Kept live by `syncOrderTracking()` wired into record-sale (paid/balance), production handoff, `advanceProjectStage`, and the production-order advance. Added to monthly-backup EXPORTS + SW precache.
+- **Custom domain:** `CNAME` file added = `barroindustires-operatingsystem.ravenmails.com` (⚠️ **spelling: "barroindustires" is missing an 'r'** — verify before pointing DNS). Whole app will serve from it once the DNS CNAME → `barroindustries.github.io` is created.
+- **⚠️ Deploy:** `git push` (app + `track.html` + `CNAME`) **AND `firebase deploy --only firestore:rules`** (the new `order_tracking` rule — until then the tracker returns `permission-denied` and link generation is best-effort/no-op). Verified in preview: office theme intact, no console errors, all new globals present, `track.html` renders + Firebase inits (correctly `permission-denied` pre-deploy), no mobile overflow.
+
+---
+
+## 🆕 SESSION 2026-07-08 — Sales declutter + Office light default
+
+- **Default theme is now Office (Fluent light).** `initTheme`/`getTheme`/`setTheme` fallback + the topbar icon default flipped `dark → office` in `js/app.js`; `<meta theme-color>` → `#FAF9F8`. Users who already picked a theme keep it. (Reverses the V11 "dark default" call per owner request for a light, office-like default.) Verified in preview: `html.light theme-office`, `#FAF9F8` canvas, Segoe UI, no console errors, no mobile overflow at 375px.
+- **Sales consolidated 10 tabs → 6:** `Clients · Quotes · Partner · Files · SOP · Tasks` (`renderSales`/`loadSalesContent`). The three quote entry points collapse into **Quotes** (＋ New Quotation opens the builder · **Quick Estimate** · **Records** with revisions/reopen/sales-order/delete-with-approval untouched); the two partner tabs into **Partner** (Quotes · Files); the two file collections into **Files** (Work Plans · Proposals). New scoped `salesSubNav()` inner chip toggle (binds only its own bar — no cross-fire with the outer Sales chips or a sub-view's chips). Legacy deep-link keys aliased; `bk-quotations` route now passes `Quotes`. `DEFAULT_SALES_SOP` tab refs updated to the new nav.
+- **Not pushed/deployed** — local only; no rules changed. `git push` ships it.
+
+---
+
 ## 🆕 SESSION 2026-07-01 — NEXT-UP backlog sweep (v11.0.47 → v11.0.51)
 
 Worked the whole **🎯 NEXT UP** backlog. **⚠️ Not yet pushed/deployed at time of writing** — commits are local; `git push` ships the app, and `firestore.rules` needs a separate `firebase deploy --only firestore:rules` (a NEW `pay_runs` rule was added).

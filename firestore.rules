@@ -791,6 +791,21 @@ service cloud.firestore {
       allow delete: if isAuth() && isAdmin();
     }
 
+    // ── Public order tracking (client-facing, PUBLIC read by unguessable token) ──
+    // Each doc id is a random 20-char Firestore auto-id acting as an unguessable
+    // access token — the shareable client link is /track.html?t={id}. `get` is
+    // PUBLIC (no auth) so a client can open the link without an account; `list` is
+    // DENIED so nobody can enumerate all orders. Only client-SAFE fields live here
+    // (status, dates, amounts the client already knows) — never internal cost/margin.
+    // Internal non-partner staff create/update it; admins may delete.
+    match /order_tracking/{token} {
+      allow get:    if true;
+      allow list:   if false;
+      allow create: if isAuth() && getRole() != 'partner';
+      allow update: if isAuth() && getRole() != 'partner';
+      allow delete: if isAuth() && isAdmin();
+    }
+
     // ── Leave balances (remaining day counters per user) ─
     // Kept in their own collection (NOT on the users doc) so finance can set
     // balances without being granted broad write access to user profiles.

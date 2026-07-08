@@ -517,15 +517,29 @@ function eomMonthLabel(ym) {
 // and only the President can write settings/*. So the President's Team page
 // computes the live standings and persists the winner to settings/employeeOfMonth;
 // everyone else just reads that one doc (cheap, and consistent for all viewers).
+// Shift a "YYYY-MM" string by `delta` months (handles year rollover).
+function ymShift(ym, delta) {
+  let y = +ym.slice(0, 4), m = +ym.slice(5, 7) - 1 + delta;
+  y += Math.floor(m / 12); m = ((m % 12) + 12) % 12;
+  return `${y}-${String(m + 1).padStart(2, '0')}`;
+}
+
 async function renderEomBanner(users, canManage) {
   const host = document.getElementById('eom-banner');
   if (!host) return;
-  const month = window.bizDate().slice(0, 7);
+  // Employee of the Month is finalised & revealed on the 5th of each month
+  // (matches the payroll "finalise by the 5th" cutoff, by which KPI + attendance
+  // + grades have settled). From the 5th we show LAST month's winner; before the
+  // 5th that month isn't settled yet, so we show the month before it. The award is
+  // always a COMPLETED month — never a live mid-month running total.
+  const _today = window.bizDate();
+  const month = ymShift(_today.slice(0, 7), (+_today.slice(8, 10) >= 5) ? -1 : -2);
+  const monthLbl = eomMonthLabel(month) || month;
 
   // ── President: compute live standings and persist the winner ──
   if (canManage) {
     let standings = [];
-    try { standings = await computeEomStandings(users); } catch (e) { standings = []; }
+    try { standings = await computeEomStandings(users, month); } catch (e) { standings = []; }
     const winner = standings[0] || null;
 
     if (!winner) {
@@ -533,8 +547,8 @@ async function renderEomBanner(users, canManage) {
         <div class="eom-banner eom-banner--empty">
           <div class="eom-empty-icon">🏆</div>
           <div class="eom-empty-text">
-            <strong>Employee of the Month</strong>
-            <span>Auto-selected from KPI &amp; attendance. Standings appear once the team logs activity this month.</span>
+            <strong>Employee of the Month · ${escHtml(monthLbl)}</strong>
+            <span>Auto-selected from KPI &amp; attendance, finalised and revealed on the 5th. No eligible activity recorded for ${escHtml(monthLbl)}.</span>
           </div>
           <button class="btn-secondary btn-sm" id="eom-standings-btn">📊 Standings</button>
         </div>`;
@@ -627,11 +641,17 @@ function renderEomCard(host, data, users, canManage, standings, month) {
 //   taskKPI    = completed / assigned tasks  (neutral 0.5 when none assigned)
 //   attendance = attendance points / workdays elapsed this month
 //   grade      = President grade /10  (neutral 0.5 when ungraded)
-async function computeEomStandings(users) {
+async function computeEomStandings(users, monthStr) {
   const todayStr = window.bizDate();
-  const y = +todayStr.slice(0, 4), m = +todayStr.slice(5, 7) - 1, d = +todayStr.slice(8, 10);
-  const monthStart = `${todayStr.slice(0, 7)}-01`;
-  const workDaysElapsed = (typeof countWorkDays === 'function') ? countWorkDays(y, m, d) : Math.max(1, d);
+  const month = monthStr || todayStr.slice(0, 7);
+  const isPastMonth = month < todayStr.slice(0, 7);
+  const y = +month.slice(0, 4), m = +month.slice(5, 7) - 1;
+  const monthStart = `${month}-01`;
+  // For a completed month, score the WHOLE month; for the (rare) current-month
+  // fallback, score through today.
+  const lastDom = isPastMonth ? new Date(y, m + 1, 0).getDate() : +todayStr.slice(8, 10);
+  const rangeEndStr = isPastMonth ? `${month}-${String(lastDom).padStart(2, '0')}` : todayStr;
+  const workDaysElapsed = (typeof countWorkDays === 'function') ? countWorkDays(y, m, lastDom) : Math.max(1, lastDom);
 
   const candidates = users.filter(u =>
     u.role !== 'partner' && u.role !== 'president'
@@ -662,7 +682,7 @@ async function computeEomStandings(users) {
     try {
       const snap = await db.collection('attendance').doc(uid).collection('records')
         .where(firebase.firestore.FieldPath.documentId(), '>=', monthStart)
-        .where(firebase.firestore.FieldPath.documentId(), '<=', todayStr).get();
+        .where(firebase.firestore.FieldPath.documentId(), '<=', rangeEndStr).get();
       attDays = snap.size;
       const total = snap.docs.reduce((s, doc) => s + recScore(doc.data()), 0);
       attScore = Math.min(1, total / workDaysElapsed);
@@ -692,8 +712,9 @@ async function computeEomStandings(users) {
   eligible.sort((a, b) =>
     b.score - a.score || b.attScore - a.attScore || b.taskScore - a.taskScore
     || (a.displayName || '').localeCompare(b.displayName || ''));
+  const monthLbl = eomMonthLabel(month) || month;
   eligible.forEach(r => {
-    r.citation = `Top performer this month — ${r.attPct}% attendance · ${r.taskPct}% task KPI`
+    r.citation = `Top performer for ${monthLbl} — ${r.attPct}% attendance · ${r.taskPct}% task KPI`
       + (r.doneTasks > 0 ? ` · ${r.doneTasks} task${r.doneTasks !== 1 ? 's' : ''} done` : '') + '.';
   });
   return eligible;
@@ -734,9 +755,9 @@ function openEomStandingsModal(standings, month) {
     : `<button class="btn-primary" id="eom-announce-btn">📣 Announce ${escHtml(firstName)}</button><button class="btn-secondary" onclick="closeModal()">Close</button>`;
 
   openModal('📊 Employee of the Month — Standings', `
-    <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">System-ranked by task KPI (50%), attendance (40%) and performance grade (10%) — updated live for ${escHtml(eomMonthLabel(month) || 'this month')}.</p>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Final standings for <strong>${escHtml(eomMonthLabel(month) || 'last month')}</strong> — ranked by task KPI (50%), attendance (40%) and performance grade (10%). Revealed &amp; awarded on the 5th.</p>
     <div>${rows}</div>
-  `, footer);
+  `, footer, {size:'wide'});
 
   document.getElementById('eom-announce-btn')?.addEventListener('click', async () => {
     try {

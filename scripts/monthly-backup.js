@@ -200,6 +200,7 @@ const EXPORTS = [
   // ── Projects (job lifecycle + design board) ──
   { name:'job_projects',              filename:'job_projects',              dateField:null },
   { name:'projects',                  filename:'projects',                  dateField:null },
+  { name:'order_tracking',            filename:'order_tracking',            dateField:null },
 
   // ── Purchasing ──
   { name:'purchase_requisitions',     filename:'purchase_requisitions',     dateField:null },

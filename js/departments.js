@@ -2096,8 +2096,12 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     db.collection('salary_history').orderBy('month','desc').limit(200).get().catch(()=>({docs:[]})),
     db.collection('payroll_delete_requests').where('status','==','pending').get().catch(()=>({docs:[]}))
   ]);
-  const employees = usersSnap.docs.map(d=>({id:d.id,...d.data()}))
-    .filter(u=>u.role!=='partner')
+  const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>u.role!=='partner');
+  // Production-class staff are paid WEEKLY via Worker Payslips (HR → Payslips),
+  // NOT in the monthly run. Excluding them here is the single-source fix that
+  // stops a production worker being paid both weekly AND monthly (double pay).
+  const productionStaff = allStaff.filter(u=>u.payClass==='production');
+  const employees = allStaff.filter(u=>u.payClass!=='production')
     .sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
   const history   = histSnap.docs.map(d=>({id:d.id,...d.data()}));
   const delReqs   = delReqSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -2120,6 +2124,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       </div>
     </div>
     <div id="pay-run-strip" style="margin-bottom:14px"></div>
+    ${productionStaff.length?`<div style="font-size:12px;color:var(--text-2);background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:12px">🏭 <strong>${productionStaff.length}</strong> production-class worker${productionStaff.length!==1?'s are':' is'} paid <strong>weekly</strong> via Worker Payslips (HR → Payslips) and ${productionStaff.length!==1?'are':'is'} excluded from this monthly run to avoid double payment.</div>`:''}
     <div class="card">
       <div class="card-body" style="padding:0">
         <div class="table-wrap">
@@ -2473,7 +2478,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               placeholder="Leave blank = deduct full ₱${fmt(caBalance)}" inputmode="decimal"/>
             <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Enter a partial amount to defer the rest to next month. Clear field to revert to full balance.</div>
           </div>` : ''}
-        `, `<button class="btn-primary" id="save-ep-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+        `, `<button class="btn-primary" id="save-ep-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`, {size:'wide'});
 
         document.getElementById('save-ep-btn').addEventListener('click', async () => {
           // All pay — base, allowance, and government deductions — lives in the
@@ -3885,7 +3890,7 @@ function openPayslipEdit(ps, currentUser, onSave) {
     </div>
     <div class="form-group"><label>Amount Already Paid (₱)</label><input id="pe-paid" type="number" value="${ps.paid||0}" inputmode="decimal"/></div>
     <div id="pe-net" style="text-align:right;font-weight:800;font-size:14px;margin-top:6px">Net: ₱${fmt(ps.netPay||0)}</div>
-  `, `<button class="btn-primary" id="pe-save-btn">Save Changes</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  `, `<button class="btn-primary" id="pe-save-btn">Save Changes</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`, {size:'wide'});
 
   const num = id => parseFloat(document.getElementById(id).value)||0;
   const recompute = () => {
@@ -4030,7 +4035,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     <button class="btn-secondary" onclick="closeModal()">Cancel</button>
     <button class="btn-secondary" id="ps-preview-btn">👁 Preview</button>
     <button class="btn-primary" id="ps-save-btn">💾 Save &amp; Generate</button>
-  `);
+  `, {size:'full'});
 
   // Bind proof upload area
   let proofFile = null;
@@ -4521,18 +4526,25 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
 // ══════════════════════════════════════════════════
 //  SALES — BARRO KITCHENS
 // ══════════════════════════════════════════════════
-window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quotes') {
+// Consolidated Sales portal (2026-07 declutter): 10 tabs → 6. The three quote
+// entry points (Quick Estimate, the Builder, and the filed Records) collapse
+// into one **Quotes** tab; the two partner tabs into **Partner**; the two file
+// collections into **Files**. Revisions + records live inside Records untouched.
+window.renderSales = async function(currentUser, currentRole, subtab = 'Clients') {
   window._bkCurrentUser = currentUser;
   window._bkCurrentRole = currentRole;
   const c = deptContainer();
-  // Single compact chip bar replaces the old 9-card tool grid + long subtab bar
-  // (declutter pass). Chips wrap to rows instead of horizontal-scrolling.
-  const salesTabs = ['Quick Estimate','BK Quotes','Quotations','Partner Quotes','Partner Files','Clients','Work Plans','Proposals','SOP','Tasks'];
+  const salesTabs = ['Clients','Quotes','Partner','Files','SOP','Tasks'];
+  // Legacy deep-link keys → new consolidated tab.
+  const alias = { 'BK Quotes':'Quotes', 'Quotations':'Quotes', 'Quick Estimate':'Quotes',
+                  'Partner Quotes':'Partner', 'Partner Files':'Partner',
+                  'Work Plans':'Files', 'Proposals':'Files' };
+  subtab = alias[subtab] || (salesTabs.includes(subtab) ? subtab : 'Clients');
   c.innerHTML = `
     <div class="page-header">
       <div>
         <h2>🍽️ Barro Kitchens — Sales</h2>
-        <p style="font-size:12px;color:var(--text-muted);margin:2px 0 0">One-stop kitchen design & build</p>
+        <p style="font-size:12px;color:var(--text-muted);margin:2px 0 0">One-stop kitchen design &amp; build · Inquiry → Quote → Order</p>
       </div>
     </div>
     ${window.chipTabs(salesTabs.map(s=>({key:s,label:s})), subtab)}
@@ -4542,46 +4554,75 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'BK Quote
   window.bindChipTabs(c, (key) => loadSalesContent(currentUser, currentRole, key));
 };
 
+// Scoped inner sub-nav (chip toggle) for a consolidated Sales tab. Binds ONLY
+// its own buttons (not the outer Sales chip bar, nor any chips a sub-view
+// renders) by querying inside the dedicated `.sales-subnav` bar element.
+function salesSubNav(content, keys, active, headerHtml, onSelect) {
+  const chips = keys.map(k =>
+    `<button type="button" class="chip-tab${k===active?' active':''}" data-chip="${escHtml(k)}">${escHtml(k)}</button>`
+  ).join('');
+  content.innerHTML = `
+    ${headerHtml || ''}
+    <div class="chip-tabs sales-subnav" style="margin-bottom:12px">${chips}</div>
+    <div id="sales-subview"><div class="loading-placeholder">Loading…</div></div>`;
+  const bar = content.querySelector('.sales-subnav');
+  const view = content.querySelector('#sales-subview');
+  bar.querySelectorAll('.chip-tab').forEach(btn => btn.addEventListener('click', () => {
+    bar.querySelectorAll('.chip-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    onSelect(btn.dataset.chip, view);
+  }));
+  onSelect(active, view);
+}
+
 async function loadSalesContent(currentUser, currentRole, sub) {
   const content = document.getElementById('sales-content');
+  if (!content) return;
   switch(sub) {
-    case 'Quick Estimate':
-      renderQuickEstimate(content, currentUser, currentRole);
-      break;
-    case 'BK Quotes':
-      // Full standalone quote builder (iframe)
-      content.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-          <span style="font-size:13px;color:var(--text-muted)">Use the builder below to create quotes. Print/PDF when ready.</span>
-          <button class="btn-secondary btn-sm" onclick="document.getElementById('bk-qb-frame').contentWindow.print()">🖨 Print / PDF</button>
-        </div>
-        <iframe id="bk-qb-frame" src="quote-builder-v2.html"
-          style="width:100%;height:calc(100dvh - 200px);min-height:500px;border:none;border-radius:12px;background:#f5f6fa;"
-          allow="print" loading="lazy"></iframe>`;
-      break;
-    case 'Quotations':
-      renderBKQuotationsSummary(content, currentUser, currentRole);
-      break;
-    case 'Partner Quotes':
-      renderSalesPartnerQuotes(content, currentUser, currentRole);
-      break;
-    case 'Partner Files':
-      content.innerHTML = `<div style="font-size:12px;color:var(--text-muted);background:rgba(10,132,255,.07);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:12px">🗂 Brilliant Steel partner files — visible to Sales for coordination.</div><div id="sales-partner-files"></div>`;
-      renderBSFiles(document.getElementById('sales-partner-files'), currentUser, currentRole);
-      break;
     case 'Clients':
       await renderClientProfiles(content, currentUser, currentRole, 'barro');
       break;
-    case 'Work Plans':
-      await renderDocCollection(content, 'work_plans', 'Work Plans', currentUser, currentRole, { icon:'📋', color:'#e65100', dept:'Sales' });
+
+    case 'Quotes': {
+      // One tab, all three quote paths. "＋ New Quotation" opens the full
+      // builder; Quick Estimate is a fast price-check that hands off to it;
+      // Records lists everything filed (with New Revision / Reopen).
+      const header = `
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:12px">
+          <button class="btn-primary btn-sm" onclick="navigateTo('bk-quote-builder')">＋ New Quotation</button>
+          <span style="font-size:12px;color:var(--text-muted)">Build a full quote, or use <strong>Quick Estimate</strong> for a fast price check. Filed &amp; revised quotes live under <strong>Records</strong>.</span>
+        </div>`;
+      salesSubNav(content, ['Records','Quick Estimate'], 'Records', header, (key, view) => {
+        if (key === 'Quick Estimate') renderQuickEstimate(view, currentUser, currentRole);
+        else renderBKQuotationsSummary(view, currentUser, currentRole);
+      });
       break;
-    case 'Proposals':
-      content.innerHTML = renderFileCollection('Proposals', 'sales-props', currentRole);
-      bindFileCollection('sales-props', currentUser, 'Sales', 'Proposals');
+    }
+
+    case 'Partner':
+      salesSubNav(content, ['Quotes','Files'], 'Quotes',
+        `<div style="font-size:12px;color:var(--text-muted);background:rgba(15,108,189,.06);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:12px">🤝 Brilliant Steel partner — quotes &amp; files shared with Sales for coordination.</div>`,
+        (key, view) => {
+          if (key === 'Files') renderBSFiles(view, currentUser, currentRole);
+          else renderSalesPartnerQuotes(view, currentUser, currentRole);
+        });
       break;
+
+    case 'Files':
+      salesSubNav(content, ['Work Plans','Proposals'], 'Work Plans', '', (key, view) => {
+        if (key === 'Proposals') {
+          view.innerHTML = renderFileCollection('Proposals', 'sales-props', currentRole);
+          bindFileCollection('sales-props', currentUser, 'Sales', 'Proposals');
+        } else {
+          renderDocCollection(view, 'work_plans', 'Work Plans', currentUser, currentRole, { icon:'📋', color:'#e65100', dept:'Sales' });
+        }
+      });
+      break;
+
     case 'SOP':
       renderSalesSOP(content);
       break;
+
     case 'Tasks':
       await renderDeptTasks(content, 'Sales', currentUser, currentRole);
       break;
@@ -4923,43 +4964,43 @@ const DEFAULT_SALES_SOP = {
         'Flag delivery location (affects freight / installation).',
         'Disqualify or park leads that are not a real fit — keep the pipeline clean.'
       ], out:'Qualified requirement with clear scope.' },
-    { short:'Site Visit', title:'Site Visit & Measurement', owner:'Sales + Design', tab:'Clients · Work Plans',
+    { short:'Site Visit', title:'Site Visit & Measurement', owner:'Sales + Design', tab:'Clients · Files',
       desc:'For custom kitchen builds or fabricated steel — gather exact requirements on site. Skip for off-the-shelf items.',
       actions:[
         'Schedule the visit; take measurements, photos, and the customer brief.',
         'Coordinate with **Design** for drawings / layout where a design is required.',
-        'Record findings as a Work Plan in **Sales → Work Plans**.'
+        'Record findings as a Work Plan in **Sales → Files → Work Plans**.'
       ], out:'Site data & design brief ready for pricing.' },
-    { short:'Quote', title:'Prepare the Quotation', owner:'Sales Agent / Sales Staff', tab:'BK Quotes · Quote Builder',
+    { short:'Quote', title:'Prepare the Quotation', owner:'Sales Agent / Sales Staff', tab:'Quotes',
       desc:'Build the priced quotation using the system, not a manual computation.',
       actions:[
-        'Use **Sales → BK Quotes** (Quote Builder) to price products, materials, labor, delivery, and installation.',
+        'Open **Sales → Quotes → ＋ New Quotation** to price products, materials, labor, delivery, and installation (use **Quick Estimate** for a fast price check first).',
         'Apply correct unit prices, quantities, and any approved discounts.',
         'State validity period and payment terms (e.g. 50% down payment, balance before delivery).'
       ], out:'Draft quotation saved.' },
-    { short:'Approve', title:'Internal Review & Approval', owner:'Sales Manager / Finance', tab:'Quotations',
+    { short:'Approve', title:'Internal Review & Approval', owner:'Sales Manager / Finance', tab:'Quotes → Records',
       desc:'No quotation leaves the company without a margin check.',
       actions:[
-        'Manager / Finance reviews pricing, margin, discounts, and terms in **Sales → Quotations**.',
-        'Correct any error or under-priced line before it reaches the client.',
+        'Manager / Finance reviews pricing, margin, discounts, and terms in **Sales → Quotes → Records**.',
+        'Correct any error or under-priced line before it reaches the client — send back with **New Revision** if needed.',
         'Approve the quotation to release it.'
       ], out:'Approved quotation, cleared to send.' },
-    { short:'Send', title:'Send Quotation to Client', owner:'Sales Agent / Sales Staff', tab:'Quotations',
+    { short:'Send', title:'Send Quotation to Client', owner:'Sales Agent / Sales Staff', tab:'Quotes → Records',
       desc:'Deliver the approved quote and record that it went out.',
       actions:[
         'Export the quotation to PDF and send via the agreed channel.',
-        'Mark the quotation as **Sent** in **Sales → Quotations** with the date.',
+        'Mark the quotation as **Sent** in **Sales → Quotes → Records** with the date.',
         'Confirm the client received it.'
       ], out:'Quotation sent and logged.' },
-    { short:'Follow-up', title:'Follow-up & Negotiation', owner:'Sales Agent / Sales Staff', tab:'Quotations',
+    { short:'Follow-up', title:'Follow-up & Negotiation', owner:'Sales Agent / Sales Staff', tab:'Quotes → Records',
       desc:'Most deals are won in the follow-up. Stay on it.',
       actions:[
         'Follow up within 2–3 working days of sending.',
-        'Handle questions, revisions, and price / term negotiation.',
+        'Handle questions, revisions, and price / term negotiation — use **New Revision** to keep every version on record.',
         'Re-route any revised pricing back through review (Step 5) before re-sending.',
         'Keep the quotation status current (Sent → Negotiating → Won / Lost).'
       ], out:'Clear client decision.' },
-    { short:'Confirm', title:'Client Confirmation & Down Payment', owner:'Sales + Finance', tab:'Quotations',
+    { short:'Confirm', title:'Client Confirmation & Down Payment', owner:'Sales + Finance', tab:'Quotes → Records',
       desc:'A verbal "yes" is not an order. Secure the commitment.',
       actions:[
         'Obtain written confirmation: signed quotation, contract, or Purchase Order.',
@@ -8183,6 +8224,41 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
   bindQuoteActions(qsContent, currentUser, currentRole, container);
 }
 
+// Show + copy the public client order-tracking link (reuses the shared modal).
+window.orderTrackUrl = function(token){ return `${location.origin}/track.html?t=${token}`; };
+window.showOrderTrackModal = function(url, orderNo){
+  openModal('🔗 Client Order-Tracking Link', `
+    <p style="font-size:13px;color:var(--text-2);margin-bottom:12px">Share this link with the client for <strong>${escHtml(orderNo||'their order')}</strong>. They can open it any time — <strong>no login needed</strong> — to see their order status, dates and balance. Internal costs are never shown.</p>
+    <div style="display:flex;gap:8px;align-items:center">
+      <input id="track-url" readonly value="${escHtml(url)}" style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px" onclick="this.select()"/>
+      <button class="btn-primary btn-sm" id="track-copy" style="white-space:nowrap">Copy</button>
+    </div>
+    <div style="margin-top:12px"><a href="${escHtml(url)}" target="_blank" rel="noopener" style="font-size:12px;color:var(--primary);font-weight:600">Preview the client view ↗</a></div>
+  `, `<button class="btn-secondary" onclick="closeModal()">Done</button>`);
+  const btn=document.getElementById('track-copy');
+  btn?.addEventListener('click', async ()=>{
+    const inp=document.getElementById('track-url');
+    try{ await navigator.clipboard.writeText(inp.value); }catch(_){ inp.select(); try{document.execCommand('copy');}catch(__){} }
+    btn.textContent='✓ Copied'; setTimeout(()=>{btn.textContent='Copy';},1600);
+    Notifs.showToast('Tracking link copied','success');
+  });
+};
+
+// Update a client's PUBLIC tracking doc (status advance, payment, dates). Keyed by
+// the token stamped on the order/project. Best-effort — never blocks the caller.
+// Passing `status` also stamps that stage's date (deep-merged, preserves history).
+window.syncOrderTracking = async function(token, patch){
+  if(!token || !patch) return;
+  try{
+    const upd = Object.assign({}, patch, { updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    if(patch.status){
+      const day = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
+      upd.stageStamps = { [patch.status]: day };   // set-merge deep-merges the map
+    }
+    await db.collection('order_tracking').doc(token).set(upd, { merge:true });
+  }catch(_){ /* best-effort */ }
+};
+
 // Convert a won quote into a Sales Order: capture payment + receipt, route to Finance.
 async function openSalesOrderModal(d, currentUser, currentRole, container){
   const total = parseFloat(d.total)||0;
@@ -8199,7 +8275,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
     <div class="form-group"><label>Notes</label><textarea id="so-notes" rows="2" placeholder="Payment ref #, schedule, etc."></textarea></div>
     <div class="form-group"><label>Receipt / Proof of Payment</label><div id="so-receipt-upload"></div></div>
     <div id="so-err" class="error-msg hidden"></div>
-  `, `<button class="btn-primary" id="so-save">Create &amp; Send to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  `, `<button class="btn-primary" id="so-save">Create &amp; Send to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`, {size:'wide'});
   let receipt=null;
   if(window.Drive?.renderUploadArea) Drive.renderUploadArea('so-receipt-upload',(r)=>{receipt=r;},{label:'Upload receipt (photo/PDF)',accept:'image/*,.pdf',dept:'Finance',subfolder:'SalesOrders'});
   document.getElementById('so-save').addEventListener('click', async ()=>{
@@ -8227,16 +8303,39 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
       // 4) record the Sales Order on the project's document register + link the SO id
       try{ await db.collection('job_projects').doc(proj.id).update({ salesOrderId:ref.id,
         documents:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order', ref:proj.projectNo, at:new Date().toISOString(), by:userProfile?.displayName||currentUser.email }) }); }catch(_){}
+      // 5) client order-tracking link — created once the downpayment is captured.
+      //    Public, unguessable token; client-SAFE fields only (no cost/margin).
+      let trackUrl='';
+      try{
+        const tRef = db.collection('order_tracking').doc();
+        const dayStr = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
+        await tRef.set({
+          orderId:ref.id, projectId:proj.id, orderNo:proj.projectNo, clientName:d.client||'',
+          company:(d.co==='BK'?'Barro Kitchens':'Brilliant Steel'), scope:project,
+          status:'confirmed', stageStamps:{ confirmed:dayStr },
+          contractAmount:contract, paid:paid, balance:Math.max(0,contract-paid),
+          orderDate:dayStr, expectedDate:null,
+          publicNote:'Thank you for your order! This page updates as your order moves through production and delivery.',
+          createdAt:firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+        });
+        await db.collection('sales_orders').doc(ref.id).update({ trackingToken:tRef.id }).catch(()=>{});
+        await db.collection('job_projects').doc(proj.id).update({ trackingToken:tRef.id }).catch(()=>{});
+        trackUrl = window.orderTrackUrl(tRef.id);
+      }catch(_){ /* tracking is best-effort — never block the order */ }
       window.logAudit&&window.logAudit('create','sales_order',ref.id,{client:d.client, contract, paid, projectNo:proj.projectNo});
       const who=userProfile?.displayName||currentUser.email;
       try{ await Notifs.sendToDept('Finance',{ title:'🧾 New Sales Order', body:`${who}: ${d.client} — ₱${contract.toLocaleString()} (₱${paid.toLocaleString()} received). Project ${proj.projectNo}. Record income + verify receipt.`, icon:'🧾', type:'sales_order', link:'sales-orders' }); }catch(_){}
       try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${d.client} (${proj.projectNo}) won — create the production order when ready.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
       try{ await Notifs.sendToOwner({ title:'🤝 Quote won → Project '+proj.projectNo, body:`${d.client} — ₱${contract.toLocaleString()} closed by ${who}.`, icon:'🤝', type:'sales_order' }); }catch(_){}
-      closeModal(); Notifs.showToast('Sales order + project '+proj.projectNo+' created');
+      Notifs.showToast('Sales order + project '+proj.projectNo+' created');
       if (typeof container!=='undefined' && container) {
         if (d.co==='BK') renderBKQuotationsSummary(container, currentUser, currentRole);
         else renderBSQuotationsSummary(container, currentUser, currentRole);
       }
+      // Surface the shareable client tracking link (falls back to just closing).
+      if (trackUrl) window.showOrderTrackModal(trackUrl, proj.projectNo);
+      else closeModal();
     }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
   });
 }
@@ -8416,6 +8515,7 @@ function openRecordSaleModal(o, container){
               timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Sale recorded ₱${amount.toLocaleString()} by Finance`, by:who }) };
             if(newAR<=0) upd.stage='paid';
             await db.collection('job_projects').doc(o.projectId).update(upd);
+            if(o.trackingToken) window.syncOrderTracking(o.trackingToken, { paid:newCollected, balance:newAR });
           }
         }catch(_){}
       }
@@ -8440,6 +8540,7 @@ async function transferOrderToProduction(o){
       }
     }
     await db.collection('sales_orders').doc(o.id).update({ sentToProduction:true, sentToProductionAt:firebase.firestore.FieldValue.serverTimestamp() });
+    if(o.trackingToken) window.syncOrderTracking(o.trackingToken, { status:'production' });
     try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${o.clientName} — sale recorded by Finance. Create the production order.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
     window.logAudit&&window.logAudit('update','sales_order',o.id,{ sentToProduction:true });
   }catch(ex){ Notifs.showToast('Transfer failed: '+(ex.message||ex.code),'error'); }
@@ -11033,6 +11134,9 @@ async function advanceProjectStage(p, nextId){
       stage:nextId, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
       timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Moved to '+ns.label, by:who })
     });
+    // keep the client's public tracker in step with the internal lifecycle
+    const _trkStage = { won:'confirmed', in_production:'production', qc:'qc', for_delivery:'ready', ready:'ready', delivered:'delivered', paid:'delivered' }[nextId];
+    if(p.trackingToken && _trkStage) window.syncOrderTracking(p.trackingToken, { status:_trkStage });
     // hand off to the owning department of the new stage
     const dept=ns.dept;
     try{ if(dept&&dept!=='Sales') await Notifs.sendToDept(dept,{ title:`📈 ${ns.label}: ${p.clientName||p.projectNo}`, body:`Project ${p.projectNo} is now "${ns.label}". Your team's action is needed.`, icon:ns.icon, type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
@@ -11352,6 +11456,10 @@ async function renderProdOrders(el, currentUser, currentRole) {
               ...(advance ? { stage: projStage } : {}),
               updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
               timeline: firebase.firestore.FieldValue.arrayUnion(evt) });
+            // reflect the milestone on the client's public tracker (forward only)
+            const _tok = jdoc.exists ? jdoc.data().trackingToken : null;
+            if(_tok){ const _trk = ({qc:'qc',ready:'ready',delivered:'delivered'})[next.id] || (advance ? 'production' : null);
+              if(_trk) window.syncOrderTracking(_tok, { status:_trk }); }
           } catch(_) {}
         }
         Notifs.showToast(`Moved to ${next.label}`);

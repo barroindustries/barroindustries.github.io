@@ -2038,11 +2038,15 @@ body.sidebar-open .top-nav-strip { display: none !important; }
   border: 1px solid rgba(255,255,255,0.10);
   border-radius: var(--r-lg);
   box-shadow: var(--sh-lg), 0 0 0 1px rgba(255,45,120,0.08);
-  width: 100%; max-width: 560px; max-height: 90dvh;
+  width: 100%; max-width: 620px; max-height: 92dvh;
   display: flex; flex-direction: column; overflow: hidden;
   animation: popIn 0.26s var(--spring);
   position: relative;
 }
+/* Roomier variants for content-heavy popups (forms, payslips, sales orders) so
+   they don't render as a cramped small dialog. Applied via openModal({size}). */
+.modal-box.modal-wide { max-width: 920px; }
+.modal-box.modal-full { max-width: min(1200px, 96vw); max-height: 94dvh; }
 /* top gradient trim on modal */
 .modal-box::before {
   content: '';
