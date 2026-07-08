@@ -1312,9 +1312,11 @@ body.sidebar-open .top-nav-strip { display: none !important; }
 .kpi-card.warn::after   { background: var(--grad-amber); }
 .kpi-card.red::after    { background: var(--grad-red);    box-shadow: 0 0 8px rgba(255,69,58,0.30); }
 
-.kpi-card.accent { box-shadow: 0 0 20px rgba(255,214,10,0.08); }
-.kpi-card.green  { box-shadow: 0 0 20px rgba(48,209,88,0.08); }
-.kpi-card.red    { box-shadow: 0 0 20px rgba(255,69,58,0.08); }
+/* Colour variants keep ONLY their top stripe (::after) for identity — the
+   box-shadow is intentionally NOT overridden, so every KPI card shares the same
+   elevation. (Previously accent/green/red got a flat coloured glow while
+   plain/warn got a real drop shadow, which read as "some cards have shadow, some
+   don't".) */
 
 .kpi-label {
   font-size: 10px; font-weight: 600;
@@ -3681,7 +3683,8 @@ html.light .bottom-nav, html.theme-pink .bottom-nav, html.theme-grey .bottom-nav
 html.light .login-container, html.theme-pink .login-container, html.theme-grey .login-container { background: rgba(255,255,255,0.74); border-color: rgba(0,0,0,0.10); }
 html.light .card, html.theme-pink .card, html.theme-grey .card { background: rgba(255,255,255,0.60); border-color: rgba(0,0,0,0.08);
                             box-shadow: 0 4px 20px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.90); }
-html.light .kpi-card, html.theme-pink .kpi-card, html.theme-grey .kpi-card { background: rgba(255,255,255,0.60); border-color: rgba(0,0,0,0.08); }
+html.light .kpi-card, html.theme-pink .kpi-card, html.theme-grey .kpi-card { background: rgba(255,255,255,0.72); border-color: rgba(0,0,0,0.08); box-shadow: var(--sh-sm); }
+html.light .kpi-card:hover, html.theme-pink .kpi-card:hover, html.theme-grey .kpi-card:hover { box-shadow: var(--sh-md); }
 html.light .item-card, html.theme-pink .item-card, html.theme-grey .item-card { background: rgba(255,255,255,0.56); border-color: rgba(0,0,0,0.08); }
 html.light .subtab-bar, html.theme-pink .subtab-bar, html.theme-grey .subtab-bar { background: rgba(0,0,0,0.04);       border-color: rgba(0,0,0,0.08); }
 html.light .login-role-card, html.theme-pink .login-role-card, html.theme-grey .login-role-card { background: rgba(255,255,255,0.55); border-color: rgba(0,0,0,0.08); }
