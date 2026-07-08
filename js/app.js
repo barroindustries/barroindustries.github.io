@@ -7088,6 +7088,40 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('modal-overlay')?.addEventListener('click',e=>{if(e.target===document.getElementById('modal-overlay'))closeModal();});
 });
 
+// ── KPI value auto-fit ────────────────────────────
+// The CSS clamp sizes by VIEWPORT, so a long peso figure can still clip inside a
+// narrow card. This shrinks each .kpi-value from its natural size until it fits
+// its own card width (content-aware), with a readable floor. Runs on any content
+// change (observer) + resize, so it covers every dashboard without per-card edits.
+window.fitKpiValues = function(root){
+  const scope = (root && root.querySelectorAll) ? root : document;
+  scope.querySelectorAll('.kpi-value').forEach(el=>{
+    el.style.whiteSpace = 'nowrap';
+    // Capture the natural (CSS/inline) size once per element, then always re-fit
+    // from it so resizing back up works too.
+    if(!el.dataset.maxFs){ el.dataset.maxFs = parseFloat(getComputedStyle(el).fontSize) || 24; }
+    let size = parseFloat(el.dataset.maxFs);
+    el.style.fontSize = size + 'px';
+    let guard = 0;
+    while(el.scrollWidth > el.clientWidth + 1 && size > 11 && guard < 40){
+      size -= 1; el.style.fontSize = size + 'px'; guard++;
+    }
+  });
+};
+(function(){
+  let t; const run = () => { clearTimeout(t); t = setTimeout(() => {
+    try { window.fitKpiValues(document.getElementById('page-content') || document); } catch(_){}
+  }, 60); };
+  const start = () => {
+    const pc = document.getElementById('page-content');
+    // Observe node additions (NOT attributes) so our own font-size writes don't loop.
+    if(pc && 'MutationObserver' in window){ new MutationObserver(run).observe(pc, {childList:true, subtree:true}); }
+    window.addEventListener('resize', run);
+    run();
+  };
+  if(document.readyState === 'loading'){ document.addEventListener('DOMContentLoaded', start); } else { start(); }
+})();
+
 // ── Mini Calendar ─────────────────────────────────
 let _calMonthOffset = 0;
 async function renderMiniCal() {

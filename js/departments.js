@@ -8269,6 +8269,31 @@ window.syncOrderTracking = async function(token, patch){
   }catch(_){ /* best-effort */ }
 };
 
+// Return the tracking token for a sales order, creating the public tracking doc
+// on demand if it doesn't exist yet (e.g. orders made before this feature). Lets
+// the "🔗 Link" button re-surface a shareable link for ANY order.
+window.ensureOrderTracking = async function(o){
+  if(o.trackingToken) return o.trackingToken;
+  const dayStr = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
+  let orderNo = o.quoteNumber || '';
+  if(o.projectId){ try{ const ps=await db.collection('job_projects').doc(o.projectId).get(); if(ps.exists) orderNo = ps.data().projectNo || orderNo; }catch(_){} }
+  const paid = o.recordedAmount || o.paymentReceived || 0;
+  const tRef = db.collection('order_tracking').doc();
+  await tRef.set({
+    orderId:o.id, projectId:o.projectId||null, orderNo:orderNo||('SO-'+o.id.slice(-6).toUpperCase()),
+    clientName:o.clientName||'', company:(o.company==='BK'?'Barro Kitchens':'Brilliant Steel'), scope:o.project||'',
+    status:(o.sentToProduction?'production':'confirmed'), stageStamps:{ confirmed:dayStr },
+    contractAmount:o.contractAmount||0, paid, balance:Math.max(0,(o.contractAmount||0)-paid),
+    orderDate:dayStr, expectedDate:null,
+    publicNote:'Thank you for your order! This page updates as your order moves through production and delivery.',
+    createdAt:firebase.firestore.FieldValue.serverTimestamp(), updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  });
+  try{ await db.collection('sales_orders').doc(o.id).update({ trackingToken:tRef.id }); }catch(_){}
+  if(o.projectId){ try{ await db.collection('job_projects').doc(o.projectId).update({ trackingToken:tRef.id }); }catch(_){} }
+  o.trackingToken = tRef.id;
+  return tRef.id;
+};
+
 // Convert a won quote into a Sales Order: capture payment + receipt, route to Finance.
 async function openSalesOrderModal(d, currentUser, currentRole, container){
   const total = parseFloat(d.total)||0;
@@ -8374,7 +8399,7 @@ window.renderSalesOrders = async function(container){
     <div class="card"><div class="card-body" style="padding:0">
     ${!orders.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧾</div><h4>No sales orders yet</h4><p>They appear here when a won quote is converted to a sales order.</p></div>':
     `<div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Date</th><th>Client / Project</th><th>Contract</th><th>Received</th><th>Method</th><th>Receipt</th><th>By</th><th>Status</th>${isFin?'<th></th>':''}</tr></thead>
+      <thead><tr><th>Date</th><th>Client / Project</th><th>Contract</th><th>Received</th><th>Method</th><th>Receipt</th><th>By</th><th>Status</th><th></th></tr></thead>
       <tbody>${orders.map(o=>`<tr>
         <td>${o.createdAt?.toDate?o.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''}</td>
         <td><strong>${escHtml(o.clientName||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(o.project||'')}${o.quoteNumber?' · '+escHtml(o.quoteNumber):''}</div></td>
@@ -8384,10 +8409,18 @@ window.renderSalesOrders = async function(container){
         <td>${o.receiptUrl?`<a href="${escHtml(o.receiptUrl)}" target="_blank" class="btn-icon">📎</a>`:'—'}</td>
         <td style="font-size:11px">${escHtml(o.createdByName||'')}</td>
         <td><span class="badge ${o.status==='recorded'?'badge-green':'badge-orange'}">${escHtml(o.status||'pending')}</span>${o.sentToProduction?'<span class="badge badge-blue" style="font-size:9px;margin-left:4px">🏭 in production</span>':''}</td>
-        ${isFin?`<td>${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}">Record Sale</button>`:(!o.sentToProduction?`<button class="btn-secondary btn-sm so-prod-btn" data-id="${o.id}">🏭 To Production</button>`:'✓')}</td>`:''}
+        <td style="white-space:nowrap"><button class="btn-secondary btn-sm so-link-btn" data-id="${o.id}" title="Copy the client order-tracking link">🔗 Link</button>${isFin?` ${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}">Record Sale</button>`:(!o.sentToProduction?`<button class="btn-secondary btn-sm so-prod-btn" data-id="${o.id}">🏭 To Production</button>`:'✓')}`:''}</td>
       </tr>`).join('')}</tbody>
     </table></div>`}
     </div></div>`;
+  // Tracking link is available to every viewer of this list (non-partner).
+  c.querySelectorAll('.so-link-btn').forEach(b=>b.addEventListener('click', async ()=>{
+    const o = orders.find(x=>x.id===b.dataset.id); if(!o) return;
+    const orig=b.textContent; b.disabled=true; b.textContent='…';
+    try{ const tok = await window.ensureOrderTracking(o); window.showOrderTrackModal(window.orderTrackUrl(tok), o.clientName||o.project||''); }
+    catch(e){ Notifs.showToast('Could not create link: '+(e.message||e.code),'error'); }
+    b.disabled=false; b.textContent=orig;
+  }));
   if(isFin){
     c.querySelectorAll('.so-record-btn').forEach(b=>b.addEventListener('click', ()=>{
       const o = orders.find(x=>x.id===b.dataset.id); if(o) openRecordSaleModal(o, container);
