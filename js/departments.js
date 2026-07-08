@@ -8268,7 +8268,28 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
 }
 
 // Show + copy the public client order-tracking link (reuses the shared modal).
-window.orderTrackUrl = function(token){ return `${location.origin}/track.html?t=${token}`; };
+// Short, on-brand tracking URL (own domain, short /t/ path + short code) — no
+// third-party shortener (those read as suspicious). e.g. …ravenmails.com/t/?A1b2C3d4
+window.orderTrackUrl = function(token){ return `${location.origin}/t/?${token}`; };
+
+// Unguessable short code for a public tracking doc id. 8 chars from a 54-char
+// unambiguous alphabet (no 0/O/1/I/l) ≈ 7×10¹³ combos — plenty for order status.
+window.makeTrackCode = function(len){
+  len = len || 8;
+  var A = '23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ', out = '';
+  try { var a = new Uint32Array(len); (window.crypto||window.msCrypto).getRandomValues(a);
+    for (var i=0;i<len;i++) out += A[a[i] % A.length];
+  } catch(_) { for (var j=0;j<len;j++) out += A[Math.floor(Math.random()*A.length)]; }
+  return out;
+};
+async function uniqueTrackCode(){
+  for (let i=0;i<5;i++){
+    const code = window.makeTrackCode(8);
+    try { const s = await db.collection('order_tracking').doc(code).get(); if(!s.exists) return code; }
+    catch(_){ return code; }   // read blocked → collision odds are negligible anyway
+  }
+  return window.makeTrackCode(11);
+}
 window.showOrderTrackModal = function(url, orderNo){
   openModal('🔗 Client Order-Tracking Link', `
     <p style="font-size:13px;color:var(--text-2);margin-bottom:12px">Share this link with the client for <strong>${escHtml(orderNo||'their order')}</strong>. They can open it any time — <strong>no login needed</strong> — to see their order status, dates and balance. Internal costs are never shown.</p>
@@ -8311,7 +8332,7 @@ window.ensureOrderTracking = async function(o){
   let orderNo = o.quoteNumber || '';
   if(o.projectId){ try{ const ps=await db.collection('job_projects').doc(o.projectId).get(); if(ps.exists) orderNo = ps.data().projectNo || orderNo; }catch(_){} }
   const paid = o.recordedAmount || o.paymentReceived || 0;
-  const tRef = db.collection('order_tracking').doc();
+  const tRef = db.collection('order_tracking').doc(await uniqueTrackCode());
   await tRef.set({
     orderId:o.id, projectId:o.projectId||null, orderNo:orderNo||('SO-'+o.id.slice(-6).toUpperCase()),
     clientName:o.clientName||'', company:(o.company==='BK'?'Barro Kitchens':'Brilliant Steel'), scope:o.project||'',
@@ -8375,7 +8396,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
       //    Public, unguessable token; client-SAFE fields only (no cost/margin).
       let trackUrl='';
       try{
-        const tRef = db.collection('order_tracking').doc();
+        const tRef = db.collection('order_tracking').doc(await uniqueTrackCode());
         const dayStr = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
         await tRef.set({
           orderId:ref.id, projectId:proj.id, orderNo:proj.projectNo, clientName:d.client||'',

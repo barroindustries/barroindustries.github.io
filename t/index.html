@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>Track Your Order — Barro Industries</title>
+<meta name="theme-color" content="#0F6CBD"/>
+<meta name="robots" content="noindex"/>
+<meta name="description" content="Track the live status, timeline, and balance of your Barro Industries order."/>
+<link rel="icon" href="/icons/favicon.png"/>
+<!-- Rich link preview so a shared link shows a branded, trustworthy card. -->
+<meta property="og:type" content="website"/>
+<meta property="og:site_name" content="Barro Industries"/>
+<meta property="og:title" content="Track Your Order — Barro Industries"/>
+<meta property="og:description" content="View the live status, production timeline, and balance of your Barro Industries order."/>
+<meta property="og:image" content="https://barroindustries-operatingsystem.ravenmails.com/icons/icon-512.png"/>
+<meta property="og:image:width" content="512"/>
+<meta property="og:image:height" content="512"/>
+<meta property="og:url" content="https://barroindustries-operatingsystem.ravenmails.com/t/"/>
+<meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Track Your Order — Barro Industries"/>
+<meta name="twitter:description" content="View the live status, production timeline, and balance of your Barro Industries order."/>
+<meta name="twitter:image" content="https://barroindustries-operatingsystem.ravenmails.com/icons/icon-512.png"/>
+<style>
+  :root{
+    --blue:#0F6CBD; --blue-2:#2886DE; --ink:#242424; --muted:#616161;
+    --line:#E1DFDD; --bg:#FAF9F8; --card:#FFFFFF; --ok:#107C41; --warn:#B98900;
+    --r:10px; --shadow:0 2px 10px rgba(0,0,0,.06);
+    --font:'Segoe UI',-apple-system,system-ui,Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--ink);line-height:1.5;
+    -webkit-font-smoothing:antialiased;min-height:100dvh;padding:16px}
+  .wrap{max-width:680px;margin:0 auto}
+  .brand{display:flex;align-items:center;gap:12px;padding:8px 2px 18px}
+  .brand img{width:40px;height:40px;border-radius:9px}
+  .brand-name{font-size:17px;font-weight:800;background:linear-gradient(90deg,var(--blue),var(--blue-2));
+    -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .brand-sub{font-size:11px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    box-shadow:var(--shadow);padding:18px;margin-bottom:14px}
+  .state{text-align:center;padding:48px 20px;color:var(--muted)}
+  .state .ic{font-size:44px;margin-bottom:12px}
+  .hero-order{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .hero-no{font-size:22px;font-weight:800;margin:2px 0 4px}
+  .hero-client{font-size:14px;color:var(--muted)}
+  .badge{display:inline-block;font-size:12px;font-weight:700;padding:4px 12px;border-radius:999px;
+    background:rgba(15,108,189,.1);color:var(--blue);margin-top:10px}
+  .badge.done{background:rgba(16,124,65,.12);color:var(--ok)}
+  .sect-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+    color:var(--muted);margin:0 0 12px}
+  .steps{list-style:none}
+  .step{display:flex;gap:14px;position:relative;padding-bottom:20px}
+  .step:last-child{padding-bottom:0}
+  .step-line{position:absolute;left:13px;top:26px;bottom:0;width:2px;background:var(--line)}
+  .step.done .step-line,.step.current .step-line{background:var(--blue)}
+  .step:last-child .step-line{display:none}
+  .dot{width:28px;height:28px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;
+    justify-content:center;font-size:13px;font-weight:800;background:#F3F2F1;color:var(--muted);
+    border:2px solid var(--line);z-index:1}
+  .step.done .dot{background:var(--ok);color:#fff;border-color:var(--ok)}
+  .step.current .dot{background:var(--blue);color:#fff;border-color:var(--blue);
+    box-shadow:0 0 0 4px rgba(15,108,189,.15)}
+  .step-body{padding-top:2px}
+  .step-name{font-size:14px;font-weight:700}
+  .step.pending .step-name{color:var(--muted);font-weight:600}
+  .step-desc{font-size:12px;color:var(--muted)}
+  .step-at{font-size:11px;color:var(--blue);font-weight:600;margin-top:1px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .kv .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .kv .v{font-size:14px;font-weight:600;margin-top:1px}
+  .pay-row{display:flex;justify-content:space-between;font-size:14px;padding:6px 0}
+  .pay-row.total{border-top:1px solid var(--line);margin-top:6px;padding-top:10px;font-weight:800}
+  .note{font-size:13px;color:var(--muted);background:var(--bg);border:1px solid var(--line);
+    border-radius:8px;padding:12px}
+  .foot{text-align:center;font-size:11px;color:var(--muted);padding:18px 0 8px}
+  .foot a{color:var(--blue);text-decoration:none}
+  @media(max-width:420px){ .grid{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <img src="/icons/bi-logo.svg" alt="BI" onerror="this.style.display='none'"/>
+    <div>
+      <div class="brand-name">Barro Industries</div>
+      <div class="brand-sub">Order Tracking</div>
+    </div>
+  </div>
+  <div id="root">
+    <div class="state"><div class="ic">📦</div><div>Loading your order…</div></div>
+  </div>
+  <div class="foot">
+    Barro Industries · Commercial Kitchen &amp; Steel Solutions<br>
+    Questions about your order? Contact your Barro Industries sales representative.
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+(function(){
+  var cfg = {
+    apiKey:"AIzaSyA1-fDeMCxTsUm29O49l954Ez5BqbyHijk",
+    authDomain:"barro-industries.firebaseapp.com",
+    projectId:"barro-industries",
+    storageBucket:"barro-industries.firebasestorage.app",
+    messagingSenderId:"700081895848",
+    appId:"1:700081895848:web:265511313b4ff74575459d"
+  };
+  var root = document.getElementById('root');
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function peso(n){ n=Number(n)||0; return '₱'+n.toLocaleString('en-PH',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+  function stateMsg(ic,title,sub){
+    root.innerHTML = '<div class="state"><div class="ic">'+ic+'</div><div style="font-size:16px;font-weight:700;color:var(--ink)">'+esc(title)+'</div>'+(sub?'<div style="margin-top:6px">'+esc(sub)+'</div>':'')+'</div>';
+  }
+
+  var STAGES = [
+    { key:'confirmed', name:'Order Confirmed',    desc:'Downpayment received — your order is locked in.' },
+    { key:'production',name:'In Production',       desc:'Our team is fabricating your order.' },
+    { key:'qc',        name:'Quality Check',       desc:'Final inspection before release.' },
+    { key:'ready',     name:'Ready for Delivery',  desc:'Completed and scheduled for delivery/pickup.' },
+    { key:'delivered', name:'Delivered / Completed',desc:'Order fulfilled. Thank you!' }
+  ];
+
+  // Accept the code from ?t=, ?o=, or a bare ?CODE — so short links like
+  // /t/?A1b2C3d4 and older /t/?t=CODE both work.
+  var params = new URLSearchParams(location.search);
+  var token = params.get('t') || params.get('o') || location.search.replace(/^\?/,'').split('&')[0] || '';
+  token = token.trim();
+  if (!token){ stateMsg('🔗','Invalid tracking link','This link is missing its tracking code. Please use the exact link sent to you.'); return; }
+
+  firebase.initializeApp(cfg);
+  var db = firebase.firestore();
+  db.collection('order_tracking').doc(token).get().then(function(snap){
+    if (!snap.exists){ stateMsg('🔍','Order not found','We couldn’t find an order for this link. Double-check the link, or contact your sales rep.'); return; }
+    render(snap.data());
+  }).catch(function(e){
+    stateMsg('⚠️','Could not load order','Please try again in a moment. ('+esc(e.code||e.message||'error')+')');
+  });
+
+  function stageIndex(status){
+    var i = STAGES.findIndex(function(s){ return s.key===status; });
+    return i<0 ? 0 : i;
+  }
+  function fmtDate(v){
+    if(!v) return '';
+    try{
+      var d = v.toDate ? v.toDate() : (v.seconds ? new Date(v.seconds*1000) : new Date(v));
+      if(isNaN(d)) return esc(String(v));
+      return d.toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'});
+    }catch(_){ return esc(String(v)); }
+  }
+
+  function render(o){
+    var cur = stageIndex(o.status||'confirmed');
+    var done = cur >= STAGES.length-1;
+    var stamps = o.stageStamps || {};
+
+    var steps = STAGES.map(function(s,i){
+      var cls = i<cur ? 'done' : (i===cur ? 'current' : 'pending');
+      var when = stamps[s.key] ? '<div class="step-at">'+fmtDate(stamps[s.key])+'</div>' : '';
+      var mark = i<cur ? '✓' : (i+1);
+      return '<li class="step '+cls+'"><span class="step-line"></span>'+
+        '<span class="dot">'+mark+'</span>'+
+        '<div class="step-body"><div class="step-name">'+esc(s.name)+'</div>'+
+        '<div class="step-desc">'+esc(s.desc)+'</div>'+when+'</div></li>';
+    }).join('');
+
+    var contract = Number(o.contractAmount)||0;
+    var paid = Number(o.paid)||0;
+    var balance = (o.balance!=null) ? Number(o.balance) : Math.max(0, contract-paid);
+    var payBlock = contract>0 ? (
+      '<div class="card"><div class="sect-title">Payment Summary</div>'+
+      '<div class="pay-row"><span>Contract Amount</span><span>'+peso(contract)+'</span></div>'+
+      '<div class="pay-row"><span>Paid</span><span style="color:var(--ok)">'+peso(paid)+'</span></div>'+
+      '<div class="pay-row total"><span>Balance</span><span style="color:'+(balance>0?'var(--warn)':'var(--ok)')+'">'+peso(balance)+'</span></div>'+
+      '</div>') : '';
+
+    var details = '';
+    var rows = [
+      ['Order No.', o.orderNo],
+      ['Product Line', o.company],
+      ['Order Date', fmtDate(o.orderDate||o.createdAt)],
+      ['Est. Completion', o.expectedDate ? fmtDate(o.expectedDate) : 'To be advised']
+    ].filter(function(r){ return r[1]; });
+    if (rows.length){
+      details = '<div class="card"><div class="sect-title">Order Details</div><div class="grid">'+
+        rows.map(function(r){ return '<div class="kv"><div class="k">'+esc(r[0])+'</div><div class="v">'+esc(r[1])+'</div></div>'; }).join('')+
+        '</div>'+ (o.scope ? '<div class="kv" style="margin-top:12px"><div class="k">Scope</div><div class="v" style="font-weight:500">'+esc(o.scope)+'</div></div>' : '') +'</div>';
+    }
+
+    root.innerHTML =
+      '<div class="card">'+
+        '<div class="hero-order">'+(done?'Order Complete':'Tracking Order')+'</div>'+
+        '<div class="hero-no">'+esc(o.orderNo||'Your Order')+'</div>'+
+        '<div class="hero-client">'+esc(o.clientName||'')+'</div>'+
+        '<span class="badge'+(done?' done':'')+'">'+esc(STAGES[cur].name)+'</span>'+
+      '</div>'+
+      '<div class="card"><div class="sect-title">Progress</div><ul class="steps">'+steps+'</ul></div>'+
+      details + payBlock +
+      (o.publicNote ? '<div class="card"><div class="note">'+esc(o.publicNote)+'</div></div>' : '');
+  }
+})();
+</script>
+</body>
+</html>
