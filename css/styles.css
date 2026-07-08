@@ -1548,6 +1548,73 @@ body.sidebar-open .top-nav-strip { display: none !important; }
   box-shadow: 0 0 8px rgba(48,209,88,0.20);
 }
 
+/* ── Calling (back) face — class-driven; dark default, light override below ── */
+.id-card--calling {
+  background: linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);
+  color: #fff; text-align: center; padding: 24px 20px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.id-card--calling .idc-photo {
+  width: 72px; height: 72px; border-radius: 50%; overflow: hidden; margin-bottom: 4px;
+  display: flex; align-items: center; justify-content: center; font-size: 36px;
+  background: rgba(255,255,255,0.10); border: 3px solid rgba(255,255,255,0.30);
+}
+.id-card--calling .idc-photo img { width: 100%; height: 100%; object-fit: cover; }
+.id-card--calling .idc-name { font-size: 18px; font-weight: 800; letter-spacing: .5px; }
+.id-card--calling .idc-role { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: rgba(255,255,255,0.70); }
+.id-card--calling .idc-dept { font-size: 11px; color: rgba(255,255,255,0.50); margin-top: 2px; }
+.id-card--calling .idc-divider { width: 100%; height: 1px; background: rgba(255,255,255,0.15); margin: 10px 0; }
+.id-card--calling .idc-contact { font-size: 12px; color: rgba(255,255,255,0.80); }
+.id-card--calling .idc-brand { font-size: 10px; color: rgba(255,255,255,0.40); margin-top: 8px; letter-spacing: .1em; }
+
+/* ══════════════════════════════════════════════════
+   ID CARD — professional LIGHT variant (office / aurora / astral / slate)
+   Clean white corporate card: flat, no gold shimmer, blue accent, ink text.
+══════════════════════════════════════════════════ */
+html.light .id-card, html.theme-pink .id-card, html.theme-grey .id-card {
+  background: #FFFFFF; color: var(--text);
+  border: 1px solid var(--border); box-shadow: var(--sh-md);
+}
+/* kill the animated gold shimmer + swap the top trim to the brand-blue accent */
+html.light .id-card::before, html.theme-pink .id-card::before, html.theme-grey .id-card::before { display: none; }
+html.light .id-card::after, html.theme-pink .id-card::after, html.theme-grey .id-card::after {
+  left: 0; right: 0; height: 3px; opacity: 1;
+  background: linear-gradient(90deg, var(--primary), var(--primary-light));
+}
+html.light .id-card-bg::before, html.theme-pink .id-card-bg::before, html.theme-grey .id-card-bg::before { background: radial-gradient(circle, rgba(15,108,189,0.05) 0%, transparent 70%); }
+html.light .id-card-bg::after, html.theme-pink .id-card-bg::after, html.theme-grey .id-card-bg::after { background: radial-gradient(circle, rgba(15,108,189,0.04) 0%, transparent 70%); }
+html.light .id-card-logo, html.theme-pink .id-card-logo, html.theme-grey .id-card-logo { background: #F3F2F1; border-color: var(--border); }
+/* solid ink text (undo the gradient text-clip) */
+html.light .id-card-company, html.theme-pink .id-card-company, html.theme-grey .id-card-company {
+  background: none; -webkit-text-fill-color: var(--text); color: var(--text);
+}
+html.light .id-card-company-sub, html.theme-pink .id-card-company-sub, html.theme-grey .id-card-company-sub { color: var(--text-muted); opacity: 1; }
+html.light .id-card-photo, html.theme-pink .id-card-photo, html.theme-grey .id-card-photo { background: #F3F2F1; border-color: var(--border); }
+html.light .id-card-photo:hover, html.theme-pink .id-card-photo:hover, html.theme-grey .id-card-photo:hover { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(15,108,189,0.15); }
+html.light .id-card-name, html.theme-pink .id-card-name, html.theme-grey .id-card-name {
+  background: none; -webkit-text-fill-color: var(--text); color: var(--text);
+}
+html.light .id-card-title, html.theme-pink .id-card-title, html.theme-grey .id-card-title { color: var(--text-muted); opacity: 1; }
+html.light .id-card-detail, html.theme-pink .id-card-detail, html.theme-grey .id-card-detail { color: var(--text-2); opacity: 1; }
+html.light .id-card-detail strong, html.theme-pink .id-card-detail strong, html.theme-grey .id-card-detail strong { color: var(--text); }
+html.light .id-card-footer, html.theme-pink .id-card-footer, html.theme-grey .id-card-footer { border-top-color: var(--border); }
+html.light .id-card-id, html.theme-pink .id-card-id, html.theme-grey .id-card-id {
+  background: none; -webkit-text-fill-color: var(--primary); color: var(--primary);
+}
+html.light .id-card-status, html.theme-pink .id-card-status, html.theme-grey .id-card-status {
+  background: rgba(16,124,65,0.10); color: #107C41; border-color: rgba(16,124,65,0.28); box-shadow: none;
+}
+/* back / calling face — clean white too */
+html.light .id-card--calling, html.theme-pink .id-card--calling, html.theme-grey .id-card--calling {
+  background: #FFFFFF; color: var(--text);
+}
+html.light .id-card--calling .idc-photo, html.theme-pink .id-card--calling .idc-photo, html.theme-grey .id-card--calling .idc-photo { background: #F3F2F1; border-color: var(--primary); }
+html.light .id-card--calling .idc-role, html.theme-pink .id-card--calling .idc-role, html.theme-grey .id-card--calling .idc-role { color: var(--primary); }
+html.light .id-card--calling .idc-dept, html.theme-pink .id-card--calling .idc-dept, html.theme-grey .id-card--calling .idc-dept { color: var(--text-muted); }
+html.light .id-card--calling .idc-divider, html.theme-pink .id-card--calling .idc-divider, html.theme-grey .id-card--calling .idc-divider { background: var(--border); }
+html.light .id-card--calling .idc-contact, html.theme-pink .id-card--calling .idc-contact, html.theme-grey .id-card--calling .idc-contact { color: var(--text-2); }
+html.light .id-card--calling .idc-brand, html.theme-pink .id-card--calling .idc-brand, html.theme-grey .id-card--calling .idc-brand { color: var(--text-muted); }
+
 /* ══════════════════════════════
    PULL-TO-REFRESH
 ══════════════════════════════ */

@@ -3223,17 +3223,17 @@ function renderIDCard(containerId, u) {
       </div>
     </div>`;
 
+  // Back / calling face — class-driven so the theme controls light vs dark.
   const callingHTML = `
-    <div class="id-card id-card--calling" style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);text-align:center;padding:24px 20px;display:flex;flex-direction:column;align-items:center;gap:8px">
-      ${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.3);margin-bottom:4px" alt=""/>`:
-        `<div style="width:72px;height:72px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-size:36px;margin-bottom:4px">👤</div>`}
-      <div style="font-size:18px;font-weight:800;color:#fff;letter-spacing:.5px">${escHtml(u.displayName||u.email)}</div>
-      <div style="font-size:12px;color:rgba(255,255,255,0.7);font-weight:600;text-transform:uppercase;letter-spacing:.08em">${escHtml(roleLabel)}</div>
-      <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:2px">${escHtml(deptLabel)}</div>
-      <div style="width:100%;height:1px;background:rgba(255,255,255,0.15);margin:10px 0"></div>
-      <div style="font-size:12px;color:rgba(255,255,255,0.8)">✉️ ${escHtml(u.email)}</div>
-      ${u.phone?`<div style="font-size:12px;color:rgba(255,255,255,0.8)">📞 ${escHtml(u.phone)}</div>`:''}
-      <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:8px;letter-spacing:.1em">BARRO INDUSTRIES</div>
+    <div class="id-card id-card--calling">
+      <div class="idc-photo">${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" alt=""/>`:`<span>👤</span>`}</div>
+      <div class="idc-name">${escHtml(u.displayName||u.email)}</div>
+      <div class="idc-role">${escHtml(roleLabel)}</div>
+      <div class="idc-dept">${escHtml(deptLabel)}</div>
+      <div class="idc-divider"></div>
+      <div class="idc-contact">✉️ ${escHtml(u.email)}</div>
+      ${u.phone?`<div class="idc-contact">📞 ${escHtml(u.phone)}</div>`:''}
+      <div class="idc-brand">BARRO INDUSTRIES</div>
     </div>`;
 
   // Build the full flip scene once (no re-render on flip)
