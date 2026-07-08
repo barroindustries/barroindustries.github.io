@@ -5592,6 +5592,30 @@ function printBKQuote(lines, q) {
 }
 
 // ── BK Quotations Summary ────────────────────────
+// Group quotes into revision lineages — base quote number (sans the -Rn suffix)
+// + client — and keep only the LATEST revision of each. Returns the deduped
+// `latest` array + a Set of superseded (older-revision) ids, so KPI totals stop
+// double-counting R1 + R2 + … of the same quote.
+window.latestQuoteRevisions = function(quotes){
+  const revOf = q => { const m=String(q.quoteNumber||q.editableState?.quoteNo||'').match(/-R(\d+)\s*$/i); return m?parseInt(m[1],10):1; };
+  const lineageOf = q => {
+    const base = String(q.quoteNumber||q.editableState?.quoteNo||'').replace(/-R\d+\s*$/i,'').trim();
+    const client = (q.clientName||'').trim().toLowerCase();
+    return base ? (base+'||'+client) : ('id::'+q.id);   // unnumbered → its own lineage (no dedup)
+  };
+  const best = new Map();
+  (quotes||[]).forEach(q => {
+    const k = lineageOf(q), cur = best.get(k);
+    const better = !cur || revOf(q) > revOf(cur) ||
+      (revOf(q)===revOf(cur) && (q.createdAt?.seconds||0) >= (cur.createdAt?.seconds||0));
+    if (better) best.set(k, q);
+  });
+  const latest = [...best.values()];
+  const keep = new Set(latest.map(q=>q.id));
+  const supersededIds = new Set((quotes||[]).filter(q=>!keep.has(q.id)).map(q=>q.id));
+  return { latest, supersededIds };
+};
+
 async function renderBKQuotationsSummary(container, currentUser, currentRole) {
   const isPrivileged = ['president','manager','finance'].includes(currentRole);
   const isAdmin = ['president','manager','secretary'].includes(currentRole);
@@ -5602,21 +5626,25 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
   const snap = await q.get().catch(()=>({docs:[]}));
   const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
 
-  const total      = quotes.reduce((s,q)=>s+(q.total||0),0);
-  const accepted   = quotes.filter(q=>q.status==='accepted');
+  // KPI totals count only the LATEST revision of each quote — older revisions
+  // (R1 when an R2 exists) are superseded and must not inflate the value/counts.
+  const { latest: activeQuotes, supersededIds } = window.latestQuoteRevisions(quotes);
+  const total      = activeQuotes.reduce((s,q)=>s+(q.total||0),0);
+  const accepted   = activeQuotes.filter(q=>q.status==='accepted');
   const acceptedT  = accepted.reduce((s,q)=>s+(q.total||0),0);
-  const sent       = quotes.filter(q=>q.status==='sent').length;
-  const draft      = quotes.filter(q=>q.status==='draft').length;
+  const sent       = activeQuotes.filter(q=>q.status==='sent').length;
+  const draft      = activeQuotes.filter(q=>q.status==='draft').length;
 
   // Single quote card — reused by both the flat list and the by-customer view.
   const quoteCard = (q) => {
-    const wonish = ['filed','accepted','won','approved'].includes(q.status);
+    const superseded = supersededIds.has(q.id);
+    const wonish = !superseded && ['filed','accepted','won','approved'].includes(q.status);
     const canDel = isAdmin || currentRole==='finance' || q.createdBy===currentUser.uid;
     const label  = `BK quote ${q.quoteNumber||q.id.slice(-6).toUpperCase()} (${q.clientName||'Unnamed'})`;
     return `
-      <div class="item-card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div class="item-card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap${superseded?';opacity:.6':''}">
         <div style="flex:1;min-width:160px">
-          <div class="item-title" style="font-size:13px">BK-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${escHtml(q.clientName||'Unnamed')}</div>
+          <div class="item-title" style="font-size:13px">BK-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${escHtml(q.clientName||'Unnamed')}${superseded?' <span class="badge badge-gray" style="font-size:9px">superseded</span>':''}</div>
           <div class="item-meta" style="margin-top:4px">
             <span>${escHtml(q.scope||'Custom')}</span>
             <span>${escHtml(q.agentName||'—')}</span>
@@ -5624,7 +5652,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
           </div>
         </div>
         <div style="text-align:right">
-          <div style="font-weight:700">₱${fmt(q.total||0)}</div>
+          <div style="font-weight:700${superseded?';text-decoration:line-through;color:var(--text-muted)':''}">₱${fmt(q.total||0)}</div>
           <span class="badge ${statusBadge(q.status)}" style="margin-top:4px">${q.salesOrderId?'won':q.status||'draft'}</span>
           ${q.deleteRequested?`<span class="badge badge-red" style="font-size:10px;margin-left:4px">🗑 del req</span>`:''}
         </div>
@@ -5639,7 +5667,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
 
   container.innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:20px">
-      <div class="stat-card"><div class="stat-num">${quotes.length}</div><div class="stat-label">Total Quotes</div></div>
+      <div class="stat-card"><div class="stat-num">${activeQuotes.length}</div><div class="stat-label">Total Quotes${supersededIds.size?` <span style="font-size:9px;color:var(--text-muted)">(+${supersededIds.size} rev)</span>`:''}</div></div>
       <div class="stat-card"><div class="stat-num">₱${fmt(total)}</div><div class="stat-label">Quote Value</div></div>
       <div class="stat-card"><div class="stat-num">${accepted.length}</div><div class="stat-label">Accepted</div></div>
       <div class="stat-card"><div class="stat-num">₱${fmt(acceptedT)}</div><div class="stat-label">Accepted Value</div></div>
@@ -5677,10 +5705,12 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       const groups = {};
       quotes.forEach(q=>{ const k=((q.clientName||'').trim())||'Unnamed'; (groups[k]=groups[k]||[]).push(q); });
       body.innerHTML = Object.keys(groups).sort((a,b)=>a.localeCompare(b)).map(name=>{
-        const gq=groups[name]; const gt=gq.reduce((s,x)=>s+(x.total||0),0);
+        const gq=groups[name];
+        // Customer total = latest revisions only (superseded ones don't add up).
+        const active=gq.filter(x=>!supersededIds.has(x.id)); const gt=active.reduce((s,x)=>s+(x.total||0),0);
         return `<details open style="background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:8px 12px;margin-bottom:10px">
           <summary style="cursor:pointer;font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px">
-            <span style="flex:1">${escHtml(name)} <span class="badge badge-gray" style="font-size:10px">${gq.length}</span></span>
+            <span style="flex:1">${escHtml(name)} <span class="badge badge-gray" style="font-size:10px">${active.length}${gq.length!==active.length?` +${gq.length-active.length}`:''}</span></span>
             <span style="font-weight:700;color:var(--text-muted)">₱${fmt(gt)}</span>
           </summary>
           <div class="item-list" style="margin-top:8px">${gq.map(quoteCard).join('')}</div>
@@ -8180,12 +8210,15 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
   // ── Quote analytics ──
   // Successful = quotes that became SALES ORDERS (have salesOrderId). Pipeline =
   // overall amount of ALL quotes produced. Won = total of those converted to orders.
-  const totalMade   = all.length;
-  const wonQuotes   = all.filter(q=>q.salesOrderId);
+  // Count only the LATEST revision of each quote so R1+R2… don't inflate the
+  // pipeline value / quote count (same dedup as the BK summary).
+  const { latest: bsActive } = window.latestQuoteRevisions(all);
+  const totalMade   = bsActive.length;
+  const wonQuotes   = bsActive.filter(q=>q.salesOrderId);
   const successful  = wonQuotes.length;
   const winRate     = totalMade ? Math.round(successful/totalMade*100) : 0;
   const wonValue    = wonQuotes.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
-  const pipelineVal = all.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+  const pipelineVal = bsActive.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
   const analytics = `
     <div class="card" style="margin-bottom:14px;border:1.5px solid var(--primary)">
       <div class="card-header"><h3>📊 Quote Analytics</h3></div>
