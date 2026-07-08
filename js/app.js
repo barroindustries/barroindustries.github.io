@@ -7095,7 +7095,8 @@ document.addEventListener('DOMContentLoaded',()=>{
 // change (observer) + resize, so it covers every dashboard without per-card edits.
 window.fitKpiValues = function(root){
   const scope = (root && root.querySelectorAll) ? root : document;
-  scope.querySelectorAll('.kpi-value').forEach(el=>{
+  // Covers every big-number card face: dashboard KPI values + stat-card numbers.
+  scope.querySelectorAll('.kpi-value, .stat-num').forEach(el=>{
     el.style.whiteSpace = 'nowrap';
     // Capture the natural (CSS/inline) size once per element, then always re-fit
     // from it so resizing back up works too.
