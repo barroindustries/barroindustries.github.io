@@ -334,8 +334,12 @@ tr:hover td{background:#fafbff;}
   .qno-builder-section,.totals-controls,.status-bar,.cat-tabs,.pricing-controls{display:none!important;}
   .term-off{display:none!important;}
   .print-only{display:block!important;}
+  /* Sections must FLOW across pages — a tall section (the items table) with
+     page-break-inside:avoid was pushed whole to page 2, leaving page 1 blank
+     except the header. Rows/category groups keep their own avoid (below), so the
+     table stays readable while flowing continuously at any print scale. */
   .section{box-shadow:none;border:none;margin-bottom:6px;padding:3px 0 6px;border-radius:0;
-    border-bottom:1px solid #e3e7ef;page-break-inside:avoid;}
+    border-bottom:1px solid #e3e7ef;page-break-inside:auto;break-inside:auto;}
   .sec-title{font-size:8.5pt;color:#1E3A5F;border-bottom:1.5px solid #1E3A5F;margin-bottom:5px;padding-bottom:2px;letter-spacing:.6px;}
   .main{padding:0;max-width:100%;}
   .print-header{display:flex!important;justify-content:space-between;align-items:flex-start;
