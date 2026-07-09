@@ -1540,12 +1540,45 @@ window.backfillLedgerFromJournals = async function() {
   return { exp, crj, cdj };
 };
 
+// Recreate missing PAY-{month}-{uid} ledger rows from salary_history. Covers months
+// computed while the Compute crash (v11, 'existing' ReferenceError) blocked ledger
+// posting — salary_history committed before the crash, so it is the recovery source.
+// Idempotent: skips any month+user whose PAY- ref already exists.
+window.backfillPayrollLedger = async function() {
+  const sh = await db.collection('salary_history').get().catch(()=>({docs:[]}));
+  let posted = 0;
+  for (const d of sh.docs) {
+    const h = d.data();
+    const month = h.month, uid = h.userId || (d.id.includes('_') ? d.id.split('_')[0] : null);
+    const net = (h.finalPay != null ? h.finalPay : h.netPay) || 0;
+    if (!month || !uid || net <= 0) continue;
+    const ref = `PAY-${month}-${uid}`;
+    const ex = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>null);
+    if (!ex || ex.docs.length) continue;   // exists, or read failed — never risk a duplicate
+    await db.collection('ledger').add({
+      date:        month + '-01',
+      type:        'debit',
+      description: `Payslip — ${h.userName||'?'} (${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})})`,
+      amount:      net,
+      category:    'Payroll Expense',
+      source:      'Finance',
+      refNumber:   ref,
+      addedBy:     currentUser.uid,
+      addedByName: 'Payroll backfill',
+      createdAt:   firebase.firestore.FieldValue.serverTimestamp()
+    });
+    posted++;
+  }
+  return posted;
+};
+
 window.runLedgerBackfill = async function() {
   if (!confirm('Sync approved expenses and the cash receipt / disbursement journals into the ledger?\n\nSafe to run repeatedly — already-synced entries are skipped.')) return;
   Notifs.showToast('Syncing journals to ledger…');
   try {
     const r = await window.backfillLedgerFromJournals();
-    Notifs.showToast(`Synced ✓ ${r.exp} expenses, ${r.crj} receipts, ${r.cdj} disbursements posted.`);
+    const pay = await window.backfillPayrollLedger();
+    Notifs.showToast(`Synced ✓ ${r.exp} expenses, ${r.crj} receipts, ${r.cdj} disbursements${pay?`, ${pay} payroll rows`:''} posted.`);
     const el = document.getElementById('fin-content');
     if (el) window.renderFinancialReports(el, window.currentUser, window.currentRole, 'all');
   } catch (e) { Notifs.showToast('Sync failed: ' + (e.message||e), 'error'); }
@@ -2662,8 +2695,8 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         addedByName: window.userProfile?.displayName || currentUser.email,
         createdAt:   firebase.firestore.FieldValue.serverTimestamp()
       };
-      if (existing.docs.length) {
-        await existing.docs[0].ref.update({ amount: empNet });
+      if (existingRef) {
+        await existingRef.update({ amount: empNet });
       } else {
         await db.collection('ledger').add(entry);
       }
@@ -2861,6 +2894,7 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
   const todayStr = bizDate(), yr = String(bizYear());
   let label;
   if (range==='month') { const m=todayStr.slice(0,7); all=all.filter(e=>(e.date||'').slice(0,7)===m); label='This Month — '+m; }
+  else if (range==='prev') { const pm=window.prevBizMonth(); all=all.filter(e=>(e.date||'').slice(0,7)===pm); label='Last Month — '+pm; }
   else if (range==='year') { all=all.filter(e=>(e.date||'').slice(0,4)===yr); label='Year to Date — '+yr; }
   else { label='All Time'; }
   // Stash the period's rows so the CSV export button (inline onclick) can reach them.
@@ -2890,7 +2924,7 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
   const rangeBtn = (r,t)=>`<button class="subtab-btn ${range===r?'active':''}" onclick="renderFinancialReports(document.getElementById('fin-content'),window.currentUser,window.currentRole,'${r}')">${t}</button>`;
 
   container.innerHTML = `
-    <div class="subtab-bar" style="margin-bottom:12px">${rangeBtn('month','This Month')}${rangeBtn('year','Year to Date')}${rangeBtn('all','All Time')}</div>
+    <div class="subtab-bar" style="margin-bottom:12px">${rangeBtn('month','This Month')}${rangeBtn('prev','Last Month')}${rangeBtn('year','Year to Date')}${rangeBtn('all','All Time')}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <div style="font-size:12px;color:var(--text-muted)">${label}</div>
       <div style="display:flex;gap:6px">

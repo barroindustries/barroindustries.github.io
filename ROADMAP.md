@@ -1,5 +1,9 @@
 # Barro Industries Ops System — Roadmap & Handoff
 
+> **⚡ v12 REBUILD IN PROGRESS — read [`V12-PLAN.md`](V12-PLAN.md) FIRST.** It is the approved
+> 40-workstream master plan (2026-07-09) + build log for the rename to **Barro Industries
+> Operating System v12.0.0**. This file remains the historical record of v10/v11 work.
+
 _Last updated: 2026-07-01 — base version **v11.0.51**, cache `bi-ops-v136` (both auto-bump on commit). See **"SESSION 2026-07-01"** below for the latest work. The previous **"SESSION 2026-06-30"** + **"🎯 NEXT UP"** backlog is retained below for history._
 
 ---

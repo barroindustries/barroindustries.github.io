@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
-  <title>Barro Industries — Operations</title>
-  <meta name="description" content="Barro Industries Internal Operations System"/>
+  <title>Barro Industries Operating System</title>
+  <meta name="description" content="Barro Industries Operating System — the company's central system"/>
   <meta name="theme-color" content="#FAF9F8"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
@@ -35,20 +35,14 @@
 ══════════════════════════════════ -->
 <div id="splash-screen">
   <div class="splash-inner">
-    <div class="splash-logo-ring">
-      <svg class="splash-ring-svg" viewBox="0 0 120 120">
-        <circle class="splash-ring-track" cx="60" cy="60" r="54"/>
-        <circle class="splash-ring-arc"   cx="60" cy="60" r="54"/>
-      </svg>
-      <div class="splash-logo-circle">
-        <img src="icons/bi-logo.svg" alt="BI" class="splash-logo"
-             onerror="this.style.display='none';document.getElementById('splash-bi-fallback').style.display='flex'"/>
-        <div id="splash-bi-fallback" class="splash-bi-fallback" style="display:none">BI</div>
-      </div>
+    <div class="splash-logo-card">
+      <img src="icons/bi-logo.svg" alt="BI" class="splash-logo"
+           onerror="this.style.display='none';document.getElementById('splash-bi-fallback').style.display='flex'"/>
+      <div id="splash-bi-fallback" class="splash-bi-fallback" style="display:none">BI</div>
     </div>
     <div class="splash-wordmark-stack">
       <span class="splash-word-main">Barro Industries</span>
-      <span class="splash-word-sub">Operations System</span>
+      <span class="splash-word-sub">Operating System</span>
     </div>
     <div class="splash-bar"></div>
   </div>
@@ -65,7 +59,7 @@
       <div id="login-logo-fallback" class="login-logo-fallback" style="display:none">BI</div>
     </div>
     <h1 class="login-title">Barro Industries</h1>
-    <p class="login-sub">Operations System</p>
+    <p class="login-sub">Operating System</p>
 
     <!-- ── Role Picker ── -->
     <div id="login-role-picker">
@@ -160,7 +154,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v11.0.5 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.0 · Barro Industries</div>
   </div>
 </div>
 
@@ -181,7 +175,7 @@
       </div>
       <div class="topbar-wordmark-stack">
         <span class="topbar-brand-main">Barro Industries</span>
-        <span class="topbar-brand-sub" id="topbar-version-str">Operations · v11.0.0</span>
+        <span class="topbar-brand-sub" id="topbar-version-str">Operating System · v12.0.0</span>
       </div>
     </div>
     <div class="topbar-right">
@@ -307,7 +301,7 @@
   const _lvEl = document.getElementById('login-version-str');
   if (_lvEl) _lvEl.textContent = 'v' + _v + ' · Barro Industries';
   const _tbEl = document.getElementById('topbar-version-str');
-  if (_tbEl) _tbEl.textContent = 'Operations · v' + _v;
+  if (_tbEl) _tbEl.textContent = 'Operating System · v' + _v;
 </script>
 <script defer src="js/drive.js"></script>
 <script defer src="js/notifications.js"></script>
@@ -320,7 +314,7 @@
       const el = document.getElementById('login-version-str');
       if (el) el.textContent = 'v' + window.APP_VERSION + ' · Barro Industries';
       const tb = document.getElementById('topbar-version-str');
-      if (tb) tb.textContent = 'Operations · v' + window.APP_VERSION;
+      if (tb) tb.textContent = 'Operating System · v' + window.APP_VERSION;
     }
   });
 </script>

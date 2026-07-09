@@ -1210,14 +1210,17 @@ window.renderAttendancePage = async function() {
             const note   = document.getElementById('att-note').value.trim();
             const ref = db.collection('attendance').doc(targetUid).collection('records').doc(date);
             const FV  = firebase.firestore.FieldValue;
+            // Always write attendanceScore too: payroll and EOM read it FIRST (before
+            // the fullTime/loginTime fallbacks), so an edit that leaves an old score
+            // behind silently never reaches pay.
             if (status==='present')
-              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:true,status:'present',note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp()},{merge:true});
+              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:true,status:'present',attendanceScore:1.0,note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp()},{merge:true});
             else if (status==='half')
-              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:false,status:'half',note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp()},{merge:true});
+              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:false,status:'half',attendanceScore:0.5,note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp()},{merge:true});
             else
               // Soft-archive instead of deleting: preserve the audit trail payroll
               // depends on. Clear time markers so downstream reads classify as absent.
-              await ref.set({date,uid:targetUid,status:'absent',fullTime:false,loginTime:FV.delete(),note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp()},{merge:true});
+              await ref.set({date,uid:targetUid,status:'absent',fullTime:false,loginTime:FV.delete(),attendanceScore:0,note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp()},{merge:true});
             // Refresh in-memory copy so the calendar re-renders with the new state
             renderAttMonth();
             closeModal();

@@ -4164,124 +4164,92 @@ html.light .subtab-btn.active, html.theme-pink .subtab-btn.active, html.theme-gr
 ══════════════════════════════════════════ */
 
 /* ── Splash: circle logo + spinning ring ── */
+/* ── v12 splash: clean Fluent office look (light, matches the default theme) ── */
 #splash-screen {
-  background: #070710 !important;
+  background:
+    radial-gradient(900px 480px at 50% -10%, rgba(15,108,189,0.08), transparent 65%),
+    #FAF9F8 !important;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-/* Entrance */
 .splash-inner {
-  animation: splashEnter 0.55s cubic-bezier(0.34,1.18,0.64,1) both;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: splashEnter 0.5s cubic-bezier(0.33,1,0.68,1) both;
 }
 @keyframes splashEnter {
-  from { opacity: 0; transform: scale(0.78) translateY(14px); }
-  to   { opacity: 1; transform: scale(1)    translateY(0); }
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Ring wrapper */
-.splash-logo-ring {
-  position: relative;
-  width: 120px; height: 120px;
-  margin-bottom: 24px;
-}
-.splash-ring-svg {
-  position: absolute;
-  inset: 0;
-  width: 120px; height: 120px;
-  animation: ringRotate 1.6s linear infinite;
-  transform-origin: center;
-}
-@keyframes ringRotate {
-  to { transform: rotate(360deg); }
-}
-.splash-ring-track {
-  fill: none;
-  stroke: rgba(255,255,255,0.07);
-  stroke-width: 3;
-}
-.splash-ring-arc {
-  fill: none;
-  stroke: var(--primary-light, #6C8EF5);
-  stroke-width: 3;
-  stroke-linecap: round;
-  stroke-dasharray: 339.3;   /* 2π × 54 */
-  stroke-dashoffset: 254.5;  /* shows ≈25% arc */
-  opacity: 0.85;
-}
-
-/* Circular logo */
-.splash-logo-circle {
-  position: absolute;
-  inset: 8px;
-  border-radius: 50%;
-  overflow: hidden;
-  background: rgba(108,142,245,0.10);
+/* Logo in a Fluent card */
+.splash-logo-card {
+  width: 96px; height: 96px;
+  border-radius: 22px;
+  background: #fff;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 0 28px rgba(108,142,245,0.28);
+  overflow: hidden;
+  margin-bottom: 22px;
+  border: 1px solid rgba(20,30,45,0.06);
+  box-shadow: 0 2px 6px rgba(15,108,189,0.08), 0 14px 36px rgba(20,30,45,0.10);
 }
 .splash-logo {
   width: 100%; height: 100%;
   object-fit: cover;
-  border-radius: 50%;
+  border-radius: 0;   /* override the legacy circular crop — the card clips */
+}
+.splash-bi-fallback {
+  width: 100%; height: 100%;
+  background: linear-gradient(140deg, #0F6CBD, #0A4E8A);
+  align-items: center; justify-content: center;
+  font-size: 38px; font-weight: 800; color: #fff;
+  letter-spacing: -2px;
 }
 
-/* Loading bar */
-.splash-bar {
-  width: 120px; height: 3px;
-  background: rgba(255,255,255,0.08);
-  border-radius: 2px;
-}
-.splash-bar::after {
-  background: linear-gradient(90deg, transparent 0%, var(--primary-light) 50%, transparent 100%);
-  animation: splashBarRun 1.4s ease-in-out infinite;
-}
-
-/* old single-line wordmark — replaced by stack below */
-.splash-wordmark { display: none; }
-
-/* New two-line wordmark */
+/* Wordmark */
 .splash-wordmark-stack {
   display: flex;
   flex-direction: column;
   align-items: center;
-  margin-bottom: 36px;
-  gap: 2px;
+  margin-bottom: 30px;
+  gap: 4px;
 }
 .splash-word-main {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
-  letter-spacing: -0.3px;
-  color: rgba(240,240,255,0.92);
+  letter-spacing: -0.2px;
+  color: #1A2129;
 }
 .splash-word-sub {
   font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.14em;
+  font-weight: 600;
+  letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: rgba(240,240,255,0.42);
+  color: #0F6CBD;
 }
 
-/* BI initials fallback */
-.splash-bi-fallback {
-  width: 100px; height: 100px;
-  border-radius: 28px;
-  background: linear-gradient(135deg, var(--primary-light), var(--pink));
-  align-items: center; justify-content: center;
-  font-size: 42px; font-weight: 800; color: #fff;
-  letter-spacing: -2px;
-  margin-bottom: 20px;
-  box-shadow: 0 8px 40px rgba(108,142,245,0.50);
-}
+/* Loading bar — thin, quiet, Fluent */
 .splash-bar {
-  width: 100px; height: 3px;
-  background: rgba(255,255,255,0.10);
+  position: relative;
+  width: 148px; height: 3px;
+  background: rgba(20,30,45,0.08);
   border-radius: 2px;
+  overflow: hidden;
 }
 .splash-bar::after {
-  background: linear-gradient(90deg, transparent 0%, var(--primary-light) 50%, transparent 100%);
+  content: "";
+  position: absolute; top: 0; left: 0;
+  width: 40%; height: 100%;
+  border-radius: 2px;
+  background: #0F6CBD;
   animation: splashBarRun 1.3s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .splash-inner { animation: none; }
+  .splash-bar::after { animation: none; width: 100%; opacity: .5; }
 }
 
 /* ── Topbar: logo area ── */

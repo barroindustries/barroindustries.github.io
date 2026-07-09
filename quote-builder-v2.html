@@ -1175,6 +1175,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
     else if(e.key==='Enter'){e.preventDefault();selectFocused();}
     else if(e.key==='Escape') closeDropdown();
   });
+  // Client # auto-suggestion: mark manual edits, then suggest once auth is ready.
+  document.getElementById('qnoSeq')?.addEventListener('input',()=>{_seqTouched=true;});
+  if(typeof auth!=='undefined'&&auth.onAuthStateChanged) auth.onAuthStateChanged(u=>{ if(u) autoClientSeq(); });
 });
 
 function initUI(){
@@ -1229,6 +1232,32 @@ function setQnoMode(m){
   else{qn.setAttribute('readonly','');qn.style.background='var(--gray-light)';
     document.getElementById('qnoLabel').innerHTML='Quote Number <span style="color:var(--gray-dark);font-weight:400;text-transform:none;">(auto)</span>';}
   buildQuoteNo();
+}
+
+// Auto-suggest the next Client # from previously-filed quotes of the active
+// company (highest NNN segment + 1). Fills only while the field is untouched
+// and still at its default, so restored drafts and manual entries are never
+// overridden. Non-admins can only read their own quotes (Firestore rules), so
+// the suggestion is scoped to what the signed-in user can see.
+let _seqTouched=false;
+async function autoClientSeq(){
+  try{
+    if(qnoMode!=='auto'||_seqTouched) return;
+    const el=document.getElementById('qnoSeq');
+    if(!el||String(el.value)!=='1') return;
+    if(typeof auth==='undefined'||!auth.currentUser) return;
+    const coll=(currentCo==='BK')?'bk_quotes':'bs_quotes';
+    let docs=[];
+    try{ docs=(await db.collection(coll).get()).docs; }
+    catch(_){ docs=(await db.collection(coll).where('createdBy','==',auth.currentUser.uid).get().catch(()=>({docs:[]}))).docs; }
+    let max=0;
+    docs.forEach(d=>{
+      const n=String(d.data().quoteNumber||d.data().quoteNo||'');
+      const m=n.match(/^[A-Za-z]{2}-[A-Za-z]{2}-[A-Za-z]{2}-\d{6}-(\d{3})/);
+      if(m) max=Math.max(max,parseInt(m[1],10));
+    });
+    if(max>0&&!_seqTouched&&String(el.value)==='1'){ el.value=Math.min(max+1,999); buildQuoteNo(); }
+  }catch(e){ console.warn('autoClientSeq skipped',e); }
 }
 
 function buildQuoteNo(){

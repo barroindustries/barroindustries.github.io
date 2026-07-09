@@ -29,9 +29,11 @@ const LOGIN_TYPE_LABELS = { admin: 'Admin', employee: 'Employee', partner: 'Part
 // user back to the dashboard / rebuild nav mid-task.
 let _bootstrappedUid = null;
 document.addEventListener('DOMContentLoaded', () => {
-  initTheme();
-  initLogin();
-  Notifs.initToggle();
+  // A cosmetic failure in theme/login init must never block the auth listener
+  // below from attaching — that would strand the app on the splash screen.
+  try { initTheme(); } catch(e) { console.error('initTheme failed', e); }
+  try { initLogin(); } catch(e) { console.error('initLogin failed', e); }
+  try { Notifs.initToggle(); } catch(e) { console.error('Notifs.initToggle failed', e); }
   auth.onAuthStateChanged(async user => {
     if (user) {
       currentUser = user;
@@ -605,12 +607,10 @@ function initLogin() {
     document.getElementById('email').value = savedEmail;
     document.getElementById('remember-me').checked = true;
   }
-  // Pre-fill saved guest name
-  const savedGuest = localStorage.getItem('bi-guest-name');
-  if (savedGuest) {
-    document.getElementById('guest-name').value = savedGuest;
-    document.getElementById('guest-save-name').checked = true;
-  }
+  // Legacy guest login was removed from index.html — clear its stale key. (A device
+  // still holding 'bi-guest-name' used to throw here on the missing #guest-name
+  // element, which blocked the auth listener from attaching → app stuck on splash.)
+  localStorage.removeItem('bi-guest-name');
 
   // Role picker cards (admin / employee / partner)
   document.querySelectorAll('.login-role-card[data-type]').forEach(card => {
@@ -2642,14 +2642,21 @@ async function renderSecretaryDashboard() {
 // ── Finance period filter (shared by Finance Dashboard + Analytics) ──
 // Periods: 'month' = current Manila month · 'ytd' = since Jan 1 of the current
 // year · 'all' = all time. dateStr may be 'YYYY-MM-DD' or 'YYYY-MM'.
-window.FIN_PERIOD_TABS = [['month','This Month'],['ytd','Since Jan 1'],['all','All Time']];
+window.FIN_PERIOD_TABS = [['month','This Month'],['prev','Last Month'],['ytd','Since Jan 1'],['all','All Time']];
+// Previous Manila month as 'YYYY-MM' (completed months must stay one click away —
+// records never "disappear" at month rollover).
+window.prevBizMonth = function() {
+  const [y, m] = bizDate().slice(0,7).split('-').map(Number);
+  return m === 1 ? (y-1) + '-12' : y + '-' + String(m-1).padStart(2,'0');
+};
 window.finPeriodMatch = function(dateStr, period) {
   const ss = String(dateStr||''); if (!ss) return false;
   if (period === 'all') return true;
   if (period === 'ytd') return ss.slice(0,4) === String(bizYear());
+  if (period === 'prev') return ss.slice(0,7) === window.prevBizMonth();
   return ss.slice(0,7) === bizDate().slice(0,7);   // 'month'
 };
-window.finPeriodLabel = function(period){ return ({month:'This Month', ytd:'YTD '+bizYear(), all:'All Time'})[period] || 'This Month'; };
+window.finPeriodLabel = function(period){ return ({month:'This Month', prev:'Last Month '+window.prevBizMonth(), ytd:'YTD '+bizYear(), all:'All Time'})[period] || 'This Month'; };
 // onclickJs: a JS expression string in which '%P%' is replaced by each period key.
 window.finPeriodBar = function(active, onclickJs) {
   return '<div class="subtab-bar" style="margin-bottom:12px">' +
