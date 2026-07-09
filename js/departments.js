@@ -541,7 +541,9 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
     const todayStr = today();
     const in3d = new Date(); in3d.setDate(in3d.getDate() + 3);
     const in3Str   = window.bizDate ? window.bizDate(in3d) : in3d.toISOString().slice(0, 10);
-    const snap = await db.collection('tasks').get().catch(()=>({docs:[]}));
+    const snap = typeof dbCachedGet==='function'
+      ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000).catch(()=>({docs:[]}))
+      : await db.collection('tasks').get().catch(()=>({docs:[]}));
     let tasks = snap.docs.map(d=>normTask(d.data(),d.id)).filter(t=>!DONE_STATUSES.includes(t.status)&&t.status!=='archived');
     if (sub === 'overdue') {
       tasks = tasks.filter(t=>t.dueDate && t.dueDate < todayStr)
@@ -1359,12 +1361,12 @@ async function loadCashContent(currentUser, currentRole, sub) {
     content.innerHTML = expenseTable(expenses, isPrivileged);
     bindExpenseActions(content, currentUser, currentRole, sub);
   } else if (sub === 'all-expenses') {
-    const snap = await db.collection('expenses').get();
+    const snap = await db.collection('expenses').get().catch(()=>({docs:[]}));
     const expenses = snap.docs.map(d => ({id:d.id,...d.data()})).sort((a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     content.innerHTML = expenseTable(expenses, true);
     bindExpenseActions(content, currentUser, currentRole, sub);
   } else if (sub === 'summary') {
-    const snap = await db.collection('expenses').get();
+    const snap = await db.collection('expenses').get().catch(()=>({docs:[]}));
     const expenses = snap.docs.map(d => d.data());
     const total     = expenses.reduce((s,e) => s + (e.amount||0), 0);
     const approved  = expenses.filter(e => e.status==='approved').reduce((s,e) => s + (e.amount||0), 0);
@@ -9224,7 +9226,7 @@ window.renderApprovals = async function(currentUser) {
         ...atSnap.docs.map(d=>({id:d.id,...d.data(),type:'attendance',icon:'⏰',label:'Attendance Extension',name:d.data().userName||'Unknown',detail:d.data().date||'',ts:d.data().requestedAt})),
         ...caSnap2.docs.map(d=>({id:d.id,...d.data(),type:'ca',icon:'💸',label:'Cash Advance',name:d.data().userName||'Unknown',detail:`₱${fmt(d.data().amount||0)}`,ts:d.data().createdAt})),
         ...subSnap2.docs.map(d=>({id:d.id,...d.data(),type:'submission',icon:'📤',label:'Work Submission',name:d.data().submittedByName||d.data().userName||d.data().authorName||'Unknown',detail:d.data().title||'',ts:d.data().createdAt})),
-        ...reviewTasksSnap.docs.map(d=>({id:d.id,...d.data(),type:'review-task',icon:'📋',label:'Task for Review',name:d.data().title||'Untitled Task',detail:(()=>{const uids=Array.isArray(d.data().assignedTo)?d.data().assignedTo:[d.data().assignedTo].filter(Boolean);return uids.length?'by '+d.data().assignedToNames?.join(', '):'';})(),ts:d.data().lastModifiedAt||d.data().createdAt})),
+        ...reviewTasksSnap.docs.map(d=>({id:d.id,...d.data(),type:'review-task',icon:'📋',label:'Task for Review',name:d.data().title||'Untitled Task',detail:(()=>{const uids=Array.isArray(d.data().assignedTo)?d.data().assignedTo:[d.data().assignedTo].filter(Boolean);const nm=(d.data().assignedToNames||[]).join(', ');return uids.length&&nm?'by '+nm:'';})(),ts:d.data().lastModifiedAt||d.data().createdAt})),
         ...finReqSnap2.docs.map(d=>({id:d.id,...d.data(),type:'finance-req',icon:'💼',label:'Finance Request',name:`Delete: ${d.data().userName||'?'} (${d.data().month||'?'})`,detail:`by ${d.data().requestedByName||'?'} — ${d.data().reason||''}`,ts:d.data().createdAt})),
         ...finDelSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'finance-del',icon:'🗑',label:'Finance Delete',name:`Delete: ${x.label||'record'}`,detail:`by ${x.requestedByName||'?'}${x.reason?' — '+x.reason:''}`,ts:x.createdAt,recLabel:x.label};}),
         // Partner quote approvals (partner submitted a quote for the president to review/edit/return)
