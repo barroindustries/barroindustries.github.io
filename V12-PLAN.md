@@ -4,6 +4,15 @@
 (along with `ROADMAP.md` + `CLAUDE.md`) and continues from the Build Log at the bottom.
 Full audit report artifact: https://claude.ai/code/artifact/8185aea0-da1b-4769-8f81-4a9a224fe241
 
+> **🧭 Cost-effective build strategy (Neil, 2026-07-09): Fable decides, Sonnet implements.**
+> [`fable-workplan/INDEX.md`](fable-workplan/INDEX.md) has all 18 Phase-2 + Phase-3 workstreams
+> ALREADY GROUNDED in the current code (18 parallel research agents read the real repo — exact
+> file:line citations, data shapes, constraints — so no re-discovery is needed). **Fable's next
+> session:** open one brief at a time from that folder, resolve its `[ ]` open decisions, write
+> the spec back into that file. **Sonnet then implements** from the finished specs — zero further
+> architecture calls needed, which is what makes that half cost-efficient. Do not open all 18
+> briefs in one session — load one workstream at a time (~25-40K chars each).
+
 ## Vision (owner's words, 2026-07-09)
 
 > "The system is like a combination of all apps needed for a business."
@@ -205,3 +214,7 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
 
 - **2026-07-09 (this session):** Plan approved. Phase 1 items 1–8 implemented (see commit
   "v12.0.0 Phase 1"). NEXT UP: workstream 9 (BRAND) + 10 (routing) + 11 (confirm dialog).
+- **2026-07-09 (later, cost-effectiveness prep):** All 18 Phase-2 + Phase-3 workstreams
+  pre-grounded in current code (18 parallel research agents) and written to
+  `fable-workplan/*.md` (INDEX + one file per workstream). Decisions NOT yet resolved —
+  that's Fable's next step. See the strategy note above.
