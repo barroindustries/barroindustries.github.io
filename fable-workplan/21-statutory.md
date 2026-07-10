@@ -1,5 +1,12 @@
 # Workstream 21 — Statutory Tables (SSS/PhilHealth/Pag-IBIG/TRAIN withholding, employer shares, 13th-month)
 
+> ✅ **IMPLEMENTED 2026-07-10** (shipped as one diff with WS20+WS22, per build order).
+> `js/statutory-tables.js` — window.STATUTORY/computeStatutory — wired into index.html/sw.js.
+> **‼️ Every bracket number is still a PLACEHOLDER (`verified:false`)** — do not trust this for
+> real payroll until Neil's accountant confirms every figure against the published 2026
+> circulars. 13th-month payout run and full historical GROSS re-booking are forward-only/
+> deferred, exactly as decided. See V12-PLAN.md Build Log for the full implementation note.
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

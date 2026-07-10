@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.1';
+window.APP_VERSION = '12.0.2';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -373,7 +373,8 @@ window.COA = {
               'Operating Expense', 'Utilities', 'Tax', 'Materials',
               'General Expense', 'Other Expense'],
   asset:     ['Cash', 'Accounts Receivable', 'Inventory'],
-  liability: ['Accounts Payable', 'VAT Payable', 'Statutory Payables'],
+  liability: ['Accounts Payable', 'VAT Payable', 'Statutory Payables',
+              'SSS Payable', 'PhilHealth Payable', 'Pag-IBIG Payable', 'Withholding Tax Payable'], // v12 WS20/21 — per-agency remittance legs (WS39 reads these)
   equity:    ["Owner's Equity", 'Retained Earnings'],
 };
 // Legacy category → accountType (used by ledgerKind's fallback + the backfill).
@@ -619,4 +620,334 @@ window.brandEntity = function(kind){
   return {  // 'corporate' (default)
     name: L.opcName, registration: L.opcRegistration,
     tin: L.opcTin, address: L.addressShort, phone: L.phone, email: L.email };
+};
+
+// ── Cash Advance service (v12 WS22) ──────────────────────
+// ONE writer for all cash_advances mutations — every UI (Cash Advance tab,
+// Finance CA tab, Approvals aggregated tab, Approvals CA subtab, Personal
+// Finance, the worker-payslip CA field, the HR profile editor) becomes a thin
+// caller. Lives here (not departments.js/modules.js) because modules.js loads
+// LAST in index.html's script order — a shared service usable by app.js AND
+// modules.js AND departments.js must load before all three.
+function _caRound2(n){ return Math.round((n+Number.EPSILON)*100)/100; }
+// Oldest-first split of `total` across a user's approved CA docs, capped per-doc
+// balance. Shared by CashAdvance.planFor()'s custom-amount branch AND the Edit
+// Payroll modal's live "Custom amount" / "Pay in full" previews, so there is
+// exactly one splitting algorithm, not one per caller.
+function _caSplit(cas, total) {
+  let remaining = Math.max(0, total||0);
+  const plan = [];
+  for (const a of cas) {
+    if (remaining <= 0) break;
+    const due = Math.min(a.balance||0, remaining);
+    if (due > 0) plan.push({ caId:a.id, amount:_caRound2(due), installmentNo:_caInstallmentNo(a), terms:a.terms||1, monthlyPayment:a.monthlyPayment||a.balance });
+    remaining -= due;
+  }
+  return plan;
+}
+// "Installment N of M" — N = prior payroll-sourced payments (tagged source:'payroll') + 1.
+function _caInstallmentNo(a) {
+  return ((a.payments||[]).filter(p => p && p.source === 'payroll').length) + 1;
+}
+
+window.CashAdvance = {
+  RATE_DEFAULT: 2, // %/mo — approval-time prefill; nothing charges until an approver confirms
+
+  canAct() {
+    const role = window.currentRole || '';
+    if (['president','manager','finance'].includes(role)) return true;
+    return typeof window.canEditDept === 'function' && window.canEditDept('Finance');
+  },
+
+  // ── Request (the ONE request form's data path) ──────────────────────
+  async request({ amount, terms, reason, dateNeeded }) {
+    const amt = parseFloat(amount)||0;
+    if (!amt || amt < 100) throw new Error('Enter a valid amount (min ₱100).');
+    if (amt > 50000)       throw new Error('Maximum cash advance is ₱50,000.');
+    const t    = parseInt(terms)||1;
+    const uid  = window.currentUser && window.currentUser.uid;
+    const name = (window.userProfile && window.userProfile.displayName) || (window.currentUser && window.currentUser.email) || '';
+    await db.collection('cash_advances').add({
+      userId: uid, userName: name,
+      employeeId: (window.userProfile && window.userProfile.employeeId) || uid,
+      amount: amt, terms: t,
+      // Interest/monthly/total are finalized at approval (v12 WS22 decision 3) —
+      // the employee no longer picks whether interest applies.
+      interest: 0, interestCharged: false, monthlyPayment: null, totalPayable: null,
+      balance: 0, status: 'pending', payments: [],
+      date: dateNeeded || (window.bizDate ? window.bizDate() : today()),
+      reason: (reason||'').trim(),
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
+    await Notifs.sendToOwner({ title:'Cash Advance Request', body:`${name} requests ₱${fmt(amt)} (${t}-month plan).`, icon:'💸', type:'cash_advance' });
+  },
+
+  openRequestForm() {
+    openModal('Request Cash Advance', `
+      <div class="form-group"><label>Amount Needed (₱, max ₱50,000)</label>
+        <input id="ca-req-amt" type="number" inputmode="decimal" min="100" max="50000" step="100" placeholder="0.00"/>
+      </div>
+      <div class="form-group"><label>Repayment Terms</label>
+        <select id="ca-req-terms" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          <option value="1">1 month (lump sum)</option>
+          <option value="2">2 months</option>
+          <option value="3" selected>3 months</option>
+          <option value="6">6 months</option>
+          <option value="12">12 months</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Date Needed</label><input id="ca-req-date" type="date" value="${window.bizDate?window.bizDate():today()}"/></div>
+      <div class="form-group"><label>Reason / Purpose</label>
+        <textarea id="ca-req-reason" rows="3" placeholder="e.g., Medical emergency, school fees…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea>
+      </div>
+      <p style="font-size:11px;color:var(--text-muted);margin-top:2px">Interest (if any) and the exact repayment schedule are set by Finance when your request is approved.</p>
+    `, `<button class="btn-primary" id="ca-req-submit-btn">Submit Request</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    document.getElementById('ca-req-submit-btn').addEventListener('click', async () => {
+      try {
+        await window.CashAdvance.request({
+          amount:     document.getElementById('ca-req-amt').value,
+          terms:      document.getElementById('ca-req-terms').value,
+          reason:     document.getElementById('ca-req-reason').value,
+          dateNeeded: document.getElementById('ca-req-date').value
+        });
+        closeModal();
+        Notifs.showToast('Request submitted! Waiting for approval.');
+        if (typeof window.renderCashAdvancePage === 'function') window.renderCashAdvancePage();
+        else if (typeof window.renderPersonalFinance === 'function' && window.currentUser) window.renderPersonalFinance(window.currentUser, window.currentRole);
+      } catch (err) {
+        Notifs.showToast(err.message || 'Could not submit request.', 'error');
+      }
+    });
+  },
+
+  // ── Approve / reject (race-safe everywhere — a strict upgrade over the two
+  //    call sites that previously skipped the transaction) ────────────────
+  async approve(id, { interestPct = null } = {}) {
+    const ref = db.collection('cash_advances').doc(id);
+    let result = null;
+    await db.runTransaction(async t => {
+      const fresh = await t.get(ref);
+      if (!fresh.exists) throw new Error('Record no longer exists.');
+      const cur = fresh.data();
+      if (cur.status !== 'pending') throw new Error('This request is no longer pending (already actioned).');
+      const pct     = interestPct != null ? interestPct : (cur.interest || 0);
+      const terms   = cur.terms || 1;
+      const total   = pct > 0 ? cur.amount * Math.pow(1 + pct/100, terms) : cur.amount;
+      const monthly = total / terms;
+      const uid     = window.currentUser && window.currentUser.uid;
+      t.update(ref, {
+        status: 'approved', interest: pct, interestCharged: pct > 0,
+        totalPayable: _caRound2(total), monthlyPayment: _caRound2(monthly), balance: _caRound2(total),
+        approvedBy: uid, approvedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      result = { userId: cur.userId, amount: cur.amount, total: _caRound2(total) };
+    });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
+    if (result) {
+      await Notifs.send(result.userId, { title:'Cash Advance Approved', body:`Your ₱${fmt(result.amount)} cash advance was approved — repay ₱${fmt(result.total)}.`, icon:'💸', type:'cash_advance', dedupKey:`ca-approved-${id}` });
+      window.logAudit && window.logAudit('approve','cash_advance', id, { total: result.total });
+    }
+    return result;
+  },
+
+  openApproveModal(id, onDone) {
+    db.collection('cash_advances').doc(id).get().then(snap => {
+      if (!snap.exists) { Notifs.showToast('Record no longer exists.','error'); if (onDone) onDone(); return; }
+      const a = snap.data();
+      const terms = a.terms || 1;
+      openModal(`Approve Cash Advance — ${escHtml(a.userName||'Employee')}`, `
+        <div class="ca-detail" style="margin-bottom:10px"><span>Principal</span><strong>₱${fmt(a.amount)}</strong></div>
+        <div class="ca-detail" style="margin-bottom:10px"><span>Terms</span><span>${terms} month${terms>1?'s':''}</span></div>
+        <div class="form-group"><label>Interest Rate (%/month)</label>
+          <input id="ca-appr-rate" type="number" inputmode="decimal" min="0" step="0.5" value="${window.CashAdvance.RATE_DEFAULT}"/>
+        </div>
+        <div id="ca-appr-preview" style="font-size:13px;color:var(--text-muted);margin-top:8px"></div>
+      `, `<button class="btn-primary" id="ca-appr-confirm-btn">Approve</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      const updatePreview = () => {
+        const pct = parseFloat(document.getElementById('ca-appr-rate').value)||0;
+        const total = pct>0 ? a.amount*Math.pow(1+pct/100,terms) : a.amount;
+        const monthly = total/terms;
+        document.getElementById('ca-appr-preview').innerHTML = `Employee repays <strong>₱${fmt(total)}</strong> (₱${fmt(monthly)}/mo × ${terms})`;
+      };
+      document.getElementById('ca-appr-rate').addEventListener('input', updatePreview);
+      updatePreview();
+      document.getElementById('ca-appr-confirm-btn').addEventListener('click', async () => {
+        const pct = parseFloat(document.getElementById('ca-appr-rate').value)||0;
+        try {
+          await window.CashAdvance.approve(id, { interestPct: pct });
+          closeModal();
+          Notifs.showToast('Approved!');
+        } catch (err) {
+          Notifs.showToast(err.message || 'Could not approve.', 'error');
+        }
+        if (onDone) onDone();
+      });
+    });
+  },
+
+  async reject(id, reason) {
+    const ref  = db.collection('cash_advances').doc(id);
+    const snap = await ref.get().catch(()=>null);
+    if (!snap || !snap.exists) throw new Error('Record no longer exists.');
+    const a   = snap.data();
+    const uid = window.currentUser && window.currentUser.uid;
+    await ref.update({
+      status: 'rejected', rejectedBy: uid, rejectedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      ...(reason ? { rejectReason: reason } : {})
+    });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
+    await Notifs.send(a.userId, { title:'Cash Advance Rejected', body: reason ? `Your cash advance request was not approved: ${reason}` : 'Your cash advance request was not approved.', icon:'❌', type:'cash_advance', dedupKey:`ca-rejected-${id}` });
+    window.logAudit && window.logAudit('reject','cash_advance', id, {});
+  },
+
+  // ── Payments (ALWAYS transactional — fixes the one unguarded record-payment site) ──
+  async recordPayment(id, { amount, date }) {
+    const paid = parseFloat(amount)||0;
+    if (paid <= 0) throw new Error('Enter a payment amount greater than ₱0.');
+    const ref     = db.collection('cash_advances').doc(id);
+    const uid     = window.currentUser && window.currentUser.uid;
+    const payDate = date || (window.bizDate ? window.bizDate() : today());
+    let result = null;
+    await db.runTransaction(async t => {
+      const fresh = await t.get(ref);
+      if (!fresh.exists) throw new Error('Record no longer exists.');
+      const cur = fresh.data();
+      if (cur.status !== 'approved' || (cur.balance||0) <= 0)
+        throw new Error('This cash advance has no outstanding balance (already paid or not approved).');
+      const newBal   = Math.max(0, (cur.balance||0) - paid);
+      const payments = [...(cur.payments||[]), { amount: paid, date: payDate, recordedBy: uid }];
+      t.update(ref, { balance: newBal, payments, status: newBal <= 0 ? 'paid' : 'approved', ...(newBal<=0?{paidAt:firebase.firestore.FieldValue.serverTimestamp()}:{}) });
+      result = { newBal, userId: cur.userId };
+    });
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
+    if (result) {
+      const statusMsg = result.newBal <= 0 ? 'fully paid off 🎉' : `balance remaining: ₱${fmt(result.newBal)}`;
+      await Notifs.send(result.userId, { title:'💳 Cash Advance Payment Recorded', body:`₱${fmt(paid)} payment was recorded. ${statusMsg}`, icon:'💳', type:'cash_advance' });
+    }
+    return result;
+  },
+
+  openPaymentModal(id, onDone) {
+    db.collection('cash_advances').doc(id).get().then(snap => {
+      if (!snap.exists) { Notifs.showToast('Record no longer exists.','error'); if (onDone) onDone(); return; }
+      const a = snap.data();
+      openModal(`Record Payment${a.userName?` — ${escHtml(a.userName)}`:''}`, `
+        <div class="ca-detail" style="margin-bottom:12px"><span>Balance:</span><strong>₱${fmt(a.balance||0)}</strong></div>
+        <div class="form-group"><label>Amount Paid</label><input id="ca-pay-amt" type="number" inputmode="decimal" value="${a.monthlyPayment||a.balance||0}" min="0" max="${a.balance||0}"/></div>
+        <div class="form-group"><label>Date</label><input id="ca-pay-date" type="date" value="${window.bizDate?window.bizDate():today()}"/></div>
+      `, `<button class="btn-primary" id="ca-pay-confirm-btn">Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      document.getElementById('ca-pay-confirm-btn').addEventListener('click', async () => {
+        try {
+          await window.CashAdvance.recordPayment(id, {
+            amount: document.getElementById('ca-pay-amt').value,
+            date:   document.getElementById('ca-pay-date').value
+          });
+          closeModal();
+          Notifs.showToast('Payment recorded!');
+        } catch (err) {
+          Notifs.showToast('Error recording payment: ' + err.message, 'error');
+        }
+        if (onDone) onDone();
+      });
+    });
+  },
+
+  // ── Payroll plug-ins (WS20 calls these; nothing else should touch CA balances) ──
+  // planFor: the DEFAULT plan for this uid/month — installment-by-default, or a
+  // custom total if an approved ca_deduct request or a legacy override exists.
+  async planFor(uid, month) {
+    const caSnap = await db.collection('cash_advances')
+      .where('userId','==',uid).where('status','==','approved').get().catch(()=>({docs:[]}));
+    const cas = caSnap.docs.map(d=>({id:d.id,...d.data()}))
+      .filter(a => (a.balance||0) > 0)
+      .sort((a,b) => (a.createdAt?.toMillis?.()||0) - (b.createdAt?.toMillis?.()||0)); // oldest-first
+    const caBalance = _caRound2(cas.reduce((s,a)=>s+(a.balance||0),0));
+    if (!cas.length) return { caBalance: 0, mode: 'full', caPlanned: 0, plan: [], source: 'none' };
+
+    // Custom source, priority: approved approval_requests(ca_deduct) → legacy
+    // payroll_ca_overrides (transition only) → default installment.
+    let customAmount = null, source = 'installment';
+    const reqSnap = await db.collection('approval_requests')
+      .where('userId','==',uid).where('type','==','ca_deduct').where('month','==',month).where('status','==','approved')
+      .limit(1).get().catch(()=>({docs:[]}));
+    if (reqSnap.docs.length) { customAmount = reqSnap.docs[0].data().amount; source = 'custom-request'; }
+    if (customAmount == null) {
+      const ovrSnap = await db.collection('payroll_ca_overrides').doc(`${uid}_${month}`).get().catch(()=>null);
+      if (ovrSnap && ovrSnap.exists) { customAmount = ovrSnap.data().amount; source = 'legacy-override'; }
+    }
+
+    if (customAmount != null) {
+      const plan = _caSplit(cas, Math.min(customAmount, caBalance));
+      return { caBalance, mode:'custom', caPlanned: _caRound2(plan.reduce((s,p)=>s+p.amount,0)), plan, source };
+    }
+    // Default installment: per-CA (monthlyPayment ?? balance), oldest-first.
+    const plan = cas.map(a => {
+      const due = Math.min(a.monthlyPayment != null ? a.monthlyPayment : a.balance, a.balance||0);
+      return { caId:a.id, amount:_caRound2(due), installmentNo:_caInstallmentNo(a), terms:a.terms||1, monthlyPayment:a.monthlyPayment||a.balance };
+    });
+    return { caBalance, mode:'installment', caPlanned: _caRound2(plan.reduce((s,p)=>s+p.amount,0)), plan, source:'installment' };
+  },
+
+  // "Pay in full" preview/plan — every approved CA's full balance, oldest-first.
+  planFull(cas) { return _caSplit(cas, cas.reduce((s,a)=>s+(a.balance||0),0)); },
+  // "Custom amount" preview/plan — split a Finance-typed total, oldest-first.
+  planCustom(cas, amount) { return _caSplit(cas, amount); },
+
+  // deduct: THE only balance mutation for payroll — called from disbursePayRun,
+  // never from Compute. `actorUid` is the disbursing president/finance user (for
+  // the payments[] audit trail); omit only for system/backfill callers.
+  async deduct(uid, month, plan, actorUid) {
+    if (!Array.isArray(plan) || !plan.length) return [];
+    const batch = db.batch();
+    const caDeductions = [];
+    for (const p of plan) {
+      if (!p.caId || !(p.amount > 0)) continue;
+      const ref  = db.collection('cash_advances').doc(p.caId);
+      const snap = await ref.get().catch(()=>null);
+      if (!snap || !snap.exists) continue;
+      const cur = snap.data();
+      const toDeduct = Math.min(cur.balance||0, p.amount);
+      if (toDeduct <= 0) continue;
+      const newBal   = Math.max(0, (cur.balance||0) - toDeduct);
+      const payments = [...(cur.payments||[]), { amount:_caRound2(toDeduct), date:(window.bizDate?window.bizDate():today()), recordedBy: actorUid||'system', source:'payroll', month }];
+      batch.update(ref, {
+        balance: newBal, payments,
+        ...(newBal <= 0 ? { status:'paid', paidAt: firebase.firestore.FieldValue.serverTimestamp() } : {})
+      });
+      caDeductions.push({ caId: p.caId, amount: _caRound2(toDeduct) });
+    }
+    if (caDeductions.length) await batch.commit();
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
+    if (caDeductions.length) {
+      await Notifs.send(uid, {
+        title: '💳 Cash Advance Deducted from Payroll',
+        body: `₱${fmt(caDeductions.reduce((s,c)=>s+c.amount,0))} was deducted from your ${month} payroll.`,
+        icon: '💳', type: 'cash_advance'
+      });
+    }
+    return caDeductions;
+  },
+
+  // worker_profiles is a SEPARATE, non-cash_advances-backed population (no
+  // migration — that would force an identity-model project). Clamped,
+  // transaction-guarded, audit-logged decrement — used by the weekly payslip
+  // generator/editor. NOT for the HR profile editor's "set starting balance"
+  // field, which is a direct value-set, not a deduction (see call site).
+  async deductWorker(profileId, amount, ctx = {}) {
+    const amt = parseFloat(amount)||0;
+    const ref = db.collection('worker_profiles').doc(profileId);
+    let result = null;
+    await db.runTransaction(async t => {
+      const fresh = await t.get(ref);
+      if (!fresh.exists) throw new Error('Worker profile not found.');
+      const cur = fresh.data();
+      const before = cur.caBalance || 0;
+      const after  = Math.max(0, before - amt);
+      t.update(ref, { caBalance: after });
+      result = { before, after };
+    });
+    window.logAudit && window.logAudit('worker-ca-deduct','worker_profiles', profileId, { amount: amt, ...ctx, ...result });
+    return result;
+  },
 };

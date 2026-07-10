@@ -1,5 +1,14 @@
 # Workstream 20 — One Payroll Engine (v12 Phase 3)
 
+> ✅ **IMPLEMENTED 2026-07-10** (shipped as one diff with WS21+WS22, per build order).
+> Rules validated via `firebase deploy --only firestore:rules --dry-run` (compiled OK) but
+> **NOT yet deployed**. Path B (app.js Record Payroll) deleted entirely. See V12-PLAN.md
+> Build Log for the full implementation note, including two defensive fixes added beyond
+> the literal spec (a client-side president-only guard on disbursePayRun; financeDeleteCascade
+> now also reverses the new per-employee `-ER` ledger leg) and what's still needed before
+> this is production-ready (accountant sign-off on WS21's tables, a live Compute→Verify→
+> Disburse test, the Payroll-reconciliation report from Spec 5 — not built this pass).
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

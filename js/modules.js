@@ -1298,7 +1298,7 @@ async function renderCashAdvanceEmployee(c) {
   };
 
   renderTab('active');
-  document.getElementById('new-ca-btn').addEventListener('click', () => openCashAdvanceModal());
+  document.getElementById('new-ca-btn').addEventListener('click', () => window.CashAdvance.openRequestForm());
   c.querySelectorAll('#ca-tabs .subtab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       c.querySelectorAll('#ca-tabs .subtab-btn').forEach(b=>b.classList.remove('active'));
@@ -1464,107 +1464,26 @@ function renderCAList(advances, container, isAdmin) {
     </div>`;
   }).join('');
 
-  container.querySelectorAll('.ca-approve-btn').forEach(btn => btn.addEventListener('click', async e => {
-    const id = e.target.dataset.id;
-    const ref = db.collection('cash_advances').doc(id);
-    const peek = await ref.get();
-    if (!peek.exists) { Notifs.showToast('Record no longer exists.','error'); window.renderCashAdvancePage(); return; }
-    const peekData = peek.data();
-    if (!confirm(`Approve this cash advance of ₱${fmtN(peekData.amount)} for ${peekData.userName||'this employee'}?`)) return;
-    btn.disabled = true;
-    let approvedData = null;
-    try {
-      // Transaction: re-read and assert still pending so a double-tap or a second
-      // admin cannot approve twice and corrupt the balance.
-      await db.runTransaction(async t => {
-        const fresh = await t.get(ref);
-        if (!fresh.exists) throw new Error('Record no longer exists.');
-        const a = fresh.data();
-        if (a.status !== 'pending') throw new Error('This request is no longer pending (already actioned).');
-        t.update(ref, {
-          status: 'approved',
-          approvedBy: currentUser.uid,
-          approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          // Repayable balance = Total Payable (principal + interest when charged),
-          // falling back to principal for legacy records / interest-free advances.
-          balance: (a.totalPayable != null ? a.totalPayable : a.amount)
-        });
-        approvedData = a;
-      });
-    } catch (err) {
-      btn.disabled = false;
-      Notifs.showToast(err.message || 'Could not approve.', 'error');
-      window.renderCashAdvancePage();
-      return;
-    }
-    await Notifs.send(approvedData.userId, {title:'Cash Advance Approved', body:`Your ₱${fmtN(approvedData.amount)} cash advance request was approved!`, icon:'✅', type:'cash_advance', dedupKey:`ca-approved-${id}`});
-    Notifs.showToast('Approved!');
-    window.renderCashAdvancePage();
-  }));
+  // v12 WS22 — all three route through the one shared CashAdvance service
+  // (this page already had the safest transaction-guarded versions; now every
+  // other CA surface in the app matches this same safety level).
+  container.querySelectorAll('.ca-approve-btn').forEach(btn => {
+    btn.addEventListener('click', () => window.CashAdvance.openApproveModal(btn.dataset.id, () => window.renderCashAdvancePage()));
+  });
 
   container.querySelectorAll('.ca-reject-btn').forEach(btn => btn.addEventListener('click', async e => {
-    const id = e.currentTarget.dataset.id;
     e.currentTarget.disabled = true;
-    const snap = await db.collection('cash_advances').doc(id).get().catch(()=>null);
-    if (!snap || !snap.exists) { Notifs.showToast('Record no longer exists.','error'); window.renderCashAdvancePage(); return; }
-    await db.collection('cash_advances').doc(id).update({status:'rejected'});
-    await Notifs.send(snap.data().userId, {title:'Cash Advance Rejected', body:'Your cash advance request was not approved.', icon:'❌', type:'cash_advance', dedupKey:`ca-rejected-${id}`});
-    Notifs.showToast('Rejected.');
+    try { await window.CashAdvance.reject(e.currentTarget.dataset.id); Notifs.showToast('Rejected.'); }
+    catch (err) { Notifs.showToast(err.message||'Could not reject.','error'); }
     window.renderCashAdvancePage();
   }));
 
-  container.querySelectorAll('.ca-payment-btn').forEach(btn => btn.addEventListener('click', async e => {
-    const id = e.currentTarget.dataset.id;
-    const snap = await db.collection('cash_advances').doc(id).get().catch(()=>null);
-    if (!snap || !snap.exists) { Notifs.showToast('Record no longer exists.','error'); window.renderCashAdvancePage(); return; }
-    const a = snap.data();
-    openModal('Record Payment', `
-      <div class="ca-detail" style="margin-bottom:14px"><span>Balance:</span><strong>₱${fmtN(a.balance||0)}</strong></div>
-      <div class="ca-detail" style="margin-bottom:14px"><span>Monthly due:</span><strong>₱${fmtN(a.monthlyPayment||0)}</strong></div>
-      <div class="form-group"><label>Amount Paid</label><input id="pay-amount" type="number" inputmode="decimal" value="${a.monthlyPayment||0}" min="0" max="${a.balance||0}"/></div>
-      <div class="form-group"><label>Date</label><input id="pay-date" type="date" value="${window.bizDate()}"/></div>
-    `, `<button class="btn-primary" id="save-payment-btn">Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('save-payment-btn').addEventListener('click', async () => {
-      const saveBtn = document.getElementById('save-payment-btn');
-      try {
-        const paid = parseFloat(document.getElementById('pay-amount').value)||0;
-        const payDate = document.getElementById('pay-date').value;
-        if (paid <= 0) { Notifs.showToast('Enter a payment amount greater than ₱0.','error'); return; }
-        if (!confirm(`Record a payment of ₱${fmtN(paid)} against this cash advance?`)) return;
-        saveBtn.disabled = true;
-        const ref = db.collection('cash_advances').doc(id);
-        // Transaction: re-read balance/status so two admins or a double-tap can't
-        // record the same payment twice or overpay a stale balance.
-        const result = await db.runTransaction(async t => {
-          const fresh = await t.get(ref);
-          if (!fresh.exists) throw new Error('Record no longer exists.');
-          const cur = fresh.data();
-          if (cur.status !== 'approved' || (cur.balance||0) <= 0)
-            throw new Error('This cash advance has no outstanding balance (already paid or not approved).');
-          const newBal = Math.max(0, (cur.balance||0) - paid);
-          const payments = [...(cur.payments||[]), {amount:paid, date:payDate, recordedBy:currentUser.uid}];
-          t.update(ref, {
-            balance: newBal, payments,
-            status: newBal <= 0 ? 'paid' : 'approved'
-          });
-          return { newBal, userId: cur.userId };
-        });
-        // Notify the employee
-        const statusMsg = result.newBal <= 0 ? 'fully paid off 🎉' : `balance remaining: ₱${fmtN(result.newBal)}`;
-        await Notifs.send(result.userId, {
-          title: '💳 Cash Advance Payment Recorded',
-          body: `₱${fmtN(paid)} payment was recorded on your cash advance. ${statusMsg.charAt(0).toUpperCase()+statusMsg.slice(1)}.`,
-          icon: '💳', type: 'cash_advance'
-        });
-        closeModal(); Notifs.showToast('Payment recorded!');
-        await window.renderCashAdvancePage();
-        // Stay on Active Loans/CA's tab after payment
-        const activeBtn = document.querySelector('#ca-tabs [data-sub="active"]');
-        if (activeBtn) activeBtn.click();
-      } catch(err) {
-        if (saveBtn) saveBtn.disabled = false;
-        Notifs.showToast('Error recording payment: ' + err.message, 'error');
-      }
+  container.querySelectorAll('.ca-payment-btn').forEach(btn => btn.addEventListener('click', e => {
+    window.CashAdvance.openPaymentModal(e.currentTarget.dataset.id, async () => {
+      await window.renderCashAdvancePage();
+      // Stay on Active Loans/CA's tab after payment
+      const activeBtn = document.querySelector('#ca-tabs [data-sub="active"]');
+      if (activeBtn) activeBtn.click();
     });
   }));
 
@@ -1577,84 +1496,10 @@ function renderCAList(advances, container, isAdmin) {
   }));
 }
 
-function openCashAdvanceModal() {
-  const RATE = 2; // 2% per month interest
-  openModal('Request Cash Advance', `
-    <div class="form-group"><label>Amount (max ₱50,000)</label>
-      <input id="ca-amt" type="number" inputmode="decimal" min="100" max="50000" step="100" placeholder="0.00" oninput="updateCACalc()"/>
-    </div>
-    <div class="form-group"><label>Repayment Terms</label>
-      <select id="ca-terms" onchange="updateCACalc()" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-        <option value="1">1 month (lump sum)</option>
-        <option value="2">2 months</option>
-        <option value="3" selected>3 months</option>
-        <option value="6">6 months</option>
-        <option value="12">12 months</option>
-      </select>
-    </div>
-    <div class="form-group" style="display:flex;align-items:center;gap:8px">
-      <input id="ca-interest-on" type="checkbox" checked onchange="updateCACalc()" style="width:auto;margin:0"/>
-      <label for="ca-interest-on" style="margin:0;cursor:pointer">Charge ${RATE}%/month interest</label>
-    </div>
-    <div id="ca-calc" class="ca-calc-box" style="display:none"></div>
-    <div class="form-group"><label>Date Needed</label><input id="ca-date" type="date" value="${window.bizDate()}"/></div>
-    <div class="form-group"><label>Reason / Purpose</label>
-      <textarea id="ca-reason" rows="3" placeholder="e.g., Medical emergency, school fees…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea>
-    </div>
-  `, `<button class="btn-primary" id="submit-ca-btn">Submit Request</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-
-  window.updateCACalc = () => {
-    const amt   = parseFloat(document.getElementById('ca-amt')?.value)||0;
-    const terms = parseInt(document.getElementById('ca-terms')?.value)||1;
-    const calc  = document.getElementById('ca-calc');
-    if (!calc) return;
-    if (!amt) { calc.style.display='none'; return; }
-    const interestOn = document.getElementById('ca-interest-on')?.checked !== false;
-    const total   = interestOn ? amt * Math.pow(1 + RATE/100, terms) : amt;
-    const monthly = total / terms;
-    const interest= total - amt;
-    calc.style.display = 'block';
-    calc.innerHTML = `
-      <div class="ca-detail"><span>Principal</span><span>₱${fmtN(amt)}</span></div>
-      ${interestOn ? `<div class="ca-detail"><span>Interest (${RATE}%/mo × ${terms}mo)</span><span style="color:var(--danger)">+₱${fmtN(interest)}</span></div>` : `<div class="ca-detail"><span>Interest</span><span style="color:var(--text-muted)">None (interest-free)</span></div>`}
-      <div class="ca-detail"><span>Total Payable</span><span style="font-weight:700">₱${fmtN(total)}</span></div>
-      <div class="ca-detail" style="border-top:1.5px solid var(--border);padding-top:8px;margin-top:4px">
-        <span>Monthly Payment</span><span style="font-weight:800;font-size:16px;color:var(--primary-light)">₱${fmtN(monthly)}</span>
-      </div>`;
-  };
-
-  document.getElementById('submit-ca-btn').addEventListener('click', async () => {
-    const amt  = parseFloat(document.getElementById('ca-amt').value)||0;
-    if (!amt||amt<100) { Notifs.showToast('Enter a valid amount (min ₱100).','error'); return; }
-    if (amt>50000)     { Notifs.showToast('Maximum cash advance is ₱50,000.','error'); return; }
-    const terms   = parseInt(document.getElementById('ca-terms').value)||1;
-    const interestOn = document.getElementById('ca-interest-on')?.checked !== false;
-    const total   = interestOn ? amt * Math.pow(1 + RATE/100, terms) : amt;
-    const monthly = total / terms;
-    const name    = userProfile.displayName || currentUser.email;
-    await db.collection('cash_advances').add({
-      userId:         currentUser.uid,
-      userName:       name,
-      employeeId:     userProfile.employeeId || currentUser.uid,
-      amount:         amt,
-      terms,
-      interest:       interestOn ? RATE : 0,
-      interestCharged: interestOn,
-      totalPayable:   Math.round(total*100)/100,
-      monthlyPayment: Math.round(monthly*100)/100,
-      balance:        0,
-      date:           document.getElementById('ca-date').value,
-      reason:         document.getElementById('ca-reason').value.trim(),
-      status:         'pending',
-      payments:       [],
-      createdAt:      firebase.firestore.FieldValue.serverTimestamp()
-    });
-    await Notifs.sendToOwner({title:'Cash Advance Request', body:`${name} requests ₱${fmtN(amt)} (${terms}-month plan).`, icon:'💸', type:'cash_advance'});
-    closeModal();
-    Notifs.showToast('Request submitted! Waiting for approval.');
-    window.renderCashAdvancePage();
-  });
-}
+// openCashAdvanceModal() retired (v12 WS22) — its form + write now live as the
+// ONE shared window.CashAdvance.openRequestForm()/request() in js/config.js.
+// The employee-facing interest checkbox is gone too: interest is now an
+// approval-time decision, never an employee choice (WS22 decision 3).
 
 function fmtN(n) {
   return Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});

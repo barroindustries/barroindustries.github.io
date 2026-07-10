@@ -191,6 +191,10 @@ const EXPORTS = [
 
   // ── Payroll / HR ──
   { name:'payroll',                   filename:'payroll',                   dateField:null },
+  // v12 WS20 — pay_runs now carries the frozen per-employee lines[] snapshot
+  // (the source of truth for Compute/Verify/Disburse), not just state metadata.
+  { name:'pay_runs',                  filename:'pay_runs',                  dateField:null },
+  { name:'payroll_delete_requests',   filename:'payroll_delete_requests',   dateField:null },
   { name:'payslips',                  filename:'payslips',                  dateField:null },
   { name:'worker_profiles',           filename:'worker_profiles',           dateField:null },
   { name:'salary_raises',             filename:'salary_raises',             dateField:null },

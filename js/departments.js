@@ -146,14 +146,26 @@ async function financeDeleteCascade(collection, docId) {
     const ref = `PAY-${d.month}-${d.userId||''}`;
     const ls = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
     if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
+    // v12 WS20/21: the employer-share debit leg this employee's line posted
+    // (gross-with-liability-legs booking). NOTE: the aggregate SSSPAY-/PHPAY-/
+    // HDMFPAY-/WHTPAY-/NETPAY-{month} credit legs (shared across the WHOLE
+    // run, not per-employee) are NOT adjusted here — they'd need re-deriving
+    // from every other still-standing line for that month. Known gap, left
+    // for whoever builds WS39 (BIR/remittance reports, the eventual owner of
+    // these legs) since a wrong partial fix is worse than an honest one.
+    const lsEr = await db.collection('ledger').where('refNumber','==',ref+'-ER').limit(1).get().catch(()=>({docs:[]}));
+    if (lsEr.docs.length) await lsEr.docs[0].ref.delete().catch(()=>{});
     // Restore any cash-advance balances this payroll run deducted, so deleting the
     // run doesn't leave an employee's loan wrongly marked paid.
     if (Array.isArray(d.caDeductions)) {
       for (const cd of d.caDeductions) {
         if (cd && cd.caId && cd.amount > 0) {
+          // v12 WS22 fix: every reader filters status==='approved' for an
+          // outstanding balance — 'active' was never a recognized status and
+          // made a reversed CA invisible to Compute's balance aggregation.
           await db.collection('cash_advances').doc(cd.caId).update({
             balance: firebase.firestore.FieldValue.increment(cd.amount),
-            status: 'active', paidAt: firebase.firestore.FieldValue.delete()
+            status: 'approved', paidAt: firebase.firestore.FieldValue.delete()
           }).catch(()=>{});
         }
       }
@@ -2178,6 +2190,279 @@ window.renderHR = async function(currentUser, currentRole){
   });
 };
 
+// ═══════════════════════════════════════════════════════════
+//  ONE PAYROLL ENGINE (v12 WS20) — Compute → Verify → Disburse
+//  computePayLine: pure per-employee math (no writes, no reads).
+//  computePayRun:  read-heavy, freezes lines[] onto pay_runs/{month}, no
+//                  money-moving side effects — safe to re-run before Verify.
+//  disbursePayRun: THE single mutating step — CA balances decrement, ledger
+//                  posts, salary_history mirrors write, employees notified.
+// ═══════════════════════════════════════════════════════════
+window.computePayLine = function(emp, ctx) {
+  const policy = ctx.policy || 'flat';
+  const base   = emp.salary || 0;
+  const allowance = emp.allowance || 0;
+  const otherDeductions = emp.deductions || 0;
+  const gross = base + allowance; // nominal — statutory brackets key off THIS, not the performance-adjusted figure
+
+  // Statutory: a hand-typed non-zero value on payroll/{uid} always wins over the
+  // WS21 table suggestion (Finance can override real edge cases); er (employer
+  // share) is never hand-typed — always computed and frozen.
+  const stat = window.computeStatutory
+    ? window.computeStatutory({ grossPay: gross, year: window.bizYear ? window.bizYear() : new Date().getFullYear() })
+    : null;
+  const sss        = emp.sss        || (stat ? stat.ee.sss : 0);
+  const philhealth = emp.philhealth || (stat ? stat.ee.philhealth : 0);
+  const pagibig    = emp.pagibig    || (stat ? stat.ee.pagibig : 0);
+  const tax        = emp.tax        || (stat ? stat.ee.tax : 0);
+  const er         = stat ? stat.er : { sss:0, philhealth:0, pagibig:0 };
+  const statutoryTotal = sss + philhealth + pagibig + tax;
+
+  const kpiScore   = ctx.kpiScore != null ? ctx.kpiScore : 1;
+  const attScore   = ctx.attScore != null ? ctx.attScore : 1;
+  const perfFactor = Math.min(1, Math.max(0, kpiScore*0.7 + attScore*0.3));
+
+  const caPlan    = ctx.caPlan || [];
+  const caPlanned = caPlan.reduce((s,p)=>s+(p.amount||0), 0);
+  const caBalance = ctx.caBalance != null ? ctx.caBalance : caPlanned;
+
+  // policy 'flat'        = exactly Path A today (unification changes no one's pay).
+  // policy 'performance' = allowance scales by perfFactor; BASE WAGE is never
+  // docked (PH labor-safe) — inert until the President flips payPolicy on a run.
+  const netBeforeCA = policy === 'performance'
+    ? (base - statutoryTotal - otherDeductions + allowance*perfFactor)
+    : (gross - statutoryTotal - otherDeductions);
+  const finalPay = netBeforeCA - caPlanned;
+  // The TRUE economic cost of this line (what disbursePayRun's ledger debit
+  // legs must balance against) — equals nominal `gross` under 'flat', but
+  // correctly reflects a performance-scaled allowance under 'performance'
+  // (an unearned allowance withholding is not a real company expense).
+  const effectiveGross = netBeforeCA + statutoryTotal + otherDeductions;
+
+  return {
+    uid: emp.id, name: emp.displayName||emp.email, payClass: emp.payClass==='production'?'production':'regular',
+    base, allowance, otherDeductions,
+    sss, philhealth, pagibig, tax, er,
+    kpiScore, attScore, perfFactor, policy,
+    caBalance, caPlanned, caPlan,
+    gross, effectiveGross, statutoryTotal, netBeforeCA, finalPay
+  };
+};
+
+window.computePayRun = async function(month, { policy } = {}) {
+  const usersSnap = await fetchUsersWithPayroll();
+  const isExternalPartner = (u) => {
+    if (u.role === 'partner') return true;
+    if (typeof u.title === 'string' && u.title.trim().toLowerCase() === 'partner') return true;
+    const depts = Array.isArray(u.departments) ? u.departments : (u.department ? [u.department] : []);
+    return depts.length === 1 && depts[0] === 'Brilliant Steel';
+  };
+  const allStaff = usersSnap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>!isExternalPartner(u));
+
+  // A regular-payroll uid can ALSO be paid weekly via a worker_profiles doc
+  // (v12 WS20 D3, structural bridge — worker_profiles.linkedUid). Hard-skip
+  // both routes into the monthly run so nobody is paid twice.
+  const wpSnap = await db.collection('worker_profiles').get().catch(()=>({docs:[]}));
+  const linkedUids = new Set(
+    wpSnap.docs.map(d=>d.data()).filter(p=>p.status!=='inactive' && p.linkedUid).map(p=>p.linkedUid)
+  );
+
+  const skipped = [];
+  const employees = [];
+  for (const u of allStaff) {
+    if (u.payClass === 'production')  { skipped.push({ uid:u.id, name:u.displayName||u.email, reason:'production' }); continue; }
+    if (linkedUids.has(u.id))         { skipped.push({ uid:u.id, name:u.displayName||u.email, reason:'linked-worker-profile' }); continue; }
+    employees.push(u);
+  }
+  employees.sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+
+  // Bulk-fetch once — avoids N+1 reads across the whole run.
+  const [tasksSnap, kpiTargetsSnap] = await Promise.all([
+    db.collection('tasks').get().catch(()=>({docs:[]})),
+    db.collection('kpi_targets').get().catch(()=>({docs:[]}))
+  ]);
+  const allTasks = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const kpiTargetsMap = Object.fromEntries(kpiTargetsSnap.docs.map(d=>[d.id, d.data()]));
+  const DONE_ST = ['done','approved','archived'];
+  const runPolicy = policy || 'flat';
+
+  const lines = await Promise.all(employees.map(async (emp) => {
+    const userTasks = allTasks.filter(t => Array.isArray(t.assignedTo) ? t.assignedTo.includes(emp.id) : t.assignedTo === emp.id);
+    // KPI floor fix (v12 WS20 D2): zero assigned tasks ⇒ kpi = 1.0. Path B's old
+    // 0.5 floor punished people for not being assigned work — wrong.
+    let kpiScore = 1;
+    if (userTasks.length) {
+      const taskScore  = Math.min(1, userTasks.filter(t=>DONE_ST.includes(t.status)).length/userTasks.length);
+      const kpiTargetD = kpiTargetsMap[emp.id] || {};
+      const delivScore = typeof kpiTargetD.deliverableScore === 'number' ? Math.min(1, kpiTargetD.deliverableScore/100) : 1;
+      kpiScore = taskScore*0.7 + delivScore*0.3;
+    }
+    const attScore = window.getAttendanceScore ? await window.getAttendanceScore(emp.id) : 1;
+    const planResult = window.CashAdvance ? await window.CashAdvance.planFor(emp.id, month) : { plan: [] };
+    return window.computePayLine(emp, { month, policy: runPolicy, kpiScore, attScore, caPlan: planResult.plan, caBalance: planResult.caBalance });
+  }));
+
+  const totalNet = lines.reduce((s,l)=>s+l.finalPay, 0);
+  const currentUser = window.currentUser;
+  await db.collection('pay_runs').doc(month).set({
+    month, state:'computed', payPolicy: runPolicy,
+    employeeCount: lines.length, totalNet, lines, skipped,
+    computedBy: currentUser?.uid, computedByName: window.userProfile?.displayName || currentUser?.email,
+    computedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge:true });
+
+  return { lines, totals: { totalNet, employeeCount: lines.length }, skipped };
+};
+
+window.disbursePayRun = async function(month) {
+  // Fail fast, before any write — firestore.rules only rejects the FINAL
+  // state-flip to 'disbursed' for a non-president, which would otherwise let
+  // the CA deductions/ledger posts below succeed first (a partial disburse).
+  if (typeof isRealPresident === 'function' && !isRealPresident()) {
+    Notifs.showToast('Only the President can disburse payroll.','error'); return;
+  }
+  const runRef  = db.collection('pay_runs').doc(month);
+  const runSnap = await runRef.get();
+  if (!runSnap.exists) { Notifs.showToast('No pay run found for this month.','error'); return; }
+  const run = runSnap.data();
+  if (run.state !== 'verified') { Notifs.showToast(`Run must be Verified before Disburse (currently ${run.state||'draft'}).`,'error'); return; }
+  const lines = run.lines || [];
+  if (!lines.length) { Notifs.showToast('This run has no computed lines.','error'); return; }
+
+  // Checked once, before any write — a closed month can't be disbursed (v12 WS12).
+  await window.assertPeriodOpen(month + '-01');
+
+  const currentUser = window.currentUser;
+  const monthLabel  = new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'});
+
+  // ── 1. Freeze the salary_history mirror (owner-readable, unlike pay_runs) ──
+  const shBatch = db.batch();
+  for (const line of lines) {
+    const shRef = db.collection('salary_history').doc(`${line.uid}_${month}`);
+    shBatch.set(shRef, {
+      userId: line.uid, userName: line.name, month,
+      salary: line.base, allowance: line.allowance, deductions: line.otherDeductions,
+      sss: line.sss, philhealth: line.philhealth, pagibig: line.pagibig, tax: line.tax,
+      philHealth: line.philhealth, pagIbig: line.pagibig, // legacy mixed-case mirror (transition — v12 WS21 decision 6)
+      er: line.er, kpiScore: line.kpiScore, attScore: line.attScore, perfFactor: line.perfFactor,
+      policy: line.policy, runMonth: month,
+      caDeducted: line.caPlanned, netPay: line.netBeforeCA, finalPay: line.finalPay,
+      recordedBy: currentUser?.uid, recordedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge:true });
+  }
+  await shBatch.commit();
+
+  // ── 2. Cash-advance deductions — THE only balance mutation, via the one
+  //       shared service. financeDeleteCascade reverses caDeductions[] later.
+  for (const line of lines) {
+    if (line.caPlan && line.caPlan.length) {
+      const res = await window.CashAdvance.deduct(line.uid, month, line.caPlan, currentUser?.uid);
+      if (res.length) await db.collection('salary_history').doc(`${line.uid}_${month}`)
+        .set({ caDeductions: res }, { merge:true }).catch(()=>{});
+    }
+  }
+
+  // ── 3. Ledger — gross-with-liability-legs (v12 WS21 decision 11). Per-employee
+  //       Payroll Expense debits (cost-center granularity); aggregate per-agency
+  //       payable + cash credits (remittance/bank-transfer granularity). Balances:
+  //       Σ(effectiveGross)+Σ(erShare) == Σ(statutory+er)+Σ(effectiveGross-statutory).
+  const _payLedgerByRef = {};
+  const _prefetch = await db.collection('ledger')
+    .where('refNumber','>=',`PAY-${month}-`)
+    .where('refNumber','<', `PAY-${month}-` + String.fromCharCode(0xf8ff))
+    .get().catch(()=>({docs:[]}));
+  _prefetch.docs.forEach(d => { const r = d.data().refNumber; if (r) _payLedgerByRef[r] = d.ref; });
+
+  const upsertLedger = async (ref, entry) => {
+    let existingRef = _payLedgerByRef[ref] || null;
+    if (!existingRef) {
+      const _ex = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
+      existingRef = _ex.docs.length ? _ex.docs[0].ref : null;
+    }
+    if (existingRef) await existingRef.update({ amount: entry.amount });
+    else await db.collection('ledger').add(entry);
+  };
+  const addedByName = window.userProfile?.displayName || currentUser?.email;
+
+  let sssAgg=0, phAgg=0, piAgg=0, taxAgg=0, netCashAgg=0;
+  for (const line of lines) {
+    sssAgg += (line.sss||0) + (line.er?.sss||0);
+    phAgg  += (line.philhealth||0) + (line.er?.philhealth||0);
+    piAgg  += (line.pagibig||0) + (line.er?.pagibig||0);
+    taxAgg += (line.tax||0);
+    netCashAgg += (line.effectiveGross||0) - (line.statutoryTotal||0);
+
+    await upsertLedger(`PAY-${month}-${line.uid}`, {
+      date: month+'-01', type:'debit', accountType:'expense', account:'Payroll Expense',
+      description: `Payslip — ${line.name} (${monthLabel})`, amount: line.effectiveGross,
+      category:'Payroll Expense', source:'Finance', refNumber:`PAY-${month}-${line.uid}`,
+      addedBy: currentUser?.uid, addedByName, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    const erTotal = (line.er?.sss||0)+(line.er?.philhealth||0)+(line.er?.pagibig||0);
+    if (erTotal > 0) await upsertLedger(`PAY-${month}-${line.uid}-ER`, {
+      date: month+'-01', type:'debit', accountType:'expense', account:'Payroll Expense',
+      description: `Employer statutory share — ${line.name} (${monthLabel})`, amount: erTotal,
+      category:'Payroll Expense', source:'Finance', refNumber:`PAY-${month}-${line.uid}-ER`,
+      addedBy: currentUser?.uid, addedByName, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }
+  // Remove any old aggregate PAY-{month} leftover from pre-WS13 code (comment
+  // preserved from the original: an aggregate on top of per-employee rows
+  // double-counts payroll in every view that sums debits).
+  const _oldAgg = await db.collection('ledger').where('refNumber','==',`PAY-${month}`).limit(1).get().catch(()=>({docs:[]}));
+  if (_oldAgg.docs.length) await _oldAgg.docs[0].ref.delete().catch(()=>{});
+
+  const aggLeg = async (ref, account, amount) => {
+    if (amount <= 0) return;
+    await upsertLedger(ref, {
+      date: month+'-01', type:'credit', accountType:'liability', account,
+      description: `${account} — ${monthLabel} payroll`, amount,
+      category:'Payroll Expense', source:'Finance', refNumber: ref,
+      addedBy: currentUser?.uid, addedByName, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  };
+  await aggLeg(`SSSPAY-${month}`,  'SSS Payable',        sssAgg);
+  await aggLeg(`PHPAY-${month}`,   'PhilHealth Payable', phAgg);
+  await aggLeg(`HDMFPAY-${month}`, 'Pag-IBIG Payable',   piAgg);
+  await aggLeg(`WHTPAY-${month}`,  'Withholding Tax Payable', taxAgg);
+  if (netCashAgg > 0) await upsertLedger(`NETPAY-${month}`, {
+    date: month+'-01', type:'credit', accountType:'asset', account:'Cash',
+    description: `Net payroll cash — ${monthLabel}`, amount: netCashAgg,
+    category:'Payroll Expense', source:'Finance', refNumber:`NETPAY-${month}`,
+    addedBy: currentUser?.uid, addedByName, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+
+  // ── 4. Notify ────────────────────────────────────────────────────────
+  await Promise.all(lines.map(line => Notifs.send(line.uid, {
+    title: '💰 Payroll Disbursed', body: `Your ${monthLabel} pay of ₱${fmt(line.finalPay)} has been disbursed.`,
+    icon: '💰', type: 'payroll', dedupKey: `payroll-disbursed-${line.uid}-${month}`
+  })));
+
+  // ── 5. Flip state — TERMINAL from here (v12 WS20 D5: no reopen, no recompute) ──
+  await runRef.set({
+    state:'disbursed', disbursedBy: currentUser?.uid, disbursedByName: addedByName,
+    disbursedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge:true });
+  window.logAudit && window.logAudit('disburse-payrun','pay_run', month, { totalNet: run.totalNet, employeeCount: lines.length });
+};
+
+// President-only: verified → computed (undoes an in-progress run before it's
+// disbursed). disbursed is terminal — there is no reopen from there.
+window.reopenPayRun = async function(month) {
+  const ref  = db.collection('pay_runs').doc(month);
+  const snap = await ref.get();
+  if (!snap.exists || snap.data().state !== 'verified') { Notifs.showToast('Only a Verified run can be reopened.','error'); return; }
+  const currentUser = window.currentUser;
+  await ref.set({
+    state:'computed', reopenedBy: currentUser?.uid, reopenedByName: window.userProfile?.displayName||currentUser?.email,
+    reopenedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge:true });
+  window.logAudit && window.logAudit('reopen-payrun','pay_run', month, {});
+  Notifs.showToast(`${month} payroll reopened — Compute is available again.`);
+};
+
 async function renderPayrollManagement(container, currentUser, currentRole) {
   const [usersSnap, histSnap, delReqSnap] = await Promise.all([
     fetchUsersWithPayroll(),
@@ -2443,49 +2728,41 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     }
   }
 
-  // Shared state for gen-payroll to use after loadPayrollTable runs
-  let _caByUser = {}, _caDocsByUser = {}, _caOverrideByUser = {};
+  // Per-employee CA plan (WS22's CashAdvance.planFor), read by both the table
+  // preview and the Edit Payroll modal — one shared computation, not two.
+  let _planByUser = {};
 
   async function loadPayrollTable(month) {
     const tbody = document.getElementById('payroll-tbody');
     tbody.innerHTML = '<tr><td colspan="14" style="text-align:center;padding:20px">Loading…</td></tr>';
 
-    const [caSnap, overrideSnap] = await Promise.all([
-      db.collection('cash_advances').where('status','==','approved').get().catch(()=>({docs:[]})),
-      db.collection('payroll_ca_overrides').where('month','==',month).get().catch(()=>({docs:[]}))
-    ]);
-
-    // Build CA totals + per-doc list per user
-    _caByUser = {}; _caDocsByUser = {};
-    caSnap.docs.forEach(d => {
-      const a = d.data();
-      _caByUser[a.userId] = (_caByUser[a.userId]||0) + (a.balance||0);
-      (_caDocsByUser[a.userId] = _caDocsByUser[a.userId]||[]).push({id:d.id,...a});
-    });
-
-    // Build override map: userId → { amount, docId }
-    _caOverrideByUser = {};
-    overrideSnap.docs.forEach(d => {
-      const o = d.data();
-      _caOverrideByUser[o.userId] = { amount: o.amount, docId: d.id };
-    });
+    const statYear = window.bizYear ? window.bizYear() : new Date().getFullYear();
+    const plans = await Promise.all(employees.map(u => window.CashAdvance
+      ? window.CashAdvance.planFor(u.id, month)
+      : Promise.resolve({ caBalance:0, mode:'full', caPlanned:0, plan:[] })));
+    _planByUser = {};
+    employees.forEach((u,i) => { _planByUser[u.id] = plans[i]; });
 
     tbody.innerHTML = employees.map(u => {
       const depts    = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';
       const base     = u.salary||0;
       const allow    = u.allowance||0;
       const gross    = base + allow;
-      const sss      = u.sss || 0;
-      const ph       = u.philhealth || 0;
-      const pagibig  = u.pagibig || 0;
-      const tax      = u.tax || 0;
-      const caBalance= _caByUser[u.id]||0;
-      const hasOverride = _caOverrideByUser[u.id] !== undefined;
-      const caAdv    = hasOverride ? _caOverrideByUser[u.id].amount : caBalance;
+      // Hand-typed value wins; otherwise WS21's statutory table suggests the amount
+      // (the "Auto-computed if 0" placeholder text is finally backed by real math).
+      const sug      = window.computeStatutory ? window.computeStatutory({ grossPay: gross, year: statYear }) : null;
+      const sss      = u.sss        || (sug ? sug.ee.sss : 0);
+      const ph       = u.philhealth || (sug ? sug.ee.philhealth : 0);
+      const pagibig  = u.pagibig    || (sug ? sug.ee.pagibig : 0);
+      const tax      = u.tax        || (sug ? sug.ee.tax : 0);
+      const plan     = _planByUser[u.id] || { caBalance:0, mode:'full', caPlanned:0, plan:[] };
+      const caBalance= plan.caBalance;
+      const caAdv    = plan.caPlanned;
       const deduct   = (u.deductions||0) + sss + ph + pagibig + tax;
       const net      = gross - deduct - caAdv;
+      const modeTag  = { installment:'installment', 'custom-request':'custom', 'legacy-override':'custom', full:'full' }[plan.mode];
       const caCell   = caBalance > 0
-        ? `<div style="color:var(--danger);white-space:nowrap">-₱${fmt(caAdv)}${hasOverride?` <span style="font-size:10px;background:var(--primary-light);color:#fff;border-radius:4px;padding:1px 5px">custom</span>`:''}</div>
+        ? `<div style="color:var(--danger);white-space:nowrap">-₱${fmt(caAdv)}${modeTag?` <span style="font-size:10px;background:var(--primary-light);color:#fff;border-radius:4px;padding:1px 5px">${modeTag}</span>`:''}</div>
            <div style="font-size:10px;color:var(--text-muted)">bal ₱${fmt(caBalance)}</div>`
         : '<span style="color:var(--text-muted)">—</span>';
       return `<tr>
@@ -2507,11 +2784,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         <td>${caCell}</td>
         <td><strong style="color:${net>=0?'var(--success)':'var(--danger)'}">₱${fmt(net)}</strong></td>
         <td>
-          <button class="btn-secondary btn-sm edit-emp-pay-btn"
-            data-uid="${u.id}"
-            data-ca-balance="${caBalance}"
-            data-ca-override="${hasOverride ? _caOverrideByUser[u.id].amount : ''}"
-            title="Edit">✎</button>
+          <button class="btn-secondary btn-sm edit-emp-pay-btn" data-uid="${u.id}" title="Edit">✎</button>
           ${canFinance ? `<button class="btn-secondary btn-sm raise-emp-btn" data-uid="${u.id}" title="Give raise">💸</button>` : ''}
           <button class="btn-secondary btn-sm print-slip-btn" data-uid="${u.id}" title="Payslip">🖨</button>
         </td>
@@ -2539,11 +2812,16 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 
     tbody.querySelectorAll('.edit-emp-pay-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        const uid        = btn.dataset.uid;
-        const emp        = employees.find(u=>u.id===uid);
-        const caBalance  = parseFloat(btn.dataset.caBalance)||0;
-        const caOverride = btn.dataset.caOverride; // '' means no override
+        const uid  = btn.dataset.uid;
+        const emp  = employees.find(u=>u.id===uid);
+        const plan = _planByUser[uid] || { caBalance:0, mode:'full', caPlanned:0, plan:[] };
+        const caBalance = plan.caBalance;
         if (!emp) return;
+
+        const statYear = window.bizYear ? window.bizYear() : new Date().getFullYear();
+        const sug = window.computeStatutory ? window.computeStatutory({ grossPay: (emp.salary||0)+(emp.allowance||0), year: statYear }) : null;
+        const unverifiedBadge = sug && sug.unverified ? ` <span style="font-size:10px;color:var(--warning)">⚠ unverified rates</span>` : '';
+        const inst = plan.plan[0]; // first CA in the plan, for the "installment N of M" label
 
         const _payClass = emp.payClass==='production' ? 'production' : 'regular';
         openModal(`Edit Payroll — ${emp.displayName}`, `
@@ -2560,23 +2838,49 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           </div>
           <div class="form-row">
             <div class="form-group"><label>Other Deductions</label><input id="ep-deduct" type="number" value="${emp.deductions||0}" inputmode="decimal"/></div>
-            <div class="form-group"><label>SSS</label><input id="ep-sss" type="number" value="${emp.sss||0}" placeholder="Auto-computed if 0" inputmode="decimal"/></div>
+            <div class="form-group"><label>SSS${unverifiedBadge}</label><input id="ep-sss" type="number" value="${emp.sss||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.sss):'0.00'}" inputmode="decimal"/></div>
           </div>
           <div class="form-row">
-            <div class="form-group"><label>PhilHealth</label><input id="ep-ph" type="number" value="${emp.philhealth||0}" placeholder="Auto-computed if 0" inputmode="decimal"/></div>
-            <div class="form-group"><label>Pag-IBIG</label><input id="ep-pi" type="number" value="${emp.pagibig||0}" inputmode="decimal"/></div>
+            <div class="form-group"><label>PhilHealth</label><input id="ep-ph" type="number" value="${emp.philhealth||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.philhealth):'0.00'}" inputmode="decimal"/></div>
+            <div class="form-group"><label>Pag-IBIG</label><input id="ep-pi" type="number" value="${emp.pagibig||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.pagibig):'0.00'}" inputmode="decimal"/></div>
           </div>
-          <div class="form-group"><label>Tax</label><input id="ep-tax" type="number" value="${emp.tax||0}" inputmode="decimal"/></div>
+          <div class="form-group"><label>Tax</label><input id="ep-tax" type="number" value="${emp.tax||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.tax):'0.00'}" inputmode="decimal"/></div>
           ${caBalance > 0 ? `
           <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-            <label style="font-weight:600">💳 Cash Advance Deduction This Month</label>
-            <div style="font-size:12px;color:var(--text-muted);margin:4px 0 8px">Outstanding balance: <strong>₱${fmt(caBalance)}</strong></div>
-            <input id="ep-ca-deduct" type="number" min="0" max="${caBalance}" step="0.01"
-              value="${caOverride}"
-              placeholder="Leave blank = deduct full ₱${fmt(caBalance)}" inputmode="decimal"/>
-            <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Enter a partial amount to defer the rest to next month. Clear field to revert to full balance.</div>
+            <label style="font-weight:600">💳 Cash Advance — Outstanding ₱${fmt(caBalance)}${inst?` · Installment ${inst.installmentNo} of ${inst.terms}`:''}</label>
+            <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+                <input type="radio" name="ep-ca-mode" value="installment" ${plan.mode!=='full'?'checked':''}/>
+                This month's installment — ₱${fmt(plan.caPlanned)}
+              </label>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+                <input type="radio" name="ep-ca-mode" value="full" ${plan.mode==='full'?'checked':''}/>
+                Pay off full balance — ₱${fmt(caBalance)}
+              </label>
+              <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+                <input type="radio" name="ep-ca-mode" value="custom"/>
+                Custom amount
+                <input id="ep-ca-custom" type="number" min="0" max="${caBalance}" step="0.01" style="width:120px;margin-left:4px" placeholder="0.00"/>
+              </label>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Remaining after this payroll: ₱<span id="ep-ca-remaining">${fmt(Math.max(0,caBalance-plan.caPlanned))}</span></div>
           </div>` : ''}
         `, `<button class="btn-primary" id="save-ep-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`, {size:'wide'});
+
+        if (caBalance > 0) {
+          const updateRemaining = () => {
+            const mode   = document.querySelector('input[name="ep-ca-mode"]:checked')?.value || 'installment';
+            const custom = parseFloat(document.getElementById('ep-ca-custom')?.value)||0;
+            const amt    = mode==='full' ? caBalance : mode==='custom' ? Math.min(custom, caBalance) : plan.caPlanned;
+            document.getElementById('ep-ca-remaining').textContent = fmt(Math.max(0, caBalance-amt));
+          };
+          document.querySelectorAll('input[name="ep-ca-mode"]').forEach(r=>r.addEventListener('change', updateRemaining));
+          document.getElementById('ep-ca-custom')?.addEventListener('input', () => {
+            const radio = document.querySelector('input[name="ep-ca-mode"][value="custom"]');
+            if (radio) radio.checked = true;
+            updateRemaining();
+          });
+        }
 
         document.getElementById('save-ep-btn').addEventListener('click', async () => {
           // All pay — base, allowance, and government deductions — lives in the
@@ -2594,16 +2898,29 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           if (emp) emp.payClass = document.getElementById('ep-class')?.value === 'production' ? 'production' : 'regular';
           window.logAudit && window.logAudit('update','payroll',uid,{ salary:parseFloat(document.getElementById('ep-salary').value)||0 });
 
-          // Save / clear CA deduction override
+          // Override tracking (v12 WS21 decision 4) — flag divergence from the
+          // computed suggestion for later audit review; never blocks the save.
+          if (sug) {
+            [['sss',sug.ee.sss,'ep-sss'],['philhealth',sug.ee.philhealth,'ep-ph'],['pagibig',sug.ee.pagibig,'ep-pi'],['tax',sug.ee.tax,'ep-tax']]
+              .forEach(([field, computed, elId]) => {
+                const typed = parseFloat(document.getElementById(elId).value)||0;
+                if (typed && Math.abs(typed-computed) > 0.01) {
+                  window.logAudit && window.logAudit('statutory-override','payroll',uid,{ field, computed, entered: typed });
+                }
+              });
+          }
+
+          // Cash-advance choice for THIS run (v12 WS22). Writes payroll_ca_overrides
+          // as the transition mechanism — CashAdvance.planFor() reads it ahead of
+          // WS20's frozen pay_runs.lines[i].caPlan on the next Compute.
           if (caBalance > 0) {
-            const caInput = document.getElementById('ep-ca-deduct');
-            const rawVal  = caInput?.value.trim();
+            const mode = document.querySelector('input[name="ep-ca-mode"]:checked')?.value || 'installment';
             const overrideRef = db.collection('payroll_ca_overrides').doc(`${uid}_${month}`);
-            if (rawVal !== '' && rawVal !== null && rawVal !== undefined) {
-              const amount = Math.min(parseFloat(rawVal)||0, caBalance);
-              await overrideRef.set({ userId:uid, month, amount, setBy:currentUser.uid, setAt:firebase.firestore.FieldValue.serverTimestamp() });
+            if (mode === 'installment') {
+              await overrideRef.delete().catch(()=>{}); // revert to the plan default
             } else {
-              await overrideRef.delete().catch(()=>{});
+              const amount = mode === 'full' ? caBalance : Math.min(parseFloat(document.getElementById('ep-ca-custom')?.value)||0, caBalance);
+              await overrideRef.set({ userId:uid, month, amount, setBy:currentUser.uid, setAt:firebase.firestore.FieldValue.serverTimestamp() });
             }
           }
 
@@ -2642,22 +2959,43 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         ${grace?`<div style="font-size:12px;color:var(--text-muted)">⏳ ${grace}</div>`:''}
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           ${(canFinance && state==='computed')?`<button class="btn-secondary btn-sm" id="pr-verify-btn">✓ Mark Verified</button>`:''}
-          ${(isPres && state==='verified')?`<button class="btn-primary btn-sm" id="pr-disburse-btn">💵 Mark Disbursed</button>`:''}
+          ${(isPres && state==='verified')?`<button class="btn-primary btn-sm" id="pr-disburse-btn">💵 Disburse</button><button class="btn-secondary btn-sm" id="pr-reopen-btn">↺ Reopen</button>`:''}
           ${state==='draft'?`<span style="font-size:12px;color:var(--text-muted)">Use <strong>Compute Payroll</strong> to start this month's run.</span>`:''}
           ${state==='disbursed'&&data.disbursedAt?`<span style="font-size:12px;color:var(--success)">💵 Disbursed${data.disbursedByName?` by ${escHtml(data.disbursedByName)}`:''}</span>`:''}
         </div>
       </div></div>`;
+    // Verify — only from 'computed' (re-checked here, not just hidden by the UI,
+    // since a stale page could still fire a click after someone else acted).
     document.getElementById('pr-verify-btn')?.addEventListener('click', async ()=>{
+      const chk = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+      if (!chk || !chk.exists || chk.data().state !== 'computed') { Notifs.showToast('Run must be Computed before Verify.','error'); loadPayRunStrip(month); return; }
       if(!confirm(`Mark ${month} payroll as VERIFIED? This confirms the computed amounts have been checked.`)) return;
       await db.collection('pay_runs').doc(month).set({ state:'verified', verifiedBy:currentUser.uid, verifiedByName:window.userProfile?.displayName||currentUser.email, verifiedAt:firebase.firestore.FieldValue.serverTimestamp() },{merge:true});
       window.logAudit && window.logAudit('update','pay_run',month,{state:'verified'});
       Notifs.showToast('Payroll marked verified.'); loadPayRunStrip(month);
     });
+    // Disburse — v12 WS20 D6: THE single mutating step (CA deducted, ledger
+    // posted, salary_history frozen, employees notified). Terminal afterward.
     document.getElementById('pr-disburse-btn')?.addEventListener('click', async ()=>{
-      if(!confirm(`Mark ${month} payroll as DISBURSED? Do this only once salaries have actually been released.`)) return;
-      await db.collection('pay_runs').doc(month).set({ state:'disbursed', disbursedBy:currentUser.uid, disbursedByName:window.userProfile?.displayName||currentUser.email, disbursedAt:firebase.firestore.FieldValue.serverTimestamp() },{merge:true});
-      window.logAudit && window.logAudit('update','pay_run',month,{state:'disbursed'});
-      Notifs.showToast('Payroll marked disbursed.'); loadPayRunStrip(month);
+      const chk  = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+      const data2 = (chk && chk.exists) ? chk.data() : {};
+      if(!confirm(`Disburse ${month} payroll — ₱${fmt(data2.totalNet||0)} to ${data2.employeeCount||0} staff? This deducts cash advances, posts the ledger, and notifies employees. This cannot be undone.`)) return;
+      const dbtn = document.getElementById('pr-disburse-btn');
+      dbtn.disabled = true; dbtn.textContent = 'Disbursing…';
+      try {
+        await window.disbursePayRun(month);
+        Notifs.showToast('Payroll disbursed!');
+      } catch (err) {
+        Notifs.showToast(err.message || 'Could not disburse payroll.', 'error');
+      }
+      loadPayRunStrip(month);
+      loadFinanceContent(currentUser, currentRole, 'Payroll');
+    });
+    // Reopen — president-only, verified → computed (v12 WS20 D5).
+    document.getElementById('pr-reopen-btn')?.addEventListener('click', async ()=>{
+      if(!confirm(`Reopen ${month} payroll for editing? This returns it to Computed — Verify again before Disburse.`)) return;
+      await window.reopenPayRun(month);
+      loadPayRunStrip(month);
     });
   }
 
@@ -2668,160 +3006,29 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 
   document.getElementById('gen-payroll-btn').addEventListener('click', async () => {
     const month = document.getElementById('pr-month-sel').value;
-    if (!confirm(`Generate and save payroll for ${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}?`)) return;
 
-    // Was this month already generated? salary_history + ledger writes below are
-    // idempotent (keyed by month), but the cash-advance deduction is NOT — re-running
-    // must never deduct an employee's CA balance a second time.
-    const _genSnap = await db.collection('salary_history').where('month','==',month).limit(1).get().catch(()=>({docs:[]}));
-    const alreadyGenerated = _genSnap.docs.length > 0;
-    if (alreadyGenerated && !confirm('Payroll for this month was already generated. Re-generating refreshes the salary records and ledger but will NOT deduct cash advances again. Continue?')) return;
+    // Compute is allowed only in draft/computed — once Verified, the President
+    // must Reopen first (v12 WS20 D5: kills the old silent disburse→computed
+    // regression, where Compute could be re-clicked after Verify/Disburse).
+    const runSnap  = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+    const runState = (runSnap && runSnap.exists) ? (runSnap.data().state||'draft') : 'draft';
+    if (['verified','disbursed'].includes(runState)) {
+      Notifs.showToast(`Run is ${runState} — President must Reopen first.`, 'error');
+      return;
+    }
+    if (!confirm(`Compute payroll for ${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}? Safe to re-run before Verify — no money moves until Disburse.`)) return;
     // Checked once, before any write — a closed month can't be (re)computed
     // (v12 WS12; toast shown by assertPeriodOpen if blocked).
-    await window.assertPeriodOpen(month + '-01');
+    try { await window.assertPeriodOpen(month + '-01'); } catch (e) { return; }
 
-    // 1. Write salary_history
-    const batch = db.batch();
-    for (const u of employees) {
-      const base     = u.salary||0;
-      const allow    = u.allowance||0;
-      const caBalance= _caByUser[u.id]||0;
-      const hasOvr   = _caOverrideByUser[u.id] !== undefined;
-      const caAdv    = hasOvr ? _caOverrideByUser[u.id].amount : caBalance;
-      const gross    = base + allow;
-      const sss      = u.sss || 0;
-      const ph       = u.philhealth || 0;
-      const pagibig  = u.pagibig || 0;
-      const tax      = u.tax || 0;
-      const deduct   = (u.deductions||0) + sss + ph + pagibig + tax;
-      const net      = gross - deduct - caAdv;
-      const ref      = db.collection('salary_history').doc(`${u.id}_${month}`);
-      batch.set(ref, {
-        userId:u.id, userName:u.displayName||u.email, month,
-        salary:base, allowance:allow, deductions:u.deductions||0,
-        sss, philHealth:ph, pagIbig:pagibig, tax,
-        caDeducted:caAdv, netPay:net, finalPay:net,
-        recordedBy:currentUser.uid,
-        recordedAt:firebase.firestore.FieldValue.serverTimestamp()
-      }, {merge:true});
-    }
-    await batch.commit();
-
-    // 2. Auto-write per-employee ledger debit entries (Payroll Expense)
-    const monthLabel = new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'});
-    let totalNetPay = 0;
-    // Pre-fetch this month's existing payroll ledger rows in ONE range query
-    // (refNumber = PAY-<month>-<uid>) instead of a per-employee existence check.
-    // Same upsert result; the range covers exactly the PAY-<month>-* refs so no
-    // duplicate is possible. If the prefetch fails we fall back to the original
-    // per-employee query below, so there is no new duplicate risk.
-    const _payLedgerByRef = {};
-    let _prefetchOK = true;
+    const btn = document.getElementById('gen-payroll-btn');
+    btn.disabled = true; btn.textContent = 'Computing…';
     try {
-      const _exSnap = await db.collection('ledger')
-        .where('refNumber','>=',`PAY-${month}-`)
-        .where('refNumber','<', `PAY-${month}-` + String.fromCharCode(0xf8ff))
-        .get();
-      _exSnap.docs.forEach(d => { const r = d.data().refNumber; if (r) _payLedgerByRef[r] = d.ref; });
-    } catch(_) { _prefetchOK = false; }
-    for (const u of employees) {
-      const base   = u.salary||0, allow = u.allowance||0;
-      const caAdv  = (_caOverrideByUser[u.id]?.amount ?? _caByUser[u.id]) || 0;
-      const deduct = (u.deductions||0)+(u.sss||0)+(u.philhealth||0)+(u.pagibig||0)+(u.tax||0);
-      const empNet = base + allow - deduct - caAdv;
-      totalNetPay += empNet;
-      const ledgerRef = `PAY-${month}-${u.id}`;
-      // Upsert so re-generating the same month doesn't duplicate.
-      let existingRef = null;
-      if (_prefetchOK) {
-        existingRef = _payLedgerByRef[ledgerRef] || null;
-      } else {
-        const _ex = await db.collection('ledger').where('refNumber','==',ledgerRef).limit(1).get().catch(()=>({docs:[]}));
-        existingRef = _ex.docs.length ? _ex.docs[0].ref : null;
-      }
-      const entry = {
-        date:        month + '-01',
-        type:        'debit',
-        accountType: 'expense', account: 'Payroll Expense',
-        description: `Payslip — ${u.displayName||u.email} (${monthLabel})`,
-        amount:      empNet,
-        category:    'Payroll Expense',
-        source:      'Finance',
-        refNumber:   ledgerRef,
-        addedBy:     currentUser.uid,
-        addedByName: window.userProfile?.displayName || currentUser.email,
-        createdAt:   firebase.firestore.FieldValue.serverTimestamp()
-      };
-      if (existingRef) {
-        await existingRef.update({ amount: empNet });
-      } else {
-        await db.collection('ledger').add(entry);
-      }
+      await window.computePayRun(month);
+      Notifs.showToast('Payroll computed!');
+    } catch (err) {
+      Notifs.showToast(err.message || 'Could not compute payroll.', 'error');
     }
-    // NOTE: we intentionally do NOT write an aggregate `PAY-{month}` ledger entry.
-    // The per-employee debits above already sum to the full payroll; an aggregate on
-    // top of them double-counts payroll in every view that sums debits (Finance
-    // dashboard, Financial Reports, Analytics). Remove any aggregate left by old code.
-    void totalNetPay;
-    const _oldAgg = await db.collection('ledger').where('refNumber','==',`PAY-${month}`).limit(1).get().catch(()=>({docs:[]}));
-    if (_oldAgg.docs.length) await _oldAgg.docs[0].ref.delete().catch(()=>{});
-
-    // 4. Apply CA deductions to actual cash_advance balances — ONLY on the first
-    //    generation for this month (these balance writes are NOT idempotent, so
-    //    re-running would deduct the same cash advance again).
-    if (!alreadyGenerated) for (const u of employees) {
-      const caBalance = _caByUser[u.id]||0;
-      if (caBalance <= 0) continue;
-      const hasOvr    = _caOverrideByUser[u.id] !== undefined;
-      const deductAmt = hasOvr ? _caOverrideByUser[u.id].amount : caBalance;
-      if (deductAmt <= 0) continue;
-
-      let remaining = deductAmt;
-      const caDocs  = _caDocsByUser[u.id] || [];
-      const caBatch = db.batch();
-      const caDeductions = []; // per-advance split, stored so a payroll delete can reverse it
-      for (const caDoc of caDocs) {
-        if (remaining <= 0) break;
-        const docBal   = caDoc.balance||0;
-        const toDeduct = Math.min(docBal, remaining);
-        const newBal   = Math.max(0, docBal - toDeduct);
-        caBatch.update(db.collection('cash_advances').doc(caDoc.id), {
-          balance: newBal,
-          ...(newBal <= 0 ? { status:'paid', paidAt:firebase.firestore.FieldValue.serverTimestamp() } : {})
-        });
-        if (toDeduct > 0) caDeductions.push({ caId: caDoc.id, amount: toDeduct });
-        remaining -= toDeduct;
-      }
-      await caBatch.commit();
-      // Record which advances were debited so financeDeleteCascade can restore them
-      // if this payroll run is later deleted.
-      if (caDeductions.length) await db.collection('salary_history').doc(`${u.id}_${month}`)
-        .set({ caDeductions }, { merge:true }).catch(()=>{});
-
-      // Notify employee about CA deduction
-      await Notifs.send(u.id, {
-        title: '💳 Cash Advance Deducted from Payroll',
-        body: `₱${fmt(deductAmt)} was deducted from your ${month} payroll. Remaining CA balance: ₱${fmt(Math.max(0, caBalance-deductAmt))}.`,
-        icon: '💳', type: 'cash_advance'
-      });
-    }
-
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
-
-    // Stamp the pay-run state to 'computed' (governance metadata only — does not
-    // touch the salary math above). Verify/Disburse advance it from the strip.
-    const _runNet = employees.reduce((s,u)=>{
-      const caAdv=(_caOverrideByUser[u.id]?.amount ?? _caByUser[u.id])||0;
-      return s + ((u.salary||0)+(u.allowance||0)-((u.deductions||0)+(u.sss||0)+(u.philhealth||0)+(u.pagibig||0)+(u.tax||0))-caAdv);
-    },0);
-    await db.collection('pay_runs').doc(month).set({
-      month, state:'computed', employeeCount: employees.length, totalNet: _runNet,
-      computedBy: currentUser.uid, computedByName: window.userProfile?.displayName||currentUser.email,
-      computedAt: firebase.firestore.FieldValue.serverTimestamp()
-    }, {merge:true}).catch(()=>{});
-    window.logAudit && window.logAudit('update','pay_run',month,{state:'computed',net:_runNet});
-
-    Notifs.showToast('Payroll computed!');
     loadFinanceContent(currentUser, currentRole, 'Payroll');
   });
 }
@@ -3687,6 +3894,77 @@ async function renderRecordsTab(container, currentUser, currentRole) {
   bindFileCollection('fin-acct', currentUser, 'Finance', 'Accounting');
 }
 
+// ── CA data repair (v12 WS22 migration) — dry-runnable, idempotent, president-
+// gated one-time fix for live inconsistencies the pre-service code produced:
+// (1) 'active' status (financeDeleteCascade's old bug — never a real status,
+//     invisible to every status==='approved' filter incl. payroll's own),
+// (2) interest silently dropped by paths B/C (approved with raw amount instead
+//     of totalPayable) — restored ONLY for untouched loans (no payments yet);
+//     mid-repayment matches are listed for Neil's own call, not auto-fixed,
+// (3) legacy no-terms docs (the old app.js dead form) get an explicit
+//     single-payment plan {terms:1, monthlyPayment:balance} — same behavior,
+//     now explicit instead of undefined.
+window.runCADataRepair = async function(dryRun = true) {
+  const snap = await db.collection('cash_advances').get().catch(()=>({docs:[]}));
+  const docs = snap.docs.map(d=>({ id:d.id, ref:d.ref, ...d.data() }));
+  const report = { normalizedActive:[], interestRestored:[], midRepaymentFlagged:[], legacyTermsBackfilled:[] };
+  const batch = db.batch();
+  let writeCount = 0;
+
+  for (const d of docs) {
+    if (d.status === 'active') {
+      report.normalizedActive.push({ id:d.id, userName:d.userName||'?' });
+      if (!dryRun) { batch.update(d.ref, { status:'approved' }); writeCount++; }
+    }
+    const paidSoFar = (d.payments||[]).reduce((s,p)=>s+(p.amount||0),0);
+    if (d.interestCharged && d.status==='approved' && d.totalPayable!=null && d.totalPayable!==d.amount) {
+      if (!d.payments || !d.payments.length) {
+        if (d.balance === d.amount) {
+          report.interestRestored.push({ id:d.id, userName:d.userName||'?', from:d.balance, to:d.totalPayable });
+          if (!dryRun) { batch.update(d.ref, { balance:d.totalPayable }); writeCount++; }
+        }
+      } else if (Math.abs((d.balance+paidSoFar)-d.amount) < 1 && Math.abs((d.balance+paidSoFar)-d.totalPayable) > 1) {
+        // Mid-repayment with the same signature — retro-charging interest on a
+        // partially repaid loan is a policy decision, not a data repair.
+        report.midRepaymentFlagged.push({ id:d.id, userName:d.userName||'?', balance:d.balance, paidSoFar, totalPayable:d.totalPayable });
+      }
+    }
+    if (d.status !== 'rejected' && d.status !== 'pending' && d.terms == null) {
+      report.legacyTermsBackfilled.push({ id:d.id, userName:d.userName||'?' });
+      if (!dryRun) { batch.update(d.ref, { terms:1, monthlyPayment: d.balance!=null ? d.balance : d.amount }); writeCount++; }
+    }
+  }
+
+  if (!dryRun && writeCount) await batch.commit();
+  window.logAudit && window.logAudit(dryRun?'ca-repair-dry-run':'ca-repair-apply','cash_advances','bulk',{ writeCount });
+  return report;
+};
+
+function openCADataRepairModal(onDone) {
+  window.runCADataRepair(true).then(report => {
+    const total = report.normalizedActive.length + report.interestRestored.length + report.legacyTermsBackfilled.length;
+    const listRows = (arr, cols) => arr.length
+      ? arr.map(r => `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">${escHtml(r.userName)} — ${cols(r)}</div>`).join('')
+      : `<div style="font-size:12px;color:var(--text-muted)">None found.</div>`;
+    openModal('🔄 Cash Advance Data Repair — Dry Run', `
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Scanned every cash_advances record. Nothing has been written yet.</p>
+      <div style="margin-bottom:14px"><strong>Status 'active' → 'approved'</strong> (${report.normalizedActive.length})${listRows(report.normalizedActive, r=>`will be normalized`)}</div>
+      <div style="margin-bottom:14px"><strong>Interest restored</strong> (${report.interestRestored.length})${listRows(report.interestRestored, r=>`₱${fmt(r.from)} → ₱${fmt(r.to)}`)}</div>
+      <div style="margin-bottom:14px"><strong>⚠️ Mid-repayment — needs your call, NOT auto-fixed</strong> (${report.midRepaymentFlagged.length})${listRows(report.midRepaymentFlagged, r=>`balance ₱${fmt(r.balance)}, paid ₱${fmt(r.paidSoFar)}, totalPayable ₱${fmt(r.totalPayable)}`)}</div>
+      <div style="margin-bottom:14px"><strong>Legacy docs — explicit single-payment plan</strong> (${report.legacyTermsBackfilled.length})${listRows(report.legacyTermsBackfilled, r=>`terms:1 added`)}</div>
+    `, total
+      ? `<button class="btn-primary" id="ca-repair-apply-btn">Apply ${total} Fix${total>1?'es':''}</button><button class="btn-secondary" onclick="closeModal()">Close</button>`
+      : `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    document.getElementById('ca-repair-apply-btn')?.addEventListener('click', async () => {
+      if (!confirm(`Apply ${total} cash-advance data fix(es)? This writes to live records.`)) return;
+      await window.runCADataRepair(false);
+      closeModal();
+      Notifs.showToast('CA data repair applied.');
+      if (onDone) onDone();
+    });
+  });
+}
+
 async function renderFinanceCA(container, currentUser, currentRole) {
   const isPrivileged = isFinancePriv();
   container.innerHTML = '<div class="loading-placeholder">Loading cash advances…</div>';
@@ -3712,6 +3990,7 @@ async function renderFinanceCA(container, currentUser, currentRole) {
     </div>
     ${isPrivileged?`<div style="display:flex;gap:8px;margin-bottom:14px">
       <button class="btn-primary btn-sm" id="fin-ca-add-btn">+ Add CA Record</button>
+      ${isRealPresident()?`<button class="btn-secondary btn-sm" id="fin-ca-repair-btn">🔄 Data Repair</button>`:''}
     </div>`:''}
     <div class="subtab-bar" id="fin-ca-tabs" style="margin-bottom:14px">
       <button class="subtab-btn active" data-sub="pending">Pending (${pending.length})</button>
@@ -3748,39 +4027,19 @@ async function renderFinanceCA(container, currentUser, currentRole) {
         ${isPrivileged?`<button class="btn-secondary btn-sm fin-ca-del" data-id="${a.id}" data-label="${escHtml((a.userName||'CA')+' — ₱'+fmt(a.amount))}" style="color:var(--danger);margin-left:4px" title="${isRealPresident()?'Delete':'Request deletion'}">🗑</button>`:''}
       </div>`).join('');
 
-    list.querySelectorAll('.fin-ca-approve').forEach(btn=>btn.addEventListener('click',async e=>{
-      const {id,uid,name,amount}=e.currentTarget.dataset;
-      await db.collection('cash_advances').doc(id).update({status:'approved',balance:parseFloat(amount),approvedAt:firebase.firestore.FieldValue.serverTimestamp(),approvedBy:currentUser.uid});
-      await Notifs.send(uid,{title:'Cash Advance Approved',body:`Your ₱${fmt(parseFloat(amount))} request was approved.`,icon:'✅',type:'cash_advance',dedupKey:`ca-approved-${id}`});
-      Notifs.showToast(`Approved for ${name}`);
-      renderFinanceCA(container,currentUser,currentRole);
+    // v12 WS22 — all three actions route through the one shared CashAdvance
+    // service (fixes: this approve used to ignore totalPayable/interest, and
+    // this payment path had no transaction guard).
+    list.querySelectorAll('.fin-ca-approve').forEach(btn=>btn.addEventListener('click',e=>{
+      window.CashAdvance.openApproveModal(e.currentTarget.dataset.id, () => renderFinanceCA(container,currentUser,currentRole));
     }));
     list.querySelectorAll('.fin-ca-reject').forEach(btn=>btn.addEventListener('click',async e=>{
-      const {id,uid,name}=e.currentTarget.dataset;
-      await db.collection('cash_advances').doc(id).update({status:'rejected'});
-      await Notifs.send(uid,{title:'Cash Advance Rejected',body:'Your request was not approved.',icon:'❌',type:'cash_advance',dedupKey:`ca-rejected-${id}`});
-      Notifs.showToast(`Rejected for ${name}`);
+      try { await window.CashAdvance.reject(e.currentTarget.dataset.id); Notifs.showToast(`Rejected for ${e.currentTarget.dataset.name}`); }
+      catch (err) { Notifs.showToast(err.message||'Could not reject.','error'); }
       renderFinanceCA(container,currentUser,currentRole);
     }));
-    list.querySelectorAll('.fin-ca-pay').forEach(btn=>btn.addEventListener('click',async e=>{
-      const {id,balance,monthly,uid,name}=e.currentTarget.dataset;
-      openModal('Record Payment — '+name,`
-        <div class="ca-detail" style="margin-bottom:12px"><span>Balance:</span><strong>₱${fmt(parseFloat(balance))}</strong></div>
-        <div class="form-group"><label>Amount Paid</label><input id="fin-pay-amt" type="number" inputmode="decimal" value="${monthly}" min="0" max="${balance}"/></div>
-        <div class="form-group"><label>Date</label><input id="fin-pay-date" type="date" value="${today()}"/></div>
-      `,`<button class="btn-primary" id="fin-pay-save">Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-      document.getElementById('fin-pay-save').addEventListener('click',async()=>{
-        const paid=parseFloat(document.getElementById('fin-pay-amt').value)||0;
-        const date=document.getElementById('fin-pay-date').value;
-        const newBal=Math.max(0,(parseFloat(balance)||0)-paid);
-        const caSnap=await db.collection('cash_advances').doc(id).get();
-        const payments=[...(caSnap.data().payments||[]),{amount:paid,date,recordedBy:currentUser.uid}];
-        await db.collection('cash_advances').doc(id).update({balance:newBal,payments,status:newBal===0?'paid':'approved',lastPaymentAt:firebase.firestore.FieldValue.serverTimestamp()});
-        if(uid) await Notifs.send(uid,{title:'💳 CA Payment Recorded',body:`₱${fmt(paid)} payment recorded. Remaining: ₱${fmt(newBal)}`,icon:'💳',type:'cash_advance'});
-        closeModal();
-        Notifs.showToast('Payment recorded!');
-        renderFinanceCA(container,currentUser,currentRole);
-      });
+    list.querySelectorAll('.fin-ca-pay').forEach(btn=>btn.addEventListener('click',e=>{
+      window.CashAdvance.openPaymentModal(e.currentTarget.dataset.id, () => renderFinanceCA(container,currentUser,currentRole));
     }));
     list.querySelectorAll('.fin-ca-edit').forEach(btn=>btn.addEventListener('click',()=>{
       const a = records.find(x=>x.id===btn.dataset.id) || all.find(x=>x.id===btn.dataset.id);
@@ -3814,6 +4073,9 @@ async function renderFinanceCA(container, currentUser, currentRole) {
   if(isPrivileged){
     document.getElementById('fin-ca-add-btn')?.addEventListener('click',()=>{
       window.renderCashAdvancePage && window.openPresidentCashAdvanceModal ? window.openPresidentCashAdvanceModal() : navigateTo('cash-advance');
+    });
+    document.getElementById('fin-ca-repair-btn')?.addEventListener('click', () => {
+      openCADataRepairModal(() => renderFinanceCA(container, currentUser, currentRole));
     });
   }
 }
@@ -3986,6 +4248,11 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
         </label>
       </div>
     </div>
+    <div class="form-group">
+      <label>Linked Login Account (uid) — optional</label>
+      <input id="hrp-linked-uid" value="${escHtml(profile?.linkedUid||'')}" placeholder="Only if this worker ALSO has a users/ login account"/>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">v12 WS20: set this if the worker is paid weekly here AND has a regular-staff login — the monthly payroll run hard-skips this uid to prevent double pay.</div>
+    </div>
   `, `<button class="btn-primary" id="hrp-save-btn">${isEdit?'Update':'Save'} Profile</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   document.getElementById('hrp-save-btn').addEventListener('click', async () => {
@@ -4015,6 +4282,7 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       status: document.getElementById('hrp-status').value,
       caBalance: parseFloat(document.getElementById('hrp-ca-balance').value)||0,
       includeInPayroll: document.getElementById('hrp-include-payroll').checked,
+      linkedUid: document.getElementById('hrp-linked-uid').value.trim(),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     };
     if (!isEdit) { data.createdAt = firebase.firestore.FieldValue.serverTimestamp(); data.createdBy = currentUser.uid; }
@@ -4222,8 +4490,10 @@ function openPayslipEdit(ps, currentUser, onSave) {
     // delta leaves the running balance permanently wrong.
     const _oldCa = ps.deductions?.other?.cashAdvance || 0;
     if (ca !== _oldCa && ps.workerId) {
-      await db.collection('worker_profiles').doc(ps.workerId)
-        .update({ caBalance: firebase.firestore.FieldValue.increment(_oldCa - ca) }).catch(()=>{});
+      // v12 WS22 — routed through the shared, transaction-guarded service. A
+      // negative delta here correctly INCREASES caBalance (deductWorker's
+      // clamp only floors at 0, it never blocks restoring balance an edit gave back).
+      await window.CashAdvance.deductWorker(ps.workerId, ca - _oldCa, { reason:'payslip-edit-reconcile', payslipId: ps.id }).catch(()=>{});
     }
     // Mutate the in-memory copy so the summary reflects changes immediately
     ps.regular   = {...(ps.regular||{}), ratePerHr:rph, hrsWorked:hrs, dailyRate:parseFloat((rph*8).toFixed(2)), total:reg};
@@ -4389,9 +4659,10 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     d.createdAt = firebase.firestore.FieldValue.serverTimestamp();
     d.createdBy = currentUser.uid;
     const ref = await db.collection('payslips').add(d);
-    // Apply CA deduction to the worker's running balance
+    // Apply CA deduction to the worker's running balance — transaction-guarded
+    // re-read (v12 WS22), instead of trusting the balance the modal opened with.
     if (d.deductions.other.cashAdvance > 0) {
-      await db.collection('worker_profiles').doc(profile.id).update({ caBalance: d.caBalanceAfter });
+      await window.CashAdvance.deductWorker(profile.id, d.deductions.other.cashAdvance, { reason:'weekly-payslip', payslipId: ref.id }).catch(()=>{});
     }
     // Note: the general-ledger entry is posted when the payslip is "Submitted" (see openPayslipHistory).
     closeModal();
@@ -9427,6 +9698,7 @@ window.renderApprovals = async function(currentUser) {
     'review-task':    ['president','manager','secretary'],
     'leave':          ['president','manager','secretary'],
     'ca':             ['president','manager'],
+    'ca_deduct':      ['president','manager'], // v12 WS22 — employee's CA-deduction-for-this-run request
     'quote-approval': ['president','manager'],
     'finance-req':    ['president'],
     'finance-del':    ['president'],
@@ -9553,8 +9825,11 @@ window.renderApprovals = async function(currentUser) {
         ...reviewTasksSnap.docs.map(d=>({id:d.id,...d.data(),type:'review-task',icon:'📋',label:'Task for Review',name:d.data().title||'Untitled Task',detail:(()=>{const uids=Array.isArray(d.data().assignedTo)?d.data().assignedTo:[d.data().assignedTo].filter(Boolean);const nm=(d.data().assignedToNames||[]).join(', ');return uids.length&&nm?'by '+nm:'';})(),ts:d.data().lastModifiedAt||d.data().createdAt})),
         ...finReqSnap2.docs.map(d=>({id:d.id,...d.data(),type:'finance-req',icon:'💼',label:'Finance Request',name:`Delete: ${d.data().userName||'?'} (${d.data().month||'?'})`,detail:`by ${d.data().requestedByName||'?'} — ${d.data().reason||''}`,ts:d.data().createdAt})),
         ...finDelSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'finance-del',icon:'🗑',label:'Finance Delete',name:`Delete: ${x.label||'record'}`,detail:`by ${x.requestedByName||'?'}${x.reason?' — '+x.reason:''}`,ts:x.createdAt,recLabel:x.label};}),
-        // Partner quote approvals (partner submitted a quote for the president to review/edit/return)
-        ...qApprSnap2.docs.map(d=>({id:d.id,...d.data(),type:'quote-approval',icon:'📤',label:'Quote Approval',name:`${d.data().quoteNumber||'Quote'} — ${d.data().clientName||''}`,detail:`${d.data().agentName||'Partner'} · ₱${fmt(d.data().total||0)}`,ts:d.data().createdAt})),
+        // Partner quote approvals (partner submitted a quote for the president to review/edit/return).
+        // approval_requests also hosts v12 WS22's ca_deduct requests — split by
+        // `type` so those don't get mislabeled as quote approvals.
+        ...qApprSnap2.docs.filter(d=>d.data().type!=='ca_deduct').map(d=>({id:d.id,...d.data(),type:'quote-approval',icon:'📤',label:'Quote Approval',name:`${d.data().quoteNumber||'Quote'} — ${d.data().clientName||''}`,detail:`${d.data().agentName||'Partner'} · ₱${fmt(d.data().total||0)}`,ts:d.data().createdAt})),
+        ...qApprSnap2.docs.filter(d=>d.data().type==='ca_deduct').map(d=>{const x=d.data();return {id:d.id,...x,type:'ca_deduct',icon:'💳',label:'CA Deduction Request',name:x.userName||'Employee',detail:`₱${fmt(x.amount||0)} this month${x.reason?' — '+x.reason:''}`,ts:x.createdAt};}),
         // Quote delete requests (partner bs_quotes + internal bk_quotes + client folder) — president approves or denies
         ...delQSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-quote',coll:'bs_quotes',icon:'🗑',label:'Quote Delete Request',name:`Delete quote ${d.data().quoteNumber||d.id.slice(-6)}`,detail:`${d.data().clientName||''}${d.data().deleteReason?' — '+d.data().deleteReason:''}`,ts:d.data().deleteRequestedAt})),
         ...delBKQSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-quote',coll:'bk_quotes',icon:'🗑',label:'BK Quote Delete Request',name:`Delete BK quote ${d.data().quoteNumber||d.id.slice(-6)}`,detail:`${d.data().clientName||''}${d.data().deleteReason?' — '+d.data().deleteReason:''}`,ts:d.data().deleteRequestedAt})),
@@ -9591,6 +9866,9 @@ window.renderApprovals = async function(currentUser) {
               `:item.type==='ca'?`
                 <button class="btn-success btn-sm ca-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}" data-amount="${item.amount||0}" data-uid="${item.userId||''}">✓ Approve CA</button>
                 <button class="btn-danger btn-sm ca-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✗ Reject</button>
+              `:item.type==='ca_deduct'?`
+                <button class="btn-success btn-sm cad-approve-btn" data-id="${item.id}">✓ Approve</button>
+                <button class="btn-danger btn-sm cad-reject-btn" data-id="${item.id}">✗ Reject</button>
               `:item.type==='review-task'?`
                 <button class="btn-primary btn-sm rt-view-btn" data-id="${item.id}">👁 View Task</button>
                 <button class="btn-success btn-sm rt-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✓ Approve</button>
@@ -9654,14 +9932,28 @@ window.renderApprovals = async function(currentUser) {
       }));
 
       // CA approve/reject
-      wrap.querySelectorAll('.ca-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-          await db.collection('cash_advances').doc(btn.dataset.id).update({ status:'approved', balance:parseFloat(btn.dataset.amount)||0, approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
-          if (btn.dataset.uid) await safeNotify(() => Notifs.send(btn.dataset.uid, { title:'Cash Advance Approved', body:`Your CA of ₱${fmt(parseFloat(btn.dataset.amount)||0)} has been approved.`, icon:'💸', type:'ca_approved' }));
-          Notifs.showToast(`CA approved for ${btn.dataset.name}`);
+      // v12 WS22 — routes through the shared service (fixes: this approve used
+      // to ignore totalPayable/interest, collecting strictly less than the
+      // Cash Advance tab's own approve path for the same request).
+      wrap.querySelectorAll('.ca-approve-btn').forEach(btn => {
+        btn.addEventListener('click', () => window.CashAdvance.openApproveModal(btn.dataset.id, () => loadApprovalsSub('all')));
+      });
+      wrap.querySelectorAll('.ca-reject-btn').forEach(btn => onClickSafe(btn, async () => {
+          await window.CashAdvance.reject(btn.dataset.id);
           loadApprovalsSub('all');
       }));
-      wrap.querySelectorAll('.ca-reject-btn').forEach(btn => onClickSafe(btn, async () => {
-          await db.collection('cash_advances').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid, rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
+
+      // CA deduction-for-this-run request (v12 WS22 decision 9) — approving just
+      // flips status; CashAdvance.planFor() picks it up as that month's custom
+      // amount the next time Compute runs for that employee's month.
+      wrap.querySelectorAll('.cad-approve-btn').forEach(btn => onClickSafe(btn, async () => {
+          await db.collection('approval_requests').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          Notifs.showToast('CA deduction request approved.');
+          loadApprovalsSub('all');
+      }));
+      wrap.querySelectorAll('.cad-reject-btn').forEach(btn => onClickSafe(btn, async () => {
+          await db.collection('approval_requests').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid, rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          Notifs.showToast('CA deduction request rejected.');
           loadApprovalsSub('all');
       }));
 
@@ -10276,21 +10568,16 @@ window.renderApprovals = async function(currentUser) {
         </div>
       `;
 
+      // v12 WS22 — this was the site with the "balance never set" bug: it flipped
+      // status to 'approved' without ever writing a balance, so an advance
+      // approved here stayed invisible to every downstream balance filter.
       wrap.querySelectorAll('.ca-approve').forEach(btn => {
-        btn.addEventListener('click', async e => {
-          const { id, uid, name, amount } = e.currentTarget.dataset;
-          await db.collection('cash_advances').doc(id).update({ status:'approved', approvedAt: firebase.firestore.FieldValue.serverTimestamp() });
-          await Notifs.send(uid, { title:'Cash Advance Approved', body:`Your ₱${fmt(parseFloat(amount))} request has been approved.`, icon:'💸', type:'cash_advance', dedupKey:`ca-approved-${id}` });
-          Notifs.showToast(`Approved ₱${fmt(parseFloat(amount))} for ${name}`);
-          loadApprovalsSub('ca');
-        });
+        btn.addEventListener('click', e => window.CashAdvance.openApproveModal(e.currentTarget.dataset.id, () => loadApprovalsSub('ca')));
       });
       wrap.querySelectorAll('.ca-reject').forEach(btn => {
         btn.addEventListener('click', async e => {
-          const { id, uid, name } = e.currentTarget.dataset;
-          await db.collection('cash_advances').doc(id).update({ status:'rejected' });
-          await Notifs.send(uid, { title:'Cash Advance Declined', body:'Your cash advance request was not approved this time.', icon:'💸', type:'cash_advance', dedupKey:`ca-rejected-${id}` });
-          Notifs.showToast('Request rejected.');
+          try { await window.CashAdvance.reject(e.currentTarget.dataset.id); Notifs.showToast('Request rejected.'); }
+          catch (err) { Notifs.showToast(err.message||'Could not reject.','error'); }
           loadApprovalsSub('ca');
         });
       });

@@ -415,9 +415,32 @@ service cloud.firestore {
     // ── Pay runs (Compute → Verify → Disburse workflow state per month) ──
     // Doc id = YYYY-MM. Governance metadata only (no raw pay). Finance/admin
     // read & write; the President prunes.
+    // v12 WS20 — transition-aware state machine. isMoneyAdmin() (not
+    // isFinanceOrAdmin()) drives Compute/Verify so 'secretary' can't write
+    // pay_runs directly (matches WS19's money-tier narrowing everywhere else).
+    // 'disbursed' is reachable ONLY by the president, ONLY from 'verified', and
+    // is immutable afterward — no clause below permits updating a disbursed doc.
     match /pay_runs/{month} {
-      allow read:   if isAuth() && isFinanceOrAdmin();
-      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow read: if isAuth() && isFinanceOrAdmin();
+      allow create: if isAuth() && isMoneyAdmin() &&
+        request.resource.data.get('state','draft') in ['draft','computed'];
+      allow update: if isAuth() && (
+        ( isMoneyAdmin() &&
+          resource.data.get('state','draft') in ['draft','computed'] &&
+          request.resource.data.get('state','') in ['computed','verified'] )
+        ||
+        ( isPresident() && (
+            // verify → disburse (the only path to disbursed)
+            ( resource.data.get('state','')=='verified' &&
+              request.resource.data.get('state','')=='disbursed' ) ||
+            // president reopen: verified → computed
+            ( resource.data.get('state','')=='verified' &&
+              request.resource.data.get('state','')=='computed' ) ||
+            // president may also perform the finance-tier transitions
+            ( resource.data.get('state','draft') in ['draft','computed'] &&
+              request.resource.data.get('state','') in ['computed','verified'] )
+        ))
+      );
       allow delete: if isAuth() && isPresident();
     }
 

@@ -4042,11 +4042,12 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     const monthLabel = new Date(bz2Y, bz2M, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
     document.getElementById('pf-content').innerHTML = `
       <div class="card" style="margin-bottom:16px">
-        <div class="card-header">
-          <h3>Team Payroll — ${monthLabel}</h3>
-          <button class="btn-primary btn-sm" id="record-payroll-btn">Record Payroll</button>
-        </div>
-        <div style="font-size:12px;color:var(--text-muted);padding:8px 16px">Computed earnings based on ${daysElapsed2} of ${daysInMonth2} days elapsed this month</div>
+        <div class="card-header"><h3>Payroll — ${monthLabel}</h3></div>
+        <div id="pf-payrun-summary" style="padding:14px 16px"><div class="loading-placeholder">Loading…</div></div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h3>Performance &amp; Attendance — ${monthLabel}</h3></div>
+        <div style="font-size:12px;color:var(--text-muted);padding:8px 16px">Task KPI and attendance — a performance reference, not the pay computation. Actual pay runs through Finance → Payroll.</div>
         <div class="table-wrap">
           <table class="data-table">
             <thead><tr><th>Employee</th><th>Dept</th><th>Net Pay</th><th>Task KPI</th><th>Attendance</th><th>Earned So Far</th><th>Self /10</th><th>Pres /10</th><th></th></tr></thead>
@@ -4055,6 +4056,27 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         </div>
       </div>
     `;
+    // v12 WS20 D1 — Path B's own payroll-writing engine is gone; this is now a
+    // READ-ONLY summary of the real pay_runs/{month} doc, linking to the one
+    // payroll engine (departments.js renderPayrollManagement).
+    (async () => {
+      const wrap = document.getElementById('pf-payrun-summary');
+      if (!wrap) return;
+      const doc = await db.collection('pay_runs').doc(defaultMonth).get().catch(()=>null);
+      const data = (doc && doc.exists) ? doc.data() : {};
+      const state = data.state || 'draft';
+      const stateLabel = { draft:'Not started', computed:'Computed', verified:'Verified', disbursed:'Disbursed' }[state] || 'Not started';
+      const badgeClass = state==='disbursed' ? 'badge-green' : (state==='verified'||state==='computed') ? 'badge-blue' : 'badge-gray';
+      wrap.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <div>
+            <span class="badge ${badgeClass}">${stateLabel}</span>
+            ${data.totalNet!=null?`<span style="font-size:13px;color:var(--text-muted);margin-left:8px">₱${formatNum(data.totalNet)} · ${data.employeeCount||0} staff</span>`:''}
+          </div>
+          <button class="btn-primary btn-sm" id="pf-open-payroll-btn">Open Payroll →</button>
+        </div>`;
+      document.getElementById('pf-open-payroll-btn')?.addEventListener('click', () => window.renderFinance(currentUser, currentRole, 'Payroll'));
+    })();
     // Grade buttons
     document.querySelectorAll('.grade-emp-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -4103,105 +4125,9 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         });
       });
     });
-    document.getElementById('record-payroll-btn')?.addEventListener('click', () => {
-      // Show self-assessment status in modal
-      const pendingSelf = userRows.filter(r => !r.selfDone).map(r => r.name);
-      const pendingHtml = pendingSelf.length
-        ? `<div style="background:#fff3e0;border:1px solid #ff8f00;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px">
-            <strong>⚠️ ${pendingSelf.length} employee${pendingSelf.length>1?'s have':'has'} not submitted self-assessment:</strong>
-            <div style="color:#e65100;margin-top:4px">${pendingSelf.map(escHtml).join(', ')}</div>
-           </div>`
-        : `<div style="background:#e8f5e9;border:1px solid #2e7d32;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#2e7d32">✅ All employees have completed their self-assessment.</div>`;
-      openModal('Record Monthly Payroll', `
-        ${pendingHtml}
-        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Records salary computation for all employees. Employees will be notified when payroll is recorded.</p>
-        <div class="form-group"><label>Month</label><input id="pr-month" type="month" value="${defaultMonth}"/></div>
-      `, `<button class="btn-primary" id="save-pr-btn">Record for All Employees</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-      document.getElementById('save-pr-btn').addEventListener('click', async () => {
-        const month = document.getElementById('pr-month').value;
-        if (!month) { Notifs.showToast('Select a month.','error'); return; }
-        // Checked once, before any write (v12 WS12) — this legacy path is slated
-        // for removal by WS20, but guarded here too since it's still live.
-        try { await window.assertPeriodOpen(month + '-01'); } catch (e) { return; }
-        const btn2 = document.getElementById('save-pr-btn');
-        btn2.disabled = true; btn2.textContent = 'Recording…';
-        const batch = db.batch();
-        // Bulk-fetch users + tasks + kpi_targets to avoid N+1 reads in the loop below
-        const [usersSnap2, tasksSn2, kpiTgtSn2] = await Promise.all([
-          dbCachedGet('users',       () => db.collection('users').get(),       30000),
-          dbCachedGet('tasks-all',   () => db.collection('tasks').get(),       30000),
-          dbCachedGet('kpi-targets', () => db.collection('kpi_targets').get(), 60000),
-        ]);
-        const _allTasks2    = tasksSn2.docs.map(d=>({id:d.id,...d.data()}));
-        const _kpiTgtMap2   = Object.fromEntries(kpiTgtSn2.docs.map(d=>[d.id, d.data()]));
-        const _DONE2        = ['done','approved','archived'];
-        const empDocs = usersSnap2.docs.filter(d => !['partner'].includes(d.data().role));
-        // Compute attendance in parallel across all employees, then write batch
-        const empPayloads = await Promise.all(empDocs.map(async doc => {
-          const u2   = doc.data();
-          const net2 = (u2.salary||0)+(u2.allowance||0)-(u2.deductions||0);
-          // KPI from bulk data
-          const ut2  = _allTasks2.filter(t =>
-            (Array.isArray(t.assignedTo) ? t.assignedTo.includes(doc.id) : t.assignedTo === doc.id)
-          );
-          const ts2  = ut2.length ? Math.min(1, ut2.filter(t=>_DONE2.includes(t.status)).length / ut2.length) : 0.5;
-          const td2  = _kpiTgtMap2[doc.id] || {};
-          const ds2  = typeof td2.deliverableScore === 'number' ? Math.min(1, td2.deliverableScore/100) : 0.5;
-          const kpi2 = ts2*0.7 + ds2*0.3;
-          const att2 = await getAttendanceScore(doc.id);
-          return { doc, u2, net2, kpi2, att2 };
-        }));
-        for (const { doc, u2, net2, kpi2, att2 } of empPayloads) {
-          const finalPay = net2 * (kpi2*0.7 + att2*0.3);
-          const ref = db.collection('salary_history').doc(`${doc.id}_${month}`);
-          batch.set(ref, {
-            userId: doc.id, userName: u2.displayName||u2.email,
-            month, salary: u2.salary||0, allowance: u2.allowance||0,
-            deductions: u2.deductions||0, netPay: net2,
-            kpiScore: kpi2, attScore: att2, finalPay,
-            recordedBy: currentUser.uid, recordedAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-        }
-        await batch.commit();
-        // Post per-employee debit entries to the canonical `ledger` collection,
-        // keyed by the same PAY-{month}-{uid} refNumber the Finance → Payroll tab uses,
-        // so BOTH payroll paths converge on one idempotent representation that the
-        // Finance, President and Analytics dashboards all read. (Previously this wrote a
-        // single aggregate to the orphaned `ledger_entries` collection that no dashboard
-        // except Analytics read — a split-brain.) Upsert = re-runnable.
-        const monthLabel2 = new Date(month+'-02').toLocaleString('en-PH',{month:'long',year:'numeric'});
-        for (const { doc, u2, net2, kpi2, att2 } of empPayloads) {
-          const amt2  = +((net2 * (kpi2*0.7 + att2*0.3)) || 0);   // KPI/attendance-weighted final pay
-          const lref2 = `PAY-${month}-${doc.id}`;
-          const ex2   = await db.collection('ledger').where('refNumber','==',lref2).limit(1).get().catch(()=>({docs:[]}));
-          const entry2 = {
-            date: month + '-01', type: 'debit',
-            accountType: 'expense', account: 'Payroll Expense',
-            description: `Payslip — ${u2.displayName||u2.email} (${monthLabel2})`,
-            amount: amt2, category: 'Payroll Expense', source: 'Finance',
-            refNumber: lref2,
-            addedBy: currentUser.uid,
-            addedByName: currentUser.displayName || currentUser.email,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          };
-          if (ex2.docs.length) await ex2.docs[0].ref.update({ amount: amt2, description: entry2.description });
-          else await db.collection('ledger').add(entry2);
-        }
-        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
-        // Notify all employees in parallel
-        await Promise.all(empPayloads.map(({ doc }) =>
-          Notifs.send(doc.id, {
-            title: '💰 Payroll Recorded',
-            body: `Your payroll for ${monthLabel2} has been recorded. Check Personal Finance for your breakdown.`,
-            icon: '💰', type: 'payroll',
-            dedupKey: `payroll-${doc.id}-${month}`
-          })
-        ));
-        closeModal();
-        Notifs.showToast(`Payroll recorded for ${month}!`);
-        window.renderPersonalFinance(currentUser, currentRole);
-      });
-    });
+    // Path B's own payroll-writing engine (Record Payroll) is retired — v12
+    // WS20 D1. Payroll now runs exclusively through the one engine in
+    // departments.js (Finance → Payroll), linked from the summary card above.
     return;
   }
 
@@ -4257,10 +4183,24 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   const targetScore   = kpiProfile?.exists ? (kpiProfile.data().targetScore||80) : 80;
   const outcomeMet    = taskPct >= targetScore;
 
-  // Computed earnings based on days covered so far (not full month)
-  const multiplier    = kpi*0.7 + att*0.3;
-  const computedMonth = net * multiplier; // full month projected
-  const earnedSoFar   = computedMonth * (daysElapsed / daysInMonth); // prorated
+  // Computed earnings — v12 WS20 D8: the SAME pure computePayLine the real
+  // engine uses (one source of math for computation AND preview). Employees
+  // can't read pay_runs (finance-only rule) to check disburse state directly,
+  // but salary_history is now written ONLY at Disburse — so a matching-month
+  // mirror existing IS the disbursed signal. When it exists, every figure
+  // below shows the FROZEN line, not a live re-projection.
+  const frozenThisMonth = salaryHistory.find(h => h.month === currentMonth);
+  const isFinalMonth    = !!frozenThisMonth;
+  const dispKpi = isFinalMonth ? (frozenThisMonth.kpiScore ?? kpi) : kpi;
+  const dispAtt = isFinalMonth ? (frozenThisMonth.attScore ?? att) : att;
+  const multiplier = isFinalMonth ? (frozenThisMonth.perfFactor ?? (dispKpi*0.7+dispAtt*0.3)) : (kpi*0.7+att*0.3);
+  const projLine = (!isFinalMonth && window.computePayLine)
+    ? window.computePayLine({ ...u, id: currentUser.uid }, { month: currentMonth, policy: 'flat', kpiScore: kpi, attScore: att, caPlan: [], caBalance: totalAdvance })
+    : null;
+  // netBeforeCA / netPay — pre-CA, so the existing "Cash Advance Balance" line
+  // further down isn't double-subtracted.
+  const computedMonth = isFinalMonth ? (frozenThisMonth.netPay ?? frozenThisMonth.finalPay ?? 0) : (projLine ? projLine.netBeforeCA : net*multiplier);
+  const earnedSoFar   = isFinalMonth ? computedMonth : computedMonth * (daysElapsed / daysInMonth); // a disbursed month is fully earned, no proration
 
   // YTD = completed months from salary history + current month earned so far
   const thisYear  = String(bzYear);
@@ -4268,8 +4208,8 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   const ytdPay    = ytdHistory.reduce((s,h)=>s+(h.finalPay||h.netPay||0),0) + earnedSoFar;
 
   const monthLabel = new Date(bzYear, bzMonth, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
-  const kpiColor  = kpi>=0.8?'var(--success)':kpi>=0.6?'var(--warning)':'var(--danger)';
-  const attColor  = att>=0.85?'var(--success)':att>=0.6?'var(--warning)':'var(--danger)';
+  const kpiColor  = dispKpi>=0.8?'var(--success)':dispKpi>=0.6?'var(--warning)':'var(--danger)';
+  const attColor  = dispAtt>=0.85?'var(--success)':dispAtt>=0.6?'var(--warning)':'var(--danger)';
 
   // Cache for printPayslip()
   window._payslipData = {
@@ -4277,7 +4217,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     employeeId: u.employeeId || '—',
     department: (Array.isArray(u.departments)&&u.departments.length ? u.departments.join(', ') : u.department) || '—',
     salary: u.salary||0, allowance: u.allowance||0, deductions: u.deductions||0,
-    net, kpi, att, multiplier, computedMonth, earnedSoFar, totalAdvance,
+    net, kpi: dispKpi, att: dispAtt, multiplier, computedMonth, earnedSoFar, totalAdvance, isFinalMonth,
     monthLabel, taskPct, doneTasks: doneTasks.length, myTasksTotal: myTasks.length,
     salaryHistory
   };
@@ -4317,11 +4257,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       </div>
       <div class="kpi-card accent">
         <div class="kpi-label">Attendance</div>
-        <div class="kpi-value" style="color:${attColor}">${Math.round(att*100)}%</div>
+        <div class="kpi-value" style="color:${attColor}">${Math.round(dispAtt*100)}%</div>
         <div class="kpi-sub">${daysElapsed} days elapsed</div>
       </div>
       <div class="kpi-card ${computedMonth<net*0.9?'red':'green'}">
-        <div class="kpi-label">Projected Full Month</div>
+        <div class="kpi-label">${isFinalMonth?'Final — Disbursed':'Projected Full Month'}</div>
         <div class="kpi-value" style="font-size:14px">₱${formatNum(computedMonth)}</div>
         <div class="kpi-sub">Base ₱${formatNum(net)}</div>
       </div>
@@ -4380,14 +4320,14 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         <div class="payslip-row"><span>Deductions</span><span style="color:var(--danger)">-₱${formatNum(u.deductions)}</span></div>
         <div class="payslip-row"><span>Net Pay (Full Month)</span><strong>₱${formatNum(net)}</strong></div>
         <div style="height:1px;background:var(--border);margin:12px 0"></div>
-        <div style="font-size:12px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:8px;letter-spacing:0.5px">Performance Multiplier</div>
+        <div style="font-size:12px;color:var(--text-muted);font-weight:700;text-transform:uppercase;margin-bottom:8px;letter-spacing:0.5px">${isFinalMonth?'Performance Multiplier (final)':'Performance Multiplier'}</div>
         <div class="payslip-row">
           <span>Task KPI (70%) — ${taskPct}% completion</span>
-          <span style="color:${kpiColor}">${(kpi*0.7).toFixed(2)}×</span>
+          <span style="color:${kpiColor}">${(dispKpi*0.7).toFixed(2)}×</span>
         </div>
         <div class="payslip-row">
-          <span>Attendance (30%) — ${Math.round(att*100)}% rate (${daysElapsed} days)</span>
-          <span style="color:${attColor}">${(att*0.3).toFixed(2)}×</span>
+          <span>Attendance (30%) — ${Math.round(dispAtt*100)}% rate (${daysElapsed} days)</span>
+          <span style="color:${attColor}">${(dispAtt*0.3).toFixed(2)}×</span>
         </div>
         <div class="payslip-row" style="font-weight:700">
           <span>Combined Multiplier</span>
@@ -4395,11 +4335,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         </div>
         <div style="height:1px;background:var(--border);margin:12px 0"></div>
         <div class="payslip-row">
-          <span>Projected Full Month (₱${formatNum(net)} × ${multiplier.toFixed(2)})</span>
+          <span>${isFinalMonth?'Final Pay — Disbursed':`Projected Full Month (₱${formatNum(net)} × ${multiplier.toFixed(2)})`}</span>
           <strong>₱${formatNum(computedMonth)}</strong>
         </div>
         <div class="payslip-row">
-          <span>Earned So Far (${daysElapsed}/${daysInMonth} days)</span>
+          <span>${isFinalMonth?'Earned This Month':`Earned So Far (${daysElapsed}/${daysInMonth} days)`}</span>
           <strong style="color:var(--primary-light)">₱${formatNum(earnedSoFar)}</strong>
         </div>
         <div class="payslip-row" style="background:var(--surface2);border-radius:8px;padding:10px 14px;margin-top:8px">
@@ -4539,51 +4479,36 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     });
   });
 
-  document.getElementById('req-advance-btn')?.addEventListener('click', () => {
-    openModal('Request Cash Advance', `
-      <div class="form-group"><label>Amount Needed (₱)</label><input id="ca-amount" type="number" inputmode="decimal" step="100" placeholder="0.00" min="0"/></div>
-      <div class="form-group"><label>Date Needed</label><input id="ca-date" type="date" value="${bizDate()}"/></div>
-      <div class="form-group"><label>Repayment Date</label><input id="ca-repay" type="date"/></div>
-      <div class="form-group"><label>Reason / Purpose</label><textarea id="ca-reason" rows="3" placeholder="e.g., Medical emergency, family need…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea></div>
-    `, `<button class="btn-primary" id="save-ca-btn">Submit Request</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    document.getElementById('save-ca-btn').addEventListener('click', async () => {
-      const amount = parseFloat(document.getElementById('ca-amount').value)||0;
-      if (!amount) { Notifs.showToast('Enter an amount.', 'error'); return; }
-      const name = userProfile.displayName || currentUser.email;
-      await db.collection('cash_advances').add({
-        userId: currentUser.uid, userName: name, employeeId: currentUser.uid,
-        amount, date: document.getElementById('ca-date').value,
-        repayDate: document.getElementById('ca-repay').value,
-        reason: document.getElementById('ca-reason').value.trim(),
-        status: 'pending',
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      dbCacheInvalidate && dbCacheInvalidate('ca-pending');
-      await Notifs.sendToOwner({ title:'Cash Advance Request', body:`${name} requests ₱${formatNum(amount)} cash advance.`, icon:'💸', type:'cash_advance' });
-      closeModal(); Notifs.showToast('Request submitted! Waiting for approval.');
-      renderPersonalFinance(currentUser, currentRole);
-    });
-  });
+  // v12 WS22 decision 4 — this second, independent request form is retired
+  // (its create always omitted `balance`, which firestore.rules' `balance==0`
+  // check denies — the button was dead today). Replaced by the ONE shared form.
+  document.getElementById('req-advance-btn')?.addEventListener('click', () => window.CashAdvance.openRequestForm());
 
   // CA Deduction Override — employee requests how much to deduct this payroll
+  // v12 WS22 decision 9 — this used to write directly to payroll_ca_overrides,
+  // which firestore.rules restricts to finance/admin only, so a plain
+  // employee's write here was silently rejected. Now files a real
+  // approval_requests doc; on approval, CashAdvance.planFor() reads it as
+  // that month's custom deduction amount.
   document.getElementById('ca-deduct-req-btn')?.addEventListener('click', async () => {
     const month = bizDate().slice(0,7);   // Manila pay-period YYYY-MM
     const activeCA = cashAdvances.filter(a=>a.status==='approved'&&(a.balance||0)>0);
     if (!activeCA.length) { Notifs.showToast('No active cash advance balance.', 'error'); return; }
     const totalBal = activeCA.reduce((s,a)=>s+(a.balance||0),0);
-    const existing = await db.collection('payroll_ca_overrides')
-      .where('userId','==',currentUser.uid).where('month','==',month).limit(1).get().catch(()=>({docs:[]}));
-    const currentOverride = existing.docs[0]?.data()?.amount || '';
+    const existing = await db.collection('approval_requests')
+      .where('userId','==',currentUser.uid).where('type','==','ca_deduct').where('month','==',month).where('status','==','pending')
+      .limit(1).get().catch(()=>({docs:[]}));
+    const currentRequest = existing.docs[0]?.data()?.amount || '';
 
     openModal('Set CA Deduction for This Payroll', `
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
         Your current outstanding CA balance is <strong>₱${formatNum(totalBal)}</strong>.<br>
-        Enter how much you want deducted from your <strong>${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}</strong> payroll.
-        If left at full balance, the full amount will be deducted.
+        Request how much you want deducted from your <strong>${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}</strong> payroll.
+        Finance/the President reviews this before it takes effect. If not approved, the plan's normal installment applies.
       </p>
       <div class="form-group">
         <label>Deduction Amount (₱) — max ₱${formatNum(totalBal)}</label>
-        <input id="ca-override-amt" type="number" inputmode="decimal" step="100" min="0" max="${totalBal}" value="${currentOverride||totalBal}" placeholder="${totalBal}"/>
+        <input id="ca-override-amt" type="number" inputmode="decimal" step="100" min="0" max="${totalBal}" value="${currentRequest||totalBal}" placeholder="${totalBal}"/>
       </div>
       <div class="form-group">
         <label>Reason / Note (optional)</label>
@@ -4595,12 +4520,13 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       const amt = parseFloat(document.getElementById('ca-override-amt').value)||0;
       const note = document.getElementById('ca-override-note').value.trim();
       if (amt <= 0 || amt > totalBal) { Notifs.showToast(`Enter an amount between ₱1 and ₱${formatNum(totalBal)}.`, 'error'); return; }
-      const docId = `${currentUser.uid}_${month}`;
-      await db.collection('payroll_ca_overrides').doc(docId).set({
+      await db.collection('approval_requests').add({
+        type: 'ca_deduct',
         userId: currentUser.uid,
         userName: userProfile.displayName || currentUser.email,
-        month, amount: amt, note,
-        submittedAt: firebase.firestore.FieldValue.serverTimestamp()
+        month, amount: amt, reason: note,
+        status: 'pending',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       await Notifs.sendToOwner({
         title: '💳 CA Deduction Request',
@@ -4692,9 +4618,9 @@ function printPayslip() {
 <div class="emp-info"><div><div class="label">Employee Name</div><div class="value">${escHtml(pd.name)}</div></div><div><div class="label">Employee ID</div><div class="value">${escHtml(pd.employeeId)}</div></div><div><div class="label">Department</div><div class="value">${escHtml(pd.department)}</div></div><div><div class="label">Pay Period</div><div class="value">${pd.monthLabel}</div></div></div>
 <div class="stitle">Earnings &amp; Deductions</div>
 <table><tr><td>Base Salary</td><td>₱${formatNum(pd.salary)}</td></tr><tr><td class="pos">Allowances</td><td class="pos">+₱${formatNum(pd.allowance)}</td></tr><tr><td class="neg">Deductions</td><td class="neg">-₱${formatNum(pd.deductions)}</td></tr><tr class="tr"><td><strong>Net Pay (Full Month)</strong></td><td>₱${formatNum(pd.net)}</td></tr></table>
-<div class="ms"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#666;margin-bottom:6px">Performance Multiplier</div><div class="mr"><span>Task KPI (70%)</span><span>${Math.round(pd.kpi*100)}% → ${(pd.kpi*0.7).toFixed(2)}×</span></div><div class="mr"><span>Attendance (30%)</span><span>${Math.round(pd.att*100)}% → ${(pd.att*0.3).toFixed(2)}×</span></div><div class="mr" style="font-weight:700;color:#1a1a2e;margin-top:4px;border-top:1px solid #ddd;padding-top:4px"><span>Combined Multiplier</span><span>${pd.multiplier.toFixed(2)}×</span></div></div>
+<div class="ms"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#666;margin-bottom:6px">${pd.isFinalMonth?'Performance Multiplier (final)':'Performance Multiplier'}</div><div class="mr"><span>Task KPI (70%)</span><span>${Math.round(pd.kpi*100)}% → ${(pd.kpi*0.7).toFixed(2)}×</span></div><div class="mr"><span>Attendance (30%)</span><span>${Math.round(pd.att*100)}% → ${(pd.att*0.3).toFixed(2)}×</span></div><div class="mr" style="font-weight:700;color:#1a1a2e;margin-top:4px;border-top:1px solid #ddd;padding-top:4px"><span>Combined Multiplier</span><span>${pd.multiplier.toFixed(2)}×</span></div></div>
 <div class="stitle">Computed Pay</div>
-<table><tr><td>Tasks Completed</td><td>${pd.doneTasks} of ${pd.myTasksTotal} (${pd.taskPct}%)</td></tr><tr><td>Projected Full Month (₱${formatNum(pd.net)} × ${pd.multiplier.toFixed(2)})</td><td>₱${formatNum(pd.computedMonth)}</td></tr><tr><td class="neg">CA Outstanding Balance</td><td class="neg">-₱${formatNum(pd.totalAdvance)}</td></tr><tr class="hr"><td>Take-Home So Far</td><td>₱${formatNum(Math.max(0,pd.earnedSoFar-pd.totalAdvance))}</td></tr></table>
+<table><tr><td>Tasks Completed</td><td>${pd.doneTasks} of ${pd.myTasksTotal} (${pd.taskPct}%)</td></tr><tr><td>${pd.isFinalMonth?'Final Pay — Disbursed':`Projected Full Month (₱${formatNum(pd.net)} × ${pd.multiplier.toFixed(2)})`}</td><td>₱${formatNum(pd.computedMonth)}</td></tr><tr><td class="neg">CA Outstanding Balance</td><td class="neg">-₱${formatNum(pd.totalAdvance)}</td></tr><tr class="hr"><td>Take-Home So Far</td><td>₱${formatNum(Math.max(0,pd.earnedSoFar-pd.totalAdvance))}</td></tr></table>
 <div class="ss"><div class="sl">Prepared by: Finance</div><div class="sl">Noted by: HR</div><div class="sl">Approved by: President</div></div>
 <div class="footer">System-generated payslip · Barro Industries · ${now.toLocaleString('en-PH')}</div>
 <div style="text-align:center;margin-top:20px"><button onclick="window.print()" style="padding:10px 24px;background:#1a237e;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer">🖨️ Print / Save as PDF</button></div>

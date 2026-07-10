@@ -1,5 +1,14 @@
 # Workstream 22 — Cash-Advance Installments in Payroll (ONE CashAdvance service)
 
+> ✅ **IMPLEMENTED 2026-07-10** (shipped as one diff with WS20+WS21, per build order).
+> `window.CashAdvance` (js/config.js) — all 4 approval surfaces + 2 payment surfaces + both
+> request forms route through it now; `financeDeleteCascade`'s `status:'active'` bug fixed;
+> the second, dead request form (app.js req-advance-btn) deleted. A president-gated
+> "🔄 CA Data Repair" dry-run tool shipped with it (Finance → Cash Advances). No rules changes
+> needed (`payroll_ca_overrides` unchanged, honored transition-only; `approval_requests`
+> already enumerated `ca_deduct` from an earlier session). See V12-PLAN.md Build Log for the
+> full implementation note.
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

@@ -111,17 +111,25 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
 
 ### PHASE 3 — Payroll & HR done right
 
-20. `[ ]` **One payroll engine** — kill the second compute path; Compute freezes per-employee
+20. `[x]` **One payroll engine** — kill the second compute path; Compute freezes per-employee
     snapshot lines into pay_runs (past months reprint exactly); Verify approves; **Disburse is
     when money moves** + profiles auto-update; rules enforce president-only disburse.
-21. `[ ]` **Statutory tables** — 2026 SSS/PhilHealth/Pag-IBIG/TRAIN withholding computed, not
+    IMPLEMENTED (window.computePayLine/computePayRun/disbursePayRun/reopenPayRun,
+    departments.js) — see Build Log. Path B (app.js Record Payroll) deleted entirely.
+21. `[x]` **Statutory tables** — 2026 SSS/PhilHealth/Pag-IBIG/TRAIN withholding computed, not
     hand-typed; employer shares; 13th-month accrual + run; payroll booked GROSS with liability
-    legs (ties to 1601-C/remittances).
-22. `[ ]` **Cash-advance installments in payroll** — every run shows balance + deduction
+    legs (ties to 1601-C/remittances). IMPLEMENTED (js/statutory-tables.js —
+    window.STATUTORY/computeStatutory) — see Build Log. Bracket numbers are PLACEHOLDERS,
+    `verified:false` — needs Neil's accountant before go-live. 13th-month payout run and full
+    historical re-book are explicitly forward-only/deferred per spec.
+22. `[x]` **Cash-advance installments in payroll** — every run shows balance + deduction
     (encoded/editable); installment plans default to the monthly amount with "this month's
     installment / pay in full / custom"; running balance on the payslip; ONE CashAdvance
     service (approve/pay/deduct) shared by all 3 surfaces (they currently disagree on
-    interest).
+    interest). IMPLEMENTED (window.CashAdvance, js/config.js) — see Build Log. All 4 CA-approval
+    sites + 2 payment-record sites + the 2 request forms now route through the one service;
+    the payroll_ca_overrides collection is honored during transition then superseded by
+    pay_runs.lines[].caPlan; a president-gated "🔄 CA Data Repair" dry-run tool ships with it.
 23. `[ ]` **Raises** — effective-dated raise workflow (pending raise auto-applies at first
     Compute on/after date), approval-routed, salary history timeline.
 24. `[ ]` **The payslip** — ONE branded template (letterhead engine), employee+employer
@@ -405,3 +413,112 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   the same way it already does for quotes. Committed, not yet pushed to master.
   NEXT: workstream 20+21+22 (the payroll bundle — one payroll engine, statutory tables,
   cash-advance installments) per the build order in fable-workplan/INDEX.md.
+- **2026-07-10 (Sonnet implementation — WS20+21+22 payroll bundle, per spec — the largest,
+  highest-stakes change of the build):** All three specs implemented together, in the
+  dependency order the specs themselves called for (statutory table + CashAdvance service
+  first, engine on top, then call-site surgery across 4 files).
+  **WS21** — new js/statutory-tables.js: `window.STATUTORY[2026]` (SSS/PhilHealth/Pag-IBIG/
+  TRAIN withholding brackets, every peso figure marked PLACEHOLDER, `verified:false`) +
+  `window.computeStatutory({grossPay,year}) → {ee:{sss,philhealth,pagibig,tax}, er:{sss,
+  philhealth,pagibig}, unverified}`. Wired into index.html/sw.js PRECACHE after config.js.
+  **WS22** — new `window.CashAdvance` service in js/config.js: `request/openRequestForm`
+  (the ONE request form, interest checkbox removed — interest is now approval-time only),
+  `approve/openApproveModal` (transaction-guarded, editable interest rate, exact repay figure
+  shown before confirm — closes the raw-amount under-collection bug in 2 of 4 approval
+  sites), `reject`, `recordPayment/openPaymentModal` (now transactional everywhere — 1 of 2
+  payment sites had no guard before), `planFor` (oldest-first installment plan, honors an
+  approved `ca_deduct` approval_requests doc or a legacy payroll_ca_overrides doc as a custom
+  override), `deduct` (the ONLY payroll-side balance mutation, called from disbursePayRun),
+  `deductWorker` (transaction-guarded worker_profiles.caBalance decrement, replaces 3 raw
+  update() call sites). All 4 CA-approval surfaces (modules.js Cash Advance tab,
+  departments.js Finance CA tab, Approvals aggregated tab, Approvals dedicated CA subtab) and
+  both payment-record surfaces now call this one service; the second, dead request form
+  (app.js req-advance-btn, whose create always omitted `balance` and was silently rejected by
+  rules) is deleted outright. `financeDeleteCascade`'s `status:'active'` bug (never a
+  recognized status anywhere else) fixed to `'approved'`. Employee's CA-deduction-override
+  request (app.js ca-deduct-req-btn) now files a real `approval_requests` type:`ca_deduct` doc
+  (its old direct write to payroll_ca_overrides was rules-rejected for a plain employee) — new
+  Approvals-page card type + approve/reject handlers added, `APPROVAL_CAPS.ca_deduct` set to
+  president/manager. `worker_profiles` gains an optional `linkedUid` field (HR profile editor)
+  for WS20 D3's double-pay bridge. **WS20** — `window.computePayLine(emp,ctx)` (pure) +
+  `computePayRun(month,{policy})` (read-only, freezes `pay_runs.lines[]`, hard-skips
+  `payClass==='production'` OR any uid appearing as an active worker_profile's `linkedUid`) +
+  `disbursePayRun(month)` (THE only mutating step: CashAdvance.deduct() per line,
+  salary_history mirror write, gross-with-liability-legs ledger booking, employee
+  notifications, then flips `pay_runs.state` to `disbursed`) + `reopenPayRun(month)`
+  (president-only, verified→computed) — all in departments.js, above renderPayrollManagement.
+  Compute/Verify/Disburse handlers rewritten to call the engine with explicit state guards
+  (Compute blocked once verified/disbursed; Verify re-checks state==='computed' before
+  writing); a Reopen button was added next to Disburse. The Edit Payroll modal now pre-fills
+  SSS/PhilHealth/Pag-IBIG/Tax from `computeStatutory()` (backing the "Auto-computed if 0"
+  placeholder that was dead since the field existed) with override-divergence audit logging,
+  and its single CA-override input became the 3-way chooser ("this month's installment" /
+  "pay in full" / "custom", per Neil's original ask) writing `payroll_ca_overrides` as the
+  transition mechanism. **Path B deleted entirely**: app.js `renderPersonalFinance`'s
+  president/manager "Record Payroll" button + its ~100-line multiplicative-formula handler
+  (net×(kpi·0.7+att·0.3), no statutory subtraction, no payClass filter — the confirmed
+  double-pay bug for production workers) are gone, replaced by a read-only `pay_runs/{month}`
+  summary + an "Open Payroll →" link into the real engine; the KPI-grading table beside it
+  (a separate feature) is untouched. The employee's own self-preview (`_payslipData`,
+  `printPayslip`) now calls `computePayLine(...,{policy:'flat'})` for the SAME math the real
+  engine uses (closing the "preview says one number, actual pay says another" gap), and shows
+  the FROZEN `salary_history` line labeled "Final — Disbursed" instead of a live projection
+  once this month's mirror exists (employees can't read `pay_runs` to check state directly —
+  existence of the mirror is the disbursed signal, since salary_history is now written ONLY
+  at Disburse). Ledger booking basis changed going forward only (decided, not silently
+  applied): gross Payroll-Expense debit + employer-share debit, credited against 4 new
+  per-agency liability accounts (SSS/PhilHealth/Pag-IBIG/Withholding-Tax Payable, added to
+  `window.COA`) plus one aggregate Cash credit — verified the double-entry balances
+  algebraically before writing it (ΣeffectiveGross+Σer == Σstatutory+Σer+Σ(effectiveGross−
+  statutory)); historical NET-booked months are NOT re-booked. **firestore.rules**: `pay_runs`
+  rewritten to a transition-aware state machine — `isMoneyAdmin()` (not `isFinanceOrAdmin()`,
+  matching WS19's already-established money-tier narrowing) drives Compute/Verify,
+  `disbursed` reachable ONLY by the president ONLY from `verified`, and immutable afterward
+  (no clause permits updating a disbursed doc) — closes the confirmed gap where any
+  finance-tier role could write `state:'disbursed'` directly. `pay_runs` + `payroll_delete_
+  requests` added to scripts/monthly-backup.js EXPORTS (a real prior gap — pay_runs now
+  carries the entire frozen snapshot, arguably the most important payroll collection to back
+  up). **Two defensive fixes found and applied while implementing, beyond the literal spec**:
+  (1) `disbursePayRun` now checks `isRealPresident()` client-side before any write — without
+  it, a non-president could trigger the CA deductions/ledger posts (gated by `isMoneyAdmin()`,
+  not `isPresident()`) and have only the FINAL state-flip rejected by rules, leaving a partial
+  disburse with money already moved; (2) `financeDeleteCascade`'s salary_history reversal now
+  also deletes the new per-employee `-ER` ledger leg (it only knew about the single old
+  gross-only row) — flagged and left alone in the same comment: the aggregate SSSPAY-/PHPAY-/
+  HDMFPAY-/WHTPAY-/NETPAY-{month} legs are NOT auto-adjusted on a single-employee payroll
+  delete (would need re-deriving from every other still-standing line for that month); a
+  known, explicitly-documented gap rather than a rushed partial fix, left for whoever builds
+  WS39 (BIR/remittance reports, the eventual long-term owner of these accounts).
+  **Built, per the established "migration tool ships with the workstream" pattern**: a
+  president-gated "🔄 CA Data Repair" dry-run tool (Finance → Cash Advances) — normalizes
+  `status:'active'`, restores silently-dropped interest on untouched (no-payments-yet)
+  advances, flags (does NOT auto-fix) mid-repayment advances with the same signature since
+  retro-charging interest on a partially repaid loan is a policy call, and backfills legacy
+  no-terms docs to an explicit single-payment plan. **NOT built this session** (explicitly
+  deferred, not forgotten): WS20 Spec 5's "Payroll reconciliation" report (detecting historical
+  Path-B-written salary_history rows and double-pay incidents) — flagged as still needed
+  below, since Path B's exact bug signature (kpiScore present, sss undefined) is now easy to
+  query for whenever this is picked up.
+  **Verified:** `node --check` clean on all 6 touched/new JS files; `firebase deploy --only
+  firestore:rules --dry-run` compiled successfully (re-run after every rules edit); grep-swept
+  for dangling references to every retired variable/function (`_caByUser`/`_caOverrideByUser`/
+  `_caDocsByUser`/`record-payroll-btn`/`openCashAdvanceModal`) — zero hits outside their own
+  now-removed definitions; confirmed no other direct `cash_advances` writes remain outside the
+  CashAdvance service except `financeDeleteCascade`'s reversal (correct, a cascade, not a
+  normal mutation) and `openPresidentCashAdvanceModal`'s pre-approved-creation path (a
+  deliberately separate flow, not one of the 2 request forms WS22 unified). **NOT verified**
+  (needs a live login, which this session doesn't have): an actual Compute→Verify→Disburse
+  click-through against real Firestore data, confirming a real employee's payslip preview
+  matches what Disburse actually posts, and confirming the CA data-repair tool's dry-run
+  report against real live cash_advances docs. Committed, not yet pushed to master.
+  **Still needed before this is production-ready**, in priority order: (1) have Neil's
+  accountant verify every SSS/PhilHealth/Pag-IBIG/TRAIN figure in js/statutory-tables.js and
+  flip `verified:true` — nothing should be trusted for real payroll until then; (2) deploy the
+  rules (`~/.npm-global/bin/firebase deploy --only firestore:rules`, re-diff first); (3) a live
+  Compute→Verify→Disburse run for a real month, checked against last month's Path-A numbers
+  for an exact match under the default 'flat' policy; (4) decide whether/when to enable
+  `payPolicy:'performance'` (ships inert, per WS20 decision 2 — a real pay-policy change, not
+  a code decision); (5) the WS20 Payroll-reconciliation report, when someone has bandwidth.
+  NEXT: workstream 23+24 (raises + the payslip template) per the build order in
+  fable-workplan/INDEX.md, or 10-11 (URL routing + real Back + styled dialogs) if Neil wants
+  the no-pop-ups UX work prioritized instead.

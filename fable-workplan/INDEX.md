@@ -38,9 +38,9 @@ finalizing 9's rename sweep so the two don't conflict.
 
 | WS | Brief | Open decisions | One-line current state |
 |---|---|---|---|
-| 20 | [20-payroll-engine.md](20-payroll-engine.md) | 8 | One payroll engine — unify the two compute paths |
-| 21 | [21-statutory.md](21-statutory.md) | 12 | Statutory tables — SSS/PhilHealth/Pag-IBIG/TRAIN + 13th month |
-| 22 | [22-ca-installments.md](22-ca-installments.md) | 11 | Cash-advance installments in payroll (Neil's mid-session spec) |
+| 20 | [20-payroll-engine.md](20-payroll-engine.md) | ✅ IMPLEMENTED | One payroll engine — unify the two compute paths |
+| 21 | [21-statutory.md](21-statutory.md) | ✅ IMPLEMENTED | Statutory tables — SSS/PhilHealth/Pag-IBIG/TRAIN + 13th month |
+| 22 | [22-ca-installments.md](22-ca-installments.md) | ✅ IMPLEMENTED | Cash-advance installments in payroll (Neil's mid-session spec) |
 | 23 | [23-raises.md](23-raises.md) | 8 | Effective-dated raises |
 | 24 | [24-payslip.md](24-payslip.md) | 7 | The payslip — ONE branded template (print button currently dead) |
 | 25 | [25-leave.md](25-leave.md) | 10 | Leave that actually works — balances never seeded today |
