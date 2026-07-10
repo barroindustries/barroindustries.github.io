@@ -178,6 +178,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
 
 ### PHASE 4 — Operations & departments
 
+> **Grounding research complete (2026-07-10) — architecture NOT yet decided.** All 13
+> Phase 4+5 workstreams (28-40) now have a Fable-ready grounding brief in `fable-workplan/`
+> (file:line-cited current-state research, data shapes, open decisions) — see
+> `fable-workplan/INDEX.md`'s Phase 4/Phase 5 tables and its cross-workstream dependency
+> notes. None of these has a `## DECIDED` spec yet. Per the established Fable-decides/
+> Sonnet-implements split, the next step is a Fable session per brief, NOT further Sonnet
+> implementation — do not improvise architecture for these.
+
 28. `[ ]` **Production process flow** — stages renamed to owner's flow: **Layouting → Bending &
     Cutting → Assembly → Finishing & Polishing → Quality Checking → Out for Delivery** (legacy
     stage mapping so existing orders don't strand); per-stage worker assignment + timestamps
@@ -1082,3 +1090,75 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   established (and, so far, successful) division of labor. Recommend: a Fable-tier session
   writes Phase 4 grounding briefs + DECIDED specs next (the same process used at the start of
   this session for Phases 2-3), before any further implementation proceeds.
+- **2026-07-10 (Sonnet grounding-research pass — WS28-40, per Neil's "resume til phase 5"):**
+  Dispatched 13 parallel Sonnet research subagents (one per Phase-4/5 workstream) to do the
+  SAME kind of pre-grounding pass Phase 2/3 got before Fable decided their architecture —
+  reading the actual current code, citing exact file:line, quoting real snippets rather than
+  trusting in-repo comments, and leaving every open decision unresolved for Fable. No
+  architecture was decided; no code was implemented; nothing was committed. Each brief was
+  written to its own `fable-workplan/NN-*.md` file matching the exact template/section
+  structure Phase 2/3's briefs established (Current state / Data model / Constraints / Open
+  decisions / Risks / Files likely touched / Expected deliverable format — no `## DECIDED`
+  section). **The highest-value findings, most load-bearing first:**
+  - **WS39 (BIR):** `renderFinancialReports` fetches only the 3000 most-recent ledger/
+    general_journal rows before filtering by period — once the ledger grows past that window,
+    a BIR report for an older period could silently return truncated/zero figures. Also: VAT is
+    NOT purely overstated as originally audited (2 of 5 expense-write paths already net input
+    VAT), and regular employees have no TIN/SSS#/PhilHealth#/Pag-IBIG# field captured anywhere
+    (only weekly `worker_profiles` do) — a real data-capture gap, not just a reporting one.
+  - **WS31 (Quotation builder v3):** the "BK quotes stranded in bs_quotes" bug is real and
+    pinpointed exactly (app.js:8231 hardcodes `bs_quotes` in the approval-request branch
+    regardless of company) — and "approving without filing" turned out to be worse than one
+    bug: TWO different approve implementations coexist in the same `renderApprovals` function
+    and disagree; one of them only flips `approval_requests.status` and never touches the quote
+    doc at all, so the President can click Approve and the quote stays frozen forever. Also:
+    `quote-builder.html` (v1) no longer exists (deleted 2026-06-17) — CLAUDE.md's description of
+    it is stale. ~1,190 of the claimed ~1,800 dead-code lines were verified via reproducible
+    zero-caller greps, including one complete 549-line duplicate quote builder.
+  - **WS30 (Purchasing):** there is no PO approval gate at all today — any Purchasing employee
+    can convert an RFQ and print a PO with the President's name/title pre-filled as "Approved
+    by" from a static constant, with zero approval field or action anywhere in the schema.
+  - **WS29 (Inventory):** the receive-path bug is confirmed exactly as suspected — quantity
+    increments correctly but unit cost is flatly overwritten to the latest purchase price, no
+    weighted-average logic exists anywhere in the repo. The physical Count Form is explicitly
+    non-mutating by its own code comment ("not a stock mutation").
+  - **WS35 (Design suite):** the drawing "approval" workflow has no real approver gate — the
+    identical permission check governs create, submit, approve, AND release, so any Design-dept
+    member can self-approve their own drawing. A `reviewer` field exists but is dead code
+    (written once, never read).
+  - **WS32 (Sales CRM) + WS35 (Design suite), independently confirmed the same fact:**
+    `bs_clients` is completely orphaned — even Brilliant Steel's own "Client Data" tab derives
+    synthetic clients from `bs_quotes` instead of reading its own collection. Every client↔quote
+    join app-wide is a fragile `clientName` string match; no `clientId` exists anywhere.
+  - **WS38 (Files Hub):** found a genuine live bug — two shadowed implementations of the same
+    file-browser function exist in the same file; the older one (departments.js:11379-11468) is
+    dead code, silently overridden by a newer pair, confirmed via all 15 real call sites. Also:
+    per-file sharing/ACL is flagged as architecturally hard given Storage's bearer-token
+    `getDownloadURL()` — enforcing true view-vs-edit at the byte level isn't currently possible
+    without new Cloud Function infrastructure.
+  - **WS40 (Analytics):** all 13 `new Chart(` sites hardcode colors with zero `var(--...)`
+    usage, confirmed to visually clash with WS17's new default light "Office" theme.
+  - **WS37 (Team Chat):** only 3 `onSnapshot` real-time listeners exist anywhere in the entire
+    app today (force-logout broadcast, claims listener, notification inbox) — live chat is
+    genuinely new architectural territory, not an extension of an existing pattern.
+  - **WS28 (Production flow):** the public order tracker never reads production data directly —
+    it goes through three separately hand-maintained, already-drifting stage-translation maps.
+    A naive stage rename would silently stop advancing clients' tracking pages instead of
+    erroring, and in-flight orders whose stored stage value disappears would silently reset to
+    stage 1.
+  - **WS36 (Finance additions):** zero bank-account dimension exists anywhere in the schema or
+    rules; every existing money-writer (CRJ/CDJ/EXP/PAY/SO/PROJ ledger posts, cash-advance
+    approval, payroll Disburse) would need retrofitting, not just a new collection — flagged as
+    the workstream's real blast radius.
+  - **WS33 (AEC Directory) + WS34 (Marketing):** both confirmed wholly greenfield with strong
+    existing analogs to build on (CRM stages, chip-tab filters, the shared letterhead engine) —
+    the lowest-risk of the 13.
+  **Cross-workstream dependency map** (see `fable-workplan/INDEX.md`'s Phase 4/5 status section
+  for the full version): WS31↔WS32 (BK/BS quote split), WS32↔WS35 (identical three-way client
+  fragmentation, independently discovered), WS34/WS35↔WS38 (materials library / project folders
+  overlap Files Hub's scope), WS28↔public-tracker (stage rename risk), WS40↔WS29/WS32/WS36
+  (several named metrics are blocked on those three landing first). **Nothing was implemented.**
+  This is purely the research phase — the SAME kind of pass Phase 2/3 got before Fable wrote
+  their DECIDED specs. **Next step: a Fable-tier session per brief writes the architecture
+  decisions** (the established, successful division of labor this whole engagement has used);
+  only then should Sonnet implementation resume for Phase 4/5.

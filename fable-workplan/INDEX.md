@@ -47,7 +47,53 @@ finalizing 9's rename sweep so the two don't conflict.
 | 26 | [26-attendance-v2.md](26-attendance-v2.md) | ✅ IMPLEMENTED | Attendance v2 — time-out, hours, holidays admin |
 | 27 | [27-ids.md](27-ids.md) | ✅ IMPLEMENTED | Employee + worker ID cards, worker-login unblock |
 
-## Status — ALL 18 DECIDED (Fable, 2026-07-10) ✅
+## Phase 4 — Operations & departments
+
+| WS | Brief | Open decisions | One-line current state |
+|---|---|---|---|
+| 28 | [28-production-flow.md](28-production-flow.md) | 8 | Production process flow — rename stages to match the real shop floor |
+| 29 | [29-inventory.md](29-inventory.md) | 9 | Inventory correctness — moving weighted-average cost, receive-path bug confirmed |
+| 30 | [30-purchasing.md](30-purchasing.md) | 12 | Purchasing — no PO approval gate exists at all today |
+| 31 | [31-quotation-builder-v3.md](31-quotation-builder-v3.md) | 14 | Quotation builder v3 — Quick Quote mode, repair the quote→approval→order chain |
+| 32 | [32-sales-crm.md](32-sales-crm.md) | 14 | Sales — Client Relations hub — bs_clients confirmed orphaned |
+| 33 | [33-aec-directory.md](33-aec-directory.md) | 12 | AEC Partner Directory — wholly greenfield, strong existing analogs |
+| 34 | [34-marketing.md](34-marketing.md) | 12 | Marketing suite — campaigns/leads/calendar greenfield, materials library is not |
+| 35 | [35-design-suite.md](35-design-suite.md) | 10 | Design dept suite — drawing "approval" has no real approver gate |
+| 36 | [36-finance-additions.md](36-finance-additions.md) | 14 | Finance additions — bank-accounts registry, no dimension exists anywhere |
+| 37 | [37-team-chat.md](37-team-chat.md) | 7 | Team Chat — real-time listeners are genuinely new territory (only 3 exist today) |
+| 38 | [38-files-hub.md](38-files-hub.md) | 14 | Files Hub — found dead shadowed code; per-file sharing is architecturally hard |
+
+## Phase 5 — Intelligence & BIR
+
+| WS | Brief | Open decisions | One-line current state |
+|---|---|---|---|
+| 39 | [39-bir-suite.md](39-bir-suite.md) | 15 | BIR suite — a 3000-row report-truncation landmine found; VAT partially already netted |
+| 40 | [40-analytics.md](40-analytics.md) | 15 | Analytics with conclusions — 13 charts hardcode colors that clash with the new theme |
+
+## Status — Phase 4+5 GROUNDED, not yet DECIDED (research pass, 2026-07-10)
+
+All 13 Phase-4/5 briefs are now fact-gathered (file:line citations, current-state findings,
+data shapes, open decisions) — the SAME grounding pass Phase 2/3 went through before Fable
+decided their architecture. **None of these 13 has a `## DECIDED` section yet.** Per the
+established cost-effective split (Fable decides, Sonnet implements mechanically), the next
+step is a Fable session per brief — do NOT let a Sonnet session invent these architecture
+decisions.
+
+**Cross-workstream dependencies surfaced by this research pass** (read before assigning a
+build order): WS31 (quote fix) and WS32 (CRM hub) both touch the BK/BS quote-collection
+split — resolve WS31's `bs_quotes` stranding bug before or alongside WS32's client-unification
+decision. WS32 and WS35 independently confirmed the same `sales_clients`/`design_clients`/
+`bs_clients` three-way fragmentation — one decision should cover both. WS34's materials-library
+sub-feature and WS35's project/client folders both overlap with WS38's Files Hub — sequence
+WS38 first if its scope includes killing the underlying `files_<scope>` pattern. WS28's stage
+rename risks silently breaking the public order-tracker's three independently-drifting
+translation maps — do not decide WS28 without reading that risk note. WS40's win-rate/
+cash-position/inventory-turns metrics are each blocked on WS32/WS36/WS29 respectively landing
+first. WS39 (BIR) depends on employee TIN/SSS#/PhilHealth# fields that don't exist on regular
+`users` docs today (only on weekly `worker_profiles`) — a real data-capture gap, not just a
+reporting one.
+
+## Status — Phases 2+3 ALL 18 DECIDED (Fable, 2026-07-10) ✅
 
 Every Phase-2 + Phase-3 brief now carries a full `## DECIDED` spec (resolved decisions + exact
 signatures, before/after code, data shapes, rules diffs, migration + test checklists) — ready for
