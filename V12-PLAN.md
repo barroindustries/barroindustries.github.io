@@ -251,3 +251,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   statutory bracket figures (compliance); everything else is self-contained.
   Six of 18 briefs now specced (12,13,19,20,21,22). NEXT: 9+14 (brand+letterhead), 10-11, then
   14-18 and 23-27.
+- **2026-07-10 (Fable decision session #3 — HANDOVER COMPLETE):** the remaining **11 workstreams
+  DECIDED** (09,10-11,14,15,16,17,18,23,24,25,26,27) via 11 parallel high-effort Fable passes,
+  each grounded in its brief + the upstream DECIDED specs it depends on. **ALL 18 Phase-2/3
+  workstreams now carry full implementation specs** in fable-workplan/*.md — ready for Sonnet.
+  Post-merge seam reconciliation applied: canonical letterhead API `window.buildLetterhead(opts)`
+  (WS14 owns; WS24 calls it, payslip prints the DTI taxpayer identity); canonical `window.BRAND`
+  is WS9's (WS27 interim dropped, `verifyBase` added). fable-workplan/INDEX.md now holds the
+  dependency-safe Sonnet build order (12+13 → 19 → 09+14 → 20+21+22 → 23+24 → 10-11 → 15-18 →
+  25+26+27) and the consolidated 'needs Neil' list (statutory rates verification, performance-pay
+  activation, CA interest default, OPC TIN, Company-tab prose). **Handover to Sonnet 5 is
+  complete — no architecture decisions remain.**

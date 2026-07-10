@@ -47,18 +47,35 @@ finalizing 9's rename sweep so the two don't conflict.
 | 26 | [26-attendance-v2.md](26-attendance-v2.md) | 8 | Attendance v2 — time-out, hours, holidays admin |
 | 27 | [27-ids.md](27-ids.md) | 5 | Employee + worker ID cards, worker-login unblock |
 
-## Status
+## Status — ALL 18 DECIDED (Fable, 2026-07-10) ✅
 
-**DECIDED (Fable, 2026-07-10): 12, 13, 19, 20, 21, 22** — the money core. Each now carries a full
-`## DECIDED` spec ready for Sonnet: WS13 (chart of accounts + double-expensing fix, composed
-rules with WS12), WS12 (Period engine + finance_periods close, composed rules with WS13 —
-implement 12+13 as ONE diff), WS20 (one payroll engine: lines[] frozen on pay_runs, money moves
-at Disburse, Path B deleted, transition-aware pay_runs rules), WS22 (CashAdvance service:
-approve/plan/deduct, installment default, four approval-path bugs closed — ships with WS20 or
-standalone per its sequencing note).
-Also decided: WS19 (security — secretary two-tier via isSeniorAdmin/isMoneyAdmin, partner
-lockdown sweep, attendance forgery cap, files_/budgets_ closes, worker username-login map) and
-WS21 (statutory tables — new js/statutory-tables.js, year-keyed, PLACEHOLDER rates pending
-accountant verification, ee+er shares, 13th-month display-computed).
-Remaining 12 briefs: grounded, decisions open. Suggested next: 9+14 together (brand/letterhead),
-10-11 (routing/dialogs), 14/15/16/17/18, then 23-27.
+Every Phase-2 + Phase-3 brief now carries a full `## DECIDED` spec (resolved decisions + exact
+signatures, before/after code, data shapes, rules diffs, migration + test checklists) — ready for
+Sonnet to implement mechanically.
+
+- **Phase 2:** 09-brand, 10-11-nav-dialogs, 12-period, 13-coa, 14-letterhead, 15-durability,
+  16-perf, 17-design, 18-shortcuts, 19-security — DECIDED.
+- **Phase 3:** 20-payroll-engine, 21-statutory, 22-ca-installments, 23-raises, 24-payslip,
+  25-leave, 26-attendance-v2, 27-ids — DECIDED.
+
+**Seams reconciled post-merge:** letterhead API is canonically `window.buildLetterhead(opts)`
+(WS14 owns it; WS24 calls it); `window.BRAND` is canonically WS9's (WS27's interim dropped, add
+`verifyBase`). See the `‼️ SEAM RECONCILIATION` notes in 24/27/09.
+
+### Recommended Sonnet implementation order (dependency-safe)
+1. **12 + 13 together** (one diff — shared functions + composed ledger rules).
+2. **19** (security rules — foundational; unblocks worker login for 27).
+3. **09 + 14** (BRAND + letterhead — many later docs depend on them).
+4. **20 + 21 + 22** (payroll bundle — one engine; statutory + CA plug into its lines[]).
+5. **23, 24** (raises, payslip — depend on the payroll bundle).
+6. **10-11** (routing + dialogs — large mechanical migration).
+7. **15, 16, 17, 18** (durability, perf, design system, shortcuts — mostly independent).
+8. **25, 26, 27** (leave, attendance v2, IDs).
+
+### ‼️ Items that need Neil (not decideable by engineering)
+- **WS21 statutory rates** — placeholders; an accountant must verify 2026 SSS/PhilHealth/Pag-IBIG/
+  TRAIN numbers and flip `verified:true` before payroll go-live.
+- **WS20 'performance' pay policy** — ships inert on 'flat'; Neil flips it to change pay basis.
+- **WS22 CA interest default** (2%/mo vs 0) + mid-repayment interest-mismatch list.
+- **WS09** — OPC TIN missing from code; the false 'Business Intelligence Platform' Company-tab
+  prose needs a real rewrite.

@@ -86,17 +86,549 @@ Collections this workstream must reason about (fields as read from live code, no
 - `makePublic()` (drive-lib.js:191-199) is called unconditionally inside the one shared `uploadBuffer()` helper used by BOTH scripts — any change to file-visibility policy is a one-function edit point, but it applies identically to daily file-sync uploads AND monthly JSON/CSV backup uploads today; a design that wants different visibility for 'archived business file' vs 'raw backup export of payroll data' must branch inside or around this shared call, not assume today's single code path already distinguishes them.
 - Escaping/XSS convention (`escHtml()`) and the append-only, catch-swallowing `window.logAudit()` fire-and-forget pattern (js/config.js:246-261) are the established idioms for anything this workstream surfaces back into the UI (e.g. a backup-status banner) or logs (e.g. 'restore performed by X at time Y').
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-- [ ] Static EXPORTS array (current) vs. dynamic `db.listCollections()` discovery (already used by sync-to-drive.js) vs. a native `gcloud firestore export`: the static list requires ongoing manual maintenance (already proven to drift twice — pre- and post- the ROADMAP.md:102 fix) but gives per-collection control over date-filtering/CSV-field-selection/naming; dynamic discovery is drift-proof but currently only used for file-walking, not structured JSON/CSV export, and doesn't automatically know how to filter by month for date-scoped collections; a native export is the only option that also picks up the two dynamic `files_*`/`budgets_*` families automatically AND requires zero code changes when new collections are added, but produces an opaque LevelDB-format export (not human-browsable JSON/CSV in Drive folders the way the owner currently likes 'records... visible' per V12-PLAN.md:18) and needs a GCS bucket (billing implication, see constraints). Which of these (or a hybrid — e.g. native export as the disaster-recovery layer, kept static/dynamic JSON+CSV as the human-browsable layer) Fable should choose is a real architecture decision, not pre-decided by anything in code today.
-- [ ] If a native export is chosen: does it target the SAME GCS bucket that already backs Firebase Storage (`barro-industries.firebasestorage.app`, js/firebase-config.js:11) to avoid a second billable resource, or a dedicated export bucket? Sharing the bucket keeps things free/simple but mixes automated Firestore snapshots into the same bucket the app's live file uploads live in; a dedicated bucket is cleaner but is unambiguously a second GCP resource outside the current 'free tier only' footprint.
-- [ ] Drive file-visibility redesign: given no Workspace domain exists, the realistic choices are (a) `type:'user'` sharing to a maintained list of individual employee Google-account emails (requires collecting/maintaining that list, and every new hire needs a Google account on file before their files are shared), (b) keep files Drive-private entirely and make Drive pure cold-archive that the app never links to directly (the in-app `<a href>` to `driveUrl` seen at departments.js:765/6486/6504 would need to be removed/replaced with a Firebase-Storage-backed, custom-claims-gated URL instead), or (c) accept some reduced-but-not-zero exposure (e.g. an unguessable, non-indexed 'anyone with link' left in place only for low-sensitivity folders, tightened only for payroll/finance). This is squarely a product/security tradeoff for Fable, not a mechanical fix.
-- [ ] Should the currently-surfaced `driveUrl` links in the UI (task attachments, drawing revisions) be removed/replaced once Drive is no longer public-by-link, or kept but now silently broken for anyone outside the new ACL? If kept, does the app need a NEW authenticated proxy/redirect (e.g. a Cloud Function that checks Firestore role before redirecting to a Drive file) to preserve the current one-click-open UX? That's new backend surface with a real cost/complexity tradeoff.
-- [ ] Where should the sync/backup heartbeat live: reuse the existing `settings/system` singleton doc (already has a live `onSnapshot` listener wired up for force-logout, app.js:135) by adding new fields to it, or a dedicated new collection (e.g. `system_health` or `sync_status`) with its own rules block? Reusing settings/system is less new surface area but couples an operational-monitoring concern to an unrelated feature's document; a dedicated collection is cleaner separation but is one more collection needing rules + backup coverage itself (recursion risk — see risks).
-- [ ] What exactly should trigger an in-app alert vs. a silent log: missed cron run entirely (no heartbeat write in >25h for daily sync / >32 days for monthly), a run that completed but with `stats.errors > 0` (both scripts already compute and expose this number — monthly-backup.js:320,373-377; sync-to-drive.js:261,282-286), or both? And who sees the alert — President only, or Finance/Admin roles too, given payroll data is now understood to be the single biggest coverage gap?
-- [ ] Should the write-time sync queue mentioned in the workstream title (V12-PLAN.md:73: 'write-time sync queue instead of nightly full rescan') replace sync-to-drive.js's nightly full walk entirely, or run alongside it as a fast-path with the nightly walk kept as a slower, thorough reconciliation pass (defense in depth against a missed queue write)? A pure write-time queue is more real-time but is new code (likely a Cloud Functions trigger per collection, or per document write) with its own failure modes that then themselves need monitoring — this could turn into its own sub-workstream.
-- [ ] Restore: build a real `scripts/restore-from-backup.js` that reads the monthly JSON exports back into Firestore (batch-writes, with `_counters` reconciliation per the risk noted below), or treat 'restore' as a documented manual runbook (Console import UI / point-in-time recovery via native export+import) with no bespoke code? A bespoke JSON-restore script is more automatable/testable but re-introduces the exact 'must track every collection by hand' drift problem this workstream is trying to close, unless it derives its collection list from the SAME source of truth EXPORTS derivation Fable chooses above.
-- [ ] Does 'restore' need to support partial/selective restore (e.g. 'just give me back June's ledger, not payroll') or only full point-in-time restore? The current EXPORTS structure is naturally per-month, per-collection JSON files sitting in Drive folders, which already supports selective restore trivially if a restore script is built; a native `gcloud firestore import` restores an entire export snapshot (harder to do selectively without pre-filtering).
+**Decided architecture (one paragraph).** The recurring backup-coverage drift is closed permanently by switching `monthly-backup.js` from a hand-maintained static `EXPORTS` array to the same **dynamic `db.listCollections()` discovery** already proven in `sync-to-drive.js` (sync-to-drive.js:271), plus a small keyed `OVERRIDES` map that supplies date-filtering / CSV / subcollection handling only for the ~10 collections that need it. Every other collection — including the currently-missing `pay_runs`, `approval_requests`, `payroll_delete_requests`, the five `it_*`, `kpi_targets`, `sales_orders`, `audit_log`, `_counters`, `products`, and the runtime-computed `files_*` / `budgets_*` families (all of which are **root** collections, confirmed departments.js:10449/10529/10749) — gets a complete full-document JSON snapshot with **zero** future code change, and a future workstream's new collection (e.g. WS33 `aec_contacts`) is covered automatically. The native `gcloud firestore export` path is **rejected** (it needs a billable GCS bucket, colliding with the standing 'storage stays free' decision V12-PLAN.md:192-199, and produces opaque non-browsable LevelDB) — kept only as a flagged optional DR layer. Drive uploads become **private-by-default** (Drive = cold archive, never a live-serving surface); the app keeps opening files via their existing Firebase-Storage URLs. A dedicated `system_health/{jobId}` heartbeat doc (written by both GitHub Actions jobs via the Admin SDK, which bypasses rules) drives an in-app failure/staleness banner + President/Finance notification. A new drift-proof `scripts/restore-from-backup.js` (dispatch-only, dry-run by default, `_counters`-reconciling) reads the monthly JSON back into Firestore, deriving its collection list from a `_manifest.json` the backup writes — so restore never reintroduces the hand-maintained-list drift this workstream exists to kill. The write-time sync queue is **deliberately deferred** (the nightly generic walk stays authoritative).
+
+### Resolved decisions
+
+1. **EXPORTS strategy → dynamic `db.listCollections()` discovery + thin `OVERRIDES` map (drift-proof hybrid).** JSON snapshot of every discovered collection; `OVERRIDES` only carries date-filter/CSV/subcollection specials. Rationale: kills the proven recurring drift while preserving per-collection date/CSV control and the owner's human-browsable JSON+CSV Drive layout. Native export rejected (billing + opaque format).
+2. **Native-export bucket question → moot (native export not chosen).** ‼️ FLAG FOR NEIL (optional): if you later want type-faithful point-in-time DR, add a scheduled `gcloud firestore export gs://barro-industries-dr` on Blaze — this is a paid GCS resource and is out of scope for the free-tier plan; recommend deferring unless a Blaze upgrade happens for another reason.
+3. **Drive visibility → all uploads PRIVATE (Drive is a cold archive, never live-served).** `uploadBuffer` gains an opt-in `{ public }` flag defaulting to `false`; neither script passes `true`. Kills the most severe exposure (aggregate payroll/finance JSON dumps were public-by-link) at zero UX cost. Honest security delta stated in §D.
+4. **In-app `driveUrl` links → flip precedence to the Firebase-Storage URL** (`a.url||a.driveUrl` etc.) at the 3 call sites, so files keep opening exactly as before via the app's existing Storage path once the Drive copy is private. **No** new authenticated Cloud-Function proxy is built (avoids new paid backend surface). ‼️ FLAG FOR NEIL: this shifts file-download bandwidth from Drive back onto Firebase Storage free-tier egress — see §D note.
+5. **Heartbeat location → dedicated `system_health/{jobId}` collection** (docs `daily_sync`, `monthly_backup`), NOT `settings/system`. Rationale: keeps operational monitoring decoupled from the force-logout feature; write-permission isn't the deciding factor because GitHub Actions writes via Admin SDK (bypasses rules). It is auto-covered by the new dynamic backup (no recursion gap).
+6. **Alert triggers → BOTH (a) ran-with-`errors>0` and (b) missed-run staleness; audience = `isFinanceOrAdmin()`, with a notification pushed to the President.** Staleness is elapsed-ms (timezone-agnostic): daily sync stale >30h, monthly backup stale >34 days. Banner is dismissible; notification is deduped so it fires once per problem.
+7. **Write-time sync queue → DEFERRED; nightly generic walk stays authoritative.** A per-write Cloud Function is a new failure surface that itself needs monitoring and multiplies invocations for no correctness gain (the nightly walk is already generic, idempotent via the companion-key guard, and drift-proof). If real-time mirroring is ever wanted, add it as a fast-path *alongside* the nightly walk, never replacing it.
+8. **Restore → build `scripts/restore-from-backup.js` (bespoke, dispatch-only, dry-run default).** Reads monthly JSON back via batched `set(...,{merge:true})`, derives its collection list from a `_manifest.json` the backup writes (no hand-list → no drift), reconciles `_counters` by bump-to-max (never blind overwrite), revives ISO-8601 strings back to Timestamps.
+9. **Selective restore → YES (both selective collection+month and full month).** The per-month/per-collection JSON layout makes this trivial; the script takes `RESTORE_COLLECTION` (optional) + `RESTORE_MONTH` inputs.
+
+---
+
+### A. Backup coverage — `scripts/monthly-backup.js`
+
+**A1. Replace the static `EXPORTS` array (monthly-backup.js:112-227) with a keyed `OVERRIDES` map + `EXCLUDE` set.** Only collections needing date-filtering, CSV, a custom filename, or subcollection handling appear here; everything else is auto-discovered as full JSON.
+
+```js
+// ── Per-collection overrides (specials only) ───────────────────────────────
+//  Any root collection NOT listed here is auto-discovered (db.listCollections)
+//  and exported as a COMPLETE full-document JSON snapshot — no hand-registration,
+//  so new collections (pay_runs, it_*, aec_contacts, files_*, budgets_*, …) are
+//  covered automatically and this file never drifts again.
+//    dateField  — field to filter by prev month (absent/null = full snapshot)
+//    dateIsStr  — dateField is a 'YYYY-MM-DD' string, not a Timestamp
+//    csvFields  — also emit a CSV with these columns (JSON is always complete)
+//    filename   — output basename if different from the collection name
+//    type       — 'subcollection' routes to fetchAttendanceSubcollection
+const OVERRIDES = {
+  attendance: {
+    filename: 'attendance', type: 'subcollection',
+    csvFields: ['userId','date','loginTime','timeOut','fullTime','attendanceScore','note','editedBy'],
+  },
+  tasks: {
+    dateField: 'createdAt', includeSubcol: true,
+    csvFields: ['id','title','status','priority','dept','assignedToNames','createdAt','dueDate','presidentScore'],
+  },
+  cash_advances: {
+    dateField: 'createdAt',
+    csvFields: ['id','userName','amount','terms','interest','totalPayable','monthlyPayment','balance','status','date','reason'],
+  },
+  salary_history: {
+    dateField: 'generatedAt',
+    csvFields: ['id','userId','userName','month','baseSalary','allowance','deductions','netPay','multiplier','finalPay'],
+  },
+  kpi_evals: {
+    filename: 'kpi_evaluations',
+    csvFields: ['id','selfGrade','selfNotes','presidentGrade','presidentGradeFromTasks','presidentNotes','selfAssessMonth'],
+  },
+  users: {
+    csvFields: ['id','displayName','email','username','role','dept','employeeId','salary','allowance','deductions'],
+  },
+  posts: {
+    dateField: 'createdAt',
+    csvFields: ['id','authorName','dept','title','status','pinned','createdAt'],
+  },
+  payroll_ca_overrides: {
+    filename: 'payroll_overrides',
+    csvFields: ['id','userId','month','customDeduction'],
+  },
+  attendance_extensions: {
+    dateField: 'requestedAt',
+    csvFields: ['id','userId','date','status','reason','approvedAt','expiresAt'],
+  },
+  suggestions: {
+    dateField: 'createdAt',
+    csvFields: ['id','category','text','createdAt'],
+  },
+};
+
+// Ephemeral / huge / per-user-subcollection roots we never snapshot to JSON.
+// (audit_log is intentionally NOT here — its off-site copy is the whole point.)
+const EXCLUDE = new Set(['presence', 'sessions', 'notifications']);
+```
+
+**A2. Rewrite the export loop in `main()` (monthly-backup.js:343-370, the `for (const col of EXPORTS)` block) to iterate discovered collections and add a `_manifest.json`.** Before → after of the loop body plus the surrounding lines (keep everything above line 343 and below line 370 as-is except where noted):
+
+```js
+// BEFORE (monthly-backup.js:343-370):
+//   for (const col of EXPORTS) {
+//     try {
+//       console.log(`\n📋 ${col.name}`);
+//       const docs = await fetchCollection(col, { start, end });
+//       ...
+//     } catch (err) { ... }
+//   }
+
+// AFTER:
+  const manifest = [];
+  const discovered = await db.listCollections();
+  console.log(`\n📚 ${discovered.length} root collections discovered`);
+
+  for (const ref of discovered) {
+    const name = ref.id;
+    if (EXCLUDE.has(name)) { console.log(`\n⏭️  ${name} (excluded)`); continue; }
+    const ov  = OVERRIDES[name] || {};
+    const col = { name, filename: ov.filename || name, dateField: ov.dateField ?? null,
+                  dateIsStr: ov.dateIsStr, csvFields: ov.csvFields,
+                  type: ov.type, includeSubcol: ov.includeSubcol };
+    try {
+      console.log(`\n📋 ${name}`);
+      const docs = await fetchCollection(col, { start, end });
+      await exportCollection(col, docs, monthFolder, stats);
+      stats.exported += docs.length;
+      manifest.push({ collection: name, filename: col.filename, records: docs.length });
+      summaryLines.push(`  ${col.filename}: ${docs.length} records`);
+
+      if (col.includeSubcol) {
+        console.log(`   + task-comments (subcollection)`);
+        const comments = await fetchTaskComments();
+        await uploadText(JSON.stringify(comments, null, 2), 'task_messages.json', 'application/json', monthFolder);
+        stats.files++;
+        manifest.push({ collection: 'tasks/task-comments', filename: 'task_messages', records: comments.length });
+        summaryLines.push(`  task_messages: ${comments.length} messages`);
+      }
+    } catch (err) {
+      console.error(`  ❌ ${name}: ${err.message}`);
+      stats.errors++;
+      summaryLines.push(`  ${col.filename}: ERROR — ${err.message}`);
+    }
+  }
+
+  // Self-describing manifest → drives drift-proof restore (see restore-from-backup.js)
+  await uploadText(JSON.stringify(manifest, null, 2), '_manifest.json', 'application/json', monthFolder);
+  stats.files++;
+```
+
+No change is needed to `fetchCollection` (monthly-backup.js:256-280) — it already routes `type:'subcollection'` and handles `dateField` null/string/Timestamp. `attendance` is discovered by `listCollections()`, its OVERRIDE marks it `type:'subcollection'`, and `fetchCollection` routes it to `fetchAttendanceSubcollection` — parent-doc dumping is thereby avoided.
+
+**A3. Health write — add at the very end of `main()`, just before `process.exit` (monthly-backup.js:390).** Insert:
+
+```js
+  await reportHealth('monthly_backup', stats, label, duration);
+  process.exit(stats.errors > 0 ? 1 : 0);
+```
+
+and add this helper near the other helpers (fire-and-forget, never fails the run):
+
+```js
+// ── Heartbeat: write a status doc the app watches (see §F) ──────────────────
+async function reportHealth(job, stats, label, durationSec) {
+  try {
+    await db.collection('system_health').doc(job).set({
+      job,
+      lastRunAt:       admin.firestore.FieldValue.serverTimestamp(),
+      lastStatus:      stats.errors > 0 ? 'error' : 'ok',
+      errors:          stats.errors || 0,
+      filesWritten:    stats.files || 0,
+      recordsExported: stats.exported || 0,
+      unfetchable:     stats.unfetchable || 0,
+      durationSec:     Number(durationSec) || 0,
+      label:           label || '',
+    }, { merge: true });
+    console.log(`   🫀 system_health/${job} updated (${stats.errors > 0 ? 'error' : 'ok'})`);
+  } catch (e) {
+    console.warn(`   ⚠️  could not write system_health/${job}: ${e.message}`);
+  }
+}
+```
+
+### B. `files_*` / `budgets_*` dynamic families
+
+No special prefix-scan is required. Both are **root** collections (confirmed: departments.js:10449 `files_${id...}`, :10749 `files_${scope...}`, :10529 `budgets_${dept...}` all passed straight to `db.collection(...)`), so `db.listCollections()` in the A2 loop enumerates each one and JSON-snapshots it automatically — this is precisely the drift class the switch to dynamic discovery eliminates. They carry no `OVERRIDES` entry, so they export as complete JSON with filename === collection name (e.g. `files_it.json`, `budgets_finance.json`). `budgets_*` docs are budget data (worth keeping); `files_*` docs are file-metadata records (worth keeping). No `EXCLUDE` entry — leave them in.
+
+### C. Manila-time hardening for the month window (minor, monthly-backup.js:97-105)
+
+The existing `getPrevMonthRange()` uses server-local `Date` on a UTC runner. The job fires 17:00 UTC on the 1st = 01:00 Manila on the 1st, so the month never mis-rolls in practice, but for correctness under the Manila-time discipline, offset to UTC+8 before extracting Y/M:
+
+```js
+// BEFORE: const now = new Date();
+// AFTER:  Manila 'now' on a UTC runner (UTC+8), so the label/window are PH-correct.
+const now = new Date(Date.now() + 8 * 3600 * 1000);
+```
+(Leave the rest of the function unchanged — the `new Date(year, month-1, 1)` boundaries are only used for date-filtered OVERRIDE collections; the day-boundary `.toISOString().slice(0,10)` in `fetchAttendanceSubcollection` remains as-is.) This is a low-risk hardening, not a behavior change.
+
+### D. Drive visibility — `scripts/drive-lib.js` (191-211)
+
+Thread an opt-in `public` flag; **default private**. `makePublic` is now only called when explicitly requested.
+
+```js
+// BEFORE (drive-lib.js:201-211):
+// async function uploadBuffer(drive, buffer, filename, mimeType, folderId) {
+//   const res = await drive.files.create({ ... fields: 'id,webViewLink', ...SHARED });
+//   await makePublic(drive, res.data.id);
+//   return res.data.webViewLink;
+// }
+
+// AFTER:
+// Upload a Buffer; returns the webViewLink. Files are PRIVATE by default
+// (Drive = cold archive). Pass { public:true } only for deliberately
+// low-sensitivity, shareable content — nothing in this repo does today.
+async function uploadBuffer(drive, buffer, filename, mimeType, folderId, { public: isPublic = false } = {}) {
+  const res = await drive.files.create({
+    requestBody: { name: filename, parents: [folderId] },
+    media:       { mimeType: mimeType || 'application/octet-stream', body: Readable.from(buffer) },
+    fields:      'id,webViewLink',
+    ...SHARED,
+  });
+  if (isPublic) await makePublic(drive, res.data.id);
+  return res.data.webViewLink;
+}
+```
+
+`makePublic` (drive-lib.js:191-199) is **unchanged** (kept for future opt-in). No call site passes `{ public:true }`, so **both** the daily file mirror and the monthly JSON/CSV exports become private. `monthly-backup.js`'s `uploadText` wrapper (monthly-backup.js:60-62) needs no change — it calls `uploadBuffer(...)` with the default, which is now private. `sync-to-drive.js`'s `mirror()` call (sync-to-drive.js:173) needs no change either — same default.
+
+**Security delta (state honestly, do not oversell):** this removes the *second, permanent, org-external* public surface (the Drive `type:'anyone'` link). The original Firebase Storage `?token=` download URL is itself a bearer token, so files are not becoming 'fully private' — they return to the single, app-controlled, token-revocable Storage surface the app already used. The concretely-eliminated exposures are (1) the aggregate payroll/finance JSON backup dumps that were publicly linkable, and (2) permanent anyone-with-link Drive copies of payslip proofs / drawings / memo attachments that outlived any in-app access control.
+
+‼️ **FLAG FOR NEIL — bandwidth:** with Drive private, the app serves files from Firebase Storage egress (free-tier metered). If download volume is high this could approach the free quota. Recommendation: ship private-by-default now (the security win is clear); monitor Storage egress in the Firebase console; if it becomes a problem, that's a Blaze-tier decision for you, not a reason to keep files public.
+
+### E. In-app `driveUrl` link sites — `js/departments.js`
+
+Flip precedence to the Storage URL at all three sites so files keep opening once the Drive copy is private. (JS edit ⇒ the pre-commit hook auto-bumps `APP_VERSION` and `sw.js` `CACHE_VER`; do not hand-edit.)
+
+1. **Task attachments (departments.js:765)** — inside `t.attachments.map(...)`:
+```js
+// BEFORE: const url=a&&(a.driveUrl||a.url)||'';
+// AFTER:  prefer the app's Storage URL; driveUrl is now a private archive copy
+const url=a&&(a.url||a.driveUrl)||'';
+```
+2. **Drawing current file (departments.js:6486)**:
+```js
+// BEFORE: ? `<a href="${escHtml(d.driveUrl||d.fileUrl)}" target="_blank" ...`
+// AFTER:
+? `<a href="${escHtml(d.fileUrl||d.driveUrl)}" target="_blank" class="btn-secondary btn-sm">⬇ ${escHtml(d.fileName||'Open file')}</a>`
+```
+3. **Drawing revision history (departments.js:6504)** — inside `revs.map(...)`:
+```js
+// BEFORE: <td>${r.fileUrl?`<a href="${escHtml(r.driveUrl||r.fileUrl)}" target="_blank">⬇</a>`:'—'}</td>
+// AFTER:
+<td>${r.fileUrl?`<a href="${escHtml(r.fileUrl||r.driveUrl)}" target="_blank">⬇</a>`:'—'}</td>
+```
+(`driveUrl`/`fileUrl` companions always coexist because `driveUrl` is written next to the original `url`/`fileUrl` — sync-to-drive.js:198-204 — so the fallback is harmless; the flip simply stops preferring the now-private Drive copy.)
+
+### F. Heartbeat rules + in-app alerting
+
+**F1. `firestore.rules` — add a new block** (place next to the other operational blocks, e.g. after the `settings` block at firestore.rules:261; deploy separately with `firebase deploy --only firestore:rules`). Admin SDK writes bypass rules, so client write is denied:
+
+```
+    // ── System health (backup/sync heartbeat) ──────────
+    // Written ONLY by the GitHub Actions backup/sync jobs via the Admin SDK
+    // (which bypasses these rules). No client ever writes it.
+    match /system_health/{jobId} {
+      allow read:  if isAuth() && isFinanceOrAdmin();
+      allow write: if false;
+    }
+```
+(No missing-field-throw risk: the block reads no `resource.data` fields.)
+
+**F2. Client check — add to `js/app.js`.** Call once after the user profile is loaded, for finance/admin roles only (near the post-auth nav build; safe to place right after `startForceLogoutListener(uid)` is wired, app.js:135 region). It is a cheap one-shot `get` (not a live listener), staleness is elapsed-ms (timezone-agnostic, so `bizDate()` is not needed here):
+
+```js
+// ── Backup/sync health banner (finance/admin only) ───────────────────────
+async function checkBackupHealth() {
+  try {
+    if (!['president','manager','secretary','finance'].includes(window.currentRole)) return;
+    const now = Date.now();
+    const CHECKS = [
+      { id: 'daily_sync',     label: 'Daily file sync',  staleMs: 30 * 3600 * 1000 },
+      { id: 'monthly_backup', label: 'Monthly backup',   staleMs: 34 * 24 * 3600 * 1000 },
+    ];
+    const problems = [];
+    for (const c of CHECKS) {
+      const snap = await db.collection('system_health').doc(c.id).get().catch(() => null);
+      const d = snap && snap.exists ? snap.data() : null;
+      const last = d?.lastRunAt?.toDate?.()?.getTime?.() || 0;
+      if (!last || (now - last) > c.staleMs) {
+        problems.push(`${c.label} has not reported in — last run ${last ? new Date(last).toLocaleString('en-PH') : 'never'}.`);
+      } else if (d.lastStatus === 'error') {
+        problems.push(`${c.label} last run had ${d.errors} error(s) (${d.label||''}).`);
+      }
+    }
+    if (!problems.length) return;
+    renderBackupHealthBanner(problems);
+    // Notify the President once per distinct problem (deduped).
+    if (window.Notifs?.send) {
+      const PREZ_UID = window.PRESIDENT_UID; // if unavailable, skip the push — banner still shows
+      if (PREZ_UID) {
+        window.Notifs.send(PREZ_UID, {
+          title: '⚠️ Backup/sync needs attention',
+          body: problems.join(' '),
+          icon: '🗄️', type: 'system',
+          dedupKey: 'backup-health-' + problems.join('|').slice(0, 80),
+        }).catch(() => {});
+      }
+    }
+  } catch (_) { /* monitoring must never break the app */ }
+}
+
+function renderBackupHealthBanner(problems) {
+  if (document.getElementById('backup-health-banner')) return;
+  const div = document.createElement('div');
+  div.id = 'backup-health-banner';
+  div.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#b91c1c;color:#fff;padding:10px 44px 10px 14px;font-size:13px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.3)';
+  div.innerHTML = `🗄️ <strong>Records durability alert.</strong> ${problems.map(p => escHtml(p)).join(' ')}`
+    + `<button aria-label="Dismiss" style="position:absolute;right:10px;top:8px;background:none;border:none;color:#fff;font-size:18px;cursor:pointer">×</button>`;
+  div.querySelector('button').onclick = () => div.remove();
+  document.body.appendChild(div);
+}
+```
+
+Wire the call where the app finishes bootstrapping a signed-in finance/admin user (e.g. at the end of the profile-loaded branch of `onAuthStateChanged`): `checkBackupHealth();` (fire-and-forget). `window.PRESIDENT_UID` — if the codebase has no president-uid constant, resolve it from the known president email (`neilbarro870@gmail.com`) the same way other President gating does, or omit the push (the banner alone satisfies the requirement); do not block the banner on it.
+
+### G. Restore — `scripts/restore-from-backup.js` (new) + `.github/workflows/restore.yml` (new)
+
+Drift-proof (reads `_manifest.json`), dry-run by default, `_counters`-reconciling, ISO→Timestamp reviving. Node stays pinned to 20 (OAuth token-exchange constraint). Full Sonnet-ready script:
+
+```js
+/**
+ * BARRO INDUSTRIES — Restore Firestore from a monthly Drive backup
+ * scripts/restore-from-backup.js
+ *
+ * DISPATCH-ONLY. Dry-run by default — writes NOTHING unless RESTORE_COMMIT=1.
+ * Reads BI-Operations/Monthly Backups/<month>/_manifest.json to learn which
+ * JSON file maps to which collection (no hand-maintained list → no drift),
+ * downloads the JSON, and batch-writes each doc back with merge:true.
+ *
+ * Inputs (env):
+ *   RESTORE_MONTH       required, e.g. 2026-06
+ *   RESTORE_COLLECTION  optional; restore only this collection (else all)
+ *   RESTORE_COMMIT      '1' to actually write; anything else = dry run
+ * Secrets: same as monthly-backup (FIREBASE_SERVICE_ACCOUNT, DRIVE_FOLDER_ID,
+ *   FIREBASE_STORAGE_BUCKET, GOOGLE_OAUTH_*).
+ */
+'use strict';
+
+const admin = require('firebase-admin');
+const fetch = require('node-fetch');
+const { requireEnv, initDrive, preflight, SHARED_LIST } = require('./drive-lib');
+
+const serviceAccount = JSON.parse(requireEnv('FIREBASE_SERVICE_ACCOUNT'));
+admin.initializeApp({
+  credential:    admin.credential.cert(serviceAccount),
+  storageBucket: requireEnv('FIREBASE_STORAGE_BUCKET'),
+});
+const db = admin.firestore();
+
+const { drive, authMode, ownerLabel } = initDrive();
+const ROOT_FOLDER_ID = requireEnv('DRIVE_FOLDER_ID');
+const MONTH   = requireEnv('RESTORE_MONTH');
+const ONLY    = (process.env.RESTORE_COLLECTION || '').trim();
+const COMMIT  = (process.env.RESTORE_COMMIT || '').trim() === '1';
+
+if (!/^\d{4}-\d{2}$/.test(MONTH)) {
+  console.error(`\n❌ RESTORE_MONTH must look like 2026-06 (got "${MONTH}").`);
+  process.exit(2);
+}
+
+const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+function revive(v) {
+  if (typeof v === 'string' && ISO.test(v)) return admin.firestore.Timestamp.fromDate(new Date(v));
+  if (Array.isArray(v)) return v.map(revive);
+  if (v && typeof v === 'object') { const o = {}; for (const [k, x] of Object.entries(v)) o[k] = revive(x); return o; }
+  return v;
+}
+
+async function findFolder(name, parentId) {
+  const res = await drive.files.list({
+    q: `name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and '${parentId}' in parents and trashed=false`,
+    fields: 'files(id,name)', ...SHARED_LIST,
+  });
+  return res.data.files[0] || null;
+}
+async function listJson(folderId) {
+  const res = await drive.files.list({
+    q: `'${folderId}' in parents and trashed=false and mimeType='application/json'`,
+    fields: 'files(id,name)', pageSize: 1000, ...SHARED_LIST,
+  });
+  return res.data.files || [];
+}
+async function download(fileId) {
+  const res = await drive.files.get({ fileId, alt: 'media', ...SHARED_LIST }, { responseType: 'text' });
+  return typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+}
+
+async function restoreCollection(name, docs) {
+  // _counters: never blind-overwrite a sequence — bump to max(current, restored).
+  if (name === '_counters') {
+    for (const d of docs) {
+      const id = d.id; const restored = Number(d.count) || 0;
+      const cur = await db.collection('_counters').doc(id).get();
+      const current = cur.exists ? (Number(cur.data().count) || 0) : 0;
+      const next = Math.max(current, restored);
+      console.log(`   _counters/${id}: current=${current} restored=${restored} → ${next}`);
+      if (COMMIT) await db.collection('_counters').doc(id).set({ count: next }, { merge: true });
+    }
+    return docs.length;
+  }
+  let batch = db.batch(), n = 0, written = 0;
+  for (const d of docs) {
+    const { id, ...rest } = d;
+    if (COMMIT) { batch.set(db.collection(name).doc(id), revive(rest), { merge: true }); n++; }
+    written++;
+    if (n >= 400) { await batch.commit(); batch = db.batch(); n = 0; }
+  }
+  if (COMMIT && n) await batch.commit();
+  return written;
+}
+
+async function main() {
+  console.log(`\n♻️  Barro Industries — Restore from backup`);
+  console.log(`   Month     : ${MONTH}`);
+  console.log(`   Collection: ${ONLY || '(ALL)'}`);
+  console.log(`   Mode      : ${COMMIT ? '🔴 COMMIT (writes Firestore)' : '🟢 DRY RUN (no writes)'}`);
+  await preflight(drive, ROOT_FOLDER_ID, authMode, ownerLabel);
+
+  const backups = await findFolder('Monthly Backups', ROOT_FOLDER_ID);
+  if (!backups) { console.error(`\n❌ No "Monthly Backups" folder under DRIVE_FOLDER_ID.`); process.exit(2); }
+  const monthFolder = await findFolder(MONTH, backups.id);
+  if (!monthFolder) { console.error(`\n❌ No backup folder "${MONTH}".`); process.exit(2); }
+
+  const files = await listJson(monthFolder.id);
+  const manifestFile = files.find(f => f.name === '_manifest.json');
+  let map; // filename(no .json) → collection
+  if (manifestFile) {
+    map = {};
+    for (const m of JSON.parse(await download(manifestFile.id))) map[m.filename] = m.collection;
+  } else {
+    console.warn(`   ⚠️  no _manifest.json (pre-manifest backup) — assuming filename === collection`);
+    map = null;
+  }
+
+  let total = 0, cols = 0;
+  for (const f of files) {
+    if (f.name === '_manifest.json' || f.name === 'task_messages.json') continue; // subcollection: manual
+    const basename = f.name.replace(/\.json$/, '');
+    const collection = map ? (map[basename] || basename) : basename;
+    if (collection.includes('/')) continue;         // subcollection entries — skip
+    if (ONLY && collection !== ONLY) continue;
+    if (collection === 'attendance') { console.log(`\n⏭️  attendance (subcollection) — restore manually`); continue; }
+    const docs = JSON.parse(await download(f.id));
+    console.log(`\n📄 ${collection}: ${docs.length} docs`);
+    const written = await restoreCollection(collection, docs);
+    total += written; cols++;
+  }
+
+  console.log(`\n${'─'.repeat(50)}`);
+  console.log(`${COMMIT ? '✅ Restore complete' : '✅ Dry run complete (nothing written)'}`);
+  console.log(`   Collections: ${cols}   Docs: ${total}`);
+  console.log(`${'─'.repeat(50)}\n`);
+  process.exit(0);
+}
+main().catch(err => { console.error('Fatal error:', err); process.exit(1); });
+```
+
+**`.github/workflows/restore.yml` (new — dispatch-only, Node 20):**
+```yaml
+name: Restore Firestore from Backup
+on:
+  workflow_dispatch:
+    inputs:
+      month:      { description: 'Backup month (YYYY-MM)', required: true }
+      collection: { description: 'Single collection (blank = all)', required: false }
+      commit:     { description: 'Type EXACTLY "1" to write; anything else = dry run', required: true, default: '0' }
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm install
+        working-directory: scripts
+      - run: node restore-from-backup.js
+        working-directory: scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT:   ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          DRIVE_FOLDER_ID:            ${{ secrets.DRIVE_FOLDER_ID }}
+          FIREBASE_STORAGE_BUCKET:    ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          GOOGLE_OAUTH_CLIENT_ID:     ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          RESTORE_MONTH:      ${{ inputs.month }}
+          RESTORE_COLLECTION: ${{ inputs.collection }}
+          RESTORE_COMMIT:     ${{ inputs.commit }}
+```
+Add `scripts/package.json` script (optional convenience): `"restore": "node restore-from-backup.js"`. No new npm deps (`firebase-admin`, `googleapis`, `node-fetch` already present). **Restore caveat to document:** `attendance` (subcollection) and `tasks/task-comments` (`task_messages.json`) are not auto-restored by this script — restore them manually from the JSON if ever needed; they are the only two non-flat shapes.
+
+### H. Sync heartbeat in `sync-to-drive.js`
+
+Mirror §A3 in `sync-to-drive.js`. Add the same `reportHealth` helper (adjust the stat names) and call it before `process.exit` (sync-to-drive.js:289):
+```js
+  await reportHealth('daily_sync', stats, '', duration);
+  process.exit(stats.errors > 0 ? 1 : 0);
+```
+with:
+```js
+async function reportHealth(job, stats, label, durationSec) {
+  try {
+    await db.collection('system_health').doc(job).set({
+      job, lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastStatus: stats.errors > 0 ? 'error' : 'ok',
+      errors: stats.errors || 0, filesWritten: stats.synced || 0,
+      unfetchable: stats.unfetchable || 0, durationSec: Number(durationSec) || 0, label: label || '',
+    }, { merge: true });
+  } catch (e) { console.warn(`   ⚠️  system_health/${job}: ${e.message}`); }
+}
+```
+
+### I. Docs to update
+
+- **`DRIVE_SYNC_SETUP.md`** — replace the stale ~9-file 'Drive folder structure created' listing with: 'Every non-ephemeral Firestore collection is snapshotted to JSON automatically via `db.listCollections()`; `_manifest.json` records the file→collection map; specific collections additionally get a CSV (see `OVERRIDES` in monthly-backup.js).' Document Drive-private-by-default, the `system_health` heartbeat, and the restore workflow (dispatch, dry-run default, `commit=1` to write).
+- **`ROADMAP.md`** — close item 17 ('verify the monthly backup GitHub Action actually runs; document restore'): coverage is now dynamic-discovery-driven (drift-proof), a restore workflow exists, and a `system_health` heartbeat surfaces missed/failed runs in-app.
+- Add a discoverability comment at the two dynamic-collection definition sites (departments.js:10449, 10529) noting that root collections are auto-backed-up — so a future author knows new collections need no backup registration.
+
+### Migration / rollout checklist
+
+1. Edit `scripts/drive-lib.js` (§D), `scripts/monthly-backup.js` (§A1-A3, §C), `scripts/sync-to-drive.js` (§H), and add `scripts/restore-from-backup.js` (§G). No new GitHub Secrets — all reuse the existing backup secret set.
+2. Add `.github/workflows/restore.yml` (§G).
+3. Edit `js/departments.js` (§E, 3 sites) and `js/app.js` (§F2). Commit — the pre-commit hook auto-bumps `APP_VERSION` + `sw.js` `CACHE_VER` (do not hand-edit).
+4. Add the `system_health` block to `firestore.rules` (§F1). Deploy rules separately: `firebase deploy --only firestore:rules` (rules do NOT ship via git push).
+5. `git push origin v12` (per branch) — deploys app + scripts to GitHub Pages; the GitHub Actions workflows pick up the new script versions on their next run.
+6. Manually `workflow_dispatch` **Monthly Firestore → Google Drive Backup** once. Verify in Drive: `Monthly Backups/<month>/` now contains `_manifest.json`, `pay_runs.json`, `approval_requests.json`, `payroll_delete_requests.json`, `it_access.json`…`it_tickets.json`, `kpi_targets.json`, `sales_orders.json`, `audit_log.json`, `_counters.json`, `products.json`, and any `files_*`/`budgets_*`; and that `_summary.txt` shows `Errors: 0`.
+7. Confirm every file uploaded in step 6 is **Private** in Drive (no 'Anyone with the link' badge).
+8. Manually `workflow_dispatch` **Daily File Sync** once; verify newly-mirrored files are Private and that `system_health/daily_sync` exists (Firestore console).
+9. Sign in as President/Finance; confirm no health banner when both `system_health` docs are fresh. Temporarily edit one `system_health` doc's `lastRunAt` to a past date (or `lastStatus:'error'`) in the console and reload — confirm the banner + President notification fire, then revert.
+10. Dry-run restore: run **Restore Firestore from Backup** with `month=<recent>`, `commit=0`; confirm it lists collections/doc counts and writes nothing.
+11. Update `DRIVE_SYNC_SETUP.md` and `ROADMAP.md` (§I); commit + push.
+
+### Manual test checklist (no automated suite)
+
+- [ ] Backup dispatch: `_manifest.json` present and lists every non-ephemeral collection; each entry has a matching `<filename>.json`.
+- [ ] Previously-missing collections all have JSON: `pay_runs`, `approval_requests`, `payroll_delete_requests`, `it_*` (×5), `kpi_targets`, `sales_orders`, `audit_log`, `_counters`, `products`, `quotes`, `memos`, `policies`, `sops`, `settings`, `signup_requests`, `president_message`, `files_*`, `budgets_*`.
+- [ ] `attendance.json` still populated (subcollection path still works via OVERRIDE).
+- [ ] Every Drive file (backup exports AND daily-mirror files) shows Private, not 'Anyone with link'.
+- [ ] Task attachment, drawing current-file, and drawing-revision download links still open in-app (served from Storage `url`).
+- [ ] `system_health/daily_sync` and `system_health/monthly_backup` update after each job with `lastStatus`, `lastRunAt`, `errors`.
+- [ ] Finance/admin sees the red durability banner when a heartbeat is stale/error; non-finance roles never see it; banner dismiss works; President gets one deduped notification.
+- [ ] Restore dry-run writes nothing; restore `commit=1` on a single collection into a scratch/staging project writes docs and reconciles `_counters` to max (verify `_counters/employees` is not lowered).
+- [ ] ISO timestamps in restored docs come back as Firestore Timestamps, not strings.
+
+### Deferred / cross-workstream flags
+
+- **WS20/22 (payroll/CashAdvance) field-shape coupling — RESOLVED, no coordination needed.** Because auto-discovered collections (including `pay_runs`, `payroll_delete_requests`) are snapshotted as **whole-document JSON** with no hand-picked `csvFields`, any Phase-3 schema change is captured completely and automatically. The CSV-truncation risk only ever applied to collections with an explicit `csvFields` OVERRIDE (JSON is always complete) — and none of the payroll-governance collections have one. Do not add `csvFields` for `pay_runs`/`approval_requests`.
+- **`gov_biddings` orphan (app.js:6105) — pre-existing analytics bug, NOT this workstream's fix.** The `an_gov` widget reads a legacy/empty `gov_biddings` collection distinct from the live `gov_philgeps`/`gov_active_bids`/`gov_archive`. If it holds no docs, `listCollections()` simply won't surface it (nothing to back up); if it holds stale docs, they'll be backed up automatically. Repointing the widget belongs to whichever workstream owns analytics — flag, don't paper over.
+- **Write-time sync queue — DEFERRED (decision 7).** Do not build a per-write Cloud Function; the nightly generic walk remains authoritative.
+- **Native `gcloud firestore export` DR layer — FLAGGED, not built (decision 2).** Owner call; needs Blaze/GCS billing.
+- **`sync-to-drive.js` subcollection depth cap = 1 (sync-to-drive.js:250-254)** — flagged for WS28: if `job_projects/{id}/stages/{stageId}/photos` (two levels deep) ships, those files will be silently missed by the file mirror. Out of scope here; call it out so WS28 raises the depth cap or mirrors those explicitly.
+- **Drive→Storage bandwidth shift (decision 4)** — ‼️ FLAG FOR NEIL; monitor Firebase Storage egress, Blaze is the escape hatch if needed.
 
 ## Risks / cross-workstream interactions
 

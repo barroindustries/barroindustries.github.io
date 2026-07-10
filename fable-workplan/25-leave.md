@@ -26,18 +26,358 @@ leave_requests/{docId}, top-level collection: userId string, userName string, ty
 - Attendance edits soft-archive rather than hard-delete (modules.js:1221-1223, preserving the audit trail payroll depends on) - a leave-day attendance write should follow the same non-destructive merge pattern, not erase a same-day check-in the person already made.
 - Records are kept forever, real-time, visible is an owner standing directive (V12-PLAN.md:17-20) - any yearly balance reset must preserve prior-year history somewhere rather than silently overwriting the counter with no trace of what was forfeited or carried over.
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-- [ ] Storage model for balances: a mutable stored counter (current leave_balances shape, decremented on approve, now also incremented by a new seeding/accrual job) versus a fully lazy-computed balance derived from hire date plus policy on every read, the way getAttendanceScore already derives its score with no stored running counter. The stored-counter approach needs a reliable trigger to stay correct and can drift if policy changes later; the lazy-computed approach needs a trustworthy hire-date field, and u.startDate exists today but is populated and used in only one place (app.js:3198), plus it repeats a monthly-range-query cost on every view similar to getAttendanceScore.
-- [ ] Accrual cadence and mechanism: a yearly lump-sum grant, monthly pro-rata accrual with a rounding rule, or hire-anniversary-based accrual where each employee's year starts on their own hire date rather than the calendar year. If cadence is stored (not lazy), where does the job live - a new Firebase Scheduled Function (no precedent in this repo, adds a Cloud Scheduler dependency) versus a new GitHub Actions cron workflow plus scripts file (matches the existing monthly-backup.yml/sync-to-drive.yml precedent and reuses the existing service-account secret) versus a lazy check-and-backfill on next login.
-- [ ] Legal-fact flag, verify before hard-coding: the plan text says PH 5-day SIL minimum. Philippine Labor Code Article 95, Service Incentive Leave, is understood to be a single 5-day-per-year pool after one year of continuous service, usable for any purpose and commutable to cash if unused - this is a legal fact that must be verified against current DOLE guidance or counsel before Fable encodes a number, and it describes ONE combined pool, not separate vacation and sick pools. The existing schema already splits vacation and sick into two separate balances (modules.js:2196-2199), so Fable must decide whether the statutory five days becomes one combined pool split by policy, or whether the company intends to grant five vacation plus five sick as a more generous benefit than the legal floor - and must not present ten combined days as if that were the legal minimum.
-- [ ] Should probationary or newly hired employees accrue from day one prorated by hire date, or only after completing one year of service, matching the legal SIL trigger? Either path needs u.startDate, or a better hire-date field, audited for how many employees actually have it populated today.
-- [ ] What exactly does an approved leave day write to attendance/{uid}/records/{date}, and does it need to reach the REAL payroll Compute path or only the personal-finance display projection described above? Since Compute (departments.js:2616-2769) reads no attendance data today, so it doesn't cut pay can currently only be satisfied by fixing the display projection in app.js - should this workstream also reach into workstream 20's territory and make the real Compute engine attendance-aware for the first time, or stay strictly scoped to the display path and let workstream 20 unify it later?
-- [ ] Should a leave day be recorded as attendanceScore 1.0, identical to an ordinary full present day, or as a new distinct marker such as status:'leave' that the six duplicated score-reading call sites and the attendance calendar UI (modules.js:1137-1142) can render distinctly, for example a palm-tree badge instead of a green checkmark? If a new marker is introduced, every one of the six duplicated readers must be updated together, or one of the readers will still show the day as an ordinary present day.
-- [ ] Should unpaid leave, which already exists as a LEAVE_TYPES entry with drawsBalance false (modules.js:2199), also write a paid-looking attendance record, or should the attendance write be conditional on leave type - i.e. does unpaid leave legitimately still reduce pay the way an unapproved absence does, just without an accompanying disciplinary flag?
-- [ ] Should the leave day follow the same no-work-day treatment already used for Sundays and PH holidays, excluded from both the numerator and denominator in countWorkDays (app.js:4628-4638) and isNoWork in the calendar (modules.js:1130), rather than being scored as a present day that adds to the numerator - these two treatments produce different attendance-percentage arithmetic.
-- [ ] Who is authorized to seed, grant, or adjust a balance directly, bypassing accrual? The existing rules allow any isFinanceOrAdmin caller to write leave_balances (firestore.rules:815), which includes the secretary role, but secretary is elsewhere scoped to view-only routine approvals with money-moving and delete actions reserved for the president, per the corporate-secretary memory. A direct-grant UI may need a tighter rule than the current leave_balances write rule provides.
-- [ ] Should filing leave reconcile workingDays (modules.js:2206-2213, Sunday-only exclusion, used to compute how many days a request costs) against countWorkDays (app.js:4628-4638, Sunday-plus-holiday exclusion, used as the payroll and attendance-percentage denominator)? Today, a leave request spanning a PH holiday charges that holiday against the balance even though payroll would never have penalized an absence on that day anyway.
+### Resolved decisions (one line each)
+
+1. **Storage model → mutable STORED COUNTER (keep `leave_balances/{uid}` shape), plus a per-user-per-year idempotency/audit doc `leave_accruals/{uid}_{YYYY}`.** Lazy-compute was rejected: it needs a trustworthy hire date (`u.startDate` is seeded on new users via `bizDate()`/`today()` at app.js:452, modules.js:487, departments.js:9846/9342 but is ABSENT on legacy users — confirmed by grep), and it repeats a per-view monthly-range read like `getAttendanceScore`. The decrement-on-approve path already writes a counter; we keep it and add the missing seed/grant writer.
+2. **Accrual cadence → YEARLY lump-sum, CALENDAR-year, prorated in the employee's first partial year.** Mechanism → a manual, idempotent **"Run annual leave accrual" button** in the Leave admin screen (finance/president), plus a seed call at the two admin user-creation points — **NO cron, NO new Cloud Function, NO Cloud Scheduler.** Yearly cadence + the repo's existing manual `backfillPayrollLedger` precedent make a once-a-year button sufficient; a GitHub-Actions annual cron is documented as an optional later enhancement only.
+3. **Legal fact → ‼️ FLAG FOR NEIL (do not ship the number blind).** The statutory PH floor (Labor Code Art. 95) is **ONE combined 5-day Service Incentive Leave pool** after 1 year of service, commutable to cash if unused — NOT 5 vacation + 5 sick. The existing schema splits vacation/sick, so the company grant is a *policy choice above the floor*. Ship `window.LEAVE_POLICY` with **PLACEHOLDER `{vacation:5, sick:5}`** clearly labelled; the UI must never present 10 combined days as the legal minimum.
+4. **New-hire / probation → prorate from hire month, day-one (recommended).** First calendar year of employment: grant × (monthsRemaining/12), rounded to nearest 0.5. ‼️ **FLAG FOR NEIL:** confirm whether probationary/first-year staff accrue day-one (recommended, generous) or only after completing 1 year of continuous service (the legal SIL trigger). Engine supports both via a `LEAVE_POLICY.probation` switch defaulting to `'prorate-from-hire'`.
+5. **What an approved leave day writes → an ATTENDANCE record; it does NOT touch the Compute engine.** Under WS20's DECIDED engine, `computePayRun` reads attendance only through `getAttendanceScore(uid,month)` (which reads `attendance/{uid}/records`). A paid-leave day written as `attendanceScore:1.0` is automatically counted as a full present day by that reader — so "leave doesn't cut pay" is satisfied with **zero edits to `computePayRun`/`computePayLine`**. This workstream stays out of WS20's Compute code and out of WS20's frozen `lines[]`.
+6. **Marker → score 1.0 AND a distinct `status` field (both).** Paid leave writes `attendanceScore:1.0` (so every score-reader counts it as full without special-casing) **plus** `status:'leave'` + `leaveType` so the calendar/standings UIs can render a 🌴 badge instead of a green ✓. All SIX duplicated readers are updated together (enumerated in Spec 3) via two new shared helpers in config.js.
+7. **Unpaid leave → conditional, NOT paid-looking.** `unpaid` type writes `status:'unpaid_leave'`, `attendanceScore:0`, `fullTime:false` — it reduces pay exactly like an absence (correct: unpaid = no work = no pay) but carries a distinct non-disciplinary badge (📅), not the red ✗ of an unmarked absence. Paid types = `vacation`/`sick`/`emergency`; unpaid type = `unpaid` (a new `paid` flag is added to `LEAVE_TYPES`).
+8. **No-work-day vs present-day → PRESENT (score 1.0) for paid leave, leave `countWorkDays` untouched.** A leave day is already inside `countWorkDays`' denominator (Mon–Sat, non-holiday); giving it a `1.0` numerator makes it full-credit = neutral net pay effect, and requires **no change** to `countWorkDays`/`getAttendanceScore`. (Excluding it from the denominator would force `countWorkDays` to query leave — rejected as needless coupling.)
+9. **Who may seed/grant → `leave_balances.write` stays `isFinanceOrAdmin()` (secretary INCLUDED) but gains field-shape validation; the direct grant/adjust UI is gated to president+finance+manager (NOT secretary) CLIENT-side.** Secretary must keep write access because `APPROVAL_CAPS.leave` (departments.js:9138) lets a secretary approve leave, and approval decrements the balance — revoking write would silently desync the counter. Rules add non-negative-number validation to block a buggy accrual run writing NaN/negative.
+10. **Reconcile day-counting → YES.** Filing switches from Sunday-only `workingDays` to a holiday-aware `leaveWorkingDays(start,end)` (excludes Sundays AND `getPHHolidays`), so a request spanning a PH holiday no longer charges the balance for a day payroll never penalizes; the attendance-write loop skips the same no-work days.
+
+**Scoping / sequencing:** depends on **WS19** (attendance write goes through the finance/admin path — the approver is always finance/admin/secretary, all `isFinanceOrAdmin()`, so WS19's employee-self-write lockdown does NOT affect this code); composes with **WS20** with no code coupling (leave writes attendance, WS20 reads it); coordinates with **WS26** (both merge into `attendance/{uid}/records` — this spec uses non-destructive `merge:true` and only sets its own keys, so WS26's `timeOut`/`hours` fields survive and vice-versa).
+
+---
+
+### Spec 1 — Data shapes (annotated literals)
+
+```js
+// leave_balances/{uid}   — UNCHANGED shape + one new field. Stored counter.
+{ vacation: 5,            // number ≥ 0  (remaining vacation days)
+  sick: 5,                // number ≥ 0  (remaining sick days)
+  year: '2026',           // NEW — policy year this counter was granted for (guards mid-year re-reset)
+  updatedAt }             // serverTimestamp
+
+// leave_accruals/{uid}_{YYYY}   — NEW collection. Idempotency key + forfeiture audit.
+{ uid: 'abc123',
+  year: '2026',
+  grantedVacation: 5,     // number — what the annual grant awarded (post-proration)
+  grantedSick: 5,
+  proratedFromMonth: 7,   // number 1-12 or null (null = full-year grant)
+  priorYearEndingVacation: 2,  // number or null — unused balance carried into this reset (audit; NOT re-credited by default)
+  priorYearEndingSick: 0,      // number or null
+  grantedBy: 'system'|'<uid>', // 'system' from creation handler, or the finance/president uid who ran backfill
+  grantedAt }             // serverTimestamp
+
+// attendance/{uid}/records/{YYYY-MM-DD}   — leave-approval write (merge:true, non-destructive)
+// PAID leave (vacation/sick/emergency):
+{ date:'2026-07-15', uid,
+  attendanceScore: 1.0,   // full credit → getAttendanceScore counts it, no pay cut
+  fullTime: true,
+  status: 'leave',        // NEW status value — drives 🌴 badge in all readers
+  leaveType: 'vacation',  // for badge label / tooltip
+  leaveReqId: '<leave_requests docId>',
+  editedBy: '<approverUid>', editedAt }   // audit, mirrors admin-edit path
+// UNPAID leave (unpaid):
+{ date, uid, attendanceScore: 0, fullTime:false,
+  status:'unpaid_leave', leaveType:'unpaid', leaveReqId, editedBy, editedAt }
+
+// window.LEAVE_POLICY   — NEW config constant (js/config.js). PLACEHOLDER numbers — see FLAG.
+window.LEAVE_POLICY = {
+  grants: { vacation: 5, sick: 5 },   // ‼️ PLACEHOLDER — Neil to confirm (legal floor is ONE 5-day SIL pool)
+  yearBasis: 'calendar',              // grants reset on Jan 1 (Manila)
+  probation: 'prorate-from-hire'      // vs 'after-1-year'  ‼️ FLAG FOR NEIL
+};
+```
+
+### Spec 2 — New helpers & service (all pure/idempotent)
+
+**2a — Consolidated attendance-record readers (js/config.js, so they load before every caller).**
+```js
+// score: paid leave is stored as 1.0 so no special-case needed here.
+window.attRecScore = function(rec){
+  if (!rec) return 0;
+  if (typeof rec.attendanceScore === 'number') return rec.attendanceScore;
+  if (rec.fullTime) return 1.0;
+  if (rec.loginTime) return 0.5;
+  return 0;
+};
+// kind: status wins, then score. Drives badge/colour in the six UIs.
+window.attRecKind = function(rec){
+  if (!rec) return 'none';
+  if (rec.status === 'leave')        return 'leave';
+  if (rec.status === 'unpaid_leave') return 'unpaid-leave';
+  if (rec.status === 'absent')       return 'absent';
+  const sc = window.attRecScore(rec);
+  if (sc >= 1) return 'present';
+  if (sc > 0 || rec.loginTime) return 'half';
+  return 'none';
+};
+// central badge glyph/colour so all readers agree
+window.attKindBadge = function(kind){
+  return ({ present:{m:'✓',c:'#30d158'}, half:{m:'½',c:'#ffa040'},
+            absent:{m:'✗',c:'#ff6b6b'}, leave:{m:'🌴',c:'#30d158'},
+            'unpaid-leave':{m:'📅',c:'#8e8e93'}, none:{m:'',c:'#8e8e93'} })[kind] || {m:'',c:'#8e8e93'};
+};
+```
+
+**2b — Leave-accrual service (js/config.js, after LEAVE_POLICY). Runs in admin context only.**
+```js
+window.LeaveAccrual = {
+  policyYear(){ return window.bizDate().slice(0,4); },      // calendar year, Manila
+  // pure proration: full year unless hired within `year`
+  grantFor(annual, startDate, year){
+    const y = String(year), hy = (startDate||'').slice(0,4);
+    if (hy !== y) return { vacation:annual.vacation, sick:annual.sick, proratedFromMonth:null };
+    if ((window.LEAVE_POLICY.probation) === 'after-1-year')
+      return { vacation:0, sick:0, proratedFromMonth:parseInt((startDate||'').slice(5,7),10)||1 };
+    const hm = parseInt((startDate||'').slice(5,7),10) || 1;   // 1-12
+    const f  = (12 - (hm - 1)) / 12;                           // Jan→1, Jul→0.5, Dec→1/12
+    const r5 = x => Math.round(x*2)/2;                         // nearest 0.5
+    return { vacation:r5(annual.vacation*f), sick:r5(annual.sick*f), proratedFromMonth:hm };
+  },
+  // idempotent per {uid, year}: skip if leave_accruals/{uid}_{year} already exists
+  async grantForYear(uid, { startDate }={}, year, { force }={}){
+    year = year || this.policyYear();
+    const mref = db.collection('leave_accruals').doc(`${uid}_${year}`);
+    const mkr  = await mref.get();
+    if (mkr.exists && !force) return { uid, skipped:true };
+    const g    = this.grantFor(window.LEAVE_POLICY.grants, startDate, year);
+    const cur  = await db.collection('leave_balances').doc(uid).get();
+    const prior = cur.exists ? cur.data() : {};
+    const FV = firebase.firestore.FieldValue;
+    await db.collection('leave_balances').doc(uid).set(
+      { vacation:g.vacation, sick:g.sick, year:String(year), updatedAt:FV.serverTimestamp() }, {merge:true});
+    await mref.set({ uid, year:String(year),
+      grantedVacation:g.vacation, grantedSick:g.sick, proratedFromMonth:g.proratedFromMonth,
+      priorYearEndingVacation: cur.exists ? (prior.vacation??null) : null,
+      priorYearEndingSick:     cur.exists ? (prior.sick??null) : null,
+      grantedBy: (window.currentUser && currentUser.uid) || 'system',
+      grantedAt: FV.serverTimestamp() });
+    return { uid, granted:g };
+  },
+  // one-button seed / annual rollover — the backfillPayrollLedger analogue
+  async runAnnualAccrual(onProgress){
+    const year = this.policyYear();
+    const usnap = await db.collection('users').get();
+    let seeded=0, skipped=0, i=0;
+    for (const d of usnap.docs){
+      const u = d.data();
+      if (u.role === 'partner') { skipped++; continue; }        // partners have no leave
+      const res = await this.grantForYear(d.id, { startDate:u.startDate }, year);
+      res.skipped ? skipped++ : seeded++;
+      onProgress && onProgress(++i, usnap.size);
+    }
+    return { year, seeded, skipped, total:usnap.size };
+  }
+};
+```
+
+### Spec 3 — The SIX duplicated score-readers → route through the shared helpers
+
+Replace each inline ternary. `window.attRecScore`/`attRecKind` are defined in config.js, which loads before departments.js/app.js/modules.js, so all callers can see them.
+
+| # | File:line | Current | Change |
+|---|-----------|---------|--------|
+| 1 | modules.js:677 `recScore` | inline `typeof r.attendanceScore==='number'?…` | `const recScore = r => window.attRecScore(r);` (paid leave = 1.0 → counts as present in EOM candidates — correct) |
+| 2 | modules.js:1134-1152 calendar classifier | `if(rec?.status==='absent')… else if fullTime… else if loginTime…` | insert `const kind = window.attRecKind(rec);` and branch: `kind==='leave'` → new `leaveCount++; workDays++; status='leave'`; `kind==='unpaid-leave'` → `absentCount++; workDays++; status='unpaid-leave'`; keep present/half/absent. Render badge via `window.attKindBadge(kind)` (🌴 for leave, 📅 for unpaid). Rate numerator counts paid leave as full: `pct = round(((fullCount+leaveCount)+halfCount*0.5)/workDays*100)` |
+| 3 | app.js:2482-2487 `attStatus` (team-today) | ignores `status`; returns present/half/unmarked | `const attStatus = (data)=> !data ? 'unmarked' : window.attRecKind(data);` then map 'none'→'unmarked' for the pills; add 🌴/📅 chips for 'leave'/'unpaid-leave' |
+| 4 | app.js:2847-2849 employee dashboard `attScore` | inline ternary | `const attScore = window.attRecScore(attData);` (leave already 1.0; optionally show 🌴 if `attData.status==='leave'`) |
+| 5 | app.js:4641-4647 `_attRecScore` | inline | make it delegate: `function _attRecScore(r){ return window.attRecScore(r); }` (keeps the name for `getAttendanceScore`; leave 1.0 flows into WS20 automatically) |
+| 6 | app.js:4727-4733 (Standings) AND app.js:4943-4948 (related grid) | two identical inline blocks | `const kind = window.attRecKind(rec); const score = window.attRecScore(rec); const b = window.attKindBadge(kind);` use `b.m`/`b.c` for mark/colour; count paid leave in the `full` bucket, `unpaid-leave` in `absent` |
+
+### Spec 4 — Leave day-counting + centralised approval writer (js/modules.js LEAVE IIFE)
+
+**4a — holiday-aware count (add inside the IIFE, alongside `workingDays` at modules.js:2206).**
+```js
+// Inclusive working-day count, excluding Sundays AND PH holidays — matches
+// payroll's countWorkDays so a leave range never charges a day payroll ignores.
+function leaveWorkingDays(start, end){
+  if(!start||!end) return 0;
+  const s=new Date(start+'T12:00:00'), e=new Date(end+'T12:00:00');
+  if(isNaN(s)||isNaN(e)||e<s) return 0;
+  const hol = (typeof getPHHolidays==='function') ? getPHHolidays(s.getFullYear()) : {};
+  const holNext = (s.getFullYear()!==e.getFullYear() && typeof getPHHolidays==='function') ? getPHHolidays(e.getFullYear()) : {};
+  let n=0; const d=new Date(s);
+  while(d<=e){
+    const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    if(window.bizDow(new Date(ds+'T12:00:00'))!==0 && !hol[ds] && !holNext[ds]) n++;
+    d.setDate(d.getDate()+1); if(n>366) break;
+  }
+  return n;
+}
+```
+Replace the two `workingDays(...)` calls in `openLeaveModal` (modules.js:2311 hint + 2319 save) with `leaveWorkingDays(...)`; update the hint copy to `"… working day(s) (excl. Sundays & holidays)"`. Leave the historic `workingDays` fn in place (unreferenced after this) or delete — Sonnet's choice, no other caller (grep-confirmed).
+
+**4b — add `paid` to LEAVE_TYPES (modules.js:2195-2200).**
+```js
+const LEAVE_TYPES = [
+  { id:'vacation',  label:'Vacation Leave',  icon:'🌴', drawsBalance:true,  paid:true  },
+  { id:'sick',      label:'Sick Leave',      icon:'🤒', drawsBalance:true,  paid:true  },
+  { id:'emergency', label:'Emergency Leave', icon:'🚨', drawsBalance:false, paid:true  }, // paid, no counter
+  { id:'unpaid',    label:'Unpaid Leave',    icon:'📅', drawsBalance:false, paid:false },
+];
+```
+
+**4c — single-source approval writer (add inside the IIFE, before `approveLeave`).** This is the DRY fix that both approval surfaces call — mirrors the centralised `approveLeaveRequest` pattern the brief tells us to preserve.
+```js
+// Writes a paid/unpaid attendance record for every WORK day in the leave range,
+// skipping Sundays & PH holidays, non-destructively (merge). Runs as the approver
+// (finance/admin/secretary) → passes the attendance finance/admin write path.
+async function writeLeaveAttendance(r, lt){
+  if(!r.startDate || !r.endDate) return;
+  const FV = firebase.firestore.FieldValue;
+  const paid = lt.paid !== false;
+  const s=new Date(r.startDate+'T12:00:00'), e=new Date(r.endDate+'T12:00:00');
+  if(isNaN(s)||isNaN(e)||e<s) return;
+  const d=new Date(s); let guard=0;
+  while(d<=e && guard++<366){
+    const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const hol=(typeof getPHHolidays==='function')?getPHHolidays(d.getFullYear()):{};
+    if(window.bizDow(new Date(ds+'T12:00:00'))!==0 && !hol[ds]){
+      await db.collection('attendance').doc(r.userId).collection('records').doc(ds).set(
+        paid
+          ? { date:ds, uid:r.userId, attendanceScore:1.0, fullTime:true,  status:'leave',        leaveType:r.type, leaveReqId:r.id, editedBy:currentUser.uid, editedAt:FV.serverTimestamp() }
+          : { date:ds, uid:r.userId, attendanceScore:0,   fullTime:false, status:'unpaid_leave', leaveType:r.type, leaveReqId:r.id, editedBy:currentUser.uid, editedAt:FV.serverTimestamp() },
+        {merge:true});
+    }
+    d.setDate(d.getDate()+1);
+  }
+}
+// Shared balance-decrement + attendance-write. BOTH approval paths call this.
+async function applyLeaveApproval(r){
+  const lt = leaveType(r.type);
+  if(lt.drawsBalance){
+    const bal = await getBalance(r.userId);
+    const newBal = Math.max(0,(bal[r.type]||0)-(r.days||0));
+    await db.collection('leave_balances').doc(r.userId).set(
+      { [r.type]:newBal, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+  }
+  await writeLeaveAttendance(r, lt);
+}
+```
+
+**4d — `approveLeave` (modules.js:2336-2350) before→after.** Replace the inline decrement block.
+```js
+// BEFORE (2340-2345):
+      const lt=leaveType(r.type);
+      if(lt.drawsBalance){
+        const bal=await getBalance(r.userId);
+        const newBal=Math.max(0,(bal[r.type]||0)-(r.days||0));
+        await db.collection('leave_balances').doc(r.userId).set({ [r.type]:newBal, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+      }
+// AFTER:
+      const lt=leaveType(r.type);
+      await applyLeaveApproval(r);   // decrement + write attendance (single source)
+```
+
+**4e — `approveLeaveRequest` (modules.js:2370-2376) before→after.** Same substitution.
+```js
+// BEFORE (2371-2376):
+    const lt = leaveType(r.type);
+    if(lt.drawsBalance){
+      const bal = await getBalance(r.userId);
+      const newBal = Math.max(0,(bal[r.type]||0)-(r.days||0));
+      await db.collection('leave_balances').doc(r.userId).set({ [r.type]:newBal, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+    }
+// AFTER:
+    const lt = leaveType(r.type);
+    await applyLeaveApproval(r);    // decrement + write attendance (single source)
+```
+(`rejectLeave`/`rejectLeaveRequest` unchanged — no balance/attendance side-effects.)
+
+### Spec 5 — Admin grant/adjust UI + accrual button (js/modules.js `renderLeaveAdmin`, ~2266)
+
+Add to the admin header button row (gate client-side to president/finance/manager — NOT secretary):
+```js
+const canGrant = ['president','manager','finance'].includes(currentRole);
+// in the <div style="display:flex;gap:8px"> at 2266, prepend when canGrant:
+//   <button class="btn-secondary btn-sm" id="lv-accrue">↻ Run Annual Accrual</button>
+//   <button class="btn-secondary btn-sm" id="lv-grant">＋ Adjust Balance</button>
+```
+Handlers (append after the CSV binding at 2290):
+```js
+if(canGrant){
+  document.getElementById('lv-accrue')?.addEventListener('click', async ()=>{
+    const yr = window.LeaveAccrual.policyYear();
+    if(!confirm(`Grant / reset ${yr} leave balances for all employees?\nAlready-accrued employees are skipped (idempotent). Vacation ${window.LEAVE_POLICY.grants.vacation} / Sick ${window.LEAVE_POLICY.grants.sick} days.`)) return;
+    Notifs.showToast('Running annual accrual…');
+    try{ const res=await window.LeaveAccrual.runAnnualAccrual();
+      window.logAudit && window.logAudit('accrue','leave',yr,res);
+      Notifs.showToast(`Accrual ${yr}: ${res.seeded} granted, ${res.skipped} skipped.`);
+      renderLeaveAdmin(c);
+    }catch(ex){ Notifs.showToast('Accrual failed: '+(ex.message||ex.code),'error'); }
+  });
+  document.getElementById('lv-grant')?.addEventListener('click', ()=> openGrantModal(c));
+}
+```
+`openGrantModal` — a small form (employee picker, vacation number, sick number) that `db.collection('leave_balances').doc(uid).set({vacation,sick,year:LeaveAccrual.policyYear(),updatedAt},{merge:true})` after `escHtml`-ing the picker labels. Numbers must be `>=0` (client `Math.max(0,…)`), matching the new rule shape check.
+
+**Seed at user creation** (so new hires aren't stuck at 0): after each admin-context `users.add(...)`/`.set(...)` that creates an employee, call
+```js
+await window.LeaveAccrual.grantForYear(newUid, { startDate: <the startDate just written> });
+```
+Call sites to patch (all run as president/finance → allowed to write `leave_balances`): the signup-approval add at departments.js:9342, the HR add-employee handler around app.js:6594-6721, and departments.js:9846. If a site `.add()`s (auto-id) and doesn't await the ref, capture `const ref = await users.add(...); await LeaveAccrual.grantForYear(ref.id, {startDate:…});`.
+
+### Spec 6 — firestore.rules diffs (block-scoped, before→after)
+
+**6a — `leave_balances` (rules 809-816): add non-negative-number shape validation.** Principal set unchanged (secretary retained so the approve-decrement path still works — see Decision 9).
+```
+// BEFORE
+    match /leave_balances/{uid} {
+      allow read:  if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+      allow write: if isAuth() && isFinanceOrAdmin();
+    }
+// AFTER
+    match /leave_balances/{uid} {
+      allow read:  if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+      // Shape-guard so a buggy accrual run can't write NaN/negative/wrong-typed counters.
+      // .get(field,default) — a missing field must not deny the rule (missing-field-throws memory).
+      allow write: if isAuth() && isFinanceOrAdmin()
+        && request.resource.data.get('vacation', 0) is number
+        && request.resource.data.get('vacation', 0) >= 0
+        && request.resource.data.get('sick', 0) is number
+        && request.resource.data.get('sick', 0) >= 0;
+    }
+```
+
+**6b — NEW `leave_accruals` block (place after `leave_balances`, ~817).**
+```
+    // ── Leave accruals (annual grant idempotency key + forfeiture audit) ─
+    // docId = {uid}_{YYYY}. Owner reads own history; finance/admin read all +
+    // write (grant runs in admin context — employees never write). President-only delete.
+    match /leave_accruals/{docId} {
+      allow read:   if isAuth() && (resource.data.get('uid','') == request.auth.uid || isFinanceOrAdmin());
+      allow create: if isAuth() && isFinanceOrAdmin()
+        && request.resource.data.get('grantedVacation', 0) is number
+        && request.resource.data.get('grantedVacation', 0) >= 0
+        && request.resource.data.get('grantedSick', 0) is number
+        && request.resource.data.get('grantedSick', 0) >= 0;
+      allow update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
+    }
+```
+
+**6c — `attendance` (rules 152-156): NO change in this workstream.** The leave-approval write is performed by the approver (always `isFinanceOrAdmin()`), which the existing `allow write` already permits. When WS19 tightens the owner-self-write path, the finance/admin clause this code relies on must remain — leave this block to WS19. Deploy `leave_balances`/`leave_accruals` via `firebase deploy --only firestore:rules` (re-diff first per the concurrent-edit memory).
+
+### Spec 7 — Migration / rollout checklist (ordered)
+
+1. **Deploy rules first** (6a + 6b) via `--only firestore:rules`, re-diffing against live to avoid clobbering a concurrent session's rules edits.
+2. **Ship the JS** (one commit): config.js (helpers + `LEAVE_POLICY` + `LeaveAccrual`), modules.js (`leaveWorkingDays`, `paid` flag, `writeLeaveAttendance`/`applyLeaveApproval`, the two approval substitutions, admin buttons), the six reader replacements in app.js/modules.js, and the seed-at-creation calls. Verify with `node --check` on each edited file + a preview boot (no automated suite). CACHE_VER/APP_VERSION auto-bump via the pre-commit hook — do not hand-edit.
+3. **Confirm `LEAVE_POLICY.grants` with Neil BEFORE step 4** (‼️ FLAG — the number is a legal/policy decision, not an engineering one).
+4. **Seed existing employees:** open Leave Management → **Run Annual Accrual**. This writes every non-partner user's `leave_balances` + `leave_accruals/{uid}_{2026}` (idempotent; safe to re-run). Employees hired in 2026 are auto-prorated from `startDate`; legacy users with no `startDate` get the full-year grant. This MUST precede any resumed filing, or the client pre-check (modules.js:2322) blocks a first request against a still-zero balance.
+5. **Forward-only attendance:** already-approved PAST leave is **NOT** auto-backfilled into attendance (rewriting historical attendance could shift closed-month attendance %s and past pay — risky). New approvals write attendance going forward. If a specific past request needs backfilling, re-approve it (idempotent) or add a per-request "Write attendance" admin action later — out of scope here.
+6. **Annual rollover (each January):** finance presses Run Annual Accrual once. The `year` field on `leave_balances` + the `leave_accruals/{uid}_{YYYY}` marker guard against a mid-year double-reset; the prior year's ending balance is captured in `leave_accruals.priorYearEnding*` for the forfeiture/commutation audit. ‼️ **FLAG FOR NEIL:** (a) carry-over of unused days (default: none — reset to fresh grant, prior balance recorded not re-credited); (b) cash commutation of unused SIL (legally required for the statutory pool). Optional later enhancement: a GitHub-Actions annual cron calling a `scripts/` runner of `runAnnualAccrual` against `FIREBASE_SERVICE_ACCOUNT` — matches `monthly-backup.yml` precedent, no code here depends on it.
+7. **Backup coverage:** `leave_balances` is already in `scripts/monthly-backup.js:190`; add `leave_accruals` to that EXPORTS list in the same commit.
+
+### Spec 8 — Manual test checklist (no automated suite)
+
+1. Run Annual Accrual → an existing employee's `leave_balances` shows `vacation:5 / sick:5 / year:'2026'`; `leave_accruals/{uid}_2026` exists. Re-run → toast reports them **skipped** (idempotent), balances unchanged.
+2. New employee hired 2026-07 via HR form → balance auto-seeds to ~2.5 vacation / 2.5 sick (6/12 proration, rounded to 0.5); `proratedFromMonth:7` on the accrual doc.
+3. Employee files 3-day vacation spanning a Sunday and a PH holiday → modal charges **3** working days, not 5 (holiday-aware count).
+4. Approve that request from BOTH surfaces (standalone Leave screen AND unified Approvals queue) → balance decrements by 3 in each case (shared `applyLeaveApproval`); `attendance/{uid}/records/{date}` for each work day shows `status:'leave', attendanceScore:1.0`; Sunday/holiday dates have NO leave record.
+5. Open the attendance calendar (modules.js) for that month → leave days render 🌴 (green), count toward the rate as full, NOT as absent.
+6. Confirm the same leave days render 🌴 on: team-today dashboard (app.js:2482), Employee Standings modal (app.js:4727), the related grid (app.js:4943), and the employee's own dashboard (app.js:2847). No reader shows a plain ✓ or ✗ for a leave day.
+7. Approve a 1-day **unpaid** leave → attendance shows `status:'unpaid_leave', attendanceScore:0`, renders 📅 (grey), and DROPS that day's attendance credit (unpaid, but visually distinct from a red ✗ absence). Balance NOT decremented (unpaid draws no balance).
+8. WS20 integration: run WS20 Compute for the month → the leave employee's `attScore` is unchanged/high (paid leave counted full by `getAttendanceScore`); under default `payPolicy:'flat'` their `finalPay` is identical to a full-attendance month → **leave did not cut pay.**
+9. Rules: as a signed-in employee, attempt `leave_balances/{ownUid}.set({vacation:999})` from console → DENIED (write requires finance/admin). As finance, attempt `set({vacation:-1})` → DENIED (shape guard). As finance, `set({vacation:4})` → allowed.
+10. Secretary approves a leave request from the Approvals queue → balance still decrements (secretary retained in `leave_balances.write`); but the ＋ Adjust Balance / Run Annual Accrual buttons are HIDDEN for secretary (client gate).
 
 ## Risks / cross-workstream interactions
 

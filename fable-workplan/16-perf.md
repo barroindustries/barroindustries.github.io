@@ -105,15 +105,344 @@ Read/aggregated client-side today for: MTD income/expense/net (renderPresidentDa
 - Script load order (index.html) is fixed: Firebase SDK/Chart.js/Lucide -> firebase-config.js -> config.js -> drive.js -> notifications.js -> departments.js -> app.js -> modules.js. Any new shared helper (e.g. a unified aggregate-fetch helper) must be defined in config.js (loaded before departments.js/app.js/modules.js, which are the only consumers found) or attached to window before first use.
 - CACHE_VER in sw.js must be bumped on any JS/CSS edit (auto-handled by the pre-commit hook per CLAUDE.md) — not a design constraint but a mechanical one Fable's build spec should remind Sonnet of if it forgets.
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-- [ ] Aggregate/counter-doc scope: should the MTD ledger sums (income/expense/net, by-category breakdown) be replaced by a Cloud-Function-maintained rollup doc (functions/index.js already has one Firestore trigger, sendPushOnNotification — a second trigger `onLedgerWrite` would follow that precedent) vs. a client-maintained counter written transactionally at the same call sites that already do `db.collection('ledger').add(...)` (11+ sites)? Tradeoff: Cloud Function is centrally correct and immune to a client skipping the increment, but this app has zero Firestore-trigger-based aggregation today (only the one push-notification trigger) — introducing the pattern is a bigger architectural step than extending the existing client-side idempotent-write convention.
-- [ ] Granularity of the counter doc(s): one doc per month (ledger_monthly/{YYYY-MM}) matching the existing finPeriodMatch/months6 period logic, or a single running-totals doc (ledger_totals) with month-keyed map fields, or per-category-per-month? Tradeoff: per-month docs scale better for 'All Time'/YTD scans (read N month-docs instead of N*rows) but need a migration/backfill step for existing history; a single doc with a nested map risks the 1 MiB Firestore document-size ceiling once the company has years of monthly-by-category history.
-- [ ] Should the low-stock count (currently recomputed client-side in 4 places: modules.js:1890, departments.js:12036, app.js:2286/2726, plus the uncached login-time notifications.js:607 check) become a maintained counter (e.g. inventory_meta.lowStockCount, incremented/decremented on every inventory_items write that crosses the reorderLevel threshold), or should the fix instead be a bounded query (`where('qty','<=', reorderLevel)` isn't expressible directly in Firestore since it compares two fields of the same doc) forcing a client-side filter regardless — meaning a counter doc may be the ONLY real fix here, not just the cheaper one? This is the cleanest test case to decide the general pattern before applying it elsewhere.
-- [ ] Cache-key unification approach: collapse 'tasks-all'/'tasks'/'an_tasks' (and the ledger/expenses/quotes/users-payroll equivalents) into one canonical key, OR keep the dashboard/analytics namespaces separate but make invalidation collection-driven (e.g. `dbCacheInvalidate` looks up a per-collection registry of every key that reads it) so the 'an_*' staleness gap closes without merging the keys and losing the deliberate 60s/30s TTL separation the original author wanted? Tradeoff: full unification is simpler and removes the duplicate reads outright, but the analytics author explicitly chose separate keys/TTLs (app.js:6092 comment) — Fable should decide whether that reasoning still holds once reads are cheaper (via limits/aggregates) or whether it becomes moot.
-- [ ] For tasks specifically: dashboards only ever render the top 8 sorted-open items (app.js:2295-2302 `sortedOpen.slice(0,8)`) and a few counts (open/overdue/high-priority) from a full 5,000-row scan. Should the fix be (a) a bounded/indexed query (`where('status','not-in',[...]).orderBy('dueDate').limit(50)`, needing a new composite index) that still computes counts from the returned page (undercounting overdue/high-priority beyond the page), (b) a maintained counters doc for the numeric badges plus a separate bounded query for the rendered list, or (c) both? This is a real tradeoff between exact counts and read cost that Fable must resolve, not assume away.
-- [ ] Should 'users-payroll' (app.js:2680, 1 call site) simply be deleted in favor of the existing 'users' key (which already forces the payroll-aware fetcher per config.js:218-220), or is there a reason (e.g. a different intended TTL for Finance Dashboard vs other dashboards) the original author split it out that a fresh read of the diff history would surface? Grounded fact: today both keys resolve to byte-identical data via the same fetchUsersWithPayroll function, just cached under two names with two TTLs (30000ms for both, actually — so no TTL difference either); this looks like pure oversight, but Fable should confirm before deleting a key some other in-flight workstream might depend on.
-- [ ] Where should the canonical multi-collection mergers (getAllQuotes for bk_quotes+bs_quotes+quotes, window.Projects.listAll for job_projects+projects) live going forward — kept as-is in app.js/departments.js, or centralized into config.js alongside dbCachedGet/fetchUsersWithPayroll as 'the' place shared aggregate fetchers live, given that workstream 16 also proposes splitting departments.js (currently ~12.7k lines)?
+> Governing principle for this workstream: **the ledger stays the single source of truth and NO displayed money number changes.** Every read-cost win here is either (a) a *bounded* query that returns the exact same rows the client already filtered to, or (b) *cache-sharing / de-duplication* of reads that were byte-identical. The one class of genuinely-unbounded aggregate (all-time lifetime totals) is **deferred to WS13** rather than solved with a counter doc now — see D1/D11 — precisely so the finance owner never sees a number move because of a performance change.
+
+### Resolved decisions
+
+1. **D1 — No client counter docs, no Cloud Function trigger for money aggregates. Use bounded date-range queries instead.** *Why:* the dashboards/Analytics only ever need *period-scoped* sums, and WS12's `Period.parse()` gives exact inclusive `start`/`end` bounds — so `where('date','>=',start).where('date','<=',end)` returns only that period's rows (dozens–hundreds), exactly the set the client already `.filter()`s to today. This is drift-free (no increment to get wrong), needs no backfill, needs no new rules/index, and — critically — composes with WS13's incoming `accountType` field with zero rework (the field just flows through the same rows). A `ledger_monthly` counter keyed only by type/category would have to be rebuilt the moment WS13 splits asset-purchases out of expenses.
+2. **D2 — Counter-doc granularity question is moot** (follows from D1: no counter doc is introduced in WS16). The only surviving genuinely-all-time aggregate (renderFinanceOverview's lifetime Income/Expense KPI) is handled by cache-sharing now and flagged for a WS13-built, `accountType`-aware running-total doc later (D11). Recommended shape *for WS13 when it builds it*: `finance_rollup/{YYYY-MM}: {byType:{credit,debit}, byAccountType:{asset,expense,income,...}, byCategory:{...}, updatedAt}` — one doc per Manila month keyed exactly like `Period.monthKeyOf()`, so 'All Time' reads N month-docs not N rows and no single doc approaches the 1 MiB ceiling. **Not built in WS16.**
+3. **D3 — Low-stock: no counter doc; unify all inventory reads onto one cached read.** *Why:* `where('qty','<=','reorderLevel')` is inexpressible (two fields of the same doc), so the choice was counter-vs-full-scan — but `inventory_items` is a small finite-SKU collection, so a maintained `inventory_meta.lowStockCount` would add drift risk for marginal benefit. The real defect is that the count is recomputed from **7 independent uncached full scans** (incl. one on every login). Fix = route all of them through `dbCachedGet('inventory_items', …)` so the whole app scans inventory at most once per TTL window. (If SKUs ever exceed ~2000, revisit a counter — flagged as a documented follow-up, not built now.)
+4. **D4 — Cache-key unification: keep each collection's ALREADY-invalidated key as canonical; merge the duplicate/`an_*` keys INTO it; make `dbCacheInvalidate` collection-aware so it also clears period-scoped sub-keys.** *Why:* the canonical key must be the one the 60+ existing `dbCacheInvalidate(...)` writers already name, so **zero invalidation call-sites need editing** (e.g. `tasks-all` has 15 correct invalidators; renaming to `tasks` would mean touching all 15). Merging `an_*` into the canonical key also *fixes the live staleness bug* (D9) for free, because writers already bust the canonical key. See the mapping table in Spec 2.
+5. **D5 — `users-payroll` (app.js:2680) is DELETED, folded into `users`.** *Why:* confirmed byte-identical — both resolve through `fetchUsersWithPayroll` (the `key==='users'` override at config.js:218 forces it regardless of the passed lambda), same 30000ms TTL. Pure accidental duplicate; no in-flight workstream depends on it (grep shows the only reader is renderFinanceDashboard). Its 3 invalidation calls (app.js:6604/6730/6792) become harmless no-ops; remove them for tidiness.
+6. **D6 — `users-presence` (app.js:6511) is KEPT separate.** *Why:* deliberate 8000ms TTL for live presence dots, documented in-code (app.js:6506-6510), and already invalidated correctly alongside `users`. Not a duplicate — a genuine different-freshness need.
+7. **D7 — Tasks: unify the 3 keys into `tasks-all`, keep the FULL read (no bound), do NOT change task schema.** *Why:* a correct bounded task query needs `where('open','==',true).orderBy('dueDate')` — but 'open' is the open-ended complement of `['done','approved','archived']`, so it can't be an `in`/`not-in` query (Firestore forbids `not-in` + `orderBy` on a different field), meaning a real bound would require adding+backfilling+maintaining a `closed` boolean across ~15 task-status write sites. That ripple is out of proportion for a **non-money** KPI whose reads are already de-duped to once-per-30s by the cache. So: eliminate the duplicate reads (13 sites → 1 key), keep exact counts from the full cached array. A `closed`-flag bounded query is flagged as a **documented follow-up** (`kpi_counters`/index sketch below) to trigger only if the tasks collection ever proves large in production.
+8. **D8 — Chart.js loads on demand, not eagerly.** *Why:* it is ~200 KB parsed on every page load but all 13 `new Chart(` sites are in app.js on Analytics/dashboard screens the average worker never opens. Remove the eager `<script>` from index.html; inject it via `window.ensureChart()` on first chart render. Keep the CDN URL in sw.js PRECACHE so the on-demand fetch is served from cache instantly.
+9. **D9 — The `an_*` staleness bug is fixed as a side-effect of D4, and that correctness win is an accepted co-justification for unification** (not merely read-count). After merge, Analytics reads the canonical keys that every writer already invalidates, so a president who posts an expense and immediately opens Analytics sees fresh totals. Per-call-site TTLs are preserved because `dbCachedGet`'s freshness check uses the *caller's* `ttlMs` against the stored `ts` — Analytics can pass 60000 while sharing one stored entry with a dashboard that passed 30000. There is no real 'clash' the original `an_*` author feared; merging is strictly better.
+10. **D10 — Presence heartbeat: no change (already throttled).** *Why:* startPresenceHeartbeat (app.js:111-127) already pings only every 60s *and only while `document.visibilityState==='visible'`*, with a 15s-debounced visibility/focus ping. That is already a conservative write rate. Optional future bump to 90s is noted but not worth a code change this pass.
+11. **D11 — renderFinanceOverview (departments.js:4508) keeps ALL-TIME semantics; it is cache-shared now and its lifetime-totals aggregate is DEFERRED to WS13.** *Why:* its headline Income/Expense sum the *entire* ledger (lifetime), not a month — bounding it to a period would change the displayed number (a live-money regression, forbidden). So WS16 only removes the *uncached, per-click* 10k-read (route through `dbCachedGet`), and flags that lifetime totals should move to WS13's `accountType`-aware `finance_rollup` doc so the counter is built correctly the first time.
+12. **D12 — Canonical multi-collection mergers (`getAllQuotes`, `window.Projects.listAll`) stay where they are for this pass.** *Why:* both already self-cache correctly (`all-quotes`, `projects-unified`) and moving them into config.js is churn that collides with the deferred departments.js split (D-split below). Relocation to config.js is the right *eventual* home and is recorded as a follow-up to be done AS PART OF the departments.js split, not before it.
+13. **D-split — Splitting departments.js (~12.7k lines) is DEFERRED to a dedicated later pass, sequenced LAST relative to WS12/13/16 finance edits.** *Why:* the split touches nearly every function these workstreams edit; doing it mid-stream invalidates all their line anchors. Do all finance/perf logic changes first against stable line numbers, then mechanically move code. Recorded, not done here.
+14. **D-dead — `ledger_entries` is confirmed DEAD and excluded from every design here.** app.js:4153 literally comments it as "the orphaned `ledger_entries` collection that no dashboard" reads; no `.add()` writes it in js/*.js or functions/index.js. The bounded-ledger design keys only off `ledger`. (Cleanup of the orphaned collection + its rules block is out of scope — flag only.)
+
+### ‼️ FLAG FOR NEIL (owner decisions — recommended defaults chosen, confirm before deploy)
+- **All-time Finance Overview totals will remain a full ledger scan (cached) until WS13.** Recommendation: accept — the number is correct and the read is now shared/TTL'd, and building the counter now would guarantee rework when account-types land. Confirm you're OK with the ~1-per-45s full read on the Finance ▸ Overview tab in the interim.
+- **Tasks stay a full read (no server-side bound).** Recommendation: accept for now (tasks is not money and reads are cache-de-duped). Only if the tasks collection is genuinely heading past a few thousand rows should we do the `closed`-boolean migration — say the word and I'll spec it.
+
+---
+
+### Spec 1 — new shared helpers in js/config.js (add immediately AFTER the dbCachedGet IIFE, ~config.js:239; all load before departments/app/modules)
+
+These depend on WS12's `window.Period` (already added to config.js by WS12, earlier in the file). Implement WS12 first or in the same pass.
+
+```js
+// ── Month-string arithmetic (Manila-safe, no Date parsing) ──
+window.ymAddMonths = function(ym, delta) {
+  let [y, m] = String(ym).split('-').map(Number);
+  m += delta; y += Math.floor((m - 1) / 12); m = ((m - 1) % 12 + 12) % 12 + 1;
+  return y + '-' + String(m).padStart(2, '0');
+};
+
+// ── Bounded ledger readers (WS16) — return {docs:[{data()}...]} like a snapshot ──
+// Cached per RESOLVED period key so switching period re-queries only that range.
+// 'all' (or an unbounded need) falls back to the full cached read.
+window.ledgerForPeriod = function(periodKey) {
+  const p = Period.parse(periodKey);
+  if (p.type === 'all')
+    return dbCachedGet('ledger', () => db.collection('ledger').get().catch(() => ({docs:[]})), 45000);
+  return dbCachedGet('ledger:' + p.key,
+    () => db.collection('ledger').where('date','>=',p.start).where('date','<=',p.end)
+            .get().catch(() => ({docs:[]})), 45000);
+};
+// Everything on/after startYYYYMMDD (for the 6-month trend etc.). Bounded, cached by start.
+window.ledgerSince = function(startYmd) {
+  if (!startYmd)
+    return dbCachedGet('ledger', () => db.collection('ledger').get().catch(() => ({docs:[]})), 60000);
+  return dbCachedGet('ledger>=' + startYmd,
+    () => db.collection('ledger').where('date','>=',startYmd).get().catch(() => ({docs:[]})), 60000);
+};
+
+// ── Chart.js on demand (WS16 D8) ──
+window.ensureChart = function() {
+  if (window.Chart) return Promise.resolve();
+  if (window._chartLoading) return window._chartLoading;
+  window._chartLoading = new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
+    s.onload = () => res(); s.onerror = rej; document.head.appendChild(s);
+  });
+  return window._chartLoading;
+};
+```
+
+**Collection-aware invalidation** — REPLACE the `dbCacheInvalidate` definition inside the IIFE (config.js:235-238) so one call also clears period-scoped sub-keys and registered aliases (no writer-site edits needed):
+
+*Before (config.js:235-238):*
+```js
+  window.dbCacheInvalidate = function(key) {
+    if (key) delete _store[key];
+    else Object.keys(_store).forEach(k => delete _store[k]);
+  };
+```
+*After:*
+```js
+  // Aliases + sub-key prefixes cleared when a base collection key is invalidated.
+  const _alias = {
+    'ledger':   { prefixes: ['ledger:', 'ledger>='] },  // period-scoped + since-scoped reads
+    'expenses': { alsoKeys: ['expenses-pending', 'expenses-recent'] },
+  };
+  window.dbCacheInvalidate = function(key) {
+    if (!key) { Object.keys(_store).forEach(k => delete _store[k]); return; }
+    delete _store[key];
+    const a = _alias[key];
+    if (a) {
+      (a.alsoKeys || []).forEach(k => delete _store[k]);
+      (a.prefixes || []).forEach(pfx => Object.keys(_store).forEach(k => { if (k.indexOf(pfx) === 0) delete _store[k]; }));
+    }
+  };
+```
+Effect: the existing 22 `dbCacheInvalidate('ledger')` writers now also flush every `ledger:2026-07` / `ledger>=…` entry (dashboards + Analytics), and the 3 `dbCacheInvalidate('expenses')` writers flush `expenses-pending`/`expenses-recent`. This is the structural close of the `an_*` staleness gap.
+
+### Spec 2 — cache-key unification (old → canonical) + exact read-site edits
+
+| Collection | Canonical key (unchanged, already-invalidated) | Old keys merged INTO it | Read-site edits |
+|---|---|---|---|
+| tasks | `tasks-all` | `tasks` (modules.js:664), `an_tasks` (app.js:6098) | 2 edits below |
+| ledger | `ledger` + `ledger:*`/`ledger>=*` (period-scoped) | `an_ledger` (app.js:6104), the uncached read in renderFinanceOverview | see Spec 3 |
+| expenses | `expenses` (+ `expenses-pending`, `expenses-recent`) | `an_expenses` (app.js:6101) | see Spec 3 |
+| quotes | `all-quotes` | `an_quotes` double-wrap (app.js:6099) | 1 edit below |
+| users | `users` | `users-payroll` (app.js:2680) — DELETED | 1 edit + remove 3 invalidators |
+| users (presence) | `users-presence` | — KEEP separate | none |
+| submissions | `submissions` | `an_subs` (app.js:6100) | 1 edit |
+| cash_advances | `cash_advances` | `an_cas` (app.js:6102) | 1 edit |
+| payslips | `payslips` | `an_payslips` (app.js:6103) | 1 edit |
+| gov_biddings | `gov_biddings` | `an_gov` (app.js:6105) | 1 edit |
+| job_projects | `job_projects` | `an_jobprojects` (app.js:6106) | 1 edit |
+| job_costs | `job_costs` | `an_jobcosts` (app.js:6107) | 1 edit |
+| projects | `projects` | `an_designprojects` (app.js:6108) | 1 edit |
+| sales_clients | `sales_clients` | `an_salesclients` (app.js:6109) | 1 edit |
+
+**Analytics Promise.all (app.js:6096-6110)** — replace each `cg('an_X', db.collection('X'))` with the canonical key, keeping the 60000ms TTL the `cg` wrapper used. Concretely, redefine the local `cg` helper to drop the `an_` prefix, OR edit each line. Recommended minimal edit — change the wrapper call keys:
+
+*Before (app.js:6098-6109):*
+```js
+    cg('an_tasks', db.collection('tasks')),
+    dbCachedGet('an_quotes', getAllQuotes, 60000).catch(()=>({docs:[]})),
+    cg('an_subs', db.collection('submissions')),
+    cg('an_expenses', db.collection('expenses')),
+    cg('an_cas', db.collection('cash_advances')),
+    cg('an_payslips', db.collection('payslips')),
+    cg('an_ledger', db.collection('ledger')),
+    cg('an_gov', db.collection('gov_biddings').orderBy('createdAt','desc')),
+    cg('an_jobprojects', db.collection('job_projects')),
+    cg('an_jobcosts', db.collection('job_costs')),
+    cg('an_designprojects', db.collection('projects')),
+    cg('an_salesclients', db.collection('sales_clients')),
+```
+*After* (note `an_ledger` becomes a bounded `ledgerSince` — see Spec 3; `an_quotes` collapses to the canonical `all-quotes`):
+```js
+    cg('tasks-all', db.collection('tasks')),
+    dbCachedGet('all-quotes', getAllQuotes, 60000).catch(()=>({docs:[]})),
+    cg('submissions', db.collection('submissions')),
+    cg('expenses', db.collection('expenses')),
+    cg('cash_advances', db.collection('cash_advances')),
+    cg('payslips', db.collection('payslips')),
+    (window._AN_LED_START ? ledgerSince(window._AN_LED_START) : dbCachedGet('ledger', ()=>db.collection('ledger').get().catch(()=>({docs:[]})), 60000)),
+    cg('gov_biddings', db.collection('gov_biddings').orderBy('createdAt','desc')),
+    cg('job_projects', db.collection('job_projects')),
+    cg('job_costs', db.collection('job_costs')),
+    cg('projects', db.collection('projects')),
+    cg('sales_clients', db.collection('sales_clients')),
+```
+Add, immediately before this `Promise.all` (after `const anPeriod = window._AN_PERIOD||'month'`), the ledger-start computation:
+```js
+  const _anP = Period.parse(window._AN_PERIOD || 'month');
+  const _sixStart = ymAddMonths(bizDate().slice(0,7), -5) + '-01';   // covers the 6-month trend
+  window._AN_LED_START = (window._AN_PERIOD === 'all') ? null
+    : ((_anP.start && _anP.start < _sixStart) ? _anP.start : _sixStart);
+```
+The downstream `ledger` array (app.js:6119) is unchanged in shape; it is now bounded to the needed window instead of the whole collection (full read only when the user explicitly picks All Time).
+
+**modules.js:664** (computeEomStandings) — *before:* `dbCachedGet('tasks', () => db.collection('tasks').get(), 60000)` → *after:* `dbCachedGet('tasks-all', () => db.collection('tasks').get(), 60000)`.
+
+**users key edits:** app.js:2680 *before* `dbCachedGet('users-payroll', fetchUsersWithPayroll, 30000)` → *after* `dbCachedGet('users', fetchUsersWithPayroll, 30000)`. Then delete the now-dead `dbCacheInvalidate('users-payroll');` at app.js:6604, 6730, 6792 (leave the `'users'` and `'users-presence'` calls on those lines).
+
+### Spec 3 — bounded reads (before/after) for the Section C offenders
+
+**C3 renderPresidentDashboard (app.js:2249, 2276-2284)** — replace the full ledger read with two bounded reads; the client-side `.filter(...slice(0,7)===mtd)` disappears.
+
+*Before — in the Promise.all (app.js:2249):*
+```js
+      dbCachedGet('ledger',              () => safeGet(db.collection('ledger')),                                                45000),
+```
+*After* (swap that one array element for two; add a matching destructuring slot `ledgerSnap, prevLedSnap`):
+```js
+      ledgerForPeriod('month'),
+      ledgerForPeriod('prev'),
+```
+*Before (app.js:2276-2284):*
+```js
+    const _allLedger = ledgerSnap.docs.map(d=>d.data());
+    const mtdLedger = _allLedger.filter(e=>(e.date||'').slice(0,7)===mtd);
+    const mtdNet = mtdLedger.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0)
+                 - mtdLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+    const _pm = (()=>{ const [yy,mm]=mtd.split('-').map(Number); return mm===1?`${yy-1}-12`:`${yy}-${String(mm-1).padStart(2,'0')}`; })();
+    const prevLedger = _allLedger.filter(e=>(e.date||'').slice(0,7)===_pm);
+    const prevNet = prevLedger.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0)
+                  - prevLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+```
+*After:*
+```js
+    const mtdLedger  = ledgerSnap.docs.map(d=>d.data());     // already this-month-bounded
+    const mtdNet = mtdLedger.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0)
+                 - mtdLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+    const prevLedger = prevLedSnap.docs.map(d=>d.data());    // already prev-month-bounded
+    const prevNet = prevLedger.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0)
+                  - prevLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+```
+(Read drops from ~10k rows to ~two months of rows. `inventory_items` on the same Promise.all stays cached, unchanged.)
+
+**C3 renderFinanceDashboard (app.js:2679-2702)** — the period picker (WS12) now drives the main numbers; query the *selected* period plus prev-month for the mom delta.
+
+*Before (app.js:2679-2687):*
+```js
+    const [usersSnap, ledgerSnap, expSnap, caSnap, invSnap, jobSnap, projList] = await Promise.all([
+      dbCachedGet('users-payroll', fetchUsersWithPayroll, 30000),
+      dbCachedGet('ledger',          () => safeGet(db.collection('ledger')),                                            45000),
+      dbCachedGet('expenses',        () => safeGet(db.collection('expenses')),                                          45000),
+      dbCachedGet('ca-pending',      () => safeGet(db.collection('cash_advances').where('status','==','pending')),      30000),
+      dbCachedGet('inventory_items', () => safeGet(db.collection('inventory_items')),                                   45000),
+      dbCachedGet('job_costs',       () => safeGet(db.collection('job_costs')),                                         45000),
+      (window.Projects && window.Projects.listAll ? window.Projects.listAll() : Promise.resolve([])).catch(()=>[]),
+    ]);
+```
+*After:*
+```js
+    const [usersSnap, ledgerSnap, prevLedSnap, expSnap, caSnap, invSnap, jobSnap, projList] = await Promise.all([
+      dbCachedGet('users', fetchUsersWithPayroll, 30000),
+      ledgerForPeriod(period),
+      ledgerForPeriod('prev'),
+      dbCachedGet('expenses-pending', () => safeGet(db.collection('expenses').where('status','==','pending')),         45000),
+      dbCachedGet('ca-pending',      () => safeGet(db.collection('cash_advances').where('status','==','pending')),      30000),
+      dbCachedGet('inventory_items', () => safeGet(db.collection('inventory_items')),                                   45000),
+      dbCachedGet('job_costs',       () => safeGet(db.collection('job_costs')),                                         45000),
+      (window.Projects && window.Projects.listAll ? window.Projects.listAll() : Promise.resolve([])).catch(()=>[]),
+    ]);
+```
+*Before (app.js:2693-2702):*
+```js
+    const ledger = ledgerSnap.docs.map(d=>d.data());
+    const periodLedger = ledger.filter(e=>finPeriodMatch(e.date, period));
+    ...
+    const _pm = (()=>{ const [yy,mm]=mtd.split('-').map(Number); return mm===1?`${yy-1}-12`:`${yy}-${String(mm-1).padStart(2,'0')}`; })();
+    const _prevL = ledger.filter(e=>(e.date||'').slice(0,7)===_pm);
+```
+*After:*
+```js
+    const periodLedger = ledgerSnap.docs.map(d=>d.data());   // already period-bounded — no re-filter
+    ...
+    const _prevL = prevLedSnap.docs.map(d=>d.data());         // already prev-month-bounded
+```
+(Everything downstream — `mtdIncome/mtdExpense/byCat/catRows` at 2695-2724 — is unchanged; it just now operates on the pre-bounded arrays. `pendingExp` at 2716 reads the pending-only snapshot, which is all it uses. `expenses` full read is no longer needed here.) **Note:** when `period==='all'`, `ledgerForPeriod` falls back to the full cached read — identical numbers, All-Time is the only heavy case, and it's an explicit user choice.
+
+**C2/C4 renderFinanceOverview (departments.js:4515-4520)** — keep ALL-TIME totals (D11), just stop the per-click uncached 10k read; bound the expense reads.
+
+*Before (departments.js:4515-4520):*
+```js
+  const [expSnap, ledSnap] = await Promise.all([
+    db.collection('expenses').get().catch(()=>({docs:[]})),
+    db.collection('ledger').get().catch(()=>({docs:[]}))
+  ]);
+  const expenses   = expSnap.docs.map(d => ({id:d.id,...d.data()}));
+  const ledger     = ledSnap.docs.map(d => d.data());
+```
+*After:*
+```js
+  const [pendSnap, recentSnap, ledSnap] = await Promise.all([
+    dbCachedGet('expenses-pending', () => db.collection('expenses').where('status','==','pending').get().catch(()=>({docs:[]})), 45000),
+    dbCachedGet('expenses-recent',  () => db.collection('expenses').orderBy('date','desc').limit(50).get().catch(()=>({docs:[]})), 45000),
+    dbCachedGet('ledger',           () => db.collection('ledger').get().catch(()=>({docs:[]})), 45000),  // ALL-TIME totals — shared TTL; WS13 replaces with finance_rollup
+  ]);
+  const pendingExpDocs = pendSnap.docs.map(d => ({id:d.id,...d.data()}));
+  const expenses       = recentSnap.docs.map(d => ({id:d.id,...d.data()}));  // for the Recent Expenses card
+  const ledger         = ledSnap.docs.map(d => d.data());
+```
+*Before (departments.js:4524):* `const pendingExp = expenses.filter(e => e.status==='pending').reduce((s,e) => s + (e.amount||0), 0);`
+*After:* `const pendingExp = pendingExpDocs.reduce((s,e) => s + (e.amount||0), 0);`
+(`ledIncome`/`ledExpense` at 4522-4523 unchanged — still lifetime sums over the now-shared cached ledger. **Displayed numbers identical.**)
+
+**C1 checkLowStock (notifications.js:607)** — route the login-time scan through the shared cache.
+*Before:* `const snap = await db.collection('inventory_items').get();`
+*After:* `const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);`
+
+**C5 renderStock (modules.js:1887)** — share the cache; sort client-side.
+*Before:* `const snap = await db.collection('inventory_items').orderBy('name').get().catch(()=>({docs:[]}));`
+*After:* `const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);`
+Then where it maps items, add `.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')))` to preserve name ordering.
+
+**C5 remaining inventory sites** — same shared-cache swap (add client sort where `orderBy('name')` is removed): app.js:1686 (openBomModal), departments.js:11823 (renderProdInventoryForm), departments.js:12034 (renderProdMaterials), departments.js:12124 (renderRFQs), departments.js:12515 (receivePurchaseIntoInventory). Pattern for each: `db.collection('inventory_items')[.orderBy('name')].get()` → `dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000)`. (departments.js:11676 already uses the key — bump its TTL 30000→45000 for consistency; optional.)
+
+**C6 renderGlobalSearch (modules.js:2422-2429)** — cache the four raw client/inventory reads (60s; Search re-opens are common). `products` keeps its `.limit(1000)`.
+*Before (the four raw lines among the Promise.all):*
+```js
+        safe(db.collection('sales_clients').get()),
+        safe(db.collection('design_clients').get()),
+        safe(db.collection('bs_clients').get()),
+        safe(db.collection('inventory_items').get()),
+```
+*After:*
+```js
+        dbCachedGet('sales_clients',    () => db.collection('sales_clients').get().catch(()=>({docs:[]})), 60000),
+        dbCachedGet('design_clients',   () => db.collection('design_clients').get().catch(()=>({docs:[]})), 60000),
+        dbCachedGet('bs_clients',       () => db.collection('bs_clients').get().catch(()=>({docs:[]})), 60000),
+        dbCachedGet('inventory_items',  () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000),
+```
+(The `tasks` read at modules.js:2423 already uses `tasks-all` — leave it; it now shares with dashboards/Analytics.)
+
+### Spec 4 — Chart.js on demand (app.js — all 13 `new Chart(` sites)
+
+1. **index.html:294** — remove the eager script tag `<script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>`.
+2. **sw.js PRECACHE (sw.js:41)** — KEEP the `'cdn.jsdelivr.net/npm/chart.js'` entry so the on-demand fetch is served from cache.
+3. At each of the 13 `new Chart(` sites in app.js, ensure the library is loaded first. The mechanical wrap: the enclosing render function (renderAnalytics and the dashboard chart builders) must `await ensureChart();` before the first `new Chart(...)`. Since all 13 are in app.js and clustered in analytics/dashboard renderers, add `await window.ensureChart();` at the top of each chart-drawing block (right before `new Chart`). If a block is synchronous, convert the immediate caller to `async` or wrap: `window.ensureChart().then(() => { …new Chart(ctx, cfg)… });`. Guard each site with `if (!window.Chart) { await window.ensureChart(); }` to be idempotent.
+
+### Spec 5 — firestore.rules / firestore.indexes.json
+
+**No changes in WS16.** Explicitly: no new collection is introduced (D1/D3 — no counter docs), so no new rules match block is needed. Every bounded read added here is a **single-field** query (`where('date','>=' / '<=')` on ledger, `where('status','==','pending')` on expenses, `orderBy('date').limit(50)` on expenses) — all served by Firestore's automatic single-field indexes, so **no composite index** is added and `firebase deploy --only firestore` is NOT required for this workstream. (When WS13 builds the `finance_rollup` counter doc, THAT workstream adds its own `match /finance_rollup/{month}` block per the every-collection-needs-a-rule discipline — recorded, not here.)
+
+*Documented follow-up index (NOT added now — only if D7's tasks bound is ever built):* a `closed`-boolean migration would need `firestore.indexes.json` entry `tasks (closed ASC, dueDate ASC)` plus `where('closed','==',false).orderBy('dueDate').limit(50)`. Sketched so a future implementer has it; do not add until the tasks-scale trigger fires.
+
+### Spec 6 — migration / rollout checklist
+
+1. **Depends on WS12.** Land WS12 first (or same pass): `window.Period`, `Period.parse/monthKeyOf`, and the D6 **"🩹 Fix undated rows"** ledger backfill. The bounded ledger `where('date','>=',…)` queries silently drop rows whose `date` is missing/malformed — WS12's backfill is what makes the range read complete. Do NOT ship Spec 3's bounded ledger reads before that backfill has run against production.
+2. **config.js:** add Spec 1 helpers (`ymAddMonths`, `ledgerForPeriod`, `ledgerSince`, `ensureChart`) after the dbCachedGet IIFE; replace `dbCacheInvalidate` with the collection-aware version. `node --check js/config.js`.
+3. **app.js:** apply Spec 2 (Analytics key merge + `_AN_LED_START`), Spec 3 (president + finance dashboards), the `users-payroll`→`users` edit + remove 3 dead invalidators, Spec 4 (Chart lazy-load at the 13 sites). `node --check js/app.js`.
+4. **departments.js:** Spec 3 renderFinanceOverview + the 5 inventory-site swaps. `node --check js/departments.js`.
+5. **modules.js:** modules.js:664 `tasks`→`tasks-all`; renderStock + globalSearch inventory/client cache swaps. `node --check js/modules.js`.
+6. **notifications.js:** checkLowStock cache swap. `node --check js/notifications.js`.
+7. **index.html:** remove the eager Chart.js `<script>` (Spec 4). **sw.js:** leave the Chart PRECACHE entry.
+8. **CACHE_VER + version stamp:** all of config/app/departments/modules/notifications + index.html change — the `.git/hooks/pre-commit` hook auto-bumps `sw.js` `CACHE_VER` and `window.APP_VERSION`. **Do not hand-edit.** Confirm the hook fired (CACHE_VER incremented) after `git add`.
+9. **No `firebase deploy` needed** (Spec 5). Deploy is `git push origin v12` only.
+
+### Spec 7 — manual test checklist (no automated suite)
+
+1. `npx serve -p 3838 .`, hard-reload (clear SW). Console must be error-free on login (checkLowStock now cached).
+2. **President dashboard:** MTD Net + mom-delta match the pre-change numbers exactly. In DevTools ▸ Network, confirm the ledger read is now a bounded query (only ~current+prev-month docs), not the full collection.
+3. **Finance dashboard:** switch the WS12 period picker across This Month / Last Month / YTD / a custom month / All Time — each shows correct sums; each switch issues a *bounded* ledger read (except All Time = full). Post a new expense (approve it) → the dashboard AND Analytics both reflect it immediately (the D9 staleness fix; previously Analytics lagged up to 60s).
+4. **Finance ▸ Overview:** lifetime Income/Expense identical to before; opening the tab twice within 45s issues zero new ledger reads (cached). Recent Expenses list still populated; Pending total correct.
+5. **Analytics:** loads; 6-month trend correct across a year boundary (test by picking a period spanning Dec→Jan if data exists); ledger read is bounded to the ≥6-month window (full only on All Time). Charts render (Chart.js injected on demand — confirm the chart.umd.min.js request appears only when Analytics/a chart opens, served from SW cache).
+6. **Inventory tab / RFQ / BOM modal / receive-into-inventory:** all still list items (name-sorted); repeated opens hit cache. Login low-stock digest still fires once/day.
+7. **Global search:** first keystroke returns clients + inventory + products; reopening search within 60s issues no new client/inventory reads.
+8. **Invalidation:** edit an inventory item → Stock tab and dashboards reflect it (shared key busted). Edit a user's pay → Team + Finance dashboard update (users key; users-payroll no longer exists but nothing breaks).
+9. Average worker login: confirm chart.umd.min.js is NOT fetched (D8 win) unless they open a charted screen.
+
+### Deferred / blocked (do NOT do in this pass)
+- **Ledger lifetime running-total counter** → defer to **WS13** (build it `accountType`-aware; see D2/D11). renderFinanceOverview stays a cached full read until then.
+- **Tasks server-side bound (`closed` boolean + index)** → defer; only if tasks proves large in production (D7). Sketch in Spec 5.
+- **departments.js split** → defer, sequence LAST after all WS12/13/16 finance edits (D-split).
+- **Relocating getAllQuotes / Projects.listAll into config.js** → defer, do it as part of the split (D12).
+- **`ledger_entries` orphan cleanup** → out of scope; flagged dead (D-dead).
+- **Bounded ledger reads (Spec 3 ledger portions)** → blocked on WS12's Fix-undated-rows backfill (checklist item 1). The cache-unification, inventory, global-search, and Chart-lazy-load parts are independent and can ship regardless.
 
 ## Risks / cross-workstream interactions
 

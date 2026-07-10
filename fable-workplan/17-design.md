@@ -65,18 +65,355 @@ Relevant shapes actually read/written today:
 - No `prefers-color-scheme` media query exists anywhere today (confirmed via grep across css/styles.css and all js/*.js) — 'Auto (system) theme' is a from-scratch addition on top of the existing class-toggle mechanism (`document.documentElement.classList`), not a tweak to an existing partial implementation.
 - manifest.json's `theme_color`/`background_color` are read once at PWA-install time and cannot be updated live by the running page (a platform limitation, not a code bug) — only the `<meta name="theme-color">` DOM tag (index.html:8) can be kept in sync with `setTheme()` at runtime; Fable should not promise manifest-level live sync.
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-- [ ] Token architecture depth: (a) a light dedup pass that just merges the duplicate base-selector definitions across the three cascade layers (.modal-box, .bottom-nav x3, .card, .topbar, .page-header, .subtab-btn, .kpi-value, plus the doubly-redefined --ease/--r-* tokens at styles.css:3841-3852) into single definitions, keeping the existing 'each theme fully re-declares :root' pattern (already clean for office/light/pink/grey/midnight) — vs (b) a deeper semantic-token rewrite that also eliminates the ~166-167 `html.light, html.theme-pink, html.theme-grey { .component {...} }` grouped overrides by pushing every hardcoded literal color in those ~166 rules through a token, so themes need zero component-level patches. (b) is far larger (touches most of the 874 var() usages) but actually satisfies 'one token layer'; (a) is safer/faster but only partially fixes the audit finding. State which, and how far.
-- [ ] Should the three self-labeled cascade layers ('base', 'LIQUID GLASS — Design Layer v1', 'iOS DESIGN OVERHAUL — v1') be physically flattened into one ordered stylesheet (large diff, full re-test across 6 themes x every screen), or kept as distinct, clearly-scoped layers (e.g. converted to CSS `@layer` so intent and precedence are explicit and enforced by the browser rather than by file position) that still coexist? `@layer` would directly solve the 'source order is the only thing preventing breakage' problem without a line-count-heavy merge.
-- [ ] Theme roster: keep all 6 named themes (Office/Obsidian/Midnight/Aurora/Astral/Slate) and simply ADD a 7th 'Auto' entry, or use 'Auto' as an opportunity to prune the roster (the owner's standing directive is 'professional Microsoft/Apple design' + 'everything uniform' — a 7-way picker may be in tension with that) down to e.g. just Office (light) / Obsidian (dark) / Auto?
-- [ ] Where 'Auto' lives mechanically: a 7th `THEMES` entry (app.js:770) whose `cls` is computed live from `window.matchMedia('(prefers-color-scheme: dark)')` rather than fixed — and does it need a `change` event listener on that MediaQueryList so switching OS theme while the app is open updates instantly (no reload), and which two concrete themes does it resolve to (Office <-> Obsidian, or Aurora <-> Midnight, or something new)?
-- [ ] Should theme preference remain 100% localStorage/per-device (current behavior, zero schema/rules risk) or become account-level via a new `users/{uid}` field so 'Auto/manual choice' follows the user across devices, consistent with the owner's 'one login, one design' vision statement in V12-PLAN.md? Tradeoff: cross-device consistency vs. a new write path needing a rules check.
-- [ ] Icon migration scope: DEPARTMENTS.icon (config.js:70-121) is emoji, consumed as literal text at 6+ call sites (app.js:911,3318,3919-3920,5116,6040; departments.js:606) — should this become a Lucide icon-name field (mirroring the already-Lucide `*_BOTTOM_NAV` pattern), keeping department color-coding via `DEPARTMENTS.color` separately, or should department glyphs stay emoji deliberately (owner may want the colorful, distinct per-department 'brand feel' that flat monochrome Lucide icons wouldn't convey) while only the ~1,000+ generic-chrome emoji (buttons, empty-states, list bullets) get replaced? This brief does not adjudicate which of the 1,160 occurrences are 'content/brand' (keep) vs 'UI chrome' (replace) — that triage is Fable's call, ideally producing an explicit keep/replace list rather than a blanket rule.
-- [ ] The `icon` field on `notifications/{uid}/items/{id}` docs (emoji, e.g. departments.js:217/252, notifications.js:251/569/593/619) is Firestore-persisted, not just a render-time literal — should it be migrated to Lucide icon names (requiring a fallback lookup for the thousands of already-written historical docs whose `icon` is still an emoji string), or left as-is since it's cheap and isolated to one small render function (notifications.js:114-118)?
-- [ ] Focus-visible states: replace the current hand-curated selector allowlist (styles.css:4571-4586) with a single universal `:focus-visible` rule covering every element (simpler, future-proof against new custom interactive components, but risks visibly outlining decorative elements that acquire focus/tabindex unexpectedly) — or keep curating the allowlist as new components are added?
-- [ ] Typography scale: introduce a small numbered/semantic scale (replacing 274 raw `font-size:` declarations across ~21-34 distinct px values) and sweep the WHOLE file in one pass, or introduce the scale now and apply it incrementally (dashboard KPIs, page headers, nav first) given the size of the file (4,633 lines) and the risk of a single giant diff being hard to visually re-verify?
-- [ ] How far does this workstream reach into quote-builder-v2.html (its own separate `:root` block + 149 var() usages) and the 6 print-window inline `<style>` templates (app.js:4670/4989; departments.js:4288/6780/7683/11990/12708)? Pull them onto the same consolidated token names now (bigger scope, but kills a 4th/5th independent color source), or explicitly defer that bridge to workstream 14 (shared letterhead engine) and keep 17 scoped to css/styles.css + the app shell (js/app.js, config.js, departments.js, modules.js, notifications.js)?
+> Scope discipline for this workstream is deliberately **surgical, not a rewrite**. There is no automated test suite and every duplicate selector relies on file order, so a giant reorder/merge diff has high silent-regression risk. The plan below fixes the audit's *root cause* (order-dependence + no single token/type/icon system) with changes that are **provably visual-no-op** (dedup a shadowed rule, tokenize a px value to a token whose value equals that px, fold a duplicate `:root` reassignment into the canonical `:root`) plus a small set of *additive* features (Auto theme, dynamic theme-color, universal focus ring). Deep semantic-token purity (killing the ~166 `html.light .foo` component overrides) is explicitly **rejected for 17** and left as a documented follow-up — it touches ~874 `var()` sites for zero visual change and cannot be safely verified without tests.
+
+### Resolved decisions (one line each)
+
+1. **Token architecture depth → Option (a)+ (safe dedup), NOT (b).** Merge the duplicated base-selector rules and fold the duplicate `:root` token reassignments into ONE canonical `:root`; keep the existing clean per-theme `:root` re-declaration pattern; **do not** rewrite the ~166 `html.light/.theme-pink/.theme-grey .component{}` overrides. Rationale: (b) is a 874-site change with no test net and zero rendered-pixel benefit; (a)+ removes the actual footgun (duplicate/shadowed definitions) at no visual cost.
+2. **Flatten vs `@layer` → NEITHER a physical flatten NOR blanket `@layer`.** Do not wrap the three banner sections in `@layer` — naive layering inverts specificity (a low-specificity rule in the "overhaul" layer would start beating a high-specificity base rule, changing pixels). Instead **delete the shadowed duplicates so there is genuinely one definition per selector**, which achieves "one ordered stylesheet" without a risky reorder. The three banner comments stay as section dividers only.
+3. **Theme roster → picker shows 3 (Office · Auto · Obsidian); the other 4 classes stay in code, honored if already in localStorage, but are removed from the picker UI.** Matches the owner's "professional Microsoft/Apple, everything uniform, no redundancy" directive. No CSS/theme-class deletion, so nobody's saved choice breaks. ‼️ FLAG FOR NEIL below (reversible product call).
+4. **Auto mechanics → 7th `THEMES.auto` entry, `cls` computed live from `matchMedia('(prefers-color-scheme: dark)')`, resolving Obsidian(dark)↔Office(light);** a `change` listener on the MediaQueryList re-applies instantly (no reload) while `auto` is the active choice.
+5. **Theme persistence → stays 100% `localStorage` (`bi-theme`), per-device. No `users/{uid}` field, no rules change.** Cross-device consistency is delivered by *defaulting everyone to the same professional theme* + Auto-follows-OS, not by syncing a per-user preference. Zero schema/rules risk.
+6. **DEPARTMENTS.icon → add a parallel `lucideIcon` field; switch the 6 render sites to Lucide; keep `icon` (emoji) and `color` untouched for back-compat.** Department glyphs become monochrome Lucide (uniform, professional) with color still supplied by `DEPARTMENTS.color`.
+7. **`notifications` `icon` field → NOT migrated in Firestore; mapped at render time.** `notifications.js` render resolves emoji→Lucide via `window.LUCIDE_EMOJI_MAP` with a raw-emoji fallback, so the thousands of legacy persisted docs keep working. `send()` default stays a value; new sends may pass a Lucide name (both render correctly through the same helper).
+8. **Focus-visible → replace the hand-curated allowlist with ONE universal `:focus-visible` rule**, plus an explicit opt-out for programmatically-focused containers (`[tabindex="-1"]`). Future-proof; no new component ever ships without a focus ring again.
+9. **Typography scale → introduce `--fs-*` tokens whose values EQUAL the existing common px values, then sweep ALL `font-size:` declarations in `css/styles.css` (excluding `.kpi-value`/`.stat-num`).** Because each token equals the px it replaces, the whole-file sweep is a mechanical find/replace with **zero rendered change** — the safe kind of "big" diff. Inline JS `style="font-size:…"` strings are OUT of scope.
+10. **Reach into quote-builder-v2.html + the 6 print templates → DEFERRED to workstream 14.** 17 is scoped to `css/styles.css` + the app shell (`app.js`, `config.js`, `departments.js`, `modules.js`, `notifications.js`, `index.html`, `manifest.json`, `sw.js`). Interface contract for 14/9 named in §H.
+11. **safe-area-inset → LEFT EXACTLY AS-IS (no `--safe-*` tokenization).** It works; partial tokenization is the exact way this class of notch bug regresses. Out of scope, deliberately.
+12. **Font `@import` → kept as-is.** Self-hosting is a separate infra change; the system-font fallback in `--font` already covers offline. Noted, not touched.
+13. **`window.fitKpiValues` → untouched; protected.** The typography sweep explicitly excludes `.kpi-value` and `.stat-num` so their `font-size` (and `fitKpiValues`'s `getComputedStyle` natural-size read) is byte-identical.
+14. **firestore.rules → ZERO changes.** Confirmed: this workstream introduces no collection and no new `users` field. (Decision 5 is what keeps it at zero.)
+
+---
+
+### A. Token policy + the ADDED/MERGED token tables
+
+**Policy: no existing token is renamed.** Renaming any of the current 77 `var(--x)` names ripples to ~874 usages with no visual payoff — rejected (decision 1). We only (i) fold duplicate `:root` reassignments into the base `:root`, and (ii) ADD new tokens (typography, brand aliases, theme-color).
+
+**A1 — MERGED tokens (fold the duplicate iOS `:root` at styles.css:3841-3852 into the base `:root` at styles.css:13-126).** These five tokens are currently declared twice at equal `:root` specificity; the later (iOS) value wins today. Folding them into the base block with the iOS value as canonical is a provable no-op (per-theme blocks that re-declare `--r-*`, e.g. `html.theme-office`, have higher specificity and are unaffected; no theme block re-declares `--ease`).
+
+| token | base `:root` value now (styles.css:88-110) | iOS `:root` value now (styles.css:3846-3851) — **winning today** | canonical value after merge |
+|---|---|---|---|
+| `--ease` | `cubic-bezier(0.4,0,0.2,1)` | `cubic-bezier(0.25,0.46,0.45,0.94)` | `cubic-bezier(0.25,0.46,0.45,0.94)` |
+| `--r` | `14px` | `16px` | `16px` |
+| `--r-sm` | `10px` | `12px` | `12px` |
+| `--r-lg` | `18px` | `20px` | `20px` |
+| `--r-xl` | `24px` | `26px` | `26px` |
+
+The iOS-only motion tokens in that same block (`--ios-spring`, `--ios-spring-out`, `--ios-enter`) are NOT duplicates — move them verbatim into the base `:root` too, so after the edit the entire `:root{…}` at 3841-3852 can be deleted (comment `/* iOS motion tokens — merged into base :root */` left in its place).
+
+**A2 — ADDED tokens (append to the base `:root` at styles.css:126, before the closing `}`).** Values chosen to EQUAL the existing common px literals so the sweep is a no-op. These are theme-independent (font-size does not vary by theme today).
+
+```css
+  /* ── Typography scale (values == today's most-used px literals; no visual change on swap) ── */
+  --fs-2xs: 10px;   /* micro labels, badges */
+  --fs-xs:  11px;   /* captions, meta, timestamps */
+  --fs-sm:  12px;   /* secondary text, chips */
+  --fs-md:  13px;   /* dense body */
+  --fs-base:14px;   /* DEFAULT body */
+  --fs-lg:  16px;   /* emphasized body, inputs */
+  --fs-xl:  18px;   /* card titles */
+  --fs-2xl: 20px;   /* section headers */
+  --fs-3xl: 24px;   /* page sub-headers */
+  --fs-4xl: 28px;   /* page titles */
+  --fs-5xl: 34px;   /* large numeric displays */
+  --fs-6xl: 44px;   /* hero */
+  /* line-heights (unitless) */
+  --lh-tight: 1.2;
+  --lh-snug:  1.35;
+  --lh-base:  1.5;
+  /* ── Brand-role aliases (decouple 'accent role' from the literal --pink) ── */
+  --brand-primary:      var(--pink);   /* the app's primary accent ROLE — reassign here per theme, not by overloading --pink */
+  --brand-primary-2:    var(--pink-2);
+  --brand-on-primary:   var(--white);
+  /* ── Status-bar / theme-color (read by setTheme() to sync <meta name=theme-color>) ── */
+  --theme-color: var(--bg);
+```
+
+**A3 — The `--pink` split (the requested "used as literal AND as accent role" resolution).** Today `--pink` (#FF2D78) is consumed in TWO meanings: (1) literal brand pink in decorative gradients, and (2) generic "active/accent" role (e.g. `.bottom-nav-item.active{color:var(--pink)}` at styles.css:1255, `.topbar-avatar:hover{box-shadow:var(--sh-pink)}`). In the Office theme `html.theme-office` already re-points `--pink` to Microsoft blue (styles.css:2468) — proving "pink" is really being used as the accent role there. Resolution: **add `--brand-primary` (A2) as the accent ROLE token**; when new/edited component rules mean "the accent", they use `var(--brand-primary)`. We do NOT sweep-replace existing `var(--pink)` accent usages in this pass (out of the safe no-op envelope), but every rule this workstream *touches* that means "accent" uses `--brand-primary`. Five worked examples of the intended split:
+
+| site | today | means | new usage when touched |
+|---|---|---|---|
+| `.bottom-nav-item.active` color (1255) | `var(--pink)` | accent role | `var(--brand-primary)` |
+| `--grad-pink` (35) | `#FF2D78→#FF6B9D` | literal brand pink | unchanged (literal) |
+| `.topbar-avatar:hover` shadow (959) | `var(--sh-pink)` | accent role | `var(--sh-pink)` unchanged (shadow token already theme-remapped at 2505) |
+| focus ring (4587) | `var(--accent)` | accent role | `var(--brand-primary)` |
+| `.subtab-btn.active` (1834) | `var(--pink)`/`var(--accent)` | accent role | `var(--brand-primary)` |
+
+Because `--brand-primary` defaults to `var(--pink)`, and every theme already remaps `--pink`, this is backward-identical until a theme chooses to set `--brand-primary` independently — which is the hook WS9 (BRAND) will use.
+
+---
+
+### B. Duplicate base-selector merges (before/after, keyed to exact lines)
+
+**Merge rule (mechanical, applies to every row):** produce ONE rule = the union of all declarations across the duplicate copies; on any property that appears in more than one copy, the **last (highest-line) copy's value wins**; place the merged rule **at the position of the last copy**; delete the earlier copies. Deleting a fully-shadowed earlier copy while preserving any earlier-only property at the later position is a visual no-op (nothing between them re-set those properties at equal-or-higher specificity — verify per theme per §I). Verified anchors:
+
+| selector | copies (styles.css lines) | keep merged rule at | delete |
+|---|---|---|---|
+| `.topbar` | 801, 3295 | 3295 | 801 block (fold its unique props up into 3295) |
+| `.topbar::after` | 812, 3302 | 3302 | 812 |
+| `.card` | 1418, 3345 | 3345 | 1418 (fold unique props) |
+| `.page-header` | 1267, 3855 | 3855 | 1267 (fold unique props) |
+| `.subtab-btn` | 1826, + Layer-1 dup | later | earlier |
+| `.modal-box` | 2104, 3399 | 3399 | 2104 (also reconcile `::before`/`::after` at 2120/3407/3945 the same way) |
+| `.bottom-nav` | 1213, 3487, 4041 | 4041 | 1213 + 3487 (three-way union, 4041 values win) |
+| `.kpi-value` | 1326, 4009 | **4009 (leave verbatim — protected)** | 1326 (fold only props NOT already in 4009; do NOT alter the `clamp()` line) |
+
+Worked example — `.card` (styles.css:1418 → 3345):
+
+```css
+/* BEFORE — 1418 (base) */
+.card { background: var(--grad-card); border: 1px solid var(--border); border-radius: var(--r-lg);
+        position: relative; overflow: hidden; transition: border-color var(--t2) var(--ease); }
+.card::before { /* … */ }
+/* … and later, BEFORE — 3345 (LIQUID GLASS) */
+.card { background: var(--glass-surface); backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--glass-border); box-shadow: var(--glass-spec), var(--glass-shadow);
+        border-radius: var(--r-lg); }
+```
+```css
+/* AFTER — single rule AT 3345's position; 1418 deleted. Union, glass (later) wins on conflicts. */
+.card { background: var(--glass-surface); backdrop-filter: var(--glass-blur);
+        border: 1px solid var(--glass-border); box-shadow: var(--glass-spec), var(--glass-shadow);
+        border-radius: var(--r-lg);
+        position: relative; overflow: hidden;                 /* preserved from 1418 (glass didn't set) */
+        transition: border-color var(--t2) var(--ease); }     /* preserved from 1418 */
+```
+
+Worked example — `.kpi-value` (protected merge, 1326 → 4009):
+
+```css
+/* KEEP 4009 EXACTLY (do not touch clamp/nowrap/tabular-nums — fitKpiValues depends on it) */
+.kpi-value { font-size: clamp(15px, 4.6vw, 28px); white-space: nowrap; font-variant-numeric: tabular-nums; /* …existing… */ }
+/* From 1326, port up ONLY properties 4009 does not set (e.g. color, letter-spacing, font-weight). Delete 1326. */
+```
+
+Also delete the two now-stale "canonical clamp() wins by source order" comments at styles.css:2288 and 3158-3159 (they document the very fragility we just removed).
+
+---
+
+### C. `@layer` decision (explicit)
+
+**No `@layer` is introduced, and no physical flatten is performed** (decision 2). After §B there is exactly one rule per previously-duplicated selector, so precedence no longer depends on hidden duplicate stacking. The three banner comments (`v3 base`, `LIQUID GLASS`, `iOS DESIGN OVERHAUL`) remain **as section headers only**. Rationale recorded for the next architect: wrapping the existing unlayered rules in `@layer base, glass, overhaul` would make every `overhaul` rule beat every `base` rule *regardless of specificity*, inverting cases where a high-specificity base rule currently wins — an unverifiable pixel change across 6 themes. If a future workstream WITH a screenshot-diff harness wants true layering, that is the safe time to do it.
+
+---
+
+### D. Icon migration
+
+**D1 — Infrastructure (add to `js/config.js`, top-level, after `DEPARTMENTS`).**
+
+```js
+// ── Emoji → Lucide icon-name map (UI chrome). Extend as new glyphs appear. ──
+window.LUCIDE_EMOJI_MAP = {
+  '✅':'check-circle','✓':'check','☑':'check-square','❌':'x-circle','✗':'x','⚠':'alert-triangle','⚠️':'alert-triangle',
+  '📋':'clipboard-list','🗑':'trash-2','🗑️':'trash-2','📄':'file-text','🧾':'receipt','📊':'bar-chart-3','📈':'trending-up','📉':'trending-down',
+  '📅':'calendar','🕐':'clock','⏰':'alarm-clock','🌅':'sunrise','📦':'package','💸':'banknote','💰':'wallet','💵':'banknote',
+  '🔔':'bell','🔒':'lock','🔓':'unlock','🔑':'key','⚙️':'settings','⚙':'settings','🔧':'wrench','🔍':'search','➕':'plus','➖':'minus',
+  '✏️':'pencil','✏':'pencil','📝':'file-pen-line','📌':'pin','📎':'paperclip','🏢':'building-2','🏭':'factory','🏛️':'landmark','🏛':'landmark',
+  '👥':'users','👤':'user','🤝':'handshake','📢':'megaphone','💻':'laptop','🎨':'palette','🛒':'shopping-cart','📁':'folder','📂':'folder-open',
+  '🚀':'rocket','⭐':'star','🌟':'star','❓':'help-circle','ℹ️':'info','💡':'lightbulb','🎯':'target','�️':'link','🔗':'link','📧':'mail','📞':'phone',
+  '🌴':'palm-tree','📖':'book-open','🖨️':'printer','⬇️':'download','⬆️':'upload','🔄':'refresh-cw','▶️':'play','⏸️':'pause','🏆':'trophy','🎁':'gift'
+};
+// Render helper: emoji OR a Lucide name -> Lucide <i>. Falls back to the raw emoji if unmapped.
+// size in px (optional). ALWAYS follow an innerHTML write that uses this with lucide.createIcons(...).
+window.emojiIcon = function(glyph, size){
+  if (!glyph) return '';
+  const name = window.LUCIDE_EMOJI_MAP[glyph] || (/^[a-z0-9-]+$/.test(glyph) ? glyph : null);
+  if (!name) return `<span class="emoji-icon">${(window.escHtml?escHtml(glyph):glyph)}</span>`; // legacy/unmapped: keep emoji
+  const s = size ? ` style=\"width:${size}px;height:${size}px\"` : '';
+  return `<i data-lucide=\"${name}\"${s}></i>`;
+};
+```
+
+**D2 — `DEPARTMENTS.lucideIcon` (add one field per entry, `js/config.js:70-121). Emoji `icon` and `color` stay.**
+
+| dept | keep `icon` | add `lucideIcon` |
+|---|---|---|
+| Admin `🏢` | ✓ | `building-2` |
+| Finance `💰` | ✓ | `wallet` |
+| HR `👥` | ✓ | `users` |
+| Sales `🤝` | ✓ | `handshake` |
+| Marketing `📢` | ✓ | `megaphone` |
+| Government Biddings `🏛️` | ✓ | `landmark` |
+| IT `💻` | ✓ | `laptop` |
+| Design `🎨` | ✓ | `palette` |
+| Production `🏭` | ✓ | `factory` |
+| Purchasing `🛒` | ✓ | `shopping-cart` |
+| Brilliant Steel `⚙️` | ✓ | `settings` |
+| Partners `🤝` | ✓ | `handshake` |
+
+**D3 — The 6 DEPARTMENTS render sites → Lucide.** At each, replace the raw `cfg.icon` text interpolation with `emojiIcon(cfg.lucideIcon || cfg.icon, <size>)` and ensure a `lucide.createIcons()` call runs after that innerHTML write.
+
+| site | before (pattern) | after |
+|---|---|---|
+| `app.js:911` nav item build | `…>${cfg.icon}<…` | `…>${emojiIcon(cfg.lucideIcon||cfg.icon,18)}<…` |
+| `app.js:3318` dept card | `${cfg.icon}` | `${emojiIcon(cfg.lucideIcon||cfg.icon,22)}` |
+| `app.js:3919-3920` page-header + empty-state fallback | `${cfg?.icon||'🗂️'}` | `${emojiIcon(cfg?.lucideIcon||cfg?.icon||'folder',24)}` |
+| `app.js:5116` | `${cfg.icon}` | `${emojiIcon(cfg.lucideIcon||cfg.icon,20)}` |
+| `app.js:6040` dept-icon-large | `${cfg.icon}` | `${emojiIcon(cfg.lucideIcon||cfg.icon,32)}` |
+| `departments.js:606` | `${cfg.icon}` | `${emojiIcon(cfg.lucideIcon||cfg.icon,20)}` |
+
+**createIcons reminder (per site):** `app.js:911`/`3318`/`5116`/`6040` feed nav/dashboard which already call `lucide.createIcons()` after render — VERIFY the call runs after these writes; if a site writes into a detached fragment, add `lucide.createIcons({nodes:[<container>]})`. `departments.js:606` is inside a `render*` — confirm that function ends with `lucide.createIcons()` (grep the function; add if missing).
+
+**D4 — Notifications (render-time map, no Firestore migration).** `js/notifications.js:114-118`:
+
+```js
+// BEFORE
+const icon = n.icon || lead || '🔔';
+// …
+<div class="notif-item-emoji">${escHtml(icon)}</div>
+```
+```js
+// AFTER — resolve emoji OR Lucide-name to an <i>, tolerate legacy emoji, keep escHtml on any raw fallback
+const icon = n.icon || lead || 'bell';
+// …
+<div class="notif-item-emoji">${window.emojiIcon(icon, 20)}</div>
+```
+Then after `list.innerHTML = …` in that render function, add `if (window.lucide) lucide.createIcons({ nodes: [list] });`. `send()` default (`notifications.js:251`) and reminder icons (569 `'⏰'`, 593 `'🌅'`, 619 `'📦'`) may stay emoji (they render fine through `emojiIcon`) OR be changed to `'alarm-clock'`/`'sunrise'`/`'package'` — either works; **no data backfill**.
+
+**D5 — Profile shortcut emoji (`app.js:6949-6954`)** and page-header prefixes (e.g. `departments.js:1209 <h2>📋 Submissions</h2>`): replace the leading emoji with `emojiIcon(...)` per the map; these render functions already run `lucide.createIcons({nodes:[drawer]})` (app.js:6994) / end-of-render createIcons — verify.
+
+**D6 — Distinct-glyph table (the ~130 chrome glyphs; top offenders by count fully specified, long tail via the map).** Sonnet applies `window.LUCIDE_EMOJI_MAP` mechanically to remaining `departments.js`/`modules.js` chrome emoji (icon-only buttons like `departments.js:744/1734 <button…>🗑</button>` → `<button…>${emojiIcon('trash-2',16)}</button>`, empty-state icons, header prefixes). **KEEP as brand/content (do NOT replace):** none required — all 1,160 occurrences are UI chrome; there is no colorful per-department brand glyph that survives (dept color-coding now comes from `DEPARTMENTS.color`, not the emoji). Any glyph NOT in the map renders unchanged via `emojiIcon`'s fallback, so partial completion never breaks a screen. Highest-frequency rows: ✅→`check-circle`(99), ✓→`check`(55), 📋→`clipboard-list`(53), 🗑→`trash-2`(53), ⚠→`alert-triangle`(35), ❌→`x-circle`(33), 📄→`file-text`(32), 💸→`banknote`(31), 🧾→`receipt`(28), ✗→`x`(27), 📊→`bar-chart-3`(26), 📅→`calendar`(25).
+
+> **Rule for Sonnet at EVERY touched render function:** after any `innerHTML =`/`insertAdjacentHTML` that introduces `<i data-lucide>` (via `emojiIcon` or literal), call `lucide.createIcons()` (or the scoped `lucide.createIcons({nodes:[el]})`). Omitting it renders an empty tag with no console error.
+
+---
+
+### E. Theme: Auto, dynamic theme-color, picker (exact diffs)
+
+**E1 — `THEMES` (app.js:770-777):**
+```js
+const THEMES = {
+  auto:     { label: 'Auto',     cls: () => matchMedia('(prefers-color-scheme: dark)').matches ? null : 'light theme-office' },
+  office:   { label: 'Office',   cls: 'light theme-office' },
+  dark:     { label: 'Obsidian', cls: null },
+  midnight: { label: 'Midnight', cls: 'theme-midnight' },
+  light:    { label: 'Aurora',   cls: 'light' },
+  pink:     { label: 'Astral',   cls: 'theme-pink' },
+  grey:     { label: 'Slate',    cls: 'theme-grey' },
+};
+// cls may now be a string | null | function → string|null. Resolve everywhere via _themeCls().
+function _themeCls(t){ const c = THEMES[t] && THEMES[t].cls; return typeof c === 'function' ? c() : c; }
+```
+`auto` resolves to Office(light)↔Obsidian(dark) (decision 4).
+
+**E2 — `setTheme` (app.js:785-793) rewritten to use `_themeCls`, sync the meta tag, and remove ALL theme classes (superset across every theme):**
+```js
+function setTheme(theme, persist = true) {
+  if (!THEMES[theme]) theme = 'office';
+  const html = document.documentElement;
+  // strip every class any theme could add (static strings + the two Auto resolves)
+  ['light','theme-office','theme-midnight','theme-pink','theme-grey'].forEach(c => html.classList.remove(c));
+  const cls = _themeCls(theme);
+  if (cls) cls.split(' ').forEach(c => html.classList.add(c));
+  if (persist) localStorage.setItem('bi-theme', theme);
+  _applyThemeIcon(theme);
+  _syncThemeColorMeta();          // NEW — keep <meta name=theme-color> in step with the rendered theme
+}
+// Read the resolved --theme-color (falls back to --bg) and write it to the meta tag.
+function _syncThemeColorMeta(){
+  let meta = document.querySelector('meta[name=\"theme-color\"]');
+  if (!meta) { meta = document.createElement('meta'); meta.name = 'theme-color'; document.head.appendChild(meta); }
+  const cs = getComputedStyle(document.documentElement);
+  const c = (cs.getPropertyValue('--theme-color') || cs.getPropertyValue('--bg') || '').trim();
+  if (c) meta.setAttribute('content', c);
+}
+```
+
+**E3 — Auto live-follow (insert next to `initTheme`, app.js:779-783):**
+```js
+function initTheme() {
+  setTheme(localStorage.getItem('bi-theme') || 'office', false);
+  // When 'auto' is active, follow the OS scheme instantly (no reload).
+  const mq = matchMedia('(prefers-color-scheme: dark)');
+  const onOsScheme = () => { if ((localStorage.getItem('bi-theme') || 'office') === 'auto') setTheme('auto', false); };
+  mq.addEventListener ? mq.addEventListener('change', onOsScheme) : mq.addListener(onOsScheme);
+}
+```
+
+**E4 — `toggleTheme` (app.js:799-803):** cycle only the 3 picker themes: `const order = ['auto','office','dark'];`.
+
+**E5 — `_applyThemeIcon` (app.js:805-811):** icon for `auto` = `monitor`; `dark`/`midnight` = `moon`; everything else = `sun`:
+```js
+const iconName = theme === 'auto' ? 'monitor' : (theme === 'dark' || theme === 'midnight') ? 'moon' : 'sun';
+```
+
+**E6 — Picker markup (app.js:6924-6931):** show 3 swatches only.
+```html
+<div class="theme-picker" id="drawer-theme-picker">
+  <button class="theme-swatch theme-swatch-office" data-theme="office" title="Office (light)"><span class="theme-swatch-dot"></span>Office</button>
+  <button class="theme-swatch" data-theme="auto" title="Match system"><span class="theme-swatch-dot"></span>Auto</button>
+  <button class="theme-swatch theme-swatch-dark" data-theme="dark" title="Obsidian (dark)"><span class="theme-swatch-dot"></span>Obsidian</button>
+</div>
+```
+Picker wiring (app.js:7002-7015) is unchanged (it reads `data-theme` and calls `setTheme`). `getTheme()` unchanged. A user whose `bi-theme` is a hidden value (`midnight`/`light`/`pink`/`grey`) still renders correctly — `setTheme` honors it; `updateActive()` simply marks no swatch active, which is fine.
+
+**E7 — `manifest.json`:** cannot live-sync (install-time constant). Leave `background_color:'#0a0a0a'`. Set `theme_color:'#0F6CBD'` (the Office/default accent) so the installed-shell chrome matches the default professional theme instead of today's black. Fix `index.html:8` static `<meta name="theme-color" content="#FAF9F8"/>` — it becomes dynamic via `_syncThemeColorMeta()`, but leave a sensible static default matching the Office `--bg` (`#FAF9F8`) for first paint before JS runs.
+
+---
+
+### F. Focus-visible (styles.css:4571-4602 → universal)
+
+```css
+/* BEFORE: the 16-selector allowlist at 4571-4590 + the :not(:focus-visible) block at 4592-4602 */
+/* AFTER — one universal rule + one opt-out. Delete the entire 4571-4602 allowlist. */
+:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+/* Programmatically-focused scroll/containers must not show a ring */
+[tabindex="-1"]:focus-visible { outline: none; }
+/* Suppress the UA ring on non-keyboard focus (kept, broadened to all elements) */
+:focus:not(:focus-visible) { outline: none; }
+```
+Uses `--brand-primary` (was `--accent`; identical today, decouples for WS9). The `@media (prefers-reduced-motion)` block at 4604-4633 is untouched.
+
+---
+
+### G. Typography sweep (styles.css only; exact value map)
+
+Sweep every `font-size:<px>;` declaration in `css/styles.css` → `font-size:var(--fs-*)` using the exact map below (token value == px, so no visual change). **EXCLUDE** `.kpi-value` (clamp, line 4009) and `.stat-num`. Where a px value falls between tokens (e.g. `15px`, `17px`, `22px`, `26px`), map to the NEAREST token ONLY if equal; otherwise **leave the raw px** (do not round — rounding is a visual change). Map: `10→--fs-2xs`, `11→--fs-xs`, `12→--fs-sm`, `13→--fs-md`, `14→--fs-base`, `16→--fs-lg`, `18→--fs-xl`, `20→--fs-2xl`, `24→--fs-3xl`, `28→--fs-4xl`, `34→--fs-5xl`, `44→--fs-6xl`. Non-matching literals (`8,9,15,17,19,21,22,26,32,36,40,48,56`) stay raw px this pass (a later pass may extend the scale). Inline JS `style` font-sizes are OUT of scope.
+
+---
+
+### H. Interface contract for WS9 (BRAND) and WS14 (letterhead)
+
+- WS9 `window.BRAND.colors` becomes the source of truth for accent by assigning `--brand-primary` / `--brand-primary-2` at init (e.g. `document.documentElement.style.setProperty('--brand-primary', BRAND.colors.primary)`), rather than editing `--pink`. `DEPARTMENTS.color` stays the per-dept accent for now; WS9 may later derive it.
+- WS14 (letterhead/print) OWNS all print `@media`/inline print `<style>` and `quote-builder-v2.html`'s `:root`. WS17 does NOT touch them. The canonical brand tokens WS14 should consume once 17 lands: `--brand-primary`, `--text`, `--text-2`, `--border`, `--bg`, `--fs-*`. WS14 must NOT assume `css/styles.css` tokens reach print windows (separate documents) — it re-declares these names locally with the same values.
+
+---
+
+### I. Migration checklist (sequential, safe order)
+
+1. **Tokens:** fold the 5 duplicate `:root` reassignments + 3 iOS motion tokens (A1) into base `:root` (styles.css:13-126); delete the `:root{}` at 3841-3852 (leave a one-line comment). Append the ADDED tokens (A2).
+2. **Duplicate-selector merges (B):** in ascending caution — `.topbar`/`.topbar::after`, `.page-header`, `.subtab-btn`, `.card`, `.modal-box`(+::before/::after), `.bottom-nav`(3-way), then `.kpi-value` (protected merge — do not touch the clamp line). Delete the stale comments at 2288 and 3158-3159.
+3. **Focus-visible (F):** replace 4571-4602 with the universal rule.
+4. **Typography sweep (G):** map font-size literals to `--fs-*`, excluding `.kpi-value`/`.stat-num`.
+5. **Icon infra (D1):** add `LUCIDE_EMOJI_MAP` + `emojiIcon()` to `config.js`.
+6. **DEPARTMENTS (D2):** add `lucideIcon` to all 12 entries.
+7. **Dept render sites (D3):** swap the 6 sites; verify `createIcons` runs after each.
+8. **Notifications (D4):** render-time map + `createIcons` after `list.innerHTML`.
+9. **Chrome emoji (D5/D6):** apply the map across profile shortcuts, page-header prefixes, icon-only buttons, empty states; add `createIcons` after every touched render.
+10. **Theme (E1-E7):** `THEMES`+`_themeCls`, `setTheme`+`_syncThemeColorMeta`, `initTheme` live-follow, `toggleTheme`, `_applyThemeIcon`, picker markup; `index.html:8` default + `manifest.json` `theme_color`.
+11. **DO NOT touch:** safe-area `env()` calcs, the font `@import`, `fitKpiValues`, print/quote-builder styles, `firestore.rules`.
+12. **FINAL:** bump `CACHE_VER` in `sw.js:11` (`bi-ops-v162` → `bi-ops-v163`) — single bump for all edits. (App code deploys via `git push origin master`; no rules deploy needed — zero rules change.)
+
+---
+
+### J. Manual verification checklist (no automated suite)
+
+For **each of the 3 picker themes (Office, Auto→both OS modes, Obsidian)** AND spot-check the 4 hidden themes still render if forced via `localStorage.setItem('bi-theme','midnight')`:
+1. **KPI auto-fit @ 375px:** open the finance dashboard at 375px width; a long peso figure (e.g. `₱1,234,567.89`) in a `.kpi-value` and a `.stat-num` card must shrink to fit, floor 11px, no clipping (the twice-fixed bug). Confirm `el.dataset.maxFs` still captures the CSS size (font-size still resolves via `--fs`/clamp).
+2. **Modal:** open one representative modal (e.g. a task or expense modal) — border-radius, glass background, and `::before`/`::after` accents render as before the merge.
+3. **Bottom-nav:** renders with correct height, active-item accent color, per-page icon strokes (styles.css:3181-3196), and the `.nav-shrunk` state on scroll.
+4. **Icons:** dept cards/nav show Lucide glyphs (not empty boxes) — proves `createIcons` ran; a legacy notification (old emoji `icon`) and a new one both show an icon.
+5. **Auto:** with theme=Auto, toggle OS light/dark (macOS System Settings) while the app is open → theme flips instantly, and the browser/status-bar `theme-color` follows (inspect `<meta name=theme-color>` content changes).
+6. **Focus ring:** Tab through nav, buttons, inputs, AND a previously-unlisted element (a bare `onclick` div, an icon-only button) → all show the 2px `--brand-primary` ring; mouse-click shows none; a `[tabindex="-1"]` scroll container shows none.
+7. **Print:** open a payslip/quote print preview → still renders in its own untouched styling (confirms 17 didn't leak into WS14 territory).
+8. **Notch/PWA:** on an iOS device/simulator (or DevTools device with safe-area), topbar/bottom-nav still clear the notch & home indicator (safe-area untouched — sanity check only).
 
 ## Risks / cross-workstream interactions
 

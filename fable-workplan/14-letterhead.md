@@ -168,16 +168,266 @@ No new collections exist yet for workstream 14 itself — this is grounding on w
 - CACHE_VER in sw.js must be bumped on any .js/.css edit (CLAUDE.md) — auto-handled by the pre-commit hook per current setup, but if a NEW file (e.g. js/letterhead.js) is added it must also be added to index.html's script list AND sw.js's PRECACHE array by hand.
 - Version stamps are auto-bumped by .git/hooks/pre-commit (CLAUDE.md) — do not hand-edit window.APP_VERSION or the vX.Y.Z strings.
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-- [ ] Sequencing vs workstream 9 (BRAND): V12-PLAN.md states window.BRAND (workstream 9, not started) 'drives ... all print headers.' Does workstream 14's letterhead engine consume window.BRAND as a hard dependency (build 9 first, or build both together), or does 14 ship with its own interim company-info object now (duplicating quote-builder-v2's local `CO` map) that gets swapped for window.BRAND later? Tradeoff: building 14 first risks a second throwaway config object (there are already at least 4: quote-builder-v2's CO, the payslip's hardcoded strings, the PO's hardcoded strings, the billing invoice's hardcoded strings); waiting for 9 blocks 14 entirely.
-- [ ] Which registered legal entity + TIN prints on which document type? Real strings found in the live code: 'Barro Industries OPC' (SEC-registered OPC, per js/modules.js:1770, used as the entity on quotes/PO/company-info tab), 'NEILBARRO STEEL & METAL FABRICATION SERVICES' with TIN 951-145-613-000 (a DTI sole-prop trade name, appears ONLY on payslips and billing invoices, js/departments.js:4310-4313 and :6800-6803), 'Barro Kitchens' (trademark/sub-brand under Barro Industries OPC), and 'Brilliant Steel Corporation' (a wholly separate partner entity, signed by Gerald Chan). This is a real BIR/compliance question, not a styling one — is the correct behavior one canonical entity+TIN per doc TYPE (e.g. all BIR-facing docs use the DTI trade name+TIN, all client-facing marketing docs use the OPC/trademark name), one per COMPANY/department, or does Fable need to surface this back to Neil as an open business question rather than silently picking one?
-- [ ] Doc-serial-number scheme: four different, mutually incompatible schemes exist today — quotes use client-computed `CO-LOC-METHOD-YYMMDD-SEQ-Rn` (quote-builder-v2.html:1263-1276, seq/rev derived from a client-side query of the current user's own docs, racy under concurrent salespeople); billing invoices use `INV-YYYYMMDD-SEQ` scoped to one project's `invoices` array length (departments.js ~line 11376); POs reuse whatever `prNo`/`rfqNo` purchasing already assigned (no dedicated serial); payslips have no serial at all. Meanwhile a genuinely atomic, rules-covered counter pattern already exists (`_counters/{docId}` + `runTransaction`, js/app.js:440-446, used today only for employeeId). Should the letterhead engine standardize all doc types on `_counters`-backed atomic sequences (one counter doc per doc-type, e.g. `_counters/quote_BK`), keep each generator's existing scheme as-is (accept the collision risk), or something in between (e.g. atomic counters only for BIR-facing docs where a gap/duplicate number is a compliance problem)?
-- [ ] Two incompatible technical delivery patterns for 'print' coexist: quote-builder-v2's in-page CSS-toggle (`.print-header`/`.no-print` classes + `window.print()` on the current document) vs. every other generator's new-window `document.write()` pattern. Should the shared letterhead be built as (a) a JS function that returns an HTML+`<style>` string, callable from both patterns (new-window callers document.write() it directly; the in-page caller injects it into a hidden container), (b) a pure DOM/CSS component requiring every generator to migrate to the in-page toggle pattern (a bigger rewrite), or (c) the reverse — migrate quote-builder-v2 to the new-window pattern for consistency with everything else? This is an architecture call, not a styling one.
-- [ ] Logo handling: quote-builder-v2's `#phLogo` `<img>` exists in markup but is never given a `src` and stays `display:none` (dead code) — the 'best' current printable renders NO logo at all. Every other generator references `icons/barro-industries.png` with an `onerror` hide-fallback via three slightly different path constructions (bare relative path in payslip/invoice; `location.origin + location.pathname.replace(...)` in the PO). Should the shared letterhead always attempt the logo, and what should the fallback be when the image 404s or hasn't loaded yet at print time (icons/ path may not resolve the same way inside a `window.open('','_blank')` document, since it has no base href context) — blank space, a text monogram, or omit the logo slot entirely for now until workstream 9 supplies a real asset?
-- [ ] Signature-block shape varies across today's generators: quote-builder-v2 uses a 2-column 'Conforme — Accepted by Client' / 'Reviewed & Approved by' grid (lines 887-901); the PO uses a 2-column 'Prepared by — Purchasing' / 'Approved by — President' grid (departments.js:12755-12758); the legacy app.js payslip generators use a 3-column 'Prepared by: Finance / Noted by: HR / Approved by: President' row (app.js:4680, 4999). Should the shared component support a variable count (2 or 3) of labeled signature slots per doc-type, or should Fable standardize on one fixed shape and require every doc type to fit it?
-- [ ] Which of the >=3 duplicate payslip generators (departments.js buildPayslipHTML tied to worker_profiles manual HR entry; app.js printPayslip and printWorkerPayslip, both tied to the legacy users-doc KPI x Attendance performance-multiplier model, NOT payroll/{uid}) does the letterhead-engine call site target? Is picking/retiring the canonical payslip generator in scope for workstream 14 (which only owns the header/footer chrome), or strictly workstream 24's job ('ONE branded template') — and if 24's, should 14 simply wrap all three for now, accepting that two of them will likely be deleted shortly after?
-- [ ] Which of the >=4 quote-print code paths (quote-builder-v2.html canonical; printBKQuote; printQuote; renderBSQuoteBuilder's inline bs-print-header, all in js/departments.js) should actually receive the shared letterhead? printBKQuote/printQuote/renderBSQuoteBuilder look like legacy 'quick print from list' duplicates that heavily overlap with V12-PLAN workstream 31's explicit note to 'delete ~1,800 lines of dead builder code' — should workstream 14 retrofit them anyway (in case they survive), skip them and let 31 delete them first, or is determining which is dead code itself blocked on 31's audit (i.e. sequencing: does 31 need to run before 14 touches any quote print path)?
+### Resolved decisions (one-line rulings)
+
+1. **Sequencing vs WS09 → WS14 consumes `window.BRAND` as a HARD dependency; no interim CO duplicate in the parent app.** BRAND ships in the same v12 batch (config.js, appended by WS09) and loads before departments.js. The quote-builder-v2.html iframe keeps its own `CO` (isolation) and is NOT retrofitted here — it is already the working reference implementation.
+2. **Entity + TIN per doc → interim mapping = current behavior, exact BIR entity FLAGGED.** `brandEntity('bir')` (DTI trade name + TIN 951-145-613-000) for statutory/BIR-facing docs (payslip, billing invoice, and future OR/SI/2316); `brandEntity('corporate')` (Barro Industries OPC) for client/marketing docs (quotes, POs, proposals). This is byte-for-byte what the code prints today → zero behavior change. `‼️ FLAG FOR NEIL` below asks which entity is legally correct going forward.
+3. **Doc-serial → the letterhead engine is serial-AGNOSTIC (accepts `docNumber` as a string param).** WS14 changes NO existing serial scheme. A bonus `window.nextSerial(counterKey, prefix)` atomic helper (reusing the existing `_counters` + `runTransaction` pattern) is provided for future BIR docs; `_counters/*` is already covered by firestore.rules L112-115 (`allow read,write: if isAuth() && isAdmin()`), so **no rules change is required**. Migrating billing invoices to `_counters/invoice` is a RECOMMENDATION, not part of WS14's mechanical scope.
+4. **Delivery pattern → (a) a JS function returning HTML+`<style>` strings.** `window.buildLetterhead(opts) → { headerHTML, footerHTML, printCSS }`. New-window `document.write()` callers concatenate the three strings into their document; the in-page quote-builder could inject them into a hidden container later (not done now). This reaches BOTH technical patterns without migrating anyone's delivery mechanism.
+5. **Logo → always attempt, absolute URL, hide-on-error fallback.** The engine computes `location.origin + pathname-base + BRAND.logo.print` (the PO's technique) so it resolves inside a `window.open('','_blank')` doc that has no base href. Fallback = `onerror` hides the `<img>`; the entity name text remains prominent (no monogram needed).
+6. **Signature block → variable array of labeled slots (1–4), rendered in an auto-column grid.** `signatures: [{label, name, title}]`. Doc types genuinely differ (2-col Conforme/Approved, 2-col Prepared/Approved, 3-col Finance/HR/President); a fixed shape would force awkward fits.
+7. **Which payslip generator → OUT of scope to pick/retire (that is WS24).** WS14 converts the live, `worker_profiles`-backed `buildPayslipHTML` header/footer as the reference conversion, and LEAVES `app.js` `printPayslip`/`printWorkerPayslip` untouched (WS24 consolidates/deletes them).
+8. **Which quote path → NONE retrofitted by WS14.** quote-builder-v2.html = canonical reference (already correct, WS31 v3 will consolidate). `printBKQuote`/`printQuote`/`renderBSQuoteBuilder` = DEFER-TO-WS31 (likely deleted). The live escHtml gaps in `printBKQuote` (L5592-5594) and `printQuote` (L9105) are FLAGGED as a tiny optional safety patch, independent of the letterhead work.
+
+### Company/entity data model (the compliance decision — ships as documented interim)
+
+| Doc type | Entity via | Name printed | TIN printed | Address |
+|---|---|---|---|---|
+| Payslip (buildPayslipHTML) | `brandEntity('bir')` | NEILBARRO STEEL & METAL FABRICATION SERVICES | 951-145-613-000 | full postal |
+| Billing Invoice | `brandEntity('bir')` | NEILBARRO STEEL & METAL FABRICATION SERVICES | 951-145-613-000 | full postal |
+| Purchase Order | `brandEntity('corporate')` | Barro Industries OPC | (none) | short marketing |
+| Inventory Count Form | `brandEntity('corporate')` | Barro Industries OPC | (none) | short marketing |
+| Quotes (BK/BS) | `BRAND.companies.{BK,BS}` (iframe keeps its own CO) | per company | (none) | per company |
+| Future OR / Sales Invoice / 2316 | `brandEntity('bir')` | ‼️ pending Neil | ‼️ pending | — |
+
+This table reproduces exactly what each generator prints today, so the migration is behavior-preserving. `brandEntity()` is defined in WS09's `config.js` block.
+
+### The letterhead engine (exact — new file `js/letterhead.js`, full body)
+
+```js
+/* ═══════════════════════════════════════════════════
+   BARRO INDUSTRIES — Shared Document Letterhead Engine
+   js/letterhead.js  (loads AFTER config.js so window.BRAND exists)
+   ═══════════════════════════════════════════════════
+   window.buildLetterhead(opts) -> { headerHTML, footerHTML, printCSS }
+   All three are inlinable strings usable inside a window.open()+document.write()
+   document OR injected into an in-page container. Caller concatenates:
+     <style>${printCSS}${docSpecificCSS}</style> ... ${headerHTML} ...<sections>... ${footerHTML}
+   The engine escapes every field it interpolates (BRAND fields are trusted-static;
+   doc-specific fields like docNumber / signature names may be user-derived). */
+(function () {
+  const esc = (s) => (window.escHtml ? window.escHtml(String(s == null ? '' : s))
+                                     : String(s == null ? '' : s).replace(/[&<>"']/g,
+                        c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])));
+
+  // Absolute logo URL — resolves inside window.open('','_blank') docs (no base href).
+  function absLogo(path) {
+    try { return location.origin + location.pathname.replace(/[^/]*$/, '') + path; }
+    catch (_) { return path; }
+  }
+
+  window.buildLetterhead = function (opts) {
+    const o = opts || {};
+    const B = window.BRAND || {};
+    const ent = o.entity || (window.brandEntity ? window.brandEntity('corporate') : {});
+    const accent = o.accent || '#1E3A5F';
+    const showLogo = o.showLogo !== false;
+    const logoUrl = absLogo(o.logo || (B.logo && B.logo.print) || 'icons/barro-industries.png');
+
+    // ── Entity identity lines (left column) ──
+    const idLines = [];
+    if (ent.registration) idLines.push(esc(ent.registration));
+    if (ent.address)      idLines.push(esc(ent.address));
+    const contactBits = [];
+    if (ent.phone) contactBits.push(esc(ent.phone));
+    if (ent.email) contactBits.push(esc(ent.email));
+    if (contactBits.length) idLines.push(contactBits.join('  ·  '));
+    if (ent.tin)   idLines.push('TIN: ' + esc(ent.tin));
+
+    const logoImg = showLogo
+      ? `<img src="${logoUrl}" class="lh-logo" alt="" onerror="this.style.display='none'"/>` : '';
+
+    // ── Right column: doc title / number / date / extra meta ──
+    const metaLines = [];
+    if (o.docNumber) metaLines.push(`<div class="lh-docno">${esc(o.docNumber)}</div>`);
+    if (o.dateLabel) metaLines.push(`<div class="lh-docdate">${esc(o.dateLabel)}</div>`);
+    (o.extraMeta || []).forEach(m => metaLines.push(`<div class="lh-docmeta">${esc(m)}</div>`));
+
+    const headerHTML =
+`<div class="lh-header" style="--lh-accent:${accent}">
+  <div class="lh-id">
+    ${logoImg}
+    <div>
+      <div class="lh-name">${esc(ent.name || B.name || '')}</div>
+      ${idLines.map(l => `<div class="lh-idline">${l}</div>`).join('')}
+    </div>
+  </div>
+  <div class="lh-doc">
+    ${o.docTitle ? `<div class="lh-doctitle">${esc(o.docTitle)}</div>` : ''}
+    ${metaLines.join('')}
+  </div>
+</div>`;
+
+    // ── Signature grid (variable 1–4 slots) ──
+    const sigs = Array.isArray(o.signatures) ? o.signatures : [];
+    const sigHTML = sigs.length
+      ? `<div class="lh-sig-row" style="grid-template-columns:repeat(${sigs.length},1fr)">` +
+        sigs.map(s =>
+          `<div class="lh-sig"><div class="lh-sig-line"></div>` +
+          `<b>${esc(s.name || '')}</b>` +
+          `<span>${esc(s.label || '')}${s.title ? ' — ' + esc(s.title) : ''}</span></div>`
+        ).join('') + `</div>`
+      : '';
+
+    const footerHTML =
+`${sigHTML}
+<div class="lh-footer" style="--lh-accent:${accent}">${esc(o.footerNote || (B.fullName || 'Barro Industries Operating System'))}</div>`;
+
+    // ── Shared print CSS — generalized from quote-builder-v2.html:329-386 ──
+    const printCSS =
+`.lh-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;padding-bottom:7px;border-bottom:2.5px solid var(--lh-accent,#1E3A5F);}
+.lh-id{display:flex;align-items:flex-start;gap:12px;}
+.lh-logo{height:56px;flex-shrink:0;margin-top:1px;}
+.lh-name{font-size:16pt;font-weight:900;color:var(--lh-accent,#1E3A5F);letter-spacing:.4px;line-height:1.1;}
+.lh-idline{font-size:9pt;color:#555;margin-top:1px;}
+.lh-doc{text-align:right;}
+.lh-doctitle{font-size:14pt;font-weight:900;color:var(--lh-accent,#1E3A5F);letter-spacing:1px;}
+.lh-docno{font-size:11pt;font-weight:700;color:#333;margin-top:4px;}
+.lh-docdate,.lh-docmeta{font-size:9.5pt;color:#555;margin-top:2px;}
+.lh-sig-row{display:grid;gap:36px;margin-top:20px;}
+.lh-sig{text-align:center;}
+.lh-sig-line{border-top:1px solid #000;margin-top:26px;}
+.lh-sig b{display:block;font-size:11px;color:#000;margin-top:5px;}
+.lh-sig span{font-size:10px;color:#444;}
+.lh-footer{margin-top:18px;border-top:1px solid #ddd;padding-top:8px;font-size:9px;color:#999;text-align:center;}
+@media print{
+  @page{size:A4 portrait;margin:11mm 10mm 7mm;}
+  body{background:#fff!important;}
+  .lh-noprint{display:none!important;}
+  /* two-tier page-break strategy (quote fix aab024a): sections FLOW, headers repeat, rows stay whole */
+  .lh-section{page-break-inside:auto;break-inside:auto;}
+  thead{display:table-header-group;}
+  tr,.lh-avoid,.cat-row,.subtotal-row{page-break-inside:avoid;break-inside:avoid;}
+  .lh-sig-row{page-break-inside:avoid;}
+  th{background:var(--lh-accent,#1E3A5F)!important;color:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+}`;
+
+    return { headerHTML, footerHTML, printCSS };
+  };
+
+  // ── Bonus: atomic doc-serial for future BIR docs (reuses _counters, already rules-covered) ──
+  // e.g. await nextSerial('invoice','INV') -> 'INV-2026-000123'. Not called by WS14 conversions.
+  window.nextSerial = async function (counterKey, prefix) {
+    const ref = db.collection('_counters').doc(counterKey);
+    const n = await db.runTransaction(async t => {
+      const c = await t.get(ref);
+      const next = (c.exists ? (c.data().count || 0) : 0) + 1;
+      t.set(ref, { count: next }, { merge: true });
+      return next;
+    });
+    return `${prefix}-${(window.bizYear ? window.bizYear() : new Date().getFullYear())}-${String(n).padStart(6, '0')}`;
+  };
+})();
+```
+
+### Per-call-site before/after conversions
+
+**Wiring (index.html + sw.js) — do FIRST:**
+```html
+<!-- index.html: insert AFTER js/config.js (needs window.BRAND), before drive.js -->
+<script defer src="js/config.js"></script>
+<script defer src="js/letterhead.js"></script>   <!-- NEW -->
+<script defer src="js/drive.js"></script>
+```
+```js
+// sw.js PRECACHE array — add:
+  '/js/letterhead.js',
+// CACHE_VER is auto-bumped by the pre-commit hook once any .js is staged.
+```
+
+**(1) buildPayslipHTML — departments.js L4304-4316 header → engine (BIR entity)**
+```js
+// before (L4304-4316): hardcoded logo + company-name + NEILBARRO/CARLATAN/TIN block
+// after — at the top of the generator, build the letterhead once:
+const _lh = buildLetterhead({
+  docTitle: 'PAYSLIP',
+  entity: brandEntity('bir'),
+  accent: '#1a237e',
+  dateLabel: 'Pay Date: ' + fmtD(d.payDate),
+  signatures: [
+    { label: 'Prepared by', name: '', title: 'Finance' },
+    { label: 'Noted by',    name: '', title: 'HR' },
+    { label: 'Approved by', name: window.BRAND.legal.signatory.name, title: 'President' }
+  ],
+  footerNote: 'System-generated payslip · ' + window.BRAND.name + ' · ' + new Date().toLocaleString('en-PH')
+});
+// then: replace the <div class="header-top">…</div> block with  ${_lh.headerHTML}
+// add  ${_lh.printCSS}  inside the doc's <style>…</style>
+// append  ${_lh.footerHTML}  before the closing page div
+```
+
+**(2) buildBillingInvoiceHTML — departments.js L6795-6806 header → engine (BIR entity)**
+```js
+const _lh = buildLetterhead({
+  docTitle: 'BILLING INVOICE',
+  docNumber: esc(inv.no || ''),          // caller escapes (already user-derived)
+  dateLabel: 'Date: ' + fmtD(inv.date),
+  entity: brandEntity('bir'),
+  accent: '#1a237e',
+  signatures: [{ label:'Prepared by', name:'', title:'Finance' },
+               { label:'Approved by', name:window.BRAND.legal.signatory.name, title:'President' }],
+  footerNote: window.BRAND.name + ' · Generated ' + new Date().toLocaleString('en-PH')
+});
+// replace L6795-6806 header block with ${_lh.headerHTML}; keep the existing .doc-title/.meta-grid below.
+```
+
+**(3) printPurchaseOrder — departments.js L12716-12759 → engine (corporate entity)**
+```js
+// remove the local logoUrl computation (L12657 — engine computes its own absolute URL)
+const _lh = buildLetterhead({
+  docTitle: 'PURCHASE ORDER',
+  docNumber: e(p.prNo || p.rfqNo || ''),
+  dateLabel: 'Date: ' + e(issuedStr) + (p.neededBy ? ' · Needed by: ' + e(p.neededBy) : ''),
+  entity: brandEntity('corporate'),
+  accent: '#1E3A5F',
+  signatures: [{ label:'Prepared by', name:e(preparedBy), title:'Purchasing' },
+               { label:'Approved by', name:window.BRAND.legal.signatory.name, title:'President, Barro Industries OPC' }],
+  footerNote: window.BRAND.fullName + ' · Generated ' + new Date().toLocaleString('en-PH')
+});
+// replace <div class="htop">…</div> (L12717-12728) with ${_lh.headerHTML}
+// replace the .sign block (L12755-12758) + .foot (L12759) with ${_lh.footerHTML}
+// add ${_lh.printCSS} into the <style>; this fixes the old 'Operations System' footer string too.
+```
+
+**(4) openInventoryCountForm — departments.js L11939-12023 → engine (corporate entity)**
+```js
+// same shape as (3): docTitle:'PHYSICAL INVENTORY COUNT FORM', entity:brandEntity('corporate'),
+// footerNote keeps its 'Physical count supersedes system quantity upon approval.' sentence appended.
+// replace the .htop header + footer line; add ${_lh.printCSS}.
+```
+
+**Dispositions for legacy generators (do NOT convert):**
+- `app.js printPayslip` (L4666-4685) & `printWorkerPayslip` (L4970-5004) → **LEAVE. WS24** consolidates/deletes them (they read the legacy `users`-doc KPI×attendance model, not `payroll/{uid}`).
+- `departments.js printBKQuote` (L5560-5627) & `printQuote` (L9096-9111) → **LEAVE. WS31** (dead-builder deletion). `‼️` recommend a 2-line escHtml patch on the unescaped fields (`printBKQuote` L5592-5594 `q.quoteNumber/q.date/q.validUntil`; `printQuote` L9105 `q?.date`) as an independent safety fix.
+- `departments.js renderBSQuoteBuilder` bs-print-header (L7693-7710) → **LEAVE. WS31** (~1,800 lines of dead builder code).
+- `quote-builder-v2.html` print-header (L420-438) → **LEAVE. Reference implementation**; WS31 v3 rebuild can adopt `buildLetterhead` if it survives.
+
+### `‼️ FLAG FOR NEIL`
+
+1. **BIR entity/TIN — compliance, not styling.** Three legal identities appear in code: `Barro Industries OPC` (SEC), `NEILBARRO STEEL & METAL FABRICATION SERVICES` + TIN 951-145-613-000 (DTI sole-prop), and `Brilliant Steel Corporation` (separate). Only the DTI name carries a real TIN. The interim mapping prints the **DTI name+TIN on payslips/invoices** (exactly as today) and the **OPC name on quotes/POs**. Confirm: is the OPC the correct registered taxpayer for BIR-facing docs going forward, and what is the OPC's TIN? Until answered, BIR docs stay on the DTI name+TIN. Recommendation: keep current split.
+
+### Migration checklist (execution order)
+
+1. **config.js** — `window.BRAND` + `window.brandEntity` land (WS09 dependency — must merge first).
+2. **Create `js/letterhead.js`** with the full engine body above.
+3. **Wire it**: add the `<script defer src="js/letterhead.js">` tag after config.js in index.html; add `'/js/letterhead.js'` to sw.js PRECACHE. (Hook auto-bumps CACHE_VER + APP_VERSION on commit.)
+4. **Convert buildPayslipHTML** header/footer/CSS (conversion 1) — one Edit.
+5. **Convert buildBillingInvoiceHTML** (conversion 2) — one Edit.
+6. **Convert printPurchaseOrder** (conversion 3); remove the now-dead local `logoUrl` (L12657).
+7. **Convert openInventoryCountForm** (conversion 4).
+8. **Commit** (re-`git diff` departments.js first — OneDrive/concurrent-edit hazard; expect Edit-tool mtime staleness, batch edits).
+9. **Deploy**: `git push origin master`. **No firestore.rules deploy needed** (`_counters` already covered; no new collection introduced by WS14's core).
+10. **Verify** (manual — no test suite): print each converted doc; for a LONG one (multi-page payslip / long PO), confirm page 1 is NOT blank and column headers repeat on page 2 (the aab024a two-tier fix now applies everywhere). Confirm the logo renders inside the new-window doc (absolute URL) and hides cleanly if 404.
+
+### Out of scope for WS14 (do not scope-creep)
+
+- Payroll data-source correctness (`buildPayslipHTML` reads HR-form values, not `payroll/{uid}`) → **WS24**.
+- Picking/deleting the canonical payslip generator among the three → **WS24**.
+- Deciding which quote builder survives / deleting dead builder code → **WS31**.
+- Changing any existing doc-serial scheme (quotes' client-side counter, PO's prNo reuse, invoice array-length seq) → left as-is; `nextSerial` is provided but not wired.
+- President-editable / Firestore-backed brand copy → deferred (see WS09 decision 3).
 
 ## Risks / cross-workstream interactions
 

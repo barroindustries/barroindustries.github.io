@@ -297,13 +297,634 @@ order_tracking/{20-char autoId} — cited only as the precedent shape for a publ
 - The existing Cloud Functions deployment path is `cd functions && npm run deploy` (= `firebase deploy --only functions`, Node 22, per CLAUDE.md) — separate from the `git push`-triggered GitHub Pages deploy for the frontend. If Fable chooses the Cloud-Function-lookup option for username login, that's a SEPARATE deploy step from the rules/frontend changes, and must be sequenced correctly (function must exist before any frontend code calls it, or the call fails loudly for every worker attempting to log in).
 - Re-diff before a whole-file firestore.rules deploy (per this repo's working memory) — concurrent sessions may have touched firestore.rules; re-run `git diff` immediately before `firebase deploy --only firestore:rules` so this workstream's rules edit doesn't accidentally ship or clobber an unrelated in-flight change.
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-- [ ] Username lookup unblock — public Firestore rule vs. Cloud Function. Option A: broaden `/users/{uid}` (or a new narrow collection) with something like `allow list: if request.query.limit <= 1 && ...` — Firestore security rules CAN constrain a query's `.where()` clause and result size in some SDK versions, but doing this safely on the FULL `users` collection risks exposing every user's role/department/employeeId/phone to an unauthenticated caller who crafts their own query (rules can restrict shape, not redact fields from a list read) — the order_tracking precedent (firestore.rules:801-806) works specifically because it's a single-doc `get` on an unguessable token, not a `list`/`where`; there is no equivalent 'unguessable token' for a username lookup, since the whole point is the input IS the username. Option B: a new `onCall` Cloud Function (no `context.auth` required, following the `adminResetPassword` shape in functions/index.js:183-215 but WITHOUT its auth-required check) that takes a username and returns only `{ authEmail }` (or a signed custom-auth-token directly, skipping the email round-trip entirely) — narrower exposure (one field, one document) but is a new 'public unauthenticated Cloud Function' pattern not yet used anywhere in this codebase, and adds a second deploy path (functions vs. rules/frontend) that must be coordinated. Fable must weigh: exposure surface, deploy-sequencing risk, and whether a subset of `users` fields (e.g. a dedicated `usernames/{username}` doc containing ONLY `{ authEmail }`, written alongside the `users` doc at Create-Worker-Account time, with `allow get: if true` / `allow list: if false` mirroring the order_tracking shape exactly) is a third, possibly simplest, option that reuses the existing pattern instead of inventing a new one.
-- [ ] Worker_profiles ID card + QR-verify with no auth.uid — what does 'verify' resolve against? Since a worker_profiles doc has no logged-in identity, a scanned QR code can't authenticate as that worker. Option A: mirror order_tracking exactly — mint an unguessable public token per worker_profiles doc (either the docId itself if it's already an unguessable Firestore auto-id, or a separate token field) with a new firestore.rules match allowing `get: if true` / `list: if false` on a narrow public-safe projection (name, photo, employeeId, department, status=active/inactive — explicitly NOT ssNum/phNum/pagibigNum/tinNum/dailyRate/caBalance/address/phone), verified via a public HTML page analogous to track.html. Option B: a Cloud Function verify endpoint that looks up the token server-side and returns only a yes/no + name/photo (never exposes the raw doc at all, tightest exposure but another new deploy artifact). Fable must decide the exact public-safe field allowlist and whether the token lives on the worker_profiles doc itself (simpler) or a separate mapping collection (extra indirection but keeps the sensitive payroll doc away from any public rule entirely, even a narrow one) — the latter is likely safer given `worker_profiles` currently holds SSS/PhilHealth/Pag-IBIG/TIN numbers and cash-advance balances in the SAME doc shape renderFinanceHRProfiles already uses.
-- [ ] Should `worker_profiles` and username-login 'HR-managed worker accounts' (users docs with `hrManagedAccount:true`) be unified into one identity, or deliberately kept as two separate concepts? Today they are UNRELATED records — a worker_profiles doc (weekly-paid, no login, has SSS/PhilHealth/etc.) and a users-doc-with-username (has a real Firebase Auth account, no SSS/PhilHealth/etc. fields at all in its schema) can describe the same physical person with zero data linkage. Fable must decide: (a) keep them separate — worker_profiles gets its own ID-card+QR system entirely independent of login/auth, Create-Worker-Account stays a distinct opt-in for workers who need app access (attendance check-in, tasks) — tradeoff: HR may end up double-entering the same person in two places; or (b) add a linking field (e.g. `worker_profiles.linkedUserId`) so a worker_profiles-holder who ALSO gets a username account shows as one person across both HR Profiles and Team & Payroll screens — tradeoff: touches the salary_raises `subjectType` discriminator, the payroll-vs-worker_profiles pay-computation split already called out in workstream 22/23 (Cash-advance/Raises), and risks re-opening the 'two project collections'/'no single source of truth' class of issue flagged in the finance-reporting-open-items memory.
-- [ ] Where should the resurrected Create-Worker-Account entry point live? Option A: re-link `page:'team'` (renderTeam, the existing Team & Payroll admin table) directly into the sidebar for president/manager, e.g. as its own nav item or as what the HR hub's 'People & Roles' card points to INSTEAD of 'team-directory' (which currently goes to the unrelated social directory, renderTeamTab in modules.js:348 — Employee-of-the-Month/status notes/search, no salary editing, no account creation). Re-pointing 'People & Roles' would fix the orphan with zero new nav real estate but changes what that existing, already-used card does for anyone who currently relies on it for the social directory. Option B: add a new HR hub card (HR module currently has 5 cards: People & Roles, Payroll, Worker Payslips, Leave, Attendance — departments.js:2097-2103) e.g. '🔑 Accounts & Logins' → `navigateTo('team')`, leaving 'People & Roles' pointed at the directory as today — additive, no behavior change to an existing entry point, but grows the HR hub to 6 cards. Option C: fold Create-Worker-Account as a button directly into the existing, ALREADY-NAV-WIRED 'Worker Payslips' screen (renderFinanceHRProfiles, which already lists worker_profiles and is reached via HR → Worker Payslips) so HR does 'create profile + create login' in one place — but that conflates the two unrelated data shapes from the previous open question, so this choice is entangled with that one and shouldn't be decided independently of it.
-- [ ] Print/export and CR80 batch print — this repo currently has ZERO `@media print` rules anywhere in css/styles.css (confirmed by grep), so both the single employee-ID print/export ask and the worker-ID batch/CR80-size print ask are greenfield CSS work, not extensions of an existing print stylesheet. Fable should decide whether these use a browser print dialog (`window.print()` + a `@media print` stylesheet scoped to `.id-card`, roughly CR80 physical dimensions at print resolution) or a generated PDF/export (heavier — would pull in a client-side PDF library, which this vanilla-JS/no-bundler codebase currently has none of; note quote-builder-v2.html/track.html are the only 'export'-adjacent standalone tools in the repo and neither currently does image/PDF card export either).
+### Resolved decisions
+
+1. **Worker-login username unblock → OWNED BY WS19, not re-decided here.** WS19 (DECIDED) already ships the public `usernames/{usernameLower}` → `{email, uid}` map (`allow get: if true; allow list: if false; create/update/delete: isAuth() && isAdmin()`) and rewrites `app.js:696-703` to `db.collection('usernames').doc(input.toLowerCase()).get()`. WS27's ONLY obligation is to make `openCreateWorkerModal` (and any username edit) WRITE that mapping doc, plus contribute the one-time backfill. Rationale: composing beats a second competing pre-auth pattern.
+2. **QR-verify uses a NEW public `id_verify/{token}` mapping collection — never `worker_profiles`/`users` directly.** Mirrors the `order_tracking` precedent (`get:true`/`list:false`, unguessable token). The doc holds ONLY a public-safe projection (name, photo, id number, department, job title, employment type, company, status, issuedOn). SSS/PhilHealth/Pag-IBIG/TIN/rates/caBalance/address/phone/email NEVER leave the sensitive doc. One collection serves BOTH employee IDs and worker IDs via a `kind` discriminator. Rationale: keeps every payroll field one layer away from any public rule — a narrow rule on `worker_profiles` itself is too dangerous given it co-houses SSS/TIN/CA balance.
+3. **`worker_profiles` and `hrManagedAccount` users stay TWO separate identities** — with an OPTIONAL one-way `worker_profiles.linkedUserId` (nullable) set only when HR explicitly issues a login for that worker. No change to `salary_raises.subjectType`, no change to the payroll-vs-worker_profiles pay split. Rationale: unifying reopens the "two sources of truth" class-issue flagged in finance memory and collides with WS22/23/24 which already key on the split; a soft link is enough for the ID system, which discriminates by `kind` exactly as `salary_raises` discriminates by `subjectType`.
+4. **Create-Worker-Account re-link → Option B (additive HR-hub card), president/manager only.** Add a 6th HR-hub card `🔑 Accounts & Logins` → `navigateTo('team')`, rendered ONLY for president/manager (hidden for secretary/finance so there is no dead click into `renderAccessDenied('Team')`). `People & Roles` keeps pointing at the social directory (no behaviour change to an existing entry). `renderTeam()`'s own `!isPresident()&&currentRole!=='manager'` gate is LEFT UNCHANGED. Worker ID-card generation (which finance needs) lives separately as buttons inside the already-nav-wired `renderFinanceHRProfiles` (HR → Worker Payslips), so finance never needs `renderTeam`.
+5. **Print/export → browser print at CR80, NO PDF library.** The digital employee card stays an on-screen widget; a `🖨 Print / Save PDF` button opens a new-window `document.write()` print document (same pattern as payslip/PO) sized to CR80 (85.6 × 53.98 mm), front+back, then `window.print()` (user picks "Save as PDF"). Worker batch print = one new-window doc with N CR80 cards, `@page` sized. QR is rendered by a vendored dependency-free `qrcode-generator` (a `window.buildQRSVG()` wrapper returning an inline SVG string, so it survives inside the styleless new-window doc); if the lib is unavailable the card falls back to printing the plain verify URL text. Rationale: no bundler exists; a client-side PDF lib is disproportionate and offline-fragile.
+6. **Worker ID numbering → new `_counters/workers` atomic transaction minting `BI-W-###`; NO backfill.** Existing free-text `worker_profiles.idNumber` values are left untouched (some already printed on physical cards). HR presses a `Generate` button to mint a `BI-W-###` into the ID field for profiles that want one. Rationale: mirrors the proven `_counters/employees` pattern (app.js:440-446) for race safety; renumbering issued cards is a compliance/logistics hazard with no upside.
+7. **Worker photo upload → new role-gated Storage path `worker-id-photos/{profileId}/…`.** Cannot reuse `profile-photos/{uid}` (uid-owner-scoped; a worker_profiles doc has no uid). New `Drive.uploadWorkerPhoto(file, profileId)` helper writes there; `worker_profiles` gains a `photoUrl` field. Gated by `isFinanceClaim()` (custom-claim tier, HR = finance/admin).
+
+---
+
+### 0. New files + load-order/PRECACHE wiring
+
+**New file `js/qrcode.js`** — vendor the MIT `qrcode-generator` (Kazuhiko Arase) UMD single-file build (≈4 KB) verbatim (download `https://raw.githubusercontent.com/kazuhikoarase/qrcode-generator/master/js/qrcode.js`), then append this wrapper at the bottom of the same file:
+```js
+// ── Thin app wrapper: text → inline SVG string (works inside document.write) ──
+window.buildQRSVG = function(text, px){
+  px = px || 96;
+  try {
+    var q = qrcode(0, 'M');            // type 0 = auto-fit, error-correction M
+    q.addData(String(text)); q.make();
+    var n = q.getModuleCount(), cell = px / n, svg = '';
+    svg += '<svg xmlns="http://www.w3.org/2000/svg" width="'+px+'" height="'+px+'" viewBox="0 0 '+px+' '+px+'" shape-rendering="crispEdges">';
+    svg += '<rect width="'+px+'" height="'+px+'" fill="#fff"/>';
+    for (var r=0;r<n;r++) for (var c=0;c<n;c++) if (q.isDark(r,c))
+      svg += '<rect x="'+(c*cell).toFixed(2)+'" y="'+(r*cell).toFixed(2)+'" width="'+cell.toFixed(2)+'" height="'+cell.toFixed(2)+'" fill="#000"/>';
+    return svg + '</svg>';
+  } catch(e){ return ''; }             // caller falls back to printing the URL text
+};
+```
+- **index.html**: insert `<script defer src="js/qrcode.js"></script>` immediately AFTER line 297 (`js/config.js`) and BEFORE line 306 (`js/drive.js`) — it is a leaf lib with no deps, must exist before app.js/departments.js print handlers run.
+- **sw.js PRECACHE** (array at sw.js:16-36): add `'/js/qrcode.js'`, `'/v/'`, `'/v/index.html'`.
+- **CACHE_VER**: bump `sw.js:11` `'bi-ops-v162'` → `'bi-ops-v163'` by hand (JS/CSS edits; auto-hook only bumps APP_VERSION).
+
+**New file `/v/index.html`** — public ID-verify page, a near-clone of `/t/index.html` (self-contained, inlined Firebase compat, no auth). Full body:
+```html
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>Verify ID — Barro Industries</title>
+<meta name="theme-color" content="#0F6CBD"/><meta name="robots" content="noindex"/>
+<meta name="description" content="Verify a Barro Industries employee or worker ID."/>
+<link rel="icon" href="/icons/favicon.png"/>
+<meta property="og:type" content="website"/><meta property="og:site_name" content="Barro Industries"/>
+<meta property="og:title" content="Verify ID — Barro Industries"/>
+<meta property="og:description" content="Confirm this ID belongs to an authorised member of Barro Industries."/>
+<meta property="og:image" content="https://barroindustries-operatingsystem.ravenmails.com/icons/icon-512.png"/>
+<style>
+  :root{--blue:#0F6CBD;--blue-2:#2886DE;--ink:#242424;--muted:#616161;--line:#E1DFDD;--bg:#FAF9F8;--card:#FFF;--ok:#107C41;--gray:#8A8886;--r:10px;--shadow:0 2px 10px rgba(0,0,0,.06);--font:'Segoe UI',-apple-system,system-ui,Roboto,Arial,sans-serif}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);background:var(--bg);color:var(--ink);line-height:1.5;min-height:100dvh;padding:16px}
+  .wrap{max-width:520px;margin:0 auto}
+  .brand{display:flex;align-items:center;gap:12px;padding:8px 2px 18px}
+  .brand img{width:40px;height:40px;border-radius:9px}
+  .brand-name{font-size:17px;font-weight:800;background:linear-gradient(90deg,var(--blue),var(--blue-2));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .brand-sub{font-size:11px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:22px;margin-bottom:14px}
+  .state{text-align:center;padding:48px 20px;color:var(--muted)}.state .ic{font-size:44px;margin-bottom:12px}
+  .vhead{display:flex;gap:16px;align-items:center}
+  .vphoto{width:88px;height:88px;border-radius:12px;object-fit:cover;background:#F3F2F1;border:1px solid var(--line);flex:0 0 auto;display:flex;align-items:center;justify-content:center;font-size:34px}
+  .vname{font-size:20px;font-weight:800}.vrole{font-size:13px;color:var(--muted)}
+  .vok{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--ok);margin-top:6px}
+  .vbad{color:var(--gray)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+  .kv .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.kv .v{font-size:14px;font-weight:600;margin-top:1px}
+  .foot{text-align:center;font-size:11px;color:var(--muted);padding:18px 0 8px}
+  @media(max-width:420px){.grid{grid-template-columns:1fr}}
+</style></head><body>
+<div class="wrap">
+  <div class="brand"><img src="/icons/bi-logo.svg" alt="BI" onerror="this.style.display='none'"/>
+    <div><div class="brand-name">Barro Industries</div><div class="brand-sub">ID Verification</div></div></div>
+  <div id="root"><div class="state"><div class="ic">🪪</div><div>Verifying ID…</div></div></div>
+  <div class="foot">Barro Industries · This page confirms an ID was issued by Barro Industries. It never shows salary, government numbers, or contact details.</div>
+</div>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>(function(){
+  var cfg={apiKey:"AIzaSyA1-fDeMCxTsUm29O49l954Ez5BqbyHijk",authDomain:"barro-industries.firebaseapp.com",projectId:"barro-industries",storageBucket:"barro-industries.firebasestorage.app",messagingSenderId:"700081895848",appId:"1:700081895848:web:265511313b4ff74575459d"};
+  var root=document.getElementById('root');
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+  function stateMsg(ic,t,s){root.innerHTML='<div class="state"><div class="ic">'+ic+'</div><div style="font-size:16px;font-weight:700;color:var(--ink)">'+esc(t)+'</div>'+(s?'<div style="margin-top:6px">'+esc(s)+'</div>':'')+'</div>';}
+  var params=new URLSearchParams(location.search);
+  var token=(params.get('t')||location.search.replace(/^\?/,'').split('&')[0]||'').trim();
+  if(!token){stateMsg('🔗','Invalid link','This verification link is missing its code.');return;}
+  firebase.initializeApp(cfg); var db=firebase.firestore();
+  db.collection('id_verify').doc(token).get().then(function(snap){
+    if(!snap.exists){stateMsg('🔍','ID not found','No ID matches this code. It may have been revoked.');return;}
+    render(snap.data());
+  }).catch(function(e){stateMsg('⚠️','Could not verify','Try again shortly. ('+esc(e.code||e.message||'error')+')');});
+  function render(d){
+    var active=(d.status!=='inactive');
+    var photo=d.photoUrl?'<img class="vphoto" src="'+esc(d.photoUrl)+'" alt="" onerror="this.outerHTML=&quot;<div class=\\&quot;vphoto\\&quot;>👤</div>&quot;"/>':'<div class="vphoto">👤</div>';
+    var rows=[['ID Number',d.idNumber],['Department',d.department],['Position',d.jobTitle],['Type',d.employmentType],['Company',d.company],['Issued',d.issuedOn]].filter(function(r){return r[1];});
+    root.innerHTML='<div class="card"><div class="vhead">'+photo+'<div><div class="vname">'+esc(d.name||'—')+'</div><div class="vrole">'+esc(d.jobTitle||d.department||'')+'</div>'+(active?'<div class="vok">✅ Verified — '+esc(d.kind==='worker'?'authorised worker':'authorised employee')+'</div>':'<div class="vok vbad">⚠️ This ID is marked inactive</div>')+'</div></div>'+(rows.length?'<div class="grid">'+rows.map(function(r){return '<div class="kv"><div class="k">'+esc(r[0])+'</div><div class="v">'+esc(r[1])+'</div></div>';}).join('')+'</div>':'')+'</div>';
+  }
+})();</script>
+</body></html>
+```
+Verify URL shape: `https://<host>/v/?<token>` (bare-query form, exactly like `/t/?<code>`).
+
+---
+
+### 1. Interim `window.BRAND` (WS9 not started — flagged)
+
+‼️ **FLAG FOR NEIL:** the ID adopts brand identity from `window.BRAND`, but WS9 (BRAND module) is not built and WS14 (letterhead entity/TIN mapping) is undecided. WS27 ships an **interim** `window.BRAND` so the ID renders now; WS9 replaces it. **Do NOT print a TIN on the employee/worker ID** — an ID is not a BIR document, and the personal/company TIN is sensitive; entity/TIN-per-document is WS14/Neil's call. Add to `js/config.js` (top-level, after `window.bizYear` ~line 37):
+```js
+// Interim brand identity — WS9 (BRAND module) will own/replace this. ID cards
+// read from it; no TIN on IDs by design (IDs are not BIR documents).
+window.BRAND = window.BRAND || {
+  name:      'BARRO INDUSTRIES',
+  legalName: 'Barro Industries OPC',
+  tagline:   'Commercial Kitchen & Steel Solutions',
+  logo:      'icons/barro-industries.png',
+  verifyBase:(location.origin || 'https://barroindustries-operatingsystem.ravenmails.com') + '/v/',
+  navy:      '#1E3A5F'
+};
+```
+
+---
+
+### 2. Shared helpers (add to `js/app.js`, just above `renderIDCard` at line 3191)
+
+```js
+// ── ID verify token minting + public-safe projection ──────────────
+// Builds the ONLY fields that may live in the public id_verify/{token} doc.
+function buildIdVerifyDoc(kind, src, uidOrNull) {
+  const B = window.BRAND || {};
+  const dept = Array.isArray(src.departments) && src.departments.length
+    ? src.departments.join(', ') : (src.department || '');
+  return {
+    kind,                                            // 'employee' | 'worker'
+    name:           src.displayName || src.name || '',
+    photoUrl:       src.photoUrl || '',
+    idNumber:       src.employeeId || src.idNumber || '',
+    department:     dept,
+    jobTitle:       src.title || src.jobTitle || '',
+    employmentType: src.employmentType || '',
+    company:        B.name || 'Barro Industries',
+    status:         (src.status === 'inactive') ? 'inactive' : 'active',
+    issuedOn:       src.issuedOn || src.startDate || (window.bizDate ? bizDate() : ''),
+    uid:            uidOrNull || null,               // employee kind only (rules check)
+    updatedAt:      firebase.firestore.FieldValue.serverTimestamp()
+  };
+}
+
+// Ensure the LOGGED-IN employee's own verify token exists; idempotent (reuses
+// an existing token so reprinted QR codes stay stable). Returns the token.
+async function ensureEmployeeVerifyToken(u) {
+  if (u.verifyToken) {
+    // refresh the public projection in case name/photo/dept changed
+    db.collection('id_verify').doc(u.verifyToken)
+      .set(buildIdVerifyDoc('employee', u, currentUser.uid), { merge: true }).catch(()=>{});
+    return u.verifyToken;
+  }
+  const token = window.makeTrackCode(10);
+  await db.collection('id_verify').doc(token)
+    .set(buildIdVerifyDoc('employee', u, currentUser.uid));
+  await db.collection('users').doc(currentUser.uid)
+    .set({ verifyToken: token }, { merge: true });      // not a frozen field → self-write OK
+  u.verifyToken = token;
+  if (window.userProfile && userProfile.id === currentUser.uid) userProfile.verifyToken = token;
+  return token;
+}
+```
+`window.makeTrackCode` is already global (departments.js ~8315). `verifyToken` is NOT in `userPrivilegedFieldsUnchanged()` (role/salary/allowance/deductions/department/departments/employeeId/username), so the `isOwner` self-update branch permits it under WS19's rules.
+
+---
+
+### 3. Employee ID card — QR + Print (before/after in `renderIDCard`, app.js:3204-3231 & 3260-3291)
+
+**3a. Add a QR slot to the digital face.** In `idHTML`, replace the footer block (app.js:3227-3230):
+```js
+// BEFORE
+      <div class="id-card-footer">
+        <div class="id-card-id">${u.employeeId||'BI-0000'}</div>
+        <div class="id-card-status">ACTIVE</div>
+      </div>
+    </div>`;
+// AFTER
+      <div class="id-card-footer">
+        <div class="id-card-id">${escHtml(u.employeeId||'BI-0000')}</div>
+        <div class="id-card-status">${(u.status==='inactive')?'INACTIVE':'ACTIVE'}</div>
+      </div>
+      <div class="id-card-qr" id="id-qr-${containerId}" title="Scan to verify"></div>
+    </div>`;
+```
+(`id-card-id` was previously unescaped — now escaped, closing an escHtml gap.)
+
+**3b. After the flip scene is built and listeners wired, append the print button + async-inject the QR.** Insert immediately before the closing `}` of `renderIDCard` (after app.js:3290 `scene.addEventListener('click', ...)`):
+```js
+  // Print / Save-PDF button (rendered once, below the flip scene)
+  const printBtn = document.createElement('button');
+  printBtn.className = 'btn-secondary btn-sm';
+  printBtn.style.marginTop = '12px';
+  printBtn.innerHTML = '🖨 Print / Save PDF';
+  el.appendChild(printBtn);
+
+  // Mint/refresh the verify token, then draw the on-card QR and wire printing.
+  ensureEmployeeVerifyToken(u).then(token => {
+    const url = (window.BRAND?.verifyBase || '/v/') + '?' + encodeURIComponent(token);
+    const qrEl = document.getElementById(`id-qr-${containerId}`);
+    if (qrEl) qrEl.innerHTML = window.buildQRSVG ? window.buildQRSVG(url, 64) : '';
+    printBtn.addEventListener('click', () => window.printIDCards([buildIdVerifyDoc('employee', u, currentUser.uid)], token ? [token] : ['']));
+  }).catch(() => {
+    printBtn.addEventListener('click', () => window.printIDCards([buildIdVerifyDoc('employee', u, currentUser.uid)], ['']));
+  });
+```
+No change to the two existing callers (app.js:2438, app.js:3105) — they still pass `userProfile`/`u`, which now also carries `verifyToken` after first mint.
+
+---
+
+### 4. Shared CR80 print builder (add to `js/app.js`, after `renderIDCard`)
+
+One function prints 1..N cards (employee single OR worker batch). New-window doc is styleless, so all CSS is inlined and the QR is an SVG string. `data[i]` is a `buildIdVerifyDoc()` object; `tokens[i]` is its verify token.
+```js
+// ── CR80 ID-card print (new-window document.write; front+back per card) ──
+window.printIDCards = function(data, tokens) {
+  const B = window.BRAND || {};
+  const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const logoAbs = (location.origin||'') + '/' + (B.logo||'icons/barro-industries.png');
+  const navy = B.navy || '#1E3A5F';
+
+  const cardFront = (d, tok) => {
+    const url = (B.verifyBase || (location.origin+'/v/')) + '?' + encodeURIComponent(tok||'');
+    const qr = (window.buildQRSVG && tok) ? window.buildQRSVG(url, 84) : '';
+    const photo = d.photoUrl
+      ? `<img class="p" src="${esc(d.photoUrl)}" alt=""/>`
+      : `<div class="p ph">👤</div>`;
+    return `<div class="cr80 front">
+      <div class="top"><img class="logo" src="${esc(logoAbs)}" onerror="this.style.display='none'"/>
+        <div><div class="co">${esc(B.name||'BARRO INDUSTRIES')}</div><div class="cosub">COMPANY ID</div></div></div>
+      <div class="mid">${photo}
+        <div class="info"><div class="nm">${esc(d.name||'')}</div>
+          <div class="rl">${esc(d.jobTitle||d.department||'')}</div>
+          <div class="dt">${esc(d.department||'')}</div>
+          <div class="dt">ID: <b>${esc(d.idNumber||'')}</b></div>
+          ${d.employmentType?`<div class="dt">${esc(d.employmentType)}</div>`:''}
+        </div>
+        <div class="qr">${qr||`<div class="qrfb">${esc(url)}</div>`}</div>
+      </div>
+      <div class="bot"><span>${esc(d.status==='inactive'?'INACTIVE':'ACTIVE')}</span><span>Issued ${esc(d.issuedOn||'')}</span></div>
+    </div>`;
+  };
+  const cardBack = (d) => `<div class="cr80 back">
+      <div class="bkco">${esc(B.name||'BARRO INDUSTRIES')}</div>
+      <div class="bktag">${esc(B.tagline||'')}</div>
+      <div class="bkrule"></div>
+      <div class="bknote">This card is property of ${esc(B.legalName||B.name||'the company')}. If found, please return to the company. Scan the QR on the front to verify the holder.</div>
+      <div class="bkbrand">${esc(B.legalName||'')}</div>
+    </div>`;
+
+  const body = data.map((d,i)=>cardFront(d, (tokens||[])[i]) + cardBack(d)).join('');
+  const w = window.open('', '_blank');
+  if (!w) { alert('Please allow pop-ups to print ID cards.'); return; }
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ID Cards — Barro Industries</title><style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',system-ui,Arial,sans-serif;background:#eee;padding:12px;display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+    .cr80{width:85.6mm;height:53.98mm;background:#fff;color:#111;border-radius:3mm;overflow:hidden;padding:4mm;position:relative;box-shadow:0 1px 4px rgba(0,0,0,.2)}
+    .front{border-top:3mm solid ${navy}}
+    .top{display:flex;align-items:center;gap:2mm;margin-bottom:2mm}
+    .logo{height:8mm;width:8mm;object-fit:contain}
+    .co{font-size:10pt;font-weight:800;color:${navy};letter-spacing:.3px}
+    .cosub{font-size:6pt;letter-spacing:2px;color:#777}
+    .mid{display:flex;gap:3mm;align-items:flex-start}
+    .p{width:18mm;height:22mm;object-fit:cover;border:0.4mm solid #ccc;border-radius:1.5mm;flex:0 0 auto}
+    .ph{display:flex;align-items:center;justify-content:center;font-size:20pt;background:#f2f2f2}
+    .info{flex:1;min-width:0}
+    .nm{font-size:11pt;font-weight:800;line-height:1.1}
+    .rl{font-size:7.5pt;color:#555;margin:.5mm 0}
+    .dt{font-size:7pt;color:#444;line-height:1.4}
+    .qr{width:20mm;height:20mm;flex:0 0 auto}.qr svg{width:100%;height:100%}
+    .qrfb{font-size:4pt;word-break:break-all;color:#333}
+    .bot{position:absolute;left:4mm;right:4mm;bottom:2.5mm;display:flex;justify-content:space-between;font-size:6.5pt;color:#666;border-top:0.3mm solid #eee;padding-top:1mm}
+    .back{border-top:3mm solid ${navy};display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+    .bkco{font-size:11pt;font-weight:800;color:${navy}}
+    .bktag{font-size:6.5pt;color:#666;margin-top:.5mm}
+    .bkrule{width:60%;height:0.3mm;background:#ddd;margin:2mm 0}
+    .bknote{font-size:6.5pt;color:#555;line-height:1.5;max-width:70mm}
+    .bkbrand{font-size:6pt;color:#999;margin-top:2mm;letter-spacing:.5px}
+    @page{size:auto;margin:6mm}
+    @media print{body{background:#fff;padding:0;gap:4mm}.cr80{box-shadow:none;page-break-inside:avoid;break-inside:avoid}}
+  </style></head><body>${body}
+  <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script>
+  </body></html>`);
+  w.document.close();
+};
+```
+
+---
+
+### 5. Worker ID cards inside `renderFinanceHRProfiles` (departments.js:3607-3630 & 3675-3678)
+
+**5a. Header batch button.** In the `isPriv` button row (departments.js:3598-3602) add after the raise-history button:
+```js
+      <button class="btn-secondary btn-sm" id="hrp-batch-id-btn">🪪 Batch Print IDs</button>
+```
+**5b. Per-row ID button.** In the row action cell (departments.js:3619-3624), add after the Payslip button:
+```js
+                <button class="btn-secondary btn-sm hrp-id-btn" data-id="${p.id}" style="margin-right:4px">🪪 ID</button>
+```
+**5c. Wire them.** In the `if (isPriv)` block (after departments.js:3636) add:
+```js
+    document.getElementById('hrp-batch-id-btn')?.addEventListener('click', () => window.batchPrintWorkerIDs(profiles.filter(p=>p.status!=='inactive')));
+    container.querySelectorAll('.hrp-id-btn').forEach(btn => {
+      const profile = profiles.find(p=>p.id===btn.dataset.id);
+      btn.addEventListener('click', () => window.openWorkerIDModal(profile, () => renderFinanceHRProfiles(container,currentUser,currentRole)));
+    });
+```
+
+**5d. New functions (add to `js/departments.js`, near `renderFinanceHRProfiles`).** These mint/refresh the worker's `id_verify` doc (HR-authored, `isFinanceOrAdmin` branch), then preview + print via the shared `window.printIDCards`:
+```js
+// Ensure a worker_profiles doc has a stable verify token + fresh public projection.
+async function ensureWorkerVerifyToken(profile) {
+  const proj = window.buildIdVerifyDoc('worker', profile, null);
+  if (profile.verifyToken) {
+    db.collection('id_verify').doc(profile.verifyToken).set(proj, { merge:true }).catch(()=>{});
+    return profile.verifyToken;
+  }
+  const token = window.makeTrackCode(10);
+  await db.collection('id_verify').doc(token).set(proj);
+  await db.collection('worker_profiles').doc(profile.id).set({ verifyToken: token }, { merge:true });
+  profile.verifyToken = token;
+  return token;
+}
+
+window.openWorkerIDModal = async function(profile, onDone) {
+  if (!profile) return;
+  const token = await ensureWorkerVerifyToken(profile).catch(()=>null);
+  const url = (window.BRAND?.verifyBase || '/v/') + '?' + encodeURIComponent(token||'');
+  const qr = (window.buildQRSVG && token) ? window.buildQRSVG(url, 120) : '';
+  openModal('🪪 Worker ID — ' + escHtml(profile.name||''), `
+    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:90px;height:110px;border:1px solid var(--border);border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2);font-size:34px">
+        ${profile.photoUrl?`<img src="${escHtml(profile.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:'👤'}</div>
+      <div style="flex:1;min-width:160px">
+        <div style="font-size:17px;font-weight:800">${escHtml(profile.name||'')}</div>
+        <div style="font-size:12px;color:var(--text-muted)">${escHtml(profile.jobTitle||'')}</div>
+        <div style="font-size:12px;margin-top:4px">ID: <b>${escHtml(profile.idNumber||'—')}</b></div>
+        <div style="font-size:12px">${escHtml(profile.department||'')} · ${escHtml(profile.employmentType||'')}</div>
+      </div>
+      <div style="width:120px;height:120px">${qr||`<div style="font-size:10px;word-break:break-all">${escHtml(url)}</div>`}</div>
+    </div>
+    ${token?`<p style="font-size:11px;color:var(--text-muted);margin-top:12px">Verify link: <a href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(url)}</a></p>`:'<p style="font-size:11px;color:var(--danger);margin-top:12px">Could not create a verify link (permission). The card will print without a QR.</p>'}
+  `, `<button class="btn-primary" id="wid-print">🖨 Print / Save PDF</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  document.getElementById('wid-print')?.addEventListener('click', () => {
+    window.printIDCards([window.buildIdVerifyDoc('worker', profile, null)], [token||'']);
+  });
+  if (onDone) onDone();
+};
+
+window.batchPrintWorkerIDs = async function(profiles) {
+  if (!profiles || !profiles.length) { Notifs.showToast('No active worker profiles to print','error'); return; }
+  Notifs.showToast('Preparing '+profiles.length+' ID cards…');
+  const tokens = [];
+  for (const p of profiles) tokens.push(await ensureWorkerVerifyToken(p).catch(()=>''));
+  window.printIDCards(profiles.map(p=>window.buildIdVerifyDoc('worker', p, null)), tokens);
+};
+```
+
+---
+
+### 6. `openHRProfileForm` — photo upload + `BI-W-###` generate (departments.js:3687-3691, 3746-3775)
+
+**6a. ID-number row + photo (replace the first form-row, departments.js:3688-3691):**
+```js
+// BEFORE
+    <div class="form-row">
+      <div class="form-group"><label>Full Name *</label><input id="hrp-name" value="${escHtml(profile?.name||'')}"/></div>
+      <div class="form-group"><label>ID Number</label><input id="hrp-id" value="${escHtml(profile?.idNumber||'')}"/></div>
+    </div>
+// AFTER
+    <div class="form-row">
+      <div class="form-group"><label>Full Name *</label><input id="hrp-name" value="${escHtml(profile?.name||'')}"/></div>
+      <div class="form-group"><label>ID Number</label>
+        <div style="display:flex;gap:6px">
+          <input id="hrp-id" value="${escHtml(profile?.idNumber||'')}" style="flex:1" placeholder="BI-W-001"/>
+          <button type="button" class="btn-secondary btn-sm" id="hrp-gen-id" title="Generate BI-W number">Generate</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>ID Photo</label>
+      <div style="display:flex;gap:12px;align-items:center">
+        <div id="hrp-photo-prev" style="width:64px;height:78px;border:1px solid var(--border);border-radius:6px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2);font-size:26px">
+          ${profile?.photoUrl?`<img src="${escHtml(profile.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:'👤'}</div>
+        <div><input type="file" id="hrp-photo-file" accept="image/*"/>
+          <div id="hrp-photo-status" style="font-size:11px;color:var(--text-muted);margin-top:4px"></div></div>
+      </div>
+    </div>
+```
+**6b. Wire the two new controls** (add inside `openHRProfileForm`, right after the `openModal(...)` call, before the save handler at departments.js:3746). Note it needs the doc id: for a NEW profile we pre-allocate one so the photo path is stable.
+```js
+  // Stable doc id (pre-allocate for new profiles so the photo path is known).
+  const profileId = profile?.id || db.collection('worker_profiles').doc().id;
+  let uploadedPhotoUrl = profile?.photoUrl || '';
+
+  document.getElementById('hrp-gen-id')?.addEventListener('click', async () => {
+    const btn = document.getElementById('hrp-gen-id'); btn.disabled = true; btn.textContent = '…';
+    try { document.getElementById('hrp-id').value = await window.nextWorkerIdNumber(); }
+    catch(e){ Notifs.showToast('Could not generate ID number','error'); }
+    btn.disabled = false; btn.textContent = 'Generate';
+  });
+
+  document.getElementById('hrp-photo-file')?.addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const st = document.getElementById('hrp-photo-status'); st.textContent = 'Uploading…';
+    try {
+      uploadedPhotoUrl = await window.Drive.uploadWorkerPhoto(f, profileId);
+      document.getElementById('hrp-photo-prev').innerHTML = `<img src="${escHtml(uploadedPhotoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`;
+      st.textContent = '✅ Photo uploaded';
+    } catch(err){ st.textContent = '❌ ' + (err.message||'Upload failed'); }
+  });
+```
+**6c. Persist `photoUrl` + use the pre-allocated id.** In the save handler (departments.js:3749-3777):
+```js
+// add to the `data` object (after `idNumber:`):
+      photoUrl: uploadedPhotoUrl || '',
+// and replace the add/update tail (departments.js:3776-3777):
+// BEFORE
+    if (isEdit) { await db.collection('worker_profiles').doc(profile.id).update(data); }
+    else         { await db.collection('worker_profiles').add(data); }
+// AFTER
+    await db.collection('worker_profiles').doc(profileId).set(data, { merge: true });
+```
+(`set(..., {merge:true})` on the pre-allocated id works for both create and edit and matches the id the photo was uploaded under.)
+
+---
+
+### 7. `_counters/workers` transaction (add to `js/departments.js`, near HR functions)
+
+```js
+// BI-W-### atomic worker ID (mirrors the _counters/employees pattern, app.js:440-446).
+window.nextWorkerIdNumber = async function() {
+  const ref = db.collection('_counters').doc('workers');
+  return db.runTransaction(async t => {
+    const c = await t.get(ref);
+    const next = (c.exists ? (c.data().count || 0) : 0) + 1;
+    t.set(ref, { count: next }, { merge: true });
+    return `BI-W-${String(next).padStart(3,'0')}`;
+  });
+};
+```
+
+---
+
+### 8. Create-Worker-Account: write the `usernames` map + optional link (app.js:6698-6728)
+
+**8a. Uniqueness check → use WS19's map** (app.js:6698, keep the users query as a fallback belt-and-suspenders):
+```js
+// BEFORE
+    const existing = await db.collection('users').where('username','==',username).limit(1).get();
+    if (!existing.empty) { errEl.textContent='Username already taken. Choose another.'; errEl.classList.remove('hidden'); return; }
+// AFTER
+    const taken = await db.collection('usernames').doc(username).get().catch(()=>({exists:false}));
+    if (taken.exists) { errEl.textContent='Username already taken. Choose another.'; errEl.classList.remove('hidden'); return; }
+```
+**8b. Write the mapping doc** — add immediately after the `payroll/{uid}` write (app.js:6727), inside the `try`:
+```js
+      // WS19 public login map: usernames/{username} → { email, uid } (pre-auth resolvable).
+      await db.collection('usernames').doc(username).set({ email: authEmail, uid });
+```
+**8c. `linkedUserId` (decision 3, optional soft link).** If HR opened this modal from a worker_profiles row (future wiring), pass the `worker_profiles.id`; if present, also stamp the link. Minimal version — no wiring change needed now, but reserve the field: when `openCreateWorkerModal(prefillProfileId)` is later called with an id, after the users write add `await db.collection('worker_profiles').doc(prefillProfileId).set({ linkedUserId: uid }, {merge:true});`. Left as a no-op today (the modal currently takes no argument); documented so WS22/24 can populate it without a schema surprise.
+
+---
+
+### 9. `Drive.uploadWorkerPhoto` (js/drive.js — add beside `uploadProfilePhoto`, line 52)
+
+```js
+  // ── Worker ID Photo Upload (HR-uploaded; role-gated path, not uid-owned) ──
+  async function uploadWorkerPhoto(file, profileId) {
+    const ref = storage.ref(`worker-id-photos/${profileId}/${Date.now()}_${file.name}`);
+    await ref.put(file);
+    return ref.getDownloadURL();
+  }
+```
+And export it (drive.js:272):
+```js
+// BEFORE
+  return { uploadFile, uploadProfilePhoto, deleteFile, renderUploadArea, renderStorageStatus, resolveUrl, sourceLabel, sourceIcon };
+// AFTER
+  return { uploadFile, uploadProfilePhoto, uploadWorkerPhoto, deleteFile, renderUploadArea, renderStorageStatus, resolveUrl, sourceLabel, sourceIcon };
+```
+
+---
+
+### 10. Nav re-link — HR hub card (departments.js:2097-2103)
+
+```js
+// BEFORE
+  const cards = [
+    { icon:'👥', title:'People & Roles', desc:'Assign roles, departments & employee class', go:()=>navigateTo('team-directory') },
+    { icon:'💰', title:'Payroll',        desc:'Monthly run — Compute → Verify → Disburse', go:()=>window.renderFinance(currentUser, currentRole, 'Payroll') },
+    { icon:'👷', title:'Worker Payslips',desc:'Weekly Production payslips & profiles',      go:()=>window.renderFinance(currentUser, currentRole, 'HR Profiles') },
+    { icon:'🌴', title:'Leave',          desc:'Requests, approvals & balances',             go:()=>window.renderLeavePage && window.renderLeavePage() },
+    { icon:'🕐', title:'Attendance',     desc:'Daily attendance & time-extension requests', go:()=>navigateTo('attendance') },
+  ];
+// AFTER
+  const canAccounts = ['president','manager'].includes(role);   // renderTeam gate parity
+  const cards = [
+    { icon:'👥', title:'People & Roles', desc:'Assign roles, departments & employee class', go:()=>navigateTo('team-directory') },
+    { icon:'💰', title:'Payroll',        desc:'Monthly run — Compute → Verify → Disburse', go:()=>window.renderFinance(currentUser, currentRole, 'Payroll') },
+    { icon:'👷', title:'Worker Payslips',desc:'Weekly Production payslips, profiles & ID cards', go:()=>window.renderFinance(currentUser, currentRole, 'HR Profiles') },
+    ...(canAccounts ? [{ icon:'🔑', title:'Accounts & Logins', desc:'Create worker logins, reset passwords, edit pay', go:()=>navigateTo('team') }] : []),
+    { icon:'🌴', title:'Leave',          desc:'Requests, approvals & balances',             go:()=>window.renderLeavePage && window.renderLeavePage() },
+    { icon:'🕐', title:'Attendance',     desc:'Daily attendance & time-extension requests', go:()=>navigateTo('attendance') },
+  ];
+```
+Router already has `case 'team': renderTeam(); break;` (app.js:1877) — no router change. `renderTeam()`'s `!isPresident()&&currentRole!=='manager'` gate is unchanged, and the card is hidden for secretary/finance, so no dead click. `getSidebarItems()` is NOT touched (the card is the entry point; adding a top-level sidebar item is unnecessary and would need its own gating). Add one SOP line to the HR panel (departments.js:2106-2112) if desired: `'Accounts & Logins — create username/password logins for workers, reset passwords, edit base pay (president & managers only).'`
+
+---
+
+### 11. firestore.rules diffs (block-scoped, before→after)
+
+**11a. New `id_verify` collection** — insert a new match block (place it near `order_tracking`, ~firestore.rules:807, same public-token neighbourhood). `isPartner()` is the WS19-added helper (WS19 deploys first — see cross-workstream note):
+```
+    // ── Public ID verification (QR scan target) ────────
+    // Each doc id is an unguessable token; the public /v/?<token> page resolves
+    // it. Holds ONLY a public-safe projection (name/photo/id-no/dept/title/
+    // status) — NEVER SSS/PhilHealth/TIN/rates/CA/address/phone/email, which
+    // stay in worker_profiles/users. `get` public, `list` denied (no enumeration).
+    match /id_verify/{token} {
+      allow get:  if true;
+      allow list: if false;
+      allow create, update: if isAuth() && !isPartner() && (
+        isFinanceOrAdmin() ||                                     // HR mints worker + employee cards
+        ( request.resource.data.get('kind','') == 'employee'      // employee self-mints OWN card only
+          && request.resource.data.get('uid','') == request.auth.uid )
+      );
+      allow delete: if isAuth() && isAdmin();
+    }
+```
+
+**11b. `_counters` — widen write to finance** (firestore.rules:113-114) so finance/HR can mint `BI-W-###` (currently admin-only would DENY finance):
+```
+// BEFORE
+    match /_counters/{docId} {
+      allow read, write: if isAuth() && isAdmin();
+    }
+// AFTER
+    match /_counters/{docId} {
+      allow read:  if isAuth();
+      allow write: if isAuth() && isFinanceOrAdmin();   // employees counter (admin) + workers counter (HR/finance)
+    }
+```
+(Widening is safe: `_counters` docs are opaque monotonic integers; the worst a finance user can do is advance a sequence number.)
+
+**11c. `worker_profiles` (firestore.rules:675-679) — NO rule change needed.** The new fields (`photoUrl`, `verifyToken`, `linkedUserId`) fall under the existing `create, update: isFinanceOrAdmin()` rule. Left as-is.
+
+**11d. `users` — NO new rule needed for `verifyToken`.** It is not in `userPrivilegedFieldsUnchanged()`, so the WS19 `isOwner(uid) && userPrivilegedFieldsUnchanged()` self-update branch already permits it.
+
+**11e. `usernames` (firestore.rules) — OWNED BY WS19, already specified there** (`get:true`/`list:false`/`create,update,delete: isAuth() && isAdmin()`). WS27 does NOT redeclare it; it only writes into it (§8b). ‼️ If WS27 ships before WS19's rules deploy, the `usernames.set()` at §8b DENIES — deploy WS19 rules first (they are Phase-2 Foundation; WS27 is Phase-3).
+
+---
+
+### 12. storage.rules diff — worker ID photos (insert after the `profile-photos` blocks, storage.rules:124)
+
+```
+    // ── Worker ID photos — HR-uploaded (NOT uid-owned; worker has no auth uid) ──
+    // Read: any signed-in staff (photo shows on the ID card + verify page).
+    // Write: finance tier only (HR uploads on the worker's behalf); valid image.
+    match /worker-id-photos/{profileId}/{allPaths=**} {
+      allow read:  if isSignedIn();
+      allow write: if isSignedIn() && isFinanceClaim()
+        && (request.resource == null || isValidImage());
+    }
+```
+‼️ Note: `getDownloadURL()` on this path returns a token-bearing URL that gets stored in the public `id_verify.photoUrl`. That is intentional and acceptable — the ID photo is public-by-design (it is printed on a physical card and shown on the verify page). Do NOT put anything but the face photo under this path.
+
+---
+
+### 13. Migration / rollout checklist (execution order)
+
+1. **Deploy WS19 rules first** (`usernames` map + `isPartner()`/`isSeniorAdmin()`/`isMoneyAdmin()` helpers + users update split). WS27 depends on all of these.
+2. Add `js/qrcode.js` (vendored lib + wrapper, §0); add `<script defer src="js/qrcode.js">` to index.html after line 297; add `/js/qrcode.js`, `/v/`, `/v/index.html` to `sw.js` PRECACHE; bump `CACHE_VER` v162→v163.
+3. Add `/v/index.html` (§0).
+4. Add `window.BRAND` interim object to config.js (§1).
+5. Add helpers `buildIdVerifyDoc` + `ensureEmployeeVerifyToken` + `printIDCards` to app.js (§2, §4); edit `renderIDCard` (§3).
+6. Add `nextWorkerIdNumber`, `ensureWorkerVerifyToken`, `openWorkerIDModal`, `batchPrintWorkerIDs` to departments.js (§5d, §7); wire buttons in `renderFinanceHRProfiles` (§5a-c); edit `openHRProfileForm` (§6).
+7. Add `Drive.uploadWorkerPhoto` + export (§9).
+8. Edit Create-Worker-Account (§8) and HR-hub cards (§10).
+9. **Re-diff firestore.rules** (concurrent OneDrive/other-session edits — deploy-recheck memory), apply block-scoped edits §11a/§11b, then `~/.npm-global/bin/firebase deploy --only firestore:rules`. Separate from `git push`.
+10. **Re-diff storage.rules**, apply §12, then `~/.npm-global/bin/firebase deploy --only storage`.
+11. **usernames backfill** — run WS19's one-time backfill (read all `users` with a `username`, write `usernames/{username.toLowerCase()} = {email: authEmail||email, uid}`). Idempotent. Confirm it ran (shared with WS19; do not double-implement).
+12. **NO worker `idNumber` backfill** (decision 6) — existing free-text ID numbers stay. New `BI-W-###` applies only when HR presses Generate.
+13. **NO employee/worker `verifyToken` backfill** — tokens mint lazily on first ID print. (Optional: a president-only "mint all verify tokens" pass can be added later; not required.)
+14. `git push origin master` (deploys app code to GitHub Pages).
+15. Add `id_verify` and `usernames` to `scripts/monthly-backup.js` EXPORTS (usernames is WS19's line; add `id_verify` for WS27).
+
+---
+
+### 14. Manual test checklist (no automated suite)
+
+Accounts: president / manager / secretary / finance / employee / worker(username login) / partner.
+- **Employee digital ID**: dashboard shows the card with a QR; click `🖨 Print / Save PDF` → new window renders one CR80 front+back, `window.print()` fires → verify the printed QR resolves. ✓
+- **QR resolves**: scan/open `/v/?<token>` → shows name, photo, ID number, dept, ACTIVE badge, "Verified employee". NO salary/SSS/TIN/phone anywhere on the page. ✓
+- **Worker ID (HR)**: HR (finance) → HR hub → Worker Payslips → row `🪪 ID` → modal shows QR + `🖨 Print`; `🪪 Batch Print IDs` prints all active workers, one CR80 card each. ✓
+- **Worker photo**: openHRProfileForm → upload image → preview updates, saved `photoUrl` appears on the printed card and the `/v/` page. ✓
+- **BI-W generate**: openHRProfileForm → `Generate` → field fills `BI-W-00N`; create a second profile and Generate → increments (no duplicate). ✓
+- **Worker login (WS19 map)**: create a worker account → hand username/password → log in by username → succeeds (resolves email from `usernames/`). ✓
+- **Nav re-link**: president/manager → HR hub shows `🔑 Accounts & Logins` → opens `renderTeam` (roster, Create Worker Account). secretary/finance → card is HIDDEN (no dead click). ✓
+- **Rules — public verify**: signed-out browser opens `/v/?<token>` → renders (public get). ✓ Signed-out attempt to LIST `id_verify` (devtools) → DENIED. ✓
+- **Rules — id_verify write guard**: employee devtools `id_verify.doc('x').set({kind:'employee', uid:<someone-else-uid>, ...})` → DENIED (uid mismatch). ✓ partner attempts any id_verify write → DENIED. ✓ finance writes a worker id_verify doc → ALLOWED. ✓
+- **Rules — counters**: finance presses Generate (writes `_counters/workers`) → ALLOWED. ✓ partner writes `_counters/*` → DENIED. ✓
+- **Storage**: finance uploads to `worker-id-photos/<id>/…` → ALLOWED; employee (non-finance) upload there → DENIED; oversized/non-image → DENIED. ✓
+- **QR fallback**: temporarily rename `js/qrcode.js` → card/print falls back to printing the plain `/v/?<token>` URL text (still verifiable). ✓
+
+---
+
+### 15. Cross-workstream call-outs (WS22 / WS23 / WS24)
+
+- **New `worker_profiles` fields**: `photoUrl` (string), `verifyToken` (string), `linkedUserId` (string|null). WS22 (CashAdvance), WS23 (Raises), WS24 (Payslip) all read/write `worker_profiles` — they must PRESERVE these fields (use `{merge:true}` / spread, never full-doc overwrite) so an ID card's photo/token isn't wiped by a pay edit. `openHRProfileForm`'s save now uses `set(..., {merge:true})` (§6c) — already safe.
+- **`kind` discriminator** parallels `salary_raises.subjectType` ('worker_profile' vs 'payroll'); the ID system reuses that mental model but does NOT touch `salary_raises`.
+- **`linkedUserId`** is the sanctioned soft-link if WS22/24 later need to reconcile a worker_profiles record with an `hrManagedAccount` users login. It is one-way (worker_profiles → users) and optional; nothing reads it yet.
+- **`usernames` map**: WS27 writes it at Create-Worker-Account; WS19 owns the collection + rule + backfill. Any other place that sets/changes a `users.username` (e.g. an edit path in WS20/team) must mirror-write `usernames/{new}` and delete `usernames/{old}` — flag for whoever touches username editing.
+- **OUT OF SCOPE for WS27**: the payslip/letterhead engine (WS14/24), the employees-vs-worker_profiles pay-source unification (deliberately kept separate, decision 3), and any BIR entity/TIN-on-documents question (WS14/Neil) — the ID deliberately carries NO TIN.
+
+## ‼️ SEAM RECONCILIATION (Fable orchestrator, post-merge 2026-07-10)
+WS9 (BRAND) was decided in the SAME batch and is CANONICAL — the full `window.BRAND` object
+(name/systemName/fullName/shortName/tagline/legal/logo/companies) is defined in WS9's spec and lives
+in js/config.js. This brief's 'interim window.BRAND' is SUPERSEDED: do NOT ship a second BRAND
+definition. Sonnet: use WS9's `window.BRAND` as-is. WS9's object must additionally carry the ID-verify
+base — add `verifyBase: '/v/'` to `window.BRAND` in WS9's config.js object (one line). The ID card
+reads `window.BRAND.name`, `window.BRAND.logo.wordmark`, and `window.BRAND.verifyBase`. The rule that
+the ID carries NO TIN still stands (an ID is not a BIR document).
 
 ## Risks / cross-workstream interactions
 

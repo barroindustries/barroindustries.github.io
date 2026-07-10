@@ -174,16 +174,419 @@ Cross-cutting read: countWorkDays(year, month, upToDay) (app.js:4628-4636) calls
 - CACHE_VER in sw.js must be bumped on this workstream's edits (any js/css touch) per CLAUDE.md — though note the repo's pre-commit hook now auto-bumps APP_VERSION/index.html strings; confirm whether CACHE_VER itself is included in that automation or still needs a manual bump (CLAUDE.md's own wording flags CACHE_VER as a separate manual step from the auto-bumped APP_VERSION).
 - Production/hourly worker data (worker_profiles) has no rules-level self-read (firestore.rules:675-679 is finance/admin-only, no owner clause) because there is no uid to check — this is a structural precondition, not a bug: any change that lets workers self-clock-in requires resolving how a worker authenticates at all (ties directly into workstream 27's 'worker login unblock', not something workstream 26 can silently assume away).
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-- [ ] Where does time-out get captured, and by whom? A second self-service button next to check-in-btn (app.js:3111) for the SAME users/{uid}-keyed attendance/{uid}/records/{date} doc (adds a logoutTime field) — vs. a kiosk/geofence device that writes on behalf of factory floor staff who may not carry the app open all day. The plan text ('optional geofence/kiosk for factory staff') suggests these might be two different mechanisms for two different populations (office employees self-serve; factory workers use a kiosk) — Fable must decide whether that's one unified attendance write path with two entry UIs, or genuinely separate data flows.
-- [ ] How does a derived hoursWorked reconcile with the existing 0/0.5/1.0 attendanceScore model that payroll/KPI already depend on (modules.js:1213-1215 says payroll reads attendanceScore FIRST)? Options: (a) hoursWorked becomes a NEW parallel field alongside attendanceScore, with attendanceScore continuing to gate monthly-employee KPI/pay math unchanged, while hoursWorked feeds ONLY the new production/hourly pay path; (b) attendanceScore itself gets redefined/derived from hoursWorked for everyone (higher blast radius — touches every existing attendanceScore reader: app.js:2847-2849, 4645, 4727, 4943, modules.js:677, 1140, 1178). Tradeoff is migration risk (b) vs. two-systems-forever complexity (a).
-- [ ] Do production/hourly workers (worker_profiles, no uid) get real accounts to punch in/out through the SAME attendance/{uid}/records collection — which requires worker auth to exist first (workstream 27's currently-orphaned 'worker login unblock' + Create-Worker-Account screen) — or does workstream 26 need its own workerId-keyed attendance path (e.g. attendance_worker/{workerProfileId}/records/{date}) that does NOT require Firebase Auth, written by an HR-operated kiosk/tablet instead? This is the single highest-leverage architectural fork in this workstream: it determines whether 26 can ship independently or is blocked on/coupled to 27.
-- [ ] Does the new time-out/hours data feed the Worker Payslip's existing manual weekly time-log (departments.js ps-tin-{i}/ps-tout-{i}, computeDayHours() at departments.js:4152-4163) by auto-populating those 7 day-rows from real attendance records — replacing manual entry — or does it stay a fully separate, additive data source (attendance v2 for KPI/compliance visibility; the payslip's manual weekly log remains HR's pay-computation input, unchanged)? If auto-populating: what happens when actual attendance is missing/incomplete for a day in the week (device offline, kiosk down) — does HR still get to override, and how is that override reconciled back into the 'source of truth' the ledger expects (ledger is finance's single source of truth per repo conventions)?
-- [ ] What exact structure should the holidays-admin document take: one doc per year (settings/holidays_{year}) fully overriding getPHHolidays(year)'s output for that year, or a sparse per-holiday override merged on top of the hardcoded table (so the formulaic entries like fixed-date regular holidays and National-Heroes-Day-by-formula keep working untouched and admins only need to add/edit the movable ones — Holy Week, Chinese New Year, Eid'l Fitr, Eid'l Adha — for years beyond 2028, or override a specific date for a given year when Malacañang proclaims something non-standard)? Tradeoff: full-year-override is simpler to reason about but requires HR to re-enter ALL ~20 holidays every year even though most never change; sparse-merge is more surgical but is more code complexity in getPHHolidays' merge logic.
-- [ ] Who can write the holidays-admin doc? settings/{docId} is currently president-only-write (firestore.rules:260) — does 'holidays admin screen' need to loosen this to isAdmin() (president+manager) or even isFinanceOrAdmin() so HR/finance staff (who are closest to the yearly DOLE/Malacañang proclamation) can maintain it without going through the president every year, and if so is that a targeted new rules match (e.g. a dedicated settings_holidays/{year} collection with its own write rule) rather than loosening the shared settings/{docId} match (which also gates employeeOfMonth and sales_sop — loosening it for holidays would loosen it for those too, an unintended coupling)?
-- [ ] How should the extension-upgrade fix be implemented: (a) make tryUpgradeAttendanceOnNotifRead (app.js:3170-3189) query attendance_extensions/{uid}_{todayStr} and use extApproved+expiresAt exactly like the dashboard render already does (app.js:2856-2858), i.e. duplicate that same-shaped check into the upgrade path, or (b) extract a single shared isWithinAttendanceWindow(uid) / getEffectiveDeadline(uid) helper used by BOTH the dashboard render (canTimeIn/extApproved) and the upgrade function, eliminating the duplication that let them drift apart in the first place? (b) also naturally addresses the separate duplication already found between the two independent extension-approval UI surfaces (modules.js:1050-1069 vs departments.js:9922-9940), which both hand-roll the same +6h expiresAt math — should those be unified into one shared approve/deny function too (mirroring the ONE CashAdvance-service consolidation called out for workstream 22), and if so where does that shared function live (a new js/attendance.js module, or inside existing app.js/modules.js)?
-- [ ] Should the 6-hour extension window itself become configurable (e.g. stored per-request or as a settings value) now that a holidays/admin-settings pattern is being introduced for this workstream anyway, or is that scope creep the plan didn't ask for (plan text says only 'extension-upgrade bug fixed', not 'extension duration configurable')?
+### Resolved decisions
+
+1. **Time-out capture = two populations, two write paths, one shared hours helper.** Office/`users`-keyed employees get a self-service **"Time Out"** button on their dashboard that adds `logoutTime`+`hoursWorked` to the SAME `attendance/{uid}/records/{date}` doc. Factory `worker_profiles` staff (no Auth) are clocked by an **HR-operated kiosk/tablet** writing a NEW `attendance_worker/{workerProfileId}/records/{date}` collection. Both derive hours through one pure helper (`computeHoursBetween` / `computeDayHours`). Geofence stays greenfield/deferred (not built here). Rationale: office staff already carry the app; factory staff have no login yet — forcing one path would block WS26 on WS27.
+
+2. **`hoursWorked` is a NEW parallel field; `attendanceScore` stays canonical & untouched (Option a).** `attendanceScore` (0/0.5/1.0) continues to gate ALL monthly-employee KPI/pay math with zero change. `hoursWorked` is informational for office employees and is the pay input ONLY for the weekly production path. Rationale: minimal blast radius, satisfies WS19's score∈{0,0.5,1.0} cap, and WS20's monthly `getAttendanceScore` source is explicitly unchanged.
+
+3. **Production workers punch into their OWN `attendance_worker/{workerProfileId}` path — NOT `attendance/{uid}` — so WS26 ships independently of WS27.** Keyed by the `worker_profiles` doc id (which the payslip generator already holds as `profile.id`), HR-kiosk-written (an authenticated finance/admin session), no Firebase Auth required. Rationale: this is the highest-leverage fork; decoupling from WS27 lets 26 land now, and keying by `workerProfileId` means the payslip's manual time-log can auto-fill from the same key. When WS27/WS20's `worker_profiles.linkedUid` lands, an owner-read clause can be added without re-keying.
+
+4. **Time-out data AUTO-POPULATES the Worker Payslip's 7-day time-log, but the rows stay editable (HR override), and the ledger path is unchanged.** A "⟳ Load from kiosk" button in the payslip generator reads `attendance_worker/{profile.id}/records` across the chosen pay period and prefills `ps-tin-{i}`/`ps-tout-{i}`, then calls the existing `recomputeHours()`. Missing days stay at the current defaults for HR to fill. Rationale: keeps HR as the source-of-truth for the pay number (which still posts to the ledger via `WPAY-{payslipId}` on Submit, unchanged), so WS20's "one weekly engine" is not reopened.
+
+5. **Holidays admin = SPARSE per-holiday override merged on top of the formulaic table.** `settings_holidays/{year}` carries an `overrides` map keyed by date (`{name,type}` to add/edit, `null` to remove). `getPHHolidays(year)` builds its existing base table UNCHANGED, then merges the override map. Rationale: the fixed-date and National-Heroes-Day-by-formula entries keep working with zero re-entry; admins touch only movable observances (Holy Week / Chinese NY / Eid) for 2029+ or a Malacañang re-proclamation.
+
+6. **`getPHHolidays` STAYS SYNCHRONOUS; overrides come from a boot-time in-memory prefetch.** New `window.loadHolidayOverrides([years])` fills `window._holidayOverrides` once after login; `getPHHolidays` reads that synchronous cache. Rationale: making the source async would ripple through `countWorkDays` and every inline render caller — the prefetch preserves the sync signature and the existing `typeof getPHHolidays==='function'` guards, so if overrides haven't loaded the base table is returned safely.
+
+7. **Holidays doc lives in a DEDICATED `settings_holidays/{year}` collection, write = `isFinanceOrAdmin()`.** NOT the shared `settings/{docId}` match (which is president-only-write and also gates `employeeOfMonth`/`sales_sop` — loosening it would loosen those too). Rationale: HR/finance/manager/secretary are closest to the DOLE/Malacañang proclamations; a dedicated collection scopes the looser write without coupling.
+
+8. **Extension-upgrade fix = extract ONE shared deadline helper + ONE shared approve/deny function (Option b), unifying all three drifting sites.** `tryUpgradeAttendanceOnNotifRead` now reads the extension doc and honors the extended deadline via `window.attExtActive()`. The two hand-duplicated approval UIs (modules.js:1050-1069, departments.js:9922-9954) both call new `window.approveAttendanceExtension()`/`denyAttendanceExtension()`. The 6-hour window is centralized as `window.ATT_EXT_HOURS = 6` (NOT admin-configurable — that is out-of-scope creep; per-request `expiresAt` already stored). No new js file — pure helpers go in config.js, write helpers in app.js. Rationale: the bug was born from duplication; centralizing kills all three copies at once.
+
+---
+
+### Spec 1 — Data shapes (annotated literals)
+
+```js
+// attendance/{uid}/records/{date}  — office employees (EXISTING doc, 2 new fields)
+{ date:'2026-07-10', uid, loginTime:Timestamp,
+  attendanceScore:0|0.5|1.0,          // CANONICAL — unchanged, still gates monthly pay
+  fullTime:bool, autoFull:bool, fullTimeAt?:Timestamp,
+  status?:'present'|'half'|'absent', note?, editedBy?, editedAt?,   // admin path, unchanged
+  logoutTime?:Timestamp,              // NEW — set by self-service Time Out button
+  hoursWorked?:number }              // NEW — informational for office; NOT a pay input
+
+// attendance_worker/{workerProfileId}/records/{date}  — NEW collection, HR-kiosk-written
+{ workerId:'<worker_profiles doc id>', date:'2026-07-10',
+  timeIn:'07:00', timeOut:'16:00',    // HH:MM strings
+  hoursWorked:8.0,                     // computeDayHours(timeIn,timeOut)
+  recordedBy:uid, recordedByName, recordedAt:Timestamp }
+
+// settings_holidays/{year}  — NEW collection, sparse override doc
+{ year:2029,
+  overrides:{
+    '2029-04-02':{ name:'Maundy Thursday', type:'special' },  // add/edit a holiday
+    '2029-04-03':{ name:'Good Friday',     type:'regular' },
+    '2029-02-25': null                                        // REMOVE a base holiday that year
+  },
+  updatedBy:uid, updatedByName, updatedAt:Timestamp }
+```
+
+### Spec 2 — Shared helpers to ADD in js/config.js (insert after bizYear(), ~line 37)
+
+```js
+// ── Attendance extension window (single source of truth) ──────────
+window.ATT_EXT_HOURS = 6;   // approved extension duration, in hours
+// Is an approved extension still active? Returns {active, expiresAt:Date|null}.
+window.attExtActive = function(extData, now) {
+  now = now || new Date();
+  const expiresAt = (extData && extData.expiresAt && extData.expiresAt.toDate)
+                      ? extData.expiresAt.toDate() : null;
+  const active = !!(extData && extData.status === 'approved' && expiresAt && now < expiresAt);
+  return { active, expiresAt };
+};
+// Elapsed worked hours between two Date objects, minus a flat 1-hr lunch if the
+// span crosses local noon. Best-effort (informational field) — Manila-anchored.
+window.computeHoursBetween = function(inDate, outDate) {
+  if (!inDate || !outDate) return 0;
+  let mins = (outDate.getTime() - inDate.getTime()) / 60000;
+  if (mins <= 0) return 0;
+  const inH = window.bizHour(inDate), outH = window.bizHour(outDate);
+  if (inH < 13 && outH >= 12) mins -= 60;   // crossed the 12–1PM lunch window
+  return Math.max(0, mins / 60);
+};
+
+// ── Holiday admin overrides (sync in-memory cache, filled at boot) ─
+window._holidayOverrides = window._holidayOverrides || {};   // { [year]: overridesMap }
+```
+
+### Spec 3 — Extension bug fix + unified approve/deny
+
+**3a. js/app.js:3170-3189 `tryUpgradeAttendanceOnNotifRead` — BEFORE → AFTER**
+```js
+// BEFORE (only checks flat 9AM — ignores approved extensions = THE BUG)
+window.tryUpgradeAttendanceOnNotifRead = async function() {
+  if (!currentUser) return;
+  const todayStr = bizDate();
+  if (bizHour() >= 9) {
+    Notifs.showToast('⏰ Deadline passed — notifications must be checked before 9:00 AM for full attendance.', 'error');
+    return;
+  }
+  const todaySnap = await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).get();
+  if (!todaySnap.exists || !todaySnap.data().loginTime) return;
+  const current = todaySnap.data();
+  if ((current.attendanceScore||0) >= 1.0) return;
+  await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
+    attendanceScore: 1.0, fullTime: true,
+    fullTimeAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge: true });
+  Notifs.showToast('✅ Full attendance (100%) — all notifications checked!');
+};
+```
+```js
+// AFTER (honors an approved extension's expiresAt exactly like the dashboard render does)
+window.tryUpgradeAttendanceOnNotifRead = async function() {
+  if (!currentUser) return;
+  const todayStr = bizDate();
+  const now = new Date();
+  // Honor an approved extension: its expiresAt replaces the flat 9:00 AM cutoff.
+  const extSnap = await db.collection('attendance_extensions')
+    .doc(`${currentUser.uid}_${todayStr}`).get().catch(()=>({exists:false,data:()=>({})}));
+  const ext = window.attExtActive(extSnap.exists ? extSnap.data() : null, now);
+  const pastDeadline = ext.active ? (now >= ext.expiresAt) : (bizHour() >= 9);
+  if (pastDeadline) {
+    const dl = ext.active
+      ? ext.expiresAt.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',timeZone:window.BIZ_TZ})
+      : '9:00 AM';
+    Notifs.showToast(`⏰ Deadline passed — notifications must be checked before ${dl} for full attendance.`, 'error');
+    return;
+  }
+  const todaySnap = await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).get();
+  if (!todaySnap.exists || !todaySnap.data().loginTime) return; // must have timed in first
+  const current = todaySnap.data();
+  if ((current.attendanceScore||0) >= 1.0) return;              // already full
+  if (current.editedBy) return;                                // admin-set day — never self-override (also WS19-denied)
+  try {
+    await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
+      attendanceScore: 1.0, fullTime: true,
+      fullTimeAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    Notifs.showToast('✅ Full attendance (100%) — all notifications checked!');
+  } catch(e) { /* WS19 rule denied (admin-edited day) — silently ignore */ }
+};
+```
+
+**3b. NEW shared approve/deny — insert in js/app.js immediately after `tryUpgradeAttendanceOnNotifRead` (~line 3189):**
+```js
+window.approveAttendanceExtension = async function(extId, uid, name) {
+  const approvedAt = new Date();
+  const expiresAt  = new Date(approvedAt.getTime() + window.ATT_EXT_HOURS * 60 * 60 * 1000);
+  await db.collection('attendance_extensions').doc(extId).update({
+    status: 'approved',
+    approvedBy: currentUser.uid,
+    approvedByName: userProfile?.displayName || currentUser.email,
+    approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    expiresAt: firebase.firestore.Timestamp.fromDate(expiresAt)
+  });
+  const dl = expiresAt.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',timeZone:window.BIZ_TZ});
+  await Notifs.send(uid, {
+    title: '✅ Attendance Extension Approved',
+    body:  `Your Time In extension is approved. You have until ${dl} to time in and check all notifications.`,
+    icon: '✅', type: 'att_extension_approved'
+  });
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('att-ext-pending');
+  return expiresAt;
+};
+window.denyAttendanceExtension = async function(extId, uid, name) {
+  await db.collection('attendance_extensions').doc(extId).update({
+    status: 'denied', deniedBy: currentUser.uid,
+    deniedAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  await Notifs.send(uid, {
+    title: '❌ Attendance Extension Denied',
+    body:  'Your attendance extension request was not approved.',
+    icon: '❌', type: 'att_extension_denied'
+  });
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('att-ext-pending');
+};
+```
+
+**3c. js/modules.js:1050-1087 approve/deny handlers — collapse to the shared fns:**
+```js
+// AFTER
+extEl.querySelectorAll('.ext-approve-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    btn.disabled = true; btn.textContent = 'Approving…';
+    await window.approveAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
+    Notifs.showToast(`Extension approved for ${btn.dataset.name||'employee'}`);
+    loadExtensionRequests();
+  });
+});
+extEl.querySelectorAll('.ext-deny-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    if (!confirm('Deny this extension request?')) return;
+    btn.disabled = true;
+    await window.denyAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
+    Notifs.showToast('Extension denied');
+    loadExtensionRequests();
+  });
+});
+```
+
+**3d. js/departments.js:9922-9954 approve/deny handlers — same collapse:**
+```js
+// AFTER
+wrap.querySelectorAll('.ext-approve').forEach(btn => {
+  btn.addEventListener('click', async e => {
+    const { id, uid, name } = e.currentTarget.dataset;
+    await window.approveAttendanceExtension(id, uid, name);
+    Notifs.showToast(`Extension approved for ${name}`);
+    loadApprovalsSub('attendance');
+  });
+});
+wrap.querySelectorAll('.ext-deny').forEach(btn => {
+  btn.addEventListener('click', async e => {
+    const { id, uid, name } = e.currentTarget.dataset;
+    await window.denyAttendanceExtension(id, uid, name);
+    Notifs.showToast(`Extension denied for ${name}`);
+    loadApprovalsSub('attendance');
+  });
+});
+```
+
+**3e. (Consistency, optional but recommended) js/app.js:2857-2858 dashboard render** — replace the inline `extApproved` computation with the shared helper so render and upgrade can never drift again:
+```js
+// BEFORE
+const extApproved  = extData?.status === 'approved' && extData?.expiresAt && now < extData.expiresAt.toDate();
+// AFTER
+const _ext = window.attExtActive(extData, now);
+const extApproved = _ext.active;
+// (extExpiresStr at 2864-2866 → use _ext.expiresAt.toLocaleTimeString(...) when extApproved)
+```
+
+### Spec 4 — Office self-service Time Out button (js/app.js, renderEmployeeDashboard)
+
+**4a. Derived flag** — add beside `hasLogin`/`hasFull` (~app.js:2846-2850):
+```js
+const hasLogout = !!attData.logoutTime;
+```
+**4b. Button markup** — inside the `hasFull` and `hasLogin` render branches (app.js:2982-3000), append when `hasLogin && !hasLogout`:
+```js
+${(hasLogin && !hasLogout) ? `<button class="btn-secondary" id="time-out-btn" style="width:100%;margin-top:10px">
+  <i data-lucide="log-out" style="width:14px;margin-right:6px"></i>Time Out</button>` : ''}
+${hasLogout ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">👋 Timed out · ${(attData.hoursWorked||0).toFixed(1)}h logged</div>` : ''}
+```
+**4c. Handler** — add next to the `check-in-btn` listener (app.js:3111-3133):
+```js
+document.getElementById('time-out-btn')?.addEventListener('click', async () => {
+  const inTs = attData.loginTime?.toDate ? attData.loginTime.toDate() : null;
+  const hrs  = inTs ? window.computeHoursBetween(inTs, new Date()) : 0;
+  await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
+    logoutTime: firebase.firestore.FieldValue.serverTimestamp(),
+    hoursWorked: hrs
+  }, { merge: true });
+  Notifs.showToast(`👋 Timed out — ${hrs.toFixed(1)}h logged.`);
+  renderEmployeeDashboard();
+});
+```
+> WS19-compat: this merge does not touch `attendanceScore`, so the merged doc keeps its existing 0.5/1.0 (∈ the WS19 cap set), and `editedBy` is absent on a self-checked-in day — the write passes the WS19 owner rule unchanged. No firestore.rules edit is needed for `attendance/{uid}` (WS19's split block already permits it).
+
+### Spec 5 — Holidays admin
+
+**5a. js/modules.js:892-961 `getPHHolidays` — merge overrides (keep the WHOLE existing base table; add one merge block before `return holidays;` at line 960):**
+```js
+  // ── Admin overrides (prefetched into _holidayOverrides at boot) ──
+  const ov = window._holidayOverrides && window._holidayOverrides[year];
+  if (ov) {
+    for (const date in ov) {
+      if (ov[date] === null) delete holidays[date];   // admin removed a base holiday
+      else holidays[date] = ov[date];                 // admin added/edited
+    }
+  }
+  return holidays;
+```
+**5b. NEW prefetch — insert in js/modules.js right after `getPHHolidays` (~line 961):**
+```js
+window.loadHolidayOverrides = async function(years) {
+  years = years || [window.bizYear()-1, window.bizYear(), window.bizYear()+1];
+  await Promise.all(years.map(async y => {
+    try {
+      const snap = await db.collection('settings_holidays').doc(String(y)).get();
+      window._holidayOverrides[y] = (snap.exists && snap.data().overrides) ? snap.data().overrides : {};
+    } catch { window._holidayOverrides[y] = {}; }
+  }));
+};
+```
+**5c. Boot call** — in js/app.js, in the authenticated-boot path (where `userProfile` is set and the first dashboard renders), add: `if (typeof loadHolidayOverrides==='function') loadHolidayOverrides();` — non-blocking; if it hasn't resolved yet `getPHHolidays` safely returns the base table.
+
+**5d. Admin screen `window.renderHolidaysAdmin()`** — new render fn in modules.js, wired into `navigateTo` (app.js switch) + a nav entry for president/manager/finance. Behavior: year selector; list the merged `getPHHolidays(year)` with a source badge (base vs override); "Add / Edit" and "Remove" write into `settings_holidays/{year}.overrides`; on save call `loadHolidayOverrides([year])`. All name interpolation via `escHtml()`. Save write:
+```js
+await db.collection('settings_holidays').doc(String(year)).set({
+  year,
+  overrides: overridesMap,             // date → {name,type} | null
+  updatedBy: currentUser.uid,
+  updatedByName: userProfile.displayName || currentUser.email,
+  updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+}, { merge: true });
+await loadHolidayOverrides([year]);
+```
+
+### Spec 6 — Worker kiosk attendance + payslip auto-fill
+
+**6a. Kiosk write** (HR-operated screen — a simple `renderWorkerKiosk()` or a row action in `renderFinanceHRProfiles`): pick a `worker_profiles` doc, enter/scan `timeIn`/`timeOut`, write:
+```js
+const hrs = computeDayHours(timeIn, timeOut);   // existing fn, departments.js:4154
+await db.collection('attendance_worker').doc(profileId).collection('records').doc(bizDate()).set({
+  workerId: profileId, date: bizDate(), timeIn, timeOut, hoursWorked: hrs,
+  recordedBy: currentUser.uid, recordedByName: userProfile.displayName || currentUser.email,
+  recordedAt: firebase.firestore.FieldValue.serverTimestamp()
+}, { merge: true });
+```
+**6b. Payslip generator auto-fill** — add a "⟳ Load from kiosk" button in `openPayslipGenerator` (departments.js, near the time-log table ~4025) that fills the 7 rows from the pay period:
+```js
+document.getElementById('ps-load-kiosk-btn')?.addEventListener('click', async () => {
+  const start = document.getElementById('ps-start').value, end = document.getElementById('ps-end').value;
+  if (!start || !end) { Notifs.showToast('Set pay period dates first','error'); return; }
+  const snap = await db.collection('attendance_worker').doc(profile.id).collection('records')
+    .where(firebase.firestore.FieldPath.documentId(), '>=', start)
+    .where(firebase.firestore.FieldPath.documentId(), '<=', end).get().catch(()=>({docs:[]}));
+  const byDow = {}; // Mon..Sun index 0..6
+  snap.docs.forEach(d => { const r = d.data(); const dow = window.bizDow(new Date(`${r.date}T12:00:00`)); byDow[(dow+6)%7] = r; });
+  for (let i=0;i<7;i++){ const r=byDow[i]; if(!r) continue;
+    const tin=document.getElementById(`ps-tin-${i}`), tout=document.getElementById(`ps-tout-${i}`);
+    if(tin) tin.value=r.timeIn||''; if(tout) tout.value=r.timeOut||''; }
+  recomputeHours();
+  Notifs.showToast('Loaded kiosk hours — review & adjust before saving.');
+});
+```
+> The rows remain editable; `collectPayslipData` (departments.js:4165) and the `WPAY-` ledger post on Submit are UNCHANGED. HR override + ledger discipline preserved (satisfies WS20 §D3/§Risk).
+
+### Spec 7 — firestore.rules diffs (block-scoped, before→after)
+
+The existing `attendance/{uid}` block is being reshaped by **WS19** (score cap + editedBy guard). WS26 adds NO further edit there — `logoutTime`/`hoursWorked` writes already satisfy the WS19 owner rule (Spec 4 note). WS26 adds two NEW match blocks:
+
+```
+// NEW — worker kiosk attendance (no Auth link yet; HR-written). Insert near the
+// existing attendance block (~firestore.rules:156). No owner clause — workers have
+// no uid until WS27/linkedUid lands.
+match /attendance_worker/{workerId} {
+  allow read: if isAuth() && isFinanceOrAdmin();
+}
+match /attendance_worker/{workerId}/records/{date} {
+  allow read, write: if isAuth() && isFinanceOrAdmin();
+}
+
+// NEW — holidays admin override docs. Dedicated collection so the looser write
+// does NOT touch the president-only settings/{docId} match. Insert near settings (~261).
+match /settings_holidays/{year} {
+  allow read:  if isAuth();
+  allow write: if isAuth() && isFinanceOrAdmin();
+}
+```
+> Deploy: `~/.npm-global/bin/firebase deploy --only firestore:rules` — SEPARATE from `git push` (per repo convention). Re-`git diff` firestore.rules first (concurrent OneDrive/WS19/WS20 sessions edit this file); apply as block-scoped Edits, never a full-file replace. Add `attendance_worker`, `settings_holidays` to `scripts/monthly-backup.js` EXPORTS in the same commit.
+
+### Spec 8 — Migration / rollout checklist (dependency order)
+
+1. **Add config.js helpers** (`ATT_EXT_HOURS`, `attExtActive`, `computeHoursBetween`, `_holidayOverrides`) — Spec 2. Safe standalone.
+2. **Ship the extension-upgrade fix + unified approve/deny** (Spec 3a-3e). Fixes the live 9AM hard-block bug independently — ship first if isolating.
+3. **Deploy rules** (Spec 7) — the two NEW blocks. Old clients keep working (they don't read the new collections). Ships before any client writes to them.
+4. **Add office Time Out** (Spec 4). No backfill: existing docs simply lack `logoutTime`/`hoursWorked` (both optional; readers treat absent as "not timed out" / 0).
+5. **Holidays merge + prefetch + admin screen** (Spec 5). No migration — with no `settings_holidays` doc, `getPHHolidays` returns today's exact base table. First real need is 2029; 2026-2028 already correct.
+6. **Worker kiosk + payslip auto-fill** (Spec 6). No backfill — auto-fill only affects future payslips; manual entry remains the fallback for any period with no kiosk records.
+7. **Bump `CACHE_VER` in sw.js manually** (per CLAUDE.md, CACHE_VER is the separate manual step the auto-bump does not cover). Add any new render file references to PRECACHE only if a new js file is created — NONE is (all edits land in config.js/app.js/modules.js/departments.js).
+8. **Manual test** (Spec 10).
+
+**Independence vs WS27:** steps 1-6 all ship WITHOUT WS27. Worker attendance is keyed by `workerProfileId` and written by HR, so no worker login is required. When WS27/WS20 add `worker_profiles.linkedUid`, a later, additive edit can add an owner-read clause to the `attendance_worker/{workerId}/records/{date}` rule (`|| isOwner(get(worker_profiles/{workerId}).linkedUid)`) — no re-keying, no data migration.
+
+### Spec 9 — Every existing site touching attendanceScore / getPHHolidays / attendance_extensions (unchanged vs must-update)
+
+- app.js:2847-2849 `attScore` normalize — **unchanged** (canonical field untouched).
+- app.js:2856-2866 dashboard `extApproved`/`extExpiresStr` — **update (recommended)** to `window.attExtActive` (Spec 3e) to prevent future drift.
+- app.js:2883-2884 dashboard KPI via `countWorkDays` → `getPHHolidays` — **unchanged** (sync signature preserved; overrides merge transparently).
+- app.js:3122-3128 self check-in write — **unchanged** (still writes score 0.5/1.0).
+- app.js:3184-3187 notif-upgrade write — **updated** (Spec 3a; now honors extensions + editedBy guard).
+- app.js:4628-4637 `countWorkDays` — **unchanged** (calls `getPHHolidays`, still sync).
+- app.js:4640-4664 `_attRecScore`/`getAttendanceScore` — **unchanged** (WS20's monthly attScore source; explicitly not touched).
+- modules.js:892-961 `getPHHolidays` — **updated** (Spec 5a merge block; base table kept verbatim).
+- modules.js:1050-1087 extension approve/deny — **updated** (Spec 3c; collapsed to shared fns).
+- modules.js:1121-1152 calendar `_attRecScore`-equivalent status logic — **unchanged** (reads score/fullTime/loginTime as before; `logoutTime`/`hoursWorked` ignored).
+- modules.js:1208-1228 admin edit write — **unchanged** (still stamps `editedBy`, writes canonical score).
+- departments.js:4152-4163 `computeDayHours` — **unchanged** (reused by kiosk write, Spec 6a).
+- departments.js:4165-4237 `collectPayslipData`/`timeLog` — **unchanged** (auto-fill only prefills the same inputs it already reads).
+- departments.js:9891-9954 Approvals attendance sub-tab — **updated** (Spec 3d; collapsed to shared fns).
+- notifications.js:179-181 upgrade call site — **unchanged** (still calls `window.tryUpgradeAttendanceOnNotifRead`, whose internals changed).
+- WS20 `computePayRun` attScore via `getAttendanceScore` — **unchanged**; weekly production pay now optionally sources hours from `attendance_worker` via the payslip auto-fill (Spec 6b).
+- WS25 Leave: a leave day should write `attendanceScore` (per WS25) only; `hoursWorked`/`logoutTime` are OMITTED (office hoursWorked is informational; a leave day is exempt from the hours model just as holidays/Sundays are). Consistent with this shape.
+
+### Spec 10 — Sample/edge-case record shapes (write defensive code against all four)
+
+```js
+// (a) Normal full office day WITH time-out
+{ date:'2026-07-10', uid, loginTime:<07:42>, attendanceScore:1.0, fullTime:true, autoFull:false,
+  fullTimeAt:<08:55>, logoutTime:<17:03>, hoursWorked:8.35 }
+// (b) Admin-marked ABSENT, historical (NO loginTime — deliberately deleted). NEVER derive
+//     hoursWorked from loginTime here; hoursWorked/logoutTime absent.
+{ date:'2026-05-14', uid, status:'absent', fullTime:false, attendanceScore:0,
+  note:'no call no show', editedBy:<admin uid>, editedAt:<...> }   // loginTime absent
+// (c) Holiday / Sunday (isNoWorkDay) — usually NO record at all; readers must treat a
+//     missing doc + isNoWorkDay as "no penalty", never as absent.
+//     (getPHHolidays(year)[date] present → isNoWorkDay=true; skip hours entirely.)
+// (d) Approved-extension day, time-in AFTER 9AM (e.g. 11:07), notifs read at 12:30 while
+//     extension expiresAt=15:00 → upgrade SUCCEEDS (Spec 3a), score 0.5→1.0.
+{ date:'2026-07-10', uid, loginTime:<11:07>, attendanceScore:1.0, fullTime:true, autoFull:false,
+  fullTimeAt:<12:30> }   // and attendance_extensions/{uid}_2026-07-10 = {status:'approved', expiresAt:<15:00>}
+// (e) Worker kiosk record (separate collection, no uid)
+{ workerId:'wp_ab12', date:'2026-07-10', timeIn:'07:00', timeOut:'16:00', hoursWorked:8.0,
+  recordedBy:<HR uid>, recordedByName:'HR', recordedAt:<...> }
+```
+
+### Spec 11 — Manual test checklist (no automated suite)
+
+- **Extension bug (the headline fix):** as president approve a 6-hr extension at 08:00; as that employee time in at 11:00 (allowed), open 🔔 and check every notification at 12:00 → attendance upgrades to **100%** (previously blocked with the 9AM error toast). ✓
+- **Past extension deadline:** same employee, but read notifications AFTER `expiresAt` → toast names the extended time, no upgrade. ✓
+- **Normal 9AM path unchanged:** no extension, read notifs at 08:30 → 100%; at 09:30 → blocked with "before 9:00 AM". ✓
+- **Both approval UIs agree:** approve via Attendance page widget and via Approvals hub → identical `expiresAt` (+6h) and identical notification wording. ✓
+- **Office Time Out:** after time-in, tap Time Out → `logoutTime`+`hoursWorked` written, badge shows "Timed out · Xh"; `attendanceScore` unchanged (still 100%/50%). ✓ Devtools: a Time Out merge does not trip WS19 (score stays ∈ {0,0.5,1.0}). ✓
+- **Holidays admin:** add `2029-04-02 Maundy Thursday` in the admin screen → reload → 2029 calendar shows it and `countWorkDays(2029,...)` drops that day; remove a base holiday via `null` override → it disappears for that year only; 2026-2028 base holidays unaffected with no override doc. ✓
+- **Holidays rule scope:** finance/manager can save `settings_holidays/{year}`; `settings/employeeOfMonth` remains president-only-write (unchanged). ✓
+- **Worker kiosk → payslip:** HR clocks a worker for a week; in the payslip generator set the period + "⟳ Load from kiosk" → 7 rows prefill, total hours match, rows still editable; Submit posts one `WPAY-` ledger row (no duplicate path). ✓
+- **Deploy:** `~/.npm-global/bin/firebase deploy --only firestore:rules` run and confirmed (separate from `git push`). ✓
+
+### Flags for Neil
+
+- **‼️ FLAG FOR NEIL — extension duration stays a constant (6h).** Recommendation: keep `window.ATT_EXT_HOURS = 6`; making it admin-configurable is scope the plan didn't ask for. Say the word if you want a settings-driven value.
+- **‼️ FLAG FOR NEIL — holidays admin write access.** Spec uses `isFinanceOrAdmin()` (president/manager/secretary/finance) so HR can maintain the yearly proclamations without routing through you. If you want it president-only, change the `settings_holidays` write rule to `isPresident()`.
 
 ## Risks / cross-workstream interactions
 

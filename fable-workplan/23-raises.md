@@ -78,16 +78,371 @@ No Cloud Function or scheduled trigger exists today (functions/index.js exports 
 - Rules-level role check for anything payroll-adjacent should use isFinanceOrAdmin() (firestore.rules:22 — president/manager/secretary/finance) as the enforcement boundary, not the looser client-side canEditDept('Finance') (departments.js:17-25) which also admits any Finance-department 'employee'. The two are already inconsistent for payroll/worker_profiles writes today; a new pending_raises collection should not add a third, differently-scoped gate.
 - The Compute handler (departments.js:2616-2764) currently reads u.salary three separate times (2630, 2672, 2758) for three different downstream writes (salary_history, ledger, pay_runs). Any pending-raise resolution must happen once and be threaded through consistently, not recomputed independently at each site (or the three artifacts for the same month could disagree on the employee's salary).
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-- [ ] Storage shape: a top-level `pending_raises` collection (mirroring salary_raises' shape but with status:'pending'|'applied'|'cancelled' + effectiveDate) vs. fields bolted onto the existing salary_raises doc (e.g. status + applied boolean) vs. a field directly on payroll/{uid} and worker_profiles/{docId} (e.g. pendingSalary + pendingEffectiveDate). Tradeoff: a separate collection supports multiple queued future raises per employee and a clean approval-request lifecycle mirroring finance_delete_requests, but duplicates the salary_raises shape and adds a new rules block + composite index; fields-on-the-profile-doc are simpler to read during Compute (no extra query) but only support one pending raise at a time and blur the read/write model finance already relies on for payroll/worker_profiles.
-- [ ] Where exactly in the Compute handler (departments.js) does pending-raise resolution execute — inside the `employees`/`allStaff` construction (departments.js:2144-2150, before any of the three u.salary reads) so it's a single source of truth for that Compute run, or as a discrete pre-step invoked at the top of the gen-payroll-btn click handler (2616) that mutates payroll/{uid} in Firestore first (making it also correct for the Edit Payroll modal and any other future reader), or deferred entirely to WS20's rewrite of this same function? This interacts directly with WS20 ("kill the second compute path... Compute freezes per-employee snapshot lines") — Fable must decide whether WS23 lands before, after, or jointly with WS20's rewrite.
-- [ ] "At the first Compute on/after the date" — does "the date" mean effectiveDate <= wall-clock bizDate() at the moment Compute is clicked, or effectiveDate's month <= the `month` value selected in the Compute month-picker (departments.js:2161-2163, which lets finance pick and even re-run PAST months)? These differ: if finance re-runs a past month's Compute after a raise's effective date has since passed, the wall-clock check would incorrectly apply the (now-stale) raise to that past month's reprint, contradicting WS20's "past months reprint exactly" goal. This needs an explicit decision, since re-running old months is an existing, deliberately-supported feature (the alreadyGenerated confirm at departments.js:2625).
-- [ ] Approval routing mechanics: should ALL raises route through President approval (mirroring financeDelete's president-deletes-immediately / everyone-else-requests pattern, departments.js:186-227), or only raises above some percentage/peso threshold, or only raises granted by non-manager Finance-dept staff (given the canEditDept('Finance') gate today lets any Finance-department employee grant a raise unilaterally with zero approval)? V12-PLAN.md only says "approval-routed" — the threshold/who-approves/who's-exempt design is unresolved.
-- [ ] Should the two existing unlogged, immediate, bypass paths to the same fields — "✎ Edit Payroll" (departments.js:2487-2561, direct payroll/{uid}.set on salary/allowance/etc.) and Worker Profile "✎ Edit" (departments.js:3681-3785, direct worker_profiles update on dailyRate/hourlyRate) — be closed off / rerouted through the new raise-approval flow when the salary/rate field changes, or left as an intentional "admin correction, not a raise" escape hatch? If left open, the effective-dating and approval guarantees of WS23 are trivially bypassable through these existing buttons.
-- [ ] Should the existing openRaiseHistory() (departments.js:2059-2082, currently a flat admin-only 200-row log) be extended into the "salary history timeline" the plan calls for, or should a distinct per-employee timeline view be built into the employee's own Personal Finance screen (js/app.js ~4190-4265, which today queries salary_history but never salary_raises even though rules already permit it)? Related: should that self-view show PENDING (not-yet-effective) raises to the employee, or only realized ones — visibility of an unannounced pending raise to the employee themselves is a business-sensitivity question, not just a technical one.
-- [ ] Does the production-pay ambiguity (users docs with payClass:'production', departments.js:2148, vs. the separate worker_profiles roster with no obvious ID link) need to be resolved as a prerequisite, or can WS23 treat 'payroll' and 'worker_profile' as the only two subjectTypes indefinitely and ignore payClass:'production' users (who today aren't visibly paid through either raise path in a traceable way)?
-- [ ] Notification/visibility for a raise whose effective date arrives but Compute hasn't been run yet (e.g. finance is late running the monthly Compute) — is silence acceptable (the plan's "auto-applies at first Compute" implies yes, by design), or does this need a dashboard/HR reminder banner, given there is no scheduled Cloud Function infrastructure in this codebase today to drive a proactive reminder without adding new Cloud Functions infra?
+> Composes with WS20 (payroll engine), WS12 (Period), WS19 (rules helpers), WS21/WS22. The
+> raise never touches `computePayRun`/`computePayLine` — it lands on the *base-of-record*
+> (`payroll/{uid}.salary`, `worker_profiles/{id}.dailyRate`) **before** Compute reads it, via a
+> month-gated screen-load sweep. This is the single resolution point and keeps WS20's Compute
+> strictly read-only.
+
+### Resolved decisions
+
+1. **Storage shape → new top-level `pending_raises` collection (the SCHEDULE + APPROVAL lifecycle); `salary_raises` stays untouched as the immutable APPLIED audit log.** Two collections, clean split: `pending_raises` is queryable by `status` (single-field, no composite index), supports multiple queued future raises per person, and mirrors `finance_delete_requests`' request→approve lifecycle. `salary_raises` is written *only at materialization* (so every row in it is, by construction, a realized raise) — `openRaiseHistory` keeps working verbatim. Rationale: bolting `status` onto `salary_raises` would make the audit log mutable and pollute it with never-applied requests; a scalar `pendingSalary` field on `payroll/{uid}` supports only one queued raise and blurs the read model 70+ call sites depend on.
+2. **Resolution point → a month-gated sweep `window.applyDueRaises(subjectType)` at SCREEN LOAD (top of `renderPayrollManagement` for `'payroll'`, top of `renderFinanceHRProfiles` for `'worker_profile'`), NOT inside `computePayRun`.** The sweep writes the resolved base into `payroll/{uid}.salary` (the canonical field `fetchUsersWithPayroll` merges and all ~70 `u.salary` reads consume). By the time the Compute button is clickable, the base is already current, so `computePayRun` reads `u.salary` as-is and needs **zero edits** — this is the minimal-collision composition with WS20's rewrite. Rationale: the brief's "single resolution point before the three `u.salary` reads" is satisfied by mutating the source-of-truth once at load rather than threading an in-memory override through WS20's pure `computePayLine`.
+3. **"On/after the date" semantics → gated by `effectiveMonth <= currentBizMonth` (wall-clock Manila month at sweep time), NOT the Compute picker month.** A future-dated raise (`effectiveMonth > currentBizMonth`) is **never** materialized, so it can never leak into any Compute — current or a re-run of a past month. Once a raise's month has actually arrived it materializes into `payroll.salary`; from then on every run reads the raised base, which is correct (a raise effective May belongs in May). Residual, documented and accepted: re-computing a *past, still-undisbursed* month after a raise has since materialized will reflect the raised base — but WS20 D4 makes disbursed months reprint from frozen `lines[]`, so real payslips/history never change; this residual is identical to today's behavior for any `Edit Payroll` salary change and is not a new bug. Full salary-timeline reconstruction (replay to any month) is explicitly out of scope.
+4. **Approval routing → mirror `financeDelete` exactly: President acts immediately, everyone else files a request.** No peso/percent threshold (nothing to bikeshed; raises are as sensitive as deletes). Non-President finance (`isFinanceOrAdmin` minus president) can only create a `pending_approval` request — enforced in `firestore.rules` at the data layer, closing today's "any Finance-dept user grants unilaterally" hole. The President approves/rejects in the Approvals tab (sibling of the `payroll_delete_requests` block). Rationale: recognizable, already-audited governance pattern; no new capability model.
+5. **Both bypass paths CLOSED for the governed field only.** `Edit Payroll` (departments.js:2496-2540): the `salary` input becomes read-only display ("Change base pay via 💸 Give Raise") and `salary:` is dropped from the `.set()`; allowance/deductions/statutory stay directly editable (they're corrections, not raises). `openHRProfileForm` (departments.js ~3681-3785): `dailyRate`/`hourlyRate` inputs are read-only in **edit** mode, editable in **create** mode (setting a new hire's initial rate is not a raise). Rationale: without this the effective-dating + approval guarantees are trivially bypassable; the President loses nothing because immediate grants remain one click via the raise modal.
+6. **Salary-history timeline → BOTH surfaces, split by audience.** `openRaiseHistory` stays the admin *applied* log (unchanged) and gains a sibling admin panel "Scheduled / Pending raises" reading `pending_raises`. A new "Salary changes" card is added to the employee's own Personal Finance screen (app.js, after the `salary_history` query ~4207) reading `salary_raises where subjectId==uid` — **applied raises only**. Employees are **not** shown `pending_approval`/`scheduled` raises (a queued raise may be revised/cancelled; premature disclosure is an HR risk). Rationale: `salary_raises` is inherently applied-only, so the employee card is safe by construction.
+7. **Production-pay ambiguity → NOT a prerequisite.** WS23 keeps exactly two `subjectType`s: `'payroll'` (→ `payroll/{uid}.salary`) and `'worker_profile'` (→ `worker_profiles/{id}.dailyRate`+scaled `hourlyRate`). It does not reconcile the `payClass:'production'`-user-vs-`worker_profiles`-roster split — that is WS20's `linkedUid` reconciliation. Flagged, deferred.
+8. **Effective-date-arrived-but-Compute-not-run → no Cloud Function; screen-load sweep + banner.** `applyDueRaises` auto-applies due raises whenever Finance opens the Payroll or HR screen (the plan's "auto-applies at first Compute" realized as "first visit on/after the date"). A client-side banner on the Payroll screen surfaces *upcoming* future-dated scheduled raises and the pending-approval count. No `functions.pubsub`/`onSchedule` is added. **‼️ FLAG FOR NEIL:** if he wants a true midnight-of-effective-date auto-apply independent of anyone opening a screen, that is net-new Cloud Function infra (added scope). Recommendation: screen-load sweep is sufficient — payroll is only ever run from these screens anyway.
+
+---
+
+### Spec 1 — Data shape: `pending_raises/{autoId}` (annotated literal)
+
+```js
+// pending_raises/{autoId}  — schedule + approval lifecycle. Finance create; President approves;
+// the screen-load sweep materializes. Subject may read their own.
+{
+  subjectType:   'payroll',              // 'payroll' | 'worker_profile'
+  subjectId:     'AbC…uid',              // payroll → Firebase uid; worker_profile → worker_profiles docId
+  subjectName:   'Juan Dela Cruz',
+  field:         'Base Salary',          // fieldLabel (display) — 'Base Salary' | 'Daily Rate'
+  targetField:   'salary',               // NEW — Firestore field the materializer writes: 'salary' | 'dailyRate'
+  oldAmount:     25000,                   // snapshot at schedule time (audit uses LIVE value at apply)
+  newAmount:     28000,
+  changeAmount:  3000,
+  changePct:     12,                      // number | null (null when oldAmount==0)
+  effectiveDate: '2026-08-01',            // 'YYYY-MM-DD'
+  effectiveMonth:'2026-08',               // NEW — effectiveDate.slice(0,7); the month-gate key
+  reason:        'Annual increase',
+  status:        'scheduled',             // 'pending_approval'|'scheduled'|'applied'|'rejected'|'cancelled'
+  requestedBy:   'uid…', requestedByName:'Finance Clerk',
+  approvedBy:    'presUid', approvedByName:'Neil Barro',
+  approvedAt:    <serverTimestamp>,       // set when President approves (or when President creates directly)
+  appliedAt:     null,                    // <serverTimestamp> at materialize
+  appliedInMonth:null,                    // 'YYYY-MM' bizMonth at materialize
+  rejectedBy:null, rejectedByName:null, rejectedAt:null, rejectReason:null,
+  salaryRaiseId: null,                    // NEW — id of the salary_raises audit doc (== this docId, see materialize)
+  createdAt:     <serverTimestamp>
+}
+```
+
+`salary_raises` doc shape is **unchanged** (subjectType, subjectId, subjectName, field, oldAmount, newAmount, changeAmount, changePct, effectiveDate, reason, grantedBy, grantedByName, createdAt) — but is now written with a **deterministic docId == the `pending_raises` docId** so re-running the sweep can never create a duplicate audit row.
+
+### Spec 2 — New service `window.RaiseFlow` (insert in js/departments.js immediately below `openRaiseHistory`, ~after line 2082)
+
+```js
+// ── Raise lifecycle service (schedule → approve → materialize) ──────────────
+// pending_raises holds the schedule; salary_raises is the applied audit log.
+// President acts immediately; everyone else files a pending_approval request.
+window.RaiseFlow = (function () {
+  const nowMonth = () => today().slice(0, 7);            // today() wraps window.bizDate() → 'YYYY-MM-DD'
+
+  // Create a raise. President → 'scheduled' (+ apply now if due). Others → 'pending_approval'.
+  async function submitRaise(desc, { newAmount, effectiveDate, reason }) {
+    const u = window.currentUser || auth.currentUser || {};
+    const cur = parseFloat(desc.current) || 0;
+    const eff = effectiveDate || today();
+    const effMonth = eff.slice(0, 7);
+    const isPres = typeof isRealPresident === 'function' && isRealPresident();
+    const base = {
+      subjectType: desc.subjectType, subjectId: desc.subjectId, subjectName: desc.subjectName || '',
+      field: desc.fieldLabel, targetField: desc.targetField,
+      oldAmount: cur, newAmount,
+      changeAmount: +(newAmount - cur).toFixed(2),
+      changePct: cur > 0 ? +((newAmount - cur) / cur * 100).toFixed(2) : null,
+      effectiveDate: eff, effectiveMonth: effMonth, reason: reason || '',
+      requestedBy: u.uid || '', requestedByName: window.userProfile?.displayName || u.email || '',
+      appliedAt: null, appliedInMonth: null, salaryRaiseId: null,
+      rejectedBy: null, rejectedByName: null, rejectedAt: null, rejectReason: null,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    if (isPres) {
+      const ref = await db.collection('pending_raises').add({
+        ...base, status: 'scheduled',
+        approvedBy: u.uid, approvedByName: base.requestedByName,
+        approvedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      if (effMonth <= nowMonth()) await materialize(ref.id);   // same-day/back-dated → apply now
+      return { outcome: 'applied-or-scheduled', id: ref.id };
+    }
+    const ref = await db.collection('pending_raises').add({
+      ...base, status: 'pending_approval', approvedBy: null, approvedByName: null, approvedAt: null
+    });
+    await safeNotify(() => Notifs.sendToOwner({
+      title: '💸 Raise Approval Request',
+      body: `${base.requestedByName} requested a raise for ${base.subjectName}: ₱${fmt(cur)} → ₱${fmt(newAmount)} (eff ${eff}).`,
+      icon: '💸', type: 'raise_request'
+    }));
+    return { outcome: 'requested', id: ref.id };
+  }
+
+  // Materialize a scheduled raise: write base-of-record + salary_raises audit + status→applied.
+  // Idempotent: guarded on status=='scheduled'; salary_raises id == pending_raises id (merge).
+  async function materialize(raiseId) {
+    const snap = await db.collection('pending_raises').doc(raiseId).get();
+    if (!snap.exists) return;
+    const r = snap.data();
+    if (r.status !== 'scheduled') return;                    // re-entrancy / already applied
+    let liveOld = r.oldAmount;
+    if (r.subjectType === 'payroll') {
+      const p = await db.collection('payroll').doc(r.subjectId).get();
+      liveOld = (p.exists && typeof p.data().salary === 'number') ? p.data().salary : r.oldAmount;
+      await db.collection('payroll').doc(r.subjectId).set({ salary: r.newAmount }, { merge: true });
+    } else { // worker_profile — scale hourly from LIVE values (rate may have moved since schedule)
+      const wp = await db.collection('worker_profiles').doc(r.subjectId).get();
+      const curDaily = (wp.exists && wp.data().dailyRate) || 0;
+      const curHourly = (wp.exists && wp.data().hourlyRate) || 0;
+      liveOld = curDaily || r.oldAmount;
+      const newHourly = curDaily > 0 ? +((curHourly * (r.newAmount / curDaily))).toFixed(2) : +(r.newAmount / 8).toFixed(2);
+      await db.collection('worker_profiles').doc(r.subjectId).update({
+        dailyRate: r.newAmount, hourlyRate: newHourly,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+    // Audit log — deterministic id so a retried sweep overwrites instead of duplicating.
+    await db.collection('salary_raises').doc(raiseId).set({
+      subjectType: r.subjectType, subjectId: r.subjectId, subjectName: r.subjectName || '',
+      field: r.field, oldAmount: liveOld, newAmount: r.newAmount,
+      changeAmount: +(r.newAmount - liveOld).toFixed(2),
+      changePct: liveOld > 0 ? +((r.newAmount - liveOld) / liveOld * 100).toFixed(2) : null,
+      effectiveDate: r.effectiveDate, reason: r.reason || '',
+      grantedBy: r.approvedBy || r.requestedBy || '', grantedByName: r.approvedByName || r.requestedByName || '',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    await db.collection('pending_raises').doc(raiseId).update({
+      status: 'applied', appliedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      appliedInMonth: nowMonth(), salaryRaiseId: raiseId
+    });
+    window.logAudit && window.logAudit('raise-apply', r.subjectType, r.subjectId, { from: liveOld, to: r.newAmount });
+    if (r.subjectType === 'payroll' && r.subjectId) {
+      await safeNotify(() => Notifs.send(r.subjectId, {
+        title: '💸 Salary Update',
+        body: `Your ${r.field} changed from ₱${fmt(liveOld)} to ₱${fmt(r.newAmount)}, effective ${r.effectiveDate}.`,
+        icon: '💸', type: 'raise_applied'
+      }));
+    }
+    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('users'); dbCacheInvalidate('payroll'); }
+  }
+
+  // Screen-load sweep: apply every scheduled raise whose month has arrived. Month-gated so
+  // future-dated raises never leak into any Compute. Single-field query → no composite index.
+  async function applyDueRaises(subjectType) {
+    const nm = nowMonth();
+    const snap = await db.collection('pending_raises').where('status', '==', 'scheduled').get().catch(() => ({ docs: [] }));
+    const due = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .filter(r => r.subjectType === subjectType && (r.effectiveMonth || r.effectiveDate.slice(0, 7)) <= nm);
+    for (const r of due) { try { await materialize(r.id); } catch (e) { console.error('applyDueRaises', r.id, e); } }
+    return due.length;
+  }
+
+  // President approves a pending_approval request → schedule (+ apply if already due).
+  async function approve(raiseId) {
+    const ref = db.collection('pending_raises').doc(raiseId);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data().status !== 'pending_approval') return 'stale'; // re-entrancy guard
+    const u = window.currentUser || auth.currentUser || {};
+    await ref.update({
+      status: 'scheduled', approvedBy: u.uid,
+      approvedByName: window.userProfile?.displayName || u.email || 'President',
+      approvedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    const r = snap.data();
+    await safeNotify(() => Notifs.send(r.requestedBy, { title: '✅ Raise Approved',
+      body: `Your raise request for ${r.subjectName} was approved.`, icon: '✅', type: 'raise_request' }));
+    if ((r.effectiveMonth || r.effectiveDate.slice(0, 7)) <= nowMonth()) await materialize(raiseId);
+    return 'approved';
+  }
+
+  async function reject(raiseId, reason) {
+    const ref = db.collection('pending_raises').doc(raiseId);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data().status !== 'pending_approval') return 'stale';
+    const u = window.currentUser || auth.currentUser || {};
+    await ref.update({ status: 'rejected', rejectedBy: u.uid,
+      rejectedByName: window.userProfile?.displayName || u.email || 'President',
+      rejectedAt: firebase.firestore.FieldValue.serverTimestamp(), rejectReason: reason || '' });
+    const r = snap.data();
+    await safeNotify(() => Notifs.send(r.requestedBy, { title: '❌ Raise Declined',
+      body: `Your raise request for ${r.subjectName} was declined.${reason ? ' Reason: ' + reason : ''}`,
+      icon: '❌', type: 'raise_request' }));
+    return 'rejected';
+  }
+
+  return { submitRaise, materialize, applyDueRaises, approve, reject };
+})();
+```
+
+### Spec 3 — `openSalaryRaiseModal` signature change + save handler (departments.js:1985-2056)
+
+Signature loses `applyRaise`, gains `targetField`. **Before** (1985): `function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel, current, applyRaise }, currentUser, onDone) {`
+**After:** `function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel, targetField, current }, currentUser, onDone) {`
+
+The primary button label is date/role aware. **Before** (2006): `<button class="btn-primary" id="raise-save-btn">Apply Raise</button>…`
+**After:** compute label once —
+```js
+const _isPres = typeof isRealPresident === 'function' && isRealPresident();
+// default eff-date is today() → same-day. Button text updates live as the date changes.
+const _btnLabel = () => {
+  const effM = (document.getElementById('raise-eff')?.value || today()).slice(0,7);
+  if (!_isPres) return 'Request Raise';
+  return effM <= today().slice(0,7) ? 'Apply Raise' : 'Schedule Raise';
+};
+```
+Render the button as `id="raise-save-btn"` with initial text `_isPres ? 'Apply Raise' : 'Request Raise'`, and add `document.getElementById('raise-eff').addEventListener('change', () => { const b=document.getElementById('raise-save-btn'); b.textContent=_btnLabel(); });` next to the other input listeners (~2022).
+
+**Before** — save handler body (2032-2049):
+```js
+try {
+  await applyRaise(nv);
+  await db.collection('salary_raises').add({ …immediate audit… });
+  window.logAudit && window.logAudit('raise', subjectType, subjectId, { from: cur, to: nv });
+  closeModal();
+  Notifs.showToast(`Raise applied: ₱${fmt(cur)} → ₱${fmt(nv)}`);
+  onDone && onDone();
+} catch (e) { … }
+```
+**After:**
+```js
+try {
+  const res = await window.RaiseFlow.submitRaise(
+    { subjectType, subjectId, subjectName, fieldLabel, targetField, current: cur },
+    { newAmount: nv, effectiveDate: eff, reason }   // reason/eff already read at 2028-2029
+  );
+  closeModal();
+  if (res.outcome === 'requested')
+    Notifs.showToast('Raise sent to the President for approval.');
+  else
+    Notifs.showToast(`Raise ${eff.slice(0,7) <= today().slice(0,7) ? 'applied' : 'scheduled'}: ₱${fmt(cur)} → ₱${fmt(nv)}`);
+  onDone && onDone();
+} catch (e) {
+  console.error('raise failed', e);
+  btn.disabled = false; btn.textContent = _isPres ? 'Apply Raise' : 'Request Raise';
+  Notifs.showToast('Failed to submit raise','error');
+}
+```
+(All `escHtml()`/`fmt()`/`today()` usages are preserved; no raw `Date`.)
+
+### Spec 4 — Two call sites lose their `applyRaise` closures
+
+**Payroll 💸 button (departments.js:2472-2483)** — **Before** passes `applyRaise: async (nv)=>{ await db.collection('payroll')… }`. **After:**
+```js
+openSalaryRaiseModal({
+  subjectType:'payroll', subjectId:emp.id, subjectName:emp.displayName||emp.email,
+  fieldLabel:'Base Salary', targetField:'salary', current: emp.salary||0
+}, currentUser, () => loadPayrollTable(month));
+```
+**HR Profiles 💸 Raise (departments.js:3643-3661)** — **After:**
+```js
+openSalaryRaiseModal({
+  subjectType:'worker_profile', subjectId:profile.id, subjectName:profile.name||'Worker',
+  fieldLabel:'Daily Rate', targetField:'dailyRate', current: profile.dailyRate||0
+}, currentUser, () => renderFinanceHRProfiles(container,currentUser,currentRole));
+```
+The hourly-scaling that used to live in the closure now lives in `RaiseFlow.materialize` (reads live values). No behavior lost.
+
+### Spec 5 — Screen-load sweeps + banner
+
+- **`renderPayrollManagement` (departments.js:2128, first `await` in the body):** add `await window.RaiseFlow.applyDueRaises('payroll').catch(()=>{});` **before** `fetchUsersWithPayroll()` so `u.salary` is current for Compute.
+- **`renderFinanceHRProfiles` (departments.js:3578, before the `profiles` fetch):** add `await window.RaiseFlow.applyDueRaises('worker_profile').catch(()=>{});`.
+- **Payroll banner** (render near the month-picker strip): query once and show upcoming/pending counts (all string interpolation `escHtml`-safe — these are numbers):
+```js
+const _prSnap = await db.collection('pending_raises').where('status','in',['scheduled','pending_approval']).get().catch(()=>({docs:[]}));
+const _nm = today().slice(0,7);
+const _upcoming = _prSnap.docs.filter(d=>d.data().status==='scheduled' && (d.data().effectiveMonth||'') > _nm).length;
+const _pending  = _prSnap.docs.filter(d=>d.data().status==='pending_approval').length;
+const raiseBanner = (_upcoming||_pending)
+  ? `<div class="info-banner" style="margin:8px 0">💸 ${_upcoming} scheduled raise(s) upcoming${_pending?` · ${_pending} awaiting President approval`:''}. <button class="btn-secondary btn-sm" id="pr-view-raises">View</button></div>`
+  : '';
+// #pr-view-raises → openScheduledRaises() (Spec 7)
+```
+`where('status','in',[...])` is a single-field `in` filter → no composite index required.
+
+### Spec 6 — Close the two bypass paths
+
+**Edit Payroll (departments.js:2505):** **Before** `<input id="ep-salary" type="number" value="${emp.salary||0}" …/>`. **After** (read-only display, no input to submit):
+```js
+<div class="form-group"><label>${_payClass==='production'?'Weekly Rate':'Base Salary'}</label>
+  <div style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text-muted)">
+    ₱${fmt(emp.salary||0)} · <span style="font-size:11px">change via 💸 Give Raise (approval-routed)</span>
+  </div>
+</div>
+```
+And in the save handler (departments.js:2531-2540) **remove** the `salary:` line from the `.set()` payload (and the `salary` field from the `logAudit` call at 2542 → log `allowance` instead). Everything else in that modal is unchanged.
+
+**Worker Profile Edit (`openHRProfileForm`, departments.js:3681-3785):** the form is shared by create (`profile==null`) and edit. Gate the two rate inputs (~3756-3757) on mode: when editing an existing profile render them read-only with the same "change via 💸 Raise" hint; when creating keep the live `<input>`s. In the save handler (`db.collection('worker_profiles').doc(profile.id).update(data)` at 3776) **omit `dailyRate`/`hourlyRate` from `data` when `profile` is truthy** (edit mode) so an edit can never silently move the rate. Create mode still writes them.
+
+### Spec 7 — Admin scheduled/pending list + Approvals-tab wiring
+
+New `window.openScheduledRaises()` in departments.js (below `openRaiseHistory`): reads `pending_raises where status in ['scheduled','pending_approval']`, renders a `data-table` (Effective, Employee, Old→New, Status badge, By) with all user strings `escHtml`-wrapped, and — for `pending_approval` rows when `isRealPresident()` — inline **Approve** / **Reject** buttons calling `RaiseFlow.approve(id)` / prompting a reason then `RaiseFlow.reject(id,reason)`, re-rendering on resolve. Wire `#hrp-raise-history-btn` (3636) and the Payroll `#pr-view-raises` banner button to it (keep `openRaiseHistory` as the *applied* log).
+
+**Approvals tab** (mirror the `payroll_delete_requests` blocks ~9411-9432 / 9671-9686): add a `pending_raises where status=='pending_approval'` section. Each card:
+```js
+// re-entrancy: RaiseFlow.approve/reject re-read the doc and no-op if status !== 'pending_approval'
+approveBtn.onclick = async () => { const r = await window.RaiseFlow.approve(id);
+  Notifs.showToast(r==='approved'?'Raise approved.':'Already resolved.'); reloadApprovals(); };
+rejectBtn.onclick  = async () => { const reason = prompt('Reason for declining (optional):')||'';
+  await window.RaiseFlow.reject(id, reason); Notifs.showToast('Raise declined.'); reloadApprovals(); };
+```
+
+### Spec 8 — Employee self-view timeline (js/app.js, after the salary_history query ~4207)
+
+Add, after the existing `salary_history` fetch:
+```js
+const _raiseSnap = await db.collection('salary_raises').where('subjectId','==',currentUser.uid).limit(50).get().catch(()=>({docs:[]}));
+const _raises = _raiseSnap.docs.map(d=>d.data()).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0)); // client-sort → no composite index
+```
+Render a "Salary changes" card only if `_raises.length`, each row `escHtml`-wrapping `reason`/`grantedByName` and `fmt()`-formatting amounts, columns Effective · Old→New · Change · Reason. **No `pending_raises` query here** — employees see applied raises only.
+
+### Spec 9 — firestore.rules: NEW `pending_raises` block (insert after the `salary_raises` block, ~line 301)
+
+```
+    // ── Pending / scheduled raises (approval-routed schedule) ──────────
+    // Non-president finance may only FILE a request (status pending_approval);
+    // President approves → scheduled; the screen-load sweep materializes
+    // (scheduled → applied). Subject may read their own.
+    match /pending_raises/{docId} {
+      allow read: if isAuth() && (
+        resource.data.subjectId == request.auth.uid || isFinanceOrAdmin()
+      );
+      allow create: if isAuth() && (
+        isPresident()
+        || ( isFinanceOrAdmin()
+             && request.resource.data.get('status','') == 'pending_approval' )
+      );
+      allow update: if isAuth() && (
+        // Automated materialize: any finance, ONLY scheduled → applied.
+        ( isFinanceOrAdmin()
+          && resource.data.get('status','') == 'scheduled'
+          && request.resource.data.get('status','') == 'applied' )
+        // Approve / reject / cancel / reschedule: President only.
+        || isPresident()
+      );
+      allow delete: if isAuth() && isPresident();
+    }
+```
+`.get(field, default)` is used on every field read (missing-field-denies hazard). Result: a non-President finance user can create only `pending_approval` and can only push a President-approved `scheduled` raise to `applied` — they can never self-approve. `salary_raises`, `payroll`, `worker_profiles` blocks are **unchanged** (materialize writes are already covered by their `isFinanceOrAdmin()` create/update). Deploy via `firebase deploy --only firestore:rules` (re-`git diff` first per the concurrent-edit memory note). **No `firestore.indexes.json` change** — every query is single-field (`status ==`, `status in`, `subjectId ==` with client-sort).
+
+### Spec 10 — Migration & rollout checklist
+
+1. **Rules first.** Add the `pending_raises` block (Spec 9); `firebase deploy --only firestore:rules`. Harmless before app code ships (no client writes the collection yet).
+2. **Ship app code** in one commit (lets the pre-commit hook bump `APP_VERSION`/`CACHE_VER`): `RaiseFlow` service (Spec 2), modal signature + save handler (Spec 3), both call sites (Spec 4), screen-load sweeps + banner (Spec 5), bypass closures (Spec 6), admin list + Approvals wiring (Spec 7), self-view timeline (Spec 8). Run `node --check js/departments.js && node --check js/app.js`.
+3. **No data backfill.** Existing `salary_raises` rows already encode past raises (already applied). `pending_raises` starts empty. `payroll/{uid}.salary` already reflects historically-applied raises (they were immediate under the old flow), so there is nothing to re-materialize.
+4. **Composition check with WS20:** confirm `renderPayrollManagement`'s `applyDueRaises('payroll')` runs **before** `fetchUsersWithPayroll()` / `computePayRun`. `computePayRun`/`computePayLine`/`disbursePayRun` need **no** edits from WS23 (raises land on `payroll.salary` upstream).
+5. **Sequencing:** WS23 can land **after** WS20 (preferred — depends on WS20's screen structure) or independently against today's Compute (the sweep only touches `payroll.salary`, not the Compute internals). If WS20 is not yet merged, the sweep still works against the current Compute handler that reads `u.salary`.
+
+### Spec 11 — Manual test checklist (no automated suite)
+
+1. **Same-day raise, President:** open 💸 on a payroll employee, keep Effective Date = today, apply → toast "Raise applied"; `payroll/{uid}.salary` updated immediately; one `pending_raises` doc `status:'applied'`; one `salary_raises` audit row; Payroll table row shows new base after reload.
+2. **Future-dated raise, President:** set Effective Date next month → button reads "Schedule Raise"; on save `payroll/{uid}.salary` is **unchanged**; `pending_raises` doc `status:'scheduled'`; banner shows "1 scheduled raise upcoming"; Compute this month still uses the OLD base.
+3. **Auto-apply on month roll:** with a scheduled raise effective this month, reload the Payroll screen → sweep materializes it exactly once; `payroll.salary` updated; status→applied; employee gets a 💸 notification. Reload again → no duplicate audit row (deterministic id), no second write.
+4. **Month-exactness / no leak:** schedule a raise effective 2026-09 while viewing 2026-07. Re-run Compute for a *past* month (e.g. 2026-06) → the future raise does NOT appear. (Verifies the `effectiveMonth <= currentBizMonth` gate.)
+5. **Approval routing:** as a Finance-dept user who is NOT President, submit a raise → toast "sent for approval"; `pending_raises` `status:'pending_approval'`; no `payroll.salary`/`salary_raises` write (confirm the rules block a direct `scheduled` create via console). President sees it in Approvals → Approve → status becomes scheduled/applied per date; requester gets an approval notification. Reject → status rejected, reason stored, requester notified.
+6. **Bypass closed:** open Edit Payroll → Base Salary is read-only text, not editable; save changes allowance only, base untouched. Open a Worker Profile in Edit mode → Daily/Hourly rate read-only; in Create mode → editable.
+7. **Employee self-view:** as the affected employee, open Personal Finance → "Salary changes" lists the applied raise; a still-`scheduled` (unannounced) raise does NOT appear.
+8. **Idempotency under partial failure:** (simulate) if a materialize is interrupted after the `payroll.set`, the next sweep re-runs it: same `payroll.salary` value, `salary_raises` doc overwritten (not duplicated), status ends `applied`.
 
 ## Risks / cross-workstream interactions
 

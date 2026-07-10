@@ -92,15 +92,506 @@ This workstream is almost entirely client-side/DOM state — it does not need ne
 - Manila-time discipline (`window.bizDate()`/`bizHour()`/`bizDow()`, never raw `toISOString()`) — not directly implicated by routing/dialogs, but any "remember where the user was" persistence that includes a timestamp (e.g. session expiry on a saved deep link) must use these helpers, not `new Date().toISOString()`.
 - No existing Escape-key handling anywhere in the app (verified via grep) — WS11's confirmDialog and WS10's modal/drawer-dismiss-on-Back need to either introduce Esc-handling themselves or explicitly hand this off to WS18 (keyboard shortcuts) without landing two competing keydown listeners.
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-- [ ] **Hash-based vs. real pushState URLs**: `#/dept:Finance`-style hash routing needs zero server config and just works on GitHub Pages Pages hosting as-is, but reads less "professional" (owner explicitly wants "professional Microsoft/Apple design"). Real `history.pushState('/dept/Finance', ...)` paths look cleaner and support genuine deep-linking, but require adding a `404.html` fallback (none exists today) that redirects unknown paths back into `index.html` for GH Pages to serve the SPA on a hard refresh or shared link — an extra file + a bit of GH-Pages-specific plumbing Fable should weigh explicitly.
-- [ ] **Granularity of what's addressable via URL**: today `dept:Finance` is one router page regardless of which chip-tab (Overview/Accounting/Purchases/SSS-Gov) is active inside it — that sub-tab state lives purely in `bindChipTabs`'s DOM click handler (js/config.js:326-335) and is invisible to `navigateTo`/history entirely. Should the URL/history model go two levels deep (`dept:Finance` + sub-tab key, e.g. `#/dept/Finance/Purchases`) so refresh/Back restores the exact sub-tab, or is department-level granularity (current `navigateTo` page string) sufficient and sub-tabs stay session-only? Two-level granularity is more correct per the owner's "deep links + refresh keep place" requirement but touches every one of the ~15+ screens that call `chipTabs`/`bindChipTabs`, not just app.js.
-- [ ] **Should `openModal()`/`openTaskDetail()`-style full-screen panels/drawers each get their own history entry (so device Back dismisses the top overlay before navigating pages), or does WS10 only cover top-level `navigateTo` pages and leave modal/drawer/panel dismissal to a separate mechanism** (e.g. WS11's confirmDialog + a lighter "non-history-tracked" modal close on Back via a simple JS stack rather than real History API entries)? The task-fullscreen-panel (js/departments.js:680-720) and the quote-builder iframe host (`#qb-fullscreen`) are BOTH pre-existing full-screen overlay patterns outside both `navigateTo` and `openModal` — Fable needs to decide whether they get unified into the same history-entry mechanism as modals, kept as-is with manual back-button wiring, or migrated to become real `navigateTo` pages themselves (which would also simplify the current `navigateTo`-tears-down-task-panel special case at app.js:1843).
-- [ ] **Which of the 107 `openModal()` call sites migrate to full pages (per the owner's "no pop-ups" directive) vs. stay as modals-turned-history-aware-overlays?** See the representative classification in `risks` below — Fable needs to draw this line; do not treat 107 as a flat list to convert uniformly.
-- [ ] **Should `confirmDialog()` return a plain `Promise<boolean>` (drop-in for `if (!confirm(x)) return`) or a richer string-outcome contract like the existing `window.financeDelete()` pattern** (`'confirmed'|'cancelled'`, or supporting a 3rd "danger-acknowledged" state for the ~15 delete-confirmations that already carry "This cannot be undone" language)? A plain boolean is the more mechanical 1:1 swap for all 68 `confirm()` sites; a richer contract better serves the ~11 `prompt()` sites that also need to carry back a text value (would `confirmDialog` need a `promptDialog()` sibling, or one unified helper with an optional input field in `opts`?).
-- [ ] **Does killing native `confirm()`/`prompt()` require every one of the ~90 call sites (68+11, minus a couple of duplicates/legacy code) to become `async` (since the replacement will be Promise-based and dialogs are inherently non-blocking, unlike native `confirm()` which blocks synchronously)?** Several current call sites are inside synchronous event handlers or synchronous-looking helper functions (e.g. `window._closeDeal = async (id) => { if(!confirm(...)) return; ... }` at js/departments.js:3431 is already async, but plain-function guard clauses like `js/departments.js:11805 if(!confirm('Delete this production order?')) return;` need to be checked case-by-case for whether their enclosing function is already `async` or needs to become so — Fable should decide whether the deliverable includes an explicit per-call-site "already async / needs async conversion" audit or leaves that to the implementer to discover mechanically.
-- [ ] **Where does the shared `confirmDialog()` live (config.js alongside `chipTabs`/`sopPanel`, or app.js alongside `openModal`/`closeModal`)?** — config.js loads before departments.js (which has the most call sites, 46 confirm + 9 prompt), so defining it there would let departments.js call it without any forward-reference concern; defining it in app.js (which loads AFTER departments.js) would require departments.js's ~55 call sites to only invoke it at runtime (safe, since they're all inside event handlers, not top-level code) but keeps it co-located with `openModal`/`closeModal` which it's conceptually a sibling of.
+### Resolved decisions (one-line ruling + rationale each)
+
+1. **Hash-based routing, not pushState paths.** URLs are `#/dashboard`, `#/tasks`, `#/dept/Finance`, `#/dept/Finance/Purchases`. Rationale: GitHub Pages has no server rewrite and no `404.html`; real paths (`/dept/Finance`) 404 on hard refresh / shared deep link. Hash never leaves the client, survives refresh and deep-link with zero plumbing, and works in installed-PWA standalone mode where the URL bar is hidden anyway (the owner's "professional" ask is about visual design, not the address bar). **No `404.html` is created.**
+2. **Two-level granularity (page + optional sub-tab), sub-tab routing OPT-IN per screen.** `history.state = {t:'page', page, subtab}`; the sub-tab is an optional 3rd hash segment. The router fully supports it, but sub-tab restore is *adopted* only on the 3 highest-value screens in this workstream (Finance, Partners, Sales) via a 2-line change each; every other `chipTabs` screen keeps session-only sub-tabs and can adopt the identical pattern later. This bounds blast radius while satisfying "refresh/Back keeps my place" where it matters most. Sub-tab switches use `replaceState` (not push) so Back exits the department instead of cycling through its chips.
+3. **All dismissable overlays get a real history entry — device Back closes the top overlay before it ever changes pages.** A single `window.Overlay` LIFO stack (in config.js) is the one source of truth; every modal, full-screen page-panel, task-detail panel, quote-builder iframe, profile drawer, and confirm/prompt dialog pushes exactly one history entry on open. `popstate` is the SINGLE teardown trigger; UI-close paths (the X button, backdrop click, `closeModal()`, submit-success) all delegate to `history.back()`. This makes "Back works everywhere" true for all four of today's uncoordinated navigation surfaces with almost no per-call-site change.
+4. **Forms become full-screen pages via a new `window.openPage()` with the IDENTICAL 4-arg signature as `openModal()`.** The migration for ~60 form call sites is the mechanical token swap `openModal(` → `openPage(`; nothing else in their build/submit flow changes because `closeModal()` is redefined to a generic overlay-dismiss that closes a page-panel too. This delivers the owner's literal "full pages with Back" without rewriting a single submit handler. True bespoke page conversions (routes with their own render functions) are explicitly OUT of scope and deferred — `openPage` satisfies the mandate now.
+5. **`confirmDialog(opts) → Promise<boolean>` and a sibling `promptDialog(opts) → Promise<string|null>`, both in config.js.** Boolean is the exact 1:1 for `if(!confirm(x))return`; `string|null` is the exact 1:1 for `const x = prompt(msg,def)` (native prompt returns `null` on cancel, string on OK). Two helpers, not one overloaded one — the 68 confirm sites and 11 prompt sites map cleanly and the call site reads honestly. `financeDelete()`'s inner native `confirm()` (departments.js:192) is absorbed into `confirmDialog({danger:true})`.
+6. **Yes — every converted confirm/prompt call site's enclosing function becomes `async` and the call is `await`ed.** Native `confirm`/`prompt` blocked synchronously; the replacements are Promises. The deliverable's table below flags the enclosing-function state. Verified: all 4 positive-branch `if(confirm(...)){…}` sites (app.js:5565, 5803, 5867, 5929) are ALREADY inside `async` handlers; there are ZERO inline `onclick="…confirm(…)…"` attribute handlers (grep confirmed), so no attribute-to-listener extraction is needed. The conversion is therefore uniformly mechanical.
+7. **`confirmDialog`/`promptDialog`/`Overlay` live in js/config.js; `openPage`/`openModal`/`navigateTo` stay in js/app.js.** config.js loads 2nd (before departments.js's 55 dialog call sites), so those callers need no forward-reference gymnastics. The app.js router references `window.Overlay` only at runtime (inside `popstate`/`navigateTo`), which is safe. No new script file is added, so index.html's load order is untouched (only markup + a stylesheet block change).
+8. **`window._navHistory` array is retired and replaced by the real History API.** `navBack()` → `history.back()`; the top-bar `#nav-back-btn` visibility is driven by an app-internal `window._navDepth` counter (incremented on each in-app push, decremented on pop) so it never reflects external/pre-app history. Pull-to-refresh's `navigateTo(currentPage)` stays a safe no-push re-render (guarded by `opts.replace`-less same-page detection).
+9. **Esc-to-close is owned here, designed for WS18 to reuse without conflict.** `confirmDialog`/`promptDialog`/`openModal`/`openPage` all render into overlays carrying a stable `.overlay-active` class and are dismissed exclusively through `Overlay.dismissTop()`. WS11 ships ONE global `keydown` listener that calls `Overlay.dismissTop()` on Escape; WS18 must call `Overlay.dismissTop()` rather than add a second listener (documented in cross-workstream notes). No double-handling.
+10. **No new Firestore collection, no server-side "last page" persistence.** Route state lives entirely in the URL hash + `history.state`; refresh restores from the hash. This deliberately avoids triggering the per-collection rules requirement. `currentPage` remains a client `let`; the hash is the durable record.
+
+---
+
+### New/changed global function signatures
+
+```js
+// ── js/config.js (new, after the chipTabs/bindChipTabs helpers ~L335) ──
+window.Overlay = {
+  _stack: [],            // [{ id, kind, teardown }]  LIFO
+  _seq: 0,
+  _closing: false,       // guard: true while a popstate-driven teardown runs
+  isOpen(),                                   // → boolean (_stack.length > 0)
+  push(kind, teardownFn),                     // kind: 'modal'|'page'|'task'|'qb'|'drawer'|'dialog'
+                                              //   → id; pushes ONE history entry, runs teardownFn on pop
+  dismissTop(),                               // UI-close path → history.back() (no DOM work here)
+  _popOne(),                                  // INTERNAL — called by popstate; pops + tears down top
+  clearAll()                                  // INTERNAL — navigateTo unwinds overlays before a page change
+};
+
+window.confirmDialog = function(opts) → Promise<boolean>;
+//   opts = { title?='Confirm', message, confirmLabel?='Confirm', cancelLabel?='Cancel',
+//            danger?=false, html?=false }
+//   resolves true on confirm; false on cancel / backdrop / Esc / device-Back.
+
+window.promptDialog = function(opts) → Promise<string|null>;
+//   opts = { title?='', message, value?='', placeholder?='', required?=false,
+//            multiline?=false, confirmLabel?='OK', cancelLabel?='Cancel' }
+//   resolves trimmed string on OK; null on cancel / backdrop / Esc / device-Back.
+//   if required && trimmed==='' → the OK button stays disabled (never resolves empty).
+
+window.setSubroute = function(subtab) → void;   // replaceState the sub-tab onto the current page entry
+window.initialSubtab = function(defaultKey) → string;  // URL sub-tab if it targets the current page, else defaultKey
+
+// ── js/app.js (changed) ──
+function navigateTo(page, opts) → void;
+//   opts = { subtab?, replace?=false, fromHistory?=false }
+//   fromHistory=true (popstate/hashchange) ⇒ render WITHOUT pushState.
+//   replace=true ⇒ replaceState (initial load, same-page refresh).
+
+window.openPage  = function(title, bodyHTML, footerHTML='', opts) → void;  // full-screen panel, Overlay-registered
+window.openModal = function(title, bodyHTML, footerHTML='', opts) → void;  // small dialog, now Overlay-registered
+window.closeModal = function() → void;    // generic: === Overlay.dismissTop() (closes page/modal/dialog top)
+window.navBack   = function() → void;     // === history.back()
+```
+
+### `history.state` shapes (annotated literals)
+
+```js
+// Page entry (one per navigateTo):
+{ t:'page', page:'dept:Finance', subtab:'Purchases', d:7 }   // d = app-internal depth counter
+{ t:'page', page:'tasks',        subtab:null,        d:3 }
+// Overlay entry (one per open modal/page/panel/dialog), sits ON TOP of a page entry:
+{ t:'overlay', kind:'page', oid:12, base:{ page:'dept:Sales', subtab:'quotes' }, d:8 }
+```
+
+### Hash format & the parse/build helpers
+
+```js
+// Add to js/app.js, above navigateTo.
+function hashFor(page, subtab){
+  var segs = String(page).startsWith('dept:')
+    ? ['dept', page.slice(5)].concat(subtab ? [subtab] : [])
+    : [page].concat(subtab ? [subtab] : []);
+  return '#/' + segs.map(encodeURIComponent).join('/');
+}
+function parseHash(h){                       // h defaults to location.hash
+  h = (h==null ? location.hash : h).replace(/^#\/?/, '');
+  if (!h) return { page:'dashboard', subtab:null };
+  var s = h.split('/').map(decodeURIComponent);
+  if (s[0]==='dept' && s[1]) return { page:'dept:'+s[1], subtab: s[2]||null };
+  return { page: s[0]||'dashboard', subtab: s[1]||null };
+}
+```
+Dept names with spaces (`Brilliant Steel`, `Government Biddings`) round-trip through `encodeURIComponent` → `#/dept/Brilliant%20Steel`.
+
+---
+
+### Before/after — `js/app.js` load-bearing functions
+
+**A. `updateNavBackBtn` + `navBack` (app.js:1817-1826) — before:**
+```js
+function updateNavBackBtn() {
+  const b = document.getElementById('nav-back-btn');
+  if (b) b.style.display = (window._navHistory && window._navHistory.length) ? '' : 'none';
+}
+window.navBack = function() {
+  window._navHistory = window._navHistory || [];
+  const prev = window._navHistory.pop();
+  if (prev) { window._navGoingBack = true; try { navigateTo(prev); } finally { window._navGoingBack = false; } }
+  updateNavBackBtn();
+};
+```
+**after:**
+```js
+function updateNavBackBtn() {
+  const b = document.getElementById('nav-back-btn');
+  // Real history now backs this: show the button whenever we've navigated at least
+  // once within the app (depth>0) and we're not sitting on the dashboard root.
+  if (b) b.style.display = ((window._navDepth||0) > 0 && window.currentPage !== 'dashboard') ? '' : 'none';
+}
+window.navBack = function(){ history.back(); };   // the top-bar chevron === device Back
+```
+
+**B. `navigateTo` (app.js:1828-1904) — before:** (the `try{_navHistory.push…}` block L1828-1837 and the signature `function navigateTo(page)`). **after** — replace L1828-1863 (everything from the signature down to and including the `dept:` branch) with:
+```js
+function navigateTo(page, opts) {
+  opts = opts || {};
+  const subtab = (opts.subtab !== undefined) ? opts.subtab : null;
+
+  // If overlays are open and this is a real (non-history) navigation, tear them
+  // down first so a nav click from inside a modal/page doesn't leave a dangling panel.
+  if (!opts.fromHistory && window.Overlay && window.Overlay.isOpen()) window.Overlay.clearAll();
+
+  // Sync the URL + history entry (skip when we're rendering FROM history).
+  if (!opts.fromHistory) {
+    const st = { t:'page', page, subtab, d: (opts.replace ? (window._navDepth||0) : (window._navDepth = (window._navDepth||0) + (page===window.currentPage?0:1))) };
+    const url = hashFor(page, subtab);
+    try { opts.replace ? history.replaceState(st,'',url) : history.pushState(st,'',url); } catch(_){}
+  }
+
+  currentPage = page;
+  window.currentPage = page;
+  window.currentSubtab = subtab;          // screens read this via initialSubtab()
+  setActiveNav(page);
+  updateNavBackBtn();
+  if (typeof window.closeTaskPanel === 'function') window.closeTaskPanel();
+  if (page !== 'bk-quote-builder' && page !== 'bs-quote-builder') {
+    document.getElementById('qb-fullscreen')?.remove();
+  }
+  const c = document.getElementById('page-content');
+  if (window.Chart) {
+    c.querySelectorAll('canvas').forEach(canvas => { const ex = Chart.getChart(canvas); if (ex) ex.destroy(); });
+  }
+  c.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+
+  if (page.startsWith('dept:')) { renderDeptModule(page.slice(5)); return; }
+  // …switch(page){ …unchanged… }
+```
+The `switch` block (L1865-1903) is UNCHANGED. Note: the depth-increment is inlined so a same-page re-render (pull-to-refresh) yields `page===currentPage` → `d` unchanged and pushState of an identical hash is harmless (Back still skips it because state.page equals current). The old `_navGoingBack`/`_navHistory` machinery is fully removed.
+
+**C. `openModal`/`closeModal` (app.js:7075-7096) — before:** (the two functions + the `DOMContentLoaded` wiring shown in the brief). **after:**
+```js
+// Small dialog. Now registers with Overlay so device/browser Back closes it.
+window.openModal = function(title, bodyHTML, footerHTML='', opts){
+  opts = opts || {};
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-body').innerHTML = bodyHTML;
+  const footer = document.getElementById('modal-footer');
+  footer.innerHTML = footerHTML; footer.classList.toggle('hidden', !footerHTML);
+  const box = document.getElementById('modal-box');
+  if (box){ box.classList.remove('modal-wide','modal-full');
+    if (opts.size==='wide') box.classList.add('modal-wide');
+    else if (opts.size==='full') box.classList.add('modal-full'); }
+  const ov = document.getElementById('modal-overlay');
+  ov.classList.remove('hidden'); ov.classList.add('active');
+  window.Overlay.push('modal', () => { ov.classList.add('hidden'); ov.classList.remove('active'); });
+};
+// Full-screen routed panel — SAME signature as openModal. Forms swap openModal→openPage.
+window.openPage = function(title, bodyHTML, footerHTML='', opts){
+  opts = opts || {};
+  document.getElementById('page-panel')?.remove();
+  const p = document.createElement('div');
+  p.id = 'page-panel'; p.className = 'page-panel overlay-active';
+  p.innerHTML = `
+    <div class="page-panel-head">
+      <button class="page-panel-back" aria-label="Back"><i data-lucide="arrow-left"></i></button>
+      <h3 class="page-panel-title"></h3><div style="width:40px"></div>
+    </div>
+    <div class="page-panel-body"></div>
+    <div class="page-panel-foot"></div>`;
+  p.querySelector('.page-panel-title').textContent = title;
+  p.querySelector('.page-panel-body').innerHTML = bodyHTML;
+  const foot = p.querySelector('.page-panel-foot');
+  foot.innerHTML = footerHTML; foot.classList.toggle('hidden', !footerHTML);
+  document.body.appendChild(p);
+  p.querySelector('.page-panel-back').addEventListener('click', () => window.Overlay.dismissTop());
+  window.lucide?.createIcons();
+  requestAnimationFrame(() => p.classList.add('open'));
+  window.Overlay.push('page', () => { p.classList.remove('open'); setTimeout(()=>p.remove(), 300); });
+};
+// Generic dismiss — closes whatever overlay is on top (dialog | modal | page | panel).
+window.closeModal = function(){ window.Overlay.dismissTop(); };
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('modal-close')?.addEventListener('click', () => window.Overlay.dismissTop());
+  document.getElementById('modal-overlay')?.addEventListener('click', e => {
+    if (e.target === document.getElementById('modal-overlay')) window.Overlay.dismissTop();
+  });
+});
+```
+
+**D. Router wiring — add ONCE in app.js (near the DOMContentLoaded block, after the definitions above):**
+```js
+window.addEventListener('popstate', (e) => {
+  // Overlay open? A Back press dismisses the top overlay and consumes the event.
+  if (window.Overlay.isOpen()) { window.Overlay._popOne(); return; }
+  window._navDepth = Math.max(0, (window._navDepth||0) - 1);
+  const s = e.state || parseHash();
+  const st = (s.t === 'overlay') ? s.base : s;        // stale overlay entry → render its underlying page
+  navigateTo(st.page || 'dashboard', { subtab: st.subtab || null, fromHistory: true });
+});
+window.addEventListener('hashchange', () => {         // user typed/edited the URL hash
+  const p = parseHash();
+  if (p.page === window.currentPage && p.subtab === (window.currentSubtab||null)) return;
+  navigateTo(p.page, { subtab: p.subtab, replace: true });
+});
+window.addEventListener('keydown', (e) => {           // Esc closes the top overlay (WS18 must reuse this path)
+  if (e.key === 'Escape' && window.Overlay.isOpen()) { e.preventDefault(); window.Overlay.dismissTop(); }
+});
+```
+
+**E. Auth-resolve initial route (app.js:85) — before:** `navigateTo('dashboard');` **after:**
+```js
+{ const r = parseHash(); navigateTo(r.page, { subtab: r.subtab, replace: true }); }  // deep-link / refresh survives
+```
+
+---
+
+### New code — `js/config.js` (after `bindChipTabs`, ~L335)
+
+```js
+// ── Overlay stack: one history entry per dismissable surface ─────────────────
+window.Overlay = {
+  _stack: [], _seq: 0, _closing: false,
+  isOpen(){ return this._stack.length > 0; },
+  push(kind, teardown){
+    const id = ++this._seq;
+    this._stack.push({ id, kind, teardown });
+    const base = { page: window.currentPage || 'dashboard', subtab: window.currentSubtab || null };
+    try { history.pushState({ t:'overlay', kind, oid:id, base, d:(window._navDepth||0) }, '', location.hash); } catch(_){}
+    return id;
+  },
+  dismissTop(){ if (this._stack.length) history.back(); },   // → popstate → _popOne
+  _popOne(){
+    const top = this._stack.pop(); if (!top) return;
+    this._closing = true; try { top.teardown(); } catch(_){} this._closing = false;
+  },
+  clearAll(){
+    if (!this._stack.length) return;
+    const n = this._stack.length;
+    while (this._stack.length){ const o = this._stack.pop(); try { o.teardown(); } catch(_){} }
+    // Drop the overlays' history entries so the new page push lands cleanly.
+    try { history.go(-n); } catch(_){}
+  }
+};
+
+// ── Confirm / prompt dialogs (replace native confirm()/prompt()) ─────────────
+function _dlgEsc(s){ return (window.escHtml||function(x){return String(x==null?'':x);})(s); }
+window.confirmDialog = function(opts){
+  opts = opts || {};
+  return new Promise((resolve) => {
+    const ov = document.getElementById('dialog-overlay');
+    const msg = opts.html ? (opts.message||'') : _dlgEsc(opts.message||'');
+    ov.innerHTML = `<div class="dialog-box overlay-active" role="alertdialog" aria-modal="true">
+      ${opts.title ? `<h4 class="dialog-title">${_dlgEsc(opts.title)}</h4>` : ''}
+      <div class="dialog-msg">${msg}</div>
+      <div class="dialog-actions">
+        <button class="btn-secondary" data-act="cancel">${_dlgEsc(opts.cancelLabel||'Cancel')}</button>
+        <button class="${opts.danger?'btn-danger':'btn-primary'}" data-act="ok">${_dlgEsc(opts.confirmLabel||'Confirm')}</button>
+      </div></div>`;
+    ov.classList.remove('hidden'); ov.classList.add('active');
+    let settled = false;
+    const done = (val) => { if (settled) return; settled = true;
+      ov.classList.add('hidden'); ov.classList.remove('active'); ov.innerHTML=''; resolve(val); };
+    window.Overlay.push('dialog', () => done(false));           // Back/Esc/backdrop → false
+    ov.querySelector('[data-act=ok]').onclick     = () => { window.Overlay.dismissTop(); done(true); };
+    ov.querySelector('[data-act=cancel]').onclick = () => window.Overlay.dismissTop();
+    ov.onclick = (e) => { if (e.target === ov) window.Overlay.dismissTop(); };
+  });
+};
+window.promptDialog = function(opts){
+  opts = opts || {};
+  return new Promise((resolve) => {
+    const ov = document.getElementById('dialog-overlay');
+    const field = opts.multiline
+      ? `<textarea id="dlg-input" rows="3" placeholder="${_dlgEsc(opts.placeholder||'')}"></textarea>`
+      : `<input id="dlg-input" placeholder="${_dlgEsc(opts.placeholder||'')}"/>`;
+    ov.innerHTML = `<div class="dialog-box overlay-active" role="dialog" aria-modal="true">
+      ${opts.title ? `<h4 class="dialog-title">${_dlgEsc(opts.title)}</h4>` : ''}
+      ${opts.message ? `<div class="dialog-msg">${_dlgEsc(opts.message)}</div>` : ''}
+      <div class="form-group">${field}</div>
+      <div class="dialog-actions">
+        <button class="btn-secondary" data-act="cancel">${_dlgEsc(opts.cancelLabel||'Cancel')}</button>
+        <button class="btn-primary" data-act="ok">${_dlgEsc(opts.confirmLabel||'OK')}</button>
+      </div></div>`;
+    ov.classList.remove('hidden'); ov.classList.add('active');
+    const input = ov.querySelector('#dlg-input');
+    input.value = opts.value || '';
+    const okBtn = ov.querySelector('[data-act=ok]');
+    const validate = () => { if (opts.required) okBtn.disabled = (input.value.trim()===''); };
+    input.addEventListener('input', validate); validate(); setTimeout(()=>input.focus(),40);
+    let settled = false;
+    const done = (val) => { if (settled) return; settled = true;
+      ov.classList.add('hidden'); ov.classList.remove('active'); ov.innerHTML=''; resolve(val); };
+    window.Overlay.push('dialog', () => done(null));            // Back/Esc/backdrop → null (== native cancel)
+    okBtn.onclick = () => { const v = input.value.trim(); if (opts.required && !v) return;
+      window.Overlay.dismissTop(); done(v); };
+    ov.querySelector('[data-act=cancel]').onclick = () => window.Overlay.dismissTop();
+    ov.onclick = (e) => { if (e.target === ov) window.Overlay.dismissTop(); };
+    if (!opts.multiline) input.addEventListener('keydown', e => { if (e.key==='Enter') okBtn.click(); });
+  });
+};
+
+// ── Sub-tab routing helpers (opt-in per screen) ──────────────────────────────
+window.setSubroute = function(subtab){
+  const st = Object.assign({}, history.state||{t:'page',page:window.currentPage,d:(window._navDepth||0)}, { subtab });
+  window.currentSubtab = subtab;
+  try { history.replaceState(st, '', (window.hashFor||function(p,s){return location.hash;})(window.currentPage, subtab)); } catch(_){}
+};
+window.initialSubtab = function(defaultKey){
+  return (window.currentSubtab != null) ? window.currentSubtab : defaultKey;
+};
+```
+> `hashFor` is defined in app.js (loads after config.js); `setSubroute` references it as `window.hashFor` at runtime with a safe fallback. Add `window.hashFor = hashFor;` next to its definition in app.js.
+
+**Sub-tab adoption (2-line change on the 3 in-scope screens):** in `renderPartnersDept` (app.js:3344), `renderFinance`, and `renderSales`, change the initial active-chip seed from a literal to `window.initialSubtab('overview')` (use each screen's real default key), and change the `bindChipTabs(scope, fn)` call to also route: wrap the callback — `bindChipTabs(scope, (key,btn)=>{ window.setSubroute(key); loadTab(key); })`. No signature change to `chipTabs`/`bindChipTabs` is required.
+
+---
+
+### `index.html` — new markup (add after the profile-drawer block, ~L285)
+
+```html
+<!-- Full-screen page panel host (openPage) is created/removed dynamically; no static markup. -->
+<!-- Confirm / prompt dialog host (higher z than #modal-overlay so it nests on top) -->
+<div id="dialog-overlay" class="dialog-overlay hidden"></div>
+```
+No change to `#modal-overlay`/`#modal-box`/`#modal-title`/`#modal-body`/`#modal-footer` (L260-267). No new `<script>` (all new globals live in existing config.js/app.js), so the load-order block is untouched.
+
+### `css/styles.css` — add ONE new block (append near the existing modal rules ~L2118; do NOT duplicate into the second modal block at ~L3394)
+
+```css
+/* ── Full-screen page panel (openPage) ── */
+.page-panel{ position:fixed; top:calc(var(--topbar-h) + env(safe-area-inset-top,0px));
+  left:0; right:0; bottom:0; background:var(--bg); z-index:4000; display:flex; flex-direction:column;
+  transform:translateY(100%); opacity:0; transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .3s; overflow:hidden; }
+.page-panel.open{ transform:translateY(0); opacity:1; }
+.page-panel-head{ display:flex; align-items:center; gap:12px; padding:12px 16px;
+  background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
+.page-panel-back{ background:none; border:none; color:var(--primary-light); cursor:pointer; padding:4px; display:flex; }
+.page-panel-title{ flex:1; font-size:16px; font-weight:700; color:var(--text);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.page-panel-body{ flex:1; overflow-y:auto; padding:16px; -webkit-overflow-scrolling:touch; }
+.page-panel-foot{ flex-shrink:0; padding:12px 16px; border-top:1px solid var(--border);
+  display:flex; gap:8px; justify-content:flex-end; background:var(--surface); }
+.page-panel-foot.hidden{ display:none; }
+
+/* ── Confirm / prompt dialog ── */
+.dialog-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.6);
+  backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+  z-index:5000; display:flex; align-items:center; justify-content:center; padding:20px; }
+.dialog-overlay.hidden{ display:none; }
+.dialog-box{ background:var(--modal-bg); border:1px solid var(--border); border-radius:var(--r-lg);
+  box-shadow:var(--sh-lg); width:100%; max-width:400px; padding:22px; animation:popIn .22s var(--spring); }
+.dialog-title{ font-size:16px; font-weight:700; margin-bottom:8px; color:var(--text); }
+.dialog-msg{ font-size:14px; color:var(--text-muted); line-height:1.5; margin-bottom:16px; white-space:pre-wrap; }
+.dialog-actions{ display:flex; gap:8px; justify-content:flex-end; }
+```
+`.btn-danger` (css/styles.css:321-328) is reused for `danger:true` confirms; do not add a new danger style.
+
+---
+
+### Full routing table (34 switch cases + dept family)
+
+| navigateTo page | hash | sub-tab routing |
+|---|---|---|
+| dashboard | `#/dashboard` | — |
+| company | `#/company` | session-only |
+| tasks | `#/tasks` | — |
+| submissions | `#/submissions` | — |
+| files | `#/files` | session-only |
+| cash | `#/cash` | — |
+| personal-finance | `#/personal-finance` | — |
+| my-dept | `#/my-dept` | — |
+| departments | `#/departments` | — |
+| analytics | `#/analytics` | — |
+| approvals | `#/approvals` | — |
+| team | `#/team` | — |
+| progress | `#/progress` | — |
+| bs-quote-builder | `#/bs-quote-builder` | — (qb iframe, Overlay-wired) |
+| bk-quote-builder | `#/bk-quote-builder` | — (qb iframe, Overlay-wired) |
+| partner-projects | `#/partner-projects` | — |
+| notifications | `#/notifications` | — |
+| bs-quotations | `#/bs-quotations` | — |
+| bs-clients | `#/bs-clients` | — |
+| bs-files | `#/bs-files` | — |
+| bk-quotations | `#/bk-quotations` | — |
+| help | `#/help` | — |
+| sops | `#/sops` | session-only |
+| posts | `#/posts` | — |
+| memos | `#/memos` | — |
+| team-directory | `#/team-directory` | — |
+| attendance | `#/attendance` | — |
+| cash-advances | `#/cash-advances` | — |
+| leave | `#/leave` | — |
+| inventory | `#/inventory` | — |
+| product-database | `#/product-database` | president-gated (unchanged inline) |
+| audit-log | `#/audit-log` | president-gated (unchanged inline) |
+| search | `#/search` | — |
+| sales-orders | `#/sales-orders` | — |
+| projects-lifecycle | `#/projects-lifecycle` | — |
+| `dept:<Name>` | `#/dept/<Name>` (+ `/<subtab>` on Finance/Sales/Partners) | ROUTED on the 3 in-scope screens; session-only elsewhere |
+
+No route names are invented — hashes are the existing page strings verbatim (`dept:` → `dept/`).
+
+---
+
+### Dialog migration table — the 11 `prompt()` sites (complete, exact replacements)
+
+All enclosing functions must be `async` (arrow handlers already are where noted). Replace `prompt(...)` with `await promptDialog({...})`; `null` return keeps native cancel semantics.
+
+| file:line | before | after |
+|---|---|---|
+| app.js:1177 | `prompt('Notes for the partner…') \|\| ''` | `(await promptDialog({message:'Notes for the partner (what changed / what to confirm)?', multiline:true})) \|\| ''` |
+| departments.js:244 | `(prompt('Reason for deleting this quote?…')\|\|'').trim()` | `((await promptDialog({message:'Reason for deleting this quote? (sent to the President for approval)', required:true, multiline:true}))\|\|'').trim()` |
+| departments.js:1770 | `(prompt('Paste a link to attach:')\|\|'').trim()` | `((await promptDialog({message:'Paste a link to attach:'}))\|\|'').trim()` |
+| departments.js:1785 | `prompt('Edit message:', c?.text\|\|'')` | `await promptDialog({message:'Edit message:', value:c?.text\|\|'', multiline:true})` |
+| departments.js:3898 | `prompt('Manual override…', ps.status\|\|'draft')` | `await promptDialog({title:'Manual override', message:`Set status for ${ps.workerName}. Options: ${PAYSLIP_STAGES.join(', ')}`, value:ps.status\|\|'draft'})` |
+| departments.js:8700 | `prompt('Reason for deleting this quote?…')\|\|''` | `(await promptDialog({message:'Reason for deleting this quote? (sent to the president for approval)', required:true, multiline:true}))\|\|''` |
+| departments.js:9464 | `prompt('Notes for the partner…')\|\|''` | `(await promptDialog({message:'Notes for the partner (what to revise)?', multiline:true}))\|\|''` |
+| departments.js:9514 | `prompt('Reason for rejection (optional):')\|\|''` | `(await promptDialog({message:'Reason for rejection (optional):', multiline:true}))\|\|''` |
+| departments.js:9744 | `prompt('Reason for rejection (optional):')\|\|''` | `(await promptDialog({message:'Reason for rejection (optional):', multiline:true}))\|\|''` |
+| departments.js:10243 | `prompt('Reason for deleting this client folder?…')\|\|''` | `(await promptDialog({message:'Reason for deleting this client folder? (sent to the president for approval)', required:true, multiline:true}))\|\|''` |
+| modules.js:2354 | `prompt('Reason for rejection (optional):')\|\|''` | `(await promptDialog({message:'Reason for rejection (optional):', multiline:true}))\|\|''` |
+
+### Dialog migration — the 68 `confirm()` sites (mechanical rule + verified special cases)
+
+**Bulk rule (covers the 64 negative-idiom sites):** `if (!confirm(MSG)) return;` → `if (!await confirmDialog({ message: MSG })) return;`. If MSG contains "cannot be undone", "Delete", "Remove", or a peso figure being destroyed → add `danger:true`. Ensure the enclosing function is `async` (add the keyword; the guard is already an early return so no other change). Implementer re-greps at build time (`grep -nE '\bconfirm\(' js/*.js`) rather than trusting a frozen count.
+
+**Verified special cases (positive-branch — already `async`, wrap the body):**
+| file:line | transform |
+|---|---|
+| app.js:5565 | `if(confirm('Delete this memo?')){…}` → `if(await confirmDialog({message:'Delete this memo?', danger:true})){…}` |
+| app.js:5803 | same pattern → `confirmDialog({message:'Delete this memo?', danger:true})` |
+| app.js:5867 | `if(confirm('Delete?'))` → `if(await confirmDialog({message:'Delete this policy?', danger:true}))` |
+| app.js:5929 | `if(confirm('Remove this resource?'))` → `if(await confirmDialog({message:'Remove this resource?', danger:true}))` |
+
+**financeDelete (departments.js:192):** `if (!confirm(\`Delete ${label}? This cannot be undone.\`)) { resolve('cancelled'); return; }` → `if (!(await confirmDialog({ message:`Delete ${escHtml(label)}? This cannot be undone.`, danger:true, html:true }))) { resolve('cancelled'); return; }` — the enclosing `new Promise((resolve)=>{…})` executor must become `async (resolve)=>{…}` (safe: the promise still resolves via the existing `resolve()` calls). **escHtml is now required** because `label` moves from native-`confirm` plain text into HTML — this is the injection risk the brief flags; apply `html:true` + `escHtml()` on any confirm/prompt message that interpolates a user-entered name/label.
+
+### `openModal` triage — the 107 sites
+
+**Policy (decisive):** every `openModal()` call becomes ONE of exactly two things — no third option, no per-site judgment:
+
+- **→ `openPage(` (mechanical token swap, ~65 sites):** any modal whose body is a multi-field create/edit FORM for a domain record. Concretely, swap these enumerated sites (from the brief's grounded pass) and any other `openModal` whose body contains ≥2 `.form-group`/`<input>`/`<textarea>`/`<select>` fields: departments.js:1029,1120 (Task), 1280 (Submission), 1614 (Expense), 1987 (Raise), 2242,2496 (Payroll record), 3038,3155,3264 (Ledger/Cash entries), 3687 (Worker profile), 3915,3999 (Payslip), 5388,8765,8999 (Quotes), 5975,6304 (Project), 6429,6597 (Drawing), 7004 (IT ticket), 7065,7103 (Asset), 8390 (Sales Order — drop its now-redundant `size:'wide'`), 10195 (Client), 11684 (Production Order), 12245 (RFQ), 12561 (Purchase); app.js:6565 (Employee profile — drop `size:'wide'`), 6629 (Worker account); modules.js:262,299 (Post), 1582 (CA request), 1992 (Inventory item), 2153 (Job cost), 2297 (Leave). The `opts.size` arg (if present) is dropped — `openPage` is always full-screen. Their existing `closeModal()` calls on submit-success work unchanged.
+- **stays `openModal(` (history-aware small dialog, ~42 sites):** confirmations, single-field asks, credential-reveals (departments.js: Worker-Account-Created L6733-area, app.js:6798,6830 Reset-Password result — MUST stay a modal; navigating away right after minting a one-time secret is hostile), copy/link displays (departments.js:8330 order-tracking link), read-only lists/detail popovers (modules.js:246 Liked-by, 728/757 Standings, 1179 Attendance-edit, 405 Set-Note; app.js:6851 phone), and `financeDelete`'s reason form (departments.js:198). These gain Back-dismissal for free via the `openModal` rewrite — no per-site change.
+
+**Not in scope:** converting `openPage` panels into *bespoke routed pages* with their own `navigateTo` cases and render functions. `openPage` satisfies "full pages with Back" mechanically; dedicated routes are a later progressive enhancement (flagged below).
+
+---
+
+### Task panel + quote-builder iframe (highest-risk gap) — IN SCOPE, wired to Overlay
+
+**`openTaskDetail` (departments.js:690):** after `document.body.appendChild(panel)` and the slide-in, register: `window.Overlay.push('task', () => window.closeTaskPanel());`. **`closeTaskPanel` (departments.js:680)** becomes DOM-teardown-ONLY (its current body is already exactly that) — the `#task-panel-back` button (departments.js:732) changes from `onclick=closeTaskPanel` to `window.Overlay.dismissTop()`. `navigateTo`'s unconditional `closeTaskPanel()` teardown (app.js:1843) stays but is now redundant with `Overlay.clearAll()`; keep it as a belt-and-suspenders (idempotent — no-op if already removed).
+
+**`renderQuoteBuilderIframe` (app.js:1076):** after the iframe host `#qb-fullscreen` is appended, register `window.Overlay.push('qb', () => document.getElementById('qb-fullscreen')?.remove());`. Because the qb host is itself reached via `navigateTo('bk-quote-builder')` (a page), it is BOTH a page and an overlay — resolve by NOT registering it as an overlay; instead it stays a normal routed page (`#/bk-quote-builder`) and its teardown remains the existing app.js:1846 line. Device Back from the quote builder therefore returns to the previous page (correct). **Decision: qb = page (no Overlay entry); task panel = overlay (Overlay entry).** This matches their real UX: qb is a destination, task-detail is a drill-in.
+
+---
+
+### Migration checklist (numbered, sequential — ordering is load-bearing)
+
+1. **History layer, no call-site changes yet.** Add `hashFor`/`parseHash`/`window.hashFor` + `window._navDepth` to app.js; add `window.Overlay` + `setSubroute`/`initialSubtab` to config.js; rewrite `navigateTo` (B), `updateNavBackBtn`/`navBack` (A); add the `popstate`/`hashchange`/`keydown` wiring (D); change auth-resolve initial route (E). Verify Back/Forward/refresh across 3-4 top-level pages and that pull-to-refresh still re-renders in place.
+2. **Overlay-ify the modal + panel surfaces.** Rewrite `openModal`/`closeModal`, add `openPage` (C); add `#dialog-overlay` markup + the CSS block; wire the task panel to Overlay (register + `#task-panel-back` → `dismissTop`). Verify: open a modal → device Back closes it (not the page); open task detail → Back closes it; open a modal then click a nav item → modal tears down and page changes.
+3. **Build `confirmDialog`/`promptDialog`** (config.js). Verify against 3 sample sites (one `if(!confirm)` guard, one positive-branch, one `prompt` with default) — confirm nesting works (a confirmDialog opened from inside an `openPage` form; Back closes the dialog first, then the page).
+4. **Sweep all `confirm()` sites** per the rule + special-case table; add `async` to each enclosing function; `escHtml`+`html:true` on any message interpolating a user label. Re-grep to confirm zero `\bconfirm\(` remain.
+5. **Sweep all `prompt()` sites** per the 11-row table. Re-grep to confirm zero `\bprompt\(` remain.
+6. **Sweep the ~65 form `openModal(`→`openPage(`** per the triage list; drop any `size:` arg on those. Re-verify each converted form still submits and closes (they call `closeModal()` → generic dismiss).
+7. **Adopt sub-tab routing** on Finance/Sales/Partners (2-line change each: `initialSubtab` seed + routed `bindChipTabs` callback). Verify refresh on `#/dept/Finance/Purchases` restores the Purchases chip.
+8. **CACHE_VER bump in sw.js** (mandatory — JS+CSS touched). Commit (pre-commit hook auto-bumps APP_VERSION/index.html version strings). No `firebase deploy` needed (no rules/collection change). Smoke test on a real server (`npx serve -p 3838 .`).
+
+### Manual test checklist (no automated suite exists)
+
+- [ ] Deep-link: paste `#/dept/Finance/Purchases` into a fresh tab → lands on Finance/Purchases after auth.
+- [ ] Refresh on any page (not just dashboard) → same page restores (auth-resolve reads hash, not hardcoded dashboard).
+- [ ] Device/browser Back through 3 page navigations → walks back correctly; top-bar chevron hidden on dashboard, shown elsewhere.
+- [ ] Open a form (openPage) → visible back chevron; device Back and the chevron both close it and reveal the underlying page unchanged.
+- [ ] Open modal → device Back closes modal only (page stays). Open modal → click a nav link → modal gone, page changed, and a subsequent Back goes to the page under the modal (not a ghost).
+- [ ] Nested: openPage form → confirmDialog inside it → Back closes dialog first, second Back closes the page.
+- [ ] Task detail: open → Back closes panel. Quote builder: open → Back returns to previous page.
+- [ ] `confirmDialog` danger styling uses `.btn-danger`; cancel/backdrop/Esc all resolve false; `promptDialog` required-field disables OK until non-empty and returns null on cancel.
+- [ ] Injection: a client/quote named `<img src=x onerror=alert(1)>` in a delete confirm renders as text, not markup (escHtml applied).
+- [ ] Dashboard Back/Forward does NOT leak Chart.js canvases (charts destroyed on every `navigateTo`, including fromHistory renders).
+- [ ] Pull-to-refresh still re-renders current page without adding a history entry or reloading.
+
+### ‼️ FLAG FOR NEIL
+
+- **Scope line on "pages":** this workstream delivers "full pages with Back" via `openPage` (full-screen sliding panels with a real Back button + history entry) — functionally identical UX to a routed page, achieved with a mechanical one-token swap. Converting the biggest forms (New Quote, New Project, Sales Order, Payslip editor) into *dedicated URL routes* (`#/quote/new`, deep-linkable, own render function) is deliberately deferred as a later enhancement. **Confirm this satisfies the "no pop-ups" mandate for v12** — if you want specific forms to be true bookmarkable routes now, name them and they'll get dedicated `navigateTo` cases.
+- **Sub-tab routing is adopted on 3 screens only** (Finance, Sales, Partners) this pass; the other ~12 `chipTabs` screens keep session-only sub-tabs. Say the word if any other screen's sub-tab must survive refresh/Back and it'll be added (2-line change each).
 
 ## Risks / cross-workstream interactions
 

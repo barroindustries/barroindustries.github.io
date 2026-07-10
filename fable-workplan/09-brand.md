@@ -92,17 +92,280 @@ Existing Firestore precedent, if Fable chooses a partly-dynamic BRAND: `settings
 - Deploy discipline: `git push origin master` deploys the static site (GitHub Pages) but NOT firestore.rules (needs `firebase deploy --only firestore:rules` separately) and NOT Cloud Functions (needs `cd functions && npm run deploy`). functions/index.js's brand fallback string (L48) is on a different deploy path than everything else touched by this workstream.
 - Concurrent-edit risk (user memory: deploy-recheck-full-file-diff): this repo is edited live across sessions/OneDrive sync; a wide rename sweep across departments.js/app.js/index.html should re-diff immediately before any deploy step to avoid clobbering unrelated concurrent edits.
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-- [ ] Where does BRAND physically live? A `window.BRAND` object in js/config.js works for JS-rendered chrome, but manifest.json (browser-parsed, pre-JS) and sw.js/firebase-messaging-sw.js (Worker scope, no `window`) cannot consume it directly. Options: (a) accept these as permanently-separate literal mirrors with a code comment pointing back to config.js as canonical + a manual checklist item, (b) factor brand constants into a tiny `globalThis`-based file (works in both window and worker context via `importScripts`) that sw.js imports and index.html loads before config.js, still leaving manifest.json as an unavoidable static exception, or (c) something else. This is Fable's call, not a given.
-- [ ] Should any part of BRAND be Firestore-backed (e.g. `settings/brand` doc) so the President can edit tagline/president-message without a code deploy, mirroring the existing `settings/system` / `president_message` precedent — tradeoff: the existing `settings/{docId}` rule requires `isAuth()` to read, which the pre-auth splash/login screens and the fully-public track.html cannot satisfy without a new public-read carve-out; a static-only BRAND avoids this but means any brand-copy tweak needs a deploy.
-- [ ] Scope of "identity chrome" vs "narrative prose": dozens of "Barro Industries" occurrences sit inside ordinary sentences (onboarding copy, Partner Guide help text, handbook, About-page paragraphs — e.g. app.js L510/3735-3738/5960/7449-7636) rather than in logos/titles/footers. Should BRAND.name only replace structural chrome (title, splash, login, topbar, print-header company-name blocks, manifest, footer credit lines — roughly 15-25 call sites) while narrative prose stays hand-written literal text, or should Fable define a broader contract (e.g. a `brandName()` helper used inside prose too)? This single decision changes the size of the migration from ~20 sites to 150+.
-- [ ] Should per-company sub-brand data (BK/BS/PT/future trademarks) be folded into `window.BRAND.companies.{BK,BS,PT}` (mirroring the existing `DEPARTMENTS` keyed-object pattern in config.js, config.js L95-121) so departments.js's currently-independent, already-drifted BK/BS print headers (departments.js L5587-5588 hardcodes 'Barro Kitchens'/'Barro Industries OPC' text; L7699 hardcodes 'BRILLIANT STEEL' — NEITHER reads quote-builder-v2.html's `CO` object today) finally converge on one source — or should quote-builder-v2.html's `CO` object remain the sole authority for company sub-brand data, given quote-builder-v2.html is embedded via `<iframe>` today with zero dependency on the parent app's config.js (unifying would require passing BRAND in via query params or postMessage, or breaking that isolation)?
-- [ ] Which logo file is canonical for BRAND.logo.*? At least 5 different 'Barro Industries' image files are live-referenced across screens today (icons/bi-logo.svg, icons/barro-industries.png, icons/barro-logo.png, icons/icon-192.png/512.png, icons/barrokit.png for the BK sub-brand), plus several orphaned-looking duplicates in /icons with no confirmed call site (icon_192.png/icon_512.png, 'logo biops.png', barrobuild.png). Fable must pick the canonical set per context (favicon/PWA icon vs in-app wordmark logo vs print-document logo vs push-notification badge) and decide whether the orphans get deleted (separate cleanup) or left alone.
-- [ ] Contact-detail formatting: the same phone number appears as '0927-683-6300' (departments.js L4312/L6802) and '0927 683 6300' (departments.js L12721, quote-builder-v2.html L944/L948) with no canonical form. Should BRAND store one formatted string, or raw digits plus a formatter function?
-- [ ] Should this workstream also rewrite the live 'BI Ops System' Company-tab content (app.js L5223, L5241-5313) — its copy ('Business Intelligence Operations Platform') is now substantively wrong per the v12 vision, not just an old name — or is that content-authoring work better deferred to a later, non-mechanical pass since it needs new prose, not a string swap?
-- [ ] Should BRAND also own the custom tracking domain (barroindustries-operatingsystem.ravenmails.com, duplicated in track.html x3 + CNAME x1) as a single field, or is that considered infra/DNS config outside BRAND's remit?
-- [ ] Given the heavy overlap with workstream 14 (shared letterhead engine) across departments.js's five independent print-header implementations: should workstream 9 (a) mechanically string-swap all five letterhead bodies now (fast, but likely throwaway once WS14 consolidates them into one component), (b) skip the print-header bodies entirely and only fix title/meta/manifest/nav/Company-tab chrome, leaving all letterhead text for WS14 to wire up against BRAND from scratch, or (c) do a middle path — extract the literal company/address/TIN/contact/signatory strings into BRAND now (so WS14 has a data source to consume) without restructuring the five templates' markup/CSS? This sequencing choice should be made explicitly, not left implicit.
+### Resolved decisions (one-line rulings)
+
+1. **Where BRAND lives → `window.BRAND` object appended to `js/config.js`** (after `ROLES`, before nothing load-bearing). No new file. config.js already loads before index.html's inline version scripts (L298) and before departments/app/modules, so every JS consumer sees it. Rationale: a new `js/brand.js` would force the 3-things-in-lockstep dance (index.html slot + sw PRECACHE + CACHE_VER) for a plain data object, and `importScripts`/`globalThis` still can't reach manifest.json — so a shared worker file buys almost nothing.
+2. **Non-JS / worker-scope consumers → permanent literal mirrors + a sync-checklist comment (option a).** manifest.json (browser-parsed), sw.js and firebase-messaging-sw.js (worker `self`, no `window`), and functions/index.js (separate deploy) physically cannot read `window.BRAND`. They keep hardcoded strings; each gets a `// BRAND MIRROR — keep in sync with window.BRAND in js/config.js` comment. A migration-checklist item enumerates all five. This is the honest, low-risk design.
+3. **Firestore-backed BRAND → NO. Static-only.** The existing `settings/{docId}` rule requires `isAuth()` to read; splash/login (pre-auth) and public `track.html` cannot satisfy it, and a public-read carve-out is new attack surface for near-zero benefit. President-editable tagline/president-message is deferred (a later, non-mechanical workstream) — noted as out of scope, not built here.
+4. **Chrome vs prose → BRAND replaces STRUCTURAL CHROME ONLY (~20 sites). Narrative prose stays literal text.** No `brandName()` helper threaded through sentences. Rationale: keeps the sweep mechanical and small (title/meta/manifest/splash/login/topbar/version/nav/Company-tab hero/print-footer credit lines), and avoids injecting BRAND fields into dozens of prose interpolation points (each an escHtml surface).
+5. **Sub-brand data → fold `CO.BK`/`CO.BS` into `window.BRAND.companies.{BK,BS}` in config.js AS THE PARENT-APP SOURCE OF TRUTH; quote-builder-v2.html keeps its OWN local `CO` object (iframe isolation preserved).** The two are declared structurally identical (same field names) with cross-reference comments. `CO.PT` stays runtime-synthesized inside the iframe from URL params — BRAND.companies documents it as "BK/BS static; PT is iframe-runtime-only, not mirrored here." WS14 consumes `BRAND.companies` for departments.js print headers. We do NOT break iframe isolation (no postMessage/query wiring) in this workstream.
+6. **Canonical logos per context:** favicon/PWA = `icons/icon-192.png`+`icons/icon-512.png`+`favicon.svg/png` (unchanged); in-app wordmark = `icons/bi-logo.svg`; print-document logo = `icons/barro-industries.png`; push badge = `icons/icon-192.png` (retire the one-off `icons/barro-logo.png` reference). Orphan files (`icon_192.png`/`icon_512.png` underscore dupes, `logo biops.png`, `barrobuild.png`) → DEFER deletion to a separate cleanup task; do NOT delete in this sweep.
+7. **Contact formatting → BRAND stores ONE canonical string per field.** Phone canonical = `'0927 683 6300'` (spaced form, matches quote-builder + PO). The dashed `'0927-683-6300'` on payslip/invoice becomes the spaced form when WS14 rewires those headers. No formatter function.
+8. **'BI Ops System' Company-tab → minimal chrome swap now, substantive copy rewrite FLAGGED/deferred.** Rename the tab label `'BI Ops System'` → `'The System'` and swap the hero wordmark literal to `BRAND.fullName`; leave the false-positioning body prose ("Business Intelligence Operations Platform") as a `‼️ FLAG FOR NEIL` content item (needs new prose, not a string swap).
+9. **Tracking domain → NOT in BRAND.** It is infra/DNS config (CNAME + worker-context track.html, which can't read BRAND). Stays literal. track.html already reads "Barro Industries" (no "Operations System"), so it needs **no change** in this sweep.
+10. **Print-header bodies (overlap w/ WS14) → MIDDLE PATH (c): extract the company/address/TIN/contact/signatory literals into `BRAND.legal`/`BRAND.companies` NOW so WS14 has a data source; do NOT restructure the five templates' markup/CSS in WS09.** WS09 only swaps title/meta/manifest/nav/version/Company-tab chrome plus the `"Operations System"`→`"Operating System"` footer strings. WS14 owns rewiring the print headers to consume `BRAND`.
+
+### The BRAND object (exact — append to `js/config.js` after the `ROLES` block)
+
+```js
+// ── Brand / Company Identity ─────────────────────
+// Canonical source of truth for company/system identity used by all JS-rendered
+// chrome (title, splash, login, topbar, version strings, Company tab, nav) AND
+// consumed by the WS14 letterhead engine for print-document headers/footers.
+//
+// NON-JS MIRRORS (cannot read window.BRAND — keep in sync BY HAND):
+//   • manifest.json  name/short_name/description   (browser-parsed, pre-JS)
+//   • sw.js  header comment + CACHE_VER prefix       (worker scope, no window)
+//   • firebase-messaging-sw.js  L38 title fallback    (worker scope)
+//   • functions/index.js  L48 title fallback          (separate deploy pipeline)
+window.BRAND = {
+  name:       'Barro Industries',            // display company name (chrome)
+  systemName: 'Operating System',            // product/system suffix
+  fullName:   'Barro Industries Operating System',
+  shortName:  'Barro Ops',                   // replaces the retired 'BI Ops'
+  tagline:    'Building the Future, Brick by Brick.',  // the one live tagline we keep
+
+  legal: {
+    // Corporate entity (SEC OPC) — client-facing / marketing documents
+    opcName:         'Barro Industries OPC',
+    opcRegistration: 'SEC-registered One Person Corporation',
+    opcTin:          '',   // ‼️ FLAG FOR NEIL — OPC TIN not present anywhere in code
+    // DTI sole-proprietorship trade name — the registered BIR taxpayer today
+    // (currently printed on payslips + billing invoices)
+    dtiName:         'NEILBARRO STEEL & METAL FABRICATION SERVICES',
+    dtiTin:          '951-145-613-000',
+    address:         'PUROK 6, CARLATAN, 2500, CITY OF SAN FERNANDO, LA UNION, PHILIPPINES',
+    addressShort:    'La Union | Baguio City | Manila',
+    phone:           '0927 683 6300',        // canonical spaced form
+    email:           'hello@barroindustries.com',
+    signatory:       { name: 'NEIL BARRO', title: 'President, Barro Industries OPC' }
+  },
+
+  logo: {
+    wordmark:  'icons/bi-logo.svg',          // in-app splash/login/topbar
+    print:     'icons/barro-industries.png', // print-document header logo (WS14)
+    pwaIcon:   'icons/icon-192.png',         // PWA/apple-touch
+    pushBadge: 'icons/icon-192.png'          // FCM badge (retires icons/barro-logo.png)
+  },
+
+  // Per-company sub-brands. Field shape is IDENTICAL to quote-builder-v2.html's
+  // local CO object (that iframe keeps its OWN copy for isolation — see comment there).
+  // CO.PT (generic partner) is runtime-synthesized inside the iframe from URL params
+  // and is NOT mirrored here.
+  companies: {
+    BK: { name:'BARRO KITCHENS',
+      sub:'Commercial Kitchen One-Stop-Shop  •  Design · Fabricate · Install  •  by Barro Industries OPC',
+      addr:'La Union  |  Baguio City  |  Manila', contact:'09276836300  |  hello@barroindustries.com',
+      sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'}, code:'BK',
+      thanks:'Thank you for considering Barro Kitchens. We look forward to building a kitchen you can rely on for years.',
+      creds:'Barro Industries OPC  •  DTI / BIR Registered  •  hello@barroindustries.com  •  0927 683 6300  •  La Union | Baguio | Manila' },
+    BS: { name:'BRILLIANT STEEL CORPORATION', sub:'', addr:'Pasig City, Metro Manila', contact:'09276836300',
+      sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'}, code:'BS',
+      thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
+      creds:'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300' }
+  }
+};
+
+// Convenience: pick the correct legal entity for a document type.
+//   brandEntity('bir')       → DTI trade name + real TIN (payslips, invoices, BIR docs)
+//   brandEntity('corporate') → OPC name (quotes, POs, proposals, marketing)
+// Consumed by the WS14 letterhead engine. See ‼️ FLAG on entity/TIN below.
+window.brandEntity = function(kind){
+  const L = window.BRAND.legal;
+  if (kind === 'bir') return {
+    name: L.dtiName, registration: 'DTI-registered · BIR-registered',
+    tin: L.dtiTin, address: L.address, phone: L.phone, email: L.email };
+  return {  // 'corporate' (default)
+    name: L.opcName, registration: L.opcRegistration,
+    tin: L.opcTin, address: L.addressShort, phone: L.phone, email: L.email };
+};
+```
+
+### Call-site migration table (every site from the brief, bucketed)
+
+| # | File:anchor | Current literal | Action | New value |
+|---|---|---|---|---|
+| A1 | index.html L6 `<title>` | `Barro Industries Operating System` | SKIP (already correct) | — |
+| A2 | index.html L7 meta description | correct | SKIP | — |
+| A3 | index.html L11 `apple-mobile-web-app-title` | `BI Ops` | SWAP-STATIC | `Barro Ops` |
+| A4 | index.html L44-45 splash spans | correct | SKIP | — |
+| A5 | index.html L61-62 login title/sub | correct | SKIP | — |
+| A6 | index.html L157 login-version | rebuilt by script | SKIP (script owns it) | — |
+| A7 | index.html L177-178 topbar | correct | SKIP | — |
+| A8 | index.html L298-305 inline version script | `'v'+_v+' · Barro Industries'` / `'Operating System · v'+_v` | SWAP → `window.BRAND` | see block (b) |
+| A9 | index.html L311-319 load-event version script | duplicate concat | SWAP → `window.BRAND` | see block (b) |
+| M1 | manifest.json L2 `name` | `Barro Industries Operations` | SWAP-STATIC | `Barro Industries Operating System` |
+| M2 | manifest.json L3 `short_name` | `BI Ops` | SWAP-STATIC | `Barro Ops` |
+| M3 | manifest.json L4 `description` | `...Internal Operations System` | SWAP-STATIC | `Barro Industries Operating System — the company's central system` |
+| S1 | sw.js L2 header comment | `Service Worker v16` | SWAP-STATIC (cosmetic) | `Barro Industries Operating System — Service Worker` |
+| S2 | sw.js L11 `CACHE_VER` prefix `bi-ops-` | — | LEAVE (auto-bumped by hook; changing prefix busts all users' caches for zero benefit) | — |
+| F1 | firebase-messaging-sw.js L2 comment | correct-ish | SKIP | — |
+| F2 | firebase-messaging-sw.js L38 title fallback | `'Barro Industries'` | SWAP-STATIC + MIRROR comment | keep `'Barro Industries'` (already = BRAND.name; add mirror comment) |
+| F3 | firebase-messaging-sw.js L60 `badge` | `'/icons/barro-logo.png'` | SWAP-STATIC | `'/icons/icon-192.png'` |
+| FN1 | functions/index.js L48 title fallback | `'Barro Industries'` | SWAP-STATIC + MIRROR comment (separate deploy) | keep `'Barro Industries'` (add mirror comment) |
+| T1 | track.html (all) | already "Barro Industries" | SKIP | — |
+| Q1 | quote-builder-v2.html L6 `<title>` | `Quote Builder v2 — Barro Kitchens` | SWAP-STATIC | `Quote Builder — Barro Industries` |
+| Q2 | quote-builder-v2.html L939-949 `CO` | — | LEAVE + add cross-ref comment (`// Mirror of window.BRAND.companies in js/config.js — keep in sync; PT is synthesized below`) | — |
+| C1 | app.js L5223 chip label `'BI Ops System'` | — | SWAP | `'The System'` |
+| C2 | app.js L5249-5259 hero `BI OPS SYSTEM` / `Business Intelligence Operations Platform` | — | SWAP wordmark to `BRAND.fullName`; FLAG body prose | `‼️ FLAG FOR NEIL` (positioning copy rewrite) |
+| C3 | app.js L5308 footer badge `BARRO INDUSTRIES · BI OPS · 2026` | — | SWAP | `Barro Industries · Operating System · 2026` |
+| C4 | app.js L5333-5336 renderCompanyOverview hero | correct name, live tagline | SKIP (already `BRAND.tagline` value) | — |
+| P1 | departments.js L4290-4340 HR payslip header | address/TIN/contact literals | DEFER-TO-WS14 | — |
+| P2 | departments.js L6795-6804 billing invoice header | same literals | DEFER-TO-WS14 | — |
+| P3 | departments.js L12716-12759 PO header + footer `Operations System` | — | DEFER-TO-WS14 (header); the footer `Operations System`→`Operating System` string is fixed by WS14's shared footer | — |
+| P4 | departments.js L11939-12023 inventory count header + footer `Operations System` | — | DEFER-TO-WS14 | — |
+| P5 | departments.js L5560-5627 printBKQuote header | — | DEFER-TO-WS31 (likely dead) | — |
+| P6 | departments.js L7693-7710 BS quote header | — | DEFER-TO-WS31 (likely dead) | — |
+| P7 | departments.js L9096-9111 legacy printQuote | — | DEFER-TO-WS31 (dead) | — |
+| P8 | app.js L4666-4685 printPayslip / L4970-5004 printWorkerPayslip footers `Barro Industries` | — | DEFER-TO-WS24 (legacy payslip consolidation) | — |
+| D1 | modules.js L1748-1803 renderCompanyOverviewNew | — | SKIP-DEAD (zero call sites) | — |
+| PR1 | app.js L510/530/3735-3738/3827/5960/7449-7636 prose | "Barro Industries" in sentences | SKIP-PROSE | — |
+| PR2 | modules.js L435/444/611/658/768/1817/1831 EotM/invite copy | prose/placeholder | SKIP-PROSE | — |
+| PR3 | notifications.js L347 EmailJS `company:'Barro Industries'` | template param | SKIP-PROSE (matches BRAND.name; leave literal) | — |
+| PR4 | departments.js L3683 company picklist, L5167 SOP header, L12254 placeholder, L12737 deliverTo default | prose/data | SKIP-PROSE | — |
+
+### Before/after code blocks
+
+**(a) index.html L11 — apple title (static swap)**
+```html
+<!-- before -->
+  <meta name="apple-mobile-web-app-title" content="BI Ops"/>
+<!-- after -->
+  <meta name="apple-mobile-web-app-title" content="Barro Ops"/>
+```
+
+**(b) index.html L298-320 — dedupe both version scripts against BRAND**
+```html
+<!-- before: two blocks concatenating '· Barro Industries' / 'Operating System ·' literally -->
+<script defer>
+  const _v = window.APP_VERSION || '9.4';
+  const _lvEl = document.getElementById('login-version-str');
+  if (_lvEl) _lvEl.textContent = 'v' + _v + ' · Barro Industries';
+  const _tbEl = document.getElementById('topbar-version-str');
+  if (_tbEl) _tbEl.textContent = 'Operating System · v' + _v;
+</script>
+...
+<script>
+  window.addEventListener('load', () => {
+    if (window.APP_VERSION) {
+      const el = document.getElementById('login-version-str');
+      if (el) el.textContent = 'v' + window.APP_VERSION + ' · Barro Industries';
+      const tb = document.getElementById('topbar-version-str');
+      if (tb) tb.textContent = 'Operating System · v' + window.APP_VERSION;
+    }
+  });
+</script>
+```
+```html
+<!-- after: single shared updater, both call sites source BRAND (defined in config.js above) -->
+<script defer>
+  /* runs immediately after config.js (defer preserves order). BRAND + APP_VERSION exist by now. */
+  window._applyBrandVersion = function () {
+    const v = window.APP_VERSION || '9.4';
+    const B = window.BRAND || { name: 'Barro Industries', systemName: 'Operating System' };
+    const lv = document.getElementById('login-version-str');
+    if (lv) lv.textContent = 'v' + v + ' · ' + B.name;
+    const tb = document.getElementById('topbar-version-str');
+    if (tb) tb.textContent = B.systemName + ' · v' + v;
+  };
+  window._applyBrandVersion();
+</script>
+...
+<script>
+  window.addEventListener('load', () => { if (window._applyBrandVersion) window._applyBrandVersion(); });
+</script>
+```
+
+**(c) manifest.json L1-4 (static)**
+```json
+{
+  "name": "Barro Industries Operating System",
+  "short_name": "Barro Ops",
+  "description": "Barro Industries Operating System — the company's central system",
+```
+
+**(d) sw.js L2 comment + firebase-messaging-sw.js / functions/index.js mirrors**
+```js
+// sw.js L2 — before: //  Barro Industries — Service Worker v16
+//           after:  //  Barro Industries Operating System — Service Worker
+```
+```js
+// firebase-messaging-sw.js — before (L38) / after (L38 + L60):
+//   before: const notifTitle = data.title || 'Barro Industries';
+//   after:  // BRAND MIRROR — window.BRAND.name in js/config.js
+//           const notifTitle = data.title || 'Barro Industries';
+//   L60 before: badge: '/icons/barro-logo.png',
+//   L60 after:  badge: '/icons/icon-192.png',
+```
+```js
+// functions/index.js L48 — SEPARATE DEPLOY (cd functions && npm run deploy):
+//   before: title: title.trim() || 'Barro Industries',
+//   after:  // BRAND MIRROR — window.BRAND.name in js/config.js (keep in sync)
+//           title: title.trim() || 'Barro Industries',
+```
+
+**(e) track.html + CNAME → NO CHANGE.** Already brand-correct; domain is infra, not BRAND.
+
+**(f) quote-builder-v2.html** — title swap (Q1) + a cross-reference comment above `CO` (L939). The `CO` object itself is LEFT unchanged (iframe isolation).
+```js
+// quote-builder-v2.html L938 — add above `const CO = {`:
+//  Local mirror of window.BRAND.companies (js/config.js). This file loads via <iframe>
+//  with no access to the parent app's config.js — keep BK/BS in sync by hand.
+//  CO.PT is synthesized at runtime from ?pcoName/?pcoContact/?pcoSig for generic partners.
+```
+
+**(g) departments.js print headers → LEAVE UNCHANGED. WS14 owns these** (it rewires them to `buildLetterhead({ entity: brandEntity('bir'|'corporate'), ... })`). WS09 only supplies `BRAND.legal`/`brandEntity()` as the data source.
+
+**(h) Company tab (app.js L5223, L5249-5259, L5308)**
+```js
+// L5223 before:  { key:'biops', label:'BI Ops System', ... }
+// L5223 after:   { key:'biops', label:'The System', ... }
+// L5249/5259 hero wordmark before: 'BI OPS SYSTEM'  →  after: (window.BRAND?.fullName || 'Barro Industries Operating System')
+// L5308 before: BARRO INDUSTRIES · BI OPS · 2026
+// L5308 after:  Barro Industries · Operating System · 2026
+// Body prose 'Business Intelligence Operations Platform' (L5251) → ‼️ FLAG FOR NEIL (content rewrite, deferred)
+```
+
+### `‼️ FLAG FOR NEIL`
+
+1. **OPC TIN unknown.** `BRAND.legal.opcTin` ships empty — no OPC TIN exists anywhere in the code. Needed before any client-facing doc claims the OPC as taxpayer. Recommendation: leave empty; BIR-facing docs use the DTI TIN via `brandEntity('bir')` (current behavior). See WS14 flag #1.
+2. **Company-tab positioning copy** ("Business Intelligence Operations Platform", app.js L5251 + surrounding paragraph): substantively wrong per the v12 vision. Needs new prose, not a string swap. Recommendation: assign to a short content pass; WS09 only renames the tab label + wordmark.
+
+### Migration checklist (execution order)
+
+1. **config.js** — append the `window.BRAND` object + `window.brandEntity` helper (after `ROLES`). (Consumed by WS14 too.)
+2. **index.html** — apply (a) L11 apple title; apply (b) dedupe both version scripts.
+3. **manifest.json** — apply (c) name/short_name/description.
+4. **sw.js** — apply (d) L2 comment only. Do NOT touch `CACHE_VER` prefix (hook auto-bumps the number).
+5. **firebase-messaging-sw.js** — apply (d) L38 mirror comment + L60 badge path.
+6. **quote-builder-v2.html** — Q1 title + (f) cross-ref comment. Leave `CO` body unchanged.
+7. **app.js** — apply (h) Company-tab label/wordmark/footer. Leave prose + payslip footers (WS24).
+8. **functions/index.js** — apply (d) L48 mirror comment. ⚠️ **Requires `cd functions && npm run deploy`** — NOT covered by `git push`.
+9. **Commit** app-code files (hook auto-bumps APP_VERSION + CACHE_VER + index.html vX.Y.Z). Re-`git diff` first (OneDrive concurrent-edit).
+10. **Deploy**: `git push origin master` (static). No firestore.rules change in this workstream (static-only BRAND). Cloud Functions deployed separately per step 8.
+
+### Verify (grep must return ZERO over in-scope files, excluding SKIP-PROSE/SKIP-DEAD/DEFER + `.claude/worktrees/`)
+
+```bash
+cd "<repo root>"
+# Retired short-name / old positioning in CHROME (not prose/deferred):
+grep -rn --exclude-dir='.claude' "BI Ops\|BI OPS\|Business Intelligence Operations" \
+  index.html manifest.json js/app.js
+# Old 'Operations' system name in manifest (title/name fields only):
+grep -n "Operations" manifest.json
+# Retired push badge:
+grep -n "barro-logo.png" firebase-messaging-sw.js
+# EXPECT: only C2's flagged prose line (app.js L5251) may remain, and nothing else.
+```
+Manual: load app → splash, login-footer, topbar-subtitle, Company tab (label 'The System', hero wordmark) all read "Barro Industries Operating System"; install PWA → home-screen name "Barro Ops"; trigger a push → title "Barro Industries", badge renders.
+
+## ‼️ SEAM NOTE (Fable orchestrator, post-merge 2026-07-10)
+WS27 (IDs) consumes `window.BRAND` and needs an ID-verify base URL. Add one field to the BRAND object
+above: `verifyBase: '/v/',` (the public ID-verify route prefix — a token-based public page like
+order_tracking, built in WS27). No other change; WS27 defers entirely to this canonical BRAND (its
+own 'interim BRAND' is dropped).
 
 ## Risks / cross-workstream interactions
 
