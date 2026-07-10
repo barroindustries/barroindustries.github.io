@@ -2275,13 +2275,13 @@ async function renderPresidentDashboard() {
     const mtd = todayStr.slice(0,7);
     const _allLedger = ledgerSnap.docs.map(d=>d.data());
     const mtdLedger = _allLedger.filter(e=>(e.date||'').slice(0,7)===mtd);
-    const mtdNet = mtdLedger.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0)
-                 - mtdLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+    const mtdNet = mtdLedger.filter(e=>ledgerKind(e)==='income').reduce((s,e)=>s+(e.amount||0),0)
+                 - mtdLedger.filter(e=>ledgerKind(e)==='expense').reduce((s,e)=>s+(e.amount||0),0);
     // Previous calendar month net — for a month-over-month growth indicator.
     const _pm = (()=>{ const [yy,mm]=mtd.split('-').map(Number); return mm===1?`${yy-1}-12`:`${yy}-${String(mm-1).padStart(2,'0')}`; })();
     const prevLedger = _allLedger.filter(e=>(e.date||'').slice(0,7)===_pm);
-    const prevNet = prevLedger.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0)
-                  - prevLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+    const prevNet = prevLedger.filter(e=>ledgerKind(e)==='income').reduce((s,e)=>s+(e.amount||0),0)
+                  - prevLedger.filter(e=>ledgerKind(e)==='expense').reduce((s,e)=>s+(e.amount||0),0);
     // Inventory low-stock count
     const lowStock = invSnap.docs.map(d=>d.data()).filter(i=>(i.reorderLevel||0)>0 && (i.qty||0)<=(i.reorderLevel||0)).length;
     // Receivables outstanding (+ 90+ day overdue) — owner cash-flow visibility.
@@ -2639,31 +2639,11 @@ async function renderSecretaryDashboard() {
   }
 }
 
-// ── Finance period filter (shared by Finance Dashboard + Analytics) ──
-// Periods: 'month' = current Manila month · 'ytd' = since Jan 1 of the current
-// year · 'all' = all time. dateStr may be 'YYYY-MM-DD' or 'YYYY-MM'.
-window.FIN_PERIOD_TABS = [['month','This Month'],['prev','Last Month'],['ytd','Since Jan 1'],['all','All Time']];
-// Previous Manila month as 'YYYY-MM' (completed months must stay one click away —
-// records never "disappear" at month rollover).
-window.prevBizMonth = function() {
-  const [y, m] = bizDate().slice(0,7).split('-').map(Number);
-  return m === 1 ? (y-1) + '-12' : y + '-' + String(m-1).padStart(2,'0');
-};
-window.finPeriodMatch = function(dateStr, period) {
-  const ss = String(dateStr||''); if (!ss) return false;
-  if (period === 'all') return true;
-  if (period === 'ytd') return ss.slice(0,4) === String(bizYear());
-  if (period === 'prev') return ss.slice(0,7) === window.prevBizMonth();
-  return ss.slice(0,7) === bizDate().slice(0,7);   // 'month'
-};
-window.finPeriodLabel = function(period){ return ({month:'This Month', prev:'Last Month '+window.prevBizMonth(), ytd:'YTD '+bizYear(), all:'All Time'})[period] || 'This Month'; };
-// onclickJs: a JS expression string in which '%P%' is replaced by each period key.
-window.finPeriodBar = function(active, onclickJs) {
-  return '<div class="subtab-bar" style="margin-bottom:12px">' +
-    window.FIN_PERIOD_TABS.map(([k,l]) =>
-      `<button class="subtab-btn ${active===k?'active':''}" onclick="${onclickJs.replace(/%P%/g,k)}">${l}</button>`
-    ).join('') + '</div>';
-};
+// ── Finance period filter ─────────────────────────
+// Superseded by window.Period / window.periodPicker / window.bindPeriodPicker
+// in js/config.js (v12 WS12) — ONE shared engine for every money screen,
+// supporting any month/quarter/year, not just month/prev/ytd/all. The
+// finPeriodMatch/finPeriodLabel aliases there keep old callers working.
 
 // ── FINANCE DASHBOARD ─────────────────────────────
 // Money oversight: income/expense/net (selectable period), payroll, expense-by-category, pending payables.
@@ -2692,14 +2672,14 @@ async function renderFinanceDashboard() {
 
     const ledger = ledgerSnap.docs.map(d=>d.data());
     const periodLedger = ledger.filter(e=>finPeriodMatch(e.date, period));
-    const mtdIncome  = periodLedger.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0);
-    const mtdExpense = periodLedger.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+    const mtdIncome  = periodLedger.filter(e=>ledgerKind(e)==='income').reduce((s,e)=>s+(e.amount||0),0);
+    const mtdExpense = periodLedger.filter(e=>ledgerKind(e)==='expense').reduce((s,e)=>s+(e.amount||0),0);
     const mtdNet = mtdIncome - mtdExpense;
     // Previous calendar month net — for a month-over-month indicator on the net card.
     const _pm = (()=>{ const [yy,mm]=mtd.split('-').map(Number); return mm===1?`${yy-1}-12`:`${yy}-${String(mm-1).padStart(2,'0')}`; })();
     const _prevL = ledger.filter(e=>(e.date||'').slice(0,7)===_pm);
-    const prevNet = _prevL.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0)
-                  - _prevL.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+    const prevNet = _prevL.filter(e=>ledgerKind(e)==='income').reduce((s,e)=>s+(e.amount||0),0)
+                  - _prevL.filter(e=>ledgerKind(e)==='expense').reduce((s,e)=>s+(e.amount||0),0);
 
     // ── Receivables aging (open project AR by project age) ──
     const _daysSince = ts => { try { const t = ts && ts.toDate ? ts.toDate() : (ts && ts.seconds ? new Date(ts.seconds*1000) : null); return t ? Math.floor((Date.now()-t.getTime())/86400000) : 0; } catch(_) { return 0; } };
@@ -2718,7 +2698,7 @@ async function renderFinanceDashboard() {
     // Expense by category — from the LEDGER (single source of truth), so it always
     // reconciles with the Expense KPI above (payroll, COS, disbursements, approved expenses).
     const byCat = {};
-    periodLedger.filter(e=>e.type==='debit').forEach(e=>{ const k=e.category||'Other'; byCat[k]=(byCat[k]||0)+(e.amount||0); });
+    periodLedger.filter(e=>ledgerKind(e)==='expense').forEach(e=>{ const k=e.category||'Other'; byCat[k]=(byCat[k]||0)+(e.amount||0); });
     const catRows = Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
     const catMax = catRows.reduce((m,[,v])=>Math.max(m,v),0)||1;
     const monthExpTotal = catRows.reduce((s,[,v])=>s+v,0);
@@ -2730,7 +2710,7 @@ async function renderFinanceDashboard() {
     c.innerHTML = `
       <div class="page-header"><h2>Finance Dashboard</h2><span class="badge badge-green">${ROLES[currentRole]?.label||'Finance'}</span></div>
       <div id="live-clock" class="live-clock-line"></div>
-      ${finPeriodBar(period, "window._FIN_DASH_PERIOD='%P%';renderFinanceDashboard()")}
+      <div id="fin-dash-period">${window.periodPicker(period, {closedBadge:true})}</div>
       ${pendingExp.length?`<div class="alert-banner alert-warn" onclick="navigateTo('cash-advances')"><span>💸 <strong>${pendingExp.length} expense${pendingExp.length>1?'s':''}</strong> awaiting approval · ₱${formatNum(pendingExpTotal)}</span><span class="alert-chevron">›</span></div>`:''}
       <div class="kpi-row">
         <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="trending-up" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Income (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdIncome)}</div></div>
@@ -2786,6 +2766,9 @@ async function renderFinanceDashboard() {
       </div>`;
     liveDateTime('live-clock');
     if (window.lucide) lucide.createIcons({ nodes: [c] });
+    window.bindPeriodPicker(document.getElementById('fin-dash-period'), (newKey) => {
+      window._FIN_DASH_PERIOD = newKey; renderFinanceDashboard();
+    }, { closedBadge:true, activeKey: period });
     // Receivables drill-down — clients sorted by oldest debt (chase the top first).
     document.getElementById('ar-drill-btn')?.addEventListener('click', () => {
       const ageCol = d => d>90?'var(--danger)':d>60?'#FF9500':d>30?'#FFAA00':'var(--text-muted)';
@@ -4106,6 +4089,9 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       document.getElementById('save-pr-btn').addEventListener('click', async () => {
         const month = document.getElementById('pr-month').value;
         if (!month) { Notifs.showToast('Select a month.','error'); return; }
+        // Checked once, before any write (v12 WS12) — this legacy path is slated
+        // for removal by WS20, but guarded here too since it's still live.
+        try { await window.assertPeriodOpen(month + '-01'); } catch (e) { return; }
         const btn2 = document.getElementById('save-pr-btn');
         btn2.disabled = true; btn2.textContent = 'Recording…';
         const batch = db.batch();
@@ -4159,6 +4145,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
           const ex2   = await db.collection('ledger').where('refNumber','==',lref2).limit(1).get().catch(()=>({docs:[]}));
           const entry2 = {
             date: month + '-01', type: 'debit',
+            accountType: 'expense', account: 'Payroll Expense',
             description: `Payslip — ${u2.displayName||u2.email} (${monthLabel2})`,
             amount: amt2, category: 'Payroll Expense', source: 'Finance',
             refNumber: lref2,
@@ -6174,13 +6161,16 @@ async function renderAnalytics() {
     const anPeriod = window._AN_PERIOD || 'month';
     const anPlabel = finPeriodLabel(anPeriod);
     // ── Cash flow (canonical source = ledger) ──
-    const ledIn  = ym => sum(ledger.filter(l=>l.type==='credit'&&(l.date||'').slice(0,7)===ym), l=>l.amount);
-    const ledOut = ym => sum(ledger.filter(l=>(l.type==='debit'||l.type==='payslip')&&(l.date||'').slice(0,7)===ym), l=>l.amount);
+    // ledgerKind() classifies income/expense (v12 WS13) — asset/liability rows
+    // (e.g. the Inventory leg) are excluded automatically instead of being
+    // swept into "expense" by a raw type==='debit' check.
+    const ledIn  = ym => sum(ledger.filter(l=>ledgerKind(l)==='income'&&(l.date||'').slice(0,7)===ym), l=>l.amount);
+    const ledOut = ym => sum(ledger.filter(l=>ledgerKind(l)==='expense'&&(l.date||'').slice(0,7)===ym), l=>l.amount);
     // sales-based revenue fallback for months where the ledger is still sparse (accepted quotes by createdAt month)
     const wonQuotesMonth = ym => sum(quotes.filter(q=>q.status==='accepted'&&ymOf(q.createdAt)===ym), q=>q.total);
     // period-aware totals (This Month / Since Jan 1 / All Time)
-    const ledInP  = sum(ledger.filter(l=>l.type==='credit'&&finPeriodMatch(l.date,anPeriod)), l=>l.amount);
-    const ledOutP = sum(ledger.filter(l=>(l.type==='debit'||l.type==='payslip')&&finPeriodMatch(l.date,anPeriod)), l=>l.amount);
+    const ledInP  = sum(ledger.filter(l=>ledgerKind(l)==='income'&&finPeriodMatch(l.date,anPeriod)), l=>l.amount);
+    const ledOutP = sum(ledger.filter(l=>ledgerKind(l)==='expense'&&finPeriodMatch(l.date,anPeriod)), l=>l.amount);
     const wonQuotesP = sum(quotes.filter(q=>q.status==='accepted'&&finPeriodMatch(ymOf(q.createdAt),anPeriod)), q=>q.total);
     const revMTD  = ledInP || wonQuotesP;
     const revPrev = ledIn(lastMonth) || wonQuotesMonth(lastMonth);
@@ -6207,7 +6197,7 @@ async function renderAnalytics() {
     const wrap=document.getElementById('analytics-content');
     const _anDelta = (cur,prev) => anPeriod==='month' ? delta(cur,prev,true) : `<span style="font-size:11px;color:#8e8e93">${anPlabel}</span>`;
     wrap.innerHTML=`
-      ${finPeriodBar(anPeriod, "window._AN_PERIOD='%P%';window._anRenderOverview&&window._anRenderOverview()")}
+      <div id="an-overview-period">${window.periodPicker(anPeriod, {closedBadge:true})}</div>
       <div class="kpi-row" style="margin-top:16px">
         <div class="kpi-card green"><div class="kpi-label">Revenue (${anPlabel})</div><div class="kpi-value">₱${fmt(revMTD)}</div><div style="margin-top:4px">${_anDelta(revMTD,revPrev)}</div></div>
         <div class="kpi-card ${netMTD>=0?'green':'warn'}"><div class="kpi-label">Net Cash (${anPlabel})</div><div class="kpi-value">₱${fmt(netMTD)}</div><div style="margin-top:4px">${_anDelta(netMTD,netPrev)}</div></div>
@@ -6246,6 +6236,9 @@ async function renderAnalytics() {
     ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
     // Gross profit vs cost (profitability)
     new Chart(document.getElementById('bh-margin-chart'),{type:'doughnut',data:{labels:['Gross Profit','Cost'],datasets:[{data:[Math.max(grossProfit,0),jcCost],backgroundColor:['#30D158','#636366'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}},tooltip:{callbacks:{label:c=>` ${c.label}: ₱${fmt(c.parsed)}`}}}}});
+    window.bindPeriodPicker(document.getElementById('an-overview-period'), (newKey) => {
+      window._AN_PERIOD = newKey; window._anRenderOverview && window._anRenderOverview();
+    }, { closedBadge:true, activeKey: anPeriod });
   };
   window._anRenderOverview = renderOverview;
 
@@ -6347,33 +6340,42 @@ async function renderAnalytics() {
   };
 
   const renderFinanceAnalytics = () => {
+    // Follows the SAME period as the Overview tab's picker (window._AN_PERIOD) —
+    // showing "This Month" here while Overview shows "Last Month" would be a
+    // confusing split-brain on one page (v12 WS12 D3).
+    const finAnPeriod = window._AN_PERIOD || 'month';
+    const finAnLabel = finPeriodLabel(finAnPeriod);
     const totalPayroll=users.reduce((s,u)=>s+(u.salary||0)+(u.allowance||0)-(u.deductions||0),0);
     // Payroll is posted as type:'debit' category:'Payroll Expense' (no type:'payslip' exists).
     const _isPayroll=l=>l.category==='Payroll Expense';
     const disbursed=ledger.filter(_isPayroll).reduce((s,l)=>s+(l.amount||0),0);
-    const disbursedThisMonth=ledger.filter(l=>_isPayroll(l)&&inMonth(l)).reduce((s,l)=>s+(l.amount||0),0);
+    const disbursedThisMonth=ledger.filter(l=>_isPayroll(l)&&Period.match(l.date,finAnPeriod)).reduce((s,l)=>s+(l.amount||0),0);
     const caTotal=cas.filter(a=>a.status==='approved').reduce((s,a)=>s+(a.amount||0),0);
     const caPending=cas.filter(a=>a.status==='pending').length;
     // Expenses come from the ledger (single source of truth) — approved expenses,
-    // payroll, COS and disbursements are all posted there.
-    const ledDebits=ledger.filter(l=>l.type==='debit');
+    // payroll, COS and disbursements are all posted there. ledgerKind() classifies
+    // income/expense (v12 WS13) so asset/liability legs (e.g. Inventory) don't
+    // silently inflate this total.
+    const ledDebits=ledger.filter(l=>ledgerKind(l)==='expense');
     const totalExp=ledDebits.reduce((s,l)=>s+(l.amount||0),0);
-    const expThisMonth=ledDebits.filter(l=>inMonth(l)).reduce((s,l)=>s+(l.amount||0),0);
+    const expThisMonth=ledDebits.filter(l=>Period.match(l.date,finAnPeriod)).reduce((s,l)=>s+(l.amount||0),0);
     const payslipsThisMonth=payslips.filter(p=>inMonth(p));
-    const finIn = ym => sum(ledger.filter(l=>l.type==='credit'&&(l.date||'').slice(0,7)===ym),l=>l.amount);
-    const finOut= ym => sum(ledger.filter(l=>(l.type==='debit'||l.type==='payslip')&&(l.date||'').slice(0,7)===ym),l=>l.amount);
-    const netMTD=finIn(thisMonth)-finOut(thisMonth), netPrev=finIn(lastMonth)-finOut(lastMonth);
-    const payrollPct=finIn(thisMonth)>0?Math.round(totalPayroll/finIn(thisMonth)*100):null;
+    const finIn = ym => sum(ledger.filter(l=>ledgerKind(l)==='income'&&(l.date||'').slice(0,7)===ym),l=>l.amount);
+    const finOut= ym => sum(ledger.filter(l=>ledgerKind(l)==='expense'&&(l.date||'').slice(0,7)===ym),l=>l.amount);
+    const finInP  = sum(ledger.filter(l=>ledgerKind(l)==='income'&&Period.match(l.date,finAnPeriod)),l=>l.amount);
+    const finOutP = sum(ledger.filter(l=>ledgerKind(l)==='expense'&&Period.match(l.date,finAnPeriod)),l=>l.amount);
+    const netMTD=finInP-finOutP, netPrev=finIn(lastMonth)-finOut(lastMonth);
+    const payrollPct=finInP>0?Math.round(totalPayroll/finInP*100):null;
     const wrap=document.getElementById('analytics-content');
     wrap.innerHTML=`
       <div class="kpi-row" style="margin-top:16px">
         <div class="kpi-card accent"><div class="kpi-label">Total Payroll (Est.)</div><div class="kpi-value">₱${fmt(totalPayroll)}</div></div>
-        <div class="kpi-card ${netMTD>=0?'green':'warn'}"><div class="kpi-label">Net Income (MTD)</div><div class="kpi-value">₱${fmt(netMTD)}</div><div style="margin-top:4px">${delta(netMTD,netPrev,true)}</div></div>
+        <div class="kpi-card ${netMTD>=0?'green':'warn'}"><div class="kpi-label">Net Income (${finAnLabel})</div><div class="kpi-value">₱${fmt(netMTD)}</div>${finAnPeriod==='month'?`<div style="margin-top:4px">${delta(netMTD,netPrev,true)}</div>`:''}</div>
         <div class="kpi-card"><div class="kpi-label">Payroll % of Revenue</div><div class="kpi-value">${payrollPct==null?'—':payrollPct+'%'}</div></div>
-        <div class="kpi-card green"><div class="kpi-label">Disbursed This Month</div><div class="kpi-value">₱${fmt(disbursedThisMonth)}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Disbursed (${finAnLabel})</div><div class="kpi-value">₱${fmt(disbursedThisMonth)}</div></div>
         <div class="kpi-card warn"><div class="kpi-label">CA Outstanding</div><div class="kpi-value">₱${fmt(caTotal)}</div></div>
         <div class="kpi-card"><div class="kpi-label">CA Pending</div><div class="kpi-value">${caPending}</div></div>
-        <div class="kpi-card"><div class="kpi-label">Expenses This Month</div><div class="kpi-value">₱${fmt(expThisMonth)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Expenses (${finAnLabel})</div><div class="kpi-value">₱${fmt(expThisMonth)}</div></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
         <div class="card"><div class="card-header"><h3>Expense Categories</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="fin-exp-chart"></canvas></div></div></div>

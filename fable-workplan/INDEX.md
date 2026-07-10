@@ -25,8 +25,8 @@ finalizing 9's rename sweep so the two don't conflict.
 |---|---|---|---|
 | 09 | [09-brand.md](09-brand.md) | 9 | BRAND module + full rename sweep |
 | 10-11 | [10-11-nav-dialogs.md](10-11-nav-dialogs.md) | 7 | URL routing + real Back + styled dialogs (no-pop-ups mandate) |
-| 12 | [12-period.md](12-period.md) | 9 | Period engine + period close |
-| 13 | [13-coa.md](13-coa.md) | 8 | Chart of accounts — fixes double material expensing (critical) |
+| 12 | [12-period.md](12-period.md) | ✅ IMPLEMENTED | Period engine + period close |
+| 13 | [13-coa.md](13-coa.md) | ✅ IMPLEMENTED | Chart of accounts — fixes double material expensing (critical) |
 | 14 | [14-letterhead.md](14-letterhead.md) | 8 | Shared document letterhead engine |
 | 15 | [15-durability.md](15-durability.md) | 9 | Records durability — backups, restore, Drive privacy |
 | 16 | [16-perf.md](16-perf.md) | 7 | Performance & scale — unbounded reads, caching |

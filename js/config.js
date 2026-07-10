@@ -363,3 +363,187 @@ window.sopPanel = function(title, steps, opts) {
     (steps || []).map(function(s){ return '<li>' + esc(s) + '</li>'; }).join('') +
     '</ol></details>';
 };
+
+// ── Chart of Accounts (v12 WS13) ─────────────────────────────
+// Static, code-versioned. accountType drives P&L vs balance-sheet; legacy
+// rows (no accountType) derive their kind from category/type via ledgerKind.
+window.COA = {
+  income:    ['Sales Revenue', 'Other Income'],
+  expense:   ['COS – Direct Material', 'COS – Direct Labor', 'Payroll Expense',
+              'Operating Expense', 'Utilities', 'Tax', 'Materials',
+              'General Expense', 'Other Expense'],
+  asset:     ['Cash', 'Accounts Receivable', 'Inventory'],
+  liability: ['Accounts Payable', 'VAT Payable', 'Statutory Payables'],
+  equity:    ["Owner's Equity", 'Retained Earnings'],
+};
+// Legacy category → accountType (used by ledgerKind's fallback + the backfill).
+// A category not listed here falls back to type: credit→income, debit/payslip→expense.
+window.COA_LEGACY_MAP = {
+  'Sales Revenue':'income', 'Other Income':'income',
+  'Inventory – Materials':'asset',
+  'COS – Direct Material':'expense', 'COS – Direct Labor':'expense',
+  'Payroll Expense':'expense', 'Operating Expense':'expense', 'Payroll':'expense',
+  'Utilities':'expense', 'Tax':'expense', 'Materials':'expense',
+  'General Expense':'expense', 'Other Expense':'expense',
+  'Journal Entry':null, 'Journal Entry (Non-cash)':null,   // null = derive from type
+};
+// The ONE place P&L income/expense classification happens — replaces raw
+// row.type==='credit'/'debit' checks everywhere so asset/liability rows
+// (e.g. the Inventory leg) never silently inflate expense totals.
+window.ledgerKind = function(row) {
+  if (row && typeof row.accountType === 'string') return row.accountType;
+  var viaCat = row && window.COA_LEGACY_MAP[row.category];
+  if (viaCat) return viaCat;
+  if (!row) return 'expense';
+  if (row.type === 'credit') return 'income';
+  return 'expense';               // 'debit' AND legacy 'payslip' rows
+};
+
+// ── Period engine (v12 WS12) — ONE period filter for every money screen ──
+// Canonical keys: 'month:YYYY-MM' | 'quarter:YYYY-Qn' | 'year:YYYY' | 'all',
+// plus the aliases 'month'/'prev'/'ytd'/'year' (legacy Reports spelling).
+window.Period = (function() {
+  function ym() { return window.bizDate().slice(0, 7); }
+  var api = {
+    parse: function(key) {
+      key = String(key || 'month');
+      if (key === 'month') key = 'month:' + ym();
+      else if (key === 'prev') key = 'month:' + window.prevBizMonth();
+      else if (key === 'ytd' || key === 'year') key = 'year:' + window.bizYear();
+      if (key === 'all') return { type:'all', key:'all', start:null, end:null, label:'All Time' };
+      var m;
+      if ((m = key.match(/^month:(\d{4})-(\d{2})$/))) {
+        var s = m[1] + '-' + m[2];
+        return { type:'month', key:key, start: s+'-01', end: s+'-31',
+          label: new Date(s+'-01T12:00:00').toLocaleString('en-PH',{month:'long',year:'numeric'}) };
+      }
+      if ((m = key.match(/^quarter:(\d{4})-Q([1-4])$/))) {
+        var q = +m[2], sm = String((q-1)*3+1).padStart(2,'0'), em = String(q*3).padStart(2,'0');
+        return { type:'quarter', key:key, start: m[1]+'-'+sm+'-01', end: m[1]+'-'+em+'-31', label: 'Q'+q+' '+m[1] };
+      }
+      if ((m = key.match(/^year:(\d{4})$/)))
+        return { type:'year', key:key, start: m[1]+'-01-01', end: m[1]+'-12-31', label: 'Year '+m[1] };
+      return api.parse('month');    // unknown → safe default
+    },
+    match: function(dateStr, key) {
+      var ss = String(dateStr || ''); if (!ss) return false;
+      var p = (key && typeof key === 'object') ? key : api.parse(key);
+      if (p.type === 'all') return true;
+      var d = ss.length === 7 ? ss + '-15' : ss;   // month-level rows (YYYY-MM) match inside
+      return d >= p.start && d <= p.end;
+    },
+    monthKeyOf: function(dateStr) { return String(dateStr || '').slice(0, 7); },
+  };
+  return api;
+})();
+// Previous Manila month as 'YYYY-MM' (kept so completed months are always one
+// click away — records never "disappear" at rollover).
+window.prevBizMonth = function() {
+  var parts = window.bizDate().slice(0, 7).split('-').map(Number);
+  var y = parts[0], m = parts[1];
+  return m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0');
+};
+// Back-compat aliases — every existing call site keeps working untouched.
+window.finPeriodMatch = function(dateStr, period) { return window.Period.match(dateStr, period); };
+window.finPeriodLabel = function(period) {
+  if (period === 'ytd' || period === 'year') return 'YTD ' + window.bizYear();
+  return window.Period.parse(period).label;
+};
+
+// ── Shared period picker (chip row + inline "Custom" month/quarter/year) ──
+// Renders quick chips plus an inline custom-period row (no modal, per the
+// no-pop-ups mandate). Pair with window.bindPeriodPicker to wire clicks.
+window.periodPicker = function(activeKey, opts) {
+  opts = opts || {};
+  var p = window.Period.parse(activeKey || 'month');
+  var isQuickKey = ['month','prev','ytd','year','all'].indexOf(String(activeKey)) !== -1;
+  var chips = [
+    { key:'month', label:'This Month' },
+    { key:'prev',  label:'Last Month' },
+    { key:'ytd',   label:'YTD' },
+    { key:'all',   label:'All Time' },
+    { key:'custom', label: isQuickKey ? '📅 Custom' : ('📅 ' + p.label) },
+  ].map(function(c) {
+    var active = isQuickKey ? (c.key === activeKey) : (c.key === 'custom');
+    return { key:c.key, label:c.label, active: active };
+  });
+  var chipHtml = window.chipTabs(chips, isQuickKey ? activeKey : 'custom', { cls:'period-picker-chips' });
+  var yr = window.bizYear();
+  var years = []; for (var y = yr; y >= yr - 3; y--) years.push(y);
+  var curMonth = window.bizDate().slice(0, 7);
+  var customVal = (p.type === 'month') ? p.key.slice(7) : '';
+  var custom =
+    '<div class="period-custom-row" style="display:' + (isQuickKey ? 'none' : 'flex') + ';gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">' +
+      '<input type="month" class="pc-month" max="' + curMonth + '" value="' + customVal + '" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px"/>' +
+      '<span style="font-size:11px;color:var(--text-muted)">or</span>' +
+      '<select class="pc-quarter" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">' +
+        '<option value="">Quarter…</option>' +
+        [1,2,3,4].map(function(q){ return '<option value="' + q + '">Q' + q + '</option>'; }).join('') +
+      '</select>' +
+      '<select class="pc-year" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">' +
+        years.map(function(y){ return '<option value="' + y + '">' + y + '</option>'; }).join('') +
+      '</select>' +
+      '<button type="button" class="btn-secondary btn-sm pc-apply">Apply</button>' +
+      (opts.closedBadge ? '<span class="pc-closed-badge"></span>' : '') +
+    '</div>';
+  return '<div class="period-picker">' + chipHtml + custom + '</div>';
+};
+// Wire a rendered periodPicker inside `scope`; onSelect(newKey) fires on any
+// chip click or a Custom Apply. If opts.closedBadge, also read-through checks
+// finance_periods for the resolved month and appends a 🔒 Closed badge.
+window.bindPeriodPicker = function(scope, onSelect, opts) {
+  if (!scope) return;
+  opts = opts || {};
+  window.bindChipTabs(scope, function(key) {
+    if (key === 'custom') {
+      var row = scope.querySelector('.period-custom-row');
+      if (row) row.style.display = 'flex';
+      return; // wait for Apply / date input
+    }
+    onSelect(key);
+  });
+  var monthInput = scope.querySelector('.pc-month');
+  if (monthInput) monthInput.addEventListener('change', function() {
+    if (monthInput.value) onSelect('month:' + monthInput.value);
+  });
+  var applyBtn = scope.querySelector('.pc-apply');
+  if (applyBtn) applyBtn.addEventListener('click', function() {
+    var mv = scope.querySelector('.pc-month').value;
+    var qv = scope.querySelector('.pc-quarter').value;
+    var yv = scope.querySelector('.pc-year').value;
+    if (mv) onSelect('month:' + mv);
+    else if (qv && yv) onSelect('quarter:' + yv + '-Q' + qv);
+    else if (yv) onSelect('year:' + yv);
+  });
+  if (opts.closedBadge) {
+    var badge = scope.querySelector('.pc-closed-badge');
+    if (badge) {
+      var p = window.Period.parse(opts.activeKey || 'month');
+      if (p.type === 'month') {
+        window.isPeriodClosed(p.start).then(function(closed) {
+          badge.innerHTML = closed ? '&nbsp;<span class="badge badge-gray">🔒 Closed</span>' : '';
+        });
+      }
+    }
+  }
+};
+
+// ── Period close (v12 WS12) — finance_periods/{YYYY-MM} governance ───────
+// Read-through cached check + a client-side guard every ledger-write call
+// site invokes before posting. Mirrored server-side by firestore.rules'
+// periodOpen() so a devtools write can't bypass a closed month either.
+window.isPeriodClosed = async function(dateStr) {
+  var mk = window.Period.monthKeyOf(dateStr); if (!mk) return false;
+  var snap = await window.dbCachedGet('finperiod-' + mk,
+    function() { return db.collection('finance_periods').doc(mk).get(); }, 60000).catch(function(){ return null; });
+  return !!(snap && snap.exists && snap.data().closed);
+};
+window.assertPeriodOpen = async function(dateStr) {
+  if (await window.isPeriodClosed(dateStr)) {
+    var mk = window.Period.monthKeyOf(dateStr);
+    if (window.Notifs && window.Notifs.showToast) {
+      window.Notifs.showToast("That month's books are closed. Ask the President to reopen " + mk + " first.", 'error');
+    }
+    throw new Error('period-closed:' + mk);
+  }
+};

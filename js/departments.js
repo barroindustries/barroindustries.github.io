@@ -1415,14 +1415,18 @@ async function postExpenseToLedger(expId, e) {
   const ref = `EXP-${expId}`;
   const existing = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
   if (existing.docs.length) return false;
+  const date = e.date || today();
+  await window.assertPeriodOpen(date);
+  const category = e.category || 'General Expense';
   await db.collection('ledger').add({
-    date:        e.date || today(),
-    type:        'debit',
+    date, type: 'debit',
+    accountType: 'expense', account: category,
     description: `Expense — ${e.description||''}${e.submittedByName?` (${e.submittedByName})`:''}`,
     amount:      e.amount || 0,
-    category:    e.category || 'General Expense',
+    category,
     refNumber:   ref,
     source:      'Expense',
+    addedBy:     window.currentUser?.uid || null,
     addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
     createdAt:   firebase.firestore.FieldValue.serverTimestamp()
   });
@@ -1439,12 +1443,17 @@ async function postCRJToLedger(crjId, e) {
   if (existing.docs.length) return false;
   const income = crjLedgerIncome(e);
   if (income <= 0) return false; // pure A/R collection — already counted at sale time
+  const date = e.date || today();
+  await window.assertPeriodOpen(date);
+  const category = (e.creditSalesRevenue||0) >= (e.creditSundryAmount||0) ? 'Sales Revenue' : (e.creditSundryAcct||'Other Income');
   await db.collection('ledger').add({
-    date: e.date || today(), type: 'credit',
+    date, type: 'credit',
+    accountType: 'income', account: category,
     description: `Cash receipt — ${e.customer||''}${e.reference?` (${e.reference})`:''}`,
     amount: income,
-    category: (e.creditSalesRevenue||0) >= (e.creditSundryAmount||0) ? 'Sales Revenue' : (e.creditSundryAcct||'Other Income'),
+    category,
     refNumber: ref, source: 'Cash Receipt',
+    addedBy:     window.currentUser?.uid || null,
     addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
@@ -1454,6 +1463,10 @@ async function postCRJToLedger(crjId, e) {
 
 // New expense from a disbursement = Material + Labor + Sundry. A/P settlements are
 // EXCLUDED — that cost was already expensed when the payable was incurred.
+// debitAccount (v12 WS13): 'inventory' (stock materials — posts as an ASSET, not
+// an expense, until Production consumes it) vs 'material'/'sundry' (still direct
+// expense, e.g. a purchase that never touches stock). This is the fix for the
+// double-material-expensing bug — see consumeProductionMaterials for the other half.
 function cdjLedgerExpense(e) { return (e.debitMaterial||0) + (e.debitLabor||0) + (e.debitSundryAmount||0); }
 async function postCDJToLedger(cdjId, e) {
   const ref = `CDJ-${cdjId}`;
@@ -1461,17 +1474,25 @@ async function postCDJToLedger(cdjId, e) {
   if (existing.docs.length) return false;
   const expense = cdjLedgerExpense(e);
   if (expense <= 0) return false; // pure A/P settlement — already expensed when incurred
+  const date = e.date || today();
+  await window.assertPeriodOpen(date);
   let category;
   const mat = e.debitMaterial||0, lab = e.debitLabor||0, sun = e.debitSundryAmount||0;
   if (mat >= lab && mat >= sun) category = 'COS – Direct Material';
   else if (lab >= sun) category = 'COS – Direct Labor';
   else category = e.debitSundryAcct || 'Other Expense';
+  const isInventory = e.debitAccount === 'inventory';
+  const accountType = isInventory ? 'asset' : 'expense';
+  const account = isInventory ? 'Inventory' : category;
+  if (isInventory) category = 'Inventory – Materials';
   await db.collection('ledger').add({
-    date: e.date || today(), type: 'debit',
+    date, type: 'debit',
+    accountType, account,
     description: `Disbursement — ${e.payee||''}${e.reference?` (${e.reference})`:''}`,
     amount: expense, category, refNumber: ref, source: 'Cash Disbursement',
     // input VAT (reclaimable) carried through for the Net VAT Payable computation
     inputVat: e.vatAmount || 0,
+    addedBy:     window.currentUser?.uid || null,
     addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
     createdAt: firebase.firestore.FieldValue.serverTimestamp()
   });
@@ -1488,16 +1509,18 @@ async function resyncLedgerForSource(collection, docId) {
     const snap = await db.collection(collection).doc(docId).get();
     if (!snap.exists) return;
     const e = snap.data();
-    let ref, type, amount, category, description, inputVat = null;
+    let ref, type, amount, category, description, inputVat = null, accountType, account;
     if (collection === 'expenses') {
       ref = `EXP-${docId}`;
       if (e.status !== 'approved') { await _deleteLedgerByRef(ref); return; }
       type = 'debit'; amount = e.amount || 0; category = e.category || 'General Expense';
       description = `Expense — ${e.description || ''}${e.submittedByName ? ` (${e.submittedByName})` : ''}`;
+      accountType = 'expense'; account = category;
     } else if (collection === 'cash_receipt_journal') {
       ref = `CRJ-${docId}`; type = 'credit'; amount = crjLedgerIncome(e);
       category = (e.creditSalesRevenue || 0) >= (e.creditSundryAmount || 0) ? 'Sales Revenue' : (e.creditSundryAcct || 'Other Income');
       description = `Cash receipt — ${e.customer || ''}${e.reference ? ` (${e.reference})` : ''}`;
+      accountType = 'income'; account = category;
       if (amount <= 0) { await _deleteLedgerByRef(ref); return; }
     } else if (collection === 'cash_disbursement_journal') {
       ref = `CDJ-${docId}`; type = 'debit'; amount = cdjLedgerExpense(e);
@@ -1505,10 +1528,17 @@ async function resyncLedgerForSource(collection, docId) {
       category = (mat >= lab && mat >= sun) ? 'COS – Direct Material' : (lab >= sun ? 'COS – Direct Labor' : (e.debitSundryAcct || 'Other Expense'));
       description = `Disbursement — ${e.payee || ''}${e.reference ? ` (${e.reference})` : ''}`;
       inputVat = e.vatAmount || 0;
+      // Carries the debitAccount choice through on edit (v12 WS13) — an edited
+      // disbursement must keep its asset/Inventory tag, not silently drift back
+      // to expense-tagged.
+      const isInventory = e.debitAccount === 'inventory';
+      accountType = isInventory ? 'asset' : 'expense';
+      account = isInventory ? 'Inventory' : category;
+      if (isInventory) category = 'Inventory – Materials';
       if (amount <= 0) { await _deleteLedgerByRef(ref); return; }
     } else return;
     const existing = await db.collection('ledger').where('refNumber', '==', ref).limit(1).get().catch(() => ({ docs: [] }));
-    const patch = { amount, type, category, description };
+    const patch = { amount, type, category, description, accountType, account };
     if (inputVat != null) patch.inputVat = inputVat;
     if (existing.docs.length) await existing.docs[0].ref.update(patch);
     else if (collection === 'expenses') await postExpenseToLedger(docId, e);
@@ -1532,12 +1562,27 @@ window.backfillLedgerFromJournals = async function() {
     db.collection('cash_receipt_journal').get().catch(()=>({docs:[]})),
     db.collection('cash_disbursement_journal').get().catch(()=>({docs:[]}))
   ]);
-  let exp=0, crj=0, cdj=0;
-  for (const d of expSnap.docs) { if (await postExpenseToLedger(d.id, d.data()).catch(()=>false)) exp++; }
-  for (const d of crjSnap.docs) { if (await postCRJToLedger(d.id, d.data()).catch(()=>false)) crj++; }
-  for (const d of cdjSnap.docs) { if (await postCDJToLedger(d.id, d.data()).catch(()=>false)) cdj++; }
+  // Pre-check closed months so a bulk backfill over historical data never spams
+  // the period-closed toast once per row — soft-skip and report a count instead
+  // (same convention as backfillPayrollLedger's month-skip).
+  let exp=0, crj=0, cdj=0, skipped=0;
+  for (const d of expSnap.docs) {
+    const e = d.data();
+    if (await window.isPeriodClosed(e.date || today())) { skipped++; continue; }
+    if (await postExpenseToLedger(d.id, e).catch(()=>false)) exp++;
+  }
+  for (const d of crjSnap.docs) {
+    const e = d.data();
+    if (await window.isPeriodClosed(e.date || today())) { skipped++; continue; }
+    if (await postCRJToLedger(d.id, e).catch(()=>false)) crj++;
+  }
+  for (const d of cdjSnap.docs) {
+    const e = d.data();
+    if (await window.isPeriodClosed(e.date || today())) { skipped++; continue; }
+    if (await postCDJToLedger(d.id, e).catch(()=>false)) cdj++;
+  }
   if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('ledger'); dbCacheInvalidate('expenses'); }
-  return { exp, crj, cdj };
+  return { exp, crj, cdj, skipped };
 };
 
 // Recreate missing PAY-{month}-{uid} ledger rows from salary_history. Covers months
@@ -1546,18 +1591,22 @@ window.backfillLedgerFromJournals = async function() {
 // Idempotent: skips any month+user whose PAY- ref already exists.
 window.backfillPayrollLedger = async function() {
   const sh = await db.collection('salary_history').get().catch(()=>({docs:[]}));
-  let posted = 0;
+  let posted = 0, skipped = 0;
   for (const d of sh.docs) {
     const h = d.data();
     const month = h.month, uid = h.userId || (d.id.includes('_') ? d.id.split('_')[0] : null);
     const net = (h.finalPay != null ? h.finalPay : h.netPay) || 0;
     if (!month || !uid || net <= 0) continue;
+    // Soft-skip closed months (v12 WS12) — a bulk recovery tool must never spam
+    // a per-row toast; report the count instead.
+    if (await window.isPeriodClosed(month + '-01')) { skipped++; continue; }
     const ref = `PAY-${month}-${uid}`;
     const ex = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>null);
     if (!ex || ex.docs.length) continue;   // exists, or read failed — never risk a duplicate
     await db.collection('ledger').add({
       date:        month + '-01',
       type:        'debit',
+      accountType: 'expense', account: 'Payroll Expense',
       description: `Payslip — ${h.userName||'?'} (${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})})`,
       amount:      net,
       category:    'Payroll Expense',
@@ -1569,7 +1618,7 @@ window.backfillPayrollLedger = async function() {
     });
     posted++;
   }
-  return posted;
+  return { posted, skipped };
 };
 
 window.runLedgerBackfill = async function() {
@@ -1578,7 +1627,8 @@ window.runLedgerBackfill = async function() {
   try {
     const r = await window.backfillLedgerFromJournals();
     const pay = await window.backfillPayrollLedger();
-    Notifs.showToast(`Synced ✓ ${r.exp} expenses, ${r.crj} receipts, ${r.cdj} disbursements${pay?`, ${pay} payroll rows`:''} posted.`);
+    const skippedTotal = (r.skipped||0) + (pay.skipped||0);
+    Notifs.showToast(`Synced ✓ ${r.exp} expenses, ${r.crj} receipts, ${r.cdj} disbursements${pay.posted?`, ${pay.posted} payroll rows`:''} posted.${skippedTotal?` (${skippedTotal} skipped — closed months)`:''}`);
     const el = document.getElementById('fin-content');
     if (el) window.renderFinancialReports(el, window.currentUser, window.currentRole, 'all');
   } catch (e) { Notifs.showToast('Sync failed: ' + (e.message||e), 'error'); }
@@ -1594,6 +1644,9 @@ function bindExpenseActions(content, currentUser, currentRole, sub) {
       const snap = await db.collection('expenses').doc(id).get();
       const e = snap.exists ? snap.data() : null;
       if (e && e.status === 'approved') { Notifs.showToast('Already approved.'); return; }
+      // Check the period BEFORE flipping status — otherwise a closed month leaves
+      // the expense stuck 'approved' with no matching ledger row (v12 WS12).
+      if (e) await window.assertPeriodOpen(e.date || today());
       await db.collection('expenses').doc(id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
       if (e) await postExpenseToLedger(id, e);
       Notifs.showToast('Expense approved & posted to ledger ✓');
@@ -2623,6 +2676,9 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     const _genSnap = await db.collection('salary_history').where('month','==',month).limit(1).get().catch(()=>({docs:[]}));
     const alreadyGenerated = _genSnap.docs.length > 0;
     if (alreadyGenerated && !confirm('Payroll for this month was already generated. Re-generating refreshes the salary records and ledger but will NOT deduct cash advances again. Continue?')) return;
+    // Checked once, before any write — a closed month can't be (re)computed
+    // (v12 WS12; toast shown by assertPeriodOpen if blocked).
+    await window.assertPeriodOpen(month + '-01');
 
     // 1. Write salary_history
     const batch = db.batch();
@@ -2686,6 +2742,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       const entry = {
         date:        month + '-01',
         type:        'debit',
+        accountType: 'expense', account: 'Payroll Expense',
         description: `Payslip — ${u.displayName||u.email} (${monthLabel})`,
         amount:      empNet,
         category:    'Payroll Expense',
@@ -2876,8 +2933,10 @@ window.exportFinReportCSV = function() {
 };
 
 // ── Financial Reports (Income Statement + VAT/BIR reference) ─────
-// Computed from the ledger (type credit = income, debit = expense) + general
-// journal. Read-only summary for finance/admin; print-ready for filing.
+// Computed from the ledger (ledgerKind() = income/expense, v12 WS13 chart-of-
+// accounts aware) + general journal. Read-only summary for finance/admin;
+// print-ready for filing. Period picker (v12 WS12) supports any month/quarter/
+// year, not just This-Month/YTD/All — see window.Period in config.js.
 window.renderFinancialReports = async function(container, currentUser, currentRole, range='month') {
   container.innerHTML = '<div class="loading-placeholder">Building report…</div>';
   const [ledgerSnap, gjSnap] = await Promise.all([
@@ -2891,18 +2950,17 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
     return rows; });
   let all = [...led, ...gj];
 
-  const todayStr = bizDate(), yr = String(bizYear());
-  let label;
-  if (range==='month') { const m=todayStr.slice(0,7); all=all.filter(e=>(e.date||'').slice(0,7)===m); label='This Month — '+m; }
-  else if (range==='prev') { const pm=window.prevBizMonth(); all=all.filter(e=>(e.date||'').slice(0,7)===pm); label='Last Month — '+pm; }
-  else if (range==='year') { all=all.filter(e=>(e.date||'').slice(0,4)===yr); label='Year to Date — '+yr; }
-  else { label='All Time'; }
+  // 'year' (legacy Reports spelling) is a Period alias for 'ytd' — same math.
+  const periodKey = (range === 'year') ? 'ytd' : range;
+  const pParsed = window.Period.parse(periodKey);
+  all = all.filter(e => window.Period.match(e.date, pParsed));
+  const label = pParsed.type === 'all' ? 'All Time' : (periodKey === 'ytd' ? 'YTD ' + bizYear() : pParsed.label);
   // Stash the period's rows so the CSV export button (inline onclick) can reach them.
   window._finReportRows = all.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   window._finReportLabel = label;
 
-  const income  = all.filter(e=>e.type==='credit');
-  const expense = all.filter(e=>e.type==='debit');
+  const income  = all.filter(e=>ledgerKind(e)==='income');
+  const expense = all.filter(e=>ledgerKind(e)==='expense');
   const totIncome  = income.reduce((s,e)=>s+(e.amount||0),0);
   const totExpense = expense.reduce((s,e)=>s+(e.amount||0),0);
   const net = totIncome - totExpense;
@@ -2921,14 +2979,24 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
   // inputVat on the expense ledger rows). Net VAT Payable = output − input.
   const inputVat = expense.reduce((s,e)=>s+(e.inputVat||0),0);
   const netVat = outputVat - inputVat;
-  const rangeBtn = (r,t)=>`<button class="subtab-btn ${range===r?'active':''}" onclick="renderFinancialReports(document.getElementById('fin-content'),window.currentUser,window.currentRole,'${r}')">${t}</button>`;
+  const isPres = (typeof isPresident==='function') && isPresident();
+  const isClosableMonth = pParsed.type==='month' && pParsed.key !== 'month:'+bizDate().slice(0,7);
+  let periodClosed = false;
+  if (isClosableMonth) periodClosed = await window.isPeriodClosed(pParsed.start).catch(()=>false);
 
   container.innerHTML = `
-    <div class="subtab-bar" style="margin-bottom:12px">${rangeBtn('month','This Month')}${rangeBtn('prev','Last Month')}${rangeBtn('year','Year to Date')}${rangeBtn('all','All Time')}</div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div style="font-size:12px;color:var(--text-muted)">${label}</div>
-      <div style="display:flex;gap:6px">
+    <div id="finrep-period">${window.periodPicker(periodKey, {})}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:12px;color:var(--text-muted)">${label}${periodClosed?' &nbsp;<span class="badge badge-gray">🔒 Closed</span>':''}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${isFinancePriv()?`<button class="btn-secondary btn-sm" onclick="window.runLedgerBackfill()" title="Post approved expenses + cash journals into the ledger">🔄 Sync to ledger</button>`:''}
+        ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runTagAccountTypes()" title="Backfill accountType on legacy ledger rows">🏷 Tag account types</button>`:''}
+        ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runRestateMaterialCosts()" title="Fix the double material-expensing bug on historical rows">🧾 Restate material costs</button>`:''}
+        ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runFixUndatedRows()" title="Repair ledger rows with a missing/malformed date">🩹 Fix undated rows</button>`:''}
+        ${isPres&&isClosableMonth?(periodClosed
+            ? `<button class="btn-secondary btn-sm" id="finrep-reopen-btn" data-month="${pParsed.key.slice(6)}">🔓 Reopen ${pParsed.label}</button>`
+            : `<button class="btn-secondary btn-sm" id="finrep-close-btn" data-month="${pParsed.key.slice(6)}" data-label="${escHtml(pParsed.label)}">🔒 Close ${pParsed.label}</button>`
+          ):''}
         <button class="btn-secondary btn-sm" onclick="window.exportFinReportCSV()" title="Export this period's ledger to CSV">⬇ CSV</button>
         <button class="btn-secondary btn-sm" onclick="window.print()">🖨 Print</button>
       </div>
@@ -2966,6 +3034,160 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
       </div>
     </div>
   `;
+  window.bindPeriodPicker(document.getElementById('finrep-period'), (newKey) => {
+    // periodPicker/Period use canonical keys; renderFinancialReports keeps its
+    // legacy 'year' spelling for the YTD case so its own external callers
+    // (and the CSV/print title) read naturally — everything else passes through.
+    renderFinancialReports(container, currentUser, currentRole, newKey === 'ytd' ? 'year' : newKey);
+  }, { activeKey: periodKey });
+  document.getElementById('finrep-close-btn')?.addEventListener('click', async () => {
+    const mk = document.getElementById('finrep-close-btn').dataset.month;
+    if (!confirm(`Close the books for ${document.getElementById('finrep-close-btn').dataset.label}?\n\nNo new entries can post to this month until it's reopened.`)) return;
+    await window.closeFinancePeriod(mk);
+    renderFinancialReports(container, currentUser, currentRole, range);
+  });
+  document.getElementById('finrep-reopen-btn')?.addEventListener('click', async () => {
+    const mk = document.getElementById('finrep-reopen-btn').dataset.month;
+    if (!confirm(`Reopen ${mk} for editing?`)) return;
+    await window.reopenFinancePeriod(mk);
+    renderFinancialReports(container, currentUser, currentRole, range);
+  });
+};
+
+// ── Period close/reopen (v12 WS12) — president-only, audit-logged ────────
+window.closeFinancePeriod = async function(monthKey) {
+  await db.collection('finance_periods').doc(monthKey).set({
+    closed: true, closedBy: currentUser.uid,
+    closedByName: window.userProfile?.displayName || currentUser.email,
+    closedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge:true });
+  window.logAudit && window.logAudit('close-period','finance_periods',monthKey,{});
+  dbCacheInvalidate('finperiod-'+monthKey);
+  Notifs.showToast(`${monthKey} closed — no new entries can post until reopened.`);
+};
+window.reopenFinancePeriod = async function(monthKey) {
+  await db.collection('finance_periods').doc(monthKey).set({
+    closed: false, reopenedBy: currentUser.uid,
+    reopenedByName: window.userProfile?.displayName || currentUser.email,
+    reopenedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge:true });
+  window.logAudit && window.logAudit('reopen-period','finance_periods',monthKey,{});
+  dbCacheInvalidate('finperiod-'+monthKey);
+  Notifs.showToast(`${monthKey} reopened.`);
+};
+
+// ── One-time maintenance: Tag account types (v12 WS13, president, idempotent) ──
+// Backfills accountType/account onto every ledger row that predates the chart
+// of accounts, via ledgerKind()'s legacy-derivation rule. Re-runnable — skips
+// rows that already have accountType.
+window.runTagAccountTypes = async function() {
+  if (!confirm('Backfill accountType on every legacy ledger row?\n\nSafe to run repeatedly.')) return;
+  Notifs.showToast('Tagging account types…');
+  try {
+    const snap = await db.collection('ledger').get();
+    const todo = snap.docs.filter(d => typeof d.data().accountType !== 'string');
+    let batch = db.batch(), inBatch = 0, tagged = 0;
+    for (const d of todo) {
+      const row = d.data();
+      batch.update(d.ref, { accountType: ledgerKind(row), account: row.category || null });
+      inBatch++; tagged++;
+      if (inBatch >= 400) { await batch.commit(); batch = db.batch(); inBatch = 0; }
+    }
+    if (inBatch) await batch.commit();
+    dbCacheInvalidate('ledger');
+    window.logAudit && window.logAudit('tag-account-types','ledger',null,{tagged});
+    Notifs.showToast(`Tagged ${tagged} row${tagged===1?'':'s'} ✓`);
+  } catch (e) { Notifs.showToast('Tagging failed: '+(e.message||e),'error'); }
+};
+
+// ── One-time maintenance: Restate material costs (v12 WS13, president) ───
+// Fixes the double-material-expensing bug: (a) reclassifies historical
+// purchase-side CDJ mirrors that came from Purchasing (purchaseRef set,
+// debitMaterial>0) to asset/Inventory; (b) backfills the missing
+// POCOS-<id>-INV contra leg for every existing consumption row. Idempotent
+// (keyed by refNumber) — safe to re-run.
+window.runRestateMaterialCosts = async function() {
+  if (!confirm('Restate historical material costs?\n\nThis corrects the double-counted purchase+consumption expense bug. Expense totals for past periods WILL change — this is a deliberate one-time restatement. Safe to run repeatedly.')) return;
+  Notifs.showToast('Restating material costs…');
+  try {
+    let reclassified = 0, invLegsAdded = 0;
+    // (a) purchase-side CDJ mirrors that should have been asset/Inventory
+    const cdjSnap = await db.collection('cash_disbursement_journal').get().catch(()=>({docs:[]}));
+    for (const d of cdjSnap.docs) {
+      const e = d.data();
+      if (!e.purchaseRef || !(e.debitMaterial > 0)) continue;
+      const ref = `CDJ-${d.id}`;
+      const lSnap = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
+      if (!lSnap.docs.length) continue;
+      const lRow = lSnap.docs[0];
+      if (lRow.data().accountType === 'asset') continue; // already restated
+      await lRow.ref.update({ accountType:'asset', account:'Inventory', category:'Inventory – Materials' });
+      reclassified++;
+    }
+    // (b) missing POCOS-<id>-INV contra legs
+    const allLedger = await db.collection('ledger').get().catch(()=>({docs:[]}));
+    const pocosRows = allLedger.docs.filter(d => {
+      const ref = d.data().refNumber || '';
+      return ref.startsWith('POCOS-') && !ref.endsWith('-INV');
+    });
+    const existingInv = new Set(allLedger.docs.filter(d=>(d.data().refNumber||'').endsWith('-INV')).map(d=>d.data().refNumber));
+    for (const d of pocosRows) {
+      const row = d.data();
+      const refInv = row.refNumber + '-INV';
+      if (existingInv.has(refInv)) continue;
+      if (!(row.amount > 0)) continue;
+      await db.collection('ledger').add({
+        date: row.date || today(), type: 'credit',
+        accountType: 'asset', account: 'Inventory', category: 'Inventory – Materials',
+        description: `Inventory consumed — ${(row.description||'').replace(/^COS.*?—\s*/,'') || row.refNumber}`,
+        amount: row.amount, refNumber: refInv, source: 'Production',
+        projectId: row.projectId || null,
+        addedBy: currentUser.uid, addedByName: 'Restatement',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      invLegsAdded++;
+    }
+    dbCacheInvalidate('ledger');
+    window.logAudit && window.logAudit('restate-materials','ledger',null,{reclassified, invLegsAdded});
+    Notifs.showToast(`Restated ${reclassified} purchase${reclassified===1?'':'s'}, added ${invLegsAdded} inventory leg${invLegsAdded===1?'':'s'} ✓`);
+    const el = document.getElementById('fin-content');
+    if (el) window.renderFinancialReports(el, window.currentUser, window.currentRole, 'all');
+  } catch (e) { Notifs.showToast('Restatement failed: '+(e.message||e),'error'); }
+};
+
+// ── One-time maintenance: Fix undated rows (v12 WS12, president, idempotent) ──
+// orderBy('date') silently DROPS any row with a missing/malformed date — this
+// repairs historical rows so they reappear in every report. Re-runnable.
+window.runFixUndatedRows = async function() {
+  if (!confirm("Repair ledger + journal rows with a missing or malformed date?\n\nSafe to run repeatedly.")) return;
+  Notifs.showToast('Scanning for undated rows…');
+  try {
+    const dateRe = /^\d{4}-\d{2}(-\d{2})?$/;
+    const manilaDateOf = (ts) => {
+      try {
+        const d = ts && ts.toDate ? ts.toDate() : (ts && ts.seconds ? new Date(ts.seconds*1000) : null);
+        return d ? window.bizDate(d) : today();
+      } catch(_) { return today(); }
+    };
+    let fixed = 0;
+    for (const collName of ['ledger','general_journal']) {
+      const snap = await db.collection(collName).get().catch(()=>({docs:[]}));
+      const bad = snap.docs.filter(d => !dateRe.test(String(d.data().date||'')));
+      let batch = db.batch(), inBatch = 0;
+      for (const d of bad) {
+        const newDate = manilaDateOf(d.data().createdAt);
+        batch.update(d.ref, { date: newDate });
+        inBatch++; fixed++;
+        if (inBatch >= 400) { await batch.commit(); batch = db.batch(); inBatch = 0; }
+      }
+      if (inBatch) await batch.commit();
+    }
+    dbCacheInvalidate('ledger');
+    window.logAudit && window.logAudit('fix-undated','ledger',null,{fixed});
+    Notifs.showToast(`Fixed ${fixed} undated row${fixed===1?'':'s'} ✓`);
+    const el = document.getElementById('fin-content');
+    if (el) window.renderFinancialReports(el, window.currentUser, window.currentRole, 'all');
+  } catch (e) { Notifs.showToast('Fix failed: '+(e.message||e),'error'); }
 };
 
 // ── Ledger Tab (includes merged General Journal entries) ─────
@@ -3035,6 +3257,12 @@ async function renderLedgerTab(container, currentUser, currentRole) {
     {key:'credit',label:'Credit',get:e=>e.type==='credit'?(e.amount||0):''},
     {key:'refNumber',label:'Ref #'},{key:'addedByName',label:'By'}]));
   document.getElementById('add-ledger-btn').addEventListener('click', () => {
+    // Account-type-aware account picker (v12 WS13) — grouped from window.COA,
+    // defaulting from the credit/debit direction. This is the single easiest
+    // place to accidentally post into a closed period (free date, no ref) —
+    // highest-priority guard of the whole ledger surface (v12 WS12).
+    const acctOptsFor = (accountType) => (window.COA[accountType]||[])
+      .map(a => `<option value="${escHtml(a)}">${escHtml(a)}</option>`).join('');
     openModal('New Ledger Entry', `
       <div class="form-row">
         <div class="form-group"><label>Date</label><input id="led-date" type="date" value="${today()}"/></div>
@@ -3047,26 +3275,37 @@ async function renderLedgerTab(container, currentUser, currentRole) {
       <div class="form-group"><label>Description / Account Title</label><input id="led-desc" placeholder="e.g. Client payment — ABC Corp, or Accumulated Depreciation"/></div>
       <div class="form-row">
         <div class="form-group"><label>Amount (₱)</label><input id="led-amount" type="number" step="0.01" inputmode="decimal"/></div>
-        <div class="form-group"><label>Category</label>
-          <select id="led-cat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-            <option>Sales Revenue</option><option>Operating Expense</option><option>Payroll</option>
-            <option>Tax</option><option>Materials</option><option>Utilities</option>
-            <option>Journal Entry (Non-cash)</option><option>Other</option>
+        <div class="form-group"><label>Account Type</label>
+          <select id="led-accttype" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+            <option value="income">Income</option><option value="expense" selected>Expense</option>
+            <option value="asset">Asset</option><option value="liability">Liability</option><option value="equity">Equity</option>
           </select>
         </div>
+      </div>
+      <div class="form-group"><label>Account</label>
+        <select id="led-account" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${acctOptsFor('expense')}</select>
       </div>
       <div class="form-group"><label>Reference Number</label><input id="led-ref" placeholder="OR #, Invoice #, JE #, etc."/></div>
       <div id="led-file-area"></div>
     `, `<button class="btn-primary" id="save-led-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     let ledFile = null;
     Drive.renderUploadArea('led-file-area', r=>{ledFile=r;},{label:'Attach receipt/invoice',dept:'Finance',subfolder:'Ledger'});
+    const typeSel = document.getElementById('led-type'), acctTypeSel = document.getElementById('led-accttype'), acctSel = document.getElementById('led-account');
+    typeSel.addEventListener('change', () => {
+      acctTypeSel.value = typeSel.value === 'credit' ? 'income' : 'expense';
+      acctSel.innerHTML = acctOptsFor(acctTypeSel.value);
+    });
+    acctTypeSel.addEventListener('change', () => { acctSel.innerHTML = acctOptsFor(acctTypeSel.value); });
     document.getElementById('save-led-btn').addEventListener('click', async () => {
+      const date = document.getElementById('led-date').value;
+      try { await window.assertPeriodOpen(date); } catch (e) { return; } // toast already shown
       await db.collection('ledger').add({
-        date:       document.getElementById('led-date').value,
-        type:       document.getElementById('led-type').value,
+        date,
+        type:       typeSel.value,
+        accountType: acctTypeSel.value, account: acctSel.value,
         description:document.getElementById('led-desc').value.trim(),
         amount:     parseFloat(document.getElementById('led-amount').value)||0,
-        category:   document.getElementById('led-cat').value,
+        category:   acctSel.value,
         refNumber:  document.getElementById('led-ref').value.trim(),
         fileUrl:    ledFile?.url||null,
         addedBy:    currentUser.uid,
@@ -3191,6 +3430,9 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
         addedByName: window.userProfile?.displayName || currentUser.email,
         createdAt:  firebase.firestore.FieldValue.serverTimestamp()
       };
+      try {
+        await window.assertPeriodOpen(crjData.date);
+      } catch (e) { return; } // toast already shown by assertPeriodOpen
       const crjDoc = await db.collection('cash_receipt_journal').add(crjData);
       await postCRJToLedger(crjDoc.id, crjData); // mirror new income into the ledger
       closeModal(); Notifs.showToast('Cash receipt entry saved!');
@@ -3310,6 +3552,9 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
         addedByName: window.userProfile?.displayName || currentUser.email,
         createdAt:  firebase.firestore.FieldValue.serverTimestamp()
       };
+      try {
+        await window.assertPeriodOpen(cdjData.date);
+      } catch (e) { return; } // toast already shown by assertPeriodOpen
       const cdjDoc = await db.collection('cash_disbursement_journal').add(cdjData);
       await postCDJToLedger(cdjDoc.id, cdjData); // mirror the expense into the ledger
       closeModal(); Notifs.showToast('Cash disbursement entry saved!');
@@ -3842,6 +4087,11 @@ async function openPayslipHistory(currentUser, currentRole) {
         if (!ps || !next) return;
         if (!confirm(`Mark ${ps.workerName}'s payslip (${ps.payPeriodStart} – ${ps.payPeriodEnd}) as "${next}"?`)) return;
         const fieldPrefix = { verified:'verified', filed:'filed', submitted:'submitted' }[next];
+        const payDate = ps.payDate || ps.payPeriodEnd || today();
+        // Check the period BEFORE flipping status — Submit is the ledger-posting
+        // transition, so a closed month must not leave the payslip stuck
+        // 'submitted' with no matching ledger row (v12 WS12).
+        if (next === 'submitted') await window.assertPeriodOpen(payDate);
         await db.collection('payslips').doc(ps.id).update({
           status: next,
           [`${fieldPrefix}By`]: currentUser.uid,
@@ -3852,8 +4102,9 @@ async function openPayslipHistory(currentUser, currentRole) {
           const lref = `WPAY-${ps.id}`;
           const exist = await db.collection('ledger').where('refNumber','==',lref).limit(1).get().catch(()=>({docs:[]}));
           const entry = {
-            date:        ps.payDate || ps.payPeriodEnd || today(),
+            date:        payDate,
             type:        'debit',
+            accountType: 'expense', account: 'Payroll Expense',
             description: `Worker Payslip — ${ps.workerName||'?'} (${ps.payPeriodStart||''}–${ps.payPeriodEnd||''})`,
             amount:      ps.netPay || 0,
             category:    'Payroll Expense',
@@ -4519,8 +4770,8 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
   const expenses   = expSnap.docs.map(d => ({id:d.id,...d.data()}));
   const ledger     = ledSnap.docs.map(d => d.data());
   const isPriv     = isFinancePriv();
-  const ledIncome  = ledger.filter(e => e.type==='credit').reduce((s,e) => s + (e.amount||0), 0);
-  const ledExpense = ledger.filter(e => e.type==='debit').reduce((s,e) => s + (e.amount||0), 0);
+  const ledIncome  = ledger.filter(e => ledgerKind(e)==='income').reduce((s,e) => s + (e.amount||0), 0);
+  const ledExpense = ledger.filter(e => ledgerKind(e)==='expense').reduce((s,e) => s + (e.amount||0), 0);
   const pendingExp = expenses.filter(e => e.status==='pending').reduce((s,e) => s + (e.amount||0), 0);
 
   container.innerHTML = `
@@ -6175,6 +6426,10 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
         // to the books. Best-effort: if the biller is a non-finance Design member who
         // can't write the ledger (rules), the payment is still recorded on the project.
         try {
+          // Checked first (v12 WS12) so a closed-period block shows its own clear
+          // toast rather than being silently absorbed by this catch the same way
+          // a permission-denied failure is today.
+          await window.assertPeriodOpen(payment.date);
           const vatRate = 12, net = +(amt/(1+vatRate/100)).toFixed(2), vatAmount = +(amt-net).toFixed(2);
           // Deterministic ref (project id + payment index) → idempotent on retry/backfill.
           const dref = `DPROJ-${p.id}-${Math.max(0, saved.length - 1)}`;
@@ -6182,8 +6437,10 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
           if (dDupe.empty) {
             await db.collection('ledger').add({
               date: payment.date, description: `Design project — ${p.name||p.id}${payment.note?' ('+payment.note+')':''}`,
-              category: 'Sales Revenue', type: 'credit', amount: amt, net, vatAmount,
+              category: 'Sales Revenue', accountType: 'income', account: 'Sales Revenue',
+              type: 'credit', amount: amt, net, vatAmount,
               refNumber: dref, source: 'Design', projectId: p.id,
+              addedBy: currentUser.uid,
               addedByName: window.userProfile?.displayName || currentUser.email,
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
@@ -8628,7 +8885,7 @@ function openRecordSaleModal(o, container){
       // 1) ledger credit (Sales Revenue → feeds Output-VAT base)
       let ledgerId=null;
       if(amount>0){
-        const led=await db.collection('ledger').add({ date:today(), description:`Sales order — ${o.clientName}${o.quoteNumber?' ('+o.quoteNumber+')':''}`, category:'Sales Revenue', type:'credit', amount, net, vatAmount, vatTreatment, refNumber:ledgerRef, source:'Finance', projectId:o.projectId||null, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+        const led=await db.collection('ledger').add({ date:today(), description:`Sales order — ${o.clientName}${o.quoteNumber?' ('+o.quoteNumber+')':''}`, category:'Sales Revenue', accountType:'income', account:'Sales Revenue', type:'credit', amount, net, vatAmount, vatTreatment, refNumber:ledgerRef, source:'Finance', projectId:o.projectId||null, addedBy:currentUser.uid, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
         ledgerId=led.id;
         if(typeof dbCacheInvalidate==='function') dbCacheInvalidate('ledger');
       }
@@ -10550,13 +10807,13 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
   // Compute spent per budget line from ledger entries
   items.forEach(item => {
     item.spent = expenses
-      .filter(e=>e.budgetLineId===item.id && e.type==='debit')
+      .filter(e=>e.budgetLineId===item.id && ledgerKind(e)==='expense')
       .reduce((s,e)=>s+(e.amount||0),0);
   });
 
   const totalBudget = items.reduce((s,i)=>s+(i.budget||0),0);
-  const totalSpent  = expenses.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
-  const totalIncome = expenses.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0);
+  const totalSpent  = expenses.filter(e=>ledgerKind(e)==='expense').reduce((s,e)=>s+(e.amount||0),0);
+  const totalIncome = expenses.filter(e=>ledgerKind(e)==='income').reduce((s,e)=>s+(e.amount||0),0);
 
   container.innerHTML = `
     <div class="kpi-row" style="margin-bottom:14px">
@@ -10685,14 +10942,18 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
       const lineSel = document.getElementById('exp-line');
       const lineName = lineId ? lineSel.options[lineSel.selectedIndex].dataset.name : null;
       const uName = userProfile?.displayName || currentUser.email;
+      const expDate = document.getElementById('exp-date').value || today();
+      try { await window.assertPeriodOpen(expDate); } catch (e) { return; } // toast already shown
+      const category = dept + (type==='credit'?' Income':' Expense');
 
       // Write to shared Finance ledger with dept tag
       await db.collection('ledger').add({
-        date:          document.getElementById('exp-date').value,
+        date:          expDate,
         type,
+        accountType:   type==='credit' ? 'income' : 'expense', account: category,
         description:   desc,
         amount,
-        category:      dept + (type==='credit'?' Income':' Expense'),
+        category,
         dept,
         budgetLineId:  lineId || null,
         budgetLineName:lineName || null,
@@ -11335,7 +11596,7 @@ function openProjectBillingModal(p){
       const projLedgerRef=`PROJ-${p.id}-${(p.payments?.length||0)}`;
       const projDupe=await db.collection('ledger').where('refNumber','==',projLedgerRef).limit(1).get().catch(()=>({empty:true}));
       if(!projDupe.empty){ closeModal(); Notifs.showToast('This payment was already posted.','error'); window.renderProjectLifecycle(); return; }
-      const led=await db.collection('ledger').add({ date:today(), description:`Project ${p.projectNo} — ${p.clientName} (${type})`, category:'Sales Revenue', type:'credit', amount, net, vatAmount, vatTreatment, refNumber:projLedgerRef, source:'Finance', projectId:p.id, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+      const led=await db.collection('ledger').add({ date:today(), description:`Project ${p.projectNo} — ${p.clientName} (${type})`, category:'Sales Revenue', accountType:'income', account:'Sales Revenue', type:'credit', amount, net, vatAmount, vatTreatment, refNumber:projLedgerRef, source:'Finance', projectId:p.id, addedBy:currentUser.uid, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
       if(typeof dbCacheInvalidate==='function') dbCacheInvalidate('ledger');
       // 2) update the project: payment, collected, AR, OR document, timeline
       const payment={ type, amount, vatAmount, net, method, orRef, receiptUrl:receipt?.url||null, date:today(), by:who, ledgerId:led.id };
@@ -11632,7 +11893,11 @@ async function consumeProductionMaterials(order) {
   // Post COS to the ledger, idempotent by ref. Best-effort: the ledger is
   // finance-write-gated, so a plain Production employee can't post it — stock is
   // still deducted and materialsCost is recorded on the order for finance to see.
+  // Also posts the Inventory contra leg (v12 WS13) — the asset decrease that
+  // nets against the asset booked at purchase time, fixing the double-counted
+  // material expense (purchase debit + consumption debit, no netting).
   const ref = `POCOS-${order.id}`;
+  const refInv = `POCOS-${order.id}-INV`;
   let cosPosted = false;
   if (cos > 0) {
     try {
@@ -11640,8 +11905,23 @@ async function consumeProductionMaterials(order) {
       if (!existing.docs.length) {
         await db.collection('ledger').add({
           date: today(), type: 'debit',
+          accountType: 'expense', account: 'COS – Direct Material',
           description: `COS — ${order.title || order.orderNo || ''}${order.client ? ` (${order.client})` : ''}`,
           category: 'COS – Direct Material', amount: cos, refNumber: ref, source: 'Production',
+          projectId: order.projectId || null,
+          addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      }
+      // Contra leg — its own idempotency check; skip (don't risk a duplicate) if
+      // the read fails rather than the write.
+      const existingInv = await db.collection('ledger').where('refNumber', '==', refInv).limit(1).get().catch(() => null);
+      if (existingInv && !existingInv.docs.length) {
+        await db.collection('ledger').add({
+          date: today(), type: 'credit',
+          accountType: 'asset', account: 'Inventory', category: 'Inventory – Materials',
+          description: `Inventory consumed — ${order.orderNo || order.id}`,
+          amount: cos, refNumber: refInv, source: 'Production',
           projectId: order.projectId || null,
           addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
           createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -12568,7 +12848,8 @@ function recordPurchaseDisbursement(p, currentUser, onDone) {
     <div class="form-row">
       <div class="form-group"><label>Amount — Credit: Cash (₱)</label><input id="rec-amt" type="number" step="0.01" inputmode="decimal" value="${total}"/></div>
       <div class="form-group"><label>Debit Account</label><select id="rec-acct">
-        <option value="material">COS – Direct Material</option>
+        <option value="inventory" selected>Inventory – Materials (asset)</option>
+        <option value="material">COS – Direct Material (direct-to-job, skips stock)</option>
         <option value="ap">Accounts Payable</option>
         <option value="sundry">Sundry / Other</option>
       </select></div>
@@ -12609,16 +12890,23 @@ function recordPurchaseDisbursement(p, currentUser, onDone) {
         const dupe = await db.collection('cash_disbursement_journal').where('reference', '==', reference).limit(1).get().catch(() => ({ empty: true }));
         if (!dupe.empty && !confirm(`A disbursement with reference "${reference}" already exists. Post another?`)) { saveBtn.disabled = false; return; }
       }
+      const dueDate = document.getElementById('rec-date').value;
+      await window.assertPeriodOpen(dueDate);
       const vatTreatment = document.getElementById('rec-vat').value;
       const inputVat = vatTreatment === 'exempt' ? 0 : window.vatSplit(amt,'inclusive').vat;
+      // acct==='inventory' still writes the amount into debitMaterial (so legacy
+      // readers of the CDJ doc keep summing correctly); debitAccount is what
+      // tells postCDJToLedger to tag the mirrored ledger row as an asset instead
+      // of an expense (v12 WS13 — fixes double material expensing).
       const cdjData = {
-        reference, date: document.getElementById('rec-date').value, payee,
+        reference, date: dueDate, payee,
         creditCash: amt,
-        debitMaterial:     acct === 'material' ? amt : 0,
+        debitMaterial:     (acct === 'material' || acct === 'inventory') ? amt : 0,
         debitAP:           acct === 'ap' ? amt : 0,
         debitLabor:        0,
         debitSundryAcct:   acct === 'sundry' ? document.getElementById('rec-sundry').value.trim() : '',
         debitSundryAmount: acct === 'sundry' ? amt : 0,
+        debitAccount:      acct,
         vatAmount: inputVat, vatTreatment,
         purchaseRef:       p.id,
         addedBy: currentUser.uid,

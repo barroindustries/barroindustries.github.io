@@ -174,6 +174,7 @@ const EXPORTS = [
 
   // ── Finance / books (full snapshot each run — these are the company's records) ──
   { name:'ledger',                    filename:'ledger',                    dateField:null },
+  { name:'finance_periods',           filename:'finance_periods',           dateField:null }, // v12 WS12 — period close/reopen governance
   { name:'general_journal',           filename:'general_journal',           dateField:null },
   { name:'cash_receipt_journal',      filename:'cash_receipt_journal',      dateField:null },
   { name:'cash_disbursement_journal', filename:'cash_disbursement_journal', dateField:null },

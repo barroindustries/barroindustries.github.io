@@ -1,5 +1,9 @@
 # Workstream 12 — Period Engine + Period Close (v12 Barro Ops System)
 
+> ✅ **IMPLEMENTED 2026-07-10** (shipped as one diff with WS13, per spec). Rules validated via
+> `firebase deploy --only firestore:rules --dry-run` (compiled OK) but **NOT yet deployed**.
+> See V12-PLAN.md Build Log for the full implementation note.
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

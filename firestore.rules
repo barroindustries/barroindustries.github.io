@@ -579,21 +579,62 @@ service cloud.firestore {
     // staff file a finance_delete_requests doc that the President approves in the
     // Approvals tab (the actual delete then runs in the President's context). This
     // mirrors the existing salary_history / cash_advances delete gate.
+    // v12 WS12 — period-close guard helpers. A ledger create must (a) carry a
+    // real date (every one of the ~14 client posting sites already sends one —
+    // this only catches a malformed/missing date before it can silently vanish
+    // from an orderBy('date') report) and (b) target a month that isn't closed.
+    // Missing finance_periods doc = open (fail-open on absence, the safe default
+    // per the missing-field-denies gotcha). President bypasses the close-lock —
+    // the governance model is reopen -> fix -> re-close, never a silent side door.
+    function ledgerDateOk() {
+      return request.resource.data.get('date', '').matches('^\\d{4}-\\d{2}(-\\d{2})?$');
+    }
+    function ledgerPeriodOpen() {
+      return isPresident() ||
+        !exists(/databases/$(database)/documents/finance_periods/$(
+          request.resource.data.get('date', '').split('-')[0] + '-' +
+          request.resource.data.get('date', '').split('-')[1])) ||
+        get(/databases/$(database)/documents/finance_periods/$(
+          request.resource.data.get('date', '').split('-')[0] + '-' +
+          request.resource.data.get('date', '').split('-')[1])).data.get('closed', false) == false;
+    }
+    match /finance_periods/{month} {
+      allow read: if isAuth() && canFinance();
+      allow create, update: if isAuth() && isPresident();
+      allow delete: if false;
+    }
     match /ledger/{docId} {
       allow read: if isAuth() && canFinance();
-      // Finance/admin post anything. Production may ALSO post its own material COS,
-      // but tightly fenced: a positive DEBIT only, fixed category + source, and a
-      // POCOS-* reference — so a production user can't forge revenue (credit), a
-      // negative, or an arbitrary entry. Update/delete stay finance/president.
-      allow create: if isAuth() && (
+      // Finance/admin post anything (subject to the date + period-close gate
+      // above). Production may ALSO post its own material COS — v12 WS13 adds a
+      // second Production-postable shape, the Inventory contra-leg that nets the
+      // consumption expense against the asset booked at purchase time (fixes
+      // double material expensing). Both legs are tightly fenced: fixed
+      // category/source/type/refNumber pattern, positive amount only — so a
+      // Production user can't forge revenue, a negative, or an arbitrary entry.
+      // accountType is read tolerantly (.get(...,'expense')/.get(...,'')) so an
+      // old, not-yet-updated client posting the legacy (no-accountType) COS shape
+      // is still accepted. Update/delete stay finance/president.
+      allow create: if isAuth() && ledgerDateOk() && ledgerPeriodOpen() && (
         canFinance()
         || (canProduction()
-            && request.resource.data.get('category', '') == 'COS – Direct Material'
             && request.resource.data.get('source', '') == 'Production'
-            && request.resource.data.get('type', '') == 'debit'
             && request.resource.data.get('amount', 0) is number
             && request.resource.data.get('amount', 0) > 0
-            && request.resource.data.get('refNumber', '').matches('POCOS-.*'))
+            && (
+              // expense leg (COS – Direct Material) — old clients (no accountType
+              // field) and new clients (accountType:'expense') both accepted.
+              (request.resource.data.get('type', '') == 'debit'
+                && request.resource.data.get('category', '') == 'COS – Direct Material'
+                && request.resource.data.get('refNumber', '').matches('POCOS-.*')
+                && request.resource.data.get('accountType', 'expense') == 'expense')
+              ||
+              // Inventory contra leg — new clients only.
+              (request.resource.data.get('type', '') == 'credit'
+                && request.resource.data.get('accountType', '') == 'asset'
+                && request.resource.data.get('account', '') == 'Inventory'
+                && request.resource.data.get('refNumber', '').matches('POCOS-.*-INV'))
+            ))
       );
       allow update: if isAuth() && canFinance();
       allow delete: if isAuth() && isPresident();

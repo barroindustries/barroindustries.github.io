@@ -67,12 +67,15 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     drawers dismissable by Back; deep links + refresh keep place.
 11. `[ ]` **Styled confirm/prompt** — one `confirmDialog()` promise helper; kill all 79 native
     confirm()/alert()/prompt().
-12. `[ ]` **Period engine + period close** — ONE shared period filter (kills the 3 divergent
+12. `[x]` **Period engine + period close** — ONE shared period filter (kills the 3 divergent
     YTD implementations); picker for any month/quarter/year; close-period lock; fix
-    `orderBy('date')` dropping date-less rows (records-forever guarantee).
-13. `[ ]` **Chart of accounts** — account-type on ledger rows (income/expense/asset/liability/
+    `orderBy('date')` dropping date-less rows (records-forever guarantee). IMPLEMENTED
+    (window.Period/periodPicker/finance_periods) — see Build Log.
+13. `[x]` **Chart of accounts** — account-type on ledger rows (income/expense/asset/liability/
     equity); unlocks trial balance, balance sheet; fixes **double material expensing**
-    (purchase→Inventory asset; consumption→COS, the single expense event).
+    (purchase→Inventory asset; consumption→COS, the single expense event). IMPLEMENTED
+    (window.COA/ledgerKind + Inventory contra-leg) — see Build Log. Rules deploy + the
+    "🏷 Tag account types" / "🧾 Restate material costs" buttons still need to be RUN live.
 14. `[ ]` **Shared document letterhead engine** — one branded header/footer component (logo,
     registered name, address, TIN, serial, date, signature blocks) + print stylesheet; ALL
     printables adopt it. Per-department printable library listed below.
@@ -262,3 +265,44 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   25+26+27) and the consolidated 'needs Neil' list (statutory rates verification, performance-pay
   activation, CA interest default, OPC TIN, Company-tab prose). **Handover to Sonnet 5 is
   complete — no architecture decisions remain.**
+- **2026-07-10 (Sonnet implementation — WS12+13 SHIPPED as one diff, per spec):** Both specs'
+  `js/config.js` additions built: `window.COA`/`COA_LEGACY_MAP`/`ledgerKind()`, `window.Period`
+  (canonical `month:YYYY-MM`/`quarter:YYYY-Qn`/`year:YYYY`/`all` keys + `month`/`prev`/`ytd`/`all`
+  aliases), `window.periodPicker`/`bindPeriodPicker` (chip row + inline Custom month/quarter/year
+  — no modal), `window.isPeriodClosed`/`assertPeriodOpen` (read-through cached close-check).
+  `prevBizMonth`/`finPeriodMatch`/`finPeriodLabel`/`FIN_PERIOD_TABS`/`finPeriodBar` removed from
+  app.js (superseded, back-compat aliases live in config.js — no caller broke). Every raw
+  `type==='credit'/'debit'` P&L classification site found across app.js + departments.js (13
+  total, more than the brief's original 15-ish estimate once double-checked against the live
+  tree) migrated to `ledgerKind()`; the Ledger tab's own raw Debit/Credit COLUMN display was
+  deliberately left on raw `type` (that's bookkeeping display, not P&L classification — same
+  distinction WS13's D2 draws). All 14 ledger-posting call sites updated: `accountType`/`account`
+  added everywhere, `addedBy` added where missing (D8), the period-close guard
+  (`assertPeriodOpen`) added to every write site the spec's checklist marked GUARDED, with the
+  status-flip-before-guard bug pattern fixed proactively at 3 sites (expense approve, worker
+  payslip submit, legacy Record Payroll) so a closed month can't leave a doc "approved"/"submitted"
+  with no matching ledger row. Bulk backfills (`backfillLedgerFromJournals`,
+  `backfillPayrollLedger`) soft-skip closed months with a count instead of toast-spamming per row
+  — a gap the spec didn't fully anticipate, fixed to match its own stated intent.
+  `recordPurchaseDisbursement` defaults to the new `inventory` account (Purchasing always sets
+  `purchaseRef`); `consumeProductionMaterials` now posts the `POCOS-<id>-INV` contra leg.
+  `renderFinancialReports` rebuilt on the shared picker + `ledgerKind()`, plus three new
+  president-only maintenance actions (🏷 Tag account types, 🧾 Restate material costs, 🩹 Fix
+  undated rows) and Close/Reopen buttons on a viewed past month. `firestore.rules`: composed
+  `ledgerDateOk()`/`ledgerPeriodOpen()` helpers + a new `finance_periods/{month}` collection +
+  the merged ledger `create` clause (tolerant of both old and new client shapes) — **validated
+  via `firebase deploy --only firestore:rules --dry-run` (compiled successfully)**, NOT yet
+  deployed. `finance_periods` added to `scripts/monthly-backup.js` EXPORTS.
+  **Verified:** `node --check` clean on all 4 touched JS files; live preview boot with zero
+  console errors; every new global (`COA`, `ledgerKind`, `Period`, `periodPicker`,
+  `assertPeriodOpen`, the 3 maintenance functions, `closeFinancePeriod`/`reopenFinancePeriod`)
+  present and correct in isolated eval tests (quarter/year/month parsing, ledgerKind's
+  legacy-derivation for `debit`/`payslip`/`asset` rows). **NOT verified** (needs a live login,
+  which this session doesn't have): the actual rendered Finance Dashboard/Reports/Analytics
+  screens with real Firestore data, a real Compute-Payroll click-through, or the three
+  maintenance buttons against live rows. **NOT done yet — needs Neil/a live session:**
+  (1) deploy the rules (`~/.npm-global/bin/firebase deploy --only firestore:rules`, re-diff
+  first), (2) press **🏷 Tag account types** then **🧾 Restate material costs** once in the live
+  app (president) — this is the actual bug-fix; expense totals for past periods WILL drop by the
+  restated amount, exactly as flagged to Neil in the audit. Committed, not yet pushed to master.
+  NEXT: workstream 19 (security) per the recommended build order.

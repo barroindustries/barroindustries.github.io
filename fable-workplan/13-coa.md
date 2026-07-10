@@ -1,5 +1,11 @@
 # Workstream 13 — Chart of Accounts
 
+> ✅ **IMPLEMENTED 2026-07-10** (shipped as one diff with WS12, per spec). Rules validated via
+> `firebase deploy --only firestore:rules --dry-run` (compiled OK) but **NOT yet deployed**, and
+> the live "🏷 Tag account types" / "🧾 Restate material costs" buttons have not been pressed yet
+> — the double-expensing bug's actual fix on historical data is still pending that button press.
+> See V12-PLAN.md Build Log for the full implementation note.
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration
