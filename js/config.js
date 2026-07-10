@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.0';
+window.APP_VERSION = '12.0.1';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -546,4 +546,77 @@ window.assertPeriodOpen = async function(dateStr) {
     }
     throw new Error('period-closed:' + mk);
   }
+};
+
+// ── Brand / Company Identity (v12 WS09) ──────────────────
+// Canonical source of truth for company/system identity used by all JS-rendered
+// chrome (title, splash, login, topbar, version strings, Company tab, nav) AND
+// consumed by the WS14 letterhead engine for print-document headers/footers.
+//
+// NON-JS MIRRORS (cannot read window.BRAND — keep in sync BY HAND):
+//   • manifest.json  name/short_name/description   (browser-parsed, pre-JS)
+//   • sw.js  header comment + CACHE_VER prefix       (worker scope, no window)
+//   • firebase-messaging-sw.js  L38 title fallback    (worker scope)
+//   • functions/index.js  L48 title fallback          (separate deploy pipeline)
+window.BRAND = {
+  name:       'Barro Industries',            // display company name (chrome)
+  systemName: 'Operating System',            // product/system suffix
+  fullName:   'Barro Industries Operating System',
+  shortName:  'Barro Ops',                   // replaces the retired 'BI Ops'
+  tagline:    'Building the Future, Brick by Brick.',  // the one live tagline we keep
+  verifyBase: '/v/',                         // public ID-verify route prefix (WS27)
+
+  legal: {
+    // Corporate entity (SEC OPC) — client-facing / marketing documents
+    opcName:         'Barro Industries OPC',
+    opcRegistration: 'SEC-registered One Person Corporation',
+    opcTin:          '',   // ‼️ FLAG FOR NEIL — OPC TIN not present anywhere in code
+    // DTI sole-proprietorship trade name — the registered BIR taxpayer today
+    // (currently printed on payslips + billing invoices)
+    dtiName:         'NEILBARRO STEEL & METAL FABRICATION SERVICES',
+    dtiTin:          '951-145-613-000',
+    address:         'PUROK 6, CARLATAN, 2500, CITY OF SAN FERNANDO, LA UNION, PHILIPPINES',
+    addressShort:    'La Union | Baguio City | Manila',
+    phone:           '0927 683 6300',        // canonical spaced form
+    email:           'hello@barroindustries.com',
+    signatory:       { name: 'NEIL BARRO', title: 'President, Barro Industries OPC' }
+  },
+
+  logo: {
+    wordmark:  'icons/bi-logo.svg',          // in-app splash/login/topbar
+    print:     'icons/barro-industries.png', // print-document header logo (WS14)
+    pwaIcon:   'icons/icon-192.png',         // PWA/apple-touch
+    pushBadge: 'icons/icon-192.png'          // FCM badge (retires icons/barro-logo.png)
+  },
+
+  // Per-company sub-brands. Field shape is IDENTICAL to quote-builder-v2.html's
+  // local CO object (that iframe keeps its OWN copy for isolation — see comment there).
+  // CO.PT (generic partner) is runtime-synthesized inside the iframe from URL params
+  // and is NOT mirrored here.
+  companies: {
+    BK: { name:'BARRO KITCHENS',
+      sub:'Commercial Kitchen One-Stop-Shop  •  Design · Fabricate · Install  •  by Barro Industries OPC',
+      addr:'La Union  |  Baguio City  |  Manila', contact:'09276836300  |  hello@barroindustries.com',
+      sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'}, code:'BK',
+      thanks:'Thank you for considering Barro Kitchens. We look forward to building a kitchen you can rely on for years.',
+      creds:'Barro Industries OPC  •  DTI / BIR Registered  •  hello@barroindustries.com  •  0927 683 6300  •  La Union | Baguio | Manila' },
+    BS: { name:'BRILLIANT STEEL CORPORATION', sub:'', addr:'Pasig City, Metro Manila', contact:'09276836300',
+      sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'}, code:'BS',
+      thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
+      creds:'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300' }
+  }
+};
+
+// Convenience: pick the correct legal entity for a document type.
+//   brandEntity('bir')       → DTI trade name + real TIN (payslips, invoices, BIR docs)
+//   brandEntity('corporate') → OPC name (quotes, POs, proposals, marketing)
+// Consumed by the WS14 letterhead engine.
+window.brandEntity = function(kind){
+  var L = window.BRAND.legal;
+  if (kind === 'bir') return {
+    name: L.dtiName, registration: 'DTI-registered · BIR-registered',
+    tin: L.dtiTin, address: L.address, phone: L.phone, email: L.email };
+  return {  // 'corporate' (default)
+    name: L.opcName, registration: L.opcRegistration,
+    tin: L.opcTin, address: L.addressShort, phone: L.phone, email: L.email };
 };

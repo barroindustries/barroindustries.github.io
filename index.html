@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#FAF9F8"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-  <meta name="apple-mobile-web-app-title" content="BI Ops"/>
+  <meta name="apple-mobile-web-app-title" content="Barro Ops"/>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
   <meta http-equiv="Pragma" content="no-cache"/>
   <meta http-equiv="Expires" content="0"/>
@@ -154,7 +154,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.0 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.1 · Barro Industries</div>
   </div>
 </div>
 
@@ -295,13 +295,18 @@
 <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
 <script defer src="js/firebase-config.js"></script>
 <script defer src="js/config.js"></script>
+<script defer src="js/letterhead.js"></script>
 <script defer>
-  /* runs immediately after config.js (defer preserves order) */
-  const _v = window.APP_VERSION || '9.4';
-  const _lvEl = document.getElementById('login-version-str');
-  if (_lvEl) _lvEl.textContent = 'v' + _v + ' · Barro Industries';
-  const _tbEl = document.getElementById('topbar-version-str');
-  if (_tbEl) _tbEl.textContent = 'Operating System · v' + _v;
+  /* runs immediately after config.js (defer preserves order). BRAND + APP_VERSION exist by now. */
+  window._applyBrandVersion = function () {
+    const v = window.APP_VERSION || '9.4';
+    const B = window.BRAND || { name: 'Barro Industries', systemName: 'Operating System' };
+    const lv = document.getElementById('login-version-str');
+    if (lv) lv.textContent = 'v' + v + ' · ' + B.name;
+    const tb = document.getElementById('topbar-version-str');
+    if (tb) tb.textContent = B.systemName + ' · v' + v;
+  };
+  window._applyBrandVersion();
 </script>
 <script defer src="js/drive.js"></script>
 <script defer src="js/notifications.js"></script>
@@ -309,14 +314,7 @@
 <script defer src="js/app.js"></script>
 <script defer src="js/modules.js"></script>
 <script>
-  window.addEventListener('load', () => {
-    if (window.APP_VERSION) {
-      const el = document.getElementById('login-version-str');
-      if (el) el.textContent = 'v' + window.APP_VERSION + ' · Barro Industries';
-      const tb = document.getElementById('topbar-version-str');
-      if (tb) tb.textContent = 'Operating System · v' + window.APP_VERSION;
-    }
-  });
+  window.addEventListener('load', () => { if (window._applyBrandVersion) window._applyBrandVersion(); });
 </script>
 </body>
 </html>

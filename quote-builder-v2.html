@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Quote Builder v2 — Barro Kitchens</title>
+<title>Quote Builder — Barro Industries</title>
 <style>
 :root {
   --dark-blue:#1E3A5F; --mid-blue:#2E5F8A; --light-blue:#D6E4F0;
@@ -935,6 +935,10 @@ tr:hover td{background:#fafbff;}
 <script>
 // ═══════════════════════════════════════════════════════════════════
 //  COMPANY CONFIG
+//  Local mirror of window.BRAND.companies (js/config.js, v12 WS09). This file
+//  loads via <iframe> with no access to the parent app's config.js — keep
+//  BK/BS in sync by hand. CO.PT is synthesized at runtime below from
+//  ?pcoName/?pcoContact/?pcoSig for generic (non-Brilliant-Steel) partners.
 // ═══════════════════════════════════════════════════════════════════
 const CO = {
   BK:{name:'BARRO KITCHENS',sub:'Commercial Kitchen One-Stop-Shop  •  Design · Fabricate · Install  •  by Barro Industries OPC',

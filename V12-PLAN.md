@@ -61,8 +61,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
 
 ### PHASE 2 — Foundation (everything else builds on this)
 
-9.  `[ ]` **BRAND module + full rename sweep** — one `window.BRAND` drives title, splash, login,
-    sidebar, manifest.json, sw, track.html, quote builder, all print headers.
+9.  `[x]` **BRAND module + full rename sweep** — one `window.BRAND` drives title, splash, login,
+    sidebar, manifest.json, sw, track.html, quote builder, all print headers. IMPLEMENTED
+    (window.BRAND/brandEntity in config.js; manifest.json, index.html, sw.js,
+    firebase-messaging-sw.js, functions/index.js, quote-builder-v2.html, app.js all swapped;
+    track.html never referenced the old name, nothing to change) — see Build Log. One line
+    (`Business Intelligence Operations Platform` positioning copy) deliberately left as a
+    `‼️ FLAG FOR NEIL` — needs new prose, not a string swap.
 10. `[ ]` **URL routing + real Back** — History API in navigateTo; device Back works; modals/
     drawers dismissable by Back; deep links + refresh keep place.
 11. `[ ]` **Styled confirm/prompt** — one `confirmDialog()` promise helper; kill all 79 native
@@ -76,9 +81,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     (purchase→Inventory asset; consumption→COS, the single expense event). IMPLEMENTED
     (window.COA/ledgerKind + Inventory contra-leg) — see Build Log. Rules deploy + the
     "🏷 Tag account types" / "🧾 Restate material costs" buttons still need to be RUN live.
-14. `[ ]` **Shared document letterhead engine** — one branded header/footer component (logo,
+14. `[x]` **Shared document letterhead engine** — one branded header/footer component (logo,
     registered name, address, TIN, serial, date, signature blocks) + print stylesheet; ALL
-    printables adopt it. Per-department printable library listed below.
+    printables adopt it. Per-department printable library listed below. IMPLEMENTED
+    (js/letterhead.js — window.buildLetterhead/nextSerial) — see Build Log. Converted all 4
+    in-scope generators (buildPayslipHTML, buildBillingInvoiceHTML, printPurchaseOrder,
+    openInventoryCountForm). Legacy/dead print builders (app.js printPayslip/printWorkerPayslip,
+    departments.js printBKQuote/printQuote/renderBSQuoteBuilder) deliberately left unconverted
+    per spec — owned by WS24 and WS31 respectively, not scope-creep.
 15. `[ ]` **Records durability** — backup covers ALL collections + native typed export; restore
     script + docs; sync/backup failure alerting surfaced in-app; Drive files private-by-default
     (folder ACLs, payslip proofs no longer public-by-link); write-time sync queue instead of
@@ -349,3 +359,49 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   president) to seed the login map for existing worker accounts.
   NEXT: workstream 21 (statutory tables) or 09+14 (BRAND+letterhead) per the build order —
   20/21/22 (the payroll bundle) is the next major milestone.
+- **2026-07-10 (Sonnet implementation — WS09 BRAND module + WS14 letterhead engine, per spec):**
+  `window.BRAND` lands in js/config.js (name/systemName/fullName/shortName/tagline/verifyBase,
+  `legal{}` with both entities — DTI trade name+real TIN vs. Barro Industries OPC — and a
+  `signatory`, `logo{}`, `companies{BK,BS}`) plus `window.brandEntity(kind)` (`'bir'` → DTI
+  entity for statutory docs, `'corporate'` → OPC for marketing docs, default). New file
+  js/letterhead.js: `window.buildLetterhead(opts) → {headerHTML, footerHTML, printCSS}` (a
+  JS-function-returning-strings pattern that works both for `document.write()` new-window print
+  flows and future in-page injection) + `window.nextSerial(counterKey, prefix)` (atomic
+  `_counters`-based doc serial, provided but not wired to any caller yet, per spec). Wired into
+  index.html (script tag right after config.js) and sw.js PRECACHE. Full static rename sweep:
+  index.html apple-mobile-web-app-title, manifest.json name/short_name/description, sw.js header
+  comment, firebase-messaging-sw.js (badge path fixed to icon-192.png, retiring the dead
+  barro-logo.png; BRAND MIRROR comment since worker scope can't read `window`),
+  functions/index.js (same mirror comment, separate deploy pipeline), quote-builder-v2.html
+  (title + a cross-reference comment marking its CO map as a deliberate manual mirror of
+  `BRAND.companies`, kept separate for iframe isolation), and app.js (Company-tab chip label,
+  hero wordmark, footer badge, plus two "BI Ops" leftovers the first pass missed — the "What is
+  BI Ops?" section heading and lead sentence — caught by the verification grep and fixed as a
+  plain mechanical rename, distinct from the one line deliberately left flagged for Neil).
+  All four WS14 print-header conversions done: `buildPayslipHTML` (BIR entity; signature grid
+  keeps the two names the doc already captured — worker acknowledgment + preparer — instead of
+  the spec's illustrative blank Finance/HR placeholders, and adds a President-approval slot the
+  old hand-rolled table never had), `buildBillingInvoiceHTML` (BIR entity; dropped the now-
+  redundant standalone "BILLING INVOICE" banner div since the letterhead header already carries
+  the doc title, matching the payslip's pattern), `printPurchaseOrder` (corporate/OPC entity,
+  matching its existing content; removed the now-dead local `logoUrl` computation the engine
+  duplicates internally), `openInventoryCountForm` (corporate/OPC entity). Every conversion keeps
+  a same-shape fallback to the original hand-rolled markup if `buildLetterhead` somehow isn't
+  loaded, so a missing script tag degrades to the old look instead of a blank/broken document.
+  **Independent safety fix found while re-reading the WS14 spec's own risk section** (flagged
+  there as a recommendation, not part of WS14/31's scope decision): `printBKQuote` and
+  `printQuote` (the legacy quote-print builders, explicitly left unconverted — owned by WS31)
+  had live unescaped fields (`q.quoteNumber`/`q.date`/`q.validUntil`) sitting right next to
+  already-escaped ones in the same template — patched with `escHtml()` since it's a live XSS-
+  shaped gap independent of whichever workstream eventually deletes these functions.
+  **Verified:** `node --check` clean on all 5 touched JS files (config.js, app.js,
+  departments.js, letterhead.js, plus a re-check after the escHtml patch); grep-verified zero
+  remaining "BI Ops"/"BI OPS"/"Business Intelligence Operations" strings outside the one
+  deliberately-flagged positioning line and a comment explaining the rename; grep-verified
+  index.html script order (letterhead.js loads after config.js, before departments.js) and sw.js
+  PRECACHE both correct. **NOT verified** (needs a live login): actually opening each of the 4
+  converted documents in the browser to eyeball the new header/footer rendering and confirm the
+  long-document page-break fix (aab024a) now applies to payslip/invoice/PO/inventory-form prints
+  the same way it already does for quotes. Committed, not yet pushed to master.
+  NEXT: workstream 20+21+22 (the payroll bundle — one payroll engine, statutory tables,
+  cash-advance installments) per the build order in fable-workplan/INDEX.md.

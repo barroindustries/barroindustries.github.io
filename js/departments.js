@@ -4509,6 +4509,24 @@ function buildPayslipHTML(d) {
   const fmtD = s => { if(!s) return '—'; const dt=new Date(s); return dt.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}); };
   const co = d.company || 'Barro Kitchens';
   const sched = d.schedule || [];
+  // Shared letterhead (v12 WS14) — BIR entity (DTI trade name + real TIN), same
+  // identity this payslip has always printed; only the markup/CSS is shared now.
+  const _lh = window.buildLetterhead ? window.buildLetterhead({
+    docTitle: 'PAYSLIP',
+    entity: window.brandEntity ? window.brandEntity('bir') : null,
+    accent: '#1a237e',
+    dateLabel: 'Pay Date: ' + fmtD(d.payDate),
+    // Keeps the two names this payslip already captures (worker ack + preparer,
+    // fed from the send-payslip form) and adds the President slot the old
+    // hand-rolled table never had — a straight swap to blank Finance/HR labels
+    // here would have thrown away live data for no gain.
+    signatures: [
+      { label: 'Acknowledged by', name: d.workerName || '',   title: 'Employee' },
+      { label: 'Prepared by',     name: d.preparedBy || '',   title: 'Finance' },
+      { label: 'Approved by',     name: (window.BRAND && window.BRAND.legal.signatory.name) || '', title: 'President' }
+    ],
+    footerNote: 'System-generated payslip · ' + ((window.BRAND && window.BRAND.name) || 'Barro Industries') + ' · ' + new Date().toLocaleString('en-PH')
+  }) : null;
 
   return `<!DOCTYPE html><html><head>
 <meta charset="UTF-8"/>
@@ -4541,6 +4559,7 @@ function buildPayslipHTML(d) {
     body { background:#fff; }
     .page { padding:8mm; }
   }
+${_lh ? _lh.printCSS : ''}
 </style>
 </head><body>
 <div class="export-bar">
@@ -4552,7 +4571,7 @@ function buildPayslipHTML(d) {
 </div>
 <div style="height:48px"></div>
 <div class="page" id="payslip-page">
-  <!-- Header -->
+  ${_lh ? _lh.headerHTML : `
   <div class="header-top">
     <img src="icons/barro-industries.png" class="company-logo" onerror="this.style.display='none'" alt=""/>
     <div>
@@ -4564,7 +4583,7 @@ function buildPayslipHTML(d) {
         TIN: 951-145-613-000
       </div>
     </div>
-  </div>
+  </div>`}
   <div style="border:2px solid #000;padding:0;margin-top:4px">
 
     <!-- Employee Information -->
@@ -4707,6 +4726,7 @@ function buildPayslipHTML(d) {
     </table>
 
     <!-- Signatures -->
+    ${_lh ? _lh.footerHTML : `
     <table style="margin-top:4px">
       <tr>
         <td style="padding:24px 10px 6px;text-align:center;width:33%">
@@ -4719,7 +4739,7 @@ function buildPayslipHTML(d) {
           <div style="font-size:9px;color:#555">Prepared By</div>
         </td>
       </tr>
-    </table>
+    </table>`}
 
     <!-- Schedule -->
     <div class="section-header" style="margin-top:4px">Daily Time Log</div>
@@ -5809,7 +5829,7 @@ function printBKQuote(lines, q) {
   lines.forEach(l => { if(!byCategory[l.category]) byCategory[l.category]=[]; byCategory[l.category].push(l); });
 
   const w = window.open('','_blank');
-  w.document.write(`<!DOCTYPE html><html><head><title>Barro Kitchens — Quote ${q.quoteNumber}</title>
+  w.document.write(`<!DOCTYPE html><html><head><title>Barro Kitchens — Quote ${escHtml(q.quoteNumber)}</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Segoe UI',Arial,sans-serif;padding:36px;color:#222;background:#fff;font-size:13px}
@@ -5840,9 +5860,9 @@ function printBKQuote(lines, q) {
       <div class="brand-sub">One-stop kitchen design & build solution</div>
     </div>
     <div class="q-info">
-      <div class="q-no">Quote ${q.quoteNumber}</div>
-      <div>Date: ${q.date}</div>
-      <div>Valid Until: ${q.validUntil||'—'}</div>
+      <div class="q-no">Quote ${escHtml(q.quoteNumber)}</div>
+      <div>Date: ${escHtml(q.date)}</div>
+      <div>Valid Until: ${escHtml(q.validUntil||'—')}</div>
       ${q.scope&&q.scope!=='Custom Quote'?`<div>Scope: <strong>${escHtml(q.scope)}</strong></div>`:''}
     </div>
   </div>
@@ -7008,6 +7028,17 @@ function buildBillingInvoiceHTML(p, inv) {
   const fmtD = s => { if(!s) return '—'; const dt=new Date(s); return isNaN(dt.getTime())?s:dt.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}); };
   const balanceAfter = (Number(inv.balanceBefore)||0) - (Number(inv.amount)||0);
   const safeName = (inv.no||'invoice').replace(/[^a-zA-Z0-9-]/g,'');
+  const _lh = window.buildLetterhead ? window.buildLetterhead({
+    docTitle: 'BILLING INVOICE',
+    entity: window.brandEntity ? window.brandEntity('bir') : null,
+    accent: '#1a237e',
+    dateLabel: 'Invoice Date: ' + fmtD(inv.date),
+    signatures: [
+      { label: 'Issued by',   name: inv.issuedBy || '', title: (window.BRAND && window.BRAND.name) || 'Barro Industries' },
+      { label: 'Received by', name: '', title: 'Client' }
+    ],
+    footerNote: 'System-generated invoice · ' + ((window.BRAND && window.BRAND.name) || 'Barro Industries') + ' · ' + new Date().toLocaleString('en-PH')
+  }) : null;
 
   return `<!DOCTYPE html><html><head>
 <meta charset="UTF-8"/>
@@ -7039,6 +7070,7 @@ function buildBillingInvoiceHTML(p, inv) {
     body { background:#fff; }
     .page { padding:10mm; }
   }
+${_lh ? _lh.printCSS : ''}
 </style>
 </head><body>
 <div class="export-bar">
@@ -7049,6 +7081,7 @@ function buildBillingInvoiceHTML(p, inv) {
 </div>
 <div style="height:48px"></div>
 <div class="page" id="invoice-page">
+  ${_lh ? _lh.headerHTML : `
   <div class="header-top">
     <img src="icons/barro-industries.png" class="company-logo" onerror="this.style.display='none'" alt=""/>
     <div>
@@ -7061,8 +7094,7 @@ function buildBillingInvoiceHTML(p, inv) {
       </div>
     </div>
   </div>
-
-  <div class="doc-title">BILLING INVOICE</div>
+  <div class="doc-title">BILLING INVOICE</div>`}
 
   <div class="meta-grid">
     <div class="meta-box">
@@ -7096,6 +7128,7 @@ function buildBillingInvoiceHTML(p, inv) {
 
   ${inv.notes?`<div class="section-header" style="margin-top:12px">Notes</div><div class="notes-box">${escHtml(inv.notes)}</div>`:''}
 
+  ${_lh ? _lh.footerHTML : `
   <table style="margin-top:24px;border:none">
     <tr>
       <td style="border:none;padding:24px 10px 6px;text-align:center;width:50%">
@@ -7107,7 +7140,7 @@ function buildBillingInvoiceHTML(p, inv) {
         <div style="font-size:9px;color:#555">Received By / Date</div>
       </td>
     </tr>
-  </table>
+  </table>`}
 </div>
 <script>
 async function downloadJPEG() {
@@ -9359,12 +9392,12 @@ function printQuote(lines, q) {
   <div class="logo">Barro Industries</div>
   <p style="margin:4px 0;font-size:12px;color:#666">Professional Kitchen, Steel & Engineering Solutions</p>
   <hr style="margin:14px 0;border:none;border-top:1px solid #eee"/>
-  <p><strong>Quote for:</strong> ${escHtml(q?.clientName||'Client')} &nbsp;&nbsp; <strong>Date:</strong> ${q?.date||today()}</p>
+  <p><strong>Quote for:</strong> ${escHtml(q?.clientName||'Client')} &nbsp;&nbsp; <strong>Date:</strong> ${escHtml(q?.date||today())}</p>
   <table><tr><th>Description</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr>
   ${lines.map(l=>`<tr><td>${escHtml(l.description)}</td><td>${l.qty}</td><td>₱${fmt(l.price)}</td><td>₱${fmt(l.qty*l.price)}</td></tr>`).join('')}
   </table>
   <div class="total">Total: ₱${fmt(total)}</div>
-  <div class="footer">Valid until: ${q?.validUntil||'N/A'} · ${escHtml(q?.notes||'')}</div>
+  <div class="footer">Valid until: ${escHtml(q?.validUntil||'N/A')} · ${escHtml(q?.notes||'')}</div>
   <script>window.print();<\/script></body></html>`);
 }
 
@@ -12216,7 +12249,18 @@ function openInventoryCountForm(items, draft, kindFilter){
   const fmtDate = s => { if(!s) return ''; const dt=new Date(s+'T00:00:00'); return isNaN(dt.getTime())?s:dt.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}); };
   const kindLabel = kindFilter==='material'?'Raw Materials':kindFilter==='product'?'Finished Goods':'All Items';
   const varCell = (sys,phys)=>{ if(phys===''||phys==null||isNaN(parseFloat(phys))) return ''; const v=parseFloat(phys)-Number(sys||0); return (v>0?'+':'')+num(v); };
-  const logoUrl = location.origin + location.pathname.replace(/[^/]*$/,'') + 'icons/barro-industries.png';
+  const _lh = window.buildLetterhead ? window.buildLetterhead({
+    docTitle: 'INVENTORY COUNT FORM',
+    docNumber: h.formNo || '',
+    dateLabel: 'Count Date: ' + fmtDate(h.date),
+    extraMeta: [kindLabel],
+    signatures: [
+      { label: 'Counted by',  name: h.countedBy || '', title: '' },
+      { label: 'Verified by', name: h.verifiedBy || '', title: '' },
+      { label: 'Approved by', name: '', title: '' }
+    ],
+    footerNote: ((window.BRAND && window.BRAND.fullName) || 'Barro Industries Operating System') + ' · Generated ' + new Date().toLocaleString('en-PH') + ' · Physical count supersedes system quantity upon approval.'
+  }) : null;
 
   const rows = items.map((i,idx)=>{ const c=counts[i.id]||{}; return `<tr>
       <td class="c">${idx+1}</td>
@@ -12268,6 +12312,7 @@ function openInventoryCountForm(items, draft, kindFilter){
   .bar button{background:#fff;color:#1a237e;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
   @page{size:A4 landscape;margin:8mm}
   @media print{ .bar,.barpad{display:none!important} body{background:#fff} .page{padding:0;width:auto;min-height:0} }
+${_lh ? _lh.printCSS : ''}
 </style></head><body>
 <div class="bar">
   <span style="font-weight:700">📋 Inventory Count Form — ${e(h.formNo||'')}</span>
@@ -12276,11 +12321,12 @@ function openInventoryCountForm(items, draft, kindFilter){
 </div>
 <div class="barpad" style="height:46px"></div>
 <div class="page">
+  ${_lh ? _lh.headerHTML : `
   <div class="htop">
-    <img src="${logoUrl}" class="logo" onerror="this.style.display='none'" alt=""/>
+    <img src="${location.origin + location.pathname.replace(/[^/]*$/,'') + 'icons/barro-industries.png'}" class="logo" onerror="this.style.display='none'" alt=""/>
     <div><div class="cname">BARRO INDUSTRIES</div><div class="csub">Physical Inventory Count Form</div></div>
     <div class="title"><div class="t">Inventory Count</div><div class="scope">${e(kindLabel)}</div></div>
-  </div>
+  </div>`}
   <div class="meta">
     <div class="mbox"><div class="l">Form No.</div><div class="v">${e(h.formNo||'')}</div></div>
     <div class="mbox"><div class="l">Count Date</div><div class="v">${e(fmtDate(h.date))}</div></div>
@@ -12295,12 +12341,13 @@ function openInventoryCountForm(items, draft, kindFilter){
     </tr></thead>
     <tbody>${rows}${extraRows}${blanks}</tbody>
   </table>
+  ${_lh ? _lh.footerHTML : `
   <div class="sign">
     <div class="sline">Counted by${h.countedBy?` — ${e(h.countedBy)}`:''}</div>
     <div class="sline">Verified by${h.verifiedBy?` — ${e(h.verifiedBy)}`:''}</div>
     <div class="sline">Approved by</div>
   </div>
-  <div class="foot">Barro Industries Operations System · Generated ${new Date().toLocaleString('en-PH')} · Physical count supersedes system quantity upon approval.</div>
+  <div class="foot">Barro Industries Operating System · Generated ${new Date().toLocaleString('en-PH')} · Physical count supersedes system quantity upon approval.</div>`}
 </div>
 </body></html>`;
 
@@ -12942,8 +12989,19 @@ function printPurchaseOrder(p) {
   const total = p.total != null ? p.total : purchTotal(items);
   const issued = p.convertedAt && p.convertedAt.toDate ? p.convertedAt.toDate() : new Date();
   const issuedStr = issued.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
-  const logoUrl = location.origin + location.pathname.replace(/[^/]*$/, '') + 'icons/barro-industries.png';
   const preparedBy = p.convertedByName || p.createdByName || '';
+  const _sig = (window.BRAND && window.BRAND.legal.signatory) || { name: 'NEIL BARRO', title: 'President, Barro Industries OPC' };
+  const _lh = window.buildLetterhead ? window.buildLetterhead({
+    docTitle: 'PURCHASE ORDER',
+    docNumber: p.prNo || p.rfqNo || '',
+    dateLabel: 'Date: ' + issuedStr,
+    extraMeta: p.neededBy ? ['Needed by: ' + p.neededBy] : [],
+    signatures: [
+      { label: 'Prepared by', name: preparedBy, title: 'Purchasing' },
+      { label: 'Approved by', name: _sig.name, title: _sig.title }
+    ],
+    footerNote: ((window.BRAND && window.BRAND.fullName) || 'Barro Industries Operating System') + ' · Generated ' + new Date().toLocaleString('en-PH')
+  }) : null;
 
   const rows = items.map((it, i) => `<tr>
       <td class="c">${i + 1}</td>
@@ -12994,6 +13052,7 @@ function printPurchaseOrder(p) {
   .bar button{background:#fff;color:#1E3A5F;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
   @page{size:A4 portrait;margin:9mm}
   @media print{ .bar,.barpad{display:none!important} body{background:#fff} .page{padding:0;width:auto;min-height:0} }
+${_lh ? _lh.printCSS : ''}
 </style></head><body>
 <div class="bar">
   <span style="font-weight:700">🛒 Purchase Order — ${e(p.prNo || p.rfqNo || '')}</span>
@@ -13002,8 +13061,9 @@ function printPurchaseOrder(p) {
 </div>
 <div class="barpad" style="height:46px"></div>
 <div class="page">
+  ${_lh ? _lh.headerHTML : `
   <div class="htop">
-    <img src="${logoUrl}" class="logo" onerror="this.style.display='none'" alt=""/>
+    <img src="${location.origin + location.pathname.replace(/[^/]*$/, '') + 'icons/barro-industries.png'}" class="logo" onerror="this.style.display='none'" alt=""/>
     <div>
       <div class="cname">BARRO INDUSTRIES</div>
       <div class="csub">Barro Industries OPC · DTI / BIR Registered<br>hello@barroindustries.com · 0927 683 6300 · La Union | Baguio | Manila</div>
@@ -13013,7 +13073,7 @@ function printPurchaseOrder(p) {
       <div class="no">${e(p.prNo || p.rfqNo || '')}</div>
       <div class="dt">Date: ${e(issuedStr)}${p.neededBy ? `<br>Needed by: ${e(p.neededBy)}` : ''}</div>
     </div>
-  </div>
+  </div>`}
   <div class="parties">
     <div class="pbox">
       <div class="l">Supplier / Vendor</div>
@@ -13040,11 +13100,12 @@ function printPurchaseOrder(p) {
     <h4>Terms &amp; Conditions</h4>
     <p>Please supply the items listed above at the agreed prices. Reference this PO number on your delivery receipt and invoice. Deliver to the address above on or before the date indicated. Any discrepancy in quantity, price, or specification must be confirmed in writing before fulfilment.</p>
   </div>
+  ${_lh ? _lh.footerHTML : `
   <div class="sign">
     <div class="sline"><b>${e(preparedBy)}</b>Prepared by — Purchasing</div>
-    <div class="sline"><b>NEIL BARRO</b>Approved by — President, Barro Industries OPC</div>
+    <div class="sline"><b>${e(_sig.name)}</b>Approved by — ${e(_sig.title)}</div>
   </div>
-  <div class="foot">Barro Industries Operations System · Generated ${new Date().toLocaleString('en-PH')}</div>
+  <div class="foot">Barro Industries Operating System · Generated ${new Date().toLocaleString('en-PH')}</div>`}
 </div>
 </body></html>`;
 

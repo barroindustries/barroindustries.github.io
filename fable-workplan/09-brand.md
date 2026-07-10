@@ -1,5 +1,11 @@
 # Workstream 09 — window.BRAND source of truth + full rename sweep
 
+> ✅ **IMPLEMENTED 2026-07-10** (shipped as one diff with WS14, per build order). No rules
+> involved — nothing to deploy separately. See V12-PLAN.md Build Log for the full
+> implementation note, including the one deliberately-still-open item (`‼️ FLAG FOR NEIL`:
+> the Company-tab "Business Intelligence Operations Platform" positioning line needs new
+> prose, not a string swap).
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

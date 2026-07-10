@@ -1,5 +1,13 @@
 # Workstream 14 — Shared Document Letterhead Engine
 
+> ✅ **IMPLEMENTED 2026-07-10** (shipped as one diff with WS09, per build order). No rules
+> involved (`_counters` already covered; `nextSerial` provided but not wired). All 4 in-scope
+> conversions done (buildPayslipHTML, buildBillingInvoiceHTML, printPurchaseOrder,
+> openInventoryCountForm); the 5 dispositioned-LEAVE legacy generators were correctly left
+> untouched (owned by WS24/WS31). See V12-PLAN.md Build Log for the full implementation note,
+> including an independent escHtml safety patch applied to printBKQuote/printQuote while
+> re-reading this spec's risk section (unrelated to the letterhead conversion itself).
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

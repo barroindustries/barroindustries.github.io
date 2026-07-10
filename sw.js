@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════
-//  Barro Industries — Service Worker v16
+//  Barro Industries Operating System — Service Worker
 //  Strategy:
 //    • Install → pre-cache core app shell
 //    • Local JS/CSS → Network-first (so a CACHE_VER bump applies on the next load, not two loads later)
@@ -8,7 +8,7 @@
 //    • HTML / API → Network-first, cache as offline fallback
 // ═══════════════════════════════════════════════════════
 
-const CACHE_VER   = 'bi-ops-v162';
+const CACHE_VER   = 'bi-ops-v163';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -23,6 +23,7 @@ const PRECACHE = [
   '/manifest.json',
   '/js/firebase-config.js',
   '/js/config.js',
+  '/js/letterhead.js',
   '/js/drive.js',
   '/js/notifications.js',
   '/js/departments.js',

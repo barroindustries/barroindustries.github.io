@@ -35,6 +35,8 @@ const _shownNotifIds = new Set();
 // no longer auto-displays a second copy.
 messaging.onBackgroundMessage(payload => {
   const data = payload.data || {};
+  // BRAND MIRROR — window.BRAND.name in js/config.js (this file is worker-scope,
+  // no `window`, so it can't read it directly — keep this literal in sync by hand).
   const notifTitle = data.title || 'Barro Industries';
   const notifBody  = data.body  || 'You have a new notification.';
   const notifId    = data.notifId || '';
@@ -57,7 +59,7 @@ messaging.onBackgroundMessage(payload => {
     self.registration.showNotification(notifTitle, {
       body:     notifBody,
       icon:     '/icons/icon-192.png',
-      badge:    '/icons/barro-logo.png',
+      badge:    '/icons/icon-192.png',
       tag:      tag,
       renotify: false,
       data:     data,

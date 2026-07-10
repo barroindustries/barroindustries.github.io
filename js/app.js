@@ -5238,7 +5238,7 @@ async function renderCompany() {
       {key:'policies',label:'Policies'},
       {key:'downloads',label:'Downloads'},
       {key:'handbook',label:'Handbook'},
-      {key:'bi-ops',label:'BI Ops System'},
+      {key:'bi-ops',label:'The System'},
     ], 'overview', {cls:'company-tabs'})}
     <div id="company-tab-content"></div>
   `;
@@ -5255,7 +5255,7 @@ async function renderCompany() {
   switchCompanyTab('overview');
 }
 
-// ── Company: BI Ops System ────────────────────────
+// ── Company: The System (fka "BI Ops") ────────────
 function renderCompanyBiOps(ct) {
   ct.innerHTML = `
     <div style="padding:16px 0">
@@ -5264,18 +5264,22 @@ function renderCompanyBiOps(ct) {
       <div style="display:flex;align-items:center;gap:18px;background:linear-gradient(135deg,#0a0e09 0%,#0d1510 100%);border:1px solid rgba(255,215,0,0.18);border-radius:16px;padding:20px 22px;margin-bottom:18px">
         <img src="icons/barro-industries.png" alt="Barro Industries" style="width:72px;height:72px;border-radius:14px;flex-shrink:0;object-fit:contain"/>
         <div>
-          <div style="font-size:11px;font-weight:600;letter-spacing:2.5px;color:#B8860B;margin-bottom:4px">BI OPS SYSTEM</div>
+          <div style="font-size:11px;font-weight:600;letter-spacing:2.5px;color:#B8860B;margin-bottom:4px">${escHtml((window.BRAND&&window.BRAND.fullName)||'Barro Industries Operating System')}</div>
           <div style="font-size:20px;font-weight:700;color:#fff;line-height:1.2">Barro Industries</div>
+          <!-- ‼️ FLAG FOR NEIL (v12 WS09) — this positioning copy ("Business Intelligence
+               Operations Platform") is now false vs. the v12 vision (a full business-operating
+               system, not a narrow BI/analytics tool). Needs new prose, not a string swap;
+               left as-is pending a content pass. -->
           <div style="font-size:13px;color:#8a8070;margin-top:3px">Business Intelligence Operations Platform</div>
         </div>
       </div>
 
       <!-- About -->
       <div class="co-section">
-        <h3 class="co-section-title">What is BI Ops?</h3>
+        <h3 class="co-section-title">What is ${escHtml((window.BRAND&&window.BRAND.shortName)||'Barro Ops')}?</h3>
         <p class="co-body">
-          <strong style="color:var(--gold)">BI Ops</strong> is Barro Industries' proprietary intelligence hub — a centralized platform for data analytics,
-          reporting, and operational management across all business units. It transforms raw data into clear,
+          <strong style="color:var(--gold)">${escHtml((window.BRAND&&window.BRAND.shortName)||'Barro Ops')}</strong> is Barro Industries' central operating system — a single platform for tasks, finance,
+          production, and every department's day-to-day work. It transforms raw data into clear,
           actionable insights, giving every team member a single source of truth for company performance.
         </p>
       </div>
@@ -5323,7 +5327,7 @@ function renderCompanyBiOps(ct) {
 
       <!-- Footer badge -->
       <div style="text-align:center;padding:14px 0 4px">
-        <span style="font-size:10px;font-weight:600;letter-spacing:2px;color:#4a4035">BARRO INDUSTRIES · BI OPS · 2026</span>
+        <span style="font-size:10px;font-weight:600;letter-spacing:2px;color:#4a4035">Barro Industries · Operating System · 2026</span>
       </div>
     </div>
   `;

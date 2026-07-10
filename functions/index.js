@@ -45,6 +45,8 @@ exports.sendPushOnNotification = functions
     const message = {
       token: fcmToken,
       data: {
+        // BRAND MIRROR — window.BRAND.name in js/config.js (keep in sync by hand;
+        // this deploys separately via `cd functions && npm run deploy`).
         title:   title.trim() || 'Barro Industries',
         body:    body.trim()  || 'You have a new notification.',
         type:    type.trim()  || 'general',

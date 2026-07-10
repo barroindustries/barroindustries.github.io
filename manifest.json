@@ -1,7 +1,7 @@
 {
-  "name": "Barro Industries Operations",
-  "short_name": "BI Ops",
-  "description": "Barro Industries Internal Operations System",
+  "name": "Barro Industries Operating System",
+  "short_name": "Barro Ops",
+  "description": "Barro Industries Operating System — the company's central system",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0a0a0a",
