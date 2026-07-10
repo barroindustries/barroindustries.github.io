@@ -41,8 +41,8 @@ finalizing 9's rename sweep so the two don't conflict.
 | 20 | [20-payroll-engine.md](20-payroll-engine.md) | ✅ IMPLEMENTED | One payroll engine — unify the two compute paths |
 | 21 | [21-statutory.md](21-statutory.md) | ✅ IMPLEMENTED | Statutory tables — SSS/PhilHealth/Pag-IBIG/TRAIN + 13th month |
 | 22 | [22-ca-installments.md](22-ca-installments.md) | ✅ IMPLEMENTED | Cash-advance installments in payroll (Neil's mid-session spec) |
-| 23 | [23-raises.md](23-raises.md) | 8 | Effective-dated raises |
-| 24 | [24-payslip.md](24-payslip.md) | 7 | The payslip — ONE branded template (print button currently dead) |
+| 23 | [23-raises.md](23-raises.md) | ✅ IMPLEMENTED | Effective-dated raises |
+| 24 | [24-payslip.md](24-payslip.md) | ✅ IMPLEMENTED | The payslip — ONE branded template (print button currently dead) |
 | 25 | [25-leave.md](25-leave.md) | 10 | Leave that actually works — balances never seeded today |
 | 26 | [26-attendance-v2.md](26-attendance-v2.md) | 8 | Attendance v2 — time-out, hours, holidays admin |
 | 27 | [27-ids.md](27-ids.md) | 5 | Employee + worker ID cards, worker-login unblock |

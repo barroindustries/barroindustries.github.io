@@ -74,6 +74,14 @@
       ]
     },
     {
+      "collectionGroup": "payslips",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "workerId",       "order": "ASCENDING" },
+        { "fieldPath": "payPeriodStart", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "partner_deals",
       "queryScope": "COLLECTION",
       "fields": [

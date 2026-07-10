@@ -1,5 +1,14 @@
 # Workstream 24 — The Payslip (ONE branded template)
 
+> ✅ **IMPLEMENTED 2026-07-10** (shipped as one diff with WS23, per build order).
+> `window.toPayslipModel`/`buildPayslipHTML`/`renderPayslipPage` (departments.js) — no pop-ups
+> anywhere in payroll now (grep-confirmed). Used this brief's own SEAM RECONCILIATION note to
+> call the real `window.buildLetterhead()` (WS14) rather than the placeholder API. `payslips`
+> rules workerId/userId bug fixed; new composite index added for weekly YTD (rules validated
+> via dry-run; **rules+index NOT yet deployed**). `printPayslip()`/`printWorkerPayslip()`
+> deleted outright, along with the now-orphaned `window._payslipData`. See V12-PLAN.md Build
+> Log for the full implementation note.
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

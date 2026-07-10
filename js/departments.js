@@ -2047,8 +2047,9 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
 // Applies a raise immediately and logs it to salary_raises (old→new, %, effective
 // date, reason, who granted it). Finance/admin only; an affected app-user can read
 // their own raise records (firestore.rules mirrors the salary_history gate).
-function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel, current, applyRaise }, currentUser, onDone) {
+function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel, targetField, current }, currentUser, onDone) {
   const cur = parseFloat(current) || 0;
+  const _isPres = typeof isRealPresident === 'function' && isRealPresident();
   openModal(`💸 Give Raise — ${escHtml(subjectName||'')}`, `
     <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
       Current ${escHtml(fieldLabel)}: <strong style="color:var(--text)">₱${fmt(cur)}</strong>
@@ -2068,12 +2069,20 @@ function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel,
       <div class="form-group"><label>Effective Date</label><input id="raise-eff" type="date" value="${today()}"/></div>
       <div class="form-group"><label>Reason / Notes</label><input id="raise-reason" placeholder="e.g. Annual increase, promotion"/></div>
     </div>
-  `, `<button class="btn-primary" id="raise-save-btn">Apply Raise</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    ${!_isPres?`<div style="font-size:11px;color:var(--text-muted);margin-top:2px">Raises are approval-routed — this will be sent to the President.</div>`:''}
+  `, `<button class="btn-primary" id="raise-save-btn">${_isPres?'Apply Raise':'Request Raise'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   const newInp = document.getElementById('raise-new');
   const amtInp = document.getElementById('raise-amt');
   const pctInp = document.getElementById('raise-pct');
   const prev   = document.getElementById('raise-preview');
+  // Button text is date/role aware (v12 WS23): a future-dated raise SCHEDULES
+  // rather than applies, even for the President.
+  const _btnLabel = () => {
+    const effM = (document.getElementById('raise-eff')?.value || today()).slice(0,7);
+    if (!_isPres) return 'Request Raise';
+    return effM <= today().slice(0,7) ? 'Apply Raise' : 'Schedule Raise';
+  };
   const refresh = () => {
     const nv = parseFloat(newInp.value) || 0;
     const diff = nv - cur;
@@ -2085,6 +2094,9 @@ function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel,
   amtInp.addEventListener('input', () => { if (amtInp.value !== '') { newInp.value = (cur + (parseFloat(amtInp.value)||0)).toFixed(2); pctInp.value = ''; } refresh(); });
   pctInp.addEventListener('input', () => { if (pctInp.value !== '') { newInp.value = (cur * (1 + (parseFloat(pctInp.value)||0)/100)).toFixed(2); amtInp.value = ''; } refresh(); });
   newInp.addEventListener('input', () => { amtInp.value = ''; pctInp.value = ''; refresh(); });
+  document.getElementById('raise-eff').addEventListener('change', () => {
+    const b = document.getElementById('raise-save-btn'); if (b) b.textContent = _btnLabel();
+  });
 
   document.getElementById('raise-save-btn').addEventListener('click', async () => {
     const nv = parseFloat(newInp.value) || 0;
@@ -2093,29 +2105,22 @@ function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel,
     const reason = document.getElementById('raise-reason').value.trim();
     const eff    = document.getElementById('raise-eff').value || today();
     const btn = document.getElementById('raise-save-btn');
-    btn.disabled = true; btn.textContent = 'Applying…';
+    btn.disabled = true; btn.textContent = 'Submitting…';
     try {
-      await applyRaise(nv);
-      await db.collection('salary_raises').add({
-        subjectType, subjectId, subjectName: subjectName || '',
-        field: fieldLabel,
-        oldAmount: cur, newAmount: nv,
-        changeAmount: +(nv - cur).toFixed(2),
-        changePct: cur > 0 ? +((nv - cur) / cur * 100).toFixed(2) : null,
-        effectiveDate: eff,
-        reason,
-        grantedBy: currentUser.uid,
-        grantedByName: window.userProfile?.displayName || currentUser.email || '',
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      window.logAudit && window.logAudit('raise', subjectType, subjectId, { from: cur, to: nv });
+      const res = await window.RaiseFlow.submitRaise(
+        { subjectType, subjectId, subjectName, fieldLabel, targetField, current: cur },
+        { newAmount: nv, effectiveDate: eff, reason }
+      );
       closeModal();
-      Notifs.showToast(`Raise applied: ₱${fmt(cur)} → ₱${fmt(nv)}`);
+      if (res.outcome === 'requested')
+        Notifs.showToast('Raise sent to the President for approval.');
+      else
+        Notifs.showToast(`Raise ${eff.slice(0,7) <= today().slice(0,7) ? 'applied' : 'scheduled'}: ₱${fmt(cur)} → ₱${fmt(nv)}`);
       onDone && onDone();
     } catch (e) {
       console.error('raise failed', e);
-      btn.disabled = false; btn.textContent = 'Apply Raise';
-      Notifs.showToast('Failed to apply raise','error');
+      btn.disabled = false; btn.textContent = _isPres ? 'Apply Raise' : 'Request Raise';
+      Notifs.showToast('Failed to submit raise','error');
     }
   });
 }
@@ -2145,6 +2150,185 @@ async function openRaiseHistory(opts = {}) {
   openModal(`💸 Salary Raise History${opts.subjectName?` — ${escHtml(opts.subjectName)}`:''}`, rows,
     `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
 }
+
+// ── Raise lifecycle service (v12 WS23) — schedule → approve → materialize ──
+// pending_raises holds the schedule/approval; salary_raises stays the
+// immutable APPLIED audit log (unchanged shape, written only at materialize).
+// President acts immediately; everyone else files a pending_approval request.
+window.RaiseFlow = (function () {
+  const nowMonth = () => today().slice(0, 7);            // today() wraps window.bizDate() → 'YYYY-MM-DD'
+
+  // Create a raise. President → 'scheduled' (+ apply now if due). Others → 'pending_approval'.
+  async function submitRaise(desc, { newAmount, effectiveDate, reason }) {
+    const u = window.currentUser || auth.currentUser || {};
+    const cur = parseFloat(desc.current) || 0;
+    const eff = effectiveDate || today();
+    const effMonth = eff.slice(0, 7);
+    const isPres = typeof isRealPresident === 'function' && isRealPresident();
+    const base = {
+      subjectType: desc.subjectType, subjectId: desc.subjectId, subjectName: desc.subjectName || '',
+      field: desc.fieldLabel, targetField: desc.targetField,
+      oldAmount: cur, newAmount,
+      changeAmount: +(newAmount - cur).toFixed(2),
+      changePct: cur > 0 ? +((newAmount - cur) / cur * 100).toFixed(2) : null,
+      effectiveDate: eff, effectiveMonth: effMonth, reason: reason || '',
+      requestedBy: u.uid || '', requestedByName: window.userProfile?.displayName || u.email || '',
+      appliedAt: null, appliedInMonth: null, salaryRaiseId: null,
+      rejectedBy: null, rejectedByName: null, rejectedAt: null, rejectReason: null,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    if (isPres) {
+      const ref = await db.collection('pending_raises').add({
+        ...base, status: 'scheduled',
+        approvedBy: u.uid, approvedByName: base.requestedByName,
+        approvedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      if (effMonth <= nowMonth()) await materialize(ref.id);   // same-day/back-dated → apply now
+      return { outcome: 'applied-or-scheduled', id: ref.id };
+    }
+    const ref = await db.collection('pending_raises').add({
+      ...base, status: 'pending_approval', approvedBy: null, approvedByName: null, approvedAt: null
+    });
+    await safeNotify(() => Notifs.sendToOwner({
+      title: '💸 Raise Approval Request',
+      body: `${base.requestedByName} requested a raise for ${base.subjectName}: ₱${fmt(cur)} → ₱${fmt(newAmount)} (eff ${eff}).`,
+      icon: '💸', type: 'raise_request'
+    }));
+    return { outcome: 'requested', id: ref.id };
+  }
+
+  // Materialize a scheduled raise: write base-of-record + salary_raises audit + status→applied.
+  // Idempotent: guarded on status=='scheduled'; salary_raises id == pending_raises id (merge).
+  async function materialize(raiseId) {
+    const snap = await db.collection('pending_raises').doc(raiseId).get();
+    if (!snap.exists) return;
+    const r = snap.data();
+    if (r.status !== 'scheduled') return;                    // re-entrancy / already applied
+    let liveOld = r.oldAmount;
+    if (r.subjectType === 'payroll') {
+      const p = await db.collection('payroll').doc(r.subjectId).get();
+      liveOld = (p.exists && typeof p.data().salary === 'number') ? p.data().salary : r.oldAmount;
+      await db.collection('payroll').doc(r.subjectId).set({ salary: r.newAmount }, { merge: true });
+    } else { // worker_profile — scale hourly from LIVE values (rate may have moved since schedule)
+      const wp = await db.collection('worker_profiles').doc(r.subjectId).get();
+      const curDaily = (wp.exists && wp.data().dailyRate) || 0;
+      const curHourly = (wp.exists && wp.data().hourlyRate) || 0;
+      liveOld = curDaily || r.oldAmount;
+      const newHourly = curDaily > 0 ? +((curHourly * (r.newAmount / curDaily))).toFixed(2) : +(r.newAmount / 8).toFixed(2);
+      await db.collection('worker_profiles').doc(r.subjectId).update({
+        dailyRate: r.newAmount, hourlyRate: newHourly,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+    // Audit log — deterministic id so a retried sweep overwrites instead of duplicating.
+    await db.collection('salary_raises').doc(raiseId).set({
+      subjectType: r.subjectType, subjectId: r.subjectId, subjectName: r.subjectName || '',
+      field: r.field, oldAmount: liveOld, newAmount: r.newAmount,
+      changeAmount: +(r.newAmount - liveOld).toFixed(2),
+      changePct: liveOld > 0 ? +((r.newAmount - liveOld) / liveOld * 100).toFixed(2) : null,
+      effectiveDate: r.effectiveDate, reason: r.reason || '',
+      grantedBy: r.approvedBy || r.requestedBy || '', grantedByName: r.approvedByName || r.requestedByName || '',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    await db.collection('pending_raises').doc(raiseId).update({
+      status: 'applied', appliedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      appliedInMonth: nowMonth(), salaryRaiseId: raiseId
+    });
+    window.logAudit && window.logAudit('raise-apply', r.subjectType, r.subjectId, { from: liveOld, to: r.newAmount });
+    if (r.subjectType === 'payroll' && r.subjectId) {
+      await safeNotify(() => Notifs.send(r.subjectId, {
+        title: '💸 Salary Update',
+        body: `Your ${r.field} changed from ₱${fmt(liveOld)} to ₱${fmt(r.newAmount)}, effective ${r.effectiveDate}.`,
+        icon: '💸', type: 'raise_applied'
+      }));
+    }
+    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('users'); dbCacheInvalidate('payroll'); }
+  }
+
+  // Screen-load sweep: apply every scheduled raise whose month has arrived. Month-gated so
+  // future-dated raises never leak into any Compute. Single-field query → no composite index.
+  async function applyDueRaises(subjectType) {
+    const nm = nowMonth();
+    const snap = await db.collection('pending_raises').where('status', '==', 'scheduled').get().catch(() => ({ docs: [] }));
+    const due = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .filter(r => r.subjectType === subjectType && (r.effectiveMonth || r.effectiveDate.slice(0, 7)) <= nm);
+    for (const r of due) { try { await materialize(r.id); } catch (e) { console.error('applyDueRaises', r.id, e); } }
+    return due.length;
+  }
+
+  // President approves a pending_approval request → schedule (+ apply if already due).
+  async function approve(raiseId) {
+    const ref = db.collection('pending_raises').doc(raiseId);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data().status !== 'pending_approval') return 'stale'; // re-entrancy guard
+    const u = window.currentUser || auth.currentUser || {};
+    await ref.update({
+      status: 'scheduled', approvedBy: u.uid,
+      approvedByName: window.userProfile?.displayName || u.email || 'President',
+      approvedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    const r = snap.data();
+    await safeNotify(() => Notifs.send(r.requestedBy, { title: '✅ Raise Approved',
+      body: `Your raise request for ${r.subjectName} was approved.`, icon: '✅', type: 'raise_request' }));
+    if ((r.effectiveMonth || r.effectiveDate.slice(0, 7)) <= nowMonth()) await materialize(raiseId);
+    return 'approved';
+  }
+
+  async function reject(raiseId, reason) {
+    const ref = db.collection('pending_raises').doc(raiseId);
+    const snap = await ref.get();
+    if (!snap.exists || snap.data().status !== 'pending_approval') return 'stale';
+    const u = window.currentUser || auth.currentUser || {};
+    await ref.update({ status: 'rejected', rejectedBy: u.uid,
+      rejectedByName: window.userProfile?.displayName || u.email || 'President',
+      rejectedAt: firebase.firestore.FieldValue.serverTimestamp(), rejectReason: reason || '' });
+    const r = snap.data();
+    await safeNotify(() => Notifs.send(r.requestedBy, { title: '❌ Raise Declined',
+      body: `Your raise request for ${r.subjectName} was declined.${reason ? ' Reason: ' + reason : ''}`,
+      icon: '❌', type: 'raise_request' }));
+    return 'rejected';
+  }
+
+  return { submitRaise, materialize, applyDueRaises, approve, reject };
+})();
+
+// Admin list of scheduled + pending-approval raises (the SCHEDULE half of the
+// lifecycle — openRaiseHistory above stays the immutable APPLIED log).
+window.openScheduledRaises = async function() {
+  const snap = await db.collection('pending_raises').where('status','in',['scheduled','pending_approval']).get().catch(()=>({docs:[]}));
+  const list = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.effectiveDate||'').localeCompare(b.effectiveDate||''));
+  const isPres = typeof isRealPresident === 'function' && isRealPresident();
+  const render = () => {
+    const rows = !list.length
+      ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">💸</div><p>No scheduled or pending raises.</p></div>'
+      : `<div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Effective</th><th>Employee</th><th>Old → New</th><th>Status</th><th>By</th><th></th></tr></thead>
+          <tbody>${list.map(r=>`<tr data-id="${r.id}">
+            <td style="white-space:nowrap;font-size:12px">${escHtml(r.effectiveDate||'—')}</td>
+            <td style="font-weight:600">${escHtml(r.subjectName||'—')}</td>
+            <td style="white-space:nowrap">₱${fmt(r.oldAmount||0)} → <strong>₱${fmt(r.newAmount||0)}</strong></td>
+            <td><span class="badge ${r.status==='scheduled'?'badge-blue':'badge-orange'}">${r.status==='scheduled'?'Scheduled':'Pending Approval'}</span></td>
+            <td style="font-size:12px;color:var(--text-muted)">${escHtml(r.requestedByName||'—')}</td>
+            <td style="white-space:nowrap">
+              ${(r.status==='pending_approval'&&isPres)?`<button class="btn-success btn-sm sr-approve-btn" data-id="${r.id}">✓ Approve</button> <button class="btn-danger btn-sm sr-reject-btn" data-id="${r.id}">✗ Reject</button>`:''}
+            </td>
+          </tr>`).join('')}</tbody>
+        </table></div>`;
+    openModal('💸 Scheduled &amp; Pending Raises', rows, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    document.querySelectorAll('.sr-approve-btn').forEach(btn=>btn.addEventListener('click', async ()=>{
+      const r = await window.RaiseFlow.approve(btn.dataset.id);
+      Notifs.showToast(r==='approved'?'Raise approved.':'Already resolved.');
+      window.openScheduledRaises();
+    }));
+    document.querySelectorAll('.sr-reject-btn').forEach(btn=>btn.addEventListener('click', async ()=>{
+      const reason = prompt('Reason for declining (optional):')||'';
+      await window.RaiseFlow.reject(btn.dataset.id, reason);
+      Notifs.showToast('Raise declined.');
+      window.openScheduledRaises();
+    }));
+  };
+  render();
+};
 
 // ── Payroll Management ───────────────────────────
 // ── HR department hub ──────────────────────────────────────────────────
@@ -2464,6 +2648,9 @@ window.reopenPayRun = async function(month) {
 };
 
 async function renderPayrollManagement(container, currentUser, currentRole) {
+  // v12 WS23 — apply any due-dated raise BEFORE the base salary is read, so
+  // Compute/the table preview always see the current base. Safe to re-run.
+  await window.RaiseFlow.applyDueRaises('payroll').catch(()=>{});
   const [usersSnap, histSnap, delReqSnap] = await Promise.all([
     fetchUsersWithPayroll(),
     db.collection('salary_history').orderBy('month','desc').limit(200).get().catch(()=>({docs:[]})),
@@ -2494,6 +2681,15 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   const months    = [...new Set(history.map(h=>h.month))].sort().reverse();
   const thisMonth = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10)).slice(0,7); // Manila YYYY-MM
 
+  // v12 WS23 — scheduled/pending raise counts for the banner below.
+  const _prSnap = await db.collection('pending_raises').where('status','in',['scheduled','pending_approval']).get().catch(()=>({docs:[]}));
+  const _nm = thisMonth;
+  const _upcomingRaises = _prSnap.docs.filter(d=>d.data().status==='scheduled' && (d.data().effectiveMonth||'') > _nm).length;
+  const _pendingRaises  = _prSnap.docs.filter(d=>d.data().status==='pending_approval').length;
+  const raiseBanner = (_upcomingRaises||_pendingRaises)
+    ? `<div class="info-banner" style="margin:8px 0">💸 ${_upcomingRaises} scheduled raise(s) upcoming${_pendingRaises?` · ${_pendingRaises} awaiting President approval`:''}. <button class="btn-secondary btn-sm" id="pr-view-raises">View</button></div>`
+    : '';
+
   container.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
       <select id="pr-month-sel" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px">
@@ -2506,6 +2702,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         <button class="btn-secondary btn-sm" id="print-payroll-btn">🖨 Print All</button>
       </div>
     </div>
+    ${raiseBanner}
     <div id="pay-run-strip" style="margin-bottom:14px"></div>
     ${productionStaff.length?`<div style="font-size:12px;color:var(--text-2);background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:12px">🏭 <strong>${productionStaff.length}</strong> production-class worker${productionStaff.length!==1?'s are':' is'} paid <strong>weekly</strong> via Worker Payslips (HR → Payslips) and ${productionStaff.length!==1?'are':'is'} excluded from this monthly run to avoid double payment.</div>`:''}
     <div class="card">
@@ -2800,12 +2997,8 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           subjectId:   emp.id,
           subjectName: emp.displayName || emp.email,
           fieldLabel:  'Base Salary',
-          current:     emp.salary || 0,
-          applyRaise:  async (nv) => {
-            // Base salary lives in the protected payroll/{uid} doc, not the users doc.
-            await db.collection('payroll').doc(emp.id).set({ salary: nv }, { merge:true });
-            emp.salary = nv; // keep in-memory row fresh for the reload below
-          }
+          targetField: 'salary',
+          current:     emp.salary || 0
         }, currentUser, () => loadPayrollTable(month));
       });
     });
@@ -2833,7 +3026,11 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Regular staff are paid monthly here; Production workers are paid weekly via the Payslip generator.</div>
           </div>
           <div class="form-row">
-            <div class="form-group"><label>${_payClass==='production'?'Weekly Rate':'Base Salary'}</label><input id="ep-salary" type="number" value="${emp.salary||0}" inputmode="decimal"/></div>
+            <div class="form-group"><label>${_payClass==='production'?'Weekly Rate':'Base Salary'}</label>
+              <div style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface2,var(--surface));color:var(--text-muted)">
+                ₱${fmt(emp.salary||0)} · <span style="font-size:11px">change via 💸 Give Raise (approval-routed)</span>
+              </div>
+            </div>
             <div class="form-group"><label>Allowance</label><input id="ep-allow" type="number" value="${emp.allowance||0}" inputmode="decimal"/></div>
           </div>
           <div class="form-row">
@@ -2885,9 +3082,10 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         document.getElementById('save-ep-btn').addEventListener('click', async () => {
           // All pay — base, allowance, and government deductions — lives in the
           // protected payroll/{uid} doc (finance/admin write), not the users doc.
+          // v12 WS23 — base salary is NOT writable here (approval-routed via 💸
+          // Give Raise instead); this modal only edits allowance/deductions/statutory.
           await db.collection('payroll').doc(uid).set({
             payClass:   document.getElementById('ep-class')?.value === 'production' ? 'production' : 'regular',
-            salary:     parseFloat(document.getElementById('ep-salary').value)||0,
             allowance:  parseFloat(document.getElementById('ep-allow').value)||0,
             deductions: parseFloat(document.getElementById('ep-deduct').value)||0,
             sss:        parseFloat(document.getElementById('ep-sss').value)||0,
@@ -2896,7 +3094,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             tax:        parseFloat(document.getElementById('ep-tax').value)||0,
           }, {merge:true});
           if (emp) emp.payClass = document.getElementById('ep-class')?.value === 'production' ? 'production' : 'regular';
-          window.logAudit && window.logAudit('update','payroll',uid,{ salary:parseFloat(document.getElementById('ep-salary').value)||0 });
+          window.logAudit && window.logAudit('update','payroll',uid,{ allowance:parseFloat(document.getElementById('ep-allow').value)||0 });
 
           // Override tracking (v12 WS21 decision 4) — flag divergence from the
           // computed suggestion for later audit review; never blocks the save.
@@ -3003,6 +3201,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   loadPayRunStrip(thisMonth);
   document.getElementById('pr-month-sel').addEventListener('change', e => { loadPayrollTable(e.target.value); loadPayRunStrip(e.target.value); });
   document.getElementById('raise-history-btn')?.addEventListener('click', () => openRaiseHistory());
+  document.getElementById('pr-view-raises')?.addEventListener('click', () => window.openScheduledRaises());
 
   document.getElementById('gen-payroll-btn').addEventListener('click', async () => {
     const month = document.getElementById('pr-month-sel').value;
@@ -3030,6 +3229,51 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       Notifs.showToast(err.message || 'Could not compute payroll.', 'error');
     }
     loadFinanceContent(currentUser, currentRole, 'Payroll');
+  });
+
+  // v12 WS24 — the two print buttons were dead UI (no handler ever attached).
+  // Delegated on the tbody since rows re-render on every loadPayrollTable call.
+  document.getElementById('payroll-tbody').addEventListener('click', async (e) => {
+    const b = e.target.closest('.print-slip-btn'); if (!b) return;
+    const month = document.getElementById('pr-month-sel').value;
+    const runDoc = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+    const line = runDoc?.exists ? (runDoc.data().lines||[]).find(l=>l.uid===b.dataset.uid) : null;
+    let model;
+    if (line) {
+      model = window.toPayslipModel({...line, month}, 'monthly');
+      model.official = runDoc.data().state === 'disbursed';
+      model.payDateLabel = runDoc.data().disbursedAt ? new Date(runDoc.data().disbursedAt.toDate()).toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}) : '';
+    } else {
+      // Interim projection — no computed line for this month yet.
+      const emp = employees.find(u=>u.id===b.dataset.uid);
+      if (!emp) return;
+      model = window.toPayslipModel({ ...emp, uid:emp.id, month, base:emp.salary }, 'monthly');
+      model.official = false;
+    }
+    model.ytd = await window.payslipYtdMonthly(b.dataset.uid, window.bizYear?window.bizYear():new Date().getFullYear());
+    window.renderPayslipPage(model, () => window.renderFinance(currentUser, currentRole, 'Payroll'));
+  });
+  document.getElementById('print-payroll-btn').addEventListener('click', async () => {
+    const month = document.getElementById('pr-month-sel').value;
+    const runDoc = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+    const lines = runDoc?.exists ? (runDoc.data().lines||[]) : [];
+    if (!lines.length) { Notifs.showToast('No computed pay run for this month yet.','error'); return; }
+    const year = window.bizYear ? window.bizYear() : new Date().getFullYear();
+    const official = runDoc.data().state === 'disbursed';
+    const models = await Promise.all(lines.map(async l => {
+      const mdl = window.toPayslipModel({...l, month}, 'monthly');
+      mdl.official = official;
+      mdl.ytd = await window.payslipYtdMonthly(l.uid, year);
+      return mdl;
+    }));
+    const host = document.getElementById('page-content');
+    host.innerHTML = `
+      <div class="no-print" style="display:flex;gap:8px;align-items:center;margin-bottom:14px">
+        <button class="btn-secondary btn-sm" id="ps-back-btn">← Back</button>
+        <button class="btn-primary btn-sm" onclick="window.print()">🖨 Print All</button>
+      </div>
+      ${models.map(mdl => `<div class="payslip-print" style="page-break-after:always">${window.buildPayslipHTML(mdl)}</div>`).join('')}`;
+    document.getElementById('ps-back-btn').addEventListener('click', () => window.renderFinance(currentUser, currentRole, 'Payroll'));
   });
 }
 
@@ -4084,6 +4328,9 @@ async function renderFinanceCA(container, currentUser, currentRole) {
 async function renderFinanceHRProfiles(container, currentUser, currentRole) {
   const isPriv = isFinancePriv();
   container.innerHTML = '<div class="loading-placeholder">Loading worker profiles…</div>';
+  // v12 WS23 — same due-raise sweep as the monthly Payroll screen, for the
+  // worker_profile subjectType (dailyRate/hourlyRate).
+  await window.RaiseFlow.applyDueRaises('worker_profile').catch(()=>{});
 
   const now = new Date();
   const monthStr = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10)).slice(0,7); // Manila YYYY-MM
@@ -4146,25 +4393,13 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
       const profile = profiles.find(p=>p.id===btn.dataset.id);
       btn.addEventListener('click', () => {
         if (!profile) return;
-        const curDaily = profile.dailyRate || 0;
         openSalaryRaiseModal({
           subjectType: 'worker_profile',
           subjectId:   profile.id,
           subjectName: profile.name || 'Worker',
           fieldLabel:  'Daily Rate',
-          current:     curDaily,
-          applyRaise:  async (nv) => {
-            // Scale hourly by the same ratio so any custom daily↔hourly relationship
-            // is preserved; fall back to nv/8 when there's no prior daily rate.
-            const newHourly = curDaily > 0
-              ? +(((profile.hourlyRate||0) * (nv / curDaily))).toFixed(2)
-              : +(nv / 8).toFixed(2);
-            await db.collection('worker_profiles').doc(profile.id).update({
-              dailyRate: nv,
-              hourlyRate: newHourly,
-              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
-          }
+          targetField: 'dailyRate',
+          current:     profile.dailyRate || 0
         }, currentUser, () => renderFinanceHRProfiles(container,currentUser,currentRole));
       });
     });
@@ -4212,8 +4447,15 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       </select></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Hourly Rate (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">used to compute pay</span></label><input id="hrp-hourly" type="number" inputmode="decimal" step="0.01" value="${profile?.hourlyRate||(profile?.dailyRate?(profile.dailyRate/8).toFixed(2):0)}"/></div>
-      <div class="form-group"><label>Daily Rate (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">reference</span></label><input id="hrp-daily" type="number" inputmode="decimal" value="${profile?.dailyRate||0}"/></div>
+      ${isEdit ? `
+      <div class="form-group"><label>Hourly Rate (₱)</label>
+        <div style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface2,var(--surface));color:var(--text-muted)">₱${fmt(profile?.hourlyRate||(profile?.dailyRate?profile.dailyRate/8:0))}</div>
+      </div>
+      <div class="form-group"><label>Daily Rate (₱)</label>
+        <div style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface2,var(--surface));color:var(--text-muted)">₱${fmt(profile?.dailyRate||0)} · <span style="font-size:11px">change via 💸 Raise (approval-routed)</span></div>
+      </div>` : `
+      <div class="form-group"><label>Hourly Rate (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">used to compute pay</span></label><input id="hrp-hourly" type="number" inputmode="decimal" step="0.01" value="0"/></div>
+      <div class="form-group"><label>Daily Rate (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">reference</span></label><input id="hrp-daily" type="number" inputmode="decimal" value="0"/></div>`}
     </div>
     <div class="form-row">
       <div class="form-group"><label>Food Allowance (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">auto-added per day &gt;4 hrs</span></label><input id="hrp-food" type="number" inputmode="decimal" value="${profile?.foodAllowance||0}"/></div>
@@ -4265,8 +4507,13 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       department: document.getElementById('hrp-dept').value,
       employmentType: document.getElementById('hrp-emptype').value,
       workType: document.getElementById('hrp-worktype').value,
-      dailyRate: parseFloat(document.getElementById('hrp-daily').value)||0,
-      hourlyRate: parseFloat(document.getElementById('hrp-hourly').value)||0,
+      // v12 WS23 — dailyRate/hourlyRate are read-only in edit mode (change via
+      // 💸 Raise instead); the inputs don't exist in the DOM then, so omit them
+      // from the write entirely rather than reading a null element.
+      ...(isEdit ? {} : {
+        dailyRate: parseFloat(document.getElementById('hrp-daily').value)||0,
+        hourlyRate: parseFloat(document.getElementById('hrp-hourly').value)||0,
+      }),
       foodAllowance: parseFloat(document.getElementById('hrp-food').value)||0,
       issuedOn: document.getElementById('hrp-issued').value,
       allowances: {
@@ -4347,7 +4594,12 @@ async function openPayslipHistory(currentUser, currentRole) {
   const bindRows = () => {
     document.querySelectorAll('.ps-view-btn').forEach(btn => {
       const ps = list.find(p=>p.id===btn.dataset.id);
-      btn.addEventListener('click', () => ps && renderPayslipPreview(ps));
+      btn.addEventListener('click', async () => {
+        if (!ps) return;
+        const model = window.toPayslipModel(ps, 'weekly');
+        model.ytd = await window.payslipYtdWeekly(ps.workerId, (ps.payPeriodStart||'').slice(0,4) || (window.bizYear?window.bizYear():new Date().getFullYear()));
+        window.renderPayslipPage(model, () => renderFinanceHRProfiles(deptContainer(), currentUser, currentRole));
+      });
     });
     document.querySelectorAll('.ps-advance-btn').forEach(btn => onClickSafe(btn, async () => {
         const ps = list.find(p=>p.id===btn.dataset.id);
@@ -4646,9 +4898,13 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
   };
   document.getElementById('ps-ca')?.addEventListener('input', updateCaRemaining);
 
-  document.getElementById('ps-preview-btn').addEventListener('click', () => {
+  document.getElementById('ps-preview-btn').addEventListener('click', async () => {
     const d = collectPayslipData(profile, currentUser);
-    if (d) previewPayslip(d);
+    if (!d) return;
+    const model = window.toPayslipModel(d, 'weekly');
+    model.official = false; // never yet saved — a draft/projection by construction
+    model.ytd = await window.payslipYtdWeekly(profile.id, (d.payPeriodStart||'').slice(0,4) || (window.bizYear?window.bizYear():new Date().getFullYear()));
+    window.renderPayslipPage(model, () => renderFinanceHRProfiles(deptContainer(), currentUser, currentRole));
   });
 
   document.getElementById('ps-save-btn').addEventListener('click', async () => {
@@ -4667,7 +4923,9 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     // Note: the general-ledger entry is posted when the payslip is "Submitted" (see openPayslipHistory).
     closeModal();
     Notifs.showToast('Payslip saved as draft! Verify and file it from Payslip History.');
-    setTimeout(() => renderPayslipPreview({...d, id: ref.id}, true), 400);
+    const model = window.toPayslipModel({...d, id: ref.id}, 'weekly');
+    model.ytd = await window.payslipYtdWeekly(profile.id, (d.payPeriodStart||'').slice(0,4) || (window.bizYear?window.bizYear():new Date().getFullYear()));
+    setTimeout(() => window.renderPayslipPage(model, () => renderFinanceHRProfiles(deptContainer(), currentUser, currentRole)), 400);
   });
 }
 
@@ -4749,6 +5007,7 @@ function collectPayslipData(profile, currentUser) {
       govt: { sss, philhealth: ph, pagibig: pib, total: govTotal },
       other: { cashAdvance: ca, loans, taxes: tax, total: otherTotal }
     },
+    employerShare: null, // v12 WS24 decision 3 — weekly ER manual-only for now; WS21/WS39 may populate later
     caBalanceBefore,
     caBalanceAfter,
     totalDeductions,
@@ -4759,292 +5018,205 @@ function collectPayslipData(profile, currentUser) {
   };
 }
 
-function previewPayslip(data) {
-  const html = buildPayslipHTML(data);
-  const win = window.open('','_blank','width=900,height=700');
-  if (!win) { Notifs.showToast('Allow popups to preview','error'); return; }
-  win.document.write(html);
-  win.document.close();
-}
-
-function renderPayslipPreview(ps, showExport = false) {
-  const html = buildPayslipHTML(ps);
-  const win = window.open('','_blank','width=900,height=700');
-  if (!win) { Notifs.showToast('Allow popups to view payslip','error'); return; }
-  win.document.write(html);
-  win.document.close();
-}
-
-function buildPayslipHTML(d) {
-  const f = n => (parseFloat(n)||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
-  const fmtD = s => { if(!s) return '—'; const dt=new Date(s); return dt.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}); };
-  const co = d.company || 'Barro Kitchens';
-  const sched = d.schedule || [];
-  // Shared letterhead (v12 WS14) — BIR entity (DTI trade name + real TIN), same
-  // identity this payslip has always printed; only the markup/CSS is shared now.
-  const _lh = window.buildLetterhead ? window.buildLetterhead({
-    docTitle: 'PAYSLIP',
-    entity: window.brandEntity ? window.brandEntity('bir') : null,
-    accent: '#1a237e',
-    dateLabel: 'Pay Date: ' + fmtD(d.payDate),
-    // Keeps the two names this payslip already captures (worker ack + preparer,
-    // fed from the send-payslip form) and adds the President slot the old
-    // hand-rolled table never had — a straight swap to blank Finance/HR labels
-    // here would have thrown away live data for no gain.
-    signatures: [
-      { label: 'Acknowledged by', name: d.workerName || '',   title: 'Employee' },
-      { label: 'Prepared by',     name: d.preparedBy || '',   title: 'Finance' },
-      { label: 'Approved by',     name: (window.BRAND && window.BRAND.legal.signatory.name) || '', title: 'President' }
-    ],
-    footerNote: 'System-generated payslip · ' + ((window.BRAND && window.BRAND.name) || 'Barro Industries') + ' · ' + new Date().toLocaleString('en-PH')
-  }) : null;
-
-  return `<!DOCTYPE html><html><head>
-<meta charset="UTF-8"/>
-<title>Payslip — ${escHtml(d.workerName)}</title>
-<style>
-  * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #f0f0f0; }
-  .page { width:210mm; min-height:297mm; margin:0 auto; background:#fff; padding:12mm; }
-  table { width:100%; border-collapse:collapse; }
-  td, th { border:1px solid #000; padding:3px 5px; vertical-align:middle; font-size:10px; }
-  .header-top { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
-  .company-logo { width:60px; height:60px; object-fit:contain; border:2px solid #000; padding:2px; flex-shrink:0; }
-  .company-name { font-size:22px; font-weight:900; letter-spacing:1px; }
-  .company-sub { font-size:9px; line-height:1.6; }
-  .section-header { background:#1a237e; color:#fff; font-weight:700; font-size:10px; padding:4px 6px; text-transform:uppercase; letter-spacing:.05em; }
-  .field-label { font-weight:700; font-size:9px; text-transform:uppercase; color:#333; }
-  .value-cell { font-weight:600; }
-  .number-cell { text-align:right; }
-  .total-row td { font-weight:700; background:#e3f2fd; }
-  .gross-row td { font-weight:800; font-size:12px; background:#1a237e; color:#fff; }
-  .net-row td { font-weight:800; font-size:13px; background:#ffeb3b; color:#000; }
-  .section-divider { background:#e0e0e0; }
-  .no-border td, .no-border th { border:none; }
-  .sig-line { border-top:1px solid #000; margin-top:30px; font-size:9px; text-align:center; }
-  .export-bar { position:fixed; top:0; left:0; right:0; background:#1a237e; color:#fff; padding:10px 20px; display:flex; gap:10px; align-items:center; z-index:999; }
-  .export-bar button { background:#fff; color:#1a237e; border:none; padding:6px 16px; border-radius:6px; font-weight:700; font-size:12px; cursor:pointer; }
-  .export-bar button:hover { background:#e3f2fd; }
-  @media print {
-    .export-bar { display:none !important; }
-    body { background:#fff; }
-    .page { padding:8mm; }
+// ═══════════════════════════════════════════════════════════
+//  THE PAYSLIP — ONE branded template (v12 WS24)
+//  toPayslipModel normalizes either cycle's raw source into ONE PayslipModel;
+//  buildPayslipHTML renders that model; renderPayslipPage hosts it in-app
+//  (no pop-ups — same-document window.print(), per the owner's directive).
+// ═══════════════════════════════════════════════════════════
+window.toPayslipModel = function(source, kind) {
+  const g = (o,a,b)=> (o?.[a] ?? o?.[b] ?? 0);            // casing-tolerant getter (WS21 D6 canonical lowercase)
+  if (kind === 'monthly') {
+    // source = a frozen pay_runs line OR a salary_history mirror doc (same field set)
+    const base = source.base ?? source.salary ?? 0;
+    const allowance = source.allowance ?? 0;
+    const ee = { sss:g(source,'sss'), philhealth:g(source,'philhealth','philHealth'),
+                 pagibig:g(source,'pagibig','pagIbig'), tax:source.tax??0 };
+    const er = source.er ? { sss:source.er.sss||0, philhealth:source.er.philhealth||0, pagibig:source.er.pagibig||0 } : null;
+    const gross = base + allowance;
+    const eeTotal = ee.sss+ee.philhealth+ee.pagibig+ee.tax;
+    const other = source.otherDeductions ?? source.deductions ?? 0;
+    const caBefore = source.caBalance ?? source.caBalanceBefore ?? 0;
+    const caInst = source.caPlanned ?? source.caDeducted ?? 0;
+    return {
+      kind:'monthly', official:true,
+      docNumber:`PS-${source.month || source.runMonth}-${source.uid || source.userId}`,
+      periodLabel:new Date((source.month||source.runMonth)+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'}),
+      payDateLabel: source.payDateLabel || '',
+      employee:{ name:source.name||source.userName||'', idNumber:source.employeeId||'',
+                 jobTitle:source.title||'', department:source.department||'',
+                 tin:'', sss:'', philhealth:'', pagibig:'' },
+      earnings:{ base, allowance, overtime:0, gross },
+      statutory:{ ee, er },
+      otherDeductions:other,
+      ca:{ before:caBefore, installment:caInst, after:Math.max(0, caBefore-caInst) },
+      net: source.finalPay ?? (gross - eeTotal - other - caInst),
+      ytd:{ gross:0, net:0, thirteenthAccrual:0 },   // filled by caller (needs the year query)
+      performance: (source.kpiScore!=null||source.perfFactor!=null)
+        ? { kpi:source.kpiScore||0, att:source.attScore||0, perfFactor:source.perfFactor??1, policy:source.policy||'flat' } : null,
+      timeLog:null,
+      signatures:[{label:'Prepared by',name:'',title:'Finance'},{label:'Verified by',name:'',title:'HR'},{label:'Approved by',name:(window.BRAND&&window.BRAND.legal.signatory.name)||'',title:'President'}],
+      proofUrl:''
+    };
   }
-${_lh ? _lh.printCSS : ''}
-</style>
-</head><body>
-<div class="export-bar">
-  <span style="font-weight:700">📄 Payslip — ${escHtml(d.workerName)}</span>
-  <button onclick="window.print()">🖨 Save as PDF / Print</button>
-  <button onclick="downloadJPEG()">📷 Save as JPEG</button>
-  ${d.proofUrl ? `<a href="${safeHttpUrl(d.proofUrl)}" target="_blank" style="color:#FFD60A;font-weight:600;margin-left:8px">📎 Transfer Proof</a>` : ''}
-  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,0.15);color:#fff">✕ Close</button>
-</div>
-<div style="height:48px"></div>
-<div class="page" id="payslip-page">
-  ${_lh ? _lh.headerHTML : `
-  <div class="header-top">
-    <img src="icons/barro-industries.png" class="company-logo" onerror="this.style.display='none'" alt=""/>
-    <div>
-      <div class="company-name">${escHtml(co.toUpperCase())}</div>
-      <div class="company-sub">
-        NEILBARRO STEEL &amp; METAL FABRICATION SERVICES<br/>
-        PUROK 6, CARLATAN, 2500, CITY OF SAN FERNANDO, LA UNION, PHILIPPINES<br/>
-        CONTACT: NEIL BARRO, 0927-683-6300<br/>
-        TIN: 951-145-613-000
-      </div>
+  // kind === 'weekly'  (source = a payslips/{id} doc)
+  const dg = source.deductions?.govt || {};
+  const ee = { sss:dg.sss||0, philhealth:g(dg,'philhealth')||0, pagibig:g(dg,'pagibig')||0, tax:source.deductions?.other?.taxes||0 };
+  const er = source.employerShare ? { sss:source.employerShare.sss||0, philhealth:source.employerShare.philhealth||0, pagibig:source.employerShare.pagibig||0 } : null;
+  return {
+    kind:'weekly', official:true, docNumber:source.id||'',
+    periodLabel:`${source.payPeriodStart||''} – ${source.payPeriodEnd||''}`,
+    payDateLabel:source.payDate||'',
+    employee:{ name:source.workerName||'', idNumber:source.workerIdNum||'', jobTitle:source.jobTitle||'',
+               department:source.department||'', tin:source.tinNum||'', sss:source.ssNum||'',
+               philhealth:source.phNum||'', pagibig:source.pagibigNum||'' },
+    earnings:{ base:source.regular?.total||0, allowance:source.allowances?.total||0, overtime:source.overtime?.total||0,
+               gross:source.grossPay||0 },
+    statutory:{ ee, er },
+    otherDeductions:(source.deductions?.other?.loans||0),
+    ca:{ before:source.caBalanceBefore||0, installment:source.deductions?.other?.cashAdvance||0, after:source.caBalanceAfter||0 },
+    net:source.netPay||0,
+    ytd:{ gross:0, net:0, thirteenthAccrual:0 },   // filled by caller (weekly year query)
+    performance:null,
+    timeLog:source.schedule||[],
+    signatures:[{label:'Prepared by',name:source.preparedBy||'',title:'Finance'},{label:'Verified by',name:'',title:'HR'},{label:'Approved by',name:(window.BRAND&&window.BRAND.legal.signatory.name)||'',title:'President'}],
+    proofUrl:source.proofUrl||''
+  };
+};
+
+// YTD helpers — display-computed each render, never stored on the payslip.
+window.payslipYtdMonthly = async function(uid, year) {
+  const snap = await db.collection('salary_history').where('userId','==',uid)
+    .where('month','>=',`${year}-01`).where('month','<=',`${year}-12`).get().catch(()=>({docs:[]}));
+  let gross=0, net=0, baseSum=0;
+  snap.docs.forEach(d=>{ const r=d.data(); const b=r.base??r.salary??0;
+    baseSum+=b; gross+=b+(r.allowance||0); net+=(r.finalPay??r.netPay??0); });
+  return { gross, net, thirteenthAccrual: Math.round((baseSum/12)*100)/100 };   // WS21 D7
+};
+window.payslipYtdWeekly = async function(workerId, year) {
+  const snap = await db.collection('payslips').where('workerId','==',workerId)
+    .where('payPeriodStart','>=',`${year}-01-01`).where('payPeriodStart','<=',`${year}-12-31`).get().catch(()=>({docs:[]}));
+  let gross=0, net=0, baseSum=0;
+  snap.docs.forEach(d=>{ const r=d.data(); baseSum+=r.regular?.total||0; gross+=r.grossPay||0; net+=r.netPay||0; });
+  return { gross, net, thirteenthAccrual: Math.round((baseSum/12)*100)/100 };
+};
+
+// The ONE branded template — renders a PayslipModel to inner HTML (no <html>
+// wrapper; hosted by renderPayslipPage inside #page-content).
+window.buildPayslipHTML = function(model) {
+  const f = n => (parseFloat(n)||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const m = model, s = m.statutory, er = s.er;
+  const erCell = k => er ? f(er[k]) : '—';
+  const badge = m.official ? '' : `<div class="ps-badge-proj">PROJECTION — not yet disbursed</div>`;
+  // Payslips are BIR/DOLE-facing — DTI trade name + real TIN (matches what this
+  // template has always printed, and WS14's own resolution for this doc type).
+  const _lh = window.buildLetterhead ? window.buildLetterhead({
+    docTitle: 'PAYSLIP', entity: window.brandEntity ? window.brandEntity('bir') : null,
+    accent: '#1a237e', docNumber: m.docNumber, dateLabel: m.periodLabel,
+    signatures: m.signatures,
+    footerNote: 'System-generated payslip · ' + escHtml(m.docNumber) + ' · ' + escHtml(m.periodLabel)
+  }) : null;
+  const perf = m.performance ? `
+    <div class="ps-sec-h">Performance</div>
+    <table class="ps-t">
+      <tr><td>Task KPI (70%)</td><td class="num">${Math.round(m.performance.kpi*100)}%</td></tr>
+      <tr><td>Attendance (30%)</td><td class="num">${Math.round(m.performance.att*100)}%</td></tr>
+      <tr class="ps-sub"><td>Performance factor (policy: ${escHtml(m.performance.policy)})</td><td class="num">${m.performance.perfFactor.toFixed(2)}×</td></tr>
+    </table>` : '';
+  const timelog = (m.timeLog && m.timeLog.length) ? `
+    <div class="ps-sec-h">Daily Time Log</div>
+    <table class="ps-t"><thead><tr><th>Day</th><th>Time In</th><th>Time Out</th><th class="num">Hours</th></tr></thead>
+    <tbody>${m.timeLog.map(r=>`<tr><td>${escHtml(r.day)}</td><td>${escHtml(r.timeIn||'—')}</td><td>${escHtml(r.timeOut||'—')}</td><td class="num">${(r.hours||0).toFixed(2)}</td></tr>`).join('')}</tbody></table>` : '';
+  return `
+  ${_lh ? `<style>${_lh.printCSS}</style>` : ''}
+  ${_lh ? _lh.headerHTML : `<div class="lh-head"><div class="lh-name">${escHtml((window.BRAND&&window.BRAND.legal.dtiName)||'')}</div><div class="lh-doc"><div class="lh-title">PAYSLIP</div><div class="lh-no">${escHtml(m.docNumber)}</div><div class="lh-date">${escHtml(m.periodLabel)}</div></div></div>`}
+  ${badge}
+  <div class="ps-sec-h">Employee</div>
+  <table class="ps-t">
+    <tr><td class="lbl">Name</td><td>${escHtml(m.employee.name)}</td><td class="lbl">TIN</td><td>${escHtml(m.employee.tin)}</td></tr>
+    <tr><td class="lbl">ID</td><td>${escHtml(m.employee.idNumber)}</td><td class="lbl">SSS</td><td>${escHtml(m.employee.sss)}</td></tr>
+    <tr><td class="lbl">Job Title</td><td>${escHtml(m.employee.jobTitle)}</td><td class="lbl">PhilHealth</td><td>${escHtml(m.employee.philhealth)}</td></tr>
+    <tr><td class="lbl">Department</td><td>${escHtml(m.employee.department)}</td><td class="lbl">Pag-IBIG</td><td>${escHtml(m.employee.pagibig)}</td></tr>
+    <tr><td class="lbl">Pay Period</td><td>${escHtml(m.periodLabel)}</td><td class="lbl">Pay Date</td><td>${escHtml(m.payDateLabel||'—')}</td></tr>
+  </table>
+
+  <div class="ps-sec-h">Earnings</div>
+  <table class="ps-t">
+    <tr><td>Basic Pay</td><td class="num">${f(m.earnings.base)}</td></tr>
+    <tr><td>Allowances</td><td class="num">${f(m.earnings.allowance)}</td></tr>
+    ${m.earnings.overtime?`<tr><td>Overtime</td><td class="num">${f(m.earnings.overtime)}</td></tr>`:''}
+    <tr class="ps-gross"><td>Gross Pay</td><td class="num">${f(m.earnings.gross)}</td></tr>
+  </table>
+
+  <div class="ps-sec-h">Deductions &amp; Contributions</div>
+  <table class="ps-t">
+    <thead><tr><th>Contribution</th><th class="num">Employee</th><th class="num">Employer</th></tr></thead>
+    <tbody>
+      <tr><td>SSS</td><td class="num">${f(s.ee.sss)}</td><td class="num">${erCell('sss')}</td></tr>
+      <tr><td>PhilHealth</td><td class="num">${f(s.ee.philhealth)}</td><td class="num">${erCell('philhealth')}</td></tr>
+      <tr><td>Pag-IBIG</td><td class="num">${f(s.ee.pagibig)}</td><td class="num">${erCell('pagibig')}</td></tr>
+      <tr><td>Withholding Tax</td><td class="num">${f(s.ee.tax)}</td><td class="num">—</td></tr>
+      ${m.otherDeductions?`<tr><td>Other Deductions</td><td class="num">${f(m.otherDeductions)}</td><td class="num">—</td></tr>`:''}
+    </tbody>
+  </table>
+
+  <div class="ps-sec-h">Cash Advance</div>
+  <table class="ps-t">
+    <tr><td>Balance (before)</td><td class="num">${f(m.ca.before)}</td></tr>
+    <tr><td>Installment this period</td><td class="num">${f(m.ca.installment)}</td></tr>
+    <tr class="ps-sub"><td>Balance (after)</td><td class="num">${f(m.ca.after)}</td></tr>
+  </table>
+
+  ${perf}
+
+  <table class="ps-t ps-net-t">
+    <tr class="ps-net"><td>NET PAY</td><td class="num">₱${f(m.net)}</td></tr>
+  </table>
+
+  <div class="ps-sec-h">Year to Date (${escHtml(String((window.bizYear?window.bizYear():new Date().getFullYear())))})</div>
+  <table class="ps-t">
+    <tr><td>YTD Gross</td><td class="num">${f(m.ytd.gross)}</td></tr>
+    <tr><td>YTD Net</td><td class="num">${f(m.ytd.net)}</td></tr>
+    <tr class="ps-sub"><td>13th-Month Accrual (est.)</td><td class="num">${f(m.ytd.thirteenthAccrual)}</td></tr>
+  </table>
+
+  ${timelog}
+
+  ${_lh ? _lh.footerHTML : `<div class="ps-sigs">${m.signatures.map(sig=>`<div class="ps-sig"><div class="ps-sig-line">${escHtml(sig.name||'')}</div><div class="ps-sig-lbl">${escHtml(sig.label)}${sig.title?` — ${escHtml(sig.title)}`:''}</div></div>`).join('')}</div>`}
+  `;
+};
+
+// Full in-app page, no pop-ups (owner directive) — prints via same-document window.print().
+window.renderPayslipPage = function(model, backFn) {
+  const host = document.getElementById('page-content');
+  host.innerHTML = `
+    <div class="no-print" style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+      <button class="btn-secondary btn-sm" id="ps-back-btn">← Back</button>
+      <button class="btn-primary btn-sm" onclick="window.print()">🖨 Print / Save PDF</button>
+      <button class="btn-secondary btn-sm" id="ps-jpeg-btn">📷 Save as JPEG</button>
+      ${model.proofUrl?`<a class="btn-secondary btn-sm" href="${safeHttpUrl(model.proofUrl)}" target="_blank">📎 Transfer Proof</a>`:''}
     </div>
-  </div>`}
-  <div style="border:2px solid #000;padding:0;margin-top:4px">
+    <div class="payslip-print">${buildPayslipHTML(model)}</div>`;
+  document.getElementById('ps-back-btn').addEventListener('click', ()=> (backFn ? backFn() : history.back()));
+  document.getElementById('ps-jpeg-btn')?.addEventListener('click', () => window.downloadPayslipJPEG(model));
+  if (window.lucide) lucide.createIcons();
+};
 
-    <!-- Employee Information -->
-    <div class="section-header">Employee Information</div>
-    <table>
-      <tr>
-        <td class="field-label" style="width:15%">Full Name</td>
-        <td class="value-cell" style="width:35%">${escHtml(d.workerName||'')}</td>
-        <td class="field-label" style="width:10%">TIN</td>
-        <td style="width:40%">${escHtml(d.tinNum||'')}</td>
-      </tr>
-      <tr>
-        <td class="field-label">ID Number</td><td>${escHtml(d.workerIdNum||'')}</td>
-        <td class="field-label">PhilHealth</td><td>${escHtml(d.phNum||'')}</td>
-      </tr>
-      <tr>
-        <td class="field-label">Job Title</td><td>${escHtml(d.jobTitle||'')}</td>
-        <td class="field-label">SSS</td><td>${escHtml(d.ssNum||'')}</td>
-      </tr>
-      <tr>
-        <td class="field-label">Department</td><td>${escHtml(d.department||'')}</td>
-        <td class="field-label">PAG IBIG</td><td>${escHtml(d.pagibigNum||'')}</td>
-      </tr>
-    </table>
-
-    <!-- Pay Period -->
-    <div class="section-header">Pay Period Details</div>
-    <table>
-      <tr>
-        <td class="field-label" style="width:20%">Pay Period Covered</td>
-        <td style="width:30%">${fmtD(d.payPeriodStart)} – ${fmtD(d.payPeriodEnd)}</td>
-        <td class="field-label" style="width:15%">Pay Date</td>
-        <td>${fmtD(d.payDate)}</td>
-      </tr>
-    </table>
-
-    <!-- Earnings -->
-    <div class="section-header">Earnings</div>
-    <table>
-      <tr>
-        <th style="width:22%;text-align:center">Regular</th>
-        <th style="width:10%;text-align:right"></th>
-        <th style="width:16%;text-align:center">Overtime</th>
-        <th style="width:10%;text-align:right"></th>
-        <th style="width:22%;text-align:center">Allowances:</th>
-        <th style="width:10%;text-align:right"></th>
-      </tr>
-      <tr>
-        <td class="field-label">Daily Rate</td>
-        <td class="number-cell">${f(d.regular?.dailyRate)}</td>
-        <td class="field-label">OT Rate/hr</td>
-        <td class="number-cell">${f(d.overtime?.ratePerHr)}</td>
-        <td class="field-label">Transport</td>
-        <td class="number-cell">${(d.allowances?.transport||0)>0?f(d.allowances.transport):'-'}</td>
-      </tr>
-      <tr>
-        <td class="field-label">Rate/HR</td>
-        <td class="number-cell">${f(d.regular?.ratePerHr)}</td>
-        <td class="field-label">OT Hours</td>
-        <td class="number-cell">${(d.overtime?.hours||0)>0?f(d.overtime.hours):'-'}</td>
-        <td class="field-label">Meal</td>
-        <td class="number-cell">${(d.allowances?.meal||0)>0?f(d.allowances.meal):'-'}</td>
-      </tr>
-      <tr>
-        <td class="field-label">HRS Worked</td>
-        <td class="number-cell">${f(d.regular?.hrsWorked)}</td>
-        <td class="field-label" colspan="2"></td>
-        <td class="field-label">Rent</td>
-        <td class="number-cell">${(d.allowances?.rent||0)>0?f(d.allowances.rent):'-'}</td>
-      </tr>
-      <tr class="total-row">
-        <td>Total:</td><td class="number-cell">${f(d.regular?.total)}</td>
-        <td>Total:</td><td class="number-cell">${(d.overtime?.total||0)>0?f(d.overtime.total):'-'}</td>
-        <td>Total:</td><td class="number-cell">${(d.allowances?.total||0)>0?f(d.allowances.total):'-'}</td>
-      </tr>
-      <tr class="gross-row">
-        <td colspan="2" style="text-align:right">Total Gross Pay</td>
-        <td colspan="4" style="text-align:center;font-size:14px">${f(d.grossPay)}</td>
-      </tr>
-    </table>
-
-    <!-- Deductions -->
-    <div class="section-header">Deductions</div>
-    <table>
-      <tr>
-        <th style="width:22%;text-align:center">Government Mandatory</th>
-        <th style="width:10%"></th>
-        <th style="width:28%;text-align:center" colspan="2">Other Deductions:</th>
-        <th style="width:20%;text-align:center">Company Charges</th>
-        <th style="width:10%"></th>
-      </tr>
-      <tr>
-        <td class="field-label">SSS</td>
-        <td class="number-cell">${(d.deductions?.govt?.sss||0)>0?f(d.deductions.govt.sss):''}</td>
-        <td class="field-label">Cash Advance</td>
-        <td class="number-cell">${(d.deductions?.other?.cashAdvance||0)>0?f(d.deductions.other.cashAdvance):''}</td>
-        <td class="field-label">Company Charges</td>
-        <td></td>
-      </tr>
-      <tr>
-        <td class="field-label">PhilHealth</td>
-        <td class="number-cell">${(d.deductions?.govt?.philhealth||0)>0?f(d.deductions.govt.philhealth):''}</td>
-        <td class="field-label">Loans</td>
-        <td class="number-cell">${(d.deductions?.other?.loans||0)>0?f(d.deductions.other.loans):''}</td>
-        <td class="field-label">Taxes</td>
-        <td class="number-cell">${(d.deductions?.other?.taxes||0)>0?f(d.deductions.other.taxes):''}</td>
-      </tr>
-      <tr>
-        <td class="field-label">Pag-IBIG</td>
-        <td class="number-cell">${(d.deductions?.govt?.pagibig||0)>0?f(d.deductions.govt.pagibig):''}</td>
-        <td colspan="4"></td>
-      </tr>
-      <tr class="total-row">
-        <td>Total</td><td class="number-cell">${(d.deductions?.govt?.total||0)>0?f(d.deductions.govt.total):'-'}</td>
-        <td>Total</td><td class="number-cell">${(d.deductions?.other?.total||0)>0?f(d.deductions.other.total):'-'}</td>
-        <td colspan="2"></td>
-      </tr>
-    </table>
-    <table>
-      <tr class="total-row">
-        <td style="width:30%;font-weight:700">Total Deductions</td>
-        <td class="number-cell">${f(d.totalDeductions)}</td>
-        <td colspan="2"></td>
-      </tr>
-      <tr style="background:#bbdefb;">
-        <td style="font-weight:800;font-size:12px">TOTAL PAY</td>
-        <td class="number-cell" style="font-weight:800;font-size:12px">${f(d.totalPay)}</td>
-        <td colspan="2"></td>
-      </tr>
-      <tr>
-        <td class="field-label">PAID</td>
-        <td class="number-cell">${(d.paid||0)>0?f(d.paid):'-'}</td>
-        <td colspan="2"></td>
-      </tr>
-      <tr class="net-row">
-        <td>NET PAY:</td>
-        <td class="number-cell">${f(d.netPay)}</td>
-        <td colspan="2"></td>
-      </tr>
-    </table>
-
-    <!-- Signatures -->
-    ${_lh ? _lh.footerHTML : `
-    <table style="margin-top:4px">
-      <tr>
-        <td style="padding:24px 10px 6px;text-align:center;width:33%">
-          <div style="border-top:1px solid #000;padding-top:4px">${escHtml(d.workerName||'')}</div>
-          <div style="font-size:9px;color:#555">Acknowledged By</div>
-        </td>
-        <td style="padding:24px 10px 6px;width:34%"></td>
-        <td style="padding:24px 10px 6px;text-align:center;width:33%">
-          <div style="border-top:1px solid #000;padding-top:4px">${escHtml(d.preparedBy||'')}</div>
-          <div style="font-size:9px;color:#555">Prepared By</div>
-        </td>
-      </tr>
-    </table>`}
-
-    <!-- Schedule -->
-    <div class="section-header" style="margin-top:4px">Daily Time Log</div>
-    <table>
-      <tr>${(d.schedule||[]).map(s=>`<th style="text-align:center;font-size:9px">${s.day}</th>`).join('')}</tr>
-      <tr>${(d.schedule||[]).map(s=>`<td style="text-align:center;font-size:8px">${s.timeIn&&s.timeOut?`${s.timeIn}–${s.timeOut}`:'REST'}</td>`).join('')}</tr>
-      <tr>${(d.schedule||[]).map(s=>`<td style="text-align:center;font-size:9px;font-weight:700">${(s.hours||0).toFixed?s.hours.toFixed(2):s.hours} hrs</td>`).join('')}</tr>
-    </table>
-    ${d.proofUrl ? `<div class="section-header" style="margin-top:8px">Transfer Confirmation</div>
-    <div style="border:1px solid #000;border-top:none;padding:8px;text-align:center;page-break-inside:avoid">
-      <img src="${safeHttpUrl(d.proofUrl)}" alt="Transfer confirmation" crossorigin="anonymous" style="max-width:100%;max-height:120mm;object-fit:contain" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"/>
-      <div style="display:none;font-size:10px;color:#555">Proof on file: <a href="${safeHttpUrl(d.proofUrl)}" target="_blank">${escHtml(d.proofUrl)}</a></div>
-    </div>` : ''}
-  </div>
-</div>
-<script>
-async function downloadJPEG() {
-  const btn = document.querySelector('.export-bar button:nth-child(3)');
-  if(btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
-  // Load html2canvas from CDN
+// JPEG export — migrated from the old popup's inline script to the in-page container.
+window.downloadPayslipJPEG = async function(model) {
+  const btn = document.getElementById('ps-jpeg-btn');
+  if (btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
   if (!window.html2canvas) {
     await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
   }
-  const el = document.getElementById('payslip-page');
+  const el = document.querySelector('.payslip-print');
   const canvas = await html2canvas(el, { scale:2, useCORS:true, backgroundColor:'#fff', logging:false });
   const link = document.createElement('a');
-  link.download = 'payslip-${(d.workerName||'worker').replace(/\\s+/g,'-')}-${d.payPeriodStart||''}.jpg';
+  link.download = `payslip-${(model.employee.name||'employee').replace(/\s+/g,'-')}-${(model.docNumber||'').replace(/[^a-zA-Z0-9-]/g,'')}.jpg`;
   link.href = canvas.toDataURL('image/jpeg', 0.95);
   link.click();
-  if(btn) { btn.textContent = '📷 Save as JPEG'; btn.disabled = false; }
-}
-<\/script>
-</body></html>`;
-}
+  if (btn) { btn.textContent = '📷 Save as JPEG'; btn.disabled = false; }
+};
 
 // ── Finance Overview ──────────────────────────────
 async function renderFinanceOverview(container, currentUser, currentRole) {
@@ -9699,6 +9871,7 @@ window.renderApprovals = async function(currentUser) {
     'leave':          ['president','manager','secretary'],
     'ca':             ['president','manager'],
     'ca_deduct':      ['president','manager'], // v12 WS22 — employee's CA-deduction-for-this-run request
+    'raise':          ['president'], // v12 WS23 — only the President approves/rejects a raise request
     'quote-approval': ['president','manager'],
     'finance-req':    ['president'],
     'finance-del':    ['president'],
@@ -9802,7 +9975,7 @@ window.renderApprovals = async function(currentUser) {
       // index per-collection. If that index isn't provisioned, the query is rejected and
       // silently swallowed by .catch(), making items vanish from "All Requests". We sort
       // client-side instead so a missing index can never hide pending items.
-      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2] = await Promise.all([
+      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2] = await Promise.all([
         db.collection('signup_requests').where('status','==','pending').get().catch(e=>{console.error('signup_requests query failed',e);return {docs:[]};}),
         db.collection('attendance_extensions').where('status','==','pending').get().catch(e=>{console.error('attendance_extensions query failed',e);return {docs:[]};}),
         db.collection('cash_advances').where('status','==','pending').get().catch(e=>{console.error('cash_advances query failed',e);return {docs:[]};}),
@@ -9814,7 +9987,8 @@ window.renderApprovals = async function(currentUser) {
         db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('bs_quotes delete query failed',e);return {docs:[]};}),
         db.collection('bk_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('bk_quotes delete query failed',e);return {docs:[]};}),
         db.collection('bs_clients').where('deleteRequested','==',true).get().catch(e=>{console.error('bs_clients delete query failed',e);return {docs:[]};}),
-        db.collection('leave_requests').where('status','==','pending').get().catch(e=>{console.error('leave_requests query failed',e);return {docs:[]};})
+        db.collection('leave_requests').where('status','==','pending').get().catch(e=>{console.error('leave_requests query failed',e);return {docs:[]};}),
+        db.collection('pending_raises').where('status','==','pending_approval').get().catch(e=>{console.error('pending_raises query failed',e);return {docs:[]};})
       ]);
 
       const allPending = [
@@ -9835,7 +10009,9 @@ window.renderApprovals = async function(currentUser) {
         ...delBKQSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-quote',coll:'bk_quotes',icon:'🗑',label:'BK Quote Delete Request',name:`Delete BK quote ${d.data().quoteNumber||d.id.slice(-6)}`,detail:`${d.data().clientName||''}${d.data().deleteReason?' — '+d.data().deleteReason:''}`,ts:d.data().deleteRequestedAt})),
         ...delCSnap2.docs.map(d=>({id:d.id,...d.data(),type:'delete-client',icon:'🗑',label:'Client Delete Request',name:`Delete client "${d.data().name||''}"`,detail:d.data().deleteReason||'',ts:d.data().deleteRequestedAt})),
         // Leave requests — surfaced here so every request type funnels through this page.
-        ...leaveSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'leave',icon:'🌴',label:'Leave Request',name:x.userName||'Employee',detail:`${x.days||0}d ${x.type||'leave'} · ${x.startDate||''}→${x.endDate||''}${x.reason?' — '+x.reason:''}`,ts:x.createdAt};})
+        ...leaveSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'leave',icon:'🌴',label:'Leave Request',name:x.userName||'Employee',detail:`${x.days||0}d ${x.type||'leave'} · ${x.startDate||''}→${x.endDate||''}${x.reason?' — '+x.reason:''}`,ts:x.createdAt};}),
+        // v12 WS23 — raise requests from non-president finance/HR.
+        ...raiseSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'raise',icon:'💸',label:'Raise Request',name:x.subjectName||'Employee',detail:`₱${fmt(x.oldAmount||0)} → ₱${fmt(x.newAmount||0)} · eff ${x.effectiveDate||''}${x.reason?' — '+x.reason:''}`,ts:x.createdAt};})
       ].sort((a,b)=>(b.ts?.seconds||0)-(a.ts?.seconds||0));
 
       if (!allPending.length) {
@@ -9889,6 +10065,9 @@ window.renderApprovals = async function(currentUser) {
               `:item.type==='delete-client'?`
                 <button class="btn-danger btn-sm dc-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${item.deleteRequestedBy||''}">✓ Approve Delete</button>
                 <button class="btn-secondary btn-sm dc-deny-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${item.deleteRequestedBy||''}">✗ Deny</button>
+              `:item.type==='raise'?`
+                <button class="btn-success btn-sm rz-approve-btn" data-id="${item.id}">✓ Approve</button>
+                <button class="btn-danger btn-sm rz-reject-btn" data-id="${item.id}">✗ Reject</button>
               `:item.type==='leave'?`
                 <button class="btn-success btn-sm lv-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}">✓ Approve</button>
                 <button class="btn-danger btn-sm lv-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}">✗ Reject</button>
@@ -9954,6 +10133,19 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.cad-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('approval_requests').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid, rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
           Notifs.showToast('CA deduction request rejected.');
+          loadApprovalsSub('all');
+      }));
+
+      // Raise request approve/reject (v12 WS23) — re-entrancy guarded inside RaiseFlow itself.
+      wrap.querySelectorAll('.rz-approve-btn').forEach(btn => onClickSafe(btn, async () => {
+          const r = await window.RaiseFlow.approve(btn.dataset.id);
+          Notifs.showToast(r==='approved'?'Raise approved.':'Already resolved.');
+          loadApprovalsSub('all');
+      }));
+      wrap.querySelectorAll('.rz-reject-btn').forEach(btn => onClickSafe(btn, async () => {
+          const reason = prompt('Reason for declining (optional):')||'';
+          await window.RaiseFlow.reject(btn.dataset.id, reason);
+          Notifs.showToast('Raise declined.');
           loadApprovalsSub('all');
       }));
 

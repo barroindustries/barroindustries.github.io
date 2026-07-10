@@ -397,6 +397,32 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
+    // ── Pending / scheduled raises (v12 WS23 — approval-routed schedule) ────
+    // Non-president finance may only FILE a request (status pending_approval —
+    // filing is a safe escalation, not itself money-moving, matching the
+    // secretary's existing "request President approval" pattern elsewhere).
+    // President approves → scheduled; the screen-load sweep materializes
+    // (scheduled → applied). Subject may read their own.
+    match /pending_raises/{docId} {
+      allow read: if isAuth() && (
+        resource.data.subjectId == request.auth.uid || isFinanceOrAdmin()
+      );
+      allow create: if isAuth() && (
+        isPresident()
+        || ( isFinanceOrAdmin()
+             && request.resource.data.get('status','') == 'pending_approval' )
+      );
+      allow update: if isAuth() && (
+        // Automated materialize: any finance, ONLY scheduled → applied.
+        ( isFinanceOrAdmin()
+          && resource.data.get('status','') == 'scheduled'
+          && request.resource.data.get('status','') == 'applied' )
+        // Approve / reject / cancel / reschedule: President only.
+        || isPresident()
+      );
+      allow delete: if isAuth() && isPresident();
+    }
+
     // ── Payroll CA overrides ───────────────────────────
     match /payroll_ca_overrides/{docId} {
       allow read: if isAuth() && (
@@ -849,8 +875,16 @@ service cloud.firestore {
 
     // ── Payslips & Worker profiles (Brilliant Steel) ───
     match /payslips/{docId} {
+      // v12 WS24 fix — the doc field written by collectPayslipData() is
+      // `workerId`, never `userId`; the old rule checked a field that never
+      // existed, so this owner-read branch was dead code (only finance/admin
+      // could ever read a payslip). `.get(field, default)` per the
+      // missing-field-denies hazard. `linkedUid` future-proofs WS20 D3's
+      // worker_profiles bridge — harmless if never written.
       allow read: if isAuth() && (
-        resource.data.userId == request.auth.uid || isFinanceOrAdmin()
+        resource.data.get('workerId', '') == request.auth.uid ||
+        resource.data.get('linkedUid', '') == request.auth.uid ||
+        isFinanceOrAdmin()
       );
       allow create, update: if isAuth() && isFinanceOrAdmin();
       allow delete: if isAuth() && isPresident();

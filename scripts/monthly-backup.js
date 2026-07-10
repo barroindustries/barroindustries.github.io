@@ -198,6 +198,7 @@ const EXPORTS = [
   { name:'payslips',                  filename:'payslips',                  dateField:null },
   { name:'worker_profiles',           filename:'worker_profiles',           dateField:null },
   { name:'salary_raises',             filename:'salary_raises',             dateField:null },
+  { name:'pending_raises',            filename:'pending_raises',            dateField:null }, // v12 WS23
   { name:'leave_balances',            filename:'leave_balances',            dateField:null },
   { name:'leave_requests',            filename:'leave_requests',            dateField:null },
 

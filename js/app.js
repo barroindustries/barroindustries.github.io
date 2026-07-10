@@ -4162,6 +4162,12 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   const salaryHistory = salaryHistSnap.docs.map(d=>({id:d.id,...d.data()}));
   const totalAdvance  = cashAdvances.filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
 
+  // v12 WS23 — applied raises only (salary_raises is written only at materialize,
+  // so it's inherently safe for an employee to see — no still-pending/scheduled
+  // raise ever appears here).
+  const _raiseSnap = await db.collection('salary_raises').where('subjectId','==',currentUser.uid).limit(50).get().catch(()=>({docs:[]}));
+  const myRaises = _raiseSnap.docs.map(d=>d.data()).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+
   const evalData       = evalSnap?.exists ? evalSnap.data() : {};
   const selfGrade      = evalData.selfGrade ?? null;
   // presidentGrade: manual override first, then auto-averaged from task scores
@@ -4210,17 +4216,6 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   const monthLabel = new Date(bzYear, bzMonth, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
   const kpiColor  = dispKpi>=0.8?'var(--success)':dispKpi>=0.6?'var(--warning)':'var(--danger)';
   const attColor  = dispAtt>=0.85?'var(--success)':dispAtt>=0.6?'var(--warning)':'var(--danger)';
-
-  // Cache for printPayslip()
-  window._payslipData = {
-    name: u.displayName || currentUser.email,
-    employeeId: u.employeeId || '—',
-    department: (Array.isArray(u.departments)&&u.departments.length ? u.departments.join(', ') : u.department) || '—',
-    salary: u.salary||0, allowance: u.allowance||0, deductions: u.deductions||0,
-    net, kpi: dispKpi, att: dispAtt, multiplier, computedMonth, earnedSoFar, totalAdvance, isFinalMonth,
-    monthLabel, taskPct, doneTasks: doneTasks.length, myTasksTotal: myTasks.length,
-    salaryHistory
-  };
 
   c.innerHTML = `
     <div class="page-header">
@@ -4348,7 +4343,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
         <div class="payslip-row" style="font-size:16px;font-weight:800;margin-top:8px;padding-top:8px;border-top:2px solid var(--border)">
           <span>Take-Home So Far</span><span style="color:var(--success)">₱${formatNum(Math.max(0,earnedSoFar-totalAdvance))}</span>
         </div>
-        <button class="btn-secondary" style="margin-top:14px;width:100%" onclick="printPayslip()">Generate Payslip PDF</button>
+        <button class="btn-secondary" style="margin-top:14px;width:100%" id="my-payslip-btn">Generate Payslip PDF</button>
       </div>
     </div>
 
@@ -4378,6 +4373,26 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
             </table></div>`}
       </div>
     </div>
+
+    ${myRaises.length ? `
+    <!-- Salary changes (v12 WS23) — applied raises only, never scheduled/pending -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-header"><h3>Salary Changes</h3></div>
+      <div class="card-body" style="padding:0">
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Effective</th><th>Old → New</th><th>Change</th><th>Reason</th></tr></thead>
+          <tbody>${myRaises.map(r=>{
+            const up = (r.changeAmount||0) >= 0;
+            return `<tr>
+              <td style="white-space:nowrap;font-size:12px">${escHtml(r.effectiveDate||'—')}</td>
+              <td style="white-space:nowrap">₱${formatNum(r.oldAmount||0)} → <strong>₱${formatNum(r.newAmount||0)}</strong></td>
+              <td style="white-space:nowrap;color:${up?'var(--success)':'var(--danger)'};font-weight:700">${up?'+':''}₱${formatNum(r.changeAmount||0)}${r.changePct!=null?` (${r.changePct>=0?'+':''}${r.changePct}%)`:''}</td>
+              <td style="font-size:12px">${escHtml(r.reason||'—')}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      </div>
+    </div>` : ''}
 
     <!-- Cash Advances -->
     <div class="card">
@@ -4483,6 +4498,30 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   // (its create always omitted `balance`, which firestore.rules' `balance==0`
   // check denies — the button was dead today). Replaced by the ONE shared form.
   document.getElementById('req-advance-btn')?.addEventListener('click', () => window.CashAdvance.openRequestForm());
+
+  // v12 WS24 — the ONE branded payslip template, no pop-ups. Reads the frozen
+  // salary_history mirror if this month is already disbursed (official=true);
+  // otherwise falls back to a labelled projection via the same computePayLine
+  // the real engine uses (never the old KPI×Attendance multiplier).
+  document.getElementById('my-payslip-btn')?.addEventListener('click', async () => {
+    const month = (window.bizDate?bizDate():new Date().toISOString().slice(0,10)).slice(0,7);
+    const uid = currentUser.uid, year = (window.bizYear?bizYear():new Date().getFullYear());
+    const shSnap = await db.collection('salary_history').doc(`${uid}_${month}`).get().catch(()=>null);
+    let model;
+    if (shSnap?.exists) {
+      model = window.toPayslipModel({...shSnap.data(), uid, month}, 'monthly');
+      model.official = true;
+    } else {
+      const line = window.computePayLine
+        ? window.computePayLine(userProfile, {month, projection:true, policy:'flat'})
+        : {uid, month, base:userProfile.salary||0, allowance:userProfile.allowance||0, name:userProfile.displayName};
+      model = window.toPayslipModel({...line, uid, month}, 'monthly');
+      model.official = false;
+    }
+    model.employee.name = userProfile.displayName||''; model.employee.idNumber = userProfile.employeeId||''; model.employee.department = (userProfile.department||'');
+    model.ytd = await window.payslipYtdMonthly(uid, year);
+    window.renderPayslipPage(model, ()=>navigateTo('personal-finance'));
+  });
 
   // CA Deduction Override — employee requests how much to deduct this payroll
   // v12 WS22 decision 9 — this used to write directly to payroll_ca_overrides,
@@ -4607,26 +4646,9 @@ async function getAttendanceScore(uid) {
   } catch { return 0.5; }
 }
 
-function printPayslip() {
-  const pd = window._payslipData;
-  if (!pd) { Notifs?.showToast('Load your Finance page first.','error'); return; }
-  const now = new Date();
-  const STYLES = `*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Helvetica Neue',Arial,sans-serif;padding:40px;color:#1a1a2e;background:#fff;max-width:720px;margin:0 auto}.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:20px;border-bottom:3px solid #1a237e}.company{font-size:22px;font-weight:900;color:#1a237e;letter-spacing:-0.5px}.company-sub{font-size:11px;color:#666;margin-top:2px}.payslip-label{background:#1a237e;color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:4px;letter-spacing:1px;text-transform:uppercase}.emp-info{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;background:#f5f6fa;border-radius:8px;padding:16px;margin-bottom:20px}.emp-info .label{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px}.emp-info .value{font-size:13px;font-weight:700;color:#1a1a2e}.stitle{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:#888;font-weight:700;margin-bottom:8px;margin-top:20px}table{width:100%;border-collapse:collapse;margin-bottom:4px}td{padding:8px 10px;font-size:13px;border-bottom:1px solid #eef0f5}td:last-child{text-align:right}.tr td{font-weight:700;font-size:15px;background:#f5f6fa;border-bottom:none}.hr td{background:#e8eaf6;font-weight:800;font-size:15px;color:#1a237e;border:none}.pos{color:#2e7d32}.neg{color:#c62828}.ms{background:#f5f6fa;border-radius:8px;padding:12px 14px;margin:12px 0}.mr{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:#555}.ss{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:36px}.sl{border-top:1px solid #aaa;padding-top:6px;text-align:center;font-size:11px;color:#888}.footer{margin-top:28px;padding-top:12px;border-top:1px solid #eee;font-size:10px;color:#aaa;text-align:center}@media print{body{padding:20px}button{display:none!important}}`;
-  const w = window.open('','_blank');
-  w.document.write(`<!DOCTYPE html><html><head><title>Payslip — ${escHtml(pd.name)}</title><style>${STYLES}</style></head><body>
-<div class="header"><div><div class="company">BARRO INDUSTRIES</div><div class="company-sub">Employee Payslip</div></div><div style="text-align:right"><div class="payslip-label">Payslip</div><div style="font-size:12px;color:#666;margin-top:6px">Period: ${pd.monthLabel}</div><div style="font-size:11px;color:#999">Generated: ${now.toLocaleDateString('en-PH')}</div></div></div>
-<div class="emp-info"><div><div class="label">Employee Name</div><div class="value">${escHtml(pd.name)}</div></div><div><div class="label">Employee ID</div><div class="value">${escHtml(pd.employeeId)}</div></div><div><div class="label">Department</div><div class="value">${escHtml(pd.department)}</div></div><div><div class="label">Pay Period</div><div class="value">${pd.monthLabel}</div></div></div>
-<div class="stitle">Earnings &amp; Deductions</div>
-<table><tr><td>Base Salary</td><td>₱${formatNum(pd.salary)}</td></tr><tr><td class="pos">Allowances</td><td class="pos">+₱${formatNum(pd.allowance)}</td></tr><tr><td class="neg">Deductions</td><td class="neg">-₱${formatNum(pd.deductions)}</td></tr><tr class="tr"><td><strong>Net Pay (Full Month)</strong></td><td>₱${formatNum(pd.net)}</td></tr></table>
-<div class="ms"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#666;margin-bottom:6px">${pd.isFinalMonth?'Performance Multiplier (final)':'Performance Multiplier'}</div><div class="mr"><span>Task KPI (70%)</span><span>${Math.round(pd.kpi*100)}% → ${(pd.kpi*0.7).toFixed(2)}×</span></div><div class="mr"><span>Attendance (30%)</span><span>${Math.round(pd.att*100)}% → ${(pd.att*0.3).toFixed(2)}×</span></div><div class="mr" style="font-weight:700;color:#1a1a2e;margin-top:4px;border-top:1px solid #ddd;padding-top:4px"><span>Combined Multiplier</span><span>${pd.multiplier.toFixed(2)}×</span></div></div>
-<div class="stitle">Computed Pay</div>
-<table><tr><td>Tasks Completed</td><td>${pd.doneTasks} of ${pd.myTasksTotal} (${pd.taskPct}%)</td></tr><tr><td>${pd.isFinalMonth?'Final Pay — Disbursed':`Projected Full Month (₱${formatNum(pd.net)} × ${pd.multiplier.toFixed(2)})`}</td><td>₱${formatNum(pd.computedMonth)}</td></tr><tr><td class="neg">CA Outstanding Balance</td><td class="neg">-₱${formatNum(pd.totalAdvance)}</td></tr><tr class="hr"><td>Take-Home So Far</td><td>₱${formatNum(Math.max(0,pd.earnedSoFar-pd.totalAdvance))}</td></tr></table>
-<div class="ss"><div class="sl">Prepared by: Finance</div><div class="sl">Noted by: HR</div><div class="sl">Approved by: President</div></div>
-<div class="footer">System-generated payslip · Barro Industries · ${now.toLocaleString('en-PH')}</div>
-<div style="text-align:center;margin-top:20px"><button onclick="window.print()" style="padding:10px 24px;background:#1a237e;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer">🖨️ Print / Save as PDF</button></div>
-</body></html>`);
-  w.document.close();
-}
+// printPayslip() retired (v12 WS24) — replaced by window.renderPayslipPage(),
+// the ONE branded template, called from the my-payslip-btn handler above.
+// No more pop-ups.
 
 // ── Employee Standings Modal ───────────────────────
 async function openEmpStandingsModal(uid, name, preloaded) {
@@ -4764,7 +4786,22 @@ async function openWorkerProfilePanel(uid, name, preloaded) {
   }
   panel.querySelectorAll('.wp-tab').forEach(tab => { tab.addEventListener('click', () => activateTab(tab.dataset.tab)); });
   panel.querySelector('#wp-back-btn')?.addEventListener('click', () => { panel.style.transform = 'translateY(100%)'; setTimeout(() => panel.remove(), 300); });
-  panel.querySelector('#wp-payslip-btn')?.addEventListener('click', () => printWorkerPayslip(uid, name, preloaded));
+  panel.querySelector('#wp-payslip-btn')?.addEventListener('click', async () => {
+    const month = (window.bizDate?bizDate():new Date().toISOString().slice(0,10)).slice(0,7);
+    const year = (window.bizYear?bizYear():new Date().getFullYear());
+    const shSnap = await db.collection('salary_history').doc(`${uid}_${month}`).get().catch(()=>null);
+    let model;
+    if (shSnap?.exists) {
+      model = window.toPayslipModel({...shSnap.data(), uid, month}, 'monthly');
+      model.official = true;
+    } else {
+      model = window.toPayslipModel({ uid, month, name, base:preloaded?.salary||0, allowance:preloaded?.allowance||0, deductions:preloaded?.deductions||0 }, 'monthly');
+      model.official = false;
+    }
+    model.ytd = await window.payslipYtdMonthly(uid, year);
+    panel.remove(); // dismiss the slide-up panel before replacing #page-content underneath
+    window.renderPayslipPage(model, ()=>renderPersonalFinance(currentUser, currentRole));
+  });
   activateTab('overview');
 }
 
@@ -4911,41 +4948,10 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
   }
 }
 
-async function printWorkerPayslip(uid, name, preloaded) {
-  const now = new Date();   // for "Generated" print timestamps only (audit/display)
-  // Pay period & workday denominator from Manila business calendar.
-  const _bzP = bizDate();
-  const bzPY = +_bzP.slice(0,4), bzPM = +_bzP.slice(5,7)-1, bzPD = +_bzP.slice(8,10);
-  const monthLabel = new Date(bzPY, bzPM, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
-  const daysElapsed = countWorkDays(bzPY, bzPM, bzPD);
-  const daysInMonth = countWorkDays(bzPY, bzPM, new Date(bzPY,bzPM+1,0).getDate());
-  const [userSnap, kpi, att] = await Promise.all([
-    db.collection('users').doc(uid).get().catch(()=>null),
-    getKpiScore(uid), getAttendanceScore(uid)
-  ]);
-  const u = userSnap?.exists ? userSnap.data() : {};
-  const salary=preloaded.salary||u.salary||0, allowance=preloaded.allowance||u.allowance||0, deductions=preloaded.deductions||u.deductions||0;
-  const net=salary+allowance-deductions, mult=kpi*0.7+att*0.3;
-  const computedMonth=net*mult, earnedSoFar=computedMonth*(daysElapsed/daysInMonth);
-  const dept=(Array.isArray(u.departments)&&u.departments.length?u.departments.join(', '):u.department)||'—';
-  const role=u.role?(window.ROLES?.[u.role]?.label||u.role):'—';
-  const empId=u.employeeId||'—';
-  const STYLES=`*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Helvetica Neue',Arial,sans-serif;padding:40px;color:#1a1a2e;background:#fff;max-width:720px;margin:0 auto}.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:20px;border-bottom:3px solid #1a237e}.company{font-size:22px;font-weight:900;color:#1a237e}.company-sub{font-size:11px;color:#666;margin-top:2px}.pl{background:#1a237e;color:#fff;font-size:11px;font-weight:700;padding:4px 10px;border-radius:4px;letter-spacing:1px;text-transform:uppercase}.ei{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;background:#f5f6fa;border-radius:8px;padding:16px;margin-bottom:20px}.ei .lb{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px}.ei .vl{font-size:13px;font-weight:700;color:#1a1a2e}.st{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:#888;font-weight:700;margin-bottom:8px;margin-top:20px}table{width:100%;border-collapse:collapse}td{padding:8px 10px;font-size:13px;border-bottom:1px solid #eef0f5}td:last-child{text-align:right}.tr td{font-weight:700;font-size:15px;background:#f5f6fa;border-bottom:none}.hr td{background:#e8eaf6;font-weight:800;font-size:15px;color:#1a237e;border:none}.pos{color:#2e7d32}.neg{color:#c62828}.ms{background:#f5f6fa;border-radius:8px;padding:12px 14px;margin:12px 0}.mr{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;color:#555}.ss{display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-top:36px}.sl{border-top:1px solid #aaa;padding-top:6px;text-align:center;font-size:11px;color:#888}.footer{margin-top:28px;padding-top:12px;border-top:1px solid #eee;font-size:10px;color:#aaa;text-align:center}@media print{body{padding:20px}button{display:none!important}}`;
-  const w=window.open('','_blank');
-  w.document.write(`<!DOCTYPE html><html><head><title>Payslip — ${escHtml(name)}</title><style>${STYLES}</style></head><body>
-<div class="header"><div><div class="company">BARRO INDUSTRIES</div><div class="company-sub">Employee Payslip</div></div><div style="text-align:right"><div class="pl">Payslip</div><div style="font-size:12px;color:#666;margin-top:6px">Period: ${monthLabel}</div><div style="font-size:11px;color:#999">Generated: ${now.toLocaleDateString('en-PH')}</div></div></div>
-<div class="ei"><div><div class="lb">Employee Name</div><div class="vl">${escHtml(name)}</div></div><div><div class="lb">Employee ID</div><div class="vl">${escHtml(empId)}</div></div><div><div class="lb">Department</div><div class="vl">${escHtml(dept)}</div></div><div><div class="lb">Position / Role</div><div class="vl">${escHtml(role)}</div></div><div><div class="lb">Pay Period</div><div class="vl">${monthLabel}</div></div><div><div class="lb">Days Covered</div><div class="vl">${daysElapsed} of ${daysInMonth} days</div></div></div>
-<div class="st">Earnings &amp; Deductions</div>
-<table><tr><td>Base Salary</td><td>₱${formatNum(salary)}</td></tr><tr><td class="pos">Allowances</td><td class="pos">+₱${formatNum(allowance)}</td></tr><tr><td class="neg">Deductions</td><td class="neg">-₱${formatNum(deductions)}</td></tr><tr class="tr"><td><strong>Net Pay (Full Month)</strong></td><td>₱${formatNum(net)}</td></tr></table>
-<div class="ms"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#666;margin-bottom:6px">Performance Multiplier</div><div class="mr"><span>Task KPI (70%)</span><span>${Math.round(kpi*100)}% → ${(kpi*0.7).toFixed(2)}×</span></div><div class="mr"><span>Attendance (30%)</span><span>${Math.round(att*100)}% → ${(att*0.3).toFixed(2)}×</span></div><div class="mr" style="font-weight:700;color:#1a1a2e;margin-top:4px;border-top:1px solid #ddd;padding-top:4px"><span>Combined Multiplier</span><span>${mult.toFixed(2)}×</span></div></div>
-<div class="st">Computed Pay</div>
-<table><tr><td>Tasks Completed</td><td>${preloaded.mDone||0} of ${preloaded.mTotal||0}</td></tr><tr><td>Projected Full Month (₱${formatNum(net)} × ${mult.toFixed(2)})</td><td>₱${formatNum(computedMonth)}</td></tr><tr class="hr"><td>Earned So Far (${daysElapsed}/${daysInMonth} days)</td><td>₱${formatNum(earnedSoFar)}</td></tr></table>
-<div class="ss"><div class="sl">Prepared by: Finance</div><div class="sl">Noted by: HR</div><div class="sl">Approved by: President</div></div>
-<div class="footer">System-generated payslip · Barro Industries · ${now.toLocaleString('en-PH')}</div>
-<div style="text-align:center;margin-top:20px"><button onclick="window.print()" style="padding:10px 24px;background:#1a237e;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer">🖨️ Print / Save as PDF</button></div>
-</body></html>`);
-  w.document.close();
-}
+// printWorkerPayslip() retired (v12 WS24) — near-verbatim duplicate of the old
+// printPayslip() (same retired KPI×Attendance multiplier). Its only caller,
+// #wp-payslip-btn, now calls window.renderPayslipPage() directly (see
+// openWorkerProfilePanel below).
 
 // ── Progress Reports ──────────────────────────────
 async function renderProgressReports() {

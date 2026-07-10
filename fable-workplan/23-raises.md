@@ -1,5 +1,12 @@
 # Workstream 23 — Effective-Dated Raises (approval-routed, salary history timeline)
 
+> ✅ **IMPLEMENTED 2026-07-10** (shipped as one diff with WS24, per build order).
+> `window.RaiseFlow` (departments.js) — new `pending_raises` schedule/approval collection;
+> `salary_raises` stays the immutable applied log, unchanged shape. Rules validated via
+> `firebase deploy --only firestore:rules --dry-run` (compiled OK) but **NOT yet deployed**.
+> Both bypass paths (Edit Payroll salary, Worker Profile Edit rate) closed. See V12-PLAN.md
+> Build Log for the full implementation note.
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

@@ -130,10 +130,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     sites + 2 payment-record sites + the 2 request forms now route through the one service;
     the payroll_ca_overrides collection is honored during transition then superseded by
     pay_runs.lines[].caPlan; a president-gated "🔄 CA Data Repair" dry-run tool ships with it.
-23. `[ ]` **Raises** — effective-dated raise workflow (pending raise auto-applies at first
-    Compute on/after date), approval-routed, salary history timeline.
-24. `[ ]` **The payslip** — ONE branded template (letterhead engine), employee+employer
+23. `[x]` **Raises** — effective-dated raise workflow (pending raise auto-applies at first
+    Compute on/after date), approval-routed, salary history timeline. IMPLEMENTED
+    (window.RaiseFlow — pending_raises schedule/approval, salary_raises stays the
+    immutable applied log) — see Build Log. Both bypass paths (Edit Payroll salary,
+    Worker Profile Edit rate) closed.
+24. `[x]` **The payslip** — ONE branded template (letterhead engine), employee+employer
     statutory shares, YTD, CA balance; monthly print buttons fixed (currently dead).
+    IMPLEMENTED (window.toPayslipModel/buildPayslipHTML/renderPayslipPage,
+    departments.js) — see Build Log. printPayslip()/printWorkerPayslip() deleted;
+    no more print pop-ups anywhere in payroll.
 25. `[ ]` **Leave that works** — HR grants/accrues balances (PH 5-day SIL minimum); approved
     leave writes attendance records so it doesn't cut pay.
 26. `[ ]` **Attendance v2** — time-out + hours (feeds weekly hourly production pay); holidays
@@ -522,3 +528,82 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   NEXT: workstream 23+24 (raises + the payslip template) per the build order in
   fable-workplan/INDEX.md, or 10-11 (URL routing + real Back + styled dialogs) if Neil wants
   the no-pop-ups UX work prioritized instead.
+- **2026-07-10 (Sonnet implementation — WS23+24, raises + the payslip, per spec):** Both
+  specs implemented together (23 lands the raise on the base-of-record BEFORE 24 reads it, so
+  they compose cleanly with no shared-function collision — unlike WS20/22/23's shared
+  Compute-handler risk flagged in WS23's own grounding, already resolved since WS20 replaced
+  that handler with a thin `computePayRun()` call last session).
+  **WS23 — window.RaiseFlow** (departments.js, below openRaiseHistory): `submitRaise` (President
+  → `scheduled` + apply-if-due; everyone else → `pending_approval`), `materialize` (idempotent,
+  guarded on `status=='scheduled'`, writes `payroll.salary` or `worker_profiles.dailyRate`+scaled
+  `hourlyRate` from LIVE values, then the `salary_raises` audit row keyed to the SAME doc id so a
+  retried sweep overwrites instead of duplicating), `applyDueRaises(subjectType)` (month-gated
+  screen-load sweep — `effectiveMonth <= currentBizMonth`, so a future-dated raise can never leak
+  into any Compute, current or a re-run of a past month), `approve`/`reject`. New
+  `window.openScheduledRaises()` admin list (Approve/Reject inline, president-only). Both call
+  sites (Payroll 💸, HR Profiles 💸 Raise) lost their `applyRaise` closures — the hourly-scaling
+  math that used to live in the HR closure now lives in `materialize` (reads live values, same
+  result). Both bypass paths closed: Edit Payroll's Base Salary field is now read-only display
+  ("change via 💸 Give Raise") with `salary` dropped from the save payload; Worker Profile Edit's
+  Daily/Hourly Rate inputs are read-only in edit mode, still editable in create mode (setting a
+  new hire's *initial* rate isn't a raise) — the save handler omits `dailyRate`/`hourlyRate`
+  from the write entirely in edit mode rather than reading a now-nonexistent input element.
+  Screen-load sweeps added to the top of `renderPayrollManagement` and `renderFinanceHRProfiles`;
+  a banner shows scheduled/pending counts with a "View" link. Approvals page gains a `raise` type
+  card (president-only per decision 4 — no manager fallback, unlike `ca`/`ca_deduct`). Employee
+  self-view gains a "Salary Changes" card reading `salary_raises` (applied-only by construction —
+  a still-scheduled/pending raise can never appear there, so no separate visibility gate was
+  needed). `firestore.rules`: new `pending_raises` block — non-president finance may only CREATE
+  a `pending_approval` doc (filing is a safe escalation, not itself money-moving — matches the
+  secretary's existing "request President approval" pattern elsewhere in this codebase, so I kept
+  the spec's literal `isFinanceOrAdmin()` gate here rather than narrowing to `isMoneyAdmin()` as
+  I did for WS20's `pay_runs` last session); only the materialize transition (scheduled→applied)
+  and everything else is `isPresident()`-gated, with `.get(field,default)` throughout.
+  **WS24 — the ONE payslip.** `window.toPayslipModel(source, kind)` normalizes either cycle
+  (a frozen `pay_runs` line/`salary_history` mirror, or a `payslips` doc) into one `PayslipModel`;
+  `window.buildPayslipHTML(model)` renders it (letterhead + Employee/Earnings/Deductions&
+  Contributions [EE+ER 3-column]/Cash-Advance-before-installment-after/Performance[monthly-only]/
+  Net Pay/YTD/Time-Log[weekly-only]/Signatures); `window.renderPayslipPage(model, backFn)` hosts
+  it inside `#page-content` with a Back button and same-document `window.print()` — **zero
+  pop-ups**, per the owner's standing directive (grep-confirmed: no `window.open` call remains
+  anywhere in payroll/payslip code). Used the SEAM RECONCILIATION note in the WS24 brief itself
+  (written after WS14 landed in the same batch) to call the real `window.buildLetterhead()`
+  directly rather than the brief's placeholder `window.Letterhead.header()` API that was never
+  built. `printPayslip()` and `printWorkerPayslip()` (near-duplicate KPI×Attendance-multiplier
+  popup generators, one of them silently reading pay from the wrong collection as a fallback) are
+  deleted outright; their buttons now build a model and call `renderPayslipPage`. The two
+  previously-dead Payroll-tab print buttons (`print-payroll-btn`/`print-slip-btn` — confirmed via
+  grep that no handler had ever been attached) are wired: per-row 🖨 opens one payslip from the
+  frozen line (or a labelled `PROJECTION — not yet disbursed` badge if no line exists yet this
+  month); "🖨 Print All" stacks every employee's payslip with `page-break-after`, reusing WS14's
+  two-tier page-break CSS so long payslips don't reproduce the "blank page 1" bug fixed for quotes
+  (aab024a). Also found and deleted `window._payslipData` entirely (not just its role as a print
+  payload, per the spec's own conditional instruction) — grep confirmed nothing reads it anymore
+  once `printPayslip()` was gone. Fixed the `payslips` rules bug WS21 had explicitly deferred:
+  the owner-read branch checked `resource.data.userId`, a field that's never written (the actual
+  field is `workerId`) — so a worker with a login could never read their own payslip; fixed with
+  `.get('workerId','')` (+ a future-proofing `linkedUid` check for WS20 D3's bridge). New
+  composite index `payslips(workerId ASC, payPeriodStart ASC)` for the weekly YTD query (monthly
+  YTD needed no new index — reuses the existing `salary_history(userId,month)` index).
+  `collectPayslipData()` gains `employerShare: null` (weekly ER stays manual-only per decision 3,
+  same as WS21 left it). Print CSS moved out of inline `<style>` tags into `css/styles.css`
+  (`.payslip-print` + scoped `.lh-*` mirrors of `js/letterhead.js`'s classes, since this is the
+  first letterhead consumer that renders in-page rather than in a popup's own document) — the
+  JPEG-export feature (html2canvas) was preserved, just retargeted from `#payslip-page` to the
+  `.payslip-print` container and renamed `window.downloadPayslipJPEG` to avoid any collision with
+  the (separately-scoped, popup-only) `downloadJPEG()` still used by other print flows.
+  **Verified:** `node --check` clean on both touched JS files; `firebase deploy --only
+  firestore:rules --dry-run` compiled after each rules edit; `firestore.indexes.json` validated
+  as well-formed JSON; CSS brace-balance sanity check; grep-swept for dangling references to
+  every retired function/object (`applyRaise`, `previewPayslip`, `renderPayslipPreview`,
+  `printPayslip`, `printWorkerPayslip`, `window._payslipData`, `buildPayslipHTML(` with the old
+  raw-doc argument shape) — zero hits outside intentional historical comments. **NOT verified**
+  (needs a live login): an actual same-day vs. future-dated raise click-through, a live payslip
+  render for a disbursed vs. not-yet-disbursed month, and the weekly YTD index actually finishing
+  its build in the Firebase console before that query is exercised for real. Committed, not yet
+  pushed to master. **Still needed:** deploy the rules + the new index
+  (`~/.npm-global/bin/firebase deploy --only firestore:rules,firestore:indexes`, re-diff first);
+  a live test of both workstreams' manual checklists (WS23 Spec 11 / WS24 Spec 10).
+  NEXT: workstream 10-11 (URL routing + real Back + styled dialogs — the no-pop-ups UX mandate,
+  which WS24 already partially delivered for payslips specifically) or 15-18 (durability,
+  performance, design-system, keyboard shortcuts) per the build order in fable-workplan/INDEX.md.
