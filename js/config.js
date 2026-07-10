@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.9';
+window.APP_VERSION = '12.0.10';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -65,6 +65,30 @@ window.attKindBadge = function(kind){
             absent:{m:'✗',c:'#ff6b6b'}, leave:{m:'🌴',c:'#30d158'},
             'unpaid-leave':{m:'📅',c:'#8e8e93'}, none:{m:'',c:'#8e8e93'} })[kind] || {m:'',c:'#8e8e93'};
 };
+
+// ── Attendance extension window (single source of truth) (WS26) ────
+window.ATT_EXT_HOURS = 6;   // approved extension duration, in hours
+// Is an approved extension still active? Returns {active, expiresAt:Date|null}.
+window.attExtActive = function(extData, now) {
+  now = now || new Date();
+  const expiresAt = (extData && extData.expiresAt && extData.expiresAt.toDate)
+                      ? extData.expiresAt.toDate() : null;
+  const active = !!(extData && extData.status === 'approved' && expiresAt && now < expiresAt);
+  return { active, expiresAt };
+};
+// Elapsed worked hours between two Date objects, minus a flat 1-hr lunch if the
+// span crosses local noon. Best-effort (informational field) — Manila-anchored.
+window.computeHoursBetween = function(inDate, outDate) {
+  if (!inDate || !outDate) return 0;
+  let mins = (outDate.getTime() - inDate.getTime()) / 60000;
+  if (mins <= 0) return 0;
+  const inH = window.bizHour(inDate), outH = window.bizHour(outDate);
+  if (inH < 13 && outH >= 12) mins -= 60;   // crossed the 12–1PM lunch window
+  return Math.max(0, mins / 60);
+};
+
+// ── Holiday admin overrides (sync in-memory cache, filled at boot) ─
+window._holidayOverrides = window._holidayOverrides || {};   // { [year]: overridesMap }
 
 // ── Google Drive API Config ──────────────────────
 window.DRIVE_CONFIG = {

@@ -219,6 +219,18 @@ service cloud.firestore {
         && (resource == null || resource.data.get('editedBy', null) == null);
     }
 
+    // ── Worker kiosk attendance (WS26) ──────────────────
+    // Factory worker_profiles staff have no Firebase Auth yet, so there is no
+    // owner clause — every record is HR-kiosk-written. When WS27/WS20's
+    // worker_profiles.linkedUid lands, an additive owner-read clause can be
+    // added here without re-keying (workerId already == the worker_profiles docId).
+    match /attendance_worker/{workerId} {
+      allow read: if isAuth() && isFinanceOrAdmin();
+    }
+    match /attendance_worker/{workerId}/records/{date} {
+      allow read, write: if isAuth() && isFinanceOrAdmin();
+    }
+
     // ── Attendance extension requests ──────────────────
     match /attendance_extensions/{docId} {
       // Internal HR data — external Brilliant Steel partners excluded from reading.
@@ -349,6 +361,15 @@ service cloud.firestore {
     match /settings/{docId} {
       allow read: if isAuth() && (!isPartner() || docId == 'system');
       allow write: if isAuth() && isPresident();
+    }
+
+    // ── Holidays admin overrides (WS26) ─────────────────
+    // Dedicated collection so the looser finance/admin write does NOT touch
+    // the president-only settings/{docId} match above (which also gates
+    // employeeOfMonth/sales_sop — loosening it would loosen those too).
+    match /settings_holidays/{year} {
+      allow read:  if isAuth();
+      allow write: if isAuth() && isFinanceOrAdmin();
     }
 
     // ── System health (backup/sync heartbeat) ──────────

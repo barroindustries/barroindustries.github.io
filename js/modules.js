@@ -958,8 +958,26 @@ function getPHHolidays(year) {
     holidays[eidAlAdha[year]] = { name:'Eid\'l Adha (Feast of Sacrifice)', type:'regular' };
   }
 
+  // ── Admin overrides (prefetched into _holidayOverrides at boot) ──
+  const ov = window._holidayOverrides && window._holidayOverrides[year];
+  if (ov) {
+    for (const date in ov) {
+      if (ov[date] === null) delete holidays[date];   // admin removed a base holiday
+      else holidays[date] = ov[date];                 // admin added/edited
+    }
+  }
   return holidays;
 }
+
+window.loadHolidayOverrides = async function(years) {
+  years = years || [window.bizYear()-1, window.bizYear(), window.bizYear()+1];
+  await Promise.all(years.map(async y => {
+    try {
+      const snap = await db.collection('settings_holidays').doc(String(y)).get();
+      window._holidayOverrides[y] = (snap.exists && snap.data().overrides) ? snap.data().overrides : {};
+    } catch { window._holidayOverrides[y] = {}; }
+  }));
+};
 
 // ══════════════════════════════════════════════════
 //  ATTENDANCE CALENDAR (full-page)
@@ -1041,7 +1059,7 @@ window.renderAttendancePage = async function() {
               <td>${r.requestedAt ? new Date(r.requestedAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'}) : '—'}</td>
               <td style="white-space:nowrap">
                 <button class="btn-primary btn-sm ext-approve-btn" data-id="${r.id}" data-uid="${r.uid}" data-name="${escHtml(r.userName||'')}">✓ Approve</button>
-                <button class="btn-danger btn-sm ext-deny-btn" data-id="${r.id}" data-uid="${r.uid}" style="margin-left:4px">✕ Deny</button>
+                <button class="btn-danger btn-sm ext-deny-btn" data-id="${r.id}" data-uid="${r.uid}" data-name="${escHtml(r.userName||'')}" style="margin-left:4px">✕ Deny</button>
               </td>
             </tr>`).join('')}</tbody>
           </table></div>
@@ -1051,19 +1069,7 @@ window.renderAttendancePage = async function() {
     extEl.querySelectorAll('.ext-approve-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         btn.disabled = true; btn.textContent = 'Approving…';
-        const approvedAt = new Date();
-        const expiresAt  = new Date(approvedAt.getTime() + 6 * 60 * 60 * 1000); // +6 hrs
-        await db.collection('attendance_extensions').doc(btn.dataset.id).update({
-          status:     'approved',
-          approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          expiresAt:  firebase.firestore.Timestamp.fromDate(expiresAt),
-          approvedBy: currentUser.uid
-        });
-        await Notifs.send(btn.dataset.uid, {
-          title: '✅ Attendance Extension Approved',
-          body:  `Your Time In extension is approved. You have until ${expiresAt.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',timeZone:window.BIZ_TZ})} to time in and complete notifications.`,
-          icon: '✅', type: 'att_extension_approved'
-        });
+        await window.approveAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
         Notifs.showToast(`Extension approved for ${btn.dataset.name||'employee'}`);
         loadExtensionRequests();
       });
@@ -1073,15 +1079,7 @@ window.renderAttendancePage = async function() {
       btn.addEventListener('click', async () => {
         if (!(await confirmDialog({ message: 'Deny this extension request?' }))) return;
         btn.disabled = true;
-        await db.collection('attendance_extensions').doc(btn.dataset.id).update({
-          status: 'denied', deniedBy: currentUser.uid,
-          deniedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        await Notifs.send(btn.dataset.uid, {
-          title: '❌ Attendance Extension Denied',
-          body:  `Your extension request for ${new Date().toLocaleDateString('en-PH',{month:'short',day:'numeric',timeZone:window.BIZ_TZ})} was not approved.`,
-          icon: '❌', type: 'att_extension_denied'
-        });
+        await window.denyAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
         Notifs.showToast('Extension denied');
         loadExtensionRequests();
       });
@@ -1247,6 +1245,128 @@ window.renderAttendancePage = async function() {
   });
 
   renderAttMonth();
+};
+
+// ══════════════════════════════════════════════════
+//  HOLIDAYS ADMIN — settings_holidays/{year} overrides
+//  (finance/admin only — merges on top of getPHHolidays' base table)
+//  NOTE: not yet wired into navigateTo's switch / a nav entry — that's
+//  app.js's job (routing/nav is out of scope for this file per WS26 split).
+// ══════════════════════════════════════════════════
+window.renderHolidaysAdmin = async function(container) {
+  const c = container || document.getElementById('page-content');
+  if (!c) return;
+  const canEdit = ['president','manager','secretary','finance'].includes(currentRole);
+  if (!canEdit) {
+    c.innerHTML = `<div class="empty-state" style="padding:24px"><div class="empty-icon">🔒</div><h4>Not available</h4><p>Holidays admin is finance/admin only.</p></div>`;
+    return;
+  }
+
+  let year = window._holidaysAdminYear || window.bizYear();
+
+  async function renderYear(y) {
+    year = y;
+    window._holidaysAdminYear = y;
+    c.innerHTML = '<div class="loading-placeholder">Loading holidays…</div>';
+    if (typeof window.loadHolidayOverrides === 'function') {
+      await window.loadHolidayOverrides([y]);
+    }
+    const merged    = typeof getPHHolidays === 'function' ? getPHHolidays(y) : {};
+    const overrides = (window._holidayOverrides && window._holidayOverrides[y]) || {};
+    const dates     = Object.keys(merged).sort();
+
+    c.innerHTML = `
+      <div class="page-header">
+        <h2>📅 Holidays Admin</h2>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="btn-secondary btn-sm" id="hol-prev-year">‹</button>
+          <strong style="min-width:48px;text-align:center;display:inline-block">${y}</strong>
+          <button class="btn-secondary btn-sm" id="hol-next-year">›</button>
+          <button class="btn-primary btn-sm" id="hol-add-btn" style="margin-left:8px">＋ Add / Edit</button>
+        </div>
+      </div>
+      <div class="card"><div class="card-header"><h3>Holidays — ${y}</h3></div>
+        <div class="card-body" style="padding:0">
+          <div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Date</th><th>Name</th><th>Type</th><th>Source</th><th></th></tr></thead>
+            <tbody>
+              ${dates.length ? dates.map(d => {
+                const h = merged[d];
+                const isOverride = Object.prototype.hasOwnProperty.call(overrides, d);
+                return `<tr>
+                  <td>${escHtml(d)}</td>
+                  <td>${escHtml(h.name||'')}</td>
+                  <td><span class="badge ${h.type==='regular'?'badge-green':'badge-orange'}">${escHtml(h.type||'')}</span></td>
+                  <td>${isOverride ? '<span class="badge badge-purple">override</span>' : '<span class="badge badge-gray">base</span>'}</td>
+                  <td style="white-space:nowrap">
+                    <button class="btn-secondary btn-sm hol-edit-btn" data-date="${escHtml(d)}">Edit</button>
+                    <button class="btn-danger btn-sm hol-remove-btn" data-date="${escHtml(d)}" style="margin-left:4px">Remove</button>
+                  </td>
+                </tr>`;
+              }).join('') : `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">No holidays for ${y}.</td></tr>`}
+            </tbody>
+          </table></div>
+        </div>
+      </div>`;
+
+    document.getElementById('hol-prev-year').addEventListener('click', () => renderYear(y-1));
+    document.getElementById('hol-next-year').addEventListener('click', () => renderYear(y+1));
+    document.getElementById('hol-add-btn').addEventListener('click', () => openHolidayModal(null, null));
+    c.querySelectorAll('.hol-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => openHolidayModal(btn.dataset.date, merged[btn.dataset.date]));
+    });
+    c.querySelectorAll('.hol-remove-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const name = merged[btn.dataset.date]?.name || btn.dataset.date;
+        if (!(await confirmDialog({ message: `Remove "${name}" from ${year}? (base holidays only disappear for ${year} — other years are unaffected)` }))) return;
+        await saveOverride(btn.dataset.date, null);
+      });
+    });
+  }
+
+  async function saveOverride(date, value) {
+    const overridesMap = { ...((window._holidayOverrides && window._holidayOverrides[year]) || {}) };
+    overridesMap[date] = value;   // null removes a base holiday; object adds/edits
+    try {
+      await db.collection('settings_holidays').doc(String(year)).set({
+        year,
+        overrides: overridesMap,
+        updatedBy: currentUser.uid,
+        updatedByName: userProfile.displayName || currentUser.email,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+      await window.loadHolidayOverrides([year]);
+      Notifs.showToast(value === null ? 'Holiday removed for '+year : 'Holiday saved for '+year);
+      renderYear(year);
+    } catch (ex) {
+      Notifs.showToast('Save failed: '+(ex.message||ex.code), 'error');
+    }
+  }
+
+  function openHolidayModal(date, existing) {
+    openModal(date ? '✏️ Edit Holiday' : '＋ Add Holiday', `
+      <div class="form-group"><label>Date</label><input id="hol-date" type="date" value="${escHtml(date||`${year}-01-01`)}" ${date?'disabled':''}/></div>
+      <div class="form-group"><label>Name</label><input id="hol-name" type="text" value="${escHtml(existing?.name||'')}" placeholder="e.g. Maundy Thursday"/></div>
+      <div class="form-group"><label>Type</label>
+        <select id="hol-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          <option value="regular" ${existing?.type==='regular'?'selected':''}>Regular</option>
+          <option value="special" ${existing?.type!=='regular'?'selected':''}>Special (non-working)</option>
+        </select>
+      </div>
+      <div id="hol-err" class="error-msg hidden"></div>
+    `, `<button class="btn-primary" id="hol-save-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    document.getElementById('hol-save-btn').addEventListener('click', async () => {
+      const d = document.getElementById('hol-date').value || date;
+      const name = document.getElementById('hol-name').value.trim();
+      const type = document.getElementById('hol-type').value;
+      const err = document.getElementById('hol-err');
+      if (!d || !name) { err.textContent = 'Date and name are required.'; err.classList.remove('hidden'); return; }
+      closeModal();
+      await saveOverride(d, { name, type });
+    });
+  }
+
+  await renderYear(year);
 };
 
 // ══════════════════════════════════════════════════

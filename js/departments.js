@@ -4388,6 +4388,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
               <td><span class="badge ${p.status==='active'?'badge-green':'badge-gray'}">${p.status||'active'}</span></td>
               <td style="white-space:nowrap">
                 <button class="btn-primary btn-sm hrp-gen-btn" data-id="${p.id}" style="margin-right:4px">📄 Payslip</button>
+                ${isPriv?`<button class="btn-secondary btn-sm hrp-kiosk-btn" data-id="${p.id}" title="Record today's time in/out" style="margin-right:4px">⏱ Clock</button>`:''}
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-raise-btn" data-id="${p.id}" title="Give raise" style="margin-right:4px">💸 Raise</button>`:''}
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-edit-btn" data-id="${p.id}">✎ Edit</button>`:''}
                 ${isPriv?`<button class="btn-danger btn-sm hrp-del-btn" data-id="${p.id}" data-label="${escHtml(p.name||p.id.slice(-5))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>`:''}
@@ -4428,6 +4429,13 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
     container.querySelectorAll('.hrp-del-btn').forEach(btn => btn.addEventListener('click', () => {
       window.financeDelete({ collection:'worker_profiles', docId:btn.dataset.id, label:`worker profile "${btn.dataset.label}"`, onDone:()=>renderFinanceHRProfiles(container,currentUser,currentRole) });
     }));
+
+    // v12 WS26 — HR kiosk: record today's time in/out for a worker_profile
+    // (no Firebase Auth login required for factory staff; see attendance_worker collection).
+    container.querySelectorAll('.hrp-kiosk-btn').forEach(btn => {
+      const profile = profiles.find(p=>p.id===btn.dataset.id);
+      btn.addEventListener('click', () => { if (profile) openWorkerKioskModal(profile, currentUser); });
+    });
   }
 
   // Generate payslip
@@ -4555,6 +4563,36 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
     closeModal();
     Notifs.showToast(isEdit ? 'Profile updated!' : 'Worker profile created!');
     onSave();
+  });
+}
+
+// v12 WS26 — HR-operated kiosk: record a worker_profile's time in/out for today.
+// Writes attendance_worker/{profileId}/records/{bizDate()} (NOT attendance/{uid} —
+// factory worker_profiles have no Firebase Auth login yet). Reuses the existing
+// computeDayHours(timeIn,timeOut) helper (same one the payslip time-log uses) so
+// the hours math never drifts between kiosk entry and manual payslip entry.
+function openWorkerKioskModal(profile, currentUser) {
+  const label = escHtml(profile.name || 'Worker');
+  openModal(`⏱ Clock — ${label}`, `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Recording time for <strong>${label}</strong> on ${bizDate()}.</div>
+    <div class="form-row">
+      <div class="form-group"><label>Time In</label><input id="kiosk-time-in" type="time" value="07:00"/></div>
+      <div class="form-group"><label>Time Out</label><input id="kiosk-time-out" type="time" value="16:00"/></div>
+    </div>
+  `, `<button class="btn-primary" id="kiosk-save-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  document.getElementById('kiosk-save-btn').addEventListener('click', async () => {
+    const timeIn  = document.getElementById('kiosk-time-in').value;
+    const timeOut = document.getElementById('kiosk-time-out').value;
+    if (!timeIn || !timeOut) { Notifs.showToast('Time In and Time Out are required','error'); return; }
+    const hrs = computeDayHours(timeIn, timeOut);
+    await db.collection('attendance_worker').doc(profile.id).collection('records').doc(bizDate()).set({
+      workerId: profile.id, date: bizDate(), timeIn, timeOut, hoursWorked: hrs,
+      recordedBy: currentUser.uid, recordedByName: (window.userProfile && window.userProfile.displayName) || currentUser.email,
+      recordedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    closeModal();
+    Notifs.showToast(`Clocked ${label} — ${hrs.toFixed(1)}h logged.`);
   });
 }
 
@@ -4796,9 +4834,12 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     </div>
 
     <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap">
         <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em">Daily Time Log</div>
-        <span style="font-size:10px;color:var(--text-muted)">Auto-computes hours · −1hr lunch if shift spans 12–1PM</span>
+        <div style="display:flex;align-items:center;gap:10px">
+          <button type="button" class="btn-secondary btn-sm" id="ps-load-kiosk-btn">⟳ Load from kiosk</button>
+          <span style="font-size:10px;color:var(--text-muted)">Auto-computes hours · −1hr lunch if shift spans 12–1PM</span>
+        </div>
       </div>
       <table style="width:100%;font-size:11px;border-collapse:collapse">
         <thead><tr>
@@ -4905,6 +4946,25 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
   };
   document.querySelectorAll('.ps-time-input').forEach(inp => inp.addEventListener('input', recomputeHours));
   recomputeHours();
+
+  // ── v12 WS26: pull HR-kiosk-recorded worker attendance (attendance_worker/{profile.id}/records)
+  // into this SAME time-log table so HR doesn't re-key hours already clocked at the kiosk.
+  // This ONLY prefills ps-tin-{i}/ps-tout-{i} then calls the existing recomputeHours() — rows
+  // stay editable, and collectPayslipData/the WPAY- ledger post on Submit are untouched.
+  document.getElementById('ps-load-kiosk-btn')?.addEventListener('click', async () => {
+    const start = document.getElementById('ps-start').value, end = document.getElementById('ps-end').value;
+    if (!start || !end) { Notifs.showToast('Set pay period dates first','error'); return; }
+    const snap = await db.collection('attendance_worker').doc(profile.id).collection('records')
+      .where(firebase.firestore.FieldPath.documentId(), '>=', start)
+      .where(firebase.firestore.FieldPath.documentId(), '<=', end).get().catch(()=>({docs:[]}));
+    const byDow = {}; // Mon..Sun index 0..6
+    snap.docs.forEach(d => { const r = d.data(); const dow = window.bizDow(new Date(`${r.date}T12:00:00`)); byDow[(dow+6)%7] = r; });
+    for (let i=0;i<7;i++){ const r=byDow[i]; if(!r) continue;
+      const tin=document.getElementById(`ps-tin-${i}`), tout=document.getElementById(`ps-tout-${i}`);
+      if(tin) tin.value=r.timeIn||''; if(tout) tout.value=r.timeOut||''; }
+    recomputeHours();
+    Notifs.showToast('Loaded kiosk hours — review & adjust before saving.');
+  });
 
   // ── Live CA remaining-balance preview ──
   const updateCaRemaining = () => {
@@ -10724,18 +10784,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.ext-approve').forEach(btn => {
         btn.addEventListener('click', async e => {
           const { id, uid, name } = e.currentTarget.dataset;
-          const expiresAt = new Date(); expiresAt.setHours(expiresAt.getHours() + 6);
-          await db.collection('attendance_extensions').doc(id).update({
-            status: 'approved',
-            approvedBy: currentUser.uid,
-            approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
-            expiresAt: firebase.firestore.Timestamp.fromDate(expiresAt)
-          });
-          await Notifs.send(uid, {
-            title: '✅ Extension Approved',
-            body: `Your time extension has been approved. You have 6 hours from now to time in.`,
-            icon: '✅', type: 'att_extension'
-          });
+          await window.approveAttendanceExtension(id, uid, name);
           Notifs.showToast(`Extension approved for ${name}`);
           loadApprovalsSub('attendance');
         });
@@ -10744,12 +10793,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.ext-deny').forEach(btn => {
         btn.addEventListener('click', async e => {
           const { id, uid, name } = e.currentTarget.dataset;
-          await db.collection('attendance_extensions').doc(id).update({ status: 'denied' });
-          await Notifs.send(uid, {
-            title: '❌ Extension Denied',
-            body: 'Your attendance extension request was not approved.',
-            icon: '❌', type: 'att_extension'
-          });
+          await window.denyAttendanceExtension(id, uid, name);
           Notifs.showToast(`Extension denied for ${name}`);
           loadApprovalsSub('attendance');
         });

@@ -92,6 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
       startClaimsListener(user.uid);
       checkBackupHealth();
       try { window.Keymap.maybeShowFirstRunHint(); } catch(_){}
+      try { if (typeof loadHolidayOverrides==='function') loadHolidayOverrides(); } catch(_){}
       // Mark this uid as fully bootstrapped so subsequent token-refresh fires
       // for the same user are treated as no-ops above.
       _bootstrappedUid = user.uid;
@@ -2020,6 +2021,7 @@ function navigateTo(page, opts) {
     case 'attendance':       window.renderAttendancePage?.(); break;
     case 'cash-advances':    window.renderCashAdvancePage?.(); break;
     case 'leave':            window.renderLeavePage?.(); break;
+    case 'holidays':         window.renderHolidaysAdmin?.(); break;
     case 'inventory':        window.renderInventory?.(); break;
     case 'product-database': isPresident() ? renderProductDatabase() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔒</div><h4>Access Denied</h4></div>`); break;
     case 'audit-log':        isPresident() ? renderAuditLog() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔒</div><h4>Access Denied</h4></div>`); break;
@@ -2952,21 +2954,22 @@ async function renderEmployeeDashboard() {
     const hasLogin    = !!attData.loginTime;
     const attScore    = window.attRecScore(attData);
     const hasFull     = attScore >= 1.0;
+    const hasLogout   = !!attData.logoutTime;
 
     // Attendance window: 7:00–9:00 AM Manila time (or approved extension)
     const nowHour      = bizHour();
     const inWindow     = nowHour >= 7 && nowHour < 9;   // normal 2-hr window
     const beforeWindow = nowHour < 7;
     const extData      = extSnap.exists ? extSnap.data() : null;
-    const extApproved  = extData?.status === 'approved' && extData?.expiresAt
-                           && now < extData.expiresAt.toDate();
+    const _ext = window.attExtActive(extData, now);
+    const extApproved = _ext.active;
     const extPending   = extData?.status === 'pending';
     const extDenied    = extData?.status === 'denied';
     const extExpired   = extData?.status === 'approved'
                            && (!extData?.expiresAt || now >= extData.expiresAt.toDate());
     const canTimeIn    = !hasLogin && (inWindow || extApproved);
     const extExpiresStr = extApproved
-      ? extData.expiresAt.toDate().toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})
+      ? _ext.expiresAt.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})
       : '';
 
     // KPI computation
@@ -3092,7 +3095,10 @@ async function renderEmployeeDashboard() {
                 <div style="font-size:13px;font-weight:600;color:var(--success)">Full attendance — 100%</div>
                 <div style="font-size:11px;color:var(--text-muted)">Timed in + all notifications checked ✓</div>
               </div>
-            </div>`
+            </div>
+            ${(hasLogin && !hasLogout) ? `<button class="btn-secondary" id="time-out-btn" style="width:100%;margin-top:10px">
+              <i data-lucide="log-out" style="width:14px;margin-right:6px"></i>Time Out</button>` : ''}
+            ${hasLogout ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">👋 Timed out · ${(attData.hoursWorked||0).toFixed(1)}h logged</div>` : ''}`
           : hasLogin ? `
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
               <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,159,10,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">🟡</div>
@@ -3104,6 +3110,9 @@ async function renderEmployeeDashboard() {
             ${!hasFull?`<div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--text-muted)">
               Tap the 🔔 bell → check <em>every</em> notification before 9:00 AM${extApproved?' (before '+extExpiresStr+')':''} → 100%.
             </div>`:''}
+            ${(hasLogin && !hasLogout) ? `<button class="btn-secondary" id="time-out-btn" style="width:100%;margin-top:10px">
+              <i data-lucide="log-out" style="width:14px;margin-right:6px"></i>Time Out</button>` : ''}
+            ${hasLogout ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">👋 Timed out · ${(attData.hoursWorked||0).toFixed(1)}h logged</div>` : ''}
           ` : canTimeIn ? `
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
               ${extApproved?`<span style="color:var(--warning)">⏰ Extension approved — expires ${extExpiresStr}</span><br>`:''}
@@ -3238,6 +3247,18 @@ async function renderEmployeeDashboard() {
       renderEmployeeDashboard();
     });
 
+    // Office self-service Time Out button
+    document.getElementById('time-out-btn')?.addEventListener('click', async () => {
+      const inTs = attData.loginTime?.toDate ? attData.loginTime.toDate() : null;
+      const hrs  = inTs ? window.computeHoursBetween(inTs, new Date()) : 0;
+      await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
+        logoutTime: firebase.firestore.FieldValue.serverTimestamp(),
+        hoursWorked: hrs
+      }, { merge: true });
+      Notifs.showToast(`👋 Timed out — ${hrs.toFixed(1)}h logged.`);
+      renderEmployeeDashboard();
+    });
+
     // Request extension button
     document.getElementById('req-ext-btn')?.addEventListener('click', async () => {
       const btn = document.getElementById('req-ext-btn');
@@ -3276,22 +3297,63 @@ async function renderEmployeeDashboard() {
 window.tryUpgradeAttendanceOnNotifRead = async function() {
   if (!currentUser) return;
   const todayStr = bizDate();
-
-  // 9am Manila is the hard deadline for both time-in and notification reading
-  if (bizHour() >= 9) {
-    Notifs.showToast('⏰ Deadline passed — notifications must be checked before 9:00 AM for full attendance.', 'error');
+  const now = new Date();
+  // Honor an approved extension: its expiresAt replaces the flat 9:00 AM cutoff.
+  const extSnap = await db.collection('attendance_extensions')
+    .doc(`${currentUser.uid}_${todayStr}`).get().catch(()=>({exists:false,data:()=>({})}));
+  const ext = window.attExtActive(extSnap.exists ? extSnap.data() : null, now);
+  const pastDeadline = ext.active ? (now >= ext.expiresAt) : (bizHour() >= 9);
+  if (pastDeadline) {
+    const dl = ext.active
+      ? ext.expiresAt.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',timeZone:window.BIZ_TZ})
+      : '9:00 AM';
+    Notifs.showToast(`⏰ Deadline passed — notifications must be checked before ${dl} for full attendance.`, 'error');
     return;
   }
-
   const todaySnap = await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).get();
   if (!todaySnap.exists || !todaySnap.data().loginTime) return; // must have timed in first
   const current = todaySnap.data();
-  if ((current.attendanceScore||0) >= 1.0) return; // already full
-  await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
-    attendanceScore: 1.0, fullTime: true,
-    fullTimeAt: firebase.firestore.FieldValue.serverTimestamp()
-  }, { merge: true });
-  Notifs.showToast('✅ Full attendance (100%) — all notifications checked!');
+  if ((current.attendanceScore||0) >= 1.0) return;              // already full
+  if (current.editedBy) return;                                // admin-set day — never self-override (also WS19-denied)
+  try {
+    await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
+      attendanceScore: 1.0, fullTime: true,
+      fullTimeAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    Notifs.showToast('✅ Full attendance (100%) — all notifications checked!');
+  } catch(e) { /* WS19 rule denied (admin-edited day) — silently ignore */ }
+};
+
+window.approveAttendanceExtension = async function(extId, uid, name) {
+  const approvedAt = new Date();
+  const expiresAt  = new Date(approvedAt.getTime() + window.ATT_EXT_HOURS * 60 * 60 * 1000);
+  await db.collection('attendance_extensions').doc(extId).update({
+    status: 'approved',
+    approvedBy: currentUser.uid,
+    approvedByName: userProfile?.displayName || currentUser.email,
+    approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    expiresAt: firebase.firestore.Timestamp.fromDate(expiresAt)
+  });
+  const dl = expiresAt.toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',timeZone:window.BIZ_TZ});
+  await Notifs.send(uid, {
+    title: '✅ Attendance Extension Approved',
+    body:  `Your Time In extension is approved. You have until ${dl} to time in and check all notifications.`,
+    icon: '✅', type: 'att_extension_approved'
+  });
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('att-ext-pending');
+  return expiresAt;
+};
+window.denyAttendanceExtension = async function(extId, uid, name) {
+  await db.collection('attendance_extensions').doc(extId).update({
+    status: 'denied', deniedBy: currentUser.uid,
+    deniedAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  await Notifs.send(uid, {
+    title: '❌ Attendance Extension Denied',
+    body:  'Your attendance extension request was not approved.',
+    icon: '❌', type: 'att_extension_denied'
+  });
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('att-ext-pending');
 };
 
 // ── Employee ID Card + Calling Card toggle ────────
@@ -7041,9 +7103,11 @@ function openProfileDrawer() {
     <div class="profile-inset-card" style="padding:4px 8px">
       ${(() => {
         const isPartnerU = (typeof isPartner==='function' && isPartner()) || (typeof isBrilliantOnly==='function' && isBrilliantOnly());
+        const isHolidaysAdmin = ['president','manager','secretary','finance'].includes(currentRole);
         const links = [
           { icon:'🌴', label:'Leave', page:'leave', hide: isPartnerU },
           { icon:'📅', label:'Attendance', page:'attendance', hide: isPartnerU },
+          { icon:'🗓️', label:'Holidays Admin', page:'holidays', hide: !isHolidaysAdmin },
           { icon:'📖', label:'SOPs', page:'sops' },
           { icon:'❓', label:'Help & Guide', page:'help' },
         ].filter(l => !l.hide);

@@ -1,5 +1,10 @@
 # Workstream 26 — Attendance v2 (time-out + hours, holidays admin, extension-upgrade fix)
 
+> ✅ **IMPLEMENTED 2026-07-10.** Rules deploy required (new `attendance_worker` +
+> `settings_holidays` blocks). See V12-PLAN.md Build Log. The headline extension-upgrade bug
+> fix, kiosk clock-in, payslip auto-fill, and Holidays Admin screen are NOT live-tested — need
+> a real login. Geofence deliberately not built (greenfield/deferred, decision 1).
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration
