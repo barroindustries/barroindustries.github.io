@@ -3356,6 +3356,47 @@ window.denyAttendanceExtension = async function(extId, uid, name) {
   if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('att-ext-pending');
 };
 
+// ── ID verify token minting + public-safe projection ──────────────
+// Builds the ONLY fields that may live in the public id_verify/{token} doc.
+function buildIdVerifyDoc(kind, src, uidOrNull) {
+  const B = window.BRAND || {};
+  const dept = Array.isArray(src.departments) && src.departments.length
+    ? src.departments.join(', ') : (src.department || '');
+  return {
+    kind,                                            // 'employee' | 'worker'
+    name:           src.displayName || src.name || '',
+    photoUrl:       src.photoUrl || '',
+    idNumber:       src.employeeId || src.idNumber || '',
+    department:     dept,
+    jobTitle:       src.title || src.jobTitle || '',
+    employmentType: src.employmentType || '',
+    company:        B.name || 'Barro Industries',
+    status:         (src.status === 'inactive') ? 'inactive' : 'active',
+    issuedOn:       src.issuedOn || src.startDate || (window.bizDate ? bizDate() : ''),
+    uid:            uidOrNull || null,               // employee kind only (rules check)
+    updatedAt:      firebase.firestore.FieldValue.serverTimestamp()
+  };
+}
+
+// Ensure the LOGGED-IN employee's own verify token exists; idempotent (reuses
+// an existing token so reprinted QR codes stay stable). Returns the token.
+async function ensureEmployeeVerifyToken(u) {
+  if (u.verifyToken) {
+    // refresh the public projection in case name/photo/dept changed
+    db.collection('id_verify').doc(u.verifyToken)
+      .set(buildIdVerifyDoc('employee', u, currentUser.uid), { merge: true }).catch(()=>{});
+    return u.verifyToken;
+  }
+  const token = window.makeTrackCode(10);
+  await db.collection('id_verify').doc(token)
+    .set(buildIdVerifyDoc('employee', u, currentUser.uid));
+  await db.collection('users').doc(currentUser.uid)
+    .set({ verifyToken: token }, { merge: true });      // not a frozen field → self-write OK
+  u.verifyToken = token;
+  if (window.userProfile && userProfile.id === currentUser.uid) userProfile.verifyToken = token;
+  return token;
+}
+
 // ── Employee ID Card + Calling Card toggle ────────
 function renderIDCard(containerId, u) {
   const el = document.getElementById(containerId);
@@ -3393,9 +3434,10 @@ function renderIDCard(containerId, u) {
         </div>
       </div>
       <div class="id-card-footer">
-        <div class="id-card-id">${u.employeeId||'BI-0000'}</div>
-        <div class="id-card-status">ACTIVE</div>
+        <div class="id-card-id">${escHtml(u.employeeId||'BI-0000')}</div>
+        <div class="id-card-status">${(u.status==='inactive')?'INACTIVE':'ACTIVE'}</div>
       </div>
+      <div class="id-card-qr" id="id-qr-${containerId}" title="Scan to verify"></div>
     </div>`;
 
   // Back / calling face — class-driven so the theme controls light vs dark.
@@ -3456,7 +3498,96 @@ function renderIDCard(containerId, u) {
 
   // Click to toggle (desktop)
   scene.addEventListener('click', () => setFlipped(showingID));
+
+  // Print / Save-PDF button (rendered once, below the flip scene)
+  const printBtn = document.createElement('button');
+  printBtn.className = 'btn-secondary btn-sm';
+  printBtn.style.marginTop = '12px';
+  printBtn.innerHTML = '🖨 Print / Save PDF';
+  el.appendChild(printBtn);
+
+  // Mint/refresh the verify token, then draw the on-card QR and wire printing.
+  ensureEmployeeVerifyToken(u).then(token => {
+    const url = (window.BRAND?.verifyBase || '/v/') + '?' + encodeURIComponent(token);
+    const qrEl = document.getElementById(`id-qr-${containerId}`);
+    if (qrEl) qrEl.innerHTML = window.buildQRSVG ? window.buildQRSVG(url, 64) : '';
+    printBtn.addEventListener('click', () => window.printIDCards([buildIdVerifyDoc('employee', u, currentUser.uid)], token ? [token] : ['']));
+  }).catch(() => {
+    printBtn.addEventListener('click', () => window.printIDCards([buildIdVerifyDoc('employee', u, currentUser.uid)], ['']));
+  });
 }
+
+// ── CR80 ID-card print (new-window document.write; front+back per card) ──
+window.printIDCards = function(data, tokens) {
+  const B = window.BRAND || {};
+  const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const logoAbs = (location.origin||'') + '/' + ((B.logo && B.logo.print) || 'icons/barro-industries.png');
+  const navy = B.navy || '#1E3A5F';
+
+  const cardFront = (d, tok) => {
+    const url = (B.verifyBase || (location.origin+'/v/')) + '?' + encodeURIComponent(tok||'');
+    const qr = (window.buildQRSVG && tok) ? window.buildQRSVG(url, 84) : '';
+    const photo = d.photoUrl
+      ? `<img class="p" src="${esc(d.photoUrl)}" alt=""/>`
+      : `<div class="p ph">👤</div>`;
+    return `<div class="cr80 front">
+      <div class="top"><img class="logo" src="${esc(logoAbs)}" onerror="this.style.display='none'"/>
+        <div><div class="co">${esc(B.name||'BARRO INDUSTRIES')}</div><div class="cosub">COMPANY ID</div></div></div>
+      <div class="mid">${photo}
+        <div class="info"><div class="nm">${esc(d.name||'')}</div>
+          <div class="rl">${esc(d.jobTitle||d.department||'')}</div>
+          <div class="dt">${esc(d.department||'')}</div>
+          <div class="dt">ID: <b>${esc(d.idNumber||'')}</b></div>
+          ${d.employmentType?`<div class="dt">${esc(d.employmentType)}</div>`:''}
+        </div>
+        <div class="qr">${qr||`<div class="qrfb">${esc(url)}</div>`}</div>
+      </div>
+      <div class="bot"><span>${esc(d.status==='inactive'?'INACTIVE':'ACTIVE')}</span><span>Issued ${esc(d.issuedOn||'')}</span></div>
+    </div>`;
+  };
+  const cardBack = (d) => `<div class="cr80 back">
+      <div class="bkco">${esc(B.name||'BARRO INDUSTRIES')}</div>
+      <div class="bktag">${esc(B.tagline||'')}</div>
+      <div class="bkrule"></div>
+      <div class="bknote">This card is property of ${esc((B.legal && B.legal.opcName) || B.name || 'the company')}. If found, please return to the company. Scan the QR on the front to verify the holder.</div>
+      <div class="bkbrand">${esc((B.legal && B.legal.opcName) || '')}</div>
+    </div>`;
+
+  const body = data.map((d,i)=>cardFront(d, (tokens||[])[i]) + cardBack(d)).join('');
+  const w = window.open('', '_blank');
+  if (!w) { alert('Please allow pop-ups to print ID cards.'); return; }
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ID Cards — Barro Industries</title><style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',system-ui,Arial,sans-serif;background:#eee;padding:12px;display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+    .cr80{width:85.6mm;height:53.98mm;background:#fff;color:#111;border-radius:3mm;overflow:hidden;padding:4mm;position:relative;box-shadow:0 1px 4px rgba(0,0,0,.2)}
+    .front{border-top:3mm solid ${navy}}
+    .top{display:flex;align-items:center;gap:2mm;margin-bottom:2mm}
+    .logo{height:8mm;width:8mm;object-fit:contain}
+    .co{font-size:10pt;font-weight:800;color:${navy};letter-spacing:.3px}
+    .cosub{font-size:6pt;letter-spacing:2px;color:#777}
+    .mid{display:flex;gap:3mm;align-items:flex-start}
+    .p{width:18mm;height:22mm;object-fit:cover;border:0.4mm solid #ccc;border-radius:1.5mm;flex:0 0 auto}
+    .ph{display:flex;align-items:center;justify-content:center;font-size:20pt;background:#f2f2f2}
+    .info{flex:1;min-width:0}
+    .nm{font-size:11pt;font-weight:800;line-height:1.1}
+    .rl{font-size:7.5pt;color:#555;margin:.5mm 0}
+    .dt{font-size:7pt;color:#444;line-height:1.4}
+    .qr{width:20mm;height:20mm;flex:0 0 auto}.qr svg{width:100%;height:100%}
+    .qrfb{font-size:4pt;word-break:break-all;color:#333}
+    .bot{position:absolute;left:4mm;right:4mm;bottom:2.5mm;display:flex;justify-content:space-between;font-size:6.5pt;color:#666;border-top:0.3mm solid #eee;padding-top:1mm}
+    .back{border-top:3mm solid ${navy};display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+    .bkco{font-size:11pt;font-weight:800;color:${navy}}
+    .bktag{font-size:6.5pt;color:#666;margin-top:.5mm}
+    .bkrule{width:60%;height:0.3mm;background:#ddd;margin:2mm 0}
+    .bknote{font-size:6.5pt;color:#555;line-height:1.5;max-width:70mm}
+    .bkbrand{font-size:6pt;color:#999;margin-top:2mm;letter-spacing:.5px}
+    @page{size:auto;margin:6mm}
+    @media print{body{background:#fff;padding:0;gap:4mm}.cr80{box-shadow:none;page-break-inside:avoid;break-inside:avoid}}
+  </style></head><body>${body}
+  <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script>
+  </body></html>`);
+  w.document.close();
+};
 
 // ── My Department (supports dual) ─────────────────
 function renderMyDepartment() {

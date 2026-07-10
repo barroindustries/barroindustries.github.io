@@ -1523,6 +1523,10 @@ body.sidebar-open .top-nav-strip { display: none !important; }
   border: 1px solid rgba(48,209,88,0.25);
   box-shadow: 0 0 8px rgba(48,209,88,0.20);
 }
+.id-card-qr {
+  margin-top: 14px; display: flex; justify-content: center;
+  position: relative; z-index: 1;
+}
 
 /* ── Calling (back) face — class-driven; dark default, light override below ── */
 .id-card--calling {

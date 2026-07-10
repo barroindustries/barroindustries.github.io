@@ -1,5 +1,11 @@
 # Workstream 27 — IDs (employee ID redesign + worker ID cards + worker-login unblock + Create-Worker-Account re-link)
 
+> ✅ **IMPLEMENTED 2026-07-10.** Rules deploy required (`firestore.rules` new `id_verify` block
+> + widened `_counters` write; `storage.rules` new `worker-id-photos` block). See V12-PLAN.md
+> Build Log. Section 1 ("interim window.BRAND") was superseded by WS9's real, already-shipped
+> `window.BRAND` per the spec's own seam-reconciliation note. **This completes Phase 3** —
+> Phase 4 (workstreams 28-40) has no Fable specs yet; see the Build Log's scope-discovery note.
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

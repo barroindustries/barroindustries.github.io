@@ -8,7 +8,7 @@
 //    • HTML / API → Network-first, cache as offline fallback
 // ═══════════════════════════════════════════════════════
 
-const CACHE_VER   = 'bi-ops-v172';
+const CACHE_VER   = 'bi-ops-v173';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -23,6 +23,7 @@ const PRECACHE = [
   '/manifest.json',
   '/js/firebase-config.js',
   '/js/config.js',
+  '/js/qrcode.js',
   '/js/statutory-tables.js',
   '/js/letterhead.js',
   '/js/drive.js',
@@ -34,7 +35,9 @@ const PRECACHE = [
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/favicon.svg',
-  '/favicon.png'
+  '/favicon.png',
+  '/v/',
+  '/v/index.html'
 ];
 
 // External CDN scripts — cache aggressively (versioned URLs never change)

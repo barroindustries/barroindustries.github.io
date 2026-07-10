@@ -45,7 +45,7 @@ finalizing 9's rename sweep so the two don't conflict.
 | 24 | [24-payslip.md](24-payslip.md) | ✅ IMPLEMENTED | The payslip — ONE branded template (print button currently dead) |
 | 25 | [25-leave.md](25-leave.md) | ✅ IMPLEMENTED | Leave that actually works — balances never seeded today |
 | 26 | [26-attendance-v2.md](26-attendance-v2.md) | ✅ IMPLEMENTED | Attendance v2 — time-out, hours, holidays admin |
-| 27 | [27-ids.md](27-ids.md) | 5 | Employee + worker ID cards, worker-login unblock |
+| 27 | [27-ids.md](27-ids.md) | ✅ IMPLEMENTED | Employee + worker ID cards, worker-login unblock |
 
 ## Status — ALL 18 DECIDED (Fable, 2026-07-10) ✅
 

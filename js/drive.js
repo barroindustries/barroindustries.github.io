@@ -51,6 +51,13 @@ window.Drive = (() => {
     return ref.getDownloadURL();
   }
 
+  // ── Worker ID Photo Upload (HR-uploaded; role-gated path, not uid-owned) ──
+  async function uploadWorkerPhoto(file, profileId) {
+    const ref = storage.ref(`worker-id-photos/${profileId}/${Date.now()}_${file.name}`);
+    await ref.put(file);
+    return ref.getDownloadURL();
+  }
+
   // ── Delete File ────────────────────────────────────
   async function deleteFile(fileRef) {
     try { await storage.ref(fileRef.id).delete(); }
@@ -269,5 +276,5 @@ window.Drive = (() => {
     if (window.lucide) lucide.createIcons({ nodes: [el] });
   }
 
-  return { uploadFile, uploadProfilePhoto, deleteFile, renderUploadArea, renderStorageStatus, resolveUrl, sourceLabel, sourceIcon };
+  return { uploadFile, uploadProfilePhoto, uploadWorkerPhoto, deleteFile, renderUploadArea, renderStorageStatus, resolveUrl, sourceLabel, sourceIcon };
 })();

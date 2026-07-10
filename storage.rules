@@ -123,6 +123,18 @@ service firebase.storage {
         && (request.resource == null || isValidImage());
     }
 
+    // ── Worker ID photos — HR-uploaded (WS27; NOT uid-owned, worker has no auth uid) ──
+    // Read: any signed-in staff (photo shows on the ID card + verify page).
+    // Write: finance tier only (HR uploads on the worker's behalf); valid image.
+    // Note: getDownloadURL() on this path returns a token-bearing URL that gets
+    // stored in the PUBLIC id_verify.photoUrl — intentional, the ID photo is
+    // public-by-design (printed on a physical card, shown on the verify page).
+    match /worker-id-photos/{profileId}/{allPaths=**} {
+      allow read:  if isSignedIn();
+      allow write: if isSignedIn() && isFinanceClaim()
+        && (request.resource == null || isValidImage());
+    }
+
     // ── Task comment attachments (collaborative) ─────
     match /task-comments/{docId}/{fileName} {
       allow read: if isSignedIn();

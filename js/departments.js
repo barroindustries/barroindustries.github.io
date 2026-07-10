@@ -2352,10 +2352,12 @@ window.renderHR = async function(currentUser, currentRole){
     c.innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><h4>HR is management &amp; finance only</h4></div>';
     return;
   }
+  const canAccounts = ['president','manager'].includes(role);   // renderTeam gate parity
   const cards = [
     { icon:'👥', title:'People & Roles', desc:'Assign roles, departments & employee class', go:()=>navigateTo('team-directory') },
     { icon:'💰', title:'Payroll',        desc:'Monthly run — Compute → Verify → Disburse', go:()=>window.renderFinance(currentUser, currentRole, 'Payroll') },
-    { icon:'👷', title:'Worker Payslips',desc:'Weekly Production payslips & profiles',      go:()=>window.renderFinance(currentUser, currentRole, 'HR Profiles') },
+    { icon:'👷', title:'Worker Payslips',desc:'Weekly Production payslips, profiles & ID cards', go:()=>window.renderFinance(currentUser, currentRole, 'HR Profiles') },
+    ...(canAccounts ? [{ icon:'🔑', title:'Accounts & Logins', desc:'Create worker logins, reset passwords, edit pay', go:()=>navigateTo('team') }] : []),
     { icon:'🌴', title:'Leave',          desc:'Requests, approvals & balances',             go:()=>window.renderLeavePage && window.renderLeavePage() },
     { icon:'🕐', title:'Attendance',     desc:'Daily attendance & time-extension requests', go:()=>navigateTo('attendance') },
   ];
@@ -4341,6 +4343,64 @@ async function renderFinanceCA(container, currentUser, currentRole) {
 }
 
 // ── HR Profiles + Payslip Generator ─────────────────
+// BI-W-### atomic worker ID (mirrors the _counters/employees pattern, app.js:498-500).
+window.nextWorkerIdNumber = async function() {
+  const ref = db.collection('_counters').doc('workers');
+  return db.runTransaction(async t => {
+    const c = await t.get(ref);
+    const next = (c.exists ? (c.data().count || 0) : 0) + 1;
+    t.set(ref, { count: next }, { merge: true });
+    return `BI-W-${String(next).padStart(3,'0')}`;
+  });
+};
+
+// Ensure a worker_profiles doc has a stable verify token + fresh public projection.
+async function ensureWorkerVerifyToken(profile) {
+  const proj = window.buildIdVerifyDoc('worker', profile, null);
+  if (profile.verifyToken) {
+    db.collection('id_verify').doc(profile.verifyToken).set(proj, { merge:true }).catch(()=>{});
+    return profile.verifyToken;
+  }
+  const token = window.makeTrackCode(10);
+  await db.collection('id_verify').doc(token).set(proj);
+  await db.collection('worker_profiles').doc(profile.id).set({ verifyToken: token }, { merge:true });
+  profile.verifyToken = token;
+  return token;
+}
+
+window.openWorkerIDModal = async function(profile, onDone) {
+  if (!profile) return;
+  const token = await ensureWorkerVerifyToken(profile).catch(()=>null);
+  const url = (window.BRAND?.verifyBase || '/v/') + '?' + encodeURIComponent(token||'');
+  const qr = (window.buildQRSVG && token) ? window.buildQRSVG(url, 120) : '';
+  openModal('🪪 Worker ID — ' + escHtml(profile.name||''), `
+    <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+      <div style="width:90px;height:110px;border:1px solid var(--border);border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2);font-size:34px">
+        ${profile.photoUrl?`<img src="${escHtml(profile.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:'👤'}</div>
+      <div style="flex:1;min-width:160px">
+        <div style="font-size:17px;font-weight:800">${escHtml(profile.name||'')}</div>
+        <div style="font-size:12px;color:var(--text-muted)">${escHtml(profile.jobTitle||'')}</div>
+        <div style="font-size:12px;margin-top:4px">ID: <b>${escHtml(profile.idNumber||'—')}</b></div>
+        <div style="font-size:12px">${escHtml(profile.department||'')} · ${escHtml(profile.employmentType||'')}</div>
+      </div>
+      <div style="width:120px;height:120px">${qr||`<div style="font-size:10px;word-break:break-all">${escHtml(url)}</div>`}</div>
+    </div>
+    ${token?`<p style="font-size:11px;color:var(--text-muted);margin-top:12px">Verify link: <a href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(url)}</a></p>`:'<p style="font-size:11px;color:var(--danger);margin-top:12px">Could not create a verify link (permission). The card will print without a QR.</p>'}
+  `, `<button class="btn-primary" id="wid-print">🖨 Print / Save PDF</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  document.getElementById('wid-print')?.addEventListener('click', () => {
+    window.printIDCards([window.buildIdVerifyDoc('worker', profile, null)], [token||'']);
+  });
+  if (onDone) onDone();
+};
+
+window.batchPrintWorkerIDs = async function(profiles) {
+  if (!profiles || !profiles.length) { Notifs.showToast('No active worker profiles to print','error'); return; }
+  Notifs.showToast('Preparing '+profiles.length+' ID cards…');
+  const tokens = [];
+  for (const p of profiles) tokens.push(await ensureWorkerVerifyToken(p).catch(()=>''));
+  window.printIDCards(profiles.map(p=>window.buildIdVerifyDoc('worker', p, null)), tokens);
+};
+
 async function renderFinanceHRProfiles(container, currentUser, currentRole) {
   const isPriv = isFinancePriv();
   container.innerHTML = '<div class="loading-placeholder">Loading worker profiles…</div>';
@@ -4369,6 +4429,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
       <button class="btn-primary btn-sm" id="hrp-add-btn">+ Add Worker Profile</button>
       <button class="btn-secondary btn-sm" id="hrp-payslip-history-btn">📄 All Payslips</button>
       <button class="btn-secondary btn-sm" id="hrp-raise-history-btn">💸 Raise History</button>
+      <button class="btn-secondary btn-sm" id="hrp-batch-id-btn">🪪 Batch Print IDs</button>
     </div>`:''}
     <div class="card">
       <div class="card-header"><h3>👷 Worker Profiles</h3></div>
@@ -4388,6 +4449,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
               <td><span class="badge ${p.status==='active'?'badge-green':'badge-gray'}">${p.status||'active'}</span></td>
               <td style="white-space:nowrap">
                 <button class="btn-primary btn-sm hrp-gen-btn" data-id="${p.id}" style="margin-right:4px">📄 Payslip</button>
+                <button class="btn-secondary btn-sm hrp-id-btn" data-id="${p.id}" style="margin-right:4px">🪪 ID</button>
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-kiosk-btn" data-id="${p.id}" title="Record today's time in/out" style="margin-right:4px">⏱ Clock</button>`:''}
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-raise-btn" data-id="${p.id}" title="Give raise" style="margin-right:4px">💸 Raise</button>`:''}
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-edit-btn" data-id="${p.id}">✎ Edit</button>`:''}
@@ -4406,6 +4468,11 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
     document.getElementById('hrp-add-btn')?.addEventListener('click', () => openHRProfileForm(null, currentUser, currentRole, ()=>renderFinanceHRProfiles(container,currentUser,currentRole)));
     document.getElementById('hrp-payslip-history-btn')?.addEventListener('click', () => openPayslipHistory(currentUser, currentRole));
     document.getElementById('hrp-raise-history-btn')?.addEventListener('click', () => openRaiseHistory());
+    document.getElementById('hrp-batch-id-btn')?.addEventListener('click', () => window.batchPrintWorkerIDs(profiles.filter(p=>p.status!=='inactive')));
+    container.querySelectorAll('.hrp-id-btn').forEach(btn => {
+      const profile = profiles.find(p=>p.id===btn.dataset.id);
+      btn.addEventListener('click', () => window.openWorkerIDModal(profile, () => renderFinanceHRProfiles(container,currentUser,currentRole)));
+    });
 
     container.querySelectorAll('.hrp-raise-btn').forEach(btn => {
       const profile = profiles.find(p=>p.id===btn.dataset.id);
@@ -4454,7 +4521,21 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
   openPage(`${isEdit?'Edit':'Add'} Worker Profile`, `
     <div class="form-row">
       <div class="form-group"><label>Full Name *</label><input id="hrp-name" value="${escHtml(profile?.name||'')}"/></div>
-      <div class="form-group"><label>ID Number</label><input id="hrp-id" value="${escHtml(profile?.idNumber||'')}"/></div>
+      <div class="form-group"><label>ID Number</label>
+        <div style="display:flex;gap:6px">
+          <input id="hrp-id" value="${escHtml(profile?.idNumber||'')}" style="flex:1" placeholder="BI-W-001"/>
+          <button type="button" class="btn-secondary btn-sm" id="hrp-gen-id" title="Generate BI-W number">Generate</button>
+        </div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>ID Photo</label>
+      <div style="display:flex;gap:12px;align-items:center">
+        <div id="hrp-photo-prev" style="width:64px;height:78px;border:1px solid var(--border);border-radius:6px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2);font-size:26px">
+          ${profile?.photoUrl?`<img src="${escHtml(profile.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:'👤'}</div>
+        <div><input type="file" id="hrp-photo-file" accept="image/*"/>
+          <div id="hrp-photo-status" style="font-size:11px;color:var(--text-muted);margin-top:4px"></div></div>
+      </div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>Job Title</label><input id="hrp-title" value="${escHtml(profile?.jobTitle||'')}"/></div>
@@ -4522,12 +4603,34 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
     </div>
   `, `<button class="btn-primary" id="hrp-save-btn">${isEdit?'Update':'Save'} Profile</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
+  // Stable doc id (pre-allocate for new profiles so the photo path is known).
+  const profileId = profile?.id || db.collection('worker_profiles').doc().id;
+  let uploadedPhotoUrl = profile?.photoUrl || '';
+
+  document.getElementById('hrp-gen-id')?.addEventListener('click', async () => {
+    const btn = document.getElementById('hrp-gen-id'); btn.disabled = true; btn.textContent = '…';
+    try { document.getElementById('hrp-id').value = await window.nextWorkerIdNumber(); }
+    catch(e){ Notifs.showToast('Could not generate ID number','error'); }
+    btn.disabled = false; btn.textContent = 'Generate';
+  });
+
+  document.getElementById('hrp-photo-file')?.addEventListener('change', async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const st = document.getElementById('hrp-photo-status'); st.textContent = 'Uploading…';
+    try {
+      uploadedPhotoUrl = await window.Drive.uploadWorkerPhoto(f, profileId);
+      document.getElementById('hrp-photo-prev').innerHTML = `<img src="${escHtml(uploadedPhotoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`;
+      st.textContent = '✅ Photo uploaded';
+    } catch(err){ st.textContent = '❌ ' + (err.message||'Upload failed'); }
+  });
+
   document.getElementById('hrp-save-btn').addEventListener('click', async () => {
     const name = document.getElementById('hrp-name').value.trim();
     if (!name) { Notifs.showToast('Name is required','error'); return; }
     const data = {
       name,
       idNumber: document.getElementById('hrp-id').value.trim(),
+      photoUrl: uploadedPhotoUrl || '',
       jobTitle: document.getElementById('hrp-title').value.trim(),
       department: document.getElementById('hrp-dept').value,
       employmentType: document.getElementById('hrp-emptype').value,
@@ -4558,8 +4661,7 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     };
     if (!isEdit) { data.createdAt = firebase.firestore.FieldValue.serverTimestamp(); data.createdBy = currentUser.uid; }
-    if (isEdit) { await db.collection('worker_profiles').doc(profile.id).update(data); }
-    else         { await db.collection('worker_profiles').add(data); }
+    await db.collection('worker_profiles').doc(profileId).set(data, { merge: true });
     closeModal();
     Notifs.showToast(isEdit ? 'Profile updated!' : 'Worker profile created!');
     onSave();

@@ -147,9 +147,13 @@ service cloud.firestore {
       allow create, update, delete: if isAuth() && isAdmin();
     }
 
-    // ── Employee ID counter ────────────────────────────
+    // ── Sequence counters (employees, workers, etc.) ────
+    // Widened from admin-only to isFinanceOrAdmin() (WS27) so HR/finance can
+    // mint BI-W-### worker IDs. Safe: docs here are opaque monotonic integers
+    // — the worst a finance user can do is advance a sequence number.
     match /_counters/{docId} {
-      allow read, write: if isAuth() && isAdmin();
+      allow read:  if isAuth();
+      allow write: if isAuth() && isFinanceOrAdmin();
     }
 
     // ── Posts ──────────────────────────────────────────
@@ -1050,6 +1054,22 @@ service cloud.firestore {
       allow list:   if false;
       allow create: if isAuth() && !isPartner();
       allow update: if isAuth() && !isPartner();
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    // ── Public ID verification (QR scan target, WS27) ───
+    // Each doc id is an unguessable token; the public /v/?<token> page resolves
+    // it. Holds ONLY a public-safe projection (name/photo/id-no/dept/title/
+    // status) — NEVER SSS/PhilHealth/TIN/rates/CA/address/phone/email, which
+    // stay in worker_profiles/users. `get` public, `list` denied (no enumeration).
+    match /id_verify/{token} {
+      allow get:  if true;
+      allow list: if false;
+      allow create, update: if isAuth() && !isPartner() && (
+        isFinanceOrAdmin() ||                                     // HR mints worker + employee cards
+        ( request.resource.data.get('kind','') == 'employee'      // employee self-mints OWN card only
+          && request.resource.data.get('uid','') == request.auth.uid )
+      );
       allow delete: if isAuth() && isAdmin();
     }
 
