@@ -107,9 +107,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     on-demand load) — see Build Log. No counter docs built (deferred to WS13 per spec D1/D2/D11);
     departments.js split deferred (D-split); presence heartbeat needed no change (already
     throttled, D10).
-17. `[ ]` **Design-system consolidation** — collapse the override-stacked CSS into one token
+17. `[x]` **Design-system consolidation** — collapse the override-stacked CSS into one token
     layer; Lucide icons replace ~1,100 emoji; Auto (system) theme; theme-color meta follows
-    theme; typography scale; focus states.
+    theme; typography scale; focus states. IMPLEMENTED (safe CSS dedup + typography-scale
+    tokens + universal focus ring + Auto theme + icon infra) — see Build Log. Icon migration
+    is PARTIAL by design (spec's own decision: unmapped/unconverted emoji fall back to literal
+    rendering, so partial completion never breaks a screen) — infra + all named sites + ~50
+    unambiguous icon-only-button conversions done; ~600+ prose/label-prefix emoji deliberately
+    left for a future pass.
 18. `[ ]` **Keyboard shortcuts** — Esc closes overlays; Ctrl/⌘K or / global search; Alt+1..9
     nav; ? cheat sheet.
 19. `[x]` **Security closes** — partner lockdown (files_* metadata, budgets_* world-write,
@@ -748,3 +753,66 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   (post an expense, immediately check Analytics), and confirming Chart.js's CDN request only
   fires when a charted screen opens (not on every login).
   NEXT: workstream 17 (design-system consolidation) per the build order in fable-workplan/INDEX.md.
+- **2026-07-10 (Sonnet implementation — WS17 Design-system consolidation, per spec):** Split
+  across 5 parallel subagents (css/styles.css; config.js icon infra+DEPARTMENTS; app.js theme
+  system+icon sites; departments.js icon sites+sweep; modules.js+notifications.js icon sites),
+  each independently verified before integration. Scope discipline matched the spec's own stated
+  intent — "surgical, not a rewrite" — everything CSS-side is provably visual-no-op (dedup of a
+  shadowed rule, or a token value that equals the px literal it replaces); the icon migration is
+  **deliberately partial**, per the spec's own decision that unmapped/unconverted emoji fall
+  back to literal rendering so partial completion never breaks a screen. **CSS:** folded 5
+  duplicate `:root` token reassignments + 3 iOS-only motion tokens into one canonical `:root`
+  (iOS values won today, kept as canonical — a no-op); merged 8 duplicated base selectors
+  (`.topbar`, `.page-header`, `.subtab-btn`, `.card`, `.modal-box`, `.bottom-nav` 3-way, and a
+  protected `.kpi-value` merge that left its `clamp(15px, 4.6vw, 28px)` line byte-identical since
+  `window.fitKpiValues` depends on reading that exact computed size); replaced a hand-curated
+  16-selector focus-visible allowlist with one universal `:focus-visible` rule + a
+  `[tabindex="-1"]` opt-out; swept 226 `font-size:<px>` declarations to `--fs-*` tokens (44
+  non-mapped px values deliberately left raw, `.kpi-value`/`.stat-num`/print-block explicitly
+  excluded) — file went 4704→4651 lines, braces balanced 1292/1292. Added `--brand-primary` as
+  the decoupled "accent role" token (defaults to `var(--pink)`, used only in rules this pass
+  touched) per the WS9 BRAND hook. **Icon infra:** `window.LUCIDE_EMOJI_MAP` (86 entries) +
+  `window.emojiIcon(glyph,size)` in config.js (falls back to the raw emoji for anything unmapped
+  — the safety net the whole partial-completion strategy depends on); `DEPARTMENTS` gained a
+  `lucideIcon` field on all 12 entries (emoji `icon`/`color` untouched, purely additive). All 6
+  named DEPARTMENTS-icon render sites converted (5 in app.js, 1 in departments.js) plus one extra
+  `cfg.icon` site the spec's table missed (converted for consistency by the app.js agent's own
+  judgment call); notifications.js render-time icon resolution (no Firestore migration/backfill);
+  profile-drawer shortcuts; ~50 unambiguous icon-only-button sites (departments.js 22,
+  modules.js 3, plus others) converted via a conservative bounded pattern (only where an
+  element's ENTIRE content was a single mapped emoji — button/badge labels, prose, toasts, and
+  decorative prefixes-before-text were deliberately left as literal emoji, per the spec's own
+  authorization). **~600+ chrome-emoji occurrences remain unconverted app-wide** — flagged, not
+  silently dropped; a future pass can extend the D6 sweep using the same safe bounded pattern.
+  **Theme system:** added a 7th `auto` entry to `THEMES` (resolves Office↔Obsidian live via
+  `matchMedia`, no reload), `setTheme` now syncs `<meta name=theme-color>` to the resolved
+  `--theme-color`/`--bg`, picker UI shows 3 swatches (Office/Auto/Obsidian) while the 4 hidden
+  themes stay functional in code for existing localStorage values; `manifest.json`'s
+  `theme_color` updated `#0a0a0a`→`#0F6CBD` (done directly, not delegated — a 1-line change);
+  `index.html`'s static theme-color meta was already correctly `#FAF9F8`, needed no change.
+  **Genuine issue caught and fixed, not blindly copied:** the config.js agent found the spec's
+  own `LUCIDE_EMOJI_MAP` source contained one corrupted entry (a literal U+FFFD replacement
+  character as an object key, `'�️':'link'`) — verified at the byte level, dropped that one
+  redundant/corrupted entry (the mapping is already covered by `'🔗':'link'` on the next line)
+  rather than copy garbage into production code; worth fixing at the source in
+  `fable-workplan/17-design.md` if another workstream references the map again. **Verified:**
+  `node --check` clean on all 5 touched JS files; CSS brace-balance 1292/1292; grep-confirmed
+  `emojiIcon`/`LUCIDE_EMOJI_MAP` each defined exactly once; `.kpi-value`'s clamp line byte-
+  identical pre/post; zero `@layer` introduced; zero old focus-allowlist selectors remain; all
+  3 theme-swatch buttons present with matching `data-theme` values the existing click-wiring
+  already expects (no wiring changes needed); hand-spot-checked ~20+ typography-sweep sites and
+  a sample of the icon-only-button conversions to confirm no prose-embedded emoji was
+  accidentally converted. **No `firebase deploy` needed** — zero rules/collection changes,
+  confirmed by the spec's own decision 14. **NOT verified** (needs a live login across all 3
+  picker themes + the 4 hidden ones + an OS dark/light toggle): the manual test checklist in the
+  spec's §J (KPI auto-fit at 375px, modal glass rendering, bottom-nav accent color, Lucide icons
+  actually rendering vs. empty boxes, Auto theme flipping live with the OS, focus ring on a
+  previously-unlisted element, print preview unaffected, iOS notch/safe-area clearance).
+  NEXT: workstream 18 (keyboard shortcuts) per the build order in fable-workplan/INDEX.md — note
+  its spec assumes a separate `window.OverlayEsc` DOM-probe registry with its own Escape
+  keydown listener, written before WS10-11 was actually implemented; WS10-11's `window.Overlay`
+  (LIFO stack + History API) already owns Escape-to-dismiss for modal/page-panel/task-panel/
+  dialog. Implementing WS18 literally as written would create two competing Escape listeners —
+  reconciling this (route WS18's Escape entry through `Overlay.dismissTop()`/`isOpen()`, keep a
+  small DOM-probe fallback only for the two surfaces `Overlay` doesn't track — profile drawer,
+  mobile sidebar) before implementation.

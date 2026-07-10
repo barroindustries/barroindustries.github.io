@@ -1,5 +1,12 @@
 # Workstream 17 — Design-System Consolidation
 
+> ✅ **IMPLEMENTED 2026-07-10** (CSS dedup/typography/focus-ring/theme system + icon infra +
+> all named icon sites). No rules deploy needed (zero rules/collection changes, per decision
+> 14). Icon migration (D6) is deliberately PARTIAL — infra + named sites + ~50 unambiguous
+> icon-only-button conversions done; ~600+ prose/label-prefix chrome emoji intentionally left
+> for a future pass, per the spec's own partial-completion safety net. See V12-PLAN.md Build
+> Log. Live manual-test checklist (§J) not exercised — needs a live login across themes.
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.6';
+window.APP_VERSION = '12.0.7';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -69,55 +69,76 @@ window.AUTO_LOGOUT_MS = 10 * 24 * 60 * 60 * 1000;
 // ── Department Definitions ───────────────────────
 window.DEPARTMENTS = {
   'Admin': {
-    key: 'Admin', icon: '🏢', color: '#1a237e',
+    key: 'Admin', icon: '🏢', lucideIcon: 'building-2', color: '#1a237e',
     subtabs: ['Policies', 'HR Documents', 'Authorization'], navOrder: 1
   },
   'Finance': {
-    key: 'Finance', icon: '💰', color: '#1b5e20',
+    key: 'Finance', icon: '💰', lucideIcon: 'wallet', color: '#1b5e20',
     subtabs: ['Overview', 'Accounting', 'Purchases', 'SSS / Gov'], navOrder: 2
   },
   'HR': {
-    key: 'HR', icon: '👥', color: '#ad1457',
+    key: 'HR', icon: '👥', lucideIcon: 'users', color: '#ad1457',
     subtabs: ['People & Roles', 'Payroll', 'Worker Payslips', 'Leave', 'Attendance'], navOrder: 2
   },
   'Sales': {
-    key: 'Sales', icon: '🤝', color: '#e65100',
+    key: 'Sales', icon: '🤝', lucideIcon: 'handshake', color: '#e65100',
     subtabs: ['BK Quotes', 'Quotations', 'Clients', 'Work Plans', 'Proposals', 'SOP'], navOrder: 3
   },
   'Marketing': {
-    key: 'Marketing', icon: '📢', color: '#880e4f',
+    key: 'Marketing', icon: '📢', lucideIcon: 'megaphone', color: '#880e4f',
     subtabs: ['Advertising', 'Marketing Designs', 'Plan', 'Budgeting', 'Proposals'], navOrder: 4
   },
   'Government Biddings': {
-    key: 'Government Biddings', icon: '🏛️', color: '#004d40',
+    key: 'Government Biddings', icon: '🏛️', lucideIcon: 'landmark', color: '#004d40',
     subtabs: ['PhilGEPS', 'Active Bids', 'Archive'], navOrder: 5
   },
   'IT': {
-    key: 'IT', icon: '💻', color: '#0d47a1',
+    key: 'IT', icon: '💻', lucideIcon: 'laptop', color: '#0d47a1',
     subtabs: ['Overview', 'IT Tickets', 'Assets', 'Software', 'Access Control', 'Network', 'Tasks'], navOrder: 6
   },
   'Design': {
-    key: 'Design', icon: '🎨', color: '#4a148c',
+    key: 'Design', icon: '🎨', lucideIcon: 'palette', color: '#4a148c',
     subtabs: ['Projects', 'Drawings', 'Clients', 'Product Designs', 'References', 'Tasks'], navOrder: 6
   },
   'Production': {
-    key: 'Production', icon: '🏭', color: '#5d4037',
+    key: 'Production', icon: '🏭', lucideIcon: 'factory', color: '#5d4037',
     subtabs: ['Orders', 'Materials', 'Tasks', 'Files'], navOrder: 7
   },
   'Purchasing': {
-    key: 'Purchasing', icon: '🛒', color: '#00695c',
+    key: 'Purchasing', icon: '🛒', lucideIcon: 'shopping-cart', color: '#00695c',
     subtabs: ['Request for Quotation', 'Purchase Requests', 'Tasks'], navOrder: 8
   },
   'Brilliant Steel': {
-    key: 'Brilliant Steel', icon: '⚙️', color: '#37474f',
+    key: 'Brilliant Steel', icon: '⚙️', lucideIcon: 'settings', color: '#37474f',
     subtabs: ['Dashboard', 'Quote Builder', 'Quotations Summary', 'Client Data'],
     navOrder: 7, isSeparate: true
   },
   'Partners': {
-    key: 'Partners', icon: '🤝', color: '#0a84ff',
+    key: 'Partners', icon: '🤝', lucideIcon: 'handshake', color: '#0a84ff',
     subtabs: ['Overview', 'Tasks', 'Quotes', 'Activity'],
     navOrder: 8, isPartnerDept: true
   }
+};
+
+// ── Emoji → Lucide icon-name map (UI chrome). Extend as new glyphs appear. ──
+window.LUCIDE_EMOJI_MAP = {
+  '✅':'check-circle','✓':'check','☑':'check-square','❌':'x-circle','✗':'x','⚠':'alert-triangle','⚠️':'alert-triangle',
+  '📋':'clipboard-list','🗑':'trash-2','🗑️':'trash-2','📄':'file-text','🧾':'receipt','📊':'bar-chart-3','📈':'trending-up','📉':'trending-down',
+  '📅':'calendar','🕐':'clock','⏰':'alarm-clock','🌅':'sunrise','📦':'package','💸':'banknote','💰':'wallet','💵':'banknote',
+  '🔔':'bell','🔒':'lock','🔓':'unlock','🔑':'key','⚙️':'settings','⚙':'settings','🔧':'wrench','🔍':'search','➕':'plus','➖':'minus',
+  '✏️':'pencil','✏':'pencil','📝':'file-pen-line','📌':'pin','📎':'paperclip','🏢':'building-2','🏭':'factory','🏛️':'landmark','🏛':'landmark',
+  '👥':'users','👤':'user','🤝':'handshake','📢':'megaphone','💻':'laptop','🎨':'palette','🛒':'shopping-cart','📁':'folder','📂':'folder-open',
+  '🚀':'rocket','⭐':'star','🌟':'star','❓':'help-circle','ℹ️':'info','💡':'lightbulb','🎯':'target','🔗':'link','📧':'mail','📞':'phone',
+  '🌴':'palm-tree','📖':'book-open','🖨️':'printer','⬇️':'download','⬆️':'upload','🔄':'refresh-cw','▶️':'play','⏸️':'pause','🏆':'trophy','🎁':'gift'
+};
+// Render helper: emoji OR a Lucide name -> Lucide <i>. Falls back to the raw emoji if unmapped.
+// size in px (optional). ALWAYS follow an innerHTML write that uses this with lucide.createIcons(...).
+window.emojiIcon = function(glyph, size){
+  if (!glyph) return '';
+  const name = window.LUCIDE_EMOJI_MAP[glyph] || (/^[a-z0-9-]+$/.test(glyph) ? glyph : null);
+  if (!name) return `<span class="emoji-icon">${(window.escHtml?escHtml(glyph):glyph)}</span>`; // legacy/unmapped: keep emoji
+  const s = size ? ` style=\"width:${size}px;height:${size}px\"` : '';
+  return `<i data-lucide=\"${name}\"${s}></i>`;
 };
 
 // ── Role Definitions ─────────────────────────────

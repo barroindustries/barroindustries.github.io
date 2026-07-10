@@ -824,6 +824,7 @@ function friendlyError(code) {
 
 // ── Theme ─────────────────────────────────────────
 const THEMES = {
+  auto:     { label: 'Auto',     cls: () => matchMedia('(prefers-color-scheme: dark)').matches ? null : 'light theme-office' },
   office:   { label: 'Office',   cls: 'light theme-office' },
   dark:     { label: 'Obsidian', cls: null },
   midnight: { label: 'Midnight', cls: 'theme-midnight' },
@@ -831,21 +832,37 @@ const THEMES = {
   pink:     { label: 'Astral',   cls: 'theme-pink' },
   grey:     { label: 'Slate',    cls: 'theme-grey' },
 };
+// cls may now be a string | null | function → string|null. Resolve everywhere via _themeCls().
+function _themeCls(t){ const c = THEMES[t] && THEMES[t].cls; return typeof c === 'function' ? c() : c; }
 
 function initTheme() {
   // Default to the light "Office" (Fluent) theme — clean white, office-friendly.
   // Users who already picked a theme keep their choice.
   setTheme(localStorage.getItem('bi-theme') || 'office', false);
+  // When 'auto' is active, follow the OS scheme instantly (no reload).
+  const mq = matchMedia('(prefers-color-scheme: dark)');
+  const onOsScheme = () => { if ((localStorage.getItem('bi-theme') || 'office') === 'auto') setTheme('auto', false); };
+  mq.addEventListener ? mq.addEventListener('change', onOsScheme) : mq.addListener(onOsScheme);
 }
 
 function setTheme(theme, persist = true) {
   if (!THEMES[theme]) theme = 'office';
   const html = document.documentElement;
-  Object.values(THEMES).forEach(t => { if (t.cls) t.cls.split(' ').forEach(c => html.classList.remove(c)); });
-  const cls = THEMES[theme].cls;
+  // strip every class any theme could add (static strings + the two Auto resolves)
+  ['light','theme-office','theme-midnight','theme-pink','theme-grey'].forEach(c => html.classList.remove(c));
+  const cls = _themeCls(theme);
   if (cls) cls.split(' ').forEach(c => html.classList.add(c));
   if (persist) localStorage.setItem('bi-theme', theme);
   _applyThemeIcon(theme);
+  _syncThemeColorMeta();          // NEW — keep <meta name=theme-color> in step with the rendered theme
+}
+// Read the resolved --theme-color (falls back to --bg) and write it to the meta tag.
+function _syncThemeColorMeta(){
+  let meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) { meta = document.createElement('meta'); meta.name = 'theme-color'; document.head.appendChild(meta); }
+  const cs = getComputedStyle(document.documentElement);
+  const c = (cs.getPropertyValue('--theme-color') || cs.getPropertyValue('--bg') || '').trim();
+  if (c) meta.setAttribute('content', c);
 }
 
 function getTheme() {
@@ -853,7 +870,7 @@ function getTheme() {
 }
 
 function toggleTheme() {
-  const order = ['office', 'dark', 'midnight', 'light', 'pink', 'grey'];
+  const order = ['auto', 'office', 'dark'];
   const next = order[(order.indexOf(getTheme()) + 1) % order.length];
   setTheme(next);
 }
@@ -861,7 +878,7 @@ function toggleTheme() {
 function _applyThemeIcon(theme) {
   const btn = document.getElementById('theme-toggle-btn');
   if (!btn) return;
-  const iconName = theme === 'dark' ? 'moon' : 'sun';
+  const iconName = theme === 'auto' ? 'monitor' : (theme === 'dark' || theme === 'midnight') ? 'moon' : 'sun';
   btn.innerHTML = `<i data-lucide="${iconName}"></i>`;
   if (window.lucide) lucide.createIcons({ nodes: [btn] });
 }
@@ -964,7 +981,7 @@ function getSidebarItems() {
       : currentDepts;
     navDepts.forEach((dept, i) => {
       const cfg = DEPARTMENTS[dept];
-      if (cfg) items.push({ icon: cfg.icon, label: dept, page: `dept:${dept}`, section: i === 0, sectionLabel: 'My Departments' });
+      if (cfg) items.push({ icon: cfg.icon, iconHtml: `<span class="nav-icon">${emojiIcon(cfg.lucideIcon||cfg.icon,18)}</span>`, label: dept, page: `dept:${dept}`, section: i === 0, sectionLabel: 'My Departments' });
     });
     // Management section below
     items.push({ icon:'users',       label:'Team',             page:'team-directory',    section:true, sectionLabel:'Management' });
@@ -1007,7 +1024,7 @@ function buildSidebarNav() {
         lastSectionLabel = label;
       }
     }
-    return `${secLabel}<button class="nav-item" data-page="${item.page}">${_navIcon(item.icon)}${item.label}</button>`;
+    return `${secLabel}<button class="nav-item" data-page="${item.page}">${item.iconHtml || _navIcon(item.icon)}${item.label}</button>`;
   }).join('');
   nav.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -2980,7 +2997,7 @@ async function renderEmployeeDashboard() {
           ${currentDepts.map(dept => {
             const cfg = DEPARTMENTS[dept] || {};
             return `<button class="dept-quick-tab" onclick="renderDeptModule('${dept}')">
-              <span style="font-size:18px">${cfg.icon||'🗂️'}</span>
+              <span style="font-size:18px">${emojiIcon(cfg.lucideIcon||cfg.icon||'folder',18)}</span>
               <span>${dept}</span>
             </button>`;
           }).join('')}
@@ -3400,13 +3417,14 @@ function renderDualDeptPicker() {
       ${currentDepts.map(dept => {
         const cfg = DEPARTMENTS[dept]||{icon:'🗂️',color:'var(--primary-light)'};
         return `<div class="dept-card" style="border-top-color:${cfg.color};cursor:pointer" onclick="renderDeptModule('${dept}')">
-          <div class="dept-name" style="font-size:20px;margin-bottom:6px">${cfg.icon}</div>
+          <div class="dept-name" style="font-size:20px;margin-bottom:6px">${emojiIcon(cfg.lucideIcon||cfg.icon,22)}</div>
           <div class="dept-name">${dept}</div>
           <div class="dept-head" style="margin-top:6px">Tap to open →</div>
         </div>`;
       }).join('')}
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
 }
 
 function renderDeptModule(dept) {
@@ -4001,9 +4019,11 @@ function renderGovBiddings() {
 
 function renderGenericDept(dept) {
   const cfg = DEPARTMENTS[dept];
-  document.getElementById('page-content').innerHTML = `
-    <div class="page-header"><h2>${cfg?.icon||'🗂️'} ${dept}</h2></div>
-    <div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">${cfg?.icon||'🗂️'}</div><h4>${dept}</h4><p>Module coming soon.</p></div></div></div>`;
+  const c = document.getElementById('page-content');
+  c.innerHTML = `
+    <div class="page-header"><h2>${emojiIcon(cfg?.lucideIcon||cfg?.icon||'folder',24)} ${dept}</h2></div>
+    <div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">${emojiIcon(cfg?.lucideIcon||cfg?.icon||'folder',24)}</div><h4>${dept}</h4><p>Module coming soon.</p></div></div></div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
 }
 
 // ── Files (employee tab) ──────────────────────────
@@ -5135,7 +5155,7 @@ async function renderProgressReports() {
       deptView.innerHTML += `
         <div class="card" style="margin-bottom:12px">
           <div class="card-header" style="border-left:4px solid ${cfg.color}">
-            <h3>${cfg.icon} ${dept}</h3>
+            <h3>${emojiIcon(cfg.lucideIcon||cfg.icon,20)} ${dept}</h3>
             <div style="display:flex;gap:8px;align-items:center">
               <span class="badge ${mPct>=80?'badge-green':mPct>=50?'badge-orange':'badge-red'}" title="This month KPI">📅 ${mPct}%</span>
               <span class="badge ${pct>=80?'badge-green':pct>=50?'badge-orange':'badge-red'}" title="All-time KPI">Overall ${pct}%</span>
@@ -5190,6 +5210,7 @@ async function renderProgressReports() {
           </div>
         </div>`;
     });
+    if (window.lucide) lucide.createIcons({ nodes: [deptView] });
 
     // Wire up subtab toggles inside progress cards
     c.querySelectorAll('[data-dt]').forEach(btn => {
@@ -6063,7 +6084,7 @@ async function renderDepartments() {
         const subtabs = (cfg.subtabs || []).slice(0, 4);
         return `
           <div class="dept-card dept-card-clickable" data-dept="${name}" style="border-top-color:${cfg.color||'var(--primary-light)'}; cursor:pointer">
-            <div class="dept-icon-large">${cfg.icon||'🗂️'}</div>
+            <div class="dept-icon-large">${emojiIcon(cfg.lucideIcon||cfg.icon||'folder',32)}</div>
             <div class="dept-name" style="font-weight:700;font-size:14px;margin:4px 0">${name}</div>
             <div class="dept-subtabs-preview">
               ${subtabs.map(s => `<span class="dept-subtab-chip">${s}</span>`).join('')}
@@ -6073,6 +6094,7 @@ async function renderDepartments() {
       }).join('')}
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
 
   // Click → open full department module
   c.querySelectorAll('.dept-card-clickable').forEach(card => {
@@ -6987,12 +7009,9 @@ function openProfileDrawer() {
       <div class="profile-info-row no-border" style="flex-direction:column;align-items:stretch;gap:10px">
         <span class="pir-label">Appearance</span>
         <div class="theme-picker" id="drawer-theme-picker">
-          <button class="theme-swatch theme-swatch-office" data-theme="office" title="Office"><span class="theme-swatch-dot"></span>Office</button>
-          <button class="theme-swatch theme-swatch-dark"  data-theme="dark"  title="Obsidian"><span class="theme-swatch-dot"></span>Obsidian</button>
-          <button class="theme-swatch theme-swatch-midnight" data-theme="midnight" title="Midnight"><span class="theme-swatch-dot"></span>Midnight</button>
-          <button class="theme-swatch theme-swatch-light" data-theme="light" title="Aurora"><span class="theme-swatch-dot"></span>Aurora</button>
-          <button class="theme-swatch theme-swatch-pink"  data-theme="pink"  title="Astral"><span class="theme-swatch-dot"></span>Astral</button>
-          <button class="theme-swatch theme-swatch-grey"  data-theme="grey"  title="Slate"><span class="theme-swatch-dot"></span>Slate</button>
+          <button class="theme-swatch theme-swatch-office" data-theme="office" title="Office (light)"><span class="theme-swatch-dot"></span>Office</button>
+          <button class="theme-swatch" data-theme="auto" title="Match system"><span class="theme-swatch-dot"></span>Auto</button>
+          <button class="theme-swatch theme-swatch-dark" data-theme="dark" title="Obsidian (dark)"><span class="theme-swatch-dot"></span>Obsidian</button>
         </div>
       </div>
       ${u.phone
@@ -7016,7 +7035,7 @@ function openProfileDrawer() {
           { icon:'📖', label:'SOPs', page:'sops' },
           { icon:'❓', label:'Help & Guide', page:'help' },
         ].filter(l => !l.hide);
-        return links.map(l=>`<button class="profile-shortcut-btn" data-page="${l.page}" style="display:flex;align-items:center;gap:12px;width:100%;background:none;border:none;border-bottom:1px solid var(--border);padding:13px 6px;cursor:pointer;color:var(--text);font-size:14px;text-align:left"><span style="font-size:18px;width:22px;text-align:center">${l.icon}</span>${l.label}</button>`).join('');
+        return links.map(l=>`<button class="profile-shortcut-btn" data-page="${l.page}" style="display:flex;align-items:center;gap:12px;width:100%;background:none;border:none;border-bottom:1px solid var(--border);padding:13px 6px;cursor:pointer;color:var(--text);font-size:14px;text-align:left"><span style="font-size:18px;width:22px;text-align:center">${emojiIcon(l.icon,18)}</span>${l.label}</button>`).join('');
       })()}
     </div>
 

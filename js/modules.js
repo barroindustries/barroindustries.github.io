@@ -626,9 +626,10 @@ function renderEomCard(host, data, users, canManage, standings, month) {
           ${data.reason ? `<div class="eom-reason">${escHtml(data.reason)}</div>` : ''}
           <div class="eom-auto-tag">⚙️ Auto-selected by performance${metrics}</div>
         </div>
-        ${canManage ? `<button class="eom-edit-btn" id="eom-standings-btn" title="View standings">📊</button>` : ''}
+        ${canManage ? `<button class="eom-edit-btn" id="eom-standings-btn" title="View standings">${emojiIcon('bar-chart-3',16)}</button>` : ''}
       </div>
     </div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
   if (canManage) document.getElementById('eom-standings-btn')?.addEventListener('click', () => openEomStandingsModal(standings, month));
 }
 
@@ -1147,9 +1148,9 @@ window.renderAttendancePage = async function() {
       html += `<div class="att-cal-day ${cls} ${isToday?'att-today':''}" data-date="${dateStr}" data-status="${status}"${holidayTitle}>
         <span class="att-day-num">${day}</span>
         ${holiday?`<span class="att-mark" style="font-size:9px;color:rgba(180,140,0,1)">🎌</span>`:
-          status==='present'?'<span class="att-mark">✓</span>':
+          status==='present'?`<span class="att-mark">${emojiIcon('check',14)}</span>`:
           status==='half'?'<span class="att-mark">½</span>':
-          status==='absent'?'<span class="att-mark">✗</span>':''}
+          status==='absent'?`<span class="att-mark">${emojiIcon('x',14)}</span>`:''}
         ${canEdit&&!isNoWork?`<button class="att-edit-btn att-edit-visible" data-date="${dateStr}" title="Edit">✎</button>`:''}
       </div>`;
     }

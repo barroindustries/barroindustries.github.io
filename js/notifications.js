@@ -111,11 +111,11 @@ window.Notifs = (() => {
       const rawTitle = n.title || '';
       const lead = (rawTitle.match(LEAD_EMOJI) || [''])[0].trim();
       const titleText = rawTitle.replace(LEAD_EMOJI, '').trim() || rawTitle;
-      const icon = n.icon || lead || '🔔';
+      const icon = n.icon || lead || 'bell';
       return `
       <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${escHtml(n.id)}" data-type="${escHtml(n.type||'')}" data-task-id="${escHtml(n.taskId||'')}">
         <div class="notif-item-main">
-          <div class="notif-item-emoji">${escHtml(icon)}</div>
+          <div class="notif-item-emoji">${window.emojiIcon(icon, 20)}</div>
           <div class="notif-item-text">
             <div class="notif-item-title">${escHtml(titleText)}</div>
             <div class="notif-item-body">${escHtml(n.body || '')}</div>
@@ -139,6 +139,7 @@ window.Notifs = (() => {
         </div>
       </div>`;
     }).join('');
+    if (window.lucide) lucide.createIcons({ nodes: [list] });
 
     // Mark-as-read buttons
     list.querySelectorAll('.notif-read-btn').forEach(btn => {

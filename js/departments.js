@@ -615,7 +615,7 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
       const done = dTasks.filter(t=>DONE_STATUSES.includes(t.status)).length;
       return `<div class="card" style="margin-bottom:12px">
         <div class="card-header" style="border-left:4px solid ${cfg.color||'var(--primary-light)'}">
-          <h3>${cfg.icon||'🗂️'} ${dept}</h3>
+          <h3>${emojiIcon(cfg.lucideIcon||cfg.icon,20)} ${dept}</h3>
           <div style="display:flex;gap:8px"><span class="badge badge-blue">${open} open</span><span class="badge badge-green">${done} done</span></div>
         </div>
         <div class="item-list" style="padding:0 12px 12px">
@@ -623,6 +623,7 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
         </div>
       </div>`;
     }).join('');
+    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
     wrap.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole)));
   } catch(err) {
     wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">⚠️</div><h4>${err.message}</h4></div>`;
@@ -753,7 +754,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
       <div style="display:flex;gap:6px;flex-shrink:0">
         ${canSubmit?`<button class="btn-success btn-sm" id="submit-task-btn">📤 Submit</button>`:''}
         ${canEdit?`<button class="btn-secondary btn-sm" id="edit-task-btn">✎</button>`:''}
-        ${isAdmin||isCreator?`<button class="btn-danger btn-sm" id="del-task-btn">🗑</button>`:''}
+        ${isAdmin||isCreator?`<button class="btn-danger btn-sm" id="del-task-btn">${emojiIcon('trash-2',14)}</button>`:''}
       </div>
     </div>
 
@@ -834,6 +835,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   `;
 
   document.body.appendChild(panel);
+  if (window.lucide) lucide.createIcons({ nodes: [panel] });
   // Trigger animation
   requestAnimationFrame(() => {
     panel.style.transform = 'translateY(0)';
@@ -1221,11 +1223,12 @@ window.renderSubmissions = async function(currentUser, currentRole, currentDept)
   const c = deptContainer();
   c.innerHTML = `
     <div class="page-header">
-      <h2>📋 Submissions</h2>
+      <h2>${emojiIcon('clipboard-list',20)} Submissions</h2>
       <button class="btn-primary btn-sm" id="add-sub-btn">+ New Submission</button>
     </div>
     <div id="subs-list" class="item-list"><div class="loading-placeholder">Loading…</div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadSubsList(currentUser, currentRole, currentDept);
   document.getElementById('add-sub-btn').onclick = () => openAddSubModal(currentUser);
 };
@@ -1374,11 +1377,13 @@ async function loadCashContent(currentUser, currentRole, sub) {
     const expenses = snap.docs.map(d => ({id:d.id,...d.data()})).sort((a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     if (!expenses.length) { content.innerHTML = `<div class="empty-state"><div class="empty-icon">💸</div><h4>No expenses yet</h4></div>`; return; }
     content.innerHTML = expenseTable(expenses, isPrivileged);
+    if (window.lucide) lucide.createIcons({ nodes: [content] });
     bindExpenseActions(content, currentUser, currentRole, sub);
   } else if (sub === 'all-expenses') {
     const snap = await db.collection('expenses').get().catch(()=>({docs:[]}));
     const expenses = snap.docs.map(d => ({id:d.id,...d.data()})).sort((a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     content.innerHTML = expenseTable(expenses, true);
+    if (window.lucide) lucide.createIcons({ nodes: [content] });
     bindExpenseActions(content, currentUser, currentRole, sub);
   } else if (sub === 'summary') {
     const snap = await db.collection('expenses').get().catch(()=>({docs:[]}));
@@ -1412,7 +1417,7 @@ function expenseTable(expenses, showActions) {
                 <td>${escHtml(e.submittedByName||'—')}</td>
                 <td><span class="badge ${statusBadge(e.status)}">${e.status||'pending'}</span></td>
                 ${showActions?`<td>
-                  ${e.status==='pending'?`<button class="btn-icon approve-expense" data-id="${e.id}">✅</button><button class="btn-icon reject-expense" data-id="${e.id}">❌</button>`:''}
+                  ${e.status==='pending'?`<button class="btn-icon approve-expense" data-id="${e.id}">${emojiIcon('check-circle',14)}</button><button class="btn-icon reject-expense" data-id="${e.id}">${emojiIcon('x-circle',14)}</button>`:''}
                   ${e.fileUrl?`<a href="${safeHttpUrl(e.fileUrl)}" target="_blank" class="btn-icon">📎</a>`:''}
                 </td>`:''}
               </tr>
@@ -1799,7 +1804,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
                 </div>
                 ${canEdit||canDelete ? `<div class="ms-actions">
                   ${canEdit?`<button class="ms-act-btn comment-edit-btn" data-id="${c.id}">✎</button>`:''}
-                  ${canDelete?`<button class="ms-act-btn ms-del-btn comment-del-btn" data-id="${c.id}">🗑</button>`:''}
+                  ${canDelete?`<button class="ms-act-btn ms-del-btn comment-del-btn" data-id="${c.id}">${emojiIcon('trash-2',14)}</button>`:''}
                 </div>` : ''}
                 ${isLast && seenBy.length ? `<div class="ms-seen">Seen by ${escHtml(seenBy.map(r=>r.name.split(' ')[0]).join(', '))}</div>` : ''}
               </div>
@@ -1811,7 +1816,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
       <div class="messenger-input-row">
         <label for="comment-file-${docId}" class="ms-attach-btn" title="Attach file">📎</label>
         <input type="file" id="comment-file-${docId}" style="display:none" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"/>
-        <button type="button" class="ms-attach-btn" id="comment-link-${docId}" title="Attach link">🔗</button>
+        <button type="button" class="ms-attach-btn" id="comment-link-${docId}" title="Attach link">${emojiIcon('link',14)}</button>
         <input id="comment-in-${docId}" class="ms-input" placeholder="Type a message…"/>
         <button class="ms-send-btn" id="comment-send-${docId}">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
@@ -1819,6 +1824,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
       </div>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   // Scroll to bottom
   const body = document.getElementById(`msbody-${docId}`);
@@ -2985,11 +2991,12 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         <td><strong style="color:${net>=0?'var(--success)':'var(--danger)'}">₱${fmt(net)}</strong></td>
         <td>
           <button class="btn-secondary btn-sm edit-emp-pay-btn" data-uid="${u.id}" title="Edit">✎</button>
-          ${canFinance ? `<button class="btn-secondary btn-sm raise-emp-btn" data-uid="${u.id}" title="Give raise">💸</button>` : ''}
+          ${canFinance ? `<button class="btn-secondary btn-sm raise-emp-btn" data-uid="${u.id}" title="Give raise">${emojiIcon('banknote',14)}</button>` : ''}
           <button class="btn-secondary btn-sm print-slip-btn" data-uid="${u.id}" title="Payslip">🖨</button>
         </td>
       </tr>`;
     }).join('');
+    if (window.lucide) lucide.createIcons({ nodes: [tbody] });
 
     tbody.querySelectorAll('.raise-emp-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -3303,7 +3310,7 @@ async function renderTaxesTab(container, currentUser, currentRole) {
               <td>${escHtml(r.filedBy||'—')}</td>
               <td style="white-space:nowrap">
                 ${isPriv?`<button class="btn-secondary btn-sm tax-edit-btn" data-id="${r.id}">✎</button>`:''}
-                ${isPriv?`<button class="btn-danger btn-sm tax-del-btn" data-id="${r.id}" data-label="${escHtml((r.type||'Tax')+' — '+(r.period||r.id.slice(-5)))}" style="margin-left:4px">🗑</button>`:''}
+                ${isPriv?`<button class="btn-danger btn-sm tax-del-btn" data-id="${r.id}" data-label="${escHtml((r.type||'Tax')+' — '+(r.period||r.id.slice(-5)))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>`:''}
                 ${r.fileUrl?`<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm" style="margin-left:4px">📎</a>`:''}
               </td>
             </tr>`).join('')}</tbody>
@@ -3311,6 +3318,7 @@ async function renderTaxesTab(container, currentUser, currentRole) {
       </div>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
   document.getElementById('add-tax-btn').addEventListener('click', () => {
     openPage('Add Tax Record', `
       <div class="form-row">
@@ -3697,13 +3705,14 @@ async function renderLedgerTab(container, currentUser, currentRole) {
               <td style="font-size:11px">${escHtml(e.addedByName||'—')}</td>
               ${canFin?`<td style="white-space:nowrap">
                 <button class="btn-secondary btn-sm led-edit-btn" data-id="${e.id}" data-src="${e._src}">✎</button>
-                <button class="btn-danger btn-sm led-del-btn" data-id="${e.id}" data-src="${e._src}" data-label="${escHtml((e.description||'entry')+' — ₱'+fmt(e.amount))}" style="margin-left:4px">🗑</button>
+                <button class="btn-danger btn-sm led-del-btn" data-id="${e.id}" data-src="${e._src}" data-label="${escHtml((e.description||'entry')+' — ₱'+fmt(e.amount))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
               </td>`:''}
             </tr>`).join('')}</tbody>
           </table></div>`}
       </div>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
   document.getElementById('ledger-csv-btn')?.addEventListener('click', () => window.exportCSV('ledger', entries, [
     {key:'date',label:'Date'},{key:'description',label:'Description'},{key:'category',label:'Category'},
     {key:'source',label:'Source',get:e=>e.source||'Finance'},
@@ -3836,13 +3845,14 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
               <td>${e.creditSundryAmount?'₱'+fmt(e.creditSundryAmount):'—'}</td>
               ${isPriv?`<td style="white-space:nowrap">
                 <button class="btn-secondary btn-sm crj-edit-btn" data-id="${e.id}">✎</button>
-                <button class="btn-danger btn-sm crj-del-btn" data-id="${e.id}" data-label="${escHtml((e.customer||'receipt')+' — ₱'+fmt(e.debitCash))}" style="margin-left:4px">🗑</button>
+                <button class="btn-danger btn-sm crj-del-btn" data-id="${e.id}" data-label="${escHtml((e.customer||'receipt')+' — ₱'+fmt(e.debitCash))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
               </td>`:''}
             </tr>`).join('')}</tbody>
           </table></div>`}
       </div>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   document.getElementById('add-crj-btn').addEventListener('click', () => {
     openPage('New Cash Receipt Entry', `
@@ -3948,13 +3958,14 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
               <td>${e.debitSundryAmount?'₱'+fmt(e.debitSundryAmount):'—'}</td>
               ${isPriv?`<td style="white-space:nowrap">
                 <button class="btn-secondary btn-sm cdj-edit-btn" data-id="${e.id}">✎</button>
-                <button class="btn-danger btn-sm cdj-del-btn" data-id="${e.id}" data-label="${escHtml((e.payee||'disbursement')+' — ₱'+fmt(e.creditCash))}" style="margin-left:4px">🗑</button>
+                <button class="btn-danger btn-sm cdj-del-btn" data-id="${e.id}" data-label="${escHtml((e.payee||'disbursement')+' — ₱'+fmt(e.creditCash))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
               </td>`:''}
             </tr>`).join('')}</tbody>
           </table></div>`}
       </div>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   document.getElementById('add-cdj-btn').addEventListener('click', () => {
     openPage('New Cash Disbursement Entry', `
@@ -4069,13 +4080,14 @@ async function renderRecordsTab(container, currentUser, currentRole) {
               <td style="font-size:11px">${escHtml(r.encodedByName||'—')}</td>
               ${isPriv?`<td style="white-space:nowrap">
                 <button class="btn-secondary btn-sm rec-edit-btn" data-id="${r.id}">✎</button>
-                <button class="btn-danger btn-sm rec-del-btn" data-id="${r.id}" data-label="${escHtml((r.type||'record')+' — '+(r.description||r.id.slice(-5)))}" style="margin-left:4px">🗑</button>
+                <button class="btn-danger btn-sm rec-del-btn" data-id="${r.id}" data-label="${escHtml((r.type||'record')+' — '+(r.description||r.id.slice(-5)))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
               </td>`:''}
             </tr>`).join('')}</tbody>
           </table></div>`}
       </div>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
   document.getElementById('add-rec-btn').addEventListener('click', () => {
     openPage('Encode Record / Receipt', `
       <div class="form-row">
@@ -4271,8 +4283,9 @@ async function renderFinanceCA(container, currentUser, currentRole) {
         ${a.status==='approved'&&(a.balance||0)>0&&isPrivileged?`
         <button class="btn-secondary btn-sm fin-ca-pay" data-id="${a.id}" data-balance="${a.balance||0}" data-monthly="${a.monthlyPayment||0}" data-uid="${a.userId||''}" data-name="${escHtml(a.userName||'')}">💳 Record Payment</button>`:''}
         ${isPrivileged?`<button class="btn-secondary btn-sm fin-ca-edit" data-id="${a.id}" style="margin-left:4px" title="Edit">✎</button>`:''}
-        ${isPrivileged?`<button class="btn-secondary btn-sm fin-ca-del" data-id="${a.id}" data-label="${escHtml((a.userName||'CA')+' — ₱'+fmt(a.amount))}" style="color:var(--danger);margin-left:4px" title="${isRealPresident()?'Delete':'Request deletion'}">🗑</button>`:''}
+        ${isPrivileged?`<button class="btn-secondary btn-sm fin-ca-del" data-id="${a.id}" data-label="${escHtml((a.userName||'CA')+' — ₱'+fmt(a.amount))}" style="color:var(--danger);margin-left:4px" title="${isRealPresident()?'Delete':'Request deletion'}">${emojiIcon('trash-2',14)}</button>`:''}
       </div>`).join('');
+    if (window.lucide) lucide.createIcons({ nodes: [list] });
 
     // v12 WS22 — all three actions route through the one shared CashAdvance
     // service (fixes: this approve used to ignore totalPayable/interest, and
@@ -4377,7 +4390,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
                 <button class="btn-primary btn-sm hrp-gen-btn" data-id="${p.id}" style="margin-right:4px">📄 Payslip</button>
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-raise-btn" data-id="${p.id}" title="Give raise" style="margin-right:4px">💸 Raise</button>`:''}
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-edit-btn" data-id="${p.id}">✎ Edit</button>`:''}
-                ${isPriv?`<button class="btn-danger btn-sm hrp-del-btn" data-id="${p.id}" data-label="${escHtml(p.name||p.id.slice(-5))}" style="margin-left:4px">🗑</button>`:''}
+                ${isPriv?`<button class="btn-danger btn-sm hrp-del-btn" data-id="${p.id}" data-label="${escHtml(p.name||p.id.slice(-5))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>`:''}
               </td>
             </tr>`).join('')}
           </tbody>
@@ -4385,6 +4398,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
       </div>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   // Add profile
   if (isPriv) {
@@ -4569,8 +4583,8 @@ async function openPayslipHistory(currentUser, currentRole) {
         <button class="btn-secondary btn-sm ps-view-btn" data-id="${p.id}" style="font-size:11px">View</button>
         ${canAct && nextStage ? `<button class="btn-success btn-sm ps-advance-btn" data-id="${p.id}" data-next="${nextStage}" style="font-size:11px;margin-left:4px">${nextLabel}</button>` : ''}
         ${canAct ? `<button class="btn-secondary btn-sm ps-edit-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px" title="Edit amounts">✎</button>` : ''}
-        ${canAct && status!=='draft' ? `<button class="btn-secondary btn-sm ps-override-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px" title="Manually set status">⚙</button>` : ''}
-        ${canAct ? `<button class="btn-danger btn-sm ps-del-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px" title="Delete">🗑</button>` : ''}
+        ${canAct && status!=='draft' ? `<button class="btn-secondary btn-sm ps-override-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px" title="Manually set status">${emojiIcon('settings',14)}</button>` : ''}
+        ${canAct ? `<button class="btn-danger btn-sm ps-del-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px" title="Delete">${emojiIcon('trash-2',14)}</button>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -4591,6 +4605,7 @@ async function openPayslipHistory(currentUser, currentRole) {
         </table>
       </div>
     `);
+    if (window.lucide) lucide.createIcons({ nodes: [document.getElementById('modal-body')] });
     bindRows();
   };
 
@@ -5259,7 +5274,7 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
                 <td>${escHtml(e.description)}</td><td>₱${fmt(e.amount)}</td>
                 <td>${escHtml(e.submittedByName||'—')}</td>
                 <td><span class="badge ${statusBadge(e.status)}">${e.status||'pending'}</span></td>
-                <td style="white-space:nowrap">${e.fileUrl?`<a href="${safeHttpUrl(e.fileUrl)}" target="_blank" class="btn-icon">📎</a>`:''}${isPriv?`<button class="btn-secondary btn-sm exp-edit-btn" data-id="${e.id}" style="margin-left:4px">✎</button><button class="btn-danger btn-sm exp-del-btn" data-id="${e.id}" data-label="${escHtml(e.description||e.id.slice(-5))}" style="margin-left:4px">🗑</button>`:''}</td>
+                <td style="white-space:nowrap">${e.fileUrl?`<a href="${safeHttpUrl(e.fileUrl)}" target="_blank" class="btn-icon">📎</a>`:''}${isPriv?`<button class="btn-secondary btn-sm exp-edit-btn" data-id="${e.id}" style="margin-left:4px">✎</button><button class="btn-danger btn-sm exp-del-btn" data-id="${e.id}" data-label="${escHtml(e.description||e.id.slice(-5))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>`:''}</td>
               </tr>`).join('')}
             </tbody>
           </table>
@@ -5267,6 +5282,7 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
       </div>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
   document.getElementById('exp-csv-btn')?.addEventListener('click', () => window.exportCSV('expenses', expenses, [
     {key:'date',label:'Date'},{key:'description',label:'Description'},{key:'category',label:'Category'},
     {key:'amount',label:'Amount',get:e=>e.amount||0},{key:'submittedByName',label:'By'},{key:'status',label:'Status',get:e=>e.status||'pending'},{key:'fileUrl',label:'Receipt'}]));
@@ -5917,7 +5933,7 @@ function drawSalesSOPEditor(container) {
         <span style="display:flex;gap:5px">
           <button class="btn-secondary btn-sm sop-mv-up" data-i="${i}" title="Move up" ${i===0?'disabled':''}>↑</button>
           <button class="btn-secondary btn-sm sop-mv-down" data-i="${i}" title="Move down" ${i===d.steps.length-1?'disabled':''}>↓</button>
-          <button class="btn-secondary btn-sm sop-rm-step" data-i="${i}" title="Remove step" style="color:#ff6b6b">🗑</button>
+          <button class="btn-secondary btn-sm sop-rm-step" data-i="${i}" title="Remove step" style="color:#ff6b6b">${emojiIcon('trash-2',14)}</button>
         </span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -5958,6 +5974,7 @@ function drawSalesSOPEditor(container) {
       <button class="btn-secondary btn-sm" id="sop-cancel">Cancel</button>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   document.getElementById('sop-add-step')?.addEventListener('click', () => {
     salesSopGatherDOM();
@@ -6101,7 +6118,7 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
         ${['pc','set','lm','sqm','hr','lot','unit'].map(u=>`<option ${u===l.unit?'selected':''}>${u}</option>`).join('')}
       </select>
       <input type="number" value="${l.price||0}" data-i="${i}" data-f="price" min="0" step="0.01" placeholder="Unit price" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%" inputmode="decimal"/>
-      <button class="btn-icon" data-rm="${i}" style="color:#ff453a;font-size:16px;padding:4px 7px">🗑</button>
+      <button class="btn-icon" data-rm="${i}" style="color:#ff453a;font-size:16px;padding:4px 7px">${emojiIcon('trash-2',16)}</button>
     </div>`;
 
   openPage(existing ? `Edit Quote BK-${existing.quoteNumber||''}` : '🍽️ New Barro Kitchens Quote', `
@@ -6182,6 +6199,7 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
     const cont = document.getElementById('bkq-lines');
     if (!cont) return;
     cont.innerHTML = lines.map((l,i)=>lineHTML(l,i)).join('');
+    if (window.lucide) lucide.createIcons({ nodes: [cont] });
     cont.querySelectorAll('input,select').forEach(inp => {
       inp.addEventListener('input', e => {
         const i=parseInt(e.target.dataset.i), f=e.target.dataset.f;
@@ -9780,8 +9798,9 @@ function openQuoteEditor(currentUser, currentRole, brand, collection, existing, 
         <input type="text" value="${escHtml(l.description)}" data-i="${i}" data-f="description" placeholder="Description"/>
         <input type="number" value="${l.qty}" data-i="${i}" data-f="qty" min="1" inputmode="numeric"/>
         <input type="number" value="${l.price}" data-i="${i}" data-f="price" min="0" step="0.01" inputmode="decimal"/>
-        <button class="btn-icon" data-rm="${i}">🗑</button>
+        <button class="btn-icon" data-rm="${i}">${emojiIcon('trash-2',16)}</button>
       </div>`).join('');
+    if (window.lucide) lucide.createIcons({ nodes: [cont] });
     cont.querySelectorAll('input').forEach(inp => {
       inp.oninput = e => { const i=parseInt(e.target.dataset.i),f=e.target.dataset.f; lines[i][f]=f==='description'?e.target.value:parseFloat(e.target.value)||0; updateTotal(); };
     });
@@ -10958,8 +10977,8 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
       <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
         ${canAdd?`<button class="btn-secondary btn-sm cl-edit-btn" data-id="${cl.id}" title="Edit / set stage">✎</button>`:''}
         ${canDeleteDirect
-          ? `<button class="btn-secondary btn-sm cl-del-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="color:var(--danger)">🗑</button>`
-          : `<button class="btn-secondary btn-sm cl-delreq-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" ${cl.deleteRequested?'disabled':''}>${cl.deleteRequested?'⏳':'🗑'}</button>`}
+          ? `<button class="btn-secondary btn-sm cl-del-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="color:var(--danger)">${emojiIcon('trash-2',14)}</button>`
+          : `<button class="btn-secondary btn-sm cl-delreq-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" ${cl.deleteRequested?'disabled':''}>${cl.deleteRequested?'⏳':emojiIcon('trash-2',14)}</button>`}
       </div>
     </div>`;
   };
@@ -11029,6 +11048,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
     el.innerHTML = !shown.length
       ? `<div class="empty-state"><div class="empty-icon">👤</div><h4>No clients${stageFilter!=='all'?' in this stage':' yet'}</h4></div>`
       : `<div class="item-list">${shown.map(clientCard).join('')}</div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [el] });
     bindCards();
   };
 
@@ -11149,11 +11169,12 @@ async function renderDocCollection(container, collection, title, currentUser, cu
             ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:12px;margin-top:8px;display:block">📎 Open File</a>`:''}
             ${opts.editable&&canAdd?`<div style="display:flex;gap:6px;margin-top:10px">
               <button class="btn-secondary btn-sm doc-edit-btn" data-id="${d.id}">✎ Edit</button>
-              <button class="btn-danger btn-sm doc-del-btn" data-id="${d.id}" data-label="${escHtml(d.title||'item')}">🗑</button>
+              <button class="btn-danger btn-sm doc-del-btn" data-id="${d.id}" data-label="${escHtml(d.title||'item')}">${emojiIcon('trash-2',14)}</button>
             </div>`:''}
           </div>`).join('')}
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   document.getElementById('add-doc-btn')?.addEventListener('click', () => {
     openPage(`Add to ${title}`, `
@@ -12934,6 +12955,7 @@ async function renderRFQs(content, currentUser, currentRole) {
       ? `<div class="empty-state"><div class="empty-icon">📋</div><h4>No open RFQs</h4><p>Create one to request supplier pricing.</p></div>`
       : rfqs.map(r => purchRfqCard(r, canEdit)).join('')}
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [content] });
   if (canEdit) {
     document.getElementById('new-rfq-btn')?.addEventListener('click', () =>
       openRfqModal(currentUser, () => renderRFQs(content, currentUser, currentRole)));
@@ -12964,7 +12986,7 @@ function purchRfqCard(r, canEdit) {
         <div style="font-size:12px;color:var(--text-muted)">Requesting: ${escHtml(r.requestingDept || '—')}${r.neededBy ? ` · Needed by ${escHtml(r.neededBy)}` : ''}</div>
         ${r.deliverTo ? `<div style="font-size:12px;color:var(--text-muted)">Deliver to: ${escHtml(r.deliverTo)}</div>` : ''}
       </div>
-      ${canEdit ? `<button class="btn-danger btn-sm rfq-del" data-id="${r.id}" data-label="${escHtml(r.title || 'RFQ')}">🗑</button>` : ''}
+      ${canEdit ? `<button class="btn-danger btn-sm rfq-del" data-id="${r.id}" data-label="${escHtml(r.title || 'RFQ')}">${emojiIcon('trash-2',14)}</button>` : ''}
     </div>
     ${r.notes ? `<div style="font-size:12px;margin-top:6px">${escHtml(r.notes)}</div>` : ''}
     <div class="table-wrap" style="margin-top:10px"><table class="data-table">
