@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.5';
+window.APP_VERSION = '12.0.6';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -232,11 +232,59 @@ window.fetchUsersWithPayroll = async function() {
     _store[key] = { data: null, ts: 0, pending: promise };
     return promise;
   };
+  // Aliases + sub-key prefixes cleared when a base collection key is invalidated.
+  const _alias = {
+    'ledger':   { prefixes: ['ledger:', 'ledger>='] },  // period-scoped + since-scoped reads
+    'expenses': { alsoKeys: ['expenses-pending', 'expenses-recent'] },
+  };
   window.dbCacheInvalidate = function(key) {
-    if (key) delete _store[key];
-    else Object.keys(_store).forEach(k => delete _store[k]);
+    if (!key) { Object.keys(_store).forEach(k => delete _store[k]); return; }
+    delete _store[key];
+    const a = _alias[key];
+    if (a) {
+      (a.alsoKeys || []).forEach(k => delete _store[k]);
+      (a.prefixes || []).forEach(pfx => Object.keys(_store).forEach(k => { if (k.indexOf(pfx) === 0) delete _store[k]; }));
+    }
   };
 })();
+
+// ── Month-string arithmetic (Manila-safe, no Date parsing) ──
+window.ymAddMonths = function(ym, delta) {
+  let [y, m] = String(ym).split('-').map(Number);
+  m += delta; y += Math.floor((m - 1) / 12); m = ((m - 1) % 12 + 12) % 12 + 1;
+  return y + '-' + String(m).padStart(2, '0');
+};
+
+// ── Bounded ledger readers (WS16) — return {docs:[{data()}...]} like a snapshot ──
+// Cached per RESOLVED period key so switching period re-queries only that range.
+// 'all' (or an unbounded need) falls back to the full cached read.
+window.ledgerForPeriod = function(periodKey) {
+  const p = Period.parse(periodKey);
+  if (p.type === 'all')
+    return dbCachedGet('ledger', () => db.collection('ledger').get().catch(() => ({docs:[]})), 45000);
+  return dbCachedGet('ledger:' + p.key,
+    () => db.collection('ledger').where('date','>=',p.start).where('date','<=',p.end)
+            .get().catch(() => ({docs:[]})), 45000);
+};
+// Everything on/after startYYYYMMDD (for the 6-month trend etc.). Bounded, cached by start.
+window.ledgerSince = function(startYmd) {
+  if (!startYmd)
+    return dbCachedGet('ledger', () => db.collection('ledger').get().catch(() => ({docs:[]})), 60000);
+  return dbCachedGet('ledger>=' + startYmd,
+    () => db.collection('ledger').where('date','>=',startYmd).get().catch(() => ({docs:[]})), 60000);
+};
+
+// ── Chart.js on demand (WS16 D8) ──
+window.ensureChart = function() {
+  if (window.Chart) return Promise.resolve();
+  if (window._chartLoading) return window._chartLoading;
+  window._chartLoading = new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
+    s.onload = () => res(); s.onerror = rej; document.head.appendChild(s);
+  });
+  return window._chartLoading;
+};
 
 // ── Audit log (append-only) ───────────────────────
 // Records who-changed-what on sensitive data (payroll, finance, inventory,

@@ -29,7 +29,7 @@ finalizing 9's rename sweep so the two don't conflict.
 | 13 | [13-coa.md](13-coa.md) | ✅ IMPLEMENTED | Chart of accounts — fixes double material expensing (critical) |
 | 14 | [14-letterhead.md](14-letterhead.md) | ✅ IMPLEMENTED | Shared document letterhead engine |
 | 15 | [15-durability.md](15-durability.md) | ✅ IMPLEMENTED | Records durability — backups, restore, Drive privacy |
-| 16 | [16-perf.md](16-perf.md) | 7 | Performance & scale — unbounded reads, caching |
+| 16 | [16-perf.md](16-perf.md) | ✅ IMPLEMENTED | Performance & scale — unbounded reads, caching |
 | 17 | [17-design.md](17-design.md) | 10 | Design-system consolidation — CSS tokens, icons, themes |
 | 18 | [18-shortcuts.md](18-shortcuts.md) | 10 | Keyboard shortcuts |
 | 19 | [19-security.md](19-security.md) | ✅ IMPLEMENTED | Security closes — partner lockdown, secretary tier, attendance forgery |

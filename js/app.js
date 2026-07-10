@@ -2345,7 +2345,7 @@ async function renderPresidentDashboard() {
   try {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
     const todayStr = bizDate();
-    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap, ledgerSnap, invSnap, projList] = await Promise.all([
+    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap, ledgerSnap, prevLedSnap, invSnap, projList] = await Promise.all([
       dbCachedGet('users',         () => db.collection('users').get(),                                    30000),
       dbCachedGet('tasks-all',     () => db.collection('tasks').get(),                                    30000),
       dbCachedGet('submissions',   () => db.collection('submissions').get(),                              30000),
@@ -2354,7 +2354,8 @@ async function renderPresidentDashboard() {
       dbCachedGet('ca-pending',          () => safeGet(db.collection('cash_advances').where('status','==','pending')),         30000),
       dbCachedGet('att-ext-pending',     () => safeGet(db.collection('attendance_extensions').where('status','==','pending')), 30000),
       dbCachedGet('signups-pending',     () => safeGet(db.collection('signup_requests').where('status','==','pending')),       30000),
-      dbCachedGet('ledger',              () => safeGet(db.collection('ledger')),                                                45000),
+      ledgerForPeriod('month'),
+      ledgerForPeriod('prev'),
       dbCachedGet('inventory_items',     () => safeGet(db.collection('inventory_items')),                                       45000),
       (window.Projects && window.Projects.listAll ? window.Projects.listAll() : Promise.resolve([])).catch(()=>[]),
     ]);
@@ -2380,14 +2381,10 @@ async function renderPresidentDashboard() {
     const payrollBurn = users.reduce((s,u)=>(s+(u.salary||0)+(u.allowance||0)-(u.deductions||0)),0);
 
     // Month-to-date financials (ledger: credit = income, debit = expense) for remote oversight
-    const mtd = todayStr.slice(0,7);
-    const _allLedger = ledgerSnap.docs.map(d=>d.data());
-    const mtdLedger = _allLedger.filter(e=>(e.date||'').slice(0,7)===mtd);
+    const mtdLedger  = ledgerSnap.docs.map(d=>d.data());     // already this-month-bounded
     const mtdNet = mtdLedger.filter(e=>ledgerKind(e)==='income').reduce((s,e)=>s+(e.amount||0),0)
                  - mtdLedger.filter(e=>ledgerKind(e)==='expense').reduce((s,e)=>s+(e.amount||0),0);
-    // Previous calendar month net — for a month-over-month growth indicator.
-    const _pm = (()=>{ const [yy,mm]=mtd.split('-').map(Number); return mm===1?`${yy-1}-12`:`${yy}-${String(mm-1).padStart(2,'0')}`; })();
-    const prevLedger = _allLedger.filter(e=>(e.date||'').slice(0,7)===_pm);
+    const prevLedger = prevLedSnap.docs.map(d=>d.data());    // already prev-month-bounded
     const prevNet = prevLedger.filter(e=>ledgerKind(e)==='income').reduce((s,e)=>s+(e.amount||0),0)
                   - prevLedger.filter(e=>ledgerKind(e)==='expense').reduce((s,e)=>s+(e.amount||0),0);
     // Inventory low-stock count
@@ -2761,13 +2758,13 @@ async function renderFinanceDashboard() {
   try {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
     const todayStr = bizDate();
-    const mtd = todayStr.slice(0,7);
     const period = window._FIN_DASH_PERIOD || 'month';
     const plabel = finPeriodLabel(period);
-    const [usersSnap, ledgerSnap, expSnap, caSnap, invSnap, jobSnap, projList] = await Promise.all([
-      dbCachedGet('users-payroll', fetchUsersWithPayroll, 30000),
-      dbCachedGet('ledger',          () => safeGet(db.collection('ledger')),                                            45000),
-      dbCachedGet('expenses',        () => safeGet(db.collection('expenses')),                                          45000),
+    const [usersSnap, ledgerSnap, prevLedSnap, expSnap, caSnap, invSnap, jobSnap, projList] = await Promise.all([
+      dbCachedGet('users', fetchUsersWithPayroll, 30000),
+      ledgerForPeriod(period),
+      ledgerForPeriod('prev'),
+      dbCachedGet('expenses-pending', () => safeGet(db.collection('expenses').where('status','==','pending')),         45000),
       dbCachedGet('ca-pending',      () => safeGet(db.collection('cash_advances').where('status','==','pending')),      30000),
       dbCachedGet('inventory_items', () => safeGet(db.collection('inventory_items')),                                   45000),
       dbCachedGet('job_costs',       () => safeGet(db.collection('job_costs')),                                         45000),
@@ -2778,14 +2775,12 @@ async function renderFinanceDashboard() {
     const payrollDeduct = users.reduce((s,u)=>s+(u.deductions||0),0);
     const payrollNet = payrollGross - payrollDeduct;
 
-    const ledger = ledgerSnap.docs.map(d=>d.data());
-    const periodLedger = ledger.filter(e=>finPeriodMatch(e.date, period));
+    const periodLedger = ledgerSnap.docs.map(d=>d.data());   // already period-bounded — no re-filter
     const mtdIncome  = periodLedger.filter(e=>ledgerKind(e)==='income').reduce((s,e)=>s+(e.amount||0),0);
     const mtdExpense = periodLedger.filter(e=>ledgerKind(e)==='expense').reduce((s,e)=>s+(e.amount||0),0);
     const mtdNet = mtdIncome - mtdExpense;
     // Previous calendar month net — for a month-over-month indicator on the net card.
-    const _pm = (()=>{ const [yy,mm]=mtd.split('-').map(Number); return mm===1?`${yy-1}-12`:`${yy}-${String(mm-1).padStart(2,'0')}`; })();
-    const _prevL = ledger.filter(e=>(e.date||'').slice(0,7)===_pm);
+    const _prevL = prevLedSnap.docs.map(d=>d.data());         // already prev-month-bounded
     const prevNet = _prevL.filter(e=>ledgerKind(e)==='income').reduce((s,e)=>s+(e.amount||0),0)
                   - _prevL.filter(e=>ledgerKind(e)==='expense').reduce((s,e)=>s+(e.amount||0),0);
 
@@ -2800,8 +2795,7 @@ async function renderFinanceDashboard() {
     openAR.forEach(p=>{ const k=(String(p.clientName||'').trim())||'(no client)'; const g=_arByClient[k]||(_arByClient[k]={client:k,total:0,oldest:0,count:0}); g.total+=p.arBalance||0; const d=_daysSince(p.createdAt); if(d>g.oldest)g.oldest=d; g.count++; });
     const arClients = Object.values(_arByClient).sort((a,b)=>(b.oldest-a.oldest)||(b.total-a.total));
 
-    const expenses = expSnap.docs.map(d=>({id:d.id,...d.data()}));
-    const pendingExp = expenses.filter(e=>e.status==='pending');
+    const pendingExp = expSnap.docs.map(d=>({id:d.id,...d.data()}));   // already pending-bounded
     const pendingExpTotal = pendingExp.reduce((s,e)=>s+(e.amount||0),0);
     // Expense by category — from the LEDGER (single source of truth), so it always
     // reconciles with the Expense KPI above (payroll, COS, disbursements, approved expenses).
@@ -6121,24 +6115,32 @@ async function renderAnalytics() {
   const c=document.getElementById('page-content');
   c.innerHTML='<div class="loading-placeholder">Loading analytics…</div>';
   const safeGet = async (q) => { try { return await q.get(); } catch(e) { return {docs:[],size:0}; } };
-  // Analytics re-reads the same heavy collections on every visit — cache 60s. Own 'an_' keys so we don't clash with other modules' caches.
+  // Analytics re-reads the same heavy collections on every visit — cache 60s. Uses the SAME
+  // canonical keys as dashboards/writers (no more 'an_' prefix) so a post-then-view sees fresh data.
   const cg = (key,q,ttl=60000) => dbCachedGet(key, ()=>q.get(), ttl).catch(()=>({docs:[],size:0}));
+
+  // Bound the ledger read to the window Analytics actually needs (selected period, extended to
+  // cover the 6-month trend) instead of the whole collection. Full read only on explicit 'All Time'.
+  const _anP = Period.parse(window._AN_PERIOD || 'month');
+  const _sixStart = ymAddMonths(bizDate().slice(0,7), -5) + '-01';   // covers the 6-month trend
+  window._AN_LED_START = (window._AN_PERIOD === 'all') ? null
+    : ((_anP.start && _anP.start < _sixStart) ? _anP.start : _sixStart);
 
   // Fetch all data upfront
   const [usersSnap,tasksSnap,quotesSnap,subsSnap,expSnap,caSnap,payslipSnap,ledgerSnap,govSnap,jpSnap,jcSnap,dpSnap,clientsSnap] = await Promise.all([
     dbCachedGet('users', fetchUsersWithPayroll, 60000).catch(()=>({docs:[],size:0})),
-    cg('an_tasks', db.collection('tasks')),
-    dbCachedGet('an_quotes', getAllQuotes, 60000).catch(()=>({docs:[]})),
-    cg('an_subs', db.collection('submissions')),
-    cg('an_expenses', db.collection('expenses')),
-    cg('an_cas', db.collection('cash_advances')),
-    cg('an_payslips', db.collection('payslips')),
-    cg('an_ledger', db.collection('ledger')),
-    cg('an_gov', db.collection('gov_biddings').orderBy('createdAt','desc')),
-    cg('an_jobprojects', db.collection('job_projects')),
-    cg('an_jobcosts', db.collection('job_costs')),
-    cg('an_designprojects', db.collection('projects')),
-    cg('an_salesclients', db.collection('sales_clients')),
+    cg('tasks-all', db.collection('tasks')),
+    dbCachedGet('all-quotes', getAllQuotes, 60000).catch(()=>({docs:[]})),
+    cg('submissions', db.collection('submissions')),
+    cg('expenses', db.collection('expenses')),
+    cg('cash_advances', db.collection('cash_advances')),
+    cg('payslips', db.collection('payslips')),
+    (window._AN_LED_START ? ledgerSince(window._AN_LED_START) : dbCachedGet('ledger', ()=>db.collection('ledger').get().catch(()=>({docs:[]})), 60000)),
+    cg('gov_biddings', db.collection('gov_biddings').orderBy('createdAt','desc')),
+    cg('job_projects', db.collection('job_projects')),
+    cg('job_costs', db.collection('job_costs')),
+    cg('projects', db.collection('projects')),
+    cg('sales_clients', db.collection('sales_clients')),
   ]);
   const users=usersSnap.docs.map(d=>({id:d.id,...d.data()}));
   const tasks=tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -6202,7 +6204,7 @@ async function renderAnalytics() {
     <div id="analytics-content"></div>
   `;
 
-  const renderOverview = () => {
+  const renderOverview = async () => {
     const anPeriod = window._AN_PERIOD || 'month';
     const anPlabel = finPeriodLabel(anPeriod);
     // ── Cash flow (canonical source = ledger) ──
@@ -6275,11 +6277,13 @@ async function renderAnalytics() {
       </table></div></div></div>
     `;
     // Cash in vs cash out, 6-month trend
+    if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('bh-cash-chart'),{type:'bar',data:{labels:months6.map(m=>m.label),datasets:[
       {label:'Cash In',data:months6.map(m=>ledIn(m.ym)||wonQuotesMonth(m.ym)),backgroundColor:'#30D158'},
       {label:'Cash Out',data:months6.map(m=>ledOut(m.ym)),backgroundColor:'#FF453A'},
     ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
     // Gross profit vs cost (profitability)
+    if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('bh-margin-chart'),{type:'doughnut',data:{labels:['Gross Profit','Cost'],datasets:[{data:[Math.max(grossProfit,0),jcCost],backgroundColor:['#30D158','#636366'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}},tooltip:{callbacks:{label:c=>` ${c.label}: ₱${fmt(c.parsed)}`}}}}});
     window.bindPeriodPicker(document.getElementById('an-overview-period'), (newKey) => {
       window._AN_PERIOD = newKey; window._anRenderOverview && window._anRenderOverview();
@@ -6287,7 +6291,7 @@ async function renderAnalytics() {
   };
   window._anRenderOverview = renderOverview;
 
-  const renderSales = () => {
+  const renderSales = async () => {
     const salesQuotes=quotes.filter(q=>q.department==='Sales'||q.type==='sales'||!q.department);
     const won2=salesQuotes.filter(q=>q.status==='accepted').reduce((s,q)=>s+(q.total||0),0);
     const pipeline=salesQuotes.filter(q=>q.status==='sent').reduce((s,q)=>s+(q.total||0),0);
@@ -6337,15 +6341,17 @@ async function renderAnalytics() {
       </table></div></div></div>
     `;
     const statuses=['draft','sent','accepted','rejected'];
+    if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('sq-chart'),{type:'bar',data:{labels:statuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:statuses.map(s=>salesQuotes.filter(q=>q.status===s).length),backgroundColor:['#636366','#0A84FF','#30D158','#FF453A']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
     // last 6 months volume — anchored to Manila current month
     const months=[],counts=[];
     const _anchY=+thisMonth.slice(0,4), _anchM=+thisMonth.slice(5,7)-1;
     for(let i=5;i>=0;i--){const d=new Date(_anchY,_anchM-i,1);months.push(d.toLocaleString('default',{month:'short'}));counts.push(salesQuotes.filter(q=>{const qd=q.createdAt?.toDate?q.createdAt.toDate():new Date(q.createdAt||0);return qd.getMonth()===d.getMonth()&&qd.getFullYear()===d.getFullYear();}).length);}
+    if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('sq2-chart'),{type:'line',data:{labels:months,datasets:[{label:'Quotes',data:counts,borderColor:'#0A84FF',backgroundColor:'#0A84FF22',fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
   };
 
-  const renderMarketing = () => {
+  const renderMarketing = async () => {
     const mktTasks=tasks.filter(t=>t.department==='Marketing'||t.category==='Marketing');
     const doneMkt=mktTasks.filter(t=>['done','approved','archived'].includes(t.status));
     const mktSubs=subs.filter(s=>s.department==='Marketing');
@@ -6380,11 +6386,13 @@ async function renderAnalytics() {
     `;
     const taskStatuses=['todo','in-progress','review','done','approved','archived'];
     const statusCounts=taskStatuses.map(s=>mktTasks.filter(t=>t.status===s).length);
+    if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('mkt-task-chart'),{type:'doughnut',data:{labels:['Done','Active'],datasets:[{data:[doneMkt.length,mktTasks.length-doneMkt.length],backgroundColor:['#30D158','#636366'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
+    if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('mkt-status-chart'),{type:'bar',data:{labels:taskStatuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:statusCounts,backgroundColor:'#FF9F0A'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb',font:{size:10}},grid:{display:false}}}}});
   };
 
-  const renderFinanceAnalytics = () => {
+  const renderFinanceAnalytics = async () => {
     // Follows the SAME period as the Overview tab's picker (window._AN_PERIOD) —
     // showing "This Month" here while Overview shows "Last Month" would be a
     // confusing split-brain on one page (v12 WS12 D3).
@@ -6434,12 +6442,15 @@ async function renderAnalytics() {
     `;
     const cats=[...new Set(ledDebits.map(l=>l.category||'Other'))].slice(0,6);
     const catAmts=cats.map(cat=>ledDebits.filter(l=>(l.category||'Other')===cat).reduce((s,l)=>s+(l.amount||0),0));
+    if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('fin-exp-chart'),{type:'bar',data:{labels:cats,datasets:[{data:catAmts,backgroundColor:'#0A84FF'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb',font:{size:10}},grid:{display:false}}}}});
+    if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('fin-ca-chart'),{type:'doughnut',data:{labels:['Approved','Pending','Rejected'],datasets:[{data:[cas.filter(a=>a.status==='approved').length,cas.filter(a=>a.status==='pending').length,cas.filter(a=>a.status==='rejected').length],backgroundColor:['#30D158','#FF9F0A','#FF453A'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
+    if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('fin-net-chart'),{type:'line',data:{labels:months6.map(m=>m.label),datasets:[{label:'Net Income',data:months6.map(m=>finIn(m.ym)-finOut(m.ym)),borderColor:'#30D158',backgroundColor:'#30D15822',fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
   };
 
-  const renderProduction = () => {
+  const renderProduction = async () => {
     const prodTasks=tasks.filter(t=>t.department==='Production'||t.category==='Production');
     const doneProd=prodTasks.filter(t=>['done','approved','archived'].includes(t.status));
     const prodUsers=users.filter(u=>(Array.isArray(u.departments)?u.departments:u.department?[u.department]:[]).includes('Production'));
@@ -6470,12 +6481,14 @@ async function renderAnalytics() {
       </table></div></div></div>
     `;
     const taskStatuses=['todo','in-progress','review','done','approved'];
+    if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('prod-status-chart'),{type:'doughnut',data:{labels:taskStatuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:taskStatuses.map(s=>prodTasks.filter(t=>t.status===s).length),backgroundColor:['#636366','#0A84FF','#FF9F0A','#30D158','#34C759'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
     const topMembers=prodUsers.slice(0,8);
+    if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('prod-member-chart'),{type:'bar',data:{labels:topMembers.map(u=>(u.displayName||u.email||'?').split(' ')[0]),datasets:[{label:'Done',data:topMembers.map(u=>prodTasks.filter(t=>(Array.isArray(t.assignedTo)?t.assignedTo.includes(u.id):t.assignedTo===u.id)&&['done','approved','archived'].includes(t.status)).length),backgroundColor:'#30D158'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb',font:{size:10}},grid:{display:false}}}}});
   };
 
-  const renderGovernment = () => {
+  const renderGovernment = async () => {
     const wonBids=govBids.filter(b=>b.status==='won');
     const lostBids=govBids.filter(b=>b.status==='lost');
     const pendingBids=govBids.filter(b=>!b.status||b.status==='pending'||b.status==='submitted');
@@ -6510,8 +6523,10 @@ async function renderAnalytics() {
         }).join('')}</tbody>
       </table></div>`:`<p style="color:var(--text-muted);padding:16px;text-align:center">No bidding records found. Add records to the <code>gov_biddings</code> collection in Firestore.</p>`}</div></div>
     `;
+    if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('gov-outcome-chart'),{type:'doughnut',data:{labels:['Won','Lost','Pending'],datasets:[{data:[wonBids.length,lostBids.length,pendingBids.length],backgroundColor:['#30D158','#FF453A','#FF9F0A'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
     const govStatuses=['todo','in-progress','review','done'];
+    if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('gov-task-chart'),{type:'bar',data:{labels:govStatuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:govStatuses.map(s=>govTasks.filter(t=>t.status===s).length),backgroundColor:'#9BA8FF'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
   };
 
@@ -6648,7 +6663,7 @@ function openAddEmployeeModal() {
       deductions:parseFloat(document.getElementById('emp-deduct').value)||0,
     });
     window.logAudit && window.logAudit('create','payroll',ref.id,{ salary:parseFloat(document.getElementById('emp-salary').value)||0 });
-    dbCacheInvalidate('users'); dbCacheInvalidate('users-payroll'); dbCacheInvalidate('users-presence'); closeModal(); renderTeam();
+    dbCacheInvalidate('users'); dbCacheInvalidate('users-presence'); closeModal(); renderTeam();
   });
 }
 
@@ -6777,7 +6792,7 @@ function openCreateWorkerModal() {
       await db.collection('payroll').doc(uid).set({ salary, allowance: allow, deductions: 0 });
       window.logAudit && window.logAudit('create','payroll',uid,{ salary, allowance: allow });
 
-      dbCacheInvalidate('users'); dbCacheInvalidate('users-payroll'); dbCacheInvalidate('users-presence');
+      dbCacheInvalidate('users'); dbCacheInvalidate('users-presence');
 
       // Show credentials to HR — only time the password is displayed in full
       openModal('✅ Worker Account Created', `
@@ -6839,7 +6854,7 @@ function openEditEmployeeModal(u) {
       deductions:parseFloat(document.getElementById('eu-deduct').value)||0,
     }, {merge:true});
     window.logAudit && window.logAudit('update','payroll',u.id,{ salary:parseFloat(document.getElementById('eu-salary').value)||0 });
-    dbCacheInvalidate('users'); dbCacheInvalidate('users-payroll'); dbCacheInvalidate('users-presence'); closeModal(); renderTeam();
+    dbCacheInvalidate('users'); dbCacheInvalidate('users-presence'); closeModal(); renderTeam();
   });
 
   // Reset Password (worker accounts only)

@@ -100,9 +100,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     IMPLEMENTED (dynamic `db.listCollections()` backup discovery + `system_health` heartbeat +
     `restore-from-backup.js`) — see Build Log. Write-time sync queue deliberately deferred
     (nightly generic walk stays authoritative), per spec decision 7.
-16. `[ ]` **Performance & scale** — aggregate/counter docs for dashboard KPIs; limits/date
+16. `[x]` **Performance & scale** — aggregate/counter docs for dashboard KPIs; limits/date
     filters on the unbounded reads (ledger, tasks, users, quotes×3, inventory, analytics×13);
     unified cache keys; presence heartbeat throttled; split departments.js; Chart.js on demand.
+    IMPLEMENTED (bounded `ledgerForPeriod`/`ledgerSince` reads, unified cache keys, Chart.js
+    on-demand load) — see Build Log. No counter docs built (deferred to WS13 per spec D1/D2/D11);
+    departments.js split deferred (D-split); presence heartbeat needed no change (already
+    throttled, D10).
 17. `[ ]` **Design-system consolidation** — collapse the override-stacked CSS into one token
     layer; Lucide icons replace ~1,100 emoji; Auto (system) theme; theme-color meta follows
     theme; typography scale; focus states.
@@ -694,4 +698,53 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   ONLY workstream-15 rules change); then, when convenient, manually dispatch the backup workflow
   once and confirm `_manifest.json` + the previously-missing collections all appear, confirm new
   Drive uploads show Private, and dry-run the restore workflow once.
-  NEXT: workstream 16 (performance & scale) per the build order in fable-workplan/INDEX.md.
+- **2026-07-10 (Sonnet implementation — WS16 Performance & scale, per spec):** Split across 4
+  parallel subagents (config.js helpers; app.js dashboards/analytics/chart-lazy-load;
+  departments.js bounded reads; modules.js+notifications.js cache swaps) since the spec's own
+  migration checklist was already organized file-by-file with zero cross-file dependency —
+  same pattern as WS10-11's 3-way sweep. Governing constraint honored throughout: **no
+  displayed money number changes** — every read-cost win is either a bounded query returning
+  the exact same rows the client already filtered to, or cache-sharing of reads that were
+  byte-identical. `js/config.js` gained `window.ledgerForPeriod(periodKey)`/`window.ledgerSince
+  (startYmd)` (bounded `where('date','>=' /'<=')` ledger reads, cached per resolved period key;
+  falls back to a full cached read for 'all'), `window.ymAddMonths`, and `window.ensureChart()`
+  (lazy Chart.js loader); `dbCacheInvalidate` became collection-aware via an `_alias` map so
+  the existing 22 `dbCacheInvalidate('ledger')` writers now also flush `ledger:*`/`ledger>=*`
+  period-scoped cache entries and the 3 `dbCacheInvalidate('expenses')` writers flush
+  `expenses-pending`/`expenses-recent` — zero invalidation call-sites needed editing. Cache-key
+  unification merged 11 duplicate `an_*` Analytics keys into the canonical keys every writer
+  already invalidates (`tasks-all`, `all-quotes`, `submissions`, `expenses`, `cash_advances`,
+  `payslips`, `gov_biddings`, `job_projects`, `job_costs`, `projects`, `sales_clients`) — this
+  also fixes a real pre-existing staleness bug as a side effect (Analytics could lag up to 60s
+  behind the Dashboard after a president posted an expense, since `an_*` keys were never
+  explicitly invalidated anywhere). `users-payroll` (confirmed byte-identical to `users`) was
+  deleted, folding into `users`; its 3 now-dead invalidator calls removed. `renderPresidentDashboard`
+  and `renderFinanceDashboard` now read `ledgerForPeriod('month'/period)` + `ledgerForPeriod('prev')`
+  instead of a full ~10k-row ledger scan on every dashboard open — the MTD/prev-month net
+  calculations read directly off the pre-bounded snapshots instead of re-filtering client-side.
+  `renderFinanceOverview` (departments.js) keeps its ALL-TIME lifetime Income/Expense semantics
+  unchanged (bounding it would change a displayed number — forbidden; deferred to WS13's future
+  `accountType`-aware `finance_rollup` doc per D11) but stops the per-click uncached full
+  expenses+ledger read, splitting into cached `expenses-pending`/`expenses-recent`/`ledger`
+  reads. All inventory reads app-wide (7 sites across departments.js/modules.js/notifications.js
+  — RFQ, BOM modal, production forms, receive-into-inventory, low-stock login check, Stock tab,
+  global search) now share one `dbCachedGet('inventory_items', ...)` cache instead of each
+  independently re-scanning the collection; client-side `.sort()` added wherever a dropped
+  `.orderBy('name')` needs replacing. Chart.js no longer loads eagerly — all 13 `new Chart(`
+  sites (6 async Analytics tab-renderers) now `await window.ensureChart()` on first use, with
+  the CDN URL kept in `sw.js`'s PRECACHE list so the on-demand fetch is instant and offline-safe;
+  the eager `<script>` tag was removed from index.html. **Verified:** `node --check` clean on
+  all 5 touched files; grep-swept for every one of the 12 retired `an_*`/`users-payroll` cache
+  keys — zero hits; hand-spot-checked the async conversion (both `new Chart(` call sites and
+  their 6 enclosing async arrow functions, confirmed their only callers are fire-and-forget —
+  no caller awaits or depends on a synchronous return, so the async conversion is safe) and the
+  `renderFinanceOverview` bounded-read change (confirmed `ledIncome`/`ledExpense` still sum the
+  identical full cached ledger array — no displayed number changed, only the read path is now
+  cached). **No `firebase deploy` needed** — this workstream introduces no new collection or
+  composite-index query (every bounded read is a single-field `where()`/`orderBy().limit()`,
+  covered by Firestore's automatic single-field indexes), per the spec's own Spec 5. **NOT
+  verified** (needs a live login): an actual dashboard open confirming the Network tab shows a
+  bounded (not full-collection) ledger read, a live Analytics staleness-fix click-through
+  (post an expense, immediately check Analytics), and confirming Chart.js's CDN request only
+  fires when a charted screen opens (not on every login).
+  NEXT: workstream 17 (design-system consolidation) per the build order in fable-workplan/INDEX.md.

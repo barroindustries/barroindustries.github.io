@@ -5229,16 +5229,18 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
   // Totals come from the LEDGER (single source of truth). The expenses collection
   // is still read for the pending-approval queue + the recent-expenses list, but it
   // no longer feeds the headline totals (approved expenses are posted to the ledger).
-  const [expSnap, ledSnap] = await Promise.all([
-    db.collection('expenses').get().catch(()=>({docs:[]})),
-    db.collection('ledger').get().catch(()=>({docs:[]}))
+  const [pendSnap, recentSnap, ledSnap] = await Promise.all([
+    dbCachedGet('expenses-pending', () => db.collection('expenses').where('status','==','pending').get().catch(()=>({docs:[]})), 45000),
+    dbCachedGet('expenses-recent',  () => db.collection('expenses').orderBy('date','desc').limit(50).get().catch(()=>({docs:[]})), 45000),
+    dbCachedGet('ledger',           () => db.collection('ledger').get().catch(()=>({docs:[]})), 45000),  // ALL-TIME totals — shared TTL; WS13 replaces with finance_rollup
   ]);
-  const expenses   = expSnap.docs.map(d => ({id:d.id,...d.data()}));
-  const ledger     = ledSnap.docs.map(d => d.data());
+  const pendingExpDocs = pendSnap.docs.map(d => ({id:d.id,...d.data()}));
+  const expenses       = recentSnap.docs.map(d => ({id:d.id,...d.data()}));  // for the Recent Expenses card
+  const ledger         = ledSnap.docs.map(d => d.data());
   const isPriv     = isFinancePriv();
   const ledIncome  = ledger.filter(e => ledgerKind(e)==='income').reduce((s,e) => s + (e.amount||0), 0);
   const ledExpense = ledger.filter(e => ledgerKind(e)==='expense').reduce((s,e) => s + (e.amount||0), 0);
-  const pendingExp = expenses.filter(e => e.status==='pending').reduce((s,e) => s + (e.amount||0), 0);
+  const pendingExp = pendingExpDocs.reduce((s,e) => s + (e.amount||0), 0);
 
   container.innerHTML = `
     <div class="kpi-row">
@@ -12474,7 +12476,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
   // Load raw materials for the consumption picker
   let invItems = [];
   try {
-    const isnap = await dbCachedGet('inventory_items', ()=>db.collection('inventory_items').get(), 30000);
+    const isnap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
     invItems = isnap.docs.map(d=>({id:d.id,...d.data()})).filter(i=>(i.kind||'material')==='material').sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   } catch(_) {}
   const matItemOpts = (sel='') => '<option value="">— Select material —</option>' + invItems.map(i=>`<option value="${i.id}" data-name="${escHtml(i.name||'')}" data-cost="${Number(i.unitCost)||0}" ${sel===i.id?'selected':''}>${escHtml(i.name||'')} (${Number(i.qty||0).toLocaleString('en-PH')} ${escHtml(i.unit||'')} @ ₱${fmt(i.unitCost||0)})</option>`).join('');
@@ -12621,8 +12623,8 @@ function saveCountDraft(d){ try { localStorage.setItem(PROD_COUNT_DRAFT_KEY, JSO
 
 async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
   el.innerHTML = '<div class="loading-placeholder">Loading items…</div>';
-  const snap = await db.collection('inventory_items').orderBy('name').get().catch(()=>({docs:[]}));
-  const items = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
+  const items = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
   const shown = items.filter(i=> kindFilter==='all' || (i.kind||'material')===kindFilter);
 
   const draft  = loadCountDraft();
@@ -12846,8 +12848,8 @@ ${_lh ? _lh.printCSS : ''}
 
 async function renderProdMaterials(el, currentRole) {
   el.innerHTML = '<div class="loading-placeholder">Loading materials…</div>';
-  const snap = await db.collection('inventory_items').orderBy('name').get().catch(()=>({docs:[]}));
-  const mats = snap.docs.map(d=>({id:d.id,...d.data()})).filter(i=>(i.kind||'material')==='material');
+  const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
+  const mats = snap.docs.map(d=>({id:d.id,...d.data()})).filter(i=>(i.kind||'material')==='material').sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
   const low = mats.filter(i=>(i.reorderLevel||0)>0 && (i.qty||0) <= (i.reorderLevel||0));
   const stockValue = mats.reduce((s,i)=>s+(Number(i.qty)||0)*(Number(i.unitCost)||0),0);
   el.innerHTML = `
@@ -12936,7 +12938,7 @@ async function renderRFQs(content, currentUser, currentRole) {
     document.getElementById('new-rfq-btn')?.addEventListener('click', () =>
       openRfqModal(currentUser, () => renderRFQs(content, currentUser, currentRole)));
     document.getElementById('rfq-lowstock-btn')?.addEventListener('click', async () => {
-      const isnap = await db.collection('inventory_items').get().catch(() => ({ docs: [] }));
+      const isnap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
       const low = isnap.docs.map(d => d.data())
         .filter(i => (i.kind || 'material') === 'material' && (i.reorderLevel || 0) > 0 && (i.qty || 0) <= (i.reorderLevel || 0));
       if (!low.length) { Notifs.showToast('No materials are at or below reorder level. 👍'); return; }
@@ -13327,7 +13329,7 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
 async function receivePurchaseIntoInventory(p) {
   const items = (p.items || []).filter(it => it.desc && (Number(it.qty)||0) > 0);
   if (!items.length) return { matched: 0, unmatched: [] };
-  const snap = await db.collection('inventory_items').get();
+  const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
   const byName = {};
   snap.docs.forEach(d => { const n = (d.data().name||'').trim().toLowerCase(); if (n) byName[n] = d; });
   const batch = db.batch();

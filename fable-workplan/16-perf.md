@@ -1,5 +1,9 @@
 # Workstream 16 — Performance & Scale (aggregate/counter docs, unbounded reads, cache-key unification)
 
+> ✅ **IMPLEMENTED 2026-07-10.** No rules/indexes deploy needed (no new collection or
+> composite-index query, per the spec's own Spec 5). See V12-PLAN.md Build Log. No displayed
+> money number changed anywhere — verified by hand at every bounded-read site.
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

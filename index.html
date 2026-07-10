@@ -154,7 +154,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.5 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.6 · Barro Industries</div>
   </div>
 </div>
 
@@ -296,7 +296,8 @@
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>
-<script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<!-- v12 WS16 — Chart.js loads on demand via window.ensureChart() (config.js), not eagerly here.
+     The CDN URL stays in sw.js's PRECACHE list so the on-demand fetch is instant/offline-safe. -->
 <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
 <script defer src="js/firebase-config.js"></script>
 <script defer src="js/config.js"></script>

@@ -604,7 +604,7 @@ window.Notifs = (() => {
     const isPurchasing = (window.currentDepts || []).includes('Purchasing');
     if (!['president','manager','finance'].includes(role) && !isPurchasing) return;
     try {
-      const snap = await db.collection('inventory_items').get();
+      const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
       const low = snap.docs.map(d => d.data())
         .filter(i => (i.reorderLevel||0) > 0 && (i.qty||0) <= (i.reorderLevel||0));
       if (!low.length) return;

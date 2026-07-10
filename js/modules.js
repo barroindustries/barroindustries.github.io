@@ -661,7 +661,7 @@ async function computeEomStandings(users, monthStr) {
   // Load all tasks + grades once (shared across candidates), then read each
   // candidate's attendance in parallel.
   const tasksGet = (typeof dbCachedGet === 'function')
-    ? dbCachedGet('tasks', () => db.collection('tasks').get(), 60000)
+    ? dbCachedGet('tasks-all', () => db.collection('tasks').get(), 60000)
     : db.collection('tasks').get();
   const evalsGet = (typeof dbCachedGet === 'function')
     ? dbCachedGet('kpi-evals', () => db.collection('kpi_evals').get(), 60000)
@@ -1729,8 +1729,8 @@ async function renderPresidentMessageCard() {
 
   async function renderStock(el){
     el.innerHTML = '<div class="loading-placeholder">Loading stock…</div>';
-    const snap = await db.collection('inventory_items').orderBy('name').get().catch(()=>({docs:[]}));
-    const items = snap.docs.map(d=>({id:d.id,...d.data()}));
+    const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
+    const items = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
     const ce = canEditInv();
     const low = items.filter(i=>(i.reorderLevel||0)>0 && (i.qty||0) <= (i.reorderLevel||0));
     const totalValue = items.reduce((s,i)=>s+((i.qty||0)*(i.unitCost||0)),0);
@@ -2267,10 +2267,10 @@ async function renderPresidentMessageCard() {
       const [tasks, quotes, sc, dc, bsc, inv, prod] = await Promise.all([
         (typeof dbCachedGet==='function'?dbCachedGet('tasks-all',()=>db.collection('tasks').get(),30000):db.collection('tasks').get()).then(toArr).catch(()=>[]),
         (typeof getAllQuotes==='function'?getAllQuotes():db.collection('bk_quotes').get()).then(toArr).catch(()=>[]),
-        safe(db.collection('sales_clients').get()),
-        safe(db.collection('design_clients').get()),
-        safe(db.collection('bs_clients').get()),
-        safe(db.collection('inventory_items').get()),
+        dbCachedGet('sales_clients',    () => db.collection('sales_clients').get().catch(()=>({docs:[]})), 60000).then(toArr).catch(()=>[]),
+        dbCachedGet('design_clients',   () => db.collection('design_clients').get().catch(()=>({docs:[]})), 60000).then(toArr).catch(()=>[]),
+        dbCachedGet('bs_clients',       () => db.collection('bs_clients').get().catch(()=>({docs:[]})), 60000).then(toArr).catch(()=>[]),
+        dbCachedGet('inventory_items',  () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000).then(toArr).catch(()=>[]),
         safe(db.collection('products').limit(1000).get()),
       ]);
       sources = { tasks, quotes,
