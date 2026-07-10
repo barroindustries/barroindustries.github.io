@@ -49,17 +49,246 @@ firestore.rules coverage for the money collections (lines 582-637): ledger -- re
 - Existing UI-component convention for shared render helpers: window.chipTabs(items, activeKey, opts) returns an HTML string, paired with window.bindChipTabs(scope, onSelect) to wire clicks after re-render (config.js lines 293-335) -- this is the established reusable-declutter pattern in this codebase (memory: ui-chip-tabs-and-sop-helpers), distinct from the older .subtab-bar/.subtab-btn markup that finPeriodBar and renderFinancialReports' rangeBtn both currently use. A new shared period-picker should follow one of these two existing patterns rather than invent a third.
 - Ledger read is finance-only at the rules layer (firestore.rules line 583: allow read if isAuth() and canFinance()) -- no other role can query the ledger collection at all. Any shared period-picker embedded in a non-Finance screen (Design, Production) that needs ledger-derived numbers already relies on try/catch-swallowed permission errors (departments.js lines 6174-6192 confirm this is accepted, intentional behavior) -- the shared component's API must not assume ledger reads always succeed.
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-09)
 
-- [ ] Component API shape: should the unified period picker take a single opaque period key (as today: month/prev/ytd/all) or a structured object (e.g. {type:'month', ym:'2026-07'} / {type:'quarter', y:2026, q:3} / {type:'year', y:2026} / {type:'all'})? The 'any month/quarter/year' requirement cannot be expressed as a fixed enum of tab keys the way FIN_PERIOD_TABS is today -- it needs either an unbounded key space or a picker widget (month/quarter/year selectors) alongside quick-tab shortcuts. Tradeoff: an opaque key is a trivial drop-in replacement for the 11 existing finPeriodMatch(dateStr,period) call patterns but cannot express 'March 2024' or 'Q2 2025' without ad hoc key strings; a structured object is more powerful but requires touching every call site's signature.
-- [ ] Key-name reconciliation: the shared helper's 'ytd' and renderFinancialReports' 'year' key currently compute the identical thing (since Jan 1 of bizYear()) but are spelled differently and are NOT interchangeable if passed to the wrong function today. When merging, which spelling becomes canonical, and is any persisted state (a saved user preference, or a URL param if workstream 10's routing lands first) at risk of breaking if the key changes shape? Should this decision be made jointly with workstream 10's URL-param scheme for period state?
-- [ ] Should the several hardcoded-to-current-month widgets found in this audit (renderFinanceAnalytics app.js:6349, renderProgressReports app.js:5007, the Purchasing spend KPI departments.js:12348, renderFinanceHRProfiles departments.js:3577) be migrated onto the new shared component as part of this workstream, or left alone as out-of-scope fixed KPI cards that were never pickers to begin with? This directly affects how large workstream 12's diff is, and resolves the ambiguity around what the plan's '3 divergent implementations' actually refers to.
-- [ ] Where does the closed-period flag live: (a) a new top-level finance_periods/{YYYY-MM} doc with fields like closed (boolean), closedBy, closedAt, keyed only by month, with quarters/years derived from their constituent months; (b) reuse the already-existing pay_runs/{month} collection if its status field is semantically close enough; or (c) a single finance_periods/config doc holding a lastClosedMonth cursor (simplest, but only supports closing in strict chronological order, not reopening or closing an arbitrary past month later)? Tradeoff between per-month granularity/flexibility and implementation simplicity.
-- [ ] Enforcement layer: should the closed-period check be (a) client-side only -- each of the ~10 backdatable ledger-write call sites checks the flag before calling add()/update(), simple but bypassable by a technical user via devtools; (b) enforced inside firestore.rules via a get() against the periods doc on every ledger create/update -- real security, but an extra read per write plus the missing-field/missing-doc-denies-by-default hazard noted in constraints; or (c) both, for defense in depth? Given this codebase already puts critical financial guards in rules (e.g. the POCOS- fencing at firestore.rules lines 588-597), a rules-level check would be consistent with precedent, but the plan does not specify -- this is a genuine cost/complexity call.
-- [ ] Which of the 14 ledger-write call sites actually get the guard? The recovery/backfill tool (backfillPayrollLedger, departments.js:1547) and the payroll-history edit path (departments.js:2255-2293) exist specifically to write into past, potentially closed months -- should they get an explicit bypass (President-only override, a distinct unlock-and-repost action, or simply exemption from the check entirely), decided per call site rather than as one blanket rule?
-- [ ] Should closing a period also freeze/snapshot that period's reported totals (so a later fix to the orderBy(date) date-less-row bug can never retroactively change a closed month's numbers), or is 'closed' purely a write-time gate with reports still computed live from current ledger contents every time?
-- [ ] Should the two duplicate payroll-compute paths (departments.js:2701 inside the Payroll tab's Compute button, and app.js:4170 inside renderPersonalFinance's Record Payroll modal) both get the period-close guard now, given workstream 20 plans to delete one of them later -- or should workstream 12 coordinate with, or run after, workstream 20?
-- [ ] UI pattern: should the new shared picker be built on the existing .subtab-bar/.subtab-btn markup (matching today's finPeriodBar/rangeBtn, minimal visual change) or migrate to the newer chipTabs/bindChipTabs pattern (the more recently established reusable-declutter convention) -- and once quarters/arbitrary months are supported, does the control need a secondary dropdown or date input alongside quick-tab chips, and where does that live across the three different page layouts (Finance Dashboard, Analytics, Financial Reports) that would consume it?
+### Decisions
+
+**D1 — Period = compact canonical string, parsed to bounds.** A period is a string key:
+`'month:2026-07'` · `'quarter:2026-Q3'` · `'year:2026'` · `'all'`, plus resolving aliases
+`'month'` (current), `'prev'`, `'ytd'`, and `'year'` (legacy Reports spelling → same as ytd).
+One parser produces inclusive date bounds — which also future-proofs WS16's server-side
+`where('date','>=',…)` range queries with zero API change. `finPeriodMatch` survives as a thin
+alias, so every existing call site keeps working unmodified until migrated.
+
+**D2 — Canonical key is `'ytd'`; `'year'` becomes an accepted parse alias.** No persisted user
+preference exists (`_FIN_DASH_PERIOD`/`_AN_PERIOD` are in-memory) → no migration risk. WS10's
+URL params must use these canonical keys (recorded for WS10). **Live-number callout: none** —
+Reports keeps merging general_journal exactly as today; the engine only replaces the filter
+math, which is provably identical (`slice(0,7)`/`slice(0,4)` semantics preserved).
+
+**D3 — Scope of picker adoption:** Finance Dashboard, Analytics Overview, Financial Reports,
+**plus** renderFinanceAnalytics (app.js:6349 — it lives inside Analytics one tab from the
+picker; leaving it hardcoded would show contradicting numbers on the same screen). **NOT
+migrated** (fixed status KPIs, never pickers): renderProgressReports (app.js:5007), Purchasing
+spend KPI (departments.js:12348), renderFinanceHRProfiles this-month payslips
+(departments.js:3577). Listed so nobody assumes they were forgotten.
+
+**D4 — Closed flag lives in a new `finance_periods/{YYYY-MM}` collection**:
+`{closed:true, closedBy:uid, closedByName, closedAt:serverTimestamp, note?:string}`.
+NOT pay_runs (books-close ≠ payroll workflow; WS20 is about to restructure pay_runs — coupling
+them guarantees a conflict). Quarters/years derive from constituent months. Per-month
+granularity, reopenable, add to monthly-backup EXPORTS (WS15 discipline).
+
+**D5 — Enforcement: both layers (defense in depth), consistent with the POCOS precedent.**
+- *Client:* `window.assertPeriodOpen(dateStr)` — throws with the user-facing message
+  `"That month's books are closed. Ask the President to reopen ${month} first."` Fires BEFORE
+  the write → distinguishable from permission-denied.
+- *Rules:* the ledger `create` clause gains a period gate using rules string `split()` (rules
+  strings support split/list indexing): month key = `date.split('-')[0]+'-'+date.split('-')[1]`,
+  then `!exists(finance_periods/$month) || get(…).data.get('closed',false)==false`. Missing doc
+  = open (fail-open on absence — the safe default per the missing-field-denies memory).
+  President bypasses (`isPresident()`).
+- **No hidden code exemptions.** Recovery tools (backfillPayrollLedger, history-edit resync) do
+  NOT bypass the lock — the governance model is: President **reopens the month → fix runs →
+  re-close**, every step audit-logged. One mental model, no secret side doors. The Sync-to-ledger
+  backfill additionally client-skips closed months and reports "N rows skipped (closed months)".
+- Only PAST months are closable (UI blocks closing the current Manila month) — which is why the
+  three `today()`-dated write sites need no client guard.
+
+**D6 — Date integrity (the orderBy date-less fix), three parts:** (i) rules now REQUIRE
+`date` matching `^\d{4}-\d{2}(-\d{2})?$` on ledger create (every one of the 14 sites already
+sends it — verified in this brief — so no legacy-client breakage); (ii) one-time maintenance
+action **"🩹 Fix undated rows"** (president, Reports tab): full-collection read (no orderBy),
+docs missing/malformed `date` get `date := createdAt`'s Manila date, else `today()`; logAudit +
+count toast; re-runnable; (iii) after that backfill, the existing `orderBy('date')` reads no
+longer drop rows. Same treatment (client always sends date) noted for general_journal, whose
+rows Reports merges.
+
+**D7 — No frozen snapshots.** Reports stay live-computed; the ledger remains the single source
+of truth. A closed month can only change via deliberate, logged President action
+(reopen→edit→re-close). The BIR filing workstream (WS39) will capture printed/PDF exports as
+the filed artifact of record.
+
+**D8 — WS20 sequencing:** guard BOTH payroll-compute paths now (2 lines each; the legacy
+app.js path is live until WS20 deletes it — a wasted 2-line guard is cheaper than an open
+hole). **WS13 coordination:** renderFinancialReports and the ledger `create` rule are touched by
+both 12 and 13 — Sonnet must implement 12+13 as ONE combined diff; the merged rules block below
+already composes both.
+
+**D9 — UI: chipTabs pattern + inline custom row (no pop-ups).** Quick chips
+`This Month · Last Month · YTD · All · 📅 Custom`; tapping Custom expands an inline row (not a
+modal): `<input type="month">` + quarter `<select>` + year `<select>` + Apply. Shared helpers in
+config.js beside chipTabs. Reports' bespoke rangeBtn and app.js's finPeriodBar are both replaced.
+When the viewed period is a closed month, the picker shows a `🔒 Closed` badge; Reports (only)
+adds the President's `🔒 Close <month>` / `Reopen` button.
+
+---
+
+### Spec 1 — `window.Period` module (js/config.js, replaces the app.js helper block)
+
+```js
+// ── Period engine (v12 WS12) — ONE period filter for all money screens ──
+window.Period = (() => {
+  const ym = () => bizDate().slice(0, 7);
+  const bounds = {
+    parse(key) {                     // → {type,key,start,end,label} (end inclusive, null=∞)
+      key = String(key || 'month');
+      if (key === 'month') key = 'month:' + ym();
+      if (key === 'prev')  key = 'month:' + prevBizMonth();
+      if (key === 'ytd' || key === 'year') key = 'year:' + bizYear();
+      if (key === 'all') return { type:'all', key:'all', start:null, end:null, label:'All Time' };
+      let m;
+      if ((m = key.match(/^month:(\d{4})-(\d{2})$/))) {
+        const s = `${m[1]}-${m[2]}`;
+        return { type:'month', key, start:`${s}-01`, end:`${s}-31`, label: new Date(`${s}-01T12:00:00`).toLocaleString('en-PH',{month:'long',year:'numeric'}) };
+      }
+      if ((m = key.match(/^quarter:(\d{4})-Q([1-4])$/))) {
+        const q = +m[2], sm = String((q-1)*3+1).padStart(2,'0'), em = String(q*3).padStart(2,'0');
+        return { type:'quarter', key, start:`${m[1]}-${sm}-01`, end:`${m[1]}-${em}-31`, label:`Q${q} ${m[1]}` };
+      }
+      if ((m = key.match(/^year:(\d{4})$/)))
+        return { type:'year', key, start:`${m[1]}-01-01`, end:`${m[1]}-12-31`, label:`Year ${m[1]}` };
+      return bounds.parse('month');                       // unknown → safe default
+    },
+    match(dateStr, key) {
+      const ss = String(dateStr || ''); if (!ss) return false;
+      const p = typeof key === 'object' ? key : bounds.parse(key);
+      if (p.type === 'all') return true;
+      const d = ss.length === 7 ? ss + '-15' : ss;        // month-level rows (YYYY-MM) match inside
+      return d >= p.start && d <= p.end;
+    },
+    monthKeyOf(dateStr) { return String(dateStr||'').slice(0, 7); },
+  };
+  return bounds;
+})();
+// Back-compat aliases — existing call sites keep working untouched:
+window.finPeriodMatch = (dateStr, period) => Period.match(dateStr, period);
+window.finPeriodLabel = (period) => Period.parse(period).label
+  .replace(/^Year \d{4}$/, m => (period==='ytd'||period==='year') ? 'YTD ' + bizYear() : m);
+```
+`FIN_PERIOD_TABS`/`finPeriodBar`/`prevBizMonth`: `prevBizMonth` MOVES to config.js verbatim;
+the old app.js block (2645-2666) is deleted; `FIN_PERIOD_TABS` is superseded by the picker below.
+
+### Spec 2 — Shared picker (config.js, beside chipTabs)
+
+```js
+window.periodPicker = function(activeKey, opts = {}) { /* returns HTML string */ }
+window.bindPeriodPicker = function(scope, onSelect) { /* wires chips + custom row; calls onSelect(newKey) */ }
+```
+Chips: `[['month','This Month'],['prev','Last Month'],['ytd','YTD'],['all','All Time'],['custom','📅 Custom']]`
+rendered via the existing `chipTabs` markup classes. `custom` toggles an inline
+`<div class="period-custom-row">` (flex, `display:none` until toggled) containing
+`<input type="month" max="<current>">`, quarter/year selects (years: 2024→current), and Apply →
+`onSelect('month:YYYY-MM' | 'quarter:YYYY-Qn' | 'year:YYYY')`. When `Period.parse(activeKey)`
+is a specific month/quarter/year, the custom chip shows that label + active state. If
+`opts.closedBadge` and the resolved period is a closed month (read-through
+`dbCachedGet('finance_periods', …, 60000)`), append `<span class="badge badge-gray">🔒 Closed</span>`.
+Consumers + their migration: renderFinanceDashboard (app.js:2733 finPeriodBar→periodPicker;
+filter at 2694 unchanged — alias handles it), Analytics Overview (app.js:6203 same),
+renderFinanceAnalytics (app.js:6349-6394: replace the `inMonth()` closure with
+`Period.match(l.date, window._AN_PERIOD||'month')` so it follows the Analytics picker),
+renderFinancialReports (departments.js:2924 rangeBtn block → periodPicker; its inline
+month/prev/year/all filter at 2896-2899 → `all = all.filter(e => Period.match(e.date, range))`;
+`range` values become canonical keys; runLedgerBackfill's forced `'all'` still works).
+
+### Spec 3 — Close/guard machinery
+
+```js
+// config.js
+window.isPeriodClosed = async function(dateStr) {         // read-through cached
+  const mk = Period.monthKeyOf(dateStr); if (!mk) return false;
+  const snap = await dbCachedGet('finperiod-' + mk,
+    () => db.collection('finance_periods').doc(mk).get(), 60000).catch(() => null);
+  return !!(snap && snap.exists && snap.data().closed);
+};
+window.assertPeriodOpen = async function(dateStr) {
+  if (await isPeriodClosed(dateStr)) {
+    const mk = Period.monthKeyOf(dateStr);
+    Notifs.showToast(`That month's books are closed. Ask the President to reopen ${mk} first.`, 'error');
+    throw new Error('period-closed:' + mk);
+  }
+};
+```
+Close/Reopen (Reports tab, president-only, shown when viewing a specific past month):
+`🔒 Close <label>` → `finance_periods/{mk}.set({closed:true, closedBy, closedByName, closedAt})`
++ `logAudit('close-period', 'finance_periods', mk)` + `dbCacheInvalidate('finperiod-'+mk)`;
+`Reopen` sets `closed:false` (doc kept — history) + logAudit. UI must refuse to close the
+current Manila month.
+
+**Write-site checklist** (site numbers from Current state; guard = `await assertPeriodOpen(<date>)`
+immediately before the write, inside the existing try/catch where present):
+| # | Site | Verdict |
+|---|---|---|
+| 1-3 | post{Expense,CRJ,CDJ}ToLedger 1414-1480 | GUARDED (one line at top of each; covers all mirror re-syncs) |
+| 4 | backfillPayrollLedger 1547 | GUARDED-SOFT: `if (await isPeriodClosed(month+'-01')) { skipped++; continue; }` + report count |
+| 5 | history-edit resync 2255-2293 | GUARDED |
+| 6 | Compute Payroll 2701 (month from pr-month-sel) | GUARDED (check once, before the employee loop) |
+| 7 | Manual New Ledger Entry 3064 | GUARDED (highest priority — free date, no ref) |
+| 8 | Worker payslip submit 3867 | GUARDED (on ps.payDate ‖ payPeriodEnd) |
+| 9 | Design payment 6183 | GUARDED (before its try/catch so the period error isn't swallowed as permission-denied) |
+| 10 | Dept budget expense 10690 | GUARDED |
+| 11-13 | SO 8631 / PROJ 11338 / POCOS 11641 (always today()) | EXEMPT — current month is never closable; rules backstop still applies |
+| 14 | Legacy Record Payroll app.js:4170 | GUARDED (2 lines; WS20 deletes the whole path later) |
+
+### Spec 4 — firestore.rules (composed WITH WS13 — this is the final merged text)
+
+New collection block:
+```
+match /finance_periods/{month} {
+  allow read: if canFinance();
+  allow create, update: if isPresident();
+  allow delete: if false;
+}
+```
+Helper + the ledger block's final `create` clause (COMPOSES WS13 Spec 4 — implement once):
+```
+function ledgerDateOk() {
+  return request.resource.data.get('date','').matches('^\\d{4}-\\d{2}(-\\d{2})?$');
+}
+function periodOpen() {
+  return isPresident() ||
+    !exists(/databases/$(database)/documents/finance_periods/$(
+      request.resource.data.get('date','').split('-')[0] + '-' +
+      request.resource.data.get('date','').split('-')[1])) ||
+    get(/databases/$(database)/documents/finance_periods/$(
+      request.resource.data.get('date','').split('-')[0] + '-' +
+      request.resource.data.get('date','').split('-')[1])).data.get('closed', false) == false;
+}
+
+// ledger create — WS12 gate wrapped around WS13's account-aware clause:
+allow create: if ledgerDateOk() && periodOpen() && (
+  canFinance() ||
+  ( canProduction() && <WS13 Spec 4's Production two-leg predicate verbatim> )
+);
+```
+Cost: +1 rules read per ledger create (the exists/get — served from the same get). Update/delete
+stay president-only (already stricter than the gate). Deploy with the usual re-diff-first
+discipline; add `finance_periods` to scripts/monthly-backup.js EXPORTS in the same commit.
+
+### Spec 5 — "🩹 Fix undated rows" (Reports tab, president-only, idempotent)
+
+Full ledger + general_journal read WITHOUT orderBy; for each doc where
+`!/^\d{4}-\d{2}(-\d{2})?$/.test(doc.date||'')`: set `date` = Manila date of `createdAt`
+(`createdAt.toDate()` through the Intl Asia/Manila formatter) else `today()`; batched 400/write;
+logAudit('fix-undated', …, {count}); toast the count. Re-runnable (matches nothing once clean).
+
+### Spec 6 — Migration checklist
+
+1. One combined implementation pass with WS13 (same functions, same rules block — see D8).
+2. Rules deploy first (Spec 4 merged text; old clients unaffected — they always send date, and
+   no month is closed yet so periodOpen() passes everywhere).
+3. App code: config.js Period/picker/guards; delete app.js:2645-2666 helper block; migrate the
+   four consumers; insert the 11 GUARDED call-site lines; add Close/Reopen + Fix-undated buttons.
+   `node --check` ×4 + preview boot (zero console errors) before commit.
+4. Live: president runs **🩹 Fix undated rows**; verify Reports row counts vs the Ledger tab.
+5. Close the oldest complete month as the first real close; verify a backdated manual entry
+   into it is blocked with the period-closed toast (and via devtools, denied by rules).
+
+### What did NOT change
+Progress Reports / Purchasing spend KPI / HR payslips-this-month stay fixed current-month
+cards. general_journal merge behavior in Reports unchanged. No report totals change from this
+workstream (D2 callout); the only user-visible number changes come from WS13's restatement,
+announced separately.
 
 ## Risks / cross-workstream interactions
 

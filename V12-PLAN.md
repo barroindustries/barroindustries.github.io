@@ -218,3 +218,20 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   pre-grounded in current code (18 parallel research agents) and written to
   `fable-workplan/*.md` (INDEX + one file per workstream). Decisions NOT yet resolved —
   that's Fable's next step. See the strategy note above.
+- **2026-07-10 (Fable decision session #1):** Workstreams **12, 13, 20, 22** DECIDED — full
+  implementation specs written into their fable-workplan briefs (see each file's `## DECIDED`
+  section). Key architecture calls now locked: inline `accountType` + `window.COA`/`ledgerKind`
+  (13); purchase→Inventory-asset, consumption→COS with a POCOS-…-INV contra leg (13, ends
+  double expensing; historical restatement is explicit + president-gated); `window.Period`
+  engine + `finance_periods/{YYYY-MM}` close with president-only reopen, rules-level gate via
+  date split() (12); ONE monthly payroll engine `computePayRun`/`disbursePayRun`, frozen
+  `lines[]` on pay_runs, **money moves at Disburse**, Path B (app.js Record Payroll) deleted,
+  transition-aware pay_runs rules, pay policy toggle default 'flat' (20); `window.CashAdvance`
+  service — approval computes balance=totalPayable, installment-by-default deduction with
+  full/custom options, payroll_ca_overrides retired into pay-run lines, worker scalar guarded
+  by the same service (22). **Implementation notes:** 12+13 must ship as ONE diff (same
+  functions + composed rules block); 22 ships with 20 (or standalone per its sequencing note).
+  **Items needing Neil:** default CA interest policy (2%/mo vs 0 at approval); enabling the
+  'performance' pay policy (allowance × KPI/attendance factor) — engine ships inert on 'flat';
+  mid-repayment interest-mismatch CAs listed by the repair dry-run for per-case decisions.
+  NEXT Fable session: 19 (security), 21 (statutory), 9+14 (brand+letterhead together), 10-11.

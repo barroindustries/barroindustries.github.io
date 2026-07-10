@@ -274,19 +274,184 @@ Users read via `employees` array already loaded into renderPayrollManagement's c
 - dbCacheInvalidate discipline: every existing CA mutation site calls dbCacheInvalidate('ca-pending') (e.g. modules.js:1252, departments.js:9233-9234, app.js:4543) to keep the dashboard's cached pending-count badges (app.js:2246,2461,2572,2683 all key off 'ca-pending' with a 30s TTL) from showing stale counts — a unified service must keep invalidating this same cache key (and any new key it introduces) on every write.
 - Transactional integrity is inconsistent today and should be treated as a floor, not a ceiling: only 2 of the 4 approve-paths and 1 of the 2 payment-record paths currently use db.runTransaction with a re-read + status guard (modules.js:1479-1493, modules.js:1538-1551); a unified service should be at least as safe as the safest existing path, not regress to the unguarded plain .update() pattern used by departments.js:3508/9368/9992.
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-- [ ] Should the new CashAdvance service's `approve(id, opts)` be the ONLY code path allowed to write status:'approved'/balance, with all 4 current UI surfaces (modules.js CA tab, departments.js Finance CA tab, departments.js Approvals 'all' tab, departments.js Approvals 'ca' subtab) refactored to call it — or should some of these surfaces be deleted outright as redundant now that there's one canonical CA admin screen? (Owner's phrasing implies consolidation to one service, but doesn't say whether the 4 UI entry points should collapse to fewer screens too.)
-- [ ] What is the correct approved-balance formula going forward — always `totalPayable` (principal+interest) as path A/modules.js does, always raw `amount` as paths B/C do, or should approval require the approver to see and confirm the exact number (closing the silent-default gap in path D that leaves balance untouched)? This directly determines whether interest the employee opted into at request time (modules.js RATE=2%, employee-toggleable) is actually collected consistently.
-- [ ] Should the employee be allowed to opt in/out of interest on their OWN request (current modules.js UI lets them uncheck 'Charge 2%/month interest') or should interest terms be an approval-time decision made by finance/president, not a self-service checkbox? This affects whether the unified request-creation function needs an interest input at all, or whether interest becomes purely a server/approval-side computation.
-- [ ] Should the app.js:4524 Personal-Finance "+ Cash Advance" request form and modules.js:1580 "+ Request" form be merged into one request UI (killing the shape divergence: terms/interest/monthlyPayment/totalPayable/balance:0 vs bare amount/date/repayDate/reason), or does the product genuinely want two different request experiences (a quick informal ask on the dashboard vs. a structured installment-plan request on the dedicated tab)? If merged, `repayDate` (only used by the app.js path, and only surfaced back in the Approvals 'ca' subtab display at departments.js:9977) needs a decision: keep, drop, or fold into `terms`.
-- [ ] Should worker_profiles.caBalance (hourly "production" workers' cash-advance number) be migrated into the same cash_advances collection/service, or explicitly excluded from this workstream and left as a separate, later unification? The owner's brief says "shared by all 3 surfaces" which maps cleanly onto the cash_advances-collection paths only — but a service literally named CashAdvance that ignores the worker payroll engine may re-fragment the exact problem it's meant to solve. Needs an explicit scope call.
-- [ ] For the 3-way payroll-time choice ("this month's installment / pay in full / custom") — what does "this month's installment" mean precisely when an employee holds MULTIPLE concurrent approved CAs with different monthlyPayment values? Sum of monthlyPayment across all their approved CAs? And does switching the DEFAULT from full-balance (current behavior, confirmed) to this-month's-installment change already-live employee expectations / break any employee currently relying on faster payoff via full-balance default?
-- [ ] Multi-CA deduction order: when an employee has 2+ approved CAs and only a partial/custom amount is deducted, the current FIFO loop (departments.js:2726-2737) decrements in `_caDocsByUser` array order (essentially Firestore query order, not date or any explicit priority). Should the new service impose an explicit priority (oldest-first? highest-interest-first?) and expose that ordering to the approver/payroll admin, or is undefined order acceptable since it's summed into one payslip line anyway?
-- [ ] Should `payroll_ca_overrides` remain a separate collection from cash_advances, or should "this month's deduction amount" become a field directly on a redesigned cash_advances doc (or on a new per-run installment subcollection)? Tradeoff: separate collection cleanly separates "plan" from "this month's execution" and matches the existing rules-scoping (finance/admin-write-only), but doubles the number of docs a single CashAdvance.deduct() call must touch and is exactly the kind of key-composition (`{uid}_{month}`) that's easy to get wrong if the pay-period definition (calendar month vs pay-run id) ever changes.
-- [ ] Is the employee-initiated 'ca-deduct-req-btn' (app.js:4550+) supposed to be a REQUEST that finance must approve, or does it write straight to payroll_ca_overrides (which firestore.rules currently restricts to finance/admin-write, meaning as coded this employee write likely fails)? Verify actual current behavior (does the button silently no-op for an 'employee' role today?) and decide the intended UX: auto-apply, or route through the Approvals queue like every other request type per CLAUDE.md's "every request type funnels through Approvals" convention (departments.js:9273 comment).
-- [ ] Should the 'active' status value written by financeDeleteCascade's CA-reversal (departments.js:156) be corrected to 'approved' (matching every filter elsewhere), or does the new service need to explicitly special-case/normalize both spellings during a migration? This is a pre-existing latent inconsistency independent of the main approval-path bug, but any migration script touching cash_advances status values should account for it.
-- [ ] Should the 4-approval-path authorization inconsistency (role-based vs department-based vs capability-map-based, and whether 'finance' role vs 'secretary' role can act) be resolved as part of this workstream, or deferred to workstream 19 ("Security closes... secretary rules limited to true minor-approvals tier")? They touch the exact same APPROVAL_CAPS/isFinanceOrAdmin machinery.
+### Resolved decisions (one-line ruling + rationale each)
+
+1. **Single writer: `window.CashAdvance` in js/config.js.** All 4 approval surfaces, both
+   payment surfaces, and payroll call it; config.js loads before every caller (modules.js loads
+   LAST — the service cannot live there). UI surfaces are NOT deleted in this workstream (screen
+   consolidation belongs to the roles/declutter work) — they become thin callers.
+2. **Approved balance = `totalPayable ?? amount`, computed only inside `.approve()`** (in a
+   transaction), with the exact figure shown in the approver's confirm dialog
+   ("Approve — employee repays ₱23,447 (₱20,000 + 2%/mo × 8 mo)?"). Paths B/C's raw-`amount`
+   under-collection and path D's balance-never-set bug are closed by construction.
+3. **Interest is an approval-time decision, not an employee checkbox.** The request form drops
+   the interest toggle; the approver sees terms + an editable interest field (pre-filled 2%/mo,
+   editable down to 0). **FLAG FOR NEIL:** the default interest policy (2% vs 0) is a business
+   call — spec pre-fills 2% but nothing charges until an approver confirms.
+4. **One request form.** modules.js's structured form (amount, terms, reason, date-needed —
+   minus the interest checkbox) becomes `CashAdvance.openRequestForm()`; the Personal-Finance
+   "+ Cash Advance" button calls it; the app.js:4524-4548 form is DELETED (it is dead today —
+   its create omits `balance`, which the rules' `balance == 0` check denies). `repayDate` is
+   dropped (terms replaces it); the Approvals 'ca' display swaps its repayDate line for
+   "`terms` mo plan · ₱`monthlyPayment`/mo".
+5. **worker_profiles: separate data model, same service.** No migration of worker CA scalars
+   into cash_advances (that forces an identity-model project). The service gains
+   `CashAdvance.deductWorker(profileId, amount, ctx)` — a transaction-guarded, clamped,
+   audit-logged decrement of `worker_profiles.caBalance` — and the weekly payslip generator +
+   HR profile editor call it instead of raw updates. Worker default stays **0** (manual weekly
+   flow); regular-employee default changes per (6). No take-home change for workers.
+6. **"This month's installment" = Σ over the employee's approved CAs of
+   `min(monthlyPayment ?? balance, balance)`, oldest-first.** Legacy docs with no
+   terms/monthlyPayment are single-payment advances: their installment IS the full balance —
+   so old advances behave exactly as today. **THE DEFAULT CHANGES from full-balance to
+   installment** for plan-bearing advances — this is precisely Neil's instruction ("if its
+   registered as installment show option"); Finance can still pick Pay-in-full per run.
+7. **Multi-CA order: `createdAt` ascending (oldest first), explicitly sorted** — deterministic
+   and fair; the per-CA split is visible in the plan lines (no more Firestore-query-order
+   roulette).
+8. **`payroll_ca_overrides` is RETIRED.** The per-run choice lives on the pay-run line
+   (`pay_runs.lines[i].caPlan` — WS20's frozen snapshot), edited via the Edit Payroll modal
+   before Verify. Rationale: one execution record instead of two keyed collections; the
+   `{uid}_{month}` key-composition class of bug disappears. The rules match stays until a
+   later cleanup (WS19 notes it deprecated); existing override docs are honored by
+   `planFor()` during the transition month, then ignored.
+9. **Employee "Set Deduction" becomes a real request through the Approvals funnel** (it is
+   silently DEAD today — rules already deny the employee's direct write). It files
+   `approval_requests` type `'ca_deduct'` `{userId, month, amount, reason}`; on approval,
+   `planFor()` picks it up as that month's custom amount. Matches the "every request type
+   funnels through Approvals" convention.
+10. **`status:'active'` is a bug** — financeDeleteCascade (departments.js:156) is corrected to
+    write `'approved'`; the migration normalizes existing `'active'` docs.
+11. **Authorization: one `CashAdvance.canAct()` = president ‖ manager ‖ finance-role ‖
+    Finance-dept membership** (the union of today's four gates — nobody loses access). The
+    secretary stays excluded (money tier). Rules-level tightening is WS19's job (recorded
+    there); this workstream only unifies the client gate.
+
+### API surface (js/config.js, after the chipTabs helpers)
+
+```js
+window.CashAdvance = {
+  RATE_DEFAULT: 2,                                  // %/mo — approval-time prefill (see D3)
+  canAct() { /* president|manager|finance-role|canEditDept('Finance') */ },
+
+  async request({ amount, terms, reason, dateNeeded }) {
+    // validates, writes cash_advances doc: {userId, userName, employeeId, amount, terms,
+    //  interest:0, interestCharged:false, monthlyPayment:null, totalPayable:null,
+    //  balance:0, status:'pending', payments:[], date:dateNeeded, reason, createdAt:serverTs}
+    // (interest/monthly/total are finalized at approval); dbCacheInvalidate('ca-pending')
+  },
+  openRequestForm() { /* the ONE request modal (modules.js form, minus interest checkbox) */ },
+
+  async approve(id, { interestPct = null } = {}) {
+    // db.runTransaction: re-read, require status==='pending' (race-safe);
+    // pct = interestPct ?? 0; total = pct>0 ? amount*Math.pow(1+pct/100, terms||1) : amount;
+    // monthly = total/(terms||1);
+    // t.update: {status:'approved', interest:pct, interestCharged:pct>0,
+    //   totalPayable:r2(total), monthlyPayment:r2(monthly), balance:r2(total),
+    //   approvedBy, approvedAt:serverTs}
+    // confirm dialog shows the exact repay figure BEFORE the transaction;
+    // Notifs.send to employee; logAudit; dbCacheInvalidate('ca-pending')
+  },
+  async reject(id, reason) { /* status:'rejected', rejectedBy/At, notify, invalidate */ },
+
+  async recordPayment(id, { amount, date }) {
+    // db.runTransaction (ALWAYS — fixes the unguarded Finance-CA path):
+    // newBal = max(0, balance-amount); payments.push({amount, date, recordedBy});
+    // status:'paid' + paidAt when newBal<=0; invalidate
+  },
+
+  async planFor(uid, month) {
+    // → { caBalance, mode:'installment'|'full'|'custom', caPlanned,
+    //     plan:[{caId, amount, installmentNo, terms, monthlyPayment}], source }
+    // reads approved CAs (createdAt asc); per CA: due = min(monthlyPayment ?? balance, balance);
+    // installmentNo = (caDeductions applied so far, from payments.length + prior payroll
+    //   deductions counted via payments[] entries tagged source:'payroll') + 1;
+    // custom sources (priority): approved approval_requests ca_deduct for month →
+    //   legacy payroll_ca_overrides/{uid}_{month} (transition only) → default installment
+  },
+
+  async deduct(uid, month, plan) {
+    // THE only balance mutation for payroll — called from disbursePayRun (WS20 D6), never
+    // from Compute. batch: per plan line decrement balance (clamped), append
+    // payments:{amount, date:today(), recordedBy, source:'payroll', month};
+    // status:'paid'+paidAt at 0; writes nothing if plan empty; returns caDeductions[]
+    // (same shape financeDeleteCascade reverses — cascade keeps working, but its
+    //  status revert is corrected to 'approved')
+  },
+
+  async deductWorker(profileId, amount, ctx) {
+    // db.runTransaction on worker_profiles/{id}: clamp to caBalance, decrement,
+    // logAudit('worker-ca-deduct'); returns {before, after}
+  },
+};
+```
+
+### Call-site surgery (before = the verbatim blocks quoted in Current state)
+
+| Site (file:line) | After |
+|---|---|
+| modules.js:1580-1657 request form | becomes `CashAdvance.openRequestForm()` body (minus interest checkbox); modal copy: "Repayment: N months · interest is set by Finance at approval" |
+| app.js:4524-4548 second form | DELETED; `req-advance-btn` → `CashAdvance.openRequestForm()` |
+| modules.js:1467-1503 approve (A) | `await CashAdvance.approve(id, {interestPct: <approver field>})` |
+| departments.js:3506-3508 (B) | `await CashAdvance.approve(id)` — raw-amount bug gone |
+| departments.js:9367-9369 (C) | `await CashAdvance.approve(id)` |
+| departments.js:9989-9993 (D) | `await CashAdvance.approve(id)` — balance-never-set bug gone |
+| modules.js:1516-1568 payment | `await CashAdvance.recordPayment(id, {amount, date})` |
+| departments.js:3520-3539 payment | same call — gains the transaction guard |
+| payroll table+modal (2429-2431, 2517-2555, 2632-2673) | line preview shows `planFor()` output; Edit-Payroll CA block becomes the 3-way chooser (below) writing `lines[i].caPlan` (or, pre-WS20, a payroll_ca_overrides doc — see sequencing) |
+| Compute CA block 2715-2750 | DELETED from Compute — `deduct()` runs inside WS20's `disbursePayRun` |
+| financeDeleteCascade :156 | `status:'active'` → `status:'approved'` |
+| worker payslip save 4143/4196-4197 + HR profile editor 3771 | `await CashAdvance.deductWorker(...)` / editor writes routed through it |
+| employee ca-deduct-req-btn app.js:4550+ | files `approval_requests` type `'ca_deduct'`; Approvals gains the chip row (approve/reject by canAct()) |
+
+### Payroll-time UI (Edit Payroll modal CA block — replaces departments.js:2517-2533)
+
+```
+💳 Cash Advance — Outstanding: ₱65,225 · Installment 3 of 9 · ₱7,247/mo
+( • ) This month's installment — ₱7,247        ← default when a plan exists
+(   ) Pay off full balance — ₱65,225
+(   ) Custom amount  [___________]  (max ₱65,225)
+Remaining after this payroll: ₱57,978
+```
+Copy for legacy no-plan advances: "( • ) Full balance — ₱X (no installment plan)". The strings
+"Installment N of M" come from `planFor().plan[i]` (`installmentNo`/`terms`).
+
+### firestore.rules diff
+
+`cash_advances` match block: UNCHANGED except documenting that `balance == 0` on self-create
+is now always satisfied (single form). `payroll_ca_overrides`: unchanged, marked deprecated
+(WS19 removes). `approval_requests` already has a match block (Approvals funnel) — verify its
+create rule admits `type:'ca_deduct'` shape (owner-write with `hasOnly` if enumerated; if the
+existing rule enumerates types, add `'ca_deduct'`).
+
+### Migration checklist (one-time, dry-runnable, president-gated — "🔄 CA data repair")
+
+1. Normalize `status:'active'` → `'approved'` (count reported).
+2. Docs where `interestCharged==true && balance==amount && payments.length==0`
+   (approved through paths B/C — interest silently dropped, untouched since):
+   set `balance = totalPayable`. Docs **mid-repayment** with the same mismatch are NOT
+   auto-fixed — listed in the dry-run report for Neil's per-case call (retro-charging interest
+   on a partially repaid loan is a policy decision, not a data repair).
+3. Legacy docs with no `terms`: set `{terms:1, monthlyPayment:balance}` (single-payment plan —
+   behavior identical, now explicit).
+4. Dry-run mode first: prints counts + the affected list, writes nothing (same convention as
+   the WS3 June backfill).
+
+### Sequencing with WS20
+Ships in the same phase as WS20 (the deduct-at-Disburse move is WS20's D6; `planFor`/`deduct`
+are its declared plug-ins). If WS22 is implemented FIRST standalone: `deduct()` is temporarily
+called from the existing `!alreadyGenerated` Compute block (preserving today's timing), and the
+3-way chooser writes payroll_ca_overrides `{amount}` as the custom mechanism — then WS20's
+surgery relocates the call and retires the collection. Both orders are safe; do not do neither.
+
+### What NOT to touch
+Manila-time helpers (`bizDate` month keys), escHtml on userName/reason renders,
+`dbCacheInvalidate('ca-pending')` on every mutator (service does it centrally), CACHE_VER
+auto-bump, financeDeleteCascade's reversal-from-`salary_history.caDeductions` contract
+(deduct() keeps writing that exact shape), and the two already-transactional modules.js paths'
+safety level (the service is transactional everywhere — a strict upgrade).
 
 ## Risks / cross-workstream interactions
 

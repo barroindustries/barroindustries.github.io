@@ -69,16 +69,211 @@ kpi_targets/{uid} — {deliverableScore (0-100), targetScore}. kpi_evals/{uid} �
 - Version + service-worker cache bump (CACHE_VER in sw.js, APP_VERSION auto-bumped by .git/hooks/pre-commit) required on any JS/CSS edit — do not hand-edit APP_VERSION (CLAUDE.md).
 - Script load order in index.html is load-bearing: config.js → drive.js → notifications.js → departments.js → app.js → modules.js — a unified engine function must be defined before anything later in that order calls it; if the canonical implementation moves to config.js, ensure nothing in departments.js/app.js referencing it runs before config.js has defined it.
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-- [ ] Where does the unified engine live? Path A's implementation is in js/departments.js (renderPayrollManagement), Path B's is in js/app.js (renderPersonalFinance). Should the canonical compute function move to js/config.js as a shared window.computePayrollForMonth() (consistent with dbCachedGet/fetchUsersWithPayroll already living there), or should Path B simply be deleted and its UI ("Record Payroll" button + Team Payroll table in Personal Finance) either removed or repointed to read the SAME pay_runs/salary_history data Path A produces?
-- [ ] Which formula wins — Path A's flat subtraction (gross − statutory − other deductions − CA) or Path B's multiplicative KPI/attendance model (net × (kpi·0.7 + att·0.3))? Or does the owner's ROADMAP spec ("Regular — monthly, pay driven by KPI + attendance"; ROADMAP.md line 126) mean BOTH are needed — flat statutory subtraction AND a KPI/attendance multiplier applied on top — in which case neither existing path currently implements the full intended formula and Fable is designing new math, not just picking a winner. Tradeoff: multiplicative models are highly sensitive to low task counts (taskScore defaults to 0.5 when a user has zero assigned tasks — is that the right floor for pay?).
-- [ ] Is the weekly Worker-Payslip engine (payslips/worker_profiles) in scope for 'one payroll engine' at all? It uses a completely different identity model (worker_profiles docs need not map 1:1 to a users/uid Auth account) and a different cadence (weekly vs monthly). Tradeoff: folding it in gives one true system but forces every production worker to have a real Auth account and a payroll/{uid} doc (a data-migration and possibly a login-provisioning project of its own); keeping it separate means 'one payroll engine' really means 'one MONTHLY-regular engine' plus a knowingly-separate weekly-production system, and the payClass==='production' exclusion in Path A remains the only bridge between the two — should that exclusion instead be replaced by structurally routing production-class employees out of the regular users/payroll flow entirely so the double-pay bug can't recur by omission the way Path B currently demonstrates it did?
-- [ ] How should 'Compute freezes a snapshot' be modeled structurally? Options: (a) a lines:[{uid,name,base,allowance,deductions,sss,philhealth,pagibig,tax,caDeducted,kpiScore,attScore,netPay,finalPay}, ...] array embedded directly on the pay_runs/{month} doc (single read for print/reprint, but a large doc and a 1MB Firestore doc-size ceiling if headcount grows); or (b) keep salary_history as the frozen-lines collection but make writes immutable once pay_runs.state advances past 'computed' (enforced in firestore.rules by checking the parent pay_run's state via get()) — tradeoff is doc-size/read-count vs. rules complexity (get() calls in rules cost an extra read and the missing-field-throws gotcha applies to whatever state field is checked).
-- [ ] What exactly should re-running Compute do once a pay_run is past 'computed'? Today Path A allows it unconditionally and silently regresses state back to 'computed' even from 'disbursed' (departments.js:2760-2764 always .set()s state:'computed'). Should Compute be hard-blocked once verified/disbursed (forcing an explicit 'Reopen' action that requires president approval, matching the delete-approval pattern already used elsewhere), or should it remain re-runnable but only before 'verified'?
-- [ ] Should CA deduction move from Compute-time (today) to Disburse-time, matching the stated target 'Disburse is when money moves'? Tradeoff: deducting at Compute lets Finance see the true net before Verify (useful for review), but means a computed-not-yet-disbursed run has already mutated a real balance (cash_advances.balance) — if the run is later abandoned/reopened without going through the delete-approval cascade, that balance is now wrong outside of any audit trail the delete-approval flow would have provided.
-- [ ] What should happen to the employee self-service 'Projected Full Month' preview (js/app.js printPayslip() + the non-president branch of renderPersonalFinance, lines ~4190-4265) if Path B's multiplier formula is retired? Does it get rewired to show the frozen pay_run snapshot for the current month once one exists, or removed/rebuilt as part of workstream 24 (the payslip template) instead of 20?
-- [ ] Should pay_runs.state write permission in firestore.rules be tightened to president-only for the 'disbursed' transition specifically (leaving 'computed'/'verified' at isFinanceOrAdmin()), which requires a state-transition-aware rule, or is a simpler blanket 'president-only for pay_runs writes once state != draft' rule acceptable? Tradeoff: fine-grained transition rules are more correct but harder to test (missing-field-throws risk if resource doesn't exist yet on create).
+### Decisions
+
+**D1 — Path B's write path is DELETED; the engine lives in departments.js.** The canonical
+engine is `window.computePayRun(month, opts)` + pure `window.computePayLine(emp, ctx)` defined
+in js/departments.js immediately above `renderPayrollManagement` (payroll domain code lives
+there; departments.js loads before app.js so the self-preview can call `computePayLine`).
+Path B's "Record Payroll" button + handler (app.js:4092-4186) are removed; the President's
+Team-Payroll table becomes READ-ONLY (renders the month's `pay_runs` summary + a
+"Open Payroll →" link to the HR screen). Not config.js — that file is for small shared
+utilities, not a payroll engine.
+
+**D2 — Formula: BOTH components, as explicit line items, behind a pay POLICY toggle that
+defaults to today's live behavior.** Neither existing path implements the ROADMAP intent:
+- Unified math (per line):
+  `gross = base + allowance` · `statutoryTotal = sss+philhealth+pagibig+tax` (hand-typed until
+  WS21 computes them) · `perfFactor = clamp(kpi*0.7 + att*0.3, 0, 1)` ·
+  policy `'flat'`: `finalPay = gross − statutoryTotal − otherDeductions − caDeducted`
+  (**exactly Path A today — the DEFAULT, so unification changes no one's pay**) ·
+  policy `'performance'`: `finalPay = base − statutoryTotal − otherDeductions − caDeducted +
+  allowance × perfFactor` — performance scales the **allowance only, never base wage**
+  (PH labor-safe: no docking base pay below agreed wage for performance; every component is a
+  visible payslip line, not a hidden multiplier).
+- KPI floor fix: an employee with ZERO assigned tasks gets `kpi = 1.0` (Path B's 0.5 floor
+  punished people for not being assigned work — wrong).
+- `payPolicy` is stored on each pay_run (default `'flat'`), switchable per-run by the President
+  in the Payroll screen. **FLAG FOR NEIL:** enabling `'performance'` is a pay-policy change —
+  the engine ships ready but inert until he flips it.
+
+**D3 — Worker Payslips stay a separate WEEKLY engine.** Different identity model
+(worker_profiles need not have Auth accounts); folding it in = a login-provisioning project,
+out of scope. "One payroll engine" = one MONTHLY engine. The bridge becomes structural instead
+of filter-by-convention: `worker_profiles` gains optional `linkedUid`; `computePayRun` HARD-SKIPS
+any uid with `payClass==='production'` OR appearing as an active profile's `linkedUid`, and
+returns them in `skipped[]` (surfaced in the UI as "N paid weekly via Worker Payslips" +
+a reconciliation list). WS22 unifies the CA math across both via one service; WS26 wires real
+attendance into weekly pay.
+
+**D4 — Snapshot = `lines[]` embedded on pay_runs/{month}; salary_history becomes the
+per-employee mirror written at Disburse.** Sizing: ~400 bytes/line ⇒ ~2,000 employees before
+the 1MB doc ceiling — decades of headroom. Benefits: atomic freeze, one read for
+reprint/verify/WS24 payslips (incl. the dead print buttons), past months reprint EXACTLY
+(no more "recompute with today's salaries"). salary_history is kept because employees can only
+read their OWN pay (pay_runs is finance-only in rules; salary_history has owner-read) — it is
+written from the frozen lines at DISBURSE, same doc IDs `{uid}_{month}`, superset of Path A's
+current shape (adds kpiScore/attScore/perfFactor/policy). backfillPayrollLedger keeps working
+unchanged (still reads salary_history).
+
+**D5 — State machine hardened.** Compute allowed only in `draft`/`computed` (re-compute before
+verification is fine and stays idempotent — pure math + snapshot, no money). Once `verified`:
+Compute disabled; changes need **Reopen** (president-only, verified→computed, stamped
+reopenedBy/At + logAudit). `disbursed` is TERMINAL — no reopen, no recompute; corrections go
+through the existing financeDelete approval path per employee (and WS12's period-close governs
+post-hoc edits). This kills today's silent disburse→computed regression.
+
+**D6 — Money moves at DISBURSE, not Compute.** Compute = read-only math + freeze lines
+(shows planned CA per line via WS22's service so Finance reviews the true net). Verify =
+finance sign-off. **Disburse (president) is the single mutating step:** CA balance decrements,
+`PAY-{month}-{uid}` ledger upserts (same range-prefetch idempotency, now called from the
+disburse handler), salary_history mirror writes, employee notifications. A computed-then-
+abandoned run no longer corrupts cash_advances balances; the `alreadyGenerated` guard is
+replaced by the state machine (disbursed = terminal = the decrement can run at most once).
+
+**D7 — Rules: transition-aware pay_runs; salary_history left to period-close.** pay_runs
+create/update validated per transition (below); `disbursed` writable ONLY by president and ONLY
+from `verified`. salary_history rules stay as-is (owner-read, finance write, president delete) —
+post-disburse tampering is governed by WS12's period-close instead of a per-write pay_runs
+`get()` (saves a read per write and avoids the missing-field-denies hazard); rationale recorded.
+
+**D8 — Self-preview refactored, not deleted.** getAttendanceScore/countWorkDays survive (the
+engine uses them). The employee "Projected Full Month" preview and printPayslip switch to
+calling the same pure `computePayLine(emp, {projection:true})` so the math has ONE source; the
+full visual rebuild is WS24's job. If a disbursed pay_run exists for the viewed month, the
+preview shows the FROZEN line from the employee's own salary_history doc instead of a
+projection (labeled "Final — disbursed").
+
+---
+
+### Spec 1 — Data shapes (annotated literals)
+
+```js
+// pay_runs/{YYYY-MM}   (finance/admin read; rules below)
+{ month:'2026-07', state:'draft'|'computed'|'verified'|'disbursed',
+  payPolicy:'flat'|'performance',            // NEW — default 'flat'
+  employeeCount:12, totalNet:345678.50,
+  lines:[ PayLine, ... ],                    // NEW — frozen at Compute
+  skipped:[{uid,name,reason:'production'|'linked-worker-profile'|'partner'}],  // NEW
+  computedBy,computedByName,computedAt, verifiedBy,verifiedByName,verifiedAt,
+  disbursedBy,disbursedByName,disbursedAt,
+  reopenedBy,reopenedByName,reopenedAt }     // NEW — set on president Reopen
+
+// PayLine — THE plug-in surface for WS21 (statutory), WS22 (CA), WS24 (payslip)
+{ uid, name, payClass:'regular',
+  base:0, allowance:0, otherDeductions:0,
+  sss:0, philhealth:0, pagibig:0, tax:0,     // WS21 replaces hand-typed with table-computed
+  kpiScore:0, attScore:0, perfFactor:1, policy:'flat',
+  caBalance:0, caPlanned:0, caPlan:[{caId,amount,installmentNo,terms}], // from WS22 service
+  gross:0, statutoryTotal:0, netBeforeCA:0, finalPay:0 }
+
+// salary_history/{uid}_{month} — mirror written AT DISBURSE from the frozen line
+// (Path A's shape + kpiScore, attScore, perfFactor, policy, runMonth)
+```
+
+### Spec 2 — Engine signatures (insert in js/departments.js directly above renderPayrollManagement)
+
+```js
+window.computePayLine = function(emp, ctx) { /* pure; ctx={month,policy,kpiScore,attScore,caPlan} → PayLine */ }
+window.computePayRun  = async function(month, { policy } = {}) {
+  /* 1. fetchUsersWithPayroll(); filter partners; HARD-SKIP payClass==='production' OR
+        linkedUid-of-active-worker_profile → skipped[]
+     2. per employee: getAttendanceScore(uid,month), kpi from kpi_targets/tasks (reuse Path B's
+        readers, floor: no tasks ⇒ 1.0), caPlan from CashAdvance.planFor(uid,month) [WS22]
+     3. lines = map(computePayLine); NO WRITES except the pay_runs doc:
+        pay_runs/{month}.set({...meta, state:'computed', payPolicy, lines, skipped},{merge:true})
+     4. returns {lines, totals, skipped}  */
+}
+window.disbursePayRun = async function(month) {
+  /* president-only UI; reads pay_runs/{month} (must be state==='verified');
+     for each line: CashAdvance.deduct(line.caPlan)  [WS22 — the ONLY balance mutation],
+     PAY-{month}-{uid} ledger upsert (existing range-prefetch pattern, moved here),
+     salary_history/{uid}_{month} mirror set, Notifs.send(uid, …);
+     then pay_runs.set({state:'disbursed', disbursedBy…}); logAudit('disburse-payrun',…) */
+}
+```
+
+### Spec 3 — Call-site surgery
+
+1. **Path A gen-payroll-btn handler (departments.js:2616-2769):** body replaced by
+   `await computePayRun(month)` + table re-render. DELETE from it: the ledger-post loop
+   (2654-2710 — moves into disbursePayRun), the CA-decrement block (2715-2745 — becomes
+   WS22's `CashAdvance.deduct` inside disbursePayRun), the salary_history writes (move to
+   disburse mirror). Guard at top: `if (['verified','disbursed'].includes(runState)) return
+   Notifs.showToast('Run is '+runState+' — President must Reopen first','error')`.
+2. **Verify handler (2597-2602):** unchanged except allowed only from `computed`.
+3. **Disburse handler (2603-2608):** replaced by `await disbursePayRun(month)` behind the
+   existing president gate + typed confirmation (amount shown).
+4. **NEW Reopen button** (president, visible when state==='verified').
+5. **Path B (app.js:4092-4186 + button at 4033):** handler deleted; button replaced by
+   read-only summary chip of pay_runs/{month} + "Open Payroll →" (navigateTo HR/Payroll).
+6. **Self-preview (_payslipData 4257-4265, printPayslip 4666-4685):** compute via
+   `computePayLine(emp,{projection:true,policy:runPolicy||'flat'})`; if own
+   salary_history/{uid}_{month} exists → render frozen values, label "Final — disbursed".
+7. **backfillPayrollLedger:** unchanged (reads salary_history mirrors).
+
+### Spec 4 — firestore.rules pay_runs replacement block
+
+```
+match /pay_runs/{month} {
+  allow read: if isAuth() && isFinanceOrAdmin();
+  allow create: if isAuth() && isFinanceOrAdmin() &&
+    request.resource.data.get('state','draft') in ['draft','computed'];
+  allow update: if isAuth() && (
+    ( isFinanceOrAdmin() &&
+      resource.data.get('state','draft') in ['draft','computed'] &&
+      request.resource.data.get('state','') in ['computed','verified'] )
+    ||
+    ( isPresident() && (
+        // verify → disburse (the only path to disbursed)
+        ( resource.data.get('state','')=='verified' &&
+          request.resource.data.get('state','')=='disbursed' ) ||
+        // president reopen: verified → computed
+        ( resource.data.get('state','')=='verified' &&
+          request.resource.data.get('state','')=='computed' ) ||
+        // president may also do the finance transitions
+        ( resource.data.get('state','draft') in ['draft','computed'] &&
+          request.resource.data.get('state','') in ['computed','verified'] )
+    ))
+  );
+  allow delete: if isAuth() && isPresident();
+}
+```
+Result: `disbursed` is unreachable except president-from-verified, and immutable afterward
+(no clause permits updating a disbursed doc). Deploy via `--only firestore:rules` (re-diff
+first). Add `pay_runs` to scripts/monthly-backup.js EXPORTS in the same commit (WS15 gap).
+
+### Spec 5 — Migration & reconciliation checklist
+
+1. Rules deploy (Spec 4). Old client's Compute still works for draft/computed months; its
+   direct salary_history/ledger writes remain permitted (unchanged rules there) until step 2.
+2. Ship engine + call-site surgery (one commit; node --check ×4 + preview boot).
+3. One-time president report **"Payroll reconciliation"** (button beside Sync-to-ledger):
+   (a) Path-B-written months: salary_history docs where `kpiScore` exists AND `sss` is
+   undefined → list (month, employee, finalPay) — these were computed with the multiplier
+   formula and never carried statutory fields; (b) double-pay detection: uids with
+   payroll.payClass==='production' or a linkedUid profile that ALSO have salary_history rows —
+   join against payslips by payPeriodMonth → list overlaps. Report only — corrections route
+   through the existing financeDelete approval, never hard-delete.
+4. Backfill `worker_profiles.linkedUid` manually via the HR profile editor (new optional
+   field) for any production worker who also has a login.
+5. First live run: Compute → check lines vs last month's numbers (policy 'flat' ⇒ identical
+   for regular staff) → Verify → Disburse; confirm CA balances decrement exactly once and
+   employee notifications arrive.
+
+### Spec 6 — Compatibility notes for later workstreams
+
+- **WS21:** replace the hand-typed sss/philhealth/pagibig/tax reads inside `computePayLine`
+  with table lookups; PayLine field names are final.
+- **WS22:** implement `window.CashAdvance = {planFor(uid,month), deduct(caPlan), recordPayment,
+  approve}` — `computePayRun` calls `planFor`; `disbursePayRun` calls `deduct`. Worker-payslip
+  CA follows the same service against `worker_profiles.caBalance`.
+- **WS24:** payslips (incl. the dead print buttons) render from `pay_runs.lines` (finance) or
+  the employee's own salary_history mirror (self-service) — never recompute.
+- **WS26:** weekly production pay reads real attendance; monthly engine's attScore source
+  (getAttendanceScore) is unchanged by 26.
 
 ## Risks / cross-workstream interactions
 

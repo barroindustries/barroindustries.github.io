@@ -63,16 +63,244 @@ stock_movements: { itemId, itemName, type:'adjust', qty, project, note } — onl
 - dbCachedGet('ledger',...,45000) (app.js:2249,2681) and dbCacheInvalidate('ledger') must still be called after any new posting function, per existing convention (departments.js:1429,1451,1478).
 - resyncLedgerForSource(collection,docId) invariant (finance-reporting-open-items memory): expenses/cash_receipt_journal/cash_disbursement_journal are source docs mirrored into ledger; edits to source docs must call resyncLedgerForSource or the mirror drifts (departments.js:1486-1519) — keep this in sync with any ledger-shape change.
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-09)
 
-- [ ] Where does the account-type taxonomy live: a new accountType field directly on each ledger row (derived/backfilled from existing type+category), or a separate chart_of_accounts reference collection (account code → name → type) that ledger rows point to via accountCode? Tradeoff: inline field is a smaller migration with no new collection/rules-match/backup entry; a reference collection is what unlocks a real trial balance/balance sheet with renameable, consistent account names.
-- [ ] How does the new accountType axis coexist with the existing binary type (credit/debit) read as income/expense in 15+ places? Does type get reinterpreted as strict double-entry debit/credit direction (requiring asset increases to also be type:'debit', which would inflate every existing 'Total Expenses' filter) — or does accountType carry the P&L-vs-balance-sheet distinction while type/category stay legacy read-only fields, with every P&L view migrated to filter on accountType in ('income','expense') instead of raw type?
-- [ ] What is the exact structural shape of the Inventory-asset entry at purchase that nets against the COS entry at consumption? Option (a): true double-entry — a purchase-time ledger row {accountType:'asset',account:'Inventory'} and a consumption-time PAIR of rows (expense increase + asset decrease against the same Inventory account) — requires deciding whether legs are separate ledger docs or one doc with a legs[] array. Option (b): keep one-leg-per-event but tag the purchase-time leg accountType:'asset' (excluded from expense sums) and only the consumption-time leg accountType:'expense' — simpler migration but not true double-entry, doesn't produce a reconcilable Inventory balance.
-- [ ] Should recordPurchaseDisbursement's three debit-account options (departments.js:12570-12574: material/ap/sundry) be replaced by a chart-of-accounts-sourced picker defaulting to Inventory (asset) for raw-material purchases instead of COS – Direct Material? What happens to the 'ap' option, which today produces NO ledger post at all (cdjLedgerExpense excludes debitAP) — does an A/P purchase get an Inventory-asset debit at PO/receipt time (accrual) or wait for cash disbursement (cash basis)? Not stated in the plan.
-- [ ] How should the already-live double-posted CDJ-<id>/POCOS-<id> pairs (real money, already relied on in Finance reports) be remediated: a one-time backfill/correction script (reversing entries?), silent recategorization, or an explicit 'restated as of date X' note surfaced to Finance/the President?
-- [ ] Does the firestore.rules Production-write carve-out (582-597) need a new predicate shape (e.g. Production now writes both an asset-decrease leg and an expense-increase leg, or a different category/field), and what is the exact new match block?
-- [ ] Is general_journal in scope for this pass given it has no create path in current live code (read/edit/delete only) — retire/merge into ledger, leave as legacy/import-only, or give it a first-class create UI?
-- [ ] Should addedBy(uid) be made consistently required on every ledger-posting call site as part of this pass (currently populated on only ~5 of ~13 sites), or left for a later audit-trail workstream?
+### Decisions
+
+**D1 — Taxonomy lives inline + in config, NOT a Firestore collection.** Each ledger row gains
+`accountType: 'income'|'expense'|'asset'|'liability'|'equity'` and `account: string` (canonical
+name). The account list itself is a static `window.COA` in `js/config.js` (this app is
+config-driven: DEPARTMENTS/ROLES already live there). No new collection → no new rules match, no
+backup entry, no extra reads. If Neil later needs runtime-editable accounts, COA can be promoted
+to Firestore then; nothing in this design blocks that.
+
+**D2 — `type` is NOT reinterpreted.** `type` stays the legacy direction flag; `accountType`
+carries the P&L-vs-balance-sheet distinction. All P&L reads migrate to a single new
+compatibility helper `window.ledgerKind(row)` (config.js) instead of raw `type` filters. Legacy
+rows (no accountType) keep their exact current meaning; asset/liability rows are excluded from
+P&L automatically. **Critical detail:** legacy rows with `type:'payslip'` exist
+(app.js:6176 filters `l.type==='debit'||l.type==='payslip'`) — ledgerKind must map
+`payslip → 'expense'`.
+
+**D3 — One leg per event (doc-per-leg), with an explicit consumption contra-leg.** No `legs[]`
+array — that would break every reader. Deterministic refs preserve idempotency:
+- Purchase of stock materials → ONE row: debit / asset / `Inventory` (excluded from P&L).
+- Consumption → TWO rows: `POCOS-<orderId>` (debit / expense / COS – Direct Material, same as
+  today) **plus** `POCOS-<orderId>-INV` (credit / asset / Inventory — the asset decrease).
+- Inventory balance = Σ asset-Inventory debits − Σ asset-Inventory credits → reconcilable
+  against the stock valuation (workstream 29 improves the unitCost quality feeding it).
+
+**D4 — recordPurchaseDisbursement account options.** Replace material/ap/sundry with:
+1. `inventory` — **Inventory – Materials (asset)** — new DEFAULT when the disbursement has a
+   `purchaseRef` (came from Purchasing);
+2. `material` — COS – Direct Material (expense) — kept for direct-to-job purchases that never
+   hit stock (default when no purchaseRef);
+3. `ap` — A/P settlement — unchanged (still posts NO ledger row; full accrual A/P is explicitly
+   out of scope, deferred to WS39);
+4. `sundry` — Sundry/Other (expense) — unchanged.
+
+**D5 — Historical remediation: explicit restatement, idempotent, president-gated.** A one-time
+maintenance action "🧾 Restate material costs" (Reports tab, president-only) that (a)
+reclassifies historical purchase-side mirrored rows `CDJ-<id>` whose source
+cash_disbursement_journal doc has a `purchaseRef` and `debitMaterial>0` to
+asset/Inventory, and (b) backfills the missing `POCOS-<id>-INV` contra legs for every existing
+POCOS row. Both keyed by refNumber → safe to re-run. Logs via `logAudit('restate-materials',…)`
+and shows a summary toast. Per-lot matching is impossible (no lot tracking) — this blanket rule
+is correct under the new policy: purchases-to-stock are asset; consumption is the expense event.
+
+**D6 — Rules carve-out: extended to both legs, tolerant of both schema generations** (exact
+block below). Deployed BEFORE app code so old and new clients both keep working.
+
+**D7 — general_journal: out of scope.** No create path exists in live code; leave read-only
+legacy. Its flattened rows keep deriving via ledgerKind from `type`. A first-class GJ (create UI,
+account-typed) arrives with WS39 (BIR books). The orphaned `ledger_entries` rules match may be
+deleted in WS19's rules pass, not here.
+
+**D8 — addedBy: yes, opportunistically.** Add `addedBy: currentUser?.uid ?? null` to the posting
+sites currently missing it *while editing them anyway* (postExpenseToLedger, postCRJToLedger,
+postCDJToLedger, SO/DPROJ/PROJ/POCOS posts). No separate pass.
+
+---
+
+### Spec 1 — `window.COA` + `window.ledgerKind` (js/config.js, new, ~40 lines)
+
+```js
+// ── Chart of Accounts (v12 WS13) ─────────────────────────────
+// Static, code-versioned. accountType drives P&L vs balance-sheet;
+// legacy rows (no accountType) derive their kind from type/category.
+window.COA = {
+  income:    ['Sales Revenue', 'Other Income'],
+  expense:   ['COS – Direct Material', 'COS – Direct Labor', 'Payroll Expense',
+              'Operating Expense', 'Utilities', 'Tax', 'Materials',
+              'General Expense', 'Other Expense'],
+  asset:     ['Cash', 'Accounts Receivable', 'Inventory'],
+  liability: ['Accounts Payable', 'VAT Payable', 'Statutory Payables'],
+  equity:    ["Owner's Equity", 'Retained Earnings'],
+};
+// Legacy category → accountType (used by ledgerKind fallback + the backfill).
+// Any category not listed falls back to type: credit→income, debit/payslip→expense.
+window.COA_LEGACY_MAP = {
+  'Sales Revenue':'income', 'Other Income':'income',
+  'Inventory – Materials':'asset',
+  'COS – Direct Material':'expense', 'COS – Direct Labor':'expense',
+  'Payroll Expense':'expense', 'Operating Expense':'expense', 'Payroll':'expense',
+  'Utilities':'expense', 'Tax':'expense', 'Materials':'expense',
+  'General Expense':'expense', 'Other Expense':'expense',
+  'Journal Entry':null, 'Journal Entry (Non-cash)':null,   // null = derive from type
+};
+window.ledgerKind = function(row) {
+  if (row && typeof row.accountType === 'string') return row.accountType;
+  const viaCat = row && window.COA_LEGACY_MAP[row.category];
+  if (viaCat) return viaCat;
+  if (!row) return 'expense';
+  if (row.type === 'credit') return 'income';
+  return 'expense';               // 'debit' AND legacy 'payslip' rows
+};
+```
+
+### Spec 2 — P&L call-site migration (the exact find/replace)
+
+Replace every income/expense filter on ledger arrays with `ledgerKind`:
+- `X.type === 'credit'` (as an income test) → `ledgerKind(X) === 'income'`
+- `X.type === 'debit'` (as an expense test) → `ledgerKind(X) === 'expense'`
+- `(l.type==='debit'||l.type==='payslip')` → `ledgerKind(l)==='expense'`
+
+Confirmed sites from this brief (Sonnet: apply these, then grep `type==='debit'`,
+`type==='credit'`, `type === 'debit'`, `type === 'credit'` across js/app.js + js/departments.js
+restricted to ledger/general-journal arrays and apply the same — the list below is confirmed
+but not guaranteed exhaustive):
+`app.js` 2278-2284, 2695-2696, 2721, 6177-6183, 6359-6364;
+`departments.js` 2904-2908, 2993-2994, 3018-3019, 3034-3035, 4522-4523, 10558-10559.
+Do NOT touch `type` comparisons on non-ledger collections (cash journals' own fields,
+stock_movements.type, etc.).
+
+### Spec 3 — Posting-site changes
+
+**(a) postCDJToLedger (departments.js ~1458-1480).** New rule: the mirrored row's account
+depends on the CDJ doc's leg mix. Add to the computed entry:
+```js
+// after computing expense/category as today:
+const isInventory = (d.debitAccount === 'inventory');   // new field, see (b)
+entry.accountType = isInventory ? 'asset' : 'expense';
+entry.account     = isInventory ? 'Inventory'
+                   : (category /* existing computed category */);
+if (isInventory) entry.category = 'Inventory – Materials';
+entry.addedBy = (window.currentUser && currentUser.uid) || null;
+```
+(The existing amount math — debitMaterial+debitLabor+debitSundryAmount, A/P excluded — is
+unchanged; when the account picked is `inventory`, the amount lands in `debitMaterial`'s slot in
+cdjData but the mirrored row is tagged asset. See (b).)
+
+**(b) recordPurchaseDisbursement (departments.js ~12558-12645).** Change the account
+`<select>` options (~12570-12574) to the four in D4; default logic:
+```js
+const defaultAcct = p && p.id ? 'inventory' : 'material';
+```
+On save, store the choice on the CDJ doc: `debitAccount: acct` (new field, additive — no rules
+change needed for cash_disbursement_journal since its rules don't enumerate fields). When
+`acct==='inventory'`, keep writing the amount into `debitMaterial` (so legacy readers of the CDJ
+doc still sum correctly) — the mirrored ledger row's asset tagging comes from `debitAccount` per
+(a). `resyncLedgerForSource` must carry `debitAccount` through on edits (it re-runs
+postCDJToLedger's mapping — verify it passes the full doc).
+
+**(c) consumeProductionMaterials (departments.js ~11609-11658).** After the existing
+POCOS-<id> expense post (which gains `accountType:'expense', account:'COS – Direct Material',
+addedBy`), add the contra leg with its own idempotency check:
+```js
+const refInv = `POCOS-${order.id}-INV`;
+const exInv = await db.collection('ledger').where('refNumber','==',refInv).limit(1).get()
+  .catch(()=>null);
+if (cos > 0 && exInv && !exInv.docs.length) {
+  await db.collection('ledger').add({
+    date: today(), type: 'credit',
+    accountType: 'asset', account: 'Inventory', category: 'Inventory – Materials',
+    description: `Inventory consumed — ${order.orderNo||order.id}`,
+    amount: cos, refNumber: refInv, source: 'Production',
+    projectId: order.projectId || null,
+    addedBy: (window.currentUser && currentUser.uid) || null,
+    addedByName: 'Production', createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+}
+```
+(If the read fails, skip — never risk a duplicate; same convention as Phase 1's backfill.)
+
+**(d) All other posting sites** (EXP-, CRJ-, PAY- ×2 incl. app.js:4137-4171 legacy path,
+WPAY-, SO-, DPROJ-, PROJ-, manual entry, budgeting): add two fields each, no structural change:
+`accountType` = 'expense' for the debit posts / 'income' for the credit posts, and `account` =
+their existing category string (or 'Sales Revenue' for SO/PROJ/DPROJ). Manual '+New Entry' and
+the budgeting form additionally get an account dropdown sourced from `window.COA` (grouped by
+accountType), defaulting to the current category-equivalent.
+
+### Spec 4 — firestore.rules `/ledger/{docId}` replacement `create` clause
+
+Deploy FIRST (accepts both schema generations). Null-safe `.get()` throughout. Only the
+`create` clause changes — keep the live block's read/update/delete predicates as-is and re-diff
+firestore.rules immediately before deploying (concurrent-session memory):
+
+```
+allow create: if canFinance() ||
+  (
+    canProduction() &&
+    request.resource.data.get('source','') == 'Production' &&
+    request.resource.data.get('amount', 0) is number &&
+    request.resource.data.get('amount', 0) > 0 &&
+    (
+      // expense leg — old clients (no accountType) and new clients
+      (
+        request.resource.data.get('type','') == 'debit' &&
+        request.resource.data.get('category','') == 'COS – Direct Material' &&
+        request.resource.data.get('refNumber','').matches('POCOS-.*') &&
+        request.resource.data.get('accountType','expense') == 'expense'
+      ) ||
+      // inventory contra leg — new clients only
+      (
+        request.resource.data.get('type','') == 'credit' &&
+        request.resource.data.get('accountType','') == 'asset' &&
+        request.resource.data.get('account','') == 'Inventory' &&
+        request.resource.data.get('refNumber','').matches('POCOS-.*-INV')
+      )
+    )
+  );
+```
+
+### Spec 5 — One-time maintenance actions (Reports tab, president-only, both idempotent)
+
+**"🏷 Tag account types"** — paginated pass over `ledger`: for each row without `accountType`,
+set `{accountType: ledgerKind(row), account: row.category || null}` via batched updates
+(400/batch). Re-runnable (skips rows that have it). Requires president (ledger update is
+president-only in rules — correct gate).
+
+**"🧾 Restate material costs"** — (a) query `cash_disbursement_journal`, client-filter to docs
+with `purchaseRef` and `debitMaterial > 0`; for each, find its mirrored `CDJ-<id>` ledger row
+and update to `{accountType:'asset', account:'Inventory', category:'Inventory – Materials'}`;
+(b) query ledger for POCOS rows (client-filter refNumber prefix), skip `-INV` rows, and for each
+POCOS row missing its `POCOS-<id>-INV` sibling, create the contra leg (amount = the POCOS row's
+amount, date = the POCOS row's date). Log counts via `logAudit` + toast
+"Restated N purchases, added M inventory legs". After running, Reports' expense totals drop by
+exactly the double-counted amount — this is a deliberate restatement; record the date in
+V12-PLAN's decision log.
+
+### Spec 6 — Migration checklist (numbered, safe order)
+
+1. `firebase deploy --only firestore:rules` with Spec 4 (re-diff firestore.rules first).
+   Old clients keep working (predicate accepts the old shape).
+2. Ship app code (Specs 1-3 + 5's buttons) via commit → pre-commit hook bumps CACHE_VER.
+   `node --check` all JS + preview boot (zero console errors) before commit.
+3. In the live app (president): press **🏷 Tag account types**. Verify: Firestore console →
+   `ledger` filtered `accountType == null` → 0 results (or re-run).
+4. Press **🧾 Restate material costs**. Verify with Spec 7's example + confirm Reports'
+   All-Time expense total dropped by the announced restatement amount.
+5. Record the restatement date in V12-PLAN.md "Key decisions & answers".
+
+### Spec 7 — Worked example (manual verification)
+
+Buy ₱10,000 steel via Purchasing → disbursement (default `inventory`):
+`CDJ-abc {type:'debit', accountType:'asset', account:'Inventory', amount:10000}` → P&L
+expense: **₱0** (was ₱10,000 pre-fix). Consume ₱6,000 of it on order PO-2607-001:
+`POCOS-po1 {type:'debit', accountType:'expense', account:'COS – Direct Material', amount:6000}` +
+`POCOS-po1-INV {type:'credit', accountType:'asset', account:'Inventory', amount:6000}` →
+P&L expense: **₱6,000 total** (pre-fix: ₱16,000 — the bug). Inventory balance:
+10,000 − 6,000 = **₱4,000** (matches unconsumed stock value).
 
 ## Risks / cross-workstream interactions
 
