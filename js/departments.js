@@ -119,7 +119,7 @@ window.backfillProjectKind = async function() {
 };
 
 window.runProjectKindBackfill = async function() {
-  if (!confirm('Tag existing projects with their kind (job / design)?\n\nSafe to run repeatedly — already-tagged projects are skipped.')) return;
+  if (!(await confirmDialog({message:'Tag existing projects with their kind (job / design)?\n\nSafe to run repeatedly — already-tagged projects are skipped.'}))) return;
   try {
     const r = await window.backfillProjectKind();
     Notifs.showToast(`Tagged ✓ ${r.jobs} job + ${r.designs} design projects.`);
@@ -199,9 +199,9 @@ window.financeDelete = function(opts) {
   const { collection, docId, label } = opts;
   const onDone = opts.onDone || (()=>{});
   const u = window.currentUser || (typeof auth !== 'undefined' && auth.currentUser) || {};
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     if (typeof isRealPresident === 'function' && isRealPresident()) {
-      if (!confirm(`Delete ${label}? This cannot be undone.`)) { resolve('cancelled'); return; }
+      if (!(await confirmDialog({ message: `Delete ${escHtml(label)}? This cannot be undone.`, danger:true, html:true }))) { resolve('cancelled'); return; }
       window.financeExecuteDelete(collection, docId)
         .then(() => { Notifs.showToast('Deleted.'); onDone('deleted'); resolve('deleted'); })
         .catch(e => { Notifs.showToast('Delete failed: '+(e.message||e),'error'); resolve('cancelled'); });
@@ -245,7 +245,7 @@ window.financeDelete = function(opts) {
 // can't write finance_delete_requests, so they flag their own quote
 // (deleteRequested) which the President actions in Approvals → All Requests.
 // collection is 'bk_quotes' or 'bs_quotes'.
-window.requestQuoteDelete = function(collection, docId, label, createdBy, onDone) {
+window.requestQuoteDelete = async function(collection, docId, label, createdBy, onDone) {
   onDone = onDone || (()=>{});
   const role = window.currentRole || '';
   const u = window.currentUser || (typeof auth !== 'undefined' && auth.currentUser) || {};
@@ -253,7 +253,7 @@ window.requestQuoteDelete = function(collection, docId, label, createdBy, onDone
     return window.financeDelete({ collection, docId, label, onDone });
   }
   if (createdBy && u.uid === createdBy) {
-    const reason = (prompt('Reason for deleting this quote? (sent to the President for approval)') || '').trim();
+    const reason = ((await promptDialog({message:'Reason for deleting this quote? (sent to the President for approval)', required:true, multiline:true})) || '').trim();
     return db.collection(collection).doc(docId).update({
       deleteRequested: true, deleteReason: reason,
       deleteRequestedBy: u.uid, deleteRequestedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -289,7 +289,7 @@ window.financeEditModal = function({ collection, docId, title, fields, onSaved }
   const flush = () => { if (!buf.length) return; body += buf.length===2 ? `<div class="form-row">${buf.join('')}</div>` : buf[0]; buf = []; };
   fields.forEach(f => { if (f.full) { flush(); body += fieldHtml(f); } else { buf.push(fieldHtml(f)); if (buf.length===2) flush(); } });
   flush();
-  openModal('Edit '+title, body, `<button class="btn-primary" id="fe-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  openPage('Edit '+title, body, `<button class="btn-primary" id="fe-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   document.getElementById('fe-save').addEventListener('click', async () => {
     const upd = {};
     fields.forEach(f => {
@@ -839,10 +839,13 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     panel.style.transform = 'translateY(0)';
     panel.style.opacity = '1';
   });
+  // v12 WS10 — a real history entry so device/browser Back closes this panel
+  // (drill-in detail view) instead of leaving the app or changing pages.
+  window.Overlay.push('task', () => window.closeTaskPanel());
 
   renderComments('tasks',taskId,'task-comments-wrap',currentUser);
 
-  document.getElementById('task-panel-back').addEventListener('click', closeTaskPanel);
+  document.getElementById('task-panel-back').addEventListener('click', () => window.Overlay.dismissTop());
 
   // Current Standing save
   document.getElementById('cs-save-btn')?.addEventListener('click', async () => {
@@ -898,7 +901,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   document.getElementById('edit-task-btn')?.addEventListener('click',()=>{ closeTaskPanel(); openEditTaskModal(taskId,t,currentUser,currentRole); });
 
   document.getElementById('del-task-btn')?.addEventListener('click', async()=>{
-    if (!confirm('Delete this task?')) return;
+    if (!(await confirmDialog({message:'Delete this task?', danger:true}))) return;
     await db.collection('tasks').doc(taskId).delete();
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
@@ -1038,7 +1041,7 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
   const deptOptions = Object.keys(window.DEPARTMENTS||{}).map(k=>`<option value="${k}"${t.department===k?' selected':''}>${k}</option>`).join('');
   const allowedStatuses = isAdmin?TASK_STATUSES:TASK_STATUSES.filter(s=>EMP_STATUSES.includes(s.value));
 
-  openModal('Edit Task', `
+  openPage('Edit Task', `
     <div class="form-group"><label>Title</label><input id="et-title" value="${(t.title||'').replace(/"/g,'&quot;')}"/></div>
     <div class="form-group"><label>Description</label><textarea id="et-desc" rows="3">${escHtml(t.description||'')}</textarea></div>
     <div class="form-row">
@@ -1129,7 +1132,7 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
   const employees= empSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
   const deptOptions = Object.keys(window.DEPARTMENTS||{}).map(k=>`<option value="${k}"${k===defaultDept?' selected':''}>${k}</option>`).join('');
 
-  openModal('New Task', `
+  openPage('New Task', `
     <div class="form-group"><label>Title</label><input id="t-title" placeholder="Task name"/></div>
     <div class="form-group"><label>Description</label><textarea id="t-desc" rows="3" placeholder="Details…"></textarea></div>
     <div class="form-row">
@@ -1289,7 +1292,7 @@ async function openSubDetail(subId, currentUser, currentRole) {
 }
 
 function openAddSubModal(currentUser) {
-  openModal('New Submission', `
+  openPage('New Submission', `
     <div class="form-group"><label>Title</label><input id="s-title" placeholder="Submission title"/></div>
     <div class="form-group"><label>Type</label>
       <select id="s-type">
@@ -1634,7 +1637,7 @@ window.backfillPayrollLedger = async function() {
 };
 
 window.runLedgerBackfill = async function() {
-  if (!confirm('Sync approved expenses and the cash receipt / disbursement journals into the ledger?\n\nSafe to run repeatedly — already-synced entries are skipped.')) return;
+  if (!(await confirmDialog({message:'Sync approved expenses and the cash receipt / disbursement journals into the ledger?\n\nSafe to run repeatedly — already-synced entries are skipped.'}))) return;
   Notifs.showToast('Syncing journals to ledger…');
   try {
     const r = await window.backfillLedgerFromJournals();
@@ -1666,7 +1669,7 @@ function bindExpenseActions(content, currentUser, currentRole, sub) {
     } catch (err) { Notifs.showToast('Approve failed: ' + (err.message||err), 'error'); btn.disabled = false; }
   }));
   content.querySelectorAll('.reject-expense').forEach(btn => btn.addEventListener('click', async () => {
-    if (!confirm('Reject this expense?')) return;
+    if (!(await confirmDialog({message:'Reject this expense?'}))) return;
     try {
       await db.collection('expenses').doc(btn.dataset.id).update({ status:'rejected', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
       Notifs.showToast('Expense rejected.');
@@ -1676,7 +1679,7 @@ function bindExpenseActions(content, currentUser, currentRole, sub) {
 }
 
 function openAddExpenseModal(currentUser) {
-  openModal('Add Expense / Receipt', `
+  openPage('Add Expense / Receipt', `
     <div class="form-group"><label>Description</label><input id="e-desc" placeholder="What was this expense for?"/></div>
     <div class="form-row">
       <div class="form-group"><label>Amount (₱)</label><input id="e-amount" type="number" step="0.01" placeholder="0.00" inputmode="decimal"/></div>
@@ -1831,8 +1834,8 @@ window.renderComments = async function(collection, docId, containerId, currentUs
   });
 
   // Link attach
-  document.getElementById(`comment-link-${docId}`)?.addEventListener('click', () => {
-    let url = (prompt('Paste a link to attach:') || '').trim();
+  document.getElementById(`comment-link-${docId}`)?.addEventListener('click', async () => {
+    let url = ((await promptDialog({message:'Paste a link to attach:'})) || '').trim();
     if (!url) return;
     if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
     pendingLink = url;
@@ -1847,7 +1850,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
     btn.addEventListener('click', async () => {
       const cid = btn.dataset.id;
       const c   = comments.find(x=>x.id===cid);
-      const newText = prompt('Edit message:', c?.text||'');
+      const newText = await promptDialog({message:'Edit message:', value:c?.text||'', multiline:true});
       if (newText === null || newText === (c?.text||'')) return;
       await db.collection(collection).doc(docId).collection('comments').doc(cid).update({
         text: newText.trim(), editedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -1859,7 +1862,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
   // Delete message
   container.querySelectorAll('.comment-del-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm('Delete this message?')) return;
+      if (!(await confirmDialog({message:'Delete this message?', danger:true}))) return;
       await db.collection(collection).doc(docId).collection('comments').doc(btn.dataset.id).delete();
       renderComments(collection, docId, containerId, currentUser);
     });
@@ -1984,7 +1987,7 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
 // ══════════════════════════════════════════════════
 //  FINANCE DEPARTMENT
 // ══════════════════════════════════════════════════
-window.renderFinance = async function(currentUser, currentRole, subtab = 'Overview') {
+window.renderFinance = async function(currentUser, currentRole, subtab = window.initialSubtab('Overview')) {
   const c = deptContainer();
   // Finance tools vs HR tools — visually separated
   const finTabs = ['Overview','Reports','Sales Orders','Ledger','Cash Receipts','Cash Disbursements','Purchases','Inventory','Records','Taxes','SSS / Gov','Tasks'];
@@ -2005,7 +2008,7 @@ window.renderFinance = async function(currentUser, currentRole, subtab = 'Overvi
     <div id="fin-content"><div class="loading-placeholder">Loading…</div></div>
   `;
   loadFinanceContent(currentUser, currentRole, subtab);
-  window.bindChipTabs(c, (key) => loadFinanceContent(currentUser, currentRole, key));
+  window.bindChipTabs(c, (key) => { window.setSubroute(key); loadFinanceContent(currentUser, currentRole, key); });
 };
 
 async function loadFinanceContent(currentUser, currentRole, sub) {
@@ -2050,7 +2053,7 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
 function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel, targetField, current }, currentUser, onDone) {
   const cur = parseFloat(current) || 0;
   const _isPres = typeof isRealPresident === 'function' && isRealPresident();
-  openModal(`💸 Give Raise — ${escHtml(subjectName||'')}`, `
+  openPage(`💸 Give Raise — ${escHtml(subjectName||'')}`, `
     <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
       Current ${escHtml(fieldLabel)}: <strong style="color:var(--text)">₱${fmt(cur)}</strong>
     </div>
@@ -2321,7 +2324,7 @@ window.openScheduledRaises = async function() {
       window.openScheduledRaises();
     }));
     document.querySelectorAll('.sr-reject-btn').forEach(btn=>btn.addEventListener('click', async ()=>{
-      const reason = prompt('Reason for declining (optional):')||'';
+      const reason = (await promptDialog({message:'Reason for declining (optional):', multiline:true}))||'';
       await window.RaiseFlow.reject(btn.dataset.id, reason);
       Notifs.showToast('Raise declined.');
       window.openScheduledRaises();
@@ -2774,7 +2777,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         const hid = btn.dataset.id;
         const rec = history.find(h => h.id === hid);
         if (!rec) return;
-        openModal(`Edit Payroll Record — ${rec.userName||'?'} (${rec.month||'?'})`, `
+        openPage(`Edit Payroll Record — ${rec.userName||'?'} (${rec.month||'?'})`, `
           <div class="form-row">
             <div class="form-group"><label>Base Salary</label><input id="hpe-salary" type="number" value="${rec.salary||0}" inputmode="decimal"/></div>
             <div class="form-group"><label>Allowance</label><input id="hpe-allow" type="number" value="${rec.allowance||0}" inputmode="decimal"/></div>
@@ -2836,7 +2839,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         const month = btn.dataset.month;
 
         if (isPres) {
-          if (!confirm(`Delete payroll record for ${name||'?'} (${month||'?'})? This cannot be undone.`)) return;
+          if (!(await confirmDialog({message:`Delete payroll record for ${escHtml(name||'?')} (${month||'?'})? This cannot be undone.`, danger:true, html:true}))) return;
           // Cascade handles the linked PAY- ledger entry AND restores any cash-advance
           // balances this run deducted (reads the doc's own fields — no fragile split).
           await window.financeExecuteDelete('salary_history', hid);
@@ -2884,7 +2887,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           const reqId  = btn.dataset.reqId;
           const histId = btn.dataset.histId;
           const req    = delReqs.find(r => r.id === reqId);
-          if (!confirm(`Approve deletion of ${req?.userName||'?'} (${req?.month||'?'}) payroll record?`)) return;
+          if (!(await confirmDialog({message:`Approve deletion of ${escHtml(req?.userName||'?')} (${req?.month||'?'}) payroll record?`, danger:true, html:true}))) return;
           btn.disabled = true;
           // Guard against re-running an already-resolved request.
           const _chk = await db.collection('payroll_delete_requests').doc(reqId).get().catch(()=>null);
@@ -3017,7 +3020,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         const inst = plan.plan[0]; // first CA in the plan, for the "installment N of M" label
 
         const _payClass = emp.payClass==='production' ? 'production' : 'regular';
-        openModal(`Edit Payroll — ${emp.displayName}`, `
+        openPage(`Edit Payroll — ${emp.displayName}`, `
           <div class="form-group"><label>Employee Class</label>
             <select id="ep-class" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
               <option value="regular" ${_payClass==='regular'?'selected':''}>Regular — monthly (KPI + attendance)</option>
@@ -3062,7 +3065,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             </div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Remaining after this payroll: ₱<span id="ep-ca-remaining">${fmt(Math.max(0,caBalance-plan.caPlanned))}</span></div>
           </div>` : ''}
-        `, `<button class="btn-primary" id="save-ep-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`, {size:'wide'});
+        `, `<button class="btn-primary" id="save-ep-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
         if (caBalance > 0) {
           const updateRemaining = () => {
@@ -3167,7 +3170,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     document.getElementById('pr-verify-btn')?.addEventListener('click', async ()=>{
       const chk = await db.collection('pay_runs').doc(month).get().catch(()=>null);
       if (!chk || !chk.exists || chk.data().state !== 'computed') { Notifs.showToast('Run must be Computed before Verify.','error'); loadPayRunStrip(month); return; }
-      if(!confirm(`Mark ${month} payroll as VERIFIED? This confirms the computed amounts have been checked.`)) return;
+      if(!(await confirmDialog({message:`Mark ${month} payroll as VERIFIED? This confirms the computed amounts have been checked.`}))) return;
       await db.collection('pay_runs').doc(month).set({ state:'verified', verifiedBy:currentUser.uid, verifiedByName:window.userProfile?.displayName||currentUser.email, verifiedAt:firebase.firestore.FieldValue.serverTimestamp() },{merge:true});
       window.logAudit && window.logAudit('update','pay_run',month,{state:'verified'});
       Notifs.showToast('Payroll marked verified.'); loadPayRunStrip(month);
@@ -3177,7 +3180,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     document.getElementById('pr-disburse-btn')?.addEventListener('click', async ()=>{
       const chk  = await db.collection('pay_runs').doc(month).get().catch(()=>null);
       const data2 = (chk && chk.exists) ? chk.data() : {};
-      if(!confirm(`Disburse ${month} payroll — ₱${fmt(data2.totalNet||0)} to ${data2.employeeCount||0} staff? This deducts cash advances, posts the ledger, and notifies employees. This cannot be undone.`)) return;
+      if(!(await confirmDialog({message:`Disburse ${month} payroll — ₱${fmt(data2.totalNet||0)} to ${data2.employeeCount||0} staff? This deducts cash advances, posts the ledger, and notifies employees. This cannot be undone.`, danger:true}))) return;
       const dbtn = document.getElementById('pr-disburse-btn');
       dbtn.disabled = true; dbtn.textContent = 'Disbursing…';
       try {
@@ -3191,7 +3194,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     });
     // Reopen — president-only, verified → computed (v12 WS20 D5).
     document.getElementById('pr-reopen-btn')?.addEventListener('click', async ()=>{
-      if(!confirm(`Reopen ${month} payroll for editing? This returns it to Computed — Verify again before Disburse.`)) return;
+      if(!(await confirmDialog({message:`Reopen ${month} payroll for editing? This returns it to Computed — Verify again before Disburse.`}))) return;
       await window.reopenPayRun(month);
       loadPayRunStrip(month);
     });
@@ -3215,7 +3218,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       Notifs.showToast(`Run is ${runState} — President must Reopen first.`, 'error');
       return;
     }
-    if (!confirm(`Compute payroll for ${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}? Safe to re-run before Verify — no money moves until Disburse.`)) return;
+    if (!(await confirmDialog({message:`Compute payroll for ${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}? Safe to re-run before Verify — no money moves until Disburse.`}))) return;
     // Checked once, before any write — a closed month can't be (re)computed
     // (v12 WS12; toast shown by assertPeriodOpen if blocked).
     try { await window.assertPeriodOpen(month + '-01'); } catch (e) { return; }
@@ -3309,7 +3312,7 @@ async function renderTaxesTab(container, currentUser, currentRole) {
     </div>
   `;
   document.getElementById('add-tax-btn').addEventListener('click', () => {
-    openModal('Add Tax Record', `
+    openPage('Add Tax Record', `
       <div class="form-row">
         <div class="form-group"><label>Period</label><input id="tax-period" placeholder="e.g. Q1 2026"/></div>
         <div class="form-group"><label>Type</label>
@@ -3493,13 +3496,13 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
   }, { activeKey: periodKey });
   document.getElementById('finrep-close-btn')?.addEventListener('click', async () => {
     const mk = document.getElementById('finrep-close-btn').dataset.month;
-    if (!confirm(`Close the books for ${document.getElementById('finrep-close-btn').dataset.label}?\n\nNo new entries can post to this month until it's reopened.`)) return;
+    if (!(await confirmDialog({message:`Close the books for ${document.getElementById('finrep-close-btn').dataset.label}?\n\nNo new entries can post to this month until it's reopened.`}))) return;
     await window.closeFinancePeriod(mk);
     renderFinancialReports(container, currentUser, currentRole, range);
   });
   document.getElementById('finrep-reopen-btn')?.addEventListener('click', async () => {
     const mk = document.getElementById('finrep-reopen-btn').dataset.month;
-    if (!confirm(`Reopen ${mk} for editing?`)) return;
+    if (!(await confirmDialog({message:`Reopen ${mk} for editing?`}))) return;
     await window.reopenFinancePeriod(mk);
     renderFinancialReports(container, currentUser, currentRole, range);
   });
@@ -3532,7 +3535,7 @@ window.reopenFinancePeriod = async function(monthKey) {
 // of accounts, via ledgerKind()'s legacy-derivation rule. Re-runnable — skips
 // rows that already have accountType.
 window.runTagAccountTypes = async function() {
-  if (!confirm('Backfill accountType on every legacy ledger row?\n\nSafe to run repeatedly.')) return;
+  if (!(await confirmDialog({message:'Backfill accountType on every legacy ledger row?\n\nSafe to run repeatedly.'}))) return;
   Notifs.showToast('Tagging account types…');
   try {
     const snap = await db.collection('ledger').get();
@@ -3558,7 +3561,7 @@ window.runTagAccountTypes = async function() {
 // POCOS-<id>-INV contra leg for every existing consumption row. Idempotent
 // (keyed by refNumber) — safe to re-run.
 window.runRestateMaterialCosts = async function() {
-  if (!confirm('Restate historical material costs?\n\nThis corrects the double-counted purchase+consumption expense bug. Expense totals for past periods WILL change — this is a deliberate one-time restatement. Safe to run repeatedly.')) return;
+  if (!(await confirmDialog({message:'Restate historical material costs?\n\nThis corrects the double-counted purchase+consumption expense bug. Expense totals for past periods WILL change — this is a deliberate one-time restatement. Safe to run repeatedly.'}))) return;
   Notifs.showToast('Restating material costs…');
   try {
     let reclassified = 0, invLegsAdded = 0;
@@ -3610,7 +3613,7 @@ window.runRestateMaterialCosts = async function() {
 // orderBy('date') silently DROPS any row with a missing/malformed date — this
 // repairs historical rows so they reappear in every report. Re-runnable.
 window.runFixUndatedRows = async function() {
-  if (!confirm("Repair ledger + journal rows with a missing or malformed date?\n\nSafe to run repeatedly.")) return;
+  if (!(await confirmDialog({message:"Repair ledger + journal rows with a missing or malformed date?\n\nSafe to run repeatedly."}))) return;
   Notifs.showToast('Scanning for undated rows…');
   try {
     const dateRe = /^\d{4}-\d{2}(-\d{2})?$/;
@@ -3714,7 +3717,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
     // highest-priority guard of the whole ledger surface (v12 WS12).
     const acctOptsFor = (accountType) => (window.COA[accountType]||[])
       .map(a => `<option value="${escHtml(a)}">${escHtml(a)}</option>`).join('');
-    openModal('New Ledger Entry', `
+    openPage('New Ledger Entry', `
       <div class="form-row">
         <div class="form-group"><label>Date</label><input id="led-date" type="date" value="${today()}"/></div>
         <div class="form-group"><label>Type</label>
@@ -3842,7 +3845,7 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
   `;
 
   document.getElementById('add-crj-btn').addEventListener('click', () => {
-    openModal('New Cash Receipt Entry', `
+    openPage('New Cash Receipt Entry', `
       <div class="form-row">
         <div class="form-group"><label>Reference</label><input id="crj-ref" placeholder="OR #, Receipt #…"/></div>
         <div class="form-group"><label>Date</label><input id="crj-date" type="date" value="${today()}"/></div>
@@ -3954,7 +3957,7 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
   `;
 
   document.getElementById('add-cdj-btn').addEventListener('click', () => {
-    openModal('New Cash Disbursement Entry', `
+    openPage('New Cash Disbursement Entry', `
       <div class="form-row">
         <div class="form-group"><label>Reference</label><input id="cdj-ref" placeholder="Voucher #, Check #…"/></div>
         <div class="form-group"><label>Date</label><input id="cdj-date" type="date" value="${today()}"/></div>
@@ -4074,7 +4077,7 @@ async function renderRecordsTab(container, currentUser, currentRole) {
     </div>
   `;
   document.getElementById('add-rec-btn').addEventListener('click', () => {
-    openModal('Encode Record / Receipt', `
+    openPage('Encode Record / Receipt', `
       <div class="form-row">
         <div class="form-group"><label>Date</label><input id="rec-date" type="date" value="${today()}"/></div>
         <div class="form-group"><label>Type</label>
@@ -4200,7 +4203,7 @@ function openCADataRepairModal(onDone) {
       ? `<button class="btn-primary" id="ca-repair-apply-btn">Apply ${total} Fix${total>1?'es':''}</button><button class="btn-secondary" onclick="closeModal()">Close</button>`
       : `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
     document.getElementById('ca-repair-apply-btn')?.addEventListener('click', async () => {
-      if (!confirm(`Apply ${total} cash-advance data fix(es)? This writes to live records.`)) return;
+      if (!(await confirmDialog({message:`Apply ${total} cash-advance data fix(es)? This writes to live records.`}))) return;
       await window.runCADataRepair(false);
       closeModal();
       Notifs.showToast('CA data repair applied.');
@@ -4426,7 +4429,7 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
   const empTypes = ['Regular','Part-time','Contractual','Project-based'];
   const workTypes = ['Onsite','Online','Hybrid','Remote'];
 
-  openModal(`${isEdit?'Edit':'Add'} Worker Profile`, `
+  openPage(`${isEdit?'Edit':'Add'} Worker Profile`, `
     <div class="form-row">
       <div class="form-group"><label>Full Name *</label><input id="hrp-name" value="${escHtml(profile?.name||'')}"/></div>
       <div class="form-group"><label>ID Number</label><input id="hrp-id" value="${escHtml(profile?.idNumber||'')}"/></div>
@@ -4605,7 +4608,7 @@ async function openPayslipHistory(currentUser, currentRole) {
         const ps = list.find(p=>p.id===btn.dataset.id);
         const next = btn.dataset.next;
         if (!ps || !next) return;
-        if (!confirm(`Mark ${ps.workerName}'s payslip (${ps.payPeriodStart} – ${ps.payPeriodEnd}) as "${next}"?`)) return;
+        if (!(await confirmDialog({message:`Mark ${escHtml(ps.workerName)}'s payslip (${ps.payPeriodStart} – ${ps.payPeriodEnd}) as "${next}"?`, html:true}))) return;
         const fieldPrefix = { verified:'verified', filed:'filed', submitted:'submitted' }[next];
         const payDate = ps.payDate || ps.payPeriodEnd || today();
         // Check the period BEFORE flipping status — Submit is the ledger-posting
@@ -4666,7 +4669,7 @@ async function openPayslipHistory(currentUser, currentRole) {
     document.querySelectorAll('.ps-override-btn').forEach(btn => onClickSafe(btn, async () => {
         const ps = list.find(p=>p.id===btn.dataset.id);
         if (!ps) return;
-        const choice = prompt(`Manual override — set status for ${ps.workerName}'s payslip.\nOptions: ${PAYSLIP_STAGES.join(', ')}`, ps.status||'draft');
+        const choice = await promptDialog({title:'Manual override', message:`Set status for ${escHtml(ps.workerName)}'s payslip.\nOptions: ${PAYSLIP_STAGES.join(', ')}`, value:ps.status||'draft', html:true});
         if (!choice || !PAYSLIP_STAGES.includes(choice)) { if (choice) Notifs.showToast('Invalid status','error'); return; }
         await db.collection('payslips').doc(ps.id).update({
           status: choice, overriddenBy: currentUser.uid, overriddenAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -4683,7 +4686,7 @@ async function openPayslipHistory(currentUser, currentRole) {
 // Compact edit of a filed payslip's amounts (recomputes net; keeps ledger in sync).
 function openPayslipEdit(ps, currentUser, onSave) {
   const r = ps.regular||{}, ot = ps.overtime||{}, al = ps.allowances||{}, g = ps.deductions?.govt||{}, o = ps.deductions?.other||{};
-  openModal(`✎ Edit Payslip — ${escHtml(ps.workerName||'')}`, `
+  openPage(`✎ Edit Payslip — ${escHtml(ps.workerName||'')}`, `
     <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${ps.payPeriodStart||''} – ${ps.payPeriodEnd||''}</div>
     <div class="form-row">
       <div class="form-group"><label>Rate / HR (₱)</label><input id="pe-rph" type="number" step="0.01" value="${r.ratePerHr||0}" inputmode="decimal"/></div>
@@ -4707,7 +4710,7 @@ function openPayslipEdit(ps, currentUser, onSave) {
     </div>
     <div class="form-group"><label>Amount Already Paid (₱)</label><input id="pe-paid" type="number" value="${ps.paid||0}" inputmode="decimal"/></div>
     <div id="pe-net" style="text-align:right;font-weight:800;font-size:14px;margin-top:6px">Net: ₱${fmt(ps.netPay||0)}</div>
-  `, `<button class="btn-primary" id="pe-save-btn">Save Changes</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`, {size:'wide'});
+  `, `<button class="btn-primary" id="pe-save-btn">Save Changes</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   const num = id => parseFloat(document.getElementById(id).value)||0;
   const recompute = () => {
@@ -4769,7 +4772,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
   const periodEnd   = addDays(todayISO, (6 - dow + 7) % 7);  // upcoming/this Saturday
   const periodStart = addDays(periodEnd, -5);                // Monday of that pay week
 
-  openModal(`📄 Generate Payslip — ${profile.name}`, `
+  openPage(`📄 Generate Payslip — ${profile.name}`, `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
       <div class="form-group"><label>Pay Period Start</label><input id="ps-start" type="date" value="${periodStart}"/></div>
       <div class="form-group"><label>Pay Period End (Sat)</label><input id="ps-end" type="date" value="${periodEnd}"/></div>
@@ -4854,7 +4857,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     <button class="btn-secondary" onclick="closeModal()">Cancel</button>
     <button class="btn-secondary" id="ps-preview-btn">👁 Preview</button>
     <button class="btn-primary" id="ps-save-btn">💾 Save &amp; Generate</button>
-  `, {size:'full'});
+  `);
 
   // Bind proof upload area
   let proofFile = null;
@@ -5290,7 +5293,7 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
 // entry points (Quick Estimate, the Builder, and the filed Records) collapse
 // into one **Quotes** tab; the two partner tabs into **Partner**; the two file
 // collections into **Files**. Revisions + records live inside Records untouched.
-window.renderSales = async function(currentUser, currentRole, subtab = 'Clients') {
+window.renderSales = async function(currentUser, currentRole, subtab = window.initialSubtab('Clients')) {
   window._bkCurrentUser = currentUser;
   window._bkCurrentRole = currentRole;
   const c = deptContainer();
@@ -5311,7 +5314,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = 'Clients'
     <div id="sales-content"><div class="loading-placeholder">Loading…</div></div>
   `;
   loadSalesContent(currentUser, currentRole, subtab);
-  window.bindChipTabs(c, (key) => loadSalesContent(currentUser, currentRole, key));
+  window.bindChipTabs(c, (key) => { window.setSubroute(key); loadSalesContent(currentUser, currentRole, key); });
 };
 
 // Scoped inner sub-nav (chip toggle) for a consolidated Sales tab. Binds ONLY
@@ -5551,9 +5554,9 @@ function qeSetQty(i, v) {
   it.amount = it.unitPrice * it.qty;
   qeRenderItems();
 }
-function qeClearAll() {
+async function qeClearAll() {
   if (!window._qeItems.length) return;
-  if (!confirm('Clear all items from this estimate?')) return;
+  if (!(await confirmDialog({message:'Clear all items from this estimate?', danger:true}))) return;
   window._qeItems = []; qeRenderItems();
 }
 
@@ -6099,7 +6102,7 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
       <button class="btn-icon" data-rm="${i}" style="color:#ff453a;font-size:16px;padding:4px 7px">🗑</button>
     </div>`;
 
-  openModal(existing ? `Edit Quote BK-${existing.quoteNumber||''}` : '🍽️ New Barro Kitchens Quote', `
+  openPage(existing ? `Edit Quote BK-${existing.quoteNumber||''}` : '🍽️ New Barro Kitchens Quote', `
     <div class="form-row">
       <div class="form-group"><label>Client Name</label><input id="bkq-client" value="${escHtml(existing?.clientName||'')}"/></div>
       <div class="form-group"><label>Client Contact</label><input id="bkq-contact" value="${escHtml(existing?.clientContact||'')}"/></div>
@@ -6200,7 +6203,7 @@ function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
     const grand = calcTotals();
     const chosenStatus = document.getElementById('bkq-status')?.value;
     if (chosenStatus === 'accepted' && existing?.status !== 'accepted'
-        && !confirm(`Mark this quote as ACCEPTED (₱${fmt(grand)})? This signals the client has agreed.`)) return;
+        && !(await confirmDialog({message:`Mark this quote as ACCEPTED (₱${fmt(grand)})? This signals the client has agreed.`}))) return;
     const sub    = lines.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.price)||0),0);
     const disc   = parseFloat(document.getElementById('bkq-discount')?.value||0)||0;
     const vatRate= parseFloat(document.getElementById('bkq-vat')?.value||0)||0;
@@ -6686,7 +6689,7 @@ async function renderProjects(container, currentUser, currentRole) {
   });
 
   document.getElementById('add-project-btn')?.addEventListener('click', () => {
-    openModal('New Project', `
+    openPage('New Project', `
       <div class="form-group"><label>Project Name</label><input id="proj-name" placeholder="e.g. Kitchen Design — ABC Corp"/></div>
       <div class="form-group"><label>Client</label><input id="proj-client" placeholder="Client name"/></div>
       <div class="form-row">
@@ -6855,7 +6858,7 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
 
   // Record a payment
   document.getElementById('proj-payment-btn')?.addEventListener('click', () => {
-    openModal('Record Payment', `
+    openPage('Record Payment', `
       <div class="form-group"><label>Amount (₱)</label><input id="pay-amt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00"/></div>
       <div class="form-group"><label>Date</label><input id="pay-date" type="date" value="${today()}"/></div>
       <div class="form-group"><label>Method</label><input id="pay-method" placeholder="e.g. Bank transfer, Cash, Cheque"/></div>
@@ -6873,7 +6876,7 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
         byName: currentUser.displayName || currentUser.email || '',
         by:     currentUser.uid
       };
-      if (!confirm(`Record payment of ₱${fmt(amt)} for "${p.name}"? This updates the project balance.`)) return;
+      if (!(await confirmDialog({message:`Record payment of ₱${fmt(amt)} for "${escHtml(p.name)}"? This updates the project balance.`, html:true}))) return;
       try {
         const ref = db.collection('projects').doc(p.id);
         const saved = await db.runTransaction(async tx => {
@@ -6919,7 +6922,7 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
   // Create a billing invoice for collection of balance
   document.getElementById('proj-invoice-btn')?.addEventListener('click', () => {
     const bal = (Number(p.contractAmount)||0) - projectPaid(p);
-    openModal('Billing Invoice — Collection of Balance', `
+    openPage('Billing Invoice — Collection of Balance', `
       <div class="form-group"><label>Bill To</label><input id="inv-billto" value="${escHtml(p.client||'')}"/></div>
       <div class="form-row">
         <div class="form-group"><label>Invoice Date</label><input id="inv-date" type="date" value="${today()}"/></div>
@@ -6951,7 +6954,7 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
         issuedBy:       currentUser.displayName || currentUser.email || '',
         createdAt:      today()
       };
-      if (!confirm(`Generate billing invoice ${inv.no} for ₱${fmt(amt)} (${p.name||''})?`)) return;
+      if (!(await confirmDialog({message:`Generate billing invoice ${inv.no} for ₱${fmt(amt)} (${escHtml(p.name||'')})?`, html:true}))) return;
       try {
         const ref = db.collection('projects').doc(p.id);
         const saved = await db.runTransaction(async tx => {
@@ -7021,7 +7024,7 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
   const jobs    = jSnap.docs.map(d=>({id:d.id,...d.data()}));
   let team = (p.team||[]).map((uid,i)=>({uid, name:(p.teamNames||[])[i]||uid}));
 
-  openModal('Edit Project', `
+  openPage('Edit Project', `
     <div class="form-group"><label>Project Name</label><input id="pe-name" value="${escHtml(p.name||'')}"/></div>
     <div class="form-group"><label>Client (link to Design CRM)</label>
       <select id="pe-client"><option value="">— None / free text —</option>
@@ -7146,7 +7149,7 @@ async function renderProjectDrawings(host, p, currentUser, currentRole, canBill)
 async function openDrawingCreateModal(project, currentUser, currentRole, canBill){
   const uSnap = await db.collection('users').get().catch(()=>({docs:[]}));
   const users = uSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
-  openModal('New Drawing', `
+  openPage('New Drawing', `
     <div class="form-group"><label>Title</label><input id="dw-title" placeholder="e.g. Ground Floor Plan"/></div>
     <div class="form-row">
       <div class="form-group"><label>Drawing No.</label><input id="dw-no" placeholder="e.g. A-101 (optional)"/></div>
@@ -7276,7 +7279,7 @@ async function changeDrawingStatus(d, to, project, currentUser, currentRole, can
 
 function openDrawingRevisionModal(d, project, currentUser, currentRole, canBill){
   const newRev = nextRev(d.currentRev||'A');
-  openModal(`New Revision — Rev ${newRev}`, `
+  openPage(`New Revision — Rev ${newRev}`, `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Cutting <strong>Rev ${escHtml(newRev)}</strong> of "${escHtml(d.title||'')}". The drawing returns to <strong>Draft</strong> for re-review.</div>
     <div class="form-group"><label>Change Note</label><textarea id="rv-note" rows="3" placeholder="What changed in this revision"></textarea></div>
     <div class="form-group"><label>Updated File (optional)</label><div id="rv-file"></div></div>
@@ -7314,7 +7317,7 @@ function openDrawingRevisionModal(d, project, currentUser, currentRole, canBill)
 async function openDrawingEditModal(d, project, currentUser, currentRole, canBill){
   const uSnap = await db.collection('users').get().catch(()=>({docs:[]}));
   const users = uSnap.docs.map(u=>({id:u.id,...u.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
-  openModal('Edit Drawing', `
+  openPage('Edit Drawing', `
     <div class="form-group"><label>Title</label><input id="de-title" value="${escHtml(d.title||'')}"/></div>
     <div class="form-row">
       <div class="form-group"><label>Drawing No.</label><input id="de-no" value="${escHtml(d.drawingNo||'')}"/></div>
@@ -7356,7 +7359,7 @@ async function openDrawingEditModal(d, project, currentUser, currentRole, canBil
 async function openAddProjectTaskModal(project, currentUser, currentRole, canBill){
   const uSnap = await db.collection('users').get().catch(()=>({docs:[]}));
   const users = uSnap.docs.map(u=>({id:u.id,...u.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
-  openModal('Delegate Task — '+escHtml(project.name||''), `
+  openPage('Delegate Task — '+escHtml(project.name||''), `
     <div class="form-group"><label>Title</label><input id="pt-title" placeholder="Task name"/></div>
     <div class="form-group"><label>Description</label><textarea id="pt-desc" rows="2"></textarea></div>
     <div class="form-row">
@@ -7734,7 +7737,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
     renderTickets('all');
     document.getElementById('it-ticket-filter').onchange = e => renderTickets(e.target.value);
     document.getElementById('new-it-ticket-btn')?.addEventListener('click', () => {
-      openModal('New IT Ticket', `
+      openPage('New IT Ticket', `
         <div class="form-group"><label>Title</label><input id="it-t-title" placeholder="Brief description of issue"/></div>
         <div class="form-row">
           <div class="form-group"><label>Category</label>
@@ -7795,7 +7798,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
       </table></div></div>`;
     if (canEdit) {
       document.getElementById('new-asset-btn')?.addEventListener('click', () => {
-        openModal('Add Asset', `
+        openPage('Add Asset', `
           <div class="form-row">
             <div class="form-group"><label>Asset Name</label><input id="a-name" placeholder="e.g. Dell Laptop 01"/></div>
             <div class="form-group"><label>Type</label>
@@ -7833,7 +7836,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         btn.addEventListener('click', () => {
           const asset = assets.find(a=>a.id===btn.dataset.id);
           if (!asset) return;
-          openModal('Edit Asset', `
+          openPage('Edit Asset', `
             <div class="form-row">
               <div class="form-group"><label>Asset Name</label><input id="ea-name" value="${escHtml(asset.name||'')}"/></div>
               <div class="form-group"><label>Assigned To</label><input id="ea-assigned" value="${escHtml(asset.assignedTo||'')}"/></div>
@@ -7894,7 +7897,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         </tbody>
       </table></div></div>`;
     document.getElementById('new-sw-btn')?.addEventListener('click', () => {
-      openModal('Add Software / License', `
+      openPage('Add Software / License', `
         <div class="form-row">
           <div class="form-group"><label>Software Name</label><input id="sw-name" placeholder="e.g. Adobe Creative Cloud"/></div>
           <div class="form-group"><label>Vendor</label><input id="sw-vendor" placeholder="e.g. Adobe"/></div>
@@ -7933,7 +7936,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
       btn.addEventListener('click', () => {
         const sw = items.find(x=>x.id===btn.dataset.id);
         if (!sw) return;
-        openModal('Edit Software / License', `
+        openPage('Edit Software / License', `
           <div class="form-row">
             <div class="form-group"><label>Software Name</label><input id="esw-name" value="${escHtml(sw.name||'')}"/></div>
             <div class="form-group"><label>Vendor</label><input id="esw-vendor" value="${escHtml(sw.vendor||'')}"/></div>
@@ -7977,7 +7980,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           closeModal(); loadITContent(currentUser, currentRole, 'Software', canEdit);
         });
         document.getElementById('del-sw-btn').addEventListener('click', async () => {
-          if (!confirm(`Delete software record "${sw.name||''}"? This cannot be undone.`)) return;
+          if (!(await confirmDialog({message:`Delete software record "${escHtml(sw.name||'')}"? This cannot be undone.`, danger:true, html:true}))) return;
           await db.collection('it_software').doc(sw.id).delete();
           closeModal(); loadITContent(currentUser, currentRole, 'Software', canEdit);
         });
@@ -8011,7 +8014,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         </tbody>
       </table></div></div>`;
     document.getElementById('new-access-btn')?.addEventListener('click', () => {
-      openModal('Grant Access', `
+      openPage('Grant Access', `
         <div class="form-row">
           <div class="form-group"><label>Employee Name</label><input id="ac-emp" placeholder="Full name"/></div>
           <div class="form-group"><label>System / App</label><input id="ac-sys" placeholder="e.g. Google Workspace, Firebase"/></div>
@@ -8040,7 +8043,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
     });
     content.querySelectorAll('.revoke-access-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm(`Revoke access for ${btn.dataset.emp}?`)) return;
+        if (!(await confirmDialog({message:`Revoke access for ${escHtml(btn.dataset.emp)}?`, danger:true, html:true}))) return;
         await db.collection('it_access').doc(btn.dataset.id).update({ status:'revoked', revokedAt: firebase.firestore.FieldValue.serverTimestamp(), revokedBy: currentUser.uid });
         loadITContent(currentUser, currentRole, 'Access Control', canEdit);
       });
@@ -8074,7 +8077,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
             </div>`).join('')}
       </div>`;
     const netModal = (existing) => {
-      openModal(existing?'Edit Network Note':'Add Network Note', `
+      openPage(existing?'Edit Network Note':'Add Network Note', `
         <div class="form-row">
           <div class="form-group"><label>Title</label><input id="net-title" value="${escHtml(existing?.title||'')}" placeholder="e.g. Office WiFi Credentials"/></div>
           <div class="form-group"><label>Type</label>
@@ -8105,7 +8108,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
     });
     content.querySelectorAll('.del-net-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm(`Delete network note "${btn.dataset.title}"? This cannot be undone.`)) return;
+        if (!(await confirmDialog({message:`Delete network note "${escHtml(btn.dataset.title)}"? This cannot be undone.`, danger:true, html:true}))) return;
         await db.collection('it_network').doc(btn.dataset.id).delete();
         loadITContent(currentUser, currentRole, 'Network', canEdit);
       });
@@ -8122,7 +8125,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
 
 function openITTicketModal(ticket, currentUser, canEdit, onRefresh) {
   const isAssigned = canEdit || ticket.createdBy === currentUser.uid;
-  openModal(`🎫 ${escHtml(ticket.title||'Ticket')}`, `
+  openPage(`🎫 ${escHtml(ticket.title||'Ticket')}`, `
     <div style="margin-bottom:12px">
       <div class="item-meta" style="gap:8px;margin-bottom:8px">
         <span class="badge ${ticket.status==='open'?'badge-orange':ticket.status==='in-progress'?'badge-blue':ticket.status==='resolved'?'badge-green':'badge-gray'}">${ticket.status||'open'}</span>
@@ -9120,7 +9123,7 @@ window.ensureOrderTracking = async function(o){
 // Convert a won quote into a Sales Order: capture payment + receipt, route to Finance.
 async function openSalesOrderModal(d, currentUser, currentRole, container){
   const total = parseFloat(d.total)||0;
-  openModal('🧾 Create Sales Order', `
+  openPage('🧾 Create Sales Order', `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Client <strong>${escHtml(d.client||'')}</strong> · Quote ${escHtml(d.qno||'')}</div>
     <div class="form-group"><label>Project / Scope</label><input id="so-project" value="${escHtml((d.client||'')+' — '+(d.qno||''))}"/></div>
     <div class="form-row">
@@ -9133,7 +9136,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
     <div class="form-group"><label>Notes</label><textarea id="so-notes" rows="2" placeholder="Payment ref #, schedule, etc."></textarea></div>
     <div class="form-group"><label>Receipt / Proof of Payment</label><div id="so-receipt-upload"></div></div>
     <div id="so-err" class="error-msg hidden"></div>
-  `, `<button class="btn-primary" id="so-save">Create &amp; Send to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`, {size:'wide'});
+  `, `<button class="btn-primary" id="so-save">Create &amp; Send to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   let receipt=null;
   if(window.Drive?.renderUploadArea) Drive.renderUploadArea('so-receipt-upload',(r)=>{receipt=r;},{label:'Upload receipt (photo/PDF)',accept:'image/*,.pdf',dept:'Finance',subfolder:'SalesOrders'});
   document.getElementById('so-save').addEventListener('click', async ()=>{
@@ -9283,7 +9286,7 @@ function openRecordSaleModal(o, container){
   const contract = o.contractAmount||0;
   const salesNoted = o.paymentReceived||0;
   const defaultAmt = o.recordedAmount||salesNoted||0;
-  openModal('💵 Register Sale — '+escHtml(o.clientName||''), `
+  openPage('💵 Register Sale — '+escHtml(o.clientName||''), `
     <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:10px 14px;font-size:12px">
       <div style="font-weight:700;margin-bottom:6px">📋 Sales Order Terms</div>
       <div style="display:grid;grid-template-columns:1fr auto;gap:3px 12px">
@@ -9350,7 +9353,7 @@ function openRecordSaleModal(o, container){
     const { recorded:amount, net, vat:vatAmount }=window.vatSplit(entered,vatTreatment);
     // Guard the common foot-gun: entering the VAT-inclusive contract price as
     // "exclusive" grosses it up 12% over the contract → phantom over-collection.
-    if(contract>0 && amount > contract + 0.5 && !confirm(`Recorded total ₱${fmt(amount)} exceeds the contract ₱${fmt(contract)} (VAT-${vatTreatment}). Record anyway?`)){ return; }
+    if(contract>0 && amount > contract + 0.5 && !(await confirmDialog({message:`Recorded total ₱${fmt(amount)} exceeds the contract ₱${fmt(contract)} (VAT-${vatTreatment}). Record anyway?`}))){ return; }
     saveBtn.disabled=true; // guard against double-click double-posting
     try{
       // Idempotency: one Sales-Revenue credit per sales order. If this order was
@@ -9417,7 +9420,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
   el.querySelectorAll('.bs-del-btn').forEach(btn => {
     btn.addEventListener('click', async e => {
       const b = e.currentTarget;
-      if (!confirm(`Delete quote "${b.dataset.qno||b.dataset.id}"? This cannot be undone.`)) return;
+      if (!(await confirmDialog({message:`Delete quote "${escHtml(b.dataset.qno||b.dataset.id)}"? This cannot be undone.`, danger:true, html:true}))) return;
       try {
         await db.collection('bs_quotes').doc(b.dataset.id).delete();
         window.logAudit && window.logAudit('delete','quote',b.dataset.id,{ quoteNo:b.dataset.qno });
@@ -9430,7 +9433,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
   el.querySelectorAll('.bs-delreq-btn').forEach(btn => {
     btn.addEventListener('click', async e => {
       const b = e.currentTarget;
-      const reason = prompt('Reason for deleting this quote? (sent to the president for approval)')||'';
+      const reason = (await promptDialog({message:'Reason for deleting this quote? (sent to the president for approval)', required:true, multiline:true}))||'';
       try {
         await db.collection('bs_quotes').doc(b.dataset.id).update({
           deleteRequested:true, deleteReason:reason,
@@ -9495,7 +9498,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
       const b = e.currentTarget;
       const snap = await db.collection('bs_quotes').doc(b.dataset.id).get();
       const q = snap.data();
-      openModal(`✎ Edit Quote — ${b.dataset.qno}`, `
+      openPage(`✎ Edit Quote — ${b.dataset.qno}`, `
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Edit this quotation directly. You can approve after editing, or return it to the submitter.</p>
         <div class="form-group"><label>Client Name</label>
           <input id="pres-client" type="text" value="${(q.clientName||'').replace(/"/g,'&quot;')}" style="width:100%"/>
@@ -9729,7 +9732,7 @@ function openQuoteEditor(currentUser, currentRole, brand, collection, existing, 
   let lines = existing ? [...(existing.lineItems||[])] : [{description:'',qty:1,price:0}];
   const isBS = brand === 'brilliant-steel';
 
-  openModal(existing ? `Edit Quote` : 'New Quote', `
+  openPage(existing ? `Edit Quote` : 'New Quote', `
     <div class="form-row">
       <div class="form-group"><label>Client Name</label><input id="q-client" value="${escHtml(existing?.clientName||'')}"/></div>
       <div class="form-group"><label>Client Email</label><input id="q-client-email" type="email" value="${escHtml(existing?.clientEmail||'')}"/></div>
@@ -9797,7 +9800,7 @@ function openQuoteEditor(currentUser, currentRole, brand, collection, existing, 
     const total = lines.reduce((s,l) => s + l.qty*l.price, 0);
     const chosenStatus = document.getElementById('q-status').value;
     if (chosenStatus === 'accepted' && existing?.status !== 'accepted'
-        && !confirm(`Mark this quote as ACCEPTED (₱${fmt(total)})? This signals the client has agreed.`)) return;
+        && !(await confirmDialog({message:`Mark this quote as ACCEPTED (₱${fmt(total)})? This signals the client has agreed.`}))) return;
     const s = await db.collection('users').doc(currentUser.uid).get();
     const agentName = s.exists ? s.data().displayName : currentUser.email;
     const data = {
@@ -10092,7 +10095,7 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.sg-reject-btn').forEach(btn => onClickSafe(btn, async () => {
-          if (!confirm(`Reject ${btn.dataset.name}?`)) return;
+          if (!(await confirmDialog({message:`Reject ${escHtml(btn.dataset.name)}?`, html:true}))) return;
           await db.collection('signup_requests').doc(btn.dataset.id).update({ status:'rejected', rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
           loadApprovalsSub('all');
       }));
@@ -10143,7 +10146,7 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.rz-reject-btn').forEach(btn => onClickSafe(btn, async () => {
-          const reason = prompt('Reason for declining (optional):')||'';
+          const reason = (await promptDialog({message:'Reason for declining (optional):', multiline:true}))||'';
           await window.RaiseFlow.reject(btn.dataset.id, reason);
           Notifs.showToast('Raise declined.');
           loadApprovalsSub('all');
@@ -10183,7 +10186,7 @@ window.renderApprovals = async function(currentUser) {
 
       // Finance request approve/deny (from "all" view)
       wrap.querySelectorAll('.fr-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-          if (!confirm(`Approve deletion of ${btn.dataset.name} (${btn.dataset.month}) payroll record?`)) return;
+          if (!(await confirmDialog({message:`Approve deletion of ${escHtml(btn.dataset.name)} (${btn.dataset.month}) payroll record?`, danger:true, html:true}))) return;
           btn.disabled = true;
           // Guard against a stale click / second President session re-running an already-resolved request.
           const _req = await db.collection('payroll_delete_requests').doc(btn.dataset.id).get().catch(()=>null);
@@ -10207,7 +10210,7 @@ window.renderApprovals = async function(currentUser) {
 
       // Generic finance delete request approve/deny (from "all" view)
       wrap.querySelectorAll('.fdel-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-          if (!confirm(`Approve deletion of ${btn.dataset.label}? This permanently deletes it.`)) return;
+          if (!(await confirmDialog({message:`Approve deletion of ${escHtml(btn.dataset.label)}? This permanently deletes it.`, danger:true, html:true}))) return;
           btn.disabled = true;
           // Guard: a stale click or a second President session must not re-run an
           // already-resolved request (would double-apply a payslip's CA reversal).
@@ -10235,7 +10238,7 @@ window.renderApprovals = async function(currentUser) {
         loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.qa-return-btn').forEach(btn => onClickSafe(btn, async () => {
-        const notes = prompt('Notes for the partner (what to revise)?')||'';
+        const notes = (await promptDialog({message:'Notes for the partner (what to revise)?', multiline:true}))||'';
         await returnQuoteToPartner(btn.dataset.quote, btn.dataset.by, btn.dataset.qno, btn.dataset.name, notes);
         loadApprovalsSub('all');
       }));
@@ -10243,7 +10246,7 @@ window.renderApprovals = async function(currentUser) {
       // ── Quote delete requests — approve (delete) or deny (clear flag) ──
       // Collection-aware: bs_quotes (partner) and bk_quotes (internal Sales).
       wrap.querySelectorAll('.dq-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-        if (!confirm(`Approve deletion of quote ${btn.dataset.qno}? This permanently removes it.`)) return;
+        if (!(await confirmDialog({message:`Approve deletion of quote ${btn.dataset.qno}? This permanently removes it.`, danger:true}))) return;
         const coll = btn.dataset.coll || 'bs_quotes';
         try {
           await db.collection(coll).doc(btn.dataset.id).delete();
@@ -10261,7 +10264,7 @@ window.renderApprovals = async function(currentUser) {
         } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
       }));
       wrap.querySelectorAll('.dc-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-        if (!confirm(`Approve deletion of client "${btn.dataset.name}"? This permanently removes the client folder.`)) return;
+        if (!(await confirmDialog({message:`Approve deletion of client "${escHtml(btn.dataset.name)}"? This permanently removes the client folder.`, danger:true, html:true}))) return;
         try {
           await db.collection('bs_clients').doc(btn.dataset.id).delete();
           window.logAudit && window.logAudit('delete','client',btn.dataset.id,{ name:btn.dataset.name, viaApproval:true });
@@ -10285,7 +10288,7 @@ window.renderApprovals = async function(currentUser) {
         loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.lv-reject-btn').forEach(btn => onClickSafe(btn, async () => {
-        const reason = prompt('Reason for rejection (optional):')||'';
+        const reason = (await promptDialog({message:'Reason for rejection (optional):', multiline:true}))||'';
         await window.rejectLeaveRequest(btn.dataset.id, reason);
         Notifs.showToast(`Leave rejected for ${btn.dataset.name}`);
         loadApprovalsSub('all');
@@ -10364,7 +10367,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.grade-task-btn').forEach(btn=>btn.addEventListener('click',()=>openTaskDetail(btn.dataset.id, currentUser, _role)));
       wrap.querySelectorAll('.grade-kpi-btn').forEach(btn=>btn.addEventListener('click',()=>{
         const { uid, name } = btn.dataset;
-        openModal(`⭐ Grade: ${name}`, `
+        openPage(`⭐ Grade: ${name}`, `
           <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Assign a performance grade for ${escHtml(name)} (1 = poor, 10 = outstanding). Development areas are shown to the employee.</p>
           <div class="form-group"><label>President Grade (1–10)</label>
             <input id="ap-grade-input" type="number" inputmode="numeric" min="1" max="10" step="1" placeholder="e.g. 8"/></div>
@@ -10439,7 +10442,7 @@ window.renderApprovals = async function(currentUser) {
       `;
 
       wrap.querySelectorAll('.fr-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-          if (!confirm(`Approve deletion of ${btn.dataset.name} (${btn.dataset.month}) payroll record?`)) return;
+          if (!(await confirmDialog({message:`Approve deletion of ${escHtml(btn.dataset.name)} (${btn.dataset.month}) payroll record?`, danger:true, html:true}))) return;
           btn.disabled = true;
           // Guard against a stale click / second President session re-running an already-resolved request.
           const _req = await db.collection('payroll_delete_requests').doc(btn.dataset.id).get().catch(()=>null);
@@ -10461,7 +10464,7 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('finance-requests');
       }));
       wrap.querySelectorAll('.fdel-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-          if (!confirm(`Approve deletion of ${btn.dataset.label}? This permanently deletes it.`)) return;
+          if (!(await confirmDialog({message:`Approve deletion of ${escHtml(btn.dataset.label)}? This permanently deletes it.`, danger:true, html:true}))) return;
           btn.disabled = true;
           // Guard: a stale click or a second President session must not re-run an
           // already-resolved request (would double-apply a payslip's CA reversal).
@@ -10515,7 +10518,7 @@ window.renderApprovals = async function(currentUser) {
         loadApprovalsSub('leave');
       }));
       wrap.querySelectorAll('.lv-reject-btn').forEach(btn => onClickSafe(btn, async () => {
-        const reason = prompt('Reason for rejection (optional):')||'';
+        const reason = (await promptDialog({message:'Reason for rejection (optional):', multiline:true}))||'';
         await window.rejectLeaveRequest(btn.dataset.id, reason);
         Notifs.showToast(`Leave rejected for ${btn.dataset.name}`);
         loadApprovalsSub('leave');
@@ -10555,14 +10558,14 @@ window.renderApprovals = async function(currentUser) {
       </div>`;
       wrap.querySelectorAll('.rt-view-btn').forEach(btn=>btn.addEventListener('click',()=>openTaskDetail(btn.dataset.id,currentUser,window.currentRole||'president')));
       wrap.querySelectorAll('.rt-approve-btn').forEach(btn=>btn.addEventListener('click',async()=>{
-        if (!confirm(`Approve "${btn.dataset.name}"?`)) return;
+        if (!(await confirmDialog({message:`Approve "${escHtml(btn.dataset.name)}"?`, html:true}))) return;
         await db.collection('tasks').doc(btn.dataset.id).update({status:'approved',approvedAt:firebase.firestore.FieldValue.serverTimestamp(),approvedBy:currentUser.uid});
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
         Notifs.showToast(`"${btn.dataset.name}" approved!`,'success');
         loadApprovalsSub('review-tasks');
       }));
       wrap.querySelectorAll('.rt-reject-btn').forEach(btn=>btn.addEventListener('click',async()=>{
-        if (!confirm(`Send "${btn.dataset.name}" back for revision?`)) return;
+        if (!(await confirmDialog({message:`Send "${escHtml(btn.dataset.name)}" back for revision?`, html:true}))) return;
         await db.collection('tasks').doc(btn.dataset.id).update({status:'in-progress',sentBackAt:firebase.firestore.FieldValue.serverTimestamp(),sentBackBy:currentUser.uid});
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
         Notifs.showToast(`"${btn.dataset.name}" sent back for revision.`,'info');
@@ -10649,7 +10652,7 @@ window.renderApprovals = async function(currentUser) {
 
       wrap.querySelectorAll('.signup-reject').forEach(btn => {
         btn.addEventListener('click', async () => {
-          if (!confirm(`Reject ${btn.dataset.name}'s request?`)) return;
+          if (!(await confirmDialog({message:`Reject ${escHtml(btn.dataset.name)}'s request?`, html:true}))) return;
           await db.collection('signup_requests').doc(btn.dataset.id).update({
             status: 'rejected', rejectedAt: firebase.firestore.FieldValue.serverTimestamp()
           });
@@ -10858,7 +10861,7 @@ async function openQuoteApprovalReview(ctx, onDone){
   const q = snap.data();
   const ta = 'width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical';
   const hasSnapshot = !!q.editableState;
-  openModal(`📝 Review Quote — ${escHtml(quoteNumber||q.quoteNumber||'')}`, `
+  openPage(`📝 Review Quote — ${escHtml(quoteNumber||q.quoteNumber||'')}`, `
     <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Open the full quote in the builder to review/edit line items (saved back to the partner's quote), or adjust the key fields below, then approve or return it to the partner.</p>
     <button class="btn-secondary btn-sm" id="qar-open-builder" style="margin-bottom:14px" ${hasSnapshot?'':'disabled title="No editable snapshot for this quote"'}>🔧 Open full quote in Builder${hasSnapshot?'':' (no snapshot)'}</button>
     <div class="form-group"><label>Client Name</label><input id="qar-client" value="${(q.clientName||'').replace(/"/g,'&quot;')}"/></div>
@@ -10961,7 +10964,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
 
   const openClientEditor = (cl) => {
     const e = cl || {};
-    openModal(cl?'Edit Client':'Add Client', `
+    openPage(cl?'Edit Client':'Add Client', `
       <div class="form-group"><label>Name</label><input id="cl-name" value="${escHtml(e.name||'')}" placeholder="Client full name"/></div>
       <div class="form-group"><label>Company</label><input id="cl-company" value="${escHtml(e.company||'')}" placeholder="Company name"/></div>
       <div class="form-row">
@@ -11004,12 +11007,12 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
     }));
     container.querySelectorAll('.cl-edit-btn').forEach(b => b.addEventListener('click', () => openClientEditor(clients.find(c=>c.id===b.dataset.id))));
     container.querySelectorAll('.cl-del-btn').forEach(b => b.addEventListener('click', async () => {
-      if (!confirm(`Delete client "${b.dataset.name}"? This cannot be undone.`)) return;
+      if (!(await confirmDialog({message:`Delete client "${escHtml(b.dataset.name)}"? This cannot be undone.`, danger:true, html:true}))) return;
       try { await db.collection(collection).doc(b.dataset.id).delete(); window.logAudit&&window.logAudit('delete','client',b.dataset.id,{name:b.dataset.name}); Notifs.showToast('Client deleted'); renderClientProfiles(container, currentUser, currentRole, brand); }
       catch(ex){ Notifs.showToast('Delete failed','error'); }
     }));
     container.querySelectorAll('.cl-delreq-btn').forEach(b => b.addEventListener('click', async () => {
-      const reason = prompt('Reason for deleting this client folder? (sent to the president for approval)')||'';
+      const reason = (await promptDialog({message:'Reason for deleting this client folder? (sent to the president for approval)', required:true, multiline:true}))||'';
       try {
         await db.collection(collection).doc(b.dataset.id).update({ deleteRequested:true, deleteReason:reason, deleteRequestedBy:currentUser.uid, deleteRequestedAt:firebase.firestore.FieldValue.serverTimestamp() });
         await Notifs.sendToOwner({ title:'🗑 Client Delete Requested', body:`${userProfile?.displayName||currentUser.email} requests deleting client "${b.dataset.name}".${reason?' Reason: '+reason:''}`, icon:'🗑', type:'client_delete_request' });
@@ -11151,7 +11154,7 @@ async function renderDocCollection(container, collection, title, currentUser, cu
   `;
 
   document.getElementById('add-doc-btn')?.addEventListener('click', () => {
-    openModal(`Add to ${title}`, `
+    openPage(`Add to ${title}`, `
       <div class="form-group"><label>Title</label><input id="doc-title" placeholder="Document title"/></div>
       <div class="form-group"><label>Description</label><textarea id="doc-desc" rows="2"></textarea></div>
       <div id="doc-file-upload"></div>
@@ -11189,7 +11192,7 @@ async function renderDocCollection(container, collection, title, currentUser, cu
       if (opts.dept === 'Finance') {
         window.financeDelete({ collection, docId:btn.dataset.id, label:`${singular.toLowerCase()} "${btn.dataset.label}"`, onDone:redo });
       } else {
-        if (!confirm(`Delete "${btn.dataset.label}"? This cannot be undone.`)) return;
+        if (!(await confirmDialog({message:`Delete "${escHtml(btn.dataset.label)}"? This cannot be undone.`, danger:true, html:true}))) return;
         try { await db.collection(collection).doc(btn.dataset.id).delete(); Notifs.showToast('Deleted.'); redo(); }
         catch(e) { Notifs.showToast('Delete failed: '+(e.message||e),'error'); }
       }
@@ -11245,7 +11248,7 @@ function bindFileCollection(id, currentUser, dept, subfolder) {
     filesDiv.querySelectorAll('.file-delete-btn').forEach(btn => {
       btn.addEventListener('click', async e => {
         e.stopPropagation();
-        if (!confirm(`Delete "${btn.dataset.name}"? This cannot be undone.`)) return;
+        if (!(await confirmDialog({message:`Delete "${escHtml(btn.dataset.name)}"? This cannot be undone.`, danger:true, html:true}))) return;
         await db.collection(collection).doc(btn.dataset.id).delete();
         Notifs.showToast('File deleted.');
         reloadFiles();
@@ -11256,7 +11259,7 @@ function bindFileCollection(id, currentUser, dept, subfolder) {
     filesDiv.querySelectorAll('.file-req-delete-btn').forEach(btn => {
       btn.addEventListener('click', async e => {
         e.stopPropagation();
-        if (!confirm(`Request deletion of "${btn.dataset.name}"? The president will be notified to approve.`)) return;
+        if (!(await confirmDialog({message:`Request deletion of "${escHtml(btn.dataset.name)}"? The president will be notified to approve.`, danger:true, html:true}))) return;
         await db.collection(collection).doc(btn.dataset.id).update({ deleteRequested: true, deleteRequestedBy: currentUser.uid });
         // Notify president
         const presSnap = await db.collection('users').where('role','==','president').limit(1).get().catch(()=>({empty:true}));
@@ -11398,7 +11401,7 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
 
   // Add budget line
   document.getElementById('add-budget-line-btn')?.addEventListener('click', () => {
-    openModal('Add Budget Line', `
+    openPage('Add Budget Line', `
       <div class="form-group"><label>Item Name</label><input id="bg-name" placeholder="e.g. Social Media Ads"/></div>
       <div class="form-group"><label>Allocated Budget (₱)</label><input id="bg-budget" type="number" step="0.01" min="0" inputmode="decimal"/></div>
     `, `<button class="btn-primary" id="save-bg-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -11418,7 +11421,7 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
   // Log expense / income → writes to shared Finance ledger
   document.getElementById('log-expense-btn')?.addEventListener('click', () => {
     const lineOptions = items.map(i=>`<option value="${i.id}" data-name="${escHtml(i.name)}">${escHtml(i.name)}</option>`).join('');
-    openModal('Log Expense / Income', `
+    openPage('Log Expense / Income', `
       <div class="form-row">
         <div class="form-group"><label>Date</label><input id="exp-date" type="date" value="${today()}"/></div>
         <div class="form-group"><label>Type</label>
@@ -11577,7 +11580,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
   uploadBtn?.addEventListener('click', () => {
     const existingFolders = [...new Set(allFiles.map(f=>f.folder||'General'))];
     const prefill = (activeFolder!=='All' && activeFolder!=='__archived__') ? activeFolder : '';
-    openModal('Upload File', `
+    openPage('Upload File', `
       <div class="form-group"><label>File Name / Title</label><input id="fn-title" placeholder="Descriptive name"/></div>
       <div class="form-group"><label>File Type</label>
         <select id="fn-type"><option>Document</option><option>Image</option><option>Spreadsheet</option><option>PDF</option><option>Other</option></select>
@@ -11635,7 +11638,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
   addLinkBtn?.addEventListener('click', () => {
     const existingFolders = [...new Set(allFiles.map(f=>f.folder||'General'))];
     const prefill = (activeFolder!=='All' && activeFolder!=='__archived__') ? activeFolder : '';
-    openModal('Add Link', `
+    openPage('Add Link', `
       <div class="form-group"><label>Title</label><input id="lk-title" placeholder="e.g. Google Drive folder, Spec sheet"/></div>
       <div class="form-group"><label>URL</label><input id="lk-url" type="url" placeholder="https://…"/></div>
       <div class="form-group"><label>Description</label><textarea id="lk-desc" rows="2" placeholder="Optional notes about this link"></textarea></div>
@@ -11733,7 +11736,7 @@ window.renderDocCollection = function(container, collection, title, currentUser,
       <p style="font-size:14px;line-height:1.6;margin-bottom:10px">${escHtml(d.description||'No details.')}</p>
       ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:12px;display:block">📎 View File</a>`:''}
     `;
-    openModal(escHtml(d.title||d.name||'Bidding'), body,
+    openPage(escHtml(d.title||d.name||'Bidding'), body,
       canManageGov
         ? `<button class="btn-primary" id="gb-save">Save</button><button class="btn-danger" id="gb-del">Delete</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`
         : `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
@@ -11750,7 +11753,7 @@ window.renderDocCollection = function(container, collection, title, currentUser,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid
       };
       if (targetCol !== collection) {
-        if (!confirm(`Move "${title}" to ${GOV_BUCKETS.find(b=>b.collection===targetCol)?.label||targetCol}?`)) return;
+        if (!(await confirmDialog({message:`Move "${escHtml(title)}" to ${GOV_BUCKETS.find(b=>b.collection===targetCol)?.label||targetCol}?`, html:true}))) return;
         // Move = create in the target bucket + delete from current (atomic batch).
         const { id:_omitId, ...rest } = d;
         const batch = db.batch();
@@ -11766,7 +11769,7 @@ window.renderDocCollection = function(container, collection, title, currentUser,
       closeModal(); loadDocs();
     });
     document.getElementById('gb-del')?.addEventListener('click', async () => {
-      if (!confirm(`Delete "${d.title||d.name||'this bid'}"? This cannot be undone.`)) return;
+      if (!(await confirmDialog({message:`Delete "${escHtml(d.title||d.name||'this bid')}"? This cannot be undone.`, danger:true, html:true}))) return;
       await db.collection(collection).doc(d.id).delete();
       closeModal(); Notifs.showToast('Bid deleted.'); loadDocs();
     });
@@ -11774,7 +11777,7 @@ window.renderDocCollection = function(container, collection, title, currentUser,
 
   loadDocs();
   document.getElementById(`add-doc-btn-${collection}`)?.addEventListener('click', () => {
-    openModal(`Add ${title}`, `
+    openPage(`Add ${title}`, `
       <div class="form-group"><label>Title</label><input id="gd-title"/></div>
       <div class="form-group"><label>Description</label><textarea id="gd-desc" rows="3"></textarea></div>
       <div id="gd-file-area"></div>
@@ -11986,7 +11989,7 @@ function openJobProjectDetail(p){
 function openProjectMarginModal(p){
   const isShared = !!(p.split&&p.split.isShared);
   const pct = (p.split&&typeof p.split.partnerPct==='number')?p.split.partnerPct:50;
-  openModal('💰 Edit Profit Factors — '+(escHtml(p.clientName||p.projectNo||'Project')), `
+  openPage('💰 Edit Profit Factors — '+(escHtml(p.clientName||p.projectNo||'Project')), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract value <strong>₱${fmt(p.contractAmount||0)}</strong>. Expected earnings = (Contract − Capital) × split%.</div>
     <div class="form-group"><label>Capital / cost (₱)</label><input id="pm-capital" type="number" step="0.01" min="0" value="${p.capital||0}" inputmode="decimal"/>
       <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Total material + labor + overhead to produce this job.</div></div>
@@ -12055,7 +12058,7 @@ async function advanceProjectStage(p, nextId){
 
 function openProjectBillingModal(p){
   const bal=p.arBalance||0;
-  openModal('💵 Record Payment — '+(p.clientName||''), `
+  openPage('💵 Record Payment — '+(p.clientName||''), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract ₱${fmt(p.contractAmount||0)} · Collected ₱${fmt(p.amountCollected||0)} · <strong>Balance ₱${fmt(bal)}</strong></div>
     <div class="form-row">
       <div class="form-group"><label>Payment Type</label><select id="pb-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Downpayment</option><option>Progress Billing</option><option>Final Balance</option></select></div>
@@ -12132,7 +12135,7 @@ function openJobBillingInvoiceModal(p){
   const contract = Number(p.contractAmount)||0;
   const paid     = Number(p.amountCollected)||0;
   const bal      = Math.max(0, contract - paid);
-  openModal('🧾 Billing Invoice — '+escHtml(p.clientName||''), `
+  openPage('🧾 Billing Invoice — '+escHtml(p.clientName||''), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract ₱${fmt(contract)} · Collected ₱${fmt(paid)} · <strong>Balance ₱${fmt(bal)}</strong></div>
     <div class="form-group"><label>Bill To</label><input id="jinv-billto" value="${escHtml(p.clientName||'')}"/></div>
     <div class="form-row">
@@ -12167,7 +12170,7 @@ function openJobBillingInvoiceModal(p){
       issuedBy:       who,
       createdAt:      today()
     };
-    if(!confirm(`Generate billing invoice ${inv.no} for ₱${fmt(amt)} (${p.clientName||''})?`)) return;
+    if(!(await confirmDialog({message:`Generate billing invoice ${inv.no} for ₱${fmt(amt)} (${escHtml(p.clientName||'')})?`, html:true}))) return;
     try{
       // Atomic append so a concurrent edit can't clobber the invoice list.
       const ref=db.collection('job_projects').doc(p.id);
@@ -12473,7 +12476,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
   const pf = (!order && prefillProjectId) ? projs.find(p=>p.id===prefillProjectId) : null;
   const dfClient = e.client || pf?.clientName || '';
   const dfQuote  = e.quoteRef || pf?.quoteNumber || '';
-  openModal(order ? `Edit Order ${e.orderNo||''}` : '🏭 New Production Order', `
+  openPage(order ? `Edit Order ${e.orderNo||''}` : '🏭 New Production Order', `
     <div class="form-group"><label>Linked Project (job)</label>
       <select id="po-project" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${projOpts}</select>
     </div>
@@ -12536,7 +12539,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
   document.getElementById('po-consume')?.addEventListener('click', async ()=>{
     const materials = collectMaterials();
     if (!materials.length) { Notifs.showToast('Add at least one material with a quantity.','error'); return; }
-    if (!confirm(`Consume these materials? This deducts stock and posts COS to the ledger (one-time).`)) return;
+    if (!(await confirmDialog({message:`Consume these materials? This deducts stock and posts COS to the ledger (one-time).`, danger:true}))) return;
     const btn = document.getElementById('po-consume'); btn.disabled = true;
     try {
       await db.collection('production_orders').doc(order.id).update({ materials });
@@ -12594,7 +12597,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
     } catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
   });
   document.getElementById('po-del')?.addEventListener('click', async ()=>{
-    if(!confirm('Delete this production order?')) return;
+    if(!(await confirmDialog({message:'Delete this production order?', danger:true}))) return;
     try { await db.collection('production_orders').doc(order.id).delete(); window.logAudit&&window.logAudit('delete','production_order',order.id,{orderNo:order.orderNo||''}); closeModal(); Notifs.showToast('Deleted'); onSaved && onSaved(); }
     catch(ex){ Notifs.showToast('Delete failed (admin only)','error'); }
   });
@@ -12713,8 +12716,8 @@ async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
 
   el.querySelectorAll('.cf-kind-chip').forEach(b=>b.addEventListener('click',()=>renderProdInventoryForm(el,currentRole,b.dataset.kind)));
   document.getElementById('cf-addrow')?.addEventListener('click',()=>{ draft.extras.push({}); persist(); renderProdInventoryForm(el,currentRole,kindFilter); });
-  document.getElementById('cf-clear')?.addEventListener('click',()=>{
-    if(!confirm('Clear all counts, remarks and header fields on this form?')) return;
+  document.getElementById('cf-clear')?.addEventListener('click', async ()=>{
+    if(!(await confirmDialog({message:'Clear all counts, remarks and header fields on this form?', danger:true}))) return;
     localStorage.removeItem(PROD_COUNT_DRAFT_KEY); Notifs.showToast('Form cleared'); renderProdInventoryForm(el,currentRole,kindFilter);
   });
   document.getElementById('cf-print')?.addEventListener('click',()=>openInventoryCountForm(shown, loadCountDraft(), kindFilter));
@@ -13034,7 +13037,7 @@ function bindRfqCard(r, currentUser, currentRole, content) {
 
   cardEl.querySelector('.rfq-del')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
-    if (!confirm(`Delete RFQ "${btn.dataset.label}"? This cannot be undone.`)) return;
+    if (!(await confirmDialog({message:`Delete RFQ "${escHtml(btn.dataset.label)}"? This cannot be undone.`, danger:true, html:true}))) return;
     try {
       await db.collection('purchase_requisitions').doc(btn.dataset.id).delete();
       Notifs.showToast('Deleted.');
@@ -13048,7 +13051,7 @@ function openRfqModal(currentUser, onDone, prefill) {
   const deptOpts = Object.keys(window.DEPARTMENTS || {})
     .filter(k => k !== 'Brilliant Steel' && k !== 'Partners')
     .map(k => `<option>${escHtml(k)}</option>`).join('');
-  openModal('🛒 New Request for Quotation', `
+  openPage('🛒 New Request for Quotation', `
     <div class="form-row">
       <div class="form-group"><label>Title / Purpose *</label><input id="rfq-title" value="${escHtml(prefill.title||'')}" placeholder="e.g. Steel sheets for Job #123"/></div>
       <div class="form-group"><label>Supplier</label><input id="rfq-supplier" placeholder="Supplier name (optional)"/></div>
@@ -13262,7 +13265,7 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
   // Purchasing → hand the completed purchase to Finance for recordkeeping.
   if (canEdit) content.querySelectorAll('.pr-submit-fin').forEach(btn => btn.addEventListener('click', async () => {
     const p = prs.find(x => x.id === btn.dataset.id); if (!p) return;
-    if (!confirm(`Submit "${p.title || p.prNo}" (₱${fmt(p.total != null ? p.total : purchTotal(p.items))}) to Finance for recordkeeping?`)) return;
+    if (!(await confirmDialog({message:`Submit "${escHtml(p.title || p.prNo)}" (₱${fmt(p.total != null ? p.total : purchTotal(p.items))}) to Finance for recordkeeping?`, html:true}))) return;
     btn.disabled = true;
     try {
       await db.collection('purchase_requisitions').doc(p.id).update({
@@ -13364,7 +13367,7 @@ async function notifyFinanceTeam(data) {
 function recordPurchaseDisbursement(p, currentUser, onDone) {
   const total = p.total != null ? p.total : purchTotal(p.items);
   const ref = p.prNo || p.rfqNo || '';
-  openModal('🧾 Record Purchase — Cash Disbursement', `
+  openPage('🧾 Record Purchase — Cash Disbursement', `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Posting <strong>${escHtml(p.title || ref)}</strong> to the Cash Disbursement Journal.</div>
     <div class="form-row">
       <div class="form-group"><label>Reference</label><input id="rec-ref" value="${escHtml(ref)}"/></div>
@@ -13414,7 +13417,7 @@ function recordPurchaseDisbursement(p, currentUser, onDone) {
     try {
       if (reference) {
         const dupe = await db.collection('cash_disbursement_journal').where('reference', '==', reference).limit(1).get().catch(() => ({ empty: true }));
-        if (!dupe.empty && !confirm(`A disbursement with reference "${reference}" already exists. Post another?`)) { saveBtn.disabled = false; return; }
+        if (!dupe.empty && !(await confirmDialog({message:`A disbursement with reference "${escHtml(reference)}" already exists. Post another?`, html:true}))) { saveBtn.disabled = false; return; }
       }
       const dueDate = document.getElementById('rec-date').value;
       await window.assertPeriodOpen(dueDate);

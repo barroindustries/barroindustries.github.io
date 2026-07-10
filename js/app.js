@@ -82,7 +82,9 @@ document.addEventListener('DOMContentLoaded', () => {
       checkPayrollDuties(user);
       checkCAReminder(user);
       buildNav();
-      navigateTo('dashboard');
+      // v12 WS10 — deep-link/refresh survives: land wherever the hash points,
+      // not hardcoded dashboard. replace:true so this doesn't push a 2nd entry.
+      { const r = parseHash(); navigateTo(r.page, { subtab: r.subtab, replace: true }); }
       startAutoLogout();
       startPresenceHeartbeat(user.uid);
       startForceLogoutListener(user.uid);
@@ -1175,7 +1177,7 @@ async function saveReviewedPartnerQuote(ctx, action) {
   try { payload = await requestBuilderState(frame); }
   catch (e) { Notifs.showToast('Could not read the edited quote — try again', 'error'); return; }
   const notes = action === 'return'
-    ? (prompt('Notes for the partner (what changed / what to confirm)?') || '')
+    ? ((await promptDialog({message:'Notes for the partner (what changed / what to confirm)?', multiline:true})) || '')
     : '';
   const update = {
     clientName:    payload.clientName || ctx.clientName || '',
@@ -1405,7 +1407,7 @@ function normalizeProduct(p) {
 // with the current source-of-truth values each time, so it's always safe.
 window.runSecurityBackfill = async function() {
   if (!isPresident()) return;
-  if (!confirm('Backfill the username login map from existing user accounts?\n\nSafe to run repeatedly.')) return;
+  if (!await confirmDialog({ message: 'Backfill the username login map from existing user accounts?\n\nSafe to run repeatedly.' })) return;
   Notifs.showToast('Backfilling usernames…');
   try {
     const snap = await db.collection('users').get();
@@ -1644,7 +1646,7 @@ async function renderProductDatabase() {
   // Import any new catalog items (e.g. the Baking line) from products-database.json
   document.getElementById('pdb-import-btn')?.addEventListener('click', async () => {
     const btn = document.getElementById('pdb-import-btn');
-    if (!confirm('Import any new products from the catalog file?\n\nThis ADDS items not already in your database (and merges new categories like Baking). It never overwrites or deletes your existing edits.')) return;
+    if (!await confirmDialog({ message: 'Import any new products from the catalog file?\n\nThis ADDS items not already in your database (and merges new categories like Baking). It never overwrites or deletes your existing edits.' })) return;
     btn.disabled = true; btn.textContent = 'Importing…';
     try {
       const added = await importNewCatalogItems();
@@ -1799,7 +1801,7 @@ async function renderProductDatabase() {
     if (e.target.classList.contains('pdb-del-btn')) {
       const pid  = e.target.dataset.pid;
       const name = e.target.dataset.name;
-      if (!confirm(`Delete "${name}"? This cannot be undone.`)) return;
+      if (!await confirmDialog({ message: `Delete "${escHtml(name)}"? This cannot be undone.`, danger: true, html: true })) return;
       await db.collection('products').doc(pid).delete();
       window.logAudit && window.logAudit('delete', 'product', pid, { name });
       Notifs.showToast('Product deleted', 'success');
@@ -1845,29 +1847,51 @@ async function renderProductDatabase() {
 
 // ── Navigate ──────────────────────────────────────
 // Top-bar back button — shows only when there's somewhere to go back to.
+// ── v12 WS10 — hash router (History API) ─────────────────────────────────
+// Hash-based, not pushState paths: GitHub Pages has no server rewrite / no
+// 404.html, and hash never leaves the client — survives refresh/deep-link
+// with zero server plumbing.
+function hashFor(page, subtab) {
+  const segs = String(page).startsWith('dept:')
+    ? ['dept', page.slice(5)].concat(subtab ? [subtab] : [])
+    : [page].concat(subtab ? [subtab] : []);
+  return '#/' + segs.map(encodeURIComponent).join('/');
+}
+window.hashFor = hashFor;
+function parseHash(h) {
+  h = (h == null ? location.hash : h).replace(/^#\/?/, '');
+  if (!h) return { page: 'dashboard', subtab: null };
+  const s = h.split('/').map(decodeURIComponent);
+  if (s[0] === 'dept' && s[1]) return { page: 'dept:' + s[1], subtab: s[2] || null };
+  return { page: s[0] || 'dashboard', subtab: s[1] || null };
+}
+
 function updateNavBackBtn() {
   const b = document.getElementById('nav-back-btn');
-  if (b) b.style.display = (window._navHistory && window._navHistory.length) ? '' : 'none';
+  // Real history now backs this: show the button whenever we've navigated at
+  // least once within the app (depth>0) and we're not sitting on the dashboard root.
+  if (b) b.style.display = ((window._navDepth||0) > 0 && window.currentPage !== 'dashboard') ? '' : 'none';
 }
-window.navBack = function() {
-  window._navHistory = window._navHistory || [];
-  const prev = window._navHistory.pop();
-  if (prev) { window._navGoingBack = true; try { navigateTo(prev); } finally { window._navGoingBack = false; } }
-  updateNavBackBtn();
-};
+window.navBack = function() { history.back(); };   // the top-bar chevron === device Back
 
-function navigateTo(page) {
-  // Maintain a lightweight nav history for the top-bar back button (additive,
-  // never throws). Skip pushes during a back-navigation so we don't loop.
-  try {
-    if (!window._navGoingBack && window.currentPage && window.currentPage !== page) {
-      window._navHistory = window._navHistory || [];
-      window._navHistory.push(window.currentPage);
-      if (window._navHistory.length > 25) window._navHistory.shift();
-    }
-  } catch (_) {}
+function navigateTo(page, opts) {
+  opts = opts || {};
+  const subtab = (opts.subtab !== undefined) ? opts.subtab : null;
+
+  // If overlays are open and this is a real (non-history) navigation, tear them
+  // down first so a nav click from inside a modal/page doesn't leave a dangling panel.
+  if (!opts.fromHistory && window.Overlay && window.Overlay.isOpen()) window.Overlay.clearAll();
+
+  // Sync the URL + history entry (skip when we're rendering FROM history).
+  if (!opts.fromHistory) {
+    const st = { t:'page', page, subtab, d: (opts.replace ? (window._navDepth||0) : (window._navDepth = (window._navDepth||0) + (page===window.currentPage?0:1))) };
+    const url = hashFor(page, subtab);
+    try { opts.replace ? history.replaceState(st,'',url) : history.pushState(st,'',url); } catch(_){}
+  }
+
   currentPage = page;
   window.currentPage = page;
+  window.currentSubtab = subtab;          // screens read this via initialSubtab()
   setActiveNav(page);
   updateNavBackBtn();
   // Close task fullscreen panel if open
@@ -3361,6 +3385,7 @@ async function renderPartnersDept() {
     return;
   }
   const c = document.getElementById('page-content');
+  const initSub = window.initialSubtab('overview');
   c.innerHTML = `
     <div class="page-header">
       <h2>🤝 Partners</h2>
@@ -3372,11 +3397,11 @@ async function renderPartnersDept() {
       {key:'quotes',label:'Quotes'},
       {key:'quote-builder',label:'Quote Builder'},
       {key:'activity',label:'Activity'},
-    ], 'overview', {cls:'partners-dept-tabs'})}
+    ], initSub, {cls:'partners-dept-tabs'})}
     <div id="partners-dept-content"><div class="loading-placeholder">Loading…</div></div>
   `;
-  window.bindChipTabs(c.querySelector('.partners-dept-tabs'), (key)=>loadPartnersDeptTab(key));
-  loadPartnersDeptTab('overview');
+  window.bindChipTabs(c.querySelector('.partners-dept-tabs'), (key)=>{ window.setSubroute(key); loadPartnersDeptTab(key); });
+  loadPartnersDeptTab(initSub);
 }
 
 async function loadPartnersDeptTab(sub) {
@@ -3442,8 +3467,8 @@ async function loadPartnersDeptTab(sub) {
           </div></div>`}
       `;
       document.getElementById('add-deal-btn')?.addEventListener('click', () => _showAddDealModal(partners, () => loadPartnersDeptTab('deals')));
-      window._closeDeal   = async (id) => { if(!confirm('Mark this deal as completed?')) return; await db.collection('partner_deals').doc(id).update({status:'completed'}); loadPartnersDeptTab('deals'); };
-      window._markDealPaid = async (id) => { if(!confirm('Mark partner share as paid out?')) return; await db.collection('partner_deals').doc(id).update({status:'paid', paidOutDate: firebase.firestore.FieldValue.serverTimestamp()}); loadPartnersDeptTab('deals'); };
+      window._closeDeal   = async (id) => { if(!await confirmDialog({ message: 'Mark this deal as completed?' })) return; await db.collection('partner_deals').doc(id).update({status:'completed'}); loadPartnersDeptTab('deals'); };
+      window._markDealPaid = async (id) => { if(!await confirmDialog({ message: 'Mark partner share as paid out?', danger: true })) return; await db.collection('partner_deals').doc(id).update({status:'paid', paidOutDate: firebase.firestore.FieldValue.serverTimestamp()}); loadPartnersDeptTab('deals'); };
       break;
     }
     case 'overview': {
@@ -3883,7 +3908,7 @@ async function renderSOPs() {
 // the original built-in SOPs). The textarea round-trips raw HTML safely.
 function openSOPEditor(id, sop) {
   sop = sop || { title:'', items:[], order:0 };
-  openModal(id ? 'Edit SOP' : 'Add SOP', `
+  openPage(id ? 'Edit SOP' : 'Add SOP', `
     <div class="form-group"><label>Title (include an emoji, e.g. 📅 Daily Attendance)</label>
       <input id="sop-e-title" value="${escHtml(sop.title||'')}" placeholder="📋 Procedure name"/></div>
     <div class="form-group"><label>Steps — one per line (you can use &lt;strong&gt; and &lt;em&gt;)</label>
@@ -3904,7 +3929,7 @@ function openSOPEditor(id, sop) {
     } catch(e) { err.textContent = 'Save failed: '+(e.message||e.code); err.classList.remove('hidden'); }
   });
   document.getElementById('sop-e-del')?.addEventListener('click', async () => {
-    if (!confirm('Delete this SOP permanently?')) return;
+    if (!await confirmDialog({ message: 'Delete this SOP permanently?', danger: true })) return;
     try { await db.collection('sops').doc(id).delete(); closeModal(); renderSOPs(); }
     catch(e) { Notifs.showToast('Delete failed','error'); }
   });
@@ -4081,7 +4106,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
     document.querySelectorAll('.grade-emp-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const { uid, name, presgrade, presnotes, presimprove } = btn.dataset;
-        openModal(`Grade: ${name}`, `
+        openPage(`Grade: ${name}`, `
           <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Assign a performance grade for ${escHtml(name)} (1 = poor, 10 = outstanding). Improvement areas are visible to the employee.</p>
           <div class="form-group"><label>President Grade (1–10)</label>
             <input id="pres-grade-input" type="number" inputmode="numeric" min="1" max="10" step="1" value="${presgrade||''}" placeholder="e.g. 8"/>
@@ -4428,7 +4453,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   // Salary history delete (president) / request delete (finance)
   document.querySelectorAll('.ph-delete-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm(`Delete payroll record for ${btn.dataset.month}? This cannot be undone.`)) return;
+      if (!await confirmDialog({ message: `Delete payroll record for ${escHtml(btn.dataset.month)}? This cannot be undone.`, danger: true, html: true })) return;
       await db.collection('salary_history').doc(btn.dataset.id).delete();
       Notifs.showToast('Record deleted.');
       window.renderPersonalFinance(currentUser, currentRole);
@@ -4436,7 +4461,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
   });
   document.querySelectorAll('.ph-req-delete-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if (!confirm(`Request deletion of payroll record for ${btn.dataset.month}? The president will be notified.`)) return;
+      if (!await confirmDialog({ message: `Request deletion of payroll record for ${escHtml(btn.dataset.month)}? The president will be notified.`, danger: true, html: true })) return;
       const presSnap = await db.collection('users').where('role','==','president').limit(1).get().catch(()=>({empty:true}));
       if (!presSnap.empty) {
         await Notifs.send(presSnap.docs[0].id, {
@@ -4452,7 +4477,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
 
   // Self Evaluation button
   document.getElementById('self-eval-btn')?.addEventListener('click', () => {
-    openModal(`Self-Assessment — ${monthLabel}`, `
+    openPage(`Self-Assessment — ${monthLabel}`, `
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
         This is <strong>required for payroll</strong> every 1st of the month. Be honest — the president also grades you.
       </p>
@@ -4539,7 +4564,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       .limit(1).get().catch(()=>({docs:[]}));
     const currentRequest = existing.docs[0]?.data()?.amount || '';
 
-    openModal('Set CA Deduction for This Payroll', `
+    openPage('Set CA Deduction for This Payroll', `
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
         Your current outstanding CA balance is <strong>₱${formatNum(totalBal)}</strong>.<br>
         Request how much you want deducted from your <strong>${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}</strong> payroll.
@@ -5435,7 +5460,7 @@ async function renderCompanyOverview(ct, canAdd) {
   `;
   if (canAdd) {
     document.getElementById('co-force-logout-btn')?.addEventListener('click', async () => {
-      if (!confirm('This will immediately sign out ALL active members. Continue?')) return;
+      if (!await confirmDialog({ message: 'This will immediately sign out ALL active members. Continue?', danger: true })) return;
       await db.collection('settings').doc('system').set({
         forceLogoutAt: firebase.firestore.FieldValue.serverTimestamp(),
         excludeUid: currentUser.uid,
@@ -5516,7 +5541,7 @@ async function renderCompanyMemos(ct, canAdd) {
       });
     });
     list.querySelectorAll('.co-del-btn').forEach(btn=>{
-      btn.addEventListener('click',async e=>{e.stopPropagation();if(confirm('Delete this memo?')){await window.deleteMemo(btn.dataset.id);renderCompanyMemos(ct,canAdd);}});
+      btn.addEventListener('click',async e=>{e.stopPropagation();if(await confirmDialog({message:'Delete this memo?', danger:true})){await window.deleteMemo(btn.dataset.id);renderCompanyMemos(ct,canAdd);}});
     });
     if(window.lucide) lucide.createIcons({nodes:[list]});
   }
@@ -5530,7 +5555,7 @@ async function renderCompanyMemos(ct, canAdd) {
 
   // ── Create modal ──
   document.getElementById('add-memo-btn')?.addEventListener('click',()=>{
-    openModal('New Memo',`
+    openPage('New Memo',`
       <div class="form-group"><label>Memo Title</label><input id="memo-title" placeholder="e.g. Updated Leave Policy"/></div>
       <div class="form-group"><label>From</label><input id="memo-from" placeholder="Management / HR / Finance" value="${escHtml(currentUser?.displayName||'Management')}"/></div>
       <div class="form-group"><label>Content</label><textarea id="memo-content" rows="7" placeholder="Write the memo here…"></textarea></div>
@@ -5754,7 +5779,7 @@ function openMemoDetailModal(m, onChange) {
       }
     });
   }
-  document.getElementById('del-memo-btn')?.addEventListener('click',async e2=>{if(confirm('Delete this memo?')){await window.deleteMemo(e2.currentTarget.dataset.id);closeModal();onChange?.();}});
+  document.getElementById('del-memo-btn')?.addEventListener('click',async e2=>{if(await confirmDialog({message:'Delete this memo?', danger:true})){await window.deleteMemo(e2.currentTarget.dataset.id);closeModal();onChange?.();}});
 }
 window.openMemoDetailModal = openMemoDetailModal;
 
@@ -5818,12 +5843,12 @@ async function renderCompanyPolicies(ct, canAdd) {
         if(e.target.tagName==='A') return;
         const p=policies.find(x=>x.id===card.dataset.id);
         openModal(p.title,`<p style="font-size:14px;line-height:1.7;white-space:pre-wrap;color:var(--text-2)">${escHtml(p.content||'No content.')}</p>${p.fileUrl?`<a href="${p.fileUrl}" target="_blank" class="btn-secondary" style="display:inline-block;margin-top:14px">📎 Open File</a>`:''}${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-policy-btn" data-id="${p.id}">Delete</button>`:''}`);
-        document.getElementById('del-policy-btn')?.addEventListener('click',async e2=>{if(confirm('Delete?')){await db.collection('policies').doc(e2.currentTarget.dataset.id).delete();closeModal();renderCompanyPolicies(ct,canAdd);}});
+        document.getElementById('del-policy-btn')?.addEventListener('click',async e2=>{if(await confirmDialog({message:'Delete this policy?', danger:true})){await db.collection('policies').doc(e2.currentTarget.dataset.id).delete();closeModal();renderCompanyPolicies(ct,canAdd);}});
       });
     });
   }
   document.getElementById('add-policy-btn')?.addEventListener('click',()=>{
-    openModal('Add Policy',`
+    openPage('Add Policy',`
       <div class="form-group"><label>Title</label><input id="pol-title"/></div>
       <div class="form-group"><label>Icon</label><input id="pol-icon" placeholder="📄" maxlength="4"/></div>
       <div class="form-group"><label>Short Description</label><input id="pol-desc"/></div>
@@ -5880,13 +5905,13 @@ async function renderCompanyDownloads(ct, canAdd) {
       </div>`;
     }).join('');
     list.querySelectorAll('.co-del-btn').forEach(btn=>{
-      btn.addEventListener('click',async e=>{e.preventDefault();e.stopPropagation();if(confirm('Remove this resource?')){await db.collection('resources').doc(btn.dataset.id).delete();renderCompanyDownloads(ct,canAdd);}});
+      btn.addEventListener('click',async e=>{e.preventDefault();e.stopPropagation();if(await confirmDialog({message:'Remove this resource?', danger:true})){await db.collection('resources').doc(btn.dataset.id).delete();renderCompanyDownloads(ct,canAdd);}});
     });
   }
   if(window.lucide) lucide.createIcons({nodes:[list]});
 
   document.getElementById('add-dl-btn')?.addEventListener('click',()=>{
-    openModal('Upload Resource',`
+    openPage('Upload Resource',`
       <div class="form-group"><label>Title</label><input id="dl-title" placeholder="e.g. Daily Time Record Form"/></div>
       <div class="form-group"><label>Category</label>
         <select id="dl-cat"><option value="Forms">Forms</option><option value="Templates">Templates</option><option value="Reports">Reports</option><option value="Others">Others</option></select>
@@ -5955,7 +5980,7 @@ async function renderCompanyHandbook(ct, canAdd) {
   if(window.lucide) lucide.createIcons({nodes:[ct]});
 
   document.getElementById('add-handbook-btn')?.addEventListener('click',()=>{
-    openModal('Add Handbook Section',`
+    openPage('Add Handbook Section',`
       <div class="form-group"><label>Section Title</label><input id="hb-title"/></div>
       <div class="form-group"><label>Icon (Lucide name)</label><input id="hb-icon" placeholder="e.g. file-text, clock, shield-check" value="file-text"/></div>
       <div class="form-group"><label>Content</label><textarea id="hb-content" rows="8" placeholder="Write section content…"></textarea></div>
@@ -6008,7 +6033,7 @@ async function renderDepartments() {
   });
 
   document.getElementById('add-dept-btn')?.addEventListener('click', () => {
-    openModal('Add Department', `
+    openPage('Add Department', `
       <div class="form-group"><label>Name</label>
         <select id="dept-name-sel">
           <option value="">-- Select --</option>
@@ -6519,7 +6544,7 @@ async function renderTeam() {
     { key:'net', label:'Net', get:u=>(u.salary||0)+(u.allowance||0)-(u.deductions||0) },
   ]));
   document.getElementById('force-logout-all-btn')?.addEventListener('click', async () => {
-    if (!confirm('This will immediately sign out ALL active members. Continue?')) return;
+    if (!await confirmDialog({ message: 'This will immediately sign out ALL active members. Continue?', danger: true })) return;
     await db.collection('settings').doc('system').set({
       forceLogoutAt: firebase.firestore.FieldValue.serverTimestamp(),
       excludeUid: currentUser.uid,
@@ -6531,7 +6556,7 @@ async function renderTeam() {
 }
 
 function openAddEmployeeModal() {
-  openModal('Add Employee Profile',`
+  openPage('Add Employee Profile',`
     <p style="font-size:12px;color:var(--text-muted);background:var(--surface2);padding:10px;border-radius:8px;margin-bottom:14px">Adds a profile record only. Use <strong>👷 Create Worker Account</strong> to also create a username login.</p>
     <div class="form-group"><label>Display Name</label><input id="emp-name"/></div>
     <div class="form-group"><label>Email (if they have one)</label><input id="emp-email" type="email"/></div>
@@ -6595,7 +6620,7 @@ function openCreateWorkerModal() {
 
   const initialPw = generatePassword('worker');
 
-  openModal('👷 Create Worker Account', `
+  openPage('👷 Create Worker Account', `
     <p style="font-size:12px;color:var(--text-muted);background:var(--surface2);padding:10px;border-radius:8px;margin-bottom:14px">
       Creates a username + password login. The worker does <strong>not</strong> need an email address.
       HR manages all credentials.
@@ -6722,7 +6747,7 @@ function openCreateWorkerModal() {
 
 function openEditEmployeeModal(u) {
   const curDepts = Array.isArray(u.departments)&&u.departments.length ? u.departments : u.department ? [u.department] : [];
-  openModal(`Edit: ${u.displayName||u.email}`,`
+  openPage(`Edit: ${u.displayName||u.email}`,`
     ${u.username ? `
     <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       <span style="font-size:13px">👷 Worker account — login: <strong style="color:var(--primary-light)">${escHtml(u.username)}</strong></span>
@@ -7041,7 +7066,7 @@ function closeProfileDrawer() {
   setTimeout(()=>drawer.classList.add('hidden'),300);
 }
 
-// ── Modal ─────────────────────────────────────────
+// ── Modal / Page panel (v12 WS10/WS11 — Overlay-registered, device Back closes) ──
 // opts.size: 'wide' (~920px) or 'full' (up to 1200px / 94dvh) for content-heavy
 // popups so they don't render as a cramped small dialog. Default stays compact.
 window.openModal=function(title,bodyHTML,footerHTML='',opts){
@@ -7055,16 +7080,57 @@ window.openModal=function(title,bodyHTML,footerHTML='',opts){
   if(box){ box.classList.remove('modal-wide','modal-full');
     if(opts.size==='wide') box.classList.add('modal-wide');
     else if(opts.size==='full') box.classList.add('modal-full'); }
-  document.getElementById('modal-overlay').classList.remove('hidden');
-  document.getElementById('modal-overlay').classList.add('active');
+  const ov = document.getElementById('modal-overlay');
+  ov.classList.remove('hidden');
+  ov.classList.add('active');
+  window.Overlay.push('modal', () => { ov.classList.add('hidden'); ov.classList.remove('active'); });
 };
-window.closeModal=function(){
-  document.getElementById('modal-overlay').classList.add('hidden');
-  document.getElementById('modal-overlay').classList.remove('active');
+// Full-screen routed panel — SAME signature as openModal. Forms swap openModal→openPage.
+window.openPage = function(title, bodyHTML, footerHTML='', opts){
+  opts = opts || {};
+  document.getElementById('page-panel')?.remove();
+  const p = document.createElement('div');
+  p.id = 'page-panel'; p.className = 'page-panel overlay-active';
+  p.innerHTML = `
+    <div class="page-panel-head">
+      <button class="page-panel-back" aria-label="Back"><i data-lucide="arrow-left"></i></button>
+      <h3 class="page-panel-title"></h3><div style="width:40px"></div>
+    </div>
+    <div class="page-panel-body"></div>
+    <div class="page-panel-foot"></div>`;
+  p.querySelector('.page-panel-title').textContent = title;
+  p.querySelector('.page-panel-body').innerHTML = bodyHTML;
+  const foot = p.querySelector('.page-panel-foot');
+  foot.innerHTML = footerHTML; foot.classList.toggle('hidden', !footerHTML);
+  document.body.appendChild(p);
+  p.querySelector('.page-panel-back').addEventListener('click', () => window.Overlay.dismissTop());
+  window.lucide?.createIcons();
+  requestAnimationFrame(() => p.classList.add('open'));
+  window.Overlay.push('page', () => { p.classList.remove('open'); setTimeout(()=>p.remove(), 300); });
 };
+// Generic dismiss — closes whatever overlay is on top (dialog | modal | page | panel).
+window.closeModal=function(){ window.Overlay.dismissTop(); };
 document.addEventListener('DOMContentLoaded',()=>{
-  document.getElementById('modal-close')?.addEventListener('click',closeModal);
-  document.getElementById('modal-overlay')?.addEventListener('click',e=>{if(e.target===document.getElementById('modal-overlay'))closeModal();});
+  document.getElementById('modal-close')?.addEventListener('click',() => window.Overlay.dismissTop());
+  document.getElementById('modal-overlay')?.addEventListener('click',e=>{if(e.target===document.getElementById('modal-overlay')) window.Overlay.dismissTop();});
+});
+
+// ── v12 WS10 — router wiring (Back/Forward/hash edits/Esc) ───────────────
+window.addEventListener('popstate', (e) => {
+  // Overlay open? A Back press dismisses the top overlay and consumes the event.
+  if (window.Overlay && window.Overlay.isOpen()) { window.Overlay._popOne(); return; }
+  window._navDepth = Math.max(0, (window._navDepth||0) - 1);
+  const s = e.state || parseHash();
+  const st = (s.t === 'overlay') ? s.base : s;        // stale overlay entry → render its underlying page
+  navigateTo(st.page || 'dashboard', { subtab: st.subtab || null, fromHistory: true });
+});
+window.addEventListener('hashchange', () => {         // user typed/edited the URL hash
+  const p = parseHash();
+  if (p.page === window.currentPage && p.subtab === (window.currentSubtab||null)) return;
+  navigateTo(p.page, { subtab: p.subtab, replace: true });
+});
+window.addEventListener('keydown', (e) => {           // Esc closes the top overlay (WS18 must reuse this path)
+  if (e.key === 'Escape' && window.Overlay && window.Overlay.isOpen()) { e.preventDefault(); window.Overlay.dismissTop(); }
 });
 
 // ── KPI value auto-fit ────────────────────────────
@@ -7233,7 +7299,7 @@ async function loadSuggestions() {
     </div>`;
   }).join('');
   list.querySelectorAll('.sug-delete-btn').forEach(btn => btn.addEventListener('click', async () => {
-    if (!confirm('Delete this suggestion?')) return;
+    if (!await confirmDialog({ message: 'Delete this suggestion?', danger: true })) return;
     await db.collection('suggestions').doc(btn.dataset.id).delete();
     loadSuggestions();
   }));

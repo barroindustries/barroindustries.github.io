@@ -68,10 +68,13 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     track.html never referenced the old name, nothing to change) — see Build Log. One line
     (`Business Intelligence Operations Platform` positioning copy) deliberately left as a
     `‼️ FLAG FOR NEIL` — needs new prose, not a string swap.
-10. `[ ]` **URL routing + real Back** — History API in navigateTo; device Back works; modals/
-    drawers dismissable by Back; deep links + refresh keep place.
-11. `[ ]` **Styled confirm/prompt** — one `confirmDialog()` promise helper; kill all 79 native
-    confirm()/alert()/prompt().
+10. `[x]` **URL routing + real Back** — History API in navigateTo; device Back works; modals/
+    drawers dismissable by Back; deep links + refresh keep place. IMPLEMENTED
+    (`hashFor`/`parseHash`/`window.Overlay` LIFO stack; `openPage` full-screen panels) — see
+    Build Log.
+11. `[x]` **Styled confirm/prompt** — one `confirmDialog()` promise helper; kill all 79 native
+    confirm()/alert()/prompt(). IMPLEMENTED (`window.confirmDialog`/`window.promptDialog` in
+    config.js; all 73 confirm() + 13 prompt() sites converted) — see Build Log.
 12. `[x]` **Period engine + period close** — ONE shared period filter (kills the 3 divergent
     YTD implementations); picker for any month/quarter/year; close-period lock; fix
     `orderBy('date')` dropping date-less rows (records-forever guarantee). IMPLEMENTED
@@ -604,6 +607,48 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   pushed to master. **Still needed:** deploy the rules + the new index
   (`~/.npm-global/bin/firebase deploy --only firestore:rules,firestore:indexes`, re-diff first);
   a live test of both workstreams' manual checklists (WS23 Spec 11 / WS24 Spec 10).
-  NEXT: workstream 10-11 (URL routing + real Back + styled dialogs — the no-pop-ups UX mandate,
-  which WS24 already partially delivered for payslips specifically) or 15-18 (durability,
-  performance, design-system, keyboard shortcuts) per the build order in fable-workplan/INDEX.md.
+- **2026-07-10 (Sonnet implementation — WS10+11 URL routing + real Back + styled dialogs, per
+  spec):** Built the foundation myself first (cross-cutting architecture), then delegated the
+  three large, well-specified mechanical sweeps to parallel subagents — one per file — since
+  Fable's spec had already decided every rule. **Foundation:** `hashFor(page,subtab)`/
+  `parseHash(hash)` + `window._navDepth` in app.js; `window.Overlay` (LIFO stack, one
+  `history.pushState`/`history.back()` per dismissable surface — modal/page-panel/task-panel/
+  dialog) + `window.confirmDialog(opts)→Promise<boolean>` + `window.promptDialog(opts)→
+  Promise<string|null>` + `window.setSubroute`/`window.initialSubtab` in config.js; rewrote
+  `navigateTo`/`navBack`/`updateNavBackBtn`, `openModal`/`closeModal`, and added new
+  `openPage(title,bodyHTML,footerHTML,opts)` (full-screen routed panel, identical signature to
+  `openModal`) in app.js; `popstate`/`hashchange`/`keydown`(Esc) router wiring; auth-resolve now
+  reads the initial route from the URL hash instead of hardcoding `'dashboard'`; task-detail
+  panel (departments.js `openTaskDetail`/`closeTaskPanel`) wired into `Overlay` (drill-in
+  semantics), quote-builder iframe deliberately left un-registered per spec (stays a normal
+  routed page). New `.page-panel`/`.dialog-*` CSS block appended next to the existing modal
+  rules (not the ~L3394 duplicate block, per spec). **Sweeps (3 parallel subagents, one per
+  file):** all 73 `confirm()` sites → `await confirmDialog({...})` (danger:true for destructive/
+  peso actions, escHtml()+html:true wherever a user label is interpolated), with `async`
+  threaded up through every enclosing handler; all 13 `prompt()` sites → `await promptDialog(...)`
+  preserving null-checks; all 104 `openModal(...)` sites triaged — 73 multi-field forms converted
+  to `openPage(...)`, 31 small/read-only/credential-reveal dialogs deliberately left as
+  `openModal(...)` (each with a one-line reason, e.g. two project-detail hubs that read
+  `#modal-body` directly and would have broken under `openPage`'s different DOM shape; one-time
+  password/account-creation reveals the spec explicitly says must stay modal). The
+  `window.financeDelete` special case converted per the spec's exact instruction (its
+  `new Promise((resolve)=>{...})` executor became `async (resolve)=>{...}`). Adopted sub-tab
+  routing on the 3 in-scope screens (Finance, Sales, Partners) — 2-line change each: the
+  `subtab` default parameter now calls `window.initialSubtab(defaultKey)` instead of a literal,
+  and each `bindChipTabs` callback now also calls `window.setSubroute(key)`; the other ~12
+  `chipTabs` screens keep session-only sub-tabs per spec. **Verified:** `node --check` clean on
+  all 4 touched JS files (also proves every `await` sits inside a properly `async` function,
+  since bare `await` outside `async` is a SyntaxError in these non-module `<script>` files);
+  zero raw `confirm(`/`prompt(` remain (grep-swept); CSS brace-balance check; spot-checked the
+  trickiest conversions (financeDelete, the `#modal-body`-dependent project-detail hubs left as
+  openModal) by hand. Live-browser tested the shared dialog engine pre-login: default
+  HTML-escaping (a raw `<script>` in a message rendered inert), `danger:true` styling,
+  Cancel/backdrop-click/Escape all correctly resolve `confirmDialog→false`/`promptDialog→null`,
+  value-prefill on promptDialog, and nested-overlay LIFO ordering (modal + confirmDialog on top
+  — first Escape dismisses only the dialog, second dismisses the modal); zero console errors.
+  **NOT verified** (needs a live login): deep-link/refresh-restore on a real `dept:Finance/
+  Purchases`-style URL, device Back walking multi-page history, task-panel/quote-builder Back
+  behavior, Chart.js-leak-on-Back, pull-to-refresh no-history-push. No new Firestore collection
+  or query — no rules/indexes deploy needed for this workstream, per the spec's own note.
+  NEXT: workstream 15-18 (durability, performance & scale, design-system consolidation, keyboard
+  shortcuts) per the build order in fable-workplan/INDEX.md.

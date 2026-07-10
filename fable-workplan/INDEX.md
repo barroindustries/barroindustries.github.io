@@ -24,7 +24,7 @@ finalizing 9's rename sweep so the two don't conflict.
 | WS | Brief | Open decisions | One-line current state |
 |---|---|---|---|
 | 09 | [09-brand.md](09-brand.md) | ✅ IMPLEMENTED | BRAND module + full rename sweep |
-| 10-11 | [10-11-nav-dialogs.md](10-11-nav-dialogs.md) | 7 | URL routing + real Back + styled dialogs (no-pop-ups mandate) |
+| 10-11 | [10-11-nav-dialogs.md](10-11-nav-dialogs.md) | ✅ IMPLEMENTED | URL routing + real Back + styled dialogs (no-pop-ups mandate) |
 | 12 | [12-period.md](12-period.md) | ✅ IMPLEMENTED | Period engine + period close |
 | 13 | [13-coa.md](13-coa.md) | ✅ IMPLEMENTED | Chart of accounts — fixes double material expensing (critical) |
 | 14 | [14-letterhead.md](14-letterhead.md) | ✅ IMPLEMENTED | Shared document letterhead engine |

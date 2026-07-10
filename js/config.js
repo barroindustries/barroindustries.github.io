@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.3';
+window.APP_VERSION = '12.0.4';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -332,6 +332,104 @@ window.bindChipTabs = function(scope, onSelect) {
       try { onSelect(btn.dataset.chip, btn); } catch (e) { /* swallow */ }
     });
   });
+};
+
+// ── Overlay stack (v12 WS10) — one history entry per dismissable surface ──
+// The single source of truth for "what's on top and how to tear it down."
+// Every modal/page-panel/task-panel/confirm-dialog pushes exactly one entry;
+// popstate is the ONLY teardown trigger — every UI-close path (X button,
+// backdrop click, closeModal()) delegates to history.back() via dismissTop().
+window.Overlay = {
+  _stack: [], _seq: 0, _closing: false,
+  isOpen(){ return this._stack.length > 0; },
+  push(kind, teardown){
+    const id = ++this._seq;
+    this._stack.push({ id, kind, teardown });
+    const base = { page: window.currentPage || 'dashboard', subtab: window.currentSubtab || null };
+    try { history.pushState({ t:'overlay', kind, oid:id, base, d:(window._navDepth||0) }, '', location.hash); } catch(_){}
+    return id;
+  },
+  dismissTop(){ if (this._stack.length) history.back(); },   // → popstate → _popOne
+  _popOne(){
+    const top = this._stack.pop(); if (!top) return;
+    this._closing = true; try { top.teardown(); } catch(_){} this._closing = false;
+  },
+  clearAll(){
+    if (!this._stack.length) return;
+    const n = this._stack.length;
+    while (this._stack.length){ const o = this._stack.pop(); try { o.teardown(); } catch(_){} }
+    // Drop the overlays' history entries so the new page push lands cleanly.
+    try { history.go(-n); } catch(_){}
+  }
+};
+
+// ── Confirm / prompt dialogs (v12 WS11) — replace native confirm()/prompt() ──
+// Both resolve on: OK click, Cancel click, backdrop click, Esc, or device Back
+// (Overlay.push's teardown fires resolve() exactly like a cancel).
+function _dlgEsc(s){ return (window.escHtml||function(x){return String(x==null?'':x);})(s); }
+window.confirmDialog = function(opts){
+  opts = opts || {};
+  return new Promise((resolve) => {
+    const ov = document.getElementById('dialog-overlay');
+    const msg = opts.html ? (opts.message||'') : _dlgEsc(opts.message||'');
+    ov.innerHTML = `<div class="dialog-box overlay-active" role="alertdialog" aria-modal="true">
+      ${opts.title ? `<h4 class="dialog-title">${_dlgEsc(opts.title)}</h4>` : ''}
+      <div class="dialog-msg">${msg}</div>
+      <div class="dialog-actions">
+        <button class="btn-secondary" data-act="cancel">${_dlgEsc(opts.cancelLabel||'Cancel')}</button>
+        <button class="${opts.danger?'btn-danger':'btn-primary'}" data-act="ok">${_dlgEsc(opts.confirmLabel||'Confirm')}</button>
+      </div></div>`;
+    ov.classList.remove('hidden'); ov.classList.add('active');
+    let settled = false;
+    const done = (val) => { if (settled) return; settled = true;
+      ov.classList.add('hidden'); ov.classList.remove('active'); ov.innerHTML=''; resolve(val); };
+    window.Overlay.push('dialog', () => done(false));           // Back/Esc/backdrop → false
+    ov.querySelector('[data-act=ok]').onclick     = () => { window.Overlay.dismissTop(); done(true); };
+    ov.querySelector('[data-act=cancel]').onclick = () => window.Overlay.dismissTop();
+    ov.onclick = (e) => { if (e.target === ov) window.Overlay.dismissTop(); };
+  });
+};
+window.promptDialog = function(opts){
+  opts = opts || {};
+  return new Promise((resolve) => {
+    const ov = document.getElementById('dialog-overlay');
+    const field = opts.multiline
+      ? `<textarea id="dlg-input" rows="3" placeholder="${_dlgEsc(opts.placeholder||'')}"></textarea>`
+      : `<input id="dlg-input" placeholder="${_dlgEsc(opts.placeholder||'')}"/>`;
+    ov.innerHTML = `<div class="dialog-box overlay-active" role="dialog" aria-modal="true">
+      ${opts.title ? `<h4 class="dialog-title">${_dlgEsc(opts.title)}</h4>` : ''}
+      ${opts.message ? `<div class="dialog-msg">${_dlgEsc(opts.message)}</div>` : ''}
+      <div class="form-group">${field}</div>
+      <div class="dialog-actions">
+        <button class="btn-secondary" data-act="cancel">${_dlgEsc(opts.cancelLabel||'Cancel')}</button>
+        <button class="btn-primary" data-act="ok">${_dlgEsc(opts.confirmLabel||'OK')}</button>
+      </div></div>`;
+    ov.classList.remove('hidden'); ov.classList.add('active');
+    const input = ov.querySelector('#dlg-input');
+    input.value = opts.value || '';
+    const okBtn = ov.querySelector('[data-act=ok]');
+    const validate = () => { if (opts.required) okBtn.disabled = (input.value.trim()===''); };
+    input.addEventListener('input', validate); validate(); setTimeout(()=>input.focus(),40);
+    let settled = false;
+    const done = (val) => { if (settled) return; settled = true;
+      ov.classList.add('hidden'); ov.classList.remove('active'); ov.innerHTML=''; resolve(val); };
+    window.Overlay.push('dialog', () => done(null));            // Back/Esc/backdrop → null (== native cancel)
+    okBtn.onclick = () => { const v = input.value.trim(); if (opts.required && !v) return;
+      window.Overlay.dismissTop(); done(v); };
+    ov.querySelector('[data-act=cancel]').onclick = () => window.Overlay.dismissTop();
+    ov.onclick = (e) => { if (e.target === ov) window.Overlay.dismissTop(); };
+    if (!opts.multiline) input.addEventListener('keydown', e => { if (e.key==='Enter') okBtn.click(); });
+  });
+};
+
+// ── Sub-tab routing helpers (v12 WS10, opt-in per screen) ──────────────────
+window.setSubroute = function(subtab){
+  const st = Object.assign({}, history.state||{t:'page',page:window.currentPage,d:(window._navDepth||0)}, { subtab });
+  window.currentSubtab = subtab;
+  try { history.replaceState(st, '', (window.hashFor||function(p,s){return location.hash;})(window.currentPage, subtab)); } catch(_){}
+};
+window.initialSubtab = function(defaultKey){
+  return (window.currentSubtab != null) ? window.currentSubtab : defaultKey;
 };
 
 // ── Month-over-month growth indicator (shared analytics) ──

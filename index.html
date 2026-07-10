@@ -154,7 +154,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.3 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.4 · Barro Industries</div>
   </div>
 </div>
 
@@ -283,6 +283,11 @@
   <div id="profile-body" class="drawer-body"></div>
 </div>
 <div id="drawer-overlay" class="modal-overlay hidden" style="z-index:190"></div>
+
+<!-- v12 WS11 — confirm/prompt dialog host (higher z than #modal-overlay so it
+     nests on top of a modal/page). Full-screen page panel (openPage) is
+     created/removed dynamically — no static markup needed. -->
+<div id="dialog-overlay" class="dialog-overlay hidden"></div>
 
 <!-- All scripts deferred — download in parallel, execute in order after HTML parse.
      Firebase messaging loaded lazily in notifications.js when FCM is configured. -->

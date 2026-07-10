@@ -1,5 +1,11 @@
 # Workstream 10-11 — WS10 (URL routing + real Back) + WS11 (Styled confirm/prompt) — Barro Industries Operating System v12.0.0
 
+> ✅ **IMPLEMENTED 2026-07-10.** No rules/indexes involved — nothing to deploy separately
+> (client-side only, per this spec's own note). See V12-PLAN.md Build Log for the full
+> implementation note, including the manual-test items that still need a live login to
+> exercise (deep-link/refresh-restore, device Back across multi-page history, task-panel/
+> quote-builder Back behavior, Chart.js-leak-on-Back, pull-to-refresh no-history-push).
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

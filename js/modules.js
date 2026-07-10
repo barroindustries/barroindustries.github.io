@@ -192,7 +192,7 @@ async function loadPosts(dept) {
       loadPosts(dept);
     }));
     container.querySelectorAll('.post-delete-btn').forEach(btn => btn.addEventListener('click', async e => {
-      if (!confirm('Delete this post?')) return;
+      if (!(await confirmDialog({ message: 'Delete this post?', danger: true }))) return;
       await db.collection('posts').doc(e.target.dataset.id).delete();
       Notifs.showToast('Deleted.');
       loadPosts(dept);
@@ -259,7 +259,7 @@ async function loadPosts(dept) {
       const post    = postMap.get(id) || {};
       const oldTitle   = post.title || '';
       const oldContent = post.content || '';
-      openModal('✎ Edit Post', `
+      openPage('✎ Edit Post', `
         <div class="form-group"><label>Title (optional)</label><input id="edit-post-title" placeholder="Post title…"/></div>
         <div class="form-group"><label>Content</label><textarea id="edit-post-content" rows="5" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea></div>
       `, `<button class="btn-primary" id="save-post-edit-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -296,7 +296,7 @@ async function loadPosts(dept) {
 }
 
 function openNewPostModal(publishDirectly) {
-  openModal(publishDirectly ? 'New Post' : 'Submit Post for Approval', `
+  openPage(publishDirectly ? 'New Post' : 'Submit Post for Approval', `
     <div class="form-group"><label>Title (optional)</label><input id="post-title" placeholder="Post title…"/></div>
     <div class="form-group"><label>Content</label><textarea id="post-content" rows="5" placeholder="Write your message…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text);resize:vertical"></textarea></div>
     <div class="form-group"><label>Department</label>
@@ -430,7 +430,7 @@ window.renderTeamTab = async function() {
 
   if (pres) {
     document.getElementById('invite-user-btn')?.addEventListener('click', () => {
-      openModal('Invite Team Member', `
+      openPage('Invite Team Member', `
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">They'll receive a password reset email to set their own password.</p>
         <div class="form-group"><label>Email</label><input id="inv-email" type="email" placeholder="employee@barroindustries.com"/></div>
         <div class="form-group"><label>Display Name</label><input id="inv-name" placeholder="Full name"/></div>
@@ -862,7 +862,7 @@ function renderTeamCards(users, currentUser) {
     btn.addEventListener('click', async e => {
       e.stopPropagation();
       const { uid, name } = btn.dataset;
-      if (!confirm(`Send a nudge to ${name}?`)) return;
+      if (!(await confirmDialog({ message: `Send a nudge to ${escHtml(name)}?`, html: true }))) return;
       btn.disabled = true; btn.textContent = '⏳';
       const senderName = window.userProfile?.displayName || currentUser?.displayName || 'Someone';
       await Notifs.send(uid, {
@@ -1070,7 +1070,7 @@ window.renderAttendancePage = async function() {
 
     extEl.querySelectorAll('.ext-deny-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Deny this extension request?')) return;
+        if (!(await confirmDialog({ message: 'Deny this extension request?' }))) return;
         btn.disabled = true;
         await db.collection('attendance_extensions').doc(btn.dataset.id).update({
           status: 'denied', deniedBy: currentUser.uid,
@@ -1489,7 +1489,7 @@ function renderCAList(advances, container, isAdmin) {
 
   container.querySelectorAll('.ca-delete-btn').forEach(btn => btn.addEventListener('click', async e => {
     const id = e.currentTarget.dataset.id;
-    if (!confirm('Permanently delete this cash advance record? This cannot be undone.')) return;
+    if (!(await confirmDialog({ message: 'Permanently delete this cash advance record? This cannot be undone.', danger: true }))) return;
     await db.collection('cash_advances').doc(id).delete();
     Notifs.showToast('Record deleted.');
     window.renderCashAdvancePage();
@@ -1512,7 +1512,7 @@ function openPresidentCashAdvanceModal(users) {
     `<option value="${u.id}">${escHtml(u.displayName||u.email)} (${u.role||'employee'})</option>`
   ).join('');
 
-  openModal('Record Cash Advance for Employee', `
+  openPage('Record Cash Advance for Employee', `
     <div class="form-group">
       <label>Employee</label>
       <select id="pca-uid" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
@@ -1834,7 +1834,7 @@ async function renderPresidentMessageCard() {
 
   function itemModal(item, onSaved){
     const e=item||{};
-    openModal(item?'Edit Item':'Add Inventory Item', `
+    openPage(item?'Edit Item':'Add Inventory Item', `
       <div class="form-group"><label>Name</label><input id="iv-name" value="${escHtml(e.name||'')}" placeholder="e.g. Stainless Sheet 4x8 ga.16"/></div>
       <div class="form-row">
         <div class="form-group"><label>Type</label><select id="iv-kind"><option value="material" ${e.kind!=='product'?'selected':''}>Raw Material</option><option value="product" ${e.kind==='product'?'selected':''}>Finished Good</option></select></div>
@@ -1882,7 +1882,7 @@ async function renderPresidentMessageCard() {
       }catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
     });
     document.getElementById('iv-del')?.addEventListener('click', async ()=>{
-      if(!confirm('Delete this item?')) return;
+      if(!(await confirmDialog({ message: 'Delete this item?', danger: true }))) return;
       try{ await db.collection('inventory_items').doc(item.id).delete(); window.logAudit&&window.logAudit('delete','inventory_item',item.id,{name:item.name||''}); if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items'); closeModal(); Notifs.showToast('Item deleted'); onSaved&&onSaved(); }
       catch(ex){ Notifs.showToast('Delete failed','error'); }
     });
@@ -1890,7 +1890,7 @@ async function renderPresidentMessageCard() {
 
   function moveModal(item, type, onSaved){
     if(!item) return;
-    openModal((type==='in'?'➕ Stock In — ':'➖ Stock Out — ')+(item.name||''), `
+    openPage((type==='in'?'➕ Stock In — ':'➖ Stock Out — ')+(item.name||''), `
       <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Current on-hand: <strong>${num(item.qty||0)} ${escHtml(item.unit||'')}</strong></div>
       <div class="form-group"><label>Quantity to ${type==='in'?'add':'remove'}</label><input id="mv-qty" type="number" inputmode="decimal" step="0.01" min="0"/></div>
       ${type==='out'?`<div class="form-group"><label>Project / Job (optional)</label><input id="mv-project" placeholder="e.g. Gerry's Grill — Bulacan"/></div>`:''}
@@ -1995,7 +1995,7 @@ async function renderPresidentMessageCard() {
 
   function jobModal(job, onSaved){
     const e=job||{};
-    openModal(job?'Edit Job Cost':'New Job Cost', `
+    openPage(job?'Edit Job Cost':'New Job Cost', `
       <div class="form-group"><label>Project / Client</label><input id="jb-project" value="${escHtml(e.project||'')}" placeholder="e.g. Gerry's Grill — Bulacan"/></div>
       <div class="form-group"><label>Quote Ref (optional)</label><input id="jb-quote" value="${escHtml(e.quoteRef||'')}" placeholder="BK-LU-FB-..."/></div>
       <div class="form-row">
@@ -2023,7 +2023,7 @@ async function renderPresidentMessageCard() {
       }catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
     });
     document.getElementById('jb-del')?.addEventListener('click', async ()=>{
-      if(!confirm('Delete this job cost?')) return;
+      if(!(await confirmDialog({ message: 'Delete this job cost?', danger: true }))) return;
       try{ await db.collection('job_costs').doc(job.id).delete(); closeModal(); Notifs.showToast('Deleted'); onSaved&&onSaved(); }
       catch(ex){ Notifs.showToast('Delete failed','error'); }
     });
@@ -2139,7 +2139,7 @@ async function renderPresidentMessageCard() {
 
   function openLeaveModal(bal, c){
     const today = window.bizDate?window.bizDate():new Date().toISOString().slice(0,10);
-    openModal('🌴 Request Leave', `
+    openPage('🌴 Request Leave', `
       <div class="form-group"><label>Leave Type</label>
         <select id="lv-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
           ${LEAVE_TYPES.map(t=>`<option value="${t.id}">${t.icon} ${t.label}${t.drawsBalance?` (${bal[t.id]||0} left)`:''}</option>`).join('')}
@@ -2196,7 +2196,7 @@ async function renderPresidentMessageCard() {
 
   async function rejectLeave(r, c){
     if(!r) return;
-    const reason = prompt('Reason for rejection (optional):')||'';
+    const reason = (await promptDialog({ message: 'Reason for rejection (optional):', multiline: true }))||'';
     try{
       await db.collection('leave_requests').doc(r.id).update({ status:'rejected', approvedBy:currentUser.uid, rejectedReason:reason, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
       window.logAudit && window.logAudit('reject','leave',r.id,{ user:r.userName, type:r.type });
