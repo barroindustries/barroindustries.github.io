@@ -4649,3 +4649,16 @@ html.light .profile-hero-id, html.theme-pink .profile-hero-id, html.theme-grey .
   .payslip-print tr,.payslip-print .ps-sigs,.payslip-print .lh-sig-row{page-break-inside:avoid;break-inside:avoid;}
   @page{margin:11mm 10mm 7mm;}
 }
+
+/* ── v12 WS18 — keyboard-shortcuts cheat sheet (? modal) ── */
+.kbd-cheatsheet .kbd-table { width:100%; border-collapse:collapse; }
+.kbd-cheatsheet .kbd-table td { padding:7px 10px; border-bottom:1px solid var(--border); font-size:14px; color:var(--text); }
+.kbd-cheatsheet .kbd-cell { white-space:nowrap; width:1%; }
+.kbd-cheatsheet kbd {
+  display:inline-block; min-width:22px; text-align:center; padding:2px 7px;
+  font:600 12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:var(--surface); color:var(--text);
+  border:1px solid var(--border); border-bottom-width:2px; border-radius:6px;
+}
+.kbd-cheatsheet .kbd-subhead { margin:16px 0 6px; font-size:12px; text-transform:uppercase;
+  letter-spacing:.04em; color:var(--text-muted); }

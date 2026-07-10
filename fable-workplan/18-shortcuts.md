@@ -1,5 +1,17 @@
 # Workstream 18 — Keyboard Shortcuts
 
+> ✅ **IMPLEMENTED 2026-07-10, WITH ONE RECONCILIATION.** This spec assumed a standalone
+> `window.OverlayEsc` registry, written before WS10-11's `window.Overlay` (History-API LIFO
+> stack) actually shipped in this same session. To avoid two competing Escape-keydown
+> listeners, `window.OverlayEsc` was dropped and WS18's shortcuts were folded into WS10-11's
+> existing single Escape listener instead — the 'escape' entry calls `Overlay.dismissTop()`
+> first, falling back to a DOM-class check only for the two surfaces `Overlay` doesn't track
+> (profile drawer, mobile sidebar). See V12-PLAN.md Build Log for the full mechanism and a
+> real bug this caught (a stale `_cheatSheetOpen` flag after Escape-close, fixed by moving the
+> reset into the Overlay teardown itself). No rules deploy needed. Alt+1..9 per-role nav,
+> the first-run hint toast, and profile-drawer/sidebar Escape-dismiss are NOT live-tested
+> (need a real login) — verified correct by code review only.
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

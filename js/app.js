@@ -34,6 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
   try { initTheme(); } catch(e) { console.error('initTheme failed', e); }
   try { initLogin(); } catch(e) { console.error('initLogin failed', e); }
   try { Notifs.initToggle(); } catch(e) { console.error('Notifs.initToggle failed', e); }
+  try { window.Keymap.init(); } catch(e) { console.error('Keymap.init failed', e); }
   auth.onAuthStateChanged(async user => {
     if (user) {
       currentUser = user;
@@ -90,6 +91,7 @@ document.addEventListener('DOMContentLoaded', () => {
       startForceLogoutListener(user.uid);
       startClaimsListener(user.uid);
       checkBackupHealth();
+      try { window.Keymap.maybeShowFirstRunHint(); } catch(_){}
       // Mark this uid as fully bootstrapped so subsequent token-refresh fires
       // for the same user are treated as no-ops above.
       _bootstrappedUid = user.uid;
@@ -7158,6 +7160,7 @@ function closeProfileDrawer() {
 // popups so they don't render as a cramped small dialog. Default stays compact.
 window.openModal=function(title,bodyHTML,footerHTML='',opts){
   opts = opts || {};
+  if (title !== 'Keyboard shortcuts') window._cheatSheetOpen = false;
   document.getElementById('modal-title').textContent=title;
   document.getElementById('modal-body').innerHTML=bodyHTML;
   const footer=document.getElementById('modal-footer');
@@ -7170,7 +7173,10 @@ window.openModal=function(title,bodyHTML,footerHTML='',opts){
   const ov = document.getElementById('modal-overlay');
   ov.classList.remove('hidden');
   ov.classList.add('active');
-  window.Overlay.push('modal', () => { ov.classList.add('hidden'); ov.classList.remove('active'); });
+  // Reset _cheatSheetOpen in the teardown itself (not just closeModal) so it clears
+  // on EVERY dismissal path — Escape, backdrop click, and Overlay.clearAll() all
+  // tear a modal down via this callback without necessarily going through closeModal().
+  window.Overlay.push('modal', () => { ov.classList.add('hidden'); ov.classList.remove('active'); window._cheatSheetOpen = false; });
 };
 // Full-screen routed panel — SAME signature as openModal. Forms swap openModal→openPage.
 window.openPage = function(title, bodyHTML, footerHTML='', opts){
@@ -7216,9 +7222,161 @@ window.addEventListener('hashchange', () => {         // user typed/edited the U
   if (p.page === window.currentPage && p.subtab === (window.currentSubtab||null)) return;
   navigateTo(p.page, { subtab: p.subtab, replace: true });
 });
-window.addEventListener('keydown', (e) => {           // Esc closes the top overlay (WS18 must reuse this path)
-  if (e.key === 'Escape' && window.Overlay && window.Overlay.isOpen()) { e.preventDefault(); window.Overlay.dismissTop(); }
-});
+// ── v12 WS18 — global keyboard shortcuts ──────────────────────────────────
+// Reconciliation note: the WS18 spec (fable-workplan/18-shortcuts.md) was written
+// assuming a standalone window.OverlayEsc DOM-probe registry with its own Escape
+// keydown listener. By the time this was implemented, WS10-11's window.Overlay
+// (a History-API-backed LIFO stack) already owned Escape-to-dismiss for
+// modal/page-panel/task-panel/dialog via the single listener that lived here.
+// Running both would race two independent "close on Escape" systems against the
+// same keypress, so this folds WS18's shortcuts into that ONE listener instead of
+// adding a second: the 'escape' entry below calls Overlay.dismissTop() first, and
+// only falls back to a DOM-class check for the two surfaces Overlay never tracked
+// (profile drawer, mobile sidebar — neither ever pushes a history entry).
+window.Keymap = (function () {
+  let _inited = false;
+
+  function isTextInputFocused() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+      if (el.readOnly || el.disabled) return false;
+      return true;
+    }
+    return !!el.isContentEditable;
+  }
+
+  function openSearch(e) {
+    // THIRD entry point into the search page (topbar button + renderGlobalSearch's
+    // own guard are the other two) — repeat the partner/BS-only block here too.
+    const blocked = (typeof isPartner === 'function' && isPartner()) ||
+                    (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
+    if (blocked) return false;
+    if (e) e.preventDefault();
+    navigateTo('search');
+    return true;
+  }
+
+  function navByIndex(n) {
+    let items = [];
+    try { items = (typeof getSidebarItems === 'function') ? getSidebarItems() : []; } catch (_) { return false; }
+    const it = items[n - 1];
+    if (!it || !it.page) return false;
+    navigateTo(it.page);
+    return true;
+  }
+
+  function closeTopOverlay() {
+    if (window.Overlay && window.Overlay.isOpen()) { window.Overlay.dismissTop(); return true; }
+    const drawer = document.getElementById('profile-drawer');
+    if (drawer && drawer.classList.contains('open')) {
+      if (typeof closeProfileDrawer === 'function') closeProfileDrawer();
+      return true;
+    }
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar && sidebar.classList.contains('open')) {
+      if (typeof closeSidebar === 'function') closeSidebar();
+      return true;
+    }
+    return false;
+  }
+
+  function buildCheatSheetHTML() {
+    const esc = window.escHtml || (s => (s == null ? '' : String(s)));
+    const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
+    const cmd = isMac ? '⌘' : 'Ctrl';
+    const rows = [
+      ['Esc', 'Close dialog / drawer / panel'],
+      [cmd + ' K', 'Open search'],
+      ['/', 'Open search'],
+      ['?', 'Show this cheat sheet'],
+    ];
+    let items = [];
+    try { items = (typeof getSidebarItems === 'function') ? getSidebarItems() : []; } catch (_) {}
+    const navRows = items.slice(0, 9).map((it, i) =>
+      `<tr><td class="kbd-cell"><kbd>Alt</kbd> + <kbd>${i + 1}</kbd></td><td>${esc(it.label || it.page)}</td></tr>`).join('');
+    const coreRows = rows.map(([k, d]) =>
+      `<tr><td class="kbd-cell"><kbd>${esc(k)}</kbd></td><td>${esc(d)}</td></tr>`).join('');
+    return `<div class="kbd-cheatsheet">
+      <table class="kbd-table"><tbody>${coreRows}</tbody></table>
+      ${navRows ? `<h4 class="kbd-subhead">Jump to</h4><table class="kbd-table"><tbody>${navRows}</tbody></table>` : ''}
+    </div>`;
+  }
+
+  function toggleCheatSheet(e) {
+    if (e) e.preventDefault();
+    if (window._cheatSheetOpen && document.getElementById('modal-overlay')?.classList.contains('active')) {
+      window.closeModal(); return;
+    }
+    window.openModal('Keyboard shortcuts', buildCheatSheetHTML());
+    window._cheatSheetOpen = true;
+  }
+
+  // Each entry: match(e) predicate, allowInInput (fire even while a text field is
+  // focused?), and run(e). Escape and Ctrl/⌘K are allowed in inputs; bare '/', '?'
+  // and Alt+N are suppressed while typing. Alt+digit uses e.code (Option+digit on
+  // macOS mangles e.key into a special char, but e.code stays 'Digit1'..'Digit9').
+  const KEYMAP = [
+    { id: 'escape',
+      allowInInput: true,
+      match: e => e.key === 'Escape',
+      run:   () => closeTopOverlay() },
+
+    { id: 'search-cmdk',
+      allowInInput: true,
+      match: e => (e.key === 'k' || e.key === 'K') && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey,
+      run:   e => openSearch(e) },
+
+    { id: 'search-slash',
+      allowInInput: false,
+      match: e => e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey,
+      run:   e => openSearch(e) },
+
+    { id: 'cheatsheet',
+      allowInInput: false,
+      match: e => e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey,
+      run:   e => toggleCheatSheet(e) },
+
+    { id: 'nav-alt-digit',
+      allowInInput: false,
+      match: e => e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[1-9]$/.test(e.code),
+      run:   e => navByIndex(parseInt(e.code.slice(5), 10)) },
+  ];
+
+  function onKeydown(e) {
+    if (e.defaultPrevented) return;
+    const typing = isTextInputFocused();
+    for (const entry of KEYMAP) {
+      let ok = false; try { ok = entry.match(e); } catch (_) {}
+      if (!ok) continue;
+      if (typing && !entry.allowInInput) return;
+      const acted = entry.run(e);
+      if (entry.id === 'escape') { if (acted) e.preventDefault(); return; }
+      return;
+    }
+  }
+
+  function maybeShowFirstRunHint() {
+    try {
+      if (localStorage.getItem('bi-kbd-hint-seen')) return;
+      const blocked = (typeof isPartner === 'function' && isPartner()) ||
+                      (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
+      if (blocked) return;
+      if (window.Notifs && Notifs.showToast) Notifs.showToast('Tip: press ? for keyboard shortcuts', 'success');
+      localStorage.setItem('bi-kbd-hint-seen', '1');
+    } catch (_) {}
+  }
+
+  function init() {
+    if (_inited) return;
+    _inited = true;
+    document.addEventListener('keydown', onKeydown);   // non-passive: we may preventDefault
+  }
+
+  return { init, isTextInputFocused, openSearch, navByIndex, toggleCheatSheet, buildCheatSheetHTML,
+           maybeShowFirstRunHint };
+})();
 
 // ── KPI value auto-fit ────────────────────────────
 // The CSS clamp sizes by VIEWPORT, so a long peso figure can still clip inside a

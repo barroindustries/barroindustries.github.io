@@ -115,8 +115,10 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     rendering, so partial completion never breaks a screen) — infra + all named sites + ~50
     unambiguous icon-only-button conversions done; ~600+ prose/label-prefix emoji deliberately
     left for a future pass.
-18. `[ ]` **Keyboard shortcuts** — Esc closes overlays; Ctrl/⌘K or / global search; Alt+1..9
-    nav; ? cheat sheet.
+18. `[x]` **Keyboard shortcuts** — Esc closes overlays; Ctrl/⌘K or / global search; Alt+1..9
+    nav; ? cheat sheet. IMPLEMENTED (window.Keymap in app.js) — see Build Log. Escape routes
+    through WS10-11's window.Overlay rather than a separate registry (reconciliation, since
+    the two specs were written independently — see Build Log for the exact mechanism).
 19. `[x]` **Security closes** — partner lockdown (files_* metadata, budgets_* world-write,
     users/tasks/posts reads); attendance self-write forgery; secretary rules limited to true
     minor-approvals tier; worker-login username lookup unblocked (needed for w/ IDs).
@@ -816,3 +818,57 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   reconciling this (route WS18's Escape entry through `Overlay.dismissTop()`/`isOpen()`, keep a
   small DOM-probe fallback only for the two surfaces `Overlay` doesn't track — profile drawer,
   mobile sidebar) before implementation.
+- **2026-07-10 (Sonnet implementation — WS18 Keyboard shortcuts, per spec, with a
+  cross-workstream reconciliation):** Implemented directly (not delegated) since this
+  workstream required resolving a genuine architectural conflict between two independently-
+  decided specs, which needs full context of both the WS18 spec and the actual as-built WS10-11
+  code. The WS18 spec (written before WS10-11 was implemented this session) assumed a
+  standalone `window.OverlayEsc` DOM-probe registry with its own Escape keydown listener,
+  reading overlay state via `document.getElementById('modal-overlay').classList.contains
+  ('active')`-style checks. But WS10-11 already shipped `window.Overlay` — a History-API-backed
+  LIFO stack that is the AUTHORITATIVE record of what's open (push/pop tracked in code, not
+  inferred from CSS classes) — with its own single-purpose Escape listener already wired in
+  app.js's router section (left with a deliberate forward-compat comment: "Esc closes the top
+  overlay (WS18 must reuse this path)"). Running both listeners would have raced two independent
+  "close on Escape" systems against the same keypress — e.g. `Overlay.dismissTop()`'s
+  `history.back()` resolves asynchronously via `popstate`, so a second synchronous DOM-probe
+  listener firing in the same event tick could see stale "still open" state and double-close.
+  **Resolution:** dropped `window.OverlayEsc` entirely; folded WS18's full `window.Keymap`
+  module (Ctrl/⌘K + `/` open search, `?` cheat-sheet modal, Alt+1..9 nav via the live
+  role-dependent `getSidebarItems()`, first-run discovery toast) into the SAME listener that
+  already existed, replacing it in place rather than adding a second — the 'escape' dispatch
+  entry now calls `Overlay.dismissTop()` first, falling back to a plain DOM-class check only
+  for the two UI surfaces `Overlay` never tracked (profile drawer, mobile sidebar — neither
+  ever pushes a history entry, so they were never in scope for the Overlay stack). One
+  `document.addEventListener('keydown', ...)` for the whole app, not two. **Bug caught and
+  fixed during my own verification, not shipped as-authored:** the spec's `closeModal`-level
+  `window._cheatSheetOpen = false` reset only fires when code calls `window.closeModal()`
+  directly — but Escape-triggered dismissal (and backdrop-click, and any future
+  `Overlay.clearAll()`) calls `Overlay.dismissTop()` directly, bypassing that wrapper entirely,
+  so the flag would go stale after an Escape-close (caught via a live browser test: opened the
+  cheat sheet with `?`, closed it with Escape, and `window._cheatSheetOpen` was still `true`).
+  Fixed by moving the reset into the modal's `Overlay.push('modal', ...)` teardown callback
+  itself in `openModal` — the one place EVERY dismissal path (Escape, backdrop click, X button,
+  `Overlay.clearAll()`) actually runs through — and simplified `closeModal` back to its original
+  one-liner. Re-tested after the fix: flag correctly resets to `false` after both an
+  Escape-close and a second-`?`-press toggle-close. **Verified (live browser, pre-login,
+  since dashboards need real auth):** `node --check` clean; CSS braces balanced (1297/1297);
+  zero `window.OverlayEsc` object created (confirmed via grep — the only match is this
+  reconciliation's own code comment); `?` opens the cheat-sheet modal with the `.kbd-cheatsheet`
+  table rendering; Escape closes it via `Overlay.dismissTop()` with no second listener firing;
+  nested nothing-broke-Overlay (WS10-11's earlier-verified modal+dialog LIFO ordering is
+  untouched — this workstream only added to the 'escape' entry's `run()`, never touched
+  `Overlay` itself); `Ctrl+K` navigates to the search page; the input-focus guard is exactly
+  right — `/` and `Alt+1` are suppressed and do nothing while a text input is focused (typed
+  literally instead), while `Escape` and `Ctrl+K` still fire even while typing, per the spec's
+  own allow-list. **NOT verified** (needs a live login): Alt+1..9 actually jumping to real
+  per-role sidebar items, the partner/Brilliant-Steel-only block on Ctrl+K/`/`/search (the
+  guard functions `isPartner()`/`isBrilliantOnly()` aren't meaningfully exercisable pre-auth),
+  the first-run hint toast firing once after a fresh login, and Escape actually dismissing the
+  profile drawer/mobile sidebar in a live session (verified correct by code review — the DOM-
+  class checks match `closeProfileDrawer`/`closeSidebar`'s actual `.open` class toggling — but
+  not exercised end-to-end). **No `firebase deploy` needed** — zero rules/collection changes,
+  the only persisted state is the device-local `localStorage` flag `bi-kbd-hint-seen`.
+  **This completes Phase 2 (workstreams 09, 10-11, 12, 13, 14, 15, 16, 17, 18) — all IMPLEMENTED.**
+  NEXT: Phase 3 remainder — workstreams 25 (leave), 26 (attendance v2), 27 (IDs) per the build
+  order in fable-workplan/INDEX.md.
