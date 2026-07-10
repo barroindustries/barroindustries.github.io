@@ -92,11 +92,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     openInventoryCountForm). Legacy/dead print builders (app.js printPayslip/printWorkerPayslip,
     departments.js printBKQuote/printQuote/renderBSQuoteBuilder) deliberately left unconverted
     per spec — owned by WS24 and WS31 respectively, not scope-creep.
-15. `[ ]` **Records durability** — backup covers ALL collections + native typed export; restore
+15. `[x]` **Records durability** — backup covers ALL collections + native typed export; restore
     script + docs; sync/backup failure alerting surfaced in-app; Drive files private-by-default
     (folder ACLs, payslip proofs no longer public-by-link); write-time sync queue instead of
     nightly full rescan. Storage strategy: Firestore = live DB (free tier, kept lean by
     workstream 16), Drive = archive/backup mirror (free 15GB) — the system stays free.
+    IMPLEMENTED (dynamic `db.listCollections()` backup discovery + `system_health` heartbeat +
+    `restore-from-backup.js`) — see Build Log. Write-time sync queue deliberately deferred
+    (nightly generic walk stays authoritative), per spec decision 7.
 16. `[ ]` **Performance & scale** — aggregate/counter docs for dashboard KPIs; limits/date
     filters on the unbounded reads (ledger, tasks, users, quotes×3, inventory, analytics×13);
     unified cache keys; presence heartbeat throttled; split departments.js; Chart.js on demand.
@@ -650,5 +653,45 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   Purchases`-style URL, device Back walking multi-page history, task-panel/quote-builder Back
   behavior, Chart.js-leak-on-Back, pull-to-refresh no-history-push. No new Firestore collection
   or query — no rules/indexes deploy needed for this workstream, per the spec's own note.
-  NEXT: workstream 15-18 (durability, performance & scale, design-system consolidation, keyboard
-  shortcuts) per the build order in fable-workplan/INDEX.md.
+- **2026-07-10 (Sonnet implementation — WS15 Records durability, per spec):** Delegated the full
+  mechanical implementation to one subagent (spec gave exact before/after code for every file);
+  verified independently before committing. `scripts/monthly-backup.js`'s hand-maintained
+  `EXPORTS` array (the recurring coverage-drift bug — new collections silently never got backed
+  up) is replaced by `db.listCollections()` dynamic discovery + a thin `OVERRIDES` map (10
+  entries) carrying only date-filter/CSV/subcollection specials; every other root collection —
+  including the previously-missing `pay_runs`, `approval_requests`, `payroll_delete_requests`,
+  the `it_*` family, `files_*`/`budgets_*`, etc. — now gets a complete JSON snapshot automatically,
+  with zero future code change when a new collection appears. A `_manifest.json` (file→collection
+  map) is written alongside, which the new `scripts/restore-from-backup.js` reads to restore
+  without its own hand-maintained list (drift-proof by construction). Restore is dispatch-only via
+  the new `.github/workflows/restore.yml`, dry-run by default (`RESTORE_COMMIT=1` to actually
+  write), reconciles `_counters` by bump-to-max (never blind-overwrites a sequence), and revives
+  ISO-8601 strings back to Firestore Timestamps. `scripts/drive-lib.js`'s `uploadBuffer` gained an
+  opt-in `{public}` flag defaulting to `false` — both the daily file mirror and monthly JSON/CSV
+  backups are now **private by default** (Drive stops being a second, permanent, org-external
+  public surface for payroll/finance dumps and payslip/drawing attachments); the app keeps opening
+  files via their existing Firebase Storage URLs, so 3 `driveUrl`-preferring sites in
+  departments.js (task attachments, drawing current-file, drawing revision history) had their
+  fallback order flipped to prefer the Storage `url`/`fileUrl`. A new `system_health/{jobId}`
+  collection (written only by GitHub Actions via the Admin SDK, `allow write: if false` in
+  firestore.rules) is the heartbeat both jobs report to; `js/app.js` gained
+  `checkBackupHealth()` (elapsed-ms staleness check, finance/admin-only, fire-and-forget after
+  profile load) + a dismissible red banner + a deduped President notification when a job is
+  stale or errored. **Genuine ambiguity, resolved not stopped-on:** the spec assumed a
+  `window.PRESIDENT_UID` global or an existing uid-from-email resolver would exist for the
+  notification push — grep confirmed neither does (the only `PRESIDENT_UID` in the codebase is an
+  unused, unexported email-string constant in modules.js). Used the spec's own explicit fallback
+  instruction ("do not block the banner on it") — the push silently no-ops, the banner still
+  fires; documented in a code comment rather than inventing a new global. **Verified:** `node
+  --check` clean on all 6 touched/new JS files; grep confirms zero remaining `EXPORTS` references;
+  `firestore.rules` braces balance (213/213); `.github/workflows/restore.yml` parses as valid
+  YAML; hand-spot-checked all 3 driveUrl-flip sites and the `checkBackupHealth()` call site
+  (correctly placed right after `startClaimsListener(user.uid)` in the post-profile-load auth
+  branch). **NOT verified** (needs live GitHub Actions/Drive/Firebase console access this session
+  doesn't have): an actual `workflow_dispatch` of the updated monthly backup or the new restore
+  workflow, confirming Drive files show Private in the Drive UI, or a live login to see the
+  banner render. **Still needed:** deploy `firestore.rules` (new `system_health` block — the
+  ONLY workstream-15 rules change); then, when convenient, manually dispatch the backup workflow
+  once and confirm `_manifest.json` + the previously-missing collections all appear, confirm new
+  Drive uploads show Private, and dry-run the restore workflow once.
+  NEXT: workstream 16 (performance & scale) per the build order in fable-workplan/INDEX.md.

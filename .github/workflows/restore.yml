@@ -1,0 +1,28 @@
+name: Restore Firestore from Backup
+on:
+  workflow_dispatch:
+    inputs:
+      month:      { description: 'Backup month (YYYY-MM)', required: true }
+      collection: { description: 'Single collection (blank = all)', required: false }
+      commit:     { description: 'Type EXACTLY "1" to write; anything else = dry run', required: true, default: '0' }
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm install
+        working-directory: scripts
+      - run: node restore-from-backup.js
+        working-directory: scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT:   ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          DRIVE_FOLDER_ID:            ${{ secrets.DRIVE_FOLDER_ID }}
+          FIREBASE_STORAGE_BUCKET:    ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          GOOGLE_OAUTH_CLIENT_ID:     ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_OAUTH_REFRESH_TOKEN: ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          RESTORE_MONTH:      ${{ inputs.month }}
+          RESTORE_COLLECTION: ${{ inputs.collection }}
+          RESTORE_COMMIT:     ${{ inputs.commit }}

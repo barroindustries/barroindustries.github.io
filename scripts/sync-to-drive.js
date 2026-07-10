@@ -256,6 +256,18 @@ async function processCollection(colRef, name, parentFolderId, depth, stats) {
   }
 }
 
+// ── Heartbeat: write a status doc the app watches (see §F) ──────────────────
+async function reportHealth(job, stats, label, durationSec) {
+  try {
+    await db.collection('system_health').doc(job).set({
+      job, lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastStatus: stats.errors > 0 ? 'error' : 'ok',
+      errors: stats.errors || 0, filesWritten: stats.synced || 0,
+      unfetchable: stats.unfetchable || 0, durationSec: Number(durationSec) || 0, label: label || '',
+    }, { merge: true });
+  } catch (e) { console.warn(`   ⚠️  system_health/${job}: ${e.message}`); }
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 async function main() {
   const stats     = { synced: 0, errors: 0, unfetchable: 0 };
@@ -286,6 +298,7 @@ async function main() {
   console.log(`${'─'.repeat(50)}\n`);
 
   // Only real Drive failures fail the run; unfetchable sources are expected drift.
+  await reportHealth('daily_sync', stats, '', duration);
   process.exit(stats.errors > 0 ? 1 : 0);
 }
 

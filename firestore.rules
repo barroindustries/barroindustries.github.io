@@ -351,6 +351,14 @@ service cloud.firestore {
       allow write: if isAuth() && isPresident();
     }
 
+    // ── System health (backup/sync heartbeat) ──────────
+    // Written ONLY by the GitHub Actions backup/sync jobs via the Admin SDK
+    // (which bypasses these rules). No client ever writes it.
+    match /system_health/{jobId} {
+      allow read:  if isAuth() && isFinanceOrAdmin();
+      allow write: if false;
+    }
+
     // ── President message ──────────────────────────────
     match /president_message/{docId} {
       allow read: if isAuth() && !isPartner();

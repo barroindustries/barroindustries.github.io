@@ -774,7 +774,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
         <div style="margin-bottom:12px">
           <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);margin-bottom:6px">📎 Attachments</div>
           <div style="display:flex;flex-wrap:wrap;gap:6px">
-            ${t.attachments.map(a=>{const isLink=a&&(a.source==='link'||a.kind==='link');const url=a&&(a.driveUrl||a.url)||'';return url?`<a href="${escHtml(url)}" target="_blank" rel="noopener" class="file-chip">${isLink?'🔗':'📎'} <span>${escHtml(a.name||(isLink?'Link':'File'))}</span></a>`:'';}).join('')}
+            ${t.attachments.map(a=>{const isLink=a&&(a.source==='link'||a.kind==='link');const url=a&&(a.url||a.driveUrl)||'';return url?`<a href="${escHtml(url)}" target="_blank" rel="noopener" class="file-chip">${isLink?'🔗':'📎'} <span>${escHtml(a.name||(isLink?'Link':'File'))}</span></a>`:'';}).join('')}
           </div>
         </div>`:''}
 
@@ -7206,7 +7206,7 @@ function openDrawingDetail(d, project, currentUser, currentRole, canBill){
   const revs = (d.revisions||[]).slice().reverse();
   const acts = (d.activity||[]).slice().reverse();
   const fileLink = d.fileUrl
-    ? `<a href="${escHtml(d.driveUrl||d.fileUrl)}" target="_blank" class="btn-secondary btn-sm">⬇ ${escHtml(d.fileName||'Open file')}</a>`
+    ? `<a href="${escHtml(d.fileUrl||d.driveUrl)}" target="_blank" class="btn-secondary btn-sm">⬇ ${escHtml(d.fileName||'Open file')}</a>`
     : '<span style="font-size:12px;color:var(--text-muted)">No file attached</span>';
   const trans = canManage ? drawingTransitions(d.status) : [];
   openModal(`${drawingTypeIcon(d.type)} ${escHtml(d.title||'Drawing')}`, `
@@ -7224,7 +7224,7 @@ function openDrawingDetail(d, project, currentUser, currentRole, canBill){
     </div></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">📑 Revision History</div>
     <div class="table-wrap"><table class="data-table"><thead><tr><th>Rev</th><th>Status</th><th>Note</th><th>By</th><th>Date</th><th>File</th></tr></thead><tbody>
-      ${revs.length?revs.map(r=>`<tr><td><strong>${escHtml(r.rev||'')}</strong></td><td>${escHtml(drawingStatus(r.status).label)}</td><td style="font-size:11px">${escHtml(r.note||'')}</td><td style="font-size:11px">${escHtml(r.byName||'')}</td><td style="font-size:11px;color:var(--text-muted)">${(''+(r.at||'')).slice(0,10)}</td><td>${r.fileUrl?`<a href="${escHtml(r.driveUrl||r.fileUrl)}" target="_blank">⬇</a>`:'—'}</td></tr>`).join(''):'<tr><td colspan="6" style="font-size:12px;color:var(--text-muted)">No revisions.</td></tr>'}
+      ${revs.length?revs.map(r=>`<tr><td><strong>${escHtml(r.rev||'')}</strong></td><td>${escHtml(drawingStatus(r.status).label)}</td><td style="font-size:11px">${escHtml(r.note||'')}</td><td style="font-size:11px">${escHtml(r.byName||'')}</td><td style="font-size:11px;color:var(--text-muted)">${(''+(r.at||'')).slice(0,10)}</td><td>${r.fileUrl?`<a href="${escHtml(r.fileUrl||r.driveUrl)}" target="_blank">⬇</a>`:'—'}</td></tr>`).join(''):'<tr><td colspan="6" style="font-size:12px;color:var(--text-muted)">No revisions.</td></tr>'}
     </tbody></table></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:12px 0 4px">🕘 Activity</div>
     <div style="max-height:150px;overflow:auto;font-size:12px">${acts.length?acts.map(a=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)"><strong>${escHtml(a.event||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${(''+(a.at||'')).slice(0,16).replace('T',' ')} · ${escHtml(a.byName||'')}</div></div>`).join(''):'<div style="color:var(--text-muted)">No activity.</div>'}</div>
@@ -11218,6 +11218,8 @@ function renderFileCollection(title, id, currentRole) {
 
 function bindFileCollection(id, currentUser, dept, subfolder) {
   const filesDiv = document.getElementById(`${id}-files`);
+  // Root collection, name computed at runtime — no backup registration needed:
+  // scripts/monthly-backup.js discovers every root collection via db.listCollections().
   const collection = `files_${id.replace(/-/g,'_')}`;
   const role = window.currentRole || '';
   const canDelete = role === 'president' || role === 'owner' || role === 'manager';
@@ -11298,6 +11300,8 @@ function bindFileCollection(id, currentUser, dept, subfolder) {
 //  SHARED: Budgeting
 // ══════════════════════════════════════════════════
 async function renderBudgeting(container, currentUser, currentRole, dept) {
+  // Root collection, name computed at runtime — no backup registration needed:
+  // scripts/monthly-backup.js discovers every root collection via db.listCollections().
   const collection = `budgets_${dept.toLowerCase().replace(/\s+/g,'_')}`;
   // Allow: admins, finance, president, and members of this dept
   const isDeptMember = (window.currentDepts||[]).includes(dept);
@@ -11522,6 +11526,8 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
   const uploadBtn = document.getElementById(`upload-btn-${containerId}`);
   const newFolderBtn = document.getElementById(`newfolder-btn-${containerId}`);
   const addLinkBtn = document.getElementById(`addlink-btn-${containerId}`);
+  // Root collection, name computed at runtime — no backup registration needed:
+  // scripts/monthly-backup.js discovers every root collection via db.listCollections().
   const collection = `files_${scope.toLowerCase().replace(/\s+/g,'_')}`;
   let allFiles = [];
   let activeFolder = 'All';

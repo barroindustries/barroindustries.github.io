@@ -89,6 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
       startPresenceHeartbeat(user.uid);
       startForceLogoutListener(user.uid);
       startClaimsListener(user.uid);
+      checkBackupHealth();
       // Mark this uid as fully bootstrapped so subsequent token-refresh fires
       // for the same user are treated as no-ops above.
       _bootstrappedUid = user.uid;
@@ -145,6 +146,58 @@ function startForceLogoutListener(uid) {
       Notifs.showToast('You have been signed out by an administrator.', 'info');
     }
   }, () => {});
+}
+
+// ── Backup/sync health banner (finance/admin only) ───────────────────────
+async function checkBackupHealth() {
+  try {
+    if (!['president','manager','secretary','finance'].includes(window.currentRole)) return;
+    const now = Date.now();
+    const CHECKS = [
+      { id: 'daily_sync',     label: 'Daily file sync',  staleMs: 30 * 3600 * 1000 },
+      { id: 'monthly_backup', label: 'Monthly backup',   staleMs: 34 * 24 * 3600 * 1000 },
+    ];
+    const problems = [];
+    for (const c of CHECKS) {
+      const snap = await db.collection('system_health').doc(c.id).get().catch(() => null);
+      const d = snap && snap.exists ? snap.data() : null;
+      const last = d?.lastRunAt?.toDate?.()?.getTime?.() || 0;
+      if (!last || (now - last) > c.staleMs) {
+        problems.push(`${c.label} has not reported in — last run ${last ? new Date(last).toLocaleString('en-PH') : 'never'}.`);
+      } else if (d.lastStatus === 'error') {
+        problems.push(`${c.label} last run had ${d.errors} error(s) (${d.label||''}).`);
+      }
+    }
+    if (!problems.length) return;
+    renderBackupHealthBanner(problems);
+    // Notify the President once per distinct problem (deduped).
+    if (window.Notifs?.send) {
+      // window.PRESIDENT_UID doesn't exist as a global today (js/modules.js has an
+      // unused module-scoped PRESIDENT_UID const holding an EMAIL, not a uid, and no
+      // code anywhere resolves an arbitrary uid by email) — skip the push rather than
+      // invent a new lookup; the banner alone still satisfies the alert requirement.
+      const PREZ_UID = window.PRESIDENT_UID; // if unavailable, skip the push — banner still shows
+      if (PREZ_UID) {
+        window.Notifs.send(PREZ_UID, {
+          title: '⚠️ Backup/sync needs attention',
+          body: problems.join(' '),
+          icon: '🗄️', type: 'system',
+          dedupKey: 'backup-health-' + problems.join('|').slice(0, 80),
+        }).catch(() => {});
+      }
+    }
+  } catch (_) { /* monitoring must never break the app */ }
+}
+
+function renderBackupHealthBanner(problems) {
+  if (document.getElementById('backup-health-banner')) return;
+  const div = document.createElement('div');
+  div.id = 'backup-health-banner';
+  div.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#b91c1c;color:#fff;padding:10px 44px 10px 14px;font-size:13px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.3)';
+  div.innerHTML = `🗄️ <strong>Records durability alert.</strong> ${problems.map(p => escHtml(p)).join(' ')}`
+    + `<button aria-label="Dismiss" style="position:absolute;right:10px;top:8px;background:none;border:none;color:#fff;font-size:18px;cursor:pointer">×</button>`;
+  div.querySelector('button').onclick = () => div.remove();
+  document.body.appendChild(div);
 }
 
 // ── Custom-claims token refresh ───────────────────

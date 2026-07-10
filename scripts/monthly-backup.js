@@ -95,7 +95,8 @@ function toCSV(rows) {
 
 // Date range for the PREVIOUS month
 function getPrevMonthRange() {
-  const now    = new Date();
+  // Manila 'now' on a UTC runner (UTC+8), so the label/window are PH-correct.
+  const now    = new Date(Date.now() + 8 * 3600 * 1000);
   const year   = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
   const month  = now.getMonth() === 0 ? 12 : now.getMonth(); // 1-indexed
   const start  = new Date(year, month - 1, 1, 0, 0, 0);
@@ -104,139 +105,61 @@ function getPrevMonthRange() {
   return { start, end, label };
 }
 
-// ── Collection export definitions ─────────────────────────────────────────
-//
-//  dateField   — Firestore field used to filter by prev month (null = export all)
-//  csvFields   — keys to include in the CSV (undefined = all scalar fields)
+// ── Per-collection overrides (specials only) ───────────────────────────────
+//  Any root collection NOT listed here is auto-discovered (db.listCollections)
+//  and exported as a COMPLETE full-document JSON snapshot — no hand-registration,
+//  so new collections (pay_runs, it_*, aec_contacts, files_*, budgets_*, …) are
+//  covered automatically and this file never drifts again.
+//    dateField  — field to filter by prev month (absent/null = full snapshot)
+//    dateIsStr  — dateField is a 'YYYY-MM-DD' string, not a Timestamp
+//    csvFields  — also emit a CSV with these columns (JSON is always complete)
+//    filename   — output basename if different from the collection name
+//    type       — 'subcollection' routes to fetchAttendanceSubcollection
+const OVERRIDES = {
+  attendance: {
+    filename: 'attendance', type: 'subcollection',
+    csvFields: ['userId','date','loginTime','timeOut','fullTime','attendanceScore','note','editedBy'],
+  },
+  tasks: {
+    dateField: 'createdAt', includeSubcol: true,
+    csvFields: ['id','title','status','priority','dept','assignedToNames','createdAt','dueDate','presidentScore'],
+  },
+  cash_advances: {
+    dateField: 'createdAt',
+    csvFields: ['id','userName','amount','terms','interest','totalPayable','monthlyPayment','balance','status','date','reason'],
+  },
+  salary_history: {
+    dateField: 'generatedAt',
+    csvFields: ['id','userId','userName','month','baseSalary','allowance','deductions','netPay','multiplier','finalPay'],
+  },
+  kpi_evals: {
+    filename: 'kpi_evaluations',
+    csvFields: ['id','selfGrade','selfNotes','presidentGrade','presidentGradeFromTasks','presidentNotes','selfAssessMonth'],
+  },
+  users: {
+    csvFields: ['id','displayName','email','username','role','dept','employeeId','salary','allowance','deductions'],
+  },
+  posts: {
+    dateField: 'createdAt',
+    csvFields: ['id','authorName','dept','title','status','pinned','createdAt'],
+  },
+  payroll_ca_overrides: {
+    filename: 'payroll_overrides',
+    csvFields: ['id','userId','month','customDeduction'],
+  },
+  attendance_extensions: {
+    dateField: 'requestedAt',
+    csvFields: ['id','userId','date','status','reason','approvedAt','expiresAt'],
+  },
+  suggestions: {
+    dateField: 'createdAt',
+    csvFields: ['id','category','text','createdAt'],
+  },
+};
 
-const EXPORTS = [
-  {
-    name:         'attendance',
-    filename:     'attendance',
-    type:         'subcollection', // attendance/{uid}/records/{date} — not a flat collection
-    csvFields:    ['userId','date','loginTime','timeOut','fullTime','attendanceScore','note','editedBy'],
-  },
-  {
-    name:       'tasks',
-    filename:   'tasks',
-    dateField:  'createdAt',
-    csvFields:  ['id','title','status','priority','dept','assignedToNames','createdAt','dueDate','presidentScore'],
-    includeSubcol: true,         // also export task-comments
-  },
-  {
-    name:       'cash_advances',
-    filename:   'cash_advances',
-    dateField:  'createdAt',
-    csvFields:  ['id','userName','amount','terms','interest','totalPayable','monthlyPayment','balance','status','date','reason'],
-  },
-  {
-    name:       'salary_history',
-    filename:   'salary_history',
-    dateField:  'generatedAt',
-    csvFields:  ['id','userId','userName','month','baseSalary','allowance','deductions','netPay','multiplier','finalPay'],
-  },
-  {
-    name:       'kpi_evals',
-    filename:   'kpi_evaluations',
-    dateField:  null,            // export all (small collection)
-    csvFields:  ['id','selfGrade','selfNotes','presidentGrade','presidentGradeFromTasks','presidentNotes','selfAssessMonth'],
-  },
-  {
-    name:       'users',
-    filename:   'users',
-    dateField:  null,
-    csvFields:  ['id','displayName','email','username','role','dept','employeeId','salary','allowance','deductions'],
-  },
-  {
-    name:       'usernames',   // v12 WS19 — the username->email login map
-    filename:   'usernames',
-    dateField:  null,
-    csvFields:  ['id','email','uid'],
-  },
-  {
-    name:       'posts',
-    filename:   'posts',
-    dateField:  'createdAt',
-    csvFields:  ['id','authorName','dept','title','status','pinned','createdAt'],
-  },
-  {
-    name:       'payroll_ca_overrides',
-    filename:   'payroll_overrides',
-    dateField:  null,
-    csvFields:  ['id','userId','month','customDeduction'],
-  },
-  {
-    name:       'attendance_extensions',
-    filename:   'attendance_extensions',
-    dateField:  'requestedAt',
-    csvFields:  ['id','userId','date','status','reason','approvedAt','expiresAt'],
-  },
-  {
-    name:       'suggestions',
-    filename:   'suggestions',
-    dateField:  'createdAt',
-    csvFields:  ['id','category','text','createdAt'],
-  },
-
-  // ── Finance / books (full snapshot each run — these are the company's records) ──
-  { name:'ledger',                    filename:'ledger',                    dateField:null },
-  { name:'finance_periods',           filename:'finance_periods',           dateField:null }, // v12 WS12 — period close/reopen governance
-  { name:'general_journal',           filename:'general_journal',           dateField:null },
-  { name:'cash_receipt_journal',      filename:'cash_receipt_journal',      dateField:null },
-  { name:'cash_disbursement_journal', filename:'cash_disbursement_journal', dateField:null },
-  { name:'finance_records',           filename:'finance_records',           dateField:null },
-  { name:'tax_records',               filename:'tax_records',               dateField:null },
-  { name:'expenses',                  filename:'expenses',                  dateField:null },
-  { name:'finance_delete_requests',   filename:'finance_delete_requests',   dateField:null },
-
-  // ── Payroll / HR ──
-  { name:'payroll',                   filename:'payroll',                   dateField:null },
-  // v12 WS20 — pay_runs now carries the frozen per-employee lines[] snapshot
-  // (the source of truth for Compute/Verify/Disburse), not just state metadata.
-  { name:'pay_runs',                  filename:'pay_runs',                  dateField:null },
-  { name:'payroll_delete_requests',   filename:'payroll_delete_requests',   dateField:null },
-  { name:'payslips',                  filename:'payslips',                  dateField:null },
-  { name:'worker_profiles',           filename:'worker_profiles',           dateField:null },
-  { name:'salary_raises',             filename:'salary_raises',             dateField:null },
-  { name:'pending_raises',            filename:'pending_raises',            dateField:null }, // v12 WS23
-  { name:'leave_balances',            filename:'leave_balances',            dateField:null },
-  { name:'leave_requests',            filename:'leave_requests',            dateField:null },
-
-  // ── Sales / quotes / clients ──
-  { name:'bk_quotes',                 filename:'bk_quotes',                 dateField:null },
-  { name:'bs_quotes',                 filename:'bs_quotes',                 dateField:null },
-  { name:'sales_clients',             filename:'sales_clients',             dateField:null },
-  { name:'work_plans',                filename:'work_plans',                dateField:null },
-  { name:'submissions',               filename:'submissions',               dateField:null },
-
-  // ── Projects (job lifecycle + design board) ──
-  { name:'job_projects',              filename:'job_projects',              dateField:null },
-  { name:'projects',                  filename:'projects',                  dateField:null },
-  { name:'order_tracking',            filename:'order_tracking',            dateField:null },
-
-  // ── Purchasing ──
-  { name:'purchase_requisitions',     filename:'purchase_requisitions',     dateField:null },
-  { name:'purchase_orders',           filename:'purchase_orders',           dateField:null },
-
-  // ── Production / inventory ──
-  { name:'production_orders',         filename:'production_orders',         dateField:null },
-  { name:'inventory_items',           filename:'inventory_items',           dateField:null },
-  { name:'stock_movements',           filename:'stock_movements',           dateField:null },
-  { name:'job_costs',                 filename:'job_costs',                 dateField:null },
-
-  // ── Design / Government / Marketing ──
-  { name:'design_clients',            filename:'design_clients',            dateField:null },
-  { name:'design_drawings',           filename:'design_drawings',           dateField:null },
-  { name:'gov_philgeps',              filename:'gov_philgeps',              dateField:null },
-  { name:'gov_active_bids',           filename:'gov_active_bids',           dateField:null },
-  { name:'gov_archive',               filename:'gov_archive',               dateField:null },
-  { name:'marketing_plans',           filename:'marketing_plans',           dateField:null },
-  { name:'marketing_proposals',       filename:'marketing_proposals',       dateField:null },
-
-  // ── Partners ──
-  { name:'partner_deals',             filename:'partner_deals',             dateField:null },
-  { name:'bs_clients',                filename:'bs_clients',                dateField:null },
-];
+// Ephemeral / huge / per-user-subcollection roots we never snapshot to JSON.
+// (audit_log is intentionally NOT here — its off-site copy is the whole point.)
+const EXCLUDE = new Set(['presence', 'sessions', 'notifications']);
 
 // ── Fetch attendance subcollections: attendance/{uid}/records/{date} ────────
 // The root 'attendance' collection holds one doc per user (uid as doc ID).
@@ -327,6 +250,26 @@ async function exportCollection(col, docs, folderId, stats) {
   }
 }
 
+// ── Heartbeat: write a status doc the app watches (see §F) ──────────────────
+async function reportHealth(job, stats, label, durationSec) {
+  try {
+    await db.collection('system_health').doc(job).set({
+      job,
+      lastRunAt:       admin.firestore.FieldValue.serverTimestamp(),
+      lastStatus:      stats.errors > 0 ? 'error' : 'ok',
+      errors:          stats.errors || 0,
+      filesWritten:    stats.files || 0,
+      recordsExported: stats.exported || 0,
+      unfetchable:     stats.unfetchable || 0,
+      durationSec:     Number(durationSec) || 0,
+      label:           label || '',
+    }, { merge: true });
+    console.log(`   🫀 system_health/${job} updated (${stats.errors > 0 ? 'error' : 'ok'})`);
+  } catch (e) {
+    console.warn(`   ⚠️  could not write system_health/${job}: ${e.message}`);
+  }
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 async function main() {
   const stats      = { exported: 0, files: 0, errors: 0 };
@@ -352,13 +295,24 @@ async function main() {
     `Collections exported:`,
   ];
 
-  // Export each collection
-  for (const col of EXPORTS) {
+  // Export every discovered root collection (drift-proof — see OVERRIDES/EXCLUDE above)
+  const manifest = [];
+  const discovered = await db.listCollections();
+  console.log(`\n📚 ${discovered.length} root collections discovered`);
+
+  for (const ref of discovered) {
+    const name = ref.id;
+    if (EXCLUDE.has(name)) { console.log(`\n⏭️  ${name} (excluded)`); continue; }
+    const ov  = OVERRIDES[name] || {};
+    const col = { name, filename: ov.filename || name, dateField: ov.dateField ?? null,
+                  dateIsStr: ov.dateIsStr, csvFields: ov.csvFields,
+                  type: ov.type, includeSubcol: ov.includeSubcol };
     try {
-      console.log(`\n📋 ${col.name}`);
+      console.log(`\n📋 ${name}`);
       const docs = await fetchCollection(col, { start, end });
       await exportCollection(col, docs, monthFolder, stats);
       stats.exported += docs.length;
+      manifest.push({ collection: name, filename: col.filename, records: docs.length });
       summaryLines.push(`  ${col.filename}: ${docs.length} records`);
 
       // Task comments as extra JSON under tasks
@@ -372,14 +326,19 @@ async function main() {
           monthFolder
         );
         stats.files++;
+        manifest.push({ collection: 'tasks/task-comments', filename: 'task_messages', records: comments.length });
         summaryLines.push(`  task_messages: ${comments.length} messages`);
       }
     } catch (err) {
-      console.error(`  ❌ ${col.name}: ${err.message}`);
+      console.error(`  ❌ ${name}: ${err.message}`);
       stats.errors++;
       summaryLines.push(`  ${col.filename}: ERROR — ${err.message}`);
     }
   }
+
+  // Self-describing manifest → drives drift-proof restore (see restore-from-backup.js)
+  await uploadText(JSON.stringify(manifest, null, 2), '_manifest.json', 'application/json', monthFolder);
+  stats.files++;
 
   // Upload summary file
   const duration = ((Date.now() - startedAt.getTime()) / 1000).toFixed(1);
@@ -399,6 +358,7 @@ async function main() {
   console.log(`   Duration        : ${duration}s`);
   console.log(`${'─'.repeat(50)}\n`);
 
+  await reportHealth('monthly_backup', stats, label, duration);
   process.exit(stats.errors > 0 ? 1 : 0);
 }
 

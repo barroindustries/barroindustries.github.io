@@ -1,5 +1,9 @@
 # Workstream 15 — Records Durability (backup coverage, restore, Drive privacy, sync reliability)
 
+> ✅ **IMPLEMENTED 2026-07-10.** Rules deploy required (new `system_health` collection) —
+> see V12-PLAN.md Build Log. Live GitHub Actions dispatch (backup + restore dry-run) and
+> Drive-privacy confirmation still need to be run manually — not exercised this session.
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

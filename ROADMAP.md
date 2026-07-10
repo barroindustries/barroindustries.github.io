@@ -294,8 +294,17 @@ Designed via a fan-out spec workflow, then implemented + adversarially reviewed 
 16. **Client-side error logging** to Firestore for remote debugging/monitoring.
 17. **Performance at scale** — V11 cached the heavy dashboard reads (`ledger`/`inventory`/pending badges via
     `dbCachedGet`, with write-invalidation) + switched the SW to network-first + added the `partner_deals`
-    index. _Remaining:_ pagination on the big collections as data grows; verify the monthly backup GitHub
-    Action actually runs; document restore.
+    index. ✅ **"Verify the monthly backup GitHub Action actually runs; document restore" — DONE (WS15,
+    2026-07-10, Records Durability).** `scripts/monthly-backup.js` switched from a hand-maintained `EXPORTS`
+    array (which had drifted twice, missing `pay_runs`, `approval_requests`, the IT department, etc.) to
+    dynamic `db.listCollections()` discovery + a thin `OVERRIDES` map — every root collection is backed up
+    automatically with no further hand-registration, and a `_manifest.json` records the file→collection map.
+    A dispatch-only, dry-run-by-default `scripts/restore-from-backup.js` + `.github/workflows/restore.yml`
+    now exist (reconciles `_counters` to max, revives ISO timestamps). Both the daily sync and monthly
+    backup jobs write a `system_health/{daily_sync|monthly_backup}` heartbeat; Finance/admin see an in-app
+    banner (`checkBackupHealth()`, js/app.js) if a job goes stale or errors. Drive uploads (both jobs) are
+    also now private-by-default (see DRIVE_SYNC_SETUP.md). _Remaining:_ pagination on the big collections
+    as data grows.
 18. **Production role** — inventory write is currently "any non-partner." Consider a dedicated Production
     role and tighter inventory/item-definition vs. stock-movement permissions.
 

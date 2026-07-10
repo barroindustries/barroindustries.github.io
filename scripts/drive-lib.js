@@ -198,15 +198,17 @@ async function makePublic(drive, fileId) {
   } catch (_) { /* non-fatal — Shared Drive admins may disable link sharing */ }
 }
 
-// Upload a Buffer; returns the webViewLink.
-async function uploadBuffer(drive, buffer, filename, mimeType, folderId) {
+// Upload a Buffer; returns the webViewLink. Files are PRIVATE by default
+// (Drive = cold archive). Pass { public:true } only for deliberately
+// low-sensitivity, shareable content — nothing in this repo does today.
+async function uploadBuffer(drive, buffer, filename, mimeType, folderId, { public: isPublic = false } = {}) {
   const res = await drive.files.create({
     requestBody: { name: filename, parents: [folderId] },
     media:       { mimeType: mimeType || 'application/octet-stream', body: Readable.from(buffer) },
     fields:      'id,webViewLink',
     ...SHARED,
   });
-  await makePublic(drive, res.data.id);
+  if (isPublic) await makePublic(drive, res.data.id);
   return res.data.webViewLink;
 }
 
