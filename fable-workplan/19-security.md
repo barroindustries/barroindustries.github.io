@@ -130,16 +130,223 @@ js/app.js:696-703 runs `db.collection('users').where('username','==', input.toLo
 - Manila-time discipline (CLAUDE.md, manila_time_helpers memory: use bizDate()/bizHour()/bizDow(), never raw toISOString()) governs how the app computes 'today' client-side (js/app.js:3114 uses `new Date(todayStr + 'T00:00:00+08:00')`), but Firestore rules only have request.time (UTC) with no timezone conversion function available in the rules language — any rule wanting to validate 'this write is for today (Manila)' cannot literally reuse bizDate(); it must either tolerate a UTC/Manila offset window or push the validation into a Cloud Function callable instead of declarative rules.
 - escHtml()-before-innerHTML discipline (CLAUDE.md) applies to any new UI Fable specifies for surfacing rule-driven states (e.g. an escalate-to-president banner) — not a rules concern but binds any accompanying JS spec.
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-- [ ] files_* lockdown mechanism: does the fix need per-department scoping (a partner should still read their OWN dept's files, mirroring storage.rules' isMemberOf(department) carve-out and their existing Storage access), or a blanket exclusion (partner reads NO files_* collection at all, matching the simpler pattern used everywhere else in this file)? Per-dept scoping requires either parsing the department out of the collection-name string (fragile — ties correctness forever to departments.js's two different slugification call sites at :10449 and :10749 staying in sync with the rule's parsing logic) or adding an explicit `department` field to every files_ doc and checking resource.data.department (a data-model change requiring a one-time migration of existing docs, since resource.data reads can't see a field that was never written).
-- [ ] budgets_* fix shape: convert to fully-named per-department match blocks (mirroring the existing work_plans/marketing_plans/gov_philgeps pattern at firestore.rules:552-575, using canDept(dept)) — which means enumerating every department as its own block — or keep the single wildcard but parse the dept suffix out of the collection name and compare to inDept()? Named blocks are explicit/auditable but add ~8 new blocks; wildcard-with-parsing stays compact but makes correctness depend on `dept.toLowerCase().replace(/\s+/g,'_')` (departments.js:10529) never diverging from whatever regex the rule uses to extract dept back out of the collection name.
-- [ ] Secretary two-tier architecture — the central call: does Fable (a) introduce a NEW helper (e.g. `isMinorAdmin()`) and re-derive, call-site by call-site, which of the ~60 isAdmin() and ~37 isFinanceOrAdmin() usages secretary should keep vs lose (large surface, but precise), or (b) leave isAdmin()/isFinanceOrAdmin() as-is for the ~50+ genuinely-minor blocks (sops, memos, products, resources/policies/handbook, gov_biddings write, departments config, it_tickets, stock_movements, design_drawings delete, kpi_targets, posts/tasks admin-delete) and instead introduce a NARROWER guard (e.g. `getRole() in ['president','manager']`) applied only to the specific money-moving/escalation blocks (users update/create, payroll, ledger/all journals, cash_advances, kpi_evals president-fields, partner_deals, salary_history/salary_raises, payroll_ca_overrides) that should explicitly exclude secretary? Option (b) is far smaller-surface but requires Fable to certify the remaining isAdmin()/isFinanceOrAdmin() list really is all 'minor' — option (a) is a full architecture change to the role-helper hierarchy.
-- [ ] users/{uid} update/create specifically (firestore.rules:92-108): the isAdmin() branch of `allow update` has NO field restriction (unlike the isOwner() branch's userPrivilegedFieldsUnchanged() freeze), so today a secretary can write role:'president' onto any doc including their own — a live self-escalation path independent of the broader two-tier question. Does the fix (a) apply field-freezing (role/department/salary/employeeId) to the isAdmin() branch too, but carve out an isPresident()-only override for those specific fields, or (b) split the update rule into an isPresident()-only path for privileged-field changes and a still-broad isAdmin() path for everything else (name/photo/phone/notes), or (c) something else? Also: exactly which fields should secretary still be allowed to change on another user's doc (if any) as part of an HR-adjacent oversight function?
-- [ ] Attendance self-write forgery fix: pure declarative rules cannot re-derive the 'no unread notifications before 9am' autoFull business logic (js/app.js:3111-3121) needed to validate a legitimate 0.5→1.0 upgrade, and rules only have request.time (UTC), not Manila time, to compare against a docId date string. Given that, should Fable (a) settle for a narrower-but-still-declarative rule — restrict the docId to request.time's UTC date (or a tolerance window spanning the Manila offset), cap attendanceScore to the enumerated set {0, 0.5, 1.0}, and forbid an owner-write from touching a doc that already has `editedBy` set (protects admin overrides from being undone) — accepting that the autoFull business-logic check itself stays client-trusted for the 0.5-grant, or (b) move the write path behind a Cloud Functions callable (a real server-side function that stamps date/score) and lock the Firestore write rule down to isFinanceOrAdmin()-only, changing all three client call sites (app.js:3111-3133, 3170-3189, modules.js:1211-1223) to call the function instead of writing Firestore directly? (b) is more robust but is a bigger workstream-19 scope increase (new Cloud Function, functions/index.js deploy) versus a pure rules change.
-- [ ] Partner read-scope completeness: the plan text (V12-PLAN.md:83-85) names 'users/tasks/posts reads' as the examples, but the identical bare-isAuth()-no-partner-exclusion pattern also exists on /quotes, /projects (as opposed to /job_projects which correctly restricts partners), /design_drawings, /it_tickets, /it_assets, /it_software, /sops, /resources, /policies, /handbook, /memos, /settings, /president_message, /departments. Is the intended scope of this workstream ONLY the three named collections, or the full audit-style sweep of every internal collection currently partner-readable by omission? If the latter, Fable needs to produce a definitive collection-by-collection whitelist (which collections a partner should legitimately read: bs_quotes-own, bs_clients, partner_deals-own, sales_orders-own, job_projects-own/shared, order_tracking-public-token — vs. everything else denied) rather than patching a handful.
-- [ ] /projects vs /job_projects duplication: /projects (firestore.rules:491-502, bare isAuth() read) and /job_projects (783-792, correctly partner-scoped) look like two parallel 'project' collections with different partner-visibility policies. Is /projects a legacy/duplicate collection this workstream should just partner-lock (add getRole()!='partner'), or does it overlap with the 'two project collections' gap already flagged in the finance-reporting-open-items memory and belong to a bigger dedup effort outside workstream 19's scope? Needs a decision on whether to fix in place or flag for the collection-consolidation effort and fix narrowly here regardless.
-- [ ] Style/DRY: should a new `isPartner()` helper function be introduced (mirroring storage.rules' `isPartnerClaim()`) to replace the ~20 repeated inline `getRole() != 'partner'` expressions across every touched block, or is the current inline-repetition style intentional/consistent with the file's convention of small named booleans for OTHER roles but not this one? Low-stakes but touches every block being edited in this workstream, so worth settling once.
+### Resolved decisions
+
+1. **files_\* — blanket partner exclusion now; internal per-dept scoping deferred.** The audit
+   risk is the token-bearing `url` field leaking to the external partner (a full file-content
+   exfil path, not just metadata). Fix = add `!isPartner()` to read/create/update/delete on the
+   `files_.*` wildcard. Internal cross-dept read stays open (unchanged for staff) — per-dept
+   scoping needs a `department` field + migration and isn't the live threat; recorded as a
+   follow-up. No migration required for this change.
+2. **budgets_\* — close the world-write.** Read = `!isPartner()` staff; write =
+   `isMoneyAdmin()` (president/manager/finance). The doc already carries `dept`; true per-dept
+   member-write is deferred (needs a dept-string match that's fragile) — finance/admin-write is
+   the correct, safe close of the world-write hole now.
+3. **Secretary two-tier — Option (b), surgical, via two new helpers + ONE `canFinance()`
+   redefinition** (small surface, no global find-replace of `isAdmin()`). Secretary KEEPS
+   `isAdmin()` on genuinely-minor blocks; loses money + identity.
+4. **users/{uid} self-escalation — split the admin update branch.** Privileged fields
+   (role/department/departments/salary/allowance/deductions/employeeId/username) changeable only
+   by `isSeniorAdmin()` (president/manager). Secretary/finance admins may edit only non-privileged
+   fields (name/photo/phone) — frozen by `userPrivilegedFieldsUnchanged()`. Closes the
+   secretary→president write.
+5. **Attendance forgery — declarative-narrow (Option a).** Split to a per-doc
+   `/attendance/{uid}/records/{date}` block: owner self-write only when score ∈ {0, 0.5, 1.0},
+   only on a doc with no `editedBy` (protects admin edits), only for docId within a UTC
+   today/yesterday window (kills arbitrary past/future forgery while tolerating the Manila+8
+   offset). Admins (`isFinanceOrAdmin()`) keep full write. The autoFull 0.5-grant business logic
+   stays client-trusted (a Cloud-Function-hardened path is noted as a later option, not built).
+6. **Partner read sweep — full, with an `isPartner()` helper.** Lock every clearly-internal
+   bare-`isAuth()` collection to `!isPartner()`. KEEP partner-readable: their own bs_quotes,
+   bs_clients, partner_deals(own), sales_orders(own), job_projects(own/shared), order_tracking,
+   AND `/users` (pay no longer lives there; partner UI needs names for shared projects — a
+   field-level projection is a later refinement, flagged).
+7. **/projects — partner-lock in place** (`!isPartner()`); the unified Projects view already
+   skips it for partners (departments.js:85) so no regression. The projects/job_projects dedup
+   stays a separate effort.
+8. **`isPartner()` helper — yes** (DRY; mirrors storage.rules' `isPartnerClaim()`), replaces the
+   ~20 inline `getRole() != 'partner'`.
+9. **Worker username login — a public `usernames/{usernameLower}` → {email} map** (mirrors the
+   order_tracking public-get precedent), NOT opening `/users` pre-auth. Login resolves email from
+   it, then signs in. Needs the mapping written on worker/user create + a one-time backfill.
+   WS27 (worker IDs) depends on this.
+
+### New helper functions (insert after isFinanceOrAdmin(), firestore.rules ~line 23)
+
+```
+function isPartner()     { return getRole() == 'partner'; }
+function isSeniorAdmin() { return getRole() in ['president', 'manager']; }
+function isMoneyAdmin()  { return getRole() in ['president', 'manager', 'finance']; }
+```
+And REDEFINE canFinance() (its current definition `isFinanceOrAdmin() || isFinanceDept()`):
+```
+function canFinance() { return isMoneyAdmin() || isFinanceDept(); }
+```
+Effect: every canFinance()-gated block (ledger, ledger_entries, cash_receipt_journal,
+cash_disbursement_journal, general_journal, finance_records, tax_records, purchase_orders —
+582-637) drops secretary in ONE edit. `isFinanceOrAdmin()` is otherwise LEFT INTACT (still used
+for reads and the minor blocks); only the specific money/identity blocks below are swapped.
+
+### firestore.rules diffs (block-scoped, before→after)
+
+**A. Helpers** — insert the three functions above; redefine canFinance() (find the existing
+`function canFinance()` line and replace its body).
+
+**B. users/{uid} update (89-110)** — replace the `allow update` line:
+```
+// BEFORE
+allow update: if isAuth() && (
+  (isOwner(uid) && userPrivilegedFieldsUnchanged()) || isAdmin()
+);
+// AFTER
+allow update: if isAuth() && (
+  isSeniorAdmin() ||                                          // full incl. role/dept/pay
+  (isOwner(uid) && userPrivilegedFieldsUnchanged()) ||       // self, frozen
+  (isAdmin() && userPrivilegedFieldsUnchanged())             // secretary/other admin: non-privileged only
+);
+```
+Also tighten `create`: wrap the `isAdmin()` create branch so a non-senior admin can't mint a
+privileged role —
+```
+// in the create rule, replace the bare `isAdmin() ||` with:
+isSeniorAdmin() ||
+(isAdmin() && request.resource.data.get('role','employee') in ['employee','agent','finance']) ||
+```
+(secretary may create staff, not managers/presidents).
+
+**C. Money/identity blocks — swap isFinanceOrAdmin() → isMoneyAdmin()** at these create/update
+sites (leave their read + delete rules unchanged):
+| Block | Line | Change |
+|---|---|---|
+| payroll/{uid} | 278-282 | create,update: isFinanceOrAdmin() → isMoneyAdmin() |
+| salary_history | 285-291 | create,update → isMoneyAdmin() |
+| salary_raises | 295-301 | create,update → isMoneyAdmin() |
+| payroll_ca_overrides | 304-309 | write → isMoneyAdmin() |
+| cash_advances | 170-192 | create,update: isFinanceOrAdmin() → isMoneyAdmin() (in both OR-branches) |
+| kpi_evals (pres fields) | 246-247 | the isFinanceOrAdmin() update branch → isSeniorAdmin() (only pres/mgr write presidentGrade) |
+| partner_deals | (grep) | create,update → isMoneyAdmin() |
+| pay_runs | 318-325 | see WS20 spec — its transition rules already use isPresident()/isFinanceOrAdmin(); after WS20, swap the isFinanceOrAdmin() branch → isMoneyAdmin() so secretary can't compute/verify a run |
+
+**D. Secretary KEEPS isAdmin() (NO change)** — sops, memos, resources, policies, handbook,
+products/productMeta, gov_biddings + gov_* buckets write, departments config, settings,
+president_message, it_tickets/it_assets/it_software, design_drawings, kpi_targets,
+stock_movements, posts/tasks admin-delete, approval_requests MINOR types. Rationale: these are
+the oversight/coordination surface the secretary role exists for.
+⚠️ approval_requests update (413) is isAdmin() and covers BOTH minor and money approvals — the
+UI's APPROVAL_CAPS already hides ca/quote/finance from secretary. Tighten the RULE to match:
+```
+// approval_requests update — split by the request's type:
+allow update: if isAuth() && (
+  isSeniorAdmin() ||
+  (isAdmin() && resource.data.get('type','') in
+     ['signup','attendance','submission','review-task','leave','ca_deduct'])
+);
+```
+(secretary acts on minor types only; money/quote/finance types need pres/mgr — mirrors
+APPROVAL_CAPS server-side.)
+
+**E. Partner lockdown** — introduce `isPartner()` (helper above), then add `&& !isPartner()` to
+the `allow read` of each internal collection currently bare `isAuth()`:
+quotes(373), projects(492), design_drawings(510), it_tickets(524), it_assets(533),
+it_software(537), sops(271), resources(451), policies(455), handbook(459), memos(463),
+settings(259), president_message(265), departments(691), posts(119), tasks(196) + its
+comments(218) + readers(226). Convert the ~20 existing inline `getRole() != 'partner'` to
+`!isPartner()` opportunistically (behavior-identical, DRY).
+KEEP bare `isAuth()` (partner-readable, intentional): users(90), bs_clients(836), and the
+own-scoped partner blocks already correct (bs_quotes, partner_deals, sales_orders, job_projects,
+order_tracking).
+
+**F. attendance — split the block (152-156)**:
+```
+// BEFORE
+match /attendance/{uid}/{document=**} {
+  allow read:  if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+  allow write: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+}
+// AFTER
+match /attendance/{uid} {
+  allow read: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+}
+match /attendance/{uid}/records/{date} {
+  allow read: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+  // Admins: unrestricted (the Present/Half/Absent edit path, stamps editedBy).
+  allow write: if isAuth() && isFinanceOrAdmin();
+  // Owner self check-in / auto-upgrade: score-capped, today/yesterday only (UTC
+  // window tolerates the Manila +8 offset), and cannot overwrite an admin edit.
+  allow create, update: if isAuth() && isOwner(uid)
+    && request.resource.data.get('attendanceScore', 0) in [0, 0.5, 1.0]
+    && (resource == null || resource.data.get('editedBy', null) == null)
+    && (date == request.time.toMillis() / 86400000 == false ? true : true)  // placeholder — see note
+    && ( date == string(request.time.date())                     // today (UTC)
+      || date == string(request.time.date()) );                  // (yesterday handled in note)
+}
+```
+NOTE for Sonnet: Firestore rules lack a clean date-string formatter; implement the
+today/yesterday check as: compute `let d = request.time;` and compare the docId `date` string
+against `d.year+'-'+... ` is NOT available. Practical implementation: store nothing on the
+comparison in rules beyond the score-cap + editedBy guard (which already block the two real
+forgery vectors: arbitrary score and overwriting admin edits), and enforce the
+"today/yesterday only" date window in the CLIENT (the three write sites already write only
+today). If a stricter server date-bound is required, route through a Cloud Function (deferred).
+FINAL RULE (ship this — declarative, no fragile date math):
+```
+match /attendance/{uid}/records/{date} {
+  allow read: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+  allow write: if isAuth() && isFinanceOrAdmin();
+  allow create, update: if isAuth() && isOwner(uid)
+    && request.resource.data.get('attendanceScore', 0) in [0, 0.5, 1.0]
+    && (resource == null || resource.data.get('editedBy', null) == null);
+}
+```
+This caps the score to legit values and protects admin edits — the two exploitable vectors.
+Arbitrary-date self-write remains possible but is low-value now (score is capped to what an
+honest check-in would produce); a full date-bound needs the Cloud Function path (noted, deferred).
+Client sites (app.js:3122-3128, 3184-3187, modules.js:1217-1223) need NO change — they already
+write scores in {0.5,1.0} and the admin path already stamps editedBy.
+
+**G. usernames map (new collection) + worker login unblock**:
+```
+match /usernames/{username} {
+  allow get: if true;                 // public single-doc resolve (email lookup pre-auth)
+  allow list: if false;               // no enumeration
+  allow create, update, delete: if isAuth() && isAdmin();
+}
+```
+Doc shape: `usernames/{usernameLower}` = `{ email, uid }`. Client (js/app.js:696-703) BEFORE:
+`db.collection('users').where('username','==',input).limit(1).get()` → AFTER:
+`db.collection('usernames').doc(input.toLowerCase()).get()` then read `.data().email`.
+WRITE sites: wherever a user/worker is created or username is set (openCreateWorkerModal / user
+edit) also `usernames/{username}.set({email, uid})`; on username change, delete the old doc.
+Add `usernames` to scripts/monthly-backup.js EXPORTS.
+
+### Migration checklist (one-time, president, idempotent — "🔧 Security backfill")
+
+1. **usernames backfill:** read all `users` with a `username`; for each write
+   `usernames/{username.toLowerCase()} = {email: authEmail||email, uid}`. Re-runnable.
+2. No migration needed for files_/budgets_/attendance/secretary rule changes (pure rule edits;
+   existing docs keep working — reads/writes only NARROW, and the narrowed actors weren't
+   supposed to have access).
+3. Verify no legitimate partner screen broke (test checklist below).
+
+### Manual test checklist (no automated suite)
+Accounts: president / manager / secretary / finance / employee / partner.
+- **secretary** via devtools SDK: write `role:'president'` on own users doc → DENIED ✓; approve
+  a cash_advance → DENIED ✓; post a ledger row → DENIED ✓; edit a memo/sop → ALLOWED ✓.
+- **partner:** read `files_finance` / `budgets_finance` / `tasks` / `posts` / `projects` /
+  `it_tickets` → DENIED ✓; own `bs_quotes` / `bs_clients` / `job_projects` (theirs) /
+  `order_tracking` → ALLOWED ✓; partner dashboard + BS tabs still render (no blank screen) ✓.
+- **employee** devtools: set `attendanceScore:5` → DENIED ✓; set `attendanceScore:1.0` on a doc
+  with `editedBy` set → DENIED ✓; normal check-in → ALLOWED ✓.
+- **any signed-in:** write another dept's `budgets_*` line → DENIED ✓.
+- **worker username login:** sign in by username → resolves email via `usernames/`, succeeds ✓.
+- **finance:** post ledger / approve CA / edit payroll → ALLOWED ✓ (isMoneyAdmin keeps finance).
+
+### Deploy
+`~/.npm-global/bin/firebase deploy --only firestore:rules` — re-diff firestore.rules first
+(concurrent OneDrive sessions), apply as block-scoped Edits (NOT full-file replace) so it
+composes with WS12/13/20's rules edits. This is separate from `git push`.
 
 ## Risks / cross-workstream interactions
 

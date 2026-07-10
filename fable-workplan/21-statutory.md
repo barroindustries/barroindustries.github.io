@@ -70,20 +70,195 @@ LOAD ORDER / CACHE (already documented in CLAUDE.md, re-verified): index.html lo
 - The existing `payroll/{uid}` vs `salary_history` field-name mismatch (philhealth/pagibig vs philHealth/pagIbig) is a pre-existing pattern this workstream must either perpetuate consistently or fix deliberately — it must not introduce a THIRD naming variant.
 - Two independent hand-rolled compute call sites exist today (departments.js:2396-2762 and 3989-4238); this workstream and workstream 20 (one payroll engine) both touch this exact code — sequencing/ownership must be explicit in Fable's spec, not left implicit.
 
-## Open decisions — Fable resolves these
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-- [ ] Where does the statutory bracket-table constant live? Options seen in this codebase's own conventions: (a) inside js/config.js alongside DEPARTMENTS/ROLES (config.js:70-207) — simple, always loaded early, but mixes app config with yearly-changing compliance data in a file that's already 365 lines; (b) a new js/statutory-tables.js — clean separation, but requires new entries in index.html script tags, sw.js PRECACHE, and CACHE_VER bump, and must slot in at the same early load position as config.js; (c) a Firestore-hosted config doc, editable in-app without a code deploy — but this breaks the 'static site, no server-authoritative compute' pattern every other config in this app follows, needs its own explicit rules match, needs client-side caching/fetch-on-boot, and can't be used for rules-side validation of the math without duplicating the table in rules language.
-- [ ] Should tables be versioned by effective year (e.g. `STATUTORY_TABLES['2026']`) so a REPRINTED past month's payslip uses the table that was in effect then, not whichever table is live today if a bracket changes mid-year? Workstream 20 explicitly requires 'past months reprint exactly' — that only works if either (a) the resolved peso amounts are frozen into salary_history/payslips at Compute time (not re-derived from the table at print time), or (b) the table itself is year-keyed and the doc records which year's table it used. Fable must pick one; they are not equivalent under a mid-year bracket change.
-- [ ] Where does computation run: client-side JS (consistent with today's zero-backend-compute architecture; the only Cloud Function today is functions/index.js's single `sendPushOnNotification` trigger — adding compute logic there would be the first backend business-logic precedent in this codebase) vs. a new Cloud Function? Tradeoff: client-side preserves the free-tier/no-build-step philosophy but a manipulated client could submit fabricated numbers, mitigated today only by finance/admin-only Firestore write rules (not by rules-side validation of the actual bracket math).
-- [ ] Does auto-compute REPLACE the manual number entirely, or PRE-FILL the same ep-sss/ep-ph/ep-pi/ep-tax (and ps-sss/ps-ph/ps-pib/ps-tax) inputs as an editable suggestion — fulfilling the 'Auto-computed if 0' placeholder text that already exists at departments.js:2510/2513 but has never been backed by logic? If kept editable, should a manual override from the computed value be flagged/audited (relevant for BIR audit exposure), and if so where (a new `sssOverridden:true` field, an audit-log entry via the existing window.logAudit hook seen at departments.js:2542)?
-- [ ] Should this workstream unify the two separate compute call sites (departments.js:2396-2762 regular staff, and 3989-4238 worker payslips) into one shared `computeStatutoryDeductions()`-style helper NOW, or does that wait for workstream 20's 'one payroll engine' consolidation (which explicitly owns collapsing these two paths)? Building the bracket lookup twice risks the same kind of drift that already produced the philhealth/philHealth naming mismatch between payroll and salary_history.
-- [ ] Fix the existing payroll-vs-salary_history field-name inconsistency (lowercase philhealth/pagibig vs mixed-case philHealth/pagIbig) as part of this workstream, or leave the legacy names untouched and only add new computed-vs-manual metadata alongside them?
-- [ ] 13th-month accrual model: running per-pay-period accrual written onto every salary_history doc (e.g. `thirteenthMonthAccrued: base/12`, visible as a YTD line on every payslip per the owner's 'data must be interpreted... visible' directive) vs. a single December lump-sum computed by summing the year's salary_history rows at run time. Running accrual requires a migration/backfill decision for the real Jan-June 2026 salary_history docs that already exist with no accrual field (workstream 3's June backfill); lump-sum avoids backfill but can't show a running YTD balance mid-year.
-- [ ] Does 13th-month pay get its own ledger ref pattern (e.g. `13TH-{year}-{uid}`) and its own step in workstream 20's Compute→Verify→Disburse state machine (a once-a-year 5th 'state', or a parallel pay_runs doc keyed by year instead of month), or does it ride the ordinary monthly Compute→Verify→Disburse flow for whichever month it's actually paid in (PH law: on/before Dec 24)?
-- [ ] 13th-month BASIS: PH law defines it as 1/12 of total basic salary actually earned in the calendar year (allowances/OT excluded). Since `base = u.salary||0` is read flat with no attendance-based proration anywhere in the current Compute path (departments.js:2630, 2672), is the basis simply `sum(salary_history[*].salary)` for the year, or must it reconcile against actual hours/days worked once workstream 26 (Attendance v2, hourly production pay) lands? This is a real sequencing question even if Fable can't fully resolve it yet.
-- [ ] Employer (ER) share: does this workstream add the ER-side SSS/PhilHealth/Pag-IBIG contribution (needed both for the workstream's own 'employer shares' bullet and for workstream 39's future remittance reports), and if so under what field shape (e.g. `erShares:{sss,philhealth,pagibig}` alongside the existing EE fields, written to salary_history at Compute time) — or is ER-share computation deferred entirely to workstream 39's BIR suite, computed on demand from the same bracket table rather than stored per pay period?
-- [ ] Ledger booking change to GROSS-with-liability-legs: today Compute posts one NET-pay debit per employee with no chart-of-accounts account-type (workstream 13 not started). Does workstream 21 need to wait for workstream 13 before posting proper liability legs (SSS Payable / PhilHealth Payable / Pag-IBIG Payable / Withholding Tax Payable), or does it introduce these as plain stringly-typed `category` values now (matching today's convention) for workstream 13 to retrofit account-types onto later? And does re-booking at GROSS apply retroactively to existing NET-booked months, or only forward from ship date — leaving a permanent booking-basis inconsistency in historical ledger rows that every downstream report (Finance Dashboard, Financial Reports, Analytics ×13 per workstream 16) must be aware of?
-- [ ] Do all four tables (SSS, PhilHealth, Pag-IBIG, TRAIN withholding) share one 'effective year' selector, or does each get its own independent effective-date field, since PH agencies don't all revise their schedules in the same year?
+### ‼️ FLAG FOR NEIL — compliance numbers are NOT mine to invent
+The bracket STRUCTURE and compute logic below are complete and ready to build. The actual
+peso boundaries and rates are marked `PLACEHOLDER` and seeded with best-known 2026 PH figures
+as a scaffold ONLY. **Before this goes live, have your bookkeeper/accountant verify every number
+against the current published SSS / PhilHealth / Pag-IBIG contribution schedules and the BIR
+TRAIN withholding-tax table.** This is live money; a wrong bracket silently mis-pays and
+mis-remits. Nothing computes until the tables are confirmed (the code hard-warns if a table is
+still flagged unverified — see Spec 1).
+
+### Resolved decisions
+
+1. **Location: a new `js/statutory-tables.js`**, loaded right after config.js. Compliance data
+   changes yearly and is bulky — it deserves its own auditable file, not a corner of config.js.
+   Wire into index.html (after config.js, before drive.js), sw.js PRECACHE, CACHE_VER bump.
+2. **Year-keyed AND frozen.** Tables live under `STATUTORY[2026]`; the compute helper takes a
+   `year`. AND the resolved peso amounts are frozen into WS20's `pay_runs.lines[]` /
+   salary_history at Compute — so a reprint of a past month never re-derives from a table that
+   may have changed. Both, because they answer different failure modes.
+3. **Client-side compute** (consistent with the zero-backend architecture; the only Cloud
+   Function stays the push relay). Integrity rests on finance-only write rules + WS20's frozen
+   snapshot + audit log. Rules-side validation of the math is impossible (can't embed brackets
+   in rules) — accepted, documented.
+4. **Pre-fill as an editable suggestion, with override tracking.** The compute output pre-fills
+   the existing `ep-sss/ep-ph/ep-pi/ep-tax` (and `ps-*`) inputs — finally backing the
+   "Auto-computed if 0" placeholder that has always been dead. If Finance edits away from the
+   computed value, set `{sssOverridden:true,...}` on the line + `logAudit('statutory-override',…)`.
+   Editable because real edge cases (loans, partial-month, corrections) exist.
+5. **Build the shared pure helper NOW; it survives WS20 unchanged.**
+   `computeStatutory({grossPay, year})` is path-agnostic — both current compute sites call it,
+   and WS20's unified engine keeps calling the same function. ONE implementation ⇒ no drift (the
+   philhealth/philHealth split happened precisely because math was written twice).
+6. **Fix the field-name drift: canonical lowercase everywhere** (`sss, philhealth, pagibig,
+   tax`). payroll/{uid} already uses lowercase; salary_history's mixed-case `philHealth/pagIbig`
+   is aligned when WS20 rewrites the salary_history mirror. Readers use
+   `row.philhealth ?? row.philHealth ?? 0` during transition. No third variant.
+7. **13th-month: display-computed, no per-row field, no backfill.** Shown as a running YTD line
+   on the payslip = `sum(this year's salary_history[].base) / 12 − alreadyPaid13th`. The PAYOUT
+   is its own run (Decision 8). Avoids backfilling Jan–Jun 2026 rows.
+8. **13th-month payout rides WS20's machinery** as a pay-run typed `{type:'13th'}` keyed
+   `pay_runs/{year}-13`, deterministic ledger ref `13TH-{year}-{uid}`, going through
+   Compute→Verify→Disburse in the month it's paid (PH law: on/before Dec 24). No new 5th state.
+9. **13th basis = sum of the year's basic salary ÷ 12** for regular staff (allowances/OT
+   excluded per PH law). Production-weekly workers' 13th derives from their payslips' basic pay —
+   separate, computed in the worker path. Reconciliation with WS26 hours is a noted forward dep,
+   not a blocker (monthly basic salary IS the correct basis for regular staff).
+10. **Employer share computed + frozen.** `er:{sss,philhealth,pagibig}` on each line at Compute.
+    Needed for this workstream's own bullet AND WS39 remittance reports. Stored, not recomputed.
+11. **GROSS-with-liability-leg booking is implemented in WS20's `disbursePayRun`, using these
+    numbers + WS13's accountTypes.** WS21 PRODUCES the ee/er breakdown; WS20 POSTS it. Legs:
+    debit Payroll Expense (gross) + debit Payroll Expense (er share) ; credit SSS Payable /
+    PhilHealth Payable / Pag-IBIG Payable / Withholding Tax Payable / Net-Pay-Cash. **Forward
+    only** — historical NET-booked months are NOT re-booked (would rewrite closed periods per
+    WS12); the basis change is a documented restatement, a full historical re-book is deferred to
+    WS39. Deterministic refs `SSSPAY-{month}` etc. so re-run doesn't duplicate.
+12. **One `year` selector drives all four tables** via `STATUTORY[year]`; each table records its
+    own source circular date as metadata, but the lookup key is the pay-run's year.
+
+### Spec 1 — js/statutory-tables.js (new file)
+
+```js
+// ── PH statutory tables (v12 WS21) ───────────────────────────────────────
+// ‼️ EVERY NUMBER BELOW IS A PLACEHOLDER. Verify against the published 2026
+//    SSS / PhilHealth / Pag-IBIG schedules + BIR TRAIN withholding table
+//    BEFORE go-live. Set verified:true only once an accountant signs off.
+window.STATUTORY = {
+  2026: {
+    verified: false,   // compute() WARNS + refuses silent use until true
+    source: 'PLACEHOLDER — 2026 circulars pending verification',
+    sss: {              // contribution on Monthly Salary Credit brackets
+      rateEE: 0.05 /*PLACEHOLDER*/, rateER: 0.10 /*PLACEHOLDER*/,
+      mscMin: 5000 /*PLACEHOLDER*/, mscMax: 35000 /*PLACEHOLDER*/, mscStep: 500 /*PLACEHOLDER*/,
+      mpfThreshold: 20000 /*PLACEHOLDER — WISP/MPF above this*/,
+    },
+    philhealth: { rate: 0.05 /*PLACEHOLDER*/, floor: 10000 /*PLACEHOLDER*/,
+                  ceiling: 100000 /*PLACEHOLDER*/, split: 0.5 /*EE half*/ },
+    pagibig: { rateEE: 0.02 /*PLACEHOLDER*/, rateER: 0.02 /*PLACEHOLDER*/,
+               base: 10000 /*PLACEHOLDER — cap*/, maxEE: 200 /*PLACEHOLDER*/ },
+    // TRAIN monthly withholding — compensation brackets [over, base, rateOfExcess]
+    withholdingMonthly: [ /*PLACEHOLDER rows*/
+      { over: 0,      base: 0,      rate: 0.00 },
+      { over: 20833,  base: 0,      rate: 0.15 },
+      { over: 33333,  base: 1875,   rate: 0.20 },
+      { over: 66667,  base: 8541.8, rate: 0.25 },
+      { over: 166667, base: 33541.8,rate: 0.30 },
+      { over: 666667, base: 183541.8,rate: 0.35 },
+    ],
+  },
+};
+window.computeStatutory = function({ grossPay, year }) {
+  const T = (window.STATUTORY && window.STATUTORY[year]) || null;
+  if (!T) { console.warn('[statutory] no table for', year); return { ee:{sss:0,philhealth:0,pagibig:0,tax:0}, er:{sss:0,philhealth:0,pagibig:0}, unverified:true }; }
+  if (!T.verified && !window._STATUTORY_ACK) console.warn('[statutory] table', year, 'UNVERIFIED — placeholder rates');
+  const g = Math.max(0, grossPay||0);
+  // SSS: round gross to MSC bracket, clamp, apply EE/ER
+  const msc = Math.min(T.sss.mscMax, Math.max(T.sss.mscMin, Math.round(g / T.sss.mscStep) * T.sss.mscStep));
+  const sssEE = round2(msc * T.sss.rateEE), sssER = round2(msc * T.sss.rateER);
+  // PhilHealth: rate on clamped gross, split
+  const phBase = Math.min(T.philhealth.ceiling, Math.max(T.philhealth.floor, g));
+  const phTotal = round2(phBase * T.philhealth.rate);
+  const phEE = round2(phTotal * T.philhealth.split), phER = round2(phTotal - phEE);
+  // Pag-IBIG: rate on capped base, EE cap
+  const piBase = Math.min(T.pagibig.base, g);
+  const piEE = Math.min(T.pagibig.maxEE, round2(piBase * T.pagibig.rateEE));
+  const piER = round2(piBase * T.pagibig.rateER);
+  // Withholding: taxable = gross − EE statutory (SSS/PhilHealth/Pag-IBIG are deductible)
+  const taxable = Math.max(0, g - sssEE - phEE - piEE);
+  const br = T.withholdingMonthly.filter(b => taxable > b.over).pop() || T.withholdingMonthly[0];
+  const tax = round2(br.base + (taxable - br.over) * br.rate);
+  return { ee:{sss:sssEE, philhealth:phEE, pagibig:piEE, tax}, er:{sss:sssER, philhealth:phER, pagibig:piER}, unverified: !T.verified };
+};
+function round2(n){ return Math.round((n+Number.EPSILON)*100)/100; }
+```
+(NOTE: the SSS MSC/MPF split, PhilHealth differential, and TRAIN rows above are illustrative
+shape only — Sonnet must not treat them as correct; Neil's accountant fills the verified values
+and flips `verified:true`.)
+
+### Spec 2 — call-site wiring
+
+**Edit Payroll modal (departments.js ~2496-2559):** on open, compute a suggestion and pre-fill
+if the stored value is 0/empty:
+```js
+const sug = computeStatutory({ grossPay: (emp.salary||0)+(emp.allowance||0), year: bizYear() });
+// input value = emp.sss || sug.ee.sss  (placeholder shows "computed ₱X")
+```
+On save, if the typed value !== the computed suggestion, also write `sssOverridden:true` (etc.)
++ `logAudit('statutory-override', 'payroll', uid, {field:'sss', computed:sug.ee.sss, entered})`.
+
+**Compute path — the numbers flow into WS20's `computePayLine`.** Add to the PayLine (WS20 Spec 1):
+`sss, philhealth, pagibig, tax` (EE, = stored override ?? computed) AND
+`er:{sss,philhealth,pagibig}` (always computed, frozen). `computePayLine` calls
+`computeStatutory` when no manual override is present. Until WS20 lands, the same call slots into
+the current Compute batch at departments.js:2636-2639 (replace the raw `u.sss||0` reads with
+`u.sss ?? sug.ee.sss`).
+
+**Worker payslip generator (departments.js:3999-4150):** pre-fill `ps-sss/ps-ph/ps-pib/ps-tax`
+from `computeStatutory({grossPay: weeklyGross*<annualization factor>, year})` — NOTE weekly
+basis differs; for workers, compute on the MONTHLY-equivalent then divide by pay periods, OR
+mark worker statutory as manual-only for now (RECOMMENDED: manual-only for workers this pass,
+since weekly statutory proration is a distinct compliance question — flag, don't guess).
+
+### Spec 3 — field table
+
+| Field | On | Type | Default | Notes |
+|---|---|---|---|---|
+| sss, philhealth, pagibig, tax | payroll/{uid}, pay_runs.lines[], salary_history | number | 0 | EE share; canonical lowercase |
+| er | pay_runs.lines[], salary_history | {sss,philhealth,pagibig} | {0,0,0} | employer share, computed+frozen |
+| sssOverridden … taxOverridden | pay_runs.lines[] | bool | false | set when manual ≠ computed |
+| (13th-month) | — | — | — | NOT stored; display-computed from salary_history sum |
+
+Read-safety: every display site uses `?? 0` / `row.philhealth ?? row.philHealth ?? 0` so
+Jan–Jun 2026 rows (no `er`, mixed-case names) render fine.
+
+### Spec 4 — firestore.rules
+No new collection (tables are a JS file). The new `er`/override fields ride existing
+payroll/salary_history/pay_runs blocks (finance-write already). The `13TH-{year}` pay-run uses
+the pay_runs block (WS20's transition rules). ⚠️ Note the latent `payslips` self-read bug
+(rule checks `userId`, doc has `workerId`) — DEFER to WS27 (workers can't log in yet); flagged,
+not fixed here.
+
+### Spec 5 — rollout checklist
+1. Create js/statutory-tables.js (placeholders, `verified:false`).
+2. index.html: `<script defer src="js/statutory-tables.js"></script>` after config.js, before drive.js.
+3. sw.js PRECACHE += the new file; CACHE_VER bump (auto via hook on commit).
+4. Wire `computeStatutory` into the Edit-Payroll pre-fill + override tracking.
+5. Feed ee/er into WS20's `computePayLine` (or the current Compute batch if 21 ships first).
+6. Payslip template (WS24) reads ee+er + the display-computed 13th YTD line — coordinate field
+   names (this table is canonical).
+7. NO backfill of Jan–Jun 2026 salary_history (display-computed 13th + `?? 0` reads cover it).
+8. GROSS liability-leg booking: implemented in WS20 disburse using WS13 accountTypes, FORWARD
+   ONLY; historical months stay NET-booked (documented basis change, full re-book → WS39).
+9. **Have accountant verify all numbers; set `STATUTORY[2026].verified = true`.** Until then a
+   console warning fires and the pre-fill shows an "unverified rates" badge.
+10. Test: pick a test employee at a known gross, hand-calc expected EE deductions, generate
+    Compute, confirm match; confirm override sets the flag; confirm re-run doesn't double-book.
+
+### Sequencing
+Build AFTER (or together with) WS20 — WS20 owns `computePayLine`/`disbursePayRun` where these
+numbers live and post. If 21 ships first, wire into the current Compute batch as a bridge; WS20
+then relocates the call into `computePayLine`. Coordinates with: 20 (host), 22 (CA deduction
+sits after statutory in the same line), 23 (raise changes the gross the bracket keys off —
+use the effective-dated salary), 24 (payslip prints ee+er+13th), 39 (remittance reads er +
+liability legs).
+
+### Cross-workstream call-outs for Sonnet
+20 = where compute lives; 22 = CA runs after statutory on the line; 23 = use effective-dated
+gross; 24 = payslip field names are canonical here; 39 = consumes er/liability legs. Do not
+improvise at these seams — each is specified in its own brief.
 
 ## Risks / cross-workstream interactions
 

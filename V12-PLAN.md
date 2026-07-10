@@ -235,3 +235,19 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   'performance' pay policy (allowance × KPI/attendance factor) — engine ships inert on 'flat';
   mid-repayment interest-mismatch CAs listed by the repair dry-run for per-case decisions.
   NEXT Fable session: 19 (security), 21 (statutory), 9+14 (brand+letterhead together), 10-11.
+- **2026-07-10 (Fable decision session #2):** Workstreams **19, 21** DECIDED (see their briefs'
+  `## DECIDED` sections). WS19 security: new `isPartner()`/`isSeniorAdmin()`/`isMoneyAdmin()`
+  helpers; `canFinance()` redefined to drop secretary from all finance/ledger blocks in one edit;
+  secretary two-tier enforced server-side (money+identity removed, minor kept); the live
+  secretary→president self-escalation closed via a split users-update rule; full partner
+  read-lockdown sweep (files_*, budgets_* world-write, tasks/posts/projects/it_* etc.); attendance
+  forgery capped (score ∈{0,0.5,1} + can't overwrite admin edits); worker username-login via a
+  new public `usernames/{u}→{email}` map (unblocks WS27). WS21 statutory: new
+  `js/statutory-tables.js` (year-keyed, `computeStatutory({grossPay,year})`, ee+er shares),
+  pre-fill-with-override, 13th-month display-computed (no backfill) + a `13TH-{year}` payout run,
+  GROSS liability-leg booking implemented in WS20's disburse forward-only. **‼️ WS21 rates are
+  PLACEHOLDERS — an accountant must verify all SSS/PhilHealth/Pag-IBIG/TRAIN numbers and set
+  `verified:true` before go-live; code warns until then.** **Items needing Neil:** confirm the
+  statutory bracket figures (compliance); everything else is self-contained.
+  Six of 18 briefs now specced (12,13,19,20,21,22). NEXT: 9+14 (brand+letterhead), 10-11, then
+  14-18 and 23-27.

@@ -49,12 +49,16 @@ finalizing 9's rename sweep so the two don't conflict.
 
 ## Status
 
-**DECIDED (Fable, 2026-07-10): 12, 13, 20, 22** — the money core. Each now carries a full
+**DECIDED (Fable, 2026-07-10): 12, 13, 19, 20, 21, 22** — the money core. Each now carries a full
 `## DECIDED` spec ready for Sonnet: WS13 (chart of accounts + double-expensing fix, composed
 rules with WS12), WS12 (Period engine + finance_periods close, composed rules with WS13 —
 implement 12+13 as ONE diff), WS20 (one payroll engine: lines[] frozen on pay_runs, money moves
 at Disburse, Path B deleted, transition-aware pay_runs rules), WS22 (CashAdvance service:
 approve/plan/deduct, installment default, four approval-path bugs closed — ships with WS20 or
 standalone per its sequencing note).
-Remaining 14 briefs: grounded, decisions open. Suggested next: 19 (security), 21 (statutory),
-9+14 together (brand/letterhead), 10-11, then the rest.
+Also decided: WS19 (security — secretary two-tier via isSeniorAdmin/isMoneyAdmin, partner
+lockdown sweep, attendance forgery cap, files_/budgets_ closes, worker username-login map) and
+WS21 (statutory tables — new js/statutory-tables.js, year-keyed, PLACEHOLDER rates pending
+accountant verification, ee+er shares, 13th-month display-computed).
+Remaining 12 briefs: grounded, decisions open. Suggested next: 9+14 together (brand/letterhead),
+10-11 (routing/dialogs), 14/15/16/17/18, then 23-27.
