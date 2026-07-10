@@ -675,7 +675,7 @@ async function computeEomStandings(users, monthStr) {
   const evals = {}; evalSnap.docs.forEach(e => { evals[e.id] = e.data(); });
   const DONE = ['done', 'approved', 'archived'];
   const isAssigned = (t, uid) => Array.isArray(t.assignedTo) ? t.assignedTo.includes(uid) : t.assignedTo === uid;
-  const recScore = r => (typeof r.attendanceScore === 'number') ? r.attendanceScore : (r.fullTime ? 1 : (r.loginTime ? 0.5 : 0));
+  const recScore = r => window.attRecScore(r);
 
   const rows = await Promise.all(candidates.map(async u => {
     const uid = u.id;
@@ -1119,7 +1119,7 @@ window.renderAttendancePage = async function() {
       ${dayLabels.map(d=>`<div class="att-cal-hdr">${d}</div>`).join('')}
       ${Array(firstDay).fill('<div></div>').join('')}`;
 
-    let fullCount=0, halfCount=0, absentCount=0, workDays=0;
+    let fullCount=0, halfCount=0, absentCount=0, leaveCount=0, workDays=0;
 
     for (let day=1; day<=daysInMonth; day++) {
       const dateStr  = `${viewYear}-${mm}-${String(day).padStart(2,'0')}`;
@@ -1132,10 +1132,15 @@ window.renderAttendancePage = async function() {
       const isPast    = dateStr <= todayStr;
       const rec       = records[dateStr];
       let status = '';
+      const kind = window.attRecKind(rec);
       if (!isNoWork && isPast) {
+        // Leave takes priority: an approved leave day carries its own status and
+        // must not fall through to the present/half/absent classification below.
+        if (kind === 'leave')              { status='leave';        leaveCount++;  workDays++; }
+        else if (kind === 'unpaid-leave')  { status='unpaid-leave'; absentCount++; workDays++; }
         // An explicit soft-archived "absent" record (admin marked absent) counts as
         // absent even for today — the record is preserved instead of being deleted.
-        if (rec?.status === 'absent')      { status='absent';  absentCount++; workDays++; }
+        else if (rec?.status === 'absent')      { status='absent';  absentCount++; workDays++; }
         else if (rec?.fullTime || (typeof rec?.attendanceScore==='number' && rec?.attendanceScore>=1))
                                            { status='present'; fullCount++; workDays++; }
         else if (rec?.loginTime || (typeof rec?.attendanceScore==='number' && rec?.attendanceScore>0))
@@ -1150,7 +1155,9 @@ window.renderAttendancePage = async function() {
         ${holiday?`<span class="att-mark" style="font-size:9px;color:rgba(180,140,0,1)">🎌</span>`:
           status==='present'?`<span class="att-mark">${emojiIcon('check',14)}</span>`:
           status==='half'?'<span class="att-mark">½</span>':
-          status==='absent'?`<span class="att-mark">${emojiIcon('x',14)}</span>`:''}
+          status==='absent'?`<span class="att-mark">${emojiIcon('x',14)}</span>`:
+          status==='leave'?`<span class="att-mark" style="color:${window.attKindBadge('leave').c}">${window.attKindBadge('leave').m}</span>`:
+          status==='unpaid-leave'?`<span class="att-mark" style="color:${window.attKindBadge('unpaid-leave').c}">${window.attKindBadge('unpaid-leave').m}</span>`:''}
         ${canEdit&&!isNoWork?`<button class="att-edit-btn att-edit-visible" data-date="${dateStr}" title="Edit">✎</button>`:''}
       </div>`;
     }
@@ -1158,7 +1165,7 @@ window.renderAttendancePage = async function() {
     calEl.innerHTML = html;
     if (window.lucide) lucide.createIcons({nodes:[calEl]});
 
-    const pct = workDays > 0 ? Math.round(((fullCount + halfCount*0.5)/workDays)*100) : 0;
+    const pct = workDays > 0 ? Math.round(((fullCount+leaveCount + halfCount*0.5)/workDays)*100) : 0;
     sumEl.innerHTML = `
       <div class="card-header"><h3>Summary — ${label} · ${escHtml(targetName)}</h3></div>
       <div class="card-body">
@@ -2039,22 +2046,40 @@ async function renderPresidentMessageCard() {
 // ═══════════════════════════════════════════════════
 (function(){
   const LEAVE_TYPES = [
-    { id:'vacation',  label:'Vacation Leave',  icon:'🌴', drawsBalance:true  },
-    { id:'sick',      label:'Sick Leave',      icon:'🤒', drawsBalance:true  },
-    { id:'emergency', label:'Emergency Leave', icon:'🚨', drawsBalance:false },
-    { id:'unpaid',    label:'Unpaid Leave',    icon:'📅', drawsBalance:false },
+    { id:'vacation',  label:'Vacation Leave',  icon:'🌴', drawsBalance:true,  paid:true  },
+    { id:'sick',      label:'Sick Leave',      icon:'🤒', drawsBalance:true,  paid:true  },
+    { id:'emergency', label:'Emergency Leave', icon:'🚨', drawsBalance:false, paid:true  },
+    { id:'unpaid',    label:'Unpaid Leave',    icon:'📅', drawsBalance:false, paid:false },
   ];
   const leaveType = id => LEAVE_TYPES.find(t=>t.id===id) || LEAVE_TYPES[0];
   const lvBadge = s => s==='approved'?'badge-green':s==='rejected'?'badge-red':'badge-orange';
   const esc = s => (window.escHtml ? window.escHtml(s) : (s==null?'':String(s)));
 
   // Inclusive working-day count, excluding Sundays (Manila "Sunday = no work").
+  // Superseded by leaveWorkingDays below (which also excludes PH holidays, matching
+  // payroll's countWorkDays); left in place, no other caller references it.
   function workingDays(start, end){
     if(!start||!end) return 0;
     const s=new Date(start+'T00:00:00'), e=new Date(end+'T00:00:00');
     if(isNaN(s)||isNaN(e)||e<s) return 0;
     let n=0; const d=new Date(s);
     while(d<=e){ if(d.getDay()!==0) n++; d.setDate(d.getDate()+1); if(n>366) break; }
+    return n;
+  }
+  // Inclusive working-day count, excluding Sundays AND PH holidays — matches
+  // payroll's countWorkDays so a leave range never charges a day payroll ignores.
+  function leaveWorkingDays(start, end){
+    if(!start||!end) return 0;
+    const s=new Date(start+'T12:00:00'), e=new Date(end+'T12:00:00');
+    if(isNaN(s)||isNaN(e)||e<s) return 0;
+    const hol = (typeof getPHHolidays==='function') ? getPHHolidays(s.getFullYear()) : {};
+    const holNext = (s.getFullYear()!==e.getFullYear() && typeof getPHHolidays==='function') ? getPHHolidays(e.getFullYear()) : {};
+    let n=0; const d=new Date(s);
+    while(d<=e){
+      const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      if(window.bizDow(new Date(ds+'T12:00:00'))!==0 && !hol[ds] && !holNext[ds]) n++;
+      d.setDate(d.getDate()+1); if(n>366) break;
+    }
     return n;
   }
   async function getBalance(uid){
@@ -2108,8 +2133,12 @@ async function renderPresidentMessageCard() {
     const reqs = snap.docs.map(d=>({id:d.id,...d.data()}));
     const pending = reqs.filter(r=>r.status==='pending');
     const approved = reqs.filter(r=>r.status==='approved').length;
+    // Grant/accrual utilities are gated client-side to president/manager/finance —
+    // NOT secretary (secretary keeps balance WRITE access for the approve-decrement
+    // path per rules, but the direct grant/accrual buttons stay finance/admin-only).
+    const canGrant = ['president','manager','finance'].includes(currentRole);
     c.innerHTML = `
-      <div class="page-header"><h2>🌴 Leave Management</h2><div style="display:flex;gap:8px"><button class="btn-secondary btn-sm" id="leave-csv">⬇ CSV</button><button class="btn-secondary btn-sm" id="my-leave-btn">My Leave</button></div></div>
+      <div class="page-header"><h2>🌴 Leave Management</h2><div style="display:flex;gap:8px;flex-wrap:wrap">${canGrant?`<button class="btn-secondary btn-sm" id="lv-accrue">↻ Run Annual Accrual</button><button class="btn-secondary btn-sm" id="lv-grant">＋ Adjust Balance</button>`:''}<button class="btn-secondary btn-sm" id="leave-csv">⬇ CSV</button><button class="btn-secondary btn-sm" id="my-leave-btn">My Leave</button></div></div>
       <div class="kpi-row" style="margin-bottom:14px">
         <div class="kpi-card ${pending.length?'accent':''}"><div class="kpi-label">Pending</div><div class="kpi-value">${pending.length}</div></div>
         <div class="kpi-card green"><div class="kpi-label">Approved</div><div class="kpi-value">${approved}</div></div>
@@ -2136,6 +2165,55 @@ async function renderPresidentMessageCard() {
       {key:'startDate',label:'Start'},{key:'endDate',label:'End'},{key:'status',label:'Status'},{key:'reason',label:'Reason'}]));
     c.querySelectorAll('.lv-approve').forEach(b=>b.addEventListener('click',()=>approveLeave(reqs.find(r=>r.id===b.dataset.id),c)));
     c.querySelectorAll('.lv-reject').forEach(b=>b.addEventListener('click',()=>rejectLeave(reqs.find(r=>r.id===b.dataset.id),c)));
+    if(canGrant){
+      document.getElementById('lv-accrue')?.addEventListener('click', async ()=>{
+        const yr = window.LeaveAccrual.policyYear();
+        if(!confirm(`Grant / reset ${yr} leave balances for all employees?\nAlready-accrued employees are skipped (idempotent). Vacation ${window.LEAVE_POLICY.grants.vacation} / Sick ${window.LEAVE_POLICY.grants.sick} days.`)) return;
+        Notifs.showToast('Running annual accrual…');
+        try{ const res=await window.LeaveAccrual.runAnnualAccrual();
+          window.logAudit && window.logAudit('accrue','leave',yr,res);
+          Notifs.showToast(`Accrual ${yr}: ${res.seeded} granted, ${res.skipped} skipped.`);
+          renderLeaveAdmin(c);
+        }catch(ex){ Notifs.showToast('Accrual failed: '+(ex.message||ex.code),'error'); }
+      });
+      document.getElementById('lv-grant')?.addEventListener('click', ()=> openGrantModal(c));
+    }
+  }
+
+  // Small admin utility: grant/adjust one employee's leave balance directly.
+  // Numbers are clamped non-negative client-side (matches the rules shape guard).
+  async function openGrantModal(c){
+    const snap = typeof dbCachedGet === 'function'
+      ? await dbCachedGet('users', () => db.collection('users').get(), 60000)
+      : await db.collection('users').get();
+    const users = snap.docs.map(d=>({id:d.id,...d.data()}))
+      .filter(u => u.role !== 'partner')
+      .sort((a,b) => (a.displayName||a.email||'').localeCompare(b.displayName||b.email||''));
+    openModal('＋ Adjust Balance', `
+      <div class="form-group"><label>Employee</label>
+        <select id="lv-grant-uid" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          ${users.map(u=>`<option value="${u.id}">${esc(u.displayName||u.email||u.id)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Vacation days</label><input id="lv-grant-vac" type="number" min="0" step="0.5" value="0"/></div>
+        <div class="form-group"><label>Sick days</label><input id="lv-grant-sick" type="number" min="0" step="0.5" value="0"/></div>
+      </div>
+      <div id="lv-grant-err" class="error-msg hidden"></div>
+    `, `<button class="btn-primary" id="lv-grant-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    document.getElementById('lv-grant-save').addEventListener('click', async ()=>{
+      const uid = document.getElementById('lv-grant-uid').value;
+      const vacation = Math.max(0, Number(document.getElementById('lv-grant-vac').value)||0);
+      const sick = Math.max(0, Number(document.getElementById('lv-grant-sick').value)||0);
+      const err = document.getElementById('lv-grant-err');
+      if(!uid){ err.textContent='Pick an employee.'; err.classList.remove('hidden'); return; }
+      try{
+        await db.collection('leave_balances').doc(uid).set(
+          { vacation, sick, year:window.LeaveAccrual.policyYear(), updatedAt:firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+        window.logAudit && window.logAudit('grant','leave',uid,{ vacation, sick });
+        closeModal(); Notifs.showToast('Balance updated!'); renderLeaveAdmin(c);
+      }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+    });
   }
 
   function openLeaveModal(bal, c){
@@ -2150,11 +2228,11 @@ async function renderPresidentMessageCard() {
         <div class="form-group"><label>Start Date</label><input id="lv-start" type="date" value="${today}"/></div>
         <div class="form-group"><label>End Date</label><input id="lv-end" type="date" value="${today}"/></div>
       </div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px" id="lv-days-hint">1 working day (excl. Sundays)</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px" id="lv-days-hint">1 working day (excl. Sundays &amp; holidays)</div>
       <div class="form-group"><label>Reason</label><textarea id="lv-reason" rows="2" placeholder="Brief reason"></textarea></div>
       <div id="lv-err" class="error-msg hidden"></div>
     `, `<button class="btn-primary" id="lv-save">Submit Request</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    const upd = ()=>{ const d=workingDays(document.getElementById('lv-start').value, document.getElementById('lv-end').value); document.getElementById('lv-days-hint').textContent=`${d} working day${d!==1?'s':''} (excl. Sundays)`; };
+    const upd = ()=>{ const d=leaveWorkingDays(document.getElementById('lv-start').value, document.getElementById('lv-end').value); document.getElementById('lv-days-hint').textContent=`${d} working day${d!==1?'s':''} (excl. Sundays & holidays)`; };
     document.getElementById('lv-start').addEventListener('change',upd);
     document.getElementById('lv-end').addEventListener('change',upd);
     document.getElementById('lv-save').addEventListener('click', async ()=>{
@@ -2162,7 +2240,7 @@ async function renderPresidentMessageCard() {
       const startDate=document.getElementById('lv-start').value, endDate=document.getElementById('lv-end').value;
       const reason=document.getElementById('lv-reason').value.trim();
       const err=document.getElementById('lv-err');
-      const days=workingDays(startDate,endDate);
+      const days=leaveWorkingDays(startDate,endDate);
       if(!startDate||!endDate||days<=0){ err.textContent='Pick a valid date range.'; err.classList.remove('hidden'); return; }
       const lt=leaveType(type);
       if(lt.drawsBalance && days > (bal[type]||0)){ err.textContent=`Not enough ${lt.label.toLowerCase()} — ${bal[type]||0} day(s) left, ${days} requested.`; err.classList.remove('hidden'); return; }
@@ -2179,16 +2257,47 @@ async function renderPresidentMessageCard() {
     });
   }
 
+  // Writes a paid/unpaid attendance record for every WORK day in the leave range,
+  // skipping Sundays & PH holidays, non-destructively (merge). Runs as the approver
+  // (finance/admin/secretary) → passes the attendance finance/admin write path.
+  async function writeLeaveAttendance(r, lt){
+    if(!r.startDate || !r.endDate) return;
+    const FV = firebase.firestore.FieldValue;
+    const paid = lt.paid !== false;
+    const s=new Date(r.startDate+'T12:00:00'), e=new Date(r.endDate+'T12:00:00');
+    if(isNaN(s)||isNaN(e)||e<s) return;
+    const d=new Date(s); let guard=0;
+    while(d<=e && guard++<366){
+      const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const hol=(typeof getPHHolidays==='function')?getPHHolidays(d.getFullYear()):{};
+      if(window.bizDow(new Date(ds+'T12:00:00'))!==0 && !hol[ds]){
+        await db.collection('attendance').doc(r.userId).collection('records').doc(ds).set(
+          paid
+            ? { date:ds, uid:r.userId, attendanceScore:1.0, fullTime:true,  status:'leave',        leaveType:r.type, leaveReqId:r.id, editedBy:currentUser.uid, editedAt:FV.serverTimestamp() }
+            : { date:ds, uid:r.userId, attendanceScore:0,   fullTime:false, status:'unpaid_leave', leaveType:r.type, leaveReqId:r.id, editedBy:currentUser.uid, editedAt:FV.serverTimestamp() },
+          {merge:true});
+      }
+      d.setDate(d.getDate()+1);
+    }
+  }
+  // Shared balance-decrement + attendance-write. BOTH approval paths call this.
+  async function applyLeaveApproval(r){
+    const lt = leaveType(r.type);
+    if(lt.drawsBalance){
+      const bal = await getBalance(r.userId);
+      const newBal = Math.max(0,(bal[r.type]||0)-(r.days||0));
+      await db.collection('leave_balances').doc(r.userId).set(
+        { [r.type]:newBal, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
+    }
+    await writeLeaveAttendance(r, lt);
+  }
+
   async function approveLeave(r, c){
     if(!r) return;
     try{
       await db.collection('leave_requests').doc(r.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
       const lt=leaveType(r.type);
-      if(lt.drawsBalance){
-        const bal=await getBalance(r.userId);
-        const newBal=Math.max(0,(bal[r.type]||0)-(r.days||0));
-        await db.collection('leave_balances').doc(r.userId).set({ [r.type]:newBal, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
-      }
+      await applyLeaveApproval(r);   // decrement + write attendance (single source)
       window.logAudit && window.logAudit('approve','leave',r.id,{ user:r.userName, type:r.type, days:r.days });
       try{ Notifs.send(r.userId, { title:'Leave Approved ✅', body:`Your ${r.days}-day ${lt.label} (${r.startDate}→${r.endDate}) was approved.`, icon:'✅', type:'leave', dedupKey:`leave-ok-${r.id}` }); }catch(_){}
       Notifs.showToast('Leave approved'); window.renderLeavePage(c);
@@ -2215,11 +2324,7 @@ async function renderPresidentMessageCard() {
     const r = { id:s.id, ...s.data() };
     await db.collection('leave_requests').doc(r.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
     const lt = leaveType(r.type);
-    if(lt.drawsBalance){
-      const bal = await getBalance(r.userId);
-      const newBal = Math.max(0,(bal[r.type]||0)-(r.days||0));
-      await db.collection('leave_balances').doc(r.userId).set({ [r.type]:newBal, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
-    }
+    await applyLeaveApproval(r);    // decrement + write attendance (single source)
     window.logAudit && window.logAudit('approve','leave',r.id,{ user:r.userName, type:r.type, days:r.days });
     try{ Notifs.send(r.userId, { title:'Leave Approved ✅', body:`Your ${r.days}-day ${lt.label} (${r.startDate}→${r.endDate}) was approved.`, icon:'✅', type:'leave', dedupKey:`leave-ok-${r.id}` }); }catch(_){}
     return r;

@@ -2600,14 +2600,12 @@ async function renderManagerDashboard() {
       + (approvalsSnap.size||0) + (caSnap.size||0);
 
     // Today's attendance for the team (admin can read attendance/{uid}/records/{date})
-    // Attendance status is COMPUTED from the record's fields (the app never
-    // stores a `status` key): full day = fullTime/score≥1, half = loginTime/score>0,
-    // and an absent person simply has no record yet → 'unmarked'. (Mirrors modules.js.)
+    // Attendance status is derived via the shared window.attRecKind reader (config.js),
+    // which DOES check a `status` key (present/half/absent/leave/unpaid-leave, plus
+    // 'none' for no record yet) — kept consistent with every other attendance reader.
     const attStatus = (data) => {
-      if (!data) return 'unmarked';
-      if (data.fullTime || (typeof data.attendanceScore==='number' && data.attendanceScore>=1)) return 'present';
-      if (data.loginTime || (typeof data.attendanceScore==='number' && data.attendanceScore>0)) return 'half';
-      return 'unmarked';
+      const kind = !data ? 'unmarked' : window.attRecKind(data);
+      return kind === 'none' ? 'unmarked' : kind;
     };
     const att = await Promise.all(team.map(u =>
       db.collection('attendance').doc(u.id).collection('records').doc(todayStr).get()
@@ -2653,11 +2651,15 @@ async function renderManagerDashboard() {
             <div class="card-header"><h3>👥 Team Today</h3><button class="btn-primary btn-sm" onclick="navigateTo('attendance')">Attendance</button></div>
             <div class="card-body" style="padding:0">
               ${!team.length?'<div class="empty-state" style="padding:20px"><p>No team members assigned</p></div>':
-                att.slice(0,12).map(a=>`<div style="display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid var(--border)">
-                  <span style="width:8px;height:8px;border-radius:50%;background:${a.status==='present'?'var(--success)':a.status==='half'?'var(--warning)':'var(--text-muted)'}"></span>
+                att.slice(0,12).map(a=>{
+                  const dot = { present:'var(--success)', half:'var(--warning)', absent:'var(--danger)', leave:'var(--success)', 'unpaid-leave':'var(--text-muted)' }[a.status] || 'var(--text-muted)';
+                  const cls = { present:'badge-green', half:'badge-orange', absent:'badge-red', leave:'badge-green', 'unpaid-leave':'badge-gray' }[a.status] || 'badge-gray';
+                  const label = { present:'present', half:'half', absent:'absent', leave:'🌴 leave', 'unpaid-leave':'📅 unpaid leave', unmarked:'not in' }[a.status] || a.status;
+                  return `<div style="display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid var(--border)">
+                  <span style="width:8px;height:8px;border-radius:50%;background:${dot}"></span>
                   <span style="flex:1;font-size:13px">${escHtml(a.name)}</span>
-                  <span class="badge ${a.status==='present'?'badge-green':a.status==='half'?'badge-orange':'badge-gray'}" style="font-size:10px">${a.status==='unmarked'?'not in':a.status}</span>
-                </div>`).join('')}
+                  <span class="badge ${cls}" style="font-size:10px">${label}</span>
+                </div>`;}).join('')}
             </div>
           </div>
           <div class="card"><div class="card-header"><h3>Quick Actions</h3></div>
@@ -2948,9 +2950,7 @@ async function renderEmployeeDashboard() {
     // Attendance — new model: 0 / 0.5 / 1.0
     const attData     = attSnap.exists ? attSnap.data() : {};
     const hasLogin    = !!attData.loginTime;
-    const attScore    = typeof attData.attendanceScore === 'number'
-                          ? attData.attendanceScore
-                          : (attData.fullTime ? 1.0 : hasLogin ? 0.5 : 0);
+    const attScore    = window.attRecScore(attData);
     const hasFull     = attScore >= 1.0;
 
     // Attendance window: 7:00–9:00 AM Manila time (or approved extension)
@@ -2988,8 +2988,10 @@ async function renderEmployeeDashboard() {
     const attDaysFull = Math.round(monthAttScore * workDaysDash);
     const caBalance = recentCA.filter(a=>a.status==='approved'&&(a.balance||0)>0).reduce((s,a)=>s+(a.balance||0),0);
 
-    const attBadgeClass = isNoWorkDay ? 'badge-gray' : hasFull ? 'badge-green' : hasLogin ? 'badge-orange' : 'badge-gray';
-    const attLabel      = isNoWorkDay ? (isSundayToday?'Sunday':'Holiday') : hasFull ? '100% Full ✅' : hasLogin ? '50% Timed In 🟡' : 'Not Timed In';
+    const isLeaveToday       = attData.status === 'leave';
+    const isUnpaidLeaveToday = attData.status === 'unpaid_leave';
+    const attBadgeClass = isLeaveToday ? 'badge-green' : isUnpaidLeaveToday ? 'badge-gray' : isNoWorkDay ? 'badge-gray' : hasFull ? 'badge-green' : hasLogin ? 'badge-orange' : 'badge-gray';
+    const attLabel      = isLeaveToday ? '🌴 On Leave' : isUnpaidLeaveToday ? '📅 Unpaid Leave' : isNoWorkDay ? (isSundayToday?'Sunday':'Holiday') : hasFull ? '100% Full ✅' : hasLogin ? '50% Timed In 🟡' : 'Not Timed In';
 
     // Dept quick tab buttons
     const deptTabsHTML = currentDepts.length ? `
@@ -4714,13 +4716,13 @@ function countWorkDays(year, month, upToDay) {
   return Math.max(1, count);
 }
 
-/** Normalise a Firestore attendance record to a 0/0.5/1.0 score. */
+/** Normalise a Firestore attendance record to a 0/0.5/1.0 score.
+ *  Delegates to the shared window.attRecScore (config.js) — paid leave is
+ *  stored as attendanceScore:1.0 so it flows through untouched. Name/signature
+ *  kept identical: called by getAttendanceScore, which WS20's payroll Compute
+ *  depends on via getAttendanceScore/attScore. */
 function _attRecScore(r) {
-  if (!r) return 0;
-  if (typeof r.attendanceScore === 'number') return r.attendanceScore;
-  if (r.fullTime)  return 1.0;
-  if (r.loginTime) return 0.5;
-  return 0;
+  return window.attRecScore(r);
 }
 
 async function getAttendanceScore(uid) {
@@ -4784,13 +4786,14 @@ async function openEmpStandingsModal(uid, name, preloaded) {
       const rec = attRecords[ds];
       const dow = new Date(ds + 'T12:00:00').getDay(); // 0=Sun (noon avoids TZ rollover)
       if (dow === 0) { dayBoxes.push(`<div class="att-day-box" style="background:rgba(100,100,100,0.15);border:1px solid rgba(100,100,100,0.2);opacity:0.5" title="${ds} — Sunday"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:10px">✗</span></div>`); continue; }
-      const score = rec ? (typeof rec.attendanceScore === 'number' ? rec.attendanceScore : rec.fullTime ? 1.0 : rec.loginTime ? 0.5 : 0) : 0;
-      const bg = score >= 1 ? 'rgba(48,209,88,0.18)' : score >= 0.5 ? 'rgba(255,160,64,0.18)' : 'rgba(255,68,68,0.12)';
-      const bc = score >= 1 ? 'rgba(48,209,88,0.4)' : score >= 0.5 ? 'rgba(255,160,64,0.4)' : 'rgba(255,68,68,0.25)';
-      const mark = score >= 1 ? '✓' : score >= 0.5 ? '½' : '✗';
-      const markColor = score >= 1 ? '#30d158' : score >= 0.5 ? '#ffa040' : '#ff6b6b';
-      const attLabel = score >= 1 ? 'Full' : score >= 0.5 ? 'Half' : 'Absent';
-      dayBoxes.push(`<div class="att-day-box" style="background:${bg};border:1px solid ${bc};border-radius:5px;padding:3px 4px;text-align:center;min-width:28px" title="${ds} — ${attLabel}"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:11px;color:${markColor};font-weight:700">${mark}</span></div>`);
+      const kind = window.attRecKind(rec);
+      const score = window.attRecScore(rec);
+      const dispKind = kind === 'none' ? 'absent' : kind; // no record for an elapsed workday = absent
+      const b = window.attKindBadge(dispKind);
+      const bg = dispKind==='present'||dispKind==='leave' ? 'rgba(48,209,88,0.18)' : dispKind==='half' ? 'rgba(255,160,64,0.18)' : dispKind==='unpaid-leave' ? 'rgba(142,142,147,0.18)' : 'rgba(255,68,68,0.12)';
+      const bc = dispKind==='present'||dispKind==='leave' ? 'rgba(48,209,88,0.4)' : dispKind==='half' ? 'rgba(255,160,64,0.4)' : dispKind==='unpaid-leave' ? 'rgba(142,142,147,0.4)' : 'rgba(255,68,68,0.25)';
+      const attLabel = dispKind==='leave' ? 'Leave' : dispKind==='unpaid-leave' ? 'Unpaid Leave' : dispKind==='present' ? 'Full' : dispKind==='half' ? 'Half' : 'Absent';
+      dayBoxes.push(`<div class="att-day-box" style="background:${bg};border:1px solid ${bc};border-radius:5px;padding:3px 4px;text-align:center;min-width:28px" title="${ds} — ${attLabel}"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:11px;color:${b.c};font-weight:700">${b.m}</span></div>`);
     }
 
     body.innerHTML = `
@@ -4831,10 +4834,12 @@ async function openEmpStandingsModal(uid, name, preloaded) {
         <div style="background:var(--surface2,rgba(255,255,255,0.05));border-radius:12px;padding:14px">
           <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Attendance This Month</div>
           <div style="display:flex;flex-wrap:wrap;gap:4px">${dayBoxes.join('')}</div>
-          <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--text-muted)">
+          <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--text-muted);flex-wrap:wrap">
             <span><span style="color:#30d158;font-weight:700">✓</span> Full</span>
             <span><span style="color:#ffa040;font-weight:700">½</span> Half</span>
             <span><span style="color:#ff6b6b;font-weight:700">✗</span> Absent</span>
+            <span>🌴 Leave</span>
+            <span>📅 Unpaid Leave</span>
             <span style="opacity:.6">✗ Sundays</span>
           </div>
         </div>
@@ -5015,13 +5020,16 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
         const dow = new Date(ds + 'T12:00:00').getDay();
         if (dow===0) { boxes.push(`<div style="background:rgba(100,100,100,0.1);border:1px solid rgba(100,100,100,0.15);border-radius:5px;padding:3px 4px;text-align:center;min-width:28px;opacity:0.4"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:10px">—</span></div>`); continue; }
         const rec = recs[ds];
-        const score = rec?(typeof rec.attendanceScore==='number'?rec.attendanceScore:rec.fullTime?1:rec.loginTime?0.5:0):0;
-        const bg=score>=1?'rgba(48,209,88,0.18)':score>=0.5?'rgba(255,160,64,0.18)':'rgba(255,68,68,0.12)';
-        const bc=score>=1?'rgba(48,209,88,0.4)':score>=0.5?'rgba(255,160,64,0.4)':'rgba(255,68,68,0.25)';
-        const mark=score>=1?'✓':score>=0.5?'½':'✗';
-        const mc=score>=1?'#30d158':score>=0.5?'#ffa040':'#ff6b6b';
-        if (score>=1) full++; else if (score>=0.5) half++; else absent++;
-        boxes.push(`<div style="background:${bg};border:1px solid ${bc};border-radius:5px;padding:3px 4px;text-align:center;min-width:28px"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:11px;color:${mc};font-weight:700">${mark}</span></div>`);
+        const kind = window.attRecKind(rec);
+        const score = window.attRecScore(rec);
+        const dispKind = kind === 'none' ? 'absent' : kind; // no record for an elapsed workday = absent
+        const b = window.attKindBadge(dispKind);
+        const bg = dispKind==='present'||dispKind==='leave' ? 'rgba(48,209,88,0.18)' : dispKind==='half' ? 'rgba(255,160,64,0.18)' : dispKind==='unpaid-leave' ? 'rgba(142,142,147,0.18)' : 'rgba(255,68,68,0.12)';
+        const bc = dispKind==='present'||dispKind==='leave' ? 'rgba(48,209,88,0.4)' : dispKind==='half' ? 'rgba(255,160,64,0.4)' : dispKind==='unpaid-leave' ? 'rgba(142,142,147,0.4)' : 'rgba(255,68,68,0.25)';
+        if (dispKind==='present' || dispKind==='leave') full++;
+        else if (dispKind==='half') half++;
+        else absent++; // covers 'absent' and 'unpaid-leave'
+        boxes.push(`<div style="background:${bg};border:1px solid ${bc};border-radius:5px;padding:3px 4px;text-align:center;min-width:28px"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:11px;color:${b.c};font-weight:700">${b.m}</span></div>`);
       }
       content.innerHTML = `
         <div style="font-size:13px;font-weight:700;margin-bottom:12px">${monthLabel}</div>
@@ -5031,10 +5039,12 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
           <div style="background:rgba(255,68,68,0.1);border:1px solid rgba(255,68,68,0.25);border-radius:10px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#ff6b6b">${absent}</div><div style="font-size:10px;color:var(--text-muted)">Absences</div></div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:4px">${boxes.join('')}</div>
-        <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--text-muted)">
+        <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--text-muted);flex-wrap:wrap">
           <span><span style="color:#30d158;font-weight:700">✓</span> Full</span>
           <span><span style="color:#ffa040;font-weight:700">½</span> Half</span>
           <span><span style="color:#ff6b6b;font-weight:700">✗</span> Absent</span>
+          <span>🌴 Leave</span>
+          <span>📅 Unpaid Leave</span>
         </div>`;
     }
   } catch(err) {

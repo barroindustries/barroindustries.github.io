@@ -10110,7 +10110,9 @@ window.renderApprovals = async function(currentUser) {
           const pwd = generatePassword(btn.dataset.name);
           const empCount = (await db.collection('users').get().catch(()=>({size:0}))).size;
           const empId = `BI-${window.bizYear ? window.bizYear() : new Date().getFullYear()}-${String(empCount+1).padStart(3,'0')}`;
-          await db.collection('users').add({ displayName:btn.dataset.name, email:btn.dataset.email, phone:btn.dataset.phone, role:'employee', departments:[], employeeId:empId, photoUrl:'', startDate:today(), createdAt:firebase.firestore.FieldValue.serverTimestamp(), pendingPasswordSetup:true });
+          const newStartDate = today();
+          const newUserRef = await db.collection('users').add({ displayName:btn.dataset.name, email:btn.dataset.email, phone:btn.dataset.phone, role:'employee', departments:[], employeeId:empId, photoUrl:'', startDate:newStartDate, createdAt:firebase.firestore.FieldValue.serverTimestamp(), pendingPasswordSetup:true });
+          await window.LeaveAccrual.grantForYear(newUserRef.id, { startDate: newStartDate });
           await db.collection('signup_requests').doc(btn.dataset.id).update({ status:'approved', generatedPassword:pwd, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
           Notifs.showToast(`${btn.dataset.name} approved! Password: ${pwd}`);
           loadApprovalsSub('all');
@@ -10637,14 +10639,16 @@ window.renderApprovals = async function(currentUser) {
           // Create Firestore user profile (no uid yet — president creates Firebase Auth manually)
           const empCount = (await db.collection('users').get().catch(()=>({size:0}))).size;
           const empId    = `BI-${window.bizYear ? window.bizYear() : new Date().getFullYear()}-${String(empCount+1).padStart(3,'0')}`;
-          await db.collection('users').add({
+          const newStartDate = today();
+          const newUserRef = await db.collection('users').add({
             displayName: name, email, phone,
             role: 'employee', departments: [],
             employeeId: empId,
-            photoUrl: '', startDate: today(),
+            photoUrl: '', startDate: newStartDate,
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             pendingPasswordSetup: true
           });
+          await window.LeaveAccrual.grantForYear(newUserRef.id, { startDate: newStartDate });
           await db.collection('signup_requests').doc(id).update({
             status: 'approved',
             generatedPassword: pwd,

@@ -1038,7 +1038,27 @@ service cloud.firestore {
     // The owner reads their own balance; finance/admin read all + write.
     match /leave_balances/{uid} {
       allow read:  if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
-      allow write: if isAuth() && isFinanceOrAdmin();
+      // Shape-guard so a buggy accrual run can't write NaN/negative/wrong-typed counters.
+      // .get(field,default) — a missing field must not deny the rule (missing-field-throws memory).
+      allow write: if isAuth() && isFinanceOrAdmin()
+        && request.resource.data.get('vacation', 0) is number
+        && request.resource.data.get('vacation', 0) >= 0
+        && request.resource.data.get('sick', 0) is number
+        && request.resource.data.get('sick', 0) >= 0;
+    }
+
+    // ── Leave accruals (annual grant idempotency key + forfeiture audit) ─
+    // docId = {uid}_{YYYY}. Owner reads own history; finance/admin read all +
+    // write (grant runs in admin context — employees never write). President-only delete.
+    match /leave_accruals/{docId} {
+      allow read:   if isAuth() && (resource.data.get('uid','') == request.auth.uid || isFinanceOrAdmin());
+      allow create: if isAuth() && isFinanceOrAdmin()
+        && request.resource.data.get('grantedVacation', 0) is number
+        && request.resource.data.get('grantedVacation', 0) >= 0
+        && request.resource.data.get('grantedSick', 0) is number
+        && request.resource.data.get('grantedSick', 0) >= 0;
+      allow update: if isAuth() && isFinanceOrAdmin();
+      allow delete: if isAuth() && isPresident();
     }
 
     // ── Suggestions ────────────────────────────────────

@@ -1,5 +1,12 @@
 # Workstream 25 — Leave that works (balance seeding/accrual + attendance integration)
 
+> ✅ **IMPLEMENTED 2026-07-10.** Rules deploy required (`leave_balances` shape guard + new
+> `leave_accruals` block). See V12-PLAN.md Build Log. **‼️ FLAG FOR NEIL — do not press "Run
+> Annual Accrual" until you confirm:** `LEAVE_POLICY.grants` ships as a labelled PLACEHOLDER
+> `{vacation:5,sick:5}` (the true PH legal floor is ONE combined 5-day SIL pool, not 5+5 — this
+> is a policy choice above the floor); `LEAVE_POLICY.probation` (day-one prorated vs.
+> after-1-year); and carry-over/cash-commutation of unused days at annual rollover.
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

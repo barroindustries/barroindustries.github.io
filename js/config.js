@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.8';
+window.APP_VERSION = '12.0.9';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -35,6 +35,36 @@ window.bizDow = function(date) {
   return { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 }[wd];
 };
 window.bizYear = function() { return parseInt(window.bizDate().slice(0, 4), 10); };
+
+// ── Consolidated attendance-record readers (WS25) ────────────────
+// Single source of truth for reading an attendance/{uid}/records/{date} doc.
+// Defined here (config.js) so they load before every caller (departments.js,
+// app.js, modules.js) per the fixed script-load-order rule.
+// score: paid leave is stored as 1.0 so no special-case needed here.
+window.attRecScore = function(rec){
+  if (!rec) return 0;
+  if (typeof rec.attendanceScore === 'number') return rec.attendanceScore;
+  if (rec.fullTime) return 1.0;
+  if (rec.loginTime) return 0.5;
+  return 0;
+};
+// kind: status wins, then score. Drives badge/colour in the six UIs.
+window.attRecKind = function(rec){
+  if (!rec) return 'none';
+  if (rec.status === 'leave')        return 'leave';
+  if (rec.status === 'unpaid_leave') return 'unpaid-leave';
+  if (rec.status === 'absent')       return 'absent';
+  const sc = window.attRecScore(rec);
+  if (sc >= 1) return 'present';
+  if (sc > 0 || rec.loginTime) return 'half';
+  return 'none';
+};
+// central badge glyph/colour so all readers agree
+window.attKindBadge = function(kind){
+  return ({ present:{m:'✓',c:'#30d158'}, half:{m:'½',c:'#ffa040'},
+            absent:{m:'✗',c:'#ff6b6b'}, leave:{m:'🌴',c:'#30d158'},
+            'unpaid-leave':{m:'📅',c:'#8e8e93'}, none:{m:'',c:'#8e8e93'} })[kind] || {m:'',c:'#8e8e93'};
+};
 
 // ── Google Drive API Config ──────────────────────
 window.DRIVE_CONFIG = {
@@ -158,6 +188,67 @@ window.ROLES = {
   agent:     { label: 'Sales Agent',         badge: 'badge-orange', canSeeAll: false },
   finance:   { label: 'Accountant',          badge: 'badge-green',  canSeeAll: false },
   partner:   { label: 'Partner',             badge: 'badge-teal',   canSeeAll: false }
+};
+
+// ── Leave policy (WS25) ──────────────────────────
+// ‼️ PLACEHOLDER — Neil to confirm (legal floor is ONE 5-day SIL pool, not
+// 5 vacation + 5 sick). Do NOT present this as the legal minimum in any UI.
+window.LEAVE_POLICY = {
+  grants: { vacation: 5, sick: 5 },   // PLACEHOLDER — Neil to confirm
+  yearBasis: 'calendar',
+  probation: 'prorate-from-hire'
+};
+
+// ── Leave-accrual service (WS25) ──────────────────
+// Manual, idempotent annual grant/seed mechanism — no cron, no Cloud Function.
+// Runs in admin context only (finance/president via the Leave admin screen).
+window.LeaveAccrual = {
+  policyYear(){ return window.bizDate().slice(0,4); },      // calendar year, Manila
+  // pure proration: full year unless hired within `year`
+  grantFor(annual, startDate, year){
+    const y = String(year), hy = (startDate||'').slice(0,4);
+    if (hy !== y) return { vacation:annual.vacation, sick:annual.sick, proratedFromMonth:null };
+    if ((window.LEAVE_POLICY.probation) === 'after-1-year')
+      return { vacation:0, sick:0, proratedFromMonth:parseInt((startDate||'').slice(5,7),10)||1 };
+    const hm = parseInt((startDate||'').slice(5,7),10) || 1;   // 1-12
+    const f  = (12 - (hm - 1)) / 12;                           // Jan→1, Jul→0.5, Dec→1/12
+    const r5 = x => Math.round(x*2)/2;                         // nearest 0.5
+    return { vacation:r5(annual.vacation*f), sick:r5(annual.sick*f), proratedFromMonth:hm };
+  },
+  // idempotent per {uid, year}: skip if leave_accruals/{uid}_{year} already exists
+  async grantForYear(uid, { startDate }={}, year, { force }={}){
+    year = year || this.policyYear();
+    const mref = db.collection('leave_accruals').doc(`${uid}_${year}`);
+    const mkr  = await mref.get();
+    if (mkr.exists && !force) return { uid, skipped:true };
+    const g    = this.grantFor(window.LEAVE_POLICY.grants, startDate, year);
+    const cur  = await db.collection('leave_balances').doc(uid).get();
+    const prior = cur.exists ? cur.data() : {};
+    const FV = firebase.firestore.FieldValue;
+    await db.collection('leave_balances').doc(uid).set(
+      { vacation:g.vacation, sick:g.sick, year:String(year), updatedAt:FV.serverTimestamp() }, {merge:true});
+    await mref.set({ uid, year:String(year),
+      grantedVacation:g.vacation, grantedSick:g.sick, proratedFromMonth:g.proratedFromMonth,
+      priorYearEndingVacation: cur.exists ? (prior.vacation??null) : null,
+      priorYearEndingSick:     cur.exists ? (prior.sick??null) : null,
+      grantedBy: (window.currentUser && currentUser.uid) || 'system',
+      grantedAt: FV.serverTimestamp() });
+    return { uid, granted:g };
+  },
+  // one-button seed / annual rollover — the backfillPayrollLedger analogue
+  async runAnnualAccrual(onProgress){
+    const year = this.policyYear();
+    const usnap = await db.collection('users').get();
+    let seeded=0, skipped=0, i=0;
+    for (const d of usnap.docs){
+      const u = d.data();
+      if (u.role === 'partner') { skipped++; continue; }        // partners have no leave
+      const res = await this.grantForYear(d.id, { startDate:u.startDate }, year);
+      res.skipped ? skipped++ : seeded++;
+      onProgress && onProgress(++i, usnap.size);
+    }
+    return { year, seeded, skipped, total:usnap.size };
+  }
 };
 
 // ── Bottom Nav — Employee ────────────────────────

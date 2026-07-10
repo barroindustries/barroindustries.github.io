@@ -157,8 +157,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     IMPLEMENTED (window.toPayslipModel/buildPayslipHTML/renderPayslipPage,
     departments.js) — see Build Log. printPayslip()/printWorkerPayslip() deleted;
     no more print pop-ups anywhere in payroll.
-25. `[ ]` **Leave that works** — HR grants/accrues balances (PH 5-day SIL minimum); approved
-    leave writes attendance records so it doesn't cut pay.
+25. `[x]` **Leave that works** — HR grants/accrues balances (PH 5-day SIL minimum); approved
+    leave writes attendance records so it doesn't cut pay. IMPLEMENTED (window.LeaveAccrual +
+    consolidated attRecScore/attRecKind/attKindBadge helpers) — see Build Log.
+    `LEAVE_POLICY.grants` ships as a labelled PLACEHOLDER `{vacation:5,sick:5}` — needs Neil's
+    confirmation before the "Run Annual Accrual" button is pressed for real (the true legal
+    floor is ONE combined 5-day SIL pool, not 5+5 — see the spec's decision 3).
 26. `[ ]` **Attendance v2** — time-out + hours (feeds weekly hourly production pay); holidays
     admin screen (yearly proclamations without code changes); optional geofence/kiosk for
     factory staff; extension-upgrade bug fixed (approved extension currently hard-blocks 9AM).
@@ -872,3 +876,67 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   **This completes Phase 2 (workstreams 09, 10-11, 12, 13, 14, 15, 16, 17, 18) — all IMPLEMENTED.**
   NEXT: Phase 3 remainder — workstreams 25 (leave), 26 (attendance v2), 27 (IDs) per the build
   order in fable-workplan/INDEX.md.
+- **2026-07-10 (Sonnet implementation — WS25 Leave that actually works, per spec):** Split
+  across 4 parallel subagents (config.js helpers+LeaveAccrual; modules.js leave IIFE+calendar
+  classifier; app.js's four score-reader sites; departments.js seed-at-creation calls),
+  firestore.rules done directly, each independently verified before integration. WS25 depends
+  on WS19 (satisfied, already implemented) and composes with WS20/WS26 by design (leave writes
+  attendance non-destructively via `merge:true`, touching only its own keys, so WS26's future
+  `timeOut`/`hoursWorked` fields — not yet implemented — will survive). **Storage:** kept the
+  existing mutable `leave_balances/{uid}` counter shape (rejected lazy-compute — many legacy
+  users have no trustworthy `startDate`), added a new `leave_accruals/{uid}_{YYYY}` idempotency
+  + forfeiture-audit doc. **Accrual:** yearly lump-sum, calendar-year, prorated to the nearest
+  0.5 day in an employee's first partial year — a manual, idempotent "↻ Run Annual Accrual"
+  button in the Leave admin screen (no cron, no Cloud Function, matching the repo's existing
+  `backfillPayrollLedger` manual-button precedent), plus auto-seeding at both employee-creation
+  sites in departments.js (signup approval and the dedicated Signups sub-tab — both restructured
+  from bare `.add()` to capture the new uid so `LeaveAccrual.grantForYear` can seed it
+  immediately). **Pay-safety:** an approved leave day writes an `attendance/{uid}/records`
+  doc with `attendanceScore:1.0` (paid) or `0` (unpaid) plus a distinct `status:'leave'`/
+  `'unpaid_leave'` + `leaveType` — WS20's `computePayRun` reads attendance only through
+  `getAttendanceScore`→`_attRecScore` (now a one-line delegate to the new shared
+  `window.attRecScore` helper, its name/signature/callers completely untouched), so paid leave
+  is automatically counted as a full present day with **zero edits to Compute's frozen-line
+  math**. **The six-way duplication fix:** consolidated `window.attRecScore`/`attRecKind`/
+  `attKindBadge` in config.js and routed all six previously-independent inline score/badge
+  ternaries through them (modules.js's EOM-standings `recScore` + the attendance-calendar
+  classifier; app.js's team-today `attStatus`, employee-dashboard `attScore`, `_attRecScore`,
+  and both the Employee Standings modal + the related worker-profile grid) — a leave day now
+  renders 🌴 consistently everywhere instead of risking a stale ✓/✗ on whichever reader wasn't
+  fixed, the exact bug class Phase 1 workstream 5 existed to close. The calendar classifier
+  edit was verified byte-preserving for every non-leave branch (present/half/absent logic
+  untouched, only reached via a new `else if` after the leave/unpaid-leave check). Day-counting
+  now uses a new holiday-aware `leaveWorkingDays()` (excludes Sundays AND PH holidays) instead
+  of the old Sunday-only `workingDays()`, so a request spanning a holiday no longer over-charges
+  the balance for a day payroll never penalizes. A single `applyLeaveApproval`/
+  `writeLeaveAttendance` pair now backs BOTH approval surfaces (the standalone Leave screen's
+  `approveLeave` and the unified Approvals queue's `approveLeaveRequest`), replacing two
+  independently-duplicated decrement blocks. **Rules:** `leave_balances.write` gained a
+  non-negative-number shape guard (via `.get(field,default)`, per the missing-field-throws
+  memory) so a buggy accrual run can't write NaN/negative; a new `leave_accruals` block reads
+  by owner-or-finance/admin, writes finance/admin-only, deletes president-only. **Backup
+  coverage note:** the spec's own migration checklist says to add `leave_accruals` to
+  `scripts/monthly-backup.js`'s `EXPORTS` array — that step is now MOOT, since WS15 (implemented
+  earlier this same session) already replaced the hand-maintained `EXPORTS` array with
+  `db.listCollections()` dynamic discovery, so the new collection is backed up automatically
+  with zero code change. **‼️ FLAG FOR NEIL (do not ship blind, per the spec's own decision 3):**
+  `window.LEAVE_POLICY.grants` is a labelled PLACEHOLDER `{vacation:5, sick:5}` — the actual PH
+  Labor Code floor (Art. 95) is ONE combined 5-day Service Incentive Leave pool, not 5 vacation
+  + 5 sick; the current split is a policy choice above the floor that needs your confirmation
+  before "Run Annual Accrual" is ever pressed for real. Also needs your call on
+  `LEAVE_POLICY.probation` (day-one prorated accrual, the current default, vs. only-after-1-year)
+  and on carry-over/cash-commutation of unused days at each annual rollover (currently: reset to
+  a fresh grant, prior balance recorded in `leave_accruals.priorYearEnding*` but not re-credited).
+  **Verified:** `node --check` clean on all 4 touched JS files; firestore.rules braces balanced
+  (217/217); grep-confirmed every one of the six score-reader sites now calls the shared
+  helpers with zero remaining inline duplicate ternaries; confirmed `_attRecScore`'s callers
+  (`getAttendanceScore` and its own 5 callers) are completely unchanged — only the function body
+  was replaced with a one-line delegate. **NOT verified** (needs a live login): an actual Run
+  Annual Accrual click-through, a real leave request/approval cycle from both approval surfaces,
+  the 🌴 badge rendering live across all six readers, and a WS20 Compute run confirming leave
+  truly doesn't cut pay for a real employee. **Still needed:** deploy `firestore.rules` (new
+  `leave_accruals` block + the `leave_balances` shape guard); then, once Neil confirms the
+  policy numbers, press Run Annual Accrual to seed existing employees (must happen before any
+  resumed leave filing, or the client pre-check blocks a first request against a still-zero
+  balance).
+  NEXT: workstream 26 (Attendance v2) per the build order in fable-workplan/INDEX.md.
