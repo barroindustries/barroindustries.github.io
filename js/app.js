@@ -692,17 +692,18 @@ function initLogin() {
       let input = document.getElementById('email').value.trim();
       let emailToUse = input;
 
-      // Username login: no @ means it's a username, look up their auth email
+      // Username login: no @ means it's a username, look up their auth email.
+      // v12 WS19: resolves via the public usernames/{u} map instead of querying
+      // /users directly — that query ran pre-auth (request.auth is still null
+      // here), and /users' read rule requires isAuth(), so this always denied
+      // before the map existed (worker username login was silently broken).
       if (!input.includes('@')) {
-        const snap = await db.collection('users')
-          .where('username', '==', input.toLowerCase())
-          .limit(1).get();
-        if (snap.empty) {
+        const unameDoc = await db.collection('usernames').doc(input.toLowerCase()).get();
+        if (!unameDoc.exists) {
           showLoginError('No account found with that username. Contact HR.');
           setLoginLoading(false); return;
         }
-        const uData = snap.docs[0].data();
-        emailToUse = uData.authEmail || uData.email;
+        emailToUse = unameDoc.data().email;
         if (!emailToUse) {
           showLoginError('Account not configured. Contact HR.');
           setLoginLoading(false); return;
@@ -1396,6 +1397,35 @@ function normalizeProduct(p) {
 }
 
 // ── Audit Log viewer (president only) ─────────────
+// ── One-time security backfill (v12 WS19, president, idempotent) ──────────
+// Seeds the usernames/{u} -> {email, uid} login map from every existing users
+// doc that has a username, so worker username-login works immediately after
+// deploy (new accounts are kept in sync going forward by openCreateWorkerModal
+// — see js/app.js's Create Worker Account handler). Re-runnable: overwrites
+// with the current source-of-truth values each time, so it's always safe.
+window.runSecurityBackfill = async function() {
+  if (!isPresident()) return;
+  if (!confirm('Backfill the username login map from existing user accounts?\n\nSafe to run repeatedly.')) return;
+  Notifs.showToast('Backfilling usernames…');
+  try {
+    const snap = await db.collection('users').get();
+    let batch = db.batch(), inBatch = 0, seeded = 0;
+    for (const d of snap.docs) {
+      const u = d.data();
+      const uname = (u.username || '').toLowerCase().trim();
+      if (!uname) continue;
+      const email = u.authEmail || u.email;
+      if (!email) continue;
+      batch.set(db.collection('usernames').doc(uname), { email, uid: d.id });
+      inBatch++; seeded++;
+      if (inBatch >= 400) { await batch.commit(); batch = db.batch(); inBatch = 0; }
+    }
+    if (inBatch) await batch.commit();
+    window.logAudit && window.logAudit('security-backfill', 'usernames', null, { seeded });
+    Notifs.showToast(`Seeded ${seeded} username${seeded===1?'':'s'} ✓`);
+  } catch (e) { Notifs.showToast('Backfill failed: ' + (e.message||e), 'error'); }
+};
+
 async function renderAuditLog() {
   if (!isPresident()) return;
   const c = document.getElementById('page-content');
@@ -1414,7 +1444,7 @@ async function renderAuditLog() {
   const fmtTs = ts => { try { return ts?.toDate ? ts.toDate().toLocaleString('en-PH',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'; } catch(_) { return '—'; } };
 
   c.innerHTML = `
-    <div class="page-header"><h2>📜 Audit Log</h2><div style="display:flex;gap:8px;align-items:center"><span class="badge badge-gray">${entries.length} entr${entries.length===1?'y':'ies'}</span><button class="btn-secondary btn-sm" id="audit-csv">⬇ CSV</button></div></div>
+    <div class="page-header"><h2>📜 Audit Log</h2><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="badge badge-gray">${entries.length} entr${entries.length===1?'y':'ies'}</span><button class="btn-secondary btn-sm" id="security-backfill-btn" title="One-time: backfill the username login map">🔧 Security backfill</button><button class="btn-secondary btn-sm" id="audit-csv">⬇ CSV</button></div></div>
     <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Append-only trail of changes to sensitive data (payroll, finance, inventory, products, production, deals, passwords). Newest first, last 500.</p>
     <div class="subtab-bar" style="flex-wrap:wrap;gap:8px;margin-bottom:12px">
       <select id="audit-entity" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">
@@ -1450,6 +1480,7 @@ async function renderAuditLog() {
   };
   document.getElementById('audit-entity')?.addEventListener('change', draw);
   document.getElementById('audit-action')?.addEventListener('change', draw);
+  document.getElementById('security-backfill-btn')?.addEventListener('click', () => window.runSecurityBackfill());
   document.getElementById('audit-csv')?.addEventListener('click', () => {
     const fe = document.getElementById('audit-entity')?.value || 'all';
     const fa = document.getElementById('audit-action')?.value || 'all';
@@ -6696,9 +6727,10 @@ function openCreateWorkerModal() {
     if (!username) { errEl.textContent='Username is required.'; errEl.classList.remove('hidden'); return; }
     if (!password) { errEl.textContent='Password is required.'; errEl.classList.remove('hidden'); return; }
 
-    // Check username uniqueness
-    const existing = await db.collection('users').where('username','==',username).limit(1).get();
-    if (!existing.empty) { errEl.textContent='Username already taken. Choose another.'; errEl.classList.remove('hidden'); return; }
+    // Check username uniqueness against the canonical usernames/{u} map
+    // (v12 WS19) — a single doc get, and the source login itself resolves from.
+    const unameTaken = await db.collection('usernames').doc(username).get();
+    if (unameTaken.exists) { errEl.textContent='Username already taken. Choose another.'; errEl.classList.remove('hidden'); return; }
 
     btn.disabled = true; btn.textContent = 'Creating…';
 
@@ -6725,6 +6757,8 @@ function openCreateWorkerModal() {
         createdBy:   currentUser.uid,
         createdAt:   firebase.firestore.FieldValue.serverTimestamp()
       });
+      // Keep the username -> email login map in sync (v12 WS19).
+      await db.collection('usernames').doc(username).set({ email: authEmail, uid });
       // Pay → protected payroll/{uid} (keyed by Auth UID == users doc id).
       await db.collection('payroll').doc(uid).set({ salary, allowance: allow, deductions: 0 });
       window.logAudit && window.logAudit('create','payroll',uid,{ salary, allowance: allow });

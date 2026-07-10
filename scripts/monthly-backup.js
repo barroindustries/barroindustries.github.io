@@ -148,6 +148,12 @@ const EXPORTS = [
     csvFields:  ['id','displayName','email','username','role','dept','employeeId','salary','allowance','deductions'],
   },
   {
+    name:       'usernames',   // v12 WS19 — the username->email login map
+    filename:   'usernames',
+    dateField:  null,
+    csvFields:  ['id','email','uid'],
+  },
+  {
     name:       'posts',
     filename:   'posts',
     dateField:  'createdAt',

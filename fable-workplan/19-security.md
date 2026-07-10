@@ -1,5 +1,14 @@
 # Workstream 19 — Security closes (partner lockdown, attendance forgery, secretary two-tier)
 
+> ✅ **IMPLEMENTED 2026-07-10.** Rules validated via `firebase deploy --only firestore:rules
+> --dry-run` (compiled OK, re-run ~6 times through implementation) but **NOT yet deployed**.
+> Two real regressions found and fixed beyond the spec's literal text — see V12-PLAN.md Build
+> Log: (1) `tasks` needed an own-task-scoped exception for partners (the spec's blanket lock
+> would have broken the shipped partner "My Tasks" feature); (2) `settings` needed a
+> `docId=='system'` exception (every session, including partner, listens to it for the
+> force-logout signal). **Still needed:** deploy the rules, then press "🔧 Security backfill"
+> once (Audit Log page, president) to seed the username login map for existing accounts.
+
 *Grounding brief — facts only. Resolve every open decision below, then replace the
 checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
 further judgment calls: function signatures, before/after code, data shapes, migration

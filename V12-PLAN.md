@@ -92,9 +92,12 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     theme; typography scale; focus states.
 18. `[ ]` **Keyboard shortcuts** — Esc closes overlays; Ctrl/⌘K or / global search; Alt+1..9
     nav; ? cheat sheet.
-19. `[ ]` **Security closes** — partner lockdown (files_* metadata, budgets_* world-write,
+19. `[x]` **Security closes** — partner lockdown (files_* metadata, budgets_* world-write,
     users/tasks/posts reads); attendance self-write forgery; secretary rules limited to true
     minor-approvals tier; worker-login username lookup unblocked (needed for w/ IDs).
+    IMPLEMENTED — see Build Log. Two real regressions found + fixed during implementation
+    (tasks and settings/system both had genuine partner dependencies the spec didn't
+    anticipate); rules deploy still pending.
 
 ### PHASE 3 — Payroll & HR done right
 
@@ -306,3 +309,43 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   app (president) — this is the actual bug-fix; expense totals for past periods WILL drop by the
   restated amount, exactly as flagged to Neil in the audit. Committed, not yet pushed to master.
   NEXT: workstream 19 (security) per the recommended build order.
+- **2026-07-10 (Sonnet implementation — WS19 security closes, per spec):** All seven decisions
+  implemented in firestore.rules + js/app.js. New helpers `isPartner()`/`isSeniorAdmin()`/
+  `isMoneyAdmin()`; `canFinance()` redefined (drops secretary from every ledger/journal write in
+  one edit). Secretary two-tier enforced: `users/{uid}` update/create split so only
+  president/manager can touch privileged fields (role/dept/pay/employeeId/**username** — added
+  username to `userPrivilegedFieldsUnchanged()`, since it's the new login map's key) — closes the
+  live secretary→president self-escalation gap the grounding found. Money/identity blocks
+  (payroll, salary_history, salary_raises, payroll_ca_overrides, cash_advances, partner_deals,
+  kpi_evals' presidentGrade branch, approval_requests' money/quote types) swapped from
+  `isFinanceOrAdmin()` to `isMoneyAdmin()`/`isSeniorAdmin()`. Full partner read-lockdown: 16
+  previously-bare-`isAuth()` collections now require `!isPartner()` (quotes, projects,
+  design_drawings, it_tickets/assets/software, sops, resources, policies, handbook, memos,
+  settings, president_message, departments, posts) plus the `files_*`/`budgets_*` wildcards
+  (`budgets_*` was also a genuine world-write, now `isMoneyAdmin()`-only); all 25 pre-existing
+  inline `getRole() != 'partner'` checks converted to `!isPartner()` (DRY). Attendance split into
+  `/attendance/{uid}` + `/attendance/{uid}/records/{date}`, the latter capping self-writes to
+  `attendanceScore ∈ {0,0.5,1.0}` and blocking overwrite of an admin-edited doc. New
+  `usernames/{username}` public-get map unblocks worker username login (client rewired in
+  app.js: the pre-auth lookup now resolves via this map instead of the always-denied `/users`
+  query); `openCreateWorkerModal` keeps it in sync on create; a president-only "🔧 Security
+  backfill" button (Audit Log page) seeds it from existing accounts.
+  **Two real regressions found and fixed during implementation** (the spec's own risk section
+  flagged this exact failure mode and told me to check for it): (1) **tasks** — a blanket
+  partner lock would have blanked the partner dashboard's shipped "My Tasks" card
+  (`assignedTo array-contains`, `openTaskDetail` is shared code) — fixed with an own-task-scoped
+  read (`!isPartner() || assignedTo contains uid`) extended to the comments/readers subcollections
+  via a `taskAssignee()` helper, instead of the spec's literal blanket lock. (2) **settings** —
+  EVERY session (including partner) listens to `settings/system` for the president's
+  force-logout signal (`app.js:135`); a blanket lock would silently break force-logout for
+  partner sessions specifically — fixed by scoping the exception to `docId=='system'` only
+  (the other two settings docs, sales_sop/employeeOfMonth, stay locked).
+  **Verified:** `node --check` clean; `firebase deploy --only firestore:rules --dry-run`
+  compiled successfully (re-run after every edit, ~6 times) — **NOT deployed**. **NOT verified:**
+  actual login/permission behavior against live Firestore (no credentials this session) — the
+  manual test checklist in `fable-workplan/19-security.md` still needs a real click-through per
+  role. `usernames` added to `scripts/monthly-backup.js` EXPORTS.
+  **Still needed:** deploy the rules, then press "🔧 Security backfill" once (Audit Log page,
+  president) to seed the login map for existing worker accounts.
+  NEXT: workstream 21 (statutory tables) or 09+14 (BRAND+letterhead) per the build order —
+  20/21/22 (the payroll bundle) is the next major milestone.

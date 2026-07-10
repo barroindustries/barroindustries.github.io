@@ -32,7 +32,7 @@ finalizing 9's rename sweep so the two don't conflict.
 | 16 | [16-perf.md](16-perf.md) | 7 | Performance & scale — unbounded reads, caching |
 | 17 | [17-design.md](17-design.md) | 10 | Design-system consolidation — CSS tokens, icons, themes |
 | 18 | [18-shortcuts.md](18-shortcuts.md) | 10 | Keyboard shortcuts |
-| 19 | [19-security.md](19-security.md) | 8 | Security closes — partner lockdown, secretary tier, attendance forgery |
+| 19 | [19-security.md](19-security.md) | ✅ IMPLEMENTED | Security closes — partner lockdown, secretary tier, attendance forgery |
 
 ## Phase 3 — Payroll & HR
 

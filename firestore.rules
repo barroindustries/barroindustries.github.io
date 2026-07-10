@@ -21,6 +21,14 @@ service cloud.firestore {
     function isAdmin()          { return getRole() in ['president', 'manager', 'secretary']; }
     function isFinanceOrAdmin() { return getRole() in ['president', 'manager', 'secretary', 'finance']; }
     function isPresident()      { return getRole() == 'president'; }
+    // v12 WS19 — secretary two-tier: secretary keeps isAdmin()/isFinanceOrAdmin()
+    // for the minor/oversight surface (memos, SOPs, sign-ups, minor approvals),
+    // but money-moving and identity-changing blocks use these narrower helpers
+    // instead so secretary can act on neither, while president/manager (and
+    // finance, for the money helper) still can.
+    function isPartner()     { return getRole() == 'partner'; }
+    function isSeniorAdmin() { return getRole() in ['president', 'manager']; }
+    function isMoneyAdmin()  { return getRole() in ['president', 'manager', 'finance']; }
 
     // Member of the Finance DEPARTMENT (by string `department` or array `departments`),
     // regardless of their role. Lets a Finance-dept staffer record sales income even if
@@ -29,8 +37,10 @@ service cloud.firestore {
       let u = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
       return u.get('department', '') == 'Finance' || u.get('departments', []).hasAny(['Finance']);
     }
-    // Anyone allowed to operate the books: finance/admin role OR Finance-dept member.
-    function canFinance() { return isFinanceOrAdmin() || isFinanceDept(); }
+    // Anyone allowed to operate the books: money-tier role OR Finance-dept member.
+    // v12 WS19: was isFinanceOrAdmin()||isFinanceDept() — narrowed to isMoneyAdmin()
+    // so 'secretary' no longer has ledger/journal write access via this helper.
+    function canFinance() { return isMoneyAdmin() || isFinanceDept(); }
 
     // Member of the Design DEPARTMENT (by string `department` or array `departments`).
     // Same null-safe pattern as isFinanceDept(). Gates Design drawings + project edits.
@@ -82,15 +92,23 @@ service cloud.firestore {
           && n.get('deductions', null)  == o.get('deductions', null)
           && n.get('department', null)  == o.get('department', null)
           && n.get('departments', null) == o.get('departments', null)
-          && n.get('employeeId', null)  == o.get('employeeId', null);
+          && n.get('employeeId', null)  == o.get('employeeId', null)
+          // v12 WS19: username is also privileged — it's the lookup key in the
+          // new usernames/{u} map (login), so a free self-change would desync it.
+          && n.get('username', null)    == o.get('username', null);
     }
 
     // ── Users ──────────────────────────────────────────
     match /users/{uid} {
       allow read: if isAuth();
       // Self-signup creates its own doc as 'employee'; admins create staff/worker docs.
+      // v12 WS19: only isSeniorAdmin() (president/manager) may mint a manager/
+      // president/secretary account — a secretary/other isAdmin() account may
+      // still onboard ordinary staff (employee/agent/finance-department hires).
       allow create: if isAuth() && (
-        isAdmin() || (
+        isSeniorAdmin() || (
+          isAdmin() && request.resource.data.get('role', 'employee') in ['employee', 'agent', 'finance']
+        ) || (
           isOwner(uid)
           && request.resource.data.role == 'employee'
           // Self-signup must not self-assign into a privileged department:
@@ -102,11 +120,31 @@ service cloud.firestore {
         )
       );
       // Owner-first short-circuit: routine self-updates (name/photo/phone/lastSeen)
-      // need no role lookup. Privileged fields are frozen unless an admin makes the change.
+      // need no role lookup. Privileged fields (role/dept/pay/employeeId/username)
+      // are frozen unless a SENIOR admin makes the change — v12 WS19 closes a live
+      // self-escalation gap where any isAdmin() (incl. secretary) could write
+      // role:'president' onto any user doc with zero field restriction. Secretary/
+      // other non-senior admins may still edit a user's non-privileged fields
+      // (name/photo/phone) for HR-adjacent oversight, just not the privileged ones.
       allow update: if isAuth() && (
-        (isOwner(uid) && userPrivilegedFieldsUnchanged()) || isAdmin()
+        isSeniorAdmin() ||
+        (isOwner(uid) && userPrivilegedFieldsUnchanged()) ||
+        (isAdmin() && userPrivilegedFieldsUnchanged())
       );
       allow delete: if isAuth() && isPresident();
+    }
+
+    // ── Username → email lookup (v12 WS19) ─────────────
+    // Worker login is by username; the client must resolve a username to an
+    // email BEFORE calling signInWithEmailAndPassword — i.e. while
+    // request.auth is still null. /users read requires isAuth(), so that
+    // pre-auth query was always denied (worker username login was broken).
+    // Fix: a narrow public single-doc GET (mirrors the order_tracking public-
+    // get precedent) — no enumeration (list:false), no other user data exposed.
+    match /usernames/{username} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update, delete: if isAuth() && isAdmin();
     }
 
     // ── Employee ID counter ────────────────────────────
@@ -115,8 +153,11 @@ service cloud.firestore {
     }
 
     // ── Posts ──────────────────────────────────────────
+    // v12 WS19: read locked to !isPartner() — internal company feed, was bare
+    // isAuth() (the audit separately flagged that published-post NOTIFICATIONS
+    // also fan out to partners; that's a different, notification-side fix).
     match /posts/{postId} {
-      allow read: if isAuth();
+      allow read: if isAuth() && !isPartner();
       allow create: if isAuth();
       // Author/admin may edit anything. Anyone may toggle their OWN like — an update
       // that changes ONLY the `hearts` field (so likes persist for normal users).
@@ -150,9 +191,32 @@ service cloud.firestore {
     }
 
     // ── Attendance ─────────────────────────────────────
-    match /attendance/{uid}/{document=**} {
+    // v12 WS19: split from a single `{document=**}` wildcard (plain isOwner(uid),
+    // no field constraints at all) into a per-doc records/{date} block, because
+    // the client itself writes attendanceScore directly with no server
+    // validation — an employee could set attendanceScore:1.0 for any date via
+    // devtools, and payroll/EOM read that score directly. `records` is the only
+    // subcollection under attendance/{uid} today (verified).
+    match /attendance/{uid} {
       allow read: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
-      allow write: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+    }
+    match /attendance/{uid}/records/{date} {
+      allow read: if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
+      // Admins: unrestricted (the Present/Half/Absent edit path, stamps editedBy).
+      allow write: if isAuth() && isFinanceOrAdmin();
+      // Owner self check-in / notification-driven auto-upgrade: score capped to
+      // the set an honest client ever produces, and can never overwrite a doc an
+      // admin has already hand-edited (protects a Present/Half/Absent correction
+      // from being silently reverted by the owner's own next check-in write).
+      // A full server-side date-bound (today/yesterday only) would need a Cloud
+      // Function — request.time has no clean date-string formatter in rules —
+      // deferred; these two checks already close the two exploitable vectors
+      // (arbitrary score, overwriting an admin edit). Client call sites need no
+      // change — they already write scores in {0.5,1.0} and the admin path
+      // already stamps editedBy.
+      allow create, update: if isAuth() && isOwner(uid)
+        && request.resource.data.get('attendanceScore', 0) in [0, 0.5, 1.0]
+        && (resource == null || resource.data.get('editedBy', null) == null);
     }
 
     // ── Attendance extension requests ──────────────────
@@ -161,7 +225,7 @@ service cloud.firestore {
       // getRole() is null-safe: null (no/missing role) is treated as "not partner"
       // so internal users with incomplete profiles are never wrongly locked out;
       // only a positively-identified 'partner' is denied.
-      allow read: if isAuth() && getRole() != 'partner';
+      allow read: if isAuth() && !isPartner();
       allow create: if isAuth();
       allow update, delete: if isAuth() && isAdmin();
     }
@@ -172,17 +236,21 @@ service cloud.firestore {
         resource.data.userId == request.auth.uid || isFinanceOrAdmin()
       );
       // Employees may only file their OWN request, pending and unfunded.
-      // Finance/admin may record/approve any (e.g. president-entered advances).
+      // Money-tier (president/manager/finance) may record/approve any (e.g.
+      // president-entered advances) — v12 WS19: narrowed from isFinanceOrAdmin()
+      // to isMoneyAdmin() so 'secretary' can no longer approve a cash advance via
+      // a direct write (the UI already hides this button from secretary; the
+      // rule now matches).
       allow create: if isAuth() && (
-        isFinanceOrAdmin() ||
+        isMoneyAdmin() ||
         (request.resource.data.userId == request.auth.uid
           && request.resource.data.status == 'pending'
           && request.resource.data.balance == 0)
       );
-      // Only finance/admin can approve or change the money. Owners may edit
+      // Only money-tier can approve or change the money. Owners may edit
       // non-financial details (e.g. reason) but never status/balance/amount.
       allow update: if isAuth() && (
-        isFinanceOrAdmin() ||
+        isMoneyAdmin() ||
         (resource.data.userId == request.auth.uid
           && request.resource.data.status  == resource.data.status
           && request.resource.data.balance == resource.data.balance
@@ -193,7 +261,13 @@ service cloud.firestore {
 
     // ── Tasks ──────────────────────────────────────────
     match /tasks/{taskId} {
-      allow read: if isAuth();
+      // v12 WS19: was bare isAuth() — a partner could browse EVERY internal task
+      // across every department. BUT a partner's dashboard has a real, shipped
+      // "My Tasks" feature (assignedTo array-contains) + an "All Tasks" link into
+      // the same tasks page (js/app.js ~2099, openTaskDetail is shared code) —
+      // a blanket !isPartner() lock would blank-screen that. Fix: partner may
+      // read only tasks they're assigned to; full read stays for internal staff.
+      allow read: if isAuth() && (!isPartner() || request.auth.uid in resource.data.get('assignedTo', []));
       // Admins create any task. Design-dept members may create Design tasks only
       // (so designers can delegate project work) — scoped strictly to department=='Design'.
       allow create: if isAuth() && (
@@ -214,8 +288,14 @@ service cloud.firestore {
       // subcollections, so this needs explicit coverage — tasks are readable
       // by all signed-in users, so their messages are too. Author owns their
       // own message; admins can moderate.
+      // v12 WS19: same own-task scoping as the parent — a partner assigned to
+      // THIS task can still read/use its comment thread (openTaskDetail is
+      // shared code with the partner dashboard); a partner NOT assigned cannot.
+      function taskAssignee() {
+        return request.auth.uid in get(/databases/$(database)/documents/tasks/$(taskId)).data.get('assignedTo', []);
+      }
       match /comments/{commentId} {
-        allow read:   if isAuth();
+        allow read:   if isAuth() && (!isPartner() || taskAssignee());
         allow create: if isAuth() && request.resource.data.authorId == request.auth.uid;
         allow update, delete: if isAuth() && (
           resource.data.authorId == request.auth.uid || isAdmin()
@@ -223,7 +303,7 @@ service cloud.firestore {
       }
       // Read receipts ("Seen by"). Each user writes only their own receipt.
       match /readers/{readerUid} {
-        allow read:  if isAuth();
+        allow read:  if isAuth() && (!isPartner() || taskAssignee());
         allow write: if isAuth() && isOwner(readerUid);
       }
     }
@@ -242,9 +322,13 @@ service cloud.firestore {
         return !request.resource.data.keys()
           .hasAny(['presidentGrade','presidentNotes','presidentImprovements','presidentUpdatedAt','presidentGradeFromTasks','presidentScoreTaskCount']);
       }
+      // v12 WS19: create/update's admin branch narrowed to isSeniorAdmin() — the
+      // isOwner branch is frozen by presFieldsAbsentOnCreate/UntouchedOnUpdate,
+      // but the admin branch had NO such freeze, so 'secretary' could otherwise
+      // write/forge presidentGrade directly. Only president/manager grade KPIs.
       allow read:   if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
-      allow create: if isAuth() && (isFinanceOrAdmin() || (isOwner(uid) && presFieldsAbsentOnCreate()));
-      allow update: if isAuth() && (isFinanceOrAdmin() || (isOwner(uid) && presFieldsUntouchedOnUpdate()));
+      allow create: if isAuth() && (isSeniorAdmin() || (isOwner(uid) && presFieldsAbsentOnCreate()));
+      allow update: if isAuth() && (isSeniorAdmin() || (isOwner(uid) && presFieldsUntouchedOnUpdate()));
       allow delete: if isAuth() && isFinanceOrAdmin();
     }
 
@@ -255,29 +339,42 @@ service cloud.firestore {
     }
 
     // ── Settings ───────────────────────────────────────
+    // v12 WS19: read locked to internal staff on the internal docs (sales_sop,
+    // employeeOfMonth) — was bare isAuth(). 'system' stays universally readable:
+    // EVERY session (incl. partner) listens to settings/system via onSnapshot
+    // for the president's force-logout signal (js/app.js:135) — locking it out
+    // would silently break force-logout for partner sessions specifically,
+    // exactly when the President most needs it to work (cutting off a
+    // compromised/terminated partner account).
     match /settings/{docId} {
-      allow read: if isAuth();
+      allow read: if isAuth() && (!isPartner() || docId == 'system');
       allow write: if isAuth() && isPresident();
     }
 
     // ── President message ──────────────────────────────
     match /president_message/{docId} {
-      allow read: if isAuth();
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && isPresident();
     }
 
-    // ── SOPs — readable by all staff, editable by admins (president/manager) ─
+    // ── SOPs — readable by internal staff, editable by admins ────────────
+    // v12 WS19: read locked to !isPartner() — was bare isAuth(). Write stays
+    // isAdmin() (secretary keeps this oversight/coordination surface).
     match /sops/{docId} {
-      allow read: if isAuth();
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && isAdmin();
     }
 
     // ── Payroll (live pay: salary/allowance/deductions) ─
     // Moved off the world-readable users doc so pay isn't visible to all staff.
     // Each user may read their OWN pay; only finance/admin may read others or write.
+    // v12 WS19: create/update narrowed isFinanceOrAdmin() -> isMoneyAdmin() on
+    // payroll/salary_history/salary_raises/payroll_ca_overrides (secretary no
+    // longer writes live pay); read stays isFinanceOrAdmin() (secretary keeps
+    // oversight visibility) — only the write surface is money-tier now.
     match /payroll/{uid} {
       allow read:  if isAuth() && (isOwner(uid) || isFinanceOrAdmin());
-      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow create, update: if isAuth() && isMoneyAdmin();
       allow delete: if isAuth() && isPresident();
     }
 
@@ -286,7 +383,7 @@ service cloud.firestore {
       allow read: if isAuth() && (
         resource.data.userId == request.auth.uid || isFinanceOrAdmin()
       );
-      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow create, update: if isAuth() && isMoneyAdmin();
       allow delete: if isAuth() && isPresident();
     }
 
@@ -296,7 +393,7 @@ service cloud.firestore {
       allow read: if isAuth() && (
         resource.data.subjectId == request.auth.uid || isFinanceOrAdmin()
       );
-      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow create, update: if isAuth() && isMoneyAdmin();
       allow delete: if isAuth() && isPresident();
     }
 
@@ -305,7 +402,7 @@ service cloud.firestore {
       allow read: if isAuth() && (
         resource.data.userId == request.auth.uid || isFinanceOrAdmin()
       );
-      allow write: if isAuth() && isFinanceOrAdmin();
+      allow write: if isAuth() && isMoneyAdmin();
     }
 
     // ── Payroll delete requests ────────────────────────
@@ -369,8 +466,11 @@ service cloud.firestore {
 
     // ── Quotes (internal) ──────────────────────────────
     // NOTE: was incorrectly named 'quotations' in previous rules — fixed
+    // v12 WS19: read locked to !isPartner() — this is the INTERNAL Sales quotes
+    // collection (distinct from bk_quotes/bs_quotes, which already correctly
+    // exclude/scope the partner) and was bare isAuth().
     match /quotes/{docId} {
-      allow read: if isAuth();
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && isAdmin();
     }
 
@@ -380,7 +480,7 @@ service cloud.firestore {
     // (The reverse — partner reading internal bk_quotes — is denied below.)
     match /bs_quotes/{docId} {
       allow read: if isAuth() && (
-        resource.data.createdBy == request.auth.uid || getRole() != 'partner'
+        resource.data.createdBy == request.auth.uid || !isPartner()
       );
       allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
       allow update: if isAuth() && (
@@ -394,11 +494,11 @@ service cloud.firestore {
     // creator or an admin may read. A partner has no bk_quotes of their own,
     // so this collection is effectively invisible to them.
     match /bk_quotes/{docId} {
-      allow read: if isAuth() && getRole() != 'partner' && (
+      allow read: if isAuth() && !isPartner() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
       );
-      allow create: if isAuth() && getRole() != 'partner' && request.resource.data.createdBy == request.auth.uid;
-      allow update: if isAuth() && getRole() != 'partner' && (
+      allow create: if isAuth() && !isPartner() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if isAuth() && !isPartner() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
       );
       allow delete: if isAuth() && isAdmin();
@@ -406,11 +506,20 @@ service cloud.firestore {
 
     // ── Approval requests ──────────────────────────────
     match /approval_requests/{docId} {
-      // Internal workflow data — external partners excluded from reading
-      // (null-safe getRole(): null is treated as "not partner").
-      allow read: if isAuth() && getRole() != 'partner';
+      // Internal workflow data — external partners excluded from reading.
+      allow read: if isAuth() && !isPartner();
       allow create: if isAuth();
-      allow update, delete: if isAuth() && isAdmin();
+      // v12 WS19: the client's APPROVAL_CAPS table already hides money/quote
+      // approve-buttons from secretary, but the rule itself allowed any isAdmin()
+      // to approve them via a direct write — tightened to match: secretary
+      // (isAdmin() but not isSeniorAdmin()) may only act on the MINOR request
+      // types; money/quote/finance approvals need president or manager.
+      allow update: if isAuth() && (
+        isSeniorAdmin() ||
+        (isAdmin() && resource.data.get('type', '') in
+          ['signup', 'attendance', 'submission', 'review-task', 'leave', 'ca_deduct'])
+      );
+      allow delete: if isAuth() && isAdmin();
     }
 
     // ── Signup requests — anyone can apply (pre-auth) ──
@@ -431,8 +540,10 @@ service cloud.firestore {
       allow read: if isAuth() && (
         resource.data.partnerUid == request.auth.uid || isAdmin()
       );
-      // Only admins can create/update deals — partners cannot self-register earnings.
-      allow create, update: if isAuth() && isAdmin();
+      // Only money-tier can create/update deals (this is a profit-split payout
+      // record) — partners cannot self-register earnings. v12 WS19: narrowed
+      // from isAdmin() to isMoneyAdmin() so secretary can't post a deal.
+      allow create, update: if isAuth() && isMoneyAdmin();
       allow delete: if isAuth() && isPresident();
     }
 
@@ -447,20 +558,22 @@ service cloud.firestore {
     }
 
     // ── Reference materials ────────────────────────────
+    // v12 WS19: read locked to internal staff (!isPartner()) on all four — were
+    // bare isAuth(). Write stays isAdmin() (secretary keeps this surface).
     match /resources/{docId} {
-      allow read: if isAuth();
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && isAdmin();
     }
     match /policies/{docId} {
-      allow read: if isAuth();
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && isAdmin();
     }
     match /handbook/{docId} {
-      allow read: if isAuth();
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && isAdmin();
     }
     match /memos/{docId} {
-      allow read:   if isAuth();
+      allow read:   if isAuth() && !isPartner();
       allow create: if isAuth() && isAdmin();
       allow delete: if isAuth() && isAdmin();
       // Admins edit freely. A tagged recipient may update ONLY to record their
@@ -488,8 +601,12 @@ service cloud.firestore {
     }
 
     // ── Projects ───────────────────────────────────────
+    // v12 WS19: read locked to !isPartner() — was bare isAuth(). NOTE: this is
+    // DIFFERENT from /job_projects (which already correctly partner-scopes) —
+    // the unified Projects view already skips this collection for partners
+    // client-side, so this closes the gap without any UI regression.
     match /projects/{docId} {
-      allow read: if isAuth();
+      allow read: if isAuth() && !isPartner();
       allow create: if isAuth();
       // Creator/admin can edit anything; finance (role or Finance-dept) may also
       // update so they can record payments & issue billing invoices for collection.
@@ -506,8 +623,9 @@ service cloud.firestore {
     // (not a subcollection) so the cross-project Drawings dashboard is a simple
     // query. Rules do NOT cascade, so this needs its own block. All field reads
     // are .get(field, default) — a bare read of an absent field DENIES the rule.
+    // v12 WS19: read locked to !isPartner() — was bare isAuth().
     match /design_drawings/{docId} {
-      allow read:   if isAuth();
+      allow read:   if isAuth() && !isPartner();
       allow create: if isAuth() && canDesign()
                     && request.resource.data.get('createdBy', '') == request.auth.uid;
       // Creator, assigned designer, Design-dept member, or admin may edit.
@@ -520,8 +638,9 @@ service cloud.firestore {
     }
 
     // ── IT collections ─────────────────────────────────
+    // v12 WS19: read locked to !isPartner() on all three — were bare isAuth().
     match /it_tickets/{docId} {
-      allow read: if isAuth();
+      allow read: if isAuth() && !isPartner();
       allow create: if isAuth();
       allow update: if isAuth() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
@@ -530,11 +649,11 @@ service cloud.firestore {
     }
     // IT assets/software: IT-dept members manage them (UI gates on canEditDept('IT')).
     match /it_assets/{docId} {
-      allow read: if isAuth();
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && canDept('IT');
     }
     match /it_software/{docId} {
-      allow read: if isAuth();
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && canDept('IT');
     }
     match /it_access/{docId} {
@@ -550,27 +669,27 @@ service cloud.firestore {
     // These were unruled → silent permission-denied (blank screens). Internal
     // staff read; the owning department (or an admin) writes. Partners excluded.
     match /work_plans/{docId} {
-      allow read: if isAuth() && getRole() != 'partner';
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && canDept('Sales');
     }
     match /marketing_plans/{docId} {
-      allow read: if isAuth() && getRole() != 'partner';
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && canDept('Marketing');
     }
     match /marketing_proposals/{docId} {
-      allow read: if isAuth() && getRole() != 'partner';
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && canDept('Marketing');
     }
     match /gov_philgeps/{docId} {
-      allow read: if isAuth() && getRole() != 'partner';
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && canDept('Government Biddings');
     }
     match /gov_active_bids/{docId} {
-      allow read: if isAuth() && getRole() != 'partner';
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && canDept('Government Biddings');
     }
     match /gov_archive/{docId} {
-      allow read: if isAuth() && getRole() != 'partner';
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && canDept('Government Biddings');
     }
 
@@ -723,13 +842,14 @@ service cloud.firestore {
     match /gov_biddings/{docId} {
       // Government bidding pipeline is internal-only — external partners excluded
       // from reading (null-safe getRole(): null is treated as "not partner").
-      allow read: if isAuth() && getRole() != 'partner';
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && isAdmin();
     }
 
     // ── Departments config ─────────────────────────────
+    // v12 WS19: read locked to !isPartner() — was bare isAuth().
     match /departments/{docId} {
-      allow read: if isAuth();
+      allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && isAdmin();
     }
 
@@ -737,13 +857,13 @@ service cloud.firestore {
     // Operational data for internal staff. Item costs are visible to staff;
     // external partners are excluded from reading/writing.
     match /inventory_items/{docId} {
-      allow read:  if isAuth() && getRole() != 'partner';
-      allow write: if isAuth() && getRole() != 'partner';
+      allow read:  if isAuth() && !isPartner();
+      allow write: if isAuth() && !isPartner();
     }
     // Stock movement log — anyone internal can record in/out; only admins edit/delete history.
     match /stock_movements/{docId} {
-      allow read:   if isAuth() && getRole() != 'partner';
-      allow create: if isAuth() && getRole() != 'partner';
+      allow read:   if isAuth() && !isPartner();
+      allow create: if isAuth() && !isPartner();
       allow update, delete: if isAuth() && isAdmin();
     }
     // Job costing carries revenue/margin per project — finance/admin only.
@@ -756,8 +876,8 @@ service cloud.firestore {
     // read and advance an order through its stages; external partners excluded;
     // only admins delete an order outright.
     match /production_orders/{docId} {
-      allow read:           if isAuth() && getRole() != 'partner';
-      allow create, update: if isAuth() && getRole() != 'partner';
+      allow read:           if isAuth() && !isPartner();
+      allow create, update: if isAuth() && !isPartner();
       allow delete:         if isAuth() && isAdmin();
     }
 
@@ -814,7 +934,7 @@ service cloud.firestore {
       // users, which is why created orders "weren't reflecting". Partners only see
       // their own. Finance/admin still gate create→record (update).
       allow read:   if isAuth() && (
-        resource.data.createdBy == request.auth.uid || getRole() != 'partner'
+        resource.data.createdBy == request.auth.uid || !isPartner()
       );
       allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
       allow update: if isAuth() && canFinance();
@@ -826,9 +946,9 @@ service cloud.firestore {
     match /job_projects/{docId} {
       // Partner sees projects they created OR shared projects originating from their quote.
       // Partner may NOT edit profit factors — only the project owner / non-partner staff can update.
-      allow read:   if isAuth() && (resource.data.createdBy == request.auth.uid || resource.data.partnerUid == request.auth.uid || getRole() != 'partner');
+      allow read:   if isAuth() && (resource.data.createdBy == request.auth.uid || resource.data.partnerUid == request.auth.uid || !isPartner());
       allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
-      allow update: if isAuth() && (resource.data.createdBy == request.auth.uid || getRole() != 'partner');
+      allow update: if isAuth() && (resource.data.createdBy == request.auth.uid || !isPartner());
       allow delete: if isAuth() && isAdmin();
     }
 
@@ -842,8 +962,8 @@ service cloud.firestore {
     match /order_tracking/{token} {
       allow get:    if true;
       allow list:   if false;
-      allow create: if isAuth() && getRole() != 'partner';
-      allow update: if isAuth() && getRole() != 'partner';
+      allow create: if isAuth() && !isPartner();
+      allow update: if isAuth() && !isPartner();
       allow delete: if isAuth() && isAdmin();
     }
 
@@ -872,8 +992,8 @@ service cloud.firestore {
     // sales_clients / design_clients are INTERNAL CRMs — external partners excluded
     // from reading (null-safe getRole(): null treated as "not partner"). bs_clients
     // is the Brilliant-Steel CRM and STAYS readable by the partner.
-    match /sales_clients/{docId}  { allow read: if isAuth() && getRole() != 'partner'; allow create, update: if isAuth(); allow delete: if isAuth() && isAdmin(); }
-    match /design_clients/{docId} { allow read: if isAuth() && getRole() != 'partner'; allow create, update: if isAuth(); allow delete: if isAuth() && isAdmin(); }
+    match /sales_clients/{docId}  { allow read: if isAuth() && !isPartner(); allow create, update: if isAuth(); allow delete: if isAuth() && isAdmin(); }
+    match /design_clients/{docId} { allow read: if isAuth() && !isPartner(); allow create, update: if isAuth(); allow delete: if isAuth() && isAdmin(); }
     match /bs_clients/{docId}      { allow read: if isAuth(); allow create, update: if isAuth(); allow delete: if isAuth() && isAdmin(); }
 
     // ── Dynamic / runtime-named collections ────────────
@@ -886,17 +1006,28 @@ service cloud.firestore {
     // access for those families; all explicitly-named collections above keep
     // their own (stricter) rules via the permissive union of matching rules.
     match /{coll}/{docId} {
-      // Files: readable by the team; you own what you upload; owner/admin edit or remove.
-      allow read:   if isAuth() && coll.matches('files_.*');
-      allow create: if isAuth() && coll.matches('files_.*')
+      // Files: readable by internal staff; you own what you upload; owner/admin
+      // edit or remove. v12 WS19: added !isPartner() — a files_* doc's `url`
+      // field is a token-bearing Storage download link (js/drive.js), so letting
+      // the external partner read it was a full file-content exfiltration path,
+      // not just a metadata leak. Internal cross-department read stays open
+      // (per-dept scoping would need a schema migration — deferred).
+      allow read:   if isAuth() && coll.matches('files_.*') && !isPartner();
+      allow create: if isAuth() && coll.matches('files_.*') && !isPartner()
                     && request.resource.data.uploadedBy == request.auth.uid;
-      allow update, delete: if isAuth() && coll.matches('files_.*')
+      allow update, delete: if isAuth() && coll.matches('files_.*') && !isPartner()
                     && (resource.data.uploadedBy == request.auth.uid || isAdmin());
     }
     match /{coll}/{docId} {
-      // Budget lines: internal planning data, read/write by any signed-in staffer
-      // (the UI already gates the edit buttons to dept members + finance/admin).
-      allow read, write: if isAuth() && coll.matches('budgets_.*');
+      // Budget lines: internal planning data. v12 WS19: this was a genuine
+      // world-write (any signed-in account, including a partner, could
+      // create/update/delete ANY department's budget lines) — the UI's dept/
+      // finance gating was cosmetic only. Read stays broad for internal staff;
+      // write narrowed to money-tier (true per-department member-write would
+      // need a fragile dept-string parse — deferred, finance/admin is the safe
+      // close of the hole now).
+      allow read:  if isAuth() && coll.matches('budgets_.*') && !isPartner();
+      allow write: if isAuth() && coll.matches('budgets_.*') && isMoneyAdmin();
     }
   }
 }
