@@ -934,6 +934,11 @@ function getSidebarItems() {
     items.push({ icon:'user-cog',      label:'HR',               page:'dept:HR'                        });
     items.push({ icon:'calendar',      label:'Attendance',       page:'attendance'                     });
     items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'                    });
+    // v12 WS38 — Files Hub: admins/managers/secretary had NO top-level Files door
+    // before this (only employees via page:'files' / partners via page:'files'
+    // /'bs-files', both pre-existing and left as-is — "N doors" per the DECIDED
+    // spec). This is the "admin sees everything, all scopes" door.
+    items.push({ icon:'folder-open',   label:'Files',            page:'files-hub'                      });
     items.push({ icon:'boxes',         label:'Inventory',        page:'inventory',       section:true, sectionLabel:'Operations' });
     items.push({ icon:'trending-up',   label:'Projects',         page:'projects-lifecycle'             });
     items.push({ icon:'receipt',       label:'Sales Orders',     page:'sales-orders'                   });
@@ -1996,6 +2001,7 @@ function navigateTo(page, opts) {
     case 'tasks':            renderTasks(currentUser, currentRole, currentDepts[0]||''); break;
     case 'submissions':      renderSubmissions(currentUser, currentRole, currentDepts[0]||''); break;
     case 'files':            renderFiles(currentUser, currentRole); break;
+    case 'files-hub':        window.renderFilesHub?.(); break;
     case 'cash':             renderCash(currentUser, currentRole); break;
     case 'personal-finance': renderPersonalFinance(currentUser, currentRole); break;
     case 'my-dept':          renderMyDepartment(); break;

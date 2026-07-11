@@ -3,9 +3,10 @@
   "version": "2.0.0",
   "description": "Barro Industries — Firebase to Google Drive sync & monthly backup",
   "scripts": {
-    "sync":    "node sync-to-drive.js",
-    "backup":  "node monthly-backup.js",
-    "restore": "node restore-from-backup.js"
+    "sync":              "node sync-to-drive.js",
+    "backup":            "node monthly-backup.js",
+    "restore":           "node restore-from-backup.js",
+    "migrate-files-hub": "node migrate-files-hub.js"
   },
   "dependencies": {
     "firebase-admin": "^12.0.0",

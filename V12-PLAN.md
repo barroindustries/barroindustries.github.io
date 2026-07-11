@@ -239,10 +239,19 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     online presence, Seen avatars, typing…, inline photos/files; live listeners + push; full
     page with Back; participant-scoped rules; partner walled off. **DECIDED** (Fable,
     2026-07-10) — see `fable-workplan/37-team-chat.md`; not yet implemented.
-38. `[~]` **Files Hub** — Drive-style: one browser over all files; folders/subfolders,
+38. `[x]` **Files Hub** — Drive-style: one browser over all files; folders/subfolders,
     drag-drop, grid/list, global file search, previews (img/PDF), versions, recycle bin;
     share to person/dept/role with view-vs-edit; rides Storage + nightly Drive mirror.
-    **DECIDED** (Fable, 2026-07-11) — see `fable-workplan/38-files-hub.md`; not yet implemented.
+    **DECIDED** (Fable, 2026-07-11) — see `fable-workplan/38-files-hub.md`. IMPLEMENTED
+    (new `hub_files`/`hub_folders` collections + rules + 7 composite indexes, `window.FilesHub`
+    service + `openFilePreview` lightbox in drive.js, `bindFileCollection` rewritten in place
+    against `hub_files` with zero call-site edits, top-level Files Hub page + 6th global-search
+    source, idempotent `scripts/migrate-files-hub.js`, dead shadowed
+    `renderFileCollection`/`bindFileCollection`/`renderDocCollection` pairs deleted) — see Build
+    Log. **Deploy-pending (not run by the implementing session):**
+    `firebase deploy --only firestore:rules,firestore:indexes`, then
+    `node scripts/migrate-files-hub.js` (needs `FIREBASE_SERVICE_ACCOUNT`) — run once after the
+    rules deploy, once more after the JS ships, per Spec 10.
 
 ### PHASE 5 — Intelligence & compliance
 
@@ -1183,3 +1192,30 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   their DECIDED specs. **Next step: a Fable-tier session per brief writes the architecture
   decisions** (the established, successful division of labor this whole engagement has used);
   only then should Sonnet implementation resume for Phase 4/5.
+- **2026-07-11 (Sonnet implementation, WS38 Files Hub):** Implemented the DECIDED spec in
+  `fable-workplan/38-files-hub.md` exactly. New `hub_files`/`hub_folders` collections
+  (deliberately not `files_*`-prefixed, per decision 14) with a new `firestore.rules` block
+  (uid-array sharing enforcement: `sharedUserIds`/`editorUserIds`, `visibility` company/private,
+  president-only permanent delete) and 7 new composite indexes in `firestore.indexes.json`.
+  `window.FilesHub` (load/share/version/soft-delete/purge) + `window.openFilePreview` (new
+  lightbox, zero prior component) added to js/drive.js; `Drive.renderStorageStatus` now reads
+  the `system_health/daily_sync` heartbeat. The live `window.bindFileCollection` in
+  js/departments.js was rewritten in place against `hub_files` — same signature, all 15 existing
+  call sites untouched — adding folders (`hub_folders`, real parent/child), versions
+  (`versions[]`, integer `v`), a Recycle Bin chip, share/preview/new-version row actions, and a
+  grid/list `chipTabs` toggle with drag-drop-to-folder. Deleted the two shadowed dead-code pairs
+  confirmed in decision 12: old `renderFileCollection`/`bindFileCollection`
+  (departments.js:11379-11470 at research time) and old `renderDocCollection`
+  (departments.js:11303-11374) — verified by grep that exactly one definition of each survives.
+  Added a top-level "Files" nav page (`renderFilesHub`, js/modules.js) wired to
+  `case 'files-hub'` in app.js's router, plus a 6th `hub_files` source group in
+  `renderGlobalSearch`. New idempotent `scripts/migrate-files-hub.js` (Admin SDK, NOT run by
+  this session — needs `FIREBASE_SERVICE_ACCOUNT`). `scripts/sync-to-drive.js` LABELS gained
+  `hub_files: 'Files Hub'`. CACHE_VER bumped (sw.js). **One deviation from the spec's exact file
+  citation, not its decision:** decision 11's nav entry was specified for "config.js" but the
+  internal-staff sidebar array actually lives in js/app.js's `getSidebarItems()` — added there
+  instead, and only to the admin/president/manager/secretary branch (the one branch with no
+  existing "Files" door; employees and partners already had one via the pre-existing
+  `page:'files'`/`page:'bs-files'` entries that the spec's own research didn't surface). Rules,
+  indexes, and the migration script are **not deployed/run** — that's explicitly left to the
+  session with deploy credentials, per this task's constraints.

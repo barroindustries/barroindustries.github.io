@@ -11298,178 +11298,6 @@ async function openClientQuotesModal(cl, quoteColl, builderNav){
 }
 
 // ══════════════════════════════════════════════════
-//  SHARED: Generic Document Collection
-// ══════════════════════════════════════════════════
-async function renderDocCollection(container, collection, title, currentUser, currentRole, opts = {}) {
-  const snap = await db.collection(collection).orderBy('createdAt','desc').get().catch(() => ({ docs: [] }));
-  const docs = snap.docs.map(d => ({id:d.id,...d.data()}));
-  const canAdd = opts.dept ? canEditDept(opts.dept)
-    : (currentRole==='owner'||currentRole==='manager'||currentRole==='president'||currentRole==='finance');
-
-  container.innerHTML = `
-    ${canAdd?`<div style="text-align:right;margin-bottom:12px"><button class="btn-primary btn-sm" id="add-doc-btn">+ Add ${title.slice(0,-1)}</button></div>`:''}
-    <div class="policy-grid">
-      ${!docs.length
-        ? `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">${opts.icon||'📄'}</div><h4>No ${title} yet</h4></div>`
-        : docs.map(d => `
-          <div class="policy-card">
-            <div class="policy-icon">${opts.icon||'📄'}</div>
-            <div class="policy-title">${escHtml(d.title)}</div>
-            <div class="policy-desc">${escHtml(d.description||'')}</div>
-            ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:12px;margin-top:8px;display:block">📎 Open File</a>`:''}
-            ${opts.editable&&canAdd?`<div style="display:flex;gap:6px;margin-top:10px">
-              <button class="btn-secondary btn-sm doc-edit-btn" data-id="${d.id}">✎ Edit</button>
-              <button class="btn-danger btn-sm doc-del-btn" data-id="${d.id}" data-label="${escHtml(d.title||'item')}">${emojiIcon('trash-2',14)}</button>
-            </div>`:''}
-          </div>`).join('')}
-    </div>
-  `;
-  if (window.lucide) lucide.createIcons({ nodes: [container] });
-
-  document.getElementById('add-doc-btn')?.addEventListener('click', () => {
-    openPage(`Add to ${title}`, `
-      <div class="form-group"><label>Title</label><input id="doc-title" placeholder="Document title"/></div>
-      <div class="form-group"><label>Description</label><textarea id="doc-desc" rows="2"></textarea></div>
-      <div id="doc-file-upload"></div>
-    `, `<button class="btn-primary" id="save-doc-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-
-    let uploadedFile = null;
-    Drive.renderUploadArea('doc-file-upload', (result) => { uploadedFile = result; }, { label:'Attach file (optional)', accept:'*' });
-
-    document.getElementById('save-doc-btn').addEventListener('click', async () => {
-      await db.collection(collection).add({
-        title:       document.getElementById('doc-title').value.trim(),
-        description: document.getElementById('doc-desc').value.trim(),
-        fileUrl:     uploadedFile?.url||null,
-        fileName:    uploadedFile?.name||null,
-        addedBy:     currentUser.uid,
-        createdAt:   firebase.firestore.FieldValue.serverTimestamp()
-      });
-      closeModal(); renderDocCollection(container, collection, title, currentUser, currentRole, opts);
-    });
-  });
-
-  // Opt-in edit/delete (currently used by Finance → Purchasing). Deletes in a
-  // Finance collection route through President approval; others delete directly.
-  if (opts.editable && canAdd) {
-    const redo = () => renderDocCollection(container, collection, title, currentUser, currentRole, opts);
-    const singular = title.replace(/s$/,'');
-    document.querySelectorAll('.doc-edit-btn').forEach(btn => btn.addEventListener('click', () => {
-      const d = docs.find(x=>x.id===btn.dataset.id); if (!d) return;
-      window.financeEditModal({ collection, docId:d.id, title:singular, onSaved:redo, fields:[
-        { key:'title', label:'Title', type:'text', value:d.title, full:true },
-        { key:'description', label:'Description', type:'textarea', value:d.description, full:true }
-      ]});
-    }));
-    document.querySelectorAll('.doc-del-btn').forEach(btn => btn.addEventListener('click', async () => {
-      if (opts.dept === 'Finance') {
-        window.financeDelete({ collection, docId:btn.dataset.id, label:`${singular.toLowerCase()} "${btn.dataset.label}"`, onDone:redo });
-      } else {
-        if (!(await confirmDialog({message:`Delete "${escHtml(btn.dataset.label)}"? This cannot be undone.`, danger:true, html:true}))) return;
-        try { await db.collection(collection).doc(btn.dataset.id).delete(); Notifs.showToast('Deleted.'); redo(); }
-        catch(e) { Notifs.showToast('Delete failed: '+(e.message||e),'error'); }
-      }
-    }));
-  }
-}
-
-// ══════════════════════════════════════════════════
-//  SHARED: File Collection (upload/view)
-// ══════════════════════════════════════════════════
-function renderFileCollection(title, id, currentRole) {
-  const canUpload = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance'||currentRole==='employee'||currentRole==='agent';
-  return `
-    <div class="card">
-      <div class="card-header"><h3>${title}</h3></div>
-      <div class="card-body">
-        ${canUpload?`<div id="${id}-upload" style="margin-bottom:16px"></div>`:''}
-        <div id="${id}-files" class="item-list"><div class="loading-placeholder">Loading files…</div></div>
-      </div>
-    </div>
-  `;
-}
-
-function bindFileCollection(id, currentUser, dept, subfolder) {
-  const filesDiv = document.getElementById(`${id}-files`);
-  // Root collection, name computed at runtime — no backup registration needed:
-  // scripts/monthly-backup.js discovers every root collection via db.listCollections().
-  const collection = `files_${id.replace(/-/g,'_')}`;
-  const role = window.currentRole || '';
-  const canDelete = role === 'president' || role === 'owner' || role === 'manager';
-  const canRequestDelete = role === 'finance';
-
-  const reloadFiles = () => {
-  db.collection(collection).orderBy('createdAt','desc').get().then(snap => {
-    const files = snap.docs.map(d => ({id:d.id,...d.data()}));
-    if (!files.length) { filesDiv.innerHTML = `<div class="empty-state" style="padding:20px"><div class="empty-icon">📁</div><p>No files uploaded yet</p></div>`; return; }
-    filesDiv.innerHTML = files.map(f => `
-      <div class="item-card" data-file-id="${f.id}">
-        <div class="item-top">
-          <div class="item-title">📄 ${escHtml(f.name)}</div>
-          <div style="display:flex;gap:6px;align-items:center">
-            ${f.url?`<a href="${safeHttpUrl(f.url)}" target="_blank" class="btn-primary btn-sm">Open</a>`:''}
-            ${canDelete ? `<button class="btn-danger btn-sm file-delete-btn" data-id="${f.id}" data-name="${(f.name||'').replace(/"/g,'&quot;')}" style="font-size:11px">Delete</button>` : ''}
-            ${canRequestDelete ? `<button class="btn-secondary btn-sm file-req-delete-btn" data-id="${f.id}" data-name="${(f.name||'').replace(/"/g,'&quot;')}" style="font-size:11px;color:var(--danger)">Request Delete</button>` : ''}
-          </div>
-        </div>
-        <div class="item-meta">
-          <span>👤 ${escHtml(f.uploadedByName||'—')}</span>
-          ${f.createdAt?`<span>${new Date(f.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
-          ${f.deleteRequested?`<span style="color:var(--danger);font-size:11px;font-weight:600">⏳ Delete requested</span>`:''}
-        </div>
-      </div>`).join('');
-
-    // Direct delete (president/manager)
-    filesDiv.querySelectorAll('.file-delete-btn').forEach(btn => {
-      btn.addEventListener('click', async e => {
-        e.stopPropagation();
-        if (!(await confirmDialog({message:`Delete "${escHtml(btn.dataset.name)}"? This cannot be undone.`, danger:true, html:true}))) return;
-        await db.collection(collection).doc(btn.dataset.id).delete();
-        Notifs.showToast('File deleted.');
-        reloadFiles();
-      });
-    });
-
-    // Request delete (finance — notifies president)
-    filesDiv.querySelectorAll('.file-req-delete-btn').forEach(btn => {
-      btn.addEventListener('click', async e => {
-        e.stopPropagation();
-        if (!(await confirmDialog({message:`Request deletion of "${escHtml(btn.dataset.name)}"? The president will be notified to approve.`, danger:true, html:true}))) return;
-        await db.collection(collection).doc(btn.dataset.id).update({ deleteRequested: true, deleteRequestedBy: currentUser.uid });
-        // Notify president
-        const presSnap = await db.collection('users').where('role','==','president').limit(1).get().catch(()=>({empty:true}));
-        if (!presSnap.empty) {
-          const requesterName = window.userProfile?.displayName || currentUser.email;
-          await Notifs.send(presSnap.docs[0].id, {
-            title: '🗑️ File Deletion Request',
-            body: `${requesterName} is requesting to delete "${btn.dataset.name}". Go to Files to approve.`,
-            icon: '🗑️', type: 'file_delete_request'
-          });
-        }
-        Notifs.showToast('Deletion request sent to president.');
-        reloadFiles();
-      });
-    });
-  });
-  };
-  reloadFiles();
-
-  // Bind upload
-  const uploadDiv = document.getElementById(`${id}-upload`);
-  if (!uploadDiv) return;
-  Drive.renderUploadArea(`${id}-upload`, async (result, file) => {
-    const s = await db.collection('users').doc(currentUser.uid).get();
-    const name = s.exists ? s.data().displayName : currentUser.email;
-    await db.collection(collection).add({
-      name: file.name, url: result.url, source: result.source,
-      uploadedBy: currentUser.uid, uploadedByName: name,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    bindFileCollection(id, currentUser, dept, subfolder);
-  }, { label: 'Upload file to Drive', dept, subfolder });
-}
-
-// ══════════════════════════════════════════════════
 //  SHARED: Budgeting
 // ══════════════════════════════════════════════════
 async function renderBudgeting(container, currentUser, currentRole, dept) {
@@ -11699,93 +11527,322 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
   const uploadBtn = document.getElementById(`upload-btn-${containerId}`);
   const newFolderBtn = document.getElementById(`newfolder-btn-${containerId}`);
   const addLinkBtn = document.getElementById(`addlink-btn-${containerId}`);
-  // Root collection, name computed at runtime — no backup registration needed:
-  // scripts/monthly-backup.js discovers every root collection via db.listCollections().
-  const collection = `files_${scope.toLowerCase().replace(/\s+/g,'_')}`;
+  // v12 WS38 — Files Hub: files_<scope> is retired. Every scope now lives in the
+  // single hub_files collection, namespaced by the `scope` field (see
+  // window.FilesHub, js/drive.js). This function's own signature is UNCHANGED so
+  // all 15 existing call sites across app.js/departments.js keep working as-is.
+  const collection = 'hub_files';
+  const scopeKey = scope.toLowerCase().replace(/\s+/g,'_');
+  const RESERVED_FOLDER_NAMES = ['all','__archived__','__bin__'];
   let allFiles = [];
+  let binFiles = [];
+  let allFolders = [];
+  let foldersById = {};
   let activeFolder = 'All';
+  let viewMode = 'list';
+
+  const folderName = id => (foldersById[id] && foldersById[id].name) || 'General';
+  // Sharing/visibility is owner-or-admin only (Spec DECIDED §6: editors may
+  // never change sharing) — narrower than FilesHub.canEdit(), which also
+  // covers plain content/organization editors.
+  const canShare = f => ['president','manager','owner'].includes(window.currentRole)
+    || f.uploadedBy === currentUser.uid;
+
+  const cardHtml = (f, isBin) => {
+    const isLink = f.kind === 'link';
+    const icon = isLink ? '🔗' : (/^image\//.test(f.contentType||'') ? '🖼️' : /pdf/.test(f.contentType||'') ? '📕' : '📄');
+    return `<div class="item-card fh-card" data-id="${f.id}" draggable="${(!isBin && FilesHub.canEdit(f))?'true':'false'}" data-file-row="${f.id}" style="cursor:pointer;text-align:center;padding:14px 8px">
+      <div style="font-size:28px">${icon}</div>
+      <div style="font-weight:600;font-size:12px;margin-top:6px;word-break:break-word">${escHtml(f.name||'File')}</div>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${escHtml(folderName(f.folderId))}</div>
+      <div style="font-size:10px;color:var(--text-muted)">${escHtml(f.uploaderName||'—')}</div>
+    </div>`;
+  };
 
   const renderList = () => {
-    // folder markers (empty folders) are tracked but never shown as rows
-    const markers = allFiles.filter(f=>f.isFolderMarker);
-    const realFiles = allFiles.filter(f=>!f.isFolderMarker);
-    const folders = [...new Set([
-      ...realFiles.filter(f=>!f.archived).map(f=>f.folder||'General'),
-      ...markers.map(m=>m.folder).filter(Boolean)
-    ])].sort();
-    const archivedCount = realFiles.filter(f=>f.archived).length;
-    const showing = activeFolder==='__archived__'
-      ? realFiles.filter(f=>f.archived)
-      : realFiles.filter(f=>!f.archived && (activeFolder==='All' || (f.folder||'General')===activeFolder));
+    // Show every hub_folders doc for this scope as a chip — including ones with
+    // zero files yet — so a just-created empty folder (per "Create a folder now,
+    // then upload files or add links into it") stays reachable/clickable.
+    const foldersToShow = allFolders;
+    const archivedCount = allFiles.filter(f=>f.archived).length;
+    const isBin = activeFolder === '__bin__';
+    const showing = isBin
+      ? binFiles
+      : activeFolder === '__archived__'
+        ? allFiles.filter(f=>f.archived)
+        : allFiles.filter(f=>!f.archived && (activeFolder==='All' || (f.folderId||null)===activeFolder));
+
+    const chips = [
+      { key:'All', label:'📁 All' },
+      ...foldersToShow.map(fo => ({ key:fo.id, label:`📁 ${escHtml(fo.name)}` })),
+      ...(archivedCount ? [{ key:'__archived__', label:`🗄 Archived (${archivedCount})` }] : []),
+      { key:'__bin__', label:`🗑 Recycle Bin (${binFiles.length})` }
+    ];
     const chipBar = `<div class="subtab-bar" style="margin-bottom:10px">
-      ${['All',...folders].map(c=>`<button class="subtab-btn file-folder-chip ${activeFolder===c?'active':''}" data-folder="${escHtml(c)}">📁 ${escHtml(c)}</button>`).join('')}
-      ${archivedCount?`<button class="subtab-btn file-folder-chip ${activeFolder==='__archived__'?'active':''}" data-folder="__archived__">🗄 Archived (${archivedCount})</button>`:''}
+      ${chips.map(c=>`<button class="subtab-btn file-folder-chip ${activeFolder===c.key?'active':''}" data-folder="${escHtml(c.key)}">${c.label}</button>`).join('')}
     </div>`;
-    const rows = showing.length ? showing.map(f=>{
-      const isLink = f.kind==='link';
-      return `<tr>
-        <td><a href="${escHtml(f.url)}" target="_blank" style="color:var(--primary);font-weight:600">${isLink?'🔗 ':'📄 '}${escHtml(f.name||'File')}</a>${f.description?`<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(f.description)}</div>`:''}</td>
-        <td><span class="badge badge-gray">${escHtml(f.folder||'General')}</span></td>
+
+    const emptyMsg = isBin ? 'Recycle Bin is empty'
+      : (activeFolder!=='All' && activeFolder!=='__archived__') ? 'This folder is empty' : 'No files here';
+
+    const rows = showing.length ? showing.map(f => {
+      const isLink = f.kind === 'link';
+      const canEdit = FilesHub.canEdit(f);
+      const mirrored = f.driveUrl ? `<i data-lucide="${Drive.sourceIcon(f)}" title="Mirrored to Drive" style="width:12px;height:12px;stroke:var(--text-muted);vertical-align:-2px"></i>` : '';
+      const verBadge = (f.versions && f.versions.length > 1) ? `<span class="badge badge-gray" style="margin-left:6px;font-size:10px">v${f.currentV||1}</span>` : '';
+      return `<tr draggable="${(!isBin && canEdit)?'true':'false'}" data-file-row="${f.id}">
+        <td>
+          <a href="#" class="fh-preview-link" data-id="${f.id}" style="color:var(--primary);font-weight:600">${isLink?'🔗 ':'📄 '}${escHtml(f.name||'File')}</a>${mirrored}${verBadge}
+          ${f.description?`<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(f.description)}</div>`:''}
+        </td>
+        <td><span class="badge badge-gray">${escHtml(folderName(f.folderId))}</span></td>
         <td>${escHtml(f.uploaderName||'—')}</td>
         <td style="font-size:11px;color:var(--text-muted)">${f.createdAt?new Date(f.createdAt.toDate()).toLocaleDateString('en-PH'):''}</td>
-        <td style="white-space:nowrap"><a href="${escHtml(f.url)}" target="_blank" class="btn-secondary btn-sm" title="${isLink?'Open link':'Download'}">${isLink?'↗':'⬇'}</a>
-          <button class="btn-secondary btn-sm file-arch-btn" data-id="${f.id}" data-arch="${f.archived?'0':'1'}" title="${f.archived?'Restore':'Archive'}">${f.archived?'♻️':'🗄'}</button></td>
+        <td style="white-space:nowrap">${isBin ? `
+          ${canEdit?`<button class="btn-secondary btn-sm fh-restore" data-id="${f.id}">♻️ Restore</button>`:''}
+          ${window.currentRole==='president'?`<button class="btn-danger btn-sm fh-purge" data-id="${f.id}" data-name="${escHtml(f.name||'File')}">🗑 Delete forever</button>`:''}
+        ` : `
+          <a href="${safeHttpUrl(f.url)}" target="_blank" class="btn-secondary btn-sm" title="${isLink?'Open link':'Download'}">${isLink?'↗':'⬇'}</a>
+          <button class="btn-secondary btn-sm fh-preview" data-id="${f.id}" title="Preview">👁</button>
+          ${canEdit?`<button class="btn-secondary btn-sm fh-version" data-id="${f.id}" title="Upload new version">⬆</button>`:''}
+          ${canShare(f)?`<button class="btn-secondary btn-sm fh-share" data-id="${f.id}" title="Share">🔀</button>`:''}
+          <button class="btn-secondary btn-sm file-arch-btn" data-id="${f.id}" data-arch="${f.archived?'0':'1'}" title="${f.archived?'Restore':'Archive'}">${f.archived?'♻️':'🗄'}</button>
+          ${canEdit?`<button class="btn-danger btn-sm fh-delete" data-id="${f.id}" data-name="${escHtml(f.name||'File')}" title="Move to Recycle Bin">🗑</button>`:''}
+        `}</td>
       </tr>`;
-    }).join('') : `<tr><td colspan="5"><div class="empty-state" style="padding:18px"><div class="empty-icon">📁</div><h4>${activeFolder!=='All'&&activeFolder!=='__archived__'?'This folder is empty':'No files here'}</h4></div></td></tr>`;
-    listEl.innerHTML = chipBar + `<div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Name</th><th>Folder</th><th>Added By</th><th>Date</th><th></th></tr></thead>
-      <tbody>${rows}</tbody></table></div>`;
-    listEl.querySelectorAll('.file-folder-chip').forEach(b=>b.addEventListener('click',()=>{ activeFolder=b.dataset.folder; renderList(); }));
-    listEl.querySelectorAll('.file-arch-btn').forEach(b=>b.addEventListener('click', async ()=>{
+    }).join('') : `<tr><td colspan="5"><div class="empty-state" style="padding:18px"><div class="empty-icon">📁</div><h4>${emptyMsg}</h4></div></td></tr>`;
+
+    const bodyHtml = viewMode === 'grid'
+      ? `<div class="fh-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">${
+          showing.length ? showing.map(f=>cardHtml(f,isBin)).join('') : `<div class="empty-state" style="grid-column:1/-1;padding:18px"><div class="empty-icon">📁</div><h4>${emptyMsg}</h4></div>`
+        }</div>`
+      : `<div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Name</th><th>Folder</th><th>Added By</th><th>Date</th><th></th></tr></thead>
+          <tbody>${rows}</tbody></table></div>`;
+
+    listEl.innerHTML =
+      window.chipTabs([{key:'list',label:'☰ List'},{key:'grid',label:'▦ Grid'}], viewMode, {cls:'fh-view'}) +
+      chipBar + bodyHtml;
+    if (window.lucide) lucide.createIcons({ nodes: [listEl] });
+
+    window.bindChipTabs(listEl.querySelector('.fh-view'), key => { viewMode = key; renderList(); });
+
+    // ── Folder-chip click (navigate) + drag-drop-to-move targets ──
+    listEl.querySelectorAll('.file-folder-chip').forEach(b => {
+      b.addEventListener('click', () => { activeFolder = b.dataset.folder; renderList(); });
+      const key = b.dataset.folder;
+      if (key !== '__archived__' && key !== '__bin__') {
+        b.addEventListener('dragover', e => { e.preventDefault(); b.classList.add('drag-over'); });
+        b.addEventListener('dragleave', () => b.classList.remove('drag-over'));
+        b.addEventListener('drop', async e => {
+          e.preventDefault(); b.classList.remove('drag-over');
+          const fid = e.dataTransfer.getData('text/plain');
+          if (!fid) return;
+          try { await FilesHub.moveToFolder(fid, key === 'All' ? null : key); Notifs.showToast('Moved.'); loadFiles(); }
+          catch (err) { Notifs.showToast('Move failed: ' + (err.message||err), 'error'); }
+        });
+      }
+    });
+
+    // ── Draggable rows/cards (drag-an-existing-file-onto-a-folder-chip) ──
+    listEl.querySelectorAll('[data-file-row]').forEach(el => {
+      if (el.getAttribute('draggable') === 'true') {
+        el.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', el.dataset.fileRow));
+      }
+    });
+
+    // ── Preview ──
+    listEl.querySelectorAll('.fh-preview-link, .fh-preview').forEach(el => el.addEventListener('click', e => {
+      e.preventDefault();
+      const f = allFiles.find(x=>x.id===el.dataset.id) || binFiles.find(x=>x.id===el.dataset.id);
+      if (f) window.openFilePreview(f);
+    }));
+    listEl.querySelectorAll('.fh-card').forEach(el => el.addEventListener('click', () => {
+      const f = allFiles.find(x=>x.id===el.dataset.id) || binFiles.find(x=>x.id===el.dataset.id);
+      if (f) window.openFilePreview(f);
+    }));
+
+    // ── Archive toggle (kept as-is, now against hub_files) ──
+    listEl.querySelectorAll('.file-arch-btn').forEach(b => b.addEventListener('click', async () => {
       try {
-        await db.collection(collection).doc(b.dataset.id).update({ archived: b.dataset.arch==='1' });
+        await db.collection(collection).doc(b.dataset.id).update({ archived: b.dataset.arch==='1', updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
         const f = allFiles.find(x=>x.id===b.dataset.id); if (f) f.archived = b.dataset.arch==='1';
         renderList();
-      } catch(e) { Notifs.showToast('Only the uploader or an admin can archive this file','error'); }
+      } catch(e) { Notifs.showToast('Only the uploader, an editor, or an admin can archive this file','error'); }
+    }));
+
+    // ── Recycle Bin: soft-delete / restore / permanent delete ──
+    listEl.querySelectorAll('.fh-delete').forEach(b => b.addEventListener('click', async () => {
+      if (!(await confirmDialog({message:`Move "${escHtml(b.dataset.name)}" to the Recycle Bin?`, danger:true, html:true}))) return;
+      try { await FilesHub.softDelete(b.dataset.id); Notifs.showToast('Moved to Recycle Bin.'); loadFiles(); }
+      catch(e) { Notifs.showToast('Delete failed: ' + (e.message||e), 'error'); }
+    }));
+    listEl.querySelectorAll('.fh-restore').forEach(b => b.addEventListener('click', async () => {
+      try { await FilesHub.restore(b.dataset.id); Notifs.showToast('Restored.'); loadFiles(); }
+      catch(e) { Notifs.showToast('Restore failed: ' + (e.message||e), 'error'); }
+    }));
+    listEl.querySelectorAll('.fh-purge').forEach(b => b.addEventListener('click', async () => {
+      const typed = await promptDialog({title:'Delete forever', message:`Type DELETE to permanently remove "${b.dataset.name}". This deletes the Storage file and cannot be undone. (The Google Drive mirror copy, if any, is kept — records-forever archive.)`, placeholder:'DELETE', required:true});
+      if ((typed||'').trim().toUpperCase() !== 'DELETE') { if (typed) Notifs.showToast('Type DELETE exactly to confirm.','error'); return; }
+      const f = binFiles.find(x=>x.id===b.dataset.id);
+      if (!f) return;
+      try { await FilesHub.purge(f); Notifs.showToast('Permanently deleted.'); loadFiles(); }
+      catch(e) { Notifs.showToast('Delete failed: ' + (e.message||e), 'error'); }
+    }));
+
+    // ── New version ──
+    listEl.querySelectorAll('.fh-version').forEach(b => b.addEventListener('click', () => {
+      const f = allFiles.find(x=>x.id===b.dataset.id); if (!f) return;
+      openPage(`Upload new version — ${escHtml(f.name||'File')}`, `
+        <div id="fh-version-upload"></div>
+        <div class="form-group"><label>Note (optional)</label><input id="fh-version-note" placeholder="What changed?"/></div>
+      `, `<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      Drive.renderUploadArea('fh-version-upload', async (result, file) => {
+        try {
+          await FilesHub.uploadNewVersion(f, result, file, document.getElementById('fh-version-note').value.trim());
+          Notifs.showToast('New version uploaded.'); closeModal(); loadFiles();
+        } catch(e) { Notifs.showToast('Upload failed: ' + (e.message||e), 'error'); }
+      }, { label:'Choose new version', dept, subfolder:'Files', allowLinks:false });
+    }));
+
+    // ── Share ──
+    listEl.querySelectorAll('.fh-share').forEach(b => b.addEventListener('click', async () => {
+      const f = allFiles.find(x=>x.id===b.dataset.id); if (!f) return;
+      const usersSnap = await db.collection('users').get().catch(()=>({docs:[]}));
+      const userOpts = usersSnap.docs.map(d=>({id:d.id,...d.data()}))
+        .map(u=>`<option value="${u.id}">${escHtml(u.displayName||u.email||u.id)}</option>`).join('');
+      const deptOpts = Object.keys(window.DEPARTMENTS||{}).map(d=>`<option value="${escHtml(d)}">${escHtml(d)}</option>`).join('');
+      const roleOpts = ['president','manager','employee','agent','finance'].map(r=>`<option value="${r}">${r}</option>`).join('');
+      const alreadyShared = (f.shares||[]).length ? (f.shares||[]).map(s=>escHtml(s.label||s.id)).join(', ') : '—';
+      openPage(`Share "${escHtml(f.name||'File')}"`, `
+        <div class="form-group"><label>Share with</label>
+          <select id="fh-share-type">
+            <option value="user">Specific person</option>
+            <option value="dept">Department</option>
+            <option value="role">Role</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Target</label>
+          <select id="fh-share-target-user">${userOpts}</select>
+          <select id="fh-share-target-dept" class="hidden">${deptOpts}</select>
+          <select id="fh-share-target-role" class="hidden">${roleOpts}</select>
+        </div>
+        <div class="form-group"><label>Permission</label>
+          <select id="fh-share-perm"><option value="view">View</option><option value="edit">Edit</option></select>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted)">Already shared with: ${alreadyShared}</div>
+      `, `<button class="btn-primary" id="fh-share-save">Share</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      const typeSel = document.getElementById('fh-share-type');
+      const uSel = document.getElementById('fh-share-target-user');
+      const dSel = document.getElementById('fh-share-target-dept');
+      const rSel = document.getElementById('fh-share-target-role');
+      typeSel.addEventListener('change', () => {
+        uSel.classList.toggle('hidden', typeSel.value!=='user');
+        dSel.classList.toggle('hidden', typeSel.value!=='dept');
+        rSel.classList.toggle('hidden', typeSel.value!=='role');
+      });
+      document.getElementById('fh-share-save').addEventListener('click', async () => {
+        const type = typeSel.value;
+        const sel = type==='user' ? uSel : type==='dept' ? dSel : rSel;
+        const id = sel.value;
+        if (!id) { Notifs.showToast('Choose a target','error'); return; }
+        const label = type==='user' ? (sel.options[sel.selectedIndex]?.textContent||id) : id;
+        const perm = document.getElementById('fh-share-perm').value;
+        try { await FilesHub.share(f, {type, id, label}, perm); Notifs.showToast('Shared.'); closeModal(); loadFiles(); }
+        catch(e) { Notifs.showToast('Share failed: ' + (e.message||e), 'error'); }
+      });
     }));
   };
 
   const loadFiles = async () => {
     listEl.innerHTML = '<div class="loading-placeholder">Loading…</div>';
-    let snap;
-    if (filterUid) snap = await db.collection(collection).where('uploadedBy','==',filterUid).get().catch(()=>({docs:[]}));
-    else           snap = await db.collection(collection).where('department','==',dept).get().catch(()=>({docs:[]}));
-    allFiles = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    if (filterUid) {
+      const snap = await db.collection(collection)
+        .where('scope','==',scopeKey).where('deleted','==',false).where('uploadedBy','==',filterUid)
+        .get().catch(()=>({docs:[]}));
+      allFiles = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    } else {
+      allFiles = await FilesHub.loadFiles(scopeKey, { includeDeleted:false });
+    }
+    const [folders, bin] = await Promise.all([
+      FilesHub.loadFolders(scopeKey),
+      FilesHub.loadFiles(scopeKey, { includeDeleted:true })
+    ]);
+    allFolders = folders;
+    foldersById = {}; folders.forEach(fo => { foldersById[fo.id] = fo; });
+    binFiles = filterUid ? bin.filter(f=>f.uploadedBy===filterUid) : bin;
     renderList();
   };
 
   loadFiles();
 
   uploadBtn?.addEventListener('click', () => {
-    const existingFolders = [...new Set(allFiles.map(f=>f.folder||'General'))];
-    const prefill = (activeFolder!=='All' && activeFolder!=='__archived__') ? activeFolder : '';
+    const folderOpts = allFolders.map(fo=>`<option value="${fo.id}">${escHtml(fo.name)}</option>`).join('');
+    const prefill = (activeFolder!=='All' && activeFolder!=='__archived__' && activeFolder!=='__bin__') ? activeFolder : '';
     openPage('Upload File', `
       <div class="form-group"><label>File Name / Title</label><input id="fn-title" placeholder="Descriptive name"/></div>
       <div class="form-group"><label>File Type</label>
         <select id="fn-type"><option>Document</option><option>Image</option><option>Spreadsheet</option><option>PDF</option><option>Other</option></select>
       </div>
       <div class="form-group"><label>Folder</label>
-        <input id="fn-folder" list="fn-folder-list" placeholder="General" value="${escHtml(prefill)}"/>
-        <datalist id="fn-folder-list">${existingFolders.map(f=>`<option value="${escHtml(f)}"></option>`).join('')}</datalist>
+        <select id="fn-folder">
+          <option value="">— General (no folder) —</option>
+          ${folderOpts}
+          <option value="__new__">+ New folder…</option>
+        </select>
+        <input id="fn-folder-new" class="hidden" placeholder="New folder name" style="margin-top:6px"/>
       </div>
       <div id="fn-upload-area"></div>
     `, `<button class="btn-primary" id="save-fn-btn">Upload</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    let uploadedFile = null;
-    Drive.renderUploadArea('fn-upload-area', r => { uploadedFile = r; }, { label: 'Choose file', dept, subfolder: 'Files' });
+    if (prefill) document.getElementById('fn-folder').value = prefill;
+    document.getElementById('fn-folder').addEventListener('change', e => {
+      document.getElementById('fn-folder-new').classList.toggle('hidden', e.target.value !== '__new__');
+    });
+    let uploadedFile = null, uploadedRaw = null;
+    Drive.renderUploadArea('fn-upload-area', (r, file) => { uploadedFile = r; uploadedRaw = file; }, { label: 'Choose file', dept, subfolder: 'Files' });
     document.getElementById('save-fn-btn').addEventListener('click', async () => {
       const s = await db.collection('users').doc(currentUser.uid).get();
       const uploaderName = s.exists ? s.data().displayName : currentUser.email;
+      let folderId = document.getElementById('fn-folder').value;
+      if (folderId === '__new__') {
+        const newName = document.getElementById('fn-folder-new').value.trim();
+        if (!newName) { Notifs.showToast('Enter a folder name','error'); return; }
+        if (RESERVED_FOLDER_NAMES.includes(newName.toLowerCase())) { Notifs.showToast('Reserved name','error'); return; }
+        const ref = await db.collection('hub_folders').add({
+          name: newName, parentId: null, scope: scopeKey, department: dept,
+          createdBy: currentUser.uid, createdByName: uploaderName,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        folderId = ref.id;
+      }
+      const isLink = uploadedFile && uploadedFile.kind === 'link';
+      const now = new Date().toISOString();
+      const title = document.getElementById('fn-title').value.trim() || (uploadedFile?.name || 'File');
+      const versionEntry = { v:1, url: uploadedFile?.url||'', name: uploadedFile?.name||title,
+        size: uploadedRaw?.size||null, contentType: uploadedRaw?.type||null, note:'',
+        by: currentUser.uid, byName: uploaderName, at: now };
       await db.collection(collection).add({
-        name: document.getElementById('fn-title').value.trim() || (uploadedFile?.name||'File'),
+        name: title,
+        description: '',
         fileType: document.getElementById('fn-type').value,
-        folder: document.getElementById('fn-folder').value.trim() || 'General',
-        archived: false,
-        url: uploadedFile?.url || '',
+        kind: isLink ? 'link' : 'file',
+        scope: scopeKey,
         department: dept,
-        scope,
-        uploadedBy: currentUser.uid,
-        uploaderName,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        folderId: folderId || null,
+        url: uploadedFile?.url || '',
+        driveUrl: null,
+        size: uploadedRaw?.size || null, contentType: uploadedRaw?.type || null,
+        source: uploadedFile?.source || 'firebase',
+        currentV: 1,
+        versions: [versionEntry],
+        archived: false,
+        deleted: false, deletedAt: null, deletedBy: null,
+        visibility: 'company',
+        sharedUserIds: [], editorUserIds: [], shares: [],
+        uploadedBy: currentUser.uid, uploaderName,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       closeModal(); loadFiles();
     });
@@ -11800,33 +11857,32 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
     document.getElementById('save-nf-btn').addEventListener('click', async () => {
       const name = document.getElementById('nf-name').value.trim();
       if (!name) { Notifs.showToast('Enter a folder name','error'); return; }
-      if (name==='__archived__') { Notifs.showToast('Reserved name','error'); return; }
+      if (RESERVED_FOLDER_NAMES.includes(name.toLowerCase())) { Notifs.showToast('Reserved name','error'); return; }
       const s = await db.collection('users').doc(currentUser.uid).get();
       const uploaderName = s.exists ? s.data().displayName : currentUser.email;
-      await db.collection(collection).add({
-        isFolderMarker: true, folder: name, name: `📁 ${name}`,
-        archived: false, department: dept, scope,
-        uploadedBy: currentUser.uid, uploaderName,
+      const ref = await db.collection('hub_folders').add({
+        name, parentId: null, scope: scopeKey, department: dept,
+        createdBy: currentUser.uid, createdByName: uploaderName,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
-      closeModal(); activeFolder = name; loadFiles();
+      closeModal(); activeFolder = ref.id; loadFiles();
     });
   });
 
   // ── Attach a link (URL) with title + description ──
   addLinkBtn?.addEventListener('click', () => {
-    const existingFolders = [...new Set(allFiles.map(f=>f.folder||'General'))];
-    const prefill = (activeFolder!=='All' && activeFolder!=='__archived__') ? activeFolder : '';
+    const folderOpts = allFolders.map(fo=>`<option value="${fo.id}">${escHtml(fo.name)}</option>`).join('');
+    const prefill = (activeFolder!=='All' && activeFolder!=='__archived__' && activeFolder!=='__bin__') ? activeFolder : '';
     openPage('Add Link', `
       <div class="form-group"><label>Title</label><input id="lk-title" placeholder="e.g. Google Drive folder, Spec sheet"/></div>
       <div class="form-group"><label>URL</label><input id="lk-url" type="url" placeholder="https://…"/></div>
       <div class="form-group"><label>Description</label><textarea id="lk-desc" rows="2" placeholder="Optional notes about this link"></textarea></div>
       <div class="form-group"><label>Folder</label>
-        <input id="lk-folder" list="lk-folder-list" placeholder="General" value="${escHtml(prefill)}"/>
-        <datalist id="lk-folder-list">${existingFolders.map(f=>`<option value="${escHtml(f)}"></option>`).join('')}</datalist>
+        <select id="lk-folder"><option value="">— General (no folder) —</option>${folderOpts}</select>
       </div>
       <div id="lk-err" class="error-msg hidden"></div>
     `, `<button class="btn-primary" id="save-lk-btn">Add Link</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    if (prefill) document.getElementById('lk-folder').value = prefill;
     document.getElementById('save-lk-btn').addEventListener('click', async () => {
       const err = document.getElementById('lk-err');
       const title = document.getElementById('lk-title').value.trim();
@@ -11836,12 +11892,19 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
       if (!/^https?:\/\//i.test(url)) url = 'https://' + url;  // tolerate bare domains
       const s = await db.collection('users').doc(currentUser.uid).get();
       const uploaderName = s.exists ? s.data().displayName : currentUser.email;
+      const now = new Date().toISOString();
+      const folderId = document.getElementById('lk-folder').value || null;
       await db.collection(collection).add({
-        kind: 'link', name: title, description: document.getElementById('lk-desc').value.trim(),
-        folder: document.getElementById('lk-folder').value.trim() || 'General',
-        archived: false, url, department: dept, scope,
+        name: title, description: document.getElementById('lk-desc').value.trim(),
+        fileType: 'Other', kind: 'link', scope: scopeKey, department: dept,
+        folderId,
+        url, driveUrl: null, size: null, contentType: null, source: 'link',
+        currentV: 1, versions: [{ v:1, url, name:title, size:null, contentType:null, note:'', by:currentUser.uid, byName:uploaderName, at:now }],
+        archived: false, deleted: false, deletedAt: null, deletedBy: null,
+        visibility: 'company', sharedUserIds: [], editorUserIds: [], shares: [],
         uploadedBy: currentUser.uid, uploaderName,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       closeModal(); loadFiles();
     });

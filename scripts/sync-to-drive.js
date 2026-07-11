@@ -69,6 +69,7 @@ const LABELS = {
   expenses: 'Receipts', payslips: 'Payslips', policies: 'Policies',
   sales_orders: 'Sales Orders', job_projects: 'Project Payments',
   job_costs: 'Project Payments', partner_deals: 'Partner Deals',
+  hub_files: 'Files Hub', // v12 WS38 — unified file-metadata collection (hub_folders holds no URLs, skipped naturally)
 };
 function titleCase(s) {
   return s.replace(/[_-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());

@@ -252,9 +252,22 @@ window.Drive = (() => {
   }
 
   // ── Render Storage Status Card (Settings) ─────────
-  function renderStorageStatus(containerId) {
+  // v12 WS38: reads the system_health/daily_sync heartbeat WS15's sync job writes
+  // (finance/admin-only per firestore.rules — non-admin viewers just keep the
+  // static "Active" badge via the try/catch below, no crash).
+  async function renderStorageStatus(containerId) {
     const el = document.getElementById(containerId);
     if (!el) return;
+    let health = null;
+    try {
+      const snap = await db.collection('system_health').doc('daily_sync').get();
+      if (snap.exists) health = snap.data();
+    } catch (_) { /* non-admin viewer, or offline — fall back to static card */ }
+    const ok = !!health && health.lastStatus === 'ok';
+    const badgeCls = health ? (ok ? 'badge-green' : 'badge-red') : 'badge-blue';
+    const badgeLabel = health ? (ok ? 'Synced' : 'Sync issue') : 'Active';
+    const lastRun = health && health.lastRunAt && health.lastRunAt.toDate
+      ? health.lastRunAt.toDate().toLocaleString('en-PH') : '—';
     el.innerHTML = `
       <div class="storage-status-card drive-on">
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
@@ -265,12 +278,13 @@ window.Drive = (() => {
             <div style="font-size:14px;font-weight:700">Cloud Storage + Google Drive Sync</div>
             <div style="font-size:12px;color:var(--text-muted)">Uploads save instantly to Cloud · Auto-synced to Google Drive at midnight</div>
           </div>
-          <span class="badge badge-blue" style="margin-left:auto">Active</span>
+          <span class="badge ${badgeCls}" style="margin-left:auto">${badgeLabel}</span>
         </div>
         <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
           Employees upload directly — no Google login required.<br>
           Links automatically update to Google Drive after the nightly sync.
         </p>
+        ${health ? `<p style="font-size:11px;color:var(--text-muted)">Last sync: ${_esc(lastRun)} · ${health.filesWritten||0} file${health.filesWritten===1?'':'s'} mirrored${health.errors?` · <span style="color:var(--danger)">${health.errors} error${health.errors===1?'':'s'}</span>`:''}</p>` : ''}
       </div>
     `;
     if (window.lucide) lucide.createIcons({ nodes: [el] });
@@ -278,3 +292,122 @@ window.Drive = (() => {
 
   return { uploadFile, uploadProfilePhoto, uploadWorkerPhoto, deleteFile, renderUploadArea, renderStorageStatus, resolveUrl, sourceLabel, sourceIcon };
 })();
+
+/* ═══════════════════════════════════════════════════
+   FILES HUB (WS38) — window.FilesHub service
+   Unified file-metadata service for the `hub_files` / `hub_folders`
+   collections. Lives here (not departments.js) because drive.js loads
+   before departments.js/app.js/modules.js in index.html's fixed script
+   order, so FilesHub is available to every caller.
+   Contract for WS34/WS35 — see fable-workplan/38-files-hub.md.
+═══════════════════════════════════════════════════ */
+window.FilesHub = {
+  // ── Read fan-out. Rules cannot be satisfied by one unfiltered query for
+  // non-admins, so merge 3 provable queries (admins: 1 broad query).
+  async loadFiles(scope /* string|null = all scopes */, { includeDeleted=false } = {}) {
+    const uid = currentUser.uid;
+    const base = () => {
+      let q = db.collection('hub_files');
+      if (scope) q = q.where('scope','==',scope);
+      return q.where('deleted','==', includeDeleted);
+    };
+    const isAdminRole = ['president','manager','owner'].includes(window.currentRole);
+    const snaps = await Promise.all(
+      isAdminRole
+        ? [ base().get().catch(()=>({docs:[]})) ]
+        : [ base().where('visibility','==','company').get().catch(()=>({docs:[]})),
+            base().where('uploadedBy','==',uid).get().catch(()=>({docs:[]})),
+            base().where('sharedUserIds','array-contains',uid).get().catch(()=>({docs:[]})) ]);
+    const seen = {}; const out = [];
+    snaps.forEach(s => s.docs.forEach(d => { if (!seen[d.id]) { seen[d.id]=1; out.push({id:d.id,...d.data()}); } }));
+    return out.sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+  },
+  async loadFolders(scope) {
+    const snap = await db.collection('hub_folders').where('scope','==',scope).get().catch(()=>({docs:[]}));
+    return snap.docs.map(d=>({id:d.id,...d.data()}));
+  },
+  folderPath(folderId, foldersById) {          // client-side path resolution (decision 2)
+    const parts = []; let f = foldersById[folderId]; let guard = 0;
+    while (f && guard++ < 20) { parts.unshift(f.name); f = foldersById[f.parentId]; }
+    return parts.join(' / ');
+  },
+  canEdit(f) {
+    return ['president','manager','owner'].includes(window.currentRole)
+      || f.uploadedBy === currentUser.uid
+      || (f.editorUserIds||[]).includes(currentUser.uid);
+  },
+  // ── Mutations (all set/update with merge-mindset; updatedAt always stamped)
+  moveToFolder: (id, folderId) => db.collection('hub_files').doc(id)
+    .update({ folderId: folderId || null, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }),
+  async uploadNewVersion(f, result /* Drive.renderUploadArea result */, file, note) {
+    const FV = firebase.firestore.FieldValue;
+    const entry = { v:(f.currentV||1)+1, url:result.url, name:file?.name||result.name,
+      size:file?.size||null, contentType:file?.type||null, note:note||'',
+      by:currentUser.uid, byName:(window.userProfile?.displayName||currentUser.email),
+      at:new Date().toISOString() };                     // ISO — arrayUnion can't hold serverTimestamp
+    await db.collection('hub_files').doc(f.id).update({
+      versions: FV.arrayUnion(entry),
+      url:entry.url, size:entry.size, contentType:entry.contentType,
+      currentV:entry.v, driveUrl:null,                    // new blob → re-mirrored by nightly sync
+      updatedAt: FV.serverTimestamp() });
+  },
+  softDelete: (id) => db.collection('hub_files').doc(id).update({
+    deleted:true, deletedAt:firebase.firestore.FieldValue.serverTimestamp(),
+    deletedBy:currentUser.uid, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }),
+  restore: (id) => db.collection('hub_files').doc(id).update({
+    deleted:false, deletedAt:null, deletedBy:null,
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp() }),
+  async purge(f) {                                        // PRESIDENT ONLY (rules-enforced)
+    // First-ever real Drive.deleteFile caller — blob deletes are best-effort:
+    // link docs have no Storage object, legacy-migrated docs may 404, and the
+    // Drive-mirror copies are deliberately NOT deleted (cold archive,
+    // records-forever directive). Deletes EVERY version's blob, then the doc.
+    const urlToPath = u => { try { return decodeURIComponent(new URL(u).pathname.split('/o/')[1]||''); } catch { return ''; } };
+    if (f.source === 'firebase') {
+      const urls = [...new Set([f.url, ...(f.versions||[]).map(v=>v.url)].filter(Boolean))];
+      for (const u of urls) {
+        const p = urlToPath(u);
+        if (p) { try { await Drive.deleteFile({ id: p }); } catch(e) { console.warn('blob delete skipped:', e.message||e); } }
+      }
+    }
+    await db.collection('hub_files').doc(f.id).delete();
+  },
+  // ── Sharing. target = {type:'user'|'dept'|'role', id, label}; perm 'view'|'edit'.
+  // Dept/role targets are EXPANDED to uids NOW (decision 5); partners are excluded
+  // from dept/role expansion — a partner can only be shared to as an explicit user.
+  async share(f, target, perm) {
+    const FV = firebase.firestore.FieldValue;
+    let uids = [];
+    if (target.type === 'user') uids = [target.id];
+    else {
+      const us = await db.collection('users').get();
+      us.docs.forEach(d => { const u = d.data();
+        if (u.role === 'partner') return;                  // WS19 guard, by construction
+        if (target.type === 'dept' && (u.departments||[]).includes(target.id)) uids.push(d.id);
+        if (target.type === 'role' && u.role === target.id) uids.push(d.id); });
+    }
+    if (!uids.length) throw new Error('No matching users for this share target');
+    const upd = { sharedUserIds: FV.arrayUnion(...uids),
+      shares: FV.arrayUnion({ ...target, perm, by:currentUser.uid,
+        byName:(window.userProfile?.displayName||currentUser.email), at:new Date().toISOString() }),
+      updatedAt: FV.serverTimestamp() };
+    if (perm === 'edit') upd.editorUserIds = FV.arrayUnion(...uids);  // editors ⊆ shared invariant
+    await db.collection('hub_files').doc(f.id).update(upd);
+  }
+};
+
+// ── Preview lightbox (wholly new — zero existing component, Current state §9) ──
+window.openFilePreview = function(f) {
+  const url = f.url || '';
+  const isImg = /^image\//.test(f.contentType||'') || /\.(png|jpe?g|gif|webp|svg)(\?|$)/i.test(url);
+  const isPdf = /pdf/.test(f.contentType||'') || /\.pdf(\?|$)/i.test(url);
+  const safe = (typeof safeHttpUrl==='function') ? safeHttpUrl(url) : url;
+  const esc = (typeof escHtml==='function') ? escHtml : (s => String(s==null?'':s));
+  const body = isImg ? `<img src="${safe}" style="max-width:100%;max-height:70vh;border-radius:8px" alt="">`
+    : isPdf ? `<iframe src="${safe}" style="width:100%;height:70vh;border:0;border-radius:8px"></iframe>`
+    : `<div class="empty-state" style="padding:30px"><div class="empty-icon">📄</div>
+         <p>No inline preview for this file type.</p></div>`;
+  openModal(`${f.kind==='link'?'🔗':'📄'} ${esc(f.name||'File')}`,
+    body + `<div style="text-align:right;margin-top:10px">
+      <a href="${safe}" target="_blank" class="btn-primary btn-sm">Open in new tab ↗</a></div>`, '');
+};

@@ -2471,6 +2471,11 @@ async function renderPresidentMessageCard() {
 (function(){
   const esc = s => (window.escHtml ? window.escHtml(s) : (s==null?'':String(s)));
   const hit = (q, ...fields) => fields.some(f => (f||'').toString().toLowerCase().includes(q));
+  // v12 WS38 — Files Hub result lookup (inline onclick can't hold a whole file
+  // object, so stash the last-rendered matches by id, same convention other
+  // groups use of passing an id string into a global opener function).
+  let _gsFilesStash = {};
+  window.__gsOpenFile = function(id){ const f = _gsFilesStash[id]; if (f && window.openFilePreview) window.openFilePreview(f); };
 
   window.renderGlobalSearch = async function(initialQuery){
     const c = document.getElementById('page-content');
@@ -2480,7 +2485,7 @@ async function renderPresidentMessageCard() {
 
     c.innerHTML = `
       <div class="page-header"><h2>🔎 Search</h2></div>
-      <input id="gsearch-input" placeholder="Search tasks, clients, inventory, products, quotes…" value="${(initialQuery||'').replace(/"/g,'&quot;')}"
+      <input id="gsearch-input" placeholder="Search tasks, clients, inventory, products, quotes, files…" value="${(initialQuery||'').replace(/"/g,'&quot;')}"
         style="width:100%;padding:12px 14px;border:1.5px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);font-size:15px;margin-bottom:14px"/>
       <div id="gsearch-results"><div class="empty-state" style="padding:30px"><div class="empty-icon">🔎</div><p>Type to search across the company.</p></div></div>`;
     const input = document.getElementById('gsearch-input');
@@ -2491,7 +2496,7 @@ async function renderPresidentMessageCard() {
       if(sources) return sources;
       const toArr = s => s.docs.map(d=>({id:d.id,...d.data()}));
       const safe = p => p.then(toArr).catch(()=>[]);
-      const [tasks, quotes, sc, dc, bsc, inv, prod] = await Promise.all([
+      const [tasks, quotes, sc, dc, bsc, inv, prod, files] = await Promise.all([
         (typeof dbCachedGet==='function'?dbCachedGet('tasks-all',()=>db.collection('tasks').get(),30000):db.collection('tasks').get()).then(toArr).catch(()=>[]),
         (typeof getAllQuotes==='function'?getAllQuotes():db.collection('bk_quotes').get()).then(toArr).catch(()=>[]),
         dbCachedGet('sales_clients',    () => db.collection('sales_clients').get().catch(()=>({docs:[]})), 60000).then(toArr).catch(()=>[]),
@@ -2499,10 +2504,14 @@ async function renderPresidentMessageCard() {
         dbCachedGet('bs_clients',       () => db.collection('bs_clients').get().catch(()=>({docs:[]})), 60000).then(toArr).catch(()=>[]),
         dbCachedGet('inventory_items',  () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000).then(toArr).catch(()=>[]),
         safe(db.collection('products').limit(1000).get()),
+        // hub_files ONLY (v12 WS38 decision 8) — legacy files_<scope> collections are
+        // frozen/unenumerable and NOT searched. Company-visible + mine + shared-with-me,
+        // via FilesHub's rules-provable 3-query fan-out, capped at 1000 like Products.
+        (typeof FilesHub!=='undefined' ? FilesHub.loadFiles(null).then(a=>a.slice(0,1000)) : Promise.resolve([])).catch(()=>[]),
       ]);
       sources = { tasks, quotes,
         clients: [...sc.map(x=>({...x,_brand:'sales'})), ...dc.map(x=>({...x,_brand:'design'})), ...bsc.map(x=>({...x,_brand:'bs'}))],
-        inv, prod };
+        inv, prod, files };
       return sources;
     }
 
@@ -2520,14 +2529,17 @@ async function renderPresidentMessageCard() {
       const inv     = S.inv.filter(i=>hit(q,i.name,i.category,i.supplier));
       const prod    = S.prod.filter(p=>hit(q,p.title,p.name,p.shortName,p.id,p.category));
       const quotes  = S.quotes.filter(qt=>hit(q,qt.quoteNumber,qt.clientName,qt.status));
-      const total = tasks.length+clients.length+inv.length+prod.length+quotes.length;
+      const files   = S.files.filter(f=>hit(q,f.name,f.description,f.scope));
+      const total = tasks.length+clients.length+inv.length+prod.length+quotes.length+files.length;
       if(!total){ out.innerHTML = `<div class="empty-state" style="padding:30px"><div class="empty-icon">🤷</div><h4>No results for "${esc(qRaw)}"</h4></div>`; return; }
+      _gsFilesStash = {}; files.forEach(f=>{ _gsFilesStash[f.id]=f; });
       out.innerHTML =
         groupHtml('✅','Tasks',tasks,t=>rowItem('📋',t.title||'(untitled)',(t.department||'')+(t.status?' · '+t.status:''),`window.openTaskDetail&&window.openTaskDetail('${t.id}',window.currentUser,window.currentRole)`)) +
         groupHtml('👤','Clients',clients,x=>rowItem('👤',x.name||x.company||'Client',(x.company||'')+(x.phone?' · '+x.phone:''),`navigateTo('${x._brand==='design'?'dept:Design':x._brand==='bs'?'bs-clients':'dept:Sales'}')`)) +
         groupHtml('📦','Inventory',inv,i=>rowItem('📦',i.name||'(item)',(i.category||'')+' · '+(i.qty||0)+' '+(i.unit||''),`navigateTo('inventory')`)) +
         groupHtml('🛒','Products',prod,p=>rowItem('🛒',p.title||p.name||p.id,(p.id||'')+(p.category?' · '+p.category:''),`navigateTo('product-database')`)) +
-        groupHtml('📄','Quotes',quotes,qt=>rowItem('📄',(qt.quoteNumber||'Quote')+(qt.clientName?' — '+qt.clientName:''),(qt.status||'draft'),`navigateTo('${(qt.quoteNumber||'').toString().toUpperCase().startsWith('BS')?'bs-quotations':'dept:Sales'}')`));
+        groupHtml('📄','Quotes',quotes,qt=>rowItem('📄',(qt.quoteNumber||'Quote')+(qt.clientName?' — '+qt.clientName:''),(qt.status||'draft'),`navigateTo('${(qt.quoteNumber||'').toString().toUpperCase().startsWith('BS')?'bs-quotations':'dept:Sales'}')`)) +
+        groupHtml('📁','Files',files,f=>rowItem(f.kind==='link'?'🔗':'📄',f.name||'File',(f.scope||'')+(f.department?' · '+f.department:''),`window.__gsOpenFile('${f.id}')`));
     }
 
     let _t; input.addEventListener('input',()=>{ clearTimeout(_t); _t=setTimeout(()=>runSearch(input.value),220); });
@@ -2535,3 +2547,93 @@ async function renderPresidentMessageCard() {
     if(initialQuery) runSearch(initialQuery);
   };
 })();
+
+// ═══════════════════════════════════════════════════
+//  FILES HUB (v12 WS38) — top-level "Files" page, all scopes
+//  Reuses window.renderFileCollection / window.bindFileCollection (js/departments.js,
+//  rewritten in WS38 to read/write hub_files) per selected scope, so this page adds
+//  zero new file-listing logic of its own — it's a scope switcher + admin all-scopes view.
+// ═══════════════════════════════════════════════════
+window.renderFilesHub = function(){
+  const c = document.getElementById('page-content');
+  if(!c) return;
+  const blocked = (typeof isPartner==='function' && isPartner()) || (typeof isBrilliantOnly==='function' && isBrilliantOnly());
+  if(blocked){ c.innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><h4>Files Hub is not available for this account</h4></div>'; return; }
+  const isAdminRole = ['president','manager','owner','secretary'].includes(window.currentRole);
+
+  // Seed list of the 12 known pre-WS38 scopes (Spec 9) — Brilliant Steel's
+  // per-subtab scopes are dynamic (data-driven by its own subtab list) and stay
+  // reachable through the Brilliant Steel department's own Files tab, unchanged.
+  const SEED_SCOPES = [
+    { key:'personal',        label:'Personal',          dept:'General'    },
+    { key:'shared',          label:'Department',        dept:'General'    },
+    { key:'all',             label:'All Company',       dept:'General'    },
+    { key:'advertising',     label:'Advertising',       dept:'Marketing'  },
+    { key:'designs',         label:'Marketing Designs', dept:'Marketing'  },
+    { key:'sss',             label:'SSS & Gov Docs',    dept:'Finance'    },
+    { key:'accounting',      label:'Accounting',        dept:'Finance'    },
+    { key:'proposals',       label:'Sales Proposals',   dept:'Sales'      },
+    { key:'product_designs', label:'Product Designs',   dept:'Design'     },
+    { key:'references',      label:'References',        dept:'Design'     },
+    { key:'files',           label:'Production',        dept:'Production' }
+  ];
+  const scopeByKey = {}; SEED_SCOPES.forEach(s=>{ scopeByKey[s.key]=s; });
+  const chips = [
+    ...(isAdminRole ? [{ key:'__all__', label:'🌐 All Scopes' }] : []),
+    ...SEED_SCOPES.map(s=>({ key:s.key, label:s.label }))
+  ];
+  const defaultKey = isAdminRole ? '__all__' : SEED_SCOPES[0].key;
+
+  c.innerHTML = `
+    <div class="page-header"><h2>📁 Files Hub</h2></div>
+    <input id="fh-hub-search" placeholder="Search my files…" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:14px;margin-bottom:12px"/>
+    ${window.chipTabs(chips, defaultKey, {cls:'fh-hub-scope-tabs'})}
+    <div id="fh-hub-content"></div>
+  `;
+
+  let allScopeFiles = [];
+  let _gsFilesStashHub = {};
+  const hit = (q, ...fields) => fields.some(f => (f||'').toString().toLowerCase().includes(q));
+  const loadScope = (key) => {
+    const fc = document.getElementById('fh-hub-content');
+    if (key === '__all__') {
+      fc.innerHTML = '<div class="loading-placeholder">Loading all files…</div>';
+      FilesHub.loadFiles(null).then(files => {
+        allScopeFiles = files;
+        renderAllScope();
+      });
+      return;
+    }
+    const seed = scopeByKey[key] || { label:key, dept:'General' };
+    fc.innerHTML = window.renderFileCollection(seed.label, `fh-hub-${key}`, window.currentRole);
+    window.bindFileCollection(`fh-hub-${key}`, window.currentUser, seed.dept, seed.key);
+  };
+
+  const renderAllScope = () => {
+    const fc = document.getElementById('fh-hub-content');
+    const q = (document.getElementById('fh-hub-search')?.value||'').trim().toLowerCase();
+    const showing = q ? allScopeFiles.filter(f=>hit(q,f.name,f.description,f.scope,f.department)) : allScopeFiles;
+    if (!showing.length) { fc.innerHTML = '<div class="empty-state" style="padding:24px"><div class="empty-icon">📁</div><h4>No files found</h4></div>'; return; }
+    _gsFilesStashHub = {}; showing.forEach(f=>{ _gsFilesStashHub[f.id]=f; });
+    fc.innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Name</th><th>Scope</th><th>Dept</th><th>Uploader</th><th>Date</th><th></th></tr></thead>
+      <tbody>${showing.map(f=>`<tr>
+        <td><a href="#" class="fh-hub-open" data-id="${f.id}" style="color:var(--primary);font-weight:600">${f.kind==='link'?'🔗 ':'📄 '}${escHtml(f.name||'File')}</a></td>
+        <td><span class="badge badge-gray">${escHtml(f.scope||'—')}</span></td>
+        <td style="font-size:12px">${escHtml(f.department||'—')}</td>
+        <td style="font-size:12px">${escHtml(f.uploaderName||'—')}</td>
+        <td style="font-size:11px;color:var(--text-muted)">${f.createdAt?new Date(f.createdAt.toDate()).toLocaleDateString('en-PH'):''}</td>
+        <td><a href="${safeHttpUrl(f.url)}" target="_blank" class="btn-secondary btn-sm">⬇</a></td>
+      </tr>`).join('')}</tbody></table></div>`;
+    fc.querySelectorAll('.fh-hub-open').forEach(el=>el.addEventListener('click', e=>{
+      e.preventDefault(); const f = _gsFilesStashHub[el.dataset.id]; if (f) window.openFilePreview(f);
+    }));
+  };
+
+  loadScope(defaultKey);
+  window.bindChipTabs(c.querySelector('.fh-hub-scope-tabs'), key => loadScope(key));
+  document.getElementById('fh-hub-search').addEventListener('input', () => {
+    const active = c.querySelector('.fh-hub-scope-tabs .chip-tab.active');
+    if (active && active.dataset.chip === '__all__') renderAllScope();
+  });
+};

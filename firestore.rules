@@ -1155,5 +1155,47 @@ service cloud.firestore {
       allow read:  if isAuth() && coll.matches('budgets_.*') && !isPartner();
       allow write: if isAuth() && coll.matches('budgets_.*') && isMoneyAdmin();
     }
+
+    // ── Files Hub (WS38) — unified file metadata + folder tree ─────────
+    // Deliberately NOT named files_*: the files_.* wildcard above would
+    // union-grant all-internal read and defeat per-file visibility/sharing.
+    // Sharing enforcement uses ONLY uid arrays (sharedUserIds/editorUserIds)
+    // — the canonical `uid in array` + array-contains-query pattern that
+    // Firestore can prove for list queries. Dept/role shares are expanded
+    // to uids client-side at share time. All .get(field, default) per the
+    // missing-field-throws memory (migrated docs predate some fields).
+    match /hub_files/{fileId} {
+      allow read: if isAuth() && (
+           isAdmin()
+        || resource.data.get('uploadedBy','') == request.auth.uid
+        || request.auth.uid in resource.data.get('sharedUserIds', [])
+        || (!isPartner() && resource.data.get('visibility','company') == 'company')
+      );
+      allow create: if isAuth() && !isPartner()
+        && request.resource.data.get('uploadedBy','') == request.auth.uid
+        && request.resource.data.get('visibility','company') in ['company','private']
+        && request.resource.data.get('deleted', false) == false;
+      // Owner/admin: any update (incl. sharing/visibility). Editors: content &
+      // organization fields only — NEVER the ACL/ownership fields.
+      allow update: if isAuth() && (
+           isAdmin()
+        || resource.data.get('uploadedBy','') == request.auth.uid
+        || (request.auth.uid in resource.data.get('editorUserIds', [])
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+                 ['name','description','fileType','folderId','archived',
+                  'deleted','deletedAt','deletedBy',
+                  'url','driveUrl','size','contentType','versions','currentV',
+                  'updatedAt']))
+      );
+      // Permanent delete = president only (Recycle Bin soft-delete/restore are updates).
+      allow delete: if isAuth() && isPresident();
+    }
+    match /hub_folders/{folderId} {
+      allow read:   if isAuth() && !isPartner();
+      allow create: if isAuth() && !isPartner()
+        && request.resource.data.get('createdBy','') == request.auth.uid;
+      allow update, delete: if isAuth() && !isPartner()
+        && (resource.data.get('createdBy','') == request.auth.uid || isAdmin());
+    }
   }
 }

@@ -61,7 +61,7 @@ finalizing 9's rename sweep so the two don't conflict.
 | 35 | [35-design-suite.md](35-design-suite.md) | ✅ DECIDED | Design dept suite — drawing "approval" has no real approver gate |
 | 36 | [36-finance-additions.md](36-finance-additions.md) | ✅ DECIDED | Finance additions — bank-accounts registry, no dimension exists anywhere |
 | 37 | [37-team-chat.md](37-team-chat.md) | ✅ DECIDED | Team Chat — real-time listeners are genuinely new territory (only 3 exist today) |
-| 38 | [38-files-hub.md](38-files-hub.md) | ✅ DECIDED | Files Hub — found dead shadowed code; per-file sharing is architecturally hard |
+| 38 | [38-files-hub.md](38-files-hub.md) | ✅ DECIDED · ✅ IMPLEMENTED (2026-07-11) | Files Hub — found dead shadowed code; per-file sharing is architecturally hard |
 
 ## Phase 5 — Intelligence & BIR
 
@@ -70,7 +70,9 @@ finalizing 9's rename sweep so the two don't conflict.
 | 39 | [39-bir-suite.md](39-bir-suite.md) | ✅ DECIDED | BIR suite — a 3000-row report-truncation landmine found; VAT partially already netted |
 | 40 | [40-analytics.md](40-analytics.md) | ✅ DECIDED | Analytics with conclusions — 13 charts hardcode colors that clash with the new theme |
 
-## Status — Phase 4+5: ALL 13 DECIDED ✅ (2026-07-11), none implemented yet
+## Status — Phase 4+5: ALL 13 DECIDED ✅ (2026-07-11); WS38 (Files Hub) IMPLEMENTED (2026-07-11,
+code-complete — firestore.rules/indexes changed but not deployed, migration script written but
+not run, see V12-PLAN.md Build Log); rest not yet implemented
 
 **Decided (Fable decision session #4, 2026-07-10): WS28, WS32, WS33, WS36, WS37.**
 **Decided (Fable decision session #5, 2026-07-11): Wave A — WS29, WS38, WS39 (commit

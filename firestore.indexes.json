@@ -88,6 +88,65 @@
         { "fieldPath": "partnerUid", "order": "ASCENDING"  },
         { "fieldPath": "createdAt",  "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "hub_files",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "scope",   "order": "ASCENDING" },
+        { "fieldPath": "deleted", "order": "ASCENDING" },
+        { "fieldPath": "visibility", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "hub_files",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "scope",      "order": "ASCENDING" },
+        { "fieldPath": "deleted",    "order": "ASCENDING" },
+        { "fieldPath": "uploadedBy", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "hub_files",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sharedUserIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "scope",         "order": "ASCENDING" },
+        { "fieldPath": "deleted",       "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "hub_files",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "deleted",    "order": "ASCENDING" },
+        { "fieldPath": "visibility", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "hub_files",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "deleted",    "order": "ASCENDING" },
+        { "fieldPath": "uploadedBy", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "hub_files",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "sharedUserIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "deleted",       "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "hub_folders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "scope",      "order": "ASCENDING" },
+        { "fieldPath": "department", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
