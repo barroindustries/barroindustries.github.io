@@ -8,6 +8,50 @@ _Last updated: 2026-07-01 — base version **v11.0.51**, cache `bi-ops-v136` (bo
 
 ---
 
+## 🆕 SESSION 2026-07-11/12 — WS42 Complete UI Overhaul, Batch F (FINAL batch): motion, performance, cross-theme/device QA, docs
+
+**v12 WS42** — see `V12-PLAN.md` item 42 and `fable-workplan/42-ui-overhaul.md` for the full
+30-phase spec. This session closed out the last 5 phases (26-30) of the six-batch build (A-E
+were prior sessions: `d1e2bac`, `9f0f0bc`, `9092b49`, `1ba7035`, `82b9433`).
+
+- **Motion (Phase 26):** standardized 160ms page-enter fade/rise on `#page-content > *` — pure
+  CSS, no JS hook (fresh DOM nodes from `navigateTo()` auto-play it). Found and fixed **five
+  unconditional infinite `animation:` loops** left over from earlier batches that ran in
+  Light/Dark, not just Astral (`.subtab-btn.active`, `.id-card::before` gold shine,
+  `.id-flip-hint` bounce, `.progress-bar-fill`, `#mini-cal td.today`) — all now
+  `html.theme-astral`-scoped.
+- **Performance (Phase 27):** the handoff's flagged `backdrop-filter` leftovers
+  (`.quote-sheet`, `.team-member-card`, `.alert-banner`, `.quick-action-btn`, `.dept-card`,
+  `.policy-card`, `.upload-area`) were **still live** — root cause was a stray unscoped
+  `:root { --glass-blur-sm: ...; --glass-surface: ...; }` block leaking real glass tokens into
+  every theme; rescoped to `html.theme-astral` and gave the seven components proper
+  Light/Dark base rules. Deleted the dead `theme-midnight`/`theme-office`/`theme-pink`/
+  `theme-grey` CSS blocks and collapsed 94 `html.light .foo, html.theme-pink .foo,
+  html.theme-grey .foo` compound selectors to plain `html.light .foo`. `styles.css`:
+  239,812 → 228,307 bytes. Added `content-visibility`/`contain-intrinsic-size` to
+  task-feed/chat-inbox/team-grid/data-table rows, and font preconnects to index.html.
+- **Cross-theme QA (Phase 28):** converted ~66 hardcoded hex colors to tokens (Analytics KPI
+  captions, dashboard/Company-Overview icon-tile stroke+background pairs that were literal
+  copies of the Astral palette regardless of active theme). **Flagged for Neil:** Dark theme's
+  `on-primary`/`primary` button-text contrast measures **2.90:1** (fails WCAG AA 4.5:1) —
+  needs a token decision, not changed this batch since it's shared by every button/badge.
+  `html.light` survivors: 95 single-selector rules (down from ~189 compound selectors),
+  reviewed and listed as consciously-kept per component in V12-PLAN.md's build log
+  (`.id-card` is the biggest cluster — its base isn't token-driven by design; flagged as a
+  candidate for a future dedicated redesign).
+- **Cross-device QA (Phase 29):** resize sweep at all eight spec breakpoints against the login
+  screen (only surface reachable pre-login) — zero horizontal-overflow offenders, zero new
+  console errors, at every width. Topbar/sidebar/bottom-nav/dashboard/chat need a live-login
+  pass (flagged, not done headlessly).
+- **Docs (Phase 30):** `sw.js` PRECACHE / script order verified complete; `node --check` clean
+  on all `js/*.js`; live-preview verified `window.Gestures`, `window.deptIconTile`/`iconTile`,
+  `THEMES` keys `auto/light/dark/astral`; updated the in-app Help page's stale "sun/moon icon"
+  copy to describe the Light/Dark/Astral profile-drawer picker.
+- **Not pushed** — commit is local only; Neil approves the push. **No `firestore.rules` /
+  `firestore.indexes.json` changes.**
+
+---
+
 ## 🆕 SESSION 2026-07-08b — KPI 5th-gate, payroll safety, roomier modals, client order-tracking link
 
 - **Employee of the Month → revealed & awarded on the 5th.** `renderEomBanner`/`computeEomStandings` (modules.js) now score a **completed** month, not a live running total: from the 5th we show **last month's** finalised winner, before the 5th the month before (matches the payroll "finalise by the 5th" cutoff). New `ymShift()` helper; `computeEomStandings(users, monthStr)` scores the whole past month (attendance range = full month, workdays = whole month). Standings modal + citation reworded ("Final standings for June 2026 · revealed & awarded on the 5th").

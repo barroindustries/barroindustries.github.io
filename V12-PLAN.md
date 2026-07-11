@@ -297,6 +297,42 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     set (spec's Decision 14) wasn't explicitly confirmed by Neil — shipped with a sensible
     default, reversible one-line change.
 
+42. `[x]` **Complete UI overhaul — Light/Dark/Astral themes, mobile-first shell, Messenger-grade
+    chat, BI icon-tile system, motion/perf/QA pass** — 30-phase spec (`fable-workplan/42-ui-overhaul.md`),
+    executed in six batches (Sonnet, max effort) per the spec's own batching. **DECIDED +
+    IMPLEMENTED 2026-07-11/12.** Commits: `d1e2bac` (Batch A — semantic tokens + Light/Dark/Astral
+    theme foundation + switcher migration), `9f0f0bc` (Batch B — shell + core components: topbar,
+    sidebar, bottom nav, cards/buttons/inputs/chips/tables, modals/sheets/toasts), `9092b49`
+    (Batch C — safe-area audit, `js/gestures.js` edge swipe-back + sheet swipe-dismiss, touch
+    ergonomics, overflow fixes, tablet tier), `1ba7035` (Batch D — Messenger-grade chat: inbox,
+    bubbles, wallpapers, composer, mobile shell), `82b9433` (Batch E — BI icon-tile system,
+    ~1000-glyph emoji→Lucide sweep, dashboard widget restyle, minimal login/splash), and Batch F
+    (this session — motion system, performance pass, cross-theme/cross-device QA, docs; see
+    Build Log for the exact fixes and the commit hash once it lands).
+    **Batch F specifics:** standardized 160ms page-enter (`#page-content > *`, pure CSS, no JS
+    hook — new elements auto-play on insert) + a capped 8-item CSS-only stagger on the team
+    grid; found and fixed several real perf-budget violations left over from earlier batches —
+    `.quote-sheet`, `.team-member-card`, `.alert-banner`, `.quick-action-btn`, `.dept-card`,
+    `.policy-card`, `.upload-area` all had unconditional `backdrop-filter` (root cause: a stray
+    unscoped `:root { --glass-blur-sm: ... }` "Liquid Glass Design Layer v1" block leaked real
+    blur/glass tokens into Light/Dark — rescoped to `html.theme-astral`), plus five unconditional
+    infinite `animation:` loops (`.subtab-btn.active`, `.id-card::before` gold shine,
+    `.id-flip-hint` bounce, `.progress-bar-fill`, `#mini-cal td.today`) now Astral-scoped; deleted
+    the dead `theme-midnight`/`theme-office`/`theme-pink`/`theme-grey` token blocks and collapsed
+    94 `html.light .foo, html.theme-pink .foo, html.theme-grey .foo` compound selectors down to
+    plain `html.light .foo` (setTheme's legacy-class cleanup list in app.js kept untouched, as
+    instructed); `content-visibility:auto` + `contain-intrinsic-size` on task-feed/chat-inbox/
+    team-grid/data-table rows; font preconnects for fonts.googleapis.com/gstatic.com added to
+    index.html; converted ~66 hardcoded hex colors to semantic tokens (`color:#8e8e93` →
+    `var(--text-muted)` ×10, dashboard/Company-Overview icon-tile stroke+background pairs →
+    `var(--info|success|danger|warning|primary)(-soft)` ×56); updated the in-app Help page's
+    stale "sun/moon icon" copy to describe the Light/Dark/Astral profile-drawer picker. Full
+    cross-device resize sweep (360×740 through 1280×800) and cross-theme contrast check done
+    live in preview — see Build Log for results and the one flagged item (Dark theme's
+    on-primary/primary button contrast measures 2.90:1, below WCAG AA 4.5:1 — needs a design
+    decision from Neil, not touched this batch since it's a shared token affecting every button).
+    **Not pushed** — Neil approves the push.
+
 ---
 
 ## Per-department printable documents (all on the ONE formal letterhead — workstream 14)
@@ -1314,3 +1350,92 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   server-side (until then, the UI-side gate in `changeDrawingStatus` is the only backstop).
   `CACHE_VER` in sw.js and `APP_VERSION` in js/config.js were deliberately left untouched per
   this task's constraints (pre-commit hook / main session's responsibility).
+
+- **2026-07-11/12 (WS42 Batch F — motion, performance, cross-theme/device QA, docs, FINAL
+  batch):** Phases 26-30 of the WS42 UI overhaul (see item 42 above for the full batch A-E
+  commit list). **Phase 26 (motion):** `#page-content > *` gets a standardized 160ms
+  fade/4px-rise `pageEnter` keyframe — pure CSS, no JS trigger needed (navigateTo() always
+  replaces innerHTML with fresh nodes, so the animation just plays on insert); a capped
+  8-item stagger added to `.team-masonry > .team-member-card`. Re-grepped every
+  `animation: ... infinite` in styles.css and found **five real perf-budget violations** left
+  over from earlier batches, none previously flagged: `.subtab-btn.active` (gradRun),
+  `.id-card::before` (goldShine), `.id-flip-hint span` (ptr-bounce), `.progress-bar-fill`
+  (gradRun), `#mini-cal td.today` (gradRun) — all ran continuously in Light/Dark, not just
+  Astral. Fixed by stripping the animation from the base rule and adding an
+  `html.theme-astral .foo { animation: ... }` override (base keeps the same visual, just static).
+  The existing global `prefers-reduced-motion` kill switch (styles.css ~5245) was already
+  correct and needed no change. **Phase 27 (performance):** re-ran `grep -n backdrop-filter`
+  and found the handoff's flagged leftovers were still live — `.quote-sheet`, `.team-member-card`,
+  `.alert-banner`, `.quick-action-btn`, `.dept-card`, `.policy-card`, `.upload-area` all had
+  unconditional `backdrop-filter`. Root cause: a second, unscoped `:root { --glass-blur-sm: ...;
+  --glass-surface: ...; }` block ("Liquid Glass Design Layer v1", ~line 3563) defined the same
+  custom properties `html.theme-astral` already defined (2698 region) but at the `:root` level —
+  since Light/Dark never override those properties, the blur/glass values leaked through to
+  every theme. Rescoped that whole block to `html.theme-astral` (its stronger blur values now
+  correctly become Astral's effective glass strength) and prefixed the seven component blocks
+  above with `html.theme-astral`, giving `.team-member-card` a proper flat Light/Dark base rule
+  it never had. Added `content-visibility:auto` + `contain-intrinsic-size` to `.task-feed-item`
+  (48px), `.chat-inbox-row` (56px), `.team-masonry > .team-member-card` (150px), and
+  `.data-table tbody tr` (42px) — flagged for a live-data layout-jump check, not verifiable
+  headlessly. Added `<link rel="preconnect">` for fonts.googleapis.com + fonts.gstatic.com to
+  index.html (the Inter font loads via `@import` inside styles.css, so those origins weren't
+  discoverable until the stylesheet parsed). Deleted the dead `theme-midnight`/`theme-office`/
+  `theme-pink`/`theme-grey` token blocks entirely (all confirmed inert — `initTheme()` migrates
+  every legacy stored name to light/dark on load) and collapsed 94
+  `html.light .foo, html.theme-pink .foo, html.theme-grey .foo` compound selectors down to plain
+  `html.light .foo` via a python regex pass (verified brace-balanced after: 1488/1488). Also
+  found and removed a fully-superseded duplicate splash-screen CSS block (dead
+  `.splash-wordmark`/`@keyframes splashIn`, values overridden by the real token-driven splash
+  block later in the file) and three `html.light .quick-action-btn/.dept-card/.policy-card`
+  translucent-white (0.55 alpha) overrides that fought the token-driven flat design the base
+  rules already provide. `styles.css`: 239,812 → 228,307 bytes (−11,505, ≈4.8%) despite adding
+  new rules, net of the dead-code removal. **Phase 28 (cross-theme QA):** swept JS template
+  literals for hardcoded hex colors; fixed `color:#8e8e93` → `var(--text-muted)` (10× app.js,
+  Analytics KPI captions) and 56 dashboard/Company-Overview icon-tile `stroke:#hex` +
+  `background:rgba(...)` pairs → `var(--info|success|danger|warning|primary)` / `-soft` (these
+  were literal copies of the Astral `:root` token values, so icon tiles showed astral hues
+  regardless of the active theme — now theme-correct). Left print/letterhead/payslip/invoice
+  hex colors untouched (js/letterhead.js, payslip/invoice print CSS in app.js/departments.js) —
+  those are fixed-white-paper documents by design, same exception class as Company-Overview.
+  Contrast measured live in preview (alpha-composited against `--surface`, not raw hex): Light
+  text/surface 16.71:1, text-2/surface 6.60:1 — both comfortably pass; **Dark on-primary/primary
+  (white button text on `--primary` #4599FF) measures 2.90:1 — fails WCAG AA 4.5:1 and even the
+  3:1 large-text minimum is marginal. Not fixed this batch** (changing `--primary`/`--on-primary`
+  touches every button/badge/nav-active-state app-wide — needs Neil's call, not a rushed token
+  edit). `--text-muted` sits at 3.08:1 (Light) / 3.79:1 (Dark) / ~4.1:1 (Astral) — below 4.5:1
+  but consistent with its intentional "tertiary/de-emphasized" role (same tier as iOS
+  tertiaryLabel); not flagged as a defect. Remaining `html.light .foo` single-selector rules:
+  95, down from ~189 compound selectors pre-batch — the survivors are legitimate per-component
+  overrides (`.id-card-*` ~30, since the base `.id-card` is a deliberately non-token-driven dark
+  glossy design; `.co-*`/`.handbook-*` ~15, Company Overview — the spec's own named exception;
+  badges/alert/help/profile/topbar-brand-gradient/task-feed/payslip-row/kpi-bar-track/
+  scrollbar/sidebar-overlay/btn-logout-inline/btn-success/btn-danger — each a hand-picked
+  color choice for that one component, not compound tech debt anymore since the theme-pink/
+  theme-grey duplication is gone). Full redesign of `.id-card` to be pixel-token-driven is
+  flagged as a candidate for a future dedicated pass, out of scope here. **Phase 29
+  (cross-device QA):** resize sweep at all eight spec breakpoints (360×740, 375×812, 390×844,
+  414×896, 768×1024, 820×1180, 1024×768, 1280×800) against the login screen (the only surface
+  reachable without live credentials) — zero horizontal-overflow offenders at every width
+  (`[...document.querySelectorAll('*')].filter(e=>e.scrollWidth>e.clientWidth+1)` returned `[]`
+  every time), zero new console errors beyond the pre-existing benign
+  `enableIndexedDbPersistence not available` Firestore warning, `overscroll-behavior-y: none`
+  and transparent `-webkit-tap-highlight-color` confirmed via computed style. Topbar/sidebar/
+  bottom-nav/dashboard/chat/modals could not be exercised headlessly (need a live login) —
+  flagged below for Neil's manual pass. **Phase 30 (integration/docs):** `sw.js` PRECACHE
+  confirmed to include every script index.html loads (incl. `js/gestures.js`); `node --check`
+  clean on all 13 `js/*.js` files; live preview confirmed `window.Gestures` (`{enable,disable}`),
+  `window.deptIconTile`/`window.iconTile` (functions), and `THEMES` keys
+  `auto/light/dark/astral` all present; updated both "sun/moon icon" mentions in the in-app
+  Help page (js/app.js) to describe the Light/Dark/Astral picker in the profile drawer instead;
+  this V12-PLAN.md entry + item 42 above, the ROADMAP.md session note, and the
+  `fable-workplan/42-ui-overhaul.md` header IMPLEMENTED stamp are this batch's doc updates.
+  **Needs live-login verification (flagged, not done headlessly):** topbar/sidebar/bottom-nav/
+  dept-switcher/chat/dashboard/modals-as-sheets rendering across the device sweep and both
+  Dark/Astral themes past the login screen; the `content-visibility` contain-intrinsic-size
+  estimates against real (possibly taller) row content — watch for scrollbar jump on task
+  lists, chat inbox, team grid, and finance tables with long content. **Deferred/flagged for
+  Neil:** Dark theme's on-primary/primary button contrast (2.90:1, needs a token decision);
+  `.id-card` full token-driven redesign (currently ~30 `html.light` overrides just to flatten
+  its hardcoded dark-glossy base — works, but is the single biggest remaining
+  `html.light`-survivor cluster). **Not pushed** — commit is local only, per the WS42 spec;
+  Neil approves the push. No `firestore.rules`/`firestore.indexes.json` changes in this batch.

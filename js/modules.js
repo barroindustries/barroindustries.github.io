@@ -115,7 +115,7 @@ async function loadPosts(dept) {
         return `
         <div class="post-card post-memo-card" data-id="${p.id}" data-memo-id="${escHtml(p.memoId)}" style="cursor:pointer;border-left:3px solid var(--primary,#0A84FF)">
           <div class="post-header">
-            <div class="post-avatar" style="background:rgba(10,132,255,0.12)">${emojiIcon('📋',16)}</div>
+            <div class="post-avatar" style="background:var(--info-soft)">${emojiIcon('📋',16)}</div>
             <div class="post-meta">
               <div class="post-author">${escHtml(p.authorName||'Management')}</div>
               <div class="post-time">${escHtml(ts)} · Memo</div>

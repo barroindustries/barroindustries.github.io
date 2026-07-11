@@ -40,6 +40,12 @@
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin/>
   <link rel="preconnect" href="https://storage.googleapis.com" crossorigin/>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin/>
+  <!-- v12 WS42 Phase 27 — the Inter font is loaded via @import inside css/styles.css,
+       so these origins aren't discovered until the stylesheet itself is parsed;
+       preconnecting here lets the DNS+TLS handshake happen in parallel instead
+       of serially after that discovery. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link rel="dns-prefetch" href="https://unpkg.com"/>
 
   <!-- Stylesheet — browser downloads in parallel with scripts below -->
@@ -163,7 +169,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.42 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.43 · Barro Industries</div>
   </div>
 </div>
 

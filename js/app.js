@@ -2568,45 +2568,45 @@ async function renderPresidentDashboard() {
 
       <div class="kpi-row">
         <div class="kpi-card">
-          <div class="kpi-icon-wrap" style="background:rgba(10,132,255,0.12)"><i data-lucide="users" style="stroke:#0A84FF;width:18px"></i></div>
+          <div class="kpi-icon-wrap" style="background:var(--info-soft)"><i data-lucide="users" style="stroke:var(--info);width:18px"></i></div>
           <div class="kpi-label">Team</div>
           <div class="kpi-value">${users.length}</div>
         </div>
         <div class="kpi-card ${openTasks.length>0?'accent':''}">
-          <div class="kpi-icon-wrap" style="background:rgba(155,168,255,0.12)"><i data-lucide="check-square" style="stroke:#9BA8FF;width:18px"></i></div>
+          <div class="kpi-icon-wrap" style="background:var(--primary-soft)"><i data-lucide="check-square" style="stroke:var(--primary);width:18px"></i></div>
           <div class="kpi-label">Open Tasks</div>
           <div class="kpi-value">${openTasks.length}</div>
           <div class="kpi-sub">${doneTasks.length} done · ${highPriority} high</div>
         </div>
         <div class="kpi-card ${overdueTasks.length>0?'red':''}">
-          <div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="alert-triangle" style="stroke:#FF453A;width:18px"></i></div>
+          <div class="kpi-icon-wrap" style="background:var(--danger-soft)"><i data-lucide="alert-triangle" style="stroke:var(--danger);width:18px"></i></div>
           <div class="kpi-label">Overdue</div>
           <div class="kpi-value">${overdueTasks.length}</div>
         </div>
         <div class="kpi-card green">
-          <div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="trending-up" style="stroke:#30D158;width:18px"></i></div>
+          <div class="kpi-icon-wrap" style="background:var(--success-soft)"><i data-lucide="trending-up" style="stroke:var(--success);width:18px"></i></div>
           <div class="kpi-label">Quote Pipeline</div>
           <div class="kpi-value" style="font-size:15px">₱${formatNum(totalQuotes)}</div>
         </div>
         <div class="kpi-card warn">
-          <div class="kpi-icon-wrap" style="background:rgba(255,170,0,0.12)"><i data-lucide="banknote" style="stroke:#FFAA00;width:18px"></i></div>
+          <div class="kpi-icon-wrap" style="background:var(--warning-soft)"><i data-lucide="banknote" style="stroke:var(--warning);width:18px"></i></div>
           <div class="kpi-label">Monthly Payroll</div>
           <div class="kpi-value" style="font-size:15px">₱${formatNum(payrollBurn)}</div>
         </div>
         <div class="kpi-card ${mtdNet>=0?'green':'red'}" style="cursor:pointer" onclick="navigateTo('dept:Finance')">
-          <div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="line-chart" style="stroke:#30D158;width:18px"></i></div>
+          <div class="kpi-icon-wrap" style="background:var(--success-soft)"><i data-lucide="line-chart" style="stroke:var(--success);width:18px"></i></div>
           <div class="kpi-label">Net Income (MTD)</div>
           <div class="kpi-value" style="font-size:15px;color:${mtdNet>=0?'var(--success)':'var(--danger)'}">₱${formatNum(mtdNet)}</div>
           <div style="margin-top:3px">${window.momDelta ? window.momDelta(mtdNet, prevNet, true) : ''}</div>
         </div>
         <div class="kpi-card ${arOverdue>0?'red':''}" style="cursor:pointer" onclick="navigateTo('dept:Finance')">
-          <div class="kpi-icon-wrap" style="background:rgba(155,168,255,0.12)"><i data-lucide="hand-coins" style="stroke:#9BA8FF;width:18px"></i></div>
+          <div class="kpi-icon-wrap" style="background:var(--primary-soft)"><i data-lucide="hand-coins" style="stroke:var(--primary);width:18px"></i></div>
           <div class="kpi-label">A/R Outstanding</div>
           <div class="kpi-value" style="font-size:15px">₱${formatNum(arOutstanding)}</div>
           ${arOverdue>0?`<div class="kpi-sub" style="color:var(--danger)">₱${formatNum(arOverdue)} overdue 90+d</div>`:''}
         </div>
         <div class="kpi-card ${lowStock>0?'red':''}" style="cursor:pointer" onclick="navigateTo('inventory')">
-          <div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="boxes" style="stroke:#FF453A;width:18px"></i></div>
+          <div class="kpi-icon-wrap" style="background:var(--danger-soft)"><i data-lucide="boxes" style="stroke:var(--danger);width:18px"></i></div>
           <div class="kpi-label">Low Stock</div>
           <div class="kpi-value">${lowStock}</div>
           <div class="kpi-sub">${lowStock>0?'needs reorder':'all stocked'}</div>
@@ -2736,10 +2736,10 @@ async function renderManagerDashboard() {
       ${overdueT.length?`<div class="alert-banner alert-danger" onclick="navigateTo('tasks')"><span>${emojiIcon('⚠️',16)} <strong>${overdueT.length} overdue</strong> in your ${depts.length>1?'departments':'department'}</span><span class="alert-chevron">›</span></div>`:''}
       ${deptPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>${emojiIcon('📋',16)} <strong>${deptPending} pending</strong> approval${deptPending>1?'s':''} / request${deptPending>1?'s':''}</span><span class="alert-chevron">›</span></div>`:''}
       <div class="kpi-row">
-        <div class="kpi-card"><div class="kpi-icon-wrap" style="background:rgba(10,132,255,0.12)"><i data-lucide="users" style="stroke:#0A84FF;width:18px"></i></div><div class="kpi-label">Team</div><div class="kpi-value">${team.length}</div></div>
-        <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="user-check" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Present today</div><div class="kpi-value">${present}</div><div class="kpi-sub">${half} half · ${unmarked} not in yet</div></div>
-        <div class="kpi-card ${openT.length?'accent':''}"><div class="kpi-icon-wrap" style="background:rgba(155,168,255,0.12)"><i data-lucide="check-square" style="stroke:#9BA8FF;width:18px"></i></div><div class="kpi-label">Open Tasks</div><div class="kpi-value">${openT.length}</div><div class="kpi-sub">${doneT.length} done</div></div>
-        <div class="kpi-card ${overdueT.length?'red':''}"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="alert-triangle" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Overdue</div><div class="kpi-value">${overdueT.length}</div></div>
+        <div class="kpi-card"><div class="kpi-icon-wrap" style="background:var(--info-soft)"><i data-lucide="users" style="stroke:var(--info);width:18px"></i></div><div class="kpi-label">Team</div><div class="kpi-value">${team.length}</div></div>
+        <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:var(--success-soft)"><i data-lucide="user-check" style="stroke:var(--success);width:18px"></i></div><div class="kpi-label">Present today</div><div class="kpi-value">${present}</div><div class="kpi-sub">${half} half · ${unmarked} not in yet</div></div>
+        <div class="kpi-card ${openT.length?'accent':''}"><div class="kpi-icon-wrap" style="background:var(--primary-soft)"><i data-lucide="check-square" style="stroke:var(--primary);width:18px"></i></div><div class="kpi-label">Open Tasks</div><div class="kpi-value">${openT.length}</div><div class="kpi-sub">${doneT.length} done</div></div>
+        <div class="kpi-card ${overdueT.length?'red':''}"><div class="kpi-icon-wrap" style="background:var(--danger-soft)"><i data-lucide="alert-triangle" style="stroke:var(--danger);width:18px"></i></div><div class="kpi-label">Overdue</div><div class="kpi-value">${overdueT.length}</div></div>
       </div>
       <div class="dashboard-grid">
         <div class="card">
@@ -2836,10 +2836,10 @@ async function renderSecretaryDashboard() {
       ${totalPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>${emojiIcon('📋',16)} <strong>${totalPending} request${totalPending>1?'s':''}</strong> awaiting the President's approval — review the queue</span><span class="alert-chevron">›</span></div>`:''}
       ${pendingDeletes?`<div class="alert-banner alert-danger" onclick="navigateTo('approvals')"><span>${emojiIcon('🗑',16)} <strong>${pendingDeletes} deletion request${pendingDeletes>1?'s':''}</strong> pending President approval</span><span class="alert-chevron">›</span></div>`:''}
       <div class="kpi-row">
-        <div class="kpi-card"><div class="kpi-icon-wrap" style="background:rgba(10,132,255,0.12)"><i data-lucide="users" style="stroke:#0A84FF;width:18px"></i></div><div class="kpi-label">People</div><div class="kpi-value">${activeStaff}</div></div>
-        <div class="kpi-card ${totalPending?'accent':''}" style="cursor:pointer" onclick="navigateTo('approvals')"><div class="kpi-icon-wrap" style="background:rgba(255,170,0,0.12)"><i data-lucide="shield-check" style="stroke:#FFAA00;width:18px"></i></div><div class="kpi-label">Pending Approvals</div><div class="kpi-value">${totalPending}</div></div>
-        <div class="kpi-card ${openT.length?'accent':''}"><div class="kpi-icon-wrap" style="background:rgba(155,168,255,0.12)"><i data-lucide="check-square" style="stroke:#9BA8FF;width:18px"></i></div><div class="kpi-label">Open Tasks</div><div class="kpi-value">${openT.length}</div></div>
-        <div class="kpi-card ${overdueT.length?'red':''}"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="alert-triangle" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Overdue</div><div class="kpi-value">${overdueT.length}</div></div>
+        <div class="kpi-card"><div class="kpi-icon-wrap" style="background:var(--info-soft)"><i data-lucide="users" style="stroke:var(--info);width:18px"></i></div><div class="kpi-label">People</div><div class="kpi-value">${activeStaff}</div></div>
+        <div class="kpi-card ${totalPending?'accent':''}" style="cursor:pointer" onclick="navigateTo('approvals')"><div class="kpi-icon-wrap" style="background:var(--warning-soft)"><i data-lucide="shield-check" style="stroke:var(--warning);width:18px"></i></div><div class="kpi-label">Pending Approvals</div><div class="kpi-value">${totalPending}</div></div>
+        <div class="kpi-card ${openT.length?'accent':''}"><div class="kpi-icon-wrap" style="background:var(--primary-soft)"><i data-lucide="check-square" style="stroke:var(--primary);width:18px"></i></div><div class="kpi-label">Open Tasks</div><div class="kpi-value">${openT.length}</div></div>
+        <div class="kpi-card ${overdueT.length?'red':''}"><div class="kpi-icon-wrap" style="background:var(--danger-soft)"><i data-lucide="alert-triangle" style="stroke:var(--danger);width:18px"></i></div><div class="kpi-label">Overdue</div><div class="kpi-value">${overdueT.length}</div></div>
       </div>
       <div class="dashboard-grid">
         <div class="card">
@@ -2950,12 +2950,12 @@ async function renderFinanceDashboard() {
       <div id="fin-dash-period">${window.periodPicker(period, {closedBadge:true})}</div>
       ${pendingExp.length?`<div class="alert-banner alert-warn" onclick="navigateTo('cash-advances')"><span>${emojiIcon('💸',16)} <strong>${pendingExp.length} expense${pendingExp.length>1?'s':''}</strong> awaiting approval · ₱${formatNum(pendingExpTotal)}</span><span class="alert-chevron">›</span></div>`:''}
       <div class="kpi-row">
-        <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="trending-up" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Income (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdIncome)}</div></div>
-        <div class="kpi-card red"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="trending-down" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Expense (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdExpense)}</div></div>
-        <div class="kpi-card ${mtdNet>=0?'green':'red'}"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="line-chart" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Net Income (${plabel})</div><div class="kpi-value" style="font-size:15px;color:${mtdNet>=0?'var(--success)':'var(--danger)'}">₱${formatNum(mtdNet)}</div>${period==='month'&&window.momDelta?`<div style="margin-top:2px">${window.momDelta(mtdNet, prevNet, true)}</div>`:''}</div>
-        <div class="kpi-card warn"><div class="kpi-icon-wrap" style="background:rgba(255,170,0,0.12)"><i data-lucide="banknote" style="stroke:#FFAA00;width:18px"></i></div><div class="kpi-label">Payroll (run-rate)</div><div class="kpi-value" style="font-size:15px">₱${formatNum(payrollNet)}</div><div class="kpi-sub">${users.length} staff · already in Expense</div></div>
-        <div class="kpi-card ${pendingExpTotal>0?'accent':''}" style="cursor:pointer" onclick="navigateTo('cash-advances')"><div class="kpi-icon-wrap" style="background:rgba(155,168,255,0.12)"><i data-lucide="receipt" style="stroke:#9BA8FF;width:18px"></i></div><div class="kpi-label">Payables (pending)</div><div class="kpi-value" style="font-size:15px">₱${formatNum(pendingExpTotal)}</div></div>
-        <div class="kpi-card ${lowStock>0?'red':''}" style="cursor:pointer" onclick="navigateTo('inventory')"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="boxes" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Low Stock</div><div class="kpi-value">${lowStock}</div></div>
+        <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:var(--success-soft)"><i data-lucide="trending-up" style="stroke:var(--success);width:18px"></i></div><div class="kpi-label">Income (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdIncome)}</div></div>
+        <div class="kpi-card red"><div class="kpi-icon-wrap" style="background:var(--danger-soft)"><i data-lucide="trending-down" style="stroke:var(--danger);width:18px"></i></div><div class="kpi-label">Expense (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdExpense)}</div></div>
+        <div class="kpi-card ${mtdNet>=0?'green':'red'}"><div class="kpi-icon-wrap" style="background:var(--success-soft)"><i data-lucide="line-chart" style="stroke:var(--success);width:18px"></i></div><div class="kpi-label">Net Income (${plabel})</div><div class="kpi-value" style="font-size:15px;color:${mtdNet>=0?'var(--success)':'var(--danger)'}">₱${formatNum(mtdNet)}</div>${period==='month'&&window.momDelta?`<div style="margin-top:2px">${window.momDelta(mtdNet, prevNet, true)}</div>`:''}</div>
+        <div class="kpi-card warn"><div class="kpi-icon-wrap" style="background:var(--warning-soft)"><i data-lucide="banknote" style="stroke:var(--warning);width:18px"></i></div><div class="kpi-label">Payroll (run-rate)</div><div class="kpi-value" style="font-size:15px">₱${formatNum(payrollNet)}</div><div class="kpi-sub">${users.length} staff · already in Expense</div></div>
+        <div class="kpi-card ${pendingExpTotal>0?'accent':''}" style="cursor:pointer" onclick="navigateTo('cash-advances')"><div class="kpi-icon-wrap" style="background:var(--primary-soft)"><i data-lucide="receipt" style="stroke:var(--primary);width:18px"></i></div><div class="kpi-label">Payables (pending)</div><div class="kpi-value" style="font-size:15px">₱${formatNum(pendingExpTotal)}</div></div>
+        <div class="kpi-card ${lowStock>0?'red':''}" style="cursor:pointer" onclick="navigateTo('inventory')"><div class="kpi-icon-wrap" style="background:var(--danger-soft)"><i data-lucide="boxes" style="stroke:var(--danger);width:18px"></i></div><div class="kpi-label">Low Stock</div><div class="kpi-value">${lowStock}</div></div>
       </div>
       <div class="card" style="margin-bottom:16px">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3>${emojiIcon('📥',20)} Receivables Aging <span style="font-size:11px;color:var(--text-muted);font-weight:400">· by invoice due date</span></h3><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:800">₱${formatNum(arTotal)}</span>${arTotal>0?'<button class="btn-secondary btn-sm" id="ar-drill-btn">By client ›</button>':''}</div></div>
@@ -5657,12 +5657,12 @@ function renderCompanyBiOps(ct) {
             <div class="co-value-desc">Real-time KPIs, revenue metrics, and operational data across all departments in one view.</div>
           </div>
           <div class="co-value-card">
-            <div class="co-value-icon" style="background:rgba(10,132,255,0.10)"><i data-lucide="link" style="width:20px;height:20px;stroke:#0A84FF"></i></div>
+            <div class="co-value-icon" style="background:var(--info-soft)"><i data-lucide="link" style="width:20px;height:20px;stroke:var(--info)"></i></div>
             <div class="co-value-name">Data Integration</div>
             <div class="co-value-desc">Connects with existing tools and data sources without disrupting current workflows.</div>
           </div>
           <div class="co-value-card">
-            <div class="co-value-icon" style="background:rgba(48,209,88,0.10)"><i data-lucide="zap" style="width:20px;height:20px;stroke:#30D158"></i></div>
+            <div class="co-value-icon" style="background:var(--success-soft)"><i data-lucide="zap" style="width:20px;height:20px;stroke:var(--success)"></i></div>
             <div class="co-value-name">Automated Reporting</div>
             <div class="co-value-desc">Scheduled reports and alerts surface critical information automatically — no manual pulls.</div>
           </div>
@@ -5770,7 +5770,7 @@ async function renderCompanyOverview(ct, canAdd) {
           <div class="co-value-desc">Our foundation. We build with precision and hold our products to the highest standard.</div>
         </div>
         <div class="co-value-card">
-          <div class="co-value-icon" style="background:rgba(10,132,255,0.10)"><i data-lucide="flask-conical" style="width:20px;height:20px;stroke:#0A84FF"></i></div>
+          <div class="co-value-icon" style="background:var(--info-soft)"><i data-lucide="flask-conical" style="width:20px;height:20px;stroke:var(--info)"></i></div>
           <div class="co-value-name">R&amp;D (Future Direction)</div>
           <div class="co-value-desc">We are building toward a research and development capability — innovating products and processes for sustainable, scalable growth.</div>
         </div>
@@ -5828,7 +5828,7 @@ async function renderCompanyOverview(ct, canAdd) {
           <div class="co-value-desc">We operate with transparency and do what we say we will do.</div>
         </div>
         <div class="co-value-card">
-          <div class="co-value-icon" style="background:rgba(10,132,255,0.10)"><i data-lucide="users" style="width:20px;height:20px;stroke:#0A84FF"></i></div>
+          <div class="co-value-icon" style="background:var(--info-soft)"><i data-lucide="users" style="width:20px;height:20px;stroke:var(--info)"></i></div>
           <div class="co-value-name">People First</div>
           <div class="co-value-desc">Our team and our clients are at the center of every decision we make.</div>
         </div>
@@ -5933,7 +5933,7 @@ async function renderCompanyMemos(ct, canAdd) {
       const d = m.createdAt?.toDate ? m.createdAt.toDate() : new Date();
       const chip = statusChip(m);
       return `<div class="co-doc-card" data-id="${m.id}">
-        <div class="co-doc-icon" style="background:rgba(10,132,255,0.10)"><i data-lucide="file-text" style="width:18px;height:18px;stroke:#0A84FF"></i></div>
+        <div class="co-doc-icon" style="background:var(--info-soft)"><i data-lucide="file-text" style="width:18px;height:18px;stroke:var(--info)"></i></div>
         <div class="co-doc-body">
           <div class="co-doc-title">${escHtml(m.title)} ${chip}</div>
           <div class="co-doc-meta">From: ${escHtml(m.from||'Management')} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'short',day:'numeric'})}</div>
@@ -6546,13 +6546,13 @@ async function renderAnalytics() {
   // delta badge — arrow shows direction, colour shows good/bad (goodUp=false ⇒ up is bad, e.g. expenses)
   const delta=(cur,prev,goodUp=true)=>{
     cur=+cur||0; prev=+prev||0;
-    if(cur===0&&prev===0) return `<span style="font-size:11px;color:#8e8e93">— vs last mo</span>`;
+    if(cur===0&&prev===0) return `<span style="font-size:11px;color:var(--text-muted)">— vs last mo</span>`;
     const dir=cur>prev?1:cur<prev?-1:0;
     const pct=prev===0?100:Math.round((cur-prev)/Math.abs(prev)*100);
     const good=dir===0?null:((dir>0)===goodUp);
     const col=good===null?'#8e8e93':good?'#30D158':'#FF453A';
     const arrow=dir>0?'▲':dir<0?'▼':'—';
-    return `<span style="font-size:11px;font-weight:600;color:${col}">${arrow} ${Math.abs(pct)}%</span> <span style="font-size:11px;color:#8e8e93">vs last mo</span>`;
+    return `<span style="font-size:11px;font-weight:600;color:${col}">${arrow} ${Math.abs(pct)}%</span> <span style="font-size:11px;color:var(--text-muted)">vs last mo</span>`;
   };
 
   // ── v12 WS40 — shared metrics bag (Spec 2d) ─────────────────────────
@@ -6671,17 +6671,17 @@ async function renderAnalytics() {
       </div>`).join('');
 
     const wrap=document.getElementById('analytics-content');
-    const _anDelta = (cur,prev) => anPeriod==='month' ? delta(cur,prev,true) : `<span style="font-size:11px;color:#8e8e93">${anPlabel}</span>`;
+    const _anDelta = (cur,prev) => anPeriod==='month' ? delta(cur,prev,true) : `<span style="font-size:11px;color:var(--text-muted)">${anPlabel}</span>`;
     const _cashAccts = M.cash ? Object.values(M.cash.perAccount||{}) : [];
     wrap.innerHTML=`
       <div id="an-overview-period">${window.periodPicker(anPeriod, {closedBadge:true})}</div>
       <div class="kpi-row" style="margin-top:16px">
         <div class="kpi-card green"><div class="kpi-label">Revenue (${anPlabel})</div><div class="kpi-value">₱${fmt(revMTD)}</div><div style="margin-top:4px">${_anDelta(revMTD,revPrev)}</div></div>
         <div class="kpi-card ${netMTD>=0?'green':'warn'}"><div class="kpi-label">Net Cash (${anPlabel})</div><div class="kpi-value">₱${fmt(netMTD)}</div><div style="margin-top:4px">${_anDelta(netMTD,netPrev)}</div></div>
-        <div class="kpi-card accent"><div class="kpi-label">Gross Margin</div><div class="kpi-value">${grossMargin==null?'—':grossMargin+'%'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${grossMargin==null?'add job costs':'₱'+fmt(grossProfit)+' profit'}</div></div>
-        <div class="kpi-card warn"><div class="kpi-label">Receivables</div><div class="kpi-value">₱${fmt(receivables)}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${openProjects.length} open job${openProjects.length===1?'':'s'}</div></div>
-        <div class="kpi-card"><div class="kpi-label">Payroll % of Revenue</div><div class="kpi-value">${payrollPct==null?'—':payrollPct+'%'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">₱${fmt(totalPayroll)}/mo</div></div>
-        <div class="kpi-card ${M.cash?(M.cash.total>=window.ANALYTICS_POLICY.cashFloor?'green':'warn'):''}"><div class="kpi-label">${emojiIcon('🏦',16)} Cash Position</div><div class="kpi-value">${M.cash?'₱'+fmt(M.cash.total):'—'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${M.cash?'Excludes statutory remittances until the WS39 remittance flow ships.':'Register bank accounts (Finance → Bank Accounts) to activate'}</div>${_cashAccts.length?`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:11px;color:var(--text-muted)">${_cashAccts.length} account${_cashAccts.length===1?'':'s'} ›</summary><div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">${_cashAccts.map(x=>`<div style="display:flex;justify-content:space-between;font-size:11px"><span>${escHtml(window.BankAccounts.label(x.account))}</span><span style="font-weight:600">₱${fmt(x.balance)}</span></div>`).join('')}</div></details>`:''}</div>
+        <div class="kpi-card accent"><div class="kpi-label">Gross Margin</div><div class="kpi-value">${grossMargin==null?'—':grossMargin+'%'}</div><div style="margin-top:4px;font-size:11px;color:var(--text-muted)">${grossMargin==null?'add job costs':'₱'+fmt(grossProfit)+' profit'}</div></div>
+        <div class="kpi-card warn"><div class="kpi-label">Receivables</div><div class="kpi-value">₱${fmt(receivables)}</div><div style="margin-top:4px;font-size:11px;color:var(--text-muted)">${openProjects.length} open job${openProjects.length===1?'':'s'}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Payroll % of Revenue</div><div class="kpi-value">${payrollPct==null?'—':payrollPct+'%'}</div><div style="margin-top:4px;font-size:11px;color:var(--text-muted)">₱${fmt(totalPayroll)}/mo</div></div>
+        <div class="kpi-card ${M.cash?(M.cash.total>=window.ANALYTICS_POLICY.cashFloor?'green':'warn'):''}"><div class="kpi-label">${emojiIcon('🏦',16)} Cash Position</div><div class="kpi-value">${M.cash?'₱'+fmt(M.cash.total):'—'}</div><div style="margin-top:4px;font-size:11px;color:var(--text-muted)">${M.cash?'Excludes statutory remittances until the WS39 remittance flow ships.':'Register bank accounts (Finance → Bank Accounts) to activate'}</div>${_cashAccts.length?`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:11px;color:var(--text-muted)">${_cashAccts.length} account${_cashAccts.length===1?'':'s'} ›</summary><div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">${_cashAccts.map(x=>`<div style="display:flex;justify-content:space-between;font-size:11px"><span>${escHtml(window.BankAccounts.label(x.account))}</span><span style="font-weight:600">₱${fmt(x.balance)}</span></div>`).join('')}</div></details>`:''}</div>
       </div>
       <div class="card" style="margin-bottom:16px"><div class="card-header"><h3>${emojiIcon('📌',20)} Conclusions</h3></div><div class="card-body">${_insightsHtml}<div style="margin-top:8px;text-align:right"><a href="javascript:void(0)" id="an-see-strategy" style="font-size:12px;font-weight:600">See all → ${emojiIcon('🎯',16)} Strategy</a></div></div></div>
       <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-bottom:16px">
@@ -6755,7 +6755,7 @@ async function renderAnalytics() {
       <div class="kpi-row" style="margin-top:16px">
         <div class="kpi-card green"><div class="kpi-label">Revenue Won</div><div class="kpi-value">₱${fmt(won2)}</div><div style="margin-top:4px">${delta(wonMTD,wonPrev,true)}</div></div>
         <div class="kpi-card accent"><div class="kpi-label">Pipeline Value</div><div class="kpi-value">₱${fmt(pipeline)}</div></div>
-        <div class="kpi-card"><div class="kpi-label">Win Rate (quotes)</div><div class="kpi-value">${winRate}%</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${wonCount}W / ${lostCount}L</div></div>
+        <div class="kpi-card"><div class="kpi-label">Win Rate (quotes)</div><div class="kpi-value">${winRate}%</div><div style="margin-top:4px;font-size:11px;color:var(--text-muted)">${wonCount}W / ${lostCount}L</div></div>
         <div class="kpi-card"><div class="kpi-label">Avg Deal Size</div><div class="kpi-value">₱${fmt(avgDeal)}</div></div>
         <div class="kpi-card warn"><div class="kpi-label">Total Quotes</div><div class="kpi-value">${salesQuotes.length}</div></div>
         <div class="kpi-card"><div class="kpi-label">Tasks Done</div><div class="kpi-value">${doneSalesTasks.length}/${salesTasks.length}</div></div>
@@ -6898,7 +6898,7 @@ async function renderAnalytics() {
         <div class="kpi-card warn"><div class="kpi-label">CA Outstanding</div><div class="kpi-value">₱${fmt(caTotal)}</div></div>
         <div class="kpi-card"><div class="kpi-label">CA Pending</div><div class="kpi-value">${caPending}</div></div>
         <div class="kpi-card"><div class="kpi-label">Expenses (${finAnLabel})</div><div class="kpi-value">₱${fmt(expThisMonth)}</div></div>
-        <div class="kpi-card"><div class="kpi-label">${emojiIcon('📦',16)} Inventory Turns</div><div class="kpi-value">${M.turns&&M.turns.turns!=null?M.turns.turns.toFixed(1)+'× /yr':'—'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${M.turns&&M.turns.turns!=null?'~'+M.turns.daysOnHand+'d on hand · WAC-costed, meaningful going-forward from WS29 ship date':'pending WS29 inventory movements'}</div></div>
+        <div class="kpi-card"><div class="kpi-label">${emojiIcon('📦',16)} Inventory Turns</div><div class="kpi-value">${M.turns&&M.turns.turns!=null?M.turns.turns.toFixed(1)+'× /yr':'—'}</div><div style="margin-top:4px;font-size:11px;color:var(--text-muted)">${M.turns&&M.turns.turns!=null?'~'+M.turns.daysOnHand+'d on hand · WAC-costed, meaningful going-forward from WS29 ship date':'pending WS29 inventory movements'}</div></div>
       </div>
       <div class="card" style="margin-bottom:16px">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3>${emojiIcon('📥',20)} Receivables Aging</h3><span style="font-weight:800">₱${fmt(M.aging.total)}</span></div>
@@ -6999,7 +6999,7 @@ async function renderAnalytics() {
       <div class="kpi-row" style="margin-top:16px">
         <div class="kpi-card green"><div class="kpi-label">Contracts Won</div><div class="kpi-value">₱${fmt(totalWon)}</div></div>
         <div class="kpi-card accent"><div class="kpi-label">Total Bids</div><div class="kpi-value">${govBids.length}</div><div style="margin-top:4px">${delta(bidsMTD,bidsPrev,true)}</div></div>
-        <div class="kpi-card"><div class="kpi-label">Win Rate (Government)</div><div class="kpi-value">${winRate}%</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${wonBids.length}W / ${lostBids.length}L</div></div>
+        <div class="kpi-card"><div class="kpi-label">Win Rate (Government)</div><div class="kpi-value">${winRate}%</div><div style="margin-top:4px;font-size:11px;color:var(--text-muted)">${wonBids.length}W / ${lostBids.length}L</div></div>
         <div class="kpi-card"><div class="kpi-label">Avg Contract</div><div class="kpi-value">₱${fmt(avgContract)}</div></div>
         <div class="kpi-card warn"><div class="kpi-label">Pending / Submitted</div><div class="kpi-value">${pendingBids.length}</div></div>
         <div class="kpi-card"><div class="kpi-label">Gov Tasks</div><div class="kpi-value">${govTasks.length}</div></div>
@@ -8322,7 +8322,7 @@ function renderHelpAdmin() {
     <div class="help-section">
       <h3><i data-lucide="moon" class="help-h-icon"></i> Tips</h3>
       <ul class="help-list">
-        <li>Tap the <strong>sun/moon icon</strong> in the topbar to toggle light/dark mode</li>
+        <li>Tap your <strong>avatar</strong> in the topbar to open your profile drawer, then pick <strong>Light, Dark, or Astral</strong> from the theme picker (or leave it on Auto to follow your device)</li>
         <li>Tap your <strong>avatar</strong> in the topbar to update your profile photo and display name</li>
         <li>The app works offline — cached data loads even without signal</li>
         <li>Add to your home screen on iPhone: Safari → Share → Add to Home Screen</li>
@@ -8335,7 +8335,7 @@ function renderHelpEmployee() {
   return `
   <div class="help-guide">
     <div class="help-hero">
-      <div class="help-hero-icon" style="background:rgba(10,132,255,0.10)"><i data-lucide="user" style="stroke:var(--blue);width:28px;height:28px"></i></div>
+      <div class="help-hero-icon" style="background:var(--info-soft)"><i data-lucide="user" style="stroke:var(--blue);width:28px;height:28px"></i></div>
       <div><h2>Employee Guide</h2><p>Your personal dashboard for tasks, attendance, and pay</p></div>
     </div>
 
@@ -8437,7 +8437,7 @@ function renderHelpEmployee() {
       <h3><i data-lucide="moon" class="help-h-icon"></i> Tips &amp; Shortcuts</h3>
       <ul class="help-list">
         <li>Use the <strong>bottom navigation bar</strong> for quick access to your most-used pages</li>
-        <li>Tap the <strong>sun/moon icon</strong> to switch between dark and light mode</li>
+        <li>Open your <strong>profile drawer</strong> (tap your avatar) to switch between Light, Dark, and Astral themes</li>
         <li>The app works on any phone or computer browser — no app store needed</li>
         <li>You'll get push notifications for task deadlines and approval results</li>
       </ul>

@@ -1,5 +1,14 @@
 # Workstream 42 — Complete UI Overhaul (30 phases) — Barro Industries Operating System
 
+> ✅ **IMPLEMENTED 2026-07-11/12.** All six batches shipped: `d1e2bac` (A — theme foundation),
+> `9f0f0bc` (B — shell + components), `9092b49` (C — mobile & gestures), `1ba7035`
+> (D — Messenger chat), `82b9433` (E — icons & key screens), and Batch F (motion/performance/
+> cross-theme+device QA/docs — this session, commit local, see V12-PLAN.md item 42 + Build Log
+> for the full account). **Not pushed** — commits are local only; Neil approves the push.
+> Flagged for Neil: Dark theme's `on-primary`/`primary` button contrast (2.90:1, below WCAG AA)
+> needs a token decision; topbar/sidebar/dashboard/chat/modals need a live-login verification
+> pass (only the pre-login login screen could be exercised headlessly in Batch F's QA).
+
 > **DECIDED 2026-07-11 (Fable session).** This is the implementation spec. Sonnet executes it
 > phase by phase, in order, in six batches (A–F, 5 phases each). Escalate ambiguities back to
 > the main session instead of improvising. **Do not push** — commit locally per batch; Neil
