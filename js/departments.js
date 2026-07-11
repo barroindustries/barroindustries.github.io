@@ -346,10 +346,19 @@ async function financeDeleteCascade(collection, docId) {
     const ls = await db.collection('ledger').where('refNumber','==',`WPAY-${docId}`).limit(1).get().catch(()=>({docs:[]}));
     if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
   } else if (collection === 'cash_receipt_journal' || collection === 'cash_disbursement_journal' || collection === 'expenses') {
-    // Remove the mirrored ledger row (CRJ-/CDJ-/EXP-<id>) so deleting the source
+    // Remove the mirrored ledger row(s) (CRJ-/CDJ-/EXP-<id>, plus the v12 WS36
+    // A/R-/A/P-settlement legs CRJ-/CDJ-<id>-AR/-AP) so deleting the source
     // entry doesn't leave the books overstated.
     const prefix = collection === 'cash_receipt_journal' ? 'CRJ' : collection === 'cash_disbursement_journal' ? 'CDJ' : 'EXP';
-    const ls = await db.collection('ledger').where('refNumber','==',`${prefix}-${docId}`).limit(1).get().catch(()=>({docs:[]}));
+    const refs = [`${prefix}-${docId}`, `${prefix}-${docId}-AR`, `${prefix}-${docId}-AP`];
+    for (const r of refs) {
+      const ls = await db.collection('ledger').where('refNumber','==',r).limit(1).get().catch(()=>({docs:[]}));
+      if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
+    }
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+  } else if (collection === 'cash_advances') {
+    // v12 WS36 — remove the mirrored cash-release ledger row (CA-<id>).
+    const ls = await db.collection('ledger').where('refNumber','==',`CA-${docId}`).limit(1).get().catch(()=>({docs:[]}));
     if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
   }
@@ -1601,7 +1610,9 @@ function expenseTable(expenses, showActions) {
 
 // Post an approved expense into the ledger as a debit (idempotent, keyed EXP-<id>).
 // Shared by the approve action and the one-time backfill. Returns true if it posted.
-async function postExpenseToLedger(expId, e) {
+// `acct` (v12 WS36, optional) tags which company account paid it; callers that don't
+// pass one (resync, backfill) post untagged, which is correct for those paths.
+async function postExpenseToLedger(expId, e, acct) {
   const ref = `EXP-${expId}`;
   const existing = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
   if (existing.docs.length) return false;
@@ -1618,7 +1629,8 @@ async function postExpenseToLedger(expId, e) {
     source:      'Expense',
     addedBy:     window.currentUser?.uid || null,
     addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
-    createdAt:   firebase.firestore.FieldValue.serverTimestamp()
+    createdAt:   firebase.firestore.FieldValue.serverTimestamp(),
+    ...window.BankAccounts.tag(acct, 'out')
   });
   if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('ledger'); dbCacheInvalidate('expenses'); }
   return true;
@@ -1627,28 +1639,44 @@ async function postExpenseToLedger(expId, e) {
 // New income from a cash receipt = Sales Revenue + Sundry income. AR collections
 // are EXCLUDED — that money was already booked as income when the sale was recorded.
 function crjLedgerIncome(e) { return (e.creditSalesRevenue||0) + (e.creditSundryAmount||0); }
+// v12 WS36 — also mints the A/R-collection leg (asset credit, non-P&L; real cash that
+// previously posted NO ledger row at all, invisible to cash position) when e.creditAR>0.
+// The CRJ doc's own bankAccountId/bankAccountName (set at entry time) tags both legs.
 async function postCRJToLedger(crjId, e) {
-  const ref = `CRJ-${crjId}`;
-  const existing = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
-  if (existing.docs.length) return false;
-  const income = crjLedgerIncome(e);
-  if (income <= 0) return false; // pure A/R collection — already counted at sale time
   const date = e.date || today();
+  const income = crjLedgerIncome(e);
+  const ar = e.creditAR || 0;
+  if (income <= 0 && ar <= 0) return false;
   await window.assertPeriodOpen(date);
-  const category = (e.creditSalesRevenue||0) >= (e.creditSundryAmount||0) ? 'Sales Revenue' : (e.creditSundryAcct||'Other Income');
-  await db.collection('ledger').add({
-    date, type: 'credit',
-    accountType: 'income', account: category,
-    description: `Cash receipt — ${e.customer||''}${e.reference?` (${e.reference})`:''}`,
-    amount: income,
-    category,
-    refNumber: ref, source: 'Cash Receipt',
-    addedBy:     window.currentUser?.uid || null,
-    addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
-    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-  });
-  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
-  return true;
+  const tag = e.bankAccountId ? { bankAccountId: e.bankAccountId, bankAccountName: e.bankAccountName || null, bankFlow: 'in' } : {};
+  const who = { addedBy: window.currentUser?.uid || null,
+                addedByName: window.userProfile?.displayName || window.currentUser?.email || '' };
+  let posted = false;
+  if (income > 0) {                                       // new income — unchanged logic, now tagged
+    const ref = `CRJ-${crjId}`;
+    const existing = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
+    if (!existing.docs.length) {
+      const category = (e.creditSalesRevenue||0) >= (e.creditSundryAmount||0) ? 'Sales Revenue' : (e.creditSundryAcct||'Other Income');
+      await db.collection('ledger').add({ date, type:'credit', accountType:'income', account:category,
+        description:`Cash receipt — ${e.customer||''}${e.reference?` (${e.reference})`:''}`,
+        amount:income, category, refNumber:ref, source:'Cash Receipt', ...tag, ...who,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      posted = true;
+    }
+  }
+  if (ar > 0) {                                           // v12 WS36 — A/R-collection leg (asset credit, non-P&L)
+    const refAR = `CRJ-${crjId}-AR`;
+    const exAR = await db.collection('ledger').where('refNumber','==',refAR).limit(1).get().catch(()=>({docs:[]}));
+    if (!exAR.docs.length) {
+      await db.collection('ledger').add({ date, type:'credit', accountType:'asset', account:'Accounts Receivable',
+        description:`A/R collection — ${e.customer||''}${e.reference?` (${e.reference})`:''}`,
+        amount:ar, category:'A/R Collection', refNumber:refAR, source:'Cash Receipt', ...tag, ...who,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      posted = true;
+    }
+  }
+  if (posted && typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+  return posted;
 }
 
 // New expense from a disbursement = Material + Labor + Sundry. A/P settlements are
@@ -1658,36 +1686,57 @@ async function postCRJToLedger(crjId, e) {
 // expense, e.g. a purchase that never touches stock). This is the fix for the
 // double-material-expensing bug — see consumeProductionMaterials for the other half.
 function cdjLedgerExpense(e) { return (e.debitMaterial||0) + (e.debitLabor||0) + (e.debitSundryAmount||0); }
+// v12 WS36 — also mints the A/P-settlement leg (liability debit, non-P&L; real cash
+// that previously posted NO ledger row at all, invisible to cash position) when
+// e.debitAP>0. The CDJ doc's own bankAccountId/bankAccountName tags both legs.
 async function postCDJToLedger(cdjId, e) {
-  const ref = `CDJ-${cdjId}`;
-  const existing = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
-  if (existing.docs.length) return false;
-  const expense = cdjLedgerExpense(e);
-  if (expense <= 0) return false; // pure A/P settlement — already expensed when incurred
   const date = e.date || today();
+  const expense = cdjLedgerExpense(e);
+  if (expense <= 0 && !(e.debitAP > 0)) return false;
   await window.assertPeriodOpen(date);
-  let category;
-  const mat = e.debitMaterial||0, lab = e.debitLabor||0, sun = e.debitSundryAmount||0;
-  if (mat >= lab && mat >= sun) category = 'COS – Direct Material';
-  else if (lab >= sun) category = 'COS – Direct Labor';
-  else category = e.debitSundryAcct || 'Other Expense';
-  const isInventory = e.debitAccount === 'inventory';
-  const accountType = isInventory ? 'asset' : 'expense';
-  const account = isInventory ? 'Inventory' : category;
-  if (isInventory) category = 'Inventory – Materials';
-  await db.collection('ledger').add({
-    date, type: 'debit',
-    accountType, account,
-    description: `Disbursement — ${e.payee||''}${e.reference?` (${e.reference})`:''}`,
-    amount: expense, category, refNumber: ref, source: 'Cash Disbursement',
-    // input VAT (reclaimable) carried through for the Net VAT Payable computation
-    inputVat: e.vatAmount || 0,
-    addedBy:     window.currentUser?.uid || null,
-    addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
-    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-  });
-  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
-  return true;
+  const tag = e.bankAccountId ? { bankAccountId: e.bankAccountId, bankAccountName: e.bankAccountName || null, bankFlow: 'out' } : {};
+  const who = { addedBy: window.currentUser?.uid || null,
+                addedByName: window.userProfile?.displayName || window.currentUser?.email || '' };
+  let posted = false;
+  if (expense > 0) {
+    const ref = `CDJ-${cdjId}`;
+    const existing = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
+    if (!existing.docs.length) {
+      let category;
+      const mat = e.debitMaterial||0, lab = e.debitLabor||0, sun = e.debitSundryAmount||0;
+      if (mat >= lab && mat >= sun) category = 'COS – Direct Material';
+      else if (lab >= sun) category = 'COS – Direct Labor';
+      else category = e.debitSundryAcct || 'Other Expense';
+      const isInventory = e.debitAccount === 'inventory';
+      const accountType = isInventory ? 'asset' : 'expense';
+      const account = isInventory ? 'Inventory' : category;
+      if (isInventory) category = 'Inventory – Materials';
+      await db.collection('ledger').add({
+        date, type: 'debit',
+        accountType, account,
+        description: `Disbursement — ${e.payee||''}${e.reference?` (${e.reference})`:''}`,
+        amount: expense, category, refNumber: ref, source: 'Cash Disbursement',
+        // input VAT (reclaimable) carried through for the Net VAT Payable computation
+        inputVat: e.vatAmount || 0,
+        ...tag, ...who,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      posted = true;
+    }
+  }
+  if (e.debitAP > 0) {                                    // v12 WS36 — A/P-settlement leg (liability debit, non-P&L)
+    const refAP = `CDJ-${cdjId}-AP`;
+    const exAP = await db.collection('ledger').where('refNumber','==',refAP).limit(1).get().catch(()=>({docs:[]}));
+    if (!exAP.docs.length) {
+      await db.collection('ledger').add({ date, type:'debit', accountType:'liability', account:'Accounts Payable',
+        description:`A/P settlement — ${e.payee||''}${e.reference?` (${e.reference})`:''}`,
+        amount:e.debitAP, category:'A/P Settlement', refNumber:refAP, source:'Cash Disbursement', ...tag, ...who,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      posted = true;
+    }
+  }
+  if (posted && typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+  return posted;
 }
 
 // Re-sync the mirrored ledger row after a source doc (expense / CRJ / CDJ) is
@@ -1711,7 +1760,6 @@ async function resyncLedgerForSource(collection, docId) {
       category = (e.creditSalesRevenue || 0) >= (e.creditSundryAmount || 0) ? 'Sales Revenue' : (e.creditSundryAcct || 'Other Income');
       description = `Cash receipt — ${e.customer || ''}${e.reference ? ` (${e.reference})` : ''}`;
       accountType = 'income'; account = category;
-      if (amount <= 0) { await _deleteLedgerByRef(ref); return; }
     } else if (collection === 'cash_disbursement_journal') {
       ref = `CDJ-${docId}`; type = 'debit'; amount = cdjLedgerExpense(e);
       const mat = e.debitMaterial || 0, lab = e.debitLabor || 0, sun = e.debitSundryAmount || 0;
@@ -1725,21 +1773,58 @@ async function resyncLedgerForSource(collection, docId) {
       accountType = isInventory ? 'asset' : 'expense';
       account = isInventory ? 'Inventory' : category;
       if (isInventory) category = 'Inventory – Materials';
-      if (amount <= 0) { await _deleteLedgerByRef(ref); return; }
     } else return;
-    const existing = await db.collection('ledger').where('refNumber', '==', ref).limit(1).get().catch(() => ({ docs: [] }));
-    const patch = { amount, type, category, description, accountType, account };
-    if (inputVat != null) patch.inputVat = inputVat;
-    if (existing.docs.length) await existing.docs[0].ref.update(patch);
-    else if (collection === 'expenses') await postExpenseToLedger(docId, e);
-    else if (collection === 'cash_receipt_journal') await postCRJToLedger(docId, e);
-    else await postCDJToLedger(docId, e);
+    // v12 WS36: a CRJ/CDJ main row can legitimately be zero (a pure A/R-collection
+    // or A/P-settlement entry) — that must still fall through to the leg sync below,
+    // not early-return past it, or an edit would silently stop keeping the -AR/-AP
+    // leg in step with the source doc.
+    if (amount > 0) {
+      const existing = await db.collection('ledger').where('refNumber', '==', ref).limit(1).get().catch(() => ({ docs: [] }));
+      const patch = { amount, type, category, description, accountType, account };
+      if (inputVat != null) patch.inputVat = inputVat;
+      if (e.bankAccountId) { patch.bankAccountId = e.bankAccountId; patch.bankAccountName = e.bankAccountName || null;
+        patch.bankFlow = (collection === 'cash_receipt_journal') ? 'in' : 'out'; }
+      if (existing.docs.length) await existing.docs[0].ref.update(patch);
+      else if (collection === 'expenses') await postExpenseToLedger(docId, e);
+      else if (collection === 'cash_receipt_journal') await postCRJToLedger(docId, e);
+      else await postCDJToLedger(docId, e);
+    } else {
+      await _deleteLedgerByRef(ref);
+    }
+    // v12 WS36 — keep the A/R-/A/P-settlement legs in step with the source doc.
+    if (collection === 'cash_receipt_journal') {
+      const arTag = e.bankAccountId ? { bankAccountId: e.bankAccountId, bankAccountName: e.bankAccountName || null, bankFlow: 'in' } : {};
+      await _syncLedgerLeg(`CRJ-${docId}-AR`, e.creditAR || 0, () => ({
+        date: e.date || today(), type: 'credit', accountType: 'asset', account: 'Accounts Receivable',
+        description: `A/R collection — ${e.customer || ''}${e.reference ? ` (${e.reference})` : ''}`,
+        amount: e.creditAR || 0, category: 'A/R Collection', refNumber: `CRJ-${docId}-AR`, source: 'Cash Receipt', ...arTag,
+        addedBy: window.currentUser?.uid || null, addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      }));
+    }
+    if (collection === 'cash_disbursement_journal') {
+      const apTag = e.bankAccountId ? { bankAccountId: e.bankAccountId, bankAccountName: e.bankAccountName || null, bankFlow: 'out' } : {};
+      await _syncLedgerLeg(`CDJ-${docId}-AP`, e.debitAP || 0, () => ({
+        date: e.date || today(), type: 'debit', accountType: 'liability', account: 'Accounts Payable',
+        description: `A/P settlement — ${e.payee || ''}${e.reference ? ` (${e.reference})` : ''}`,
+        amount: e.debitAP || 0, category: 'A/P Settlement', refNumber: `CDJ-${docId}-AP`, source: 'Cash Disbursement', ...apTag,
+        addedBy: window.currentUser?.uid || null, addedByName: window.userProfile?.displayName || window.currentUser?.email || '',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      }));
+    }
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
   } catch (err) { console.warn('[ledger resync]', err?.message || err); }
 }
 async function _deleteLedgerByRef(ref) {
   const ls = await db.collection('ledger').where('refNumber', '==', ref).limit(1).get().catch(() => ({ docs: [] }));
   if (ls.docs.length) { await ls.docs[0].ref.delete().catch(() => {}); if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger'); }
+}
+// v12 WS36 — update / create / delete one keyed non-P&L settlement leg (A/R or A/P),
+// kept in step with its source CRJ/CDJ doc across edits. Shared by resyncLedgerForSource.
+async function _syncLedgerLeg(ref, amount, mkEntry) {
+  const ls = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
+  if (amount > 0) { if (ls.docs.length) await ls.docs[0].ref.update({ amount }); else await db.collection('ledger').add(mkEntry()); }
+  else if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
 }
 
 // One-time (re-runnable) backfill: post existing approved expenses + all cash
@@ -1826,6 +1911,24 @@ window.runLedgerBackfill = async function() {
 
 // Wire the approve / reject buttons in the expense table (previously unbound — the
 // buttons did nothing). Approving posts the expense to the ledger.
+// v12 WS36 — one-field account prompt for approve-style transitions that post a
+// cash-out ledger row but have no form of their own. Registry empty → resolves
+// untagged WITHOUT prompting (feature inert pre-seed).
+async function promptBankAccount(title) {
+  const list = await window.BankAccounts.list();
+  if (!list.length) return { bankAccountId: null, bankAccountName: null };
+  const opts = await window.BankAccounts.optionsHTML();
+  return new Promise(resolve => {
+    openModal(title || 'Paid from which account?', `
+      <div class="form-group"><label>Paid from (company account)</label>
+        <select id="pba-sel" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${opts}</select></div>
+    `, `<button class="btn-primary" id="pba-ok">Confirm</button><button class="btn-secondary" id="pba-skip">Skip (untagged)</button>`);
+    document.getElementById('pba-ok').addEventListener('click', async () => {
+      const a = await window.BankAccounts.pick(document.getElementById('pba-sel').value); closeModal(); resolve(a); });
+    document.getElementById('pba-skip').addEventListener('click', () => { closeModal(); resolve({ bankAccountId:null, bankAccountName:null }); });
+  });
+}
+
 function bindExpenseActions(content, currentUser, currentRole, sub) {
   content.querySelectorAll('.approve-expense').forEach(btn => btn.addEventListener('click', async () => {
     btn.disabled = true;
@@ -1837,8 +1940,9 @@ function bindExpenseActions(content, currentUser, currentRole, sub) {
       // Check the period BEFORE flipping status — otherwise a closed month leaves
       // the expense stuck 'approved' with no matching ledger row (v12 WS12).
       if (e) await window.assertPeriodOpen(e.date || today());
+      const acct = await promptBankAccount('Expense paid from which account?');
       await db.collection('expenses').doc(id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
-      if (e) await postExpenseToLedger(id, e);
+      if (e) await postExpenseToLedger(id, e, acct);
       Notifs.showToast('Expense approved & posted to ledger ✓');
       loadCashContent(currentUser, currentRole, sub);
     } catch (err) { Notifs.showToast('Approve failed: ' + (err.message||err), 'error'); btn.disabled = false; }
@@ -2166,7 +2270,7 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
 window.renderFinance = async function(currentUser, currentRole, subtab = window.initialSubtab('Overview')) {
   const c = deptContainer();
   // Finance tools vs HR tools — visually separated
-  const finTabs = ['Overview','Reports','Sales Orders','Ledger','Cash Receipts','Cash Disbursements','Purchases','Inventory','Records','Taxes','SSS / Gov','Tasks'];
+  const finTabs = ['Overview','Reports','Sales Orders','Ledger','Bank Accounts','Cash Receipts','Cash Disbursements','Purchases','Inventory','Records','Taxes','SSS / Gov','Tasks'];
   const hrTabs  = ['Payroll','HR Profiles','Cash Advances'];
   const allTabs = [...finTabs, ...hrTabs];
   c.innerHTML = `
@@ -2195,6 +2299,7 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'Payroll':      await renderPayrollManagement(content, currentUser, currentRole); break;
     case 'Taxes':        await renderTaxesTab(content, currentUser, currentRole); break;
     case 'Ledger':       await renderLedgerTab(content, currentUser, currentRole); break;
+    case 'Bank Accounts': await window.renderBankAccounts(content); break;
     case 'Cash Receipts':       await renderCashReceiptJournal(content, currentUser, currentRole); break;
     case 'Cash Disbursements':  await renderCashDisbursementJournal(content, currentUser, currentRole); break;
     case 'Sales Orders':        await window.renderSalesOrders(content); break;
@@ -2679,7 +2784,8 @@ window.computePayRun = async function(month, { policy } = {}) {
   return { lines, totals: { totalNet, employeeCount: lines.length }, skipped };
 };
 
-window.disbursePayRun = async function(month) {
+window.disbursePayRun = async function(month, opts = {}) {
+  const bankAcct = opts.bankAccount || { bankAccountId: null, bankAccountName: null };
   // Fail fast, before any write — firestore.rules only rejects the FINAL
   // state-flip to 'disbursed' for a non-president, which would otherwise let
   // the CA deductions/ledger posts below succeed first (a partial disburse).
@@ -2794,7 +2900,8 @@ window.disbursePayRun = async function(month) {
     date: month+'-01', type:'credit', accountType:'asset', account:'Cash',
     description: `Net payroll cash — ${monthLabel}`, amount: netCashAgg,
     category:'Payroll Expense', source:'Finance', refNumber:`NETPAY-${month}`,
-    addedBy: currentUser?.uid, addedByName, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    addedBy: currentUser?.uid, addedByName, createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    ...window.BankAccounts.tag(bankAcct,'out')
   });
 
   if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
@@ -2808,7 +2915,8 @@ window.disbursePayRun = async function(month) {
   // ── 5. Flip state — TERMINAL from here (v12 WS20 D5: no reopen, no recompute) ──
   await runRef.set({
     state:'disbursed', disbursedBy: currentUser?.uid, disbursedByName: addedByName,
-    disbursedAt: firebase.firestore.FieldValue.serverTimestamp()
+    disbursedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    disbursedFrom: bankAcct.bankAccountId || null, disbursedFromName: bankAcct.bankAccountName || null
   }, { merge:true });
   window.logAudit && window.logAudit('disburse-payrun','pay_run', month, { totalNet: run.totalNet, employeeCount: lines.length });
 };
@@ -3357,19 +3465,26 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     // Disburse — v12 WS20 D6: THE single mutating step (CA deducted, ledger
     // posted, salary_history frozen, employees notified). Terminal afterward.
     document.getElementById('pr-disburse-btn')?.addEventListener('click', async ()=>{
-      const chk  = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+      const chk = await db.collection('pay_runs').doc(month).get().catch(()=>null);
       const data2 = (chk && chk.exists) ? chk.data() : {};
-      if(!(await confirmDialog({message:`Disburse ${month} payroll — ₱${fmt(data2.totalNet||0)} to ${data2.employeeCount||0} staff? This deducts cash advances, posts the ledger, and notifies employees. This cannot be undone.`, danger:true}))) return;
-      const dbtn = document.getElementById('pr-disburse-btn');
-      dbtn.disabled = true; dbtn.textContent = 'Disbursing…';
-      try {
-        await window.disbursePayRun(month);
-        Notifs.showToast('Payroll disbursed!');
-      } catch (err) {
-        Notifs.showToast(err.message || 'Could not disburse payroll.', 'error');
-      }
-      loadPayRunStrip(month);
-      loadFinanceContent(currentUser, currentRole, 'Payroll');
+      const bankOpts = await window.BankAccounts.optionsHTML();
+      openModal(`Disburse ${month} payroll`, `
+        <p style="font-size:13px;margin-bottom:10px">₱${fmt(data2.totalNet||0)} to ${data2.employeeCount||0} staff. This deducts cash advances, posts the ledger, and notifies employees. <strong>This cannot be undone.</strong></p>
+        <div class="form-group"><label>Paid from (company account)</label>
+          <select id="pr-bankacct" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
+      `, `<button class="btn-danger" id="pr-disburse-go">Disburse</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      document.getElementById('pr-disburse-go').addEventListener('click', async ()=>{
+        const sel = document.getElementById('pr-bankacct').value;
+        if (!sel && (await window.BankAccounts.list()).length) { Notifs.showToast('Select the paying account.','error'); return; }
+        const acct = await window.BankAccounts.pick(sel);
+        closeModal();
+        const dbtn = document.getElementById('pr-disburse-btn');
+        if (dbtn) { dbtn.disabled = true; dbtn.textContent = 'Disbursing…'; }
+        try { await window.disbursePayRun(month, { bankAccount: acct }); Notifs.showToast('Payroll disbursed!'); }
+        catch (err) { Notifs.showToast(err.message || 'Could not disburse payroll.', 'error'); }
+        loadPayRunStrip(month);
+        loadFinanceContent(currentUser, currentRole, 'Payroll');
+      });
     });
     // Reopen — president-only, verified → computed (v12 WS20 D5).
     document.getElementById('pr-reopen-btn')?.addEventListener('click', async ()=>{
@@ -3985,6 +4100,217 @@ async function renderLedgerTab(container, currentUser, currentRole) {
   }
 }
 
+// ── Bank Accounts registry + reconciliation (v12 WS36) ──
+// Balances are DERIVED (window.BankAccounts.computeBalances) — nothing stored here
+// can drift. Add/Edit/Delete gated to the money tier (matches bank_accounts rules:
+// create/update isMoneyAdmin(), delete isPresident() via financeDelete).
+window.renderBankAccounts = async function(container) {
+  const c = container || deptContainer();
+  c.innerHTML = '<div class="loading-placeholder">Loading bank accounts…</div>';
+  const canWrite = ['president','manager','finance'].includes(window.currentRole);
+  const [accounts, ledgerSnap] = await Promise.all([
+    window.BankAccounts.list({ activeOnly:false }),
+    window.ledgerForPeriod('all')
+  ]);
+  const rows = ledgerSnap.docs.map(d => d.data());
+  const bookBal = window.BankAccounts.computeBalances(accounts, rows);
+  const recBal  = window.BankAccounts.computeBalances(accounts, rows, { reconciledOnly:true });
+  const cashTotal = accounts.filter(a=>a.active!==false).reduce((s,a)=>s+(bookBal[a.id]?bookBal[a.id].balance:0),0);
+  const unreconciled = rows.filter(r=>r.bankAccountId && !r.reconciled).length;
+  const typeIcon = t => t==='ewallet' ? '📱' : t==='cash' ? '💵' : '🏦';
+
+  c.innerHTML = `
+    <div class="page-header"><h2>🏦 Bank Accounts</h2><span style="font-size:12px;color:var(--text-muted)">Company cash locations — balances derive from opening anchor + tagged ledger flows</span></div>
+    <div class="kpi-row" style="margin-bottom:14px">
+      <div class="kpi-card green"><div class="kpi-label">Cash Position</div><div class="kpi-value" style="font-size:15px">₱${fmt(cashTotal)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Active Accounts</div><div class="kpi-value">${accounts.filter(a=>a.active!==false).length}</div></div>
+      <div class="kpi-card warn"><div class="kpi-label">Unreconciled Rows</div><div class="kpi-value">${unreconciled}</div></div>
+    </div>
+    ${canWrite?`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn-primary btn-sm" id="ba-add-btn">+ Add Account</button></div>`:''}
+    <div class="card"><div class="card-body" style="padding:0">
+    ${!accounts.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🏦</div><h4>No bank accounts registered</h4><p>Add every real company account (bank / e-wallet / petty cash) to start tracking balances.</p></div>':
+    `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th></th><th>Account</th><th>Opening</th><th>Book Balance</th><th>Reconciled Balance</th><th>Status</th>${canWrite?'<th></th>':''}</tr></thead>
+      <tbody>${accounts.map(a=>{
+        const bb = bookBal[a.id]?bookBal[a.id].balance:0, rb = recBal[a.id]?recBal[a.id].balance:0;
+        return `<tr>
+        <td>${typeIcon(a.type)}</td>
+        <td class="ba-row-link" data-id="${escHtml(a.id)}" style="cursor:pointer"><strong>${escHtml(a.nickname||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(window.BankAccounts.label(a))}${a.isDefault?' · <span class="badge badge-blue" style="font-size:9px">default</span>':''}</div></td>
+        <td style="font-size:12px">₱${fmt(a.openingBalance||0)}<div style="font-size:10px;color:var(--text-muted)">@ ${escHtml(a.openingDate||'—')}</div></td>
+        <td style="font-weight:700">₱${fmt(bb)}</td>
+        <td>₱${fmt(rb)}</td>
+        <td><span class="badge ${a.active!==false?'badge-green':'badge-gray'}">${a.active!==false?'active':'closed'}</span></td>
+        ${canWrite?`<td style="white-space:nowrap">
+          <button class="btn-secondary btn-sm ba-edit-btn" data-id="${escHtml(a.id)}">✎</button>
+          <button class="btn-danger btn-sm ba-del-btn" data-id="${escHtml(a.id)}" data-label="${escHtml(a.nickname||'bank account')}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
+        </td>`:''}
+      </tr>`;}).join('')}</tbody>
+    </table></div>`}
+    </div></div>
+    <div id="ba-drilldown"></div>
+  `;
+  if (window.lucide) lucide.createIcons({ nodes:[c] });
+
+  const redo = () => window.renderBankAccounts(container);
+
+  c.querySelectorAll('.ba-row-link').forEach(td => td.addEventListener('click', () => {
+    const a = accounts.find(x=>x.id===td.dataset.id); if (a) renderBankAccountDrilldown(a);
+  }));
+
+  if (canWrite) {
+    document.getElementById('ba-add-btn')?.addEventListener('click', () => openBankAccountModal(null, redo));
+    c.querySelectorAll('.ba-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+      const a = accounts.find(x=>x.id===btn.dataset.id); if (a) openBankAccountModal(a, redo);
+    }));
+    c.querySelectorAll('.ba-del-btn').forEach(btn => btn.addEventListener('click', () => {
+      window.financeDelete({ collection:'bank_accounts', docId:btn.dataset.id, label:`bank account "${btn.dataset.label}"`, onDone:redo });
+    }));
+  }
+};
+
+// Add/Edit modal — fields exactly per Spec 1 (nickname required; openingBalance
+// number; openingDate default bizDate(); type select; isDefault checkbox, which
+// on save clears every other doc's isDefault so at most one is ever true).
+function openBankAccountModal(a, onDone) {
+  const isEdit = !!a;
+  a = a || { nickname:'', type:'bank', bankName:'', accountName:'', accountNo:'', branch:'',
+    openingBalance:0, openingDate:(window.bizDate?window.bizDate():today()), active:true, isDefault:false, sortOrder:0, notes:'' };
+  openModal(isEdit?'Edit Bank Account':'Add Bank Account', `
+    <div class="form-row">
+      <div class="form-group"><label>Nickname</label><input id="ba-nickname" value="${escHtml(a.nickname||'')}" placeholder="e.g. BDO Checking — Main"/></div>
+      <div class="form-group"><label>Type</label><select id="ba-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+        <option value="bank" ${a.type==='bank'?'selected':''}>Bank</option>
+        <option value="ewallet" ${a.type==='ewallet'?'selected':''}>E-wallet</option>
+        <option value="cash" ${a.type==='cash'?'selected':''}>Cash (petty cash)</option>
+      </select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Bank / Provider Name</label><input id="ba-bankname" value="${escHtml(a.bankName||'')}" placeholder="e.g. BDO, GCash"/></div>
+      <div class="form-group"><label>Branch (optional)</label><input id="ba-branch" value="${escHtml(a.branch||'')}"/></div>
+    </div>
+    <div class="form-group"><label>Account Name (registered holder)</label><input id="ba-acctname" value="${escHtml(a.accountName||'')}" placeholder="e.g. NEILBARRO STEEL & METAL FABRICATION SERVICES"/></div>
+    <div class="form-group"><label>Account No. (full — prints on invoices; lists show masked)</label><input id="ba-acctno" value="${escHtml(a.accountNo||'')}"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Opening Balance (₱)</label><input id="ba-opening" type="number" step="0.01" inputmode="decimal" value="${a.openingBalance||0}"/></div>
+      <div class="form-group"><label>Opening Date</label><input id="ba-openingdate" type="date" value="${a.openingDate||(window.bizDate?window.bizDate():today())}"/></div>
+    </div>
+    <div class="form-group"><label>Notes (optional)</label><input id="ba-notes" value="${escHtml(a.notes||'')}"/></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px;cursor:pointer">
+      <input type="checkbox" id="ba-default" ${a.isDefault?'checked':''} style="width:16px;height:16px"/> Default account (preselected in pickers)
+    </label>
+    ${isEdit?`<label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:4px;cursor:pointer">
+      <input type="checkbox" id="ba-active" ${a.active!==false?'checked':''} style="width:16px;height:16px"/> Active (uncheck to close — kept forever, hidden from pickers)
+    </label>`:''}
+    <div id="ba-err" class="error-msg hidden" style="margin-top:8px"></div>
+  `, `<button class="btn-primary" id="ba-save-btn">${isEdit?'Save':'Add Account'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  document.getElementById('ba-save-btn').addEventListener('click', async () => {
+    const err = document.getElementById('ba-err');
+    const nickname = document.getElementById('ba-nickname').value.trim();
+    if (!nickname) { err.textContent='Nickname is required.'; err.classList.remove('hidden'); return; }
+    const data = {
+      nickname,
+      type: document.getElementById('ba-type').value,
+      bankName: document.getElementById('ba-bankname').value.trim(),
+      accountName: document.getElementById('ba-acctname').value.trim(),
+      accountNo: document.getElementById('ba-acctno').value.trim(),
+      branch: document.getElementById('ba-branch').value.trim(),
+      currency: 'PHP',
+      openingBalance: parseFloat(document.getElementById('ba-opening').value)||0,
+      openingDate: document.getElementById('ba-openingdate').value || (window.bizDate?window.bizDate():today()),
+      isDefault: document.getElementById('ba-default').checked,
+      sortOrder: a.sortOrder||0,
+      notes: document.getElementById('ba-notes').value.trim(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    if (isEdit) data.active = document.getElementById('ba-active').checked;
+    try {
+      if (data.isDefault) {
+        // At most one isDefault=true — clear every other doc's flag first.
+        const others = await db.collection('bank_accounts').get().catch(()=>({docs:[]}));
+        await Promise.all(others.docs.filter(d=>d.id!==a.id && d.data().isDefault).map(d=>d.ref.update({isDefault:false})));
+      }
+      if (isEdit) {
+        await db.collection('bank_accounts').doc(a.id).update(data);
+        window.logAudit && window.logAudit('update','bank_account',a.id,{ nickname });
+      } else {
+        data.active = true;
+        data.createdBy = currentUser.uid;
+        data.createdByName = window.userProfile?.displayName || currentUser.email;
+        data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+        const ref = await db.collection('bank_accounts').add(data);
+        window.logAudit && window.logAudit('create','bank_account',ref.id,{ nickname });
+      }
+      window.BankAccounts.invalidate();
+      closeModal();
+      Notifs.showToast(isEdit?'Bank account updated':'Bank account added');
+      onDone && onDone();
+    } catch (ex) { err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+  });
+}
+
+// Drill-down (click a row) — every tagged ledger row for this account, a per-row
+// reconcile checkbox, and a re-tag select to move a mis-tagged row to another
+// account. Both writes are plain ledger updates, permitted by the existing
+// ledger.update: canFinance() rule (no rules change needed).
+async function renderBankAccountDrilldown(a) {
+  const wrap = document.getElementById('ba-drilldown');
+  if (!wrap) return;
+  wrap.innerHTML = '<div class="loading-placeholder">Loading transactions…</div>';
+  const [snap, bankOpts] = await Promise.all([ window.ledgerForPeriod('all'), window.BankAccounts.optionsHTML(a.id) ]);
+  const rows = snap.docs.map(d => ({ id:d.id, ...d.data() }))
+    .filter(r => r.bankAccountId === a.id && (!a.openingDate || (r.date||'') >= a.openingDate))
+    .sort((x,y) => (x.date||'').localeCompare(y.date||''));
+  let running = +(a.openingBalance||0);
+  wrap.innerHTML = `
+    <div class="card" style="margin-top:14px"><div class="card-body">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <strong>${escHtml(window.BankAccounts.label(a))} — transactions since ${escHtml(a.openingDate||'—')}</strong>
+        <button class="btn-secondary btn-sm" id="ba-dd-close">✕ Close</button>
+      </div>
+      ${!rows.length?'<div class="empty-state" style="padding:16px"><div class="empty-icon">📭</div><h4>No tagged transactions yet</h4></div>':
+      `<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Date</th><th>Description</th><th>Ref #</th><th>Amount</th><th>Running Balance</th><th>Reconciled</th><th>Re-tag to</th></tr></thead>
+        <tbody>${rows.map(r=>{
+          running += (r.bankFlow==='in'?1:-1) * (+r.amount||0);
+          return `<tr>
+          <td style="font-size:11px">${r.date||'—'}</td>
+          <td style="font-size:12px">${escHtml(r.description||'—')}</td>
+          <td><code>${escHtml(r.refNumber||'—')}</code></td>
+          <td style="color:${r.bankFlow==='in'?'var(--success)':'var(--danger)'}">${r.bankFlow==='in'?'+':'-'}₱${fmt(r.amount||0)}</td>
+          <td style="font-weight:700">₱${fmt(running)}</td>
+          <td><input type="checkbox" class="ba-recon-chk" data-id="${escHtml(r.id)}" ${r.reconciled?'checked':''}/></td>
+          <td><select class="ba-retag-sel" data-id="${escHtml(r.id)}" style="font-size:11px;padding:3px 6px">${bankOpts}</select></td>
+        </tr>`; }).join('')}</tbody>
+      </table></div>`}
+    </div></div>
+  `;
+  document.getElementById('ba-dd-close')?.addEventListener('click', () => { wrap.innerHTML=''; });
+  wrap.querySelectorAll('.ba-recon-chk').forEach(chk => chk.addEventListener('change', async () => {
+    try {
+      await db.collection('ledger').doc(chk.dataset.id).update({
+        reconciled: chk.checked,
+        reconciledBy: currentUser.uid,
+        reconciledAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+      Notifs.showToast(chk.checked?'Marked reconciled':'Marked unreconciled');
+    } catch (ex) { Notifs.showToast('Could not update: '+(ex.message||ex),'error'); chk.checked = !chk.checked; }
+  }));
+  wrap.querySelectorAll('.ba-retag-sel').forEach(sel => sel.addEventListener('change', async () => {
+    const newId = sel.value;
+    if (!newId || newId === a.id) return;
+    try {
+      const acct = await window.BankAccounts.pick(newId);
+      await db.collection('ledger').doc(sel.dataset.id).update({
+        bankAccountId: acct.bankAccountId, bankAccountName: acct.bankAccountName
+      });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+      Notifs.showToast('Row re-tagged to another account');
+      renderBankAccountDrilldown(a);
+    } catch (ex) { Notifs.showToast('Could not re-tag: '+(ex.message||ex),'error'); }
+  }));
+}
+
 // ── Cash Receipt Journal (for cash-based receipts only) ──
 async function renderCashReceiptJournal(container, currentUser, currentRole) {
   const snap = await db.collection('cash_receipt_journal').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]}));
@@ -4026,7 +4352,8 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
 
-  document.getElementById('add-crj-btn').addEventListener('click', () => {
+  document.getElementById('add-crj-btn').addEventListener('click', async () => {
+    const bankOpts = await window.BankAccounts.optionsHTML();
     openPage('New Cash Receipt Entry', `
       <div class="form-row">
         <div class="form-group"><label>Reference</label><input id="crj-ref" placeholder="OR #, Receipt #…"/></div>
@@ -4045,6 +4372,8 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
         <div class="form-group"><label>Credit: Sundry Account</label><input id="crj-sundry-acct" placeholder="e.g. Other Income"/></div>
         <div class="form-group"><label>Credit: Sundry Amount (₱)</label><input id="crj-sundry-amt" type="number" step="0.01" value="0" inputmode="decimal"/></div>
       </div>
+      <div class="form-group"><label>Received into (company account)</label>
+        <select id="crj-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
     `, `<button class="btn-primary" id="save-crj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
     document.getElementById('save-crj-btn').addEventListener('click', async () => {
@@ -4052,6 +4381,7 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
       const debitCash = parseFloat(document.getElementById('crj-cash').value)||0;
       if (!customer) { Notifs.showToast('Enter a customer name.','error'); return; }
       if (!debitCash) { Notifs.showToast('Enter the cash amount received.','error'); return; }
+      const crjAcct = await window.BankAccounts.pick(document.getElementById('crj-bank').value);
       const crjData = {
         reference:           document.getElementById('crj-ref').value.trim(),
         date:                document.getElementById('crj-date').value,
@@ -4062,6 +4392,8 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
         creditSalesRevenue:  parseFloat(document.getElementById('crj-revenue').value)||0,
         creditSundryAcct:    document.getElementById('crj-sundry-acct').value.trim(),
         creditSundryAmount:  parseFloat(document.getElementById('crj-sundry-amt').value)||0,
+        bankAccountId:  crjAcct.bankAccountId||null,
+        bankAccountName: crjAcct.bankAccountName||null,
         addedBy:    currentUser.uid,
         addedByName: window.userProfile?.displayName || currentUser.email,
         createdAt:  firebase.firestore.FieldValue.serverTimestamp()
@@ -4139,7 +4471,8 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
 
-  document.getElementById('add-cdj-btn').addEventListener('click', () => {
+  document.getElementById('add-cdj-btn').addEventListener('click', async () => {
+    const bankOpts = await window.BankAccounts.optionsHTML();
     openPage('New Cash Disbursement Entry', `
       <div class="form-row">
         <div class="form-group"><label>Reference</label><input id="cdj-ref" placeholder="Voucher #, Check #…"/></div>
@@ -4162,6 +4495,8 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
           <option value="exempt">No input VAT (exempt / non-VAT)</option>
         </select>
       </div>
+      <div class="form-group"><label>Paid from (company account)</label>
+        <select id="cdj-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
     `, `<button class="btn-primary" id="save-cdj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
     document.getElementById('save-cdj-btn').addEventListener('click', async () => {
@@ -4174,6 +4509,9 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
       const _cdjVatBase = (parseFloat(document.getElementById('cdj-material').value)||0)
         + (parseFloat(document.getElementById('cdj-sundry-amt').value)||0);
       const _cdjInputVat = document.getElementById('cdj-vat').value === 'exempt' ? 0 : window.vatSplit(_cdjVatBase,'inclusive').vat;
+      const cdjBankSel = document.getElementById('cdj-bank').value;
+      if (!cdjBankSel && (await window.BankAccounts.list()).length) { Notifs.showToast('Select the paying account.', 'error'); return; }
+      const cdjAcct = await window.BankAccounts.pick(cdjBankSel);
       const cdjData = {
         reference:         document.getElementById('cdj-ref').value.trim(),
         date:              document.getElementById('cdj-date').value,
@@ -4185,6 +4523,8 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
         debitSundryAcct:   document.getElementById('cdj-sundry-acct').value.trim(),
         debitSundryAmount: parseFloat(document.getElementById('cdj-sundry-amt').value)||0,
         vatAmount: _cdjInputVat, vatTreatment: document.getElementById('cdj-vat').value,
+        bankAccountId:  cdjAcct.bankAccountId||null,
+        bankAccountName: cdjAcct.bankAccountName||null,
         addedBy:    currentUser.uid,
         addedByName: window.userProfile?.displayName || currentUser.email,
         createdAt:  firebase.firestore.FieldValue.serverTimestamp()
@@ -4981,6 +5321,11 @@ async function openPayslipHistory(currentUser, currentRole) {
         if (next === 'submitted') {
           const lref = `WPAY-${ps.id}`;
           const exist = await db.collection('ledger').where('refNumber','==',lref).limit(1).get().catch(()=>({docs:[]}));
+          // v12 WS36 — runs inside the payslips modal (no room for a second modal),
+          // so auto-tag with the registry's default account. Mis-tagged/untagged
+          // rows are correctable from the Bank Accounts drill-down's re-tag control.
+          const _def  = (await window.BankAccounts.list()).find(a => a.isDefault) || null;
+          const _acct = await window.BankAccounts.pick(_def && _def.id);
           const entry = {
             date:        payDate,
             type:        'debit',
@@ -4992,7 +5337,8 @@ async function openPayslipHistory(currentUser, currentRole) {
             refNumber:   lref,
             addedBy:     currentUser.uid,
             addedByName: window.userProfile?.displayName || currentUser.email,
-            createdAt:   firebase.firestore.FieldValue.serverTimestamp()
+            createdAt:   firebase.firestore.FieldValue.serverTimestamp(),
+            ...window.BankAccounts.tag(_acct, 'out')
           };
           if (exist.docs.length) await exist.docs[0].ref.update({ amount: entry.amount, description: entry.description });
           else await db.collection('ledger').add(entry);
@@ -7246,17 +7592,21 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
   });
 
   // Record a payment
-  document.getElementById('proj-payment-btn')?.addEventListener('click', () => {
+  document.getElementById('proj-payment-btn')?.addEventListener('click', async () => {
+    const bankOpts = await window.BankAccounts.optionsHTML();
     openPage('Record Payment', `
       <div class="form-group"><label>Amount (₱)</label><input id="pay-amt" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0.00"/></div>
       <div class="form-group"><label>Date</label><input id="pay-date" type="date" value="${today()}"/></div>
       <div class="form-group"><label>Method</label><input id="pay-method" placeholder="e.g. Bank transfer, Cash, Cheque"/></div>
       <div class="form-group"><label>Reference / Note</label><input id="pay-note" placeholder="OR no., remarks"/></div>
+      <div class="form-group"><label>Deposited to (company account) — optional</label>
+        <select id="pay-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
     `, `<button class="btn-primary" id="save-pay-btn">Save Payment</button><button class="btn-secondary" id="pay-back-btn">Cancel</button>`);
     document.getElementById('pay-back-btn').addEventListener('click', reopen);
     document.getElementById('save-pay-btn').addEventListener('click', async () => {
       const amt = parseFloat(document.getElementById('pay-amt').value) || 0;
       if (amt <= 0) { Notifs.showToast('Enter a valid amount','error'); return; }
+      const acct = await window.BankAccounts.pick(document.getElementById('pay-bank').value);
       const payment = {
         amount: amt,
         date:   document.getElementById('pay-date').value || today(),
@@ -7297,7 +7647,8 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
               refNumber: dref, source: 'Design', projectId: p.id,
               addedBy: currentUser.uid,
               addedByName: window.userProfile?.displayName || currentUser.email,
-              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+              createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+              ...window.BankAccounts.tag(acct, 'in')
             });
             if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
           }
@@ -7863,8 +8214,9 @@ function buildBillingInvoiceHTML(p, inv) {
   const fmtD = s => { if(!s) return '—'; const dt=new Date(s); return isNaN(dt.getTime())?s:dt.toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}); };
   const balanceAfter = (Number(inv.balanceBefore)||0) - (Number(inv.amount)||0);
   const safeName = (inv.no||'invoice').replace(/[^a-zA-Z0-9-]/g,'');
+  const docTitle = inv.kind === 'downpayment' ? 'DOWNPAYMENT INVOICE' : 'BILLING INVOICE';
   const _lh = window.buildLetterhead ? window.buildLetterhead({
-    docTitle: 'BILLING INVOICE',
+    docTitle,
     entity: window.brandEntity ? window.brandEntity('bir') : null,
     accent: '#1a237e',
     dateLabel: 'Invoice Date: ' + fmtD(inv.date),
@@ -7877,7 +8229,7 @@ function buildBillingInvoiceHTML(p, inv) {
 
   return `<!DOCTYPE html><html><head>
 <meta charset="UTF-8"/>
-<title>Billing Invoice — ${escHtml(inv.no||'')}</title>
+<title>${docTitle} — ${escHtml(inv.no||'')}</title>
 <style>
   * { box-sizing:border-box; margin:0; padding:0; }
   body { font-family: Arial, sans-serif; font-size: 11px; color:#000; background:#f0f0f0; }
@@ -7909,7 +8261,7 @@ ${_lh ? _lh.printCSS : ''}
 </style>
 </head><body>
 <div class="export-bar">
-  <span style="font-weight:700">🧾 Billing Invoice — ${escHtml(inv.no||'')}</span>
+  <span style="font-weight:700">🧾 ${docTitle} — ${escHtml(inv.no||'')}</span>
   <button onclick="window.print()">🖨 Save as PDF / Print</button>
   <button onclick="downloadJPEG()">📷 Save as JPEG</button>
   <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,0.15);color:#fff">✕ Close</button>
@@ -7929,7 +8281,7 @@ ${_lh ? _lh.printCSS : ''}
       </div>
     </div>
   </div>
-  <div class="doc-title">BILLING INVOICE</div>`}
+  <div class="doc-title">${docTitle}</div>`}
 
   <div class="meta-grid">
     <div class="meta-box">
@@ -7960,6 +8312,24 @@ ${_lh ? _lh.printCSS : ''}
       <tr><td style="font-size:10px;color:#333">Remaining balance after this invoice is settled</td><td class="number-cell" style="font-size:10px;color:#333">₱${f(balanceAfter)}</td></tr>
     </tbody>
   </table>
+
+  ${Array.isArray(inv.schedule) && inv.schedule.length ? `
+  <div class="section-header" style="margin-top:12px">Payment Schedule — Balance After Downpayment</div>
+  <table>
+    <thead><tr><th style="width:8%">#</th><th>Milestone</th><th style="width:22%">Due Date</th><th class="number-cell" style="width:20%">Amount</th></tr></thead>
+    <tbody>
+      ${inv.schedule.map(s=>`<tr><td>${s.seq}</td><td>${escHtml(s.label||'')}</td><td>${s.dueDate?fmtD(s.dueDate):'TBD'}</td><td class="number-cell">₱${f(s.amount)}</td></tr>`).join('')}
+      <tr class="muted-row"><td colspan="3" style="font-weight:700;text-align:right">Total balance after downpayment</td><td class="number-cell" style="font-weight:700">₱${f(inv.schedule.reduce((s,x)=>s+(+x.amount||0),0))}</td></tr>
+    </tbody>
+  </table>` : ''}
+  ${inv.bank ? `
+  <div class="section-header" style="margin-top:12px">Payment Instructions</div>
+  <div class="notes-box">
+    <strong>${inv.bank.type==='ewallet'?'E-wallet':'Deposit to'}:</strong> ${escHtml(inv.bank.bankName||'')}${inv.bank.branch?' — '+escHtml(inv.bank.branch):''}<br/>
+    <strong>Account Name:</strong> ${escHtml(inv.bank.accountName||'')}<br/>
+    <strong>Account No.:</strong> ${escHtml(inv.bank.accountNo||'')}<br/>
+    Please send the deposit slip / transfer confirmation to ${escHtml((window.BRAND&&window.BRAND.legal.email)||'')} referencing invoice ${escHtml(inv.no||'')}.
+  </div>` : ''}
 
   ${inv.notes?`<div class="section-header" style="margin-top:12px">Notes</div><div class="notes-box">${escHtml(inv.notes)}</div>`:''}
 
@@ -9520,12 +9890,26 @@ window.ensureOrderTracking = async function(o){
 // Convert a won quote into a Sales Order: capture payment + receipt, route to Finance.
 async function openSalesOrderModal(d, currentUser, currentRole, container){
   const total = parseFloat(d.total)||0;
+  // v12 WS36 — the quote's payment terms can't ride the dataset bag (nested object);
+  // fetch the quote doc directly to prefill the DP%. Best-effort — never blocks the modal.
+  let quotePay = null;
+  try { const qs = await db.collection(d.co==='BK'?'bk_quotes':'bs_quotes').doc(d.id).get();
+        if (qs.exists) quotePay = qs.data().payment || null; } catch(_) {}
+  const dpPrefill = quotePay
+    ? (quotePay.downPaymentMode === 'custom'
+        ? (total > 0 ? +(100*(quotePay.downPayment||0)/total).toFixed(1) : '')
+        : (parseFloat(quotePay.downPaymentMode) || ''))
+    : '';
   openPage('🧾 Create Sales Order', `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Client <strong>${escHtml(d.client||'')}</strong> · Quote ${escHtml(d.qno||'')}</div>
     <div class="form-group"><label>Project / Scope</label><input id="so-project" value="${escHtml((d.client||'')+' — '+(d.qno||''))}"/></div>
     <div class="form-row">
       <div class="form-group"><label>Contract Amount (₱)</label><input id="so-contract" type="number" step="0.01" value="${total}" inputmode="decimal"/></div>
       <div class="form-group"><label>Payment Received (₱)</label><input id="so-paid" type="number" step="0.01" placeholder="e.g. downpayment" inputmode="decimal"/></div>
+    </div>
+    <div class="form-group"><label>Downpayment % of contract (optional)</label>
+      <input id="so-dp-pct" type="number" min="0" max="100" step="0.5" value="${dpPrefill}" inputmode="decimal" placeholder="e.g. 40"/>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Prefilled from the quote's payment terms — drives the Downpayment Invoice on the project.</div>
     </div>
     <div class="form-group"><label>Payment Method</label>
       <select id="so-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Bank Transfer</option><option>GCash</option><option>Cash</option><option>Cheque</option><option>Other</option></select>
@@ -9542,9 +9926,10 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
     const paid=parseFloat(document.getElementById('so-paid').value)||0;
     const project=document.getElementById('so-project').value.trim();
     if(!project){ err.textContent='Project is required.'; err.classList.remove('hidden'); return; }
+    const dpPercent = Math.max(0, Math.min(100, parseFloat(document.getElementById('so-dp-pct').value)||0)) || null;
     try{
       // 1) create the master project (the spine that ties the whole job together)
-      const proj = await createJobProject({ ...d, total:contract });
+      const proj = await createJobProject({ ...d, total:contract, dpPercent });
       // 2) sales order, linked to the project
       const ref=await db.collection('sales_orders').add({
         projectId:proj.id, quoteId:d.id, quoteNumber:d.qno||'', clientName:d.client||'', company:d.co||'BS',
@@ -9690,10 +10075,11 @@ window.vatSplit = function(entered, treatment) {
 // linked project's collected/AR, then optionally hands the job off to Production.
 // This is the single bridge that was missing — previously "Record Income" only
 // touched the ledger, so the Projects tab never reflected the money or the handoff.
-function openRecordSaleModal(o, container){
+async function openRecordSaleModal(o, container){
   const contract = o.contractAmount||0;
   const salesNoted = o.paymentReceived||0;
   const defaultAmt = o.recordedAmount||salesNoted||0;
+  const bankOpts = await window.BankAccounts.optionsHTML(o.bankAccountId);
   openPage('💵 Register Sale — '+escHtml(o.clientName||''), `
     <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:10px 14px;font-size:12px">
       <div style="font-weight:700;margin-bottom:6px">📋 Sales Order Terms</div>
@@ -9713,6 +10099,10 @@ function openRecordSaleModal(o, container){
       <div class="form-group"><label>Method</label><select id="rs-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
         ${['Bank Transfer','GCash','Cash','Cheque','Other'].map(m=>`<option ${o.paymentMethod===m?'selected':''}>${m}</option>`).join('')}
       </select></div>
+    </div>
+    <div class="form-group"><label>Deposited to (company account)</label>
+      <select id="rs-bankacct" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Which company account received the cash — feeds the Bank Accounts balance. Further collections for this job are recorded on the linked Project (Projects → 💵 Record Payment).</div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>VAT treatment</label>
@@ -9762,6 +10152,11 @@ function openRecordSaleModal(o, container){
     // Guard the common foot-gun: entering the VAT-inclusive contract price as
     // "exclusive" grosses it up 12% over the contract → phantom over-collection.
     if(contract>0 && amount > contract + 0.5 && !(await confirmDialog({message:`Recorded total ₱${fmt(amount)} exceeds the contract ₱${fmt(contract)} (VAT-${vatTreatment}). Record anyway?`}))){ return; }
+    const acctSel = document.getElementById('rs-bankacct').value;
+    if (amount > 0 && !acctSel && (await window.BankAccounts.list()).length) {
+      err.textContent = 'Select the company account that received this payment.'; err.classList.remove('hidden'); return;
+    }
+    const acct = await window.BankAccounts.pick(acctSel);
     saveBtn.disabled=true; // guard against double-click double-posting
     try{
       // Idempotency: one Sales-Revenue credit per sales order. If this order was
@@ -9772,12 +10167,12 @@ function openRecordSaleModal(o, container){
       // 1) ledger credit (Sales Revenue → feeds Output-VAT base)
       let ledgerId=null;
       if(amount>0){
-        const led=await db.collection('ledger').add({ date:today(), description:`Sales order — ${o.clientName}${o.quoteNumber?' ('+o.quoteNumber+')':''}`, category:'Sales Revenue', accountType:'income', account:'Sales Revenue', type:'credit', amount, net, vatAmount, vatTreatment, refNumber:ledgerRef, source:'Finance', projectId:o.projectId||null, addedBy:currentUser.uid, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+        const led=await db.collection('ledger').add({ date:today(), description:`Sales order — ${o.clientName}${o.quoteNumber?' ('+o.quoteNumber+')':''}`, category:'Sales Revenue', accountType:'income', account:'Sales Revenue', type:'credit', amount, net, vatAmount, vatTreatment, refNumber:ledgerRef, source:'Finance', projectId:o.projectId||null, addedBy:currentUser.uid, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp(), ...window.BankAccounts.tag(acct,'in') });
         ledgerId=led.id;
         if(typeof dbCacheInvalidate==='function') dbCacheInvalidate('ledger');
       }
       // 2) mark the sales order recorded
-      await db.collection('sales_orders').doc(o.id).update({ status:'recorded', recordedAmount:amount, recordedAt:firebase.firestore.FieldValue.serverTimestamp(), recordedBy:who });
+      await db.collection('sales_orders').doc(o.id).update({ status:'recorded', recordedAmount:amount, recordedAt:firebase.firestore.FieldValue.serverTimestamp(), recordedBy:who, bankAccountId: acct.bankAccountId||null, bankAccountName: acct.bankAccountName||null });
       // 3) sync the linked project's collected / AR so the Projects tab shows true values
       if(o.projectId && amount>0){
         try{
@@ -9787,7 +10182,7 @@ function openRecordSaleModal(o, container){
             const newCollected=(p.amountCollected||0)+amount;
             const newAR=Math.max(0,(p.contractAmount||contract)-newCollected);
             const upd={ amountCollected:newCollected, arBalance:newAR, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
-              payments:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order Payment', amount, vatAmount, net, method, orRef, date:today(), by:who, ledgerId }),
+              payments:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order Payment', amount, vatAmount, net, method, orRef, date:today(), by:who, ledgerId, bankAccountId: acct.bankAccountId||null, bankAccountName: acct.bankAccountName||null }),
               documents:firebase.firestore.FieldValue.arrayUnion({ type:'Official Receipt', ref:orRef||('₱'+amount.toLocaleString()), at:new Date().toISOString(), by:who }),
               timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Sale recorded ₱${amount.toLocaleString()} by Finance`, by:who }) };
             if(newAR<=0) upd.stage='paid';
@@ -12965,6 +13360,7 @@ async function createJobProject(d){
     clientName:d.client||'', clientId: d.clientId || null, stage:'won',
     quoteId:d.id||null, quoteNumber:d.qno||'', quoteCollection: company==='BK'?'bk_quotes':'bs_quotes',
     contractAmount:contract, amountCollected:0, arBalance:contract, vatRate:12, capital:0,
+    dpPercent: d.dpPercent || null, balanceSchedule: null,
     partnerUid,
     split:{ isShared: company==='BS', barroPct:50, partnerPct:50 },
     documents:[{ type:'Quotation', ref:d.qno||'', at:new Date().toISOString(), by:who }],
@@ -13173,8 +13569,9 @@ async function advanceProjectStage(p, nextId){
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
 }
 
-function openProjectBillingModal(p){
+async function openProjectBillingModal(p){
   const bal=p.arBalance||0;
+  const bankOpts = await window.BankAccounts.optionsHTML();
   openPage('💵 Record Payment — '+(p.clientName||''), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract ₱${fmt(p.contractAmount||0)} · Collected ₱${fmt(p.amountCollected||0)} · <strong>Balance ₱${fmt(bal)}</strong></div>
     <div class="form-row">
@@ -13189,6 +13586,9 @@ function openProjectBillingModal(p){
           <option value="exempt">VAT-exempt / Zero-rated — no VAT</option>
         </select></div>
       <div class="form-group"><label>Method</label><select id="pb-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Bank Transfer</option><option>GCash</option><option>Cash</option><option>Cheque</option></select></div>
+    </div>
+    <div class="form-group"><label>Deposited to (company account)</label>
+      <select id="pb-bankacct" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select>
     </div>
     <div class="card" style="margin:6px 0"><div class="card-body" style="padding:8px 14px;font-size:12px;display:grid;grid-template-columns:1fr auto;gap:2px 12px">
       <span style="color:var(--text-muted)">Recorded total</span><span id="pb-rec" style="text-align:right;font-weight:700;color:var(--success)">₱0.00</span>
@@ -13221,6 +13621,11 @@ function openProjectBillingModal(p){
     const newAR=Math.max(0,(p.contractAmount||0)-newCollected);
     const who=userProfile?.displayName||currentUser.email;
     const type=document.getElementById('pb-type').value, method=document.getElementById('pb-method').value, orRef=document.getElementById('pb-ref').value.trim();
+    const acctSel=document.getElementById('pb-bankacct').value;
+    if (!acctSel && (await window.BankAccounts.list()).length) {
+      err.textContent = 'Select the company account that received this payment.'; err.classList.remove('hidden'); return;
+    }
+    const acct = await window.BankAccounts.pick(acctSel);
     saveBtn.disabled=true; // guard against double-click double-posting (payments are legitimately multiple)
     try{
       // 1) post income credit to the ledger (category 'Sales Revenue' so it feeds the Output-VAT base)
@@ -13228,10 +13633,10 @@ function openProjectBillingModal(p){
       const projLedgerRef=`PROJ-${p.id}-${(p.payments?.length||0)}`;
       const projDupe=await db.collection('ledger').where('refNumber','==',projLedgerRef).limit(1).get().catch(()=>({empty:true}));
       if(!projDupe.empty){ closeModal(); Notifs.showToast('This payment was already posted.','error'); window.renderProjectLifecycle(); return; }
-      const led=await db.collection('ledger').add({ date:today(), description:`Project ${p.projectNo} — ${p.clientName} (${type})`, category:'Sales Revenue', accountType:'income', account:'Sales Revenue', type:'credit', amount, net, vatAmount, vatTreatment, refNumber:projLedgerRef, source:'Finance', projectId:p.id, addedBy:currentUser.uid, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+      const led=await db.collection('ledger').add({ date:today(), description:`Project ${p.projectNo} — ${p.clientName} (${type})`, category:'Sales Revenue', accountType:'income', account:'Sales Revenue', type:'credit', amount, net, vatAmount, vatTreatment, refNumber:projLedgerRef, source:'Finance', projectId:p.id, addedBy:currentUser.uid, addedByName:who, createdAt:firebase.firestore.FieldValue.serverTimestamp(), ...window.BankAccounts.tag(acct,'in') });
       if(typeof dbCacheInvalidate==='function') dbCacheInvalidate('ledger');
       // 2) update the project: payment, collected, AR, OR document, timeline
-      const payment={ type, amount, vatAmount, net, method, orRef, receiptUrl:receipt?.url||null, date:today(), by:who, ledgerId:led.id };
+      const payment={ type, amount, vatAmount, net, method, orRef, receiptUrl:receipt?.url||null, date:today(), by:who, ledgerId:led.id, bankAccountId: acct.bankAccountId||null, bankAccountName: acct.bankAccountName||null };
       const update={ amountCollected:newCollected, arBalance:newAR, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
         payments:firebase.firestore.FieldValue.arrayUnion(payment),
         documents:firebase.firestore.FieldValue.arrayUnion({ type:'Official Receipt', ref:orRef||('₱'+amount.toLocaleString()), at:new Date().toISOString(), by:who }),
@@ -13248,13 +13653,39 @@ function openProjectBillingModal(p){
 // Finance issues a printable billing invoice against a job_projects record (the
 // sales-record spine). Issuing an invoice only documents what's owed — it does NOT
 // move money (that's "Record Payment"), so AR/Collected are untouched here.
-function openJobBillingInvoiceModal(p){
+async function openJobBillingInvoiceModal(p){
   const contract = Number(p.contractAmount)||0;
   const paid     = Number(p.amountCollected)||0;
   const bal      = Math.max(0, contract - paid);
+  const bankOpts = await window.BankAccounts.optionsHTML();
   openPage('🧾 Billing Invoice — '+escHtml(p.clientName||''), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract ₱${fmt(contract)} · Collected ₱${fmt(paid)} · <strong>Balance ₱${fmt(bal)}</strong></div>
     <div class="form-group"><label>Bill To</label><input id="jinv-billto" value="${escHtml(p.clientName||'')}"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Invoice Kind</label>
+        <select id="jinv-kind" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          <option value="standard">Standard collection</option>
+          <option value="downpayment">Downpayment (with balance schedule)</option></select></div>
+      <div class="form-group"><label>Deposit to (company account)</label>
+        <select id="jinv-bankacct" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
+    </div>
+    <div id="jinv-dp-wrap" style="display:none">
+      <div class="form-row">
+        <div class="form-group"><label>Downpayment % of contract</label>
+          <input id="jinv-dppct" type="number" min="0" max="100" step="0.5" value="${p.dpPercent||''}" inputmode="decimal" placeholder="e.g. 40"/></div>
+        <div class="form-group"><label>Balance mode</label>
+          <select id="jinv-balmode" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+            <option value="lump">Lump sum on completion</option>
+            <option value="stagger3">3 staggered progress payments</option><option value="stagger4">4 staggered</option><option value="stagger5">5 staggered</option>
+            <option value="install3">3-month installment</option><option value="install6">6-month installment</option>
+            <option value="install9">9-month installment</option><option value="install12">12-month installment</option></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" id="jinv-int-wrap" style="display:none"><label>Interest % p.a.</label><input id="jinv-interest" type="number" min="0" step="0.5" value="0" inputmode="decimal"/></div>
+        <div class="form-group"><label>Est. completion date</label><input id="jinv-complete" type="date"/></div>
+      </div>
+      <div id="jinv-sched-preview" style="font-size:12px;color:var(--text-muted);margin:4px 0 8px"></div>
+    </div>
     <div class="form-row">
       <div class="form-group"><label>Invoice Date</label><input id="jinv-date" type="date" value="${today()}"/></div>
       <div class="form-group"><label>Due Date</label><input id="jinv-due" type="date"/></div>
@@ -13265,14 +13696,37 @@ function openJobBillingInvoiceModal(p){
     <div id="jinv-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="jinv-gen">Generate Invoice</button><button class="btn-secondary" id="jinv-back">Cancel</button>`);
   document.getElementById('jinv-back').addEventListener('click', ()=>openJobProjectDetail(p));
+
+  // ── Kind toggle + live balance-schedule preview (v12 WS36) ──
+  const kindSel=document.getElementById('jinv-kind'), dpWrap=document.getElementById('jinv-dp-wrap');
+  const balModeSel=document.getElementById('jinv-balmode'), intWrap=document.getElementById('jinv-int-wrap');
+  const renderSchedPreview=()=>{
+    if(kindSel.value!=='downpayment'){ document.getElementById('jinv-sched-preview').innerHTML=''; return; }
+    const pct=parseFloat(document.getElementById('jinv-dppct').value)||0;
+    const dpAmt=parseFloat(document.getElementById('jinv-amt').value)||0;
+    const schedule=window.buildBalanceSchedule(contract, dpAmt, balModeSel.value, parseFloat(document.getElementById('jinv-interest').value)||0,
+      document.getElementById('jinv-date').value||today(), document.getElementById('jinv-complete').value||null);
+    document.getElementById('jinv-sched-preview').innerHTML=schedule.map(s=>`${s.seq}. ${s.label} — ${s.dueDate||'TBD'} — ₱${fmt(s.amount)}`).join('<br>');
+  };
+  kindSel.addEventListener('change', ()=>{
+    dpWrap.style.display = kindSel.value==='downpayment' ? '' : 'none';
+    if(kindSel.value==='downpayment'){
+      const pct=parseFloat(document.getElementById('jinv-dppct').value)||0;
+      document.getElementById('jinv-amt').value=(+(contract*(pct/100))).toFixed(2);
+      document.getElementById('jinv-desc').value=`Downpayment (${pct}% of contract)`;
+    }
+    renderSchedPreview();
+  });
+  balModeSel.addEventListener('change', ()=>{ intWrap.style.display=/^install/.test(balModeSel.value)?'':'none'; renderSchedPreview(); });
+  ['jinv-dppct','jinv-interest','jinv-complete','jinv-date','jinv-amt'].forEach(id=>document.getElementById(id).addEventListener('input', renderSchedPreview));
+
   document.getElementById('jinv-gen').addEventListener('click', async ()=>{
     const err=document.getElementById('jinv-err');
     const amt=parseFloat(document.getElementById('jinv-amt').value)||0;
     if(amt<=0){ err.textContent='Enter a valid amount.'; err.classList.remove('hidden'); return; }
-    const seq=((p.invoices||[]).length+1);
+    const kind = kindSel.value==='downpayment' ? 'downpayment' : 'standard';
     const who=userProfile?.displayName||currentUser.email||'';
     const inv={
-      no:             'INV-'+today().replace(/-/g,'')+'-'+String(seq).padStart(3,'0'),
       date:           document.getElementById('jinv-date').value||today(),
       due:            document.getElementById('jinv-due').value||'',
       billTo:         document.getElementById('jinv-billto').value.trim(),
@@ -13287,24 +13741,49 @@ function openJobBillingInvoiceModal(p){
       issuedBy:       who,
       createdAt:      today()
     };
-    if(!(await confirmDialog({message:`Generate billing invoice ${inv.no} for ₱${fmt(amt)} (${escHtml(p.clientName||'')})?`, html:true}))) return;
+    let pct=null, schedule=null;
+    if(kind==='downpayment'){
+      pct = Math.max(0, Math.min(100, parseFloat(document.getElementById('jinv-dppct').value)||0));
+      const completeDate = document.getElementById('jinv-complete').value||null;
+      schedule = window.buildBalanceSchedule(contract, amt, balModeSel.value, parseFloat(document.getElementById('jinv-interest').value)||0, inv.date, completeDate);
+      inv.kind = 'downpayment'; inv.dpPercent = pct; inv.schedule = schedule;
+    } else {
+      inv.kind = 'standard';
+    }
+    // v12 WS36 decision 9 — the registry SUPERSEDES the quote's free-text bankDetails;
+    // snapshot the chosen account onto the invoice so a later account edit never
+    // rewrites an issued invoice.
+    const acct = await window.BankAccounts.pick(document.getElementById('jinv-bankacct').value);
+    if (acct.bankAccountId) {
+      const full = (await window.BankAccounts.list({activeOnly:false})).find(a=>a.id===acct.bankAccountId);
+      if (full) inv.bank = { nickname:full.nickname||'', type:full.type||'bank', bankName:full.bankName||'', branch:full.branch||'', accountName:full.accountName||'', accountNo:full.accountNo||'' };
+    }
+    const confirmMsg = `Generate ${kind==='downpayment'?'downpayment':'billing'} invoice for ₱${fmt(amt)} (${escHtml(p.clientName||'')})?`
+      + (kind==='downpayment' && p.balanceSchedule ? ' This replaces the existing balance schedule.' : '');
+    if(!(await confirmDialog({message:confirmMsg, html:true}))) return;
     try{
+      // Numbering (decision 13) — minted AFTER the confirm so a cancelled dialog
+      // burns no serial. ONE series for standard + downpayment invoices.
+      inv.no = await window.nextSerial('billing_invoice','INV');
       // Atomic append so a concurrent edit can't clobber the invoice list.
       const ref=db.collection('job_projects').doc(p.id);
       const saved=await db.runTransaction(async tx=>{
         const doc=await tx.get(ref);
         const cur=(doc.exists && Array.isArray(doc.data().invoices))?doc.data().invoices:[];
         const next=[...cur, inv];
-        tx.update(ref, {
+        const upd={
           invoices:next,
           documents:firebase.firestore.FieldValue.arrayUnion({ type:'Billing Invoice', ref:inv.no, at:new Date().toISOString(), by:who }),
           timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Billing invoice ${inv.no} issued (₱${amt.toLocaleString()})`, by:who }),
           updatedAt:firebase.firestore.FieldValue.serverTimestamp()
-        });
+        };
+        if(kind==='downpayment'){ upd.dpPercent=pct; upd.balanceSchedule=schedule; }
+        tx.update(ref, upd);
         return next;
       });
       p.invoices=saved;
-      window.logAudit && window.logAudit('create','invoice',p.id,{ no:inv.no, amount:amt, projectNo:p.projectNo });
+      if(kind==='downpayment'){ p.dpPercent=pct; p.balanceSchedule=schedule; }
+      window.logAudit && window.logAudit('create','invoice',p.id,{ no:inv.no, amount:amt, projectNo:p.projectNo, kind });
       closeModal();
       Notifs.showToast('Billing invoice generated','success');
       window.openBillingInvoice(p, inv);
@@ -14754,9 +15233,10 @@ async function notifyFinanceTeam(data) {
 // Finance posts a submitted purchase into the cash disbursement journal.
 // Pre-fills from the purchase request; the PR's PO number becomes the reference
 // so a double-entry is easy to spot.
-function recordPurchaseDisbursement(p, currentUser, onDone) {
+async function recordPurchaseDisbursement(p, currentUser, onDone) {
   const total = p.total != null ? p.total : purchTotal(p.items);
   const ref = p.prNo || p.rfqNo || '';
+  const bankOpts = await window.BankAccounts.optionsHTML();
   openPage('🧾 Record Purchase — Cash Disbursement', `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Posting <strong>${escHtml(p.title || ref)}</strong> to the Cash Disbursement Journal.</div>
     <div class="form-row">
@@ -14772,6 +15252,9 @@ function recordPurchaseDisbursement(p, currentUser, onDone) {
         <option value="ap">Accounts Payable</option>
         <option value="sundry">Sundry / Other</option>
       </select></div>
+    </div>
+    <div class="form-group"><label>Paid from (company account)</label>
+      <select id="rec-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select>
     </div>
     <div class="form-group" id="rec-sundry-wrap" style="display:none"><label>Sundry Account Name</label><input id="rec-sundry" placeholder="e.g. Office Supplies Expense"/></div>
     <div class="form-group"><label>Input VAT</label>
@@ -14803,6 +15286,9 @@ function recordPurchaseDisbursement(p, currentUser, onDone) {
     const acct = acctSel.value;
     if (!payee) { Notifs.showToast('Enter a payee.', 'error'); return; }
     if (!amt) { Notifs.showToast('Enter the amount.', 'error'); return; }
+    const bankSel = document.getElementById('rec-bank').value;
+    if (!bankSel && (await window.BankAccounts.list()).length) { Notifs.showToast('Select the paying account.', 'error'); return; }
+    const bankAcct = await window.BankAccounts.pick(bankSel);
     const saveBtn = document.getElementById('rec-save'); saveBtn.disabled = true;
     try {
       if (reference) {
@@ -14828,6 +15314,7 @@ function recordPurchaseDisbursement(p, currentUser, onDone) {
         debitAccount:      acct,
         vatAmount: inputVat, vatTreatment,
         purchaseRef:       p.id,
+        bankAccountId: bankAcct.bankAccountId || null, bankAccountName: bankAcct.bankAccountName || null,
         addedBy: currentUser.uid,
         addedByName: window.userProfile?.displayName || currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()

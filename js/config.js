@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.22';
+window.APP_VERSION = '12.0.23';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -446,6 +446,95 @@ window.ledgerSince = function(startYmd) {
     () => db.collection('ledger').where('date','>=',startYmd).get().catch(() => ({docs:[]})), 60000);
 };
 
+// ── Bank accounts registry (v12 WS36) ──────────────────────────────────────
+// Balances are DERIVED (opening anchor + tagged ledger flows) — never stored.
+// Field family: bankAccountId/bankAccountName/bankFlow — NEVER 'account'/
+// 'accountType' (those are WS13 chart-of-accounts fields on every ledger row).
+window.BankAccounts = {
+  async list({ activeOnly = true } = {}) {
+    const snap = await dbCachedGet('bank_accounts',
+      () => db.collection('bank_accounts').get().catch(() => ({ docs: [] })), 60000);
+    const all = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .sort((a,b) => (a.sortOrder||0)-(b.sortOrder||0) || (a.nickname||'').localeCompare(b.nickname||''));
+    return activeOnly ? all.filter(a => a.active !== false) : all;
+  },
+  invalidate() { if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('bank_accounts'); },
+  label(a) {                                   // 'BDO Checking — Main (•••• 7890)' — masked, safe for lists
+    if (!a) return '';
+    const tail = (a.accountNo||'').replace(/\D/g,'').slice(-4);
+    return (a.nickname || a.bankName || '') + (tail ? ` (•••• ${tail})` : '');
+  },
+  async optionsHTML(selectedId) {              // <option> set for pickers; preselects selectedId, else isDefault
+    const list = await this.list();
+    const def = selectedId || (list.find(a => a.isDefault) || {}).id || '';
+    return ['<option value="">— no account —</option>']
+      .concat(list.map(a => `<option value="${escHtml(a.id)}" ${a.id===def?'selected':''}>${escHtml(this.label(a))}</option>`))
+      .join('');
+  },
+  async pick(id) {                             // picked id → the write-ready pair (null-safe)
+    if (!id) return { bankAccountId: null, bankAccountName: null };
+    const a = (await this.list({ activeOnly: false })).find(x => x.id === id);
+    return { bankAccountId: id, bankAccountName: a ? this.label(a) : null };
+  },
+  tag(acct, flow) {                            // spread into a ledger write; {} when untagged (keys OMITTED, not null)
+    return (acct && acct.bankAccountId)
+      ? { bankAccountId: acct.bankAccountId, bankAccountName: acct.bankAccountName || null, bankFlow: flow }
+      : {};
+  },
+  // DERIVED balances (decision 2). rows = ledger doc datas. Pure — no reads.
+  computeBalances(accounts, rows, { reconciledOnly = false, asOf = null } = {}) {
+    const out = {};
+    accounts.forEach(a => { out[a.id] = { account: a, balance: +(a.openingBalance||0), in: 0, out: 0 }; });
+    rows.forEach(r => {
+      if (!r || !r.bankAccountId || !out[r.bankAccountId]) return;
+      const acc = out[r.bankAccountId].account;
+      if (r.date && acc.openingDate && r.date < acc.openingDate) return;  // pre-anchor rows excluded
+      if (asOf && r.date && r.date > asOf) return;
+      if (reconciledOnly && !r.reconciled) return;
+      const amt = +(r.amount||0);
+      if (r.bankFlow === 'in')  { out[r.bankAccountId].balance += amt; out[r.bankAccountId].in  += amt; }
+      if (r.bankFlow === 'out') { out[r.bankAccountId].balance -= amt; out[r.bankAccountId].out += amt; }
+    });
+    return out;
+  },
+  // WS40 reads THIS (see handoff note above).
+  async cashPosition() {
+    const [accounts, snap] = await Promise.all([ this.list(), window.ledgerForPeriod('all') ]);
+    const per = this.computeBalances(accounts, snap.docs.map(d => d.data()));
+    return { total: Object.values(per).reduce((s,x) => s + x.balance, 0), perAccount: per };
+  }
+};
+
+// Ported from quote-builder-v2.html:1821-1878 (that file is iframe-isolated by
+// design — math re-derived here, not imported). Returns the POST-DP schedule.
+window.buildBalanceSchedule = function(contract, dpAmount, balMode, interestRate, invoiceDate, completionDate) {
+  const bal = Math.max(0, (+contract||0) - (+dpAmount||0));
+  if (bal <= 0) return [];
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const addDays   = (s,n) => { const d = new Date(s+'T12:00:00'); d.setDate(d.getDate()+n);   return iso(d); };
+  const addMonths = (s,n) => { const d = new Date(s+'T12:00:00'); d.setMonth(d.getMonth()+n); return iso(d); };
+  if (balMode === 'lump')
+    return [{ seq:1, label:'Balance — due upon completion', dueDate: completionDate||null, amount:+bal.toFixed(2) }];
+  if (/^stagger[345]$/.test(balMode)) {
+    const n = +balMode.replace('stagger',''), per = +(bal/n).toFixed(2), out = [];
+    const span = (invoiceDate && completionDate)
+      ? Math.max(0, Math.round((new Date(completionDate+'T12:00:00') - new Date(invoiceDate+'T12:00:00'))/86400000)) : 0;
+    for (let i=1;i<=n;i++) out.push({ seq:i, label:`Progress payment ${i} of ${n}`,
+      dueDate: span ? addDays(invoiceDate, Math.round(span*i/n)) : null,
+      amount: i===n ? +(bal - per*(n-1)).toFixed(2) : per });          // last row absorbs rounding
+    return out;
+  }
+  if (/^install(3|6|9|12)$/.test(balMode)) {
+    const m = +balMode.replace('install',''), r = (+interestRate||0)/100/12;
+    const monthly = r > 0 ? bal*r/(1-Math.pow(1+r,-m)) : bal/m, out = [];
+    for (let i=1;i<=m;i++) out.push({ seq:i,
+      label:`Installment ${i} of ${m}${r>0?` (@ ${interestRate}% p.a.)`:''}`,
+      dueDate: invoiceDate ? addMonths(invoiceDate, i) : null, amount:+monthly.toFixed(2) });
+    return out;
+  }
+  return [{ seq:1, label:'Balance', dueDate:null, amount:+bal.toFixed(2) }];
+};
+
 // ── Chart.js on demand (WS16 D8) ──
 window.ensureChart = function() {
   if (window.Chart) return Promise.resolve();
@@ -690,7 +779,7 @@ window.COA = {
   expense:   ['COS – Direct Material', 'COS – Direct Labor', 'Payroll Expense',
               'Operating Expense', 'Utilities', 'Tax', 'Materials',
               'General Expense', 'Other Expense'],
-  asset:     ['Cash', 'Accounts Receivable', 'Inventory'],
+  asset:     ['Cash', 'Accounts Receivable', 'Inventory', 'Advances to Employees'],
   liability: ['Accounts Payable', 'VAT Payable', 'Statutory Payables',
               'SSS Payable', 'PhilHealth Payable', 'Pag-IBIG Payable', 'Withholding Tax Payable'], // v12 WS20/21 — per-agency remittance legs (WS39 reads these)
   equity:    ["Owner's Equity", 'Retained Earnings'],
@@ -705,6 +794,9 @@ window.COA_LEGACY_MAP = {
   'Utilities':'expense', 'Tax':'expense', 'Materials':'expense',
   'General Expense':'expense', 'Other Expense':'expense',
   'Journal Entry':null, 'Journal Entry (Non-cash)':null,   // null = derive from type
+  // v12 WS36 — bank-accounts blast-radius retrofit (A/R & A/P settlement legs,
+  // cash-advance release). Safety fallback; rows always carry accountType too.
+  'Cash Advance':'asset', 'A/R Collection':'asset', 'A/P Settlement':'liability',
 };
 // The ONE place P&L income/expense classification happens — replaces raw
 // row.type==='credit'/'debit' checks everywhere so asset/liability rows
@@ -1041,7 +1133,7 @@ window.CashAdvance = {
 
   // ── Approve / reject (race-safe everywhere — a strict upgrade over the two
   //    call sites that previously skipped the transaction) ────────────────
-  async approve(id, { interestPct = null } = {}) {
+  async approve(id, { interestPct = null, bankAccount = null } = {}) {
     const ref = db.collection('cash_advances').doc(id);
     let result = null;
     await db.runTransaction(async t => {
@@ -1057,50 +1149,75 @@ window.CashAdvance = {
       t.update(ref, {
         status: 'approved', interest: pct, interestCharged: pct > 0,
         totalPayable: _caRound2(total), monthlyPayment: _caRound2(monthly), balance: _caRound2(total),
+        bankAccountId: (bankAccount && bankAccount.bankAccountId) || null,
+        bankAccountName: (bankAccount && bankAccount.bankAccountName) || null,
         approvedBy: uid, approvedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
-      result = { userId: cur.userId, amount: cur.amount, total: _caRound2(total) };
+      result = { userId: cur.userId, amount: cur.amount, total: _caRound2(total), userName: cur.userName || '' };
     });
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
     if (result) {
+      // v12 WS36 — mirror the cash release into the ledger (idempotent, keyed CA-<id>).
+      // Best-effort: an approver without ledger-write rights (or a closed period —
+      // ledgerPeriodOpen() is enforced server-side) must not break the approval itself.
+      try {
+        const lref = `CA-${id}`;
+        const dupe = await db.collection('ledger').where('refNumber','==',lref).limit(1).get().catch(()=>({docs:[]}));
+        if (!dupe.docs.length) {
+          await db.collection('ledger').add({
+            date: (window.bizDate ? window.bizDate() : today()), type:'debit',
+            accountType:'asset', account:'Advances to Employees',
+            description:`Cash advance released — ${result.userName}`,
+            amount: result.amount, category:'Cash Advance', refNumber: lref, source:'Cash Advance',
+            ...window.BankAccounts.tag(bankAccount, 'out'),
+            addedBy: window.currentUser?.uid || null,
+            addedByName: (window.userProfile && window.userProfile.displayName) || (window.currentUser && window.currentUser.email) || '',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+        }
+      } catch(e) { console.warn('[CA ledger]', e?.message || e); }
       await Notifs.send(result.userId, { title:'Cash Advance Approved', body:`Your ₱${fmt(result.amount)} cash advance was approved — repay ₱${fmt(result.total)}.`, icon:'💸', type:'cash_advance', dedupKey:`ca-approved-${id}` });
       window.logAudit && window.logAudit('approve','cash_advance', id, { total: result.total });
     }
     return result;
   },
 
-  openApproveModal(id, onDone) {
-    db.collection('cash_advances').doc(id).get().then(snap => {
-      if (!snap.exists) { Notifs.showToast('Record no longer exists.','error'); if (onDone) onDone(); return; }
-      const a = snap.data();
-      const terms = a.terms || 1;
-      openModal(`Approve Cash Advance — ${escHtml(a.userName||'Employee')}`, `
-        <div class="ca-detail" style="margin-bottom:10px"><span>Principal</span><strong>₱${fmt(a.amount)}</strong></div>
-        <div class="ca-detail" style="margin-bottom:10px"><span>Terms</span><span>${terms} month${terms>1?'s':''}</span></div>
-        <div class="form-group"><label>Interest Rate (%/month)</label>
-          <input id="ca-appr-rate" type="number" inputmode="decimal" min="0" step="0.5" value="${window.CashAdvance.RATE_DEFAULT}"/>
-        </div>
-        <div id="ca-appr-preview" style="font-size:13px;color:var(--text-muted);margin-top:8px"></div>
-      `, `<button class="btn-primary" id="ca-appr-confirm-btn">Approve</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-      const updatePreview = () => {
-        const pct = parseFloat(document.getElementById('ca-appr-rate').value)||0;
-        const total = pct>0 ? a.amount*Math.pow(1+pct/100,terms) : a.amount;
-        const monthly = total/terms;
-        document.getElementById('ca-appr-preview').innerHTML = `Employee repays <strong>₱${fmt(total)}</strong> (₱${fmt(monthly)}/mo × ${terms})`;
-      };
-      document.getElementById('ca-appr-rate').addEventListener('input', updatePreview);
-      updatePreview();
-      document.getElementById('ca-appr-confirm-btn').addEventListener('click', async () => {
-        const pct = parseFloat(document.getElementById('ca-appr-rate').value)||0;
-        try {
-          await window.CashAdvance.approve(id, { interestPct: pct });
-          closeModal();
-          Notifs.showToast('Approved!');
-        } catch (err) {
-          Notifs.showToast(err.message || 'Could not approve.', 'error');
-        }
-        if (onDone) onDone();
-      });
+  async openApproveModal(id, onDone) {
+    const snap = await db.collection('cash_advances').doc(id).get();
+    if (!snap.exists) { Notifs.showToast('Record no longer exists.','error'); if (onDone) onDone(); return; }
+    const a = snap.data();
+    const terms = a.terms || 1;
+    const bankOpts = await window.BankAccounts.optionsHTML();
+    openModal(`Approve Cash Advance — ${escHtml(a.userName||'Employee')}`, `
+      <div class="ca-detail" style="margin-bottom:10px"><span>Principal</span><strong>₱${fmt(a.amount)}</strong></div>
+      <div class="ca-detail" style="margin-bottom:10px"><span>Terms</span><span>${terms} month${terms>1?'s':''}</span></div>
+      <div class="form-group"><label>Interest Rate (%/month)</label>
+        <input id="ca-appr-rate" type="number" inputmode="decimal" min="0" step="0.5" value="${window.CashAdvance.RATE_DEFAULT}"/>
+      </div>
+      <div class="form-group"><label>Release from (company account)</label>
+        <select id="ca-appr-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
+      <div id="ca-appr-preview" style="font-size:13px;color:var(--text-muted);margin-top:8px"></div>
+    `, `<button class="btn-primary" id="ca-appr-confirm-btn">Approve</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    const updatePreview = () => {
+      const pct = parseFloat(document.getElementById('ca-appr-rate').value)||0;
+      const total = pct>0 ? a.amount*Math.pow(1+pct/100,terms) : a.amount;
+      const monthly = total/terms;
+      document.getElementById('ca-appr-preview').innerHTML = `Employee repays <strong>₱${fmt(total)}</strong> (₱${fmt(monthly)}/mo × ${terms})`;
+    };
+    document.getElementById('ca-appr-rate').addEventListener('input', updatePreview);
+    updatePreview();
+    document.getElementById('ca-appr-confirm-btn').addEventListener('click', async () => {
+      const pct = parseFloat(document.getElementById('ca-appr-rate').value)||0;
+      try {
+        const acct = await window.BankAccounts.pick(document.getElementById('ca-appr-bank').value);
+        await window.CashAdvance.approve(id, { interestPct: pct, bankAccount: acct });
+        closeModal();
+        Notifs.showToast('Approved!');
+      } catch (err) {
+        Notifs.showToast(err.message || 'Could not approve.', 'error');
+      }
+      if (onDone) onDone();
     });
   },
 

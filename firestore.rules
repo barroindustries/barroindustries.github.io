@@ -830,7 +830,10 @@ service cloud.firestore {
       // accountType is read tolerantly (.get(...,'expense')/.get(...,'')) so an
       // old, not-yet-updated client posting the legacy (no-accountType) COS shape
       // is still accepted. Update/delete stay finance/president.
-      allow create: if isAuth() && ledgerDateOk() && ledgerPeriodOpen() && (
+      // v12 WS36 — bankFlow shape guard ('' | 'in' | 'out'). .get(field,default) so
+      // untagged rows and old clients (no bankFlow at all) still pass.
+      allow create: if isAuth() && ledgerDateOk() && ledgerPeriodOpen()
+        && request.resource.data.get('bankFlow', '') in ['', 'in', 'out'] && (
         canFinance()
         || (canProduction()
             && request.resource.data.get('source', '') == 'Production'
@@ -851,7 +854,8 @@ service cloud.firestore {
                 && request.resource.data.get('refNumber', '').matches('POCOS-.*-INV'))
             ))
       );
-      allow update: if isAuth() && canFinance();
+      allow update: if isAuth() && canFinance()
+        && request.resource.data.get('bankFlow', '') in ['', 'in', 'out'];
       allow delete: if isAuth() && isPresident();
     }
     match /ledger_entries/{docId} {
@@ -918,6 +922,23 @@ service cloud.firestore {
       allow read: if isAuth() && canFinance();
       allow create: if isAuth() && canFinance();
       allow update, delete: if isAuth() && isPresident();
+    }
+
+    // ── Bank accounts registry (v12 WS36) ──────────────
+    // Master data for the company's cash locations (bank / e-wallet / petty cash).
+    // Balances are DERIVED client-side (opening anchor + tagged ledger flows) — no
+    // balance field lives here, so nothing a buggy writer could drift. Reads are
+    // books-operators only (account numbers are sensitive); create/update is the
+    // money tier (matches payroll/pay_runs post-WS19); deletes are President-only —
+    // the client routes them through finance_delete_requests like every finance doc.
+    match /bank_accounts/{docId} {
+      allow read:   if isAuth() && canFinance();
+      allow create, update: if isAuth() && isMoneyAdmin()
+        && request.resource.data.get('nickname', '') is string
+        && request.resource.data.get('nickname', '') != ''
+        && request.resource.data.get('openingBalance', 0) is number
+        && request.resource.data.get('type', 'bank') in ['bank', 'ewallet', 'cash'];
+      allow delete: if isAuth() && isPresident();
     }
 
     // ── Payslips & Worker profiles (Brilliant Steel) ───
@@ -1080,7 +1101,13 @@ service cloud.firestore {
       // Partner may NOT edit profit factors — only the project owner / non-partner staff can update.
       allow read:   if isAuth() && (resource.data.createdBy == request.auth.uid || resource.data.partnerUid == request.auth.uid || !isPartner());
       allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
-      allow update: if isAuth() && (resource.data.createdBy == request.auth.uid || !isPartner());
+      // v12 WS36 — money keys need books access; stage/timeline/documents/tracking
+      // edits stay open to internal staff exactly as before (affectedKeys diff, so
+      // writes not touching money keys are unaffected).
+      allow update: if isAuth() && (resource.data.createdBy == request.auth.uid || !isPartner())
+        && ( !request.resource.data.diff(resource.data).affectedKeys().hasAny(
+               ['payments', 'amountCollected', 'arBalance', 'invoices', 'dpPercent', 'balanceSchedule'])
+             || canFinance() );
       allow delete: if isAuth() && isAdmin();
     }
 
