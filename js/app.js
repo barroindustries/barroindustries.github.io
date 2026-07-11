@@ -2528,8 +2528,6 @@ async function renderPresidentDashboard() {
       </div>
       <div id="live-clock" class="live-clock-line"></div>
 
-      <div id="pres-id-card-wrap" style="margin-bottom:20px"></div>
-
       ${overdueTasks.length>0?`
       <div class="alert-banner alert-danger" onclick="navigateTo('tasks')">
         <span>⚠️ <strong>${overdueTasks.length} overdue task${overdueTasks.length>1?'s':''}</strong> need immediate attention</span>
@@ -2642,7 +2640,6 @@ async function renderPresidentDashboard() {
         </div>
       </div>
     `;
-    renderIDCard('pres-id-card-wrap', userProfile);
     liveDateTime('live-clock');
     renderMiniCal();
     if (window.lucide) lucide.createIcons({ nodes: [c] });
@@ -3108,8 +3105,6 @@ async function renderEmployeeDashboard() {
       </div>
       <div id="live-clock" class="live-clock-line"></div>
 
-      <div id="emp-id-card-wrap" style="margin-bottom:16px"></div>
-
       ${overdue.length>0?`<div class="alert-banner alert-danger" onclick="navigateTo('tasks')"><span>⚠️ <strong>${overdue.length} overdue task${overdue.length>1?'s':''}</strong></span><span class="alert-chevron">›</span></div>`:''}
 
       <!-- Departmental Tabs -->
@@ -3306,7 +3301,6 @@ async function renderEmployeeDashboard() {
       </div>
     `;
 
-    renderIDCard('emp-id-card-wrap', u);
     liveDateTime('live-clock');
     renderMiniCal();
     if (window.lucide) lucide.createIcons({ nodes: [c] });
