@@ -286,15 +286,16 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
 > Fable decides architecture into a `fable-workplan/NN-*.md` `## DECIDED` spec, Sonnet
 > implements mechanically from it.
 
-41. `[ ]` **My Profile tab + Facebook-inspired shell redesign** — a new personal-hub tab
+41. `[x]` **My Profile tab + Facebook-inspired shell redesign** — a new personal-hub tab
     (ID, Personal Finance & Performance, Personal Analytics, Tasks, Recent Activities) plus a
-    shell restructure: a Facebook-style top nav for desktop/iPad (Profile · Chats ·
-    Notifications · Menu · Departments · Search · logo/title) with the left sidebar
-    simplified to the remaining core sections (Tasks, Posts, Company, etc.), and an
-    equivalent mobile layout (Facebook-inspired; exact mobile icon set is an open decision).
-    Full mandate captured verbatim in `fable-workplan/41-profile-and-nav-redesign.md`. High
-    blast-radius — touches every page's chrome across all 6 roles and all device tiers, no
-    incremental per-department rollout possible. Being architected now (Fable).
+    shell restructure: a Facebook-style top nav for desktop/iPad (Search · Departments ·
+    Chats · Notifications · Menu · Avatar/Profile · logo/title) with the left sidebar
+    simplified (Chat/Departments/Personal Finance nav entries removed, all three routes stay
+    live), and mobile bottom-nav arrays reshaped to add Profile. **DECIDED + IMPLEMENTED**
+    2026-07-11 — see `fable-workplan/41-profile-and-nav-redesign.md`; commits 7eed7d9
+    (DECIDED) + 5bc03c9 (implemented, rules/index deployed). ‼️ FLAG FOR NEIL: mobile icon
+    set (spec's Decision 14) wasn't explicitly confirmed by Neil — shipped with a sensible
+    default, reversible one-line change.
 
 ---
 
