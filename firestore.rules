@@ -151,9 +151,12 @@ service cloud.firestore {
     // Widened from admin-only to isFinanceOrAdmin() (WS27) so HR/finance can
     // mint BI-W-### worker IDs. Safe: docs here are opaque monotonic integers
     // — the worst a finance user can do is advance a sequence number.
+    // Widened again (WS28) so Production can mint DR-serials via nextSerial().
+    // Safe per the WS27 rationale: docs here are opaque monotonic integers —
+    // the worst any internal user can do is advance a sequence number.
     match /_counters/{docId} {
       allow read:  if isAuth();
-      allow write: if isAuth() && isFinanceOrAdmin();
+      allow write: if isAuth() && !isPartner();
     }
 
     // ── Posts ──────────────────────────────────────────
@@ -927,6 +930,17 @@ service cloud.firestore {
       allow create, update: if isAuth() && isFinanceOrAdmin();
       allow delete: if isAuth() && isPresident();
     }
+    // ── Worker directory (public-safe roster projection, v12 WS28) ──
+    // Mirror of worker_profiles holding ONLY assignment-safe fields (name, ID
+    // number, job title, dept, status, photo) so Production staff can pick
+    // per-stage workers WITHOUT read access to worker_profiles (rates/CA/SSS/
+    // PhilHealth/TIN stay locked to finance/admin). docId == the worker_profiles
+    // docId. Maintained by the HR profile save + the Sync Directory button.
+    match /worker_directory/{docId} {
+      allow read:           if isAuth() && !isPartner();
+      allow create, update: if isAuth() && isFinanceOrAdmin();
+      allow delete:         if isAuth() && isFinanceOrAdmin();
+    }
 
     // ── Government biddings ────────────────────────────
     match /gov_biddings/{docId} {
@@ -962,13 +976,30 @@ service cloud.firestore {
     }
 
     // ── Production orders (shop-floor pipeline) ─────────
-    // Internal manufacturing/work-order data. Any signed-in internal staffer can
-    // read and advance an order through its stages; external partners excluded;
-    // only admins delete an order outright.
+    // v12 WS28: writes scoped to the people who run the pipeline — Production
+    // dept (or admins) manage orders; Sales may CREATE one (the "Job Order"
+    // button on a project). Two transition gates are enforced server-side so a
+    // devtools or stale-SW client can't skip them: entering Out for Delivery
+    // needs a PASSED QC record; entering Delivered needs a delivery receipt.
+    // Legacy pre-rename ids ('ready') are honoured in the transition checks so
+    // routine edits to old docs aren't wrongly gated. Creating an order directly
+    // in the last two stages is denied (only reachable through the gates).
+    // Reads stay open to all internal staff (dashboards); only admins delete.
     match /production_orders/{docId} {
-      allow read:           if isAuth() && !isPartner();
-      allow create, update: if isAuth() && !isPartner();
-      allow delete:         if isAuth() && isAdmin();
+      allow read:   if isAuth() && !isPartner();
+      allow create: if isAuth() && !isPartner() && (canProduction() || inDept('Sales'))
+        && request.resource.data.get('stage','') != 'out_for_delivery'
+        && request.resource.data.get('stage','') != 'delivered';
+      allow update: if isAuth() && !isPartner() && canProduction()
+        // QC gate — may not ENTER Out for Delivery without a passed inspection
+        && ( request.resource.data.get('stage','') != 'out_for_delivery'
+             || resource.data.get('stage','') in ['out_for_delivery','ready']
+             || request.resource.data.get('qc', {}).get('result','') == 'passed' )
+        // DR gate — may not ENTER Delivered without a delivery receipt
+        && ( request.resource.data.get('stage','') != 'delivered'
+             || resource.data.get('stage','') == 'delivered'
+             || request.resource.data.get('deliveryReceipt', null) != null );
+      allow delete: if isAuth() && isAdmin();
     }
 
     // ── Audit log (append-only) ─────────────────────────

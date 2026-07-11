@@ -4354,6 +4354,24 @@ window.nextWorkerIdNumber = async function() {
   });
 };
 
+// v12 WS28 — seed/refresh worker_directory from worker_profiles (finance/admin only;
+// idempotent set-merge; prunes directory docs whose profile was deleted).
+window.syncWorkerDirectory = async function(){
+  const [ps, ds] = await Promise.all([
+    db.collection('worker_profiles').get(),
+    db.collection('worker_directory').get().catch(()=>({docs:[]}))
+  ]);
+  const live = new Set(ps.docs.map(d=>d.id));
+  for (const d of ps.docs){ const p=d.data();
+    await db.collection('worker_directory').doc(d.id).set({
+      name:p.name||'', idNumber:p.idNumber||'', jobTitle:p.jobTitle||'',
+      department:p.department||'', status:p.status||'active', photoUrl:p.photoUrl||'',
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge:true }); }
+  for (const d of ds.docs) if (!live.has(d.id)) await db.collection('worker_directory').doc(d.id).delete().catch(()=>{});
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('worker_directory');
+  return ps.size;
+};
+
 // Ensure a worker_profiles doc has a stable verify token + fresh public projection.
 async function ensureWorkerVerifyToken(profile) {
   const proj = window.buildIdVerifyDoc('worker', profile, null);
@@ -4430,6 +4448,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
       <button class="btn-secondary btn-sm" id="hrp-payslip-history-btn">📄 All Payslips</button>
       <button class="btn-secondary btn-sm" id="hrp-raise-history-btn">💸 Raise History</button>
       <button class="btn-secondary btn-sm" id="hrp-batch-id-btn">🪪 Batch Print IDs</button>
+      <button class="btn-secondary btn-sm" id="hrp-sync-dir-btn">↻ Sync Directory</button>
     </div>`:''}
     <div class="card">
       <div class="card-header"><h3>👷 Worker Profiles</h3></div>
@@ -4469,6 +4488,11 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
     document.getElementById('hrp-payslip-history-btn')?.addEventListener('click', () => openPayslipHistory(currentUser, currentRole));
     document.getElementById('hrp-raise-history-btn')?.addEventListener('click', () => openRaiseHistory());
     document.getElementById('hrp-batch-id-btn')?.addEventListener('click', () => window.batchPrintWorkerIDs(profiles.filter(p=>p.status!=='inactive')));
+    document.getElementById('hrp-sync-dir-btn')?.addEventListener('click', async ()=>{
+      Notifs.showToast('Syncing worker directory…');
+      try { const n = await window.syncWorkerDirectory(); Notifs.showToast(`Directory synced — ${n} workers.`); }
+      catch(ex){ Notifs.showToast('Sync failed: '+(ex.message||ex.code),'error'); }
+    });
     container.querySelectorAll('.hrp-id-btn').forEach(btn => {
       const profile = profiles.find(p=>p.id===btn.dataset.id);
       btn.addEventListener('click', () => window.openWorkerIDModal(profile, () => renderFinanceHRProfiles(container,currentUser,currentRole)));
@@ -4662,6 +4686,14 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
     };
     if (!isEdit) { data.createdAt = firebase.firestore.FieldValue.serverTimestamp(); data.createdBy = currentUser.uid; }
     await db.collection('worker_profiles').doc(profileId).set(data, { merge: true });
+    // v12 WS28 — keep the public-safe roster projection in step (name/title/dept/
+    // status/photo ONLY — never rates/CA/gov IDs). Best-effort: a denied projection
+    // write must not fail the profile save.
+    db.collection('worker_directory').doc(profileId).set({
+      name: data.name, idNumber: data.idNumber||'', jobTitle: data.jobTitle||'',
+      department: data.department||'', status: data.status||'active',
+      photoUrl: data.photoUrl||'', updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge:true }).catch(()=>{});
     closeModal();
     Notifs.showToast(isEdit ? 'Profile updated!' : 'Worker profile created!');
     onSave();
@@ -12043,17 +12075,214 @@ window.renderDocCollection = function(container, collection, title, currentUser,
 // ═══════════════════════════════════════════════════
 //  PRODUCTION DEPARTMENT — shop-floor work orders
 // ═══════════════════════════════════════════════════
+// v12 WS28: the owner's real shop-floor flow + terminal Delivered.
 const PROD_STAGES = [
-  { id:'queued',    label:'Queued',      icon:'📋', color:'#78909c' },
-  { id:'cutting',   label:'Cutting',     icon:'✂️', color:'#5c6bc0' },
-  { id:'welding',   label:'Welding / Fab', icon:'🔧', color:'#7e57c2' },
-  { id:'assembly',  label:'Assembly',    icon:'🛠️', color:'#26a69a' },
-  { id:'finishing', label:'Finishing',   icon:'✨', color:'#26c6da' },
-  { id:'qc',        label:'QC',          icon:'🔍', color:'#ffa726' },
-  { id:'ready',     label:'Ready',       icon:'📦', color:'#66bb6a' },
-  { id:'delivered', label:'Delivered',   icon:'🚚', color:'#43a047' },
+  { id:'layouting',        label:'Layouting',             icon:'📐', color:'#78909c' },
+  { id:'bending_cutting',  label:'Bending & Cutting',     icon:'✂️', color:'#5c6bc0' },
+  { id:'assembly',         label:'Assembly',              icon:'🛠️', color:'#26a69a' },
+  { id:'finishing',        label:'Finishing & Polishing', icon:'✨', color:'#26c6da' },
+  { id:'qc',               label:'Quality Checking',      icon:'🔍', color:'#ffa726' },
+  { id:'out_for_delivery', label:'Out for Delivery',      icon:'🚚', color:'#66bb6a' },
+  { id:'delivered',        label:'Delivered',             icon:'✅', color:'#43a047' },
 ];
-function prodStage(id){ return PROD_STAGES.find(s=>s.id===id) || PROD_STAGES[0]; }
+// Legacy → v12 id normalization. Docs written before the rename keep their old
+// stage string until their next stage write; EVERY read site must go through
+// normProdStageId() so no in-flight order visually resets to stage 1 (the old
+// find-or-fallback-to-first behavior). Do NOT bulk-rewrite stored ids — stale
+// service-worker clients may write old ids for a while, and the shim absorbs that.
+const LEGACY_PROD_STAGE = { queued:'layouting', cutting:'bending_cutting', welding:'assembly', ready:'out_for_delivery' };
+function normProdStageId(id){ id = id || 'layouting'; return LEGACY_PROD_STAGE[id] || id; }
+function prodStage(id){ const n = normProdStageId(id); return PROD_STAGES.find(s=>s.id===n) || PROD_STAGES[0]; }
+
+// Single source of truth: internal stage id (EITHER vocabulary — the two id sets
+// never collide on a key with different targets) → public order_tracking status.
+// Early shop-floor stages intentionally return null; the prod-advance call site
+// decides whether to push the generic 'production' bucket (forward-only guard).
+// Replaces the three drifted inline maps (old JOB_STAGES map / the two prod-advance
+// maps; the old JOB_STAGES map's qc/ready keys were dead code and are dropped).
+function trackerKeyFor(id){
+  return ({ won:'confirmed', in_production:'production',
+            qc:'qc', out_for_delivery:'ready', for_delivery:'ready',
+            delivered:'delivered', paid:'delivered' })[id] || null;
+}
+// Prod stage → the job_projects lifecycle stage it implies (forward-only at the call site).
+function prodToJobStage(prodId){
+  return prodId==='delivered' ? 'delivered' : prodId==='out_for_delivery' ? 'for_delivery' : 'in_production';
+}
+
+// The hardcoded QC checklist (v12 WS28). Universal; edit labels here to change
+// the shop's checklist. Per-product variants = future workstream (YAGNI for now).
+const QC_CHECKLIST = [
+  { id:'dims',     label:'Dimensions match drawing / layout' },
+  { id:'welds',    label:'Welds ground smooth — no pinholes, spatter or sharp edges' },
+  { id:'finish',   label:'Surface finish & polish uniform, no deep scratches' },
+  { id:'moving',   label:'Doors / drawers / moving parts aligned and operating' },
+  { id:'level',    label:'Unit sits level; legs / feet adjusted' },
+  { id:'clean',    label:'Cleaned & degreased; protective film / stickers removed' },
+  { id:'complete', label:'Quantity & accessories complete vs the order' },
+];
+
+function openQCModal(order, onSaved){
+  const prev = order.qc || null;
+  const stateOf = id => prev?.items?.find(i=>i.id===id)?.state || '';
+  openModal('🔍 Quality Checking — '+escHtml(order.orderNo||order.title||''), `
+    ${prev?`<div style="font-size:11px;margin-bottom:8px;color:${prev.result==='passed'?'var(--success)':'var(--danger)'}">Last inspection: <b>${prev.result}</b> · ${escHtml(prev.byName||'')} · ${prev.at?new Date(prev.at).toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''}</div>`:''}
+    <div style="display:flex;flex-direction:column">
+      ${QC_CHECKLIST.map(it=>`
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border-bottom:1px solid var(--border);padding:7px 0">
+          <span style="font-size:12px;flex:1">${escHtml(it.label)}</span>
+          <span style="display:flex;gap:8px;flex-shrink:0">
+            ${['pass','fail','na'].map(s=>`<label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="qc-${it.id}" value="${s}" ${stateOf(it.id)===s?'checked':''}/>${s==='pass'?'✅':s==='fail'?'❌':'N/A'}</label>`).join('')}
+          </span>
+        </div>`).join('')}
+    </div>
+    <div class="form-group" style="margin-top:10px"><label>Inspection notes</label><textarea id="qc-notes" rows="2" placeholder="Rework needed, remarks…">${escHtml(prev?.notes||'')}</textarea></div>
+    <div id="qc-err" class="error-msg hidden"></div>
+  `, `<button class="btn-primary" id="qc-save">Save Inspection</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  document.getElementById('qc-save').addEventListener('click', async ()=>{
+    const err = document.getElementById('qc-err');
+    const items = QC_CHECKLIST.map(it=>({ id:it.id, label:it.label,
+      state: document.querySelector(`input[name="qc-${it.id}"]:checked`)?.value || '' }));
+    if (items.some(i=>!i.state)) { err.textContent='Mark every item (pass / fail / N/A).'; err.classList.remove('hidden'); return; }
+    if (items.every(i=>i.state==='na')) { err.textContent='At least one item must actually be inspected (not all N/A).'; err.classList.remove('hidden'); return; }
+    const result = items.some(i=>i.state==='fail') ? 'failed' : 'passed';
+    const qc = { result, items, notes: document.getElementById('qc-notes').value.trim(),
+      by: currentUser.uid, byName: userProfile?.displayName||currentUser.email||'', at: new Date().toISOString() };
+    try {
+      await db.collection('production_orders').doc(order.id).update({ qc, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      window.logAudit && window.logAudit('update','production_order',order.id,{ qc: result });
+      Notifs.showToast(result==='passed' ? 'QC passed — press Advance → to move the order on.' : 'QC failed — rework, then re-inspect.', result==='passed'?undefined:'error');
+      closeModal(); onSaved && onSaved();
+    } catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+  });
+}
+
+function openDeliveryReceiptModal(order, onSaved){
+  const dr = order.deliveryReceipt || null;
+  if (dr) {   // view / reprint mode
+    openModal('🧾 Delivery Receipt — '+escHtml(dr.no||''), `
+      <div style="font-size:12px;display:grid;grid-template-columns:auto 1fr;gap:4px 12px">
+        <span style="color:var(--text-muted)">Receipt #</span><b>${escHtml(dr.no||'')}</b>
+        <span style="color:var(--text-muted)">Received by</span><span>${escHtml(dr.receivedBy||'')}</span>
+        <span style="color:var(--text-muted)">Date</span><span>${escHtml(dr.date||'')}</span>
+        ${dr.notes?`<span style="color:var(--text-muted)">Notes</span><span>${escHtml(dr.notes)}</span>`:''}
+        <span style="color:var(--text-muted)">Recorded by</span><span>${escHtml(dr.byName||'')}</span>
+      </div>`,
+      `<button class="btn-primary" id="dr-print">🖨 Print</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    document.getElementById('dr-print')?.addEventListener('click', ()=>printDeliveryReceipt(order));
+    return;
+  }
+  const dayStr = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
+  openModal('🧾 Record Delivery Receipt — '+escHtml(order.orderNo||order.title||''), `
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Required before this order can be marked <b>Delivered</b>. Fill it in with the client's receiving rep at handover.</div>
+    <div class="form-row">
+      <div class="form-group"><label>Received by (client rep)</label><input id="dr-name" placeholder="e.g. Maria Santos — Purchasing"/></div>
+      <div class="form-group" style="flex:0 0 140px"><label>Date</label><input id="dr-date" type="date" value="${dayStr}"/></div>
+    </div>
+    <div class="form-group"><label>Notes (optional)</label><textarea id="dr-notes" rows="2" placeholder="Condition on arrival, partial delivery, etc."></textarea></div>
+    <div id="dr-err" class="error-msg hidden"></div>
+  `, `<button class="btn-primary" id="dr-save">Save Receipt</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  document.getElementById('dr-save').addEventListener('click', async ()=>{
+    const err = document.getElementById('dr-err');
+    const receivedBy = document.getElementById('dr-name').value.trim();
+    if(!receivedBy){ err.textContent='"Received by" is required — the client rep who accepted the delivery.'; err.classList.remove('hidden'); return; }
+    const btn=document.getElementById('dr-save'); btn.disabled=true;
+    try {
+      const no = await window.nextSerial('delivery_receipt','DR');   // DR-2026-000001 (atomic; a failed save burns a serial — fine)
+      const byName = userProfile?.displayName||currentUser.email||'';
+      const deliveryReceipt = { no, receivedBy, date: document.getElementById('dr-date').value || dayStr,
+        notes: document.getElementById('dr-notes').value.trim(), by: currentUser.uid, byName, at: new Date().toISOString() };
+      await db.collection('production_orders').doc(order.id).update({ deliveryReceipt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      if (order.projectId) { try { await db.collection('job_projects').doc(order.projectId).update({
+        documents: firebase.firestore.FieldValue.arrayUnion({ type:'Delivery Receipt', ref:no, at:new Date().toISOString(), by:byName }),
+        timeline:  firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Delivery receipt '+no+' recorded', by:byName }),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp() }); } catch(_) {} }
+      window.logAudit && window.logAudit('update','production_order',order.id,{ deliveryReceipt: no });
+      Notifs.showToast('Receipt '+no+' recorded — press Advance → again to mark Delivered.');
+      closeModal(); onSaved && onSaved();
+    } catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); btn.disabled=false; }
+  });
+}
+
+// Printable Delivery Receipt on letterhead — cloned from printPurchaseOrder's
+// standalone-page skeleton (style block, A4 .page layout, window.open+
+// document.write tail). No prices anywhere — a delivery receipt is not an invoice.
+function printDeliveryReceipt(order) {
+  const e = s => escHtml(s == null ? '' : String(s));
+  const dr = order.deliveryReceipt || {};
+  const _lh = window.buildLetterhead ? window.buildLetterhead({
+    docTitle: 'DELIVERY RECEIPT',
+    docNumber: dr.no || '',
+    dateLabel: 'Date: ' + (dr.date || ''),
+    extraMeta: [ 'Work Order: ' + (order.orderNo || ''), order.quoteRef ? ('Quote: ' + order.quoteRef) : null ].filter(Boolean),
+    signatures: [
+      { label: 'Delivered by', name: dr.byName || '', title: 'Production — Barro Industries' },
+      { label: 'Received by (client)', name: dr.receivedBy || '', title: order.client || '' }
+    ],
+    footerNote: ((window.BRAND && window.BRAND.fullName) || 'Barro Industries') + ' · Generated ' + new Date().toLocaleString('en-PH')
+  }) : null;
+
+  const rows = `<tr>
+      <td class="c">1</td>
+      <td>${e(order.title || '—')}</td>
+      <td class="c">${Number(order.qty || 0).toLocaleString('en-PH')}</td>
+    </tr>`;
+  let blanks = ''; for (let k = 1; k < 4; k++) blanks += `<tr class="blank"><td class="c">${k + 1}</td><td></td><td></td></tr>`;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>Delivery Receipt — ${e(dr.no || '')}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background:#e8e8e8}
+  .page{width:210mm;min-height:297mm;margin:0 auto;background:#fff;padding:14mm}
+  .parties{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+  .pbox{border:1px solid #999;border-radius:6px;padding:8px 11px}
+  .pbox .l{font-size:8px;text-transform:uppercase;letter-spacing:.6px;color:#1E3A5F;font-weight:800;margin-bottom:3px}
+  .pbox .v{font-size:12px;font-weight:700;min-height:15px}
+  table{width:100%;border-collapse:collapse;margin-bottom:10px}
+  th,td{border:1px solid #444;padding:5px 7px;font-size:11px;vertical-align:top}
+  th{background:#1E3A5F;color:#fff;font-size:9px;text-transform:uppercase;letter-spacing:.04em}
+  td.c{text-align:center}
+  tr.blank td{height:22px}
+  .note{font-size:10px;color:#444;margin:4px 0 10px;line-height:1.5}
+  .note b{color:#1E3A5F}
+  .bar{position:fixed;top:0;left:0;right:0;background:#1E3A5F;color:#fff;padding:9px 18px;display:flex;gap:10px;align-items:center;z-index:99}
+  .bar button{background:#fff;color:#1E3A5F;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
+  @page{size:A4 portrait;margin:9mm}
+  @media print{ .bar,.barpad{display:none!important} body{background:#fff} .page{padding:0;width:auto;min-height:0} }
+${_lh ? _lh.printCSS : ''}
+</style></head><body>
+<div class="bar">
+  <span style="font-weight:700">🧾 Delivery Receipt — ${e(dr.no || '')}</span>
+  <button onclick="window.print()">🖨 Print / Save as PDF</button>
+  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">✕ Close</button>
+</div>
+<div class="barpad" style="height:46px"></div>
+<div class="page">
+  ${_lh ? _lh.headerHTML : `<div style="font-size:20px;font-weight:900">DELIVERY RECEIPT ${e(dr.no || '')}</div>`}
+  <div class="parties">
+    <div class="pbox">
+      <div class="l">Deliver To</div>
+      <div class="v">${e(order.client || '—')}</div>
+    </div>
+    <div class="pbox">
+      <div class="l">Work Order</div>
+      <div class="v">${e(order.orderNo || '')}</div>
+    </div>
+  </div>
+  <table>
+    <thead><tr><th style="width:32px">#</th><th>Description</th><th style="width:80px">Qty</th></tr></thead>
+    <tbody>${rows}${blanks}</tbody>
+  </table>
+  ${dr.notes ? `<div class="note"><b>Notes:</b> ${e(dr.notes)}</div>` : ''}
+  ${_lh ? _lh.footerHTML : ''}
+</div>
+</body></html>`;
+
+  const win = window.open('', '_blank', 'width=900,height=720');
+  if (!win) { Notifs.showToast('Allow pop-ups to open the printable Delivery Receipt', 'error'); return; }
+  win.document.write(html); win.document.close();
+}
 
 // ═══════════════════════════════════════════════════
 //  PROJECT LIFECYCLE — the spine tying quote → sales order → production →
@@ -12286,7 +12515,7 @@ async function advanceProjectStage(p, nextId){
       timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Moved to '+ns.label, by:who })
     });
     // keep the client's public tracker in step with the internal lifecycle
-    const _trkStage = { won:'confirmed', in_production:'production', qc:'qc', for_delivery:'ready', ready:'ready', delivered:'delivered', paid:'delivered' }[nextId];
+    const _trkStage = trackerKeyFor(nextId);   // v12 WS28 — single shared translator (old qc/ready keys were dead)
     if(p.trackingToken && _trkStage) window.syncOrderTracking(p.trackingToken, { status:_trkStage });
     // hand off to the owning department of the new stage
     const dept=ns.dept;
@@ -12448,7 +12677,9 @@ window.renderProductionDept = async function(currentUser, currentRole, subtab = 
       </div>
     </div>
     ${window.sopPanel('How Production works', [
-      'Orders is the shop-floor pipeline: Queued → Cutting → Welding → Assembly → Finishing → QC → Ready → Delivered.',
+      'Orders is the shop-floor pipeline: '+PROD_STAGES.map(s=>s.label).join(' → ')+'.',
+      'Quality Checking requires a passed 🔍 QC checklist before an order can go Out for Delivery.',
+      'Marking Delivered requires a 🧾 Delivery Receipt (received-by + date) — printable on letterhead.',
       'Materials and Inventory track raw stock; "Consume → stock & COS" deducts inventory and posts material cost.',
       'Count Form records physical counts; Tasks and Files hold the department board and documents.'
     ])}
@@ -12484,7 +12715,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
   // "not receiving orders". Surface them so they can start a work order in one tap.
   const incoming = projSnap.docs.map(d=>({id:d.id,...d.data()}))
     .filter(p=>['won','in_production'].includes(p.stage) && !(Array.isArray(p.productionOrderIds) && p.productionOrderIds.length));
-  const active = orders.filter(o=>o.stage!=='delivered');
+  const active = orders.filter(o=>normProdStageId(o.stage)!=='delivered');
   const todayStr = today();
   const weekAhead = (()=>{ const d=new Date(); d.setDate(d.getDate()+7); return (window.bizDate?window.bizDate(d):d.toISOString().slice(0,10)); })();
   const overdue = active.filter(o=>o.dueDate && o.dueDate < todayStr);
@@ -12492,11 +12723,11 @@ async function renderProdOrders(el, currentUser, currentRole) {
 
   // Group active orders by stage (in pipeline order), delivered shown collapsed at end
   const byStage = {};
-  active.forEach(o=>{ (byStage[o.stage||'queued'] ||= []).push(o); });
-  const delivered = orders.filter(o=>o.stage==='delivered');
+  active.forEach(o=>{ (byStage[normProdStageId(o.stage)] ||= []).push(o); });
+  const delivered = orders.filter(o=>normProdStageId(o.stage)==='delivered');
 
   const orderCard = (o)=>{
-    const od = o.dueDate && o.dueDate < todayStr && o.stage!=='delivered';
+    const od = o.dueDate && o.dueDate < todayStr && normProdStageId(o.stage)!=='delivered';
     const pr = (o.priority||'medium');
     return `<div class="item-card prod-order" data-id="${o.id}" style="cursor:pointer;border-left:3px solid ${prodStage(o.stage).color}">
       <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
@@ -12507,12 +12738,17 @@ async function renderProdOrders(el, currentUser, currentRole) {
           </div>
           <div style="font-size:11px;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">
             ${o.dueDate?`<span style="color:${od?'var(--danger)':'var(--text-muted)'}">📅 ${escHtml(o.dueDate)}${od?' ⚠️':''}</span>`:''}
-            ${o.team?`<span style="color:var(--text-muted)">👷 ${escHtml(o.team)}</span>`:''}
+            ${(()=>{ const w=(o.assignments?.[normProdStageId(o.stage)]?.workerNames)||[];
+              return w.length?`<span style="color:var(--text-muted)">👷 ${escHtml(w.join(', '))}</span>`
+                : (o.team?`<span style="color:var(--text-muted)">👷 ${escHtml(o.team)}</span>`:''); })()}
+            ${o.qc?`<span class="badge ${o.qc.result==='passed'?'badge-green':'badge-red'}" style="font-size:9px">${o.qc.result==='passed'?'✅ QC':'❌ QC'}</span>`:''}
+            ${o.deliveryReceipt?`<span class="badge badge-blue" style="font-size:9px">🧾 ${escHtml(o.deliveryReceipt.no||'DR')}</span>`:''}
             <span class="badge ${pr==='high'||pr==='urgent'?'badge-red':pr==='low'?'badge-green':'badge-orange'}" style="font-size:9px">${pr}</span>
           </div>
         </div>
         ${canEdit?`<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
-          ${o.stage!=='delivered'?`<button class="btn-success btn-sm prod-advance" data-id="${o.id}">Advance →</button>`:''}
+          ${normProdStageId(o.stage)!=='delivered'?`<button class="btn-success btn-sm prod-advance" data-id="${o.id}">Advance →</button>`:''}
+          ${normProdStageId(o.stage)==='qc'?`<button class="btn-secondary btn-sm prod-qc" data-id="${o.id}">🔍 QC</button>`:''}
           <button class="btn-secondary btn-sm prod-edit" data-id="${o.id}">Edit</button>
         </div>`:''}
       </div>
@@ -12528,7 +12764,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
       <div class="kpi-card green"><div class="kpi-label">Delivered</div><div class="kpi-value">${delivered.length}</div></div>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-      <span style="font-size:12px;color:var(--text-muted);flex:1;min-width:180px">Pipeline: Queued → Cutting → Fab → Assembly → Finishing → QC → Ready → Delivered</span>
+      <span style="font-size:12px;color:var(--text-muted);flex:1;min-width:180px">Pipeline: ${PROD_STAGES.map(s=>s.label).join(' → ')}</span>
       <button class="btn-secondary btn-sm" id="prod-csv" style="flex-shrink:0;white-space:nowrap">⬇ CSV</button>
       ${canEdit?'<button class="btn-primary btn-sm" id="prod-add-btn" style="flex-shrink:0;white-space:nowrap">＋ New Order</button>':''}
     </div>
@@ -12571,7 +12807,10 @@ async function renderProdOrders(el, currentUser, currentRole) {
 
   document.getElementById('prod-csv')?.addEventListener('click', ()=>window.exportCSV('production-orders', orders, [
     {key:'orderNo',label:'Order #'},{key:'title',label:'Product'},{key:'client',label:'Client'},{key:'qty',label:'Qty'},
-    {key:'stage',label:'Stage',get:o=>prodStage(o.stage).label},{key:'priority',label:'Priority'},{key:'team',label:'Team'},{key:'dueDate',label:'Due'},{key:'quoteRef',label:'Quote Ref'}]));
+    {key:'stage',label:'Stage',get:o=>prodStage(o.stage).label},{key:'priority',label:'Priority'},
+    {key:'team',label:'Workers',get:o=>{const a=o.assignments?.[normProdStageId(o.stage)];return (a?.workerNames?.length)?a.workerNames.join('; '):(o.team||'');}},
+    {key:'qc',label:'QC',get:o=>o.qc?o.qc.result:''},{key:'dr',label:'DR #',get:o=>o.deliveryReceipt?.no||''},
+    {key:'dueDate',label:'Due'},{key:'quoteRef',label:'Quote Ref'}]));
   if (canEdit) {
     document.getElementById('prod-add-btn')?.addEventListener('click', ()=>prodOrderModal(null, currentUser, currentRole, ()=>renderProdOrders(el, currentUser, currentRole)));
     el.querySelectorAll('.prod-start').forEach(b=>b.addEventListener('click', (e)=>{
@@ -12582,21 +12821,38 @@ async function renderProdOrders(el, currentUser, currentRole) {
       e.stopPropagation();
       prodOrderModal(orders.find(o=>o.id===b.dataset.id), currentUser, currentRole, ()=>renderProdOrders(el, currentUser, currentRole));
     }));
+    el.querySelectorAll('.prod-qc').forEach(b=>b.addEventListener('click',(e)=>{ e.stopPropagation();
+      const o=orders.find(x=>x.id===b.dataset.id); if(o) openQCModal(o, ()=>renderProdOrders(el, currentUser, currentRole)); }));
     el.querySelectorAll('.prod-advance').forEach(b=>b.addEventListener('click', async (e)=>{
       e.stopPropagation();
       const o = orders.find(x=>x.id===b.dataset.id); if(!o) return;
-      const idx = PROD_STAGES.findIndex(s=>s.id===(o.stage||'queued'));
+      const curId = normProdStageId(o.stage);
+      const idx = PROD_STAGES.findIndex(s=>s.id===curId);
       const next = PROD_STAGES[Math.min(idx+1, PROD_STAGES.length-1)];
+      // ── QC gate: may not ENTER Out for Delivery without a PASSED inspection ──
+      if (next.id==='out_for_delivery' && (o.qc?.result)!=='passed') {
+        openQCModal(o, ()=>renderProdOrders(el, currentUser, currentRole));
+        return;
+      }
+      // ── DR gate: may not ENTER Delivered without a delivery receipt ──
+      if (next.id==='delivered' && !o.deliveryReceipt) {
+        openDeliveryReceiptModal(o, ()=>renderProdOrders(el, currentUser, currentRole));
+        return;
+      }
       b.disabled = true;
       try {
         await db.collection('production_orders').doc(o.id).update({
           stage: next.id, stageUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          // per-stage timestamp trail — ISO string (serverTimestamp is illegal in arrayUnion)
+          stageHistory: firebase.firestore.FieldValue.arrayUnion({
+            stage: next.id, enteredAt: new Date().toISOString(),
+            by: currentUser.uid, byName: userProfile?.displayName||currentUser.email||'' }) });
         // Keep the parent project's lifecycle stage in sync with production progress —
         // but only move it FORWARD. Never regress a job that's already further along
         // (e.g. delivered/paid) just because an early production sub-stage advanced.
         if (o.projectId) {
-          const projStage = next.id==='delivered' ? 'delivered' : next.id==='ready' ? 'for_delivery' : 'in_production';
+          const projStage = prodToJobStage(next.id);
           try {
             const jdoc = await db.collection('job_projects').doc(o.projectId).get();
             const cur = jdoc.exists ? jdoc.data().stage : null;
@@ -12609,7 +12865,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
               timeline: firebase.firestore.FieldValue.arrayUnion(evt) });
             // reflect the milestone on the client's public tracker (forward only)
             const _tok = jdoc.exists ? jdoc.data().trackingToken : null;
-            if(_tok){ const _trk = ({qc:'qc',ready:'ready',delivered:'delivered'})[next.id] || (advance ? 'production' : null);
+            if(_tok){ const _trk = trackerKeyFor(next.id) || (advance ? 'production' : null);
               if(_trk) window.syncOrderTracking(_tok, { status:_trk }); }
           } catch(_) {}
         }
@@ -12733,6 +12989,10 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
     const isnap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
     invItems = isnap.docs.map(d=>({id:d.id,...d.data()})).filter(i=>(i.kind||'material')==='material').sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   } catch(_) {}
+  // v12 WS28 — worker roster (public-safe projection; empty if never synced)
+  let workers = [];
+  try { const wsnap = await dbCachedGet('worker_directory', ()=>db.collection('worker_directory').get().catch(()=>({docs:[]})), 45000);
+    workers = wsnap.docs.map(d=>({id:d.id,...d.data()})).filter(w=>(w.status||'active')==='active').sort((a,b)=>(a.name||'').localeCompare(b.name||'')); } catch(_) {}
   const matItemOpts = (sel='') => '<option value="">— Select material —</option>' + invItems.map(i=>`<option value="${i.id}" data-name="${escHtml(i.name||'')}" data-cost="${Number(i.unitCost)||0}" ${sel===i.id?'selected':''}>${escHtml(i.name||'')} (${Number(i.qty||0).toLocaleString('en-PH')} ${escHtml(i.unit||'')} @ ₱${fmt(i.unitCost||0)})</option>`).join('');
   // Starting a work order from an incoming job: prefill client + quote from the project.
   const pf = (!order && prefillProjectId) ? projs.find(p=>p.id===prefillProjectId) : null;
@@ -12749,12 +13009,26 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
     </div>
     <div class="form-row">
       <div class="form-group"><label>Linked Quote (optional)</label><input id="po-quote" value="${escHtml(dfQuote)}" placeholder="BK-LU-FB-…"/></div>
-      <div class="form-group"><label>Assigned Team</label><input id="po-team" value="${escHtml(e.team||'')}" placeholder="e.g. Fab Team A"/></div>
+      <div class="form-group"><label>Workers — this stage</label>
+        ${workers.length?`
+        <div id="po-workers-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"></div>
+        <div style="display:flex;gap:6px">
+          <select id="po-worker-sel" style="flex:1;min-width:0;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">
+            <option value="">— Add worker —</option>
+            ${workers.map(w=>`<option value="${w.id}" data-name="${escHtml(w.name||'')}">${escHtml(w.name||'')}${w.jobTitle?` — ${escHtml(w.jobTitle)}`:''}</option>`).join('')}
+          </select>
+          <button class="btn-secondary btn-sm" id="po-worker-add" type="button">＋</button>
+        </div>
+        ${e.team?`<div style="font-size:11px;color:var(--text-muted);margin-top:3px">Legacy team note: ${escHtml(e.team)}</div>`:''}`
+        :`<input id="po-team" value="${escHtml(e.team||'')}" placeholder="e.g. Fab Team A"/>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:3px">No worker directory yet — Finance/HR: press "↻ Sync Directory" on HR Profiles. Free-text team is used meanwhile.</div>`}
+      </div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>Stage</label>
         <select id="po-stage" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-          ${PROD_STAGES.map(s=>`<option value="${s.id}" ${ (e.stage||'queued')===s.id?'selected':''}>${s.icon} ${s.label}</option>`).join('')}
+          ${PROD_STAGES.filter(s=>order || !['out_for_delivery','delivered'].includes(s.id))
+            .map(s=>`<option value="${s.id}" ${normProdStageId(e.stage)===s.id?'selected':''}>${s.icon} ${s.label}</option>`).join('')}
         </select>
       </div>
       <div class="form-group"><label>Priority</label>
@@ -12772,7 +13046,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
       : `<button class="btn-secondary btn-sm" id="po-add-mat" type="button" style="margin-top:6px">+ Add material</button>
          ${order?`<button class="btn-primary btn-sm" id="po-consume" type="button" style="margin-top:6px;margin-left:6px">📦 Consume → stock & COS</button>`:'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Save the order first, then reopen to consume materials.</div>'}`}
     <div id="po-err" class="error-msg hidden"></div>
-  `, `<button class="btn-primary" id="po-save">Save</button>${order?'<button class="btn-danger" id="po-del">Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  `, `<button class="btn-primary" id="po-save">Save</button>${order && ['out_for_delivery','delivered'].includes(normProdStageId(e.stage))?'<button class="btn-secondary" id="po-dr">🧾 Delivery Receipt</button>':''}${order?'<button class="btn-danger" id="po-del">Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   // Materials editor (dynamic rows)
   const matsWrap = document.getElementById('po-mats');
@@ -12792,6 +13066,21 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
   (e.materials||[]).forEach(m=>addMatRow(m.itemId, m.qty));
   if (!consumed && !(e.materials||[]).length) addMatRow();
   document.getElementById('po-add-mat')?.addEventListener('click', ()=>addMatRow());
+
+  // v12 WS28 — per-stage worker chips (initialised from the CURRENT stage's assignment)
+  let asgSel = [];
+  { const cur = e.assignments?.[normProdStageId(e.stage)];
+    if (cur) asgSel = (cur.workerIds||[]).map((id,i)=>({ id, name:(cur.workerNames||[])[i]||id })); }
+  const renderWChips = () => { const w=document.getElementById('po-workers-chips'); if(!w) return;
+    w.innerHTML = asgSel.map(x=>`<span class="badge badge-blue" style="cursor:pointer" data-uid="${escHtml(x.id)}">👷 ${escHtml(x.name)} ✕</span>`).join('')||'<span style="font-size:11px;color:var(--text-muted)">No workers assigned to this stage yet.</span>';
+    w.querySelectorAll('[data-uid]').forEach(ch=>ch.addEventListener('click',()=>{ asgSel=asgSel.filter(x=>x.id!==ch.dataset.uid); renderWChips(); })); };
+  renderWChips();
+  document.getElementById('po-worker-add')?.addEventListener('click', ()=>{
+    const sel=document.getElementById('po-worker-sel'); const id=sel.value; if(!id) return;
+    if(!asgSel.some(x=>x.id===id)) asgSel.push({ id, name: sel.options[sel.selectedIndex]?.dataset.name||'' });
+    sel.value=''; renderWChips(); });
+
+  document.getElementById('po-dr')?.addEventListener('click', ()=>{ closeModal(); openDeliveryReceiptModal({...e, id:order.id}, onSaved); });
 
   const collectMaterials = () => [...matsWrap.querySelectorAll('.po-mat-row')].map(r=>{
     const sel = r.querySelector('.pm-item'); const opt = sel.options[sel.selectedIndex];
@@ -12825,13 +13114,32 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
       qty: parseInt(document.getElementById('po-qty').value)||1,
       quoteRef: document.getElementById('po-quote').value.trim(),
       projectId: projectId || null,
-      team: document.getElementById('po-team').value.trim(),
       stage: document.getElementById('po-stage').value,
       priority: document.getElementById('po-priority').value,
       dueDate: document.getElementById('po-due').value,
       notes: document.getElementById('po-notes').value.trim(),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
     };
+    // v12 WS28 — mirror the rules-side transition gates (friendly errors)
+    const _prevStage = normProdStageId(e.stage);
+    if (data.stage==='out_for_delivery' && _prevStage!=='out_for_delivery' && (e.qc?.result)!=='passed'){
+      err.textContent='QC must pass first — run the 🔍 QC inspection before Out for Delivery.'; err.classList.remove('hidden'); return; }
+    if (data.stage==='delivered' && _prevStage!=='delivered' && !e.deliveryReceipt){
+      err.textContent='Record the 🧾 Delivery Receipt before marking Delivered.'; err.classList.remove('hidden'); return; }
+    if (workers.length) {
+      const asg = Object.assign({}, e.assignments||{});
+      if (asgSel.length) asg[data.stage] = { workerIds: asgSel.map(x=>x.id), workerNames: asgSel.map(x=>x.name) };
+      else delete asg[data.stage];
+      data.assignments = asg;                       // legacy `team` left untouched on the doc
+    } else {
+      data.team = document.getElementById('po-team')?.value.trim() || '';
+    }
+    if (order && data.stage !== _prevStage) {       // stage changed via the select → history + since-marker
+      data.stageHistory = firebase.firestore.FieldValue.arrayUnion({
+        stage: data.stage, enteredAt: new Date().toISOString(),
+        by: currentUser.uid, byName: userProfile?.displayName||currentUser.email||'' });
+      data.stageUpdatedAt = firebase.firestore.FieldValue.serverTimestamp();
+    }
     if (!e.materialsConsumed) data.materials = collectMaterials(); // lock once consumed
     try {
       if(order){ await db.collection('production_orders').doc(order.id).update(data); window.logAudit&&window.logAudit('update','production_order',order.id,{title:data.title,stage:data.stage}); }
@@ -12845,6 +13153,8 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
         data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
         data.createdBy = currentUser.uid;
         data.createdByName = userProfile?.displayName || currentUser.email || '';
+        data.stageHistory = [{ stage: data.stage, enteredAt: new Date().toISOString(),
+          by: currentUser.uid, byName: data.createdByName }];
         const _po = await db.collection('production_orders').add(data);
         window.logAudit&&window.logAudit('create','production_order',data.orderNo,{title:data.title,client:data.client||''});
         // Link back to the project: register the order, move it into production, add to the doc register
