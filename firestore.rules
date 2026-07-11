@@ -801,15 +801,50 @@ service cloud.firestore {
     // query. Rules do NOT cascade, so this needs its own block. All field reads
     // are .get(field, default) — a bare read of an absent field DENIES the rule.
     // v12 WS19: read locked to !isPartner() — was bare isAuth().
+    // v12 WS35: real approval gate. 'approved' and 'released' are privileged
+    // transitions with a pinned topology (for_review→approved→released), approvable
+    // only by president/manager or the parent project's designLead — and NEVER by
+    // the drawing's own author/assignee (self-approval hole closed at the rules
+    // layer, not just the UI). secretary is deliberately NOT an approver (view-only
+    // approvals directive), which is why this uses an explicit role list instead
+    // of isAdmin(). Everything that is not a promotion to approved/released keeps
+    // the old gate.
     match /design_drawings/{docId} {
+      // President/manager, or the designLead of the drawing's parent project.
+      // Role check FIRST so admins never depend on the project get() resolving.
+      function isDrawingApprover() {
+        return getRole() in ['president', 'manager']
+          || request.auth.uid == get(/databases/$(database)/documents/projects/$(resource.data.get('projectId', '_none_'))).data.get('designLead', '');
+      }
+      function statusNow()  { return resource.data.get('status', ''); }
+      function statusNext() { return request.resource.data.get('status', ''); }
+      // Promotion = the status field is CHANGING to approved/released.
+      function isPromotion() {
+        return statusNext() in ['approved', 'released'] && statusNext() != statusNow();
+      }
       allow read:   if isAuth() && !isPartner();
+      // v12 WS35: new drawings must start at draft (no API-created pre-approved docs).
       allow create: if isAuth() && canDesign()
-                    && request.resource.data.get('createdBy', '') == request.auth.uid;
-      // Creator, assigned designer, Design-dept member, or admin may edit.
+                    && request.resource.data.get('createdBy', '') == request.auth.uid
+                    && request.resource.data.get('status', 'draft') == 'draft';
       allow update: if isAuth() && (
-           resource.data.get('createdBy', '')  == request.auth.uid
-        || resource.data.get('assignedTo', '') == request.auth.uid
-        || canDesign()
+        // (1) ordinary edits + demotions (revisions, back-to-draft/review, supersede,
+        //     reactivate, field edits with status unchanged) — the pre-WS35 gate
+        ( !isPromotion() && (
+             resource.data.get('createdBy', '')  == request.auth.uid
+          || resource.data.get('assignedTo', '') == request.auth.uid
+          || canDesign()
+        ))
+        // (2) APPROVE: for_review → approved, by an approver who is not the
+        //     drawing's author or assigned designer (two-party control)
+        || ( statusNext() == 'approved' && statusNow() == 'for_review'
+          && isDrawingApprover()
+          && request.auth.uid != resource.data.get('createdBy', '')
+          && request.auth.uid != resource.data.get('assignedTo', '') )
+        // (3) RELEASE: approved → released, by an approver (independence was
+        //     already enforced when 'approved' was reached — see clause 2)
+        || ( statusNext() == 'released' && statusNow() == 'approved'
+          && isDrawingApprover() )
       );
       allow delete: if isAuth() && isAdmin();
     }

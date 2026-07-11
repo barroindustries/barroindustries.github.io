@@ -224,10 +224,17 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     handoff, promotions calendar, marketing materials library (Files hub), strategy templates
     (types of marketing), per-campaign insights (spend vs leads vs quotes vs wins).
     **DECIDED** (Fable, 2026-07-11) — see `fable-workplan/34-marketing.md`; not yet implemented.
-35. `[~]` **Design dept suite** — project folders + client folders synced with Sales client
+35. `[x]` **Design dept suite** — project folders + client folders synced with Sales client
     files (one client record shared, per-dept views); drawing approvals; design → production
-    handoff. **DECIDED** (Fable, 2026-07-11) — see `fable-workplan/35-design-suite.md`; not
-    yet implemented.
+    handoff. **DECIDED** (Fable, 2026-07-11) — see `fable-workplan/35-design-suite.md`.
+    IMPLEMENTED (real approve/release gate on `design_drawings` — president/manager or the
+    project's `designLead`, never the drawing's own author/assignee, enforced in both
+    `window.canApproveDrawing`/`changeDrawingStatus` and a rewritten `firestore.rules` block;
+    project/client folders via WS38's `hub_folders`/`hub_files` under a new `scope:'projects'`,
+    new `renderProjectFiles` project tab + a Files section in WS32's client hub; hardened
+    Design→Production handoff with a `drawingId`/`url` hook for WS28) — see Build Log.
+    **Rules not yet deployed** — `firestore.rules` needs `firebase deploy --only
+    firestore:rules` before the approval gate is enforced server-side.
 36. `[~]` **Finance additions** — **bank accounts registry** (accounts, balances, running
     reconciliation, which account each payment hit) + **downpayment billing invoice** document
     (letterhead, payment details/bank instructions, DP % of contract, balance schedule) wired
@@ -1219,3 +1226,71 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
   `page:'files'`/`page:'bs-files'` entries that the spec's own research didn't surface). Rules,
   indexes, and the migration script are **not deployed/run** — that's explicitly left to the
   session with deploy credentials, per this task's constraints.
+- **2026-07-11 (Sonnet implementation, WS35 Design suite):** Implemented the combined DECIDED +
+  RE-GROUNDED spec in `fable-workplan/35-design-suite.md` exactly, on top of the real (already
+  shipped) WS32 `window.Clients`/`clients` collection and WS38 `hub_files`/`hub_folders`/
+  `window.FilesHub`. **Self-approval gate (the core ask):** new `window.canApproveDrawing(d,
+  project)` (js/departments.js, above `drawingTransitions`) returns `{isApprover, approve,
+  release}` — approver = president/manager or the parent project's `designLead`; `approve`
+  is additionally `false` whenever the current uid is the drawing's `createdBy` or
+  `assignedTo`, closing the self-approval hole. Wired into `openDrawingDetail` (transition
+  buttons filtered per-capability, plus a new "Awaiting approval by {lead}" meta-card hint),
+  `changeDrawingStatus` (hard `return` + error toast if a non-approver tries `approved`/
+  `released`, defense-in-depth alongside the rules gate), and a new "🔏 For my approval" KPI
+  chip on `renderDrawingsDashboard`. Mirrored exactly in `firestore.rules`'
+  `design_drawings` block: promotions to `approved`/`released` now require an explicit
+  `isDrawingApprover()` (president/manager role check first, short-circuiting before a
+  `get()` on the parent `projects` doc's `designLead`; deliberately NOT `isAdmin()` so
+  `secretary` — view-only approvals per the corporate-secretary directive — is excluded) and,
+  for the `approved` transition specifically, `request.auth.uid !=
+  createdBy/assignedTo`; topology is pinned (`approved` only reachable from `for_review`,
+  `released` only from `approved`; `create` must start at `draft`); every other update
+  (revisions, demotions, plain edits) keeps the pre-WS35 `createdBy||assignedTo||canDesign()`
+  gate unchanged. New `releasedBy/releasedByName/releasedAt` fields mirror the existing
+  `approver*` triple on release, and are cleared (alongside `approver*`) when a new revision
+  is cut, so a superseded release stamp never survives onto Rev B+. Dead `reviewer`/
+  `reviewerName` fields (always-null since birth) removed from the create write, per decision
+  6 (not revived). **Design → Production handoff hardening:** releasing a drawing on a
+  project with no `jobProjectId` now shows a `confirmDialog` naming the consequence instead
+  of silently no-opping; the `job_projects.documents[]` append gained `drawingId` + `url`
+  (WS15-preferred `fileUrl`) as WS28's future intake hook; `for_review` submission now
+  notifies the project's `designLead` directly (falls back to `Notifs.sendToDept('Design')`
+  when unset) — previously nobody was told an approval was waiting; `dbCacheInvalidate
+  ('projects-unified')` now fires after the `job_projects` append. **Project/client folders:**
+  no bespoke folder system — new `window.DesignFolders` (get-then-create, deterministic
+  `client__{clientId}`/`proj__{projectId}` ids) ensures ordinary `hub_folders` rows under a
+  new `scope:'projects'`; a new **Files** tab in `openProjectDetail` (`renderProjectFiles`)
+  reads via `FilesHub.loadFiles('projects')` and writes a full WS38-shape `hub_files` doc
+  with the domain fields `projectId`/`clientId`; `window.Clients.timelineFor` gained a 4th
+  parallel fetch (`FilesHub.loadFiles('projects')`) and a `files` key joined on `clientId`,
+  surfaced as a new "📁 Files" section in WS32's `openClientHub` — so the same client seen
+  from Sales or Design shows the same uploaded files. Zero new collections, rules blocks, or
+  composite indexes (`hub_*` is auto-discovered by `scripts/monthly-backup.js`). **Client
+  identity:** `openProjectEditModal`'s client dropdown now sources `window.Clients.listAll()`
+  (design-brand clients sorted first) instead of raw `design_clients`, auto-fills the display
+  name on pick, and `arrayUnion('design')`s the picked `clients` doc's `brands` on save
+  (skipped for pre-migration legacy/`_legacy` fallback docs). New idempotent
+  `window.remapDesignProjectClients()` (same batched style as `backfillProjectKind`)
+  re-points `projects.clientId` from legacy `design_clients` ids to `clients` ids via WS32's
+  `migratedTo` stamp — **written but deliberately NOT run**, per this task's constraints; it
+  needs a signed-in president/manager console session, run once after WS32's
+  `migrateClientBooks()`. **Manila-time display fix:** new `window.fmtManila(v)` (js/config.js,
+  next to `bizDate`/`bizHour`) replaces every raw `.slice(0,16).replace('T',' ')`/`.slice(0,10)`
+  read of the drawing/project ISO timestamps in `openDrawingDetail`'s revision table + activity
+  feed and `renderProjActivity` — storage stays ISO strings (`arrayUnion` can't hold
+  `serverTimestamp`, consistent with WS38's `versions[]`), only the display was wrong (showed
+  UTC wall-clock). **Verified:** `node --check` clean on `js/config.js`/`js/departments.js`;
+  `firestore.rules` brace/paren-balanced (260/260, 1381/1381) and the new `design_drawings`
+  block's local `isDrawingApprover()`/`statusNow()`/`statusNext()`/`isPromotion()` functions
+  follow the file's existing per-`match`-block local-function convention; `firestore.indexes
+  .json` unchanged and still valid JSON; every new function (`canApproveDrawing`,
+  `DesignFolders`, `remapDesignProjectClients`, `renderProjectFiles`, `fmtManila`) greped to
+  exactly one definition and every call site resolved; `reviewer`/`reviewerName` confirmed
+  zero remaining references anywhere in departments.js. **No deviations from the combined
+  DECIDED + RE-GROUNDED spec** — every edit is anchored to function name/quoted-BEFORE text
+  per the RE-GROUNDED instruction, not the spec's (stale) line numbers. **Not deployed** —
+  `firestore.rules` changes are local only; the session with deploy credentials must run
+  `firebase deploy --only firestore:rules` before the approval gate is enforced
+  server-side (until then, the UI-side gate in `changeDrawingStatus` is the only backstop).
+  `CACHE_VER` in sw.js and `APP_VERSION` in js/config.js were deliberately left untouched per
+  this task's constraints (pre-commit hook / main session's responsibility).

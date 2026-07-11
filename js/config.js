@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.29';
+window.APP_VERSION = '12.0.30';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -35,6 +35,19 @@ window.bizDow = function(date) {
   return { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 }[wd];
 };
 window.bizYear = function() { return parseInt(window.bizDate().slice(0, 4), 10); };
+
+// Manila wall-clock display for ISO-string/Timestamp instants (v12 WS35). Storage
+// stays ISO (arrayUnion can't hold serverTimestamp — same pattern as WS38's
+// versions[]); this only fixes the DISPLAY, which previously showed UTC wall-clock
+// via a raw .slice(0,16) on the ISO string.
+window.fmtManila = function(v){
+  try {
+    const d = (v && v.toDate) ? v.toDate() : new Date(v);
+    if (isNaN(d)) return '';
+    return d.toLocaleString('en-PH', { timeZone:'Asia/Manila',
+      year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false });
+  } catch(_) { return ''; }
+};
 
 // ── Consolidated attendance-record readers (WS25) ────────────────
 // Single source of truth for reading an attendance/{uid}/records/{date} doc.

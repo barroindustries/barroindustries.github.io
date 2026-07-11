@@ -127,6 +127,64 @@ window.runProjectKindBackfill = async function() {
 };
 
 // ════════════════════════════════════════════════════════════════
+//  DESIGN — project/client folders (v12 WS35, WS38 Files Hub contract)
+//  Deterministic hub_folders ids ⇒ idempotent "ensure" + cross-dept
+//  discoverable from the Sales side (client__{clientId}). Get-then-create:
+//  a blind set(..,{merge:true}) on an existing folder is an UPDATE, which
+//  hub_folders' rule only grants to creator/admin — so any Design member
+//  can safely "ensure" a folder exists without owning it.
+// ════════════════════════════════════════════════════════════════
+window.DesignFolders = {
+  _who(){ return (window.userProfile && userProfile.displayName) || (currentUser && currentUser.email) || ''; },
+  async _ensure(id, data){
+    const ref = db.collection('hub_folders').doc(id);
+    const snap = await ref.get().catch(()=>({exists:false}));
+    if (!snap.exists) {
+      await ref.set({ ...data, createdBy: currentUser.uid, createdByName: this._who(),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    } else if (data.name && snap.data().name !== data.name) {
+      // best-effort rename sync (creator/admin only per rules) — never block on it
+      await ref.update({ name: data.name }).catch(()=>{});
+    }
+    return id;
+  },
+  ensureClientFolder(clientId, clientName){
+    return this._ensure(`client__${clientId}`,
+      { name: clientName || 'Client', parentId: null, scope:'projects', department:'Design', clientId });
+  },
+  async ensureProjectFolder(p){
+    const parentId = p.clientId
+      ? await this.ensureClientFolder(p.clientId, p.client || 'Client') : null;
+    return this._ensure(`proj__${p.id}`,
+      { name: p.name || 'Project', parentId, scope:'projects', department:'Design',
+        projectId: p.id, clientId: p.clientId || null });
+  }
+};
+
+// One-time: re-point projects.clientId from legacy design_clients ids to the
+// unified clients ids via the migratedTo stamp WS32's migrateClientBooks()
+// writes. Idempotent: a clientId that no longer matches a design_clients doc
+// (already remapped, or never was a legacy id) is skipped. Run once from a
+// president/manager console session after migrateClientBooks() has run.
+window.remapDesignProjectClients = async function(){
+  const [pSnap, dcSnap] = await Promise.all([
+    db.collection('projects').get(), db.collection('design_clients').get().catch(()=>({docs:[]}))]);
+  const map = {};   // legacy design_clients id -> clients id
+  dcSnap.docs.forEach(d => { const m = d.data().migratedTo; if (m && m.id) map[d.id] = m.id; });
+  let batch = db.batch(), n = 0, done = 0;
+  for (const doc of pSnap.docs) {
+    const cid = doc.data().clientId;
+    if (!cid || !map[cid]) continue;
+    batch.update(doc.ref, { clientId: map[cid], updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    done++; if (++n === 400) { await batch.commit(); batch = db.batch(); n = 0; }
+  }
+  if (n) await batch.commit();
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects-unified');
+  console.log(`remapDesignProjectClients: ${done} project(s) re-pointed`);
+  return { remapped: done, scanned: pSnap.size };
+};
+
+// ════════════════════════════════════════════════════════════════
 //  UNIFIED CLIENT BOOK (v12 WS32) — one `clients` collection, one clientId.
 //  Legacy sales_clients/design_clients/bs_clients are read-only archives once
 //  migrateClientBooks() has run; until then listAll() falls back to them
@@ -212,12 +270,13 @@ window.Clients = (function () {
   async function timelineFor(client) {
     const toMs = v => !v ? 0 : (typeof v === 'string' ? (Date.parse(v) || 0)
       : v.seconds ? v.seconds * 1000 : (v.toDate ? v.toDate().getTime() : 0));
-    const [qSnap, projects, soSnap] = await Promise.all([
+    const [qSnap, projects, soSnap, hubFiles] = await Promise.all([
       (typeof getAllQuotes === 'function' ? getAllQuotes() : Promise.resolve({ docs: [] })),
       window.Projects.listAll().catch(() => []),
       (typeof dbCachedGet === 'function'
         ? dbCachedGet('sales_orders', () => db.collection('sales_orders').get().catch(() => ({ docs: [] })), 60000)
-        : db.collection('sales_orders').get().catch(() => ({ docs: [] })))
+        : db.collection('sales_orders').get().catch(() => ({ docs: [] }))),
+      (window.FilesHub ? window.FilesHub.loadFiles('projects').catch(() => []) : Promise.resolve([]))
     ]);
     const key = client.nameKey || nameKey(client.name);
     // _coll = which collection the quote lives in (drives Reopen; survives WS31's
@@ -246,7 +305,9 @@ window.Clients = (function () {
     if (client.followUpDate) events.push({ ts: toMs(client.followUpDate), icon: '⏰', text: `Follow-up scheduled ${client.followUpDate}` });
     events.sort((a, b) => b.ts - a.ts);
     const payments = projs.flatMap(p => (p.payments || []).map(pm => ({ ...pm, projectNo: p.no })));
-    return { quotes, orders, projects: projs, payments, events: events.slice(0, 80) };
+    // v12 WS35: project/client files joined from the Files Hub (scope 'projects').
+    const files = hubFiles.filter(f => f.clientId === client.id);
+    return { quotes, orders, projects: projs, payments, events: events.slice(0, 80), files };
   }
   return { nameKey, brandOf, deptOf, normalize, listAll, findByName, upsertFromQuote, quotesFor, timelineFor };
 })();
@@ -7739,6 +7800,18 @@ const DRAWING_STATUSES = [
 function drawingStatus(id){ return DRAWING_STATUSES.find(s=>s.id===id) || DRAWING_STATUSES[0]; }
 function nextRev(letter){ return letter ? String.fromCharCode((''+letter).toUpperCase().charCodeAt(0)+1) : 'A'; }
 function drawingTypeIcon(t){ return ({DWG:'📐',PDF:'📄',Drawing:'✏️','3D':'🧊',Render:'🖼'})[t] || '📄'; }
+// Approval capability (v12 WS35) — MUST stay in lockstep with the design_drawings
+// update rule (firestore.rules). Approver = president/manager, or the parent
+// project's designLead — NEVER 'secretary' (view-only approvals directive) and
+// NEVER the drawing's own author/assignee (self-approval hole closed here + rules).
+// { approve, release, isApprover } for the current user on drawing d of project.
+window.canApproveDrawing = function(d, project){
+  const uid = (window.currentUser && currentUser.uid) || '';
+  const isApprover = ['president','manager'].includes(window.currentRole || '')
+    || (!!project && !!project.designLead && project.designLead === uid);
+  const isAuthor = !!uid && (uid === d.createdBy || uid === d.assignedTo);
+  return { isApprover, approve: isApprover && !isAuthor, release: isApprover };
+};
 // Forward status transitions offered in the drawing detail (manager-gated).
 function drawingTransitions(status){
   switch(status){
@@ -7774,7 +7847,7 @@ function drawingCard(d){
 // ══════════════════════════════════════════════════
 window.openProjectDetail = function(p, currentUser, currentRole, canBill, initialTab) {
   initialTab = initialTab || 'Overview';
-  const tabs = ['Overview','Drawings','Tasks','Financials','Activity'];
+  const tabs = ['Overview','Drawings','Files','Tasks','Financials','Activity'];
   openModal(escHtml(p.name||'Project'), `
     <div class="item-meta" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <span class="badge ${statusBadge(p.status)}">${escHtml(p.status||'active')}</span>
@@ -7794,6 +7867,7 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill, initia
     if (!host) return;
     if      (t==='Overview')   renderProjOverview(host, p, currentUser, currentRole, canBill);
     else if (t==='Drawings')   renderProjectDrawings(host, p, currentUser, currentRole, canBill);
+    else if (t==='Files')      renderProjectFiles(host, p, currentUser, currentRole);
     else if (t==='Tasks')      renderProjectTasks(host, p, currentUser, currentRole, canBill);
     else if (t==='Financials') renderProjFinancials(host, p, currentUser, currentRole, canBill);
     else if (t==='Activity')   renderProjActivity(host, p, currentUser, currentRole);
@@ -8021,25 +8095,30 @@ async function renderProjActivity(host, p, currentUser, currentRole){
   } catch(e){ console.warn(e); }
   events.sort((a,b)=>(''+(b.at)).localeCompare(''+(a.at)));
   host.innerHTML = events.length
-    ? `<div style="font-size:12px">${events.map(e=>`<div style="padding:6px 0;border-bottom:1px solid var(--border)"><div>${e.html}</div><div style="font-size:11px;color:var(--text-muted)">${(''+(e.at||'')).slice(0,16).replace('T',' ')}${e.by?' · '+escHtml(e.by):''}</div></div>`).join('')}</div>`
+    ? `<div style="font-size:12px">${events.map(e=>`<div style="padding:6px 0;border-bottom:1px solid var(--border)"><div>${e.html}</div><div style="font-size:11px;color:var(--text-muted)">${escHtml(window.fmtManila(e.at))}${e.by?' · '+escHtml(e.by):''}</div></div>`).join('')}</div>`
     : '<div class="empty-state" style="padding:20px"><div class="empty-icon">🕘</div><h4>No activity yet</h4></div>';
 }
 
 // ── Edit project: rename, status, client link, team delegation, job-project link ──
 async function openProjectEditModal(p, currentUser, currentRole, canBill){
-  const [uSnap, cSnap, jSnap] = await Promise.all([
+  // v12 WS35 — unified client book (WS32). Design-brand clients listed first;
+  // linking a project to any client makes them a design client (brands arrayUnion
+  // on save). Falls back to legacy design_clients read-only compat until
+  // migrateClientBooks() has run (window.Clients.listAll() handles that itself).
+  const [uSnap, allClients, jSnap] = await Promise.all([
     db.collection('users').get().catch(()=>({docs:[]})),
-    db.collection('design_clients').get().catch(()=>({docs:[]})),
+    window.Clients.listAll().catch(()=>[]),
     db.collection('job_projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
   ]);
   const users   = uSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
-  const clients = cSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const clients = [...allClients].sort((a,b)=>
+    (b.brands.includes('design')?1:0)-(a.brands.includes('design')?1:0) || (a.name||'').localeCompare(b.name||''));
   const jobs    = jSnap.docs.map(d=>({id:d.id,...d.data()}));
   let team = (p.team||[]).map((uid,i)=>({uid, name:(p.teamNames||[])[i]||uid}));
 
   openPage('Edit Project', `
     <div class="form-group"><label>Project Name</label><input id="pe-name" value="${escHtml(p.name||'')}"/></div>
-    <div class="form-group"><label>Client (link to Design CRM)</label>
+    <div class="form-group"><label>Client (unified CRM)</label>
       <select id="pe-client"><option value="">— None / free text —</option>
         ${clients.map(c=>`<option value="${c.id}" data-name="${escHtml(c.name||c.company||'')}" ${p.clientId===c.id?'selected':''}>${escHtml(c.name||c.company||'Client')}</option>`).join('')}
       </select>
@@ -8087,6 +8166,12 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
     if (uid && !team.some(a=>a.uid===uid)) team.push({uid,name});
     e.target.value=''; renderChips();
   });
+  // Picking a client auto-fills the display name (free text remains an override).
+  document.getElementById('pe-client').addEventListener('change', e => {
+    const nm = e.target.options[e.target.selectedIndex]?.dataset.name || '';
+    const disp = document.getElementById('pe-clientname');
+    if (nm && !disp.value.trim()) disp.value = nm;
+  });
 
   document.getElementById('pe-save-btn').addEventListener('click', async () => {
     const prevTeam = new Set(p.team||[]);
@@ -8117,6 +8202,13 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
       await db.collection('projects').doc(p.id).update(update);
       Object.assign(p, update);
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects-unified');
+      // v12 WS35: linking a project to a client marks them a design-brand client
+      // (skip legacy pre-migration compat docs — their real home is `clients`,
+      // fixed up later by remapDesignProjectClients()).
+      if (clientId && clientId !== (p.clientId||null) && !allClients.find(c=>c.id===clientId)?._legacy) {
+        try { await db.collection('clients').doc(clientId).update({ brands: firebase.firestore.FieldValue.arrayUnion('design') });
+              if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients'); } catch(_){}
+      }
       const who = window.userProfile?.displayName || currentUser.email || '';
       // notify newly delegated team members
       for (const a of team) {
@@ -8159,6 +8251,59 @@ async function renderProjectDrawings(host, p, currentUser, currentRole, canBill)
   document.getElementById('proj-add-dwg-btn')?.addEventListener('click',()=>openDrawingCreateModal(p, currentUser, currentRole, canBill));
 }
 
+// ── Per-project Files (v12 WS35 — WS38 Files Hub contract, scope 'projects') ──
+// All reads/mutations via window.FilesHub / hub_files directly — do NOT
+// re-implement upload/version/share/bin logic that WS38 already owns.
+async function renderProjectFiles(host, p, currentUser, currentRole){
+  host.innerHTML = '<div class="loading-placeholder">Loading files…</div>';
+  const canManage = canEditDept('Design');
+  const folderId = `proj__${p.id}`;                       // deterministic (DesignFolders)
+  const all = await FilesHub.loadFiles('projects').catch(()=>[]);
+  const files = all.filter(f => f.projectId === p.id || f.folderId === folderId);
+  host.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted)">📁 Project folder${p.clientId?` · client folder: ${escHtml(p.client||'Client')}`:''}</div>
+      ${canManage?`<button class="btn-primary btn-sm" id="pf-upload-btn">＋ Upload</button>`:''}
+    </div>
+    ${files.length ? `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Name</th><th>By</th><th>Date</th><th>Ver</th><th></th></tr></thead><tbody>
+      ${files.map(f=>`<tr>
+        <td>${escHtml(f.name||'')}</td>
+        <td style="font-size:11px">${escHtml(f.uploaderName||'')}</td>
+        <td style="font-size:11px;color:var(--text-muted)">${f.createdAt&&f.createdAt.toDate?f.createdAt.toDate().toLocaleDateString('en-PH'):''}</td>
+        <td><span class="badge badge-gray">v${f.currentV||1}</span></td>
+        <td><button class="btn-secondary btn-sm pf-view-btn" data-id="${f.id}">👁</button></td>
+      </tr>`).join('')}</tbody></table></div>`
+    : '<div class="empty-state" style="padding:20px"><div class="empty-icon">📁</div><h4>No files in this project folder yet</h4></div>'}
+    <div id="pf-upload-area" style="margin-top:10px;display:none"></div>`;
+  host.querySelectorAll('.pf-view-btn').forEach(b=>b.addEventListener('click',()=>{
+    const f = files.find(x=>x.id===b.dataset.id); if (f) window.openFilePreview(f);
+  }));
+  document.getElementById('pf-upload-btn')?.addEventListener('click', async () => {
+    const area = document.getElementById('pf-upload-area'); area.style.display='block';
+    const fid = await DesignFolders.ensureProjectFolder(p);   // lazy folder creation
+    Drive.renderUploadArea('pf-upload-area', async (r, file) => {
+      const FV = firebase.firestore.FieldValue;
+      const who = window.userProfile?.displayName || currentUser.email || '';
+      await db.collection('hub_files').add({           // FULL WS38 Spec-1 shape + domain fields
+        name: (file?.name || r.name || 'File'), description:'', fileType:'File', kind:'file',
+        scope:'projects', department:'Design', folderId: fid,
+        projectId: p.id, clientId: p.clientId || null,           // WS32/WS38 contract fields
+        url: r.url, driveUrl: null, size: file?.size || null, contentType: file?.type || null,
+        source:'firebase', currentV: 1,
+        versions: [{ v:1, url:r.url, name:(file?.name||r.name||''), size:file?.size||null,
+          contentType:file?.type||null, note:'', by:currentUser.uid, byName:who, at:new Date().toISOString() }],
+        archived:false, deleted:false, deletedAt:null, deletedBy:null,
+        visibility:'company', sharedUserIds:[], editorUserIds:[], shares:[],
+        uploadedBy: currentUser.uid, uploaderName: who,
+        createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp(),
+      });
+      Notifs.showToast('File added to the project folder','success');
+      renderProjectFiles(host, p, currentUser, currentRole);
+    }, { label:'Upload project file', dept:'Design', subfolder:'Files' });  // WS38 storage-path contract: 2 segments, never deeper
+  });
+}
+
 async function openDrawingCreateModal(project, currentUser, currentRole, canBill){
   const uSnap = await db.collection('users').get().catch(()=>({docs:[]}));
   const users = uSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
@@ -8196,7 +8341,7 @@ async function openDrawingCreateModal(project, currentUser, currentRole, canBill
         type: document.getElementById('dw-type').value,
         status:'draft', currentRev:'A',
         fileUrl:uploaded?.url||null, fileName:uploaded?.name||null, driveUrl:uploaded?.driveUrl||null, fileSource:uploaded?.source||(uploaded?'firebase':null),
-        assignedTo, assignedToName, reviewer:null, reviewerName:null, approver:null, approverName:null, approvedAt:null,
+        assignedTo, assignedToName, approver:null, approverName:null, approvedAt:null,
         revisions:[rev0],
         activity:[{ at:nowIso, event:'Drawing created (Rev A)', by:currentUser.uid, byName:who }],
         createdBy: currentUser.uid, createdByName: who,
@@ -8216,12 +8361,15 @@ async function openDrawingCreateModal(project, currentUser, currentRole, canBill
 function openDrawingDetail(d, project, currentUser, currentRole, canBill){
   const st = drawingStatus(d.status);
   const canManage = canEditDept('Design');
+  // v12 WS35 — per-transition capability gate. fileUrl-before-driveUrl (WS15) preserved.
+  const cap = window.canApproveDrawing(d, project);
   const revs = (d.revisions||[]).slice().reverse();
   const acts = (d.activity||[]).slice().reverse();
   const fileLink = d.fileUrl
     ? `<a href="${escHtml(d.fileUrl||d.driveUrl)}" target="_blank" class="btn-secondary btn-sm">⬇ ${escHtml(d.fileName||'Open file')}</a>`
     : '<span style="font-size:12px;color:var(--text-muted)">No file attached</span>';
-  const trans = canManage ? drawingTransitions(d.status) : [];
+  const trans = (canManage || cap.isApprover) ? drawingTransitions(d.status).filter(t =>
+    t.to === 'approved' ? cap.approve : t.to === 'released' ? cap.release : canManage) : [];
   openModal(`${drawingTypeIcon(d.type)} ${escHtml(d.title||'Drawing')}`, `
     <div class="item-meta" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <span class="badge badge-gray">Rev ${escHtml(d.currentRev||'A')}</span>
@@ -8234,13 +8382,15 @@ function openDrawingDetail(d, project, currentUser, currentRole, canBill){
       <span style="color:var(--text-muted)">Designer</span><span>${d.assignedToName?escHtml(d.assignedToName):'<span style="color:var(--text-muted)">Unassigned</span>'}</span>
       <span style="color:var(--text-muted)">Approved by</span><span>${d.approverName?escHtml(d.approverName):'<span style="color:var(--text-muted)">—</span>'}</span>
       <span style="color:var(--text-muted)">Current file</span><span>${fileLink}</span>
+      ${d.status==='for_review' && !cap.approve ? `<span style="color:var(--text-muted)">Awaiting</span><span style="font-size:12px">🔏 Approval by ${project?.designLeadName ? escHtml(project.designLeadName) : 'a manager'}${(d.createdBy===currentUser?.uid||d.assignedTo===currentUser?.uid)?' — authors cannot approve their own drawing':''}</span>` : ''}
+      ${d.releasedByName ? `<span style="color:var(--text-muted)">Released by</span><span>${escHtml(d.releasedByName)}</span>` : ''}
     </div></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">📑 Revision History</div>
     <div class="table-wrap"><table class="data-table"><thead><tr><th>Rev</th><th>Status</th><th>Note</th><th>By</th><th>Date</th><th>File</th></tr></thead><tbody>
-      ${revs.length?revs.map(r=>`<tr><td><strong>${escHtml(r.rev||'')}</strong></td><td>${escHtml(drawingStatus(r.status).label)}</td><td style="font-size:11px">${escHtml(r.note||'')}</td><td style="font-size:11px">${escHtml(r.byName||'')}</td><td style="font-size:11px;color:var(--text-muted)">${(''+(r.at||'')).slice(0,10)}</td><td>${r.fileUrl?`<a href="${escHtml(r.fileUrl||r.driveUrl)}" target="_blank">⬇</a>`:'—'}</td></tr>`).join(''):'<tr><td colspan="6" style="font-size:12px;color:var(--text-muted)">No revisions.</td></tr>'}
+      ${revs.length?revs.map(r=>`<tr><td><strong>${escHtml(r.rev||'')}</strong></td><td>${escHtml(drawingStatus(r.status).label)}</td><td style="font-size:11px">${escHtml(r.note||'')}</td><td style="font-size:11px">${escHtml(r.byName||'')}</td><td style="font-size:11px;color:var(--text-muted)">${escHtml(window.fmtManila(r.at).slice(0,10))}</td><td>${r.fileUrl?`<a href="${escHtml(r.fileUrl||r.driveUrl)}" target="_blank">⬇</a>`:'—'}</td></tr>`).join(''):'<tr><td colspan="6" style="font-size:12px;color:var(--text-muted)">No revisions.</td></tr>'}
     </tbody></table></div>
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:12px 0 4px">🕘 Activity</div>
-    <div style="max-height:150px;overflow:auto;font-size:12px">${acts.length?acts.map(a=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)"><strong>${escHtml(a.event||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${(''+(a.at||'')).slice(0,16).replace('T',' ')} · ${escHtml(a.byName||'')}</div></div>`).join(''):'<div style="color:var(--text-muted)">No activity.</div>'}</div>
+    <div style="max-height:150px;overflow:auto;font-size:12px">${acts.length?acts.map(a=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)"><strong>${escHtml(a.event||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(window.fmtManila(a.at))} · ${escHtml(a.byName||'')}</div></div>`).join(''):'<div style="color:var(--text-muted)">No activity.</div>'}</div>
   `, `
     ${canManage?`<button class="btn-secondary btn-sm" id="dwg-rev-btn">+ New Revision</button>`:''}
     ${canManage?`<button class="btn-secondary btn-sm" id="dwg-edit-btn">✏️ Edit</button>`:''}
@@ -8254,8 +8404,26 @@ function openDrawingDetail(d, project, currentUser, currentRole, canBill){
 }
 
 async function changeDrawingStatus(d, to, project, currentUser, currentRole, canBill){
+  // ── WS35 approval gate (mirror of the firestore.rules clause — defense in depth) ──
+  const cap = window.canApproveDrawing(d, project);
+  if (to === 'approved' && !cap.approve) {
+    Notifs.showToast(d.createdBy===currentUser.uid||d.assignedTo===currentUser.uid
+      ? 'You cannot approve your own drawing — the Design Lead or a manager must approve it.'
+      : 'Only the project Design Lead or a manager can approve drawings.', 'error');
+    return;
+  }
+  if (to === 'released' && !cap.release) {
+    Notifs.showToast('Only the project Design Lead or a manager can release drawings.', 'error');
+    return;
+  }
+  // ── WS35 handoff hardening: never silently release into a void ──
+  if (to === 'released' && !project?.jobProjectId) {
+    const msg = 'This Design project is NOT linked to a Job Project — releasing will only notify the Production department; nothing will appear in any Job Project document register. Link it via Edit Project first, or release anyway?';
+    const ok = (typeof confirmDialog === 'function') ? await confirmDialog({ message: msg }) : confirm(msg);
+    if (!ok) return;
+  }
   const who = window.userProfile?.displayName || currentUser.email || '';
-  const nowIso = new Date().toISOString();
+  const nowIso = new Date().toISOString();   // ISO instant — display via fmtManila (decision 10)
   const st = drawingStatus(to);
   const actEntry = { at:nowIso, event:`Status → ${st.label} (Rev ${d.currentRev||'A'})`, by:currentUser.uid, byName:who };
   const update = {
@@ -8264,14 +8432,24 @@ async function changeDrawingStatus(d, to, project, currentUser, currentRole, can
     activity: firebase.firestore.FieldValue.arrayUnion(actEntry),
   };
   if (to==='approved') { update.approver=currentUser.uid; update.approverName=who; update.approvedAt=firebase.firestore.FieldValue.serverTimestamp(); }
+  if (to==='released') { update.releasedBy=currentUser.uid; update.releasedByName=who; update.releasedAt=firebase.firestore.FieldValue.serverTimestamp(); }
   try {
     await db.collection('design_drawings').doc(d.id).update(update);
     d.status = to;
     d.activity = [...(d.activity||[]), actEntry];
     if (to==='approved'){ d.approver=currentUser.uid; d.approverName=who; }
+    if (to==='released'){ d.releasedBy=currentUser.uid; d.releasedByName=who; }
   } catch(e){ console.warn(e); Notifs.showToast('Could not update status','error'); return; }
   // Cross-department side effects — best-effort; never block the status change.
   try {
+    if (to==='for_review') {
+      // WS35: tell the approver an approval is waiting (nobody was notified before)
+      if (project?.designLead && project.designLead!==currentUser.uid) {
+        await Notifs.send(project.designLead,{title:'🔏 Drawing awaiting your approval',body:`"${d.title}" (${project?.name||d.projectName||''}) Rev ${d.currentRev||'A'} was submitted for review`,icon:'🔏',type:'drawing_for_review',dedupKey:`dwg-rev-${d.id}-${d.currentRev}`});
+      } else {
+        await Notifs.sendToDept('Design',{title:'🔏 Drawing awaiting approval',body:`"${d.title}" Rev ${d.currentRev||'A'} needs a Design Lead or manager to approve`,icon:'🔏',type:'drawing_for_review'});
+      }
+    }
     if (to==='approved' && d.assignedTo && d.assignedTo!==currentUser.uid) {
       await Notifs.send(d.assignedTo,{title:'✅ Drawing approved',body:`"${d.title}" was approved`,icon:'✅',type:'drawing_approved',dedupKey:`dwg-appr-${d.id}-${d.currentRev}`});
     }
@@ -8279,10 +8457,13 @@ async function changeDrawingStatus(d, to, project, currentUser, currentRole, can
       await Notifs.sendToDept('Production',{title:'📐 Drawing released',body:`"${d.title}" (${project?.name||d.projectName||''}) is released for production`,icon:'📐',type:'drawing_released'});
       if (project?.jobProjectId) {
         await db.collection('job_projects').doc(project.jobProjectId).update({
-          documents: firebase.firestore.FieldValue.arrayUnion({ type:'Drawing', ref:`${d.title} Rev ${d.currentRev||'A'}`, at:nowIso, by:who }),
+          // drawingId + url are WS28's intake hook — its future production flow reads
+          // this register, never design_drawings directly. url = fileUrl (WS15 precedence).
+          documents: firebase.firestore.FieldValue.arrayUnion({ type:'Drawing', ref:`${d.title} Rev ${d.currentRev||'A'}`, drawingId:d.id, url:d.fileUrl||null, at:nowIso, by:who }),
           timeline:  firebase.firestore.FieldValue.arrayUnion({ at:nowIso, event:`Drawing released: ${d.title} Rev ${d.currentRev||'A'}`, by:who }),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         });
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects-unified');
       }
     }
   } catch(e){ console.warn('drawing release side-effect failed', e); }
@@ -8314,11 +8495,12 @@ function openDrawingRevisionModal(d, project, currentUser, currentRole, canBill)
         currentRev:newRev, status:'draft',
         fileUrl, fileName, driveUrl, fileSource: uploaded?.source || d.fileSource || null,
         approver:null, approverName:null, approvedAt:null,
+        releasedBy:null, releasedByName:null, releasedAt:null,
         revisions: firebase.firestore.FieldValue.arrayUnion(revEntry),
         activity:  firebase.firestore.FieldValue.arrayUnion(actEntry),
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       });
-      Object.assign(d, { currentRev:newRev, status:'draft', fileUrl, fileName, driveUrl, approver:null, approverName:null });
+      Object.assign(d, { currentRev:newRev, status:'draft', fileUrl, fileName, driveUrl, approver:null, approverName:null, releasedBy:null, releasedByName:null, releasedAt:null });
       d.revisions = [...(d.revisions||[]), revEntry];
       d.activity  = [...(d.activity||[]), actEntry];
       Notifs.showToast(`Rev ${newRev} saved`,'success');
@@ -8435,6 +8617,8 @@ async function renderDrawingsDashboard(container, currentUser, currentRole){
   try { const ps = await db.collection('projects').get(); ps.docs.forEach(d=>projMap[d.id]={id:d.id,...d.data()}); } catch(_){}
   const counts = {}; DRAWING_STATUSES.forEach(s=>counts[s.id]=0);
   drawings.forEach(d=>{ if (counts[d.status]!=null) counts[d.status]++; });
+  // v12 WS35 — drawings this user can personally approve right now.
+  const mine = drawings.filter(d => d.status==='for_review' && window.canApproveDrawing(d, projMap[d.projectId]).approve);
   const designers = [...new Set(drawings.map(d=>d.assignedToName).filter(Boolean))].sort();
   const projects  = [...new Set(drawings.map(d=>d.projectName).filter(Boolean))].sort();
   let fStatus='All', fDesigner='All', fProject='All';
@@ -8458,6 +8642,7 @@ async function renderDrawingsDashboard(container, currentUser, currentRole){
 
   container.innerHTML = `
     <div class="kpi-row" style="margin-bottom:12px">
+      <div class="kpi-card" id="dwg-kpi-mine" style="cursor:pointer;border-color:var(--accent)"><div class="kpi-label">🔏 For my approval</div><div class="kpi-value">${mine.length}</div></div>
       ${DRAWING_STATUSES.map(s=>`<div class="kpi-card"><div class="kpi-label">${s.label}</div><div class="kpi-value">${counts[s.id]||0}</div></div>`).join('')}
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
@@ -8470,6 +8655,7 @@ async function renderDrawingsDashboard(container, currentUser, currentRole){
   document.getElementById('dwg-f-status').addEventListener('change',e=>{ fStatus=e.target.value; renderList(); });
   document.getElementById('dwg-f-designer').addEventListener('change',e=>{ fDesigner=e.target.value; renderList(); });
   document.getElementById('dwg-f-project').addEventListener('change',e=>{ fProject=e.target.value; renderList(); });
+  document.getElementById('dwg-kpi-mine')?.addEventListener('click',()=>{ fStatus='for_review'; document.getElementById('dwg-f-status').value='for_review'; renderList(); });
   renderList();
 }
 
@@ -11891,6 +12077,14 @@ async function openClientHub(cl, opts) {
         <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">₱${fmt(p.contractAmount)}${p.arBalance>0?` · AR ₱${fmt(p.arBalance)}`:' · paid'}</div>
       </div>`).join('')}
     </div>`:''}
+    ${t.files.length?`<h4 style="font-size:13px;margin:0 0 6px">📁 Files (${t.files.length})</h4>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+      ${t.files.map(f=>`<div class="item-card ch-file-row" data-id="${f.id}" style="cursor:pointer;display:flex;justify-content:space-between;gap:10px;align-items:center">
+        <div style="min-width:0"><span style="font-weight:600;font-size:12px">${escHtml(f.name||'File')}</span>
+          ${f.projectId?`<span class="badge badge-gray" style="font-size:9px">🏗 ${escHtml((t.projects.find(p=>p.id===f.projectId)||{}).no||'Project')}</span>`:''}</div>
+        <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">👁 ${f.createdAt&&f.createdAt.toDate?f.createdAt.toDate().toLocaleDateString('en-PH'):''}</div>
+      </div>`).join('')}
+    </div>`:''}
     <h4 style="font-size:13px;margin:0 0 6px">📄 Quotes (${t.quotes.length})</h4>
     ${!t.quotes.length?'<div class="empty-state" style="padding:18px"><p>No quotes recorded for this client yet.</p></div>':`<div style="display:flex;flex-direction:column;gap:8px">
       ${t.quotes.map(q=>`<div class="item-card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
@@ -11905,6 +12099,9 @@ async function openClientHub(cl, opts) {
   const nav = co => co==='BK' ? 'bk-quote-builder' : 'bs-quote-builder';
   body.querySelectorAll('.clq-reopen').forEach(btn=>btn.addEventListener('click',()=>{ closeModal(); window.reopenQuoteFromDoc(btn.dataset.coll, btn.dataset.id, nav(btn.dataset.co)); }));
   body.querySelectorAll('.clq-rev').forEach(btn=>btn.addEventListener('click',()=>{ closeModal(); window.newRevisionFromDoc(btn.dataset.coll, btn.dataset.id, nav(btn.dataset.co)); }));
+  body.querySelectorAll('.ch-file-row').forEach(row=>row.addEventListener('click',()=>{
+    const f = t.files.find(x=>x.id===row.dataset.id); if (f) window.openFilePreview(f);
+  }));
   const patch = async (upd, log) => {
     if (log) upd.contactLog = FV.arrayUnion(log);
     upd.updatedAt = FV.serverTimestamp();
