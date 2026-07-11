@@ -507,6 +507,9 @@ window.Notifs = (() => {
   }
 
   // ── Toast ─────────────────────────────────────
+  // WS42 Phase 10: pill = --surface + border + --sh-lg; the colored bit is now a
+  // small 10px status dot, not the whole pill background (perf/legibility —
+  // matches the Light/Dark/Astral token system instead of a hardcoded color block).
   function showToast(message, type = 'info') {
     const existing = document.getElementById('bi-toast');
     if (existing) existing.remove();
@@ -520,13 +523,15 @@ window.Notifs = (() => {
     const kind = type === 'success'
       ? 'success'
       : (type === 'error' || type === 'danger') ? 'error' : 'info';
-    const bg = {
-      success: cssVar('--toast-success', '#2e7d32'),
-      error:   cssVar('--toast-error',   '#c62828'),
-      info:    cssVar('--toast-info',    '#1a237e'),
+    const iconColor = {
+      success: cssVar('--toast-success', '#30D158'),
+      error:   cssVar('--toast-error',   '#FF453A'),
+      info:    cssVar('--toast-info',    '#0A84FF'),
     }[kind];
-    const fg = cssVar('--toast-text', '#fff');
-    const affordance = kind === 'success' ? '✓ ' : '';
+    const bg     = cssVar('--toast-bg',     cssVar('--surface', '#1A1D21'));
+    const border = cssVar('--toast-border', cssVar('--border', 'rgba(255,255,255,0.10)'));
+    const fg     = cssVar('--toast-text',   cssVar('--text', '#fff'));
+    const shadow = cssVar('--sh-lg', '0 12px 32px rgba(0,0,0,0.40)');
 
     const toast = document.createElement('div');
     toast.id = 'bi-toast';
@@ -537,13 +542,20 @@ window.Notifs = (() => {
       : 'calc(16px + 52px + 16px + env(safe-area-inset-bottom,0px))';
     toast.style.cssText = `
       position:fixed; bottom:${bottom}; left:50%; transform:translateX(-50%);
-      background:${bg};
-      color:${fg}; padding:10px 20px; border-radius:30px;
+      display:flex; align-items:center; gap:9px;
+      background:${bg}; border:1px solid ${border};
+      color:${fg}; padding:10px 18px; border-radius:999px;
       font-size:13px; font-weight:600; z-index:9999;
-      box-shadow:0 4px 20px rgba(0,0,0,0.3);
+      box-shadow:${shadow};
       animation:toastIn 0.3s ease; white-space:nowrap; max-width:90vw; overflow:hidden; text-overflow:ellipsis;
     `;
-    toast.textContent = affordance + message;
+    const dot = document.createElement('span');
+    dot.style.cssText = `flex-shrink:0; width:10px; height:10px; border-radius:50%; background:${iconColor};`;
+    const label = document.createElement('span');
+    label.style.cssText = 'overflow:hidden; text-overflow:ellipsis;';
+    label.textContent = message;
+    toast.appendChild(dot);
+    toast.appendChild(label);
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 3500);
   }

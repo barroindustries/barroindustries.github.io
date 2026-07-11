@@ -95,8 +95,8 @@
 
   /* ── Layout ── */
   --topbar-h:     56px;
-  --sidebar-w:    258px;
-  --bottom-nav-h: 52px;
+  --sidebar-w:    264px;
+  --bottom-nav-h: 56px;
   --top-nav-h:    50px;
 
   /* ── Type ── */
@@ -121,11 +121,16 @@
   --modal-bg:      rgba(13,13,26,0.92);
   --drawer-bg:     rgba(10,10,20,0.94);
 
-  /* ── Toast theming (consumed by notifications.js) ── */
-  --toast-success: #1E8E45;
-  --toast-error:   #D9362B;
-  --toast-info:    #2E6FD6;
-  --toast-text:    #FFFFFF;
+  /* ── Toast theming (consumed by notifications.js) — WS42 Phase 10:
+     pill = --surface + border + --sh-lg; --toast-success/-error/-info are now the
+     STATUS-ICON color (not the whole-pill background), --toast-text is the message
+     ink color, --toast-bg/-border are the pill surface. ── */
+  --toast-success: #30D158;
+  --toast-error:   #FF453A;
+  --toast-info:    #0A84FF;
+  --toast-text:    var(--text);
+  --toast-bg:      var(--surface);
+  --toast-border:  var(--border);
 
   /* ── Typography scale (values == today's most-used px literals; no visual change on swap) ── */
   --fs-2xs: 10px;   /* micro labels, badges */
@@ -319,46 +324,60 @@ body::after { content: none; }
 .badge-purple { background: rgba(139,92,246,0.14);   color: #B07EFF; border-color: rgba(139,92,246,0.20); }
 .badge-teal   { background: rgba(0,212,170,0.12);    color: #00DDB8; border-color: rgba(0,212,170,0.18); }
 
-/* ── Buttons ── */
+/* ── Buttons ── WS42 Phase 9: solid --primary/--on-primary in Light/Dark; Astral keeps gradient */
 .btn-primary {
   position: relative; overflow: hidden;
-  background: var(--grad-pk-bl);
-  background-size: 200% 200%;
-  color: #fff; border: none;
+  background: var(--primary);
+  color: var(--on-primary); border: none;
   border-radius: var(--r-sm);
+  min-height: 36px;
   padding: 10px 18px; font-size: var(--fs-md); font-weight: 600;
   cursor: pointer; letter-spacing: 0.1px;
-  transition: transform var(--t1), box-shadow var(--t2);
+  transition: transform var(--t1), box-shadow var(--t2), background var(--t2);
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  box-shadow: var(--sh-pink);
-  animation: gradRun 4s ease infinite;
-  will-change: background-position;
+  box-shadow: none;
   white-space: nowrap;
 }
-.btn-primary::before {
+.btn-primary::before { content: none; }
+@media (hover:hover) {
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: var(--sh); }
+}
+.btn-primary:active { transform: scale(0.97); }
+.btn-primary.btn-full { width: 100%; padding: 14px; font-size: 15px; border-radius: var(--r); }
+.btn-primary.btn-sm   { padding: 6px 13px; font-size: var(--fs-sm); border-radius: var(--r-xs); }
+@media (pointer:coarse) { .btn-primary, .btn-secondary, .btn-outline { min-height: 40px; } }
+html.theme-astral .btn-primary {
+  background: var(--grad-pk-bl); background-size: 200% 200%;
+  box-shadow: var(--sh-pink);
+  animation: gradRun 4s ease infinite; will-change: background-position;
+}
+html.theme-astral .btn-primary::before {
   content: '';
   position: absolute; inset: 0;
   background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
   transform: translateX(-100%) skewX(-12deg);
   transition: none;
 }
-.btn-primary:hover { transform: translateY(-1px) scale(1.01); box-shadow: 0 6px 28px rgba(255,45,120,0.45); }
-.btn-primary:hover::before { animation: shimmer 0.5s ease forwards; }
-.btn-primary:active { transform: scale(0.97); }
-.btn-primary.btn-full { width: 100%; padding: 14px; font-size: 15px; border-radius: var(--r); }
-.btn-primary.btn-sm   { padding: 6px 13px; font-size: var(--fs-sm); border-radius: var(--r-xs); }
+@media (hover:hover) {
+  html.theme-astral .btn-primary:hover { box-shadow: 0 6px 28px rgba(255,45,120,0.45); }
+  html.theme-astral .btn-primary:hover::before { animation: shimmer 0.5s ease forwards; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html.theme-astral .btn-primary { animation: none; }
+}
 
 .btn-secondary {
-  background: var(--s1); color: var(--text-2);
+  background: var(--surface-2); color: var(--text-2);
   border: 1px solid var(--border);
   border-radius: var(--r-sm);
-  padding: 9px 16px; font-size: var(--fs-md); font-weight: 500;
+  padding: 9px 16px; font-size: var(--fs-md); font-weight: 600;
   cursor: pointer;
   transition: background var(--t1), border-color var(--t1), transform var(--t1);
   display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
-  backdrop-filter: blur(8px);
 }
-.btn-secondary:hover { background: var(--s2); border-color: rgba(255,255,255,0.16); transform: translateY(-1px); }
+@media (hover:hover) {
+  .btn-secondary:hover { background: var(--surface-3); border-color: var(--border-strong); transform: translateY(-1px); }
+}
 .btn-secondary.btn-sm { padding: 6px 12px; font-size: var(--fs-sm); border-radius: var(--r-xs); }
 
 .btn-danger {
@@ -381,11 +400,11 @@ body::after { content: none; }
 
 .btn-link {
   background: none; border: none;
-  color: var(--blue-2); font-size: var(--fs-md); font-weight: 500;
+  color: var(--primary); font-size: var(--fs-md); font-weight: 500;
   cursor: pointer; padding: 4px 0;
   transition: color var(--t1), opacity var(--t1);
 }
-.btn-link:hover { color: var(--blue); }
+@media (hover:hover) { .btn-link:hover { opacity: 0.8; } }
 
 .btn-icon {
   background: none; border: none; cursor: pointer;
@@ -404,23 +423,25 @@ body::after { content: none; }
 .form-group input,
 .form-group textarea,
 .form-group select {
-  width: 100%; padding: 10px 12px;
-  border: 1.5px solid var(--border);
+  width: 100%; padding: 10px 12px; min-height: 38px;
+  border: 1px solid var(--border);
   border-radius: var(--r-sm);
   font-size: var(--fs-base); /* base size */
-  background: var(--s1); color: var(--text);
+  background: var(--surface); color: var(--text);
   transition: border-color var(--t2), box-shadow var(--t2), background var(--t2);
   outline: none; -webkit-appearance: none;
-  backdrop-filter: blur(8px);
 }
 .form-group input:focus,
 .form-group textarea:focus,
 .form-group select:focus {
-  border-color: var(--pink);
-  background: var(--s2);
-  box-shadow: 0 0 0 3px rgba(255,45,120,0.14);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
 }
 .form-group textarea { resize: vertical; min-height: 80px; line-height: 1.6; }
+/* 16px stops iOS auto-zoom on focus */
+@media (pointer: coarse) {
+  .form-group input, .form-group textarea, .form-group select { font-size: 16px; }
+}
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
 .select-sm {
@@ -916,9 +937,8 @@ html.light .handbook-text, html.theme-pink .handbook-text, html.theme-grey .hand
   top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
   left: 0; right: 0;
   height: var(--top-nav-h);
-  background: rgba(7,7,16,0.94);
-  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(255,255,255,0.08);
+  background: var(--topbar-bg);
+  border-bottom: 1px solid var(--border);
   z-index: 94;
   overflow-x: auto; overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
@@ -1004,10 +1024,8 @@ html.light .handbook-text, html.theme-pink .handbook-text, html.theme-grey .hand
   position: fixed; top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px) + 8px); right: 12px;
   width: 320px; max-height: 440px;
   background: var(--notif-bg);
-  backdrop-filter: blur(32px); -webkit-backdrop-filter: blur(32px);
   border-radius: var(--r-lg);
-  box-shadow: var(--sh-lg), 0 0 0 1px rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.09);
+  border: 1px solid var(--border);
   z-index: 150; display: flex; flex-direction: column; overflow: hidden; max-width: calc(100vw - 24px);
   animation: dropDown 0.22s var(--spring);
 }
@@ -1089,9 +1107,8 @@ html.light .handbook-text, html.theme-pink .handbook-text, html.theme-grey .hand
 #sidebar {
   width: var(--sidebar-w);
   background: var(--sidebar-bg);
-  backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
-  border-right: 1px solid rgba(255,255,255,0.07);
   position: fixed; top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px)); bottom: 0; left: 0;
+  padding-left: env(safe-area-inset-left, 0px);
   z-index: 90; display: flex; flex-direction: column;
   overflow: hidden;
   transition: transform var(--t3) var(--ease);
@@ -1232,8 +1249,7 @@ html.light .handbook-text, html.theme-pink .handbook-text, html.theme-grey .hand
 
 .sidebar-overlay {
   position: fixed; inset: 0;
-  background: rgba(0,0,0,0.55); backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px); z-index: 85;
+  background: rgba(0,0,0,0.55); z-index: 85;
 }
 
 /* ══════════════════════════════
@@ -1276,8 +1292,9 @@ body.sidebar-open .top-nav-strip { display: none !important; }
 .bottom-nav.nav-shrunk .bottom-nav-item .bn-icon svg { width: 18px; height: 18px; }
 /* Labels hidden — pill nav is icon-only */
 .bottom-nav-item .bn-label { display: none; }
-.bottom-nav-item.active { color: var(--brand-primary); }
-.bottom-nav-item.active .bn-icon { transform: scale(1.15); filter: drop-shadow(0 0 6px var(--pink-glow)); }
+.bottom-nav-item.active { color: var(--primary); }
+html.theme-astral .bottom-nav-item.active { color: var(--brand-primary); }
+html.theme-astral .bottom-nav-item.active .bn-icon { transform: scale(1.15); filter: drop-shadow(0 0 6px var(--pink-glow)); }
 .bottom-nav-item .bn-badge {
   position: absolute; top: 4px; right: 6px;
   background: var(--pink); color: #fff; font-size: 9px;
@@ -1299,14 +1316,16 @@ body.sidebar-open .top-nav-strip { display: none !important; }
 }
 .kpi-card {
   position: relative; overflow: hidden;
-  background: var(--s1); border-radius: var(--r);
+  background: var(--surface); border-radius: var(--r);
   padding: 18px 16px;
   border: 1px solid var(--border);
-  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-  transition: transform var(--t2), box-shadow var(--t2);
+  box-shadow: var(--sh-sm);
+  transition: transform var(--t2), box-shadow var(--t2), border-color var(--t2);
   animation: fadeUp 0.4s var(--ease) both;
 }
-.kpi-card:hover { transform: translateY(-3px); }
+@media (hover:hover) {
+  .kpi-card:hover { transform: translateY(-3px); box-shadow: var(--sh); border-color: var(--border-strong); }
+}
 /* shimmer on hover */
 .kpi-card::before {
   content: '';
@@ -1851,39 +1870,42 @@ html.light .id-card--calling .idc-brand, html.theme-pink .id-card--calling .idc-
 }
 .chip-tab {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 7px 13px; border-radius: 999px;
-  border: 1px solid var(--border); background: rgba(255,255,255,0.04);
+  padding: 7px 13px; border-radius: var(--pill);
+  border: 1px solid var(--border); background: var(--surface-2);
   font-size: var(--fs-md); font-weight: 500; color: var(--text-muted);
   cursor: pointer; white-space: nowrap; min-height: 34px;
-  transition: background var(--t2), color var(--t2), border-color var(--t2), box-shadow var(--t2);
+  transition: background var(--t2), color var(--t2), border-color var(--t2);
 }
-.chip-tab:hover:not(.active) { background: rgba(255,255,255,0.07); color: var(--text); }
+@media (hover:hover) { .chip-tab:hover:not(.active) { background: var(--surface-3); color: var(--text); } }
 .chip-tab.active {
-  background: var(--grad-pk-bl); background-size: 200% 200%;
-  color: #fff; font-weight: 600; border-color: transparent;
-  box-shadow: 0 2px 12px rgba(155,168,255,0.35);
-  animation: gradRun 5s ease infinite; will-change: background-position;
+  background: var(--primary-soft);
+  color: var(--primary); font-weight: 600; border-color: transparent;
 }
 .chip-count {
   display: inline-flex; align-items: center; justify-content: center;
-  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--pill);
   font-size: var(--fs-xs); font-weight: 700; line-height: 1;
-  background: rgba(255,255,255,0.12); color: var(--text-muted);
+  background: var(--surface-3); color: var(--text-muted);
 }
-.chip-tab.active .chip-count { background: rgba(255,255,255,0.28); color: #fff; }
+.chip-tab.active .chip-count { background: var(--primary); color: var(--on-primary); }
 .chip-count.on { background: var(--danger, #e5484d); color: #fff; }
-.chip-tab.active .chip-count.on { background: rgba(255,255,255,0.3); color: #fff; }
-@media (max-width:600px){ .chip-tab { min-height: 38px; } }
+.chip-tab.active .chip-count.on { background: var(--danger, #e5484d); color: #fff; }
+@media (pointer:coarse){ .chip-tab { min-height: 38px; } }
+html.theme-astral .chip-tab.active {
+  background: var(--grad-pk-bl); background-size: 200% 200%;
+  color: #fff; box-shadow: 0 2px 12px rgba(155,168,255,0.35);
+  animation: gradRun 5s ease infinite; will-change: background-position;
+}
+@media (prefers-reduced-motion: reduce) { html.theme-astral .chip-tab.active { animation: none; } }
 
 /* ══════════════════════════════
    ITEM LISTS
 ══════════════════════════════ */
 .item-list { display: flex; flex-direction: column; gap: 8px; }
 .item-card {
-  background: var(--s1); border-radius: var(--r);
+  background: var(--surface); border-radius: var(--r);
   border: 1px solid var(--border); padding: 13px 15px;
   cursor: pointer; position: relative; overflow: hidden;
-  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
   transition: background var(--t2), box-shadow var(--t2), transform var(--t1), border-color var(--t2);
   border-left: 3px solid transparent;
 }
@@ -1941,12 +1963,18 @@ html.light .id-card--calling .idc-brand, html.theme-pink .id-card--calling .idc-
   font-size: var(--fs-2xs); font-weight: 700; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.5px;
   border-bottom: 1px solid var(--border); white-space: nowrap;
-  background: rgba(255,255,255,0.015);
+  background: var(--bg-2);
+  position: sticky; top: 0; z-index: 1;
 }
-.data-table td { padding: 11px 12px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
+.data-table td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .data-table tr:last-child td { border-bottom: none; }
-.data-table tr:hover td { background: rgba(255,255,255,0.025); }
-.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+@media (hover:hover) { .data-table tr:hover td { background: var(--surface-2); } }
+.table-wrap, .table-scroll {
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+.table-wrap::-webkit-scrollbar, .table-scroll::-webkit-scrollbar { height: 6px; }
+.table-wrap::-webkit-scrollbar-thumb, .table-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--pill); }
 
 /* ══════════════════════════════
    QUOTE BUILDER
@@ -2093,8 +2121,6 @@ html.light .id-card--calling .idc-brand, html.theme-pink .id-card--calling .idc-
 ══════════════════════════════ */
 .modal-overlay {
   position: fixed; inset: 0;
-  background: rgba(0,0,0,0.60);
-  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
   z-index: 200; display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 .modal-overlay.active { display: flex; }
@@ -2120,9 +2146,10 @@ html.light .id-card--calling .idc-brand, html.theme-pink .id-card--calling .idc-
 .page-panel-foot.hidden{ display:none; }
 
 /* ── Confirm / prompt dialog (v12 WS11 — confirmDialog/promptDialog) ── */
-.dialog-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.6);
-  backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+.dialog-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.4);
   z-index:5000; display:flex; align-items:center; justify-content:center; padding:20px; }
+html.theme-dark .dialog-overlay, html.theme-astral .dialog-overlay { background: rgba(0,0,0,.6); }
+html.theme-astral .dialog-overlay { backdrop-filter: blur(14px) saturate(120%); -webkit-backdrop-filter: blur(14px) saturate(120%); }
 .dialog-overlay.hidden{ display:none; }
 .dialog-box{ background:var(--modal-bg); border:1px solid var(--border); border-radius:var(--r-lg);
   box-shadow:var(--sh-lg); width:100%; max-width:400px; padding:22px; animation:popIn .22s var(--spring); }
@@ -2155,10 +2182,8 @@ html.light .id-card--calling .idc-brand, html.theme-pink .id-card--calling .idc-
   position: fixed; top: 0; right: 0; bottom: 0;
   width: min(400px, 100vw);
   background: var(--drawer-bg);
-  backdrop-filter: blur(32px); -webkit-backdrop-filter: blur(32px);
-  border-left: 1px solid rgba(255,255,255,0.09);
+  border-left: 1px solid var(--border);
   z-index: 195; display: flex; flex-direction: column;
-  box-shadow: -8px 0 48px rgba(0,0,0,0.60);
   transform: translateX(100%);
   transition: transform var(--t3) var(--ease);
 }
@@ -2167,7 +2192,7 @@ html.light .id-card--calling .idc-brand, html.theme-pink .id-card--calling .idc-
   padding: 12px 16px; border-bottom: 1px solid var(--border);
   padding-top: calc(12px + env(safe-area-inset-top, 0px));
   display: flex; align-items: center; justify-content: space-between;
-  background: rgba(255,255,255,0.02);
+  background: var(--surface-2);
   gap: 8px;
 }
 .drawer-header h3 { font-size: 15px; font-weight: 700; color: var(--text); flex: 1; text-align: center; }
@@ -2425,7 +2450,7 @@ html.light {
   --text-inv:   #FFFFFF;
   --border-glow: var(--primary-soft); --border-gold: rgba(181,71,8,0.16);
   --sh-xs: var(--sh-sm); --sh-md: var(--sh); --sh-pink: var(--sh); --sh-blue: var(--sh); --sh-gold: var(--sh);
-  --toast-success: #16A34A; --toast-error: #DC2626; --toast-info: #2563EB; --toast-text: #FFFFFF;
+  --toast-success: #16A34A; --toast-error: #DC2626; --toast-info: #2563EB; --toast-text: var(--text);
 }
 html.light body { background: var(--bg); }
 
@@ -2490,7 +2515,7 @@ html.theme-dark {
   --text-inv:   #0F1114;
   --border-glow: var(--primary-soft); --border-gold: rgba(247,185,40,0.16);
   --sh-xs: var(--sh-sm); --sh-md: var(--sh); --sh-pink: var(--sh); --sh-blue: var(--sh); --sh-gold: var(--sh);
-  --toast-success: #31A24C; --toast-error: #F0284A; --toast-info: #4599FF; --toast-text: #FFFFFF;
+  --toast-success: #31A24C; --toast-error: #F0284A; --toast-info: #4599FF; --toast-text: var(--text);
 }
 html.theme-dark body { background: var(--bg); }
 
@@ -2701,28 +2726,19 @@ html.light .login-container, html.theme-pink .login-container, html.theme-grey .
   box-shadow: 0 0 0 1px rgba(0,0,0,0.05), 0 20px 60px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.90);
 }
 
-/* topbar */
-html.light .topbar, html.theme-pink .topbar, html.theme-grey .topbar { border-bottom-color: rgba(0,0,0,0.07); }
-html.light .topbar::after, html.theme-pink .topbar::after, html.theme-grey .topbar::after { opacity: 0.22; }
+/* topbar — border/bg/rainbow-trim now read tokens directly (var(--topbar-bg)/var(--border));
+   topbar-brand keeps its own gradient identity (not a plain token). */
 html.light .topbar-brand, html.theme-pink .topbar-brand, html.theme-grey .topbar-brand {
   background: linear-gradient(90deg, #1D1D1F 0%, #6B3F00 100%);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
-html.light .menu-toggle, html.theme-pink .menu-toggle, html.theme-grey .menu-toggle { color: rgba(29,29,31,0.55); }
-html.light .menu-toggle:hover, html.theme-pink .menu-toggle:hover, html.theme-grey .menu-toggle:hover { color: #1D1D1F; }
 
-/* sidebar */
-html.light #sidebar, html.theme-pink #sidebar, html.theme-grey #sidebar { border-right-color: rgba(0,0,0,0.08); }
-html.light #sidebar::before, html.theme-pink #sidebar::before, html.theme-grey #sidebar::before { opacity: 0.30; }
-html.light .sidebar-top, html.theme-pink .sidebar-top, html.theme-grey .sidebar-top { border-bottom-color: rgba(0,0,0,0.07); }
-html.light .sidebar-user-role, html.theme-pink .sidebar-user-role, html.theme-grey .sidebar-user-role { color: rgba(29,29,31,0.50); }
+/* sidebar — border/nav-item/nav-item.active/nav-item:hover now token-driven
+   (var(--border)/var(--primary-soft)/var(--surface-2)); sidebar-user-dept keeps its gradient. */
 html.light .sidebar-user-dept, html.theme-pink .sidebar-user-dept, html.theme-grey .sidebar-user-dept {
   background: linear-gradient(90deg, #8B6000, #C47A00);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
-html.light .nav-item, html.theme-pink .nav-item, html.theme-grey .nav-item { color: rgba(29,29,31,0.55); }
-html.light .nav-item:hover, html.theme-pink .nav-item:hover, html.theme-grey .nav-item:hover { background: rgba(0,0,0,0.04); color: #1D1D1F; }
-html.light .nav-item.active, html.theme-pink .nav-item.active, html.theme-grey .nav-item.active { background: rgba(0,0,0,0.06); color: #1D1D1F; }
 html.light .nav-section-label, html.theme-pink .nav-section-label, html.theme-grey .nav-section-label { color: rgba(29,29,31,0.35); }
 html.light .btn-logout-inline, html.theme-pink .btn-logout-inline, html.theme-grey .btn-logout-inline {
   color: #c9282d;
@@ -2732,34 +2748,9 @@ html.light .btn-logout-inline, html.theme-pink .btn-logout-inline, html.theme-gr
 html.light .btn-logout-inline:hover, html.theme-pink .btn-logout-inline:hover, html.theme-grey .btn-logout-inline:hover { background: rgba(255,69,58,0.12); }
 html.light .sidebar-overlay, html.theme-pink .sidebar-overlay, html.theme-grey .sidebar-overlay { background: rgba(0,0,0,0.30); }
 
-/* bottom nav */
-html.light .bottom-nav, html.theme-pink .bottom-nav, html.theme-grey .bottom-nav { border-top-color: rgba(0,0,0,0.07); }
-html.light .bottom-nav::before, html.theme-pink .bottom-nav::before, html.theme-grey .bottom-nav::before { opacity: 0.18; }
-html.light .bottom-nav-item, html.theme-pink .bottom-nav-item, html.theme-grey .bottom-nav-item { color: rgba(29,29,31,0.50); }
-html.light .bottom-nav-item.active, html.theme-pink .bottom-nav-item.active, html.theme-grey .bottom-nav-item.active { color: var(--pink); }
-
-/* notif panel */
-html.light .notif-panel, html.theme-pink .notif-panel, html.theme-grey .notif-panel {
-  border-color: rgba(0,0,0,0.08);
-  box-shadow: 0 8px 40px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
-}
-html.light .notif-panel-header, html.theme-pink .notif-panel-header, html.theme-grey .notif-panel-header { background: rgba(0,0,0,0.02); }
-
-/* modal */
-html.light .modal-box, html.theme-pink .modal-box, html.theme-grey .modal-box {
-  border-color: rgba(0,0,0,0.09);
-  box-shadow: 0 20px 60px rgba(0,0,0,0.16);
-}
-html.light .modal-footer, html.theme-pink .modal-footer, html.theme-grey .modal-footer { background: rgba(0,0,0,0.015); }
-html.light .drawer, html.theme-pink .drawer, html.theme-grey .drawer {
-  border-left-color: rgba(0,0,0,0.08);
-  box-shadow: -8px 0 48px rgba(0,0,0,0.12);
-}
-
-/* tables */
-html.light .data-table th, html.theme-pink .data-table th, html.theme-grey .data-table th { background: rgba(0,0,0,0.025); }
-html.light .data-table td, html.theme-pink .data-table td, html.theme-grey .data-table td { border-bottom-color: rgba(0,0,0,0.05); }
-html.light .data-table tr:hover td, html.theme-pink .data-table tr:hover td, html.theme-grey .data-table tr:hover td { background: rgba(0,0,0,0.03); }
+/* bottom nav / notif panel / modal / drawer / tables — all retired here: base rules now
+   read var(--bottom-nav-bg)/var(--primary)/var(--notif-bg)/var(--modal-bg)/var(--drawer-bg)/
+   var(--border)/var(--surface-2)/var(--bg-2) directly, no per-theme patch needed. */
 
 /* badges */
 html.light .badge-gray, html.theme-pink .badge-gray, html.theme-grey .badge-gray { background: rgba(0,0,0,0.06); border-color: rgba(0,0,0,0.10); color: rgba(29,29,31,0.55); }
@@ -3017,6 +3008,8 @@ html.theme-grey .bottom-nav-item.active { color: var(--primary); }
 /* active bottom nav icon — lucide version */
 .bottom-nav-item.active .bn-icon svg {
   transform: scale(1.10);
+}
+html.theme-astral .bottom-nav-item.active .bn-icon svg {
   filter: drop-shadow(0 0 6px var(--pink-glow));
 }
 
@@ -3360,7 +3353,8 @@ html.light .team-member-card:hover, html.theme-pink .team-member-card:hover, htm
 .bottom-nav-item[data-page="bs-clients"]       .bn-icon svg { stroke: #30D158; }
 .bottom-nav-item[data-page="bs-files"]         .bn-icon svg { stroke: #8B5CF6; }
 /* Keep active state override */
-.bottom-nav-item.active .bn-icon svg { stroke: var(--pink) !important; }
+.bottom-nav-item.active .bn-icon svg { stroke: var(--primary) !important; }
+html.theme-astral .bottom-nav-item.active .bn-icon svg { stroke: var(--pink) !important; }
 
 /* ── Attendance edit button — always visible for admin ── */
 .att-edit-btn.att-edit-visible {
@@ -3458,20 +3452,26 @@ body::before {
   background-size: 200% 200%, 200% 200%, 200% 200%, 200% 200%, 200% 200%;
 }
 
-/* ══════ TOPBAR ══════ (merged: base structural props + glass surface, glass wins on conflicts) */
+/* ══════ TOPBAR ══════ WS42 Phase 6 — token-driven; glass chrome Astral-only (perf budget) */
 .topbar {
   height: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
   padding-top: env(safe-area-inset-top, 0px);
   display: flex; align-items: center;
-  padding-left: 16px; padding-right: 16px; gap: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  gap: 12px;
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  background: var(--topbar-bg);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--sh-sm);
+}
+html.theme-astral .topbar {
   background: rgba(7,7,16,0.58);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
   border-bottom: 1px solid var(--glass-border-sm);
   box-shadow: var(--glass-spec-sm), 0 1px 28px rgba(0,0,0,0.35);
 }
-.topbar::after {
+html.theme-astral .topbar::after {
   content: '';
   position: absolute; bottom: -1px; left: 0; right: 0; height: 1px;
   background: linear-gradient(90deg,
@@ -3485,12 +3485,17 @@ body::before {
   animation: iridescent 6s ease infinite;
   opacity: 0.55;
 }
+@media (prefers-reduced-motion: reduce) {
+  html.theme-astral .topbar::after { animation: none; }
+}
 
-/* ══════ SIDEBAR ══════ */
+/* ══════ SIDEBAR ══════ WS42 Phase 7 — token-driven, no blur (perf budget: sidebar excluded) */
 #sidebar {
-  background: rgba(7,7,16,0.52);
-  backdrop-filter: var(--glass-blur-lg);
-  -webkit-backdrop-filter: var(--glass-blur-lg);
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
+  box-shadow: none;
+}
+html.theme-astral #sidebar {
   border-right: 1px solid var(--glass-border-sm);
   box-shadow: var(--glass-spec-sm), 4px 0 28px rgba(0,0,0,0.22);
 }
@@ -3501,62 +3506,64 @@ body::before {
     rgba(255,214,10,0.32) 100%);
   opacity: 0.55; width: 1.5px;
 }
+html.light #sidebar::before, html.theme-dark #sidebar::before { opacity: 0; }
 
-/* ══════ NOTIFICATION PANEL ══════ */
+/* ══════ NOTIFICATION PANEL ══════ WS42 Phase 10 (drawer/dropdown treatment) */
 .notif-panel {
-  background: rgba(9,9,20,0.52);
-  backdrop-filter: var(--glass-blur-lg);
-  -webkit-backdrop-filter: var(--glass-blur-lg);
+  background: var(--notif-bg);
+  border: 1px solid var(--border);
+  box-shadow: var(--sh-lg);
+}
+html.theme-astral .notif-panel {
+  background: rgba(9,9,20,0.80);
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow-lg), var(--glass-spec);
 }
 .notif-panel-header {
-  background: rgba(255,255,255,0.03);
-  border-bottom: 1px solid var(--glass-border-sm);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
 }
 
-/* ══════ CARDS ══════ (merged: base structural props + glass surface, glass wins on conflicts) */
+/* ══════ CARDS ══════ WS42 Phase 9 — token-driven, solid in Light/Dark; Astral keeps glass */
 .card {
   position: relative; overflow: hidden;
   border-radius: var(--r); margin-bottom: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--sh-sm);
+  transition: box-shadow var(--t2), border-color var(--t2), transform var(--t2);
+}
+@media (hover:hover) {
+  .card:hover { border-color: var(--border-strong); box-shadow: var(--sh); transform: translateY(-1px); }
+}
+.card::before { background: none; }
+.card-header {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+html.theme-astral .card {
   background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow), var(--glass-spec);
-  transition: box-shadow var(--t2), border-color var(--t2);
 }
-.card:hover {
-  border-color: rgba(255,255,255,0.20);
-  box-shadow: 0 14px 44px rgba(0,0,0,0.50), var(--glass-spec);
-  transform: translateY(-1px);
+@media (hover:hover) {
+  html.theme-astral .card:hover {
+    border-color: rgba(255,255,255,0.20);
+    box-shadow: 0 14px 44px rgba(0,0,0,0.50), var(--glass-spec);
+  }
 }
-/* Replace gradient-card interior with specular top sheen */
-.card::before {
+html.theme-astral .card::before {
   background: linear-gradient(180deg,
     rgba(255,255,255,0.09) 0%,
     rgba(255,255,255,0.02) 42%,
     transparent 100%);
 }
-.card-header {
+html.theme-astral .card-header {
   background: rgba(255,255,255,0.025);
   border-bottom: 1px solid var(--glass-border-sm);
 }
 
-/* ══════ KPI CARDS ══════ */
-.kpi-card {
-  background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow), var(--glass-spec-sm);
-}
-.kpi-card:hover {
-  transform: translateY(-4px);
-  border-color: rgba(255,255,255,0.22);
-  box-shadow: 0 18px 48px rgba(0,0,0,0.52), var(--glass-spec-sm);
-}
-/* Replace old shimmer pseudo with specular top sheen */
+/* ══════ KPI CARDS ══════ (no blur — token-driven; base rule sets surface/shadow above) */
 .kpi-card::before {
   background: linear-gradient(180deg,
     rgba(255,255,255,0.11) 0%,
@@ -3566,27 +3573,48 @@ body::before {
   pointer-events: none; width: 100%;
 }
 .kpi-card:hover::before { animation: none !important; }
-
-/* ══════ MODAL ══════ */
-.modal-overlay {
-  background: rgba(0,0,0,0.52);
-  backdrop-filter: blur(14px) saturate(120%);
-  -webkit-backdrop-filter: blur(14px) saturate(120%);
+html.theme-astral .kpi-card { background: var(--glass-surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow), var(--glass-spec-sm); }
+@media (hover:hover) {
+  html.theme-astral .kpi-card:hover { border-color: rgba(255,255,255,0.22); box-shadow: 0 18px 48px rgba(0,0,0,0.52), var(--glass-spec-sm); }
 }
+
+/* ══════ MODAL ══════ WS42 Phase 10 — token-driven; glass chrome Astral-only */
+.modal-overlay {
+  background: rgba(0,0,0,0.40);
+}
+html.theme-dark .modal-overlay, html.theme-astral .modal-overlay { background: rgba(0,0,0,0.60); }
 .modal-box {
   border-radius: var(--r-lg);
   width: 100%; max-width: 620px; max-height: 92dvh;
   display: flex; flex-direction: column; overflow: hidden;
   animation: popIn 0.26s var(--spring);
   position: relative;
-  background: rgba(9,9,20,0.50);
-  backdrop-filter: var(--glass-blur-lg);
-  -webkit-backdrop-filter: var(--glass-blur-lg);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow-lg), var(--glass-spec),
-    0 0 0 1px rgba(255,45,120,0.10);
+  background: var(--modal-bg);
+  border: 1px solid var(--border);
+  box-shadow: var(--sh-lg);
 }
-.modal-box::before {
+.modal-box::before { content: none; }
+.modal-header {
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+.modal-footer {
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+}
+.modal-close {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.modal-close:hover { background: var(--surface-3); }
+html.theme-astral .modal-overlay { backdrop-filter: blur(14px) saturate(120%); -webkit-backdrop-filter: blur(14px) saturate(120%); }
+html.theme-astral .modal-box {
+  background: rgba(9,9,20,0.50);
+  backdrop-filter: var(--glass-blur-lg); -webkit-backdrop-filter: var(--glass-blur-lg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow-lg), var(--glass-spec), 0 0 0 1px rgba(255,45,120,0.10);
+}
+html.theme-astral .modal-box::before {
   content: '';
   position: absolute; top: 0; left: 8%; right: 8%;
   border-radius: var(--pill);
@@ -3600,76 +3628,64 @@ body::before {
   animation: iridescent 5s ease infinite;
   opacity: 0.75; height: 1px;
 }
-.modal-header {
-  background: rgba(255,255,255,0.025);
-  border-bottom: 1px solid var(--glass-border-sm);
+@media (prefers-reduced-motion: reduce) {
+  html.theme-astral .modal-box::before { animation: none; }
 }
-.modal-footer {
-  background: rgba(255,255,255,0.015);
-  border-top: 1px solid var(--glass-border-sm);
-}
-.modal-close {
-  background: rgba(255,255,255,0.07);
-  border: 1px solid var(--glass-border-sm);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-}
-.modal-close:hover { background: rgba(255,255,255,0.13); }
+html.theme-astral .modal-header { background: rgba(255,255,255,0.025); border-bottom: 1px solid var(--glass-border-sm); }
+html.theme-astral .modal-footer { background: rgba(255,255,255,0.015); border-top: 1px solid var(--glass-border-sm); }
+html.theme-astral .modal-close { background: rgba(255,255,255,0.07); border: 1px solid var(--glass-border-sm); }
+html.theme-astral .modal-close:hover { background: rgba(255,255,255,0.13); }
 
-/* ══════ DRAWER ══════ */
+/* ══════ DRAWER ══════ WS42 Phase 10 — token-driven, no blur (perf budget) */
 .drawer {
-  background: rgba(8,8,20,0.50);
-  backdrop-filter: var(--glass-blur-lg);
-  -webkit-backdrop-filter: var(--glass-blur-lg);
-  border-left: 1px solid var(--glass-border);
-  box-shadow: -14px 0 64px rgba(0,0,0,0.62), var(--glass-spec-sm);
+  background: var(--drawer-bg);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--sh-lg);
 }
 .drawer-header {
-  background: rgba(255,255,255,0.025);
-  border-bottom: 1px solid var(--glass-border-sm);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
 }
+html.theme-astral .drawer { background: rgba(8,8,20,0.50); border-left: 1px solid var(--glass-border); box-shadow: -14px 0 64px rgba(0,0,0,0.62), var(--glass-spec-sm); }
+html.theme-astral .drawer-header { background: rgba(255,255,255,0.025); border-bottom: 1px solid var(--glass-border-sm); }
 
-/* ══════ SUBTAB BAR ══════ */
+/* ══════ SUBTAB BAR ══════ token-driven, no blur */
 .subtab-bar {
-  background: rgba(255,255,255,0.045);
-  backdrop-filter: var(--glass-blur-sm);
-  -webkit-backdrop-filter: var(--glass-blur-sm);
-  border: 1px solid var(--glass-border-sm);
-  box-shadow: var(--glass-spec-sm), 0 2px 14px rgba(0,0,0,0.22);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  box-shadow: none;
 }
 .subtab-btn.active {
+  box-shadow: none;
+  text-shadow: none;
+}
+.subtab-btn:hover:not(.active) {
+  background: var(--surface-3);
+}
+html.theme-astral .subtab-bar { background: rgba(255,255,255,0.045); border: 1px solid var(--glass-border-sm); box-shadow: var(--glass-spec-sm), 0 2px 14px rgba(0,0,0,0.22); }
+html.theme-astral .subtab-btn.active {
   box-shadow: 0 2px 18px rgba(255,45,120,0.40),
     inset 0 1px 0 rgba(255,255,255,0.24),
     inset 0 -1px 0 rgba(0,0,0,0.12);
   text-shadow: 0 1px 6px rgba(255,45,120,0.45);
 }
-.subtab-btn:hover:not(.active) {
-  background: rgba(255,255,255,0.07);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-}
 
-/* ══════ ITEM CARDS (tasks, list items) ══════ */
-.item-card {
-  background: var(--glass-surface);
-  backdrop-filter: var(--glass-blur-sm);
-  -webkit-backdrop-filter: var(--glass-blur-sm);
-  border: 1px solid var(--glass-border-sm);
-  box-shadow: var(--glass-spec-sm), 0 2px 10px rgba(0,0,0,0.20);
-}
+/* ══════ ITEM CARDS (tasks, list items) — token-driven, no blur ══════ */
 .item-card:hover {
-  background: var(--glass-surface-2);
-  border-color: rgba(255,255,255,0.18);
-  box-shadow: 0 10px 32px rgba(0,0,0,0.38), var(--glass-spec-sm);
+  background: var(--surface-2);
 }
 .item-card::before {
-  background: linear-gradient(180deg,
-    rgba(255,255,255,0.07) 0%, transparent 55%);
+  background: none;
   transform: none !important; animation: none !important;
   pointer-events: none !important; /* this override cancels the off-screen transform, so it must also stay non-interactive or it blocks every click on the card */
 }
 .item-card:hover::before { animation: none !important; }
+html.theme-astral .item-card { background: var(--glass-surface); border: 1px solid var(--glass-border-sm); box-shadow: var(--glass-spec-sm), 0 2px 10px rgba(0,0,0,0.20); }
+html.theme-astral .item-card:hover { background: var(--glass-surface-2); border-color: rgba(255,255,255,0.18); box-shadow: 0 10px 32px rgba(0,0,0,0.38), var(--glass-spec-sm); }
+html.theme-astral .item-card::before { background: linear-gradient(180deg, rgba(255,255,255,0.07) 0%, transparent 55%); }
 
-/* ══════ BOTTOM NAV ══════ (base rule three-way merged into iOS-layer copy at ~4050) */
-.bottom-nav::before {
+/* ══════ BOTTOM NAV rainbow trim — Astral only ══════ */
+html.theme-astral .bottom-nav::before {
   background: linear-gradient(90deg,
     transparent 0%,
     rgba(255,45,120,0.50) 20%,
@@ -3680,54 +3696,51 @@ body::before {
   animation: iridescent 7s ease infinite;
   opacity: 0.50;
 }
+@media (prefers-reduced-motion: reduce) {
+  html.theme-astral .bottom-nav::before { animation: none; }
+}
 
-/* ══════ FORM INPUTS — frosted glass ══════ */
+/* ══════ FORM INPUTS ══════ token-driven, no blur */
 .form-group input,
 .form-group textarea,
 .form-group select {
-  background: rgba(255,255,255,0.055);
-  backdrop-filter: var(--glass-blur-sm);
-  -webkit-backdrop-filter: var(--glass-blur-sm);
-  border: 1px solid var(--glass-border-sm);
-  box-shadow: var(--glass-spec-sm), inset 0 2px 8px rgba(0,0,0,0.18);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: none;
 }
 .form-group input:focus,
 .form-group textarea:focus,
 .form-group select:focus {
-  background: rgba(255,255,255,0.082);
-  border-color: rgba(255,45,120,0.55);
-  box-shadow: 0 0 0 3px rgba(255,45,120,0.14),
-    var(--glass-spec-sm), inset 0 2px 8px rgba(0,0,0,0.10);
+  background: var(--surface);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
 }
+html.theme-dark .form-group input, html.theme-dark .form-group textarea, html.theme-dark .form-group select { background: var(--surface-2); }
 
-/* ══════ BUTTONS ══════ */
+/* ══════ BUTTONS ══════ token-driven, no blur */
 .btn-secondary {
-  background: rgba(255,255,255,0.065);
-  backdrop-filter: var(--glass-blur-sm);
-  -webkit-backdrop-filter: var(--glass-blur-sm);
-  border: 1px solid var(--glass-border-sm);
-  box-shadow: var(--glass-spec-sm), 0 2px 8px rgba(0,0,0,0.18);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  box-shadow: none;
 }
 .btn-secondary:hover {
-  background: rgba(255,255,255,0.10);
-  border-color: rgba(255,255,255,0.20);
-  box-shadow: var(--glass-spec-sm), 0 4px 18px rgba(0,0,0,0.28);
+  background: var(--surface-3);
+  border-color: var(--border-strong);
+  box-shadow: none;
 }
-/* Reusable glass outline variant */
+/* Reusable outline variant */
 .btn-outline {
-  background: rgba(255,255,255,0.055);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border-sm);
-  box-shadow: var(--glass-spec-sm);
+  background: transparent;
+  border: 1px solid var(--border);
+  box-shadow: none;
   color: var(--text-2); border-radius: var(--r-sm);
   padding: 9px 16px; font-size: var(--fs-md); font-weight: 500; cursor: pointer;
   transition: background var(--t1), border-color var(--t1), box-shadow var(--t1), color var(--t1);
   display: inline-flex; align-items: center; gap: 6px;
 }
 .btn-outline:hover {
-  background: rgba(255,255,255,0.092);
-  border-color: rgba(255,255,255,0.20); color: var(--text);
-  box-shadow: var(--glass-spec-sm), 0 4px 16px rgba(0,0,0,0.25);
+  background: var(--surface-2);
+  border-color: var(--border-strong); color: var(--text);
 }
 .btn-outline.btn-sm { padding: 5px 11px; font-size: var(--fs-sm); border-radius: var(--r-xs); }
 
@@ -3825,12 +3838,7 @@ body::before {
   box-shadow: 0 12px 38px rgba(0,0,0,0.42), var(--glass-spec-sm);
 }
 
-/* ══════ DATA TABLE HEADER ══════ */
-.data-table th {
-  background: rgba(255,255,255,0.03);
-  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--glass-border-sm);
-}
+/* ══════ DATA TABLE HEADER ══════ (token-driven — see base rule) */
 
 /* ══════ UPLOAD AREA ══════ */
 .upload-area {
@@ -3845,49 +3853,24 @@ body::before {
   box-shadow: 0 0 28px rgba(255,45,120,0.10);
 }
 
-/* ══════ SIDEBAR OVERLAY ══════ */
-.sidebar-overlay {
-  backdrop-filter: blur(8px) brightness(0.68);
-  -webkit-backdrop-filter: blur(8px) brightness(0.68);
-}
+/* ══════ SIDEBAR OVERLAY ══════ (blur removed — perf budget restricts backdrop-filter to topbar/modal/bottom-nav) */
 
-/* ══════ LIGHT MODE GLASS TINTS ══════ */
-html.light .topbar, html.theme-pink .topbar, html.theme-grey .topbar { background: rgba(248,248,252,0.70); }
-html.light #sidebar, html.theme-pink #sidebar, html.theme-grey #sidebar { background: rgba(248,248,252,0.76); }
-html.light .modal-box, html.theme-pink .modal-box, html.theme-grey .modal-box { background: rgba(250,250,254,0.78); }
-html.light .drawer, html.theme-pink .drawer, html.theme-grey .drawer { background: rgba(250,250,254,0.78); }
-html.light .notif-panel, html.theme-pink .notif-panel, html.theme-grey .notif-panel { background: rgba(246,246,252,0.78); }
-html.light .bottom-nav, html.theme-pink .bottom-nav, html.theme-grey .bottom-nav { background: rgba(248,248,252,0.76); }
+/* ══════ LIGHT MODE TINTS ══════ WS42 Batch B — topbar/#sidebar/modal-box/drawer/
+   notif-panel/bottom-nav/card/kpi-card/item-card/subtab-bar/btn-secondary/form-group
+   input retired: all now read var(--topbar-bg|sidebar-bg|modal-bg|drawer-bg|notif-bg|
+   bottom-nav-bg|surface|surface-2) directly. The malformed `html.light html.light`
+   selectors previously here were dead (an html element can't nest inside another). */
 html.light .login-container, html.theme-pink .login-container, html.theme-grey .login-container { background: rgba(255,255,255,0.74); border-color: rgba(0,0,0,0.10); }
-html.light .card, html.theme-pink .card, html.theme-grey .card { background: rgba(255,255,255,0.60); border-color: rgba(0,0,0,0.08);
-                            box-shadow: 0 4px 20px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.90); }
-html.light .kpi-card, html.theme-pink .kpi-card, html.theme-grey .kpi-card { background: rgba(255,255,255,0.72); border-color: rgba(0,0,0,0.08); box-shadow: var(--sh-sm); }
-html.light .kpi-card:hover, html.theme-pink .kpi-card:hover, html.theme-grey .kpi-card:hover { box-shadow: var(--sh-md); }
-html.light .item-card, html.theme-pink .item-card, html.theme-grey .item-card { background: rgba(255,255,255,0.56); border-color: rgba(0,0,0,0.08); }
-html.light .subtab-bar, html.theme-pink .subtab-bar, html.theme-grey .subtab-bar { background: rgba(0,0,0,0.04);       border-color: rgba(0,0,0,0.08); }
 html.light .login-role-card, html.theme-pink .login-role-card, html.theme-grey .login-role-card { background: rgba(255,255,255,0.55); border-color: rgba(0,0,0,0.08); }
-html.light .btn-secondary, html.theme-pink .btn-secondary, html.theme-grey .btn-secondary { background: rgba(0,0,0,0.04);       border-color: rgba(0,0,0,0.10); }
 /* Tinted action buttons: the dark-theme light-green / light-red text is
    unreadable on a pale tint in light mode — use darker, WCAG-legible ink. */
 html.light .btn-success, html.theme-pink .btn-success, html.theme-grey .btn-success { background: rgba(16,124,65,0.10); color: #0E6B33; border-color: rgba(16,124,65,0.32); }
 html.light .btn-success:hover, html.theme-pink .btn-success:hover, html.theme-grey .btn-success:hover { background: rgba(16,124,65,0.18); }
 html.light .btn-danger, html.theme-pink .btn-danger, html.theme-grey .btn-danger { background: rgba(200,32,26,0.09); color: #B42318; border-color: rgba(200,32,26,0.30); }
 html.light .btn-danger:hover, html.theme-pink .btn-danger:hover, html.theme-grey .btn-danger:hover { background: rgba(200,32,26,0.16); }
-/* btn-link on light: light-blue is too faint on white — use the brand accent. */
-html.light .btn-link, html.theme-pink .btn-link, html.theme-grey .btn-link { color: var(--primary); }
 html.light .quick-action-btn, html.theme-pink .quick-action-btn, html.theme-grey .quick-action-btn { background: rgba(255,255,255,0.55); border-color: rgba(0,0,0,0.09); }
 html.light .dept-card, html.theme-pink .dept-card, html.theme-grey .dept-card { background: rgba(255,255,255,0.55); border-color: rgba(0,0,0,0.08); }
 html.light .policy-card, html.theme-pink .policy-card, html.theme-grey .policy-card { background: rgba(255,255,255,0.55); border-color: rgba(0,0,0,0.08); }
-html.light .form-group input, html.theme-pink .form-group input, html.theme-grey .form-group input,
-html.light html.light, html.theme-pink html.light, html.theme-grey html.light,
-html.light html.theme-pink, html.theme-pink html.theme-pink, html.theme-grey html.theme-pink,
-html.light html.theme-grey .form-group textarea, html.theme-pink html.theme-grey .form-group textarea, html.theme-grey html.theme-grey .form-group textarea,
-html.light html.light, html.theme-pink html.light, html.theme-grey html.light,
-html.light html.theme-pink, html.theme-pink html.theme-pink, html.theme-grey html.theme-pink,
-html.light html.theme-grey .form-group select, html.theme-pink html.theme-grey .form-group select, html.theme-grey html.theme-grey .form-group select {
-  background: rgba(255,255,255,0.65); border-color: rgba(0,0,0,0.12);
-  box-shadow: inset 0 1px 4px rgba(0,0,0,0.06);
-}
 
 /* ── Messenger-style chat UI ──────────────────────── */
 .messenger-wrap {
@@ -4066,13 +4049,15 @@ html.light .ms-input, html.theme-pink .ms-input, html.theme-grey .ms-input { bac
 
 /* ── Top nav strip — iOS tab bar feel ── */
 .top-nav-strip {
-  background: rgba(7,7,16,0.88);
-  backdrop-filter: blur(32px) saturate(160%);
-  -webkit-backdrop-filter: blur(32px) saturate(160%);
-  border-bottom: 0.5px solid rgba(255,255,255,0.09);
+  border-bottom: 1px solid var(--border);
   height: 50px;
   padding: 0 6px;
   gap: 0;
+}
+html.theme-astral .top-nav-strip {
+  background: rgba(7,7,16,0.88);
+  backdrop-filter: blur(32px) saturate(160%); -webkit-backdrop-filter: blur(32px) saturate(160%);
+  border-bottom: 0.5px solid rgba(255,255,255,0.09);
 }
 .top-nav-item {
   padding: 6px 11px;
@@ -4084,12 +4069,29 @@ html.light .ms-input, html.theme-pink .ms-input, html.theme-grey .ms-input { bac
 .top-nav-item .bn-icon { font-size: var(--fs-2xl); }
 .top-nav-item .tn-label { font-size: var(--fs-xs); font-weight: 600; letter-spacing: -0.1px; }
 .top-nav-item.active {
-  color: var(--pink);
-  background: rgba(255,45,120,0.10);
+  color: var(--primary);
+  background: var(--primary-soft);
 }
 .top-nav-item.active .bn-icon {
   transform: scale(1.10);
-  filter: drop-shadow(0 0 5px rgba(255,45,120,0.50));
+}
+html.theme-astral .top-nav-item.active { color: var(--pink); background: rgba(255,45,120,0.10); }
+html.theme-astral .top-nav-item.active .bn-icon { filter: drop-shadow(0 0 5px rgba(255,45,120,0.50)); }
+/* Phase 6: desktop icon-tab strip centered in the topbar band */
+@media (min-width: 1024px) {
+  .top-nav-strip {
+    display: flex; position: fixed; top: 0; height: var(--topbar-h);
+    left: 50%; right: auto; transform: translateX(-50%);
+    width: max-content; max-width: 60vw;
+    background: none; border: none; box-shadow: none;
+    padding-top: env(safe-area-inset-top, 0px);
+    z-index: 101; /* above .topbar (100) so the centered icon-tabs are visible/clickable */
+  }
+  html.theme-astral .top-nav-strip { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; border: none; }
+  .top-nav-item { flex-direction: column; width: 48px; min-height: auto; border-radius: 0; padding: 6px 0; }
+  .top-nav-item.active { background: none; border-bottom: 3px solid var(--primary); border-radius: 0; }
+  html.theme-astral .top-nav-item.active { background: none; }
+  .top-nav-item .tn-label { display: none; }
 }
 
 /* ── Bottom sheet modal on mobile ── */
@@ -4125,6 +4127,39 @@ html.light .ms-input, html.theme-pink .ms-input, html.theme-grey .ms-input { bac
   }
 }
 
+/* ── WS42 Phase 10 — mobile bottom sheet refinement (spec breakpoint: 639px) ── */
+@media (max-width: 639px) {
+  .modal-overlay { align-items: flex-end !important; padding: 0 !important; }
+  .modal-box {
+    width: 100% !important; max-width: 100% !important;
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 24px) !important;
+    border-radius: var(--r-xl) var(--r-xl) 0 0 !important;
+    margin: 0 !important; align-self: flex-end !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .modal-box::after { background: var(--border-strong); }
+  .modal-body { padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+  /* Drawers (notifications, dept switcher): same sheet treatment on mobile */
+  .drawer {
+    top: auto; bottom: 0; left: 0; right: 0; width: 100%;
+    height: auto; max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 24px);
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+    border-left: none; border-top: 1px solid var(--border);
+    transform: translateY(100%);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .drawer.open { transform: translateY(0); }
+  .drawer::before {
+    content: ''; position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    width: 36px; height: 4px; border-radius: 2px; background: var(--border-strong);
+    z-index: 10; pointer-events: none;
+  }
+  .drawer-header { padding-top: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal-box { animation: none !important; }
+}
+
 /* ── Sidebar nav items — iOS Settings style ── */
 .nav-item {
   padding: 11px 14px;
@@ -4136,16 +4171,18 @@ html.light .ms-input, html.theme-pink .ms-input, html.theme-grey .ms-input { bac
   min-height: 44px;
   transition: background 160ms var(--ios-spring), color 160ms var(--ios-spring);
 }
-/* Remove right-edge bar indicator; use background instead */
+/* Remove right-edge bar indicator; use background instead — WS42 Phase 7: full-pill active state */
 .nav-item.active::after { display: none; }
 .nav-item.active {
-  background: rgba(255,45,120,0.12);
-  color: var(--pink);
+  background: var(--primary-soft);
+  color: var(--primary);
   font-weight: 600;
+  border-radius: var(--pill);
 }
-.nav-item:hover {
-  background: rgba(255,255,255,0.07);
+@media (hover:hover) {
+  .nav-item:hover { background: var(--surface-2); }
 }
+html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: var(--pink); border-radius: 10px; }
 
 /* ── Back buttons — iOS text+chevron style ── */
 .drawer-back-btn {
@@ -4209,36 +4246,59 @@ html.light .ms-input, html.theme-pink .ms-input, html.theme-grey .ms-input { bac
 .notif-item-time  { font-size: var(--fs-xs); }
 .notif-item:active { background: var(--s2); transition: background 80ms; }
 
-/* ── Springy bottom nav pill ── (three-way merged: base structural + LIQUID GLASS surface + iOS sizing, iOS/latest wins on conflicts) */
+/* ── Bottom nav (WS42 Phase 8) — token-driven, solid; Astral keeps the floating glass pill ── */
 .bottom-nav {
   display: none;
   position: fixed;
+  left: 0; right: 0; bottom: 0; transform: none;
+  width: 100%; max-width: none; min-width: 0;
+  height: calc(var(--bottom-nav-h, 56px) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: max(4px, env(safe-area-inset-left, 0px));
+  padding-right: max(4px, env(safe-area-inset-right, 0px));
+  background: var(--bottom-nav-bg);
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid var(--border);
+  box-shadow: none;
+  z-index: 95;
+  justify-content: space-around; align-items: center;
+  box-sizing: border-box;
+  transition: height 0.25s var(--ease), opacity 0.25s var(--ease);
+}
+.bottom-nav-item .bn-icon { font-size: var(--fs-2xl); }
+.bottom-nav-item .bn-icon svg { width: 24px; height: 24px; }
+.bottom-nav-item { min-height: 44px; }
+.bottom-nav-item::after {
+  content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%) scaleX(0);
+  width: 28px; height: 3px; border-radius: 0 0 3px 3px; background: var(--primary);
+  transition: transform 160ms var(--ease);
+}
+.bottom-nav-item.active::after { transform: translateX(-50%) scaleX(1); }
+.bottom-nav-item:active .bn-icon { transform: scale(0.92); transition-duration: 120ms; }
+/* Astral showpiece: floating glass pill (kept from the original design) */
+html.theme-astral .bottom-nav {
   bottom: calc(18px + env(safe-area-inset-bottom, 0px));
-  left: 50%; transform: translateX(-50%);
+  left: 50%; right: auto; transform: translateX(-50%);
   width: auto; max-width: 380px; min-width: 250px;
-  height: 58px;
+  height: 58px; padding-bottom: 0;
   background: rgba(7,7,16,0.46);
   backdrop-filter: var(--glass-blur-lg); -webkit-backdrop-filter: var(--glass-blur-lg);
   border-radius: 24px;
   border: 1px solid rgba(255,255,255,0.10);
   border-top: 1px solid var(--glass-border-sm);
   box-shadow: var(--glass-spec-sm), 0 -4px 28px rgba(0,0,0,0.32);
-  z-index: 95;
-  padding: 0 10px;
-  justify-content: space-around; align-items: center;
-  box-sizing: border-box;
-  transition: height 0.25s var(--ease), opacity 0.25s var(--ease), box-shadow 0.25s var(--ease);
+  padding-left: 10px; padding-right: 10px;
 }
-.bottom-nav-item .bn-icon { font-size: var(--fs-3xl); }
-.bottom-nav-item .bn-icon svg { width: 24px; height: 24px; }
-.bottom-nav-item:active .bn-icon { transform: scale(0.88); transition-duration: 80ms; }
+html.theme-astral .bottom-nav-item.active::after { display: none; }
+html.theme-astral .bottom-nav-item.active .bn-icon { transform: scale(1.15); filter: drop-shadow(0 0 6px var(--pink-glow)); }
 
-/* ── Subtab bar — iOS segmented control ── */
+/* ── Subtab bar — iOS segmented control (token-driven) ── */
 .subtab-bar {
   border-radius: 12px;
   padding: 3px;
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.09);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
 }
 .subtab-btn {
   border: none; background: none;
@@ -4252,8 +4312,13 @@ html.light .ms-input, html.theme-pink .ms-input, html.theme-grey .ms-input { bac
   transition: all 200ms var(--ios-spring);
 }
 .subtab-btn.active {
+  background: var(--primary-soft);
+  color: var(--primary);
+  box-shadow: none;
+}
+html.theme-astral .subtab-btn.active {
   background: rgba(255,45,120,0.18);
-  color: var(--brand-primary);
+  color: var(--pink);
   box-shadow: 0 1px 8px rgba(255,45,120,0.22),
     inset 0 1px 0 rgba(255,255,255,0.14),
     inset 0 -1px 0 rgba(0,0,0,0.10);
@@ -4329,23 +4394,11 @@ html.light .ms-input, html.theme-pink .ms-input, html.theme-grey .ms-input { bac
   }
 }
 
-/* ── Light mode iOS tints ── */
-html.light .top-nav-strip, html.theme-pink .top-nav-strip, html.theme-grey .top-nav-strip {
-  background: rgba(248,248,252,0.92);
-  border-bottom-color: rgba(0,0,0,0.10);
-}
-html.light .top-nav-item.active, html.theme-pink .top-nav-item.active, html.theme-grey .top-nav-item.active {
-  color: var(--pink);
-  background: rgba(255,45,120,0.07);
-}
-html.light .nav-item.active, html.theme-pink .nav-item.active, html.theme-grey .nav-item.active {
-  background: rgba(255,45,120,0.08);
-  color: var(--pink);
-}
-html.light .nav-item:hover, html.theme-pink .nav-item:hover, html.theme-grey .nav-item:hover { background: rgba(0,0,0,0.05); }
-html.light .bottom-nav, html.theme-pink .bottom-nav, html.theme-grey .bottom-nav { border-radius: 24px; }
-html.light .modal-box::after, html.theme-pink .modal-box::after, html.theme-grey .modal-box::after { background: rgba(0,0,0,0.18); }
-html.light .subtab-btn.active, html.theme-pink .subtab-btn.active, html.theme-grey .subtab-btn.active { background: rgba(255,45,120,0.10); }
+/* ── Light-mode legacy tints retired WS42 Batch B — .top-nav-strip/.nav-item/.bottom-nav/
+   .subtab-btn.active now read tokens directly (--topbar-bg/--primary/--primary-soft/
+   --bottom-nav-bg). .modal-box::after (mobile sheet pull handle) kept below since it's
+   not yet token-mapped. ── */
+html.light .modal-box::after, html.theme-dark .modal-box::after { background: var(--border-strong); }
 
 /* ══════════════════════════════════════════
    TASK 4 — Splash + Topbar Logo + Light Mode
@@ -4490,8 +4543,7 @@ html.light .subtab-btn.active, html.theme-pink .subtab-btn.active, html.theme-gr
   color: rgba(255,255,255,0.40);
 }
 
-/* ── Light mode topbar text ── */
-html.light .topbar, html.theme-pink .topbar, html.theme-grey .topbar { background: rgba(248,248,252,0.92); }
+/* ── Light mode topbar text ── (.topbar background is token-driven now: var(--topbar-bg)) */
 html.light .topbar-brand-main, html.theme-pink .topbar-brand-main, html.theme-grey .topbar-brand-main { color: rgba(0,0,0,0.85); }
 html.light .topbar-brand-sub, html.theme-pink .topbar-brand-sub, html.theme-grey .topbar-brand-sub { color: rgba(0,0,0,0.38); }
 html.light .topbar-logo-card, html.theme-pink .topbar-logo-card, html.theme-grey .topbar-logo-card { background: rgba(108,142,245,0.10); }
