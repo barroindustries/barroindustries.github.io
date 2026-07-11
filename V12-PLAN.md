@@ -178,34 +178,37 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
 
 ### PHASE 4 — Operations & departments
 
-> **Status as of 2026-07-10 (mid-decision-pass, paused on account session limit):** all 13
-> Phase 4+5 workstreams (28-40) are grounded (file:line-cited research in `fable-workplan/`).
-> **5 are now DECIDED — WS28, WS32, WS33, WS36, WS37** (see `fable-workplan/INDEX.md`'s
-> status section for the exact detail). **3 are grounded-only, Fable pass in progress but
-> interrupted by the account's session usage limit before finishing — WS29, WS38, WS39**
-> (files untouched, safe to resume). **5 were never dispatched — WS30, WS31, WS34, WS35,
-> WS40** (they depend on WS29/32/36/38 landing; WS32+WS36 are now available, so WS31/34/35/40
-> can partially proceed once WS29+WS38 land too). See `fable-workplan/INDEX.md`'s "To resume
-> in a new session" section for the exact next steps. Per the established Fable-decides/
-> Sonnet-implements split, do not improvise architecture for the still-undecided ones.
+> **Status as of 2026-07-11: ALL 13 Phase 4+5 workstreams (28-40) are DECIDED.** Fable
+> decision session #5 finished the remaining 8 (Wave A: WS29, WS38, WS39 — commit b1847e3;
+> Wave B: WS30, WS31, WS34, WS35, WS40 — commit 365fde7), on top of session #4's five
+> (WS28, WS32, WS33, WS36, WS37). Every brief in `fable-workplan/` now carries a full
+> `## DECIDED` spec (resolved decisions, exact code/data shapes, rules diffs, migration +
+> test checklists) — ready for Sonnet to implement mechanically, same bar as Phase 2-3.
+> **None are implemented in app code yet.** Implement in dependency order — Wave A code
+> before Wave B code (Wave B's code calls things Wave A's implementation creates); see
+> `fable-workplan/INDEX.md`'s status section for the recommended sequence and the
+> ‼️ FLAG FOR NEIL items collected inside each spec.
 
 28. `[~]` **Production process flow** — stages renamed to owner's flow: **Layouting → Bending &
     Cutting → Assembly → Finishing & Polishing → Quality Checking → Out for Delivery** (legacy
     stage mapping so existing orders don't strand); per-stage worker assignment + timestamps
     (stageHistory); delivery step requires delivery receipt; QC checklist. **DECIDED**
     (Fable, 2026-07-10) — see `fable-workplan/28-production-flow.md`; not yet implemented.
-29. `[ ]` **Inventory correctness** — moving weighted-average cost on receive (stop re-valuing
+29. `[~]` **Inventory correctness** — moving weighted-average cost on receive (stop re-valuing
     all stock at latest price); movements logged for consumption + receiving (the two biggest
     flows, currently missing); count-form posts variances; item binding at RFQ (stop silent
-    name-mismatch loss).
-30. `[ ]` **Purchasing** — PO approval gate before the President's name prints; receiving →
-    stock + ledger correctly (with 13's asset accounting).
-31. `[ ]` **Quotation builder v3** — SALES BOTTLENECK fix. Guided "Quick Quote" 3-step mode
+    name-mismatch loss). **DECIDED** (Fable, 2026-07-11) — see
+    `fable-workplan/29-inventory.md`; not yet implemented.
+30. `[~]` **Purchasing** — PO approval gate before the President's name prints; receiving →
+    stock + ledger correctly (with 13's asset accounting). **DECIDED** (Fable, 2026-07-11) —
+    see `fable-workplan/30-purchasing.md`; not yet implemented.
+31. `[~]` **Quotation builder v3** — SALES BOTTLENECK fix. Guided "Quick Quote" 3-step mode
     (client → pick products from a photo catalog → review/send) for new users; full builder
     stays for power users; product photos in DB + builder grid + printed quote; repair the
     quote→approval→order chain (BK quotes stranded in bs_quotes; Finance's empty list;
     Approvals approving without filing); delete ~1,800 lines of dead builder code; client-#
-    auto (done in P1).
+    auto (done in P1). **DECIDED** (Fable, 2026-07-11) — see
+    `fable-workplan/31-quotation-builder-v3.md`; not yet implemented.
 32. `[~]` **Sales — Client Relations hub** — per-client timeline (quotes, orders, payments,
     files, follow-ups in one view); CRM stages rolled into win-rate analytics. **DECIDED**
     (Fable, 2026-07-10) — see `fable-workplan/32-sales-crm.md`; not yet implemented. This is the
@@ -217,12 +220,14 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     sent? · feedback/partnership potential. Filterable, CSV export, printable on letterhead,
     follow-up nudges. New `aec_contacts` collection + rules + backup. **DECIDED** (Fable,
     2026-07-10) — see `fable-workplan/33-aec-directory.md`; not yet implemented.
-34. `[ ]` **Marketing suite** — campaigns (budget→actual, dates, channels), leads inbox → Sales
+34. `[~]` **Marketing suite** — campaigns (budget→actual, dates, channels), leads inbox → Sales
     handoff, promotions calendar, marketing materials library (Files hub), strategy templates
     (types of marketing), per-campaign insights (spend vs leads vs quotes vs wins).
-35. `[ ]` **Design dept suite** — project folders + client folders synced with Sales client
+    **DECIDED** (Fable, 2026-07-11) — see `fable-workplan/34-marketing.md`; not yet implemented.
+35. `[~]` **Design dept suite** — project folders + client folders synced with Sales client
     files (one client record shared, per-dept views); drawing approvals; design → production
-    handoff.
+    handoff. **DECIDED** (Fable, 2026-07-11) — see `fable-workplan/35-design-suite.md`; not
+    yet implemented.
 36. `[~]` **Finance additions** — **bank accounts registry** (accounts, balances, running
     reconciliation, which account each payment hit) + **downpayment billing invoice** document
     (letterhead, payment details/bank instructions, DP % of contract, balance schedule) wired
@@ -234,23 +239,27 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     online presence, Seen avatars, typing…, inline photos/files; live listeners + push; full
     page with Back; participant-scoped rules; partner walled off. **DECIDED** (Fable,
     2026-07-10) — see `fable-workplan/37-team-chat.md`; not yet implemented.
-38. `[ ]` **Files Hub** — Drive-style: one browser over all files; folders/subfolders,
+38. `[~]` **Files Hub** — Drive-style: one browser over all files; folders/subfolders,
     drag-drop, grid/list, global file search, previews (img/PDF), versions, recycle bin;
     share to person/dept/role with view-vs-edit; rides Storage + nightly Drive mirror.
+    **DECIDED** (Fable, 2026-07-11) — see `fable-workplan/38-files-hub.md`; not yet implemented.
 
 ### PHASE 5 — Intelligence & compliance
 
-39. `[ ]` **BIR suite** — books of account prints (general journal, general ledger, cash
+39. `[~]` **BIR suite** — books of account prints (general journal, general ledger, cash
     receipts, cash disbursements); 2550M/Q, 1601-C worksheets, alphalist, 2316; OR/SI series;
     net-of-VAT statements; input-VAT capture on expenses (fixes the overstated VAT bugs);
     formal Financial Statement print (income statement + balance sheet + VAT summary).
-40. `[ ]` **Analytics with conclusions + the data/strategy layer** — metrics that matter (cash
+    **DECIDED** (Fable, 2026-07-11) — see `fable-workplan/39-bir-suite.md`; not yet implemented.
+40. `[~]` **Analytics with conclusions + the data/strategy layer** — metrics that matter (cash
     position, AR aging, win-rate, on-time %, payroll ratio, inventory turns); rule-based
     insight sentences + a written "conclusion" block per dashboard (owner: "data must be
     interpreted and create recommendations"); theme-aware charts (currently dark-hardcoded);
     a Strategy page: recommendations engine (e.g. "AR > 60d: collect ₱X", "quote win-rate
     fell — review pricing", "material Y price up 12% — reorder early") + market-research
     notes section per department. Server-side daily digests (scheduled Function).
+    **DECIDED** (Fable, 2026-07-11) — see `fable-workplan/40-analytics.md`; not yet
+    implemented (digest ships as GitHub Actions cron, not a paid scheduled Function).
 
 ---
 
