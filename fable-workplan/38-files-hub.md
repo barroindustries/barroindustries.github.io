@@ -706,3 +706,355 @@ is created, following the fixed load-order convention).
 > WS19 security, WS27 IDs) this spec depends on or must be sequenced around, per the Risks
 > section, so Sonnet does not build against Storage-mirror or rules assumptions that are
 > simultaneously being changed elsewhere.
+
+## DECIDED — architecture spec (Fable, 2026-07-11)
+
+### Resolved decisions (one per Open Decision, numbered to match)
+
+1. **Scope of "unify" → (a)/(c) hybrid: a genuinely NEW unified collection `hub_files` that absorbs ONLY the `files_<scope>` family (all 12+ collections), migrated by an Admin-SDK script; everything else stays put in v1.** The 15 `bindFileCollection` call sites keep their exact signatures — the LIVE implementation is rewritten internally to read/write `hub_files` filtered by `scope`, so per-department Files tabs become deep-linked views of the Hub with zero call-site edits. Task attachments, comment uploads, payslip proofs, `design_drawings`, `renderDocCollection` docs, profile/worker photos, and inline finance-doc attachments are **explicitly OUT of v1** (full per-collection table in Spec 9). Rationale: the `files_<scope>` family is the homogeneous 80% and the only part with a browsing UI today; federating unenumerable collections (option b) is impossible client-side (`db.listCollections()` is Admin-SDK-only), and migrating task/finance attachments would touch payroll/ledger surfaces mid-flight with WS20-adjacent risk.
+2. **Folder model → real `hub_folders/{id}` collection with `parentId` pointers; files carry a single `folderId`; paths are computed client-side from the loaded folder map — NO denormalized path strings on files.** Folders per scope are few (dozens, not thousands), so the Hub loads all folders for the active scope in one query and builds the tree/breadcrumbs in memory. Rename = update one folder doc, zero cascade. Delete = allowed only when empty OR reparents children to the folder's parent (client-enforced). Legacy `folder` string tags and `isFolderMarker` sentinel docs are converted to `hub_folders` docs by the migration script. The dead "📁 New Folder" mystery is resolved: its handler EXISTS at departments.js:11795-11814 (writes an `isFolderMarker` doc) — that pattern is retired in favor of `hub_folders`.
+3. **Versioning → generalize the `design_drawings` array-on-doc pattern: `versions[]` on the `hub_files` doc, integer `v` (1,2,3…), NOT letters (avoids the `nextRev` past-'Z' bug at departments.js:6914).** Entry timestamps are ISO strings (the `arrayUnion`-can't-hold-`serverTimestamp` constraint, same as design_drawings). The parent doc denormalizes the CURRENT version's `url/name/size/contentType/currentV`. No `file_versions` subcollection: general company files rarely exceed a handful of versions; at ~300 bytes/entry the 1MB doc limit gives >2,000 versions of headroom; one read renders the whole history. Old version blobs are NEVER deleted (records-forever directive). `design_drawings` keeps its own `revisions[]` mechanism untouched — no cross-migration.
+4. **Recycle bin → NEW `deleted:boolean` + `deletedAt:Timestamp` + `deletedBy` fields; the existing `archived` boolean SURVIVES as a separate concept (Archive = tidy-away, Bin = pending-delete).** Soft-delete (any editor/owner/admin) sets `deleted:true`; Restore clears it; **permanent delete is PRESIDENT-ONLY** — it deletes the Storage blob via `Drive.deleteFile` (its first-ever real caller) then the Firestore doc. It does NOT route through `financeDelete`/`finance_delete_requests`: the president IS the approver in that flow, so gating the button to president collapses the approval chain to one step with no second competing mechanism. The Drive-mirror copy is NOT deleted (cold archive, records-forever). **NO auto-purge job** — bin items sit indefinitely (‼️ FLAG FOR NEIL below). The `deleted` boolean (not a null-check on `deletedAt`) exists so every query stays equality-only and rules-provable.
+5. **Sharing/ACL shape → flattened uid arrays enforced at the FIRESTORE-RULES level (Open Decision 5 option b), with one deliberate narrowing: dept- and role-shares are EXPANDED TO CONCRETE UIDs at share time.** Rules keep exactly two enforcement arrays — `sharedUserIds` (view) and `editorUserIds` (edit; every editor uid is ALSO mirrored into `sharedUserIds` as an invariant) — because `request.auth.uid in resource.data.sharedUserIds` + a `.where('sharedUserIds','array-contains',uid)` query is the one CANONICAL, documented rules-provable list pattern; a `hasAny(get(users).departments)` disjunct is not reliably provable for list queries and would risk whole-query denials. A display-only `shares[]` array of `{type:'user'|'dept'|'role', id, label, perm, by, byName, at}` records the human-level grant for the UI; the share modal expands dept/role targets to member uids at grant time (excluding `role=='partner'` users unless the target IS a specific partner uid — closes the WS19 partner-reopen risk by construction). Known limitation, flagged: users joining a dept AFTER a dept-share don't inherit it until re-shared. No Cloud Function, no custom-claims bridge (option c rejected: new deploy surface, token-refresh latency, disproportionate for v1).
+6. **View-vs-edit semantics — exact grant table.** VIEW = see the doc, open/download/preview, see version history. EDIT = everything in VIEW plus rename/re-describe, move between folders, upload a new version, archive/unarchive, soft-delete/restore. NEITHER may: change sharing/visibility, transfer ownership, or permanently delete. Enforced in rules via `diff().affectedKeys().hasOnly(...)` on the editor clause (Spec 2) — owner/admin update any field, editors only the non-ACL field set.
+7. **Storage-level truth → sharing is METADATA-VISIBILITY ONLY; accepted and documented.** `getDownloadURL()` returns a bearer-token URL — once someone can read the doc's `url` field, forwarding it cannot be prevented without a signed-URL-minting Cloud Function proxy, which is REJECTED for v1 (matches how `order_tracking`/`id_verify` already treat token URLs). Storage paths stay the existing two-segment `${department}/Files/${Date.now()}_${name}` convention via `Drive.renderUploadArea({dept, subfolder:'Files'})` — **zero storage.rules changes**; the folder tree exists only in Firestore metadata (`folderId`), never as N-deep Storage paths. Previews and Open always use the Storage `url`, never `driveUrl` (Drive mirrors are private-by-default with zero `{public:true}` callers — an un-granted `driveUrl` won't render for colleagues). `driveUrl` becomes a "mirrored ✓" badge only, finally putting `Drive.sourceLabel`/`sourceIcon` to use and retiring the inconsistent inline `driveUrl||url` precedence (Current state §1); `design_drawings`' own `fileUrl||driveUrl` line stays untouched (out of scope).
+8. **Global file search → extend `renderGlobalSearch` (modules.js:2474) with a 6th source group reading `hub_files` ONLY** — company-visible query capped at `limit(1000)` (same cap as products) merged with "mine" + "shared-with-me" queries, client-side substring filter on `name`/`description`/folder name. Legacy `files_<scope>` collections are NOT searched (they're frozen after migration); out-of-scope attachment families (tasks, payslips, drawings) remain unsearched in v1, stated plainly in the ROADMAP note.
+9. **Previews → NEW lightbox modal `window.openFilePreview(f)` in js/drive.js** (no existing component — wholly new, confirmed by the zero-hit grep in Current state §9): `<img>` for `image/*` (by `contentType`, falling back to extension sniff), `<iframe>` for PDFs, and an "Open in new tab ↗" fallback card for everything else; always sourced from the Storage `url` per decision 7; all interpolations `escHtml`'d; URL through `safeHttpUrl`.
+10. **Grid/list toggle → `window.chipTabs`/`bindChipTabs` (the quotes-screen List/By-Customer precedent, departments.js:6614), wired to a real CSS-grid-cards vs table-rows swap. Drag-drop = BOTH mandate senses:** drag-in-to-upload already ships inside `renderUploadArea` (drive.js:198-203, keep as-is); drag-an-existing-card-onto-a-folder is NEW — HTML5 `draggable` on file rows/cards, `dragover`/`drop` targets on folder-tree nodes and folder chips, dropping calls `FilesHub.moveToFolder(fileId, folderId)` (edit-permission-gated).
+11. **Replace or add → BOTH, cheaply: a new top-level "Files" nav page (`renderFilesHub`, all scopes, admin sees everything) is ADDED, while every existing per-department Files tab KEEPS its entry point but is re-backed by `hub_files` through the rewritten `bindFileCollection` internals.** One data plane, N doors. No department screen's call site changes (decision 1), fully delivering "one browser over all files" for the files_<scope> family without a 15-screen cutover.
+12. **Dead-code cleanup → DELETE both shadowed pairs.** (i) The old `renderFileCollection`/`bindFileCollection` at **departments.js:11379-11470** (bare top-level declarations, silently shadowed by the `window.*` reassignments at 11679/11697 — 100% dead, zero reachable callers). (ii) Research for this spec found the SAME shadowing bug one function up: the old `async function renderDocCollection` at **departments.js:11303-11374** is shadowed by `window.renderDocCollection` at departments.js:11852 (top-level `function` declarations and `window.X =` assignments share one global binding; the assignment executes after hoisting and wins) — delete it in the same commit. Both deletions are pure dead-code removal; verify with grep that no remaining code references the deleted bodies' unique strings (`file-req-delete-btn`, `policy-grid`… note `policy-grid`/`policy-card` CSS classes are used by the LIVE renderDocCollection too — grep the exact function headers instead).
+13. **Composite indexes → enumerated in Spec 3 and deployed BEFORE the UI ships.** All Hub queries are deliberately equality + at most one `array-contains`, no `orderBy` (sorting is client-side after merge), which keeps the index list short and the rule proofs simple.
+14. **Naming → `hub_files` / `hub_folders`, deliberately NOT `files_*`-prefixed.** This is load-bearing, not cosmetic: `coll.matches('files_.*')` (firestore.rules:1126) would ALSO match a `files_hub` collection, and Firestore takes the permissive UNION of matching rules — the wildcard's "any internal staff reads everything" would silently defeat `visibility:'private'` and per-file sharing. Consequences handled: new dedicated rules blocks (Spec 2), `LABELS` entries in scripts/sync-to-drive.js (Spec 7) so the mirror gets a 'Files Hub' Drive folder instead of `titleCase` fallback, and `monthly-backup.js` auto-discovers both via `db.listCollections()` (no registration needed).
+
+**Scoping / sequencing:** builds ON WS15 (the reworked generic sync auto-mirrors `hub_files` once the LABELS entry lands; do NOT write bespoke sync logic); must preserve WS19's closures (`!isPartner()` guard present in every new rule clause; partner access only via explicit uid share); no WS27 dependency (the `worker-id-photos` role-gated path is precedent only, not touched). **WS34 (materials library) and WS35 (project/client folders) build directly on this spec — their binding contract is the next section.**
+
+---
+
+### CONTRACT for WS34 / WS35 (final, build against this)
+
+- **File metadata lives in `hub_files/{docId}`** (shape in Spec 1). One doc per file; `scope` (lower_snake string) is the namespace that used to be the `files_<scope>` collection suffix. WS34 uses `scope:'materials'`; WS35 uses `scope:'projects'` (or one scope per portal surface — any new scope string Just Works, no rules/sync/backup changes, because scope is a field, not a collection name).
+- **Folders live in `hub_folders/{docId}`** `{name, parentId|null, scope, department, createdBy, createdAt}` — WS35's project/client folders are ordinary `hub_folders` rows (e.g. one folder per client under `scope:'projects'`), optionally carrying extra domain fields (WS35 may add `clientId`/`projectId` fields to its folder docs; the Hub ignores unknown fields).
+- **Storage path convention:** `${department}/Files/${Date.now()}_${fileName}` via `Drive.renderUploadArea(containerId, cb, {dept, subfolder:'Files'})` — two segments, covered by the existing storage.rules catch-all (storage.rules:196-204). Do NOT invent deeper paths; the folder tree is Firestore-only.
+- **Permission model:** `visibility:'company'` (default; any internal non-partner staff) or `'private'` (owner + `sharedUserIds` only); `editorUserIds ⊆ sharedUserIds` invariant; admins (president/manager) read/write everything; partner reads only docs whose `sharedUserIds` contain their uid. Reads MUST use the query fan-out in Spec 4 (`FilesHub.loadFiles`) — a bare unfiltered `.get()` on `hub_files` is DENIED by rules for non-admins.
+- **Helpers:** call `window.FilesHub.*` (Spec 4) from js/drive.js — do not re-implement upload/version/share/bin logic.
+
+---
+
+### Spec 1 — Data shapes (annotated literals)
+
+```js
+// hub_files/{docId} — NEW unified file-metadata collection (root). Migrated docs use
+// docId = `${legacyCollection}__${legacyDocId}` (idempotency key); new uploads use auto-id.
+{
+  name: 'Q3 Proposal – ACME',        // display name (user-editable), escHtml on render
+  description: '',                    // optional, from Add Link / edit modal
+  fileType: 'PDF',                    // legacy free dropdown value, kept for continuity
+  kind: 'file',                       // 'file' | 'link'  (link = pasted URL, no Storage blob)
+  scope: 'proposals',                 // namespace — replaces the files_<scope> collection suffix
+  department: 'Sales',                // literal dept of the owning Files tab (query + display)
+  folderId: null,                     // null = scope root, else hub_folders docId
+  url: 'https://firebasestorage…',    // CURRENT version download URL ('' never; links store the link)
+  driveUrl: null,                     // filled by nightly sync companion-key write (url→driveUrl)
+  size: 182034, contentType: 'application/pdf',   // from the File object at upload (null for links)
+  source: 'firebase',                 // 'firebase' | 'link'  (Drive.uploadFile convention)
+  currentV: 1,
+  versions: [                         // design_drawings pattern, integer v, ISO `at`
+    { v:1, url, name:'proposal.pdf', size, contentType, note:'', by:'<uid>', byName:'…', at:'2026-07-11T02:10:00.000Z' }
+  ],
+  archived: false,                    // legacy tidy-away flag, KEPT (≠ recycle bin)
+  deleted: false,                     // recycle-bin flag — equality-queryable boolean
+  deletedAt: null, deletedBy: null,   // Timestamp + uid when deleted:true (audit / future purge age)
+  visibility: 'company',              // 'company' (default = today's behavior) | 'private'
+  sharedUserIds: [],                  // VIEW grants — the ONLY rules-enforced view array
+  editorUserIds: [],                  // EDIT grants — invariant: every entry also in sharedUserIds
+  shares: [                           // DISPLAY-ONLY grant log (rules never read it)
+    { type:'dept', id:'Marketing', label:'Marketing (4 people)', perm:'view', by:'<uid>', byName:'Neil', at:'<ISO>' }
+  ],
+  uploadedBy: '<uid>', uploaderName: 'Ana R.',
+  legacyColl: 'files_proposals', legacyId: 'abc123',   // migration provenance (absent on new uploads)
+  createdAt: serverTimestamp, updatedAt: serverTimestamp
+}
+
+// hub_folders/{docId} — NEW folder tree (per scope). Paths computed client-side; no cascade.
+{ name:'Campaigns', parentId:null, scope:'advertising', department:'Marketing',
+  createdBy:'<uid>', createdByName:'…', createdAt: serverTimestamp }
+```
+
+### Spec 2 — firestore.rules diff (new blocks; comment-then-match style; nothing existing changes)
+
+The `files_.*`/`budgets_.*` wildcard block (firestore.rules:1126-1157) is **left byte-identical** — legacy collections stay readable (frozen archive) and `budgets_*` is untouched. Insert AFTER that block:
+
+```
+    // ── Files Hub (WS38) — unified file metadata + folder tree ─────────
+    // Deliberately NOT named files_*: the files_.* wildcard above would
+    // union-grant all-internal read and defeat per-file visibility/sharing.
+    // Sharing enforcement uses ONLY uid arrays (sharedUserIds/editorUserIds)
+    // — the canonical `uid in array` + array-contains-query pattern that
+    // Firestore can prove for list queries. Dept/role shares are expanded
+    // to uids client-side at share time. All .get(field, default) per the
+    // missing-field-throws memory (migrated docs predate some fields).
+    match /hub_files/{fileId} {
+      allow read: if isAuth() && (
+           isAdmin()
+        || resource.data.get('uploadedBy','') == request.auth.uid
+        || request.auth.uid in resource.data.get('sharedUserIds', [])
+        || (!isPartner() && resource.data.get('visibility','company') == 'company')
+      );
+      allow create: if isAuth() && !isPartner()
+        && request.resource.data.get('uploadedBy','') == request.auth.uid
+        && request.resource.data.get('visibility','company') in ['company','private']
+        && request.resource.data.get('deleted', false) == false;
+      // Owner/admin: any update (incl. sharing/visibility). Editors: content &
+      // organization fields only — NEVER the ACL/ownership fields.
+      allow update: if isAuth() && (
+           isAdmin()
+        || resource.data.get('uploadedBy','') == request.auth.uid
+        || (request.auth.uid in resource.data.get('editorUserIds', [])
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+                 ['name','description','fileType','folderId','archived',
+                  'deleted','deletedAt','deletedBy',
+                  'url','driveUrl','size','contentType','versions','currentV',
+                  'updatedAt']))
+      );
+      // Permanent delete = president only (Recycle Bin soft-delete/restore are updates).
+      allow delete: if isAuth() && isPresident();
+    }
+    match /hub_folders/{folderId} {
+      allow read:   if isAuth() && !isPartner();
+      allow create: if isAuth() && !isPartner()
+        && request.resource.data.get('createdBy','') == request.auth.uid;
+      allow update, delete: if isAuth() && !isPartner()
+        && (resource.data.get('createdBy','') == request.auth.uid || isAdmin());
+    }
+```
+
+Deploy: `~/.npm-global/bin/firebase deploy --only firestore:rules` — separate from `git push`; re-`git diff` firestore.rules immediately before (concurrent-session memory). Apply as a block-scoped Edit insertion, never a full-file replace.
+
+### Spec 3 — firestore.indexes.json additions (deploy BEFORE the UI ships)
+
+Every Hub query is equality-only plus at most one `array-contains`, no `orderBy` (sort client-side by `createdAt.seconds` after merge). Add to `firestore.indexes.json` and run `firebase deploy --only firestore:indexes`:
+
+```json
+{ "collectionGroup":"hub_files","queryScope":"COLLECTION","fields":[
+  {"fieldPath":"scope","order":"ASCENDING"},{"fieldPath":"deleted","order":"ASCENDING"},{"fieldPath":"visibility","order":"ASCENDING"}]},
+{ "collectionGroup":"hub_files","queryScope":"COLLECTION","fields":[
+  {"fieldPath":"scope","order":"ASCENDING"},{"fieldPath":"deleted","order":"ASCENDING"},{"fieldPath":"uploadedBy","order":"ASCENDING"}]},
+{ "collectionGroup":"hub_files","queryScope":"COLLECTION","fields":[
+  {"fieldPath":"sharedUserIds","arrayConfig":"CONTAINS"},{"fieldPath":"scope","order":"ASCENDING"},{"fieldPath":"deleted","order":"ASCENDING"}]},
+{ "collectionGroup":"hub_files","queryScope":"COLLECTION","fields":[
+  {"fieldPath":"deleted","order":"ASCENDING"},{"fieldPath":"visibility","order":"ASCENDING"}]},
+{ "collectionGroup":"hub_files","queryScope":"COLLECTION","fields":[
+  {"fieldPath":"deleted","order":"ASCENDING"},{"fieldPath":"uploadedBy","order":"ASCENDING"}]},
+{ "collectionGroup":"hub_files","queryScope":"COLLECTION","fields":[
+  {"fieldPath":"sharedUserIds","arrayConfig":"CONTAINS"},{"fieldPath":"deleted","order":"ASCENDING"}]},
+{ "collectionGroup":"hub_folders","queryScope":"COLLECTION","fields":[
+  {"fieldPath":"scope","order":"ASCENDING"},{"fieldPath":"department","order":"ASCENDING"}]}
+```
+
+(First three back the per-scope tab queries; the next three back global search + the all-scopes Hub page; the last backs the folder-tree load. Some equality-only pairs may be served by index merging, but declaring them is cheap and a missing one fails loudly with a console link — declare all seven.)
+
+### Spec 4 — `window.FilesHub` service (js/drive.js, appended inside/alongside the Drive IIFE region — drive.js loads before departments/app/modules, satisfying load order)
+
+```js
+window.FilesHub = {
+  // ── Read fan-out. Rules cannot be satisfied by one unfiltered query for
+  // non-admins, so merge 3 provable queries (admins: 1 broad query).
+  async loadFiles(scope /* string|null = all scopes */, { includeDeleted=false } = {}) {
+    const uid = currentUser.uid;
+    const base = () => {
+      let q = db.collection('hub_files');
+      if (scope) q = q.where('scope','==',scope);
+      return q.where('deleted','==', includeDeleted);
+    };
+    const isAdminRole = ['president','manager','owner'].includes(window.currentRole);
+    const snaps = await Promise.all(
+      isAdminRole
+        ? [ base().get().catch(()=>({docs:[]})) ]
+        : [ base().where('visibility','==','company').get().catch(()=>({docs:[]})),
+            base().where('uploadedBy','==',uid).get().catch(()=>({docs:[]})),
+            base().where('sharedUserIds','array-contains',uid).get().catch(()=>({docs:[]})) ]);
+    const seen = {}; const out = [];
+    snaps.forEach(s => s.docs.forEach(d => { if (!seen[d.id]) { seen[d.id]=1; out.push({id:d.id,...d.data()}); } }));
+    return out.sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+  },
+  async loadFolders(scope) {
+    const snap = await db.collection('hub_folders').where('scope','==',scope).get().catch(()=>({docs:[]}));
+    return snap.docs.map(d=>({id:d.id,...d.data()}));
+  },
+  folderPath(folderId, foldersById) {          // client-side path resolution (decision 2)
+    const parts = []; let f = foldersById[folderId]; let guard = 0;
+    while (f && guard++ < 20) { parts.unshift(f.name); f = foldersById[f.parentId]; }
+    return parts.join(' / ');
+  },
+  canEdit(f) {
+    return ['president','manager','owner'].includes(window.currentRole)
+      || f.uploadedBy === currentUser.uid
+      || (f.editorUserIds||[]).includes(currentUser.uid);
+  },
+  // ── Mutations (all set/update with merge-mindset; updatedAt always stamped)
+  moveToFolder: (id, folderId) => db.collection('hub_files').doc(id)
+    .update({ folderId: folderId || null, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }),
+  async uploadNewVersion(f, result /* Drive.renderUploadArea result */, file, note) {
+    const FV = firebase.firestore.FieldValue;
+    const entry = { v:(f.currentV||1)+1, url:result.url, name:file?.name||result.name,
+      size:file?.size||null, contentType:file?.type||null, note:note||'',
+      by:currentUser.uid, byName:(window.userProfile?.displayName||currentUser.email),
+      at:new Date().toISOString() };                     // ISO — arrayUnion can't hold serverTimestamp
+    await db.collection('hub_files').doc(f.id).update({
+      versions: FV.arrayUnion(entry),
+      url:entry.url, size:entry.size, contentType:entry.contentType,
+      currentV:entry.v, driveUrl:null,                    // new blob → re-mirrored by nightly sync
+      updatedAt: FV.serverTimestamp() });
+  },
+  softDelete: (id) => db.collection('hub_files').doc(id).update({
+    deleted:true, deletedAt:firebase.firestore.FieldValue.serverTimestamp(),
+    deletedBy:currentUser.uid, updatedAt:firebase.firestore.FieldValue.serverTimestamp() }),
+  restore: (id) => db.collection('hub_files').doc(id).update({
+    deleted:false, deletedAt:null, deletedBy:null,
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp() }),
+  async purge(f) {                                        // PRESIDENT ONLY (rules-enforced)
+    // First-ever real Drive.deleteFile caller — blob deletes are best-effort:
+    // link docs have no Storage object, legacy-migrated docs may 404, and the
+    // Drive-mirror copies are deliberately NOT deleted (cold archive,
+    // records-forever directive). Deletes EVERY version's blob, then the doc.
+    const urlToPath = u => { try { return decodeURIComponent(new URL(u).pathname.split('/o/')[1]||''); } catch { return ''; } };
+    if (f.source === 'firebase') {
+      const urls = [...new Set([f.url, ...(f.versions||[]).map(v=>v.url)].filter(Boolean))];
+      for (const u of urls) {
+        const p = urlToPath(u);
+        if (p) { try { await Drive.deleteFile({ id: p }); } catch(e) { console.warn('blob delete skipped:', e.message||e); } }
+      }
+    }
+    await db.collection('hub_files').doc(f.id).delete();
+  },
+  // ── Sharing. target = {type:'user'|'dept'|'role', id, label}; perm 'view'|'edit'.
+  // Dept/role targets are EXPANDED to uids NOW (decision 5); partners are excluded
+  // from dept/role expansion — a partner can only be shared to as an explicit user.
+  async share(f, target, perm) {
+    const FV = firebase.firestore.FieldValue;
+    let uids = [];
+    if (target.type === 'user') uids = [target.id];
+    else {
+      const us = await db.collection('users').get();
+      us.docs.forEach(d => { const u = d.data();
+        if (u.role === 'partner') return;                  // WS19 guard, by construction
+        if (target.type === 'dept' && (u.departments||[]).includes(target.id)) uids.push(d.id);
+        if (target.type === 'role' && u.role === target.id) uids.push(d.id); });
+    }
+    if (!uids.length) throw new Error('No matching users for this share target');
+    const upd = { sharedUserIds: FV.arrayUnion(...uids),
+      shares: FV.arrayUnion({ ...target, perm, by:currentUser.uid,
+        byName:(window.userProfile?.displayName||currentUser.email), at:new Date().toISOString() }),
+      updatedAt: FV.serverTimestamp() };
+    if (perm === 'edit') upd.editorUserIds = FV.arrayUnion(...uids);  // editors ⊆ shared invariant
+    await db.collection('hub_files').doc(f.id).update(upd);
+  }
+};
+
+// ── Preview lightbox (wholly new — zero existing component, Current state §9) ──
+window.openFilePreview = function(f) {
+  const url = f.url || '';
+  const isImg = /^image\//.test(f.contentType||'') || /\.(png|jpe?g|gif|webp|svg)(\?|$)/i.test(url);
+  const isPdf = /pdf/.test(f.contentType||'') || /\.pdf(\?|$)/i.test(url);
+  const safe = (typeof safeHttpUrl==='function') ? safeHttpUrl(url) : url;
+  const body = isImg ? `<img src="${safe}" style="max-width:100%;max-height:70vh;border-radius:8px" alt="">`
+    : isPdf ? `<iframe src="${safe}" style="width:100%;height:70vh;border:0;border-radius:8px"></iframe>`
+    : `<div class="empty-state" style="padding:30px"><div class="empty-icon">📄</div>
+         <p>No inline preview for this file type.</p></div>`;
+  openModal(`${f.kind==='link'?'🔗':'📄'} ${_esc(f.name||'File')}`,
+    body + `<div style="text-align:right;margin-top:10px">
+      <a href="${safe}" target="_blank" class="btn-primary btn-sm">Open in new tab ↗</a></div>`, '');
+};
+```
+
+(`Drive.renderStorageStatus` gets a two-line upgrade in the same file: read `system_health/daily_sync` and show `lastRunAt`/`lastStatus`/`filesWritten` instead of the static "Active" card — the heartbeat WS15 already writes, drive.js:255-277.)
+
+### Spec 5 — Rewritten shared browser + dead-code deletion (js/departments.js)
+
+**5a. DELETE departments.js:11379-11470** — the old bare `function renderFileCollection(title,id,currentRole)` + `function bindFileCollection(id,currentUser,dept,subfolder)` pair (shadowed, 100% dead per Current state §4b). Delete the whole span including the section banner comment at 11376-11378 if it would otherwise orphan.
+
+**5b. DELETE departments.js:11303-11374** — the old bare `async function renderDocCollection(...)` (shadowed by `window.renderDocCollection` at 11852 by the same declaration-vs-assignment mechanics; the live one is the 11852 version with the Gov-Biddings lifecycle). Keep the banner comment area tidy.
+
+**5c. REWRITE the LIVE `window.bindFileCollection` (departments.js:11697-11849) in place** — same signature `(containerId, currentUser, dept, scope, filterUid)` so all 15 call sites (app.js:4240-4247; departments.js:1971-1976, 2040-2041, 4153-4155, 5557-5558, 6812-6817, 8406-8407, 12404-12405) are UNTOUCHED. Internal changes:
+- `const collection = 'hub_files'` with `const scopeKey = scope.toLowerCase().replace(/\s+/g,'_')` — the old `files_${scopeKey}` string survives only inside the migration script.
+- `loadFiles` → `allFiles = await FilesHub.loadFiles(scopeKey)` when no `filterUid`; with `filterUid` keep a direct `.where('scope','==',scopeKey).where('deleted','==',false).where('uploadedBy','==',filterUid)` query (My Files). Drop the old `.where('department','==',dept)` — scope now carries the namespace.
+- Folder chips → chips come from `FilesHub.loadFolders(scopeKey)` + per-file `folderId`; "📁 New Folder" writes a `hub_folders` doc (retire `isFolderMarker`); the reserved-name check moves to `hub_folders.name`.
+- Upload modal (was 11759-11792): write the full Spec-1 shape (`kind:'file'`, `visibility:'company'`, `deleted:false`, `currentV:1`, `versions:[entry]`, `sharedUserIds:[]`, `editorUserIds:[]`, `shares:[]`, `size`/`contentType` from the `file` arg `renderUploadArea` already passes). Folder input becomes a `<select>` of `hub_folders` + "New folder…" option.
+- Add per-row actions (gated by `FilesHub.canEdit(f)`): 👁 preview (`openFilePreview`), ⬆ new version (small modal hosting `renderUploadArea` → `FilesHub.uploadNewVersion`), 🔀 share (share modal → `FilesHub.share`), 🗑 soft-delete (`FilesHub.softDelete`); keep the 🗄/♻️ archive toggle as-is. Row shows `v{currentV}` badge when `versions.length>1` and the `Drive.sourceIcon` mirrored-badge (decision 7).
+- Add a "🗑 Recycle Bin (N)" chip after "🗄 Archived": renders `FilesHub.loadFiles(scopeKey,{includeDeleted:true})` rows with Restore (all editors/owners) and **Delete forever** (rendered only for `currentRole==='president'`; calls `FilesHub.purge` after a typed-confirm dialog).
+- Grid/list: `window.chipTabs([{key:'list',label:'☰ List'},{key:'grid',label:'▦ Grid'}],'list',{cls:'fh-view'})` above the table; grid mode renders the same `showing` array as CSS-grid cards (name, type icon, folder badge, uploader, date). Drag-drop move per decision 10 (`draggable` rows/cards; folder chips as drop targets).
+- All user strings through `escHtml`; links through `safeHttpUrl`.
+
+### Spec 6 — Top-level Files Hub page (js/modules.js) + nav
+
+- `window.renderFilesHub()` in modules.js: scope selector chips (built from the DISTINCT `scope` values of the user's loaded files + a hardcoded seed list of the 12 known scopes), then reuses `renderFileCollection`/`bindFileCollection` per selected scope; admins get an "All scopes" view via `FilesHub.loadFiles(null)`. Global "search my files" input filters client-side.
+- Router: add `case 'files-hub': renderFilesHub(); break;` to `navigateTo` (app.js switch); nav entry `{ id:'files-hub', label:'Files', icon:'folder-open' }` added to the internal-staff nav arrays in config.js (NOT the partner nav).
+
+### Spec 7 — Nightly sync + backup touches (scripts/)
+
+- scripts/sync-to-drive.js `LABELS` map (lines 63-72): add `hub_files: 'Files Hub'`. Do NOT add `hub_files`/`hub_folders` to `EXCLUDE` (`hub_folders` holds no URLs — the walker skips it naturally, matching the `budgets_` rationale; an explicit `if (name === 'hub_folders') return null;` line in `labelFor` is optional tidiness). The WS15 walker then auto-mirrors every `hub_files.url` (and version-entry URLs — it string-scans whole docs) with companion-key `driveUrl` writes. Drive-side per-folder organization of the mirror is explicitly DEFERRED (mirror = flat cold archive; the in-app Hub is the organized view).
+- scripts/monthly-backup.js: auto-discovers both new root collections via `db.listCollections()` — no change needed (confirm by dry-run).
+
+### Spec 8 — Migration script (NEW: scripts/migrate-files-hub.js, Admin SDK — clients cannot enumerate `files_*` collections)
+
+Runs locally with `FIREBASE_SERVICE_ACCOUNT` (same env as scripts/sync-to-drive.js). Idempotent — safe to re-run any time:
+
+```
+1. cols = await db.listCollections(); pick names matching /^files_/ (excludes files-free budgets_*).
+2. For each files_<scope> doc:
+   a. isFolderMarker docs → ensure hub_folders doc {name:folder, parentId:null, scope, department,
+      createdBy:uploadedBy, createdAt} keyed by deterministic id `${scope}__${slug(folder)}` (set, merge).
+   b. real docs → db.collection('hub_files').doc(`${coll}__${docId}`).set({
+        ...legacy fields mapped to Spec-1 names (uploaderName||uploadedByName, kind:link if source==='link'),
+        scope: coll.replace(/^files_/,''), folderId: folder ? `${scope}__${slug(folder)}` : null,
+        visibility:'company', deleted:false, deletedAt:null, deletedBy:null,
+        currentV:1, versions:[{v:1,url,name,size:null,contentType:null,note:'migrated',by:uploadedBy,byName:uploaderName,at:<createdAt ISO>}],
+        sharedUserIds:[], editorUserIds:[], shares:[],
+        legacyColl:coll, legacyId:docId }, {merge:true});    // deterministic id ⇒ idempotent
+3. Print per-collection counts. NEVER deletes/edits the legacy docs (frozen archive, records-forever).
+```
+
+### Spec 9 — Scope table: IN vs OUT of the v1 Hub (per collection — decision 1)
+
+| Surface | v1 |
+|---|---|
+| `files_personal/shared/all/advertising/designs/sss/accounting/proposals/product_designs/references/files_<bs-subtab>/files_files` (all 12+) | **IN — migrated to `hub_files`, legacy frozen read-only** |
+| `tasks.attachments[]`, `{taskColl}/comments.fileUrl` (incl. the direct storage.ref bypass at departments.js:1893) | OUT — task-scoped UX, WS-later |
+| `posts` attachments | OUT |
+| Admin memos/policies/resources + Purchasing via `renderDocCollection` | OUT — doc-cards pattern, financeDelete-governed |
+| `expenses`, `tax_records`, ledger journals, `sales_orders`, CA/collections proofs, `payslips` proof | OUT — finance-tier attachments, financeDelete/WS20 territory |
+| `design_drawings` (+ its `revisions[]`) | OUT — keeps its own proven versioning |
+| `users.photoUrl`, `worker_profiles.photoUrl`, `id_verify` | OUT — identity assets, WS27 |
+
+### Spec 10 — Migration / rollout checklist (dependency order)
+
+1. **Deploy rules** (Spec 2 blocks) — `firebase deploy --only firestore:rules` after a fresh `git diff` re-check. Old clients unaffected (they don't touch `hub_*`).
+2. **Deploy indexes** (Spec 3) — `firebase deploy --only firestore:indexes`. Wait for build to finish (console shows READY).
+3. **Add `LABELS` entry** to scripts/sync-to-drive.js + commit (Spec 7).
+4. **Run `node scripts/migrate-files-hub.js`** (Spec 8). Verify counts vs a spot-check of 2-3 legacy collections in the console.
+5. **Ship the JS** (one commit): drive.js (`FilesHub`, `openFilePreview`, storage-status heartbeat), departments.js (dead-code deletions 5a/5b + live rewrite 5c), modules.js (`renderFilesHub` + global-search 6th source), app.js (router case), config.js (nav arrays). `node --check` each file. CACHE_VER bump in sw.js (manual — the pre-commit hook only bumps APP_VERSION). No new script file → no index.html/PRECACHE change.
+6. **Re-run the migration script once more** after the deploy propagates — sweeps any uploads that landed in legacy collections during the deploy window (idempotent, deterministic ids).
+7. **Legacy `files_<scope>` collections stay forever** (read-only archive; wildcard rule untouched; still mirrored/backed up). No client code writes to them after step 5.
+8. Update ROADMAP.md:287 (files search now included via hub_files; out-of-scope families listed).
+
+### Spec 11 — Manual test checklist
+
+1. Migration: pick `files_proposals` — every legacy doc appears in the Sales → Proposals tab post-deploy with its folder chip intact; the legacy doc is unchanged in the console; re-running the script changes nothing (idempotent).
+2. Upload a new file into Marketing → Advertising → doc lands in `hub_files` with `scope:'advertising'`, Spec-1 shape; nightly sync later fills `driveUrl` and the row shows the mirrored badge.
+3. Folders: create nested folders A → A/B; move a file into B by drag-drop; breadcrumb shows "A / B"; rename A → path updates everywhere with a single doc write; deleting non-empty A reparents B's contents.
+4. Versions: upload v2 on a file → `currentV:2`, history modal lists v1+v2 (both downloadable), row badge "v2"; Open uses the v2 Storage `url`.
+5. Sharing: set a file `visibility:'private'` → colleague's tab no longer lists it (their 3-query merge excludes it); share to that colleague as VIEW → it appears, they can preview/download but the rename/new-version buttons are hidden AND a forced console `update({name:'x'})` is rules-DENIED; upgrade to EDIT → rename works, but `update({sharedUserIds:[...]})` from their console is DENIED (affectedKeys guard).
+6. Dept-share expansion: share to dept 'Marketing' → every current Marketing member's uid lands in `sharedUserIds`; the partner account gains nothing; `shares[]` shows one dept-grant row.
+7. Partner: Brilliant Steel partner sees NO hub files by default; after an explicit user-share to their uid they see exactly that one file.
+8. Recycle bin: soft-delete → file leaves all normal views, appears under 🗑 with restore; restore works; as president, Delete forever removes the Firestore doc AND the Storage blob (URL now 403s); as manager the Delete-forever button is absent and a console `.delete()` is DENIED.
+9. Global search: query a hub file name from the global search screen → hit appears; a task attachment name does NOT (documented out-of-scope).
+10. Grid/list chipTab toggles rendering; drag-in-to-upload still works in the upload modal.
+11. Dead code: grep confirms single definitions of `renderFileCollection`/`bindFileCollection`/`renderDocCollection`; all 15 Files tabs + Admin Policies + Purchasing + Gov Biddings screens still render (the live implementations were the only ones ever executing).
+12. Rules deploy hygiene: `git diff firestore.rules` clean-before-deploy both times; legacy `files_*` reads still work for a signed-in employee (wildcard untouched).
+
+### Flags for Neil
+
+- **‼️ FLAG FOR NEIL — Recycle Bin has NO auto-purge.** Deleted files sit in the bin indefinitely (records-forever directive); only you can "Delete forever". Say the word if you want a timed purge (e.g. 30 days) — it would be a GitHub-Actions script honoring `deletedAt`, metadata-only, blobs kept.
+- **‼️ FLAG FOR NEIL — "Delete forever" removes the app copy + Storage blob but NOT the Google Drive mirror copy.** The Drive archive keeps everything ever synced. Confirm that's the intent (it matches "records kept forever"); true full erasure would need a manual Drive delete.
+- **‼️ FLAG FOR NEIL — sharing is visibility-level, not download-level.** Anyone a file is shared with gets a working download URL they could forward outside the shared list (Firebase bearer-token URLs; same as every existing file in the app today). Cryptographic enforcement would need a Cloud-Function signed-URL proxy — deliberately not built in v1.
+- **‼️ FLAG FOR NEIL — dept/role shares snapshot membership at share time.** Someone joining Marketing NEXT month does not inherit last month's "shared to Marketing" grants until the file is re-shared. Acceptable for v1; live dept-membership sharing would need a rules pattern Firestore can't reliably prove for list queries.

@@ -352,7 +352,7 @@ open tab/screen.
   `APP_VERSION`/`index.html` version strings only, not `CACHE_VER`) — every write site already
   calls `dbCacheInvalidate('inventory_items')` after mutating stock; new writers must too.
 
-## Open decisions
+## Open decisions — → all resolved in `## DECIDED` at the end of this file
 
 - [ ] **Weighted-average cost formula, precision, and inputs.** Exact formula (standard:
   `newUnitCost = (oldQty*oldUnitCost + recvQty*recvUnitPrice) / (oldQty + recvQty)`, with a
@@ -583,3 +583,694 @@ JS/CSS edit per repo convention).
 > producing exactly the expected `stock_movements` rows, a Count Form entry→post→variance
 > cycle, and an RFQ created via the picker whose received PR line matches by `itemId` even
 > when the supplier's description text differs from the inventory item's stored name.
+
+## DECIDED — architecture spec (Fable, 2026-07-11)
+
+### Resolved decisions (one line each)
+
+1. **WAC formula → standard weighted average, per-line Firestore TRANSACTION, full-float
+   storage.** `newUnitCost = (onHand×oldCost + recvQty×recvPrice) / (onHand + recvQty)` where
+   `onHand = Math.max(0, cur.qty)`; degenerates to just `recvPrice` when `onHand <= 0` OR
+   `oldCost <= 0` (stockout / never-costed item). Stored at full float precision (repo
+   convention: `fmt()` rounds for display only). The read-modify-write runs as ONE
+   `db.runTransaction` per matched PR line — the read-all-then-batch alternative is rejected
+   because two simultaneous "Mark Received" clicks (or a concurrent consume) racing the same
+   item would compute WAC from a stale read; per-line transactions keep contention narrow and
+   retry automatically.
+2. **WAC input = the PR line's raw `unitPrice` exactly as typed (VAT-inclusive if the supplier
+   quote was).** Landed cost (freight, VAT-exclusive normalization) is explicitly OUT OF SCOPE
+   for WS29 — `recordPurchaseDisbursement`'s `vatSplit` stays a ledger-dollar-level concern
+   only. ‼️ **FLAG FOR NEIL:** this means stock valuation is VAT-inclusive whenever supplier
+   prices are typed VAT-inclusive; if you want VAT-exclusive inventory valuation, that is a
+   WS30 (Purchasing/receiving-ledger) change, not this one.
+3. **No historical backfill of `unitCost`. Forward-only.** There is no purchase-price trail
+   anywhere to reconstruct a true WAC from (confirmed: `stock_movements` carries no cost
+   detail today). Existing `unitCost` values are left as-is and become each item's opening
+   cost in the first post-ship WAC calculation. Documented as a known one-time inaccuracy;
+   Neil may hand-correct high-value items via the Edit Item modal before the first receive if
+   desired. The new movement fields (`unitCost`, `qtyAfter`, decision 5) create the missing
+   cost trail going forward, so this problem can never recur.
+4. **Shared movement helper lives in `js/config.js` (loads before departments.js AND
+   modules.js), split into a pure payload builder + a convenience writer.**
+   `window.buildStockMovement(fields)` returns the doc payload (so transactional/batched call
+   sites can `tx.set`/`batch.set` it atomically); `window.postStockMovement(fields)` is
+   `db.collection('stock_movements').add(buildStockMovement(fields))` for the one-off manual
+   flows. The two existing modules.js writers (`itemModal` adjust, `moveModal` in/out) are
+   refactored onto the helper — no third/fourth duplicated `.add()` shape.
+5. **`type` enum UNCHANGED (`'in'|'out'|'adjust'`); new discriminator fields `source`,
+   `refNumber`, `unitCost`, `qtyAfter`.** Receives log `type:'in', source:'receive'`;
+   consumption logs `type:'out', source:'consume'`; count corrections log `type:'adjust',
+   source:'count'`; the manual flows log `source:'manual'`. Mirrors the ledger's `source`
+   discriminator pattern; the two badge switches (`itemHistoryModal`, `renderMovements`
+   `typeBadge`) keep working with ZERO structural change — they only gain a ref badge/Source
+   column (Spec 4). Readers must treat a missing `source` as `'manual'` (every pre-WS29 row).
+6. **Idempotency = deterministic `stock_movements` DOC IDs, checked inside the transaction;
+   movement + qty change commit atomically, always.** Receive: doc id `RECV_{prId}_{lineIdx}`
+   — the transaction `tx.get`s it first and no-ops if it exists, so a retried click or a
+   transaction retry can never double-receive a line even if the PR's `receivedToInventory`
+   flag write failed. Consume: doc id `CONS_{orderId}_{itemId}`, `batch.set` INSIDE the
+   existing atomic stock+flag batch (departments.js:12574-12586) — an un-logged stock change
+   is the gap this workstream closes, so the movement joins the batch, not the ledger's
+   looser best-effort pattern. Count: doc id `CNT_{formNoSanitized}_{itemId}`, same
+   transactional pattern as receive.
+7. **Count Form gains a "✓ Post Variances" action: absolute qty correction + `adjust`/`count`
+   movement, NO ledger entry, client-gated to president/manager/finance.** (a) Posting sets
+   `inventory_items.qty` to the physical count (recomputed against the LIVE qty inside the
+   transaction, not the render-time snapshot) and logs the movement. (b) Anyone can still fill
+   in/print the count; only president/manager/finance see the Post button (matches the
+   existing `isFinAdmin()` tier in the Inventory IIFE). No rules change — see decision 10.
+   (c) NO shrinkage/gain ledger entry in WS29: the manual Stock In/Out precedent never touches
+   the ledger, there is no shrinkage account or period-gate on this path, and inventory↔ledger
+   value sync is exactly the WS30 boundary (decision 11). (d) One batch "Post All Variances"
+   action (per-item transactions in a loop, partial failures reported by name), not per-row
+   buttons. Write-in "blank rows" are NOT postable (no item doc) — the confirm copy says to
+   add the item in Inventory first. The localStorage-only single-device draft is ACCEPTED
+   as-is; a Firestore-backed collaborative count is explicitly deferred (out of mandate).
+8. **RFQ item binding = hybrid select-picker + free-text, `itemId: string|null` added to
+   `purchase_requisitions.items[]`, matching order `itemId` → name.** `openRfqModal.addRow`
+   gains a `<select class="ri-item">` (options = all `inventory_items`, first option
+   "— Free text / new —", extending `prodOrderModal`'s `matItemOpts` precedent) that prefills
+   desc/unit but leaves them EDITABLE — the whole point is that the supplier-facing
+   description may differ from the stored item name while `itemId` still binds. The "From low
+   stock" prefill carries `itemId: i.id` (it must map `{id: d.id, ...d.data()}` instead of
+   discarding the id). `bindRfqCard` needs NO change — its `items.map(x => ({...x}))` spread
+   already preserves `itemId` through price-entry and convert-to-PR (verified).
+   `receivePurchaseIntoInventory` matches `it.itemId` exact-first, then falls back to today's
+   case-insensitive name match — in-flight pre-WS29 PRs keep working unchanged.
+9. **Unmatched lines on receive → explicit human resolution, never silent, never
+   auto-created.** Auto-creating items from free text is rejected (a typo'd description would
+   mint a duplicate item — trading silent loss for silent corruption). Instead:
+   `receivedToInventory` is set `true` ONLY when every line landed; otherwise the PR stores
+   `receiveUnmatched: [{i, desc, qty, unit, unitPrice}]` and the PR card shows a
+   "⚠ Resolve N unmatched" button opening a resolver modal — per line, bind to an existing
+   item (select) or "＋ Create new item" (which creates the `inventory_items` doc THEN receives
+   into it), each resolution running the same idempotent `RECV_{prId}_{lineIdx}` transaction.
+   Because matched lines are line-level idempotent (decision 6), re-clicking "Mark Received"
+   on a partially-received PR is safe and simply retries the leftovers.
+10. **ZERO `firestore.rules` changes in WS29.** Verified against the live blocks: `stock_movements`
+   create is already open to any non-partner (deterministic-ID `tx.set` on a NEW doc is a
+   create ✓) and update is admin-only (so a `.set` collision on an existing movement id is
+   DENIED — a free rules-level idempotency backstop); `inventory_items` write is already any
+   non-partner (Production consume, Purchasing receive, finance count-post all pass ✓);
+   `purchase_requisitions` update by `canPurchasing()` covers `receiveUnmatched`/
+   `receivedToInventory` ✓ (Finance's 5-key `hasOnly` clause is untouched). New movement
+   fields need no shape rule (none exists on this collection). ‼️ **FLAG FOR NEIL:**
+   `inventory_items` write remains open to ANY signed-in non-partner (e.g. a Sales employee) —
+   tightening it to routed/movement-logged writers is real work that belongs with WS30's
+   receiving rewrite + WS19-style enumeration of legitimate writers, NOT a silent side-effect
+   here. Say the word if you want it pulled forward.
+11. **WS29/WS30 boundary: WS29 makes the PHYSICAL side trustworthy (qty, WAC, complete
+   movement log); ledger↔inventory VALUE reconciliation is 100% WS30.** WS29 does not touch
+   `postCDJToLedger`/`recordPurchaseDisbursement`, adds no reconciliation report, and posts no
+   ledger rows. Handoff to WS30 (binding): (a) after WS29, `Σ inventory_items.qty×unitCost` is
+   a meaningful going-forward book value and every movement row carries `unitCost`+`refNumber`,
+   so WS30 can derive the receive-time Inventory-asset debit FROM the same receive event
+   (`RECV_{prId}_{lineIdx}` rows sum to the stocked portion of the PR) instead of Finance's
+   independent manual choice; (b) the drift cases in finding 5 (unmatched line still booked as
+   asset; direct-to-job COS choice vs. stocked qty) are WS30's to close; (c) `job_costs`' third
+   manual materials number stays out of scope for both — flagged for WS40 awareness.
+   `consumeProductionMaterials`' missing period-close gate is knowingly inherited unchanged
+   (WS29 adds no new ledger writes, so no new gate decision arises).
+12. **WS40 inventory-turns metric (canonical definition, final):**
+   `inventoryTurns(windowDays) = annualizedCOGS / currentInventoryValue`, where
+   `annualizedCOGS = Σ ledger docs (accountType=='expense' && category=='COS – Direct Material' && date in window) × (365/windowDays)`
+   and `currentInventoryValue = Σ over inventory_items of (Number(qty)||0) × (Number(unitCost)||0)`
+   (negative-qty items included as-is — they're data errors the count form exists to fix, and
+   excluding them would hide the error from the KPI). Days-on-hand = `365 / turns`. Default
+   window 365 days, computed with `bizDate()` boundaries. Post-WS29 the numerator (COS posted
+   at consume-time WAC) and denominator (qty×WAC) are costed on the SAME basis, which is what
+   makes the ratio meaningful. Per-item turns (optional drill-down) =
+   `Σ stock_movements (itemId==X && type=='out' && qty×(unitCost||item.unitCost)) in window, annualized ÷ (item.qty×item.unitCost)`.
+13. **Downstream pricing effect acknowledged, no code change.** ‼️ **FLAG FOR NEIL:**
+   `openBomModal` (app.js:1792) reads `unitCost` live, so BOM-derived product capital costs in
+   the quote builder will silently shift from "latest purchase price" to "moving average" on
+   ship date. This is the CORRECT number, but quote prices re-derived after shipping may
+   differ from before — worth a heads-up to whoever quotes.
+
+**Scoping / sequencing:** coordinates with **WS28** (same ~600-line `renderProductionDept`
+region — whichever lands second rebases the Count Form subtab edits; the Post-Variances
+handler is self-contained inside `renderProdInventoryForm`, minimizing the collision surface);
+hands finding 5 + decision 11 to **WS30** (which also inherits the `receiveLineIntoItem`
+transaction as the single receive primitive to build PO receiving on); publishes the
+`items[].itemId` shape and the turns metric to **WS30/WS40**. No dependency on any unshipped
+workstream — WS29 can land now.
+
+---
+
+### Spec 1 — Data shapes (annotated literals; new fields marked NEW)
+
+```js
+// stock_movements/{docId} — docId is AUTO for manual flows, DETERMINISTIC for automated:
+//   RECV_{prId}_{lineIdx} | CONS_{orderId}_{itemId} | CNT_{formNoSanitized}_{itemId}
+{ itemId: 'abc123', itemName: 'Stainless Sheet 4x8 ga.16',   // denormalized, as today
+  type: 'in'|'out'|'adjust',          // UNCHANGED enum — badges keep working
+  qty: 25,                            // always positive; sign implied by type, as today
+  source: 'manual'|'receive'|'consume'|'count',  // NEW — flow discriminator (absent = 'manual')
+  refNumber: 'PR-2026-4821'|null,     // NEW — PR/order/count-form ref for traceability
+  unitCost: 180.5|null,               // NEW — ₱/unit at movement time (receive: line price;
+                                      //       consume/count: item WAC; null = unknown/legacy)
+  qtyAfter: 145|null,                 // NEW — on-hand after this movement (best-effort;
+                                      //       exact inside transactions, computed in batch)
+  project: '', note: '',              // as today
+  by: uid, byName: 'Neil B',          // as today
+  date: '2026-07-11',                 // bizDate(), as today
+  createdAt: serverTimestamp }
+
+// inventory_items/{docId} — NO new fields. unitCost's MEANING changes: it is now the
+// moving weighted-average cost, updated only by receiveLineIntoItem (or manual edit).
+
+// purchase_requisitions.items[] — ONE new field
+{ desc: 'SS sheet 304 4x8 #16 (supplier wording ok)', qty: 10, unit: 'sheet',
+  unitPrice: null|number,
+  itemId: '<inventory_items doc id>' | null }   // NEW — null = free-text/new item
+
+// purchase_requisitions/{docId} — receive-time fields (replaces the all-or-nothing flag)
+{ receivedToInventory: bool,          // now TRUE only when EVERY line landed in stock
+  receiveUnmatched: [                 // NEW — leftovers awaiting the resolver ([] when none)
+    { i: 2, desc: 'Argon gaas tank',  // i = index into items[] (drives RECV_{prId}_{i})
+      qty: 2, unit: 'pc', unitPrice: 4500 } ] }
+```
+
+### Spec 2 — Shared helper (js/config.js, insert after `dbCachedGet`/`dbCacheInvalidate` ~line 385)
+
+```js
+// ── Stock movement log — single shared shape (v12 WS29) ─────────────────────
+// buildStockMovement is PURE (returns the payload) so atomic call sites can
+// tx.set/batch.set it with a deterministic doc id; postStockMovement is the
+// convenience writer for one-off manual flows. Lives in config.js because
+// modules.js (the old writers) loads LAST and departments.js (the new writers)
+// loads before it — config.js is the only file both can see at parse time.
+window.buildStockMovement = function(f) {
+  return {
+    itemId: f.itemId, itemName: f.itemName || '',
+    type: f.type,                                   // 'in' | 'out' | 'adjust'
+    qty: Number(f.qty) || 0,                        // always positive
+    source: f.source || 'manual',                   // 'manual'|'receive'|'consume'|'count'
+    refNumber: f.refNumber || null,
+    project: f.project || '', note: f.note || '',
+    unitCost: (f.unitCost == null ? null : Number(f.unitCost)),
+    qtyAfter: (f.qtyAfter == null ? null : Number(f.qtyAfter)),
+    by: window.currentUser?.uid || '',
+    byName: window.userProfile?.displayName || window.currentUser?.email || '',
+    date: bizDate(),                                // Manila — never toISOString()
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+};
+window.postStockMovement = function(f) {
+  return db.collection('stock_movements').add(window.buildStockMovement(f));
+};
+```
+
+### Spec 3 — Receive path rewrite (js/departments.js)
+
+**3a. `receivePurchaseIntoInventory` (13501-13528) — BEFORE is quoted in finding 1. AFTER
+(full replacement — the blind-increment batch becomes per-line transactions):**
+```js
+// Receive a purchase's line items into inventory. Match order: line.itemId
+// (exact, from the RFQ item picker) first, then case-insensitive trimmed name
+// (legacy free-text lines and in-flight pre-WS29 PRs). Each matched line runs
+// in its OWN transaction (read current qty+unitCost → weighted-average cost →
+// write qty/unitCost AND the stock_movements row atomically). Movement doc ids
+// are deterministic (RECV_{prId}_{lineIdx}) so a retried "Mark Received" click
+// can never double-receive a line. Unmatched lines are RETURNED with their
+// items[] index so the resolver can finish the job — never silently dropped.
+async function receivePurchaseIntoInventory(p) {
+  const all = p.items || [];
+  const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
+  const byName = {}, byId = {};
+  snap.docs.forEach(d => {
+    byId[d.id] = d;
+    const n = (d.data().name || '').trim().toLowerCase(); if (n) byName[n] = d;
+  });
+  let matched = 0; const unmatched = [];
+  for (let i = 0; i < all.length; i++) {
+    const it = all[i];
+    if (!it || !(it.desc || it.itemId) || (Number(it.qty) || 0) <= 0) continue;
+    const hit = (it.itemId && byId[it.itemId]) || byName[(it.desc || '').trim().toLowerCase()];
+    if (!hit) {
+      unmatched.push({ i, desc: it.desc || '', qty: Number(it.qty) || 0, unit: it.unit || '',
+                       unitPrice: it.unitPrice != null ? Number(it.unitPrice) : null });
+      continue;
+    }
+    // true = applied, false = already received (idempotent no-op — still landed),
+    // null = transaction FAILED → leave for a retry/resolver pass, not "landed".
+    const ok = await receiveLineIntoItem(p, it, i, hit.ref)
+      .catch(e => { console.warn('[receive line]', e); return null; });
+    if (ok === null) unmatched.push({ i, desc: it.desc || '', qty: Number(it.qty) || 0, unit: it.unit || '',
+                                      unitPrice: it.unitPrice != null ? Number(it.unitPrice) : null });
+    else matched++;
+  }
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
+  return { matched, unmatched };
+}
+
+// One PR line → one inventory item, atomically: qty add + weighted-average
+// cost + movement row in a single transaction. Returns true if applied,
+// false if this exact line was already received (deterministic movement id).
+async function receiveLineIntoItem(p, it, lineIdx, itemRef) {
+  const movRef = db.collection('stock_movements').doc(`RECV_${p.id}_${lineIdx}`);
+  return db.runTransaction(async tx => {
+    const movSnap  = await tx.get(movRef);
+    if (movSnap.exists) return false;                 // already received — idempotent
+    const itemSnap = await tx.get(itemRef);
+    if (!itemSnap.exists) throw new Error('Inventory item no longer exists');
+    const cur     = itemSnap.data();
+    const recvQty = Number(it.qty) || 0;
+    const price   = (it.unitPrice != null && (Number(it.unitPrice) || 0) > 0) ? Number(it.unitPrice) : null;
+    const onHand  = Math.max(0, Number(cur.qty) || 0);   // negative stock contributes nothing to WAC
+    const oldCost = Number(cur.unitCost) || 0;
+    // Weighted-average cost (v12 WS29 — replaces the flat latest-price overwrite).
+    // Degenerates to the new price on stockout or when no prior cost exists.
+    const newCost = price == null ? null
+      : (onHand > 0 && oldCost > 0)
+        ? (onHand * oldCost + recvQty * price) / (onHand + recvQty)
+        : price;
+    const upd = {
+      qty: (Number(cur.qty) || 0) + recvQty,          // explicit add — we hold the read, no blind increment
+      lastReceivedAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    if (newCost != null) upd.unitCost = newCost;      // never let a blank/zero line wipe the cost (kept)
+    if (p.supplier && !(cur.supplier || '').trim()) upd.supplier = p.supplier;
+    tx.update(itemRef, upd);
+    tx.set(movRef, window.buildStockMovement({
+      itemId: itemRef.id, itemName: cur.name || it.desc || '',
+      type: 'in', qty: recvQty, source: 'receive',
+      refNumber: p.prNo || p.rfqNo || p.id,
+      note: `Received ${p.prNo || p.rfqNo || ''}${p.supplier ? ' — ' + p.supplier : ''}`.trim(),
+      unitCost: price, qtyAfter: upd.qty
+    }));
+    return true;
+  });
+}
+```
+Note the transaction ordering constraint: in the web v8 SDK all `tx.get`s must precede the
+first write — the code above already obeys this (both gets, then the two writes).
+
+**3b. Caller — the `pr-stat` handler (13482-13489) — BEFORE → AFTER:**
+```js
+// BEFORE
+      if (btn.dataset.stat === 'received' && p && !p.receivedToInventory) {
+        const res = await receivePurchaseIntoInventory(p).catch(e => { console.warn('[receive→inventory]', e); return null; });
+        if (res) {
+          await db.collection('purchase_requisitions').doc(p.id).update({ receivedToInventory: true }).catch(()=>{});
+          Notifs.showToast(res.matched
+            ? `Received. ${res.matched} item${res.matched>1?'s':''} added to inventory${res.unmatched.length?`; ${res.unmatched.length} not matched`:''}.`
+            : 'Received. No inventory items matched by name.');
+        } else { Notifs.showToast('Status updated.'); }
+      } else {
+// AFTER
+      if (btn.dataset.stat === 'received' && p && !p.receivedToInventory) {
+        const res = await receivePurchaseIntoInventory(p).catch(e => { console.warn('[receive→inventory]', e); return null; });
+        if (res) {
+          // Only a FULLY-landed PR gets the done flag; leftovers go to the resolver.
+          await db.collection('purchase_requisitions').doc(p.id).update({
+            receivedToInventory: res.unmatched.length === 0,
+            receiveUnmatched: res.unmatched
+          }).catch(()=>{});
+          Notifs.showToast(res.unmatched.length
+            ? `Received ${res.matched} line${res.matched===1?'':'s'} into stock — ${res.unmatched.length} not in inventory. Tap “⚠ Resolve” on the PR.`
+            : `Received. ${res.matched} item${res.matched===1?'':'s'} added to inventory ✓`);
+        } else { Notifs.showToast('Status updated.'); }
+      } else {
+```
+
+**3c. Resolver — new `openReceiveResolver(p, currentUser, redo)` in departments.js (place
+after `receiveLineIntoItem`), plus a card button.** In the PR card template inside
+`renderPurchaseRequests`, where the status buttons render, add for
+`(p.receiveUnmatched||[]).length && canEdit`:
+`<button class="btn-secondary btn-sm pr-resolve" data-id="${p.id}">⚠ Resolve ${p.receiveUnmatched.length} unmatched</button>`
+with handler `content.querySelectorAll('.pr-resolve').forEach(btn => btn.addEventListener('click', () => openReceiveResolver(prs.find(x=>x.id===btn.dataset.id), currentUser, redo)));`
+```js
+// Finish receiving a PR whose lines didn't auto-match: bind each leftover to an
+// existing item or create a new one, then run the SAME idempotent per-line
+// receive transaction. receivedToInventory flips true when the list empties.
+async function openReceiveResolver(p, currentUser, onDone) {
+  const rows = (p.receiveUnmatched || []);
+  if (!rows.length) return;
+  const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
+  const inv = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const opts = sel => `<option value="">— Choose action —</option><option value="__new__">＋ Create new inventory item</option>` +
+    inv.map(i => `<option value="${i.id}" ${sel===i.id?'selected':''}>${escHtml(i.name||'')} (${Number(i.qty||0).toLocaleString('en-PH')} ${escHtml(i.unit||'')})</option>`).join('');
+  openPage(`⚠ Resolve receipt — ${escHtml(p.prNo || p.rfqNo || '')}`, `
+    <p style="font-size:12px;color:var(--text-muted)">These purchased lines matched no inventory item by name. Bind each to an existing item, or create a new one — quantities and weighted-average cost post the moment you resolve a line.</p>
+    ${rows.map((r, k) => `<div class="rcv-row" data-k="${k}" style="border:1px solid var(--border);border-radius:9px;padding:10px;margin-bottom:8px">
+      <div style="font-weight:600">${escHtml(r.desc || '—')} <span style="font-weight:400;color:var(--text-muted)">· ${Number(r.qty||0)} ${escHtml(r.unit||'')}${r.unitPrice!=null?` @ ₱${fmt(r.unitPrice)}`:''}</span></div>
+      <select class="rcv-target" style="width:100%;margin-top:6px;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">${opts()}</select>
+      <button class="btn-primary btn-sm rcv-apply" style="margin-top:6px">Receive this line →</button>
+    </div>`).join('')}
+  `, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  document.querySelectorAll('.rcv-apply').forEach(applyBtn => applyBtn.addEventListener('click', async e => {
+    const rowEl = e.currentTarget.closest('.rcv-row');
+    const k = +rowEl.dataset.k, r = rows[k];
+    const choice = rowEl.querySelector('.rcv-target').value;
+    if (!choice) { Notifs.showToast('Choose an item or “Create new”.', 'error'); return; }
+    e.currentTarget.disabled = true;
+    try {
+      let itemRef;
+      if (choice === '__new__') {
+        itemRef = await db.collection('inventory_items').add({
+          name: r.desc, kind: 'material', unit: r.unit || '', category: '',
+          qty: 0, reorderLevel: 0, unitCost: 0,
+          supplier: p.supplier || '', supplierContact: '',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        window.logAudit && window.logAudit('create', 'inventory_item', itemRef.id, { name: r.desc, via: 'receive-resolver' });
+      } else {
+        itemRef = db.collection('inventory_items').doc(choice);
+      }
+      await receiveLineIntoItem(p, { qty: r.qty, unitPrice: r.unitPrice, desc: r.desc }, r.i, itemRef);
+      const remaining = rows.filter((_, j) => j !== k);
+      await db.collection('purchase_requisitions').doc(p.id).update({
+        receiveUnmatched: remaining, receivedToInventory: remaining.length === 0
+      });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
+      Notifs.showToast('Line received into stock ✓');
+      closeModal(); onDone && onDone();
+      if (remaining.length) openReceiveResolver({ ...p, receiveUnmatched: remaining }, currentUser, onDone);
+    } catch (ex) { Notifs.showToast('Failed: ' + (ex.message || ex), 'error'); e.currentTarget.disabled = false; }
+  }));
+}
+```
+
+### Spec 4 — Consumption movement rows join the atomic batch (js/departments.js:12567-12586)
+
+`consumeProductionMaterials` — BEFORE is quoted in the brief (finding 2 / constraint list).
+Changes, surgical: (i) dedupe materials by `itemId` (summing qty) so the deterministic doc id
+can't collide within one batch and duplicates can't double-decrement; (ii) add one `batch.set`
+per material. AFTER for lines 12568-12580:
+```js
+  const rawMats = (order.materials || []).filter(m => m.itemId && (Number(m.qty) || 0) > 0);
+  // Dedupe by itemId (summing qty) — a duplicated picker row must not
+  // double-decrement or collide on the deterministic movement doc id.
+  const byItem = {};
+  rawMats.forEach(m => { (byItem[m.itemId] ||= { ...m, qty: 0 }).qty += Number(m.qty) || 0; });
+  const mats = Object.values(byItem);
+  if (!mats.length) return { ok: false, reason: 'No materials listed.' };
+  if (order.materialsConsumed) return { ok: false, reason: 'Already consumed.' };
+  // Resolve current unit costs from inventory
+  const snaps = await Promise.all(mats.map(m => db.collection('inventory_items').doc(m.itemId).get().catch(() => null)));
+  let cos = 0;
+  const batch = db.batch();
+  mats.forEach((m, i) => {
+    const s = snaps[i];
+    const unitCost = (s && s.exists) ? (Number(s.data().unitCost) || 0) : (Number(m.unitCost) || 0);
+    const q = Number(m.qty) || 0;
+    cos += unitCost * q;
+    if (s && s.exists) {
+      batch.update(db.collection('inventory_items').doc(m.itemId), { qty: firebase.firestore.FieldValue.increment(-q) });
+      // Movement row joins the SAME atomic batch — stock change and its log
+      // entry can never desync (v12 WS29). Deterministic id + the
+      // materialsConsumed flag (also in this batch) make re-runs impossible.
+      batch.set(db.collection('stock_movements').doc(`CONS_${order.id}_${m.itemId}`),
+        window.buildStockMovement({
+          itemId: m.itemId, itemName: (s.data().name) || m.name || '',
+          type: 'out', qty: q, source: 'consume',
+          refNumber: `POCOS-${order.id}`,
+          project: order.client || order.title || '',
+          note: `Production ${order.orderNo || order.id}`,
+          unitCost, qtyAfter: (Number(s.data().qty) || 0) - q
+        }));
+    }
+  });
+```
+Everything from `batch.update(db.collection('production_orders')...` (12581) onward is
+UNCHANGED — ledger legs, job capital roll-up, cache invalidation all stay exactly as-is.
+
+### Spec 5 — Refactor the two existing manual writers onto the helper (js/modules.js)
+
+**5a. `itemModal` adjust log (2000-2005) — BEFORE → AFTER:**
+```js
+// BEFORE
+          if (Math.abs((data.qty||0) - oldQty) > 1e-9) {
+            await db.collection('stock_movements').add({ itemId:item.id, itemName:name, type:'adjust',
+              qty:Math.abs((data.qty||0)-oldQty), project:'', note:`Manual edit ${num(oldQty)} → ${num(data.qty||0)}`,
+              by:currentUser.uid, byName:userProfile?.displayName||currentUser.email,
+              date:bizDate(), createdAt:firebase.firestore.FieldValue.serverTimestamp() }).catch(()=>{});
+          }
+// AFTER
+          if (Math.abs((data.qty||0) - oldQty) > 1e-9) {
+            await window.postStockMovement({ itemId:item.id, itemName:name, type:'adjust',
+              qty:Math.abs((data.qty||0)-oldQty), note:`Manual edit ${num(oldQty)} → ${num(data.qty||0)}`,
+              source:'manual', unitCost:data.unitCost||null, qtyAfter:data.qty||0 }).catch(()=>{});
+          }
+```
+**5b. `moveModal` save (2035-2039) — BEFORE → AFTER:**
+```js
+// BEFORE
+        await db.collection('stock_movements').add({ itemId:item.id, itemName:item.name||'', type, qty,
+          project: type==='out'?(document.getElementById('mv-project')?.value.trim()||''):'',
+          note:document.getElementById('mv-note').value.trim(),
+          by:currentUser.uid, byName:userProfile?.displayName||currentUser.email,
+          date:bizDate(), createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+// AFTER
+        await window.postStockMovement({ itemId:item.id, itemName:item.name||'', type, qty,
+          project: type==='out'?(document.getElementById('mv-project')?.value.trim()||''):'',
+          note:document.getElementById('mv-note').value.trim(),
+          source:'manual', unitCost:item.unitCost||null, qtyAfter:(item.qty||0)+delta });
+```
+
+**5c. Reader updates (both stay structurally intact — reused `type` enum, decision 5).**
+`itemHistoryModal` row (1953-1958): the Project/Note cell gains the ref —
+```js
+// BEFORE:  <td style="font-size:12px">${escHtml(m.project||m.note||'—')}</td>
+// AFTER:   <td style="font-size:12px">${m.refNumber?`<span class="badge badge-gray" style="margin-right:4px">${escHtml(m.refNumber)}</span>`:''}${escHtml(m.project||m.note||'—')}</td>
+```
+`renderMovements`: (i) `typeBadge` UNCHANGED; (ii) add a Source column header `<th>Source</th>`
+after Type and cell `<td style="font-size:11px;color:var(--text-muted)">${escHtml(m.source||'manual')}${m.refNumber?`<div>${escHtml(m.refNumber)}</div>`:''}</td>`;
+(iii) extend the CSV columns with `{key:'source',label:'Source',get:m=>m.source||'manual'},
+{key:'refNumber',label:'Ref',get:m=>m.refNumber||''}, {key:'unitCost',label:'Unit Cost',get:m=>m.unitCost==null?'':m.unitCost}`;
+(iv) the search filter also matches `(m.refNumber||'')`. Legacy rows (no `source`) render as
+`manual` — the `||'manual'` fallback is mandatory in every new read.
+
+### Spec 6 — Count Form "Post Variances" (js/departments.js:12786-12903)
+
+**6a.** Update the stale header comment (12788-12790): replace "No Firestore writes — this is
+a working/print document, not a stock mutation." with "Print stays non-mutating; since v12
+WS29 the ✓ Post Variances action (president/manager/finance only) corrects on-hand qty to the
+physical count and logs an 'adjust'/'count' stock movement per corrected item."
+
+**6b.** In `renderProdInventoryForm`, add beside the existing derived flags (~12815):
+```js
+  const canPost = ['president','manager','finance'].includes(currentRole);
+```
+and in the subtab-bar (12840-12845), before the Print button:
+```js
+      ${canPost?`<button class="btn-primary btn-sm" id="cf-post">✓ Post Variances</button>`:''}
+```
+(the Print button drops to `btn-secondary` so Post is the primary action when visible).
+
+**6c.** Handler (append after the `cf-print` binding at 12902):
+```js
+  document.getElementById('cf-post')?.addEventListener('click', async () => {
+    const d = loadCountDraft();
+    const lines = shown.map(i => {
+      const c = (d.counts || {})[i.id] || {};
+      const phys = parseFloat(c.physical);
+      return { item: i, phys, remarks: c.remarks || '', v: varOf(i.qty, c.physical) };
+    }).filter(l => l.v != null && l.v !== 0);
+    if (!lines.length) { Notifs.showToast('No non-zero variances to post.'); return; }
+    const formNo = String(d.header?.formNo || 'IC').replace(/[^A-Za-z0-9-]/g, '') || 'IC';
+    if (!(await confirmDialog({ message:
+      `Post ${lines.length} variance correction${lines.length>1?'s':''}? On-hand quantities will be set to the physical count and each correction logged in the movement history. Write-in blank rows are not posted — add those items in Inventory first.`,
+      danger: true }))) return;
+    let posted = 0; const failed = [];
+    for (const l of lines) {
+      const itemRef = db.collection('inventory_items').doc(l.item.id);
+      const movRef  = db.collection('stock_movements').doc(`CNT_${formNo}_${l.item.id}`);
+      try {
+        await db.runTransaction(async tx => {
+          const mov = await tx.get(movRef);
+          if (mov.exists) return;                        // this form already posted this item
+          const cur = await tx.get(itemRef);
+          if (!cur.exists) return;
+          const sysNow = Number(cur.data().qty) || 0;    // recompute vs LIVE qty, not render-time
+          if (Math.abs(l.phys - sysNow) < 1e-9) return;  // someone already fixed it
+          tx.update(itemRef, { qty: l.phys, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+          tx.set(movRef, window.buildStockMovement({
+            itemId: l.item.id, itemName: l.item.name || '', type: 'adjust',
+            qty: Math.abs(l.phys - sysNow), source: 'count',
+            refNumber: d.header?.formNo || '',
+            note: `Count ${d.header?.date || ''}: system ${sysNow} → physical ${l.phys}${l.remarks ? ' — ' + l.remarks : ''}`,
+            unitCost: Number(cur.data().unitCost) || null, qtyAfter: l.phys
+          }));
+        });
+        posted++;
+      } catch (ex) { failed.push(l.item.name || l.item.id); }
+    }
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
+    window.logAudit && window.logAudit('adjust', 'inventory_count', formNo, { posted, failed: failed.length });
+    Notifs.showToast(failed.length
+      ? `Posted ${posted}; failed: ${failed.join(', ')}` : `Posted ${posted} variance correction${posted===1?'':'s'} ✓`);
+    renderProdInventoryForm(el, currentRole, kindFilter);
+  });
+```
+The print form's "Physical count supersedes system quantity upon approval" caption finally has
+its "elsewhere": this button. Draft counts are NOT cleared on post — the re-render shows
+variance 0 against the corrected system qty, which is the visual confirmation.
+
+### Spec 7 — RFQ item binding (js/departments.js:13112-13123, 13229-13298)
+
+**7a. "From low stock" prefill (13113-13118) — BEFORE → AFTER (carry the doc id):**
+```js
+// BEFORE
+      const low = isnap.docs.map(d => d.data())
+        .filter(i => (i.kind || 'material') === 'material' && (i.reorderLevel || 0) > 0 && (i.qty || 0) <= (i.reorderLevel || 0));
+      ...
+      const items = low.map(i => ({ desc: i.name || '', qty: Math.max(Math.round((i.reorderLevel || 0) * 2 - (i.qty || 0)), i.reorderLevel || 0), unit: i.unit || '' }));
+// AFTER
+      const low = isnap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .filter(i => (i.kind || 'material') === 'material' && (i.reorderLevel || 0) > 0 && (i.qty || 0) <= (i.reorderLevel || 0));
+      ...
+      const items = low.map(i => ({ itemId: i.id, desc: i.name || '', qty: Math.max(Math.round((i.reorderLevel || 0) * 2 - (i.qty || 0)), i.reorderLevel || 0), unit: i.unit || '' }));
+```
+
+**7b. `openRfqModal` (13229-13298) becomes async and loads the picker options once:**
+```js
+async function openRfqModal(currentUser, onDone, prefill) {
+  prefill = prefill || {};
+  let invItems = [];
+  try {
+    const isnap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
+    invItems = isnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  } catch(_) {}
+  const riItemOpts = (sel='') => `<option value="">— Free text / new —</option>` +
+    invItems.map(i => `<option value="${i.id}" data-name="${escHtml(i.name||'')}" data-unit="${escHtml(i.unit||'')}" ${sel===i.id?'selected':''}>${escHtml(i.name||'')}</option>`).join('');
+  ...
+```
+(callers already `await`-tolerant — both call sites invoke it fire-and-forget from click
+handlers; no caller change needed.)
+
+**`addRow` (13251-13262) — AFTER (select first, desc/unit prefill but stay editable):**
+```js
+  const addRow = (desc = '', qty = '', unit = '', itemId = '') => {
+    const row = document.createElement('div');
+    row.className = 'rfq-item-row';
+    row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap';
+    row.innerHTML = `
+      <select class="ri-item" title="Bind to an inventory item so receiving lands automatically" style="flex:1 1 100%;min-width:0;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">${riItemOpts(itemId)}</select>
+      <input class="ri-desc" placeholder="Item description (supplier wording ok)" value="${escHtml(desc)}" style="flex:2;min-width:0"/>
+      <input class="ri-qty" type="number" inputmode="decimal" min="0" placeholder="Qty" value="${qty}" style="flex:0 0 60px;width:60px"/>
+      <input class="ri-unit" placeholder="Unit" value="${escHtml(unit)}" style="flex:0 0 64px;width:64px"/>
+      <button class="btn-danger btn-sm ri-del" type="button" title="Remove">✕</button>`;
+    row.querySelector('.ri-del').addEventListener('click', () => row.remove());
+    row.querySelector('.ri-item').addEventListener('change', e => {
+      const opt = e.target.selectedOptions[0];
+      if (!opt || !opt.value) return;
+      const descEl = row.querySelector('.ri-desc'), unitEl = row.querySelector('.ri-unit');
+      if (!descEl.value.trim()) descEl.value = opt.dataset.name || '';
+      if (!unitEl.value.trim()) unitEl.value = opt.dataset.unit || '';
+    });
+    itemsWrap.appendChild(row);
+  };
+```
+Prefill loop (13263): `prefill.items.forEach(it => addRow(it.desc, it.qty, it.unit, it.itemId || ''));`
+
+**Save handler item collection (13270-13275) — AFTER:**
+```js
+    const items = [...itemsWrap.querySelectorAll('.rfq-item-row')].map(row => {
+      const sel = row.querySelector('.ri-item');
+      const itemId = sel.value || null;
+      let desc = row.querySelector('.ri-desc').value.trim();
+      if (!desc && itemId) desc = sel.selectedOptions[0]?.dataset.name || '';
+      return { itemId, desc,
+        qty: parseFloat(row.querySelector('.ri-qty').value) || 0,
+        unit: row.querySelector('.ri-unit').value.trim(),
+        unitPrice: null };
+    }).filter(it => it.desc || it.itemId);
+```
+
+**7c. `bindRfqCard` (13164-13227): NO change** — `(r.items||[]).map(x => ({...x}))` already
+carries `itemId` through Save Prices and Convert-to-PR (verified against the live code).
+`purchRfqCard`'s table also needs no change (it renders `desc`, which is always populated).
+
+### Spec 8 — firestore.rules: NO changes (decision 10)
+
+Per-collection justification, verified against the live file: `stock_movements` (954-958) —
+create already open to non-partners; deterministic-id `tx.set`/`batch.set` on a NEW doc is a
+create ✓, and a collision with an EXISTING id is an update → admin-only → DENIED, which is a
+free rules-level idempotency backstop. `inventory_items` (949-953) — all new writers
+(Production consume, Purchasing receive/resolver, finance count-post) are non-partners ✓.
+`purchase_requisitions` (885-897) — `receiveUnmatched`/`receivedToInventory` are written by
+`canPurchasing()` callers via the unrestricted Purchasing update clause ✓; Finance's
+five-key `hasOnly` clause is untouched. `production_orders`, `ledger`, `job_costs` —
+untouched by WS29. **No `firebase deploy --only firestore:rules` run is needed for this
+workstream** (if one happens anyway for another workstream, re-`git diff` first per the
+concurrent-edit memory).
+
+### Spec 9 — Migration / rollout checklist (ordered)
+
+1. **Ship all JS in one commit:** config.js (Spec 2 helper), departments.js (Specs 3, 4, 6, 7),
+   modules.js (Spec 5). `node --check` each edited file; CACHE_VER/APP_VERSION auto-bump via
+   the pre-commit hook — do not hand-edit. No index.html/PRECACHE change (no new file).
+   Coordinate with WS28 if it is mid-flight in the same `renderProductionDept` region —
+   whichever lands second rebases the Count Form subtab edits.
+2. **No rules deploy** (Spec 8). No new collections, no Firestore indexes (all new queries are
+   doc-id gets inside transactions).
+3. **No `unitCost` backfill** (decision 3). Optional pre-ship step for Neil: hand-correct any
+   known-wrong high-value items via Inventory → Edit Item, since the current value becomes the
+   opening cost of the first WAC calculation.
+4. **In-flight PRs need nothing:** `stage:'pr'` docs without `itemId` fall back to the
+   name-match path unchanged. PRs ALREADY flagged `receivedToInventory:true` with silently-lost
+   lines are NOT retroactively detectable (no per-line record exists) — fix any known cases
+   via manual Stock In, which now logs a movement.
+5. **Legacy `stock_movements` rows** lack `source`/`refNumber`/`unitCost`/`qtyAfter` — every
+   new read site uses `m.source||'manual'` and null-safe access (Spec 5c does). No backfill.
+6. **Backup coverage:** confirm `inventory_items` and `stock_movements` are in
+   `scripts/monthly-backup.js`'s EXPORTS list; add either if missing, in the same commit.
+7. **WS30 handoff (binding):** WS30 builds PO receiving ON `receiveLineIntoItem` (the single
+   receive primitive) and owns: ledger↔inventory value reconciliation, deriving the
+   receive-time Inventory-asset debit from `RECV_*` movement rows, the unmatched-line
+   asset-booking drift, VAT/landed-cost treatment, and any `inventory_items` rules tightening.
+   WS40 consumes the turns metric exactly as defined in decision 12.
+8. **Tell Neil about the BOM/quote effect** (decision 13) before the first post-ship receive.
+
+### Spec 10 — Manual test checklist (no automated suite)
+
+1. **WAC arithmetic (hand-checked):** item at 10 on hand @ ₱100 → receive 10 @ ₱200 → qty 20,
+   `unitCost` exactly 150; receive 20 more @ ₱120 → qty 40, `unitCost` 135
+   ((20×150+20×120)/40). Check the raw Firestore doc, not just the 2-dp display.
+2. **Stockout degenerate case:** item at qty 0 (and again at qty −3), receive 5 @ ₱80 →
+   `unitCost` exactly 80 (old cost contributes nothing); qty becomes 5 (resp. 2).
+3. **Blank-price line:** receive a line with `unitPrice` null/0 → qty adds, `unitCost`
+   UNCHANGED (preserved behavior), movement row has `unitCost: null`.
+4. **Idempotent receive:** partially-received PR (one unmatched line) → click "received"
+   again → matched lines do NOT double-add (`RECV_{prId}_{i}` movement already exists);
+   toast still reports the leftover.
+5. **Full cycle rows:** RFQ → PR → receive → consume in production. Item history shows exactly
+   two rows: `IN / receive / ref PR-…` then `OUT / consume / ref POCOS-…`, each with
+   `unitCost` and `qtyAfter` populated; Movements tab shows both with the Source column;
+   ledger still gets exactly one `POCOS-{id}` and one `POCOS-{id}-INV` row (unchanged).
+6. **Count post:** enter a physical count differing by ±N → ✓ Post Variances (visible only to
+   president/manager/finance; verify a Production employee does NOT see it) → item qty equals
+   the physical count, `ADJ`-badge movement with note "system X → physical Y — remarks";
+   re-posting the same form → 0 posted (deterministic `CNT_` id); print form still works.
+7. **RFQ picker binds through a renamed description:** create an RFQ picking item "Stainless
+   Sheet 4x8 ga.16", overwrite desc to "SUS304 sheet 4×8 #16 (JIS)" → save prices → convert →
+   receive → the line lands on the ORIGINAL item by `itemId` despite the name mismatch.
+8. **Resolver:** free-text RFQ line with a deliberate typo → receive → PR shows
+   "⚠ Resolve 1 unmatched" and `receivedToInventory:false` → bind to the right item → stock +
+   WAC land, movement `RECV_{prId}_{i}` created, `receivedToInventory` flips true and the
+   button disappears. Repeat choosing "＋ Create new item" → new doc created with qty then
+   received into it.
+9. **Low-stock prefill carries ids:** "📉 From low stock" → created RFQ's `items[].itemId`
+   equals each low item's doc id (check Firestore console).
+10. **Legacy render:** open Movements with pre-WS29 rows present → they render with Source
+    "manual", no blank/broken cells; CSV export includes the new columns with empty values
+    for legacy rows.
+11. **Cache freshness:** after each of receive/consume/count-post, the Stock tab (other
+    subtab, same session) shows the new qty within one navigation (dbCacheInvalidate fired).
+12. **Concurrency spot-check:** two browser tabs, click "Mark Received" on the same PR nearly
+    simultaneously → total qty added equals the PR line qty exactly once (transactions +
+    deterministic ids), one tab's lines report as already-received no-ops.
+
+### Flags for Neil (consolidated)
+
+- ‼️ **FLAG FOR NEIL — quote/BOM prices shift on ship date** (decision 13): `unitCost` becomes
+  a moving weighted average, so BOM-derived capital costs in the quote builder change meaning
+  the first time each item is received post-ship. Correct, but heads-up to whoever quotes.
+- ‼️ **FLAG FOR NEIL — VAT-inclusive stock valuation** (decision 2): WAC uses the PR line
+  price exactly as typed. VAT-exclusive/landed-cost valuation is deferred to WS30.
+- ‼️ **FLAG FOR NEIL — `inventory_items` writes stay open to all non-partner staff**
+  (decision 10): WS29 adds no rules tightening; the count-post gate is client-side only.
+  Real tightening belongs with WS30/WS19. Say the word to pull it forward.

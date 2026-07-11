@@ -693,3 +693,310 @@ for a period known to be older than the most recent 3000 ledger rows, confirmed 
 silently return zero; a 1601-C figure cross-checked against the already-posted
 `WHTPAY-{month}` ledger leg; and confirmation that every new BIR print shows the DTI entity
 (`brandEntity('bir')`) with a real TIN, never the OPC entity's blank TIN.
+
+## DECIDED — architecture spec (Fable, 2026-07-11)
+
+### Resolved decisions (one line each)
+
+1. **VAT registration → ‼️ FLAG FOR NEIL; ship assuming VAT-registered, behind a config flag.** The app already computes 12% VAT on every sale (only coherent if the entity IS VAT-registered), so `window.BIRCONFIG.vatRegistered = true` ships as a labelled PLACEHOLDER; if Neil/the accountant says percentage-tax (2551Q), the 2550 screen hides itself and shows a "2551Q — not yet built, entity is Non-VAT" notice instead of silently producing the wrong form. Do NOT build 2551Q speculatively.
+2. **Input-VAT capture → EXTEND to all three missing paths** (general Add-Expense, Ledger manual entry, dept budget-expense modal) via one shared field helper, with **category-based defaults**: Materials/Utilities/Office Supplies default `'inclusive'`, Meals/Transportation/Other default `'exempt'` — user can always override. `postExpenseToLedger` and `resyncLedgerForSource`'s expenses branch (which currently drops `inputVat` — verified departments.js:1532-1538) both carry it through; `exportFinReportCSV` already emits the column, unchanged.
+3. **"General journal" print → SYNTHESIZED from `ledger`**, defined as period-bounded ledger rows whose `refNumber` does NOT start with `CRJ-`/`CDJ-` (i.e., everything not already in a cash book: `EXP-`, `PAY-`, `SSSPAY-`/`PHPAY-`/`HDMFPAY-`/`WHTPAY-`/`NETPAY-`, `POCOS-`, manual entries), rendered as date/particulars/ref/debit/credit rows — PLUS legacy `general_journal` docs merged in with a "(legacy)" tag. The orphaned collection gets NO new writer; it stays read-only legacy data.
+4. **"General ledger" print → a NEW per-account view** in js/bir.js: group period-bounded `ledger` rows by `account` (via `ledgerKind()`/`COA` fallback for legacy rows), each account a section with its rows chronological + a period total (debits, credits, net). It is a print screen, NOT a mode of the existing Ledger tab (that tab is an editing surface; a book print must be read-only).
+5. **Cash Receipts / Cash Disbursements Books → read `cash_receipt_journal`/`cash_disbursement_journal` DIRECTLY** (date-range-bounded) — one row per source transaction with payee/customer, reference, column breakdown, VAT — the loose-leaf book structure. Ledger `CRJ-`/`CDJ-` rows are collapsed single-leg mirrors and lose the column detail.
+6. **Read-cap fix → `renderFinancialReports` switches to the WS16 bounded readers** (`window.ledgerForPeriod` + a new symmetric `window.gjForPeriod`), and EVERY new WS39 query is date-range-bounded — the `.limit(3000)` pattern is banned from anything BIR-facing. Full site list in Spec 2.
+7. **1601-C sourcing → recompute per-employee from `salary_history` (+ weekly `payslips`), CROSS-CHECKED against the `WHTPAY-{month}` ledger leg** with a visible ⚠ reconciliation banner when they disagree — this directly surfaces the known `financeDeleteCascade` aggregate-leg overstatement gap instead of silently trusting either source.
+8. **TIN/SSS#/PhilHealth#/Pag-IBIG# for regular employees → live on `payroll/{uid}`** (NOT `users`): it is already `isMoneyAdmin()`-write / owner-read (right sensitivity tier), already merged into payroll UI objects via `fetchUsersWithPayroll`, and avoids touching WS19's `userPrivilegedFieldsUnchanged()` freeze entirely. Captured in the existing "Edit Payroll" modal (new Statutory IDs section); frozen into pay-run lines/`salary_history` at Compute/Disburse for payslips; read LIVE from `payroll/{uid}` for alphalist/2316 (so no backfill of historical `salary_history` is needed).
+9. **Alphalist read pattern → one bounded year query is acceptable**: `salary_history.where('month','>=',Y+'-01').where('month','<=',Y+'-12')` (single-field range → automatic index), grouped client-side by `userId`; weekly workers via the equivalent `payslips` year query. Once-a-year, finance-only — same class as `renderTeam()`'s full-roster CSV. No pagination, no rollup.
+10. **OR/SI series → ATP-range-aware `nextSerialInRange()`** (start/end bounds, NO year reset, refuses to mint past the registered range) — `nextSerial()` as-written is NOT BIR-shaped. Series config ships NULL (minting disabled) until Neil supplies the ATP facts. ‼️ FLAG FOR NEIL (Spec 8).
+11. **VAT Payable → stays COMPUTED-ONLY; no ledger posting.** The payroll agency legs work because disbursement happens in-app; VAT remittance is paid outside the app and already lands as a CDJ disbursement (account 'Tax') when recorded — posting a liability leg with no in-app settlement flow would just accumulate un-reversed liabilities. `'VAT Payable'` stays in COA for manual entries; the 2550 worksheet is the artifact of record.
+12. **`finance_rollup` → NOT built.** Bounded date-range queries cover every WS39 need (an annual report = one year-range read, fine at this ledger's scale for years); a rollup doc duplicates ledger truth and needs write-fanout maintenance across ~10 ledger write paths. Documented here so WS13/WS16's deferral is formally closed as "declined, superseded by bounded reads." `renderFinanceOverview`'s all-time KPI read is out of scope.
+13. **Access tier → `canFinance()` for viewing/generating/exporting everything** (the reports only derive from collections `canFinance()` can already read — a narrower client gate would be theater, not security); OR/SI minting rides `_counters`' existing `isFinanceOrAdmin()` write rule; the generated-worksheet audit trail reuses `tax_records` (`canFinance()` create/update, president delete). Secretary is already excluded from ledger/journal reads by WS19's `canFinance()` narrowing — nothing new needed.
+14. **Print/export → BOTH**: same-document `window.print()` letterhead print (WS24 pattern, no pop-ups) AND a per-worksheet ⬇ CSV button (the accountant re-keys into eBIRForms regardless). Every print passes `entity: window.brandEntity('bir')` EXPLICITLY — never the default.
+15. **UI placement → ONE new 'BIR' chip-tab in `finTabs`** (after 'Taxes'), rendered by `window.renderBIRTab()` in a NEW `js/bir.js`, with a second-level `chipTabs` document picker: Books · VAT (2550) · Withholding (1601-C) · Alphalist / 2316 · Financial Statements. Worksheets can "Save to Taxes tab" (pre-fills a `tax_records` entry) so the manual tracker and the generator stay one system, not two.
+16. **Persisted snapshots → NO new collection.** Generated worksheets persist by pre-filling `tax_records` with three NEW optional fields (`worksheetType`, `sourceFigures` map, `generatedBy`) — existing rules block covers it, monthly backup picks it up automatically, and Finance's "did we file X" record stays in one place.
+
+**Net infrastructure impact: ZERO `firestore.rules` changes, ZERO new composite indexes, ZERO new collections.** All new queries are single-field ranges (automatic indexes); all writes land in existing rules-covered collections whose blocks have no field-shape validation to update. One new JS file (`js/bir.js`) → `index.html` + `sw.js` PRECACHE + CACHE_VER bump.
+
+**Sequencing:** no dependency on any undecided workstream. Reads WS20/21's frozen `salary_history`/agency legs as designed ("WS39 reads these"). The WS21 `verified:false` statutory-rate watermark propagates onto 1601-C/2316/alphalist prints (Spec 6). ⚠ Note the live Payroll-Compute ReferenceError (payroll-compute-existing-bug memory, PR#2): if still unfixed, `salary_history` may be sparse for recent months — the 1601-C reconciliation banner will surface this rather than hide it.
+
+---
+
+### Spec 1 — `js/bir.js` module + config
+
+**New file `js/bir.js`** — loaded in index.html AFTER `letterhead.js`, BEFORE `departments.js` (it needs `config.js`/`statutory-tables.js`/`letterhead.js`; `departments.js` calls its helpers). Add to `sw.js` PRECACHE. Contains: `BIRCONFIG`, `vatFieldHTML`/`readVatField`, `computeVatSummary`, `nextSerialInRange`, `renderBIRTab` + the per-document render/print builders, and the CSV exporters.
+
+```js
+// ── window.BIRCONFIG (top of js/bir.js) ─────────────────────────
+window.BIRCONFIG = {
+  // ‼️ FLAG FOR NEIL — PLACEHOLDER. true = files 2550M/Q (app behavior implies this).
+  // If the DTI entity is actually Non-VAT/percentage-tax, set false → 2550 screen
+  // hides and shows the "entity is Non-VAT (2551Q)" notice instead.
+  vatRegistered: true,
+  // ‼️ FLAG FOR NEIL — OR/SI series stay NULL (minting disabled, buttons hidden)
+  // until the real ATP facts arrive. Example shape once known:
+  //   or: { counterKey:'or_series_2026A', prefix:'OR-', start:1, end:5000, pad:6, atpNo:'ATP #…' }
+  series: { or: null, si: null }
+};
+
+// ── Category → default VAT treatment for the general expense flow ──
+window.VAT_DEFAULT_BY_CATEGORY = {
+  'Office Supplies':'inclusive', 'Materials':'inclusive', 'Utilities':'inclusive',
+  'Meals':'exempt', 'Transportation':'exempt', 'Other':'exempt'
+};
+
+// ── Shared input-VAT form field (Spec 3 uses this in all three forms) ──
+window.vatFieldHTML = function(id, def) {
+  return `<div class="form-group"><label>Input VAT</label>
+    <select id="${id}" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+      <option value="inclusive" ${def==='inclusive'?'selected':''}>VATable — 12% included in amount</option>
+      <option value="exempt" ${def!=='inclusive'?'selected':''}>VAT-exempt / no VAT on receipt</option>
+    </select></div>`;
+};
+window.readVatField = function(id, amount) {
+  const t = document.getElementById(id)?.value || 'exempt';
+  return { vatTreatment: t, inputVat: t==='exempt' ? 0 : window.vatSplit(amount||0,'inclusive').vat };
+};
+
+// ── ONE VAT-summary computation, shared by Financial Reports, 2550, and the FS
+//    print — never re-derive this math (reuses the exact renderFinancialReports
+//    logic incl. the legacy amount−amount/1.12 fallback). rows = ledger row objects.
+window.computeVatSummary = function(rows) {
+  const income  = rows.filter(e => ledgerKind(e)==='income');
+  const expense = rows.filter(e => ledgerKind(e)==='expense');
+  const salesRows = income.filter(e => (e.category||'')==='Sales Revenue');
+  let vatableSales=0, exemptSales=0, outputVat=0;
+  salesRows.forEach(e => {
+    const amt = e.amount||0;
+    const v = (e.vatAmount != null) ? e.vatAmount : (amt - amt/1.12);   // legacy fallback
+    if (v > 0) { outputVat += v; vatableSales += amt - v; } else exemptSales += amt;
+  });
+  const inputVat = expense.reduce((s,e)=>s+(e.inputVat||0),0);
+  return { vatableSales, exemptSales, outputVat, inputVat, netVat: outputVat - inputVat };
+};
+```
+
+`renderBIRTab(container, currentUser, currentRole)` — wired into the finance subtab switch: add `'BIR'` to the `finTabs` array (departments.js:1999) and a `case`/branch in the subtab dispatch (~2020-2030) calling `window.renderBIRTab(...)`. Second-level `window.chipTabs` inside: `books` · `vat` · `wht` · `alpha` · `fs`. Every screen: a `window.Period`-driven picker (month for 1601-C/2550M, quarter for 2550Q, year for alphalist/2316/FS, any for books), a 🖨 Print button (same-document `window.print()`, print CSS from `buildLetterhead`), and a ⬇ CSV button.
+
+**Letterhead call shape (every WS39 print — the ONLY correct form):**
+```js
+const lh = window.buildLetterhead({ entity: window.brandEntity('bir'),   // NEVER default — OPC has no TIN
+                                    title: 'CASH DISBURSEMENTS BOOK', subtitle: pParsed.label });
+// page = lh.headerHTML + <table…> + lh.footerHTML; inject lh.printCSS; window.print() in-document.
+```
+
+### Spec 2 — The `.limit(3000)` read-cap fix (the compliance landmine)
+
+**2a — new bounded reader `window.gjForPeriod` (js/config.js, directly after `ledgerSince` ~line 411):**
+```js
+// Bounded general_journal reader — symmetric with ledgerForPeriod (WS16 pattern).
+window.gjForPeriod = function(periodKey) {
+  const p = Period.parse(periodKey);
+  if (p.type === 'all')
+    return dbCachedGet('gj', () => db.collection('general_journal').get().catch(()=>({docs:[]})), 45000);
+  return dbCachedGet('gj:' + p.key,
+    () => db.collection('general_journal').where('date','>=',p.start).where('date','<=',p.end)
+            .get().catch(()=>({docs:[]})), 45000);
+};
+```
+
+**2b — departments.js:3405-3421 `renderFinancialReports` — BEFORE → AFTER (fetch block only; everything below `window._finReportRows` is unchanged):**
+```js
+// BEFORE (fetches the 3000 MOST RECENT rows of ALL TIME, then filters — older
+// periods silently truncate once the collection exceeds 3000 docs):
+  const [ledgerSnap, gjSnap] = await Promise.all([
+    db.collection('ledger').orderBy('date','desc').limit(3000).get().catch(()=>({docs:[]})),
+    db.collection('general_journal').orderBy('date','desc').limit(3000).get().catch(()=>({docs:[]}))
+  ]);
+  ...
+  const periodKey = (range === 'year') ? 'ytd' : range;
+  const pParsed = window.Period.parse(periodKey);
+  all = all.filter(e => window.Period.match(e.date, pParsed));
+// AFTER (period resolved FIRST, then date-range-bounded reads; the client-side
+// Period.match filter stays as belt-and-braces for rows with odd date strings):
+  const periodKey = (range === 'year') ? 'ytd' : range;
+  const pParsed = window.Period.parse(periodKey);
+  const [ledgerSnap, gjSnap] = await Promise.all([
+    window.ledgerForPeriod(periodKey),
+    window.gjForPeriod(periodKey)
+  ]);
+  ...
+  all = all.filter(e => window.Period.match(e.date, pParsed));
+```
+Also refactor the VAT block further down (departments.js:3435-3445) to call `window.computeVatSummary(all)` so Reports and 2550 can never drift.
+
+**2c — every existing `.limit(N)`-then-filter site (grep `limit(3000)|limit(2000)|limit(5000)` on 2026-07-11; Sonnet MUST re-grep before finalizing):**
+- departments.js:3407 (`ledger`, renderFinancialReports) — **FIXED by 2b.**
+- departments.js:3408 (`general_journal`, renderFinancialReports) — **FIXED by 2b.**
+- app.js:1423 (`products.limit(2000)`) — **unchanged**: product catalog, not a financial report; no period semantics.
+- `renderLedgerTab` (departments.js:3657+) reads ledger+general_journal for the editing tab — **unchanged**: it is a browsing/editing surface, not a filing surface; nothing BIR-facing reads through it. (If Sonnet's re-grep finds a limit-then-filter there, note it but do not expand scope.)
+- **Rule going forward:** every js/bir.js query is `where('date'>=start).where('date'<=end)` (or `month`/`payPeriodStart` equivalents) — single-field ranges, automatic indexes, `firestore.indexes.json` untouched.
+
+### Spec 3 — Input-VAT capture on the three missing expense paths
+
+**3a — `openAddExpenseModal` (departments.js:1686-1727).** Insert after the Category form-group: `${window.vatFieldHTML('e-vat', window.VAT_DEFAULT_BY_CATEGORY['Office Supplies'])}` and re-default on category change:
+```js
+document.getElementById('e-cat').addEventListener('change', ev => {
+  const el = document.getElementById('e-vat');
+  if (el) el.value = window.VAT_DEFAULT_BY_CATEGORY[ev.target.value] || 'exempt';
+});
+```
+In the save handler, extend the `expenses.add({...})` payload:
+```js
+      ...readVatField('e-vat', parseFloat(document.getElementById('e-amount').value)||0),
+      // → adds vatTreatment:'inclusive'|'exempt', inputVat:number to the expenses doc
+```
+(expenses rules:507-520 have no field-shape validation — no rules change.)
+
+**3b — `postExpenseToLedger` (departments.js:1434-1455).** Add one field to the ledger write: `inputVat: e.inputVat || 0,` (after `category`). Legacy expenses docs have no `inputVat` → 0, exactly today's behavior.
+
+**3c — `resyncLedgerForSource` expenses branch (departments.js:1532-1538).** Currently leaves `inputVat = null` for expenses (verified) so an EDITED expense loses/never gains VAT. Add inside the `collection === 'expenses'` branch: `inputVat = e.inputVat || 0;` — the existing `if (inputVat != null) patch.inputVat = inputVat;` (departments.js:1562) then carries it automatically.
+
+**3d — Ledger-tab manual entry (departments.js:3740-3782).** Insert `${window.vatFieldHTML('led-vat','exempt')}` after the Reference field; show/hide it on the existing type/accountType listeners (visible only when `typeSel.value==='debit' && acctTypeSel.value==='expense'`). In the save payload add:
+```js
+        ...( typeSel.value==='debit' && acctTypeSel.value==='expense'
+             ? readVatField('led-vat', parseFloat(document.getElementById('led-amount').value)||0) : {} ),
+```
+
+**3e — Dept budget-expense modal (departments.js:11601-11660).** Insert `${window.vatFieldHTML('exp-vat','exempt')}` after the Reference field (visible only when `exp-type` is `debit`, same show/hide pattern); spread `readVatField('exp-vat', amount)` into the `ledger.add({...})` payload when `type==='debit'`.
+
+**3f — Stays-in-sync confirmations:** `exportFinReportCSV` (departments.js:3383-3397) already emits `vatAmount`/`inputVat` columns — **unchanged**. `financeEditModal` edits on expenses route through `resyncLedgerForSource` → covered by 3c. CDJ/Purchasing paths already capture — **unchanged**. Production `POCOS-` legs deliberately VAT-free — **unchanged**.
+
+### Spec 4 — Statutory ID capture for regular employees (the alphalist/2316 prerequisite)
+
+**4a — Fields (all `string`, default `''`), on `payroll/{uid}`:** `tinNum`, `ssNum`, `phNum`, `pagibigNum` — SAME names as `worker_profiles` uses (departments.js:4580,4654) so `toPayslipModel` reads one vocabulary. No rules change (`payroll` create/update is already `isMoneyAdmin()` with no shape validation, rules:408-412; owner-read gives each employee visibility of their own IDs — correct).
+
+**4b — Capture UI: the "Edit Payroll" modal (departments.js:3032-3110).** Insert a Statutory IDs section before the Tax field:
+```html
+<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+  <label style="font-weight:600">🪪 Statutory IDs <span style="font-size:11px;color:var(--text-muted)">(required for Alphalist / BIR 2316)</span></label>
+  <div class="form-row">
+    <div class="form-group"><label>TIN</label><input id="ep-tin" value="${escHtml(emp.tinNum||'')}" placeholder="000-000-000-000"/></div>
+    <div class="form-group"><label>SSS No.</label><input id="ep-ssnum" value="${escHtml(emp.ssNum||'')}" placeholder="00-0000000-0"/></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group"><label>PhilHealth No.</label><input id="ep-phnum" value="${escHtml(emp.phNum||'')}"/></div>
+    <div class="form-group"><label>Pag-IBIG MID</label><input id="ep-pagnum" value="${escHtml(emp.pagibigNum||'')}"/></div>
+  </div>
+</div>
+```
+In the save handler's `payroll.set({...},{merge:true})` add:
+```js
+            tinNum:     document.getElementById('ep-tin')?.value.trim()   || '',
+            ssNum:      document.getElementById('ep-ssnum')?.value.trim() || '',
+            phNum:      document.getElementById('ep-phnum')?.value.trim() || '',
+            pagibigNum: document.getElementById('ep-pagnum')?.value.trim()|| '',
+```
+(`fetchUsersWithPayroll` already merges payroll fields onto `emp` — the inputs above read `emp.tinNum` etc. with zero extra plumbing. Free-text like `worker_profiles`; no format validation beyond the placeholder hint.)
+
+**4c — Freeze into the pay run (payslip prints).** At `computePayRun`'s line-assembly site (departments.js:~2497, after `computePayLine` returns), stamp the IDs onto the frozen line: `line.tinNum=emp.tinNum||''; line.ssNum=emp.ssNum||''; line.phNum=emp.phNum||''; line.pagibigNum=emp.pagibigNum||'';` — and mirror the same four fields in `disbursePayRun`'s `shBatch.set` payload (departments.js:2536-2549). Do NOT touch `computePayLine` itself (WS20's frozen math).
+
+**4d — `toPayslipModel` 'monthly' branch (departments.js:5226-5228) — BEFORE → AFTER:**
+```js
+// BEFORE:  tin:'', sss:'', philhealth:'', pagibig:'' },
+// AFTER:   tin:source.tinNum||'', sss:source.ssNum||'', philhealth:source.phNum||'', pagibig:source.pagibigNum||'' },
+```
+
+**4e — Missing-ID policy (alphalist/2316):** IDs are read LIVE from `payroll/{uid}` at report time (Spec 6), so no `salary_history` backfill is needed. An employee with a blank `tinNum`: their row renders with a red `⚠ TIN missing` chip, the print carries a top banner "N employee(s) missing TIN — not filing-ready", and the CSV emits the empty cell. Generation is NOT hard-blocked (the accountant may hold TINs offline). The alphalist screen doubles as the data-collection to-do list.
+
+**4f — Migration:** no script. HR fills IDs via the Edit Payroll modal, driven by the alphalist screen's missing-ID banner. Historical payslip prints regenerate with IDs automatically for `salary_history` docs written AFTER 4c ships; older ones show blanks (cosmetic, acceptable — regenerating months are re-frozen on the next edit anyway). Weekly workers already covered via `worker_profiles`.
+
+### Spec 5 — Books-of-account prints (all in js/bir.js, all date-range-bounded, all `brandEntity('bir')`)
+
+| Book | Source + exact query | Columns |
+|---|---|---|
+| **General Journal** | `ledgerForPeriod(period)` rows where `!/^(CRJ|CDJ)-/.test(refNumber||'')` + `gjForPeriod(period)` legacy docs (tagged "legacy") | Date · Particulars (`description`) · Ref · Account · Debit (`type==='debit'?amount:''`) · Credit |
+| **General Ledger** | `ledgerForPeriod(period)`, grouped by `account` (fallback `category`; kind via `ledgerKind()`) — sorted COA order: income, expense, asset, liability, equity | Per-account section: Date · Particulars · Ref · Debit · Credit · running balance; section totals + grand totals |
+| **Cash Receipts Book** | `db.collection('cash_receipt_journal').where('date','>=',p.start).where('date','<=',p.end).get()` sorted by date asc | Date · OR/Ref · Customer · Cash/Dr total · Cr Sales Revenue · Cr Sundry (acct + amount) · Output VAT (`vatAmount` from the mirrored ledger row where present) |
+| **Cash Disbursements Book** | same bounded query on `cash_disbursement_journal` | Date · Voucher/Ref · Payee · Cr Cash total · Dr Materials · Dr Labor · Dr AP · Dr Sundry (acct + amount) · Input VAT (`vatAmount`) · VAT treatment |
+
+Each: `escHtml()` on every payee/customer/description; page footer via `buildLetterhead`; ⬇ CSV mirrors the print columns. These are **prints of existing data** — zero new writes, zero rules impact.
+
+### Spec 6 — Statutory worksheets (labelled WORKSHEETS, not official forms — figures for the accountant to transcribe into eBIRForms/eFPS; the print header says so explicitly)
+
+**6a — 2550M/Q (VAT).** Gated on `BIRCONFIG.vatRegistered`. Period picker: `month:YYYY-MM` or `quarter:YYYY-Qn`. Rows from `ledgerForPeriod`; figures from `computeVatSummary(rows)`: VATable sales (net of VAT) · VAT-exempt sales · Output VAT · Input VAT this period · **Prior-period creditable input VAT: a manual input defaulting 0** (no carry-over history exists in the data — the accountant supplies it; stored in the saved `tax_records.sourceFigures` for next time) · Net VAT payable / (creditable). Buttons: 🖨 Print · ⬇ CSV · **"Save to Taxes tab"** →
+```js
+await db.collection('tax_records').add({ period: pParsed.label, type:'VAT',
+  amount: Math.max(0, f.netVat - priorCreditable), dueDate:'', status:'pending',
+  worksheetType: p.type==='quarter' ? '2550Q' : '2550M',
+  sourceFigures: { ...f, priorCreditable }, generatedBy: currentUser.uid,
+  createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+```
+(then `renderTaxesTab` shows it like any hand-logged filing — one system, no drift.)
+
+**6b — 1601-C + agency remittance (month picker).** Per-employee recompute + aggregate cross-check:
+```js
+const shSnap  = await db.collection('salary_history').where('month','==',month).get().catch(()=>({docs:[]}));
+const wpSnap  = await db.collection('payslips').where('payPeriodStart','>=',month+'-01')
+                        .where('payPeriodStart','<=',month+'-31').get().catch(()=>({docs:[]}));
+const legSnap = await db.collection('ledger').where('refNumber','==',`WHTPAY-${month}`).limit(1).get().catch(()=>({docs:[]}));
+```
+Table: employee · gross · SSS(EE/ER) · PhilHealth(EE/ER) · Pag-IBIG(EE/ER) · tax withheld; weekly workers appended from `payslips` (`deductions.govt.*`, `deductions.other.taxes`; ER shares blank per WS24 D3 — footnote "weekly ER share manual-only"). Footer: recomputed total vs `WHTPAY-{month}` leg; if `|diff| > 0.01` render `⚠ Ledger aggregate (₱X) ≠ per-employee total (₱Y) — a deleted employee payroll leaves the aggregate legs overstated (known financeDeleteCascade gap); the per-employee total is authoritative for filing.` Same screen shows the SSSPAY-/PHPAY-/HDMFPAY- cross-checks (one extra `where('refNumber','in',[...])` read or three `limit(1)` reads).
+
+**6c — Alphalist (year picker) + 2316 (per employee).** One year query each for `salary_history` and `payslips` (decision 9), grouped client-side; join names from the users cache and IDs live from `payroll/{uid}` (batched `getAll`-style loop over only the employees present in the year's rows). Extend `window.payslipYtdMonthly` (departments.js:5268-5276) ADDITIVELY to also sum `tax`, `sss`, `philhealth`, `pagibig` into its return (existing callers unaffected) and let 2316 reuse it. Alphalist columns: employee · TIN · gross compensation · SSS+PH+HDMF (non-taxable) · 13th-month accrual (`payslipYtdMonthly.thirteenthAccrual`) · taxable comp · tax withheld. 2316: one employee per print page — employee block (name, TIN, address blank-line), employer block from `brandEntity('bir')`, the year's figures, signature lines via `BRAND.legal.signatory`. Missing-TIN policy per Spec 4e.
+
+**6d — Unverified-rates watermark (WS21 discipline, single wording).** While `window.STATUTORY[year]?.verified === false`, every 1601-C/2316/alphalist print carries one diagonal watermark + header chip: `DRAFT — statutory tables unverified (WS21); do not file until the accountant verifies rates`. Implement once in js/bir.js (`birUnverifiedBanner(year)`) — do NOT re-word per screen (drift risk the brief warns about).
+
+### Spec 7 — Financial Statement print (year/quarter picker)
+
+One print, three sections, all from `ledgerForPeriod(period)` + `computeVatSummary`:
+1. **Income Statement** — the existing `renderFinancialReports` math (income/expense by category via `ledgerKind`), solid.
+2. **VAT Summary** — `computeVatSummary` figures, solid.
+3. **Balance Sheet — marked "PROVISIONAL".** Per-account net from ledger rows: assets = debits−credits; liabilities/equity = credits−debits; Retained Earnings line = cumulative net income (needs an ALL-TIME-to-period-end read: `ledgerSince(null)`-style bounded `where('date','<=',p.end)` — one extra query, cached). The ledger is NOT strict double-entry (single-leg entries abound), so it will not balance: render an explicit **"Unreconciled difference (single-entry records)"** plug line rather than hiding it. The print states: "Provisional statement derived from single-entry records — for management + accountant working-paper use; not audited FS."
+
+### Spec 8 — OR/SI series minting (js/bir.js)
+
+```js
+// ATP-range-aware serial: NO year reset, refuses to mint past the registered range.
+window.nextSerialInRange = async function(seriesKey) {          // 'or' | 'si'
+  const cfg = (window.BIRCONFIG.series||{})[seriesKey];
+  if (!cfg) throw new Error('Series not configured — BIRCONFIG.series.'+seriesKey+' is null (awaiting ATP details).');
+  const ref = db.collection('_counters').doc(cfg.counterKey);
+  const n = await db.runTransaction(async t => {
+    const c = await t.get(ref);
+    const cur  = c.exists ? (c.data().count || (cfg.start-1)) : (cfg.start-1);
+    const next = cur + 1;
+    if (next > cfg.end) throw new Error(`${cfg.prefix} series exhausted (ATP range ${cfg.start}–${cfg.end}). Register a new series with BIR before issuing more.`);
+    t.set(ref, { count: next, start: cfg.start, end: cfg.end, atpNo: cfg.atpNo||'' }, { merge:true });
+    return next;
+  });
+  return `${cfg.prefix}${String(n).padStart(cfg.pad||6,'0')}`;
+};
+```
+- `_counters` write is ALREADY `isFinanceOrAdmin()` (rules:154-157 — the brief's "isAdmin()" citation is stale) → finance can mint, **no rules change**. WS14's `nextSerial()` stays untouched (employee IDs).
+- **Call sites:** a small `⚙ Next OR #` button rendered beside each existing free-text OR input (`rs-ref` at departments.js:9500 and 12260, and the CRJ form's reference field ~3820-3930) — on click, `nextSerialInRange('or')` fills the input. Button renders ONLY when `BIRCONFIG.series.or` is non-null, so nothing appears until Neil supplies the range. Free-text stays (legacy manually-issued ORs exist). `si` wired the same way wherever a Sales-Invoice reference field is added later — config-ready, zero call sites forced now.
+- **‼️ FLAG FOR NEIL:** supply per series — ATP/permit number, exact prefix, numeric start/end of the authorized range, pad width. Until then minting is dormant by design.
+
+### Spec 9 — Rules / indexes / backup — explicit no-ops
+
+- `firestore.rules` — **NO changes.** Every read/write lands in existing blocks: `ledger` (bounded reads, `inputVat` is an unvalidated extra field), `expenses` (no shape validation), `payroll` (no shape validation), `tax_records` (extra optional fields fine), `_counters` (write already `isFinanceOrAdmin()`), CRJ/CDJ (read-only here). No deploy of rules needed — a genuine first for this series; re-grep `firestore.rules` for concurrent-session drift anyway before shipping (deploy-recheck memory) but expect zero diff from WS39.
+- `firestore.indexes.json` — **NO changes.** Every new query is a single-field range or equality (`date`, `month`, `payPeriodStart`, `refNumber`) → automatic indexes.
+- `scripts/monthly-backup.js` — **NO changes** (no new collections; WS15's `db.listCollections()` discovery moot here).
+
+### Spec 10 — Migration / rollout checklist (ordered)
+
+1. **Ship JS (one commit):** config.js (`gjForPeriod`), NEW js/bir.js, index.html script tag (after letterhead.js, before departments.js), sw.js PRECACHE + CACHE_VER, departments.js edits (Spec 2b, 3a-3e, 4b-4d, `finTabs`+dispatch, `computeVatSummary` refactor of Reports). `node --check` each file; preview boot. Pre-commit hook auto-bumps APP_VERSION — do not hand-edit.
+2. **No rules/index deploy** (Spec 9) — skip `firebase deploy` entirely unless a concurrent session's diff says otherwise.
+3. **Data entry:** HR/Finance fills Statutory IDs via Edit Payroll for every regular employee, driven by the alphalist screen's missing-TIN banner (Spec 4e). No script backfill.
+4. **‼️ Neil/accountant inputs, before first real filing:** (a) VAT-registered? (`BIRCONFIG.vatRegistered`); (b) OR/SI ATP ranges (`BIRCONFIG.series`); (c) WS21 statutory table verification (`verified:true`) — until then 1601-C/2316/alphalist print DRAFT-watermarked.
+5. **Next pay run** after ship freezes IDs into lines/`salary_history` automatically (Spec 4c) — no action.
+6. **First real 2550 period:** accountant supplies the prior-period creditable-input-VAT figure once; thereafter read it back from the previous saved `tax_records.sourceFigures`.
+
+### Spec 11 — Manual test checklist (no automated suite)
+
+1. **Read-cap:** temporarily seed >3000 ledger docs in a test project OR verify by query inspection — request Reports for a period older than the newest 3000 rows → figures now come from a bounded `where date` query (network tab shows the range query), NOT zero/low. Same period key twice → second load served from `dbCachedGet` cache.
+2. **Input-VAT end-to-end:** submit a ₱1,120 general expense, category Materials (defaults VATable) → approve → ledger row has `inputVat:120`; same via Ledger manual entry (debit/expense) and a dept budget expense. Edit the approved expense's amount → resync keeps/updates `inputVat` (Spec 3c). A Meals expense defaults exempt → `inputVat:0`.
+3. **VAT math cross-check:** period containing 1 sale ₱11,200 inclusive (output 1,200), 1 CDJ-VATed purchase (input 600), 1 general Materials expense ₱1,120 (input 120) → Reports card AND 2550 worksheet both show Net VAT Payable 480 (hand-calc; both via `computeVatSummary`). CSV columns match.
+4. **1601-C reconciliation:** month with a disbursed pay run → per-employee tax total == `WHTPAY-{month}` leg, no banner. Delete one employee's `salary_history` row via financeDelete flow → regenerate → ⚠ banner appears naming the discrepancy.
+5. **Alphalist/2316:** employee with TIN filled shows clean row; employee without shows `⚠ TIN missing` chip + print banner + still-generatable CSV with empty cell. 2316 YTD tax equals the sum of that employee's 12 `salary_history.tax` values (hand-check one). Weekly worker appears with `worker_profiles` IDs.
+6. **Entity:** EVERY new print (4 books, 3 worksheets, FS) shows `NEILBARRO STEEL & METAL FABRICATION SERVICES` + TIN `951-145-613-000` — never a blank-TIN OPC header. Grep js/bir.js: every `buildLetterhead(` call passes `entity:`.
+7. **Watermark:** with `STATUTORY[2026].verified===false`, 1601-C/2316/alphalist prints show the DRAFT watermark; flip to true in console → watermark gone.
+8. **Books:** GJ print excludes CRJ-/CDJ- rows and includes PAY-/EXP-/manual rows; GL groups by account with totals; CRB/CDB row counts equal the journal collections' doc counts for the period; a payee named `<b>x</b>` renders escaped.
+9. **OR minting:** with `series.or=null` → no button. Set a test range `{start:1,end:3}` → mints OR-000001..3, 4th click errors "series exhausted"; two rapid clicks never duplicate (transaction).
+10. **Taxes-tab wiring:** "Save to Taxes tab" from 2550 → entry appears in `renderTaxesTab` with amount/period/type prefilled; attach a file + mark filed as before.
+
+### Flags for Neil (consolidated)
+
+- **‼️ FLAG FOR NEIL — VAT registration classification.** Is the DTI entity (TIN 951-145-613-000) VAT-registered (files 2550M/Q — the app's 12%-on-every-sale behavior implies yes) or Non-VAT percentage-tax (files 2551Q)? Ships as `BIRCONFIG.vatRegistered = true` PLACEHOLDER; the 2550 screen is wrong to use if the answer is Non-VAT.
+- **‼️ FLAG FOR NEIL — OR/SI ATP details.** Per series: ATP/permit no., prefix, authorized numeric range (start–end), pad width. Minting stays disabled (`series: {or:null, si:null}`) until supplied.
+- **‼️ FLAG FOR NEIL — statutory tables still `verified:false` (WS21).** 1601-C/2316/alphalist print DRAFT-watermarked until the accountant verifies the SSS/PhilHealth/Pag-IBIG/TRAIN tables and flips `verified:true`. Do not file watermarked output.
+- **‼️ FLAG FOR NEIL — prior-period creditable input VAT** on the first 2550 run is a manual figure from the accountant (no history exists in-app); subsequent periods read it back from the saved worksheet.
