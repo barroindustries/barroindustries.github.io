@@ -375,7 +375,7 @@ function showApp() {
   // Init Lucide icons for static topbar elements
   if (window.lucide) lucide.createIcons();
   // Apply correct theme toggle icon
-  _applyThemeIcon(localStorage.getItem('bi-theme') || 'office');
+  _applyThemeIcon(getTheme());
   // Reset any iOS zoom that happened during login input
   _resetViewportZoom();
   // Pull-to-refresh (init once)
@@ -828,39 +828,45 @@ function friendlyError(code) {
   }[code] || 'Sign-in failed.';
 }
 
-// ── Theme ─────────────────────────────────────────
+// ── Theme (WS42 Phase 4 — Light / Dark / Astral + Auto) ──────────────────
 const THEMES = {
-  auto:     { label: 'Auto',     cls: () => matchMedia('(prefers-color-scheme: dark)').matches ? null : 'light theme-office' },
-  office:   { label: 'Office',   cls: 'light theme-office' },
-  dark:     { label: 'Obsidian', cls: null },
-  midnight: { label: 'Midnight', cls: 'theme-midnight' },
-  light:    { label: 'Aurora',   cls: 'light' },
-  pink:     { label: 'Astral',   cls: 'theme-pink' },
-  grey:     { label: 'Slate',    cls: 'theme-grey' },
+  auto:   { label: 'Auto',   cls: () => matchMedia('(prefers-color-scheme: dark)').matches ? 'theme-dark' : 'light' },
+  light:  { label: 'Light',  cls: 'light' },
+  dark:   { label: 'Dark',   cls: 'theme-dark' },
+  astral: { label: 'Astral', cls: 'theme-astral' },
 };
 // cls may now be a string | null | function → string|null. Resolve everywhere via _themeCls().
 function _themeCls(t){ const c = THEMES[t] && THEMES[t].cls; return typeof c === 'function' ? c() : c; }
 
+// Pre-WS42 stored values migrate onto the new 3-theme set, once, in place.
+const THEME_MIGRATION = { office: 'light', pink: 'light', grey: 'light', midnight: 'dark' };
+
 function initTheme() {
-  // Default to the light "Office" (Fluent) theme — clean white, office-friendly.
-  // Users who already picked a theme keep their choice.
-  setTheme(localStorage.getItem('bi-theme') || 'office', false);
+  // Default is Light (decided 2026-07-08, reaffirmed WS42). Users who already
+  // picked a theme keep their choice — old theme names migrate transparently.
+  let stored = localStorage.getItem('bi-theme');
+  if (stored && THEME_MIGRATION[stored]) {
+    stored = THEME_MIGRATION[stored];
+    localStorage.setItem('bi-theme', stored);
+  }
+  setTheme(stored || 'light', false);
   // When 'auto' is active, follow the OS scheme instantly (no reload).
   const mq = matchMedia('(prefers-color-scheme: dark)');
-  const onOsScheme = () => { if ((localStorage.getItem('bi-theme') || 'office') === 'auto') setTheme('auto', false); };
+  const onOsScheme = () => { if ((localStorage.getItem('bi-theme') || 'light') === 'auto') setTheme('auto', false); };
   mq.addEventListener ? mq.addEventListener('change', onOsScheme) : mq.addListener(onOsScheme);
 }
 
 function setTheme(theme, persist = true) {
-  if (!THEMES[theme]) theme = 'office';
+  if (THEME_MIGRATION[theme]) theme = THEME_MIGRATION[theme]; // defensive — old callers/links may still pass a legacy key
+  if (!THEMES[theme]) theme = 'light';
   const html = document.documentElement;
-  // strip every class any theme could add (static strings + the two Auto resolves)
-  ['light','theme-office','theme-midnight','theme-pink','theme-grey'].forEach(c => html.classList.remove(c));
+  // strip every class any theme (current + legacy) could add
+  ['light','theme-office','theme-midnight','theme-pink','theme-grey','theme-dark','theme-astral'].forEach(c => html.classList.remove(c));
   const cls = _themeCls(theme);
   if (cls) cls.split(' ').forEach(c => html.classList.add(c));
   if (persist) localStorage.setItem('bi-theme', theme);
   _applyThemeIcon(theme);
-  _syncThemeColorMeta();          // NEW — keep <meta name=theme-color> in step with the rendered theme
+  _syncThemeColorMeta();          // keep <meta name=theme-color> in step with the rendered theme
   // v12 WS40 — lets any open chart-bearing screen (Analytics) re-render its
   // chrome colors live, including the 'auto' matchMedia flip (initTheme already
   // routes that through setTheme('auto', false), so no second listener needed).
@@ -876,11 +882,12 @@ function _syncThemeColorMeta(){
 }
 
 function getTheme() {
-  return localStorage.getItem('bi-theme') || 'office';
+  const stored = localStorage.getItem('bi-theme');
+  return (stored && THEME_MIGRATION[stored]) || stored || 'light';
 }
 
 function toggleTheme() {
-  const order = ['auto', 'office', 'dark'];
+  const order = ['auto', 'light', 'dark'];
   const next = order[(order.indexOf(getTheme()) + 1) % order.length];
   setTheme(next);
 }
@@ -888,7 +895,7 @@ function toggleTheme() {
 function _applyThemeIcon(theme) {
   const btn = document.getElementById('theme-toggle-btn');
   if (!btn) return;
-  const iconName = theme === 'auto' ? 'monitor' : (theme === 'dark' || theme === 'midnight') ? 'moon' : 'sun';
+  const iconName = theme === 'auto' ? 'monitor' : theme === 'dark' ? 'moon' : theme === 'astral' ? 'sparkles' : 'sun';
   btn.innerHTML = `<i data-lucide="${iconName}"></i>`;
   if (window.lucide) lucide.createIcons({ nodes: [btn] });
 }
@@ -7534,9 +7541,34 @@ function openProfileDrawer() {
       <div class="profile-info-row no-border" style="flex-direction:column;align-items:stretch;gap:10px">
         <span class="pir-label">Appearance</span>
         <div class="theme-picker" id="drawer-theme-picker">
-          <button class="theme-swatch theme-swatch-office" data-theme="office" title="Office (light)"><span class="theme-swatch-dot"></span>Office</button>
-          <button class="theme-swatch" data-theme="auto" title="Match system"><span class="theme-swatch-dot"></span>Auto</button>
-          <button class="theme-swatch theme-swatch-dark" data-theme="dark" title="Obsidian (dark)"><span class="theme-swatch-dot"></span>Obsidian</button>
+          <button class="theme-card" data-theme="light" title="Light">
+            <span class="theme-card-mock" style="background:#F7F8FA">
+              <span class="theme-card-mock-card" style="background:#FFFFFF;border-color:rgba(16,24,40,0.10)"></span>
+              <span class="theme-card-mock-dot" style="background:#0866FF"></span>
+            </span>
+            <span class="theme-card-label"><i data-lucide="sun"></i>Light</span>
+          </button>
+          <button class="theme-card" data-theme="dark" title="Dark">
+            <span class="theme-card-mock" style="background:#0F1114">
+              <span class="theme-card-mock-card" style="background:#1A1D21;border-color:rgba(255,255,255,0.09)"></span>
+              <span class="theme-card-mock-dot" style="background:#4599FF"></span>
+            </span>
+            <span class="theme-card-label"><i data-lucide="moon"></i>Dark</span>
+          </button>
+          <button class="theme-card" data-theme="astral" title="Astral">
+            <span class="theme-card-mock" style="background:#070710">
+              <span class="theme-card-mock-card" style="background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.16)"></span>
+              <span class="theme-card-mock-dot" style="background:#9BA8FF"></span>
+            </span>
+            <span class="theme-card-label"><i data-lucide="sparkles"></i>Astral</span>
+          </button>
+          <button class="theme-card theme-card-auto" data-theme="auto" title="Match system">
+            <span class="theme-card-mock theme-card-mock-auto">
+              <span class="theme-card-mock-card"></span>
+              <span class="theme-card-mock-dot"></span>
+            </span>
+            <span class="theme-card-label"><i data-lucide="monitor"></i>Auto</span>
+          </button>
         </div>
       </div>
       ${u.phone
@@ -7615,7 +7647,7 @@ function openProfileDrawer() {
   if (themePicker) {
     const updateActive = () => {
       const current = getTheme();
-      themePicker.querySelectorAll('.theme-swatch').forEach(btn => {
+      themePicker.querySelectorAll('.theme-card').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.theme === current);
       });
     };

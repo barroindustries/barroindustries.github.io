@@ -150,6 +150,33 @@
   --brand-on-primary:   var(--white);
   /* ── Status-bar / theme-color (read by setTheme() to sync <meta name=theme-color>) ── */
   --theme-color: var(--bg);
+
+  /* ══════════════════════════════════════════════════
+     SEMANTIC TOKEN CONTRACT — WS42 Phase 1
+     One complete set every theme (html.light / html.theme-dark / html.theme-astral)
+     redefines. Components should read THESE names, not raw palette vars below.
+     Legacy names (--s0..--s3, --surface2, --primary, --accent, etc.) remain as
+     aliases so nothing currently referencing them breaks — do NOT delete them.
+     :root itself is the Astral-ish fallback (today's cosmic look); Light/Dark
+     override every var in this block explicitly.
+  ══════════════════════════════════════════════════ */
+  --bg-2:            var(--s0);
+  --surface-2:       var(--s2);
+  --surface-3:       var(--s3);
+  --border-strong:   rgba(255,255,255,0.16);
+  --primary-soft:    rgba(155,168,255,0.12);
+  --on-primary:      #FFFFFF;
+  --success-soft:    rgba(48,209,88,0.14);
+  --warning-soft:    rgba(255,170,0,0.14);
+  --danger-soft:     rgba(255,69,58,0.14);
+  --info-soft:       rgba(10,132,255,0.14);
+  --lh-base:         1.5;
+  /* Chat (Messenger-style bubbles, wired up ahead of Batch D) */
+  --chat-bg:         var(--bg);
+  --bubble-in-bg:    var(--s2);
+  --bubble-in-text:  var(--text);
+  --bubble-out-bg:   var(--grad-pk-bl);
+  --bubble-out-text: #FFFFFF;
 }
 
 /* ══════════════════════════════
@@ -239,44 +266,33 @@
 html {
   scroll-behavior: smooth;
   -webkit-tap-highlight-color: transparent;
-  /* Prevent white overscroll flash on iOS */
-  background: #070710;
+  /* Match the active theme's canvas so overscroll never flashes a mismatched color */
+  background: var(--bg);
   overscroll-behavior: none;
 }
+/* Universal keyboard-focus ring — WS42 Phase 5 */
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 body {
   font-family: var(--font);
-  background: linear-gradient(150deg, #070710 0%, #0D0D2B 35%, #120820 65%, #070710 100%);
+  background: var(--bg);
   color: var(--text);
-  font-size: var(--fs-base); line-height: 1.5;
+  font-size: var(--fs-base); line-height: var(--lh-base);
   min-height: 100dvh; overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   position: relative;
   /* Match overscroll gutter color on iOS */
-  background-color: #070710;
+  background-color: var(--bg);
 }
 
-/* ── Animated background mesh ── */
-body::before {
-  content: '';
-  position: fixed; inset: 0; z-index: 0; pointer-events: none;
-  background:
-    radial-gradient(ellipse 70% 60% at 10% 20%,  rgba(255,45,120,0.13) 0%, transparent 65%),
-    radial-gradient(ellipse 60% 50% at 90% 80%,  rgba(10,132,255,0.11) 0%, transparent 65%),
-    radial-gradient(ellipse 50% 50% at 55% 45%,  rgba(255,214,10,0.06) 0%, transparent 60%),
-    radial-gradient(ellipse 80% 80% at 50% 100%, rgba(139,92,246,0.07) 0%, transparent 60%);
-  background-size: 200% 200%, 200% 200%, 200% 200%, 200% 200%;
-  animation: meshDrift 18s ease-in-out infinite;
-}
-/* decorative floating orb top-right */
-body::after {
-  content: '';
-  position: fixed; top: -160px; right: -120px; z-index: 0; pointer-events: none;
-  width: 500px; height: 500px; border-radius: 50%;
-  background: radial-gradient(circle, rgba(255,45,120,0.10) 0%, transparent 70%);
-  animation: floatB 14s ease-in-out infinite;
-}
+/* ── Animated background mesh + decorative orb ──
+   WS42: Light & Dark are solid, zero-blur, zero-animation themes. The mesh/aurora
+   drift and floating orb are Astral-only (performance budget — no infinite
+   animation outside the showpiece theme). Astral re-declares body + these
+   pseudo-layers below in its own block. ── */
+body::before,
+body::after { content: none; }
 
 /* everything inside should sit above bg mesh */
 #login-screen, #app-shell { position: relative; z-index: 1; }
@@ -2315,8 +2331,13 @@ html.light .id-card--calling .idc-brand, html.theme-pink .id-card--calling .idc-
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
 
 /* ══════════════════════════════════════════════════
-   MIDNIGHT THEME — deep navy dark, electric-blue accent
-   (a dark theme like the default, shifted to navy blues)
+   LEGACY THEME BLOCKS (theme-midnight / theme-office below, plus the
+   theme-pink/theme-grey aliasing folded into the old html.light rule) —
+   WS42 Phase 4 migrates every stored theme (office|pink|grey → light,
+   midnight → dark) inside initTheme(), so these classes are never applied
+   by setTheme() again after the migration runs once. Left in place
+   deliberately (not deleted) per the WS42 ground rules — Phase 27/28 sweep
+   dead CSS blocks; until then this is inert, zero-cost dead weight.
 ══════════════════════════════════════════════════ */
 html.theme-midnight {
   --black:    #0A0E20;
@@ -2344,91 +2365,240 @@ html.theme-midnight {
 html.theme-midnight body { background: linear-gradient(160deg, #0A0E20 0%, #0E1530 55%, #0A0E20 100%); }
 
 /* ══════════════════════════════════════════════════
-   LIGHT MODE
-══════════════════════════════════════════════════ */
-html.light, html.theme-pink, html.theme-grey {
-  /* Borders */
-  --border-glow: rgba(255,45,120,0.18);
-  --border-gold: rgba(180,120,0,0.22);
-
-  /* Shadows */
-  --sh-pink: 0 4px 24px rgba(255,45,120,0.22);
-  --sh-blue: 0 4px 24px rgba(10,132,255,0.18);
-  --sh-gold: 0 4px 24px rgba(255,214,10,0.18);
-
-  /* Toast theming — slightly deeper hues read well on light surfaces */
-  --toast-success: #16A34A;
-  --toast-error:   #DC2626;
-  --toast-info:    #2563EB;
-  --toast-text:    #FFFFFF;
-}
-
-/* ══════════════════════════════════════════════════
-   AURORA (LIGHT) THEME — crisp daylight, frosted glass
+   LIGHT THEME — WS42 Phase 2 — "Fluent × Drive minimal"
+   Pure token override. Flat, airy, zero glass/blur/gradient on surfaces.
+   New default theme (js/app.js initTheme()).
 ══════════════════════════════════════════════════ */
 html.light {
-  /* Core palette */
-  --bg:         #F8FAFC;
-  --black:      #F8FAFC;
-  --black-2:    #FFFFFF;
-  --black-3:    #F1F5F9;
+  --bg:              #F7F8FA;
+  --bg-2:            #EFF1F4;
+  --surface:         #FFFFFF;
+  --surface-2:       #F2F4F7;
+  --surface-3:       #E8EBEF;
+  --border:          rgba(16,24,40,0.10);
+  --border-strong:   rgba(16,24,40,0.18);
+  --text:            #1C1E21;
+  --text-2:          rgba(28,30,33,0.72);
+  --text-muted:      rgba(28,30,33,0.48);
+  --primary:         #0866FF;
+  --primary-soft:    rgba(8,102,255,0.10);
+  --on-primary:      #FFFFFF;
+  --success:         #1B873F;
+  --success-soft:    rgba(27,135,63,0.12);
+  --warning:         #B54708;
+  --warning-soft:    rgba(181,71,8,0.12);
+  --danger:          #D92D20;
+  --danger-soft:     rgba(217,45,32,0.12);
+  --info:            #0866FF;
+  --info-soft:       rgba(8,102,255,0.10);
+  --sh-sm:           0 1px 2px rgba(16,24,40,0.06);
+  --sh:              0 2px 8px rgba(16,24,40,0.08);
+  --sh-lg:           0 12px 32px rgba(16,24,40,0.14);
+  --r-sm:            10px;
+  --r:               14px;
+  --r-lg:            18px;
+  --r-xl:            24px;
+  --pill:            999px;
+  --topbar-bg:       #FFFFFF;
+  --sidebar-bg:      #F7F8FA;
+  --bottom-nav-bg:   rgba(255,255,255,0.97);
+  --modal-bg:        #FFFFFF;
+  --drawer-bg:       #FFFFFF;
+  --notif-bg:        #FFFFFF;
+  --login-card-bg:   #FFFFFF;
+  --chat-bg:         #FFFFFF;
+  --bubble-in-bg:    #F0F2F5;
+  --bubble-in-text:  #1C1E21;
+  --bubble-out-bg:   linear-gradient(135deg,#0866FF,#0A7CFF);
+  --bubble-out-text: #FFFFFF;
+  --theme-color:     #FFFFFF;
 
-  /* Surfaces */
-  --s0:      rgba(15,23,42,0.018);
-  --s1:      rgba(15,23,42,0.04);
-  --s2:      rgba(15,23,42,0.07);
-  --s3:      rgba(15,23,42,0.11);
-  --glass:   rgba(255,255,255,0.75);
-  --glass-lt:rgba(15,23,42,0.04);
-  --surface: rgba(255,255,255,0.90);
-  --surface2:rgba(15,23,42,0.04);
-  --grad-card: linear-gradient(160deg, rgba(15,23,42,0.02) 0%, rgba(15,23,42,0.00) 100%);
-
-  /* Borders */
-  --border:      #E2E8F0;
-
-  /* Text */
-  --text:       #0F172A;
-  --text-2:     rgba(15,23,42,0.80);
-  --text-muted: #64748B;
-  --text-light: rgba(15,23,42,0.32);
-  --text-inv:   #F8FAFC;
-
-  /* Shadows — soft, low opacity */
-  --sh-xs: 0 1px 4px rgba(15,23,42,0.05);
-  --sh-sm: 0 2px 12px rgba(15,23,42,0.06);
-  --sh:    0 4px 20px rgba(15,23,42,0.07);
-  --sh-md: 0 8px 32px rgba(15,23,42,0.08);
-  --sh-lg: 0 16px 56px rgba(15,23,42,0.10);
-
-  /* Primary / secondary accent */
-  --primary:       #3B82F6;
-  --primary-light: #8B5CF6;
-
-  /* Component backgrounds */
-  --topbar-bg:     rgba(248,250,252,0.88);
-  --sidebar-bg:    rgba(248,250,252,0.96);
-  --notif-bg:      rgba(255,255,255,0.96);
-  --login-card-bg: rgba(255,255,255,0.92);
-  --bottom-nav-bg: rgba(248,250,252,0.92);
-  --modal-bg:      rgba(255,255,255,0.96);
-  --drawer-bg:     rgba(248,250,252,0.96);
+  /* Legacy aliases some components still read directly (Phase 9/28 retire these) */
+  --black:      var(--bg);      --black-2: var(--surface);   --black-3: var(--bg-2);
+  --s0:         var(--bg-2);    --s1: var(--surface);        --s2: var(--surface-2); --s3: var(--surface-3);
+  --surface2:   var(--surface-2);
+  --glass:      var(--surface); --glass-lt: var(--surface-2);
+  --grad-card:  none;
+  --primary-light: #3B82F6;
+  --accent:        var(--primary); --accent-light: #3B82F6;
+  --text-light: rgba(28,30,33,0.32);
+  --text-inv:   #FFFFFF;
+  --border-glow: var(--primary-soft); --border-gold: rgba(181,71,8,0.16);
+  --sh-xs: var(--sh-sm); --sh-md: var(--sh); --sh-pink: var(--sh); --sh-blue: var(--sh); --sh-gold: var(--sh);
+  --toast-success: #16A34A; --toast-error: #DC2626; --toast-info: #2563EB; --toast-text: #FFFFFF;
 }
-html.light body { background: linear-gradient(150deg, #F8FAFC 0%, #EFF4FA 35%, #F3F0FA 65%, #F8FAFC 100%); }
-html.light body::before {
+html.light body { background: var(--bg); }
+
+/* ══════════════════════════════════════════════════
+   DARK THEME — WS42 Phase 3 — "Messenger dark minimal"
+   Neutral dark, NOT the old glass/cosmic look. Solid surfaces, subtle
+   borders, no glow shadows, no mesh background.
+══════════════════════════════════════════════════ */
+html.theme-dark {
+  --bg:              #0F1114;
+  --bg-2:            #0A0C0E;
+  --surface:         #1A1D21;
+  --surface-2:       #24282D;
+  --surface-3:       #2E333A;
+  --border:          rgba(255,255,255,0.09);
+  --border-strong:   rgba(255,255,255,0.16);
+  --text:            #E4E6EB;
+  --text-2:          rgba(228,230,235,0.72);
+  --text-muted:      rgba(228,230,235,0.45);
+  --primary:         #4599FF;
+  --primary-soft:    rgba(69,153,255,0.14);
+  --on-primary:      #FFFFFF;
+  --success:         #31A24C;
+  --success-soft:    rgba(49,162,76,0.16);
+  --warning:         #F7B928;
+  --warning-soft:    rgba(247,185,40,0.16);
+  --danger:          #F0284A;
+  --danger-soft:     rgba(240,40,74,0.16);
+  --info:            #4599FF;
+  --info-soft:       rgba(69,153,255,0.14);
+  --sh-sm:           0 1px 3px rgba(0,0,0,0.30);
+  --sh:              0 2px 10px rgba(0,0,0,0.36);
+  --sh-lg:           0 12px 32px rgba(0,0,0,0.48);
+  --r-sm:            10px;
+  --r:               14px;
+  --r-lg:            18px;
+  --r-xl:            24px;
+  --pill:            999px;
+  --topbar-bg:       #16181B;
+  --sidebar-bg:      #121417;
+  --bottom-nav-bg:   rgba(22,24,27,0.97);
+  --modal-bg:        #1A1D21;
+  --drawer-bg:       #16181B;
+  --notif-bg:        #1A1D21;
+  --login-card-bg:   #1A1D21;
+  --chat-bg:         #0F1114;
+  --bubble-in-bg:    #2E333A;
+  --bubble-in-text:  #E4E6EB;
+  --bubble-out-bg:   linear-gradient(135deg,#0866FF,#0A7CFF);
+  --bubble-out-text: #FFFFFF;
+  --theme-color:     #16181B;
+
+  /* Legacy aliases (see html.light note above) */
+  --black:      var(--bg);      --black-2: var(--surface);   --black-3: var(--bg-2);
+  --s0:         var(--bg-2);    --s1: var(--surface);        --s2: var(--surface-2); --s3: var(--surface-3);
+  --surface2:   var(--surface-2);
+  --glass:      var(--surface); --glass-lt: var(--surface-2);
+  --grad-card:  none;
+  --primary-light: #7CB2FF;
+  --accent:        var(--primary); --accent-light: #7CB2FF;
+  --text-light: rgba(228,230,235,0.30);
+  --text-inv:   #0F1114;
+  --border-glow: var(--primary-soft); --border-gold: rgba(247,185,40,0.16);
+  --sh-xs: var(--sh-sm); --sh-md: var(--sh); --sh-pink: var(--sh); --sh-blue: var(--sh); --sh-gold: var(--sh);
+  --toast-success: #31A24C; --toast-error: #F0284A; --toast-info: #4599FF; --toast-text: #FFFFFF;
+}
+html.theme-dark body { background: var(--bg); }
+
+/* ══════════════════════════════════════════════════
+   ASTRAL THEME — WS42 Phase 4 — the showpiece
+   Deep-space canvas, mesh/aurora drift + CSS starfield, glass chrome
+   (backdrop-filter scoped to topbar/modal/bottom-nav only — Batch B wires
+   the actual component rules; this block owns the palette + background).
+   :root already carries these values as the astral-ish fallback; this
+   block restates them explicitly so every session has one true theme.
+══════════════════════════════════════════════════ */
+html.theme-astral {
+  --bg:       #070710;
+  --bg-2:     #0D0D1A;
+  --surface:  rgba(255,255,255,0.05);
+  --surface-2:rgba(255,255,255,0.08);
+  --surface-3:rgba(255,255,255,0.11);
+  --border:        rgba(255,255,255,0.09);
+  --border-strong: rgba(255,255,255,0.16);
+  --text:       #F0F0FA;
+  --text-2:     rgba(240,240,250,0.80);
+  --text-muted: rgba(240,240,250,0.45);
+  --primary:      #9BA8FF;
+  --primary-soft: rgba(155,168,255,0.14);
+  --on-primary:   #FFFFFF;
+  --success: #30D158; --success-soft: rgba(48,209,88,0.16);
+  --warning: #FFAA00; --warning-soft: rgba(255,170,0,0.16);
+  --danger:  #FF453A; --danger-soft:  rgba(255,69,58,0.16);
+  --info:    #0A84FF; --info-soft:    rgba(10,132,255,0.16);
+  --topbar-bg:     rgba(7,7,16,0.88);
+  --sidebar-bg:    rgba(7,7,16,0.94);
+  --bottom-nav-bg: rgba(7,7,16,0.90);
+  --modal-bg:      rgba(13,13,26,0.92);
+  --drawer-bg:     rgba(10,10,20,0.94);
+  --notif-bg:      rgba(13,13,26,0.92);
+  --login-card-bg: rgba(13,13,26,0.88);
+  --chat-bg:         var(--bg);
+  --bubble-in-bg:    var(--surface-2);
+  --bubble-in-text:  var(--text);
+  --bubble-out-bg:   linear-gradient(135deg,#FF2D78,#0A84FF);
+  --bubble-out-text: #FFFFFF;
+  --theme-color:     #070710;
+  /* Astral is the only theme allowed backdrop-filter + infinite animation (perf budget) */
+  --glass-blur:    blur(18px) saturate(160%);
+  --glass-blur-sm: blur(14px) saturate(140%);
+  --glass-blur-lg: blur(24px) saturate(160%);
+}
+html.theme-astral body { background: linear-gradient(150deg, #070710 0%, #0D0D2B 35%, #120820 65%, #070710 100%); }
+html.theme-astral body::before {
+  content: '';
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
   background:
-    radial-gradient(ellipse 70% 60% at 10% 20%,  rgba(59,130,246,0.05) 0%, transparent 65%),
-    radial-gradient(ellipse 60% 50% at 90% 80%,  rgba(139,92,246,0.05) 0%, transparent 65%),
-    radial-gradient(ellipse 50% 50% at 55% 45%,  rgba(255,214,10,0.03) 0%, transparent 60%),
-    radial-gradient(ellipse 80% 80% at 50% 100%, rgba(139,92,246,0.03) 0%, transparent 60%);
+    radial-gradient(ellipse 70% 60% at 10% 20%,  rgba(255,45,120,0.13) 0%, transparent 65%),
+    radial-gradient(ellipse 60% 50% at 90% 80%,  rgba(10,132,255,0.11) 0%, transparent 65%),
+    radial-gradient(ellipse 50% 50% at 55% 45%,  rgba(255,214,10,0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 80% 80% at 50% 100%, rgba(139,92,246,0.07) 0%, transparent 60%);
+  background-size: 200% 200%, 200% 200%, 200% 200%, 200% 200%;
+  animation: meshDrift 18s ease-in-out infinite;
 }
-html.light body::after {
-  background: radial-gradient(circle, rgba(59,130,246,0.04) 0%, transparent 70%);
+/* decorative floating orb top-right */
+html.theme-astral body::after {
+  content: '';
+  position: fixed; top: -160px; right: -120px; z-index: 0; pointer-events: none;
+  width: 500px; height: 500px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,45,120,0.10) 0%, transparent 70%);
+  animation: floatB 14s ease-in-out infinite;
+}
+/* Starfield — two cheap radial-gradient dot layers, slow transform parallax.
+   Pure CSS, no images, ≤ a few KB of rules. Disabled under reduced-motion. */
+@keyframes starDriftA { from { transform: translate3d(0,0,0); } to { transform: translate3d(-60px,-40px,0); } }
+@keyframes starDriftB { from { transform: translate3d(0,0,0); } to { transform: translate3d(50px,30px,0); } }
+html.theme-astral #app-shell::before,
+html.theme-astral #login-screen::before {
+  content: '';
+  position: fixed; inset: -10% ; z-index: 0; pointer-events: none; opacity: 0.55;
+  background-image:
+    radial-gradient(1.4px 1.4px at 20% 30%, rgba(255,255,255,0.55) 50%, transparent 52%),
+    radial-gradient(1.2px 1.2px at 60% 70%, rgba(255,255,255,0.40) 50%, transparent 52%),
+    radial-gradient(1px 1px at 80% 15%, rgba(255,255,255,0.35) 50%, transparent 52%),
+    radial-gradient(1.6px 1.6px at 35% 85%, rgba(255,255,255,0.45) 50%, transparent 52%),
+    radial-gradient(1px 1px at 90% 55%, rgba(255,255,255,0.30) 50%, transparent 52%);
+  background-repeat: repeat;
+  background-size: 340px 340px;
+  animation: starDriftA 90s linear infinite;
+}
+html.theme-astral #app-shell::after,
+html.theme-astral #login-screen::after {
+  content: '';
+  position: fixed; inset: -10%; z-index: 0; pointer-events: none; opacity: 0.35;
+  background-image:
+    radial-gradient(1px 1px at 12% 65%, rgba(200,210,255,0.45) 50%, transparent 52%),
+    radial-gradient(1.3px 1.3px at 48% 22%, rgba(200,210,255,0.35) 50%, transparent 52%),
+    radial-gradient(1px 1px at 72% 88%, rgba(200,210,255,0.30) 50%, transparent 52%),
+    radial-gradient(1.5px 1.5px at 95% 40%, rgba(200,210,255,0.40) 50%, transparent 52%);
+  background-repeat: repeat;
+  background-size: 420px 420px;
+  animation: starDriftB 130s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  html.theme-astral body::before, html.theme-astral body::after,
+  html.theme-astral #app-shell::before, html.theme-astral #app-shell::after,
+  html.theme-astral #login-screen::before, html.theme-astral #login-screen::after {
+    animation: none;
+  }
 }
 
 /* ══════════════════════════════════════════════════
-   OFFICE THEME — Microsoft Fluent (clean white, blue accent)
-   Extends the light theme (html gets both `light` + `theme-office`)
+   OFFICE THEME (legacy — see note above) — Microsoft Fluent
 ══════════════════════════════════════════════════ */
 html.theme-office {
   /* Neutral Fluent canvas */
@@ -2758,32 +2928,47 @@ html.theme-grey body::after { background: radial-gradient(circle, rgba(107,114,1
 html.theme-grey .bottom-nav-item.active { color: var(--primary); }
 
 /* ══════════════════════════════════════════════════
-   THEME PICKER (swatches)
+   THEME PICKER — WS42 Phase 4 (Light / Dark / Astral preview cards + Auto)
 ══════════════════════════════════════════════════ */
 .theme-picker {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
 }
-.theme-swatch {
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-  background: var(--s1); border: 1px solid var(--border);
-  border-radius: var(--r-sm); color: var(--text-muted);
-  padding: 10px 4px; font-size: var(--fs-xs); font-weight: 600;
-  cursor: pointer; transition: background var(--t1), color var(--t1), border-color var(--t1);
+@media (max-width: 420px) {
+  .theme-picker { grid-template-columns: repeat(2, 1fr); }
 }
-.theme-swatch:hover { background: var(--s2); color: var(--text); }
-.theme-swatch.active { border-color: var(--pink); color: var(--text); box-shadow: 0 0 0 1px var(--pink), 0 0 12px var(--pink-glow); }
-.theme-swatch-dot {
-  width: 22px; height: 22px; border-radius: 50%;
+.theme-card {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: var(--surface-2); border: 1.5px solid var(--border);
+  border-radius: var(--r-sm); color: var(--text-muted);
+  padding: 8px; font-size: var(--fs-xs); font-weight: 600;
+  cursor: pointer; transition: background var(--t1), color var(--t1), border-color var(--t1), box-shadow var(--t1);
+}
+.theme-card:hover { background: var(--surface-3); color: var(--text); }
+.theme-card.active { border-color: var(--primary); color: var(--text); box-shadow: 0 0 0 1px var(--primary); }
+.theme-card-mock {
+  width: 100%; height: 40px; border-radius: calc(var(--r-sm) - 3px);
+  position: relative; overflow: hidden;
   box-shadow: inset 0 0 0 1px rgba(0,0,0,0.10);
 }
-.theme-swatch-office .theme-swatch-dot { background: linear-gradient(135deg, #FFFFFF 0%, #0F6CBD 100%); }
-.theme-swatch-dark  .theme-swatch-dot { background: linear-gradient(135deg, #131325 0%, #070710 100%); }
-.theme-swatch-midnight .theme-swatch-dot { background: linear-gradient(135deg, #5EA0FF 0%, #0E1530 100%); }
-.theme-swatch-light .theme-swatch-dot { background: linear-gradient(135deg, #FFFFFF 0%, #3B82F6 100%); }
-.theme-swatch-pink  .theme-swatch-dot { background: linear-gradient(135deg, #F9A8D4 0%, #A855F7 100%); }
-.theme-swatch-grey  .theme-swatch-dot { background: linear-gradient(135deg, #FFFFFF 0%, #6B7280 100%); }
+.theme-card-mock-card {
+  position: absolute; left: 5px; bottom: 5px; right: 5px; height: 18px;
+  border-radius: 5px; border: 1px solid transparent;
+}
+.theme-card-mock-dot {
+  position: absolute; top: 5px; right: 5px;
+  width: 8px; height: 8px; border-radius: 50%;
+}
+.theme-card-mock-auto {
+  background: linear-gradient(90deg, #F7F8FA 0%, #F7F8FA 50%, #0F1114 50%, #0F1114 100%);
+}
+.theme-card-mock-auto .theme-card-mock-card {
+  background: linear-gradient(90deg, #FFFFFF 0%, #FFFFFF 50%, #1A1D21 50%, #1A1D21 100%);
+}
+.theme-card-mock-auto .theme-card-mock-dot { background: var(--primary); }
+.theme-card-label { display: flex; align-items: center; gap: 4px; }
+.theme-card-label i { width: 13px; height: 13px; }
 
 /* ══════════════════════════════════════════════════
    THEME TOGGLE BUTTON
