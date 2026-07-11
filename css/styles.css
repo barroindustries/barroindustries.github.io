@@ -278,6 +278,43 @@ html {
 /* Universal keyboard-focus ring — WS42 Phase 5 */
 :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
+/* WS42 Phase 13 — touch ergonomics: kill the ~300ms tap delay / double-tap-zoom
+   on anything interactive. [onclick] catches the many legacy inline-handler
+   elements (item-card, kpi-card, notif-item, …) that aren't real <button>s. */
+button, a, input, select, textarea, summary,
+.btn-primary, .btn-secondary, .btn-danger, .btn-success,
+.chip-tab, .nav-item, .top-nav-item, .bottom-nav-item, .subtab-btn,
+.item-card, .kpi-card, .card, .dept-card, .quick-action-btn,
+[onclick], [role="button"] {
+  touch-action: manipulation;
+}
+
+/* WS42 Phase 13 — .pressable: standardized active-state feedback (transform/opacity
+   only). Applied to shell nav rows + list rows; safe to add anywhere else too. */
+.pressable { transition: transform 120ms var(--ease, ease), opacity 120ms var(--ease, ease); }
+.pressable:active { transform: scale(0.97); opacity: 0.92; }
+@media (prefers-reduced-motion: reduce) {
+  .pressable { transition: none; }
+  .pressable:active { transform: none; opacity: 0.92; }
+}
+
+/* WS42 Phase 13 — ≥44px effective hit-area for small icon buttons on touch,
+   via an invisible ::after overlay rather than visually enlarging the icon
+   (which would look oversized next to its siblings on a compact row). */
+@media (pointer: coarse) {
+  .modal-close, .ms-act-btn, .ms-attach-btn, .ms-send-btn, .drawer-back-btn {
+    position: relative;
+  }
+  .modal-close::after, .ms-act-btn::after, .ms-attach-btn::after,
+  .ms-send-btn::after, .drawer-back-btn::after {
+    content: '';
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 44px; height: 44px;
+    transform: translate(-50%, -50%);
+  }
+}
+
 body {
   font-family: var(--font);
   background: var(--bg);
@@ -289,6 +326,9 @@ body {
   position: relative;
   /* Match overscroll gutter color on iOS */
   background-color: var(--bg);
+  /* WS42 Phase 11: stop iOS/Android pull-to-refresh fighting the SPA's own
+     pull-to-refresh + prevent vertical rubber-banding revealing the gutter. */
+  overscroll-behavior-y: none;
 }
 
 /* ── Animated background mesh + decorative orb ──
@@ -944,7 +984,7 @@ html.light .handbook-text, html.theme-pink .handbook-text, html.theme-grey .hand
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   align-items: center;
-  padding: 0 6px;
+  padding: 0 max(6px, env(safe-area-inset-right, 0px)) 0 max(6px, env(safe-area-inset-left, 0px));
   gap: 2px;
   box-sizing: border-box;
 }
@@ -1021,7 +1061,8 @@ html.light .handbook-text, html.theme-pink .handbook-text, html.theme-grey .hand
 
 /* ── Notification Panel ── */
 .notif-panel {
-  position: fixed; top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px) + 8px); right: 12px;
+  position: fixed; top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px) + 8px);
+  right: max(12px, env(safe-area-inset-right, 0px));
   width: 320px; max-height: 440px;
   background: var(--notif-bg);
   border-radius: var(--r-lg);
@@ -1035,7 +1076,7 @@ html.light .handbook-text, html.theme-pink .handbook-text, html.theme-grey .hand
   font-weight: 700; font-size: var(--fs-base); color: var(--text);
   background: rgba(255,255,255,0.02);
 }
-.notif-list { overflow-y: auto; overflow-x: hidden; flex: 1; }
+.notif-list { overflow-y: auto; overflow-x: hidden; flex: 1; -webkit-overflow-scrolling: touch; }
 .notif-backdrop { position: fixed; inset: 0; z-index: 140; }
 .notif-item {
   padding: 11px 14px; border-bottom: 1px solid var(--border);
@@ -1260,6 +1301,10 @@ html.light .handbook-text, html.theme-pink .handbook-text, html.theme-grey .hand
   min-height: calc(100dvh - var(--topbar-h));
   padding: 20px;
 }
+/* WS42 Phase 14: global horizontal-overflow guard — never rely on this alone,
+   per-widget fixes are the real fix, but this stops any stray offender from
+   pushing the whole page into horizontal scroll. */
+#page-content { overflow-x: clip; }
 
 /* Lock scroll on body when sidebar is open on mobile */
 body.sidebar-open { overflow: hidden; }
@@ -1921,6 +1966,15 @@ html.theme-astral .chip-tab.active {
   box-shadow: var(--sh-sm);
 }
 .item-card:hover::before { animation: shimmer 0.5s ease forwards; }
+/* WS42 Phase 13 — .pressable-equivalent feedback baked directly into the row
+   class (rather than sweeping every JS template literal that builds .item-card
+   to add the utility class): same transform/opacity-only press feedback. */
+.item-card:active, .notif-item:active, .chat-inbox-row:active {
+  transform: scale(0.98); opacity: 0.92; transition-duration: 90ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  .item-card:active, .notif-item:active, .chat-inbox-row:active { transform: none; opacity: 0.92; }
+}
 .item-card.priority-urgent { border-left-color: var(--danger);  box-shadow: inset 3px 0 0 var(--danger); }
 .item-card.priority-high   { border-left-color: var(--gold-3);  }
 .item-card.priority-medium { border-left-color: var(--blue);    }
@@ -2121,13 +2175,20 @@ html.theme-astral .chip-tab.active {
 ══════════════════════════════ */
 .modal-overlay {
   position: fixed; inset: 0;
-  z-index: 200; display: flex; align-items: center; justify-content: center; padding: 16px;
+  z-index: 200; display: flex; align-items: center; justify-content: center;
+  /* WS42 Phase 11: notch/home-indicator clearance (landscape phones, desktop unaffected
+     since env() resolves to 0 there); mobile bottom-sheet breakpoint overrides this to 0. */
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px))
+    max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
 }
 .modal-overlay.active { display: flex; }
 /* .modal-box + ::before merged into LIQUID GLASS copy below */
 /* Roomier variants for content-heavy popups (forms, payslips, sales orders) so
    they don't render as a cramped small dialog. Applied via openModal({size}). */
-.modal-box.modal-wide { max-width: 920px; }
+/* WS42 Phase 15: cap 'wide' modals to the viewport on tablet/narrow desktop
+   windows too, not just phones — a 920px modal on an 820px iPad would itself
+   force horizontal scroll otherwise. */
+.modal-box.modal-wide { max-width: min(920px, calc(100vw - 48px)); }
 .modal-box.modal-full { max-width: min(1200px, 96vw); max-height: 94dvh; }
 
 /* ── Full-screen page panel (v12 WS10 — openPage) ── */
@@ -2135,19 +2196,26 @@ html.theme-astral .chip-tab.active {
   left:0; right:0; bottom:0; background:var(--bg); z-index:4000; display:flex; flex-direction:column;
   transform:translateY(100%); opacity:0; transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .3s; overflow:hidden; }
 .page-panel.open{ transform:translateY(0); opacity:1; }
-.page-panel-head{ display:flex; align-items:center; gap:12px; padding:12px 16px;
+.page-panel-head{ display:flex; align-items:center; gap:12px;
+  /* WS42 Phase 11: landscape left/right notch clearance */
+  padding:12px max(16px, env(safe-area-inset-right,0px)) 12px max(16px, env(safe-area-inset-left,0px));
   background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
 .page-panel-back{ background:none; border:none; color:var(--primary-light); cursor:pointer; padding:4px; display:flex; }
 .page-panel-title{ flex:1; font-size:var(--fs-lg); font-weight:700; color:var(--text);
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.page-panel-body{ flex:1; overflow-y:auto; padding:16px; -webkit-overflow-scrolling:touch; }
-.page-panel-foot{ flex-shrink:0; padding:12px 16px; border-top:1px solid var(--border);
+.page-panel-body{ flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch;
+  padding:16px max(16px, env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px, env(safe-area-inset-left,0px)); }
+.page-panel-foot{ flex-shrink:0; border-top:1px solid var(--border);
+  padding:12px max(16px, env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(16px, env(safe-area-inset-left,0px));
   display:flex; gap:8px; justify-content:flex-end; background:var(--surface); }
 .page-panel-foot.hidden{ display:none; }
 
 /* ── Confirm / prompt dialog (v12 WS11 — confirmDialog/promptDialog) ── */
 .dialog-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.4);
-  z-index:5000; display:flex; align-items:center; justify-content:center; padding:20px; }
+  z-index:5000; display:flex; align-items:center; justify-content:center;
+  /* WS42 Phase 11: notch/home-indicator clearance in all four directions */
+  padding:max(20px, env(safe-area-inset-top,0px)) max(20px, env(safe-area-inset-right,0px))
+    max(20px, env(safe-area-inset-bottom,0px)) max(20px, env(safe-area-inset-left,0px)); }
 html.theme-dark .dialog-overlay, html.theme-astral .dialog-overlay { background: rgba(0,0,0,.6); }
 html.theme-astral .dialog-overlay { backdrop-filter: blur(14px) saturate(120%); -webkit-backdrop-filter: blur(14px) saturate(120%); }
 .dialog-overlay.hidden{ display:none; }
@@ -2188,6 +2256,11 @@ html.theme-astral .dialog-overlay { backdrop-filter: blur(14px) saturate(120%); 
   transition: transform var(--t3) var(--ease);
 }
 .drawer.open { transform: translateX(0); }
+/* WS42 Phase 11: right-edge notch clearance for the desktop/right-panel drawer only —
+   scoped above the 639px bottom-sheet breakpoint so it never touches the mobile sheet. */
+@media (min-width: 640px) {
+  .drawer { padding-right: env(safe-area-inset-right, 0px); }
+}
 .drawer-header {
   padding: 12px 16px; border-bottom: 1px solid var(--border);
   padding-top: calc(12px + env(safe-area-inset-top, 0px));
@@ -2208,7 +2281,7 @@ html.theme-astral .dialog-overlay { backdrop-filter: blur(14px) saturate(120%); 
 .drawer-back-btn:hover { background: var(--s2); color: var(--blue); transform: translateX(-2px); }
 .drawer-back-btn:active { transform: scale(0.96); }
 .drawer-back-btn svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 2.5; }
-.drawer-body { flex: 1; overflow-y: auto; padding: 20px; }
+.drawer-body { flex: 1; overflow-y: auto; padding: 20px; -webkit-overflow-scrolling: touch; }
 
 /* ══════════════════════════════
    MISC
@@ -2312,6 +2385,36 @@ html.theme-astral .dialog-overlay { backdrop-filter: blur(14px) saturate(120%); 
   /* Task feed compact */
   .task-feed-item { padding: 10px 14px; }
   .task-feed-title { font-size: var(--fs-sm); }
+}
+
+/* ══════════════════════════════
+   WS42 PHASE 15 — TABLET TIER
+   • 769–819px (portrait small/older tablets): same "no sidebar, top-nav-strip
+     instead" treatment as phones — the canvas is just wider.
+   • 820–1023px (landscape tablets / iPad Air-class): a 72px icon-only rail
+     replaces the full sidebar (nav-label hidden, title="" gives a native
+     hover tooltip); the top-nav-strip stays hidden here (the rail is nav).
+   • ≥1024px is untouched — existing full-sidebar desktop behavior above.
+══════════════════════════════ */
+@media (min-width: 769px) and (max-width: 819px) {
+  #sidebar { transform: translateX(-100%); }
+  .top-nav-strip { display: flex; }
+  .main-content {
+    margin-left: 0;
+    margin-top: calc(var(--topbar-h) + var(--top-nav-h) + env(safe-area-inset-top, 0px));
+  }
+  .kpi-row { grid-template-columns: repeat(2, 1fr); }
+  .dashboard-grid { grid-template-columns: 1fr; }
+}
+@media (min-width: 820px) and (max-width: 1023px) {
+  #sidebar { width: 72px; }
+  #sidebar .sidebar-user-info, #sidebar .nav-section-label, .nav-label { display: none; }
+  #sidebar .sidebar-top { padding: 16px 8px; }
+  #sidebar .sidebar-user { justify-content: center; }
+  .nav-item { justify-content: center; padding: 10px 0; gap: 0; }
+  .main-content { margin-left: 72px; }
+  .kpi-row { grid-template-columns: repeat(2, 1fr); }
+  .dashboard-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 420px) {
@@ -3872,6 +3975,36 @@ html.light .quick-action-btn, html.theme-pink .quick-action-btn, html.theme-grey
 html.light .dept-card, html.theme-pink .dept-card, html.theme-grey .dept-card { background: rgba(255,255,255,0.55); border-color: rgba(0,0,0,0.08); }
 html.light .policy-card, html.theme-pink .policy-card, html.theme-grey .policy-card { background: rgba(255,255,255,0.55); border-color: rgba(0,0,0,0.08); }
 
+/* ── WS42 Phase 15 — Chat page two-pane layout SCAFFOLDING ──────────────────
+   CSS container rules only: at >=1024px the inbox becomes a fixed 320px left
+   column and #chat-thread-panel (built in chat.js, appended to <body>, fixed
+   full-width) is pushed to start after it instead of covering the inbox — so
+   opening a thread already reads as "inbox + thread" side-by-side even before
+   Batch D's Messenger-grade restyle rewrites the thread/bubble markup itself.
+   Below 1024px: unchanged single-pane behavior (thread overlays full-screen). */
+.chat-page { display: flex; flex-direction: column; height: 100%; }
+.chat-page-inbox { display: flex; flex-direction: column; min-width: 0; }
+@media (min-width: 1024px) {
+  /* Row layout so a future second pane (Batch D moving the thread panel into
+     the DOM as an actual sibling) lays out side-by-side automatically. */
+  .chat-page { flex-direction: row; gap: 0; }
+  .chat-page-inbox {
+    width: 320px; flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    padding-right: 16px;
+    min-height: calc(100dvh - var(--topbar-h) - 40px);
+  }
+  /* #chat-thread-panel is position:fixed relative to the VIEWPORT (chat.js
+     appends it to <body>, not inside .chat-page), so its left offset must
+     account for the full sidebar too: sidebar-w + .main-content's 20px
+     padding + the 320px inbox column + its 16px padding-right. Recompute
+     this if any of those layout constants change. */
+  #chat-thread-panel {
+    left: calc(var(--sidebar-w) + 20px + 320px + 16px) !important;
+    border-left: 1px solid var(--border);
+  }
+}
+
 /* ── Messenger-style chat UI ──────────────────────── */
 .messenger-wrap {
   display: flex; flex-direction: column;
@@ -3885,7 +4018,7 @@ html.light .policy-card, html.theme-pink .policy-card, html.theme-grey .policy-c
   background: var(--surface2); font-size: var(--fs-md);
 }
 .messenger-body {
-  flex: 1; overflow-y: auto; padding: 16px 12px;
+  flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 16px 12px;
   display: flex; flex-direction: column; gap: 10px;
   max-height: 380px; min-height: 120px;
   background: var(--bg);
@@ -3952,7 +4085,10 @@ html.light .policy-card, html.theme-pink .policy-card, html.theme-grey .policy-c
 .ms-seen::before { content: '✓✓'; font-size: var(--fs-xs); color: var(--primary-light); }
 .messenger-input-row {
   display: flex; align-items: center; gap: 8px;
-  padding: 10px 12px; border-top: 1px solid var(--border);
+  /* WS42 Phase 11: every consumer of this row (task chat, chat.js thread panel) is
+     bottom:0-anchored full-screen, so it always needs home-indicator clearance. */
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border);
   background: var(--surface2);
 }
 .ms-attach-btn {
@@ -4562,7 +4698,9 @@ html.light .drawer-back-btn:hover, html.theme-pink .drawer-back-btn:hover, html.
 ══════════════════════════════════════════ */
 .top-nav-strip {
   justify-content: space-around;
-  padding: 0 4px;
+  /* WS42 Phase 11: landscape notch/home-indicator clearance (this is the
+     last-cascade winner for .top-nav-strip padding — the live mobile nav). */
+  padding: 0 max(4px, env(safe-area-inset-right, 0px)) 0 max(4px, env(safe-area-inset-left, 0px));
   overflow-x: hidden;
 }
 .top-nav-item {

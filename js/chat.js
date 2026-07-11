@@ -282,7 +282,7 @@ window.Chat = (() => {
         </div>
         ${leaveBtnHtml}
       </div>
-      <div id="chat-thread-scroll" style="flex:1;overflow-y:auto;padding:12px 14px"></div>
+      <div id="chat-thread-scroll" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px"></div>
       <div id="chat-typing-row" style="min-height:16px;font-size:11px;color:var(--text-muted);padding:0 14px"></div>
       <div id="chat-file-preview" style="font-size:11px;color:var(--primary-light);padding:0 14px 4px;min-height:16px"></div>
       <div class="messenger-input-row">
@@ -695,11 +695,20 @@ window.Chat = (() => {
 // ── Inbox page (router target: case 'chat') ──
 window.renderChatPage = async function() {
   const c = document.getElementById('page-content'); if (!c) return;
+  // v12 WS42 Phase 15: .chat-page wrapper is CSS-only two-pane *scaffolding* for
+  // >=1024px (a left inbox column + reserved right column) — Batch D wires the
+  // thread panel into the right column; this batch only lays the container down.
+  // A wrapper div (not a class on #page-content itself) so it never leaks onto
+  // the next page's render — it's discarded with the rest of this innerHTML.
   c.innerHTML = `
-    <div class="page-header"><h2>💬 Chat</h2>
-      <button class="btn-primary btn-sm" id="chat-new-btn">+ New Message</button></div>
-    <div id="chat-filter"></div>
-    <div id="chat-inbox"><div class="loading-placeholder">Loading…</div></div>`;
+    <div class="chat-page">
+      <div class="chat-page-inbox">
+        <div class="page-header"><h2>💬 Chat</h2>
+          <button class="btn-primary btn-sm" id="chat-new-btn">+ New Message</button></div>
+        <div id="chat-filter"></div>
+        <div id="chat-inbox"><div class="loading-placeholder">Loading…</div></div>
+      </div>
+    </div>`;
   const chips = [{ key: 'all', label: 'All' }, { key: 'dm', label: 'DMs' },
                  { key: 'group', label: 'Groups' }];
   if (window.Chat.myDeptChannels().length) chips.push({ key: 'dept', label: 'Channels' });

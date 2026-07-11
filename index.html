@@ -154,7 +154,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.39 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.40 · Barro Industries</div>
   </div>
 </div>
 
@@ -317,6 +317,9 @@
 <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
 <script defer src="js/firebase-config.js"></script>
 <script defer src="js/config.js"></script>
+<!-- v12 WS42 Phase 12 — edge swipe-back + sheet swipe-dismiss. Needs window.Overlay
+     (config.js) only; must run before app.js's router/modal wiring uses it. -->
+<script defer src="js/gestures.js"></script>
 <script defer src="js/qrcode.js"></script>
 <script defer src="js/statutory-tables.js"></script>
 <script defer src="js/letterhead.js"></script>

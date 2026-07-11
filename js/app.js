@@ -197,9 +197,9 @@ function renderBackupHealthBanner(problems) {
   if (document.getElementById('backup-health-banner')) return;
   const div = document.createElement('div');
   div.id = 'backup-health-banner';
-  div.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#b91c1c;color:#fff;padding:10px 44px 10px 14px;font-size:13px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.3)';
+  div.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#b91c1c;color:#fff;padding:calc(10px + env(safe-area-inset-top,0px)) calc(44px + env(safe-area-inset-right,0px)) 10px calc(14px + env(safe-area-inset-left,0px));font-size:13px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.3)';
   div.innerHTML = `🗄️ <strong>Records durability alert.</strong> ${problems.map(p => escHtml(p)).join(' ')}`
-    + `<button aria-label="Dismiss" style="position:absolute;right:10px;top:8px;background:none;border:none;color:#fff;font-size:18px;cursor:pointer">×</button>`;
+    + `<button aria-label="Dismiss" style="position:absolute;right:calc(10px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px));background:none;border:none;color:#fff;font-size:18px;cursor:pointer">×</button>`;
   div.querySelector('button').onclick = () => div.remove();
   document.body.appendChild(div);
 }
@@ -621,7 +621,7 @@ function showPhotoPrompt() {
   const banner = document.createElement('div');
   banner.id = 'photo-prompt-banner';
   banner.style.cssText = `
-    position:fixed;bottom:24px;right:24px;z-index:9999;
+    position:fixed;bottom:calc(24px + env(safe-area-inset-bottom,0px));right:calc(24px + env(safe-area-inset-right,0px));z-index:9999;
     background:var(--bg,#1e2433);border:1px solid var(--border,#2a3147);
     border-radius:16px;padding:18px 20px;width:290px;
     box-shadow:0 8px 32px rgba(0,0,0,0.35);
@@ -1051,7 +1051,10 @@ function buildSidebarNav() {
         lastSectionLabel = label;
       }
     }
-    return `${secLabel}<button class="nav-item" data-page="${item.page}">${item.iconHtml || _navIcon(item.icon)}${item.label}</button>`;
+    // v12 WS42 Phase 15: label wrapped in .nav-label (was a bare text node) so the
+    // 820–1023px icon-rail tier can hide it via CSS; title="" gives that tier a
+    // native hover tooltip for free — no new tooltip JS needed.
+    return `${secLabel}<button class="nav-item pressable" data-page="${item.page}" title="${escHtml(item.label)}">${item.iconHtml || _navIcon(item.icon)}<span class="nav-label">${item.label}</span></button>`;
   }).join('');
   nav.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1080,7 +1083,7 @@ function buildTopNavStrip() {
     : isBrilliantOnly() ? window.BRILLIANT_BOTTOM_NAV
     : window.BOTTOM_NAV_ITEMS;
   strip.innerHTML = items.map(item =>
-    `<button class="top-nav-item" data-page="${item.page}">
+    `<button class="top-nav-item pressable" data-page="${item.page}">
        <span class="tn-icon-wrap" style="position:relative;display:inline-flex">
          ${_bnIcon(item.icon)}
          ${item.badge ? `<span class="tn-badge" style="display:none">0</span>` : ''}
@@ -1116,10 +1119,10 @@ function buildDeptsPanel(depts) {
   const admin = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
   list.innerHTML = depts.map(d => {
     const cfg = DEPARTMENTS[d];
-    return `<button class="depts-item" data-page="dept:${escHtml(d)}">
+    return `<button class="depts-item pressable" data-page="dept:${escHtml(d)}">
       ${emojiIcon(cfg.lucideIcon || cfg.icon, 18)}<span>${escHtml(d)}</span></button>`;
   }).join('') + (admin
-    ? `<button class="depts-item" data-page="departments" style="color:var(--primary-light)">
+    ? `<button class="depts-item pressable" data-page="departments" style="color:var(--primary-light)">
          ${emojiIcon('layout-grid',18)}<span>All departments →</span></button>` : '');
   if (window.lucide) lucide.createIcons({ nodes: [list] });
   const close = () => { panel.classList.add('hidden'); back.classList.add('hidden'); };

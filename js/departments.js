@@ -1012,7 +1012,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     <!-- Scrollable content + messaging below -->
     <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
       <!-- Task info section (scrollable) -->
-      <div style="flex:0 0 auto;overflow-y:auto;max-height:42%;padding:16px;border-bottom:1px solid var(--border)" id="task-info-scroll">
+      <div style="flex:0 0 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;max-height:42%;padding:16px;border-bottom:1px solid var(--border)" id="task-info-scroll">
 
         <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap">
           ${t.assignedToNames?.length?`<span>👥 <strong>${escHtml(t.assignedToNames.join(', '))}</strong></span>`:''}
