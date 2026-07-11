@@ -4654,6 +4654,29 @@ html.light .profile-hero-id, html.theme-pink .profile-hero-id, html.theme-grey .
   @page{margin:11mm 10mm 7mm;}
 }
 
+/* ── BIR suite prints — books/worksheets/FS (v12 WS39) ───────────────────
+   Renders in-app via window.birPrintPage (no pop-ups — same-document print,
+   the WS24/payslip pattern). js/letterhead.js's buildLetterhead().printCSS is
+   injected inline per-print (a <style> tag ahead of the content) for .lh-*
+   styling — this block only handles page isolation + BIR-specific tables. */
+.bir-print{max-width:210mm;margin:0 auto;background:#fff;color:#000;padding:14mm;font:11px/1.4 Arial,sans-serif;position:relative;}
+.bir-print table.bir-t{width:100%;border-collapse:collapse;margin-top:10px;}
+.bir-print .bir-t td,.bir-print .bir-t th{border:1px solid #ccc;padding:4px 6px;font-size:9.5pt;}
+.bir-print .bir-t th{background:#1E3A5F;color:#fff;font-size:8.5pt;text-transform:uppercase;letter-spacing:.04em;text-align:left;}
+.bir-print .bir-t td.num{text-align:right;}
+.bir-print .bir-sec-h{background:#1E3A5F;color:#fff;font-weight:700;font-size:9pt;text-transform:uppercase;letter-spacing:.05em;padding:4px 8px;margin-top:14px;}
+.bir-print .bir-total-row td{font-weight:800;background:#eef0f5;}
+.bir-print .bir-banner{background:#fff3cd;border:1px solid #e0a800;color:#7a5b00;padding:8px 12px;border-radius:4px;font-size:10.5pt;margin-bottom:10px;}
+.bir-print .bir-watermark::before{content:"DRAFT — UNVERIFIED RATES";position:fixed;top:45%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:52px;font-weight:900;color:rgba(200,0,0,0.15);z-index:1;pointer-events:none;white-space:nowrap;}
+@media print{
+  body *{visibility:hidden;} .bir-print,.bir-print *{visibility:visible;} .no-print{display:none!important;}
+  .bir-print{position:absolute;left:0;top:0;width:100%;padding:8mm;}
+  .bir-print table.bir-t{page-break-inside:auto;break-inside:auto;}
+  .bir-print thead{display:table-header-group;}
+  .bir-print tr,.bir-print .lh-sig-row{page-break-inside:avoid;break-inside:avoid;}
+  @page{margin:11mm 10mm 7mm;}
+}
+
 /* ── v12 WS18 — keyboard-shortcuts cheat sheet (? modal) ── */
 .kbd-cheatsheet .kbd-table { width:100%; border-collapse:collapse; }
 .kbd-cheatsheet .kbd-table td { padding:7px 10px; border-bottom:1px solid var(--border); font-size:14px; color:var(--text); }

@@ -1625,6 +1625,9 @@ async function postExpenseToLedger(expId, e, acct) {
     description: `Expense — ${e.description||''}${e.submittedByName?` (${e.submittedByName})`:''}`,
     amount:      e.amount || 0,
     category,
+    // v12 WS39 — reclaimable input VAT (Add-Expense flow); legacy expenses with
+    // no inputVat field fall back to 0, matching today's behavior exactly.
+    inputVat:    e.inputVat || 0,
     refNumber:   ref,
     source:      'Expense',
     addedBy:     window.currentUser?.uid || null,
@@ -1755,6 +1758,10 @@ async function resyncLedgerForSource(collection, docId) {
       type = 'debit'; amount = e.amount || 0; category = e.category || 'General Expense';
       description = `Expense — ${e.description || ''}${e.submittedByName ? ` (${e.submittedByName})` : ''}`;
       accountType = 'expense'; account = category;
+      // v12 WS39 — carry input VAT through on an EDITED expense too (previously
+      // left null here, so an edit never patched/gained inputVat on the mirrored
+      // ledger row). `patch.inputVat` below picks this up automatically.
+      inputVat = e.inputVat || 0;
     } else if (collection === 'cash_receipt_journal') {
       ref = `CRJ-${docId}`; type = 'credit'; amount = crjLedgerIncome(e);
       category = (e.creditSalesRevenue || 0) >= (e.creditSundryAmount || 0) ? 'Sales Revenue' : (e.creditSundryAcct || 'Other Income');
@@ -1970,11 +1977,20 @@ function openAddExpenseModal(currentUser) {
         <option>Materials</option><option>Utilities</option><option>Other</option>
       </select>
     </div>
+    ${window.vatFieldHTML ? window.vatFieldHTML('e-vat', window.VAT_DEFAULT_BY_CATEGORY['Office Supplies']) : ''}
     <div id="expense-file-upload"></div>
   `, `<button class="btn-primary" id="save-expense-btn">Submit Expense</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   let uploadedFile = null;
   Drive.renderUploadArea('expense-file-upload', (result) => { uploadedFile = result; }, { label:'Upload Receipt (photo or PDF)', accept:'image/*,.pdf', dept:'Finance', subfolder:'Receipts' });
+
+  // v12 WS39 — re-default the Input VAT selector when the category changes
+  // (Materials/Utilities/Office Supplies default VATable; Meals/Transportation/
+  // Other default exempt). User can always override before submitting.
+  document.getElementById('e-cat').addEventListener('change', (ev) => {
+    const el = document.getElementById('e-vat');
+    if (el && window.VAT_DEFAULT_BY_CATEGORY) el.value = window.VAT_DEFAULT_BY_CATEGORY[ev.target.value] || 'exempt';
+  });
 
   document.getElementById('save-expense-btn').addEventListener('click', async () => {
     const snap = await db.collection('users').doc(currentUser.uid).get();
@@ -1989,6 +2005,10 @@ function openAddExpenseModal(currentUser) {
       submittedByName: name,
       fileUrl:         uploadedFile?.url||null,
       fileName:        uploadedFile?.name||null,
+      // v12 WS39 — input-VAT capture on the general expense flow (closes the
+      // "Add Expense" gap: postExpenseToLedger/resyncLedgerForSource carry
+      // this through to the ledger; exportFinReportCSV already has the column).
+      ...(window.readVatField ? window.readVatField('e-vat', parseFloat(document.getElementById('e-amount').value)||0) : {}),
       createdAt:       firebase.firestore.FieldValue.serverTimestamp()
     });
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('expenses');
@@ -2270,7 +2290,7 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
 window.renderFinance = async function(currentUser, currentRole, subtab = window.initialSubtab('Overview')) {
   const c = deptContainer();
   // Finance tools vs HR tools — visually separated
-  const finTabs = ['Overview','Reports','Sales Orders','Ledger','Bank Accounts','Cash Receipts','Cash Disbursements','Purchases','Inventory','Records','Taxes','SSS / Gov','Tasks'];
+  const finTabs = ['Overview','Reports','Sales Orders','Ledger','Bank Accounts','Cash Receipts','Cash Disbursements','Purchases','Inventory','Records','Taxes','BIR','SSS / Gov','Tasks'];
   const hrTabs  = ['Payroll','HR Profiles','Cash Advances'];
   const allTabs = [...finTabs, ...hrTabs];
   c.innerHTML = `
@@ -2298,6 +2318,7 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
     case 'Reports':      await renderFinancialReports(content, currentUser, currentRole); break;
     case 'Payroll':      await renderPayrollManagement(content, currentUser, currentRole); break;
     case 'Taxes':        await renderTaxesTab(content, currentUser, currentRole); break;
+    case 'BIR':          await window.renderBIRTab(content, currentUser, currentRole); break;
     case 'Ledger':       await renderLedgerTab(content, currentUser, currentRole); break;
     case 'Bank Accounts': await window.renderBankAccounts(content); break;
     case 'Cash Receipts':       await renderCashReceiptJournal(content, currentUser, currentRole); break;
@@ -2769,7 +2790,12 @@ window.computePayRun = async function(month, { policy } = {}) {
     }
     const attScore = window.getAttendanceScore ? await window.getAttendanceScore(emp.id) : 1;
     const planResult = window.CashAdvance ? await window.CashAdvance.planFor(emp.id, month) : { plan: [] };
-    return window.computePayLine(emp, { month, policy: runPolicy, kpiScore, attScore, caPlan: planResult.plan, caBalance: planResult.caBalance });
+    const line = window.computePayLine(emp, { month, policy: runPolicy, kpiScore, attScore, caPlan: planResult.plan, caBalance: planResult.caBalance });
+    // v12 WS39 — freeze statutory IDs onto the computed line (do NOT touch
+    // computePayLine itself, WS20's frozen math). Read live from payroll/{uid}.
+    line.tinNum = emp.tinNum || ''; line.ssNum = emp.ssNum || '';
+    line.phNum = emp.phNum || '';   line.pagibigNum = emp.pagibigNum || '';
+    return line;
   }));
 
   const totalNet = lines.reduce((s,l)=>s+l.finalPay, 0);
@@ -2818,6 +2844,10 @@ window.disbursePayRun = async function(month, opts = {}) {
       er: line.er, kpiScore: line.kpiScore, attScore: line.attScore, perfFactor: line.perfFactor,
       policy: line.policy, runMonth: month,
       caDeducted: line.caPlanned, netPay: line.netBeforeCA, finalPay: line.finalPay,
+      // v12 WS39 — mirror the frozen statutory IDs so a historical salary_history
+      // doc (payslip reprint) still carries the TIN/SSS/PhilHealth/Pag-IBIG that
+      // were on file at disburse time.
+      tinNum: line.tinNum || '', ssNum: line.ssNum || '', phNum: line.phNum || '', pagibigNum: line.pagibigNum || '',
       recordedBy: currentUser?.uid, recordedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge:true });
   }
@@ -3332,6 +3362,17 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             <div class="form-group"><label>Pag-IBIG</label><input id="ep-pi" type="number" value="${emp.pagibig||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.pagibig):'0.00'}" inputmode="decimal"/></div>
           </div>
           <div class="form-group"><label>Tax</label><input id="ep-tax" type="number" value="${emp.tax||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.tax):'0.00'}" inputmode="decimal"/></div>
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+            <label style="font-weight:600">🪪 Statutory IDs <span style="font-size:11px;color:var(--text-muted)">(required for Alphalist / BIR 2316)</span></label>
+            <div class="form-row">
+              <div class="form-group"><label>TIN</label><input id="ep-tin" value="${escHtml(emp.tinNum||'')}" placeholder="000-000-000-000"/></div>
+              <div class="form-group"><label>SSS No.</label><input id="ep-ssnum" value="${escHtml(emp.ssNum||'')}" placeholder="00-0000000-0"/></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>PhilHealth No.</label><input id="ep-phnum" value="${escHtml(emp.phNum||'')}"/></div>
+              <div class="form-group"><label>Pag-IBIG MID</label><input id="ep-pagnum" value="${escHtml(emp.pagibigNum||'')}"/></div>
+            </div>
+          </div>
           ${caBalance > 0 ? `
           <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
             <label style="font-weight:600">💳 Cash Advance — Outstanding ₱${fmt(caBalance)}${inst?` · Installment ${inst.installmentNo} of ${inst.terms}`:''}</label>
@@ -3382,6 +3423,13 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             philhealth: parseFloat(document.getElementById('ep-ph').value)||0,
             pagibig:    parseFloat(document.getElementById('ep-pi').value)||0,
             tax:        parseFloat(document.getElementById('ep-tax').value)||0,
+            // v12 WS39 — statutory IDs (alphalist/2316 prerequisite). Free-text,
+            // same field names as worker_profiles so toPayslipModel reads one
+            // vocabulary across both payroll cycles.
+            tinNum:     document.getElementById('ep-tin')?.value.trim()   || '',
+            ssNum:      document.getElementById('ep-ssnum')?.value.trim() || '',
+            phNum:      document.getElementById('ep-phnum')?.value.trim() || '',
+            pagibigNum: document.getElementById('ep-pagnum')?.value.trim()|| '',
           }, {merge:true});
           if (emp) emp.payClass = document.getElementById('ep-class')?.value === 'production' ? 'production' : 'regular';
           window.logAudit && window.logAudit('update','payroll',uid,{ allowance:parseFloat(document.getElementById('ep-allow').value)||0 });
@@ -3688,9 +3736,16 @@ window.exportFinReportCSV = function() {
 // year, not just This-Month/YTD/All — see window.Period in config.js.
 window.renderFinancialReports = async function(container, currentUser, currentRole, range='month') {
   container.innerHTML = '<div class="loading-placeholder">Building report…</div>';
+  // 'year' (legacy Reports spelling) is a Period alias for 'ytd' — same math.
+  const periodKey = (range === 'year') ? 'ytd' : range;
+  const pParsed = window.Period.parse(periodKey);
+  // v12 WS39 — period resolved FIRST, then date-range-bounded reads (WS16's
+  // ledgerForPeriod/gjForPeriod), NOT the old "3000 most recent rows of ALL
+  // TIME, then filter" pattern — that silently truncated any period older
+  // than the newest 3000 ledger docs (the BIR-suite compliance landmine).
   const [ledgerSnap, gjSnap] = await Promise.all([
-    db.collection('ledger').orderBy('date','desc').limit(3000).get().catch(()=>({docs:[]})),
-    db.collection('general_journal').orderBy('date','desc').limit(3000).get().catch(()=>({docs:[]}))
+    window.ledgerForPeriod(periodKey),
+    window.gjForPeriod(periodKey)
   ]);
   const led = ledgerSnap.docs.map(d=>d.data());
   const gj  = gjSnap.docs.flatMap(d=>{ const e=d.data(); const rows=[];
@@ -3698,10 +3753,9 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
     if (e.credit) rows.push({date:e.date, type:'credit', amount:e.credit, category:'Journal Entry'});
     return rows; });
   let all = [...led, ...gj];
-
-  // 'year' (legacy Reports spelling) is a Period alias for 'ytd' — same math.
-  const periodKey = (range === 'year') ? 'ytd' : range;
-  const pParsed = window.Period.parse(periodKey);
+  // Belt-and-braces client-side filter for rows with odd/legacy date strings
+  // (e.g. month-level 'YYYY-MM' rows) that the bounded query's exact-string
+  // range compare might not line up with the parsed period boundaries.
   all = all.filter(e => window.Period.match(e.date, pParsed));
   const label = pParsed.type === 'all' ? 'All Time' : (periodKey === 'ytd' ? 'YTD ' + bizYear() : pParsed.label);
   // Stash the period's rows so the CSV export button (inline onclick) can reach them.
@@ -3717,17 +3771,10 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
   const incCats = byCat(income), expCats = byCat(expense);
   const salesRows = income.filter(e=>(e.category||'')==='Sales Revenue');
   const sales = salesRows.reduce((s,e)=>s+(e.amount||0),0);
-  // Output VAT = sum of each sale's stored vatAmount (respects its per-entry VAT
-  // treatment: inclusive / exclusive / exempt). Legacy rows with no vatAmount fall
-  // back to the VAT-inclusive split (amount − amount/1.12).
-  const outputVat = salesRows.reduce((s,e)=>{
-    if (e.vatAmount != null) return s + e.vatAmount;
-    const amt = e.amount||0; return s + (amt - amt/1.12);
-  }, 0);
-  // Input VAT = reclaimable VAT on VATable purchases/disbursements (stored as
-  // inputVat on the expense ledger rows). Net VAT Payable = output − input.
-  const inputVat = expense.reduce((s,e)=>s+(e.inputVat||0),0);
-  const netVat = outputVat - inputVat;
+  // Output/Input VAT — ONE shared computation (window.computeVatSummary, js/bir.js,
+  // v12 WS39) so Reports and the 2550 worksheet can never drift from each other.
+  const vatSummary = window.computeVatSummary(all);
+  const outputVat = vatSummary.outputVat, inputVat = vatSummary.inputVat, netVat = vatSummary.netVat;
   const isPres = (typeof isPresident==='function') && isPresident();
   const isClosableMonth = pParsed.type==='month' && pParsed.key !== 'month:'+bizDate().slice(0,7);
   let periodClosed = false;
@@ -4036,16 +4083,26 @@ async function renderLedgerTab(container, currentUser, currentRole) {
         <select id="led-account" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${acctOptsFor('expense')}</select>
       </div>
       <div class="form-group"><label>Reference Number</label><input id="led-ref" placeholder="OR #, Invoice #, JE #, etc."/></div>
+      <div id="led-vat-wrap" style="display:none">${window.vatFieldHTML ? window.vatFieldHTML('led-vat','exempt') : ''}</div>
       <div id="led-file-area"></div>
     `, `<button class="btn-primary" id="save-led-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     let ledFile = null;
     Drive.renderUploadArea('led-file-area', r=>{ledFile=r;},{label:'Attach receipt/invoice',dept:'Finance',subfolder:'Ledger'});
     const typeSel = document.getElementById('led-type'), acctTypeSel = document.getElementById('led-accttype'), acctSel = document.getElementById('led-account');
+    // v12 WS39 — Input VAT only makes sense on a debit/expense row; show/hide
+    // it as the type/account-type selections change (starts hidden: default
+    // type is 'credit').
+    const ledUpdateVatVisibility = () => {
+      const wrap = document.getElementById('led-vat-wrap');
+      if (wrap) wrap.style.display = (typeSel.value==='debit' && acctTypeSel.value==='expense') ? '' : 'none';
+    };
     typeSel.addEventListener('change', () => {
       acctTypeSel.value = typeSel.value === 'credit' ? 'income' : 'expense';
       acctSel.innerHTML = acctOptsFor(acctTypeSel.value);
+      ledUpdateVatVisibility();
     });
-    acctTypeSel.addEventListener('change', () => { acctSel.innerHTML = acctOptsFor(acctTypeSel.value); });
+    acctTypeSel.addEventListener('change', () => { acctSel.innerHTML = acctOptsFor(acctTypeSel.value); ledUpdateVatVisibility(); });
+    ledUpdateVatVisibility();
     document.getElementById('save-led-btn').addEventListener('click', async () => {
       const date = document.getElementById('led-date').value;
       try { await window.assertPeriodOpen(date); } catch (e) { return; } // toast already shown
@@ -4058,6 +4115,9 @@ async function renderLedgerTab(container, currentUser, currentRole) {
         category:   acctSel.value,
         refNumber:  document.getElementById('led-ref').value.trim(),
         fileUrl:    ledFile?.url||null,
+        // v12 WS39 — input-VAT capture on manual Ledger-tab debit/expense entries.
+        ...( typeSel.value==='debit' && acctTypeSel.value==='expense' && window.readVatField
+             ? window.readVatField('led-vat', parseFloat(document.getElementById('led-amount').value)||0) : {} ),
         addedBy:    currentUser.uid,
         addedByName:userProfile?.displayName||currentUser.email,
         createdAt:  firebase.firestore.FieldValue.serverTimestamp()
@@ -4356,7 +4416,7 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
     const bankOpts = await window.BankAccounts.optionsHTML();
     openPage('New Cash Receipt Entry', `
       <div class="form-row">
-        <div class="form-group"><label>Reference</label><input id="crj-ref" placeholder="OR #, Receipt #…"/></div>
+        <div class="form-group"><label>Reference</label><input id="crj-ref" placeholder="OR #, Receipt #…"/>${window.birOrButtonHTML ? window.birOrButtonHTML('crj-ref') : ''}</div>
         <div class="form-group"><label>Date</label><input id="crj-date" type="date" value="${today()}"/></div>
       </div>
       <div class="form-group"><label>Customer</label><input id="crj-customer" placeholder="Customer name"/></div>
@@ -4375,6 +4435,7 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
       <div class="form-group"><label>Received into (company account)</label>
         <select id="crj-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
     `, `<button class="btn-primary" id="save-crj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    window.wireBirOrButtons && window.wireBirOrButtons();
 
     document.getElementById('save-crj-btn').addEventListener('click', async () => {
       const customer = document.getElementById('crj-customer').value.trim();
@@ -5771,9 +5832,12 @@ window.toPayslipModel = function(source, kind) {
       docNumber:`PS-${source.month || source.runMonth}-${source.uid || source.userId}`,
       periodLabel:new Date((source.month||source.runMonth)+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'}),
       payDateLabel: source.payDateLabel || '',
+      // v12 WS39 — statutory IDs now live on payroll/{uid} (frozen onto the pay-
+      // run line / salary_history mirror at Compute/Disburse); previously hard-
+      // coded to '' for every monthly employee (the alphalist/2316 data gap).
       employee:{ name:source.name||source.userName||'', idNumber:source.employeeId||'',
                  jobTitle:source.title||'', department:source.department||'',
-                 tin:'', sss:'', philhealth:'', pagibig:'' },
+                 tin:source.tinNum||'', sss:source.ssNum||'', philhealth:source.phNum||'', pagibig:source.pagibigNum||'' },
       earnings:{ base, allowance, overtime:0, gross },
       statutory:{ ee, er },
       otherDeductions:other,
@@ -5816,10 +5880,14 @@ window.toPayslipModel = function(source, kind) {
 window.payslipYtdMonthly = async function(uid, year) {
   const snap = await db.collection('salary_history').where('userId','==',uid)
     .where('month','>=',`${year}-01`).where('month','<=',`${year}-12`).get().catch(()=>({docs:[]}));
-  let gross=0, net=0, baseSum=0;
+  let gross=0, net=0, baseSum=0, tax=0, sss=0, philhealth=0, pagibig=0;
   snap.docs.forEach(d=>{ const r=d.data(); const b=r.base??r.salary??0;
-    baseSum+=b; gross+=b+(r.allowance||0); net+=(r.finalPay??r.netPay??0); });
-  return { gross, net, thirteenthAccrual: Math.round((baseSum/12)*100)/100 };   // WS21 D7
+    baseSum+=b; gross+=b+(r.allowance||0); net+=(r.finalPay??r.netPay??0);
+    tax+=(r.tax||0); sss+=(r.sss||0); philhealth+=(r.philhealth??r.philHealth??0); pagibig+=(r.pagibig??r.pagIbig??0); });
+  // v12 WS39 — additive: tax/sss/philhealth/pagibig YTD sums for the alphalist/
+  // 2316 worksheets. Existing callers (payslip YTD card) only read gross/net/
+  // thirteenthAccrual and are unaffected.
+  return { gross, net, thirteenthAccrual: Math.round((baseSum/12)*100)/100, tax, sss, philhealth, pagibig };   // WS21 D7
 };
 window.payslipYtdWeekly = async function(workerId, year) {
   const snap = await db.collection('payslips').where('workerId','==',workerId)
@@ -10113,7 +10181,7 @@ async function openRecordSaleModal(o, container){
         </select>
         <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Pick what the quote/sales order specified — it varies per deal.</div>
       </div>
-      <div class="form-group"><label>OR / Reference No.</label><input id="rs-ref" placeholder="Official Receipt no."/></div>
+      <div class="form-group"><label>OR / Reference No.</label><input id="rs-ref" placeholder="Official Receipt no."/>${window.birOrButtonHTML ? window.birOrButtonHTML('rs-ref') : ''}</div>
     </div>
     <div class="card" style="margin:6px 0"><div class="card-body" style="padding:8px 14px;font-size:12px;display:grid;grid-template-columns:1fr auto;gap:2px 12px">
       <span style="color:var(--text-muted)">Recorded total (to ledger &amp; project)</span><span id="rs-appr" style="text-align:right;font-weight:700;color:var(--success)">₱${fmt(defaultAmt)}</span>
@@ -10127,6 +10195,7 @@ async function openRecordSaleModal(o, container){
     <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Posts income to the ledger (with VAT split), updates the project's collected balance, and notifies Production.</div>
     <div id="rs-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="rs-save">Approve &amp; Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  window.wireBirOrButtons && window.wireBirOrButtons();
   const recompute=()=>{
     const entered=parseFloat(document.getElementById('rs-amount').value)||0;
     const t=document.getElementById('rs-vat').value;
@@ -12520,10 +12589,19 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
         </div>
       </div>
       <div class="form-group"><label>Reference # (optional)</label><input id="exp-ref" placeholder="OR #, Invoice #…"/></div>
+      <div id="exp-vat-wrap" style="display:none">${window.vatFieldHTML ? window.vatFieldHTML('exp-vat','exempt') : ''}</div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:10px;background:rgba(155,168,255,0.08);border-radius:8px;font-size:12px;color:var(--text-muted)">
         🔗 This entry will also appear in Finance → Ledger
       </div>
     `, `<button class="btn-primary" id="save-exp-btn">Save & Sync to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+    // v12 WS39 — Input VAT only applies to a debit/expense entry.
+    const expUpdateVatVisibility = () => {
+      const wrap = document.getElementById('exp-vat-wrap');
+      if (wrap) wrap.style.display = (document.getElementById('exp-type').value==='debit') ? '' : 'none';
+    };
+    document.getElementById('exp-type').addEventListener('change', expUpdateVatVisibility);
+    expUpdateVatVisibility();
 
     document.getElementById('save-exp-btn').addEventListener('click', async () => {
       const amount = parseFloat(document.getElementById('exp-amount').value)||0;
@@ -12551,6 +12629,8 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
         budgetLineId:  lineId || null,
         budgetLineName:lineName || null,
         refNumber:     document.getElementById('exp-ref').value.trim() || null,
+        // v12 WS39 — input-VAT capture on dept budget-expense debit entries.
+        ...( type==='debit' && window.readVatField ? window.readVatField('exp-vat', amount) : {} ),
         addedBy:       currentUser.uid,
         addedByName:   uName,
         source:        dept, // Finance can see which dept this came from
@@ -13595,10 +13675,11 @@ async function openProjectBillingModal(p){
       <span style="color:var(--text-muted)">Net of VAT</span><span id="pb-net" style="text-align:right">₱0.00</span>
       <span style="color:var(--text-muted)">Output VAT</span><span id="pb-vatamt" style="text-align:right">₱0.00</span>
     </div></div>
-    <div class="form-group"><label>OR / Reference No.</label><input id="pb-ref" placeholder="Official Receipt no."/></div>
+    <div class="form-group"><label>OR / Reference No.</label><input id="pb-ref" placeholder="Official Receipt no."/>${window.birOrButtonHTML ? window.birOrButtonHTML('pb-ref') : ''}</div>
     <div class="form-group"><label>Receipt (proof)</label><div id="pb-receipt-upload"></div></div>
     <div id="pb-err" class="error-msg hidden"></div>
   `, `<button class="btn-primary" id="pb-save">Record + Post to Ledger</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  window.wireBirOrButtons && window.wireBirOrButtons();
   let receipt=null;
   if(window.Drive?.renderUploadArea) Drive.renderUploadArea('pb-receipt-upload',(r)=>{receipt=r;},{label:'Upload OR / proof',accept:'image/*,.pdf',dept:'Finance',subfolder:'Collections'});
   const pbRecompute=()=>{

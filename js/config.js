@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.25';
+window.APP_VERSION = '12.0.26';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -375,7 +375,7 @@ window.fetchUsersWithPayroll = async function() {
   };
   // Aliases + sub-key prefixes cleared when a base collection key is invalidated.
   const _alias = {
-    'ledger':   { prefixes: ['ledger:', 'ledger>='] },  // period-scoped + since-scoped reads
+    'ledger':   { prefixes: ['ledger:', 'ledger>=', 'ledger<='] },  // period-scoped + since/through-scoped reads (v12 WS39 Balance Sheet cumulative-to-date read)
     'expenses': { alsoKeys: ['expenses-pending', 'expenses-recent'] },
   };
   window.dbCacheInvalidate = function(key) {
@@ -449,6 +449,19 @@ window.ledgerSince = function(startYmd) {
     return dbCachedGet('ledger', () => db.collection('ledger').get().catch(() => ({docs:[]})), 60000);
   return dbCachedGet('ledger>=' + startYmd,
     () => db.collection('ledger').where('date','>=',startYmd).get().catch(() => ({docs:[]})), 60000);
+};
+// Bounded general_journal reader — symmetric with ledgerForPeriod (v12 WS39).
+// general_journal has no active writer today (legacy/orphaned collection, read-only)
+// but renderFinancialReports still merges it in, so it needs the same date-range
+// bound as the ledger read to fix the same "silently truncates an older period"
+// compliance risk.
+window.gjForPeriod = function(periodKey) {
+  const p = Period.parse(periodKey);
+  if (p.type === 'all')
+    return dbCachedGet('gj', () => db.collection('general_journal').get().catch(() => ({docs:[]})), 45000);
+  return dbCachedGet('gj:' + p.key,
+    () => db.collection('general_journal').where('date','>=',p.start).where('date','<=',p.end)
+            .get().catch(() => ({docs:[]})), 45000);
 };
 
 // ── Bank accounts registry (v12 WS36) ──────────────────────────────────────
