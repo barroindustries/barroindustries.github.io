@@ -2496,12 +2496,10 @@ async function renderPresidentMessageCard() {
       if(sources) return sources;
       const toArr = s => s.docs.map(d=>({id:d.id,...d.data()}));
       const safe = p => p.then(toArr).catch(()=>[]);
-      const [tasks, quotes, sc, dc, bsc, inv, prod, files] = await Promise.all([
+      const [tasks, quotes, cl, inv, prod, files] = await Promise.all([
         (typeof dbCachedGet==='function'?dbCachedGet('tasks-all',()=>db.collection('tasks').get(),30000):db.collection('tasks').get()).then(toArr).catch(()=>[]),
         (typeof getAllQuotes==='function'?getAllQuotes():db.collection('bk_quotes').get()).then(toArr).catch(()=>[]),
-        dbCachedGet('sales_clients',    () => db.collection('sales_clients').get().catch(()=>({docs:[]})), 60000).then(toArr).catch(()=>[]),
-        dbCachedGet('design_clients',   () => db.collection('design_clients').get().catch(()=>({docs:[]})), 60000).then(toArr).catch(()=>[]),
-        dbCachedGet('bs_clients',       () => db.collection('bs_clients').get().catch(()=>({docs:[]})), 60000).then(toArr).catch(()=>[]),
+        window.Clients.listAll().catch(()=>[]),
         dbCachedGet('inventory_items',  () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000).then(toArr).catch(()=>[]),
         safe(db.collection('products').limit(1000).get()),
         // hub_files ONLY (v12 WS38 decision 8) — legacy files_<scope> collections are
@@ -2510,7 +2508,7 @@ async function renderPresidentMessageCard() {
         (typeof FilesHub!=='undefined' ? FilesHub.loadFiles(null).then(a=>a.slice(0,1000)) : Promise.resolve([])).catch(()=>[]),
       ]);
       sources = { tasks, quotes,
-        clients: [...sc.map(x=>({...x,_brand:'sales'})), ...dc.map(x=>({...x,_brand:'design'})), ...bsc.map(x=>({...x,_brand:'bs'}))],
+        clients: cl.map(x=>({...x, _brand:(x.brands&&x.brands[0])==='design'?'design':(x.brands&&x.brands.includes('bs'))?'bs':'sales'})),
         inv, prod, files };
       return sources;
     }

@@ -127,6 +127,176 @@ window.runProjectKindBackfill = async function() {
 };
 
 // ════════════════════════════════════════════════════════════════
+//  UNIFIED CLIENT BOOK (v12 WS32) — one `clients` collection, one clientId.
+//  Legacy sales_clients/design_clients/bs_clients are read-only archives once
+//  migrateClientBooks() has run; until then listAll() falls back to them
+//  (read-only compat view) so nothing goes blank between deploy and migration.
+// ════════════════════════════════════════════════════════════════
+window.Clients = (function () {
+  const nameKey = s => window.clientNameKey(s);
+  const brandOf = ui => ui === 'design' ? 'design' : ui === 'brilliant-steel' ? 'bs' : 'sales';
+  const deptOf  = ui => ui === 'design' ? 'Design' : ui === 'brilliant-steel' ? 'Brilliant Steel' : 'Sales';
+  function normalize(doc, legacyBrand) {
+    const d = doc.data ? doc.data() : doc;
+    return { id: doc.id || d.id, ...d,
+      nameKey: d.nameKey || nameKey(d.name),
+      brands: (Array.isArray(d.brands) && d.brands.length) ? d.brands : [legacyBrand || 'sales'],
+      _legacy: !!legacyBrand };
+  }
+  // Cached (WS16 canonical key 'clients', 60s). opts.brand filters to one book.
+  async function listAll(opts) {
+    opts = opts || {};
+    const fetch = async () => {
+      const snap = await db.collection('clients').orderBy('createdAt', 'desc').get().catch(() => ({ docs: [] }));
+      if (snap.docs.length) return snap.docs.map(d => normalize(d));
+      // pre-migration compat: merge the three legacy books, read-only
+      const [sc, dc, bc] = await Promise.all([
+        db.collection('sales_clients').get().catch(() => ({ docs: [] })),
+        db.collection('design_clients').get().catch(() => ({ docs: [] })),
+        db.collection('bs_clients').get().catch(() => ({ docs: [] })),
+      ]);
+      return [...sc.docs.map(d => normalize(d, 'sales')), ...dc.docs.map(d => normalize(d, 'design')),
+              ...bc.docs.map(d => normalize(d, 'bs'))]
+        .sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+    };
+    const all = (typeof dbCachedGet === 'function') ? await dbCachedGet('clients', fetch, 60000) : await fetch();
+    return opts.brand ? all.filter(c => c.brands.includes(opts.brand)) : all;
+  }
+  async function findByName(name) {
+    const key = nameKey(name); if (!key) return null;
+    const snap = await db.collection('clients').where('nameKey', '==', key).limit(1).get().catch(() => ({ empty: true, docs: [] }));
+    return snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() };
+  }
+  // Quote-filed upsert (replaces app.js:8196-8209's whole-collection scan with an
+  // indexed nameKey query). Never touches stage/followUpDate on existing docs.
+  // Returns the clientId (the FK the bridge stamps onto the quote) or null.
+  async function upsertFromQuote(q) {
+    const name = (q.clientName || '').trim(); if (!name) return null;
+    const key = nameKey(name), brand = (q.company === 'BK') ? 'sales' : 'bs';
+    try {
+      const FV = firebase.firestore.FieldValue;
+      const snap = await db.collection('clients').where('nameKey', '==', key).limit(1).get();
+      const cdata = { name, nameKey: key, brands: FV.arrayUnion(brand),
+        company: q.clientCompany || '', phone: q.clientPhone || '', email: q.clientEmail || '',
+        address: q.clientAddress || '', lastQuoteNumber: q.quoteNumber || '', lastQuoteTotal: q.total || 0,
+        updatedAt: FV.serverTimestamp() };
+      let id;
+      if (!snap.empty) { id = snap.docs[0].id; await db.collection('clients').doc(id).set(cdata, { merge: true }); }
+      else {
+        cdata.stage = 'lead'; cdata.followUpDate = ''; cdata.contactLog = [];
+        cdata.createdAt = FV.serverTimestamp(); cdata.createdBy = (auth.currentUser ? auth.currentUser.uid : null);
+        const ref = await db.collection('clients').add(cdata); id = ref.id;
+      }
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
+      return id;
+    } catch (_) { return null; }
+  }
+  // THE canonical client↔quote join (decision 3): clientId first, nameKey fallback.
+  function quotesFor(client, quoteDocs) {
+    const key = client.nameKey || nameKey(client.name);
+    return quoteDocs.filter(q => (q.clientId && q.clientId === client.id) || nameKey(q.clientName) === key);
+  }
+  // One per-client view-model from CACHED fetchers only (WS16 — no fresh heavy reads).
+  // Returns { quotes, orders, projects, payments, events } — events newest-first.
+  async function timelineFor(client) {
+    const toMs = v => !v ? 0 : (typeof v === 'string' ? (Date.parse(v) || 0)
+      : v.seconds ? v.seconds * 1000 : (v.toDate ? v.toDate().getTime() : 0));
+    const [qSnap, projects, soSnap] = await Promise.all([
+      (typeof getAllQuotes === 'function' ? getAllQuotes() : Promise.resolve({ docs: [] })),
+      window.Projects.listAll().catch(() => []),
+      (typeof dbCachedGet === 'function'
+        ? dbCachedGet('sales_orders', () => db.collection('sales_orders').get().catch(() => ({ docs: [] })), 60000)
+        : db.collection('sales_orders').get().catch(() => ({ docs: [] })))
+    ]);
+    const key = client.nameKey || nameKey(client.name);
+    // _coll = which collection the quote lives in (drives Reopen; survives WS31's
+    // stranded-collection bug because we join by client, not by collection).
+    const quotes = qSnap.docs
+      .map(d => ({ id: d.id, _coll: (d.ref && d.ref.parent) ? d.ref.parent.id : 'bk_quotes', ...d.data() }))
+      .filter(q => (q.clientId && q.clientId === client.id) || nameKey(q.clientName) === key)
+      .sort((a, b) => toMs(b.createdAt) - toMs(a.createdAt));
+    const orders = soSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .filter(o => (o.clientId && o.clientId === client.id) || nameKey(o.clientName) === key);
+    const projs = projects.filter(p => (p.raw && p.raw.clientId && p.raw.clientId === client.id) || nameKey(p.clientName) === key);
+    const events = [];
+    if (client.createdAt) events.push({ ts: toMs(client.createdAt), icon: '➕', text: 'Client added' });
+    (client.contactLog || []).forEach(c0 => events.push({ ts: toMs(c0.date), icon: '📞',
+      text: `Contact logged${c0.note ? ' — ' + c0.note : ''}${c0.by ? ' · ' + c0.by : ''}` }));
+    quotes.forEach(q => events.push({ ts: toMs(q.createdAt), icon: '📄',
+      text: `Quote ${q.quoteNumber || q.id.slice(-8)} · ₱${fmt(q.total || q.grandTotal || 0)} · ${q.status || q.approvalStatus || 'draft'}` }));
+    orders.forEach(o => events.push({ ts: toMs(o.createdAt), icon: '🧾',
+      text: `Sales Order ${o.quoteNumber || o.id.slice(-8)} · ₱${fmt(o.contractAmount || 0)}${o.paymentReceived ? ` (₱${fmt(o.paymentReceived)} received)` : ''}` }));
+    projs.forEach(p => {
+      ((p.raw && p.raw.timeline) || []).forEach(t => events.push({ ts: toMs(t.at), icon: '🏭', text: `${p.no ? p.no + ' · ' : ''}${t.event}` }));
+      (p.payments || []).forEach(pm => events.push({ ts: toMs(pm.date), icon: '💰',
+        text: `Payment ₱${fmt(pm.amount || 0)} (${pm.method || '—'}${pm.orRef ? ' · OR ' + pm.orRef : ''})` }));
+      ((p.raw && p.raw.documents) || []).forEach(dc => events.push({ ts: toMs(dc.at), icon: '📎', text: `${dc.type}${dc.ref ? ' · ' + dc.ref : ''}` }));
+    });
+    if (client.followUpDate) events.push({ ts: toMs(client.followUpDate), icon: '⏰', text: `Follow-up scheduled ${client.followUpDate}` });
+    events.sort((a, b) => b.ts - a.ts);
+    const payments = projs.flatMap(p => (p.payments || []).map(pm => ({ ...pm, projectNo: p.no })));
+    return { quotes, orders, projects: projs, payments, events: events.slice(0, 80) };
+  }
+  return { nameKey, brandOf, deptOf, normalize, listAll, findByName, upsertFromQuote, quotesFor, timelineFor };
+})();
+
+// One-click, RE-RUNNABLE unification: legacy books → `clients`, then clientId
+// backfill onto sales_orders/job_projects. Idempotency: legacy docs stamped
+// `migratedTo` are skipped; same-name records MERGE (brands arrayUnion +
+// fill-only-empty fields) instead of duplicating; FK backfill skips rows that
+// already carry clientId. Safe to re-run after a partial failure.
+window.migrateClientBooks = async function () {
+  const FV = firebase.firestore.FieldValue;
+  const key = window.Clients.nameKey;
+  const out = { created:0, merged:0, skipped:0, soTagged:0, jpTagged:0, unmatched:0 };
+  const cur = await db.collection('clients').get().catch(() => ({ docs: [] }));
+  const byKey = {};
+  cur.docs.forEach(d => { const x = d.data(); byKey[x.nameKey || key(x.name)] = { id: d.id, ...x }; });
+  const RANK = { lead:0, prospect:1, won:2, lost:0 };   // 'lost' never overwrites a live stage
+  for (const [coll, brand] of [['sales_clients','sales'], ['design_clients','design'], ['bs_clients','bs']]) {
+    const snap = await db.collection(coll).get().catch(() => ({ docs: [] }));
+    for (const d of snap.docs) {
+      const src = d.data();
+      if (src.migratedTo) { out.skipped++; continue; }
+      const k = key(src.name); if (!k) { out.skipped++; continue; }
+      const target = byKey[k];
+      if (target) {   // MERGE: add brand, fill only-empty fields, keep the further-along stage
+        const patch = { brands: FV.arrayUnion(brand), legacyRefs: FV.arrayUnion({ coll, id: d.id }), updatedAt: FV.serverTimestamp() };
+        ['company','email','phone','address','notes','followUpDate','lastContact','lastQuoteNumber'].forEach(f => { if (!target[f] && src[f]) patch[f] = src[f]; });
+        if ((RANK[src.stage] || 0) > (RANK[target.stage] || 0)) patch.stage = src.stage;
+        await db.collection('clients').doc(target.id).set(patch, { merge: true });
+        out.merged++;
+      } else {        // CREATE: full copy, createdAt preserved so ordering/history survive
+        const base = { name:(src.name||'').trim(), nameKey:k, brands:[brand],
+          company:src.company||'', email:src.email||'', phone:src.phone||'', address:src.address||'', notes:src.notes||'',
+          stage: ['lead','prospect','won','lost'].includes(src.stage) ? src.stage : 'lead',
+          followUpDate:src.followUpDate||'', lastContact:src.lastContact||'', contactLog:[],
+          lastQuoteNumber:src.lastQuoteNumber||'', lastQuoteTotal:src.lastQuoteTotal||0,
+          legacyRefs:[{ coll, id:d.id }], createdBy:src.addedBy||src.createdBy||null,
+          createdAt: src.createdAt || FV.serverTimestamp(), updatedAt: FV.serverTimestamp() };
+        const ref = await db.collection('clients').add(base);
+        byKey[k] = { id: ref.id, ...base };
+        out.created++;
+      }
+      await db.collection(coll).doc(d.id).set({ migratedTo: { coll:'clients', id: byKey[k].id } }, { merge: true });
+    }
+  }
+  // clientId FK backfill — unique nameKey match; no match → stays null (the
+  // nameKey fallback in Clients.quotesFor/timelineFor is the reconciliation).
+  for (const coll of ['sales_orders', 'job_projects']) {
+    const snap = await db.collection(coll).get().catch(() => ({ docs: [] }));
+    for (const d of snap.docs) {
+      const r = d.data(); if (r.clientId) continue;
+      const hit = byKey[key(r.clientName)];
+      if (hit) { await db.collection(coll).doc(d.id).update({ clientId: hit.id }); (coll === 'sales_orders') ? out.soTagged++ : out.jpTagged++; }
+      else out.unmatched++;
+    }
+  }
+  if (typeof dbCacheInvalidate === 'function') ['clients','sales_orders','projects-unified','job_projects'].forEach(dbCacheInvalidate);
+  return out;
+};
+
+// ════════════════════════════════════════════════════════════════
 //  FINANCE — edit anything, delete only with President approval
 //  Finance staff may edit every finance record. Deletes are gated:
 //  the President deletes immediately; everyone else files a request the
@@ -6626,7 +6796,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
         <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;justify-content:flex-end">
           ${q.editableState?`<button class="btn-secondary btn-sm bk-reopen-btn" data-id="${q.id}">↻ Reopen</button>`:''}
           ${q.editableState?`<button class="btn-secondary btn-sm bk-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">⎘ New Revision</button>`:''}
-          ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-total="${q.total||0}" data-co="BK" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?'✓ Ordered':'🧾 Sales Order'}</button>`:''}
+          ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${q.total||0}" data-co="BK" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?'✓ Ordered':'🧾 Sales Order'}</button>`:''}
           ${(canDel && !q.deleteRequested)?`<button class="btn-secondary btn-sm bk-del-btn" data-id="${q.id}" data-label="${escHtml(label)}" data-by="${q.createdBy||''}">🗑 Delete</button>`:''}
         </div>
       </div>`;
@@ -8415,7 +8585,15 @@ async function loadBSContent(currentUser, currentRole, sub) {
   switch(sub) {
     case 'Quote Builder':      navigateTo('bs-quote-builder'); break;
     case 'Quotations Summary': await renderBSQuotationsSummary(content, currentUser, currentRole); break;
-    case 'Client Data':        await renderBSClientData(content, currentUser, currentRole); break;
+    // Partners keep the quote-derived accordion (already scoped by bs_quotes
+    // rules); internal staff get the unified CRM hub with stages/follow-ups/timeline.
+    case 'Client Data': {
+      const partnerView = currentRole === 'partner' ||
+        ((window.currentDepts || []).length === 1 && (window.currentDepts || [])[0] === 'Brilliant Steel');
+      if (partnerView) await renderBSClientData(content, currentUser, currentRole);
+      else await renderClientProfiles(content, currentUser, currentRole, 'brilliant-steel');
+      break;
+    }
     case 'Files':              renderBSFiles(content, currentUser, currentRole); break;
   }
 }
@@ -9184,7 +9362,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
               `:''}
               ${(status==='filed'||status==='approved')?`<button class="btn-secondary btn-sm bs-reopen-btn" data-id="${q.id}" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen</button>`:''}
               ${(status==='filed'||status==='approved')&&q.editableState?`<button class="btn-secondary btn-sm bs-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">⎘ New Revision</button>`:''}
-              ${(status==='filed'||status==='approved')?`<button class="btn-success btn-sm bs-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-total="${q.total||q.grandTotal||0}" data-co="${escHtml(q.company||'BS')}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?'✓ Ordered':'🧾 Sales Order'}</button>`:''}
+              ${(status==='filed'||status==='approved')?`<button class="btn-success btn-sm bs-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${q.total||q.grandTotal||0}" data-co="${escHtml(q.company||'BS')}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?'✓ Ordered':'🧾 Sales Order'}</button>`:''}
               ${canDeleteDirect
                 ? `<button class="btn-secondary btn-sm bs-del-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" style="color:var(--danger)">🗑 Delete</button>`
                 : `<button class="btn-secondary btn-sm bs-delreq-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" ${q.deleteRequested?'disabled':''}>${q.deleteRequested?'⏳ Requested':'🗑 Request Delete'}</button>`}
@@ -9365,6 +9543,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
       // 2) sales order, linked to the project
       const ref=await db.collection('sales_orders').add({
         projectId:proj.id, quoteId:d.id, quoteNumber:d.qno||'', clientName:d.client||'', company:d.co||'BS',
+        clientId: d.clientId || null,
         project, contractAmount:contract, paymentReceived:paid,
         paymentMethod:document.getElementById('so-method').value,
         notes:document.getElementById('so-notes').value.trim(),
@@ -9378,6 +9557,16 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
       // 4) record the Sales Order on the project's document register + link the SO id
       try{ await db.collection('job_projects').doc(proj.id).update({ salesOrderId:ref.id,
         documents:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order', ref:proj.projectNo, at:new Date().toISOString(), by:userProfile?.displayName||currentUser.email }) }); }catch(_){}
+      // 4b) CRM: a client with a signed order is WON — keeps client stage and the
+      // quote-outcome win rate from drifting apart (v12 WS32 decision 8).
+      try {
+        let cid = d.clientId || null;
+        if (!cid) { const c0 = await window.Clients.findByName(d.client); cid = c0 && c0.id; }
+        if (cid) {
+          await db.collection('clients').doc(cid).update({ stage:'won', updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+          if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
+        }
+      } catch(_){ /* best-effort — never block the order */ }
       // 5) client order-tracking link — created once the downpayment is captured.
       //    Public, unguessable token; client-SAFE fields only (no cost/margin).
       let trackUrl='';
@@ -10124,7 +10313,7 @@ window.renderApprovals = async function(currentUser) {
     db.collection('approval_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
     db.collection('bk_quotes').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
-    db.collection('bs_clients').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
+    db.collection('clients').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
     db.collection('leave_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]}))
   ]);
   const pendingSignups = signupSnap.size || 0;
@@ -10204,7 +10393,7 @@ window.renderApprovals = async function(currentUser) {
         db.collection('approval_requests').where('status','==','pending').get().catch(e=>{console.error('approval_requests query failed',e);return {docs:[]};}),
         db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('bs_quotes delete query failed',e);return {docs:[]};}),
         db.collection('bk_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('bk_quotes delete query failed',e);return {docs:[]};}),
-        db.collection('bs_clients').where('deleteRequested','==',true).get().catch(e=>{console.error('bs_clients delete query failed',e);return {docs:[]};}),
+        db.collection('clients').where('deleteRequested','==',true).get().catch(e=>{console.error('clients delete query failed',e);return {docs:[]};}),
         db.collection('leave_requests').where('status','==','pending').get().catch(e=>{console.error('leave_requests query failed',e);return {docs:[]};}),
         db.collection('pending_raises').where('status','==','pending_approval').get().catch(e=>{console.error('pending_raises query failed',e);return {docs:[]};})
       ]);
@@ -10483,7 +10672,8 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.dc-approve-btn').forEach(btn => onClickSafe(btn, async () => {
         if (!(await confirmDialog({message:`Approve deletion of client "${escHtml(btn.dataset.name)}"? This permanently removes the client folder.`, danger:true, html:true}))) return;
         try {
-          await db.collection('bs_clients').doc(btn.dataset.id).delete();
+          await db.collection('clients').doc(btn.dataset.id).delete();
+          if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
           window.logAudit && window.logAudit('delete','client',btn.dataset.id,{ name:btn.dataset.name, viaApproval:true });
           if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'🗑 Client Deletion Approved', body:`Your request to delete client "${btn.dataset.name}" was approved.`, icon:'✅', type:'delete_approved' }));
           Notifs.showToast('Client deleted.'); loadApprovalsSub('all');
@@ -10491,7 +10681,8 @@ window.renderApprovals = async function(currentUser) {
       }));
       wrap.querySelectorAll('.dc-deny-btn').forEach(btn => onClickSafe(btn, async () => {
         try {
-          await db.collection('bs_clients').doc(btn.dataset.id).update({ deleteRequested:firebase.firestore.FieldValue.delete(), deleteReason:firebase.firestore.FieldValue.delete() });
+          await db.collection('clients').doc(btn.dataset.id).update({ deleteRequested:firebase.firestore.FieldValue.delete(), deleteReason:firebase.firestore.FieldValue.delete() });
+          if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
           if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'Client Deletion Denied', body:`Your request to delete client "${btn.dataset.name}" was denied.`, icon:'❌', type:'delete_denied' }));
           Notifs.showToast('Delete request denied.'); loadApprovalsSub('all');
         } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
@@ -11112,15 +11303,19 @@ const CRM_STAGES = [
 ];
 function crmStageOf(cl){ return ['lead','prospect','won','lost'].includes(cl && cl.stage) ? cl.stage : 'lead'; }
 function crmStageMeta(k){ return CRM_STAGES.find(s=>s.key===k) || CRM_STAGES[0]; }
+window.CRM_STAGES = CRM_STAGES; window.crmStageOf = crmStageOf; window.crmStageMeta = crmStageMeta;
 
 async function renderClientProfiles(container, currentUser, currentRole, brand) {
-  const collection = brand === 'brilliant-steel' ? 'bs_clients' : (brand === 'design' ? 'design_clients' : 'sales_clients');
-  const snap = await db.collection(collection).orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
-  const clients = snap.docs.map(d => ({id:d.id,...d.data()}));
-  const canAdd = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='agent';
-  const canDeleteDirect = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
-  const quoteColl  = brand==='brilliant-steel' ? 'bs_quotes' : 'bk_quotes';
-  const builderNav = brand==='brilliant-steel' ? 'bs-quote-builder' : 'bk-quote-builder';
+  // Unified book, cached read, canEditDept gating (decisions 1/10/14).
+  // quoteColl/builderNav are GONE: the hub joins quotes via clientId/nameKey across
+  // all collections (Spec 2c) and derives the builder per quote (Spec 4).
+  const COLL = 'clients';
+  const brandKey = window.Clients.brandOf(brand);           // 'sales' | 'design' | 'bs'
+  const clients  = await window.Clients.listAll({ brand: brandKey });
+  const legacyMode = clients.some(c => c._legacy);          // migration not yet run
+  const dept = window.Clients.deptOf(brand);
+  const canAdd = !legacyMode && (canEditDept(dept) || (brand === 'barro' && currentRole === 'agent'));
+  const canDeleteDirect = !legacyMode && (currentRole==='president'||currentRole==='owner'||currentRole==='manager');
   const today = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10));
 
   const counts = { all: clients.length, lead:0, prospect:0, won:0, lost:0 };
@@ -11132,6 +11327,11 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
   const chips = [{key:'all',label:'All',count:counts.all}, ...CRM_STAGES.map(s=>({key:s.key,label:s.label,icon:s.icon,count:counts[s.key]}))];
 
   container.innerHTML = `
+    ${legacyMode && ['president','manager'].includes(currentRole) ? `
+      <div class="alert-banner alert-warn" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <span>🧭 Client books not yet unified — showing the legacy read-only view.</span>
+        <button class="btn-primary btn-sm" id="cl-migrate-btn">Unify client books</button>
+      </div>` : legacyMode ? `<div class="alert-banner" style="margin-bottom:10px">🧭 Read-only until an admin unifies the client books.</div>` : ''}
     ${dueFollowups?`<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>⏰ <strong>${dueFollowups}</strong> follow-up${dueFollowups>1?'s':''} due</span></div>`:''}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
       ${window.chipTabs(chips, 'all', {cls:'cl-stage-tabs'})}
@@ -11193,10 +11393,13 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
         stage: document.getElementById('cl-stage').value,
         followUpDate: document.getElementById('cl-followup').value || '',
         lastContact: today,
+        nameKey: window.Clients.nameKey(name),                       // keep the join key in sync on rename
+        ...(cl ? {} : { brands: [brandKey], contactLog: [] }),       // brand membership on create only
       };
       try {
-        if (cl) { await db.collection(collection).doc(cl.id).update(data); window.logAudit&&window.logAudit('update','client',cl.id,{name,stage:data.stage}); }
-        else { data.addedBy=currentUser.uid; data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await db.collection(collection).add(data); }
+        if (cl) { await db.collection(COLL).doc(cl.id).update(data); window.logAudit&&window.logAudit('update','client',cl.id,{name,stage:data.stage}); }
+        else { data.addedBy=currentUser.uid; data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await db.collection(COLL).add(data); }
+        if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
         closeModal(); Notifs.showToast('Client saved'); renderClientProfiles(container, currentUser, currentRole, brand);
       } catch(ex){ Notifs.showToast('Save failed: '+(ex.message||ex.code),'error'); }
     });
@@ -11206,18 +11409,23 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
     container.querySelectorAll('.cl-card').forEach(card => card.addEventListener('click', (e) => {
       if (e.target.closest('.cl-del-btn, .cl-delreq-btn, .cl-edit-btn')) return;
       const cl = clients.find(c=>c.id===card.dataset.id); if(!cl) return;
-      openClientQuotesModal(cl, quoteColl, builderNav);
+      openClientHub(cl, { canEdit: canAdd, onChange: () => renderClientProfiles(container, currentUser, currentRole, brand) });
     }));
     container.querySelectorAll('.cl-edit-btn').forEach(b => b.addEventListener('click', () => openClientEditor(clients.find(c=>c.id===b.dataset.id))));
     container.querySelectorAll('.cl-del-btn').forEach(b => b.addEventListener('click', async () => {
       if (!(await confirmDialog({message:`Delete client "${escHtml(b.dataset.name)}"? This cannot be undone.`, danger:true, html:true}))) return;
-      try { await db.collection(collection).doc(b.dataset.id).delete(); window.logAudit&&window.logAudit('delete','client',b.dataset.id,{name:b.dataset.name}); Notifs.showToast('Client deleted'); renderClientProfiles(container, currentUser, currentRole, brand); }
+      try {
+        await db.collection(COLL).doc(b.dataset.id).delete(); window.logAudit&&window.logAudit('delete','client',b.dataset.id,{name:b.dataset.name});
+        if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
+        Notifs.showToast('Client deleted'); renderClientProfiles(container, currentUser, currentRole, brand);
+      }
       catch(ex){ Notifs.showToast('Delete failed','error'); }
     }));
     container.querySelectorAll('.cl-delreq-btn').forEach(b => b.addEventListener('click', async () => {
       const reason = (await promptDialog({message:'Reason for deleting this client folder? (sent to the president for approval)', required:true, multiline:true}))||'';
       try {
-        await db.collection(collection).doc(b.dataset.id).update({ deleteRequested:true, deleteReason:reason, deleteRequestedBy:currentUser.uid, deleteRequestedAt:firebase.firestore.FieldValue.serverTimestamp() });
+        await db.collection(COLL).doc(b.dataset.id).update({ deleteRequested:true, deleteReason:reason, deleteRequestedBy:currentUser.uid, deleteRequestedAt:firebase.firestore.FieldValue.serverTimestamp() });
+        if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
         await Notifs.sendToOwner({ title:'🗑 Client Delete Requested', body:`${userProfile?.displayName||currentUser.email} requests deleting client "${b.dataset.name}".${reason?' Reason: '+reason:''}`, icon:'🗑', type:'client_delete_request' });
         Notifs.showToast('Delete request sent to president'); renderClientProfiles(container, currentUser, currentRole, brand);
       } catch(ex){ Notifs.showToast('Request failed: '+(ex.message||ex.code),'error'); }
@@ -11236,97 +11444,158 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
 
   window.bindChipTabs(container.querySelector('.cl-stage-tabs'), (key)=>{ stageFilter=key; renderList(); });
   document.getElementById('add-client-btn')?.addEventListener('click', ()=>openClientEditor(null));
+  document.getElementById('cl-migrate-btn')?.addEventListener('click', async () => {
+    if (!(await confirmDialog({message:'Unify sales/design/BS client books into one CRM? Safe to re-run — already-migrated records are skipped.'}))) return;
+    Notifs.showToast('Migrating client books…');
+    try { const r = await window.migrateClientBooks();
+      window.logAudit && window.logAudit('migrate','clients',null,r);
+      Notifs.showToast(`Done: ${r.created} created, ${r.merged} merged, ${r.soTagged+r.jpTagged} records linked, ${r.unmatched} left name-matched.`);
+      renderClientProfiles(container, currentUser, currentRole, brand);
+    } catch (ex) { Notifs.showToast('Migration failed: ' + (ex.message||ex.code), 'error'); }
+  });
   renderList();
+
+  // "From quotes — not yet in CRM" promote section (closes the bs_clients/
+  // renderBSClientData orphan's data-loss side, decision 2). Design has no
+  // quote stream, so this only runs for the Sales/BS books.
+  if (!legacyMode && canAdd && brand !== 'design') (async () => {
+    try {
+      const qs = await getAllQuotes();
+      const wantCo = brand === 'brilliant-steel' ? (co => co !== 'BK') : (co => co === 'BK');
+      const known = new Set(clients.map(c => c.nameKey));
+      const un = {};
+      qs.docs.forEach(d => { const q = d.data(); const k = window.Clients.nameKey(q.clientName);
+        if (!k || known.has(k) || !wantCo(q.company || 'BK')) return;
+        if (!un[k]) un[k] = { clientName:(q.clientName||'').trim(), clientCompany:q.clientCompany||'', clientPhone:q.clientPhone||'',
+          clientEmail:q.clientEmail||'', clientAddress:q.clientAddress||'', quoteNumber:q.quoteNumber||'', total:q.total||0,
+          company: brand==='brilliant-steel' ? 'BS' : 'BK', n:0 };
+        un[k].n++; });
+      const list = Object.values(un); if (!list.length) return;
+      const el = document.getElementById('cl-list'); if (!el) return;
+      el.insertAdjacentHTML('beforeend', `
+        <div class="card" style="margin-top:14px"><div class="card-header"><h3 style="font-size:13px">📄 From quotes — not yet in CRM (${list.length})</h3></div>
+        <div class="card-body">${list.map((u,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+          <div style="min-width:0"><div style="font-size:13px;font-weight:600">${escHtml(u.clientName)}</div>
+          <div style="font-size:11px;color:var(--text-muted)">${u.n} quote${u.n>1?'s':''}${u.quoteNumber?' · last '+escHtml(u.quoteNumber):''}</div></div>
+          <button class="btn-secondary btn-sm cl-promote" data-i="${i}">＋ Save to CRM</button></div>`).join('')}</div></div>`);
+      el.querySelectorAll('.cl-promote').forEach(b => b.addEventListener('click', async () => {
+        b.disabled = true;
+        const id = await window.Clients.upsertFromQuote(list[+b.dataset.i]);
+        if (id) { Notifs.showToast('Client saved to CRM'); renderClientProfiles(container, currentUser, currentRole, brand); }
+        else { b.disabled = false; Notifs.showToast('Save failed','error'); }
+      }));
+    } catch(_){}
+  })();
 }
 
-// Show one client's quote history with a Reopen action per quote.
-async function openClientQuotesModal(cl, quoteColl, builderNav){
-  openModal(`👤 ${escHtml(cl.name||'Client')}`, '<div class="loading-placeholder">Loading client…</div>',
+// Per-client hub: profile + stage + follow-up + unified timeline (quotes, orders,
+// project events, payments, contacts) — V12-PLAN 197-198. Internal-only (partners
+// never reach this — decision 10), so no partner query-scoping is needed here.
+async function openClientHub(cl, opts) {
+  opts = opts || {};
+  openModal(`👤 ${escHtml(cl.name || 'Client')}`, '<div class="loading-placeholder">Loading client…</div>',
     `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
   const body = document.getElementById('modal-body');
-  // A partner may only read their OWN bs_quotes, so the query must be scoped to
-  // them (an unscoped clientName query would be rejected by Firestore rules).
-  const role = window.currentRole||'';
-  const isPartnerU = role==='partner' || ((window.currentDepts||[]).length===1 && (window.currentDepts||[])[0]==='Brilliant Steel');
-  const myUid = auth.currentUser?.uid;
-  let docs = [];
-  try {
-    let q = db.collection(quoteColl).where('clientName','==',cl.name);
-    if (isPartnerU && myUid) q = q.where('createdBy','==',myUid);
-    const snap = await q.get();
-    docs = snap.docs.map(d=>({id:d.id,...d.data()}));
-  } catch(_) {}
-  if (!docs.length) {
-    // fallback: scan recent quotes and match the name client-side
-    try {
-      let q = db.collection(quoteColl);
-      if (isPartnerU && myUid) q = q.where('createdBy','==',myUid);
-      const snap = await q.orderBy('createdAt','desc').limit(200).get();
-      docs = snap.docs.map(d=>({id:d.id,...d.data()})).filter(q=>(q.clientName||'').trim().toLowerCase()===(cl.name||'').trim().toLowerCase());
-    } catch(_) {}
-  }
-  docs.sort((a,b)=>((b.createdAt?.seconds||0)-(a.createdAt?.seconds||0)));
+  const t = await window.Clients.timelineFor(cl);
   if (!body) return;
-  const toMs = v => { if(!v) return 0; if (typeof v==='string'){ const t=Date.parse(v); return isNaN(t)?0:t; } if (v.seconds) return v.seconds*1000; if (v.toDate){ try{return v.toDate().getTime();}catch(_){return 0;} } return 0; };
+  const FV = firebase.firestore.FieldValue;
+  const today = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10));
+  const who = () => (userProfile?.displayName || currentUser?.email || '');
   const fmtD = ms => ms ? new Date(ms).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}) : '';
-  const statusBadge = (q)=>{
-    const s = q.status||q.approvalStatus||'draft';
-    const map = { won:'badge-green', filed:'badge-blue', approved:'badge-green', pending_approval:'badge-amber', pending_review:'badge-amber', needs_revision:'badge-amber', rejected:'badge-red', sent:'badge-blue', draft:'badge-gray' };
+  const st = crmStageMeta(crmStageOf(cl));
+  const fuOverdue = cl.followUpDate && cl.followUpDate <= today && !['won','lost'].includes(crmStageOf(cl));
+  const totalQuoted = t.quotes.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+  const wonVal = t.quotes.filter(window.isQuoteWon).reduce((s,q)=>s+(q.total||q.grandTotal||0),0);   // canonical (decision 8)
+  const collected = t.payments.reduce((s,p)=>s+(+p.amount||0),0);
+  const ar = t.projects.reduce((s,p)=>s+(+p.arBalance||0),0);
+  const statusBadge = (q) => {
+    const s = q.status || q.approvalStatus || 'draft';
+    const map = { won:'badge-green', accepted:'badge-green', filed:'badge-blue', approved:'badge-green',
+      pending_approval:'badge-amber', pending_review:'badge-amber', needs_revision:'badge-amber',
+      rejected:'badge-red', sent:'badge-blue', draft:'badge-gray' };
     return `<span class="badge ${map[s]||'badge-gray'}" style="font-size:9px">${escHtml(s)}</span>`;
   };
-  const st = (typeof crmStageMeta==='function') ? crmStageMeta(crmStageOf(cl)) : {icon:'',label:'',color:'#8e8e93'};
-  const today = (window.bizDate?window.bizDate():new Date().toISOString().slice(0,10));
-  const fuOverdue = cl.followUpDate && cl.followUpDate<=today && crmStageOf(cl)!=='won' && crmStageOf(cl)!=='lost';
-  const totalQuoted = docs.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
-  const wonVal = docs.filter(q=>q.salesOrderId||['won','filed','approved','accepted'].includes(q.status)).reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
-  // Activity timeline — built from client fields + quotes (no extra reads).
-  const events = [];
-  if (cl.createdAt)   events.push({ ts:toMs(cl.createdAt),   icon:'➕', text:'Client added' });
-  if (cl.lastContact) events.push({ ts:toMs(cl.lastContact), icon:'📞', text:'Contact logged' });
-  docs.forEach(q=>{ const num=escHtml(q.quoteNumber||q.id.slice(-8)); events.push({ ts:toMs(q.createdAt), icon:'📄', text:`Quote ${num} · ₱${fmt(q.total||q.grandTotal||0)} · ${escHtml(q.status||q.approvalStatus||'draft')}` }); if (q.salesOrderId) events.push({ ts:toMs(q.wonAt||q.approvedAt||q.createdAt), icon:'✅', text:`Quote ${num} → Sales Order` }); });
-  events.sort((a,b)=>b.ts-a.ts);
   body.innerHTML = `
     <div class="item-card" style="margin-bottom:12px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
-        <span class="badge" style="font-size:10px;background:${st.color};color:#fff">${st.icon} ${st.label}</span>
+        ${opts.canEdit
+          ? `<select id="ch-stage" style="padding:4px 8px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+              ${CRM_STAGES.map(s=>`<option value="${s.key}" ${crmStageOf(cl)===s.key?'selected':''}>${s.icon} ${s.label}</option>`).join('')}</select>`
+          : `<span class="badge" style="font-size:10px;background:${st.color};color:#fff">${st.icon} ${st.label}</span>`}
         ${cl.company?`<span style="font-size:12px;color:var(--text-muted)">🏢 ${escHtml(cl.company)}</span>`:''}
+        ${(cl.brands||[]).map(b=>`<span class="badge badge-gray" style="font-size:9px">${b==='sales'?'Sales':b==='design'?'Design':'Brilliant Steel'}</span>`).join('')}
       </div>
       <div class="item-meta">
         ${cl.email?`<span>✉️ ${escHtml(cl.email)}</span>`:''}
         ${cl.phone?`<span>📞 ${escHtml(cl.phone)}</span>`:''}
         ${cl.address?`<span>📍 ${escHtml(cl.address)}</span>`:''}
       </div>
-      ${cl.followUpDate?`<div style="font-size:12px;margin-top:6px;color:${fuOverdue?'var(--danger)':'var(--text-muted)'}">⏰ Follow-up: <strong>${escHtml(cl.followUpDate)}</strong>${fuOverdue?' · due':''}</div>`:''}
+      <div style="font-size:12px;margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        ${cl.followUpDate
+          ? `<span style="color:${fuOverdue?'var(--danger)':'var(--text-muted)'}">⏰ Follow-up: <strong>${escHtml(cl.followUpDate)}</strong>${fuOverdue?' · due':''}</span>
+             ${opts.canEdit?`<button class="btn-secondary btn-sm" id="ch-fu-done">✓ Done</button>`:''}`
+          : (opts.canEdit?`<button class="btn-secondary btn-sm" id="ch-fu-set">⏰ Set follow-up</button>`:'')}
+        ${opts.canEdit?`<button class="btn-secondary btn-sm" id="ch-log">📞 Log contact</button>`:''}
+      </div>
       ${cl.notes?`<div style="font-size:12px;color:var(--text-muted);margin-top:6px">📝 ${escHtml(cl.notes)}</div>`:''}
       <div style="display:flex;gap:14px;margin-top:8px;font-size:12px;border-top:1px solid var(--border);padding-top:8px;flex-wrap:wrap">
-        <span>Quotes: <strong>${docs.length}</strong></span>
+        <span>Quotes: <strong>${t.quotes.length}</strong></span>
         <span>Quoted: <strong>₱${fmt(totalQuoted)}</strong></span>
         <span>Won: <strong style="color:var(--success)">₱${fmt(wonVal)}</strong></span>
+        <span>Collected: <strong>₱${fmt(collected)}</strong></span>
+        ${ar>0?`<span>AR: <strong style="color:var(--danger)">₱${fmt(ar)}</strong></span>`:''}
       </div>
     </div>
-    ${events.length?`<h4 style="font-size:13px;margin:0 0 6px">🕓 Activity</h4>
-    <div style="border-left:2px solid var(--border);margin:0 0 14px 6px;padding-left:12px;display:flex;flex-direction:column;gap:8px">
-      ${events.map(e=>`<div style="display:flex;gap:8px;align-items:baseline"><span style="flex-shrink:0">${e.icon}</span><span style="font-size:12px;flex:1">${e.text}</span><span style="font-size:11px;color:var(--text-muted);flex-shrink:0">${fmtD(e.ts)}</span></div>`).join('')}
+    ${t.events.length?`<h4 style="font-size:13px;margin:0 0 6px">🕓 Timeline</h4>
+    <div style="border-left:2px solid var(--border);margin:0 0 14px 6px;padding-left:12px;display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto">
+      ${t.events.map(e=>`<div style="display:flex;gap:8px;align-items:baseline"><span style="flex-shrink:0">${e.icon}</span><span style="font-size:12px;flex:1">${escHtml(e.text)}</span><span style="font-size:11px;color:var(--text-muted);flex-shrink:0">${fmtD(e.ts)}</span></div>`).join('')}
     </div>`:''}
-    <h4 style="font-size:13px;margin:0 0 6px">📄 Quotes (${docs.length})</h4>
-    ${!docs.length?'<div class="empty-state" style="padding:18px"><p>No quotes recorded for this client yet.</p></div>':`<div style="display:flex;flex-direction:column;gap:8px">
-      ${docs.map(q=>`<div class="item-card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+    ${t.projects.length?`<h4 style="font-size:13px;margin:0 0 6px">🏗 Projects (${t.projects.length})</h4>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+      ${t.projects.map(p=>`<div class="item-card" style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+        <div style="min-width:0"><span style="font-weight:700;font-size:12px;font-family:monospace">${escHtml(p.no||p.id.slice(-6))}</span>
+          <span class="badge badge-blue" style="font-size:9px">${escHtml((p.stage||'—').replace(/_/g,' '))}</span></div>
+        <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">₱${fmt(p.contractAmount)}${p.arBalance>0?` · AR ₱${fmt(p.arBalance)}`:' · paid'}</div>
+      </div>`).join('')}
+    </div>`:''}
+    <h4 style="font-size:13px;margin:0 0 6px">📄 Quotes (${t.quotes.length})</h4>
+    ${!t.quotes.length?'<div class="empty-state" style="padding:18px"><p>No quotes recorded for this client yet.</p></div>':`<div style="display:flex;flex-direction:column;gap:8px">
+      ${t.quotes.map(q=>`<div class="item-card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
         <div style="flex:1;min-width:0">
           <div style="font-weight:700;font-size:13px;font-family:monospace">${escHtml(q.quoteNumber||q.id.slice(-8))}</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">₱${fmt(q.total||q.grandTotal||0)} ${statusBadge(q)} ${q.salesOrderId?'<span class="badge badge-green" style="font-size:9px">→ Sales Order</span>':''} ${q.createdAt?'· '+fmtD(toMs(q.createdAt)):''}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">₱${fmt(q.total||q.grandTotal||0)} ${statusBadge(q)} ${q.salesOrderId?'<span class="badge badge-green" style="font-size:9px">→ Sales Order</span>':''} ${q.createdAt?'· '+fmtD(q.createdAt.seconds?q.createdAt.seconds*1000:Date.parse(q.createdAt)||0):''}</div>
         </div>
-        ${q.editableState?`<div style="display:flex;gap:6px;flex-shrink:0"><button class="btn-secondary btn-sm clq-reopen" data-id="${q.id}">↻ Reopen</button><button class="btn-secondary btn-sm clq-rev" data-id="${q.id}" title="Start a new revision (R2, R3…) with today's date">⎘ New Revision</button></div>`:'<span style="font-size:10px;color:var(--text-muted);flex-shrink:0">no snapshot</span>'}
+        ${q.editableState?`<div style="display:flex;gap:6px;flex-shrink:0"><button class="btn-secondary btn-sm clq-reopen" data-id="${q.id}" data-coll="${q._coll}" data-co="${escHtml(q.company||'BS')}">↻ Reopen</button><button class="btn-secondary btn-sm clq-rev" data-id="${q.id}" data-coll="${q._coll}" data-co="${escHtml(q.company||'BS')}" title="Start a new revision (R2, R3…) with today's date">⎘ New Revision</button></div>`:'<span style="font-size:10px;color:var(--text-muted);flex-shrink:0">no snapshot</span>'}
       </div>`).join('')}
     </div>`}
   `;
-  body.querySelectorAll('.clq-reopen').forEach(btn=>btn.addEventListener('click',()=>{
-    closeModal();
-    window.reopenQuoteFromDoc(quoteColl, btn.dataset.id, builderNav);
-  }));
-  body.querySelectorAll('.clq-rev').forEach(btn=>btn.addEventListener('click',()=>{
-    closeModal();
-    window.newRevisionFromDoc(quoteColl, btn.dataset.id, builderNav);
-  }));
+  const nav = co => co==='BK' ? 'bk-quote-builder' : 'bs-quote-builder';
+  body.querySelectorAll('.clq-reopen').forEach(btn=>btn.addEventListener('click',()=>{ closeModal(); window.reopenQuoteFromDoc(btn.dataset.coll, btn.dataset.id, nav(btn.dataset.co)); }));
+  body.querySelectorAll('.clq-rev').forEach(btn=>btn.addEventListener('click',()=>{ closeModal(); window.newRevisionFromDoc(btn.dataset.coll, btn.dataset.id, nav(btn.dataset.co)); }));
+  const patch = async (upd, log) => {
+    if (log) upd.contactLog = FV.arrayUnion(log);
+    upd.updatedAt = FV.serverTimestamp();
+    await db.collection('clients').doc(cl.id).update(upd);
+    if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
+    closeModal(); opts.onChange && opts.onChange();
+  };
+  document.getElementById('ch-stage')?.addEventListener('change', async e => {
+    try { await patch({ stage: e.target.value }); Notifs.showToast('Stage updated'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+  });
+  document.getElementById('ch-log')?.addEventListener('click', async () => {
+    const note = (await promptDialog({message:'What happened? (call, site visit, email…)', multiline:true}))||'';
+    if (!note.trim()) return;
+    try { await patch({ lastContact: today }, { date: today, by: who(), note: note.trim() }); Notifs.showToast('Contact logged'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+  });
+  document.getElementById('ch-fu-done')?.addEventListener('click', async () => {
+    const next = ((await promptDialog({message:'Follow-up done ✓ — schedule the next one? (YYYY-MM-DD, blank = none)'}))||'').trim();
+    try { await patch({ followUpDate: next, lastContact: today }, { date: today, by: who(), note: 'Follow-up done' + (next ? ' → next ' + next : '') }); Notifs.showToast('Follow-up updated'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+  });
+  document.getElementById('ch-fu-set')?.addEventListener('click', async () => {
+    const d = ((await promptDialog({message:'Follow-up date (YYYY-MM-DD)'}))||'').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { if (d) Notifs.showToast('Use YYYY-MM-DD','error'); return; }
+    try { await patch({ followUpDate: d }); Notifs.showToast('Follow-up set'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+  });
 }
 
 // ══════════════════════════════════════════════════
@@ -12316,7 +12585,7 @@ async function createJobProject(d){
   const partnerUid = (company==='BS') ? (d.partnerUid||d.createdBy||null) : null;
   const ref=await db.collection('job_projects').add({
     projectNo, company, name:((d.client||'Client')+' — '+(d.qno||'')).trim(),
-    clientName:d.client||'', stage:'won',
+    clientName:d.client||'', clientId: d.clientId || null, stage:'won',
     quoteId:d.id||null, quoteNumber:d.qno||'', quoteCollection: company==='BK'?'bk_quotes':'bs_quotes',
     contractAmount:contract, amountCollected:0, arBalance:contract, vatRate:12, capital:0,
     partnerUid,

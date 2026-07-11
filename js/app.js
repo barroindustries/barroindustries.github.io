@@ -6373,12 +6373,12 @@ async function renderAnalytics() {
     cg('job_projects', db.collection('job_projects')),
     cg('job_costs', db.collection('job_costs')),
     cg('projects', db.collection('projects')),
-    cg('sales_clients', db.collection('sales_clients')),
+    window.Clients.listAll().catch(()=>[]),
   ]);
   const users=usersSnap.docs.map(d=>({id:d.id,...d.data()}));
   const tasks=tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
   const quotes=quotesSnap.docs.map(d=>({id:d.id,...d.data()}));
-  const salesClients=(clientsSnap.docs||[]).map(d=>d.data());
+  const allClients = Array.isArray(clientsSnap) ? clientsSnap : [];
   const subs=subsSnap.docs.map(d=>({id:d.id,...d.data()}));
   const expenses=expSnap.docs.map(d=>({id:d.id,...d.data()}));
   const cas=caSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -6526,39 +6526,53 @@ async function renderAnalytics() {
 
   const renderSales = async () => {
     const salesQuotes=quotes.filter(q=>q.department==='Sales'||q.type==='sales'||!q.department);
-    const won2=salesQuotes.filter(q=>q.status==='accepted').reduce((s,q)=>s+(q.total||0),0);
-    const pipeline=salesQuotes.filter(q=>q.status==='sent').reduce((s,q)=>s+(q.total||0),0);
-    const wonCount=salesQuotes.filter(q=>q.status==='accepted').length;
-    const lostCount=salesQuotes.filter(q=>q.status==='rejected').length;
-    const winRate=wonCount+lostCount>0?Math.round(wonCount/(wonCount+lostCount)*100):0;
+    const wonQ   = salesQuotes.filter(window.isQuoteWon);
+    const lostQ  = salesQuotes.filter(window.isQuoteLost);
+    const openQ  = salesQuotes.filter(window.isQuoteOpen);
+    const won2     = wonQ.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+    const pipeline = openQ.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+    const wonCount = wonQ.length, lostCount = lostQ.length;
+    const winRate  = wonCount+lostCount>0 ? Math.round(wonCount/(wonCount+lostCount)*100) : 0;
     const salesSubs=subs.filter(s=>s.department==='Sales'||s.type?.includes('sales'));
     const salesTasks=tasks.filter(t=>t.department==='Sales'||t.category==='Sales');
     const doneSalesTasks=salesTasks.filter(t=>['done','approved','archived'].includes(t.status));
-    const wonMTD=sum(salesQuotes.filter(q=>q.status==='accepted'&&ymOf(q.createdAt)===thisMonth),q=>q.total);
-    const wonPrev=sum(salesQuotes.filter(q=>q.status==='accepted'&&ymOf(q.createdAt)===lastMonth),q=>q.total);
+    const wonMTD =sum(wonQ.filter(q=>ymOf(q.createdAt)===thisMonth),q=>q.total||q.grandTotal||0);
+    const wonPrev=sum(wonQ.filter(q=>ymOf(q.createdAt)===lastMonth),q=>q.total||q.grandTotal||0);
     const avgDeal=wonCount?won2/wonCount:0;
-    // CRM pipeline — clients by lifecycle stage (from the sales_clients CRM).
-    const CRMP=[['lead','Lead','#8e8e93','🌱'],['prospect','Prospect','#FFAA00','🔥'],['won','Won','#30D158','✅'],['lost','Lost','#FF453A','✖️']];
+    // CRM funnel — ALL brands, one cached read (decision 9). Taxonomy = the shared
+    // window.CRM_STAGES export; the inline CRMP literal is DELETED.
     const stageCount={lead:0,prospect:0,won:0,lost:0};
-    salesClients.forEach(cl=>{ const s=['lead','prospect','won','lost'].includes(cl.stage)?cl.stage:'lead'; stageCount[s]++; });
-    const clTotal=salesClients.length;
+    allClients.forEach(cl=>{ stageCount[window.crmStageOf(cl)]++; });
+    const clTotal=allClients.length;
+    const clWon=stageCount.won, clLost=stageCount.lost;
+    const clConv = clWon+clLost>0 ? Math.round(clWon/(clWon+clLost)*100) : null;
     const _anToday=(window.bizDate?window.bizDate():new Date().toISOString().slice(0,10));
-    const dueFu=salesClients.filter(cl=>cl.followUpDate&&cl.followUpDate<=_anToday&&!['won','lost'].includes(cl.stage)).length;
+    const dueFu=allClients.filter(cl=>cl.followUpDate&&cl.followUpDate<=_anToday&&!['won','lost'].includes(window.crmStageOf(cl))).length;
     const wrap=document.getElementById('analytics-content');
     wrap.innerHTML=`
       <div class="kpi-row" style="margin-top:16px">
         <div class="kpi-card green"><div class="kpi-label">Revenue Won</div><div class="kpi-value">₱${fmt(won2)}</div><div style="margin-top:4px">${delta(wonMTD,wonPrev,true)}</div></div>
         <div class="kpi-card accent"><div class="kpi-label">Pipeline Value</div><div class="kpi-value">₱${fmt(pipeline)}</div></div>
-        <div class="kpi-card"><div class="kpi-label">Win Rate</div><div class="kpi-value">${winRate}%</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${wonCount}W / ${lostCount}L</div></div>
+        <div class="kpi-card"><div class="kpi-label">Win Rate (quotes)</div><div class="kpi-value">${winRate}%</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${wonCount}W / ${lostCount}L</div></div>
         <div class="kpi-card"><div class="kpi-label">Avg Deal Size</div><div class="kpi-value">₱${fmt(avgDeal)}</div></div>
         <div class="kpi-card warn"><div class="kpi-label">Total Quotes</div><div class="kpi-value">${salesQuotes.length}</div></div>
         <div class="kpi-card"><div class="kpi-label">Tasks Done</div><div class="kpi-value">${doneSalesTasks.length}/${salesTasks.length}</div></div>
       </div>
       ${clTotal?`<div class="card" style="margin-bottom:16px">
-        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3>CRM Pipeline</h3><span style="font-size:12px;color:var(--text-muted)">${clTotal} client${clTotal===1?'':'s'}${dueFu?` · <span style="color:var(--danger)">${dueFu} follow-up${dueFu>1?'s':''} due</span>`:''}</span></div>
-        <div class="card-body"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px">
-          ${CRMP.map(([k,l,col,ic])=>`<div style="background:var(--surface2);border-radius:10px;padding:10px 12px"><div style="font-size:11px;color:var(--text-muted)">${ic} ${l}</div><div style="font-size:18px;font-weight:800;color:${col}">${stageCount[k]}</div><div style="font-size:10px;color:var(--text-muted)">${clTotal?Math.round(stageCount[k]/clTotal*100):0}%</div></div>`).join('')}
-        </div></div>
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+          <h3>CRM Pipeline · All Brands</h3>
+          <span style="font-size:12px;color:var(--text-muted)">${clTotal} client${clTotal===1?'':'s'}${dueFu?` · <span style="color:var(--danger)">${dueFu} follow-up${dueFu>1?'s':''} due</span>`:''}</span>
+        </div>
+        <div class="card-body">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px">
+            ${window.CRM_STAGES.map(s=>`<div style="background:var(--surface2);border-radius:10px;padding:10px 12px"><div style="font-size:11px;color:var(--text-muted)">${s.icon} ${s.label}</div><div style="font-size:18px;font-weight:800;color:${s.color}">${stageCount[s.key]}</div><div style="font-size:10px;color:var(--text-muted)">${clTotal?Math.round(stageCount[s.key]/clTotal*100):0}%</div></div>`).join('')}
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:10px;border-top:1px solid var(--border);padding-top:8px">
+            Client conversion: <strong>${clConv==null?'—':clConv+'%'}</strong> (won vs lost clients) ·
+            Quote win rate: <strong>${winRate}%</strong> (won vs lost quotes — the authoritative KPI above).
+            Creating a Sales Order auto-moves the client to ✅ Won.
+          </div>
+        </div>
       </div>`:''}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
         <div class="card"><div class="card-header"><h3>Quote Status Breakdown</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="sq-chart"></canvas></div></div></div>
@@ -6568,14 +6582,15 @@ async function renderAnalytics() {
         <thead><tr><th>Client</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
         <tbody>${salesQuotes.slice(0,20).map(q=>{
           const d=q.createdAt?.toDate?q.createdAt.toDate():new Date(q.createdAt||0);
-          const statusColor={draft:'#636366',sent:'#0A84FF',accepted:'#30D158',rejected:'#FF453A'}[q.status]||'#636366';
+          const statusColor = window.isQuoteWon(q)?'#30D158':window.isQuoteLost(q)?'#FF453A':'#0A84FF';
           return `<tr><td>${escHtml(q.clientName||q.client||'—')}</td><td>₱${fmt(q.total||q.amount||0)}</td><td><span style="color:${statusColor};font-weight:600">${q.status||'draft'}</span></td><td>${d.toLocaleDateString('en-PH')}</td></tr>`;
         }).join('')}</tbody>
       </table></div></div></div>
     `;
-    const statuses=['draft','sent','accepted','rejected'];
     if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('sq-chart'),{type:'bar',data:{labels:statuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:statuses.map(s=>salesQuotes.filter(q=>q.status===s).length),backgroundColor:['#636366','#0A84FF','#30D158','#FF453A']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
+    new Chart(document.getElementById('sq-chart'),{type:'bar',data:{labels:['Open','Won','Lost'],
+      datasets:[{data:[openQ.length,wonQ.length,lostQ.length],backgroundColor:['#0A84FF','#30D158','#FF453A']}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
     // last 6 months volume — anchored to Manila current month
     const months=[],counts=[];
     const _anchY=+thisMonth.slice(0,4), _anchM=+thisMonth.slice(5,7)-1;
@@ -8198,28 +8213,20 @@ window.addEventListener('message', async (e) => {
     data.version = version;
     data.fileName = data.quoteNumber + (version > 1 ? ` (${version})` : '');
 
-    // Pull the client details out of the quote and upsert into the client book.
+    // Upsert into the UNIFIED client book and return the clientId to stamp on the
+    // quote (decision 3). Partners never write the internal CRM (decision 10) —
+    // their client names surface via the hub's "From quotes" section instead.
     const upsertClient = async () => {
-      const clientColl = (data.company === 'BK') ? 'sales_clients' : 'bs_clients';
-      const name = (data.clientName||'').trim();
-      if (!name) return;
-      try {
-        const snap = await db.collection(clientColl).get().catch(()=>({docs:[]}));
-        const existing = snap.docs.find(d => ((d.data().name||'').trim().toLowerCase()) === name.toLowerCase());
-        const cdata = { name, company: data.clientCompany||'', phone: data.clientPhone||'', email: data.clientEmail||'',
-          address: data.clientAddress||'', lastQuoteNumber: data.quoteNumber, lastQuoteTotal: data.total||0,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
-        if (existing) await db.collection(clientColl).doc(existing.id).set(cdata, { merge: true });
-        else { cdata.createdAt = firebase.firestore.FieldValue.serverTimestamp(); cdata.createdBy = currentUser.uid; await db.collection(clientColl).add(cdata); }
-      } catch(_) {}
+      if (typeof isPartner === 'function' && isPartner()) return null;
+      return await window.Clients.upsertFromQuote(data);
     };
 
     if (type === 'QUOTE_FILED') {
       data.status = 'filed';
       data.approvalStatus = 'filed';
       data.filedAt = firebase.firestore.FieldValue.serverTimestamp();
+      data.clientId = await upsertClient();        // FK stamped BEFORE the quote is written
       await db.collection(coll).add(data);
-      await upsertClient();
       // Notify president so they're aware of filed quotes
       await Notifs.sendToOwner({
         title: '📋 Quote Filed',
@@ -8234,8 +8241,8 @@ window.addEventListener('message', async (e) => {
       data.status = 'pending_approval';
       data.approvalStatus = 'pending_review';
       data.reviewRequestedAt = firebase.firestore.FieldValue.serverTimestamp();
+      data.clientId = await upsertClient();        // FK stamped BEFORE the quote is written
       const docRef = await db.collection('bs_quotes').add(data);
-      await upsertClient();
       await db.collection('approval_requests').add({
         type: 'bs_quote',
         quoteId: docRef.id,

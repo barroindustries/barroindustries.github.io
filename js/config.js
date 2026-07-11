@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.20';
+window.APP_VERSION = '12.0.21';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -383,6 +383,16 @@ window.fetchUsersWithPayroll = async function() {
     }
   };
 })();
+
+// ── Canonical quote-outcome + client-name-key helpers (v12 WS32) ─────────
+// THE one won/lost definition (decision 8). Retires: Analytics 'accepted'-only
+// win-rate calc, and the client modal's 'filed'/'approved'-as-won calc.
+// 'accepted' kept for legacy `quotes` docs only.
+window.isQuoteWon  = q => !!(q && (q.salesOrderId || q.status === 'won' || q.status === 'accepted'));
+window.isQuoteLost = q => !!(q && q.status === 'rejected');
+window.isQuoteOpen = q => !!q && !window.isQuoteWon(q) && !window.isQuoteLost(q);
+// THE one client-name normalizer — every join and dedupe uses this, nothing else.
+window.clientNameKey = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 // ── Stock movement log — single shared shape (v12 WS29) ─────────────────────
 // buildStockMovement is PURE (returns the payload) so atomic call sites can

@@ -1140,18 +1140,29 @@ service cloud.firestore {
       allow update, delete: if isAuth() && isAdmin();
     }
 
-    // ── Client CRM (per brand) ─────────────────────────
-    // sales_clients (Barro/Sales), design_clients (Design), bs_clients
-    // (Brilliant Steel). Shared internal CRM — any signed-in staffer can read;
-    // sales/design/admin roles maintain the records.
-    // Read + create/update by any signed-in staff (also lets non-admins flag a
-    // delete request). Actual DELETE is admin-only — others must request approval.
-    // sales_clients / design_clients are INTERNAL CRMs — external partners excluded
-    // from reading (null-safe getRole(): null treated as "not partner"). bs_clients
-    // is the Brilliant-Steel CRM and STAYS readable by the partner.
-    match /sales_clients/{docId}  { allow read: if isAuth() && !isPartner(); allow create, update: if isAuth(); allow delete: if isAuth() && isAdmin(); }
-    match /design_clients/{docId} { allow read: if isAuth() && !isPartner(); allow create, update: if isAuth(); allow delete: if isAuth() && isAdmin(); }
-    match /bs_clients/{docId}      { allow read: if isAuth(); allow create, update: if isAuth(); allow delete: if isAuth() && isAdmin(); }
+    // ── Client CRM — UNIFIED (v12 WS32) ────────────────
+    // ONE `clients` collection (brands[] tags Sales/Design/BS membership); the
+    // three per-brand books below are read-only archives kept for the audit
+    // trail. INTERNAL-ONLY: partners never read/write the client book — their
+    // Client Data view derives from their own bs_quotes (already partner-scoped).
+    // This deliberately closes the old hole where any BS partner could read the
+    // ENTIRE bs_clients book. create/update require a non-empty string name via
+    // .get(field,default) (missing-field-throws memory); note request.resource.data
+    // is the full post-write doc, so field-patch updates still pass. DELETE is
+    // admin-only — everyone else uses the deleteRequested flag (President queue).
+    match /clients/{docId} {
+      allow read:   if isAuth() && !isPartner();
+      allow create, update: if isAuth() && !isPartner()
+        && request.resource.data.get('name', '') is string
+        && request.resource.data.get('name', '') != '';
+      allow delete: if isAuth() && isAdmin();
+    }
+    // Legacy archives (records-forever directive): staff read, admin-only write
+    // (migration stamps `migratedTo`), nothing else. Partner read of bs_clients
+    // is REMOVED — no partner-facing code ever read it (grep-verified WS32 brief).
+    match /sales_clients/{docId}  { allow read: if isAuth() && !isPartner(); allow write: if isAuth() && isAdmin(); }
+    match /design_clients/{docId} { allow read: if isAuth() && !isPartner(); allow write: if isAuth() && isAdmin(); }
+    match /bs_clients/{docId}      { allow read: if isAuth() && !isPartner(); allow write: if isAuth() && isAdmin(); }
 
     // ── Dynamic / runtime-named collections ────────────
     // The app creates per-scope and per-dept collections at runtime whose names
