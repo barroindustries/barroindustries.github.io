@@ -274,8 +274,27 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done (see Build Log for 
     a Strategy page: recommendations engine (e.g. "AR > 60d: collect ₱X", "quote win-rate
     fell — review pricing", "material Y price up 12% — reorder early") + market-research
     notes section per department. Server-side daily digests (scheduled Function).
-    **DECIDED** (Fable, 2026-07-11) — see `fable-workplan/40-analytics.md`; not yet
-    implemented (digest ships as GitHub Actions cron, not a paid scheduled Function).
+    **DECIDED** (Fable, 2026-07-11) — see `fable-workplan/40-analytics.md`; IMPLEMENTED
+    2026-07-11 (digest ships as GitHub Actions cron, not a paid scheduled Function).
+
+---
+
+### PHASE 6 — Post-v12 additions (Neil, 2026-07-11)
+
+> **All 40 workstreams above (Phases 1-5) are IMPLEMENTED — the original v12.0.0 plan is
+> complete.** This phase captures work added after that milestone. Same discipline applies:
+> Fable decides architecture into a `fable-workplan/NN-*.md` `## DECIDED` spec, Sonnet
+> implements mechanically from it.
+
+41. `[ ]` **My Profile tab + Facebook-inspired shell redesign** — a new personal-hub tab
+    (ID, Personal Finance & Performance, Personal Analytics, Tasks, Recent Activities) plus a
+    shell restructure: a Facebook-style top nav for desktop/iPad (Profile · Chats ·
+    Notifications · Menu · Departments · Search · logo/title) with the left sidebar
+    simplified to the remaining core sections (Tasks, Posts, Company, etc.), and an
+    equivalent mobile layout (Facebook-inspired; exact mobile icon set is an open decision).
+    Full mandate captured verbatim in `fable-workplan/41-profile-and-nav-redesign.md`. High
+    blast-radius — touches every page's chrome across all 6 roles and all device tiers, no
+    incremental per-department rollout possible. Being architected now (Fable).
 
 ---
 
