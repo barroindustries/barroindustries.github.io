@@ -623,6 +623,31 @@ window.Notifs = (() => {
     } catch (_) { /* inventory read denied / offline — skip silently */ }
   }
 
+  // ── AEC follow-up daily digest (Sales + admins) ─
+  // One batched notification per user per day: contacts whose followUpDate has
+  // arrived and whose stage isn't terminal. Mirrors checkLowStock's shape:
+  // role/dept-scoped, dedupKey'd by day, silent on permission errors.
+  async function checkAECFollowups(uid, role) {
+    const isSales = (window.currentDepts || []).includes('Sales');
+    if (!['president','manager'].includes(role) && !isSales) return;
+    try {
+      const snap = await dbCachedGet('aec_contacts', () => db.collection('aec_contacts').get().catch(()=>({docs:[]})), 45000);
+      const todayStr  = window.bizDate();
+      const terminal  = window.AEC_TERMINAL || ['partner','dormant'];  // defensive: departments.js defines it
+      const due = snap.docs.map(d => d.data())
+        .filter(c => c.followUpDate && c.followUpDate <= todayStr && !terminal.includes(c.stage || 'new'));
+      if (!due.length) return;
+      const names = due.slice(0,5).map(c => c.company || c.contactPerson).filter(Boolean).join(', ');
+      const more  = due.length > 5 ? ` +${due.length-5} more` : '';
+      await send(uid, {
+        title: `📇 ${due.length} AEC follow-up${due.length>1?'s':''} due`,
+        body:  `Overdue: ${names}${more}. Open Sales → AEC to follow up.`,
+        icon:  '📇', type: 'aec_followup', link: 'dept:Sales',
+        dedupKey: `aec-fu-${uid}-${todayStr}`,
+      });
+    } catch (_) { /* read denied / offline — skip silently */ }
+  }
+
   // ── Helpers ───────────────────────────────────
   function timeAgo(ts) {
     if (!ts) return '';
@@ -671,7 +696,7 @@ window.Notifs = (() => {
     backdrop?.addEventListener('click', closePanel);
   }
 
-  return { startListener, stopListener, send, sendToDept, sendToAll, sendToOwner, showToast, initPush, checkDeadlines, checkAttendanceReminder, checkLowStock, initToggle, renderPage, markAllRead,
+  return { startListener, stopListener, send, sendToDept, sendToAll, sendToOwner, showToast, initPush, checkDeadlines, checkAttendanceReminder, checkLowStock, checkAECFollowups, initToggle, renderPage, markAllRead,
     requestPushPermission: (uid) => {
       const vapidKey = window.FCM_CONFIG?.VAPID_KEY;
       if (!vapidKey || vapidKey === 'YOUR_VAPID_KEY_HERE') { showToast('Push notifications not configured yet.','error'); return; }

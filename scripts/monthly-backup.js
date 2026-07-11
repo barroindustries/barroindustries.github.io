@@ -155,6 +155,11 @@ const OVERRIDES = {
     dateField: 'createdAt',
     csvFields: ['id','category','text','createdAt'],
   },
+  aec_contacts: {
+    csvFields: ['id','itemNo','type','company','contactPerson','phone','email','region',
+                'address','stage','quoteSent','quoteSentDate','quoteRef','potential',
+                'followUpDate','lastContact'],
+  },
 };
 
 // Ephemeral / huge / per-user-subcollection roots we never snapshot to JSON.

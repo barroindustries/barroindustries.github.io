@@ -80,6 +80,7 @@ document.addEventListener('DOMContentLoaded', () => {
       Notifs.checkDeadlines(user.uid);
       if (userProfile.role !== 'partner') Notifs.checkAttendanceReminder(user.uid, userProfile.displayName);
       Notifs.checkLowStock?.(user.uid, userProfile.role);
+      Notifs.checkAECFollowups?.(user.uid, userProfile.role);
       checkPayrollDuties(user);
       checkCAReminder(user);
       buildNav();

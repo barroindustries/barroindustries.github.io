@@ -5671,15 +5671,16 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
 // ══════════════════════════════════════════════════
 //  SALES — BARRO KITCHENS
 // ══════════════════════════════════════════════════
-// Consolidated Sales portal (2026-07 declutter): 10 tabs → 6. The three quote
-// entry points (Quick Estimate, the Builder, and the filed Records) collapse
-// into one **Quotes** tab; the two partner tabs into **Partner**; the two file
-// collections into **Files**. Revisions + records live inside Records untouched.
+// Consolidated Sales portal (2026-07 declutter): 10 tabs → 6 (+ AEC, WS33). The
+// three quote entry points (Quick Estimate, the Builder, and the filed Records)
+// collapse into one **Quotes** tab; the two partner tabs into **Partner**; the
+// two file collections into **Files**. Revisions + records live inside Records
+// untouched.
 window.renderSales = async function(currentUser, currentRole, subtab = window.initialSubtab('Clients')) {
   window._bkCurrentUser = currentUser;
   window._bkCurrentRole = currentRole;
   const c = deptContainer();
-  const salesTabs = ['Clients','Quotes','Partner','Files','SOP','Tasks'];
+  const salesTabs = ['Clients','AEC','Quotes','Partner','Files','SOP','Tasks'];
   // Legacy deep-link keys → new consolidated tab.
   const alias = { 'BK Quotes':'Quotes', 'Quotations':'Quotes', 'Quick Estimate':'Quotes',
                   'Partner Quotes':'Partner', 'Partner Files':'Partner',
@@ -5726,6 +5727,10 @@ async function loadSalesContent(currentUser, currentRole, sub) {
   switch(sub) {
     case 'Clients':
       await renderClientProfiles(content, currentUser, currentRole, 'barro');
+      break;
+
+    case 'AEC':
+      await renderAECDirectory(content, currentUser, currentRole);
       break;
 
     case 'Quotes': {
@@ -11289,6 +11294,378 @@ async function openQuoteApprovalReview(ctx, onDone){
       closeModal(); Notifs.showToast('Quote updated and returned to partner.'); onDone&&onDone();
     }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
+}
+
+// ══════════════════════════════════════════════════
+//  SALES — AEC PARTNER DIRECTORY (v12 WS33)
+// ══════════════════════════════════════════════════
+// Architects/Engineers/Contractors prospecting directory (owner spec 2026-07-09).
+// Type colors are the OWNER'S mandate (A=yellow / E=red / C=blue). They are
+// CATEGORY colors, not status colors — rendered as small circular letter chips
+// so a red "E" reads as a class marker, unlike the word-badges used for stage.
+window.AEC_TYPES = [
+  { key:'architect',  label:'Architect',  letter:'A', color:'#FFC300' },
+  { key:'engineer',   label:'Engineer',   letter:'E', color:'#e5484d' },
+  { key:'contractor', label:'Contractor', letter:'C', color:'#0A84FF' },
+];
+// Pipeline stage ladder — single-select filter, same {key,label,color,icon} shape
+// as CRM_STAGES (departments.js). 'partner'/'dormant' are terminal.
+window.AEC_STAGES = [
+  { key:'new',       label:'Not Contacted', color:'#8e8e93',                icon:'○'  },
+  { key:'contacted', label:'Contacted',     color:'#5856D6',                icon:'📞' },
+  { key:'prospect',  label:'Prospect',      color:'#FFAA00',                icon:'🔥' },
+  { key:'partner',   label:'Partner',       color:'var(--success,#30D158)', icon:'🤝' },
+  { key:'dormant',   label:'Dormant',       color:'#636366',                icon:'💤' },
+];
+// Terminal stages — excluded from follow-up nudges. Read defensively by
+// checkAECFollowups (notifications.js) at call-time, so load order is safe.
+window.AEC_TERMINAL = ['partner','dormant'];
+// The 18 official PH administrative regions (incl. NIR, re-established 2024).
+// Stored VERBATIM as the region value (no key→label mapping; filter by equality).
+window.AEC_REGIONS = [
+  'NCR — National Capital Region',
+  'CAR — Cordillera',
+  'Region I — Ilocos',
+  'Region II — Cagayan Valley',
+  'Region III — Central Luzon',
+  'Region IV-A — CALABARZON',
+  'MIMAROPA — Southwestern Tagalog',
+  'Region V — Bicol',
+  'Region VI — Western Visayas',
+  'NIR — Negros Island',
+  'Region VII — Central Visayas',
+  'Region VIII — Eastern Visayas',
+  'Region IX — Zamboanga Peninsula',
+  'Region X — Northern Mindanao',
+  'Region XI — Davao',
+  'Region XII — SOCCSKSARGEN',
+  'Region XIII — Caraga',
+  'BARMM — Bangsamoro',
+];
+function aecTypeMeta(k){ return window.AEC_TYPES.find(t => t.key === k) || window.AEC_TYPES[0]; }
+function aecStageOf(c){ return window.AEC_STAGES.some(s => s.key === (c && c.stage)) ? c.stage : 'new'; }
+function aecStageMeta(k){ return window.AEC_STAGES.find(s => s.key === k) || window.AEC_STAGES[0]; }
+// The owner's two derived tracker columns (Decision 6):
+function aecContacted(c){ return aecStageOf(c) !== 'new'; }
+function aecProspected(c){ return ['prospect','partner'].includes(aecStageOf(c)); }
+
+// Atomic directory number via _counters/aec_contacts — mirrors nextSerial's
+// transaction (letterhead.js) but returns the PLAIN integer (a citable
+// row number, not a year-prefixed document serial). Gaps after deletes are fine.
+// Requires the _counters docId carve-out in firestore.rules (Spec 2b).
+async function nextAECNumber(){
+  const ref = db.collection('_counters').doc('aec_contacts');
+  return db.runTransaction(async t => {
+    const cur  = await t.get(ref);
+    const next = (cur.exists ? (cur.data().count || 0) : 0) + 1;
+    t.set(ref, { count: next }, { merge:true });
+    return next;
+  });
+}
+
+async function renderAECDirectory(container, currentUser, currentRole) {
+  const snap = await db.collection('aec_contacts').orderBy('itemNo','asc').get().catch(()=>({docs:[]}));
+  const contacts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const canEdit = canEditDept('Sales');
+  const canDeleteDirect = ['president','owner','manager'].includes(currentRole);
+  const today = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10));
+
+  const isOverdue = c => c.followUpDate && c.followUpDate <= today && !window.AEC_TERMINAL.includes(aecStageOf(c));
+  const dueCount = contacts.filter(isOverdue).length;
+
+  const typeCounts = { all: contacts.length };
+  window.AEC_TYPES.forEach(t => typeCounts[t.key] = contacts.filter(c => c.type === t.key).length);
+  const stageCounts = {};
+  window.AEC_STAGES.forEach(s => stageCounts[s.key] = contacts.filter(c => aecStageOf(c) === s.key).length);
+
+  let typeFilter = 'all', stageFilter = 'all', regionFilter = 'all', search = '';
+
+  container.innerHTML = `
+    <style>
+      #aec-tbl th,#aec-tbl td{border-bottom:1px solid var(--border);padding:7px 8px;text-align:left;vertical-align:top;font-size:12px}
+      #aec-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+      #aec-tbl td.c,#aec-tbl th.c{text-align:center}
+      #aec-tbl tbody tr{cursor:pointer}
+    </style>
+    ${dueCount ? `<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>⏰ <strong>${dueCount}</strong> AEC follow-up${dueCount>1?'s':''} due</span></div>` : ''}
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      ${window.chipTabs([{key:'all',label:'All',count:typeCounts.all}, ...window.AEC_TYPES.map(t=>({key:t.key,label:t.label,count:typeCounts[t.key]}))], 'all', {cls:'aec-type-tabs'})}
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${canEdit ? `<button class="btn-primary btn-sm" id="aec-add-btn">+ Add Contact</button>` : ''}
+        <button class="btn-secondary btn-sm" id="aec-csv-btn">⬇ CSV</button>
+        <button class="btn-secondary btn-sm" id="aec-print-btn">🖨 Print</button>
+      </div>
+    </div>
+    ${window.chipTabs([{key:'all',label:'All Stages'}, ...window.AEC_STAGES.map(s=>({key:s.key,label:s.label,icon:s.icon,count:stageCounts[s.key]}))], 'all', {cls:'aec-stage-tabs'})}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px">
+      <select id="aec-region-filter" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+        <option value="all">All regions</option>
+        ${window.AEC_REGIONS.map(r=>`<option value="${escHtml(r)}">${escHtml(r)}</option>`).join('')}
+      </select>
+      <input id="aec-search" placeholder="🔍 Search company / person / email…" style="flex:1;min-width:180px;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px"/>
+    </div>
+    <div id="aec-table"></div>
+  `;
+
+  // AND-composed filter predicate — the one place all four dimensions combine.
+  const shownRows = () => contacts.filter(c =>
+    (typeFilter   === 'all' || c.type === typeFilter) &&
+    (stageFilter  === 'all' || aecStageOf(c) === stageFilter) &&
+    (regionFilter === 'all' || (c.region || '') === regionFilter) &&
+    (!search || [c.company, c.contactPerson, c.email, c.phone, c.address]
+      .join(' ').toLowerCase().includes(search))
+  );
+
+  const typeChip = c => { const t = aecTypeMeta(c.type);
+    return `<span title="${escHtml(t.label)}" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:${t.color};color:#fff;font-size:10px;font-weight:800">${t.letter}</span>`; };
+
+  const rowHtml = c => { const st = aecStageMeta(aecStageOf(c)); const od = isOverdue(c);
+    return `<tr data-id="${c.id}">
+      <td class="c">${c.itemNo || ''}</td>
+      <td class="c">${typeChip(c)}</td>
+      <td><strong>${escHtml(c.company || '')}</strong>${c.address ? `<div style="font-size:10px;color:var(--text-muted)">${escHtml(c.address)}</div>` : ''}</td>
+      <td>${escHtml(c.contactPerson || '')}</td>
+      <td style="font-size:11px">${c.phone ? `📞 ${escHtml(c.phone)}<br>` : ''}${c.email ? `✉️ ${escHtml(c.email)}` : ''}</td>
+      <td style="font-size:11px">${escHtml((c.region || '').split(' — ')[0])}</td>
+      <td><span class="badge" style="font-size:9px;background:${st.color};color:#fff">${st.icon} ${st.label}</span></td>
+      <td class="c">${c.quoteSent ? `✅${c.quoteSentDate ? `<div style="font-size:9px;color:var(--text-muted)">${escHtml(c.quoteSentDate)}</div>` : ''}` : '—'}</td>
+      <td style="font-size:11px;color:${od ? 'var(--danger)' : 'var(--text-muted)'}">${c.followUpDate ? `⏰ ${escHtml(c.followUpDate)}${od ? ' · due' : ''}` : ''}</td>
+      <td class="c" style="white-space:nowrap">
+        ${canEdit ? `<button class="btn-secondary btn-sm aec-edit-btn" data-id="${c.id}" title="Edit">✎</button>` : ''}
+        ${canDeleteDirect ? `<button class="btn-secondary btn-sm aec-del-btn" data-id="${c.id}" data-company="${escHtml(c.company || '')}" style="color:var(--danger)">${emojiIcon('trash-2',13)}</button>` : ''}
+      </td></tr>`; };
+
+  const openAECDetail = (c) => {
+    const t = aecTypeMeta(c.type), st = aecStageMeta(aecStageOf(c));
+    openModal(`${t.letter} · ${escHtml(c.company || 'AEC Contact')}`, `
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:13px">
+        <div>#${c.itemNo || ''} · <span class="badge" style="background:${t.color};color:#fff;font-size:9px">${escHtml(t.label)}</span> <span class="badge" style="background:${st.color};color:#fff;font-size:9px">${st.icon} ${st.label}</span></div>
+        ${c.contactPerson ? `<div>👤 ${escHtml(c.contactPerson)}</div>` : ''}
+        ${c.phone ? `<div>📞 ${escHtml(c.phone)}</div>` : ''}
+        ${c.email ? `<div>✉️ ${escHtml(c.email)}</div>` : ''}
+        ${c.region ? `<div>📍 ${escHtml(c.region)}</div>` : ''}
+        ${c.address ? `<div>🏠 ${escHtml(c.address)}</div>` : ''}
+        <div>📄 Quotation: ${c.quoteSent ? `sent${c.quoteSentDate ? ' ' + escHtml(c.quoteSentDate) : ''}${c.quoteRef ? ' · ' + escHtml(c.quoteRef) : ''}` : 'not sent'}</div>
+        ${c.followUpDate ? `<div>⏰ Follow-up: ${escHtml(c.followUpDate)}</div>` : ''}
+        ${c.lastContact ? `<div>🕓 Last contact: ${escHtml(c.lastContact)}</div>` : ''}
+        ${c.potential ? `<div style="margin-top:4px;padding:8px;background:rgba(128,128,128,.08);border-radius:8px">💬 ${escHtml(c.potential)}</div>` : ''}
+      </div>
+    `, `${canEdit ? `<button class="btn-primary" id="aec-detail-edit">✎ Edit</button>` : ''}<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    document.getElementById('aec-detail-edit')?.addEventListener('click', () => { closeModal(); openAECEditor(c); });
+  };
+
+  const openAECEditor = (c) => {
+    const e = c || {};
+    const sel = 'style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"';
+    openPage(c ? 'Edit AEC Contact' : 'Add AEC Contact', `
+      <div class="form-row">
+        <div class="form-group"><label>Type</label><select id="aec-type" ${sel}>${window.AEC_TYPES.map(t=>`<option value="${t.key}" ${e.type===t.key?'selected':''}>${t.letter} — ${t.label}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Stage</label><select id="aec-stage" ${sel}>${window.AEC_STAGES.map(s=>`<option value="${s.key}" ${aecStageOf(e)===s.key?'selected':''}>${s.icon} ${s.label}</option>`).join('')}</select></div>
+      </div>
+      <div class="form-group"><label>Company</label><input id="aec-company" value="${escHtml(e.company||'')}" placeholder="Firm / company name"/></div>
+      <div class="form-group"><label>Contact person</label><input id="aec-person" value="${escHtml(e.contactPerson||'')}"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Phone</label><input id="aec-phone" type="tel" value="${escHtml(e.phone||'')}"/></div>
+        <div class="form-group"><label>Email</label><input id="aec-email" type="email" value="${escHtml(e.email||'')}"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>PH Region</label><select id="aec-region" ${sel}>
+          <option value="">— Region —</option>
+          ${window.AEC_REGIONS.map(r=>`<option value="${escHtml(r)}" ${e.region===r?'selected':''}>${escHtml(r)}</option>`).join('')}
+        </select></div>
+        <div class="form-group"><label>Follow-up date</label><input id="aec-followup" type="date" value="${escHtml(e.followUpDate||'')}"/></div>
+      </div>
+      <div class="form-group"><label>Address</label><textarea id="aec-address" rows="2">${escHtml(e.address||'')}</textarea></div>
+      <div class="form-group" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="aec-quotesent" ${e.quoteSent?'checked':''}/> Quotation sent</label>
+        <input id="aec-quotedate" type="date" value="${escHtml(e.quoteSentDate||'')}" style="max-width:150px"/>
+        <input id="aec-quoteref" placeholder="Quote # (optional)" value="${escHtml(e.quoteRef||'')}" style="max-width:160px"/>
+      </div>
+      <div class="form-group"><label>Feedback / partnership potential</label><textarea id="aec-potential" rows="3">${escHtml(e.potential||'')}</textarea></div>
+    `, `<button class="btn-primary" id="aec-save-btn">${c ? 'Save' : 'Save Contact'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    document.getElementById('aec-save-btn').addEventListener('click', async () => {
+      const company = document.getElementById('aec-company').value.trim();
+      if (!company) { Notifs.showToast('Company is required.','error'); return; }
+      const quoteSent = document.getElementById('aec-quotesent').checked;
+      const data = {
+        type: document.getElementById('aec-type').value,
+        stage: document.getElementById('aec-stage').value,
+        company,
+        contactPerson: document.getElementById('aec-person').value.trim(),
+        phone: document.getElementById('aec-phone').value.trim(),
+        email: document.getElementById('aec-email').value.trim(),
+        region: document.getElementById('aec-region').value,
+        address: document.getElementById('aec-address').value.trim(),
+        quoteSent,
+        quoteSentDate: quoteSent ? (document.getElementById('aec-quotedate').value || today) : '',
+        quoteRef: document.getElementById('aec-quoteref').value.trim(),
+        potential: document.getElementById('aec-potential').value.trim(),
+        followUpDate: document.getElementById('aec-followup').value || '',
+        lastContact: today,   // Manila-correct stamp — mirrors sales_clients
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      };
+      try {
+        if (c) {
+          await db.collection('aec_contacts').doc(c.id).update(data);
+          window.logAudit && window.logAudit('update','aec_contact',c.id,{company,stage:data.stage});
+        } else {
+          data.itemNo   = await nextAECNumber();   // mint BEFORE create; a failed create just leaves a gap
+          data.addedBy  = currentUser.uid;
+          data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+          await db.collection('aec_contacts').add(data);
+          window.logAudit && window.logAudit('create','aec_contact',String(data.itemNo),{company});
+        }
+        closeModal(); Notifs.showToast('AEC contact saved');
+        renderAECDirectory(container, currentUser, currentRole);
+      } catch(ex){ Notifs.showToast('Save failed: ' + (ex.message||ex.code),'error'); }
+    });
+  };
+
+  const bindRows = () => {
+    const el = document.getElementById('aec-table'); if (!el) return;
+    el.querySelectorAll('tr[data-id]').forEach(tr => tr.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      const c = contacts.find(x => x.id === tr.dataset.id); if (c) openAECDetail(c);
+    }));
+    el.querySelectorAll('.aec-edit-btn').forEach(b => b.addEventListener('click', () => openAECEditor(contacts.find(x => x.id === b.dataset.id))));
+    el.querySelectorAll('.aec-del-btn').forEach(b => b.addEventListener('click', async () => {
+      if (!(await confirmDialog({message:`Delete AEC contact "${escHtml(b.dataset.company)}"? This cannot be undone.`, danger:true, html:true}))) return;
+      try {
+        await db.collection('aec_contacts').doc(b.dataset.id).delete();
+        window.logAudit && window.logAudit('delete','aec_contact',b.dataset.id,{company:b.dataset.company});
+        Notifs.showToast('AEC contact deleted');
+        renderAECDirectory(container, currentUser, currentRole);
+      } catch(ex){ Notifs.showToast('Delete failed','error'); }
+    }));
+  };
+
+  const renderTable = () => {
+    const rows = shownRows();
+    const el = document.getElementById('aec-table'); if (!el) return;
+    el.innerHTML = !rows.length
+      ? `<div class="empty-state"><div class="empty-icon">📇</div><h4>No AEC contacts${contacts.length ? ' match the filters' : ' yet'}</h4>${canEdit && !contacts.length ? '<p style="font-size:12px;color:var(--text-muted)">Add architects, engineers and contractors to start the partnership pipeline.</p>' : ''}</div>`
+      : `<div style="overflow-x:auto"><table id="aec-tbl" style="width:100%;min-width:860px;border-collapse:collapse">
+          <thead><tr>
+            <th class="c" style="width:36px">#</th><th class="c" style="width:40px">Type</th><th>Company</th><th>Contact Person</th>
+            <th>Contact Info</th><th style="width:80px">Region</th><th style="width:120px">Stage</th>
+            <th class="c" style="width:70px">Quote</th><th style="width:110px">Follow-up</th><th style="width:80px"></th>
+          </tr></thead><tbody>${rows.map(rowHtml).join('')}</tbody></table></div>`;
+    bindRows();
+  };
+
+  // The owner's full column list — used by BOTH the on-screen CSV button and as
+  // the reference for the monthly-backup csvFields (Spec 8). Derived columns
+  // (Contacted?/Prospected?) come from the stage ladder per Decision 6.
+  const AEC_CSV_COLUMNS = [
+    { key:'itemNo',        label:'Item #' },
+    { key:'type',          label:'Type',                 get:r => aecTypeMeta(r.type).label },
+    { key:'company',       label:'Company' },
+    { key:'contactPerson', label:'Contact Person' },
+    { key:'phone',         label:'Phone' },
+    { key:'email',         label:'Email' },
+    { key:'region',        label:'PH Region' },
+    { key:'address',       label:'Address' },
+    { key:'stage',         label:'Stage',                get:r => aecStageMeta(aecStageOf(r)).label },
+    { key:'contacted',     label:'Contacted?',           get:r => aecContacted(r) ? 'Yes' : 'No' },
+    { key:'prospected',    label:'Prospected Project?',  get:r => aecProspected(r) ? 'Yes' : 'No' },
+    { key:'quoteSent',     label:'Quotation Sent?',      get:r => r.quoteSent ? 'Yes' : 'No' },
+    { key:'quoteSentDate', label:'Quote Sent Date' },
+    { key:'quoteRef',      label:'Quote Ref' },
+    { key:'potential',     label:'Feedback / Partnership Potential' },
+    { key:'followUpDate',  label:'Follow-up Date' },
+    { key:'lastContact',   label:'Last Contact' },
+  ];
+
+  const filterLabel = () => {
+    const bits = [];
+    if (typeFilter   !== 'all') bits.push(aecTypeMeta(typeFilter).label + 's');
+    if (stageFilter  !== 'all') bits.push('stage: ' + aecStageMeta(stageFilter).label);
+    if (regionFilter !== 'all') bits.push(regionFilter.split(' — ')[0]);
+    if (search) bits.push(`search: "${search}"`);
+    return bits.length ? bits.join(' · ') : 'All contacts';
+  };
+
+  window.bindChipTabs(container.querySelector('.aec-type-tabs'),  (key) => { typeFilter  = key; renderTable(); });
+  window.bindChipTabs(container.querySelector('.aec-stage-tabs'), (key) => { stageFilter = key; renderTable(); });
+  document.getElementById('aec-region-filter')?.addEventListener('change', (e) => { regionFilter = e.target.value; renderTable(); });
+  document.getElementById('aec-search')?.addEventListener('input', (e) => { search = e.target.value.trim().toLowerCase(); renderTable(); });
+  document.getElementById('aec-add-btn')?.addEventListener('click', () => openAECEditor(null));
+  document.getElementById('aec-csv-btn')?.addEventListener('click', () => window.exportCSV('aec-contacts', shownRows(), AEC_CSV_COLUMNS));
+  document.getElementById('aec-print-btn')?.addEventListener('click', () => openAECPrintSheet(shownRows(), filterLabel()));
+  renderTable();
+}
+
+// Printable AEC contact sheet — landscape-A4 letterhead multi-row table,
+// mirroring openInventoryCountForm incl. the defensive `_lh ? … : fallback`
+// pattern. Prints the CURRENTLY-FILTERED rows. The free-text "potential" notes
+// are DELIBERATELY omitted (Decision 10). NOTE one deliberate deviation from
+// the inventory form: the local @page{A4 landscape} rule is placed AFTER
+// _lh.printCSS so it wins the cascade over the letterhead's default portrait
+// @page.
+function openAECPrintSheet(rows, scopeLabel){
+  const e = s => escHtml(s);
+  const todayStr = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10));
+  const _lh = window.buildLetterhead ? window.buildLetterhead({
+    docTitle: 'AEC PARTNER CONTACT SHEET',
+    dateLabel: 'As of ' + todayStr,
+    extraMeta: [scopeLabel || 'All contacts', rows.length + ' contact' + (rows.length === 1 ? '' : 's')],
+    signatures: [{ label:'Prepared by', name:(window.userProfile && userProfile.displayName) || '', title:'Sales' }],
+    footerNote: ((window.BRAND && window.BRAND.fullName) || 'Barro Industries Operating System') + ' · Generated ' + new Date().toLocaleString('en-PH') + ' · Internal prospecting directory — handle contact details accordingly.'
+  }) : null;
+  const body = rows.map(c => { const t = aecTypeMeta(c.type), st = aecStageMeta(aecStageOf(c));
+    return `<tr>
+      <td class="c">${c.itemNo || ''}</td>
+      <td class="c"><span class="tchip" style="background:${t.color}">${t.letter}</span></td>
+      <td class="b">${e(c.company || '')}</td>
+      <td>${e(c.contactPerson || '')}</td>
+      <td>${e(c.phone || '')}</td>
+      <td>${e(c.email || '')}</td>
+      <td>${e((c.region || '').split(' — ')[0])}</td>
+      <td>${e(c.address || '')}</td>
+      <td class="c">${st.label}</td>
+      <td class="c">${c.quoteSent ? '✔ ' + e(c.quoteSentDate || '') : '—'}</td>
+      <td class="c">${e(c.followUpDate || '')}</td>
+    </tr>`; }).join('');
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>AEC Partner Contact Sheet — ${e(todayStr)}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#000;background:#e8e8e8}
+  .page{width:297mm;min-height:210mm;margin:0 auto;background:#fff;padding:10mm 12mm}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  th,td{border:1px solid #444;padding:4px 6px;font-size:9.5px;vertical-align:top}
+  th{background:#1E3A5F;color:#fff;font-size:8px;text-transform:uppercase;letter-spacing:.04em}
+  td.c{text-align:center}td.b{font-weight:700}
+  .tchip{display:inline-block;width:14px;height:14px;line-height:14px;border-radius:50%;color:#fff;font-weight:800;font-size:9px;text-align:center}
+  .bar{position:fixed;top:0;left:0;right:0;background:#1E3A5F;color:#fff;padding:9px 18px;display:flex;gap:10px;align-items:center;z-index:99}
+  .bar button{background:#fff;color:#1E3A5F;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
+${_lh ? _lh.printCSS : ''}
+  @page{size:A4 landscape;margin:8mm}
+  @media print{ .bar,.barpad{display:none!important} body{background:#fff} .page{padding:0;width:auto;min-height:0} .tchip,th{-webkit-print-color-adjust:exact;print-color-adjust:exact} }
+</style></head><body>
+<div class="bar">
+  <span style="font-weight:700">📇 AEC Partner Contact Sheet</span>
+  <button onclick="window.print()">🖨 Print / Save as PDF</button>
+  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">✕ Close</button>
+</div>
+<div class="barpad" style="height:46px"></div>
+<div class="page">
+  ${_lh ? _lh.headerHTML : `<div style="border-bottom:3px solid #1E3A5F;padding-bottom:8px;margin-bottom:8px"><div style="font-size:20px;font-weight:900;color:#1E3A5F">BARRO INDUSTRIES</div><div style="font-size:10px;color:#555">AEC Partner Contact Sheet · ${e(todayStr)}</div></div>`}
+  <table>
+    <thead><tr>
+      <th style="width:26px">#</th><th style="width:30px">Type</th><th style="width:14%">Company</th>
+      <th style="width:11%">Contact Person</th><th style="width:9%">Phone</th><th style="width:13%">Email</th>
+      <th style="width:7%">Region</th><th>Address</th><th style="width:8%">Stage</th>
+      <th style="width:8%">Quote Sent</th><th style="width:8%">Follow-up</th>
+    </tr></thead>
+    <tbody>${body || `<tr><td colspan="11" class="c" style="padding:14px">No contacts match the current filters.</td></tr>`}</tbody>
+  </table>
+  ${_lh ? _lh.footerHTML : ''}
+</div>
+</body></html>`;
+  const win = window.open('','_blank','width=1100,height=720');
+  if (!win){ Notifs.showToast('Allow pop-ups to open the printable sheet','error'); return; }
+  win.document.write(html); win.document.close();
 }
 
 // ══════════════════════════════════════════════════

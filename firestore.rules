@@ -778,6 +778,17 @@ service cloud.firestore {
       allow write: if isAuth() && canDept('Government Biddings');
     }
 
+    // ── AEC Partner Directory (Sales prospecting: architects/engineers/contractors,
+    // v12 WS33). Internal pipeline — partner excluded, matching work_plans. Writes
+    // follow the TIGHTENED canDept pattern — deliberately stricter than the legacy
+    // bare-isAuth() sales_clients block (~1121); that looseness is pre-existing,
+    // not the template. Delete admin-only (no delete-request flow: low-stakes list).
+    match /aec_contacts/{docId} {
+      allow read: if isAuth() && !isPartner();
+      allow create, update: if isAuth() && canDept('Sales');
+      allow delete: if isAuth() && isAdmin();
+    }
+
     // ── Finance journals & records ─────────────────────
     // Finance may create + edit every line. DELETE is President-only: finance
     // staff file a finance_delete_requests doc that the President approves in the
