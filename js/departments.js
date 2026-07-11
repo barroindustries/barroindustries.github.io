@@ -12565,7 +12565,12 @@ async function renderProdOrders(el, currentUser, currentRole) {
 // the ledger (idempotent, keyed POCOS-<id>), add the cost to the linked job's
 // capital (for margin), and flag the order. Stock + flag commit atomically.
 async function consumeProductionMaterials(order) {
-  const mats = (order.materials || []).filter(m => m.itemId && (Number(m.qty) || 0) > 0);
+  const rawMats = (order.materials || []).filter(m => m.itemId && (Number(m.qty) || 0) > 0);
+  // Dedupe by itemId (summing qty) — a duplicated picker row must not
+  // double-decrement or collide on the deterministic movement doc id.
+  const byItem = {};
+  rawMats.forEach(m => { (byItem[m.itemId] ||= { ...m, qty: 0 }).qty += Number(m.qty) || 0; });
+  const mats = Object.values(byItem);
   if (!mats.length) return { ok: false, reason: 'No materials listed.' };
   if (order.materialsConsumed) return { ok: false, reason: 'Already consumed.' };
   // Resolve current unit costs from inventory
@@ -12575,8 +12580,23 @@ async function consumeProductionMaterials(order) {
   mats.forEach((m, i) => {
     const s = snaps[i];
     const unitCost = (s && s.exists) ? (Number(s.data().unitCost) || 0) : (Number(m.unitCost) || 0);
-    cos += unitCost * (Number(m.qty) || 0);
-    if (s && s.exists) batch.update(db.collection('inventory_items').doc(m.itemId), { qty: firebase.firestore.FieldValue.increment(-(Number(m.qty) || 0)) });
+    const q = Number(m.qty) || 0;
+    cos += unitCost * q;
+    if (s && s.exists) {
+      batch.update(db.collection('inventory_items').doc(m.itemId), { qty: firebase.firestore.FieldValue.increment(-q) });
+      // Movement row joins the SAME atomic batch — stock change and its log
+      // entry can never desync (v12 WS29). Deterministic id + the
+      // materialsConsumed flag (also in this batch) make re-runs impossible.
+      batch.set(db.collection('stock_movements').doc(`CONS_${order.id}_${m.itemId}`),
+        window.buildStockMovement({
+          itemId: m.itemId, itemName: (s.data().name) || m.name || '',
+          type: 'out', qty: q, source: 'consume',
+          refNumber: `POCOS-${order.id}`,
+          project: order.client || order.title || '',
+          note: `Production ${order.orderNo || order.id}`,
+          unitCost, qtyAfter: (Number(s.data().qty) || 0) - q
+        }));
+    }
   });
   batch.update(db.collection('production_orders').doc(order.id), {
     materialsConsumed: true,
@@ -12787,7 +12807,9 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
 // lets the team key the physical count → live variance + remarks on screen,
 // then print a clean A4 form (filled, or blank to count by hand). Entries
 // autosave to localStorage so a long count survives a refresh or subtab switch.
-// No Firestore writes — this is a working/print document, not a stock mutation.
+// Print stays non-mutating; since v12 WS29 the ✓ Post Variances action
+// (president/manager/finance only) corrects on-hand qty to the physical count
+// and logs an 'adjust'/'count' stock movement per corrected item.
 const PROD_COUNT_DRAFT_KEY = 'bi-prod-count-draft';
 function loadCountDraft(){ try { return JSON.parse(localStorage.getItem(PROD_COUNT_DRAFT_KEY) || '{}') || {}; } catch(e){ return {}; } }
 function saveCountDraft(d){ try { localStorage.setItem(PROD_COUNT_DRAFT_KEY, JSON.stringify(d)); } catch(e){} }
@@ -12814,6 +12836,7 @@ async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
     : `<span style="font-weight:700;color:${v===0?'var(--success)':v<0?'var(--danger)':'var(--warning)'}">${v>0?'+':''}${Number(v).toLocaleString('en-PH')}</span>`;
   const counted = shown.filter(i=>{ const c=counts[i.id]; return c && c.physical!=='' && c.physical!=null; }).length;
   const withVar = shown.filter(i=>{ const c=counts[i.id]; const v=c?varOf(i.qty,c.physical):null; return v!=null && v!==0; }).length;
+  const canPost = ['president','manager','finance'].includes(currentRole);
 
   const inEl = (cls,id,val,ph='',type='text') =>
     `<input class="${cls}" data-id="${id}" type="${type}" ${type==='number'?'inputmode="decimal" step="any"':''} value="${escHtml(val==null?'':val)}" placeholder="${ph}" style="width:100%;padding:5px 7px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--surface);color:var(--text)"/>`;
@@ -12841,7 +12864,8 @@ async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
       ${[['all','All'],['material','Raw Materials'],['product','Finished Goods']].map(([k,l])=>`<button class="subtab-btn cf-kind-chip ${kindFilter===k?'active':''}" data-kind="${k}">${l}</button>`).join('')}
       <button class="btn-secondary btn-sm" id="cf-clear" style="margin-left:auto">↺ Clear</button>
       <button class="btn-secondary btn-sm" id="cf-addrow">＋ Blank row</button>
-      <button class="btn-primary btn-sm" id="cf-print">🖨 Print / PDF</button>
+      ${canPost?`<button class="btn-primary btn-sm" id="cf-post">✓ Post Variances</button>`:''}
+      <button class="btn-secondary btn-sm" id="cf-print">🖨 Print / PDF</button>
     </div>
 
     <div class="card"><div class="card-body" style="padding:0">
@@ -12900,6 +12924,49 @@ async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
     localStorage.removeItem(PROD_COUNT_DRAFT_KEY); Notifs.showToast('Form cleared'); renderProdInventoryForm(el,currentRole,kindFilter);
   });
   document.getElementById('cf-print')?.addEventListener('click',()=>openInventoryCountForm(shown, loadCountDraft(), kindFilter));
+
+  document.getElementById('cf-post')?.addEventListener('click', async () => {
+    const d = loadCountDraft();
+    const lines = shown.map(i => {
+      const c = (d.counts || {})[i.id] || {};
+      const phys = parseFloat(c.physical);
+      return { item: i, phys, remarks: c.remarks || '', v: varOf(i.qty, c.physical) };
+    }).filter(l => l.v != null && l.v !== 0);
+    if (!lines.length) { Notifs.showToast('No non-zero variances to post.'); return; }
+    const formNo = String(d.header?.formNo || 'IC').replace(/[^A-Za-z0-9-]/g, '') || 'IC';
+    if (!(await confirmDialog({ message:
+      `Post ${lines.length} variance correction${lines.length>1?'s':''}? On-hand quantities will be set to the physical count and each correction logged in the movement history. Write-in blank rows are not posted — add those items in Inventory first.`,
+      danger: true }))) return;
+    let posted = 0; const failed = [];
+    for (const l of lines) {
+      const itemRef = db.collection('inventory_items').doc(l.item.id);
+      const movRef  = db.collection('stock_movements').doc(`CNT_${formNo}_${l.item.id}`);
+      try {
+        await db.runTransaction(async tx => {
+          const mov = await tx.get(movRef);
+          if (mov.exists) return;                        // this form already posted this item
+          const cur = await tx.get(itemRef);
+          if (!cur.exists) return;
+          const sysNow = Number(cur.data().qty) || 0;    // recompute vs LIVE qty, not render-time
+          if (Math.abs(l.phys - sysNow) < 1e-9) return;  // someone already fixed it
+          tx.update(itemRef, { qty: l.phys, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+          tx.set(movRef, window.buildStockMovement({
+            itemId: l.item.id, itemName: l.item.name || '', type: 'adjust',
+            qty: Math.abs(l.phys - sysNow), source: 'count',
+            refNumber: d.header?.formNo || '',
+            note: `Count ${d.header?.date || ''}: system ${sysNow} → physical ${l.phys}${l.remarks ? ' — ' + l.remarks : ''}`,
+            unitCost: Number(cur.data().unitCost) || null, qtyAfter: l.phys
+          }));
+        });
+        posted++;
+      } catch (ex) { failed.push(l.item.name || l.item.id); }
+    }
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
+    window.logAudit && window.logAudit('adjust', 'inventory_count', formNo, { posted, failed: failed.length });
+    Notifs.showToast(failed.length
+      ? `Posted ${posted}; failed: ${failed.join(', ')}` : `Posted ${posted} variance correction${posted===1?'':'s'} ✓`);
+    renderProdInventoryForm(el, currentRole, kindFilter);
+  });
 }
 
 // Open the filled (or blank) inventory count form in a clean, printable window.
@@ -13111,11 +13178,11 @@ async function renderRFQs(content, currentUser, currentRole) {
       openRfqModal(currentUser, () => renderRFQs(content, currentUser, currentRole)));
     document.getElementById('rfq-lowstock-btn')?.addEventListener('click', async () => {
       const isnap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
-      const low = isnap.docs.map(d => d.data())
+      const low = isnap.docs.map(d => ({ id: d.id, ...d.data() }))
         .filter(i => (i.kind || 'material') === 'material' && (i.reorderLevel || 0) > 0 && (i.qty || 0) <= (i.reorderLevel || 0));
       if (!low.length) { Notifs.showToast('No materials are at or below reorder level. 👍'); return; }
       // Suggested order qty brings stock up to ~2× the reorder level.
-      const items = low.map(i => ({ desc: i.name || '', qty: Math.max(Math.round((i.reorderLevel || 0) * 2 - (i.qty || 0)), i.reorderLevel || 0), unit: i.unit || '' }));
+      const items = low.map(i => ({ itemId: i.id, desc: i.name || '', qty: Math.max(Math.round((i.reorderLevel || 0) * 2 - (i.qty || 0)), i.reorderLevel || 0), unit: i.unit || '' }));
       openRfqModal(currentUser, () => renderRFQs(content, currentUser, currentRole), {
         title: `Reorder — ${low.length} low-stock material${low.length > 1 ? 's' : ''}`,
         items
@@ -13226,8 +13293,15 @@ function bindRfqCard(r, currentUser, currentRole, content) {
   });
 }
 
-function openRfqModal(currentUser, onDone, prefill) {
+async function openRfqModal(currentUser, onDone, prefill) {
   prefill = prefill || {};
+  let invItems = [];
+  try {
+    const isnap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
+    invItems = isnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  } catch(_) {}
+  const riItemOpts = (sel='') => `<option value="">— Free text / new —</option>` +
+    invItems.map(i => `<option value="${i.id}" data-name="${escHtml(i.name||'')}" data-unit="${escHtml(i.unit||'')}" ${sel===i.id?'selected':''}>${escHtml(i.name||'')}</option>`).join('');
   const deptOpts = Object.keys(window.DEPARTMENTS || {})
     .filter(k => k !== 'Brilliant Steel' && k !== 'Partners')
     .map(k => `<option>${escHtml(k)}</option>`).join('');
@@ -13248,31 +13322,43 @@ function openRfqModal(currentUser, onDone, prefill) {
   `, `<button class="btn-primary" id="rfq-save">Create RFQ</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   const itemsWrap = document.getElementById('rfq-items');
-  const addRow = (desc = '', qty = '', unit = '') => {
+  const addRow = (desc = '', qty = '', unit = '', itemId = '') => {
     const row = document.createElement('div');
     row.className = 'rfq-item-row';
-    row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px';
+    row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap';
     row.innerHTML = `
-      <input class="ri-desc" placeholder="Item description" value="${escHtml(desc)}" style="flex:2;min-width:0"/>
+      <select class="ri-item" title="Bind to an inventory item so receiving lands automatically" style="flex:1 1 100%;min-width:0;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">${riItemOpts(itemId)}</select>
+      <input class="ri-desc" placeholder="Item description (supplier wording ok)" value="${escHtml(desc)}" style="flex:2;min-width:0"/>
       <input class="ri-qty" type="number" inputmode="decimal" min="0" placeholder="Qty" value="${qty}" style="flex:0 0 60px;width:60px"/>
       <input class="ri-unit" placeholder="Unit" value="${escHtml(unit)}" style="flex:0 0 64px;width:64px"/>
       <button class="btn-danger btn-sm ri-del" type="button" title="Remove">✕</button>`;
     row.querySelector('.ri-del').addEventListener('click', () => row.remove());
+    row.querySelector('.ri-item').addEventListener('change', e => {
+      const opt = e.target.selectedOptions[0];
+      if (!opt || !opt.value) return;
+      const descEl = row.querySelector('.ri-desc'), unitEl = row.querySelector('.ri-unit');
+      if (!descEl.value.trim()) descEl.value = opt.dataset.name || '';
+      if (!unitEl.value.trim()) unitEl.value = opt.dataset.unit || '';
+    });
     itemsWrap.appendChild(row);
   };
-  if (Array.isArray(prefill.items) && prefill.items.length) prefill.items.forEach(it => addRow(it.desc, it.qty, it.unit));
+  if (Array.isArray(prefill.items) && prefill.items.length) prefill.items.forEach(it => addRow(it.desc, it.qty, it.unit, it.itemId || ''));
   else { addRow(); addRow(); }
   document.getElementById('rfq-add-item').addEventListener('click', () => addRow());
 
   document.getElementById('rfq-save').addEventListener('click', async () => {
     const title = document.getElementById('rfq-title').value.trim();
     if (!title) { Notifs.showToast('Enter a title.', 'error'); return; }
-    const items = [...itemsWrap.querySelectorAll('.rfq-item-row')].map(row => ({
-      desc: row.querySelector('.ri-desc').value.trim(),
-      qty: parseFloat(row.querySelector('.ri-qty').value) || 0,
-      unit: row.querySelector('.ri-unit').value.trim(),
-      unitPrice: null
-    })).filter(it => it.desc);
+    const items = [...itemsWrap.querySelectorAll('.rfq-item-row')].map(row => {
+      const sel = row.querySelector('.ri-item');
+      const itemId = sel.value || null;
+      let desc = row.querySelector('.ri-desc').value.trim();
+      if (!desc && itemId) desc = sel.selectedOptions[0]?.dataset.name || '';
+      return { itemId, desc,
+        qty: parseFloat(row.querySelector('.ri-qty').value) || 0,
+        unit: row.querySelector('.ri-unit').value.trim(),
+        unitPrice: null };
+    }).filter(it => it.desc || it.itemId);
     if (!items.length) { Notifs.showToast('Add at least one item.', 'error'); return; }
     const btn = document.getElementById('rfq-save'); btn.disabled = true;
     try {
@@ -13405,6 +13491,7 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
             ${canEdit ? `
               ${p.status !== 'ordered' && p.status !== 'received' ? `<button class="btn-secondary btn-sm pr-stat" data-id="${p.id}" data-stat="ordered">Mark Ordered</button>` : ''}
               ${p.status !== 'received' ? `<button class="btn-primary btn-sm pr-stat" data-id="${p.id}" data-stat="received">Mark Received</button>` : ''}
+              ${(p.receiveUnmatched||[]).length ? `<button class="btn-secondary btn-sm pr-resolve" data-id="${p.id}">⚠ Resolve ${p.receiveUnmatched.length} unmatched</button>` : ''}
               ${(p.status === 'ordered' || p.status === 'received') && !p.submittedToFinance ? `<button class="btn-primary btn-sm pr-submit-fin" data-id="${p.id}">📩 Submit to Finance</button>` : ''}
             ` : ''}
             ${canRecord && !p.recordedToFinance ? `<button class="btn-primary btn-sm pr-record" data-id="${p.id}">🧾 Record as Disbursement</button>` : ''}
@@ -13478,14 +13565,18 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
         status: btn.dataset.stat,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
-      // On receive, auto-match the purchased lines into inventory by name (once).
+      // On receive, auto-match the purchased lines into inventory (once).
       if (btn.dataset.stat === 'received' && p && !p.receivedToInventory) {
         const res = await receivePurchaseIntoInventory(p).catch(e => { console.warn('[receive→inventory]', e); return null; });
         if (res) {
-          await db.collection('purchase_requisitions').doc(p.id).update({ receivedToInventory: true }).catch(()=>{});
-          Notifs.showToast(res.matched
-            ? `Received. ${res.matched} item${res.matched>1?'s':''} added to inventory${res.unmatched.length?`; ${res.unmatched.length} not matched`:''}.`
-            : 'Received. No inventory items matched by name.');
+          // Only a FULLY-landed PR gets the done flag; leftovers go to the resolver.
+          await db.collection('purchase_requisitions').doc(p.id).update({
+            receivedToInventory: res.unmatched.length === 0,
+            receiveUnmatched: res.unmatched
+          }).catch(()=>{});
+          Notifs.showToast(res.unmatched.length
+            ? `Received ${res.matched} line${res.matched===1?'':'s'} into stock — ${res.unmatched.length} not in inventory. Tap “⚠ Resolve” on the PR.`
+            : `Received. ${res.matched} item${res.matched===1?'':'s'} added to inventory ✓`);
         } else { Notifs.showToast('Status updated.'); }
       } else {
         Notifs.showToast('Status updated.');
@@ -13493,38 +13584,138 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
       renderPurchaseRequests(content, currentUser, currentRole, opts);
     } catch (err) { Notifs.showToast('Update failed: ' + (err.message || err), 'error'); btn.disabled = false; }
   }));
+
+  if (canEdit) content.querySelectorAll('.pr-resolve').forEach(btn => btn.addEventListener('click', () => {
+    openReceiveResolver(prs.find(x => x.id === btn.dataset.id), currentUser, redo);
+  }));
 }
 
-// Auto-match a received purchase's line items into inventory by name (case-insensitive,
-// trimmed). Matched items get qty incremented + unit cost refreshed to the purchase
-// price + supplier filled if blank. Unmatched lines are returned so the user is told.
+// Receive a purchase's line items into inventory. Match order: line.itemId
+// (exact, from the RFQ item picker) first, then case-insensitive trimmed name
+// (legacy free-text lines and in-flight pre-WS29 PRs). Each matched line runs
+// in its OWN transaction (read current qty+unitCost → weighted-average cost →
+// write qty/unitCost AND the stock_movements row atomically). Movement doc ids
+// are deterministic (RECV_{prId}_{lineIdx}) so a retried "Mark Received" click
+// can never double-receive a line. Unmatched lines are RETURNED with their
+// items[] index so the resolver can finish the job — never silently dropped.
 async function receivePurchaseIntoInventory(p) {
-  const items = (p.items || []).filter(it => it.desc && (Number(it.qty)||0) > 0);
-  if (!items.length) return { matched: 0, unmatched: [] };
+  const all = p.items || [];
   const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
-  const byName = {};
-  snap.docs.forEach(d => { const n = (d.data().name||'').trim().toLowerCase(); if (n) byName[n] = d; });
-  const batch = db.batch();
+  const byName = {}, byId = {};
+  snap.docs.forEach(d => {
+    byId[d.id] = d;
+    const n = (d.data().name || '').trim().toLowerCase(); if (n) byName[n] = d;
+  });
   let matched = 0; const unmatched = [];
-  items.forEach(it => {
-    const hit = byName[(it.desc||'').trim().toLowerCase()];
-    if (!hit) { unmatched.push(it.desc); return; }
+  for (let i = 0; i < all.length; i++) {
+    const it = all[i];
+    if (!it || !(it.desc || it.itemId) || (Number(it.qty) || 0) <= 0) continue;
+    const hit = (it.itemId && byId[it.itemId]) || byName[(it.desc || '').trim().toLowerCase()];
+    if (!hit) {
+      unmatched.push({ i, desc: it.desc || '', qty: Number(it.qty) || 0, unit: it.unit || '',
+                       unitPrice: it.unitPrice != null ? Number(it.unitPrice) : null });
+      continue;
+    }
+    // true = applied, false = already received (idempotent no-op — still landed),
+    // null = transaction FAILED → leave for a retry/resolver pass, not "landed".
+    const ok = await receiveLineIntoItem(p, it, i, hit.ref)
+      .catch(e => { console.warn('[receive line]', e); return null; });
+    if (ok === null) unmatched.push({ i, desc: it.desc || '', qty: Number(it.qty) || 0, unit: it.unit || '',
+                                      unitPrice: it.unitPrice != null ? Number(it.unitPrice) : null });
+    else matched++;
+  }
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
+  return { matched, unmatched };
+}
+
+// One PR line → one inventory item, atomically: qty add + weighted-average
+// cost + movement row in a single transaction. Returns true if applied,
+// false if this exact line was already received (deterministic movement id).
+async function receiveLineIntoItem(p, it, lineIdx, itemRef) {
+  const movRef = db.collection('stock_movements').doc(`RECV_${p.id}_${lineIdx}`);
+  return db.runTransaction(async tx => {
+    const movSnap  = await tx.get(movRef);
+    if (movSnap.exists) return false;                 // already received — idempotent
+    const itemSnap = await tx.get(itemRef);
+    if (!itemSnap.exists) throw new Error('Inventory item no longer exists');
+    const cur     = itemSnap.data();
+    const recvQty = Number(it.qty) || 0;
+    const price   = (it.unitPrice != null && (Number(it.unitPrice) || 0) > 0) ? Number(it.unitPrice) : null;
+    const onHand  = Math.max(0, Number(cur.qty) || 0);   // negative stock contributes nothing to WAC
+    const oldCost = Number(cur.unitCost) || 0;
+    // Weighted-average cost (v12 WS29 — replaces the flat latest-price overwrite).
+    // Degenerates to the new price on stockout or when no prior cost exists.
+    const newCost = price == null ? null
+      : (onHand > 0 && oldCost > 0)
+        ? (onHand * oldCost + recvQty * price) / (onHand + recvQty)
+        : price;
     const upd = {
-      qty: firebase.firestore.FieldValue.increment(Number(it.qty)||0),
+      qty: (Number(cur.qty) || 0) + recvQty,          // explicit add — we hold the read, no blind increment
       lastReceivedAt: firebase.firestore.FieldValue.serverTimestamp()
     };
-    // Refresh to the latest purchase cost, but only for a real positive price —
-    // never let a blank/zero line wipe the stored unit cost.
-    if (it.unitPrice != null && (Number(it.unitPrice)||0) > 0) upd.unitCost = Number(it.unitPrice);
-    if (p.supplier && !(hit.data().supplier||'').trim()) upd.supplier = p.supplier;
-    batch.update(hit.ref, upd);
-    matched++;
+    if (newCost != null) upd.unitCost = newCost;      // never let a blank/zero line wipe the cost (kept)
+    if (p.supplier && !(cur.supplier || '').trim()) upd.supplier = p.supplier;
+    tx.update(itemRef, upd);
+    tx.set(movRef, window.buildStockMovement({
+      itemId: itemRef.id, itemName: cur.name || it.desc || '',
+      type: 'in', qty: recvQty, source: 'receive',
+      refNumber: p.prNo || p.rfqNo || p.id,
+      note: `Received ${p.prNo || p.rfqNo || ''}${p.supplier ? ' — ' + p.supplier : ''}`.trim(),
+      unitCost: price, qtyAfter: upd.qty
+    }));
+    return true;
   });
-  if (matched) {
-    await batch.commit();
-    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
-  }
-  return { matched, unmatched };
+}
+
+// Finish receiving a PR whose lines didn't auto-match: bind each leftover to an
+// existing item or create a new one, then run the SAME idempotent per-line
+// receive transaction. receivedToInventory flips true when the list empties.
+async function openReceiveResolver(p, currentUser, onDone) {
+  const rows = (p.receiveUnmatched || []);
+  if (!rows.length) return;
+  const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
+  const inv = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  const opts = sel => `<option value="">— Choose action —</option><option value="__new__">＋ Create new inventory item</option>` +
+    inv.map(i => `<option value="${i.id}" ${sel===i.id?'selected':''}>${escHtml(i.name||'')} (${Number(i.qty||0).toLocaleString('en-PH')} ${escHtml(i.unit||'')})</option>`).join('');
+  openPage(`⚠ Resolve receipt — ${escHtml(p.prNo || p.rfqNo || '')}`, `
+    <p style="font-size:12px;color:var(--text-muted)">These purchased lines matched no inventory item by name. Bind each to an existing item, or create a new one — quantities and weighted-average cost post the moment you resolve a line.</p>
+    ${rows.map((r, k) => `<div class="rcv-row" data-k="${k}" style="border:1px solid var(--border);border-radius:9px;padding:10px;margin-bottom:8px">
+      <div style="font-weight:600">${escHtml(r.desc || '—')} <span style="font-weight:400;color:var(--text-muted)">· ${Number(r.qty||0)} ${escHtml(r.unit||'')}${r.unitPrice!=null?` @ ₱${fmt(r.unitPrice)}`:''}</span></div>
+      <select class="rcv-target" style="width:100%;margin-top:6px;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">${opts()}</select>
+      <button class="btn-primary btn-sm rcv-apply" style="margin-top:6px">Receive this line →</button>
+    </div>`).join('')}
+  `, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  document.querySelectorAll('.rcv-apply').forEach(applyBtn => applyBtn.addEventListener('click', async e => {
+    const rowEl = e.currentTarget.closest('.rcv-row');
+    const k = +rowEl.dataset.k, r = rows[k];
+    const choice = rowEl.querySelector('.rcv-target').value;
+    if (!choice) { Notifs.showToast('Choose an item or “Create new”.', 'error'); return; }
+    e.currentTarget.disabled = true;
+    try {
+      let itemRef;
+      if (choice === '__new__') {
+        itemRef = await db.collection('inventory_items').add({
+          name: r.desc, kind: 'material', unit: r.unit || '', category: '',
+          qty: 0, reorderLevel: 0, unitCost: 0,
+          supplier: p.supplier || '', supplierContact: '',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        window.logAudit && window.logAudit('create', 'inventory_item', itemRef.id, { name: r.desc, via: 'receive-resolver' });
+      } else {
+        itemRef = db.collection('inventory_items').doc(choice);
+      }
+      await receiveLineIntoItem(p, { qty: r.qty, unitPrice: r.unitPrice, desc: r.desc }, r.i, itemRef);
+      const remaining = rows.filter((_, j) => j !== k);
+      await db.collection('purchase_requisitions').doc(p.id).update({
+        receiveUnmatched: remaining, receivedToInventory: remaining.length === 0
+      });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
+      Notifs.showToast('Line received into stock ✓');
+      closeModal(); onDone && onDone();
+      if (remaining.length) openReceiveResolver({ ...p, receiveUnmatched: remaining }, currentUser, onDone);
+    } catch (ex) { Notifs.showToast('Failed: ' + (ex.message || ex), 'error'); e.currentTarget.disabled = false; }
+  }));
 }
 
 // Notify the Finance team (Finance-dept members + Accountant role) and the

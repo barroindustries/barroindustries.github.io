@@ -1954,7 +1954,7 @@ async function renderPresidentMessageCard() {
          <td style="font-size:12px">${escHtml(m.date||'—')}</td>
          <td><span class="badge ${m.type==='in'?'badge-green':m.type==='adjust'?'badge-blue':'badge-orange'}">${m.type==='in'?'IN':m.type==='adjust'?'ADJ':'OUT'}</span></td>
          <td>${num(m.qty||0)}</td>
-         <td style="font-size:12px">${escHtml(m.project||m.note||'—')}</td>
+         <td style="font-size:12px">${m.refNumber?`<span class="badge badge-gray" style="margin-right:4px">${escHtml(m.refNumber)}</span>`:''}${escHtml(m.project||m.note||'—')}</td>
          <td style="font-size:11px">${escHtml(m.byName||'—')}</td>
        </tr>`).join('')}</tbody></table></div>`;
     if (body) body.innerHTML = html;
@@ -1998,10 +1998,9 @@ async function renderPresidentMessageCard() {
           // A manual on-hand edit changes stock without a Stock In/Out — log an
           // 'adjust' movement so the history reflects every quantity change.
           if (Math.abs((data.qty||0) - oldQty) > 1e-9) {
-            await db.collection('stock_movements').add({ itemId:item.id, itemName:name, type:'adjust',
-              qty:Math.abs((data.qty||0)-oldQty), project:'', note:`Manual edit ${num(oldQty)} → ${num(data.qty||0)}`,
-              by:currentUser.uid, byName:userProfile?.displayName||currentUser.email,
-              date:bizDate(), createdAt:firebase.firestore.FieldValue.serverTimestamp() }).catch(()=>{});
+            await window.postStockMovement({ itemId:item.id, itemName:name, type:'adjust',
+              qty:Math.abs((data.qty||0)-oldQty), note:`Manual edit ${num(oldQty)} → ${num(data.qty||0)}`,
+              source:'manual', unitCost:data.unitCost||null, qtyAfter:data.qty||0 }).catch(()=>{});
           }
         }
         else { data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); const _r=await db.collection('inventory_items').add(data); window.logAudit&&window.logAudit('create','inventory_item',_r.id,{name,qty:data.qty}); }
@@ -2032,11 +2031,10 @@ async function renderPresidentMessageCard() {
       const delta = type==='in'? qty : -qty;
       try{
         await db.collection('inventory_items').doc(item.id).update({ qty: firebase.firestore.FieldValue.increment(delta), updatedAt:firebase.firestore.FieldValue.serverTimestamp() });
-        await db.collection('stock_movements').add({ itemId:item.id, itemName:item.name||'', type, qty,
+        await window.postStockMovement({ itemId:item.id, itemName:item.name||'', type, qty,
           project: type==='out'?(document.getElementById('mv-project')?.value.trim()||''):'',
           note:document.getElementById('mv-note').value.trim(),
-          by:currentUser.uid, byName:userProfile?.displayName||currentUser.email,
-          date:bizDate(), createdAt:firebase.firestore.FieldValue.serverTimestamp() });
+          source:'manual', unitCost:item.unitCost||null, qtyAfter:(item.qty||0)+delta });
         window.logAudit&&window.logAudit('create','stock_movement',item.id,{itemName:item.name||'',type,qty,delta});
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
         closeModal(); Notifs.showToast('Stock updated'); onSaved&&onSaved();
@@ -2059,18 +2057,19 @@ async function renderPresidentMessageCard() {
       </div></div>`;
     const filtered = () => mv.filter(m=>{
       if (typeFilter!=='all' && (m.type||'out')!==typeFilter) return false;
-      if (search){ const s=search.toLowerCase(); if(!((m.itemName||'').toLowerCase().includes(s)||(m.project||'').toLowerCase().includes(s)||(m.note||'').toLowerCase().includes(s))) return false; }
+      if (search){ const s=search.toLowerCase(); if(!((m.itemName||'').toLowerCase().includes(s)||(m.project||'').toLowerCase().includes(s)||(m.note||'').toLowerCase().includes(s)||(m.refNumber||'').toLowerCase().includes(s))) return false; }
       return true;
     });
     const renderRows = () => {
       const rows = filtered(); const tbl=document.getElementById('mv-table'); if(!tbl) return;
       tbl.innerHTML = !rows.length ? '<div class="empty-state" style="padding:18px"><div class="empty-icon">🔎</div><h4>No movements match</h4></div>' :
         `<div class="table-wrap"><table class="data-table">
-          <thead><tr><th>Date</th><th>Item</th><th>Type</th><th>Qty</th><th>Project</th><th>Note</th><th>By</th></tr></thead>
+          <thead><tr><th>Date</th><th>Item</th><th>Type</th><th>Source</th><th>Qty</th><th>Project</th><th>Note</th><th>By</th></tr></thead>
           <tbody>${rows.map(m=>`<tr>
             <td style="font-size:12px">${escHtml(m.date||'—')}</td>
             <td style="font-weight:600">${escHtml(m.itemName||'—')}</td>
             <td>${typeBadge(m.type)}</td>
+            <td style="font-size:11px;color:var(--text-muted)">${escHtml(m.source||'manual')}${m.refNumber?`<div>${escHtml(m.refNumber)}</div>`:''}</td>
             <td>${num(m.qty||0)}</td>
             <td style="font-size:12px">${escHtml(m.project||'—')}</td>
             <td style="font-size:12px">${escHtml(m.note||'—')}</td>
@@ -2084,6 +2083,8 @@ async function renderPresidentMessageCard() {
     }
     document.getElementById('mv-csv')?.addEventListener('click',()=>window.exportCSV('stock-movements', filtered(), [
       {key:'date',label:'Date'},{key:'itemName',label:'Item'},{key:'type',label:'Type',get:m=>m.type==='in'?'IN':m.type==='adjust'?'ADJ':'OUT'},
+      {key:'source',label:'Source',get:m=>m.source||'manual'},{key:'refNumber',label:'Ref',get:m=>m.refNumber||''},
+      {key:'unitCost',label:'Unit Cost',get:m=>m.unitCost==null?'':m.unitCost},
       {key:'qty',label:'Qty',get:m=>m.qty||0},{key:'project',label:'Project'},{key:'note',label:'Note'},{key:'byName',label:'By'}]));
   }
 

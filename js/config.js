@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.17';
+window.APP_VERSION = '12.0.18';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -383,6 +383,32 @@ window.fetchUsersWithPayroll = async function() {
     }
   };
 })();
+
+// ── Stock movement log — single shared shape (v12 WS29) ─────────────────────
+// buildStockMovement is PURE (returns the payload) so atomic call sites can
+// tx.set/batch.set it with a deterministic doc id; postStockMovement is the
+// convenience writer for one-off manual flows. Lives in config.js because
+// modules.js (the old writers) loads LAST and departments.js (the new writers)
+// loads before it — config.js is the only file both can see at parse time.
+window.buildStockMovement = function(f) {
+  return {
+    itemId: f.itemId, itemName: f.itemName || '',
+    type: f.type,                                   // 'in' | 'out' | 'adjust'
+    qty: Number(f.qty) || 0,                        // always positive
+    source: f.source || 'manual',                   // 'manual'|'receive'|'consume'|'count'
+    refNumber: f.refNumber || null,
+    project: f.project || '', note: f.note || '',
+    unitCost: (f.unitCost == null ? null : Number(f.unitCost)),
+    qtyAfter: (f.qtyAfter == null ? null : Number(f.qtyAfter)),
+    by: window.currentUser?.uid || '',
+    byName: window.userProfile?.displayName || window.currentUser?.email || '',
+    date: bizDate(),                                // Manila — never toISOString()
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+};
+window.postStockMovement = function(f) {
+  return db.collection('stock_movements').add(window.buildStockMovement(f));
+};
 
 // ── Month-string arithmetic (Manila-safe, no Date parsing) ──
 window.ymAddMonths = function(ym, delta) {
