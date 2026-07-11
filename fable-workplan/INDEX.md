@@ -51,47 +51,73 @@ finalizing 9's rename sweep so the two don't conflict.
 
 | WS | Brief | Open decisions | One-line current state |
 |---|---|---|---|
-| 28 | [28-production-flow.md](28-production-flow.md) | 8 | Production process flow — rename stages to match the real shop floor |
-| 29 | [29-inventory.md](29-inventory.md) | 9 | Inventory correctness — moving weighted-average cost, receive-path bug confirmed |
-| 30 | [30-purchasing.md](30-purchasing.md) | 12 | Purchasing — no PO approval gate exists at all today |
-| 31 | [31-quotation-builder-v3.md](31-quotation-builder-v3.md) | 14 | Quotation builder v3 — Quick Quote mode, repair the quote→approval→order chain |
-| 32 | [32-sales-crm.md](32-sales-crm.md) | 14 | Sales — Client Relations hub — bs_clients confirmed orphaned |
-| 33 | [33-aec-directory.md](33-aec-directory.md) | 12 | AEC Partner Directory — wholly greenfield, strong existing analogs |
-| 34 | [34-marketing.md](34-marketing.md) | 12 | Marketing suite — campaigns/leads/calendar greenfield, materials library is not |
-| 35 | [35-design-suite.md](35-design-suite.md) | 10 | Design dept suite — drawing "approval" has no real approver gate |
-| 36 | [36-finance-additions.md](36-finance-additions.md) | 14 | Finance additions — bank-accounts registry, no dimension exists anywhere |
-| 37 | [37-team-chat.md](37-team-chat.md) | 7 | Team Chat — real-time listeners are genuinely new territory (only 3 exist today) |
-| 38 | [38-files-hub.md](38-files-hub.md) | 14 | Files Hub — found dead shadowed code; per-file sharing is architecturally hard |
+| 28 | [28-production-flow.md](28-production-flow.md) | ✅ DECIDED | Production process flow — rename stages to match the real shop floor |
+| 29 | [29-inventory.md](29-inventory.md) | 9 (grounded, not decided) | Inventory correctness — moving weighted-average cost, receive-path bug confirmed |
+| 30 | [30-purchasing.md](30-purchasing.md) | 12 (grounded, not decided — Wave B, needs WS29 first) | Purchasing — no PO approval gate exists at all today |
+| 31 | [31-quotation-builder-v3.md](31-quotation-builder-v3.md) | 14 (grounded, not decided — Wave B, needs WS32 first) | Quotation builder v3 — Quick Quote mode, repair the quote→approval→order chain |
+| 32 | [32-sales-crm.md](32-sales-crm.md) | ✅ DECIDED | Sales — Client Relations hub — bs_clients confirmed orphaned |
+| 33 | [33-aec-directory.md](33-aec-directory.md) | ✅ DECIDED | AEC Partner Directory — wholly greenfield, strong existing analogs |
+| 34 | [34-marketing.md](34-marketing.md) | 12 (grounded, not decided — Wave B, needs WS32+WS38 first) | Marketing suite — campaigns/leads/calendar greenfield, materials library is not |
+| 35 | [35-design-suite.md](35-design-suite.md) | 10 (grounded, not decided — Wave B, needs WS32+WS38 first) | Design dept suite — drawing "approval" has no real approver gate |
+| 36 | [36-finance-additions.md](36-finance-additions.md) | ✅ DECIDED | Finance additions — bank-accounts registry, no dimension exists anywhere |
+| 37 | [37-team-chat.md](37-team-chat.md) | ✅ DECIDED | Team Chat — real-time listeners are genuinely new territory (only 3 exist today) |
+| 38 | [38-files-hub.md](38-files-hub.md) | 14 (grounded, not decided) | Files Hub — found dead shadowed code; per-file sharing is architecturally hard |
 
 ## Phase 5 — Intelligence & BIR
 
 | WS | Brief | Open decisions | One-line current state |
 |---|---|---|---|
-| 39 | [39-bir-suite.md](39-bir-suite.md) | 15 | BIR suite — a 3000-row report-truncation landmine found; VAT partially already netted |
-| 40 | [40-analytics.md](40-analytics.md) | 15 | Analytics with conclusions — 13 charts hardcode colors that clash with the new theme |
+| 39 | [39-bir-suite.md](39-bir-suite.md) | 15 (grounded, not decided) | BIR suite — a 3000-row report-truncation landmine found; VAT partially already netted |
+| 40 | [40-analytics.md](40-analytics.md) | 15 (grounded, not decided — Wave B, needs WS29+WS32+WS36 first) | Analytics with conclusions — 13 charts hardcode colors that clash with the new theme |
 
-## Status — Phase 4+5 GROUNDED, not yet DECIDED (research pass, 2026-07-10)
+## Status — Phase 4+5: 5 of 13 DECIDED, 3 grounded-only, 5 not yet dispatched (2026-07-10)
 
-All 13 Phase-4/5 briefs are now fact-gathered (file:line citations, current-state findings,
-data shapes, open decisions) — the SAME grounding pass Phase 2/3 went through before Fable
-decided their architecture. **None of these 13 has a `## DECIDED` section yet.** Per the
-established cost-effective split (Fable decides, Sonnet implements mechanically), the next
-step is a Fable session per brief — do NOT let a Sonnet session invent these architecture
-decisions.
+**Decided (Fable decision session #4, 2026-07-10): WS28, WS32, WS33, WS36, WS37.** Each has a
+full `## DECIDED` spec (resolved decisions, exact code/data shapes, rules diffs, migration +
+test checklists) — ready for Sonnet to implement mechanically, same bar as Phase 2-3.
 
-**Cross-workstream dependencies surfaced by this research pass** (read before assigning a
-build order): WS31 (quote fix) and WS32 (CRM hub) both touch the BK/BS quote-collection
-split — resolve WS31's `bs_quotes` stranding bug before or alongside WS32's client-unification
-decision. WS32 and WS35 independently confirmed the same `sales_clients`/`design_clients`/
-`bs_clients` three-way fragmentation — one decision should cover both. WS34's materials-library
-sub-feature and WS35's project/client folders both overlap with WS38's Files Hub — sequence
-WS38 first if its scope includes killing the underlying `files_<scope>` pattern. WS28's stage
-rename risks silently breaking the public order-tracker's three independently-drifting
-translation maps — do not decide WS28 without reading that risk note. WS40's win-rate/
-cash-position/inventory-turns metrics are each blocked on WS32/WS36/WS29 respectively landing
-first. WS39 (BIR) depends on employee TIN/SSS#/PhilHealth# fields that don't exist on regular
-`users` docs today (only on weekly `worker_profiles`) — a real data-capture gap, not just a
-reporting one.
+**Grounded but NOT yet decided (their Fable pass hit the account's session usage limit before
+finishing — files are untouched, safe to resume, no corruption): WS29 (Inventory), WS38 (Files
+Hub), WS39 (BIR suite).** Re-dispatch these 3 first — they were "Wave A" (independently
+decidable) and several other undecided workstreams wait on them.
+
+**Not yet dispatched at all (Wave B — depends on Wave A landing first): WS30 (needs WS29),
+WS31 (needs WS32 — now available), WS34 (needs WS32 — now available — + WS38), WS35 (needs
+WS32 — now available — + WS38), WS40 (needs WS29 + WS32 — now available — + WS36 — now
+available).** WS31/34/35 can now read WS32's finished client-unification decision immediately.
+WS40 still needs WS29 to land (WS36 is done).
+
+**Cross-workstream dependencies** (read before dispatching Wave B): WS31 (quote fix) and WS32
+(CRM hub, now DECIDED) both touch the BK/BS quote-collection split — WS31's Fable pass should
+read WS32's finished spec before deciding. WS32 (now DECIDED) resolved the
+`sales_clients`/`design_clients`/`bs_clients` three-way fragmentation that WS35 also
+independently found — WS35's Fable pass should read WS32's decision and align to it, not
+re-decide it. WS34's materials-library sub-feature and WS35's project/client folders both
+overlap with WS38's Files Hub (not yet decided) — decide WS38 before WS34/WS35. WS28 (now
+DECIDED) resolved the stage-rename-vs-public-tracker risk — see its own spec. WS40's win-rate/
+cash-position/inventory-turns metrics are blocked on WS32 (done, use it), WS36 (done, use its
+stated cash-position handoff), and WS29 (not yet decided — wait for it). WS39 (BIR) depends on
+employee TIN/SSS#/PhilHealth# fields that don't exist on regular `users` docs today (only on
+weekly `worker_profiles`) — a real data-capture gap, not just a reporting one; this is
+self-contained within WS39's own decision, no external dependency.
+
+### To resume in a new session (exact next steps)
+1. Re-dispatch Fable-tier agents for **WS29, WS38, WS39** (the 3 that hit the session limit
+   before finishing — same prompt pattern as WS28/32/33/36/37, see the git log commit
+   "v12: Fable decision session #4" for the exact prompts used, or re-derive from each
+   brief's own "Expected deliverable format" section).
+2. Once WS29 + WS38 land, dispatch Wave B: **WS30** (reads WS29), **WS31** (reads WS32 —
+   already done), **WS34** (reads WS32 + WS38), **WS35** (reads WS32 + WS38), **WS40** (reads
+   WS29 + WS32 + WS36 — WS32/WS36 already done).
+3. Commit each wave as it lands (`git add fable-workplan/NN-*.md && git commit`), matching the
+   "Fable decision session #N" commit-message pattern already used 4 times this engagement.
+4. Once all 13 are DECIDED, begin Sonnet implementation — same per-file parallel-subagent
+   pattern used for WS09-27 (see V12-PLAN.md's Build Log for the exact playbook: implement →
+   verify (`node --check`, rules brace-balance, cross-agent grep checks) → commit → deploy
+   (`git push origin master` + `firebase deploy --only firestore:rules`/`storage` if rules
+   changed)). Sequence implementation in the SAME dependency order as the decision waves
+   above (Wave A workstreams' code before Wave B's, since Wave B's code will literally import/
+   call things Wave A's implementation creates).
 
 ## Status — Phases 2+3 ALL 18 DECIDED (Fable, 2026-07-10) ✅
 
