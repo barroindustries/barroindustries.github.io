@@ -147,6 +147,14 @@
         { "fieldPath": "scope",      "order": "ASCENDING" },
         { "fieldPath": "department", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "audit_log",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "actorUid", "order": "ASCENDING"  },
+        { "fieldPath": "ts",       "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

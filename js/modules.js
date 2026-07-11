@@ -2642,3 +2642,323 @@ window.renderFilesHub = function(){
     if (active && active.dataset.chip === '__all__') renderAllScope();
   });
 };
+
+/* ═══════════════════════════════════════════════════
+   v12 WS41 — MY PROFILE (5 sub-tabs; partners get 3)
+═══════════════════════════════════════════════════ */
+window.renderMyProfile = async function() {
+  const c = document.getElementById('page-content'); if (!c) return;
+  const u = window.userProfile || {};
+  const partner = (typeof isPartner === 'function' && isPartner()) ||
+                  (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
+  const tabs = partner
+    ? [ {key:'account',   label:'👤 Account'},
+        {key:'tasks',     label:'✅ Tasks'},
+        {key:'activity',  label:'🕘 Recent Activity'} ]
+    : [ {key:'id',        label:'🪪 ID'},
+        {key:'finance',   label:'💳 Finance & Performance'},
+        {key:'analytics', label:'📊 My Analytics'},
+        {key:'tasks',     label:'✅ Tasks'},
+        {key:'activity',  label:'🕘 Recent Activity'} ];
+  const initial = window.initialSubtab(partner ? 'account' : 'id');
+  const depts = (Array.isArray(u.departments) && u.departments.length ? u.departments
+                 : u.department ? [u.department] : []).join(', ');
+  c.innerHTML = `
+    <div class="profile-hero" style="margin-bottom:14px">
+      <div class="profile-avatar-wrap" style="cursor:default">
+        ${u.photoUrl ? `<img src="${escHtml(u.photoUrl)}" class="profile-avatar-img"/>`
+                     : `<span class="profile-avatar-initials">${escHtml((u.displayName||'?')[0].toUpperCase())}</span>`}
+      </div>
+      <div class="profile-hero-name">${escHtml(u.displayName || u.email || 'User')}</div>
+      <div class="profile-hero-role">${escHtml(ROLES[u.role]?.label || u.role || '')}${depts ? ' · ' + escHtml(depts) : ''}</div>
+      ${u.employeeId ? `<div class="profile-hero-id">${escHtml(u.employeeId)}</div>` : ''}
+    </div>
+    ${window.chipTabs(tabs, initial, { cls: 'mp-tabs' })}
+    <div id="mp-tab-host"></div>`;
+  window.bindChipTabs(c.querySelector('.mp-tabs'), key => { window.setSubroute(key); loadMyProfileTab(key); });
+  loadMyProfileTab(tabs.some(t => t.key === initial) ? initial : tabs[0].key);
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
+};
+
+async function loadMyProfileTab(key) {
+  const host = document.getElementById('mp-tab-host'); if (!host) return;
+  // Destroy any Chart.js instance from the previous sub-tab (e.g. Analytics'
+  // pay-trend chart) before wiping the DOM — same convention as renderAnalytics'
+  // subtab switch (app.js) and navigateTo's page-level Chart cleanup.
+  if (window.Chart) host.querySelectorAll('canvas').forEach(cv => { const ex = Chart.getChart(cv); if (ex) ex.destroy(); });
+  host.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+  const uid = currentUser.uid;
+  if (key === 'id') {
+    host.innerHTML = `<div id="mp-id-card-wrap" style="max-width:420px;margin:0 auto"></div>`;
+    if (typeof renderIDCard === 'function') renderIDCard('mp-id-card-wrap', window.userProfile);   // WS27, verbatim
+  } else if (key === 'finance') {
+    host.innerHTML = '';
+    await window.renderPersonalFinance(currentUser, currentRole, { host, selfOnly: true });
+    if (['president','manager'].includes(currentRole)) {
+      host.insertAdjacentHTML('afterbegin',
+        `<div style="text-align:right;margin-bottom:8px"><button class="btn-secondary btn-sm"
+           onclick="navigateTo('personal-finance')">Team view →</button></div>`);
+    }
+  } else if (key === 'analytics')  { await window.renderPersonalAnalytics(host, uid); }
+  else if (key === 'tasks')        { await window.renderMyProfileTasksList(host, uid); }
+  else if (key === 'activity')     { await window.renderRecentActivity(host, uid); }
+  else if (key === 'account') {    // partners only — read-only info card
+    const u = window.userProfile || {};
+    host.innerHTML = `<div class="card"><div class="card-body">
+      <div class="profile-info-row"><span class="pir-label">Email</span><span class="pir-value">${escHtml(u.email||'—')}</span></div>
+      <div class="profile-info-row"><span class="pir-label">Company</span><span class="pir-value">${escHtml((typeof partnerCompanyName==='function'&&partnerCompanyName())||'—')}</span></div>
+      <div class="profile-info-row no-border"><span class="pir-label">Role</span><span class="pir-value">${escHtml(ROLES[u.role]?.label||u.role||'—')}</span></div>
+    </div></div>`;
+  }
+}
+
+// ── Personal Analytics (Decision 7) — "analytics about me", composed from
+// existing per-user helpers (getKpiScore/getAttendanceScore/own tasks/
+// salary_history). No new aggregation infrastructure, no writes.
+window.renderPersonalAnalytics = async function(host, uid) {
+  const month = window.bizDate().slice(0, 7);
+  const [kpi, att, taskSnap, histSnap, evalSnap] = await Promise.all([
+    (typeof getKpiScore === 'function')        ? getKpiScore(uid)        : 0.5,
+    (typeof getAttendanceScore === 'function') ? getAttendanceScore(uid) : 0,
+    db.collection('tasks').where('assignedTo', 'array-contains', uid).get().catch(() => ({ docs: [] })),
+    db.collection('salary_history').where('userId', '==', uid).orderBy('month', 'desc').limit(6).get().catch(() => ({ docs: [] })),
+    db.collection('kpi_evals').doc(uid).get().catch(() => null)
+  ]);
+
+  // Same DONE set as getKpiScore / renderPersonalFinance (app.js).
+  const DONE = ['done', 'approved', 'archived'];
+  const todayStr = window.bizDate();
+  const tasks = taskSnap.docs.map(d => d.data());
+  const doneTasks = tasks.filter(t => DONE.includes(t.status));
+  const overdueTasks = tasks.filter(t => !DONE.includes(t.status) && t.dueDate && t.dueDate < todayStr);
+  const taskPct = tasks.length ? Math.round(doneTasks.length / tasks.length * 100) : 0;
+  const attPct = Math.round((att || 0) * 100);
+  const kpiPct = Math.round((kpi || 0) * 100);
+  const monthLabel = new Date(month + '-01T12:00:00').toLocaleString('en-PH', { month: 'long', year: 'numeric' });
+
+  const hist = histSnap.docs.map(d => d.data()).slice().reverse();   // oldest → newest
+  const evalData = (evalSnap && evalSnap.exists) ? evalSnap.data() : {};
+  // President grade: employees see only the averaged grade, and only on the
+  // 1st of the (Manila) month — same rule as renderPersonalFinance (app.js).
+  const isFirstOfMonth = window.bizDate().slice(8, 10) === '01';
+  const presGrade = isFirstOfMonth ? (evalData.presidentGradeFromTasks ?? null) : null;
+
+  host.innerHTML = `
+    <div class="kpi-row">
+      <div class="kpi-card${attPct >= 90 ? ' green' : attPct < 60 ? ' warn' : ''}">
+        <div class="kpi-label">Attendance</div>
+        <div class="kpi-value">${attPct}%</div>
+        <div class="kpi-sub">${escHtml(monthLabel)}</div>
+      </div>
+      <div class="kpi-card${taskPct >= 80 ? ' green' : ''}">
+        <div class="kpi-label">Task Completion</div>
+        <div class="kpi-value">${doneTasks.length}/${tasks.length}</div>
+        <div class="kpi-sub">${taskPct}% done</div>
+      </div>
+      <div class="kpi-card accent">
+        <div class="kpi-label">KPI Composite</div>
+        <div class="kpi-value">${kpiPct}%</div>
+        <div class="kpi-sub">70% tasks · 30% deliverables</div>
+      </div>
+      <div class="kpi-card${overdueTasks.length ? ' warn' : ''}">
+        <div class="kpi-label">Overdue Now</div>
+        <div class="kpi-value">${overdueTasks.length}</div>
+        <div class="kpi-sub">${overdueTasks.length ? 'Needs attention' : 'All clear'}</div>
+      </div>
+    </div>
+    ${hist.length === 0 ? '' : `
+    <div class="card" style="margin-top:14px">
+      <div class="card-header"><h3>💵 Net Pay — last ${hist.length} month${hist.length === 1 ? '' : 's'}</h3></div>
+      <div class="card-body"><div class="chart-wrap"><canvas id="mp-pay-trend"></canvas></div></div>
+    </div>`}
+    <div class="card" style="margin-top:14px">
+      <div class="card-header"><h3>📝 Performance Evaluation</h3></div>
+      <div class="card-body">
+        <div class="profile-info-row${(presGrade == null && !evalData.presidentImprovements) ? ' no-border' : ''}">
+          <span class="pir-label">Self Grade</span>
+          <span class="pir-value">${evalData.selfGrade != null ? escHtml(String(evalData.selfGrade)) + '/10' : '—'}</span>
+        </div>
+        ${presGrade != null ? `<div class="profile-info-row${!evalData.presidentImprovements ? ' no-border' : ''}">
+          <span class="pir-label">President Grade</span>
+          <span class="pir-value">${escHtml(String(presGrade))}/10</span>
+        </div>` : ''}
+        ${evalData.presidentImprovements ? `<div class="profile-info-row no-border" style="flex-direction:column;align-items:stretch;gap:6px">
+          <span class="pir-label">Improvement Areas</span>
+          <span class="pir-value" style="white-space:normal">${escHtml(evalData.presidentImprovements)}</span>
+        </div>` : ''}
+      </div>
+    </div>
+  `;
+
+  if (hist.length > 0) {
+    if (!window.Chart) { await window.ensureChart(); }
+    const CT = window.chartTheme();
+    const labels = hist.map(h => (h.month || '').slice(0, 7));
+    const data = hist.map(h => h.netPay ?? h.finalPay ?? 0);
+    new Chart(document.getElementById('mp-pay-trend'), {
+      type: 'line',
+      data: { labels, datasets: [{ label: 'Net Pay', data, borderColor: CT.good, backgroundColor: CT.goodA, fill: true, tension: 0.4 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: cx => ` ₱${fmt(cx.parsed.y)}` } } },
+        scales: { y: { ticks: { color: CT.text }, grid: { color: CT.grid } }, x: { ticks: { color: CT.text }, grid: { display: false } } }
+      }
+    });
+  }
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
+  if (typeof window.fitKpiValues === 'function') window.fitKpiValues(host);
+};
+
+// ── Tasks sub-tab (Decision 8) — compact read-only "assigned to me" list.
+// ONE Tasks implementation stays canonical (departments.js renderTasks); this
+// is a preview + a jump-off, never a second CRUD surface.
+window.renderMyProfileTasksList = async function(host, uid) {
+  const snap = await db.collection('tasks').where('assignedTo', 'array-contains', uid)
+    .get().catch(() => ({ docs: [] }));
+  const DONE = ['done', 'approved', 'archived'];
+  const todayStr = window.bizDate();
+  const STATUS_EMOJI = {
+    backlog: '📥', brainstorm: '💭', 'in-progress': '🔧', submitted: '📤', review: '👀',
+    returned: '↩️', approved: '✅', done: '✅', 'on-hold': '⏸️', archived: '🗄️'
+  };
+  const tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => {
+      const aOpen = !DONE.includes(a.status), bOpen = !DONE.includes(b.status);
+      if (aOpen !== bOpen) return aOpen ? -1 : 1;             // open tasks first
+      if (!a.dueDate && !b.dueDate) return 0;
+      if (!a.dueDate) return 1;                                // nulls last
+      if (!b.dueDate) return -1;
+      return a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0;
+    })
+    .slice(0, 25);
+
+  host.innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <h3>✅ My Tasks</h3>
+        <button class="btn-primary btn-sm" onclick="navigateTo('tasks')">Open full Tasks →</button>
+      </div>
+      <div class="card-body" style="padding:0">
+        ${!tasks.length
+          ? '<div class="empty-state" style="padding:20px"><div class="empty-icon">✅</div><p>No tasks assigned</p></div>'
+          : tasks.map(t => {
+              const isOverdue = t.dueDate && t.dueDate < todayStr && !DONE.includes(t.status);
+              return `<div class="task-feed-item mp-task-row ${isOverdue ? 'task-overdue' : ''}" data-id="${escHtml(t.id)}">
+                <span style="font-size:16px;flex-shrink:0">${STATUS_EMOJI[t.status] || '📌'}</span>
+                <div style="flex:1;min-width:0">
+                  <div class="task-feed-title">${escHtml(t.title || 'Untitled')}</div>
+                  ${t.dueDate ? `<div class="task-feed-meta" style="color:${isOverdue ? 'var(--danger)' : 'var(--text-muted)'}">${isOverdue ? 'Overdue' : 'Due'} ${escHtml(t.dueDate)}</div>` : ''}
+                </div>
+                ${t.department ? `<span class="badge badge-gray">${escHtml(t.department)}</span>` : ''}
+              </div>`;
+            }).join('')}
+      </div>
+    </div>
+  `;
+  // Read-only: clicking a row just navigates to the real Tasks page (Decision 8).
+  host.querySelectorAll('.mp-task-row').forEach(row => row.addEventListener('click', () => navigateTo('tasks')));
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
+};
+
+// ── millis helper for Firestore Timestamp | Date | null, shared by the feed below.
+function _mpTsMillis(ts) {
+  if (!ts) return 0;
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
+  if (typeof ts.toDate === 'function') return ts.toDate().getTime();
+  if (ts instanceof Date) return ts.getTime();
+  return 0;
+}
+function _mpTimeAgo(ms) {
+  if (!ms) return '';
+  const diff = Math.floor((Date.now() - ms) / 1000);
+  if (diff < 60)      return 'Just now';
+  if (diff < 3600)    return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400)   return Math.floor(diff / 3600) + 'h ago';
+  if (diff < 2592000) return Math.floor(diff / 86400) + 'd ago';
+  return new Date(ms).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// ── Recent Activities (Decision 9) — composed feed, zero new collection,
+// zero new writer. Every source is already owner-readable (G11); the
+// audit_log source additionally needs Spec 7's rules+index (degrades to
+// silently-empty via .catch until that's deployed).
+window.renderRecentActivity = async function(host, uid) {
+  const partner = (typeof isPartner === 'function' && isPartner());
+  const none = Promise.resolve({ docs: [] });
+  const [notif, tasks, leave, ca, att, posts, audit] = await Promise.all([
+    db.collection('notifications').doc(uid).collection('items')
+      .orderBy('createdAt', 'desc').limit(30).get().catch(() => ({ docs: [] })),
+    db.collection('tasks').where('assignedTo', 'array-contains', uid).get().catch(() => ({ docs: [] })),
+    partner ? none : db.collection('leave_requests').where('userId', '==', uid).get().catch(() => ({ docs: [] })),
+    partner ? none : db.collection('cash_advances').where('userId', '==', uid).get().catch(() => ({ docs: [] })),
+    partner ? none : db.collection('attendance').doc(uid).collection('records')
+      .orderBy(firebase.firestore.FieldPath.documentId(), 'desc').limit(14).get().catch(() => ({ docs: [] })),
+    partner ? none : db.collection('posts').where('authorId', '==', uid).get().catch(() => ({ docs: [] })),
+    db.collection('audit_log').where('actorUid', '==', uid)
+      .orderBy('ts', 'desc').limit(50).get().catch(() => ({ docs: [] }))   // needs Spec 7 rules+index; degrades silently until deployed
+  ]);
+
+  const DONE = ['done', 'approved', 'archived'];
+  const events = [];
+
+  notif.docs.forEach(d => {
+    const n = d.data();
+    events.push({ ts: _mpTsMillis(n.createdAt), icon: '🔔', html: escHtml(n.title || 'Notification') });
+  });
+
+  tasks.docs.forEach(d => {
+    const t = d.data();
+    if (DONE.includes(t.status)) {
+      // completedAt never existed in this schema; lastModifiedAt is the real
+      // generic "task last touched" timestamp set on every status transition
+      // (departments.js) — the closest live equivalent to a "completed at".
+      const doneTs = t.completedAt || t.lastModifiedAt;
+      if (doneTs) events.push({ ts: _mpTsMillis(doneTs), icon: '✅', html: `Completed “${escHtml(t.title || 'task')}”` });
+    }
+    if (t.createdAt) events.push({ ts: _mpTsMillis(t.createdAt), icon: '📋', html: `Assigned “${escHtml(t.title || 'task')}”` });
+  });
+
+  leave.docs.forEach(d => {
+    const l = d.data();
+    events.push({ ts: _mpTsMillis(l.createdAt), icon: '🌴', html: `${escHtml(l.type || 'Leave')} leave ${escHtml(l.status || 'pending')}` });
+  });
+
+  ca.docs.forEach(d => {
+    const a = d.data();
+    events.push({ ts: _mpTsMillis(a.createdAt), icon: '💸', html: `Cash advance ₱${fmt(a.amount || 0)} ${escHtml(a.status || 'pending')}` });
+  });
+
+  att.docs.forEach(d => {
+    const r = d.data();
+    if (!r.loginTime) return;   // admin-marked-absent shape (WS26) — no timed-in event
+    events.push({ ts: _mpTsMillis(r.loginTime), icon: '📅', html: `Timed in${r.status === 'leave' ? ' (leave)' : ''}` });
+  });
+
+  posts.docs.forEach(d => {
+    const p = d.data();
+    events.push({ ts: _mpTsMillis(p.createdAt), icon: '📢', html: `Posted “${escHtml(p.title || 'update')}”` });
+  });
+
+  audit.docs.forEach(d => {
+    const a = d.data();
+    events.push({ ts: _mpTsMillis(a.ts), icon: '🛠', html: `${escHtml(a.action || 'update')} ${escHtml(a.entity || '')}` });
+  });
+
+  const feed = events.filter(e => e.ts > 0).sort((a, b) => b.ts - a.ts).slice(0, 60);
+
+  host.innerHTML = !feed.length
+    ? '<div class="empty-state" style="padding:24px"><div class="empty-icon">🕘</div><p>No recent activity yet</p></div>'
+    : `<div class="card"><div class="card-body" style="padding:0">
+        ${feed.map(e => `
+          <div class="notif-item" style="cursor:default">
+            <div class="notif-item-main">
+              <div class="notif-item-emoji">${window.emojiIcon ? window.emojiIcon(e.icon, 20) : e.icon}</div>
+              <div class="notif-item-text">
+                <div class="notif-item-title">${e.html}</div>
+                <div class="notif-item-time">${_mpTimeAgo(e.ts)}</div>
+              </div>
+            </div>
+          </div>`).join('')}
+      </div></div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
+};

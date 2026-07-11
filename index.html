@@ -154,7 +154,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.34 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.35 · Barro Industries</div>
   </div>
 </div>
 
@@ -182,11 +182,20 @@
       <button class="notif-btn" id="global-search-btn" aria-label="Search" style="display:none" onclick="navigateTo('search')">
         <i data-lucide="search"></i>
       </button>
+      <button class="notif-btn tb-wide" id="topbar-depts-btn" aria-label="Departments" style="display:none">
+        <i data-lucide="layout-grid"></i>
+      </button>
+      <button class="notif-btn tb-wide" id="topbar-chat-btn" aria-label="Chats" style="display:none" onclick="navigateTo('chat')">
+        <i data-lucide="message-circle"></i>
+      </button>
       <button class="notif-btn" id="notif-btn" aria-label="Notifications">
         <i data-lucide="bell" aria-hidden="true"></i>
         <span class="notif-badge hidden" id="notif-badge">0</span>
       </button>
-      <div class="topbar-avatar" id="topbar-avatar">?</div>
+      <button class="notif-btn" id="topbar-menu-btn" aria-label="Menu">
+        <i data-lucide="menu"></i>
+      </button>
+      <div class="topbar-avatar" id="topbar-avatar" role="button" aria-label="My Profile">?</div>
     </div>
   </header>
 
@@ -204,6 +213,13 @@
     </div>
   </div>
   <div id="notif-backdrop" class="notif-backdrop hidden"></div>
+
+  <!-- Departments switcher panel (desktop/iPad; forked from notif-panel) -->
+  <div id="depts-panel" class="notif-panel hidden" style="max-width:300px">
+    <div class="notif-panel-header"><span>Departments</span></div>
+    <div id="depts-list" class="notif-list"></div>
+  </div>
+  <div id="depts-backdrop" class="notif-backdrop hidden"></div>
 
   <!-- Sidebar (desktop) -->
   <aside id="sidebar">
@@ -277,7 +293,7 @@
       <i data-lucide="arrow-left"></i>
       <span>Back</span>
     </button>
-    <h3>My Profile</h3>
+    <h3>Menu</h3>
     <div style="width:72px"></div>
   </div>
   <div id="profile-body" class="drawer-body"></div>

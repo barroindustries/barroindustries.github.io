@@ -968,6 +968,21 @@ html.light .handbook-text, html.theme-pink .handbook-text, html.theme-grey .hand
 }
 .topbar-avatar:hover { transform: scale(1.08); box-shadow: var(--sh-pink); }
 
+/* v12 WS41 — topbar icon cluster */
+@media (max-width: 768px) {
+  /* Depts + Chats are desktop/iPad-only: mobile has the ☰ sidebar (depts) and
+     the top-nav-strip Chat item. Menu/avatar/bell/search stay. */
+  #topbar-depts-btn, #topbar-chat-btn { display: none !important; }
+}
+#depts-panel .depts-item {
+  display:flex; align-items:center; gap:10px; width:100%;
+  padding:11px 14px; background:none; border:none; cursor:pointer;
+  color:var(--text); font-size:var(--fs-base); text-align:left;
+  border-bottom:1px solid var(--border);
+}
+#depts-panel .depts-item:hover { background: var(--s2); }
+#depts-panel .depts-item:last-child { border-bottom:none; }
+
 /* ── Notification Panel ── */
 .notif-panel {
   position: fixed; top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px) + 8px); right: 12px;

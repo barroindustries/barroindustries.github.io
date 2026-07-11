@@ -554,8 +554,10 @@ function applyUserUI() {
     ta.innerHTML = userProfile.photoUrl
       ? `<img src="${userProfile.photoUrl}" style="width:34px;height:34px;border-radius:50%;object-fit:cover"/>`
       : initial;
-    ta.onclick = openProfileDrawer;
+    ta.onclick = () => navigateTo('my-profile');
   }
+  const mb = document.getElementById('topbar-menu-btn');
+  if (mb) mb.onclick = openProfileDrawer;
   const sa = document.getElementById('sidebar-avatar');
   if (sa) sa.innerHTML = userProfile.photoUrl ? `<img src="${userProfile.photoUrl}"/>` : initial;
   const sn = document.getElementById('sidebar-user-name');
@@ -897,6 +899,13 @@ function buildNav() {
   // Global search is internal-only — show the topbar magnifier for everyone except partners / Brilliant-Steel-only
   const gs = document.getElementById('global-search-btn');
   if (gs) { gs.style.display = (isPartner() || isBrilliantOnly()) ? 'none' : ''; gs.setAttribute('aria-label', 'Global search'); }
+  // v12 WS41 — Departments switcher + Chats topbar buttons
+  const db_ = document.getElementById('topbar-depts-btn');
+  const cb_ = document.getElementById('topbar-chat-btn');
+  const switchable = deptsForSwitcher();                  // [] for partners/bsOnly
+  if (db_) db_.style.display = switchable.length ? '' : 'none';
+  if (cb_) cb_.style.display = '';                        // every role has Chat (WS37)
+  buildDeptsPanel(switchable);
   // a11y: label icon-only topbar nav controls.
   document.getElementById('menu-toggle')?.setAttribute('aria-label', 'Open menu');
   document.getElementById('theme-toggle-btn')?.setAttribute('aria-label', 'Toggle theme');
@@ -932,14 +941,12 @@ function getSidebarItems() {
     items.push({ icon:'bar-chart-2',   label:'Analytics',        page:'analytics',       section:false });
     items.push({ icon:'check-square',  label:'Tasks',            page:'tasks'                          });
     items.push({ icon:'megaphone',     label:'Posts',            page:'posts'                          });
-    items.push({ icon:'message-circle',label:'Chat',             page:'chat'                           });
     items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
     items.push({ icon:'shield-check',  label:'Approvals',        page:'approvals',       section:true  });
     items.push({ icon:'trending-up',   label:'Progress Reports', page:'progress'                       });
     items.push({ icon:'users',         label:'Team Directory',   page:'team-directory',  section:true  });
     items.push({ icon:'user-cog',      label:'HR',               page:'dept:HR'                        });
     items.push({ icon:'calendar',      label:'Attendance',       page:'attendance'                     });
-    items.push({ icon:'layout-grid',   label:'Departments',      page:'departments'                    });
     // v12 WS38 — Files Hub: admins/managers/secretary had NO top-level Files door
     // before this (only employees via page:'files' / partners via page:'files'
     // /'bs-files', both pre-existing and left as-is — "N doors" per the DECIDED
@@ -960,7 +967,6 @@ function getSidebarItems() {
     items.push({ icon:'briefcase',    label:'My Projects',   page:'partner-projects' });
     items.push({ icon:'check-square', label:'My Tasks',      page:'tasks'            });
     items.push({ icon:'megaphone',    label:'Posts',         page:'posts'            });
-    items.push({ icon:'message-circle', label:'Chat',        page:'chat'             });
     items.push({ icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' });
     items.push({ icon:'file-text',    label:'Quotations',    page:'bs-quotations'    });
     items.push({ icon:'users',        label:'Team',          page:'team-directory',   section:true, sectionLabel:'Directory' });
@@ -969,7 +975,6 @@ function getSidebarItems() {
     // ── External Partner role (Brilliant Steel) ──
     items.push({ icon:'check-square', label:'My Tasks',      page:'tasks'            });
     items.push({ icon:'megaphone',    label:'Posts',         page:'posts'            });
-    items.push({ icon:'message-circle', label:'Chat',        page:'chat'             });
     items.push({ icon:'briefcase',    label:'My Projects',   page:'partner-projects' });
     items.push({ icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' });
     items.push({ icon:'file-text',    label:'Quotations',    page:'bs-quotations'    });
@@ -979,7 +984,6 @@ function getSidebarItems() {
   } else if (bsOnly) {
     // ── Partner — Brilliant Steel (ISOLATED) ──
     items.push({ icon:'briefcase',   label:'My Projects',   page:'partner-projects' });
-    items.push({ icon:'message-circle', label:'Chat',       page:'chat'             });
     items.push({ icon:'calculator',  label:'Quote Builder', page:'bs-quote-builder' });
     items.push({ icon:'file-text',   label:'Quotations',    page:'bs-quotations'    });
     items.push({ icon:'book-open',   label:'Client Data',   page:'bs-clients'       });
@@ -988,7 +992,6 @@ function getSidebarItems() {
     // ── Employee / Agent / Finance ──
     items.push({ icon:'check-square', label:'My Tasks', page:'tasks' });
     items.push({ icon:'megaphone',    label:'Posts',    page:'posts' });
-    items.push({ icon:'message-circle', label:'Chat',   page:'chat' });
     items.push({ icon:'building-2',   label:'Company',  page:'company' });
     // Departments — appear ABOVE management section.
     // The Accountant (finance role) always sees the Finance department even when she
@@ -1004,7 +1007,6 @@ function getSidebarItems() {
     // Management section below
     items.push({ icon:'users',       label:'Team',             page:'team-directory',    section:true, sectionLabel:'Management' });
     items.push({ icon:'calendar',    label:'Attendance',       page:'attendance'                       });
-    items.push({ icon:'credit-card', label:'Personal Finance', page:'personal-finance'                 });
     items.push({ icon:'folder',      label:'Files',            page:'files'                            });
     if ((currentDepts||[]).includes('Production')) items.push({ icon:'boxes', label:'Inventory', page:'inventory' });
     if ((currentDepts||[]).some(d=>['Sales','Production','Finance'].includes(d)) || currentRole==='finance') items.push({ icon:'trending-up', label:'Projects', page:'projects-lifecycle' });
@@ -1083,6 +1085,46 @@ function buildTopNavStrip() {
     btn.addEventListener('click', () => navigateTo(btn.dataset.page));
   });
   if (window.lucide) lucide.createIcons({ nodes: [strip] });
+}
+
+// v12 WS41 — which departments the signed-in user can open from the topbar.
+// Mirrors getSidebarItems' derivation exactly (incl. the finance-role Finance
+// prepend, app.js:997-999). Partners/bsOnly: none (no dept pages exist for them).
+function deptsForSwitcher() {
+  if (isPartner() || isBrilliantOnly()) return [];
+  const admin = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
+  const internal = Object.keys(DEPARTMENTS)
+    .filter(d => !DEPARTMENTS[d].isSeparate && !DEPARTMENTS[d].isPartnerDept);
+  if (admin) return internal;
+  const mine = (currentRole === 'finance' && !currentDepts.includes('Finance'))
+    ? ['Finance', ...currentDepts] : currentDepts;
+  return mine.filter(d => DEPARTMENTS[d]);
+}
+function buildDeptsPanel(depts) {
+  const list  = document.getElementById('depts-list');
+  const panel = document.getElementById('depts-panel');
+  const back  = document.getElementById('depts-backdrop');
+  const btn   = document.getElementById('topbar-depts-btn');
+  if (!list || !btn) return;
+  const admin = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
+  list.innerHTML = depts.map(d => {
+    const cfg = DEPARTMENTS[d];
+    return `<button class="depts-item" data-page="dept:${escHtml(d)}">
+      ${emojiIcon(cfg.lucideIcon || cfg.icon, 18)}<span>${escHtml(d)}</span></button>`;
+  }).join('') + (admin
+    ? `<button class="depts-item" data-page="departments" style="color:var(--primary-light)">
+         ${emojiIcon('layout-grid',18)}<span>All departments →</span></button>` : '');
+  if (window.lucide) lucide.createIcons({ nodes: [list] });
+  const close = () => { panel.classList.add('hidden'); back.classList.add('hidden'); };
+  list.querySelectorAll('.depts-item').forEach(b =>
+    b.addEventListener('click', () => { close(); navigateTo(b.dataset.page); }));
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    if (depts.length === 1 && !admin) { navigateTo('dept:' + depts[0]); return; }   // single-dept: no dropdown
+    const open = !panel.classList.contains('hidden');
+    if (open) close(); else { panel.classList.remove('hidden'); back.classList.remove('hidden'); }
+  };
+  back.onclick = close;
 }
 
 function closeSidebar() {
@@ -2056,6 +2098,7 @@ function navigateTo(page, opts) {
     case 'memos':            window.renderMemosPage?.(); break;
     case 'team-directory':   window.renderTeamTab?.(); break;
     case 'chat':             window.renderChatPage?.(); break;
+    case 'my-profile':       window.renderMyProfile?.(); break;
     case 'attendance':       window.renderAttendancePage?.(); break;
     case 'cash-advances':    window.renderCashAdvancePage?.(); break;
     case 'leave':            window.renderLeavePage?.(); break;
@@ -4298,9 +4341,10 @@ window.renderFiles = async function(currentUser, currentRole) {
 };
 
 // ── Personal Finance ──────────────────────────────
-window.renderPersonalFinance = async function(currentUser, currentRole) {
-  const c = document.getElementById('page-content');
-  const pres = isPresident() || currentRole === 'manager';
+window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
+  opts = opts || {};                                   // { host?: Element, selfOnly?: bool }
+  const c = opts.host || document.getElementById('page-content');
+  const pres = (isPresident() || currentRole === 'manager') && !opts.selfOnly;
 
   if (pres) {
     // President sees all employees' finance
@@ -4446,7 +4490,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
             : `The president graded your performance: ${grade}/10.`;
           await Notifs.send(uid, { title:'📊 KPI Grade Updated', body: notifBody, icon:'📊', type:'kpi_grade' });
           closeModal(); Notifs.showToast(`Grade ${grade}/10 saved for ${name}.`);
-          window.renderPersonalFinance(currentUser, currentRole);
+          window.renderPersonalFinance(currentUser, currentRole, opts);
         });
       });
     });
@@ -4766,7 +4810,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       if (!await confirmDialog({ message: `Delete payroll record for ${escHtml(btn.dataset.month)}? This cannot be undone.`, danger: true, html: true })) return;
       await db.collection('salary_history').doc(btn.dataset.id).delete();
       Notifs.showToast('Record deleted.');
-      window.renderPersonalFinance(currentUser, currentRole);
+      window.renderPersonalFinance(currentUser, currentRole, opts);
     });
   });
   document.querySelectorAll('.ph-req-delete-btn').forEach(btn => {
@@ -4825,7 +4869,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole) {
       });
       closeModal();
       Notifs.showToast('Self-assessment submitted!');
-      window.renderPersonalFinance(currentUser, currentRole);
+      window.renderPersonalFinance(currentUser, currentRole, opts);
     });
   });
 
@@ -7455,7 +7499,6 @@ function openProfileDrawer() {
   const overlay=document.getElementById('drawer-overlay');
   const body=document.getElementById('profile-body');
   const u=userProfile;
-  const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);
   const depts=(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'Unassigned';
   body.innerHTML=`
     <!-- ── Avatar hero ── -->
@@ -7469,6 +7512,8 @@ function openProfileDrawer() {
       <div class="profile-hero-name">${escHtml(u.displayName||'User')}</div>
       <div class="profile-hero-role">${escHtml(ROLES[u.role]?.label||u.role||'Employee')} · ${escHtml(depts)}</div>
       ${u.employeeId?`<div class="profile-hero-id">${escHtml(u.employeeId)}</div>`:''}
+      <button class="btn-secondary btn-sm" style="margin-top:10px"
+        onclick="closeProfileDrawer(); navigateTo('my-profile')">View My Profile →</button>
     </div>
 
     <!-- ── Edit name ── -->
@@ -7487,15 +7532,6 @@ function openProfileDrawer() {
       <div class="profile-info-row"><span class="pir-label">Employee ID</span><span class="pir-value pir-mono">${escHtml(u.employeeId||'—')}</span></div>
       <div class="profile-info-row"><span class="pir-label">Role</span><span class="pir-value">${escHtml(ROLES[u.role]?.label||u.role||'—')}</span></div>
       <div class="profile-info-row no-border"><span class="pir-label">Department</span><span class="pir-value">${escHtml(depts)}</span></div>
-    </div>
-
-    <!-- ── Salary ── -->
-    <div class="profile-section-label">COMPENSATION</div>
-    <div class="profile-inset-card">
-      <div class="profile-info-row"><span class="pir-label">Base Salary</span><strong class="pir-value">₱${formatNum(u.salary)}</strong></div>
-      <div class="profile-info-row"><span class="pir-label">Allowance</span><span class="pir-value" style="color:var(--success)">+₱${formatNum(u.allowance)}</span></div>
-      <div class="profile-info-row"><span class="pir-label">Deductions</span><span class="pir-value" style="color:var(--danger)">−₱${formatNum(u.deductions)}</span></div>
-      <div class="profile-info-row no-border"><span class="pir-label" style="font-weight:700">Net Pay</span><strong class="pir-value" style="font-size:16px">₱${formatNum(net)}</strong></div>
     </div>
 
     <!-- ── Settings ── -->

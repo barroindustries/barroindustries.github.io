@@ -1226,7 +1226,11 @@ service cloud.firestore {
     // so entries can't be forged in another person's name. Entries are immutable
     // (no update); only the president may prune (e.g. clearing spam). Admins read.
     match /audit_log/{docId} {
-      allow read:   if isAuth() && isAdmin();
+      // v12 WS41: a user may list THEIR OWN trail (provable for
+      // where('actorUid','==',uid) queries); admins read everything.
+      // Create rule already forces actorUid == auth.uid, so "own" is sound.
+      allow read:   if isAuth()
+        && (isAdmin() || resource.data.get('actorUid','') == request.auth.uid);
       allow create: if isAuth()
         && request.resource.data.actorUid == request.auth.uid
         && request.resource.data.actorRole == getRole()

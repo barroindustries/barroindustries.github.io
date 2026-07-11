@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.34';
+window.APP_VERSION = '12.0.35';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -296,7 +296,7 @@ window.BOTTOM_NAV_ITEMS = [
   { icon: 'megaphone',    label: 'Posts',   page: 'posts'            },
   { icon: 'message-circle', label: 'Chat',  page: 'chat'             },
   { icon: 'banknote',     label: 'Cash',    page: 'cash-advances'    },
-  { icon: 'credit-card',  label: 'Finance', page: 'personal-finance' }
+  { icon: 'circle-user',  label: 'Profile', page: 'my-profile'       }
 ];
 
 // ── Bottom Nav — Admin / President ───────────────
@@ -306,7 +306,8 @@ window.PRESIDENT_BOTTOM_NAV = [
   { icon: 'megaphone',    label: 'Posts',   page: 'posts'          },
   { icon: 'message-circle', label: 'Chat',  page: 'chat'           },
   { icon: 'users',        label: 'Team',    page: 'team-directory' },
-  { icon: 'shield-check', label: 'Approve', page: 'approvals'      }
+  { icon: 'shield-check', label: 'Approve', page: 'approvals'      },
+  { icon: 'circle-user',  label: 'Profile', page: 'my-profile'     }
 ];
 
 // ── Bottom Nav — External Partner (Brilliant Steel) ─
@@ -315,7 +316,8 @@ window.PARTNER_BOTTOM_NAV = [
   { icon: 'briefcase',    label: 'Projects', page: 'partner-projects' },
   { icon: 'message-circle', label: 'Chat',   page: 'chat'             },
   { icon: 'calculator',   label: 'Quotes',   page: 'bs-quote-builder' },
-  { icon: 'file-text',    label: 'Summary',  page: 'bs-quotations'    }
+  { icon: 'file-text',    label: 'Summary',  page: 'bs-quotations'    },
+  { icon: 'circle-user',  label: 'Profile',  page: 'my-profile'       }
 ];
 
 // ── Bottom Nav — Generic Partner (any company) ──────
@@ -326,7 +328,8 @@ window.PARTNER_GENERIC_BOTTOM_NAV = [
   { icon: 'briefcase',    label: 'Projects', page: 'partner-projects' },
   { icon: 'message-circle', label: 'Chat',   page: 'chat'             },
   { icon: 'calculator',   label: 'Quotes',   page: 'bs-quote-builder' },
-  { icon: 'check-square', label: 'Tasks',    page: 'tasks'            }
+  { icon: 'check-square', label: 'Tasks',    page: 'tasks'            },
+  { icon: 'circle-user',  label: 'Profile',  page: 'my-profile'       }
 ];
 
 // ── Bottom Nav — Partner (Brilliant Steel) ───────
@@ -336,7 +339,8 @@ window.BRILLIANT_BOTTOM_NAV = [
   { icon: 'message-circle', label: 'Chat', page: 'chat'             },
   { icon: 'calculator', label: 'Quotes',   page: 'bs-quote-builder' },
   { icon: 'file-text',  label: 'Summary',  page: 'bs-quotations'    },
-  { icon: 'book-open',  label: 'Clients',  page: 'bs-clients'       }
+  { icon: 'book-open',  label: 'Clients',  page: 'bs-clients'       },
+  { icon: 'circle-user', label: 'Profile', page: 'my-profile'       }
 ];
 
 // ── Users + payroll merge ─────────────────────────
