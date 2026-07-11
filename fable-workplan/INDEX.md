@@ -51,56 +51,47 @@ finalizing 9's rename sweep so the two don't conflict.
 
 | WS | Brief | Open decisions | One-line current state |
 |---|---|---|---|
-| 28 | [28-production-flow.md](28-production-flow.md) | ✅ DECIDED | Production process flow — rename stages to match the real shop floor |
-| 29 | [29-inventory.md](29-inventory.md) | ✅ DECIDED | Inventory correctness — moving weighted-average cost, receive-path bug confirmed |
-| 30 | [30-purchasing.md](30-purchasing.md) | ✅ DECIDED | Purchasing — no PO approval gate exists at all today |
-| 31 | [31-quotation-builder-v3.md](31-quotation-builder-v3.md) | ✅ DECIDED | Quotation builder v3 — Quick Quote mode, repair the quote→approval→order chain |
-| 32 | [32-sales-crm.md](32-sales-crm.md) | ✅ DECIDED | Sales — Client Relations hub — bs_clients confirmed orphaned |
-| 33 | [33-aec-directory.md](33-aec-directory.md) | ✅ DECIDED | AEC Partner Directory — wholly greenfield, strong existing analogs |
-| 34 | [34-marketing.md](34-marketing.md) | ✅ DECIDED | Marketing suite — campaigns/leads/calendar greenfield, materials library is not |
-| 35 | [35-design-suite.md](35-design-suite.md) | ✅ DECIDED | Design dept suite — drawing "approval" has no real approver gate |
-| 36 | [36-finance-additions.md](36-finance-additions.md) | ✅ DECIDED | Finance additions — bank-accounts registry, no dimension exists anywhere |
-| 37 | [37-team-chat.md](37-team-chat.md) | ✅ DECIDED | Team Chat — real-time listeners are genuinely new territory (only 3 exist today) |
-| 38 | [38-files-hub.md](38-files-hub.md) | ✅ DECIDED · ✅ IMPLEMENTED (2026-07-11) | Files Hub — found dead shadowed code; per-file sharing is architecturally hard |
+| 28 | [28-production-flow.md](28-production-flow.md) | ✅ IMPLEMENTED | Production process flow — rename stages to match the real shop floor |
+| 29 | [29-inventory.md](29-inventory.md) | ✅ IMPLEMENTED | Inventory correctness — moving weighted-average cost, receive-path bug confirmed |
+| 30 | [30-purchasing.md](30-purchasing.md) | ✅ IMPLEMENTED | Purchasing — no PO approval gate exists at all today |
+| 31 | [31-quotation-builder-v3.md](31-quotation-builder-v3.md) | ✅ IMPLEMENTED | Quotation builder v3 — Quick Quote mode, repair the quote→approval→order chain |
+| 32 | [32-sales-crm.md](32-sales-crm.md) | ✅ IMPLEMENTED | Sales — Client Relations hub — bs_clients confirmed orphaned |
+| 33 | [33-aec-directory.md](33-aec-directory.md) | ✅ IMPLEMENTED | AEC Partner Directory — wholly greenfield, strong existing analogs |
+| 34 | [34-marketing.md](34-marketing.md) | ✅ IMPLEMENTED | Marketing suite — campaigns/leads/calendar greenfield, materials library is not |
+| 35 | [35-design-suite.md](35-design-suite.md) | ✅ IMPLEMENTED | Design dept suite — drawing "approval" has no real approver gate |
+| 36 | [36-finance-additions.md](36-finance-additions.md) | ✅ IMPLEMENTED | Finance additions — bank-accounts registry, no dimension exists anywhere |
+| 37 | [37-team-chat.md](37-team-chat.md) | ✅ IMPLEMENTED | Team Chat — real-time listeners are genuinely new territory (only 3 exist today) |
+| 38 | [38-files-hub.md](38-files-hub.md) | ✅ IMPLEMENTED | Files Hub — found dead shadowed code; per-file sharing is architecturally hard |
 
 ## Phase 5 — Intelligence & BIR
 
 | WS | Brief | Open decisions | One-line current state |
 |---|---|---|---|
-| 39 | [39-bir-suite.md](39-bir-suite.md) | ✅ DECIDED | BIR suite — a 3000-row report-truncation landmine found; VAT partially already netted |
-| 40 | [40-analytics.md](40-analytics.md) | ✅ DECIDED | Analytics with conclusions — 13 charts hardcode colors that clash with the new theme |
+| 39 | [39-bir-suite.md](39-bir-suite.md) | ✅ IMPLEMENTED | BIR suite — a 3000-row report-truncation landmine found; VAT partially already netted |
+| 40 | [40-analytics.md](40-analytics.md) | ✅ IMPLEMENTED | Analytics with conclusions — 13 charts hardcode colors that clash with the new theme |
 
-## Status — Phase 4+5: ALL 13 DECIDED ✅ (2026-07-11); WS38 (Files Hub) IMPLEMENTED (2026-07-11,
-code-complete — firestore.rules/indexes changed but not deployed, migration script written but
-not run, see V12-PLAN.md Build Log); rest not yet implemented
+## Status — Phase 4+5: ALL 13 IMPLEMENTED ✅ (2026-07-11) — the full 40-workstream v12 plan is complete
 
-**Decided (Fable decision session #4, 2026-07-10): WS28, WS32, WS33, WS36, WS37.**
-**Decided (Fable decision session #5, 2026-07-11): Wave A — WS29, WS38, WS39 (commit
-b1847e3); Wave B — WS30, WS31, WS34, WS35, WS40 (commit 365fde7).** Every brief now has a
-full `## DECIDED` spec (resolved decisions, exact code/data shapes, rules diffs, migration +
-test checklists) — ready for Sonnet to implement mechanically, same bar as Phase 2-3.
-Wave B specs were written READING Wave A + session-#4 specs and align to them (WS30 builds on
-WS29's receive primitives; WS31/34/35 on WS32's client unification; WS34/35 on WS38's
-hub_files/hub_folders contract; WS40 uses WS29's turns formula + WS36's cash-position handoff
-verbatim). Each spec carries its own ‼️ FLAG FOR NEIL items — collect and review them before
-or during implementation.
+Build order actually used: WS29 → WS38 → WS28/WS32/WS33/WS36/WS37/WS39 (independent of each
+other) → Wave B (WS30/WS31/WS34/WS35, each re-verified by a dedicated Fable pass against the
+*real* shipped WS29/WS32/WS36/WS38 code — not just their specs — before Sonnet touched them;
+this caught real drift in WS40's case) → WS40 (Analytics) last. Every workstream: implemented
+→ `node --check` + firestore.rules brace-balance verified → committed → pushed to `master` →
+`firebase deploy --only firestore:rules`/`storage`/`firestore:indexes` run the same session
+for any rule/index change. See each `fable-workplan/NN-*.md`'s `## DECIDED` (+
+`## RE-GROUNDED` where present, for the five re-verified Wave B specs) section for full
+implementation detail, and the git log (`v12 WSNN: ...` commits, 4446ab8 through 9b02cbc) for
+the exact diffs.
 
-### Sonnet implementation order (dependency-safe)
-Implement Wave A code before Wave B code — Wave B's code literally calls things Wave A's
-implementation creates:
-1. **WS29 (Inventory)** — shared `buildStockMovement`/`postStockMovement` + weighted-average
-   receive; WS30 inherits `receiveLineIntoItem`.
-2. **WS38 (Files Hub)** — `hub_files`/`hub_folders` + rewritten `bindFileCollection`; WS34/35
-   build folders on it. (Admin-SDK migration script for the legacy `files_*` collections.)
-3. **WS28, WS32, WS33, WS36, WS37, WS39** — mutually independent of each other; WS32 before
-   WS31/34/35 is already guaranteed by this ordering.
-4. **Wave B: WS30, WS31, WS34, WS35** — after their dependencies above.
-5. **WS40 (Analytics)** — last; reads WS29/WS32/WS36 implementations.
+**Two items need a human to actually trigger them** (both client-side, no missing
+credentials — just need a live logged-in session): `scripts/migrate-files-hub.js` (WS38's
+legacy-files migration, run twice per its header) and `window.remapDesignProjectClients()`
+(WS35's client-id backfill, one console call). Neither blocks anything — old data stays fully
+readable either way.
 
-Playbook per workstream (same as WS09-27, see V12-PLAN.md Build Log): parallel per-file
-Sonnet subagents implement from the `## DECIDED` spec → verify (`node --check`, rules
-brace-balance, cross-agent grep checks) → commit → deploy (`git push origin master` +
-`firebase deploy --only firestore:rules`/`storage` if rules changed).
+Each spec's ‼️ FLAG FOR NEIL items (business-policy calls, not architecture — PO approval
+scope, chat's partner-DM restriction, BIR VAT-registration status, etc.) are collected in the
+audit report artifact's "Needs your call" section: https://claude.ai/code/artifact/8185aea0-da1b-4769-8f81-4a9a224fe241
 
 ## Status — Phases 2+3 ALL 18 DECIDED (Fable, 2026-07-10) ✅
 
