@@ -859,6 +859,10 @@ function setTheme(theme, persist = true) {
   if (persist) localStorage.setItem('bi-theme', theme);
   _applyThemeIcon(theme);
   _syncThemeColorMeta();          // NEW — keep <meta name=theme-color> in step with the rendered theme
+  // v12 WS40 — lets any open chart-bearing screen (Analytics) re-render its
+  // chrome colors live, including the 'auto' matchMedia flip (initTheme already
+  // routes that through setTheme('auto', false), so no second listener needed).
+  window.dispatchEvent(new CustomEvent('bi-theme-change'));
 }
 // Read the resolved --theme-color (falls back to --bg) and write it to the meta tag.
 function _syncThemeColorMeta(){
@@ -2841,16 +2845,24 @@ async function renderFinanceDashboard() {
     const prevNet = _prevL.filter(e=>ledgerKind(e)==='income').reduce((s,e)=>s+(e.amount||0),0)
                   - _prevL.filter(e=>ledgerKind(e)==='expense').reduce((s,e)=>s+(e.amount||0),0);
 
-    // ── Receivables aging (open project AR by project age) ──
+    // ── Receivables aging (v12 WS40 decision 2 — ONE shared window.arAging() helper,
+    // invoice-due-date anchor with project-age fallback; rewired here off the old
+    // inline _daysSince bucket loop so Finance Dashboard and Analytics→Finance never
+    // show a 4th independently-computed AR number) ──
     const _daysSince = ts => { try { const t = ts && ts.toDate ? ts.toDate() : (ts && ts.seconds ? new Date(ts.seconds*1000) : null); return t ? Math.floor((Date.now()-t.getTime())/86400000) : 0; } catch(_) { return 0; } };
     const openAR = (projList||[]).filter(p=>(p.arBalance||0)>0 && !['paid','cancelled','lost'].includes(String(p.stage||'').toLowerCase()));
-    const aging = { cur:0, d3160:0, d6190:0, d90:0 };
-    openAR.forEach(p=>{ const d=_daysSince(p.createdAt); const a=p.arBalance||0; if(d<=30)aging.cur+=a; else if(d<=60)aging.d3160+=a; else if(d<=90)aging.d6190+=a; else aging.d90+=a; });
-    const arTotal = aging.cur+aging.d3160+aging.d6190+aging.d90;
-    // Per-client rollup for the collections drill-down (oldest first = chase first).
+    const aging = window.arAging(openAR);
+    const arTotal = aging.total;
+    // Per-client rollup for the collections drill-down (oldest first = chase first) —
+    // unchanged: project-age based, a separate feature from the aging buckets above.
     const _arByClient = {};
     openAR.forEach(p=>{ const k=(String(p.clientName||'').trim())||'(no client)'; const g=_arByClient[k]||(_arByClient[k]={client:k,total:0,oldest:0,count:0}); g.total+=p.arBalance||0; const d=_daysSince(p.createdAt); if(d>g.oldest)g.oldest=d; g.count++; });
     const arClients = Object.values(_arByClient).sort((a,b)=>(b.oldest-a.oldest)||(b.total-a.total));
+    // Dynamic "chase this bucket" copy (replaces the old hardcoded 90+ line) — same
+    // logic as the Insights 'ar-largest' rule (config.js), inlined here since this
+    // screen doesn't have the M metrics bag.
+    const _arBuckets = [['d90','90+ days'],['d6190','61–90 days'],['d3160','31–60 days'],['cur','0–30 days']];
+    const [_arTopKey, _arTopLabel] = _arBuckets.reduce((m,b)=> aging[b[0]] > aging[m[0]] ? b : m);
 
     const pendingExp = expSnap.docs.map(d=>({id:d.id,...d.data()}));   // already pending-bounded
     const pendingExpTotal = pendingExp.reduce((s,e)=>s+(e.amount||0),0);
@@ -2880,7 +2892,7 @@ async function renderFinanceDashboard() {
         <div class="kpi-card ${lowStock>0?'red':''}" style="cursor:pointer" onclick="navigateTo('inventory')"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="boxes" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Low Stock</div><div class="kpi-value">${lowStock}</div></div>
       </div>
       <div class="card" style="margin-bottom:16px">
-        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3>📥 Receivables Aging <span style="font-size:11px;color:var(--text-muted);font-weight:400">· by project age</span></h3><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:800">₱${formatNum(arTotal)}</span>${arTotal>0?'<button class="btn-secondary btn-sm" id="ar-drill-btn">By client ›</button>':''}</div></div>
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3>📥 Receivables Aging <span style="font-size:11px;color:var(--text-muted);font-weight:400">· by invoice due date</span></h3><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:800">₱${formatNum(arTotal)}</span>${arTotal>0?'<button class="btn-secondary btn-sm" id="ar-drill-btn">By client ›</button>':''}</div></div>
         <div class="card-body">
           ${arTotal===0?'<div class="empty-state" style="padding:16px"><p>No open receivables 🎉</p></div>':`
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px">
@@ -2891,7 +2903,7 @@ async function renderFinanceDashboard() {
                 <div style="font-size:10px;color:var(--text-muted)">${arTotal?Math.round(val/arTotal*100):0}%</div>
               </div>`).join('')}
           </div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:10px">${openAR.length} open project${openAR.length===1?'':'s'} with a balance. Chase the <strong style="color:var(--danger)">90+ day</strong> bucket first.</div>`}
+          <div style="font-size:11px;color:var(--text-muted);margin-top:10px">${openAR.length} open project${openAR.length===1?'':'s'} with a balance. ${_arTopKey==='cur'?'Receivables are current.':`Chase the <strong style="color:var(--danger)">${_arTopLabel}</strong> bucket first (₱${formatNum(aging[_arTopKey])}).`}</div>`}
         </div>
       </div>
       <div class="dashboard-grid">
@@ -6450,6 +6462,58 @@ async function renderAnalytics() {
     return `<span style="font-size:11px;font-weight:600;color:${col}">${arrow} ${Math.abs(pct)}%</span> <span style="font-size:11px;color:#8e8e93">vs last mo</span>`;
   };
 
+  // ── v12 WS40 — shared metrics bag (Spec 2d) ─────────────────────────
+  // Sales-department quotes, hoisted so both the metrics bag and renderSales
+  // read the SAME filtered array instead of re-filtering independently.
+  const salesQuotes=quotes.filter(q=>q.department==='Sales'||q.type==='sales'||!q.department);
+  // Pure, synchronous — reads ONLY already-fetched arrays (WS16 no-refetch rule).
+  // Re-run whenever window._AN_PERIOD changes (Overview's picker) so the
+  // Conclusions card can never describe a period the KPI cards next to it
+  // disagree with (the exact "wrong sentence" risk the spec warns against).
+  // cash/turns are populated separately (cash: below, once, not period-scoped;
+  // turns: Spec 4b, Finance-tab-only lazy fetch) and preserved across re-syncs.
+  const buildMetricsSync = () => {
+    const anPeriod = window._AN_PERIOD || 'month';
+    const ledInP  = sum(ledger.filter(l=>ledgerKind(l)==='income'&&finPeriodMatch(l.date,anPeriod)), l=>l.amount);
+    const ledOutP = sum(ledger.filter(l=>ledgerKind(l)==='expense'&&finPeriodMatch(l.date,anPeriod)), l=>l.amount);
+    const wonQuotesP = sum(quotes.filter(q=>q.status==='accepted'&&finPeriodMatch(ymOf(q.createdAt),anPeriod)), q=>q.total);
+    const revP = ledInP || wonQuotesP;
+    const netP = revP - ledOutP;
+    const payrollTotal = sum(users, u=>(+u.salary||0)+(+u.allowance||0)-(+u.deductions||0));
+    // "this period vs previous same-type period" (WS32 wonMTD/wonPrev ymOf pattern) —
+    // scoped to calendar month regardless of the Overview picker, mirroring the
+    // existing wonMTD/wonPrev revenue-delta convention elsewhere on this page.
+    const qStat     = window.quoteWinStats(salesQuotes.filter(qq=>ymOf(qq.createdAt)===thisMonth));
+    const qPrevStat = window.quoteWinStats(salesQuotes.filter(qq=>ymOf(qq.createdAt)===lastMonth));
+    const bidStat   = window.bidWinStats(govBids);
+    const prodTasksM   = tasks.filter(t=>t.department==='Production'||t.category==='Production');
+    const prodDoneM    = prodTasksM.filter(t=>['done','approved','archived'].includes(t.status));
+    const prodOverdueM = prodTasksM.filter(t=>!['done','approved','archived'].includes(t.status)&&t.dueDate&&t.dueDate<bizDate());
+    const onTimeRateM  = (prodDoneM.length+prodOverdueM.length)>0 ? Math.round(prodDoneM.length/(prodDoneM.length+prodOverdueM.length)*100) : 100;
+    const _fuToday = bizDate();
+    const dueFuM = allClients.filter(cl=>cl.followUpDate&&cl.followUpDate<=_fuToday&&!['won','lost'].includes(window.crmStageOf(cl))).length;
+    return {
+      periodLabel: finPeriodLabel(anPeriod),
+      revP, ledOutP, netP,
+      payrollTotal, payrollRatio: window.payrollRatio(payrollTotal, revP),
+      aging: window.arAging(allProjects),
+      q: qStat, qPrev: qPrevStat, bid: bidStat,
+      onTimeRate: onTimeRateM, prodDoneCount: prodDoneM.length, prodOverdueCount: prodOverdueM.length,
+      dueFu: dueFuM,
+      cash: (M && M.cash) || null,
+      turns: (M && M.turns) || null,
+    };
+  };
+  let M = null;
+  M = buildMetricsSync();
+  // Cash position (decision 1) — cheap (cached BankAccounts.list()+ledgerForPeriod
+  // reads), not period-scoped, fetched once. Registry-empty OR denied (non-finance
+  // role) IS the feature flag → placeholder card; NEVER falls back to Net Cash.
+  try {
+    if (window.BankAccounts?.cashPosition && (await window.BankAccounts.list()).length)
+      M.cash = await window.BankAccounts.cashPosition();
+  } catch(_) { /* denied/offline → placeholder */ }
+
   const SUBTABS = [
     {id:'overview',label:'📊 Overview'},
     {id:'sales',label:'🛒 Sales'},
@@ -6457,6 +6521,7 @@ async function renderAnalytics() {
     {id:'finance',label:'💰 Finance'},
     {id:'production',label:'🏭 Production'},
     {id:'government',label:'🏛️ Gov. Biddings'},
+    {id:'strategy',label:'🎯 Strategy'},
   ];
 
   c.innerHTML=`
@@ -6466,8 +6531,10 @@ async function renderAnalytics() {
   `;
 
   const renderOverview = async () => {
+    M = buildMetricsSync();   // v12 WS40 — refresh so the Conclusions card below never lags this tab's own period picker
+    const CT = window.chartTheme();
     const anPeriod = window._AN_PERIOD || 'month';
-    const anPlabel = finPeriodLabel(anPeriod);
+    const anPlabel = M.periodLabel;
     // ── Cash flow (canonical source = ledger) ──
     // ledgerKind() classifies income/expense (v12 WS13) — asset/liability rows
     // (e.g. the Inventory leg) are excluded automatically instead of being
@@ -6476,13 +6543,11 @@ async function renderAnalytics() {
     const ledOut = ym => sum(ledger.filter(l=>ledgerKind(l)==='expense'&&(l.date||'').slice(0,7)===ym), l=>l.amount);
     // sales-based revenue fallback for months where the ledger is still sparse (accepted quotes by createdAt month)
     const wonQuotesMonth = ym => sum(quotes.filter(q=>q.status==='accepted'&&ymOf(q.createdAt)===ym), q=>q.total);
-    // period-aware totals (This Month / Since Jan 1 / All Time)
-    const ledInP  = sum(ledger.filter(l=>ledgerKind(l)==='income'&&finPeriodMatch(l.date,anPeriod)), l=>l.amount);
-    const ledOutP = sum(ledger.filter(l=>ledgerKind(l)==='expense'&&finPeriodMatch(l.date,anPeriod)), l=>l.amount);
-    const wonQuotesP = sum(quotes.filter(q=>q.status==='accepted'&&finPeriodMatch(ymOf(q.createdAt),anPeriod)), q=>q.total);
-    const revMTD  = ledInP || wonQuotesP;
+    // period-aware totals (This Month / Since Jan 1 / All Time) — v12 WS40: computed
+    // once in buildMetricsSync (Spec 2d); reused here byte-identical, not recomputed.
+    const revMTD  = M.revP, ledOutP = M.ledOutP;
     const revPrev = ledIn(lastMonth) || wonQuotesMonth(lastMonth);
-    const netMTD  = revMTD - ledOutP, netPrev = revPrev - ledOut(lastMonth);
+    const netMTD  = M.netP, netPrev = revPrev - ledOut(lastMonth);
     // ── Profitability (job_costs) ──
     const jcRev  = sum(jobCosts, j=>j.revenue);
     const jcCost = sum(jobCosts, j=>(+j.materialsCost||0)+(+j.laborCost||0)+(+j.otherCost||0));
@@ -6492,18 +6557,28 @@ async function renderAnalytics() {
     const arOf = p => +p.arBalance||0; // normalized shape already derives arBalance
     const openProjects = allProjects.filter(p=>!['paid','cancelled','completed'].includes(p.stage));
     const receivables = sum(openProjects, arOf);
-    // ── Payroll efficiency ──
-    const totalPayroll = sum(users, u=>(+u.salary||0)+(+u.allowance||0)-(+u.deductions||0));
-    const payrollPct = revMTD>0 ? Math.round(totalPayroll/revMTD*100) : null;
+    // ── Payroll efficiency ── (v12 WS40 Spec 2a/4e — window.payrollRatio, byte-identical)
+    const totalPayroll = M.payrollTotal;
+    const payrollPct = M.payrollRatio;
     // ── Top clients by signed contract (fallback: accepted quotes) ──
     const clientRev={};
     allProjects.filter(p=>p.stage!=='cancelled').forEach(p=>{const k=p.clientName||'—';clientRev[k]=(clientRev[k]||0)+(+p.contractAmount||0);});
     if(!Object.keys(clientRev).length) quotes.filter(q=>q.status==='accepted').forEach(q=>{const k=q.clientName||q.client||'—';clientRev[k]=(clientRev[k]||0)+(+q.total||0);});
     const topClients=Object.entries(clientRev).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]).slice(0,8);
     const clientTotal=topClients.reduce((s,e)=>s+e[1],0)||1;
+    // ── v12 WS40 Spec 3 — Conclusions card ──
+    const _sevColor = { bad: window.cssVar('--danger','#FF453A'), warn: window.cssVar('--warning','#FF9F0A'),
+      info: window.cssVar('--text-muted','#8e8e93'), good: window.cssVar('--success','#30D158') };
+    const _insights = window.Insights.compute(M).slice(0, window.ANALYTICS_POLICY.maxInsights);
+    const _insightsHtml = _insights.map(i=>`
+      <div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:16px;line-height:1.3">${i.icon}</span>
+        <div><div style="font-size:13px;color:${_sevColor[i.severity]}">${i.text}</div>${i.action?`<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${i.action}</div>`:''}</div>
+      </div>`).join('');
 
     const wrap=document.getElementById('analytics-content');
     const _anDelta = (cur,prev) => anPeriod==='month' ? delta(cur,prev,true) : `<span style="font-size:11px;color:#8e8e93">${anPlabel}</span>`;
+    const _cashAccts = M.cash ? Object.values(M.cash.perAccount||{}) : [];
     wrap.innerHTML=`
       <div id="an-overview-period">${window.periodPicker(anPeriod, {closedBadge:true})}</div>
       <div class="kpi-row" style="margin-top:16px">
@@ -6512,7 +6587,9 @@ async function renderAnalytics() {
         <div class="kpi-card accent"><div class="kpi-label">Gross Margin</div><div class="kpi-value">${grossMargin==null?'—':grossMargin+'%'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${grossMargin==null?'add job costs':'₱'+fmt(grossProfit)+' profit'}</div></div>
         <div class="kpi-card warn"><div class="kpi-label">Receivables</div><div class="kpi-value">₱${fmt(receivables)}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${openProjects.length} open job${openProjects.length===1?'':'s'}</div></div>
         <div class="kpi-card"><div class="kpi-label">Payroll % of Revenue</div><div class="kpi-value">${payrollPct==null?'—':payrollPct+'%'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">₱${fmt(totalPayroll)}/mo</div></div>
+        <div class="kpi-card ${M.cash?(M.cash.total>=window.ANALYTICS_POLICY.cashFloor?'green':'warn'):''}"><div class="kpi-label">🏦 Cash Position</div><div class="kpi-value">${M.cash?'₱'+fmt(M.cash.total):'—'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${M.cash?'Excludes statutory remittances until the WS39 remittance flow ships.':'Register bank accounts (Finance → Bank Accounts) to activate'}</div>${_cashAccts.length?`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:11px;color:var(--text-muted)">${_cashAccts.length} account${_cashAccts.length===1?'':'s'} ›</summary><div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">${_cashAccts.map(x=>`<div style="display:flex;justify-content:space-between;font-size:11px"><span>${escHtml(window.BankAccounts.label(x.account))}</span><span style="font-weight:600">₱${fmt(x.balance)}</span></div>`).join('')}</div></details>`:''}</div>
       </div>
+      <div class="card" style="margin-bottom:16px"><div class="card-header"><h3>📌 Conclusions</h3></div><div class="card-body">${_insightsHtml}<div style="margin-top:8px;text-align:right"><a href="javascript:void(0)" id="an-see-strategy" style="font-size:12px;font-weight:600">See all → 🎯 Strategy</a></div></div></div>
       <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-bottom:16px">
         <div class="card"><div class="card-header"><h3>Cash Flow — last 6 months</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="bh-cash-chart"></canvas></div></div></div>
         <div class="card"><div class="card-header"><h3>Revenue vs Cost</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="bh-margin-chart"></canvas></div></div></div>
@@ -6537,15 +6614,18 @@ async function renderAnalytics() {
         }).join('')}</tbody>
       </table></div></div></div>
     `;
+    document.getElementById('an-see-strategy')?.addEventListener('click', () => {
+      c.querySelector('.an-subtabs .chip-tab[data-chip="strategy"]')?.click();
+    });
     // Cash in vs cash out, 6-month trend
     if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('bh-cash-chart'),{type:'bar',data:{labels:months6.map(m=>m.label),datasets:[
-      {label:'Cash In',data:months6.map(m=>ledIn(m.ym)||wonQuotesMonth(m.ym)),backgroundColor:'#30D158'},
-      {label:'Cash Out',data:months6.map(m=>ledOut(m.ym)),backgroundColor:'#FF453A'},
-    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
+      {label:'Cash In',data:months6.map(m=>ledIn(m.ym)||wonQuotesMonth(m.ym)),backgroundColor:CT.good},
+      {label:'Cash Out',data:months6.map(m=>ledOut(m.ym)),backgroundColor:CT.bad},
+    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:CT.text},grid:{color:CT.grid}},x:{ticks:{color:CT.text},grid:{display:false}}}}});
     // Gross profit vs cost (profitability)
     if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('bh-margin-chart'),{type:'doughnut',data:{labels:['Gross Profit','Cost'],datasets:[{data:[Math.max(grossProfit,0),jcCost],backgroundColor:['#30D158','#636366'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}},tooltip:{callbacks:{label:c=>` ${c.label}: ₱${fmt(c.parsed)}`}}}}});
+    new Chart(document.getElementById('bh-margin-chart'),{type:'doughnut',data:{labels:['Gross Profit','Cost'],datasets:[{data:[Math.max(grossProfit,0),jcCost],backgroundColor:[CT.good,CT.muted],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}},tooltip:{callbacks:{label:c=>` ${c.label}: ₱${fmt(c.parsed)}`}}}}});
     window.bindPeriodPicker(document.getElementById('an-overview-period'), (newKey) => {
       window._AN_PERIOD = newKey; window._anRenderOverview && window._anRenderOverview();
     }, { closedBadge:true, activeKey: anPeriod });
@@ -6553,14 +6633,14 @@ async function renderAnalytics() {
   window._anRenderOverview = renderOverview;
 
   const renderSales = async () => {
-    const salesQuotes=quotes.filter(q=>q.department==='Sales'||q.type==='sales'||!q.department);
-    const wonQ   = salesQuotes.filter(window.isQuoteWon);
-    const lostQ  = salesQuotes.filter(window.isQuoteLost);
-    const openQ  = salesQuotes.filter(window.isQuoteOpen);
-    const won2     = wonQ.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
-    const pipeline = openQ.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
-    const wonCount = wonQ.length, lostCount = lostQ.length;
-    const winRate  = wonCount+lostCount>0 ? Math.round(wonCount/(wonCount+lostCount)*100) : 0;
+    const CT = window.chartTheme();
+    // v12 WS40 Spec 2a / RE-GROUNDED 3 — the ONE win-rate source; salesQuotes is
+    // the hoisted, unchanged filter (was app.js's own local re-filter before WS40).
+    const q = window.quoteWinStats(salesQuotes);
+    const wonQ = q.won, lostQ = q.lost, openQ = q.open;
+    const won2     = q.wonVal, pipeline = q.pipelineVal;
+    const wonCount = q.wonCount, lostCount = q.lostCount;
+    const winRate  = q.winRate==null ? 0 : q.winRate;    // KPI keeps its 0-when-empty default
     const salesSubs=subs.filter(s=>s.department==='Sales'||s.type?.includes('sales'));
     const salesTasks=tasks.filter(t=>t.department==='Sales'||t.category==='Sales');
     const doneSalesTasks=salesTasks.filter(t=>['done','approved','archived'].includes(t.status));
@@ -6574,8 +6654,7 @@ async function renderAnalytics() {
     const clTotal=allClients.length;
     const clWon=stageCount.won, clLost=stageCount.lost;
     const clConv = clWon+clLost>0 ? Math.round(clWon/(clWon+clLost)*100) : null;
-    const _anToday=(window.bizDate?window.bizDate():new Date().toISOString().slice(0,10));
-    const dueFu=allClients.filter(cl=>cl.followUpDate&&cl.followUpDate<=_anToday&&!['won','lost'].includes(window.crmStageOf(cl))).length;
+    const dueFu = M.dueFu;   // v12 WS40 — shared with the metrics bag (Spec 2d), not recomputed
     const wrap=document.getElementById('analytics-content');
     wrap.innerHTML=`
       <div class="kpi-row" style="margin-top:16px">
@@ -6617,17 +6696,18 @@ async function renderAnalytics() {
     `;
     if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('sq-chart'),{type:'bar',data:{labels:['Open','Won','Lost'],
-      datasets:[{data:[openQ.length,wonQ.length,lostQ.length],backgroundColor:['#0A84FF','#30D158','#FF453A']}]},
-      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
+      datasets:[{data:[openQ.length,wonQ.length,lostQ.length],backgroundColor:[CT.neutral,CT.good,CT.bad]}]},
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:CT.text},grid:{color:CT.grid}},x:{ticks:{color:CT.text},grid:{display:false}}}}});
     // last 6 months volume — anchored to Manila current month
     const months=[],counts=[];
     const _anchY=+thisMonth.slice(0,4), _anchM=+thisMonth.slice(5,7)-1;
     for(let i=5;i>=0;i--){const d=new Date(_anchY,_anchM-i,1);months.push(d.toLocaleString('default',{month:'short'}));counts.push(salesQuotes.filter(q=>{const qd=q.createdAt?.toDate?q.createdAt.toDate():new Date(q.createdAt||0);return qd.getMonth()===d.getMonth()&&qd.getFullYear()===d.getFullYear();}).length);}
     if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('sq2-chart'),{type:'line',data:{labels:months,datasets:[{label:'Quotes',data:counts,borderColor:'#0A84FF',backgroundColor:'#0A84FF22',fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
+    new Chart(document.getElementById('sq2-chart'),{type:'line',data:{labels:months,datasets:[{label:'Quotes',data:counts,borderColor:CT.neutral,backgroundColor:CT.neutralA,fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:CT.text},grid:{color:CT.grid}},x:{ticks:{color:CT.text},grid:{display:false}}}}});
   };
 
   const renderMarketing = async () => {
+    const CT = window.chartTheme();
     const mktTasks=tasks.filter(t=>t.department==='Marketing'||t.category==='Marketing');
     const doneMkt=mktTasks.filter(t=>['done','approved','archived'].includes(t.status));
     const mktSubs=subs.filter(s=>s.department==='Marketing');
@@ -6663,18 +6743,19 @@ async function renderAnalytics() {
     const taskStatuses=['todo','in-progress','review','done','approved','archived'];
     const statusCounts=taskStatuses.map(s=>mktTasks.filter(t=>t.status===s).length);
     if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('mkt-task-chart'),{type:'doughnut',data:{labels:['Done','Active'],datasets:[{data:[doneMkt.length,mktTasks.length-doneMkt.length],backgroundColor:['#30D158','#636366'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
+    new Chart(document.getElementById('mkt-task-chart'),{type:'doughnut',data:{labels:['Done','Active'],datasets:[{data:[doneMkt.length,mktTasks.length-doneMkt.length],backgroundColor:[CT.good,CT.muted],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}}}}});
     if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('mkt-status-chart'),{type:'bar',data:{labels:taskStatuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:statusCounts,backgroundColor:'#FF9F0A'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb',font:{size:10}},grid:{display:false}}}}});
+    new Chart(document.getElementById('mkt-status-chart'),{type:'bar',data:{labels:taskStatuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:statusCounts,backgroundColor:CT.warn}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:CT.text},grid:{color:CT.grid}},x:{ticks:{color:CT.text,font:{size:10}},grid:{display:false}}}}});
   };
 
   const renderFinanceAnalytics = async () => {
+    const CT = window.chartTheme();
     // Follows the SAME period as the Overview tab's picker (window._AN_PERIOD) —
     // showing "This Month" here while Overview shows "Last Month" would be a
     // confusing split-brain on one page (v12 WS12 D3).
     const finAnPeriod = window._AN_PERIOD || 'month';
     const finAnLabel = finPeriodLabel(finAnPeriod);
-    const totalPayroll=users.reduce((s,u)=>s+(u.salary||0)+(u.allowance||0)-(u.deductions||0),0);
+    const totalPayroll = M.payrollTotal;   // v12 WS40 — same formula, single source (Spec 2d)
     // Payroll is posted as type:'debit' category:'Payroll Expense' (no type:'payslip' exists).
     const _isPayroll=l=>l.category==='Payroll Expense';
     const disbursed=ledger.filter(_isPayroll).reduce((s,l)=>s+(l.amount||0),0);
@@ -6694,7 +6775,23 @@ async function renderAnalytics() {
     const finInP  = sum(ledger.filter(l=>ledgerKind(l)==='income'&&Period.match(l.date,finAnPeriod)),l=>l.amount);
     const finOutP = sum(ledger.filter(l=>ledgerKind(l)==='expense'&&Period.match(l.date,finAnPeriod)),l=>l.amount);
     const netMTD=finInP-finOutP, netPrev=finIn(lastMonth)-finOut(lastMonth);
-    const payrollPct=finInP>0?Math.round(totalPayroll/finInP*100):null;
+    // v12 WS40 Spec 2a/4e/RE-GROUNDED 2 — shared formula, DIFFERENT denominator than
+    // Overview's M.payrollRatio (finInP = pure ledger income here, not revMTD's
+    // accepted-quote fallback) — decision 5's "same denominator" claim was wrong in
+    // real code; do not unify.
+    const payrollPct = window.payrollRatio(totalPayroll, finInP);
+    // v12 WS40 Spec 4b/6b — Inventory Turns KPI, lazy-fetched (Finance tab only, so
+    // Overview never pays this cost). inventory_items uses the SAME cache key/TTL as
+    // every other reader (RE-GROUNDED 8, 45s); ledgerSince keys+caches itself under
+    // 'ledger>='+start (reached by the 'ledger' alias invalidation) — call it
+    // directly rather than double-wrapping in cg(), which expects a Query, not a Promise.
+    const turnsStart = (() => { const d=new Date(bizDate()+'T12:00:00'); d.setDate(d.getDate()-365);
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+    const [invSnap, ledger365Snap] = await Promise.all([
+      cg('inventory_items', db.collection('inventory_items'), 45000),
+      window.ledgerSince(turnsStart),
+    ]);
+    M.turns = window.inventoryTurns(ledger365Snap.docs.map(d=>d.data()), invSnap.docs.map(d=>d.data()), 365);
     const wrap=document.getElementById('analytics-content');
     wrap.innerHTML=`
       <div class="kpi-row" style="margin-top:16px">
@@ -6705,6 +6802,22 @@ async function renderAnalytics() {
         <div class="kpi-card warn"><div class="kpi-label">CA Outstanding</div><div class="kpi-value">₱${fmt(caTotal)}</div></div>
         <div class="kpi-card"><div class="kpi-label">CA Pending</div><div class="kpi-value">${caPending}</div></div>
         <div class="kpi-card"><div class="kpi-label">Expenses (${finAnLabel})</div><div class="kpi-value">₱${fmt(expThisMonth)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">📦 Inventory Turns</div><div class="kpi-value">${M.turns&&M.turns.turns!=null?M.turns.turns.toFixed(1)+'× /yr':'—'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${M.turns&&M.turns.turns!=null?'~'+M.turns.daysOnHand+'d on hand · WAC-costed, meaningful going-forward from WS29 ship date':'pending WS29 inventory movements'}</div></div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3>📥 Receivables Aging</h3><span style="font-weight:800">₱${fmt(M.aging.total)}</span></div>
+        <div class="card-body">
+          ${M.aging.total===0?'<div class="empty-state" style="padding:16px"><p>No open receivables 🎉</p></div>':`
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px">
+            ${[['0–30d',M.aging.cur,'var(--success)'],['31–60d',M.aging.d3160,'#FFAA00'],['61–90d',M.aging.d6190,'#FF9500'],['90+ d',M.aging.d90,'var(--danger)']].map(([lbl,val,col])=>`
+              <div style="background:var(--surface2);border-radius:10px;padding:10px 12px">
+                <div style="font-size:11px;color:var(--text-muted)">${lbl}</div>
+                <div style="font-size:15px;font-weight:800;color:${col}">₱${fmt(val)}</div>
+                <div style="font-size:10px;color:var(--text-muted)">${M.aging.total?Math.round(val/M.aging.total*100):0}%</div>
+              </div>`).join('')}
+          </div>
+          ${M.aging.topDebtor?`<div style="font-size:11px;color:var(--text-muted);margin-top:10px">Largest balance: <strong>${escHtml(M.aging.topDebtor.name)}</strong> (₱${fmt(M.aging.topDebtor.amount)}).</div>`:''}`}
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
         <div class="card"><div class="card-header"><h3>Expense Categories</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="fin-exp-chart"></canvas></div></div></div>
@@ -6719,28 +6832,32 @@ async function renderAnalytics() {
     const cats=[...new Set(ledDebits.map(l=>l.category||'Other'))].slice(0,6);
     const catAmts=cats.map(cat=>ledDebits.filter(l=>(l.category||'Other')===cat).reduce((s,l)=>s+(l.amount||0),0));
     if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('fin-exp-chart'),{type:'bar',data:{labels:cats,datasets:[{data:catAmts,backgroundColor:'#0A84FF'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb',font:{size:10}},grid:{display:false}}}}});
+    new Chart(document.getElementById('fin-exp-chart'),{type:'bar',data:{labels:cats,datasets:[{data:catAmts,backgroundColor:CT.neutral}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:CT.text},grid:{color:CT.grid}},x:{ticks:{color:CT.text,font:{size:10}},grid:{display:false}}}}});
     if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('fin-ca-chart'),{type:'doughnut',data:{labels:['Approved','Pending','Rejected'],datasets:[{data:[cas.filter(a=>a.status==='approved').length,cas.filter(a=>a.status==='pending').length,cas.filter(a=>a.status==='rejected').length],backgroundColor:['#30D158','#FF9F0A','#FF453A'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
+    new Chart(document.getElementById('fin-ca-chart'),{type:'doughnut',data:{labels:['Approved','Pending','Rejected'],datasets:[{data:[cas.filter(a=>a.status==='approved').length,cas.filter(a=>a.status==='pending').length,cas.filter(a=>a.status==='rejected').length],backgroundColor:[CT.good,CT.warn,CT.bad],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}}}}});
     if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('fin-net-chart'),{type:'line',data:{labels:months6.map(m=>m.label),datasets:[{label:'Net Income',data:months6.map(m=>finIn(m.ym)-finOut(m.ym)),borderColor:'#30D158',backgroundColor:'#30D15822',fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
+    new Chart(document.getElementById('fin-net-chart'),{type:'line',data:{labels:months6.map(m=>m.label),datasets:[{label:'Net Income',data:months6.map(m=>finIn(m.ym)-finOut(m.ym)),borderColor:CT.good,backgroundColor:CT.goodA,fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:CT.text},grid:{color:CT.grid}},x:{ticks:{color:CT.text},grid:{display:false}}}}});
   };
 
   const renderProduction = async () => {
+    const CT = window.chartTheme();
     const prodTasks=tasks.filter(t=>t.department==='Production'||t.category==='Production');
-    const doneProd=prodTasks.filter(t=>['done','approved','archived'].includes(t.status));
     const prodUsers=users.filter(u=>(Array.isArray(u.departments)?u.departments:u.department?[u.department]:[]).includes('Production'));
     const prodSubs=subs.filter(s=>s.department==='Production');
-    const prodOverdue=prodTasks.filter(t=>!['done','approved','archived'].includes(t.status)&&t.dueDate&&t.dueDate<bizDate());
-    const onTimeRate=(doneProd.length+prodOverdue.length)>0?Math.round(doneProd.length/(doneProd.length+prodOverdue.length)*100):100;
+    // v12 WS40 Spec 2d/4f — reused from the shared metrics bag, not recomputed;
+    // relabeled "On-time task completion" (task-based, not delivery-based — a true
+    // delivery metric is a documented WS28 wire-in, decision 4; the task metric is
+    // not redefined in place).
+    const doneProdCount = M.prodDoneCount, prodOverdueCount = M.prodOverdueCount;
+    const onTimeRate = M.onTimeRate;
     const wrap=document.getElementById('analytics-content');
     wrap.innerHTML=`
       <div class="kpi-row" style="margin-top:16px">
         <div class="kpi-card"><div class="kpi-label">Team Size</div><div class="kpi-value">${prodUsers.length}</div></div>
         <div class="kpi-card accent"><div class="kpi-label">Total Tasks</div><div class="kpi-value">${prodTasks.length}</div></div>
-        <div class="kpi-card green"><div class="kpi-label">Completed</div><div class="kpi-value">${doneProd.length}</div></div>
-        <div class="kpi-card ${onTimeRate>=80?'green':'warn'}"><div class="kpi-label">On-Time Rate</div><div class="kpi-value">${onTimeRate}%</div></div>
-        <div class="kpi-card warn"><div class="kpi-label">Overdue</div><div class="kpi-value">${prodOverdue.length}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Completed</div><div class="kpi-value">${doneProdCount}</div></div>
+        <div class="kpi-card ${onTimeRate>=80?'green':'warn'}"><div class="kpi-label">On-time task completion</div><div class="kpi-value">${onTimeRate}%</div></div>
+        <div class="kpi-card warn"><div class="kpi-label">Overdue</div><div class="kpi-value">${prodOverdueCount}</div></div>
         <div class="kpi-card"><div class="kpi-label">Submissions</div><div class="kpi-value">${prodSubs.length}</div></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
@@ -6758,19 +6875,23 @@ async function renderAnalytics() {
     `;
     const taskStatuses=['todo','in-progress','review','done','approved'];
     if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('prod-status-chart'),{type:'doughnut',data:{labels:taskStatuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:taskStatuses.map(s=>prodTasks.filter(t=>t.status===s).length),backgroundColor:['#636366','#0A84FF','#FF9F0A','#30D158','#34C759'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
+    new Chart(document.getElementById('prod-status-chart'),{type:'doughnut',data:{labels:taskStatuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:taskStatuses.map(s=>prodTasks.filter(t=>t.status===s).length),backgroundColor:[CT.muted,CT.neutral,CT.warn,CT.good,CT.goodAlt],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}}}}});
     const topMembers=prodUsers.slice(0,8);
     if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('prod-member-chart'),{type:'bar',data:{labels:topMembers.map(u=>(u.displayName||u.email||'?').split(' ')[0]),datasets:[{label:'Done',data:topMembers.map(u=>prodTasks.filter(t=>(Array.isArray(t.assignedTo)?t.assignedTo.includes(u.id):t.assignedTo===u.id)&&['done','approved','archived'].includes(t.status)).length),backgroundColor:'#30D158'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb',font:{size:10}},grid:{display:false}}}}});
+    new Chart(document.getElementById('prod-member-chart'),{type:'bar',data:{labels:topMembers.map(u=>(u.displayName||u.email||'?').split(' ')[0]),datasets:[{label:'Done',data:topMembers.map(u=>prodTasks.filter(t=>(Array.isArray(t.assignedTo)?t.assignedTo.includes(u.id):t.assignedTo===u.id)&&['done','approved','archived'].includes(t.status)).length),backgroundColor:CT.good}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:CT.text},grid:{color:CT.grid}},x:{ticks:{color:CT.text,font:{size:10}},grid:{display:false}}}}});
   };
 
   const renderGovernment = async () => {
+    const CT = window.chartTheme();
     const wonBids=govBids.filter(b=>b.status==='won');
     const lostBids=govBids.filter(b=>b.status==='lost');
     const pendingBids=govBids.filter(b=>!b.status||b.status==='pending'||b.status==='submitted');
     const totalWon=wonBids.reduce((s,b)=>s+(b.contractAmount||b.bidAmount||0),0);
     const totalBid=govBids.reduce((s,b)=>s+(b.bidAmount||b.contractAmount||0),0);
-    const winRate=wonBids.length+lostBids.length>0?Math.round(wonBids.length/(wonBids.length+lostBids.length)*100):0;
+    // v12 WS40 Spec 2a/3/RE-GROUNDED 3 — the ONE bid-win-rate source (M.bid ==
+    // window.bidWinStats(govBids)); KPI keeps its 0-when-empty default and is
+    // ALWAYS labeled "(Government)" so it's never confused with quote win rate.
+    const winRate = M.bid.winRate==null ? 0 : M.bid.winRate;
     const avgContract=wonBids.length?totalWon/wonBids.length:0;
     const bidsMTD=govBids.filter(b=>ymOf(b.createdAt)===thisMonth).length;
     const bidsPrev=govBids.filter(b=>ymOf(b.createdAt)===lastMonth).length;
@@ -6781,7 +6902,7 @@ async function renderAnalytics() {
       <div class="kpi-row" style="margin-top:16px">
         <div class="kpi-card green"><div class="kpi-label">Contracts Won</div><div class="kpi-value">₱${fmt(totalWon)}</div></div>
         <div class="kpi-card accent"><div class="kpi-label">Total Bids</div><div class="kpi-value">${govBids.length}</div><div style="margin-top:4px">${delta(bidsMTD,bidsPrev,true)}</div></div>
-        <div class="kpi-card"><div class="kpi-label">Win Rate</div><div class="kpi-value">${winRate}%</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${wonBids.length}W / ${lostBids.length}L</div></div>
+        <div class="kpi-card"><div class="kpi-label">Win Rate (Government)</div><div class="kpi-value">${winRate}%</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${wonBids.length}W / ${lostBids.length}L</div></div>
         <div class="kpi-card"><div class="kpi-label">Avg Contract</div><div class="kpi-value">₱${fmt(avgContract)}</div></div>
         <div class="kpi-card warn"><div class="kpi-label">Pending / Submitted</div><div class="kpi-value">${pendingBids.length}</div></div>
         <div class="kpi-card"><div class="kpi-label">Gov Tasks</div><div class="kpi-value">${govTasks.length}</div></div>
@@ -6800,10 +6921,117 @@ async function renderAnalytics() {
       </table></div>`:`<p style="color:var(--text-muted);padding:16px;text-align:center">No bidding records found. Add records to the <code>gov_biddings</code> collection in Firestore.</p>`}</div></div>
     `;
     if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('gov-outcome-chart'),{type:'doughnut',data:{labels:['Won','Lost','Pending'],datasets:[{data:[wonBids.length,lostBids.length,pendingBids.length],backgroundColor:['#30D158','#FF453A','#FF9F0A'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#ebebf5bb'}}}}});
+    new Chart(document.getElementById('gov-outcome-chart'),{type:'doughnut',data:{labels:['Won','Lost','Pending'],datasets:[{data:[wonBids.length,lostBids.length,pendingBids.length],backgroundColor:[CT.good,CT.bad,CT.warn],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}}}}});
     const govStatuses=['todo','in-progress','review','done'];
     if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('gov-task-chart'),{type:'bar',data:{labels:govStatuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:govStatuses.map(s=>govTasks.filter(t=>t.status===s).length),backgroundColor:'#9BA8FF'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}},x:{ticks:{color:'#ebebf5bb'},grid:{display:false}}}}});
+    new Chart(document.getElementById('gov-task-chart'),{type:'bar',data:{labels:govStatuses.map(s=>s.charAt(0).toUpperCase()+s.slice(1)),datasets:[{data:govStatuses.map(s=>govTasks.filter(t=>t.status===s).length),backgroundColor:CT.accent}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:CT.text},grid:{color:CT.grid}},x:{ticks:{color:CT.text},grid:{display:false}}}}});
+  };
+
+  // ── v12 WS40 Spec 4g — Strategy subtab: full conclusions, wire-in status,
+  // market-research notes (decision 10). Reuses M/allClients/etc from the shared
+  // renderAnalytics closure — zero new reads beyond Overview's own fetch, except
+  // the ≤6-doc strategy_notes read (cached). No charts in v1 (no ensureChart).
+  const STRAT_DEPTS = [
+    {id:'general',label:'General'}, {id:'sales',label:'Sales'}, {id:'marketing',label:'Marketing'},
+    {id:'production',label:'Production'}, {id:'finance',label:'Finance'}, {id:'gov',label:'Gov. Biddings'},
+  ];
+  // v1 ship matrix (Spec 8) — cross-referenced against V12-PLAN workstreams 28/29/30/32/36
+  // so a later session knows exactly what "wires in" once each of those ships.
+  const STRAT_SHIP_MATRIX = [
+    ['Quote win rate (+ prev-period delta rule)', '✅ live', 'now (post-WS32 helpers)'],
+    ['Bid win rate (Government)', '✅ live', 'now'],
+    ['Payroll ratio (% of revenue)', '✅ live', 'now'],
+    ['On-time task completion (Production)', '✅ live', 'now'],
+    ['AR aging (due-date anchor + fallback)', '✅ live', 'now'],
+    ['Conclusions card + Strategy tab + notes', '✅ live', 'now'],
+    ['Theme-aware charts (13 sites)', '✅ live', 'now'],
+    ['Daily digest (Actions cron → notif/push)', '✅ live', 'now (after secret check)'],
+    ['Cash Position KPI', '🔲 placeholder', 'WS36 implemented + ≥1 bank account registered'],
+    ['Inventory turns KPI + turns-slow rule', '🔲 "—" until COS rows exist', 'WS29 implemented (consume-time COS @ WAC)'],
+    ['On-time DELIVERY % (second KPI)', '⛔ not built', 'WS28 stageHistory (delivery enteredAt vs due date)'],
+    ['Material price-trend insights', '⛔ not built', 'WS29 movement cost trail + WS30 PO receiving'],
+    ['Purchasing recommendations', '⛔ not built', 'WS30 purchase_requisitions/receiving analytics'],
+    ['job_costs materials in any metric', '⛔ excluded', 'per WS29 decision 11(c) — third manual number, unreliable'],
+  ];
+  const renderStrategy = async () => {
+    const wrap=document.getElementById('analytics-content');
+    wrap.innerHTML = `<div class="loading-placeholder">Loading strategy…</div>`;
+    const notesSnap = await cg('strategy_notes', db.collection('strategy_notes'));
+    const notesByDept = {};
+    notesSnap.docs.forEach(d=>{ notesByDept[d.id] = d.data(); });
+    let activeDept = STRAT_DEPTS.some(d=>d.id===window._AN_STRAT_DEPT) ? window._AN_STRAT_DEPT : 'general';
+    const canWrite = ['president','manager','finance'].includes(currentRole);
+
+    const _sevColor = { bad: window.cssVar('--danger','#FF453A'), warn: window.cssVar('--warning','#FF9F0A'),
+      info: window.cssVar('--text-muted','#8e8e93'), good: window.cssVar('--success','#30D158') };
+    const _sevLabel = { bad:'🔴 Needs attention', warn:'🟠 Watch', info:'🔵 Notable', good:'🟢 On track' };
+    const allInsights = window.Insights.compute(M);   // uncapped — Overview shows a capped preview of the same list
+    const insightsHtml = ['bad','warn','info','good'].map(sev => {
+      const rows = allInsights.filter(i=>i.severity===sev);
+      if (!rows.length) return '';
+      return `<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;color:${_sevColor[sev]};text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">${_sevLabel[sev]}</div>
+        ${rows.map(i=>`<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)"><span style="font-size:16px;line-height:1.3">${i.icon}</span><div><div style="font-size:13px;color:${_sevColor[sev]}">${i.text}</div>${i.action?`<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${i.action}</div>`:''}</div></div>`).join('')}
+      </div>`;
+    }).join('');
+
+    const shipRows = STRAT_SHIP_MATRIX.map(([m,s,a])=>`<tr><td>${escHtml(m)}</td><td>${escHtml(s)}</td><td style="color:var(--text-muted);font-size:12px">${escHtml(a)}</td></tr>`).join('');
+
+    const renderNotesFor = (deptId) => {
+      const doc = notesByDept[deptId] || {};
+      const entries = (doc.entries||[]).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,30);
+      return `
+        <div style="max-height:340px;overflow:auto">
+          ${entries.length? entries.map(e=>`<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px"><div style="color:var(--text-muted);font-size:11px">${escHtml(e.date||'')} · ${escHtml(e.byName||'—')}</div><div>${escHtml(e.note||'')}</div></div>`).join('') : `<p style="color:var(--text-muted);text-align:center;padding:16px">No notes yet for this department.</p>`}
+        </div>
+        ${canWrite ? `
+        <div style="margin-top:12px;display:flex;flex-direction:column;gap:8px">
+          <textarea id="strat-note-text" rows="3" placeholder="Add a market-research note…" style="width:100%;resize:vertical"></textarea>
+          <button class="btn-primary btn-sm" id="strat-note-add" style="align-self:flex-start">Add note</button>
+        </div>` : ''}
+      `;
+    };
+
+    wrap.innerHTML = `
+      <div class="card" style="margin-top:16px;margin-bottom:16px"><div class="card-header"><h3>🎯 Full Conclusions</h3></div><div class="card-body">${insightsHtml || '<p style="color:var(--text-muted);text-align:center;padding:16px">No insights yet.</p>'}</div></div>
+      <div class="card" style="margin-bottom:16px"><div class="card-header"><h3>Wire-in status</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Metric / feature</th><th>v1 status</th><th>Activates when</th></tr></thead>
+        <tbody>${shipRows}</tbody>
+      </table></div></div></div>
+      <div class="card"><div class="card-header"><h3>📚 Market Research Notes</h3></div><div class="card-body">
+        <div id="strat-notes-tabs">${window.chipTabs(STRAT_DEPTS.map(d=>({key:d.id,label:d.label})), activeDept, {cls:'strat-notes-chips'})}</div>
+        <div id="strat-notes-body" style="margin-top:10px">${renderNotesFor(activeDept)}</div>
+      </div></div>
+    `;
+
+    const bindNoteAdd = () => {
+      document.getElementById('strat-note-add')?.addEventListener('click', async () => {
+        const ta = document.getElementById('strat-note-text');
+        const text = (ta?.value||'').trim();
+        if (!text) return;
+        try {
+          const entry = { date: window.bizDate(), by: currentUser.uid,
+            byName: userProfile?.displayName || currentUser.email, note: text };
+          await db.collection('strategy_notes').doc(activeDept).set({
+            dept: activeDept,
+            entries: firebase.firestore.FieldValue.arrayUnion(entry),
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+          dbCacheInvalidate('strategy_notes');
+          Notifs.showToast('Note added');
+          notesByDept[activeDept] = notesByDept[activeDept] || { entries: [] };
+          notesByDept[activeDept].entries = [...(notesByDept[activeDept].entries||[]), entry];
+          document.getElementById('strat-notes-body').innerHTML = renderNotesFor(activeDept);
+          bindNoteAdd();
+        } catch(e) { Notifs.showToast('Failed to add note: ' + (e.message||e), 'error'); }
+      });
+    };
+    bindNoteAdd();
+
+    window.bindChipTabs(document.getElementById('strat-notes-tabs'), (key) => {
+      activeDept = key; window._AN_STRAT_DEPT = key;
+      document.getElementById('strat-notes-body').innerHTML = renderNotesFor(activeDept);
+      bindNoteAdd();
+    });
   };
 
   const TAB_RENDERERS = {
@@ -6813,6 +7041,7 @@ async function renderAnalytics() {
     finance: renderFinanceAnalytics,
     production: renderProduction,
     government: renderGovernment,
+    strategy: renderStrategy,
   };
 
   // Wire subtab clicks
@@ -6821,6 +7050,18 @@ async function renderAnalytics() {
     if(window.Chart) document.getElementById('analytics-content')?.querySelectorAll('canvas').forEach(cv=>{const ex=Chart.getChart(cv);if(ex)ex.destroy();});
     TAB_RENDERERS[key]?.();
   });
+
+  // v12 WS40 Spec 1b (RE-GROUNDED 5a) — re-render the active tab's charts with the
+  // live theme's chrome colors on every 'bi-theme-change' (setTheme dispatches it,
+  // including the 'auto' matchMedia flip). Self-removing once the Analytics subtab
+  // bar is gone from the DOM (navigated away), mirroring the chart-disposal lifecycle above.
+  const onTheme = () => {
+    const bar = c.querySelector('.an-subtabs');
+    if (!bar || !document.body.contains(bar)) { window.removeEventListener('bi-theme-change', onTheme); return; }
+    const active = bar.querySelector('.chip-tab.active')?.dataset.chip || 'overview';
+    (TAB_RENDERERS[active] || renderOverview)();
+  };
+  window.addEventListener('bi-theme-change', onTheme);
 
   // Load initial tab
   renderOverview();

@@ -466,6 +466,18 @@ service cloud.firestore {
       allow write: if isAuth() && isFinanceOrAdmin();
     }
 
+    // ── Strategy / market-research notes (v12 WS40) ──────────────────
+    // docId ∈ {general,sales,marketing,production,finance,gov}. Read scoped to the
+    // Analytics tier (president/manager/secretary/finance); entries appended via
+    // arrayUnion. Secretary is view-only CLIENT-side (WS25 decision-9 pattern) —
+    // rules keep the tier uniform. .get() defaults per missing-field-throws memory.
+    match /strategy_notes/{deptKey} {
+      allow read:  if isAuth() && isFinanceOrAdmin();
+      allow write: if isAuth() && isFinanceOrAdmin()
+        && request.resource.data.get('entries', []) is list;
+      allow delete: if isAuth() && isPresident();
+    }
+
     // ── System health (backup/sync heartbeat) ──────────
     // Written ONLY by the GitHub Actions backup/sync jobs via the Admin SDK
     // (which bypasses these rules). No client ever writes it.

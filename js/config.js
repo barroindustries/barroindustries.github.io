@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.30';
+window.APP_VERSION = '12.0.31';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -564,6 +564,151 @@ window.BankAccounts = {
   }
 };
 
+// ── Shared metric helpers (v12 WS40) — the single win-rate/AR/turns/payroll-
+// ratio computation. KPI cards AND the Insights engine read from these so a
+// number and the sentence describing it can never silently disagree.
+window.quoteWinStats = function(quotes){
+  const won  = quotes.filter(window.isQuoteWon), lost = quotes.filter(window.isQuoteLost),
+        open = quotes.filter(window.isQuoteOpen);
+  const val = q => q.total || q.grandTotal || 0;
+  return { won, lost, open, wonCount: won.length, lostCount: lost.length,
+    winRate: (won.length+lost.length) ? Math.round(won.length/(won.length+lost.length)*100) : null,
+    wonVal: won.reduce((s,q)=>s+val(q),0), pipelineVal: open.reduce((s,q)=>s+val(q),0) };
+};
+window.bidWinStats = function(bids){       // Government — ALWAYS labeled "(Government)"
+  const won = bids.filter(b=>b.status==='won'), lost = bids.filter(b=>b.status==='lost');
+  return { wonCount: won.length, lostCount: lost.length,
+    winRate: (won.length+lost.length) ? Math.round(won.length/(won.length+lost.length)*100) : null };
+};
+// WS40 decision 5, corrected per the RE-GROUNDED pass: real call sites round
+// and null-out (not the DECIDED spec's unrounded-float/0 version, which would
+// change displayed values). Denominators are NOT unified across call sites —
+// Overview passes revMTD, Finance tab passes finInP — only the formula/rounding
+// is shared.
+window.payrollRatio = function(totalPayroll, revenue){
+  return revenue > 0 ? Math.round(totalPayroll / revenue * 100) : null;
+};
+// ONE aging engine. Anchor = earliest invoices[].due, else project createdAt
+// (today's Finance-Dashboard proxy IS the fallback). projects = Projects.normalize shapes.
+window.arAging = function(projects, asOf){
+  asOf = asOf || window.bizDate();
+  const asOfT = new Date(asOf + 'T12:00:00').getTime();
+  const days = ymd => Math.floor((asOfT - new Date(ymd + 'T12:00:00').getTime()) / 86400000);
+  const toYmd = ts => { const d = ts?.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
+    return (d && !isNaN(d)) ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : null; };
+  const out = { cur:0, d3160:0, d6190:0, d90:0, total:0, topDebtor:null };
+  const perClient = {};
+  (projects||[]).forEach(p => {
+    const bal = +(p.arBalance || 0); if (bal <= 0) return;
+    let anchor = null;
+    (p.invoices||[]).forEach(inv => { if (inv && inv.due && (!anchor || inv.due < anchor)) anchor = inv.due; });
+    if (!anchor) anchor = toYmd(p.createdAt);
+    const d = anchor ? days(anchor) : 0;
+    out[d > 90 ? 'd90' : d > 60 ? 'd6190' : d > 30 ? 'd3160' : 'cur'] += bal;
+    out.total += bal;
+    const nm = p.clientName || p.name || '—';
+    perClient[nm] = (perClient[nm] || 0) + bal;
+  });
+  const top = Object.entries(perClient).sort((a,b)=>b[1]-a[1])[0];
+  if (top) out.topDebtor = { name: top[0], amount: top[1] };
+  return out;
+};
+// WS29 decision-12 formula — the canonical turns metric. ledgerRows must come from a
+// date-range-bounded read (ledgerSince) covering [asOf-windowDays, asOf]; NEVER .limit(N).
+window.inventoryTurns = function(ledgerRows, items, windowDays){
+  windowDays = windowDays || 365;
+  const end = window.bizDate();
+  const s = new Date(end + 'T12:00:00'); s.setDate(s.getDate() - windowDays);
+  const start = `${s.getFullYear()}-${String(s.getMonth()+1).padStart(2,'0')}-${String(s.getDate()).padStart(2,'0')}`;
+  const cos = (ledgerRows||[]).reduce((sum,r)=> sum + ((r && r.accountType==='expense'
+    && r.category==='COS – Direct Material' && r.date>=start && r.date<=end) ? +(r.amount||0) : 0), 0);
+  const annualizedCOGS = cos * (365/windowDays);
+  const invValue = (items||[]).reduce((sum,it)=> sum + (Number(it.qty)||0)*(Number(it.unitCost)||0), 0);
+  const turns = (invValue > 0 && annualizedCOGS > 0) ? annualizedCOGS/invValue : null;
+  return { turns, daysOnHand: turns ? Math.round(365/turns) : null, annualizedCOGS, invValue };
+};
+
+// ── Analytics conclusions engine (v12 WS40) ─────────────────────────
+// ‼️ Every threshold below is a PLACEHOLDER for Neil to tune — see the Flags
+// for Neil in fable-workplan/40-analytics.md. They gate SENTENCES only, never
+// a displayed money number.
+window.ANALYTICS_POLICY = {
+  ar90SharePct: 25,        // warn when 90+ bucket ≥ this % of total AR…
+  arMinAlert: 50000,       // …AND ≥ this ₱ amount (both, to avoid noise on tiny AR)
+  winRateDropPts: 10,      // percentage-POINT drop vs previous period
+  minOutcomes: 3,          // min (won+lost) in BOTH periods before win-rate rules speak
+  payrollRatioWarnPct: 35, // payroll as % of period revenue
+  onTimeWarnPct: 80,       // production on-time task completion floor
+  minProdDone: 3,          // min completed tasks before the on-time rule speaks
+  cashFloor: 100000,       // ₱ — cash-position floor (only fires post-WS36)
+  turnsSlowBelow: 2,       // turns/yr — slow-stock advisory (only fires post-WS29)
+  maxInsights: 6           // Overview card cap (Strategy tab shows all)
+};
+// Pure rule engine: rules read ONLY the metrics bag M (renderAnalytics's buildMetrics())
+// + POLICY. No fetches, no Date.now() — 'as of' semantics live in M. Output: ordered
+// insight objects, worst severity first.
+window.Insights = {
+  _esc(s){ return (window.escHtml || (x=>x))(s); },
+  rules: [
+    function netNegative(M, P){ if (M.netP >= 0) return null;
+      return { id:'net-negative', severity:'bad', icon:'📉',
+        text:`Expenses exceeded income by ₱${fmt(-M.netP)} ${M.periodLabel ? 'in '+M.periodLabel : 'this period'}.`,
+        action:'Review the Finance tab expense breakdown for the biggest categories.' }; },
+    function ar90(M, P){ const a = M.aging; if (!a || !a.total) return null;
+      const pct = Math.round(a.d90 / a.total * 100);
+      if (a.d90 < P.arMinAlert || pct < P.ar90SharePct) return null;
+      const top = a.topDebtor ? ` Largest balance: ${window.Insights._esc(a.topDebtor.name)} (₱${fmt(a.topDebtor.amount)}).` : '';
+      return { id:'ar-90', severity:'bad', icon:'📥',
+        text:`₱${fmt(a.d90)} (${pct}%) of receivables are over 90 days old.${top}`,
+        action:'Prioritize collection calls on the 90+ day bucket.' }; },
+    function arLargest(M, P){ const a = M.aging; if (!a || !a.total) return null;
+      const buckets = [['d90','90+ days'],['d6190','61–90 days'],['d3160','31–60 days'],['cur','0–30 days']];
+      const [k, label] = buckets.reduce((m,b)=> a[b[0]] > a[m[0]] ? b : m);
+      if (k === 'cur' || k === 'd90') return null;   // d90 already covered; current AR needs no chase note
+      return { id:'ar-largest', severity:'info', icon:'📬',
+        text:`The largest receivables bucket is ${label} (₱${fmt(a[k])} of ₱${fmt(a.total)}).`,
+        action:'Chase this bucket before it ages into 90+.' }; },
+    function winRateDrop(M, P){ const q = M.q, p = M.qPrev;
+      if (!q || !p || q.winRate == null || p.winRate == null) return null;
+      if (q.wonCount + q.lostCount < P.minOutcomes || p.wonCount + p.lostCount < P.minOutcomes) return null;
+      if (p.winRate - q.winRate < P.winRateDropPts) return null;
+      return { id:'win-rate-drop', severity:'warn', icon:'📊',
+        text:`Quote win rate fell from ${p.winRate}% to ${q.winRate}% vs the previous period.`,
+        action:'Review pricing and quote follow-ups on the Sales tab.' }; },
+    function payrollHigh(M, P){ if (!(M.revP > 0) || M.payrollRatio <= P.payrollRatioWarnPct) return null;
+      return { id:'payroll-ratio', severity:'warn', icon:'💼',
+        text:`Payroll is ${Math.round(M.payrollRatio)}% of period revenue (watch level: ${P.payrollRatioWarnPct}%).`,
+        action:'Compare headcount cost against the revenue trend before adding staff.' }; },
+    function onTimeLow(M, P){ if (M.prodDoneCount + M.prodOverdueCount < P.minProdDone) return null;
+      if (M.onTimeRate >= P.onTimeWarnPct) return null;
+      return { id:'on-time', severity:'warn', icon:'🏭',
+        text:`Production on-time task completion is ${Math.round(M.onTimeRate)}% (${M.prodOverdueCount} overdue).`,
+        action:'Rebalance due dates or assignments on the overdue production tasks.' }; },
+    function followUps(M, P){ if (!M.dueFu) return null;
+      return { id:'follow-ups', severity:'info', icon:'📞',
+        text:`${M.dueFu} client follow-up${M.dueFu===1?' is':'s are'} due.`,
+        action:'Open the Client Relations hub and log contact or reschedule.' }; },
+    function cashLow(M, P){ if (!M.cash || M.cash.total >= P.cashFloor) return null;
+      return { id:'cash-floor', severity:'bad', icon:'🏦',
+        text:`Cash position ₱${fmt(M.cash.total)} is below the ₱${fmt(P.cashFloor)} floor.`,
+        action:'Check the balance schedule and 90+ receivables for collectible cash.' }; },
+    function turnsSlow(M, P){ if (!M.turns || M.turns.turns == null || M.turns.turns >= P.turnsSlowBelow) return null;
+      return { id:'turns-slow', severity:'info', icon:'📦',
+        text:`Inventory turns ${M.turns.turns.toFixed(1)}×/yr (~${M.turns.daysOnHand} days on hand) — stock is slow-moving.`,
+        action:'Review slow items in Inventory before the next bulk purchase.' }; }
+  ],
+  compute(M, P){
+    P = P || window.ANALYTICS_POLICY;
+    const out = this.rules.map(r => { try { return r(M, P); } catch(_) { return null; } }).filter(Boolean);
+    if (!out.some(i => i.severity === 'bad' || i.severity === 'warn'))
+      out.push({ id:'all-clear', severity:'good', icon:'✅',
+        text:'No red flags this period — cash flow positive, receivables current, win rate steady.',
+        action:'' });
+    const rank = { bad:0, warn:1, info:2, good:3 };
+    return out.sort((a,b) => rank[a.severity] - rank[b.severity]);
+  }
+};
+
 // Ported from quote-builder-v2.html:1821-1878 (that file is iframe-isolated by
 // design — math re-derived here, not imported). Returns the POST-DP schedule.
 window.buildBalanceSchedule = function(contract, dpAmount, balMode, interestRate, invoiceDate, completionDate) {
@@ -867,6 +1012,27 @@ window.ledgerKind = function(row) {
   if (!row) return 'expense';
   if (row.type === 'credit') return 'income';
   return 'expense';               // 'debit' AND legacy 'payslip' rows
+};
+
+// ── Theme-aware chart chrome (v12 WS40) ─────────────────────────────
+// cssVar: promoted verbatim from Notifs.showToast's proven local closure
+// (notifications.js:508-512). Reads a CSS custom property off <html> live,
+// so it tracks THEMES switches including the 'auto' matchMedia flip.
+window.cssVar = function(name, fallback){
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  } catch(_) { return fallback; }
+};
+// Dataset palette — TODAY'S exact hexes, single source (WS40 decision 12). Not theme-reactive.
+window.CHART_COLORS = { good:'#30D158', bad:'#FF453A', neutral:'#0A84FF', warn:'#FF9F0A',
+  muted:'#636366', accent:'#9BA8FF', goodAlt:'#34C759', warnAlt:'#FFAA00',
+  goodA:'#30D15822', neutralA:'#0A84FF22' };
+// One call per chart-bearing render — chrome colors resolved against the LIVE theme.
+window.chartTheme = function(){
+  return { text: window.cssVar('--text-muted', '#ebebf5bb'),
+           grid: window.cssVar('--border',     '#ffffff18'),
+           ...window.CHART_COLORS };
 };
 
 // ── Period engine (v12 WS12) — ONE period filter for every money screen ──

@@ -1,0 +1,37 @@
+name: Daily Ops Digest
+
+# v12 WS40 — writes one notification doc per president/finance user into
+# notifications/{uid}/items every morning; the existing sendPushOnNotification
+# Cloud Function fires on that doc and delivers the FCM push. No Blaze billing
+# tier required — this follows the SAME GitHub Actions cron precedent as
+# sync-to-drive.yml / monthly-backup.yml (free Actions minutes), not a new
+# Firebase Scheduled Function.
+
+on:
+  schedule:
+    - cron: '0 0 * * *'   # 08:00 Philippine Time (UTC+8) every day — PH has no DST
+  workflow_dispatch:         # Manual trigger from GitHub Actions tab (test runs)
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    name: Send daily ops digest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+        working-directory: scripts
+
+      - name: Run daily digest
+        run: node daily-digest.js
+        working-directory: scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
