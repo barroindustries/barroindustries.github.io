@@ -63,9 +63,589 @@ All line numbers below were re-verified live via grep/Read against the current c
 - **Blast-radius constraint (expanded in Risks below): do not assume a `bank_accounts` registry is a narrow, additive schema change.** Per point 8, every existing cash-moving writer (ledger CRJ-/CDJ-/EXP-/PAY-/SO-/PROJ-/POCOS- posts, `cash_advances` approve, `pay_runs` Disburse, `job_projects.payments[]`) currently has zero account/method-of-record dimension beyond a free-text label. A spec that only adds `bank_accounts` + tags NEW writes, without an explicit, stated decision about the dozen existing writers, will under-deliver on "which account each payment hit" for anything already in the books.
 - `job_projects.update` is NOT finance-gated at the Firestore rules level (firestore.rules:1041, gated only `createdBy==self || !isPartner()` — i.e. any non-partner internal user can update any job_projects doc) — it is gated to finance/admin only in the UI (`_isFinAdmin()`, departments.js:2011/12149-12150). A new bank-account-tagged payment write inherits this same UI-only gate unless the rule itself is tightened; note this explicitly rather than assuming Firestore already blocks a non-finance write.
 
-## Open decisions
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-1. Is `bank_accounts` a new top-level collection, and what is its literal document shape (name/nickname, bank, account number — masked or full?, currency, opening balance, currentBalance stored-counter vs derived-from-transactions, active/closed flag, createdBy/createdAt)?
+### Resolved decisions (numbered to match the original open decisions)
+
+1. **`bank_accounts` = new top-level collection; literal shape in Spec 1.** The tag field family on money rows is `bankAccountId` / `bankAccountName` / `bankFlow:'in'|'out'` — NEVER `account`/`accountType` (WS13 collision, point 2). The FULL `accountNo` is stored (the DP invoice must print it so the client can pay); every list/picker renders it masked (`•••• 1234`) via `BankAccounts.label()`.
+2. **Balance is DERIVED — no stored counter, nothing to drift.** Per-account balance = `openingBalance` (a cutover anchor, decision 3) + Σ tagged `bankFlow:'in'` − Σ `'out'` over ledger rows dated ≥ that account's `openingDate`, computed by ONE pure function (`BankAccounts.computeBalances`, Spec 2) over the already-cached full-ledger read (`ledgerForPeriod('all')`, config.js:397-404). No `FieldValue.increment` discipline, no drift-vs-derive safety net needed (the derive IS the value), no new composite index (client-side filter on a read Finance screens already perform). This applies the `arBalance` derive-don't-trust lesson (departments.js:12060-12061) from day one.
+3. **Going-forward-only tagging + cutover anchor; NO historical backfill — resolved writer-by-writer, not hand-waved.** All 15 money-writers are enumerated in Spec 3 with an explicit v1 action each: 11 get tagged in v1, 4 are explicitly non-cash/by-design-untagged. Historical rows stay untagged forever; correctness comes from the anchor — at go-live finance creates each account with `openingBalance` = the REAL balance that morning and `openingDate` = that day, so the derived balance is exact from day one without touching any historical row. `runLedgerBackfill`/`backfillLedgerFromJournals`/`backfillPayrollLedger` keep posting untagged (historical) rows — the anchor absorbs them (they predate `openingDate`).
+4. **Reconciliation v1 = manual mark-off, no statement import.** The new Bank Accounts screen (Spec 6) lists each account's tagged ledger rows with a per-row checkbox writing `reconciled:true, reconciledBy, reconciledAt` onto the ledger doc (permitted by the existing `ledger.update: canFinance()` rule — no rules change), and shows Book balance vs Reconciled balance side by side. CSV/OFX import + auto-match is explicitly deferred (v2); no new collection is needed for v1.
+5. **`sales_orders` stays one-shot; `job_projects` is the ONLY staged-payment surface.** The `SO-{id}` dupe-guard (departments.js:9544-9545) is KEPT. "Record Sale" = the initial collection only (typically the DP — it already arrayUnions into `job_projects.payments[]`, departments.js:9564); every later collection goes through `openProjectBillingModal`. The record modal gains a hint line saying so. No third payment path is built (the exact bug class the Risks section warns about).
+6. **The DP invoice is an enhanced MODE of the existing pair, not a new document type.** `openJobBillingInvoiceModal` gains `kind:'standard'|'downpayment'`; `buildBillingInvoiceHTML` renders two additional sections (Payment Schedule + structured Payment Instructions) whenever the invoice object carries them; `docTitle` flips to `'DOWNPAYMENT INVOICE'` for the DP kind. Letterhead integration is untouched — still the same 5th-caller `buildLetterhead` pattern.
+7. **`dpPercent` is STORED once on `job_projects`.** Set at Sales-Order creation via a new optional "Downpayment %" field in `openSalesOrderModal`, PREFILLED from the won quote's `payment.downPaymentMode` by fetching the quote doc directly (the `dataset` bag can't carry the nested object — point 6); editable later in the DP-invoice modal (which persists it back). The DP invoice computes amount = `dpPercent% × contract`, still editable per-invoice as an absolute override.
+8. **`balanceSchedule` is PERSISTED as structured data on `job_projects`** — `[{seq,label,dueDate|null,amount}]`, computed at DP-invoice generation by a new pure `window.buildBalanceSchedule()` in config.js (math re-derived from quote-builder-v2.html:1821-1878; that file stays untouched — it is iframe-isolated by design). Stored so future invoices/reminders/AR views can reference the committed schedule; regenerating a DP invoice overwrites it after a confirm.
+9. **The registry SUPERSEDES the quote's free-text `bankDetails` — it is NOT threaded.** Structured payment instructions come from the `bank_accounts` doc selected at invoice time, snapshotted onto the invoice (so a later account edit never rewrites an issued invoice). The only quote field threaded downstream is `payment.downPaymentMode` (as the dp% prefill, decision 7).
+10. **`bank_accounts` create/update = `isMoneyAdmin()` with a shape guard; delete = `isPresident()` in rules, client routed through `window.financeDelete`** (the finance_delete_requests precedent, point 12). Closing an account = `active:false` via a normal isMoneyAdmin edit (reversible ≠ destructive); editing an account number is an ordinary isMoneyAdmin edit but `logAudit`'d. President-approval routing for EDITS is rejected — disproportionate friction given the audit log + president-only delete; deletes (the destructive case) keep the approval flow.
+11. **`bank_accounts.read` = `canFinance()` only.** Matches `ledger.read`; every consumer (Record Sale, Project Billing, Disburse, CA approve, invoice generation, the registry screen, WS40's cash KPI — which reads the ledger anyway) already sits behind that gate. Non-finance staff never see account numbers; the "which account" answer they'd need lives on finance-only screens regardless.
+12. **`job_projects.update` IS tightened** with an `affectedKeys` money-guard: any write touching `payments/amountCollected/arBalance/invoices/dpPercent/balanceSchedule` now additionally requires `canFinance()`; all other keys (stage, timeline, documents, trackingToken, productionOrderIds, salesOrderId…) keep the existing gate, so Sales/Production/partner flows (`advanceProjectStage`, `transferOrderToProduction`, `ensureOrderTracking`, SO step-4 back-links) are provably unaffected. Exact diff in Spec 7.
+13. **`window.nextSerial('billing_invoice','INV')` becomes THE mint for ALL billing invoices** — standard AND downpayment, ONE series (BIR expects one sequential invoice series; a separate `DPINV-` counter would fragment it). Minted AFTER the confirm dialog so a cancelled dialog burns no serial. The per-project array-length scheme (departments.js:12334, 12337) is retired; already-issued `INV-YYYYMMDD-###` numbers stand as-is (numbers are opaque strings to every reader — grep-confirmed nothing parses them).
+14. **`method` stays as its own axis; `bankAccountId`/`bankAccountName` are added ALONGSIDE it.** "How the client paid" (client-facing vocabulary: Bank Transfer/GCash/Cash/Cheque) and "which of OUR accounts it hit" (internal cash location) co-vary but are different facts; both are stored on ledger rows and payment records. No existing `paymentMethod`/`method` field is renamed or removed.
+
+**Scoping / sequencing:** depends on **WS13** (COA — Spec 2c adds one asset line `'Advances to Employees'` + legacy-map entries; the new field family deliberately never reuses `account`/`accountType`); **WS14** (letterhead — no letterhead.js changes; `nextSerial` merely gets its first caller); **WS19** (all new gates reuse `isMoneyAdmin()`/`canFinance()`; the job_projects tightening extends WS19's direction); **WS20/21** (the Disburse edit is parameter-plumbing only — no amount or leg logic changes; ‼️ **verify the `payroll-compute-existing-bug` memory's live ReferenceError (flagged in PR#2, 2026-07-09) is fixed BEFORE shipping the Disburse change, and do NOT bundle that bug fix into this workstream's commit**). No contact with WS25/26. `quote-builder-v2.html` untouched.
+
+**WS40 HANDOFF — the cash-position figure (WS40's Fable pass should build against this):** once WS36 ships, "cash position" = `await window.BankAccounts.cashPosition()` → `{ total, perAccount }`, where `total` = Σ over ACTIVE registry accounts of (`openingBalance` + tagged inflows − tagged outflows since that account's `openingDate`), derived live from the cached full-ledger read. It is a point-in-time BALANCE (exact from cutover day), not a period flow. WS40 renders `total` as the Cash Position KPI with per-account drill-down from `perAccount`, and uses **registry-empty as the feature flag**: `(await window.BankAccounts.list()).length === 0` → show WS40's option-(b) placeholder card ("wire in once accounts are registered"); otherwise show the real figure and do NOT fall back to any "Net Cash (period)" flow proxy. Known, accepted residual gap to label in fine print: statutory-payable remittances (SSS/PhilHealth/Pag-IBIG/WHT actually paid out to agencies) have NO recording flow anywhere in the app today, so they are invisible to cash position until WS39 builds one — every cash movement the app DOES record is tagged in v1 (Spec 3).
+
+---
+
+### Spec 1 — Data shapes (annotated literals)
+
+```js
+// bank_accounts/{autoId}  — NEW top-level collection. Master data ONLY — no balance
+// field exists here (balances are derived, decision 2), so nothing can drift.
+{ nickname: 'BDO Checking — Main',   // string, REQUIRED — display name (escHtml on every render)
+  type: 'bank',                      // 'bank' | 'ewallet' | 'cash'  (petty-cash box = 'cash')
+  bankName: 'BDO',                   // string ('' for type:'cash'; 'GCash' for the wallet)
+  accountName: 'NEILBARRO STEEL & METAL FABRICATION SERVICES', // registered holder — prints on invoices
+  accountNo: '001234567890',         // string, FULL number (invoice needs it); '' for type:'cash'. UI masks to last 4.
+  branch: 'San Fernando, La Union',  // string, optional
+  currency: 'PHP',                   // fixed 'PHP' in v1
+  openingBalance: 145230.55,         // number — REAL balance at start of openingDate (the cutover anchor)
+  openingDate: '2026-07-15',         // YYYY-MM-DD via bizDate() — tagged rows dated BEFORE this are ignored for this account
+  active: true,                      // false = closed: hidden from pickers, kept forever (records-forever directive)
+  isDefault: false,                  // at most one true — preselected in pickers; auto-used by the WPAY poster (Spec 4h)
+  sortOrder: 1, notes: '',
+  createdBy, createdByName, createdAt, updatedAt }   // uid / string / serverTimestamp ×2
+
+// NEW fields on ledger rows (ADDITIVE — only present on cash-tagged rows; all
+// existing fields untouched; field names chosen to dodge WS13's account/accountType):
+{ bankAccountId: '<bank_accounts docId>',            // absent entirely on untagged/non-cash rows
+  bankAccountName: 'BDO Checking — Main (•••• 7890)',// denormalized label snapshot (render without a join)
+  bankFlow: 'in' | 'out',                            // explicit direction — NEVER derived from type/accountType algebra
+  reconciled?: true, reconciledBy?: '<uid>', reconciledAt?: Timestamp }  // Spec 6 mark-off
+
+// job_projects/{id} — NEW fields (additive):
+{ dpPercent: 40,                     // number|null — set at SO creation (Spec 4c), editable in the DP-invoice modal
+  balanceSchedule: [                 // null until a DP invoice is generated (Spec 5); overwritten on regenerate
+    { seq:1, label:'Progress payment 1 of 3', dueDate:'2026-08-17'|null, amount:100000 } ] | null }
+// job_projects.payments[] entries gain: bankAccountId, bankAccountName (both nullable)
+// job_projects.invoices[] entries gain: kind:'standard'|'downpayment', dpPercent?, schedule?, bank?  (Spec 5 sample)
+
+// sales_orders/{id} — recorded update (Spec 4a) gains: bankAccountId, bankAccountName (nullable)
+// cash_advances/{id} — approve (Spec 4e) gains: bankAccountId, bankAccountName (nullable)
+// pay_runs/{month}  — disburse flip (Spec 4d) gains: disbursedFrom, disbursedFromName (nullable)
+//   (safe: the rules state machine, firestore.rules:482-503, validates state TRANSITIONS, not field lists — re-verified)
+// cash_receipt_journal / cash_disbursement_journal docs gain: bankAccountId, bankAccountName (posters copy them to ledger)
+```
+
+### Spec 2 — `window.BankAccounts` service + schedule builder + COA addition (js/config.js)
+
+**2a — service.** Insert immediately after `window.ledgerSince` (config.js:411). `escHtml` (modules.js) is referenced only at call time — every caller runs post-load, so no load-order guard is needed.
+
+```js
+// ── Bank accounts registry (v12 WS36) ──────────────────────────────────────
+// Balances are DERIVED (opening anchor + tagged ledger flows) — never stored.
+// Field family: bankAccountId/bankAccountName/bankFlow — NEVER 'account'/
+// 'accountType' (those are WS13 chart-of-accounts fields on every ledger row).
+window.BankAccounts = {
+  async list({ activeOnly = true } = {}) {
+    const snap = await dbCachedGet('bank_accounts',
+      () => db.collection('bank_accounts').get().catch(() => ({ docs: [] })), 60000);
+    const all = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .sort((a,b) => (a.sortOrder||0)-(b.sortOrder||0) || (a.nickname||'').localeCompare(b.nickname||''));
+    return activeOnly ? all.filter(a => a.active !== false) : all;
+  },
+  invalidate() { if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('bank_accounts'); },
+  label(a) {                                   // 'BDO Checking — Main (•••• 7890)' — masked, safe for lists
+    if (!a) return '';
+    const tail = (a.accountNo||'').replace(/\D/g,'').slice(-4);
+    return (a.nickname || a.bankName || '') + (tail ? ` (•••• ${tail})` : '');
+  },
+  async optionsHTML(selectedId) {              // <option> set for pickers; preselects selectedId, else isDefault
+    const list = await this.list();
+    const def = selectedId || (list.find(a => a.isDefault) || {}).id || '';
+    return ['<option value="">— no account —</option>']
+      .concat(list.map(a => `<option value="${escHtml(a.id)}" ${a.id===def?'selected':''}>${escHtml(this.label(a))}</option>`))
+      .join('');
+  },
+  async pick(id) {                             // picked id → the write-ready pair (null-safe)
+    if (!id) return { bankAccountId: null, bankAccountName: null };
+    const a = (await this.list({ activeOnly: false })).find(x => x.id === id);
+    return { bankAccountId: id, bankAccountName: a ? this.label(a) : null };
+  },
+  tag(acct, flow) {                            // spread into a ledger write; {} when untagged (keys OMITTED, not null)
+    return (acct && acct.bankAccountId)
+      ? { bankAccountId: acct.bankAccountId, bankAccountName: acct.bankAccountName || null, bankFlow: flow }
+      : {};
+  },
+  // DERIVED balances (decision 2). rows = ledger doc datas. Pure — no reads.
+  computeBalances(accounts, rows, { reconciledOnly = false, asOf = null } = {}) {
+    const out = {};
+    accounts.forEach(a => { out[a.id] = { account: a, balance: +(a.openingBalance||0), in: 0, out: 0 }; });
+    rows.forEach(r => {
+      if (!r || !r.bankAccountId || !out[r.bankAccountId]) return;
+      const acc = out[r.bankAccountId].account;
+      if (r.date && acc.openingDate && r.date < acc.openingDate) return;  // pre-anchor rows excluded
+      if (asOf && r.date && r.date > asOf) return;
+      if (reconciledOnly && !r.reconciled) return;
+      const amt = +(r.amount||0);
+      if (r.bankFlow === 'in')  { out[r.bankAccountId].balance += amt; out[r.bankAccountId].in  += amt; }
+      if (r.bankFlow === 'out') { out[r.bankAccountId].balance -= amt; out[r.bankAccountId].out += amt; }
+    });
+    return out;
+  },
+  // WS40 reads THIS (see handoff note above).
+  async cashPosition() {
+    const [accounts, snap] = await Promise.all([ this.list(), window.ledgerForPeriod('all') ]);
+    const per = this.computeBalances(accounts, snap.docs.map(d => d.data()));
+    return { total: Object.values(per).reduce((s,x) => s + x.balance, 0), perAccount: per };
+  }
+};
+```
+
+**2b — pure schedule builder** (config.js, right after 2a). Manila-safe: dates built by string parts (the leave-spec T12:00:00 pattern), never `toISOString()` on a raw now.
+
+```js
+// Ported from quote-builder-v2.html:1821-1878 (that file is iframe-isolated by
+// design — math re-derived here, not imported). Returns the POST-DP schedule.
+window.buildBalanceSchedule = function(contract, dpAmount, balMode, interestRate, invoiceDate, completionDate) {
+  const bal = Math.max(0, (+contract||0) - (+dpAmount||0));
+  if (bal <= 0) return [];
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const addDays   = (s,n) => { const d = new Date(s+'T12:00:00'); d.setDate(d.getDate()+n);   return iso(d); };
+  const addMonths = (s,n) => { const d = new Date(s+'T12:00:00'); d.setMonth(d.getMonth()+n); return iso(d); };
+  if (balMode === 'lump')
+    return [{ seq:1, label:'Balance — due upon completion', dueDate: completionDate||null, amount:+bal.toFixed(2) }];
+  if (/^stagger[345]$/.test(balMode)) {
+    const n = +balMode.replace('stagger',''), per = +(bal/n).toFixed(2), out = [];
+    const span = (invoiceDate && completionDate)
+      ? Math.max(0, Math.round((new Date(completionDate+'T12:00:00') - new Date(invoiceDate+'T12:00:00'))/86400000)) : 0;
+    for (let i=1;i<=n;i++) out.push({ seq:i, label:`Progress payment ${i} of ${n}`,
+      dueDate: span ? addDays(invoiceDate, Math.round(span*i/n)) : null,
+      amount: i===n ? +(bal - per*(n-1)).toFixed(2) : per });          // last row absorbs rounding
+    return out;
+  }
+  if (/^install(3|6|9|12)$/.test(balMode)) {
+    const m = +balMode.replace('install',''), r = (+interestRate||0)/100/12;
+    const monthly = r > 0 ? bal*r/(1-Math.pow(1+r,-m)) : bal/m, out = [];
+    for (let i=1;i<=m;i++) out.push({ seq:i,
+      label:`Installment ${i} of ${m}${r>0?` (@ ${interestRate}% p.a.)`:''}`,
+      dueDate: invoiceDate ? addMonths(invoiceDate, i) : null, amount:+monthly.toFixed(2) });
+    return out;
+  }
+  return [{ seq:1, label:'Balance', dueDate:null, amount:+bal.toFixed(2) }];
+};
+```
+
+**2c — COA additions (config.js:652-676, before→after fragments).** Needed by the CA row (4e) and the settlement legs (4g).
+
+```js
+// BEFORE (config.js:658)
+  asset:     ['Cash', 'Accounts Receivable', 'Inventory'],
+// AFTER
+  asset:     ['Cash', 'Accounts Receivable', 'Inventory', 'Advances to Employees'],
+
+// COA_LEGACY_MAP — ADD three entries (rows always carry accountType, these are the safety fallback):
+  'Cash Advance':'asset', 'A/R Collection':'asset', 'A/P Settlement':'liability',
+```
+
+### Spec 3 — Blast-radius retrofit: EVERY money-writer, one decision each
+
+This is the resolution of open decision 3 — nothing below is left for the implementer to discover.
+
+| # | Writer | Anchor | Cash? | v1 action |
+|---|--------|--------|-------|-----------|
+| 1 | Record Sale `SO-` credit | departments.js:9549 (`openRecordSaleModal`) | in | REQUIRED picker `rs-bankacct` → tag ledger row + `payments[]` entry + `sales_orders` doc (Spec 4a) |
+| 2 | Project billing `PROJ-` credit | departments.js:12293 (`openProjectBillingModal`) | in | REQUIRED picker `pb-bankacct` → tag ledger row + payment record (Spec 4b) |
+| 3 | Sales-order create | departments.js:9306-9342 | no ledger write | NO picker (cash books at Record Sale, decision 5); gains the `dpPercent` field only (Spec 4c) |
+| 4 | Payroll Disburse `NETPAY-{month}` | departments.js:2623-2628 | out | picker in a new disburse modal (replaces the confirm at 3189-3203) → tag the NETPAY leg + `pay_runs.disbursedFrom` (Spec 4d) |
+| 5 | Payroll `PAY-`/`-ER` debits + `SSSPAY-/PHPAY-/HDMFPAY-/WHTPAY-` credits | departments.js:2590-2622 | **NON-CASH** | NEVER tagged — expense recognition + agency accruals; recording the actual remittance is WS39's flow (does not exist yet) |
+| 6 | Cash-advance approval | config.js:1008-1034 (`CashAdvance.approve`) | out | picker in `openApproveModal` → NEW idempotent `CA-{id}` asset ledger row + fields on the CA doc + delete-cascade handling (Spec 4e) |
+| 7 | Purchase disbursement | departments.js:13547-13633 | out | picker `rec-bank` → fields on the CDJ doc; `postCDJToLedger` carries them + new `-AP` leg (Spec 4f/4g) |
+| 8 | CRJ manual entry | departments.js:3859-3907 | in | picker `crj-bank` → fields on the CRJ doc; `postCRJToLedger` carries them + new `-AR` leg (Spec 4g) |
+| 9 | CDJ manual entry | departments.js:3972-4030 | out | picker `cdj-bank` → same as #7 (Spec 4g) |
+| 10 | Expense approval → `EXP-` debit | departments.js:1660-1675 + 1434-1455 | out | one-field `promptBankAccount()` at approve; `postExpenseToLedger(expId, e, acct)` gains an optional 3rd param (Spec 4h) |
+| 11 | `resyncLedgerForSource` | departments.js:1527-1569 | — | carries the tag through edits; syncs the new `-AR`/`-AP` legs (Spec 4g) |
+| 12 | Design-project payment `DPROJ-` | departments.js:7042-7097 | in | OPTIONAL picker `pay-bank` in the mini-form (poster is already best-effort) (Spec 4i) |
+| 13 | Worker-payslip Submit `WPAY-{id}` | departments.js:4779-4798 | out | auto-tag with the registry's `isDefault` account (runs inside the payslips modal — no room for a second modal); re-taggable from the Bank Accounts screen (Spec 4h) |
+| 14 | `consumeProductionMaterials` `POCOS-`/`-INV` | (WS13 contra-legs) | **NON-CASH** | NEVER tagged — inventory→COS reclassification |
+| 15 | Ledger backfills | departments.js:1592-1602, `runLedgerBackfill` 1644 | historical | UNTAGGED by design — the opening-balance anchor covers everything pre-cutover |
+
+Universal picker rule: when the registry has ≥1 active account, the REQUIRED pickers (#1, #2, #4, #7, #9) block save with an inline error if unselected; when the registry is EMPTY (pre-seed), every writer proceeds untagged exactly as today — the feature is inert until accounts exist.
+
+### Spec 4 — Function-level before/after diffs
+
+**4a — `openRecordSaleModal` (departments.js:9467-9579).**
+```js
+// BEFORE (9467):
+function openRecordSaleModal(o, container){
+// AFTER:
+async function openRecordSaleModal(o, container){
+  const bankOpts = await window.BankAccounts.optionsHTML(o.bankAccountId);
+```
+Insert AFTER the Method `form-row` (below line 9490) — plus the decision-5 hint:
+```html
+    <div class="form-group"><label>Deposited to (company account)</label>
+      <select id="rs-bankacct" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Which company account received the cash — feeds the Bank Accounts balance. Further collections for this job are recorded on the linked Project (Projects → 💵 Record Payment).</div>
+    </div>
+```
+In the save handler, after the `vatSplit` destructure (9535) and before `saveBtn.disabled=true` (9539):
+```js
+    const acctSel = document.getElementById('rs-bankacct').value;
+    if (amount > 0 && !acctSel && (await window.BankAccounts.list()).length) {
+      err.textContent = 'Select the company account that received this payment.'; err.classList.remove('hidden'); return;
+    }
+    const acct = await window.BankAccounts.pick(acctSel);
+```
+Then three one-line extensions: the ledger `add` object (9549) gains `, ...window.BankAccounts.tag(acct,'in')`; the `sales_orders` update (9554) gains `, bankAccountId: acct.bankAccountId||null, bankAccountName: acct.bankAccountName||null`; the `payments` arrayUnion object (9564) gains the same two fields.
+
+**4b — `openProjectBillingModal` (departments.js:12238-12308).** Same pattern: `function` → `async function` with `const bankOpts = await window.BankAccounts.optionsHTML();` at top; add the same `pb-bankacct` form-group after the VAT/Method form-row (12254); in the save handler after the `vatSplit` destructure (12281), the same required-picker guard (`entered>0` always here) + `const acct = await window.BankAccounts.pick(...)`; the ledger `add` (12293) gains `, ...window.BankAccounts.tag(acct,'in')`; the `payment` object (12296) gains `bankAccountId: acct.bankAccountId||null, bankAccountName: acct.bankAccountName||null`.
+
+**4c — `openSalesOrderModal` (departments.js:9306) + `createJobProject` (12014-12040) — the dp% thread.**
+After `const total = parseFloat(d.total)||0;` (9307):
+```js
+  // v12 WS36 — the quote's payment terms can't ride the dataset bag (nested object);
+  // fetch the quote doc directly to prefill the DP%. Best-effort — never blocks the modal.
+  let quotePay = null;
+  try { const qs = await db.collection(d.co==='BK'?'bk_quotes':'bs_quotes').doc(d.id).get();
+        if (qs.exists) quotePay = qs.data().payment || null; } catch(_) {}
+  const dpPrefill = quotePay
+    ? (quotePay.downPaymentMode === 'custom'
+        ? (total > 0 ? +(100*(quotePay.downPayment||0)/total).toFixed(1) : '')
+        : (parseFloat(quotePay.downPaymentMode) || ''))
+    : '';
+```
+Add after the Contract/Payment `form-row` (9314):
+```html
+    <div class="form-group"><label>Downpayment % of contract (optional)</label>
+      <input id="so-dp-pct" type="number" min="0" max="100" step="0.5" value="${dpPrefill}" inputmode="decimal" placeholder="e.g. 40"/>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Prefilled from the quote's payment terms — drives the Downpayment Invoice on the project.</div>
+    </div>
+```
+In the save handler (after 9327): `const dpPercent = Math.max(0, Math.min(100, parseFloat(document.getElementById('so-dp-pct').value)||0)) || null;` and change 9332 to `const proj = await createJobProject({ ...d, total:contract, dpPercent });`. In `createJobProject`, extend the `add` object (after `capital:0,` on 12029): `dpPercent: d.dpPercent || null, balanceSchedule: null,`.
+
+**4d — `disbursePayRun` (departments.js:2512-2644) + its button handler (3189-3203).** ‼️ Confirm the payroll-compute bug (memory) is resolved first; this change is additive plumbing only.
+```js
+// BEFORE (2512):
+window.disbursePayRun = async function(month) {
+// AFTER:
+window.disbursePayRun = async function(month, opts = {}) {
+  const bankAcct = opts.bankAccount || { bankAccountId: null, bankAccountName: null };
+```
+The `NETPAY-{month}` entry object (2623-2628) gains `, ...window.BankAccounts.tag(bankAcct,'out')`. The terminal state flip (2639-2642) gains `disbursedFrom: bankAcct.bankAccountId || null, disbursedFromName: bankAcct.bankAccountName || null,`. All other legs untouched (Spec 3 #5).
+Button handler — replace the body of the `pr-disburse-btn` listener (3189-3203) with an account-aware modal:
+```js
+    document.getElementById('pr-disburse-btn')?.addEventListener('click', async ()=>{
+      const chk = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+      const data2 = (chk && chk.exists) ? chk.data() : {};
+      const bankOpts = await window.BankAccounts.optionsHTML();
+      openModal(`Disburse ${month} payroll`, `
+        <p style="font-size:13px;margin-bottom:10px">₱${fmt(data2.totalNet||0)} to ${data2.employeeCount||0} staff. This deducts cash advances, posts the ledger, and notifies employees. <strong>This cannot be undone.</strong></p>
+        <div class="form-group"><label>Paid from (company account)</label>
+          <select id="pr-bankacct" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
+      `, `<button class="btn-danger" id="pr-disburse-go">Disburse</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+      document.getElementById('pr-disburse-go').addEventListener('click', async ()=>{
+        const sel = document.getElementById('pr-bankacct').value;
+        if (!sel && (await window.BankAccounts.list()).length) { Notifs.showToast('Select the paying account.','error'); return; }
+        const acct = await window.BankAccounts.pick(sel);
+        closeModal();
+        const dbtn = document.getElementById('pr-disburse-btn');
+        if (dbtn) { dbtn.disabled = true; dbtn.textContent = 'Disbursing…'; }
+        try { await window.disbursePayRun(month, { bankAccount: acct }); Notifs.showToast('Payroll disbursed!'); }
+        catch (err) { Notifs.showToast(err.message || 'Could not disburse payroll.', 'error'); }
+        loadPayRunStrip(month);
+        loadFinanceContent(currentUser, currentRole, 'Payroll');
+      });
+    });
+```
+
+**4e — `CashAdvance.approve` (config.js:1008-1034) + `openApproveModal` (1036-…) + cascade.**
+```js
+// BEFORE (1008):
+  async approve(id, { interestPct = null } = {}) {
+// AFTER:
+  async approve(id, { interestPct = null, bankAccount = null } = {}) {
+```
+Inside the transaction's `t.update` (1021-1025) add `bankAccountId: (bankAccount && bankAccount.bankAccountId) || null, bankAccountName: (bankAccount && bankAccount.bankAccountName) || null,`; extend the `result` capture (1026) with `userName: cur.userName || ''`. Then AFTER the transaction, before the notification block (1029), insert the idempotent cash-release mirror — this is the NEW ledger row that finally makes CA disbursement visible to the books (asset debit → `ledgerKind()==='asset'` keeps it out of the P&L):
+```js
+    // v12 WS36 — mirror the cash release into the ledger (idempotent, keyed CA-<id>).
+    // Best-effort: an approver without ledger-write rights (or a closed period —
+    // ledgerPeriodOpen() is enforced server-side) must not break the approval itself.
+    if (result) { try {
+      const lref = `CA-${id}`;
+      const dupe = await db.collection('ledger').where('refNumber','==',lref).limit(1).get().catch(()=>({docs:[]}));
+      if (!dupe.docs.length) {
+        await db.collection('ledger').add({
+          date: (window.bizDate ? window.bizDate() : today()), type:'debit',
+          accountType:'asset', account:'Advances to Employees',
+          description:`Cash advance released — ${result.userName}`,
+          amount: result.amount, category:'Cash Advance', refNumber: lref, source:'Cash Advance',
+          ...window.BankAccounts.tag(bankAccount, 'out'),
+          addedBy: window.currentUser?.uid || null,
+          addedByName: (window.userProfile && window.userProfile.displayName) || (window.currentUser && window.currentUser.email) || '',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+      }
+    } catch(e) { console.warn('[CA ledger]', e?.message || e); } }
+```
+`openApproveModal`: make the `.then(snap => …)` callback `async`, compute `const bankOpts = await window.BankAccounts.optionsHTML();`, add above the interest-rate form-group:
+```html
+        <div class="form-group"><label>Release from (company account)</label>
+          <select id="ca-appr-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
+```
+and in the confirm handler pass it through: `const acct = await window.BankAccounts.pick(document.getElementById('ca-appr-bank').value);` → `await window.CashAdvance.approve(id, { interestPct: pct, bankAccount: acct });`. Any residual direct `.approve(id)` caller stays valid (posts an untagged CA row — nulls, not errors).
+`financeDeleteCascade` (departments.js:141-186): add a branch before the CRJ/CDJ/expenses branch so deleting a CA also removes its mirror:
+```js
+  } else if (collection === 'cash_advances') {
+    const ls = await db.collection('ledger').where('refNumber','==',`CA-${docId}`).limit(1).get().catch(()=>({docs:[]}));
+    if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+```
+
+**4f — `recordPurchaseDisbursement` (departments.js:13547-13633).** `function` → `async function`; `const bankOpts = await window.BankAccounts.optionsHTML();` at top; add a `rec-bank` form-group (same style as 4a's) after the Amount/Debit-Account form-row (13565). In the save handler, before building `cdjData`: required-picker guard (registry non-empty) + `const acct = await window.BankAccounts.pick(document.getElementById('rec-bank').value);`; `cdjData` gains `bankAccountId: acct.bankAccountId || null, bankAccountName: acct.bankAccountName || null,`. The ledger side is handled by 4g.
+
+**4g — the three posters + settlement legs + resync (departments.js:1434-1573).** The journal docs now carry the tag; the posters copy it onto every ledger row they mint, and the two cash journals additionally mint NON-P&L settlement legs so A/R collections and A/P settlements — real cash movements that today post NO ledger row (departments.js:1465, 1496) — finally reach cash position. Precedent: the WS13 `POCOS-…-INV` asset contra-leg; `ledgerKind()` (config.js:678) classifies asset/liability rows out of the P&L automatically.
+
+- `postExpenseToLedger` (1434): signature → `async function postExpenseToLedger(expId, e, acct)`; the `add` object gains `, ...window.BankAccounts.tag(acct, 'out')`. Callers at 1564 (resync) and 1592 (backfill) pass nothing → untagged, correct.
+- `postCRJToLedger` (1460-1482) — REPLACE with:
+```js
+async function postCRJToLedger(crjId, e) {
+  const date = e.date || today();
+  const income = crjLedgerIncome(e);
+  const ar = e.creditAR || 0;
+  if (income <= 0 && ar <= 0) return false;
+  await window.assertPeriodOpen(date);
+  const tag = e.bankAccountId ? { bankAccountId: e.bankAccountId, bankAccountName: e.bankAccountName || null, bankFlow: 'in' } : {};
+  const who = { addedBy: window.currentUser?.uid || null,
+                addedByName: window.userProfile?.displayName || window.currentUser?.email || '' };
+  let posted = false;
+  if (income > 0) {                                       // new income — unchanged logic, now tagged
+    const ref = `CRJ-${crjId}`;
+    const existing = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
+    if (!existing.docs.length) {
+      const category = (e.creditSalesRevenue||0) >= (e.creditSundryAmount||0) ? 'Sales Revenue' : (e.creditSundryAcct||'Other Income');
+      await db.collection('ledger').add({ date, type:'credit', accountType:'income', account:category,
+        description:`Cash receipt — ${e.customer||''}${e.reference?` (${e.reference})`:''}`,
+        amount:income, category, refNumber:ref, source:'Cash Receipt', ...tag, ...who,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      posted = true;
+    }
+  }
+  if (ar > 0) {                                           // v12 WS36 — A/R-collection leg (asset credit, non-P&L)
+    const refAR = `CRJ-${crjId}-AR`;
+    const exAR = await db.collection('ledger').where('refNumber','==',refAR).limit(1).get().catch(()=>({docs:[]}));
+    if (!exAR.docs.length) {
+      await db.collection('ledger').add({ date, type:'credit', accountType:'asset', account:'Accounts Receivable',
+        description:`A/R collection — ${e.customer||''}${e.reference?` (${e.reference})`:''}`,
+        amount:ar, category:'A/R Collection', refNumber:refAR, source:'Cash Receipt', ...tag, ...who,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      posted = true;
+    }
+  }
+  if (posted && typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+  return posted;
+}
+```
+- `postCDJToLedger` (1491-1521) — same restructure, mirrored: keep the existing expense/asset main row exactly as-is but add `...tag` with `bankFlow:'out'` (tag built from `e.bankAccountId` as above); relax the early return to `if (expense <= 0 && !(e.debitAP > 0)) return false;`; append an A/P-settlement leg when `e.debitAP > 0`: ref `` `CDJ-${cdjId}-AP` ``, `{ date, type:'debit', accountType:'liability', account:'Accounts Payable', description:`A/P settlement — ${e.payee||''}…`, amount:e.debitAP, category:'A/P Settlement', refNumber, source:'Cash Disbursement', ...tag, ...who, createdAt }` with the same dupe-check pattern.
+- CRJ/CDJ entry forms: make the `add-crj-btn` (3859) / `add-cdj-btn` (3972) click callbacks `async`, fetch `bankOpts`, add a `crj-bank` / `cdj-bank` form-group (labels "Received into (company account)" / "Paid from (company account)"), and add to `crjData` (3885) / `cdjData` (4007): `bankAccountId: <picked>||null, bankAccountName: <picked label>||null` via `BankAccounts.pick`. `financeEditModal` field lists (3913-3923, CDJ equivalent) are NOT extended in v1 — an edit keeps the original tag; `resyncLedgerForSource` re-copies it.
+- `resyncLedgerForSource` (1527-1569): after `const patch = { … }` (1561) add:
+```js
+    if (e.bankAccountId) { patch.bankAccountId = e.bankAccountId; patch.bankAccountName = e.bankAccountName || null;
+      patch.bankFlow = (collection === 'cash_receipt_journal') ? 'in' : 'out'; }
+```
+and after the main-row sync (1566), keep the settlement legs in step using a small shared helper placed next to `_deleteLedgerByRef` (1570):
+```js
+async function _syncLedgerLeg(ref, amount, mkEntry) {   // update / create / delete a keyed leg
+  const ls = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
+  if (amount > 0) { if (ls.docs.length) await ls.docs[0].ref.update({ amount }); else await db.collection('ledger').add(mkEntry()); }
+  else if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
+}
+// in resyncLedgerForSource, after the existing main-row upsert:
+    if (collection === 'cash_receipt_journal')
+      await _syncLedgerLeg(`CRJ-${docId}-AR`, e.creditAR||0, () => ({ /* the 4g AR-leg literal */ }));
+    if (collection === 'cash_disbursement_journal')
+      await _syncLedgerLeg(`CDJ-${docId}-AP`, e.debitAP||0, () => ({ /* the 4g AP-leg literal */ }));
+```
+- `financeDeleteCascade` CRJ/CDJ/expenses branch (178-184): delete the legs too — replace the single-ref lookup with a loop over `` [`${prefix}-${docId}`, `${prefix}-${docId}-AR`, `${prefix}-${docId}-AP`] ``.
+
+**4h — approve-style transitions with no form: expenses + worker payslips.** New helper in departments.js (near `promptBankAccount` usage, e.g. after `bindExpenseActions`):
+```js
+// v12 WS36 — one-field account prompt for approve-style transitions that post a
+// cash-out ledger row but have no form of their own. Registry empty → resolves
+// untagged WITHOUT prompting (feature inert pre-seed).
+async function promptBankAccount(title) {
+  const list = await window.BankAccounts.list();
+  if (!list.length) return { bankAccountId: null, bankAccountName: null };
+  const opts = await window.BankAccounts.optionsHTML();
+  return new Promise(resolve => {
+    openModal(title || 'Paid from which account?', `
+      <div class="form-group"><label>Paid from (company account)</label>
+        <select id="pba-sel" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${opts}</select></div>
+    `, `<button class="btn-primary" id="pba-ok">Confirm</button><button class="btn-secondary" id="pba-skip">Skip (untagged)</button>`);
+    document.getElementById('pba-ok').addEventListener('click', async () => {
+      const a = await window.BankAccounts.pick(document.getElementById('pba-sel').value); closeModal(); resolve(a); });
+    document.getElementById('pba-skip').addEventListener('click', () => { closeModal(); resolve({ bankAccountId:null, bankAccountName:null }); });
+  });
+}
+```
+- Expense approve (`bindExpenseActions`, 1660-1675): after the period check (1669), insert `const acct = await promptBankAccount('Expense paid from which account?');` and change 1671 to `if (e) await postExpenseToLedger(id, e, acct);` (the expense table is an in-page render — `openModal` is free here).
+- Worker-payslip Submit (4779-4798): runs INSIDE the payslips modal, so no second modal — auto-tag with the default account instead:
+```js
+          const _def  = (await window.BankAccounts.list()).find(a => a.isDefault) || null;
+          const _acct = await window.BankAccounts.pick(_def && _def.id);
+          const entry = { …existing fields unchanged…, ...window.BankAccounts.tag(_acct, 'out') };
+```
+Mis-tagged/untagged WPAY rows are correctable from the Bank Accounts drill-down's re-tag control (Spec 6).
+
+**4i — Design-project payment mini-form (7042-7097).** Make the `proj-payment-btn` click callback `async`, fetch `bankOpts`, add a `pay-bank` form-group (OPTIONAL — this poster is already best-effort) after the Method input (7046); in the save handler `const acct = await window.BankAccounts.pick(document.getElementById('pay-bank').value);`; the `DPROJ-` ledger `add` (7086-7094) gains `, ...window.BankAccounts.tag(acct, 'in')`. The `projects.payments[]` entry is unchanged (Design board keeps its own shape).
+
+### Spec 5 — Downpayment invoice: modal, builder, sample object, layout
+
+**5a — `openJobBillingInvoiceModal` (departments.js:12313-12375).** `function` → `async function`; `const bankOpts = await window.BankAccounts.optionsHTML();` at top. Insert AFTER the Bill-To form-group (12319):
+```html
+    <div class="form-row">
+      <div class="form-group"><label>Invoice Kind</label>
+        <select id="jinv-kind" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          <option value="standard">Standard collection</option>
+          <option value="downpayment">Downpayment (with balance schedule)</option></select></div>
+      <div class="form-group"><label>Deposit to (company account)</label>
+        <select id="jinv-bankacct" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
+    </div>
+    <div id="jinv-dp-wrap" style="display:none">
+      <div class="form-row">
+        <div class="form-group"><label>Downpayment % of contract</label>
+          <input id="jinv-dppct" type="number" min="0" max="100" step="0.5" value="${p.dpPercent||''}" inputmode="decimal" placeholder="e.g. 40"/></div>
+        <div class="form-group"><label>Balance mode</label>
+          <select id="jinv-balmode" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+            <option value="lump">Lump sum on completion</option>
+            <option value="stagger3">3 staggered progress payments</option><option value="stagger4">4 staggered</option><option value="stagger5">5 staggered</option>
+            <option value="install3">3-month installment</option><option value="install6">6-month installment</option>
+            <option value="install9">9-month installment</option><option value="install12">12-month installment</option></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" id="jinv-int-wrap" style="display:none"><label>Interest % p.a.</label><input id="jinv-interest" type="number" min="0" step="0.5" value="0" inputmode="decimal"/></div>
+        <div class="form-group"><label>Est. completion date</label><input id="jinv-complete" type="date"/></div>
+      </div>
+      <div id="jinv-sched-preview" style="font-size:12px;color:var(--text-muted);margin:4px 0 8px"></div>
+    </div>
+```
+Wiring (all inside the modal, before the generate handler): `jinv-kind` change toggles `#jinv-dp-wrap`; when switched to `downpayment` it sets `jinv-amt` = `+(contract*(pct/100)).toFixed(2)` and `jinv-desc` = `` `Downpayment (${pct}% of contract)` ``; `jinv-balmode` change toggles `#jinv-int-wrap` on `/^install/`; any change to `jinv-dppct/balmode/interest/complete/date/amt` re-renders the preview: `window.buildBalanceSchedule(contract, parseFloat(jinv-amt), balMode, interest, jinv-date, jinv-complete)` → `schedule.map(s => `${s.seq}. ${s.label} — ${s.dueDate||'TBD'} — ₱${fmt(s.amount)}`).join('<br>')`.
+Generate handler (12330-12374) — three changes:
+1. **Numbering (decision 13):** build `inv` WITHOUT `no`; move the `confirmDialog` (12352, message no longer includes the number: `` `Generate ${kind==='downpayment'?'downpayment':'billing'} invoice for ₱${fmt(amt)} (${escHtml(p.clientName||'')})?` ``) BEFORE minting; then `inv.no = await window.nextSerial('billing_invoice','INV');`. Delete the `seq` line (12334) and the old `no:` line (12337).
+2. **DP payload:** when `kind==='downpayment'` — `const pct = Math.max(0, Math.min(100, parseFloat(jinv-dppct)||0)); const schedule = window.buildBalanceSchedule(contract, amt, balMode, interest, inv.date, completeDate);` and extend `inv` with `kind, dpPercent:pct, schedule`; when standard, `kind:'standard'` only. Both kinds: `const acct = await window.BankAccounts.pick(jinv-bankacct);` and if picked, snapshot the full account onto the invoice: `inv.bank = { nickname, type, bankName, branch, accountName, accountNo }` (looked up from `BankAccounts.list({activeOnly:false})`).
+3. **Persistence (decisions 7/8):** inside the existing transaction's `tx.update` (12360-12365), when `kind==='downpayment'` also set `dpPercent: pct, balanceSchedule: schedule` (if `p.balanceSchedule` already exists, the confirm in step 1 gains the suffix `' This replaces the existing balance schedule.'`).
+
+**5b — `buildBillingInvoiceHTML` (departments.js:7654-…).** Title: `docTitle: inv.kind === 'downpayment' ? 'DOWNPAYMENT INVOICE' : 'BILLING INVOICE'` (7660) — same string in the non-letterhead fallback `.doc-title` (7725) and the `<title>`/export-bar labels. Insert between the "This Invoice" table (7755) and the Notes block (7757):
+```js
+  ${Array.isArray(inv.schedule) && inv.schedule.length ? `
+  <div class="section-header" style="margin-top:12px">Payment Schedule — Balance After Downpayment</div>
+  <table>
+    <thead><tr><th style="width:8%">#</th><th>Milestone</th><th style="width:22%">Due Date</th><th class="number-cell" style="width:20%">Amount</th></tr></thead>
+    <tbody>
+      ${inv.schedule.map(s=>`<tr><td>${s.seq}</td><td>${escHtml(s.label||'')}</td><td>${s.dueDate?fmtD(s.dueDate):'TBD'}</td><td class="number-cell">₱${f(s.amount)}</td></tr>`).join('')}
+      <tr class="muted-row"><td colspan="3" style="font-weight:700;text-align:right">Total balance after downpayment</td><td class="number-cell" style="font-weight:700">₱${f(inv.schedule.reduce((s,x)=>s+(+x.amount||0),0))}</td></tr>
+    </tbody>
+  </table>` : ''}
+  ${inv.bank ? `
+  <div class="section-header" style="margin-top:12px">Payment Instructions</div>
+  <div class="notes-box">
+    <strong>${inv.bank.type==='ewallet'?'E-wallet':'Deposit to'}:</strong> ${escHtml(inv.bank.bankName||'')}${inv.bank.branch?' — '+escHtml(inv.bank.branch):''}<br/>
+    <strong>Account Name:</strong> ${escHtml(inv.bank.accountName||'')}<br/>
+    <strong>Account No.:</strong> ${escHtml(inv.bank.accountNo||'')}<br/>
+    Please send the deposit slip / transfer confirmation to ${escHtml((window.BRAND&&window.BRAND.legal.email)||'')} referencing invoice ${escHtml(inv.no||'')}.
+  </div>` : ''}
+```
+Old invoices (no `kind/schedule/bank`) render byte-identically — both blocks are conditional.
+
+**5c — sample invoice object (build/test against THIS):**
+```js
+{ no:'INV-2026-000124', kind:'downpayment', date:'2026-07-18', due:'2026-07-25',
+  billTo:'ACME Foods Inc.', desc:'Downpayment (40% of contract)', amount:200000, dpPercent:40,
+  schedule:[
+    { seq:1, label:'Progress payment 1 of 3', dueDate:'2026-08-17', amount:100000 },
+    { seq:2, label:'Progress payment 2 of 3', dueDate:'2026-09-16', amount:100000 },
+    { seq:3, label:'Progress payment 3 of 3', dueDate:'2026-10-16', amount:100000 } ],
+  bank:{ nickname:'BDO Checking — Main', type:'bank', bankName:'BDO', branch:'San Fernando, La Union',
+         accountName:'NEILBARRO STEEL & METAL FABRICATION SERVICES', accountNo:'001234567890' },
+  notes:'Kindly settle the amount due on or before the due date.',
+  contractAmount:500000, paidToDate:0, balanceBefore:500000,
+  projectName:'ACME Foods — BK-2026-071', projectNo:'JP-2607-014', issuedBy:'Neil Barro', createdAt:'2026-07-18' }
+```
+Rendered order (A4 page): letterhead header (`DOWNPAYMENT INVOICE`, BIR entity) → Bill-To / meta grid → **Account Summary** (Contract ₱500,000.00 / Less payments ₱0.00 / Outstanding ₱500,000.00) → **This Invoice** (Downpayment (40% of contract) ₱200,000.00 / AMOUNT DUE ₱200,000.00 / remaining after settlement ₱300,000.00) → **Payment Schedule** (3 rows + total ₱300,000.00) → **Payment Instructions** (structured BDO block) → **Notes** → letterhead footer/signatures.
+
+### Spec 6 — Bank Accounts screen (registry + reconciliation UI)
+
+- Tab: `finTabs` (departments.js:1999) gains `'Bank Accounts'` after `'Ledger'`; `loadFinanceContent` (2020) gains `case 'Bank Accounts': await window.renderBankAccounts(content); break;`.
+- `window.renderBankAccounts(container)` (new, departments.js, near the other Finance renderers) — follows the `renderSalesOrders` table pattern: KPI row (**Cash Position** = `cashPosition().total`, active-account count, unreconciled-row count); accounts table (nickname, type icon 🏦/📱/💵, masked `accountNo`, opening ₱ @ date, **Book balance**, **Reconciled balance** — both from `computeBalances`, one call with and one without `reconciledOnly`), `active` badge; header button `+ Add Account` and per-row `✎` / `🗑` — all three gated client-side to `['president','manager','finance'].includes(currentRole)` (matching the rules gate); `🗑` calls `window.financeDelete({ collection:'bank_accounts', docId, label:… })` (decision 10 — NEVER a direct delete).
+- Add/Edit modal: fields exactly per Spec 1 (nickname required; `openingBalance` number; `openingDate` default `bizDate()`; type select; `isDefault` checkbox — on save with it checked, loop the other docs and clear their `isDefault`). `escHtml` every rendered field; `BankAccounts.invalidate()` + re-render after any write; `logAudit('update','bank_account',id,{…})` on edits.
+- Drill-down (click a row): loads `ledgerForPeriod('all')`, filters `r.bankAccountId===id && r.date>=openingDate`, sorts by date, renders date / description / refNumber / signed amount / running balance, plus per-row: **reconcile checkbox** → `doc.ref.update({ reconciled: <bool>, reconciledBy: currentUser.uid, reconciledAt: firebase.firestore.FieldValue.serverTimestamp() })`, and a **re-tag select** (move a mis-tagged row: `doc.ref.update({ bankAccountId, bankAccountName })`) — both permitted by the existing `ledger.update: canFinance()` rule; `dbCacheInvalidate('ledger')` after each write.
+
+### Spec 7 — firestore.rules diffs (block-scoped, before→after)
+
+**7a — NEW `bank_accounts` block.** Insert immediately after the `finance_delete_requests` block (firestore.rules:900-907).
+```
+    // ── Bank accounts registry (v12 WS36) ──────────────
+    // Master data for the company's cash locations (bank / e-wallet / petty cash).
+    // Balances are DERIVED client-side (opening anchor + tagged ledger flows) — no
+    // balance field lives here, so nothing a buggy writer could drift. Reads are
+    // books-operators only (account numbers are sensitive); create/update is the
+    // money tier (matches payroll/pay_runs post-WS19); deletes are President-only —
+    // the client routes them through finance_delete_requests like every finance doc.
+    match /bank_accounts/{docId} {
+      allow read:   if isAuth() && canFinance();
+      allow create, update: if isAuth() && isMoneyAdmin()
+        && request.resource.data.get('nickname', '') is string
+        && request.resource.data.get('nickname', '') != ''
+        && request.resource.data.get('openingBalance', 0) is number
+        && request.resource.data.get('type', 'bank') in ['bank', 'ewallet', 'cash'];
+      allow delete: if isAuth() && isPresident();
+    }
+```
+
+**7b — `ledger` (firestore.rules:807-841): light `bankFlow` shape guard.** `.get(field,default)` so untagged rows and old clients pass (missing-field-throws memory).
+```
+// BEFORE (create head + update):
+      allow create: if isAuth() && ledgerDateOk() && ledgerPeriodOpen() && (
+      ...
+      allow update: if isAuth() && canFinance();
+// AFTER:
+      allow create: if isAuth() && ledgerDateOk() && ledgerPeriodOpen()
+        && request.resource.data.get('bankFlow', '') in ['', 'in', 'out'] && (
+      ...
+      allow update: if isAuth() && canFinance()
+        && request.resource.data.get('bankFlow', '') in ['', 'in', 'out'];
+```
+
+**7c — `job_projects` (firestore.rules:1036-1043): money-keys guard (decision 12).**
+```
+// BEFORE:
+      allow update: if isAuth() && (resource.data.createdBy == request.auth.uid || !isPartner());
+// AFTER:
+      // v12 WS36 — money keys need books access; stage/timeline/documents/tracking
+      // edits stay open to internal staff exactly as before (affectedKeys diff, so
+      // writes not touching money keys are unaffected).
+      allow update: if isAuth() && (resource.data.createdBy == request.auth.uid || !isPartner())
+        && ( !request.resource.data.diff(resource.data).affectedKeys().hasAny(
+               ['payments', 'amountCollected', 'arBalance', 'invoices', 'dpPercent', 'balanceSchedule'])
+             || canFinance() );
+```
+
+**7d — explicitly UNCHANGED:** `sales_orders` (update already `canFinance()`), `cash_advances` (approve-path update gate already covers the two new fields), `pay_runs` (state machine validates transitions, not keys — `disbursedFrom` rides the disburse flip), `payroll`, `_counters` (already `isFinanceOrAdmin()` write — covers the invoice mint), `ledger_entries`. No `firestore.indexes.json` change (decision 2 — no server-side query on `bankAccountId`).
+
+### Spec 8 — Migration / rollout checklist (ordered)
+
+1. **Deploy rules first** (7a-7c) via `~/.npm-global/bin/firebase deploy --only firestore:rules` — re-`git diff` against live immediately before (concurrent-session memory).
+2. **Verify the payroll-compute bug status** (memory: `payroll-compute-existing-bug`, PR#2 2026-07-09) BEFORE shipping 4d. If still broken, ship WS36 without waiting — 4d is additive — but do not bundle that bug's fix into this commit.
+3. **Ship the JS in one commit:** config.js (Spec 2a-2c), departments.js (Specs 3-6), `sw.js` `CACHE_VER` bump (manual, per CLAUDE.md; `APP_VERSION` auto-bumps). `node --check` each edited file; no build step.
+4. **Seed the registry (Neil/finance, the cutover step):** Finance → Bank Accounts → add every real account (BDO/GCash/petty cash…) with `openingBalance` = the actual balance THAT morning and `openingDate` = that day; mark exactly one `isDefault`. **NO historical backfill — by design** (decision 3): pre-cutover rows stay untagged; the anchors make the derived balances exact from day one.
+5. **Backups:** `bank_accounts` is auto-discovered by `scripts/monthly-backup.js` (point 13) — zero changes; no `OVERRIDES` entry needed (full JSON snapshot is right for master data).
+6. **From cutover:** finance uses the pickers everywhere (they hard-require selection once accounts exist, Spec 3); cash position is live on the Bank Accounts tab and via `BankAccounts.cashPosition()` for WS40.
+7. **Notify WS40** (its Fable pass runs after this): the handoff contract above — `cashPosition()`, registry-empty as the feature flag, the statutory-remittance fine-print gap.
+
+### Spec 9 — Manual test checklist (no automated suite)
+
+1. Registry: as finance, add "BDO Checking — Main" (`opening 100,000 @ today`, default) + "GCash" (`5,000`); list masks the number (`•••• 7890`); Cash Position KPI = 105,000. As a non-finance employee, the Bank Accounts tab is absent and a console read of `bank_accounts` is DENIED.
+2. Record Sale ₱56,000 (VAT-inclusive) picking BDO → ledger `SO-{id}` row carries `bankAccountId/bankAccountName/bankFlow:'in'`; `sales_orders` doc + `job_projects.payments[0]` carry the pair; BDO book balance = 156,000. Attempting to save with no account selected → inline error.
+3. Project billing ₱30,000 via GCash → `PROJ-{id}-{n}` tagged; GCash balance = 35,000; the payment entry in the project detail shows the account.
+4. Payroll: Verify a run → Disburse now opens the account modal; pick BDO → `NETPAY-{month}` tagged `'out'`, `pay_runs.disbursedFrom` set, per-employee `PAY-` rows UNTAGGED; BDO drops by exactly the NETPAY amount.
+5. CA: approve a ₱5,000 advance from GCash → `cash_advances` doc carries the pair; NEW ledger `CA-{id}` (asset, 'Advances to Employees') tagged `'out'`; P&L expense total UNCHANGED (asset row); GCash −5,000. Re-approve attempt → transaction throws 'no longer pending', no second row. President-delete the CA → `CA-{id}` row cascades away.
+6. CDJ entry: ₱11,200 material from BDO → `CDJ-{id}` tagged; CDJ with ONLY `debitAP` ₱8,000 → NO expense row, but `CDJ-{id}-AP` (liability debit) exists, tagged `'out'`, P&L unchanged, BDO −8,000. Edit the entry's amount → `resyncLedgerForSource` updates both rows. Delete it → both rows cascade.
+7. CRJ entry with ONLY `creditAR` ₱20,000 into BDO → no income row, `CRJ-{id}-AR` tagged `'in'`, BDO +20,000, P&L income unchanged.
+8. Expense approve → account prompt appears; pick BDO → `EXP-{id}` tagged. Worker-payslip Submit → `WPAY-{id}` auto-tagged to the default account (toast unchanged); re-tag it to GCash from the drill-down and watch both balances move.
+9. DP invoice: on a ₱500,000 project with `dpPercent:40`, generate a Downpayment invoice (stagger3, completion +90d, BDO selected) → number is `INV-2026-0001xx` (nextSerial; `_counters/billing_invoice` incremented); printable shows all sections per Spec 5c; `job_projects.dpPercent/balanceSchedule` persisted; cancel-at-confirm burns NO serial; regenerating warns about replacing the schedule. A pre-existing old invoice still renders identically (no schedule/bank blocks).
+10. Reconciliation: drill into BDO, tick two rows → Reconciled balance = opening + those two only; untick → reverts. Rules: as finance, ledger update with `bankFlow:'sideways'` → DENIED; as an internal non-finance employee, `job_projects.update` touching `stage` → ALLOWED, touching `payments` → DENIED.
 2. Is the running balance a STORED COUNTER (updated via `FieldValue.increment` at every tagged payment/disbursement, mirroring the `worker_profiles.caBalance` increment precedent at functions/index.js:163) or DERIVED on read by summing all ledger/CA/payroll rows tagged with that account's id? A derived balance can never drift but requires a full-collection scan or a new composite index; a stored counter is fast but needs the same discipline WS13 flagged for `arBalance` (point: "AR is DERIVED... so the KPI is always correct even if a project's stored arBalance drifted", departments.js:12060-12061) — does bank balance get the same derive-and-compare safety net, or is a single stored counter trusted outright?
 3. Does adding a bank-account dimension require retrofitting EVERY existing money-writer in one pass (ledger's 8+ post functions, `CashAdvance.approve`, payroll Disburse, `openProjectBillingModal`, `openSalesOrderModal`, `recordPurchaseDisbursement`) before shipping, or is `bankAccountId` optional/nullable on all writers going-forward-only, with historical rows staying unattributed (a "no default account" gap forever, or a one-time backfill to a single default/unknown account)? This is the single highest-cost scoping question in this brief (see Risks).
 4. What counts as "reconciliation" — is it a person manually marking individual ledger/payment rows as `reconciled:true/false` against a bank statement they're looking at externally, or does the system import/parse a bank statement (CSV/OFX) and auto-match rows? The mandate's "running reconciliation" phrase does not specify a mechanism.

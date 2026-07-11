@@ -345,86 +345,719 @@ above, not inferred):
   `document.write()` + `window.print()` convention with inlined CSS; a new dependency here would
   be inconsistent with the rest of the app and is very unlikely to be the right call.
 
-## Open decisions
+## DECIDED — architecture spec (Fable, 2026-07-10)
 
-Per the task framing, this workstream is the most concretely specified of the remaining Phase-4
-items — the field list, the type-color mapping, and the collection name are already given by the
-owner. What remains is HOW to wire it into the existing patterns above, not WHAT it is:
+### Resolved decisions (one line each)
 
-- [ ] **Nav placement.** New top-level entry in `renderSales`'s `salesTabs` array
-      (departments.js:5479, e.g. `'AEC'`) + a new `case` in `loadSalesContent`'s switch
-      (departments.js:5514-5572), OR a nested `salesSubNav()` view under an existing tab (e.g.
-      under `'Clients'`, given both are prospecting/CRM-flavored)? Also whether
-      `DEPARTMENTS['Sales'].subtabs` (config.js:137-140, confirmed stale/cosmetic-only per item 6
-      above) is worth updating for the Departments-admin preview grid, or left as-is like the
-      other five real Sales tabs already are.
-- [ ] **Write-role gate.** Mirror the tightened `canDept('Sales')` pattern
-      (`work_plans`/`marketing_plans`/`gov_philgeps`) or the looser legacy bare-`isAuth()`
-      pattern still live on `sales_clients`/`bs_clients`/`design_clients`? These three
-      structurally similar collections currently disagree with each other in this exact repo —
-      Fable's choice here should be a deliberate one, not an accidental copy of whichever example
-      Sonnet reads first.
-- [ ] **Read scope.** Every internal (non-partner) role, matching `work_plans`/`gov_biddings`'s
-      company-wide-internal read, or Sales-department + admin-only (tighter, since a
-      partnership/prospecting pipeline could be considered more sensitive than a generic file
-      collection)?
-- [ ] **Follow-up nudge mechanism — the single biggest fork inherited from the mandate.** Pick
-      ONE: **(a)** a login-triggered role-scoped digest mirroring `checkLowStock`
-      (notifications.js:602-624) — "N AEC contacts overdue for follow-up," fired to Sales-dept
-      members/admins at login, zero new infrastructure; **(b)** an in-page-only banner mirroring
-      `renderClientProfiles`'s `dueFollowups` (departments.js:11097) — cheapest, but invisible
-      unless the screen is actually open; **(c)** a genuine server-side scheduled reminder (a new
-      Firebase Scheduled Function, or a new GitHub Actions cron + `scripts/*.js` runner) — the
-      ONLY option that reminds someone regardless of login cadence, but this repo has zero
-      `onSchedule` precedent anywhere and this would be new infrastructure (the same fork WS25
-      independently resolved for leave accrual by choosing the no-new-infra option).
-- [ ] **What data actually drives the nudge.** A manually-set `followUpDate` (mirrors
-      `sales_clients.followUpDate` exactly, salesperson types a date) vs. an auto-computed
-      "N days since last contact" threshold (no explicit date input; computed from a
-      `lastContactedAt` stamp) — different data shape and different UI.
-- [ ] **How "contacted status" / "prospected project?" / "quotation sent?" are modeled.** Three
-      independent booleans (with or without a timestamp each) vs. folding some/all into a single
-      CRM-stage-style enum (reuses `CRM_STAGES`'s exact array shape and `window.chipTabs`'
-      single-active-key filter UI wholesale) vs. a hybrid (one stage enum plus 1-2 supplementary
-      booleans). This decision determines whether the existing single-select chip-filter code
-      can be reused as-is, or whether the screen needs a NEW multi-facet filter UI — every
-      existing `chipTabs`/`bindChipTabs` call site in the app (~10 grepped) is single-active-key
-      only; simultaneous independent boolean filters would be a new UI composition, not a copy of
-      an existing one.
-- [ ] **"Item #" — persisted or positional?** A stable, `_counters`-minted number (reusing
-      `window.nextSerial`/the `_counters/workers` transaction pattern, so a salesperson can cite
-      "contact #14" regardless of current sort/filter) vs. a render/print-time positional index
-      (`idx+1`, matching every other numbered table/print in the app today, but which shifts
-      under filtering/sorting/deletion).
-- [ ] **PH region: free-text or a structured enum?** Free-text matches every existing
-      address-adjacent field in the app (zero precedent for a region dropdown anywhere); a real
-      enum of the ~17 official PH administrative regions would be the first such constant in the
-      codebase and needs a decision on where it lives (`config.js`, alongside `DEPARTMENTS`/
-      `ROLES`) and whether it's a strict `<select>` or a free-text-with-suggestions field.
-- [ ] **CSV/backup scope.** Confirm whether the free, zero-code JSON auto-discovery in
-      `scripts/monthly-backup.js` (item 12 above) is sufficient for the mandate's "+ backup"
-      clause, or whether a curated `csvFields` `OVERRIDES` entry (a few lines, matching every
-      other collection) should also be added for a human-readable monthly CSV.
-- [ ] **Print layout and content.** One letterhead-wrapped multi-row table mirroring
-      `openInventoryCountForm`'s landscape-A4 approach (item 9 above) — given ~12 mandate
-      columns, does the PRINTED sheet show every column, or a curated subset (e.g. omitting the
-      free-text "feedback/partnership potential" notes from a physical printout that might leave
-      the building)? The mandate says "printable on letterhead" (singular sheet), which points at
-      the multi-row-table format rather than one-card-per-contact, but the exact column set for
-      print vs. on-screen is undecided.
-- [ ] **Filter-dimension composition.** Given `chipTabs` is single-select, which of
-      {type A/E/C, PH region, contacted status, prospected project?, quotation sent?} get a
-      dedicated chip-filter row (type is the obvious first, matching `CRM_STAGES`), and does the
-      screen need MULTIPLE independent filter bars stacked (a new composition, not seen
-      elsewhere in the app) to satisfy "filterable" across several of these dimensions at once?
-- [ ] **"Quotation sent?" — a manual checkbox, or a real cross-reference to an actual quote
-      doc?** `renderClientProfiles`'s `openClientQuotesModal` (departments.js:11210+) already
-      queries `bk_quotes`/`bs_quotes` by `clientName` to show a client's real quote history — a
-      linked-quote reference (auto-derived `true` when a matching quote doc exists) would be
-      self-maintaining and echo WS31/WS32's stated ambition of one CRM source of truth
-      (V12-PLAN.md:191-198), vs. a manual checkbox that can silently drift from what actually
-      happened. Not resolvable without also knowing whether WS31/WS32 have been scoped yet
-      (as of this brief, they have not — see item 2).
+1. **Nav placement → new TOP-LEVEL `'AEC'` entry in `salesTabs` (7th chip, placed right after
+   `'Clients'`), NOT nested under Clients.** The owner said "table in Sales" (a peer surface, not
+   a Clients sub-view); AEC contacts are partners to sell THROUGH, `sales_clients` are customers
+   to sell TO — conflating them inside the Clients screen would also entangle this greenfield
+   build with the screen WS32 plans to rework. `DEPARTMENTS['Sales'].subtabs` (config.js:137-140)
+   stays UNTOUCHED — it is cosmetic-only, already stale for the other five real tabs, and there
+   is no discipline of maintaining it (brief item 6).
+2. **Write gate → the tightened `canDept('Sales')` pattern (`work_plans` shape), deliberately
+   NOT the legacy bare-`isAuth()` of `sales_clients` next door.** `create, update: canDept('Sales')`,
+   `delete: isAdmin()`. This is intentionally stricter than the adjacent Clients collections —
+   that looseness is a pre-existing inconsistency (see Risks), not the template; new collections
+   follow the newer pattern. No soft-delete/delete-request flow: a prospecting directory is
+   low-stakes, non-admins simply get no delete button (client-gated to `president/owner/manager`,
+   mirroring `canDeleteDirect` at departments.js:11089).
+3. **Read scope → all internal staff, partner excluded: `isAuth() && !isPartner()`.** Matches the
+   unanimous internal-pipeline pattern (`work_plans`/`gov_biddings`/`marketing_plans`); the
+   president/managers outside Sales should see the pipeline, and the constraint section already
+   called partner exclusion near-unambiguous. Client-side, edit controls are gated by
+   `canEditDept('Sales')` (departments.js:17-25), mirroring the rules tier.
+4. **Nudge mechanism → BOTH cheap options, NO cron: (a) a login-triggered daily digest
+   `checkAECFollowups` mirroring `checkLowStock` (notifications.js:602-624) for Sales-dept
+   members + president/manager, PLUS (b) the free in-page `⏰ N due` banner mirroring
+   `renderClientProfiles`'s `dueFollowups`.** (b) costs ~3 lines since the render already computes
+   overdue rows; (a) reaches people who don't open the screen. A true scheduled reminder (option
+   c) is explicitly OUT OF SCOPE — zero `onSchedule` precedent in this repo, same no-new-infra
+   resolution WS25 reached; revisit only if Neil asks for reminders independent of login.
+5. **Nudge driver → a manually-set `followUpDate` (`YYYY-MM-DD` string), mirroring
+   `sales_clients.followUpDate` exactly, with `lastContact` auto-stamped `window.bizDate()` on
+   every save (departments.js:11163 pattern).** An auto "N days since last contact" threshold
+   invents a policy number the owner never gave and diverges from the sibling CRM's model.
+   Overdue = `followUpDate <= bizDate()` AND stage not terminal (`partner`/`dormant`).
+6. **Status modeling → HYBRID: one single-select `stage` enum (CRM_STAGES-shaped, 5 stages:
+   `new`/`contacted`/`prospect`/`partner`/`dormant`) + a dedicated `quoteSent` boolean (+
+   `quoteSentDate`, `quoteRef`).** The mandate's "contacted status" and "prospected project?"
+   are DERIVED from the stage ladder (`contacted` = stage ≠ new; `prospected` = stage ∈
+   {prospect, partner}) so the single-active-key `chipTabs` filter is reused wholesale;
+   "quotation sent?" — the mandate's headline tracker — stays its own explicit boolean so it can
+   never drift with stage edits. Derivations are spelled out in Spec 5's CSV columns.
+7. **Item # → PERSISTED, `_counters`-minted plain integer (`itemNo`), via a new
+   `nextAECNumber()` transaction on `_counters/aec_contacts`.** The whole point of a directory
+   number is citability ("AEC #14") independent of filter/sort — a positional `idx+1` shifts
+   under both. Plain integer, NOT a `nextSerial`-style `INV-2026-000123` string: this is a row
+   number, not a business-document serial. **Rules consequence (verified live):** `_counters`
+   write is currently `isFinanceOrAdmin()` (firestore.rules:154-157) — a non-admin Sales member
+   could create the contact but be DENIED the mint. Spec 2 adds a docId-scoped carve-out to that
+   block. Deletion gaps in the sequence are expected and fine.
+8. **PH region → structured STRICT `<select>` over a new `window.AEC_REGIONS` constant (the 18
+   official administrative regions incl. NIR, stored as the full display string), living in
+   `departments.js` next to the other AEC constants — NOT config.js.** "Filterable by region"
+   demands an enum (free text can't filter reliably); it lives beside the render function per the
+   `CRM_STAGES` precedent since nothing outside Sales consumes it (the digest needs only the
+   terminal-stage list, exposed as `window.AEC_TERMINAL` with a defensive fallback). `address`
+   stays free-text (street/city), separate from `region`.
+9. **CSV/backup → BOTH: the on-screen `window.exportCSV` button (exports the currently-filtered
+   rows) AND one curated `csvFields` `OVERRIDES` entry in `scripts/monthly-backup.js`** (full
+   snapshot, no `dateField` — a directory is not a dated journal; JSON auto-discovery already
+   covers it, the CSV adds the human-readable monthly sheet matching `users`/`tasks` precedent).
+   All fields including `potential` go in the backup CSV — it lands in the company's own Drive.
+10. **Print → one landscape-A4 letterhead multi-row table via new `openAECPrintSheet()`,
+    mirroring `openInventoryCountForm` (departments.js:12906), printing the CURRENTLY-FILTERED
+    rows with a CURATED column set that DELIBERATELY OMITS the free-text "feedback/partnership
+    potential" notes** (a physical sheet may leave the building; long free text also wrecks an
+    11-column landscape table — notes remain in the on-screen detail view, CSV, and backup).
+    One deliberate deviation from the inventory-form template: the local `@page{size:A4
+    landscape}` rule is placed AFTER `_lh.printCSS` (the inventory form places it before, where
+    the letterhead's portrait `@page` can win the cascade) — Spec 6 notes this inline.
+11. **Filter composition → TWO stacked single-select chip bars (type A/E/C, stage) + a region
+    `<select>` + a free-text search input, AND-combined client-side.** Yes, stacked independent
+    chip bars are a new composition for this app, but each bar is a stock
+    `chipTabs`/`bindChipTabs` single-select bound to its own scoped wrapper (`.aec-type-tabs`,
+    `.aec-stage-tabs` — same scoping trick `salesSubNav` uses); the composition is just two state
+    variables ANDed in one `shownRows()` predicate, written in full in Spec 5. `quoteSent` is a
+    visible column, not a filter chip (keeps the filter surface small; stage `prospect→partner`
+    plus the Quote column covers the triage need).
+12. **"Quotation sent?" → MANUAL checkbox + optional free-text `quoteRef`, NO live
+    cross-reference into `bk_quotes`/`bs_quotes`.** WS31 is mid-rewrite on the quote data model
+    ("delete ~1,800 lines of dead builder code") — building a live join against it now risks
+    immediate rework. The schema keeps `company` and `quoteRef` as natural join keys so WS31/WS32
+    can later auto-derive this flag without a data migration (see Spec 11 call-outs).
+
+**Scoping / sequencing:** wholly greenfield; depends on NOTHING undecided (WS14 letterhead is
+shipped). Deliberately decoupled from WS31 (no quote-doc reference) and WS32 (field names
+`stage`/`followUpDate`/`lastContact` intentionally identical to `sales_clients` so a future
+generalized CRM engine can absorb both collections uniformly).
+
+---
+
+### Spec 1 — `aec_contacts/{autoId}` data shape (annotated literal)
+
+```js
+// aec_contacts/{autoId}  — NEW top-level collection. All strings default ''.
+{
+  itemNo: 14,                    // number — stable directory #, minted once via _counters/aec_contacts (Spec 3)
+  type: 'architect',             // 'architect' | 'engineer' | 'contractor'  (AEC_TYPES keys)
+  company: 'Arkitektura Mla.',   // required (the only required field)
+  contactPerson: '',
+  phone: '',
+  email: '',
+  region: 'NCR — National Capital Region',  // '' or one of AEC_REGIONS (full display string stored verbatim)
+  address: '',                   // free text (street/city) — region is the structured part
+  stage: 'new',                  // 'new'|'contacted'|'prospect'|'partner'|'dormant' (AEC_STAGES keys; default 'new')
+                                 //   derived: contacted? = stage!=='new'; prospected? = stage∈{prospect,partner}
+  quoteSent: false,              // boolean — the mandate's explicit "quotation sent?" tracker (manual)
+  quoteSentDate: '',             // '' | 'YYYY-MM-DD' (auto-defaults to bizDate() when box first ticked)
+  quoteRef: '',                  // free text, e.g. a BK-quote number — future WS31/WS32 join key, NOT a doc ref
+  potential: '',                 // free text — "feedback / partnership potential" notes
+  followUpDate: '',              // '' | 'YYYY-MM-DD' — drives banner + login digest (Decision 5)
+  lastContact: '2026-07-10',     // 'YYYY-MM-DD', bizDate()-stamped on EVERY save (mirrors sales_clients)
+  addedBy: '<uid>',              // create only
+  createdAt,                     // serverTimestamp, create only
+  updatedAt                      // serverTimestamp, every save
+}
+```
+
+No composite index needed: the only query is `orderBy('itemNo','asc')` (single-field,
+auto-indexed) — `firestore.indexes.json` is untouched.
+
+### Spec 2 — firestore.rules diffs (block-scoped, before→after)
+
+**2a — NEW `aec_contacts` block.** Insert directly after the `gov_archive` block
+(firestore.rules:776), inside the same "Per-department document collections" region:
+
+```
+    // ── AEC Partner Directory (Sales prospecting: architects/engineers/contractors,
+    // v12 WS33). Internal pipeline — partner excluded, matching work_plans. Writes
+    // follow the TIGHTENED canDept pattern — deliberately stricter than the legacy
+    // bare-isAuth() sales_clients block (~1121); that looseness is pre-existing,
+    // not the template. Delete admin-only (no delete-request flow: low-stakes list).
+    match /aec_contacts/{docId} {
+      allow read: if isAuth() && !isPartner();
+      allow create, update: if isAuth() && canDept('Sales');
+      allow delete: if isAuth() && isAdmin();
+    }
+```
+
+**2b — `_counters` block (firestore.rules:154-157): docId-scoped carve-out so non-admin Sales
+members can mint `itemNo`.** Without this, `nextAECNumber()` is DENIED for exactly the people the
+write rule invites in (verified: current write is `isFinanceOrAdmin()` only).
+
+```
+// BEFORE
+    match /_counters/{docId} {
+      allow read:  if isAuth();
+      allow write: if isAuth() && isFinanceOrAdmin();
+    }
+// AFTER
+    // aec_contacts carve-out (WS33): Sales members mint directory numbers. Safe —
+    // docs here are opaque monotonic integers; worst case is an advanced sequence.
+    match /_counters/{docId} {
+      allow read:  if isAuth();
+      allow write: if isAuth() && (isFinanceOrAdmin()
+        || (docId == 'aec_contacts' && canDept('Sales')));
+    }
+```
+
+Deploy with `~/.npm-global/bin/firebase deploy --only firestore:rules`, SEPARATE from `git push`.
+Re-`git diff firestore.rules` immediately before deploying (concurrent Phase-4 sessions edit this
+file — `deploy-recheck-full-file-diff` memory); apply as block-scoped Edits, never full-file.
+
+### Spec 3 — Constants + helpers (js/departments.js — insert as a new delimited section
+immediately BEFORE the `//  SHARED: Client Profiles` header at departments.js:11071)
+
+```js
+// ══════════════════════════════════════════════════
+//  SALES — AEC PARTNER DIRECTORY (v12 WS33)
+// ══════════════════════════════════════════════════
+// Architects/Engineers/Contractors prospecting directory (owner spec 2026-07-09).
+// Type colors are the OWNER'S mandate (A=yellow / E=red / C=blue). They are
+// CATEGORY colors, not status colors — rendered as small circular letter chips
+// so a red "E" reads as a class marker, unlike the word-badges used for stage.
+window.AEC_TYPES = [
+  { key:'architect',  label:'Architect',  letter:'A', color:'#FFC300' },
+  { key:'engineer',   label:'Engineer',   letter:'E', color:'#e5484d' },
+  { key:'contractor', label:'Contractor', letter:'C', color:'#0A84FF' },
+];
+// Pipeline stage ladder — single-select filter, same {key,label,color,icon} shape
+// as CRM_STAGES (departments.js:11075). 'partner'/'dormant' are terminal.
+window.AEC_STAGES = [
+  { key:'new',       label:'Not Contacted', color:'#8e8e93',                icon:'○'  },
+  { key:'contacted', label:'Contacted',     color:'#5856D6',                icon:'📞' },
+  { key:'prospect',  label:'Prospect',      color:'#FFAA00',                icon:'🔥' },
+  { key:'partner',   label:'Partner',       color:'var(--success,#30D158)', icon:'🤝' },
+  { key:'dormant',   label:'Dormant',       color:'#636366',                icon:'💤' },
+];
+// Terminal stages — excluded from follow-up nudges. Read defensively by
+// checkAECFollowups (notifications.js) at call-time, so load order is safe.
+window.AEC_TERMINAL = ['partner','dormant'];
+// The 18 official PH administrative regions (incl. NIR, re-established 2024).
+// Stored VERBATIM as the region value (no key→label mapping; filter by equality).
+window.AEC_REGIONS = [
+  'NCR — National Capital Region',
+  'CAR — Cordillera',
+  'Region I — Ilocos',
+  'Region II — Cagayan Valley',
+  'Region III — Central Luzon',
+  'Region IV-A — CALABARZON',
+  'MIMAROPA — Southwestern Tagalog',
+  'Region V — Bicol',
+  'Region VI — Western Visayas',
+  'NIR — Negros Island',
+  'Region VII — Central Visayas',
+  'Region VIII — Eastern Visayas',
+  'Region IX — Zamboanga Peninsula',
+  'Region X — Northern Mindanao',
+  'Region XI — Davao',
+  'Region XII — SOCCSKSARGEN',
+  'Region XIII — Caraga',
+  'BARMM — Bangsamoro',
+];
+function aecTypeMeta(k){ return window.AEC_TYPES.find(t => t.key === k) || window.AEC_TYPES[0]; }
+function aecStageOf(c){ return window.AEC_STAGES.some(s => s.key === (c && c.stage)) ? c.stage : 'new'; }
+function aecStageMeta(k){ return window.AEC_STAGES.find(s => s.key === k) || window.AEC_STAGES[0]; }
+// The owner's two derived tracker columns (Decision 6):
+function aecContacted(c){ return aecStageOf(c) !== 'new'; }
+function aecProspected(c){ return ['prospect','partner'].includes(aecStageOf(c)); }
+
+// Atomic directory number via _counters/aec_contacts — mirrors nextSerial's
+// transaction (letterhead.js:113-122) but returns the PLAIN integer (a citable
+// row number, not a year-prefixed document serial). Gaps after deletes are fine.
+// Requires the _counters docId carve-out in firestore.rules (Spec 2b).
+async function nextAECNumber(){
+  const ref = db.collection('_counters').doc('aec_contacts');
+  return db.runTransaction(async t => {
+    const cur  = await t.get(ref);
+    const next = (cur.exists ? (cur.data().count || 0) : 0) + 1;
+    t.set(ref, { count: next }, { merge:true });
+    return next;
+  });
+}
+```
+
+### Spec 4 — Nav wiring (js/departments.js, before→after)
+
+**4a — `salesTabs` (departments.js:5480):**
+```js
+// BEFORE
+  const salesTabs = ['Clients','Quotes','Partner','Files','SOP','Tasks'];
+// AFTER
+  const salesTabs = ['Clients','AEC','Quotes','Partner','Files','SOP','Tasks'];
+```
+(Also update the stale count in the section comment at departments.js:5472:
+`10 tabs → 6` becomes `10 tabs → 6 (+ AEC, WS33)`. The `alias` map needs no entry — 'AEC' has no
+legacy deep-link name. Deep links `#/Sales/AEC` work automatically via the existing
+`initialSubtab`/`setSubroute` plumbing once the string is in `salesTabs`.)
+
+**4b — `loadSalesContent` switch (departments.js:5524-5527): add one case after `'Clients'`:**
+```js
+    case 'Clients':
+      await renderClientProfiles(content, currentUser, currentRole, 'barro');
+      break;
+
+    case 'AEC':
+      await renderAECDirectory(content, currentUser, currentRole);
+      break;
+```
+
+### Spec 5 — `renderAECDirectory(container, currentUser, currentRole)` — FULL function
+(js/departments.js, in the new WS33 section from Spec 3, after `nextAECNumber`)
+
+```js
+async function renderAECDirectory(container, currentUser, currentRole) {
+  const snap = await db.collection('aec_contacts').orderBy('itemNo','asc').get().catch(()=>({docs:[]}));
+  const contacts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const canEdit = canEditDept('Sales');
+  const canDeleteDirect = ['president','owner','manager'].includes(currentRole);
+  const today = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10));
+
+  const isOverdue = c => c.followUpDate && c.followUpDate <= today && !window.AEC_TERMINAL.includes(aecStageOf(c));
+  const dueCount = contacts.filter(isOverdue).length;
+
+  const typeCounts = { all: contacts.length };
+  window.AEC_TYPES.forEach(t => typeCounts[t.key] = contacts.filter(c => c.type === t.key).length);
+  const stageCounts = {};
+  window.AEC_STAGES.forEach(s => stageCounts[s.key] = contacts.filter(c => aecStageOf(c) === s.key).length);
+
+  let typeFilter = 'all', stageFilter = 'all', regionFilter = 'all', search = '';
+
+  container.innerHTML = `
+    <style>
+      #aec-tbl th,#aec-tbl td{border-bottom:1px solid var(--border);padding:7px 8px;text-align:left;vertical-align:top;font-size:12px}
+      #aec-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+      #aec-tbl td.c,#aec-tbl th.c{text-align:center}
+      #aec-tbl tbody tr{cursor:pointer}
+    </style>
+    ${dueCount ? `<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>⏰ <strong>${dueCount}</strong> AEC follow-up${dueCount>1?'s':''} due</span></div>` : ''}
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      ${window.chipTabs([{key:'all',label:'All',count:typeCounts.all}, ...window.AEC_TYPES.map(t=>({key:t.key,label:t.label,count:typeCounts[t.key]}))], 'all', {cls:'aec-type-tabs'})}
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${canEdit ? `<button class="btn-primary btn-sm" id="aec-add-btn">+ Add Contact</button>` : ''}
+        <button class="btn-secondary btn-sm" id="aec-csv-btn">⬇ CSV</button>
+        <button class="btn-secondary btn-sm" id="aec-print-btn">🖨 Print</button>
+      </div>
+    </div>
+    ${window.chipTabs([{key:'all',label:'All Stages'}, ...window.AEC_STAGES.map(s=>({key:s.key,label:s.label,icon:s.icon,count:stageCounts[s.key]}))], 'all', {cls:'aec-stage-tabs'})}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px">
+      <select id="aec-region-filter" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
+        <option value="all">All regions</option>
+        ${window.AEC_REGIONS.map(r=>`<option value="${escHtml(r)}">${escHtml(r)}</option>`).join('')}
+      </select>
+      <input id="aec-search" placeholder="🔍 Search company / person / email…" style="flex:1;min-width:180px;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px"/>
+    </div>
+    <div id="aec-table"></div>
+  `;
+
+  // AND-composed filter predicate — the one place all four dimensions combine.
+  const shownRows = () => contacts.filter(c =>
+    (typeFilter   === 'all' || c.type === typeFilter) &&
+    (stageFilter  === 'all' || aecStageOf(c) === stageFilter) &&
+    (regionFilter === 'all' || (c.region || '') === regionFilter) &&
+    (!search || [c.company, c.contactPerson, c.email, c.phone, c.address]
+      .join(' ').toLowerCase().includes(search))
+  );
+
+  const typeChip = c => { const t = aecTypeMeta(c.type);
+    return `<span title="${escHtml(t.label)}" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:${t.color};color:#fff;font-size:10px;font-weight:800">${t.letter}</span>`; };
+
+  const rowHtml = c => { const st = aecStageMeta(aecStageOf(c)); const od = isOverdue(c);
+    return `<tr data-id="${c.id}">
+      <td class="c">${c.itemNo || ''}</td>
+      <td class="c">${typeChip(c)}</td>
+      <td><strong>${escHtml(c.company || '')}</strong>${c.address ? `<div style="font-size:10px;color:var(--text-muted)">${escHtml(c.address)}</div>` : ''}</td>
+      <td>${escHtml(c.contactPerson || '')}</td>
+      <td style="font-size:11px">${c.phone ? `📞 ${escHtml(c.phone)}<br>` : ''}${c.email ? `✉️ ${escHtml(c.email)}` : ''}</td>
+      <td style="font-size:11px">${escHtml((c.region || '').split(' — ')[0])}</td>
+      <td><span class="badge" style="font-size:9px;background:${st.color};color:#fff">${st.icon} ${st.label}</span></td>
+      <td class="c">${c.quoteSent ? `✅${c.quoteSentDate ? `<div style="font-size:9px;color:var(--text-muted)">${escHtml(c.quoteSentDate)}</div>` : ''}` : '—'}</td>
+      <td style="font-size:11px;color:${od ? 'var(--danger)' : 'var(--text-muted)'}">${c.followUpDate ? `⏰ ${escHtml(c.followUpDate)}${od ? ' · due' : ''}` : ''}</td>
+      <td class="c" style="white-space:nowrap">
+        ${canEdit ? `<button class="btn-secondary btn-sm aec-edit-btn" data-id="${c.id}" title="Edit">✎</button>` : ''}
+        ${canDeleteDirect ? `<button class="btn-secondary btn-sm aec-del-btn" data-id="${c.id}" data-company="${escHtml(c.company || '')}" style="color:var(--danger)">${emojiIcon('trash-2',13)}</button>` : ''}
+      </td></tr>`; };
+
+  const openAECDetail = (c) => {
+    const t = aecTypeMeta(c.type), st = aecStageMeta(aecStageOf(c));
+    openModal(`${t.letter} · ${escHtml(c.company || 'AEC Contact')}`, `
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:13px">
+        <div>#${c.itemNo || ''} · <span class="badge" style="background:${t.color};color:#fff;font-size:9px">${escHtml(t.label)}</span> <span class="badge" style="background:${st.color};color:#fff;font-size:9px">${st.icon} ${st.label}</span></div>
+        ${c.contactPerson ? `<div>👤 ${escHtml(c.contactPerson)}</div>` : ''}
+        ${c.phone ? `<div>📞 ${escHtml(c.phone)}</div>` : ''}
+        ${c.email ? `<div>✉️ ${escHtml(c.email)}</div>` : ''}
+        ${c.region ? `<div>📍 ${escHtml(c.region)}</div>` : ''}
+        ${c.address ? `<div>🏠 ${escHtml(c.address)}</div>` : ''}
+        <div>📄 Quotation: ${c.quoteSent ? `sent${c.quoteSentDate ? ' ' + escHtml(c.quoteSentDate) : ''}${c.quoteRef ? ' · ' + escHtml(c.quoteRef) : ''}` : 'not sent'}</div>
+        ${c.followUpDate ? `<div>⏰ Follow-up: ${escHtml(c.followUpDate)}</div>` : ''}
+        ${c.lastContact ? `<div>🕓 Last contact: ${escHtml(c.lastContact)}</div>` : ''}
+        ${c.potential ? `<div style="margin-top:4px;padding:8px;background:rgba(128,128,128,.08);border-radius:8px">💬 ${escHtml(c.potential)}</div>` : ''}
+      </div>
+    `, `${canEdit ? `<button class="btn-primary" id="aec-detail-edit">✎ Edit</button>` : ''}<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    document.getElementById('aec-detail-edit')?.addEventListener('click', () => { closeModal(); openAECEditor(c); });
+  };
+
+  const openAECEditor = (c) => {
+    const e = c || {};
+    const sel = 'style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"';
+    openPage(c ? 'Edit AEC Contact' : 'Add AEC Contact', `
+      <div class="form-row">
+        <div class="form-group"><label>Type</label><select id="aec-type" ${sel}>${window.AEC_TYPES.map(t=>`<option value="${t.key}" ${e.type===t.key?'selected':''}>${t.letter} — ${t.label}</option>`).join('')}</select></div>
+        <div class="form-group"><label>Stage</label><select id="aec-stage" ${sel}>${window.AEC_STAGES.map(s=>`<option value="${s.key}" ${aecStageOf(e)===s.key?'selected':''}>${s.icon} ${s.label}</option>`).join('')}</select></div>
+      </div>
+      <div class="form-group"><label>Company</label><input id="aec-company" value="${escHtml(e.company||'')}" placeholder="Firm / company name"/></div>
+      <div class="form-group"><label>Contact person</label><input id="aec-person" value="${escHtml(e.contactPerson||'')}"/></div>
+      <div class="form-row">
+        <div class="form-group"><label>Phone</label><input id="aec-phone" type="tel" value="${escHtml(e.phone||'')}"/></div>
+        <div class="form-group"><label>Email</label><input id="aec-email" type="email" value="${escHtml(e.email||'')}"/></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>PH Region</label><select id="aec-region" ${sel}>
+          <option value="">— Region —</option>
+          ${window.AEC_REGIONS.map(r=>`<option value="${escHtml(r)}" ${e.region===r?'selected':''}>${escHtml(r)}</option>`).join('')}
+        </select></div>
+        <div class="form-group"><label>Follow-up date</label><input id="aec-followup" type="date" value="${escHtml(e.followUpDate||'')}"/></div>
+      </div>
+      <div class="form-group"><label>Address</label><textarea id="aec-address" rows="2">${escHtml(e.address||'')}</textarea></div>
+      <div class="form-group" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:6px;margin:0"><input type="checkbox" id="aec-quotesent" ${e.quoteSent?'checked':''}/> Quotation sent</label>
+        <input id="aec-quotedate" type="date" value="${escHtml(e.quoteSentDate||'')}" style="max-width:150px"/>
+        <input id="aec-quoteref" placeholder="Quote # (optional)" value="${escHtml(e.quoteRef||'')}" style="max-width:160px"/>
+      </div>
+      <div class="form-group"><label>Feedback / partnership potential</label><textarea id="aec-potential" rows="3">${escHtml(e.potential||'')}</textarea></div>
+    `, `<button class="btn-primary" id="aec-save-btn">${c ? 'Save' : 'Save Contact'}</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+    document.getElementById('aec-save-btn').addEventListener('click', async () => {
+      const company = document.getElementById('aec-company').value.trim();
+      if (!company) { Notifs.showToast('Company is required.','error'); return; }
+      const quoteSent = document.getElementById('aec-quotesent').checked;
+      const data = {
+        type: document.getElementById('aec-type').value,
+        stage: document.getElementById('aec-stage').value,
+        company,
+        contactPerson: document.getElementById('aec-person').value.trim(),
+        phone: document.getElementById('aec-phone').value.trim(),
+        email: document.getElementById('aec-email').value.trim(),
+        region: document.getElementById('aec-region').value,
+        address: document.getElementById('aec-address').value.trim(),
+        quoteSent,
+        quoteSentDate: quoteSent ? (document.getElementById('aec-quotedate').value || today) : '',
+        quoteRef: document.getElementById('aec-quoteref').value.trim(),
+        potential: document.getElementById('aec-potential').value.trim(),
+        followUpDate: document.getElementById('aec-followup').value || '',
+        lastContact: today,   // Manila-correct stamp — mirrors sales_clients (departments.js:11163)
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      };
+      try {
+        if (c) {
+          await db.collection('aec_contacts').doc(c.id).update(data);
+          window.logAudit && window.logAudit('update','aec_contact',c.id,{company,stage:data.stage});
+        } else {
+          data.itemNo   = await nextAECNumber();   // mint BEFORE create; a failed create just leaves a gap
+          data.addedBy  = currentUser.uid;
+          data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+          await db.collection('aec_contacts').add(data);
+          window.logAudit && window.logAudit('create','aec_contact',String(data.itemNo),{company});
+        }
+        closeModal(); Notifs.showToast('AEC contact saved');
+        renderAECDirectory(container, currentUser, currentRole);
+      } catch(ex){ Notifs.showToast('Save failed: ' + (ex.message||ex.code),'error'); }
+    });
+  };
+
+  const bindRows = () => {
+    const el = document.getElementById('aec-table'); if (!el) return;
+    el.querySelectorAll('tr[data-id]').forEach(tr => tr.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      const c = contacts.find(x => x.id === tr.dataset.id); if (c) openAECDetail(c);
+    }));
+    el.querySelectorAll('.aec-edit-btn').forEach(b => b.addEventListener('click', () => openAECEditor(contacts.find(x => x.id === b.dataset.id))));
+    el.querySelectorAll('.aec-del-btn').forEach(b => b.addEventListener('click', async () => {
+      if (!(await confirmDialog({message:`Delete AEC contact "${escHtml(b.dataset.company)}"? This cannot be undone.`, danger:true, html:true}))) return;
+      try {
+        await db.collection('aec_contacts').doc(b.dataset.id).delete();
+        window.logAudit && window.logAudit('delete','aec_contact',b.dataset.id,{company:b.dataset.company});
+        Notifs.showToast('AEC contact deleted');
+        renderAECDirectory(container, currentUser, currentRole);
+      } catch(ex){ Notifs.showToast('Delete failed','error'); }
+    }));
+  };
+
+  const renderTable = () => {
+    const rows = shownRows();
+    const el = document.getElementById('aec-table'); if (!el) return;
+    el.innerHTML = !rows.length
+      ? `<div class="empty-state"><div class="empty-icon">📇</div><h4>No AEC contacts${contacts.length ? ' match the filters' : ' yet'}</h4>${canEdit && !contacts.length ? '<p style="font-size:12px;color:var(--text-muted)">Add architects, engineers and contractors to start the partnership pipeline.</p>' : ''}</div>`
+      : `<div style="overflow-x:auto"><table id="aec-tbl" style="width:100%;min-width:860px;border-collapse:collapse">
+          <thead><tr>
+            <th class="c" style="width:36px">#</th><th class="c" style="width:40px">Type</th><th>Company</th><th>Contact Person</th>
+            <th>Contact Info</th><th style="width:80px">Region</th><th style="width:120px">Stage</th>
+            <th class="c" style="width:70px">Quote</th><th style="width:110px">Follow-up</th><th style="width:80px"></th>
+          </tr></thead><tbody>${rows.map(rowHtml).join('')}</tbody></table></div>`;
+    bindRows();
+  };
+
+  // The owner's full column list — used by BOTH the on-screen CSV button and as
+  // the reference for the monthly-backup csvFields (Spec 8). Derived columns
+  // (Contacted?/Prospected?) come from the stage ladder per Decision 6.
+  const AEC_CSV_COLUMNS = [
+    { key:'itemNo',        label:'Item #' },
+    { key:'type',          label:'Type',                 get:r => aecTypeMeta(r.type).label },
+    { key:'company',       label:'Company' },
+    { key:'contactPerson', label:'Contact Person' },
+    { key:'phone',         label:'Phone' },
+    { key:'email',         label:'Email' },
+    { key:'region',        label:'PH Region' },
+    { key:'address',       label:'Address' },
+    { key:'stage',         label:'Stage',                get:r => aecStageMeta(aecStageOf(r)).label },
+    { key:'contacted',     label:'Contacted?',           get:r => aecContacted(r) ? 'Yes' : 'No' },
+    { key:'prospected',    label:'Prospected Project?',  get:r => aecProspected(r) ? 'Yes' : 'No' },
+    { key:'quoteSent',     label:'Quotation Sent?',      get:r => r.quoteSent ? 'Yes' : 'No' },
+    { key:'quoteSentDate', label:'Quote Sent Date' },
+    { key:'quoteRef',      label:'Quote Ref' },
+    { key:'potential',     label:'Feedback / Partnership Potential' },
+    { key:'followUpDate',  label:'Follow-up Date' },
+    { key:'lastContact',   label:'Last Contact' },
+  ];
+
+  const filterLabel = () => {
+    const bits = [];
+    if (typeFilter   !== 'all') bits.push(aecTypeMeta(typeFilter).label + 's');
+    if (stageFilter  !== 'all') bits.push('stage: ' + aecStageMeta(stageFilter).label);
+    if (regionFilter !== 'all') bits.push(regionFilter.split(' — ')[0]);
+    if (search) bits.push(`search: "${search}"`);
+    return bits.length ? bits.join(' · ') : 'All contacts';
+  };
+
+  window.bindChipTabs(container.querySelector('.aec-type-tabs'),  (key) => { typeFilter  = key; renderTable(); });
+  window.bindChipTabs(container.querySelector('.aec-stage-tabs'), (key) => { stageFilter = key; renderTable(); });
+  document.getElementById('aec-region-filter')?.addEventListener('change', (e) => { regionFilter = e.target.value; renderTable(); });
+  document.getElementById('aec-search')?.addEventListener('input', (e) => { search = e.target.value.trim().toLowerCase(); renderTable(); });
+  document.getElementById('aec-add-btn')?.addEventListener('click', () => openAECEditor(null));
+  document.getElementById('aec-csv-btn')?.addEventListener('click', () => window.exportCSV('aec-contacts', shownRows(), AEC_CSV_COLUMNS));
+  document.getElementById('aec-print-btn')?.addEventListener('click', () => openAECPrintSheet(shownRows(), filterLabel()));
+  renderTable();
+}
+```
+
+### Spec 6 — `openAECPrintSheet(rows, scopeLabel)` — FULL function
+(js/departments.js, immediately after `renderAECDirectory`)
+
+```js
+// Printable AEC contact sheet — landscape-A4 letterhead multi-row table,
+// mirroring openInventoryCountForm (departments.js:12906) incl. the defensive
+// `_lh ? … : fallback` pattern. Prints the CURRENTLY-FILTERED rows. The
+// free-text "potential" notes are DELIBERATELY omitted (Decision 10). NOTE one
+// deliberate deviation from the inventory form: the local @page{A4 landscape}
+// rule is placed AFTER _lh.printCSS so it wins the cascade over the
+// letterhead's default portrait @page.
+function openAECPrintSheet(rows, scopeLabel){
+  const e = s => escHtml(s);
+  const todayStr = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10));
+  const _lh = window.buildLetterhead ? window.buildLetterhead({
+    docTitle: 'AEC PARTNER CONTACT SHEET',
+    dateLabel: 'As of ' + todayStr,
+    extraMeta: [scopeLabel || 'All contacts', rows.length + ' contact' + (rows.length === 1 ? '' : 's')],
+    signatures: [{ label:'Prepared by', name:(window.userProfile && userProfile.displayName) || '', title:'Sales' }],
+    footerNote: ((window.BRAND && window.BRAND.fullName) || 'Barro Industries Operating System') + ' · Generated ' + new Date().toLocaleString('en-PH') + ' · Internal prospecting directory — handle contact details accordingly.'
+  }) : null;
+  const body = rows.map(c => { const t = aecTypeMeta(c.type), st = aecStageMeta(aecStageOf(c));
+    return `<tr>
+      <td class="c">${c.itemNo || ''}</td>
+      <td class="c"><span class="tchip" style="background:${t.color}">${t.letter}</span></td>
+      <td class="b">${e(c.company || '')}</td>
+      <td>${e(c.contactPerson || '')}</td>
+      <td>${e(c.phone || '')}</td>
+      <td>${e(c.email || '')}</td>
+      <td>${e((c.region || '').split(' — ')[0])}</td>
+      <td>${e(c.address || '')}</td>
+      <td class="c">${st.label}</td>
+      <td class="c">${c.quoteSent ? '✔ ' + e(c.quoteSentDate || '') : '—'}</td>
+      <td class="c">${e(c.followUpDate || '')}</td>
+    </tr>`; }).join('');
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>AEC Partner Contact Sheet — ${e(todayStr)}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#000;background:#e8e8e8}
+  .page{width:297mm;min-height:210mm;margin:0 auto;background:#fff;padding:10mm 12mm}
+  table{width:100%;border-collapse:collapse;margin-top:8px}
+  th,td{border:1px solid #444;padding:4px 6px;font-size:9.5px;vertical-align:top}
+  th{background:#1E3A5F;color:#fff;font-size:8px;text-transform:uppercase;letter-spacing:.04em}
+  td.c{text-align:center}td.b{font-weight:700}
+  .tchip{display:inline-block;width:14px;height:14px;line-height:14px;border-radius:50%;color:#fff;font-weight:800;font-size:9px;text-align:center}
+  .bar{position:fixed;top:0;left:0;right:0;background:#1E3A5F;color:#fff;padding:9px 18px;display:flex;gap:10px;align-items:center;z-index:99}
+  .bar button{background:#fff;color:#1E3A5F;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
+${_lh ? _lh.printCSS : ''}
+  @page{size:A4 landscape;margin:8mm}
+  @media print{ .bar,.barpad{display:none!important} body{background:#fff} .page{padding:0;width:auto;min-height:0} .tchip,th{-webkit-print-color-adjust:exact;print-color-adjust:exact} }
+</style></head><body>
+<div class="bar">
+  <span style="font-weight:700">📇 AEC Partner Contact Sheet</span>
+  <button onclick="window.print()">🖨 Print / Save as PDF</button>
+  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">✕ Close</button>
+</div>
+<div class="barpad" style="height:46px"></div>
+<div class="page">
+  ${_lh ? _lh.headerHTML : `<div style="border-bottom:3px solid #1E3A5F;padding-bottom:8px;margin-bottom:8px"><div style="font-size:20px;font-weight:900;color:#1E3A5F">BARRO INDUSTRIES</div><div style="font-size:10px;color:#555">AEC Partner Contact Sheet · ${e(todayStr)}</div></div>`}
+  <table>
+    <thead><tr>
+      <th style="width:26px">#</th><th style="width:30px">Type</th><th style="width:14%">Company</th>
+      <th style="width:11%">Contact Person</th><th style="width:9%">Phone</th><th style="width:13%">Email</th>
+      <th style="width:7%">Region</th><th>Address</th><th style="width:8%">Stage</th>
+      <th style="width:8%">Quote Sent</th><th style="width:8%">Follow-up</th>
+    </tr></thead>
+    <tbody>${body || `<tr><td colspan="11" class="c" style="padding:14px">No contacts match the current filters.</td></tr>`}</tbody>
+  </table>
+  ${_lh ? _lh.footerHTML : ''}
+</div>
+</body></html>`;
+  const win = window.open('','_blank','width=1100,height=720');
+  if (!win){ Notifs.showToast('Allow pop-ups to open the printable sheet','error'); return; }
+  win.document.write(html); win.document.close();
+}
+```
+
+### Spec 7 — Login-triggered follow-up digest (`checkAECFollowups`)
+
+**7a — NEW function in js/notifications.js, inserted immediately after `checkLowStock`'s closing
+brace (line 624), same IIFE:**
+```js
+  // ── AEC follow-up daily digest (Sales + admins) ─
+  // One batched notification per user per day: contacts whose followUpDate has
+  // arrived and whose stage isn't terminal. Mirrors checkLowStock's shape:
+  // role/dept-scoped, dedupKey'd by day, silent on permission errors.
+  async function checkAECFollowups(uid, role) {
+    const isSales = (window.currentDepts || []).includes('Sales');
+    if (!['president','manager'].includes(role) && !isSales) return;
+    try {
+      const snap = await dbCachedGet('aec_contacts', () => db.collection('aec_contacts').get().catch(()=>({docs:[]})), 45000);
+      const todayStr  = window.bizDate();
+      const terminal  = window.AEC_TERMINAL || ['partner','dormant'];  // defensive: departments.js defines it
+      const due = snap.docs.map(d => d.data())
+        .filter(c => c.followUpDate && c.followUpDate <= todayStr && !terminal.includes(c.stage || 'new'));
+      if (!due.length) return;
+      const names = due.slice(0,5).map(c => c.company || c.contactPerson).filter(Boolean).join(', ');
+      const more  = due.length > 5 ? ` +${due.length-5} more` : '';
+      await send(uid, {
+        title: `📇 ${due.length} AEC follow-up${due.length>1?'s':''} due`,
+        body:  `Overdue: ${names}${more}. Open Sales → AEC to follow up.`,
+        icon:  '📇', type: 'aec_followup', link: 'dept:Sales',
+        dedupKey: `aec-fu-${uid}-${todayStr}`,
+      });
+    } catch (_) { /* read denied / offline — skip silently */ }
+  }
+```
+
+**7b — export it (js/notifications.js:674): add `checkAECFollowups` to the IIFE's return object,
+after `checkLowStock`:**
+```js
+// BEFORE
+  return { startListener, stopListener, send, sendToDept, sendToAll, sendToOwner, showToast, initPush, checkDeadlines, checkAttendanceReminder, checkLowStock, initToggle, renderPage, markAllRead,
+// AFTER
+  return { startListener, stopListener, send, sendToDept, sendToAll, sendToOwner, showToast, initPush, checkDeadlines, checkAttendanceReminder, checkLowStock, checkAECFollowups, initToggle, renderPage, markAllRead,
+```
+
+**7c — boot call (js/app.js:82, the post-auth sequence): add one line directly after
+`Notifs.checkLowStock?.(...)`:**
+```js
+      Notifs.checkLowStock?.(user.uid, userProfile.role);
+      Notifs.checkAECFollowups?.(user.uid, userProfile.role);
+```
+(Optional-chained like `checkLowStock` so a stale-SW client without the new export is a no-op.
+The `link: 'dept:Sales'` lands on the Sales page's default tab — precedented by
+`checkLowStock`'s `dept:Purchasing`; do NOT invent a subtab deep-link format for notifications.)
+
+### Spec 8 — `scripts/monthly-backup.js` OVERRIDES entry
+
+Add to the `OVERRIDES` map (after the `suggestions` entry, ~line 157). Full snapshot — no
+`dateField` (a directory is current-state, not a dated journal). JSON export already happens via
+auto-discovery; this adds the curated human-readable CSV:
+```js
+  aec_contacts: {
+    csvFields: ['id','itemNo','type','company','contactPerson','phone','email','region',
+                'address','stage','quoteSent','quoteSentDate','quoteRef','potential',
+                'followUpDate','lastContact'],
+  },
+```
+
+### Spec 9 — Migration / rollout checklist (dependency order — greenfield, no data migration)
+
+1. **Deploy rules FIRST** (Spec 2a new `aec_contacts` block + 2b `_counters` carve-out) via
+   `~/.npm-global/bin/firebase deploy --only firestore:rules`. Re-`git diff firestore.rules`
+   immediately before deploying (concurrent Phase-4 sessions — `deploy-recheck-full-file-diff`
+   memory). Old clients are unaffected (nothing reads the collection yet). No
+   `firestore.indexes.json` change (Spec 1).
+2. **Ship the JS in one commit:** departments.js (Spec 3 constants/helpers + Spec 4 wiring +
+   Spec 5 render + Spec 6 print), notifications.js (Spec 7a+7b), app.js (Spec 7c),
+   scripts/monthly-backup.js (Spec 8). Verify each edited file with `node --check`. Confirm the
+   commit diff shows a `CACHE_VER` bump in sw.js — the pre-commit hook auto-bumps
+   `APP_VERSION`/index.html and (per the `sw_cache_bump_required` memory) now also CACHE_VER;
+   if the diff shows NO CACHE_VER bump, bump it by hand (`bi-ops-vN` → `vN+1`) before pushing.
+   No new file is added, so index.html and the sw.js `PRECACHE` list are untouched.
+3. **No seed/backfill step** — the collection starts empty by design; the first `Add Contact`
+   mints `itemNo` 1 and lazily creates `_counters/aec_contacts` (the transaction handles
+   `!exists`).
+4. **Manual test pass** (Spec 10) on the deployed rules + local serve before pushing.
+5. **`git push origin master`** (deploys the app; remember this does NOT deploy rules — step 1
+   already did).
+
+### Spec 10 — Manual test checklist (no automated suite)
+
+1. **Nav:** Sales page shows the new `AEC` chip between Clients and Quotes; direct deep-link
+   `#/Sales/AEC` lands on it after refresh (initialSubtab plumbing); the other six tabs behave
+   unchanged.
+2. **Mint + write gate (the rules carve-out):** as a NON-admin Sales-dept employee, add two
+   contacts → they get `itemNo` 1 and 2, `_counters/aec_contacts.count` = 2, docs carry
+   `addedBy`/`createdAt`/`lastContact` = today (Manila).
+3. **Read scope:** as an internal non-Sales employee, the table renders read-only (no
+   Add/✎/🗑 buttons); a console `db.collection('aec_contacts').add(...)` is DENIED. As the
+   Brilliant Steel partner login, a console read of `aec_contacts` is DENIED (and the Sales page
+   isn't reachable anyway).
+4. **Delete tier:** manager sees 🗑 and can delete after the confirm dialog; a Sales employee
+   sees no 🗑; after a delete, the next new contact continues the sequence (gap remains — 
+   expected).
+5. **Filters AND-compose:** set type=Engineer + stage=Prospect + a region + a search term →
+   table shows only rows matching ALL four; chip count pills match the unfiltered totals;
+   clearing each dimension restores rows independently.
+6. **Derived columns:** a `new`-stage contact exports Contacted?=No / Prospected?=No; a
+   `prospect` exports Yes/Yes; a `dormant` exports Yes/No — verify in the CSV.
+7. **CSV safety:** export with a company named `=HYPERLINK("x")` → cell arrives
+   apostrophe-prefixed (formula guard); ₱/ñ characters render correctly in Excel (BOM).
+8. **Quote tracking:** tick "Quotation sent" with the date blank → saves with today's Manila
+   date; untick → `quoteSentDate` clears to `''`; the table Quote column shows ✅+date / —.
+9. **Follow-up banner:** set `followUpDate` = yesterday on a `contacted` record → the ⏰ banner
+   counts it and the row's follow-up cell turns red with "· due"; flip the stage to `partner` →
+   it drops out of the count.
+10. **Login digest:** with ≥1 overdue contact, log in as a Sales member → exactly ONE 📇
+    notification listing up to 5 companies; log out/in again same day → NO duplicate (dedupKey);
+    log in as a non-Sales employee → none; tapping it opens the Sales page.
+11. **Print:** with filters active, 🖨 Print → landscape letterhead sheet containing ONLY the
+    filtered rows and the filter description in the header meta; the `potential` notes column is
+    absent; the A/E/C dot colors survive print preview; popup-blocked case shows the toast.
+12. **XSS spot-check:** a contact with company `<img src=x onerror=alert(1)>` renders inert in
+    the table, detail modal, editor, and print window (escHtml everywhere).
+
+### Spec 11 — Cross-workstream call-outs (for the implementer — do NOT "improve" these)
+
+- **WS31 (Quotation builder v3):** `quoteSent`/`quoteRef` are MANUAL by design — do not query
+  `bk_quotes`/`bs_quotes` from this screen while WS31 is mid-rewrite. Upgrade path when WS31
+  stabilizes: derive `quoteSent` from a quote-doc match on `company`/`quoteRef` and demote the
+  checkbox to an override; the schema needs no migration for that.
+- **WS32 (Client Relations hub):** `stage`/`followUpDate`/`lastContact` deliberately reuse
+  `sales_clients`' exact field names and semantics so a WS32-generalized CRM/timeline/follow-up
+  engine can treat `aec_contacts` as just another CRM collection. Whoever decides WS32 must
+  reconcile against THIS shape (this workstream landed first); `checkAECFollowups` is additive
+  and safely superseded by any future WS32 engine — delete the boot call, keep the data.
+- **Rules-posture note (so it isn't mistaken for a bug):** `aec_contacts` writes are
+  `canDept('Sales')` while `sales_clients` next door is still legacy bare-`isAuth()` — the
+  directory is deliberately on the newer, tightened pattern; the Clients looseness is a
+  pre-existing inconsistency tracked in the Risks section, not something this workstream fixes.
+- **Color-semantics note (design review, one sentence):** the owner's red Engineer chip is
+  rendered as a small circular LETTER chip, visually distinct from the word-badges that carry
+  status meaning (stage badges, overdue red) — do not render the type as a `.badge` word pill.
 
 ## Risks / cross-workstream interactions
 

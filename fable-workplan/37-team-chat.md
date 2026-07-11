@@ -1,9 +1,756 @@
 # Workstream 37 — Team Chat (DMs, group/dept channels, presence, reactions, push)
 
-*Grounding brief — facts only. Resolve every open decision below, then replace the
-checklist with `**DECIDED:**` + your spec (exact enough for Sonnet to implement with no
-further judgment calls: function signatures, before/after code, data shapes, migration
-steps, exact `firestore.rules` diffs where relevant).*
+## DECIDED — architecture spec (Fable, 2026-07-10)
+
+*(Grounding research — current state, data model, constraints, risks — is preserved
+below this section. Every citation there was re-verified against the live checkout
+before deciding. One NEW fact found during decision-review that the brief missed:
+the WS19-hardened `notifications` create rule (firestore.rules ~188) has a
+`keys().hasOnly([...])` field allowlist — so the new `chatId` notification field
+REQUIRES a rules edit (Spec 2c) — and `Notifs.send`'s `dedupKey` pre-check is
+silently a NO-OP for cross-user sends (the sender's query against the TARGET's
+inbox is rules-denied and `.catch(()=>({empty:true}))` makes it always-send,
+notifications.js:256-258) — so chat anti-spam CANNOT use `dedupKey` (Decision 6).)*
+
+### Resolved decisions (one line each + rationale)
+
+1. **Data model → ONE top-level `conversations` collection, `type: 'dm'|'group'|'dept'`, with `messages`/`readers`/`typing` subcollections.** The per-department-collection scheme (`chat_<dept>` + a `coll.matches()` wildcard rule) is REJECTED — the brief's own constraint says prefer one well-known collection with explicit rules, matching how `tasks`/`submissions` are modeled. DM doc ID is deterministic: `dm_{uidA}_{uidB}` (uids sorted lexicographically) — kills duplicate DM threads with zero `_counters` transactions; groups get auto-IDs; dept channels get `dept_{DeptKey}` (spaces in keys like `Government Biddings` are legal in doc IDs).
+2. **Dept-channel membership → DERIVED, never stored.** Rules-side: the existing `inDept(d)` helper (firestore.rules:72-75) OR `isAdmin()`; client-side: `currentDepts.includes(dept)` OR role in president/manager/secretary. `participants` stays `[]` on dept docs (no array to drift when HR reassigns departments). Channels exist ONLY for the 10 internal departments — `Object.keys(DEPARTMENTS).filter(d => !DEPARTMENTS[d].isSeparate && !DEPARTMENTS[d].isPartnerDept)` — i.e. **`Brilliant Steel` and `Partners` get NO channels, ever**, which structurally eliminates the cross-partner-company leak the brief flags. Channels are lazily created on first open by any member (no admin setup step).
+3. **Partner wall → participant-scoped everywhere + stricter-than-`renderTeamTab` recipient picker.** A partner can read/write ONLY conversations whose `participants` array contains them (same conditional shape as `tasks/comments`), and can NEVER pass the dept branch (`!isPartner()` is explicit in the rule). Client picker for a partner = **same-company partners (`users.company` match) + president/manager only** — deliberately stricter than `renderTeamTab`'s "all partners" filter (modules.js:372-376), because an undifferentiated partner pool is exactly the cross-company leak risk the brief names. Note chat is STRICTER than tasks for internal users too: internal staff may read any task, but may NOT read a DM/group they're not in. Creation-side (a partner client-forging a conversation with arbitrary participants) is client-gated only — acceptable residual: the wall protects READS; a forged conversation exposes nothing and is visible/deletable by the President.
+4. **Live delivery → a hard 4-listener budget with page/Overlay-tied lifecycle; no global chat listener.** (a) INBOX: one `where('participants','array-contains', uid)` `onSnapshot` — attached in `renderChatPage`, detached by a one-line hook in `navigateTo` (Spec 6c); **no `orderBy` → no composite index → no firestore.indexes.json change**; client sorts by `lastMessageAt`. Dept channels enter the inbox via deterministic-ID direct `.get()`s (a `where('type','==','dept')` list query would be rules-unprovable for non-admins — direct gets are provable per-doc). (b) THREAD (max one open at a time): `messages.orderBy('createdAt','desc').limit(50)` + `readers` + `typing` snapshots, ALL torn down in the `Overlay.push('chat', teardown)` callback. Pagination: "Load earlier" = one-shot `.startAfter(oldestSnap).limit(50).get()` (older pages are static — edits/reactions on them don't live-update; accepted). Unread = **boolean dot** (`lastMessageAt > my readers/{uid}.readAt`), not per-message counts (counts would need message reads per conversation per inbox render).
+5. **Full page with Back → fork the `task-fullscreen-panel` pattern (departments.js:703-852) for the thread view; `openPage()` only for one-shot forms** (New Message picker / New Group). The task panel is the proven "panel hosting a live-updating child region + Overlay-registered Back" template; `openPage`'s static-bodyHTML contract can't host a self-updating thread. The chat INBOX is a normal router page (`case 'chat'` in `navigateTo`), like `team-directory`.
+6. **Notifications → per-recipient `Notifs.send` loop (the `task_message` precedent, departments.js:1915-1931) with a new `type:'chat_message'` + new `chatId` field; push rides `sendPushOnNotification` with ZERO `functions/` changes.** Anti-spam is sender-side, NOT `dedupKey` (cross-user dedup is rules-broken, see header note): (a) skip recipients whose live `readers/{uid}.readAt` is <45s old (they're looking at the thread — zero extra reads, the open thread's readers snapshot already has this), (b) in-memory 60s throttle per `(conversation, recipient)`. Dept-channel sends notify **actual dept members only** (both `department` string AND `departments` array, mirroring `sendToDept`'s duality handling) — implicit admin members are NOT notified (the President must not get pushed for all 10 channels). Opening a conversation marks that conversation's `chat_message` notifs read (single-field `where('chatId','==',convId)` on your OWN inbox — owner-allowed, no index). OS-level push tap just focuses the app (firebase-messaging-sw.js:73-83 has no deep-linking) — routing happens from the in-app bell via the new `_navigateFromNotif` branch; this is exact parity with `task_message`, do NOT add push-SW deep-linking.
+7. **Presence → read `users/{uid}.lastSeen` through the existing `'users-presence'` 8s-TTL cache and `getPresence()` buckets (app.js:6800-6814); NO new heartbeat, NO per-user `onSnapshot`.** DM thread header shows the dot/label, refreshed by a 30s `setInterval` (cleared in thread teardown). Honors WS16 D10.
+8. **Typing → `conversations/{id}/typing/{uid}` beacon docs `{uid, name, at}`:** write throttled to ≥4s apart while keystrokes occur, deleted on send/panel-close (best-effort `.catch`); readers show "X is typing…" for beacons <6s old, re-evaluated by a 2s interval so stale beacons expire without snapshots. Deliberately separate from the presence heartbeat (WS16 D10 forbids tightening it).
+9. **Reactions → a `reactions` map field ON the message doc (`{uid: emoji}`, one reaction per user, tap-again to clear/change),** guarded by a `Map.diff().affectedKeys().hasOnly([request.auth.uid])` rule so a member can only ever touch their OWN key. Rides the existing messages listener — zero extra listeners/reads. (A reactions subcollection was rejected: N extra listeners.)
+10. **Attachments → new Storage path `chat-files/{convId}/{ts}_{filename}`, posture (b) from the brief + a no-list hardening:** access truth lives on the Firestore-gated message doc carrying the URL; Storage allows `get` to any signed-in user but **`list: if false`** — mandatory because DM convIds are DERIVABLE from uids (`dm_{a}_{b}`, and `users` is world-readable to authed users), so enumeration must be blocked; the `Date.now()`-prefixed filename keeps full paths unguessable. Write = signed-in + `isValidDocument()` (≤25MB), partners included (they may attach in their own DMs). `chat-files` is ADDED to `isReservedTop` (storage.rules:103-108). Do NOT reuse the partner-open `task-comments/` block.
+11. **Code home → NEW file `js/chat.js` (a `window.Chat` IIFE + `window.renderChatPage`), loaded LAST (after modules.js)** in index.html AND appended to sw.js `PRECACHE`. All cross-file references (`escHtml`, `Notifs`, `Overlay`, `navigateTo`, `dbCachedGet`, `DEPARTMENTS`, `currentUser`/`currentRole`/`currentDepts`/`userProfile` — shared classic-script global scope) resolve at runtime only; `navigateTo` calls it via optional chaining (`window.renderChatPage?.()`), same as modules.js pages.
+12. **`renderComments` is NOT touched.** Chat forks its markup/CSS (`.messenger-wrap`/`.ms-*` classes in css/styles.css) and its attach/link/edit/delete UX into chat.js's own live renderer. Task/submission threads keep their fetch-once behavior (upgrading them is out of scope, per the brief's risk note).
+13. **Nav/entry points → new page key `'chat'`:** sidebar entry in all five role branches of `getSidebarItems`, `{icon:'message-circle',label:'Chat',page:'chat'}` added to all five `*_BOTTOM_NAV` arrays, a 💬 button on Team directory cards (`renderTeamCards`) that calls `Chat.openDM(uid)`, and the notification-tap route.
+14. **Retention/deletion → messages: author-or-admin delete (parity with comments rules); conversations: President-only delete; no pruning** (owner "records kept forever" directive). Reading own missing/denied docs is always `.catch`-wrapped per repo convention.
+
+**Cross-workstream:** WS38 (Files Hub) — `chat-files/` is chat-private (message-doc-gated); if WS38 ships a general share mechanism, chat attachments stay as-is (a chat attachment is part of a conversation, not a library document) — coordinate only on the `isReservedTop` list, where both add segments. WS16 (perf) — the 4-listener budget + `.limit(50)` + page-scoped inbox listener is the cost posture; nothing here polls.
+
+---
+
+### Spec 1 — Data shapes (annotated literals)
+
+```js
+// conversations/{convId}   — NEW top-level collection.
+//   convId: 'dm_{uidA}_{uidB}' (sorted) | auto-ID (group) | 'dept_{DeptKey}'
+{ type: 'dm',                        // REQUIRED 'dm'|'group'|'dept'
+  participants: ['uidA','uidB'],     // REQUIRED. dm: exactly 2, sorted; group: 2+ incl. creator; dept: [] ALWAYS (field present, empty — membership derived via inDept()/isAdmin())
+  participantNames: {uidA:'Neil B'}, // denormalized display map (dm/group); {} for dept
+  name: null,                        // group: REQUIRED string; dept: the department key; dm: null (derive other party)
+  department: null,                  // dept only: a DEPARTMENTS key; else null
+  createdBy: 'uidA', createdByName: 'Neil B',
+  createdAt: serverTimestamp,
+  lastMessageAt: null,               // Timestamp|null — inbox sort key (client-side sort; NO index)
+  lastMessageText: null,             // string|null — ≤80-char preview ('🔗 Link' / '📎 name' for attachments)
+  lastMessageBy: null, lastMessageByName: null }
+
+// conversations/{convId}/messages/{autoId}   — mirrors tasks/{id}/comments + reactions
+{ text: '',                          // string, may be '' when attachment-only
+  authorId: 'uid',                   // REQUIRED == request.auth.uid at create
+  authorName: 'Neil B',
+  fileUrl: null, fileName: null,     // string|null — Storage download URL or pasted link
+  fileSource: null,                  // 'link'|null (null = uploaded file)
+  createdAt: serverTimestamp,
+  editedAt: serverTimestamp,         // OPTIONAL — set only on edit
+  reactions: { uid1:'👍', uid2:'❤️' } }  // OPTIONAL map — ONE emoji per uid; absent until first reaction
+
+// conversations/{convId}/readers/{readerUid}  — verbatim tasks/{id}/readers shape
+{ uid: 'readerUid', name: 'Neil B', readAt: serverTimestamp }
+
+// conversations/{convId}/typing/{typerUid}    — short-lived beacon (client deletes; readers expire >6s)
+{ uid: 'typerUid', name: 'Neil B', at: serverTimestamp }
+
+// notifications/{uid}/items/{autoId}          — EXISTING; ONE new optional field
+{ ..., type: 'chat_message', chatId: '<convId>' }   // chatId REQUIRES the Spec 2c rules edit
+```
+Avatars/photos are NOT denormalized onto messages — the thread renderer resolves `photoUrl` from the shared `dbCachedGet('users', ...)` cache (60s TTL; note config.js:354-356 hard-wires this key to the payroll-merged fetcher — accepted, it's the standard shared cache).
+
+### Spec 2 — firestore.rules diff (deploy: `~/.npm-global/bin/firebase deploy --only firestore:rules`, separate from `git push`; re-`git diff` first per the concurrent-edit memory)
+
+**2a — NEW `conversations` family. Insert immediately AFTER the `tasks/{taskId}` block (after firestore.rules:327's closing brace).** Uses the proven `tasks` shapes: participant-conditional partner wall, per-viewer-owned reader docs, and a `taskAssignee()`-style re-read helper for subcollections (rules do NOT cascade).
+
+```
+    // ── Team Chat (v12 WS37) — conversations + messages/readers/typing ──
+    // One collection, three types: 'dm' | 'group' | 'dept'.
+    //  • dm/group: membership = the participants array. A partner may read/write
+    //    ONLY conversations they're a participant of (conditional wall, same
+    //    semantics as tasks/comments) — and unlike tasks, internal staff are
+    //    participant-scoped too (nobody reads a DM they're not in).
+    //  • dept: membership derived live via isAdmin() || inDept(department);
+    //    partners NEVER pass this branch. participants stays [] on dept docs.
+    // Rules do NOT cascade — messages/readers/typing each get an explicit match.
+    match /conversations/{convId} {
+      // Membership vs THIS doc (parent reads/updates — no extra get()).
+      function memberOfDoc() {
+        return (request.auth.uid in resource.data.get('participants', []))
+          || (resource.data.get('type','') == 'dept' && !isPartner()
+              && (isAdmin() || inDept(resource.data.get('department',''))));
+      }
+      // Membership via re-read, for subcollections (mirrors taskAssignee()).
+      function convMember() {
+        let c = get(/databases/$(database)/documents/conversations/$(convId)).data;
+        return (request.auth.uid in c.get('participants', []))
+          || (c.get('type','') == 'dept' && !isPartner()
+              && (isAdmin() || inDept(c.get('department',''))));
+      }
+
+      // get: any member. list: the inbox query is participants array-contains,
+      // provable from the first disjunct; dept docs are fetched by direct get.
+      allow read: if isAuth() && memberOfDoc();
+
+      // dm/group: creator must include themself. dept: lazy-create by any member;
+      // the doc ID must be exactly 'dept_<department>' and participants must be [].
+      allow create: if isAuth() && (
+        ( request.resource.data.get('type','') in ['dm','group']
+          && request.resource.data.get('createdBy','') == request.auth.uid
+          && request.auth.uid in request.resource.data.get('participants', []) )
+        ||
+        ( request.resource.data.get('type','') == 'dept' && !isPartner()
+          && (isAdmin() || inDept(request.resource.data.get('department','')))
+          && convId == 'dept_' + request.resource.data.get('department','')
+          && request.resource.data.get('participants', []).size() == 0 )
+      );
+
+      // Any member may bump ONLY the lastMessage* preview fields (the second
+      // write of every send). Creator/admin manage the doc (rename, members).
+      // A participant may remove exactly themself ("leave group").
+      allow update: if isAuth() && (
+        ( memberOfDoc() && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['lastMessageAt','lastMessageText','lastMessageBy','lastMessageByName']) )
+        || resource.data.get('createdBy','') == request.auth.uid
+        || isAdmin()
+        || ( request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants'])
+             && request.resource.data.get('participants', [])
+                == resource.data.get('participants', []).removeAll([request.auth.uid]) )
+      );
+
+      allow delete: if isAuth() && isPresident();   // records kept forever
+
+      match /messages/{messageId} {
+        allow read:   if isAuth() && convMember();
+        allow create: if isAuth() && convMember()
+          && request.resource.data.get('authorId','') == request.auth.uid;
+        // Author edits own message; admin moderates; any member may toggle
+        // their OWN key inside the reactions map — and nothing else.
+        allow update: if isAuth() && (
+          resource.data.get('authorId','') == request.auth.uid
+          || isAdmin()
+          || ( convMember()
+               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+               && request.resource.data.get('reactions', {})
+                    .diff(resource.data.get('reactions', {})).affectedKeys()
+                    .hasOnly([request.auth.uid]) )
+        );
+        allow delete: if isAuth()
+          && (resource.data.get('authorId','') == request.auth.uid || isAdmin());
+      }
+      // Read receipts — per-viewer-writes-own-doc, verbatim tasks/readers shape
+      // (+ convMember so a non-participant can't plant a receipt).
+      match /readers/{readerUid} {
+        allow read:  if isAuth() && convMember();
+        allow write: if isAuth() && isOwner(readerUid) && convMember();
+      }
+      // Typing beacons — own doc only (write covers create/update/delete).
+      match /typing/{typerUid} {
+        allow read:  if isAuth() && convMember();
+        allow write: if isAuth() && isOwner(typerUid) && convMember();
+      }
+    }
+```
+Notes for Sonnet: `let` in rule functions, `Map.diff().affectedKeys()`, `List.removeAll()`, and string `+` are all rules-v2 features (the file is already `rules_version = '2'`; `let` is used at firestore.rules:37). Every field read uses `.get(field, default)` per the missing-field-throws memory. A `get` on a NONEXISTENT conversation doc evaluates `resource == null` → throws → denies — the client's lazy-create paths `.catch()` that and proceed to create (Spec 4).
+
+**2b — no firestore.indexes.json change.** Inbox = array-contains only; messages = single-field orderBy. State this explicitly so nobody "helpfully" adds one.
+
+**2c — `notifications` create rule (firestore.rules ~188) — BEFORE → AFTER (add `chatId` to the allowlist):**
+```
+// BEFORE
+        && request.resource.data.keys().hasOnly(['title','body','icon','type','link','read','createdAt','dedupKey','taskId'])
+// AFTER
+        && request.resource.data.keys().hasOnly(['title','body','icon','type','link','read','createdAt','dedupKey','taskId','chatId'])
+```
+Without this, every chat notification write is silently denied (the send loop's `.catch` would eat it and chat pushes would just never arrive).
+
+### Spec 3 — storage.rules diff (deploy: `~/.npm-global/bin/firebase deploy --only storage:rules`, separate step)
+
+**3a — `isReservedTop` (storage.rules:103-108) — BEFORE → AFTER:**
+```
+// BEFORE
+    function isReservedTop(seg) {
+      return seg == 'Finance'
+        || seg == 'tasks' || seg == 'posts'
+        || seg == 'general' || seg == 'General'
+        || seg == 'profile-photos' || seg == 'task-comments';
+    }
+// AFTER
+    function isReservedTop(seg) {
+      return seg == 'Finance'
+        || seg == 'tasks' || seg == 'posts'
+        || seg == 'general' || seg == 'General'
+        || seg == 'profile-photos' || seg == 'task-comments'
+        || seg == 'chat-files';
+    }
+```
+
+**3b — NEW block, insert directly after the `task-comments` block (storage.rules:139-144):**
+```
+    // ── Team Chat attachments (v12 WS37) ─────────────
+    // Storage rules cannot read Firestore, so per-conversation participant
+    // checks are impossible here. Model: access truth lives on the Firestore-
+    // gated message doc that carries the URL. Direct GET is open to any
+    // signed-in user, but LIST is forbidden — DM conversation ids are
+    // derivable from uids (dm_{a}_{b}), so enumeration must be blocked; the
+    // Date.now()-prefixed filename keeps full paths unguessable.
+    match /chat-files/{convId}/{fileName} {
+      allow get:  if isSignedIn();
+      allow list: if false;
+      allow write: if isSignedIn()
+        && (request.resource == null || isValidDocument());
+    }
+```
+
+### Spec 4 — NEW file `js/chat.js` (window.Chat IIFE + renderChatPage)
+
+Skeleton with every load-bearing body spelled out. Markup not shown verbatim reuses the `.messenger-wrap`/`.ms-row`/`.ms-bubble`/`.ms-avatar`/`.ms-seen`/`.messenger-input-row` classes and the attach/link/edit/delete UX forked from `renderComments` (departments.js:1775-1826, 1833-1875) — same `escHtml`/`safeHttpUrl` discipline at every interpolation.
+
+```js
+/* ═══════════════════════════════════════════════════
+   BARRO INDUSTRIES — Team Chat (v12 WS37)
+   js/chat.js — loaded LAST (after modules.js). All cross-file globals
+   (escHtml, safeHttpUrl, Notifs, Overlay, dbCachedGet, DEPARTMENTS,
+   navigateTo, currentUser/currentRole/currentDepts/userProfile) are
+   referenced at RUNTIME only — never at parse time.
+═══════════════════════════════════════════════════ */
+window.Chat = (() => {
+  // ── Tunables ──
+  const PAGE_SIZE         = 50;      // live window + "Load earlier" page size
+  const TYPING_WRITE_MS   = 4000;    // min gap between own typing beacons
+  const TYPING_TTL_MS     = 6000;    // beacon age still shown as "typing…"
+  const READ_FRESH_MS     = 45000;   // recipient read this recently → skip notif
+  const NOTIF_THROTTLE_MS = 60000;   // per (conversation, recipient) notif spacing
+  const REACTIONS = ['👍','❤️','😂','😮','😢','🙏'];
+
+  // ── Listener state — the ONLY live listeners this feature owns ──
+  let _inboxUnsub = null;                    // (1) conversations array-contains
+  let _threadUnsubs = [];                    // (2-4) messages/readers/typing for the ONE open thread
+  let _openConvId = null, _openConv = null;
+  let _convs = [], _deptConvs = [], _myReads = {};   // inbox state
+  let _msgs = [], _earlier = [], _readers = [], _typing = [];  // thread state
+  let _presenceTimer = null, _typingExpireTimer = null, _markReadTimer = null;
+  let _lastTypingWrite = 0, _filter = 'all';
+  const _notifLastSent = {};                 // `${convId}_${uid}` → ms epoch
+
+  const _isAdminRole = () => ['president','manager','secretary'].includes(currentRole);
+  const _myName = () => (window.userProfile?.displayName || currentUser.email);
+  function dmIdFor(a, b) { return 'dm_' + [a, b].sort().join('_'); }
+  function deptChannelKeys() {
+    return Object.keys(window.DEPARTMENTS || {})
+      .filter(d => !DEPARTMENTS[d].isSeparate && !DEPARTMENTS[d].isPartnerDept);
+  }
+  function myDeptChannels() {
+    if (typeof isPartner === 'function' && isPartner()) return [];  // partners NEVER
+    return _isAdminRole() ? deptChannelKeys()
+      : deptChannelKeys().filter(d => (currentDepts || []).includes(d));
+  }
+  // Decision 3: partner picker = same-company partners + president/manager.
+  function dmCandidates(users) {
+    if (typeof isPartner === 'function' && isPartner()) {
+      const myCo = (window.userProfile?.company || '').trim();
+      return users.filter(u => u.id !== currentUser.uid && (
+        (u.role === 'partner' && (u.company || '').trim() === myCo) ||
+        ['president','manager'].includes(u.role)));
+    }
+    return users.filter(u => u.id !== currentUser.uid);   // internal: everyone
+  }
+
+  // ── Teardown (exact lifecycle contract) ──
+  function teardownInbox() {                 // called by navigateTo on ANY non-chat page
+    if (_inboxUnsub) { try { _inboxUnsub(); } catch(_){} _inboxUnsub = null; }
+  }
+  function teardownThread() {                // Overlay teardown callback — NEVER calls dismissTop
+    _threadUnsubs.forEach(u => { try { u(); } catch(_){} });
+    _threadUnsubs = []; _openConvId = null; _openConv = null;
+    _msgs = []; _earlier = []; _readers = []; _typing = [];
+    if (_presenceTimer)     { clearInterval(_presenceTimer);     _presenceTimer = null; }
+    if (_typingExpireTimer) { clearInterval(_typingExpireTimer); _typingExpireTimer = null; }
+    if (_markReadTimer)     { clearTimeout(_markReadTimer);      _markReadTimer = null; }
+    const p = document.getElementById('chat-thread-panel');
+    if (p) { p.style.transform = 'translateY(100%)'; p.style.opacity = '0';
+             setTimeout(() => p.remove(), 320); }          // mirrors closeTaskPanel
+  }
+
+  // ── Inbox ──
+  function _attachInbox() {
+    teardownInbox();
+    _inboxUnsub = db.collection('conversations')
+      .where('participants', 'array-contains', currentUser.uid)
+      .onSnapshot(async snap => {
+        _convs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        await _refreshDeptChannels();        // deterministic-ID direct gets
+        await _refreshMyReads();             // one own-reader-doc get per conversation
+        _renderInbox();
+      }, () => { const el = document.getElementById('chat-inbox');
+                 if (el) el.innerHTML = '<div class="empty-state"><div class="empty-icon">💬</div><h4>Chat unavailable</h4></div>'; });
+  }
+  async function _refreshDeptChannels() {
+    _deptConvs = (await Promise.all(myDeptChannels().map(d =>
+      db.collection('conversations').doc('dept_' + d).get()
+        .then(s => s.exists ? { id: s.id, ...s.data() }
+          : { id: 'dept_' + d, type: 'dept', department: d, name: d,
+              participants: [], _unprovisioned: true })
+        .catch(() => null)             // read on missing doc is rules-denied → treat as unprovisioned? No: denied ≠ missing; drop it
+    ))).filter(Boolean);
+  }
+  async function _refreshMyReads() {
+    const all = [..._convs, ..._deptConvs];
+    await Promise.all(all.map(cv =>
+      db.collection('conversations').doc(cv.id).collection('readers').doc(currentUser.uid).get()
+        .then(s => { _myReads[cv.id] = s.exists ? (s.data().readAt?.toMillis?.() || 0) : 0; })
+        .catch(() => { _myReads[cv.id] = 0; })));
+  }
+  function _isUnread(cv) {
+    const last = cv.lastMessageAt?.toMillis?.() || 0;
+    return last > 0 && cv.lastMessageBy !== currentUser.uid && last > (_myReads[cv.id] || 0);
+  }
+  // _renderInbox(): merge _convs + _deptConvs, filter by _filter chip
+  // ('all'|'dm'|'group'|'dept'), sort by lastMessageAt desc (nulls last),
+  // rows: avatar/initials (dm: other party via participantNames + presence dot
+  // from the users-presence cache; group: name; dept: DEPARTMENTS[d].icon + name),
+  // bold title + unread dot when _isUnread, muted lastMessageText preview
+  // (escHtml), timeAgo on the right. Row click → cv._unprovisioned
+  // ? openDeptChannel(cv.department) : openConversation(cv.id, cv).
+
+  // ── Open / create ──
+  async function openDM(otherUid) {
+    const id = dmIdFor(currentUser.uid, otherUid);
+    const ref = db.collection('conversations').doc(id);
+    const snap = await ref.get().catch(() => null);
+    if (!snap || !snap.exists) {
+      const o = await db.collection('users').doc(otherUid).get().catch(() => null);
+      const otherName = o?.exists ? (o.data().displayName || o.data().email) : 'User';
+      await ref.set({
+        type: 'dm', participants: [currentUser.uid, otherUid].sort(),
+        participantNames: { [currentUser.uid]: _myName(), [otherUid]: otherName },
+        name: null, department: null,
+        createdBy: currentUser.uid, createdByName: _myName(),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        lastMessageAt: null, lastMessageText: null, lastMessageBy: null, lastMessageByName: null
+      });
+    }
+    if (window.currentPage !== 'chat') navigateTo('chat');   // clears any open overlays first
+    openConversation(id);
+  }
+  async function openDeptChannel(dept) {
+    const id = 'dept_' + dept, ref = db.collection('conversations').doc(id);
+    const snap = await ref.get().catch(() => null);
+    if (!snap || !snap.exists) {
+      await ref.set({ type: 'dept', department: dept, name: dept, participants: [],
+        participantNames: {},
+        createdBy: currentUser.uid, createdByName: _myName(),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        lastMessageAt: null, lastMessageText: null, lastMessageBy: null, lastMessageByName: null
+      }).catch(() => {});
+    }
+    openConversation(id);
+  }
+  async function openConversation(convId, preloaded) {
+    let conv = preloaded || null;
+    if (!conv) {
+      const snap = await db.collection('conversations').doc(convId).get().catch(() => null);
+      if (!snap || !snap.exists) { Notifs.showToast('Conversation not found', 'error'); return; }
+      conv = { id: snap.id, ...snap.data() };
+    }
+    teardownThread();                       // defensive idempotent reset
+    _openConvId = convId; _openConv = conv;
+    _buildThreadPanel(conv);                // Spec 5 — Overlay.push('chat', teardownThread)
+    const ref = db.collection('conversations').doc(convId);
+    _threadUnsubs.push(ref.collection('messages')
+      .orderBy('createdAt', 'desc').limit(PAGE_SIZE)
+      .onSnapshot(s => {
+        _msgs = s.docs.map(d => ({ id: d.id, ...d.data(), _snap: d })).reverse();
+        _renderThread(); _scheduleMarkRead();
+      }, () => {}));
+    _threadUnsubs.push(ref.collection('readers')
+      .onSnapshot(s => { _readers = s.docs.map(d => d.data()); _renderThread(); }, () => {}));
+    _threadUnsubs.push(ref.collection('typing')
+      .onSnapshot(s => { _typing = s.docs.map(d => d.data()); _renderTypingRow(); }, () => {}));
+    _markRead(); _clearChatNotifs(convId);
+    if (conv.type === 'dm') _startPresenceHeader(conv);
+    _typingExpireTimer = setInterval(_renderTypingRow, 2000);
+  }
+
+  // ── Read receipts (mirrors departments.js:1750-1756) ──
+  function _markRead() {
+    if (!_openConvId) return;
+    db.collection('conversations').doc(_openConvId).collection('readers')
+      .doc(currentUser.uid).set({ uid: currentUser.uid, name: _myName(),
+        readAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
+      .catch(() => {});
+  }
+  function _scheduleMarkRead() {            // debounce: at most one receipt per 2s of arrivals
+    if (_markReadTimer) return;
+    _markReadTimer = setTimeout(() => { _markReadTimer = null; _markRead(); }, 2000);
+  }
+  async function _clearChatNotifs(convId) { // mark (not delete) my pending chat notifs read
+    try {
+      const snap = await db.collection('notifications').doc(currentUser.uid)
+        .collection('items').where('chatId', '==', convId).get();
+      await Promise.all(snap.docs.filter(d => !d.data().read)
+        .map(d => d.ref.update({ read: true })));
+    } catch (_) {}
+  }
+
+  // ── Send (message add → parent preview bump → own receipt → notify) ──
+  async function sendMessage({ text, file, link }) {
+    const conv = _openConv; if (!conv) return;
+    const FV = firebase.firestore.FieldValue;
+    let fileUrl = null, fileName = null, fileSource = null;
+    if (file) {
+      try {
+        const sref = storage.ref(`chat-files/${conv.id}/${Date.now()}_${file.name}`);
+        await sref.put(file); fileUrl = await sref.getDownloadURL(); fileName = file.name;
+      } catch (_) { Notifs.showToast('File upload failed', 'error'); return; }
+    } else if (link) {
+      fileUrl = link; fileSource = 'link';
+      try { fileName = new URL(link).hostname.replace(/^www\./, ''); } catch (_) { fileName = link; }
+    }
+    await db.collection('conversations').doc(conv.id).collection('messages').add({
+      text: text || '', authorId: currentUser.uid, authorName: _myName(),
+      fileUrl: fileUrl || null, fileName: fileName || null, fileSource: fileSource || null,
+      createdAt: FV.serverTimestamp()
+    });
+    const preview = text ? (text.length > 80 ? text.slice(0, 80) + '…' : text)
+                         : (fileSource === 'link' ? '🔗 Link' : `📎 ${fileName || 'File'}`);
+    // Second write — passes the affectedKeys([lastMessage*]) member branch.
+    await db.collection('conversations').doc(conv.id).update({
+      lastMessageAt: FV.serverTimestamp(), lastMessageText: preview,
+      lastMessageBy: currentUser.uid, lastMessageByName: _myName()
+    }).catch(() => {});
+    _markRead(); _clearOwnTyping();
+    _notifyRecipients(conv, preview);       // fire-and-forget
+  }
+
+  // ── Message-arrived notifications (Decision 6 — NOT dedupKey) ──
+  async function _notifyRecipients(conv, preview) {
+    let targets;
+    if (conv.type === 'dept') {
+      const snap = await dbCachedGet('users', () => db.collection('users').get(), 60000);
+      targets = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .filter(u => u.department === conv.department ||
+                     (Array.isArray(u.departments) && u.departments.includes(conv.department)))
+        .map(u => u.id);                    // actual members only — NOT implicit admins
+    } else {
+      targets = (conv.participants || []).slice();
+    }
+    const now = Date.now();
+    const label = conv.type === 'dm' ? _myName() : (conv.name || conv.department || 'Chat');
+    for (const uid of targets) {
+      if (uid === currentUser.uid) continue;
+      const r = _readers.find(x => x.uid === uid);        // live snapshot — zero extra reads
+      if (r && r.readAt?.toMillis && (now - r.readAt.toMillis()) < READ_FRESH_MS) continue;
+      const k = `${conv.id}_${uid}`;
+      if (_notifLastSent[k] && (now - _notifLastSent[k]) < NOTIF_THROTTLE_MS) continue;
+      _notifLastSent[k] = now;
+      await Notifs.send(uid, { title: `💬 ${label}`, body: `${_myName()}: ${preview}`,
+        icon: '💬', type: 'chat_message', chatId: conv.id }).catch(() => {});
+    }
+  }
+
+  // ── Reactions (Decision 9) ──
+  async function toggleReaction(messageId, emoji) {
+    const m = _msgs.find(x => x.id === messageId) || _earlier.find(x => x.id === messageId);
+    const mine = m && m.reactions && m.reactions[currentUser.uid];
+    await db.collection('conversations').doc(_openConvId).collection('messages').doc(messageId)
+      .update({ ['reactions.' + currentUser.uid]:
+        (mine === emoji) ? firebase.firestore.FieldValue.delete() : emoji })
+      .catch(() => Notifs.showToast('Could not react', 'error'));
+  }
+
+  // ── Typing (Decision 8) ──
+  function onComposerInput() {
+    const now = Date.now();
+    if (!_openConvId || now - _lastTypingWrite < TYPING_WRITE_MS) return;
+    _lastTypingWrite = now;
+    db.collection('conversations').doc(_openConvId).collection('typing').doc(currentUser.uid)
+      .set({ uid: currentUser.uid, name: _myName(),
+             at: firebase.firestore.FieldValue.serverTimestamp() }).catch(() => {});
+  }
+  function _clearOwnTyping() {
+    if (!_openConvId) return;
+    _lastTypingWrite = 0;
+    db.collection('conversations').doc(_openConvId).collection('typing')
+      .doc(currentUser.uid).delete().catch(() => {});
+  }
+  function _renderTypingRow() {
+    const el = document.getElementById('chat-typing-row'); if (!el) return;
+    const now = Date.now();
+    const names = _typing.filter(t => t.uid !== currentUser.uid
+        && t.at?.toMillis && (now - t.at.toMillis()) < TYPING_TTL_MS)
+      .map(t => escHtml((t.name || '').split(' ')[0]));
+    el.innerHTML = names.length
+      ? `${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} typing…` : '';
+  }
+
+  // ── Pagination — one-shot older page, prepended (static; not live) ──
+  async function loadEarlier() {
+    const anchor = (_earlier[0] || _msgs[0]); if (!anchor || !anchor._snap) return;
+    const s = await db.collection('conversations').doc(_openConvId).collection('messages')
+      .orderBy('createdAt', 'desc').startAfter(anchor._snap).limit(PAGE_SIZE).get()
+      .catch(() => ({ docs: [] }));
+    _earlier = [...s.docs.map(d => ({ id: d.id, ...d.data(), _snap: d })).reverse(), ..._earlier];
+    _renderThread({ keepScrollAnchor: true });
+  }
+
+  // ── Presence header (Decision 7 — reuses users-presence cache, NO listener) ──
+  function _startPresenceHeader(conv) {
+    const otherUid = (conv.participants || []).find(u => u !== currentUser.uid);
+    const paint = async () => {
+      const el = document.getElementById('chat-presence-label'); if (!el || !otherUid) return;
+      const snap = await dbCachedGet('users-presence', fetchUsersWithPayroll, 8000).catch(() => null);
+      const u = snap && snap.docs.map(d => ({ id: d.id, ...d.data() })).find(x => x.id === otherUid);
+      // getPresence bucket logic (app.js:6805-6814): <3min green 'Online',
+      // <30min orange 'Xm ago', else gray 'Xh/Xd ago' / 'Unknown'.
+      /* set dot colour + label exactly per those buckets */
+    };
+    paint(); _presenceTimer = setInterval(paint, 30000);
+  }
+
+  // ── Manila-day dividers (bizDate discipline for calendar-day bucketing) ──
+  function _manilaDay(ts) {
+    const d = ts?.toDate ? ts.toDate() : null;
+    return d ? d.toLocaleDateString('en-CA', { timeZone: window.BIZ_TZ }) : '';
+  }
+  function _dayLabel(iso) {
+    const today = window.bizDate();
+    if (iso === today) return 'Today';
+    const y = new Date(today + 'T12:00:00'); y.setDate(y.getDate() - 1);
+    const yIso = `${y.getFullYear()}-${String(y.getMonth()+1).padStart(2,'0')}-${String(y.getDate()).padStart(2,'0')}`;
+    if (iso === yIso) return 'Yesterday';
+    return new Date(iso + 'T12:00:00').toLocaleDateString('en-PH',
+      { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  // _renderThread({keepScrollAnchor}): re-renders ONLY #chat-thread-scroll
+  // (composer lives OUTSIDE it → input value survives every snapshot):
+  //   const el = document.getElementById('chat-thread-scroll'); if (!el) return;
+  //   const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  //   el.innerHTML = _threadHtml([..._earlier, ..._msgs]);   // day dividers via
+  //     _manilaDay/_dayLabel; bubbles fork renderComments markup (mine/theirs,
+  //     avatar from users cache, inline image via the isImage regex +
+  //     safeHttpUrl, file/link chips, (edited) tag); reaction chips grouped by
+  //     emoji with count (own = highlighted, click → toggleReaction); tapping a
+  //     bubble toggles a 6-emoji REACTIONS picker row for that message;
+  //     ✎/🗑 actions: own message → promptDialog edit / confirmDialog delete,
+  //     admin → delete (NO manual re-render calls — the listener repaints);
+  //     "Seen by" avatar stack under the LAST message: _readers where
+  //     uid != lastMsg.authorId && uid != currentUser.uid && readAt >=
+  //     lastMsg.createdAt (max 5 mini-initials + "+N", title = full names);
+  //     a "↑ Load earlier" button at top when (_earlier.length + _msgs.length)
+  //     >= PAGE_SIZE → loadEarlier().
+  //   if (atBottom && !keepScrollAnchor) el.scrollTop = el.scrollHeight;
+
+  return { openDM, openConversation, openDeptChannel, sendMessage, toggleReaction,
+           loadEarlier, onComposerInput, teardownInbox, teardownThread,
+           dmIdFor, myDeptChannels, dmCandidates, _attachInbox };
+})();
+
+// ── Inbox page (router target: case 'chat') ──
+window.renderChatPage = async function() {
+  const c = document.getElementById('page-content'); if (!c) return;
+  c.innerHTML = `
+    <div class="page-header"><h2>💬 Chat</h2>
+      <button class="btn-primary btn-sm" id="chat-new-btn">+ New Message</button></div>
+    <div id="chat-filter"></div>
+    <div id="chat-inbox"><div class="loading-placeholder">Loading…</div></div>`;
+  const chips = [{ key: 'all', label: 'All' }, { key: 'dm', label: 'DMs' },
+                 { key: 'group', label: 'Groups' }];
+  if (window.Chat.myDeptChannels().length) chips.push({ key: 'dept', label: 'Channels' });
+  document.getElementById('chat-filter').innerHTML = window.chipTabs(chips, 'all');
+  window.bindChipTabs(document.getElementById('chat-filter'),
+    k => window.Chat && (window.Chat._filter = k, undefined));  // Sonnet: route via a setFilter(k) export that re-renders
+  document.getElementById('chat-new-btn').addEventListener('click', () => {
+    // openPage('New Message', body) — Decision 5: openPage for one-shot forms.
+    // Body: search input + dmCandidates(users) rows (avatar/name/role; escHtml)
+    //   → click = Overlay.dismissTop() then Chat.openDM(uid);
+    // + a "👥 New Group" section (partners: HIDDEN — partner group creation is
+    //   out of scope v1): name input + member checkbox list from dmCandidates →
+    //   create {type:'group', participants: sorted unique picked + self,
+    //   participantNames, name, createdBy/…, lastMessage*: null} via
+    //   .add(), then Overlay.dismissTop() + Chat.openConversation(newId).
+  });
+  window.Chat._attachInbox();
+};
+```
+(The two commented render bodies — `_renderInbox` and `_threadHtml` — are deliberately prose-specified: pure markup with all behavior, ids, data flow, escaping, and event wiring pinned above; no judgment calls remain.)
+
+### Spec 5 — Thread panel (fork of `task-fullscreen-panel`, departments.js:727-850)
+
+`_buildThreadPanel(conv)` — exact structural contract:
+
+```js
+function _buildThreadPanel(conv) {
+  document.getElementById('chat-thread-panel')?.remove();
+  const p = document.createElement('div');
+  p.id = 'chat-thread-panel';
+  p.style.cssText = `
+    position:fixed;
+    top:calc(var(--topbar-h) + env(safe-area-inset-top,0px));
+    left:0;right:0;bottom:0;
+    background:var(--bg); z-index:4000;
+    display:flex;flex-direction:column;
+    transform:translateY(100%); opacity:0;
+    transition:transform 0.32s cubic-bezier(.4,0,.2,1),opacity 0.32s;
+    overflow:hidden;`;                       // verbatim task-panel shell (departments.js:729-740)
+  p.innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0">
+      <button id="chat-panel-back" style="background:none;border:none;color:var(--primary-light);font-size:22px;cursor:pointer;padding:0 4px;line-height:1">‹</button>
+      <!-- avatar/initials · title (escHtml: DM = other party's name from
+           participantNames; group = conv.name; dept = DEPARTMENTS icon + name)
+           · subtitle: DM → <span id="chat-presence-dot"></span><span id="chat-presence-label"></span>
+                       group/dept → member count -->
+    </div>
+    <div id="chat-thread-scroll" style="flex:1;overflow-y:auto;padding:12px 14px"></div>
+    <div id="chat-typing-row" style="min-height:16px;font-size:11px;color:var(--text-muted);padding:0 14px"></div>
+    <div id="chat-file-preview" style="font-size:11px;color:var(--primary-light);padding:0 14px 4px;min-height:16px"></div>
+    <!-- composer: .messenger-input-row fork — 📎 file input #chat-file
+         (same accept list as departments.js:1818), link btn #chat-link
+         (promptDialog, https:// coercion, replaces pending file — mirrors
+         departments.js:1843-1852), #chat-input .ms-input
+         (input → Chat.onComposerInput; Enter-no-shift → send),
+         #chat-send .ms-send-btn (disable while sending) -->`;
+  document.body.appendChild(p);
+  if (window.lucide) lucide.createIcons({ nodes: [p] });
+  requestAnimationFrame(() => { p.style.transform = 'translateY(0)'; p.style.opacity = '1'; });
+  window.Overlay.push('chat', () => window.Chat.teardownThread());   // ONE history entry
+  document.getElementById('chat-panel-back')
+    .addEventListener('click', () => window.Overlay.dismissTop());   // Back = history.back()
+  // composer wiring: send → Chat.sendMessage({text, file, link}) then clear
+  // input/file/preview (NO re-render call — the messages listener repaints)
+}
+```
+Lifecycle guarantees this buys for free (config.js:526-548 + app.js:7417-7424): device/browser Back, Esc, and any `navigateTo` (which calls `Overlay.clearAll()`, app.js:1956) all run `teardownThread()` → every thread listener detaches; there is NO code path that leaves a chat `onSnapshot` running on another page. The inbox listener is the one non-Overlay surface, handled by the Spec 6c hook.
+
+### Spec 6 — Edits to EXISTING files (before → after, anchored)
+
+**6a — notifications.js:252 `send()` — accept + persist `chatId`:**
+```js
+// BEFORE
+  async function send(targetUid, { title, body, icon = '🔔', type = 'general', link = null, dedupKey = null, taskId = null } = {}) {
+// AFTER
+  async function send(targetUid, { title, body, icon = '🔔', type = 'general', link = null, dedupKey = null, taskId = null, chatId = null } = {}) {
+```
+```js
+// BEFORE (notifications.js:264-266)
+      ...(dedupKey ? { dedupKey } : {}),
+      ...(taskId ? { taskId } : {})
+    };
+// AFTER
+      ...(dedupKey ? { dedupKey } : {}),
+      ...(taskId ? { taskId } : {}),
+      ...(chatId ? { chatId } : {})
+    };
+```
+
+**6b — notifications.js:67 `_navigateFromNotif` — new FIRST branch + plumb `chatId`:**
+```js
+// BEFORE
+  function _navigateFromNotif(type, taskId) {
+    document.getElementById('notif-panel')?.classList.add('hidden');
+    document.getElementById('notif-backdrop')?.classList.add('hidden');
+    if (taskId || type?.startsWith('task')) {
+// AFTER
+  function _navigateFromNotif(type, taskId, chatId) {
+    document.getElementById('notif-panel')?.classList.add('hidden');
+    document.getElementById('notif-backdrop')?.classList.add('hidden');
+    if (type === 'chat_message') {
+      if (typeof navigateTo === 'function') navigateTo('chat');
+      if (chatId && window.Chat?.openConversation) window.Chat.openConversation(chatId);
+      return;
+    }
+    if (taskId || type?.startsWith('task')) {
+```
+Plus three mechanical companions: (i) NAV_TYPES (notifications.js:100) gains `'chat_message'`; (ii) the notif-item template (notifications.js:116) gains `data-chat-id="${escHtml(n.chatId||'')}"` beside `data-task-id`; (iii) the view-btn handler (notifications.js:213-227) reads `const chatId = item?.dataset.chatId || '';` and calls `_navigateFromNotif(type, taskId, chatId);`.
+
+**6c — app.js `navigateTo` — teardown hook + router case:**
+```js
+// BEFORE (app.js:1970-1971)
+  // Close task fullscreen panel if open
+  if (typeof window.closeTaskPanel === 'function') window.closeTaskPanel();
+// AFTER
+  // Close task fullscreen panel if open
+  if (typeof window.closeTaskPanel === 'function') window.closeTaskPanel();
+  // Team Chat (WS37): the inbox listener is page-scoped, not Overlay-scoped —
+  // detach it whenever any page other than chat renders. (The THREAD listeners
+  // are Overlay-scoped and already torn down by Overlay.clearAll() above.)
+  if (page !== 'chat' && window.Chat?.teardownInbox) window.Chat.teardownInbox();
+```
+```js
+// BEFORE (app.js:2020)
+    case 'team-directory':   window.renderTeamTab?.(); break;
+// AFTER
+    case 'team-directory':   window.renderTeamTab?.(); break;
+    case 'chat':             window.renderChatPage?.(); break;
+```
+
+**6d — app.js `getSidebarItems` — one insertion per role branch** (`{ icon:'message-circle', label:'Chat', page:'chat' }`): admin branch after Posts (app.js:929); generic-partner branch after Posts (951); Brilliant-partner branch after Posts (959); bsOnly branch after 'My Projects' (968 — these are INTERNAL BS-only staff, they chat); employee branch after Posts (976).
+
+**6e — config.js bottom-nav arrays (279-321)** — append `{ icon: 'message-circle', label: 'Chat', page: 'chat' }` to ALL FIVE arrays (`BOTTOM_NAV_ITEMS`, `PRESIDENT_BOTTOM_NAV`, `PARTNER_BOTTOM_NAV`, `PARTNER_GENERIC_BOTTOM_NAV`, `BRILLIANT_BOTTOM_NAV`), positioned directly after the 'Posts' item where present, else after 'Projects'. (The top-nav strip renders these — 6 items is accepted.)
+
+**6f — modules.js `renderTeamCards` (~849-851) — DM entry point.** In `.team-card-actions`, after the nudge button:
+```js
+${!isMe && (!(typeof isPartner==='function'&&isPartner()) || u.role==='partner'&&(u.company||'').trim()===(window.userProfile?.company||'').trim())
+  ? `<button class="team-card-btn chat-dm-btn" data-uid="${u.id}" title="Message ${escHtml(u.displayName||u.email)}">💬</button>` : ''}
+```
+Wiring (next to the nudge wiring, ~modules.js:862):
+```js
+  grid.querySelectorAll('.chat-dm-btn').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); window.Chat?.openDM?.(btn.dataset.uid); });
+  });
+```
+
+**6g — index.html + sw.js.** index.html: `<script defer src="js/chat.js"></script>` inserted AFTER the modules.js tag (line 323 — chat.js loads last). sw.js: add `'/js/chat.js'` to `PRECACHE` after `'/js/modules.js'` (line 33). `CACHE_VER` (sw.js:11, currently `bi-ops-v174`): the pre-commit hook auto-bumps per the sw-cache-bump memory — verify the bump landed in the commit diff; if not, bump by hand.
+
+**6h — functions/index.js: NO CHANGES.** `sendPushOnNotification` fires on any `notifications/{uid}/items` doc and forwards only title/body/type/notifId/uid (functions/index.js:45-60) — chat pushes ride it as-is. Confirmed: no group-fan-out server logic is needed (the client loop + batched Notifs writes cover ≤ dept-size recipients), and `chatId` intentionally does NOT ride the FCM payload (push tap focuses the app; routing is the in-app bell's job — parity with `task_message`).
+
+### Spec 7 — Migration / rollout checklist (ordered)
+
+1. **Deploy rules FIRST**, both services, separately: `~/.npm-global/bin/firebase deploy --only firestore:rules` (Spec 2a + 2c) and `--only storage:rules` (Spec 3). Re-`git diff` both files immediately before each deploy (concurrent-session memory). Old clients are unaffected (they never read the new collections).
+2. **No data migration, no backfill** — the feature is greenfield: DMs and groups are created on first use; dept channels lazy-provision on first open (Spec 4 `openDeptChannel`); `_counters` untouched.
+3. **Ship the JS in one commit:** new js/chat.js, plus the Spec 6 edits (notifications.js, app.js, config.js, modules.js, index.html, sw.js PRECACHE). `node --check` each edited/created js file; APP_VERSION/CACHE_VER auto-bump via pre-commit hook (verify CACHE_VER moved).
+4. **Backup coverage:** `scripts/monthly-backup.js` auto-discovers ROOT collections (`conversations` is covered automatically) but exports subcollections only where special-cased (attendance records, scripts/monthly-backup.js:164) — add a matching `conversations/{id}/messages` subcollection export in the same style, same commit. `readers`/`typing` are ephemeral receipts/beacons: explicitly NOT backed up.
+5. **Smoke-test rules in the console before announcing** (Spec 8 items 1-2 as a minimum), since a rules mistake here fails silently into `.catch` branches.
+6. **Announce via `Notifs.sendToAll`** ("💬 Team Chat is live — find it in your sidebar") — optional, President's call.
+
+### Spec 8 — Manual test checklist (no automated suite)
+
+1. **Inbox query passes rules:** sign in as an employee → Chat page loads with no console permission errors (the array-contains list + `.get()`-form participants rule is the one provability risk — if `list` is denied, swap the rule's first disjunct to bare `request.auth.uid in resource.data.participants`; safe because every conversation doc writes `participants` explicitly, including `[]` on dept docs).
+2. **Partner wall:** as a partner — (a) Chat shows no Channels chip and no dept rows; (b) console `db.collection('conversations').doc('dept_Sales').get()` → DENIED; (c) `db.collection('conversations').where('participants','array-contains', myUid)` → only own DMs/groups; (d) New Message picker lists ONLY same-company partners + president/manager; (e) a DM with the president works both directions, attachments included.
+3. **DM dedupe:** A opens a DM with B, sends "hi"; B opens a DM with A → SAME conversation (`dm_` sorted id), no duplicate thread.
+4. **Live delivery:** two browsers, same DM open → a message appears on the other screen without any refresh; sender's bubble right-aligned, recipient's left with avatar.
+5. **Seen avatars:** B opens the thread → A sees B's mini-avatar under the last message within ~2s (readers listener). B navigates away, A sends again → no fresh "seen" until B reopens.
+6. **Typing:** B types → A sees "B is typing…" within ~4s; B stops (no send) → the row clears within ~6-8s; B sends → beacon clears immediately.
+7. **Reactions:** B long-taps/clicks A's bubble, picks ❤️ → chip appears live for both; B taps ❤️ again → removed. Console negative test: B `update({['reactions.'+A_uid]:'👍'})` on A's behalf → DENIED (map-diff rule); B editing A's `text` → DENIED; A editing own text → allowed, "(edited)" renders.
+8. **Notifications:** B has the thread CLOSED → A's message creates one `chat_message` notif (with `chatId`) for B; bell badge bumps; tapping Open routes into the exact conversation; opening the thread marks that conversation's notifs read. A sends 5 messages in 30s → B gets ONE notif (60s throttle). B has the thread OPEN → no notif at all (fresh-reader suppression). Push arrives on a backgrounded device with **zero functions deploys**.
+9. **Dept channel:** a Sales member opens Channels → #Sales lazily creates; a second Sales member sees the same doc (no duplicate); a message notifies Sales members only — verify the president gets NO notif but sees the unread dot on next Chat open; a legacy `department:'Sales'` (string-only) user IS notified.
+10. **Group leave:** a non-creator member leaves → allowed (removeAll branch); console attempt to remove SOMEONE ELSE from participants as a plain member → DENIED.
+11. **Pagination:** seed >50 messages → thread opens showing the newest 50 with "Load earlier"; loading prepends the older page and preserves the scroll anchor.
+12. **Lifecycle/back:** device Back and Esc both close the thread panel (Overlay); navigating to Dashboard mid-thread tears down panel + ALL listeners (verify: no further `onSnapshot` console logging / network frames); returning to Chat re-attaches exactly one inbox listener.
+13. **Storage wall:** as any signed-in user, `storage.ref('chat-files/<someConvId>').listAll()` → DENIED (`list:false`); a message's inline image renders for a participant (token URL GET works).
+14. **Manila dividers:** messages from yesterday/today straddle a "Yesterday"/"Today" divider correctly against Manila midnight, not UTC (test near 08:00 Manila = UTC midnight).
+
+### Flags for Neil
+
+- **‼️ Notification granularity:** spec throttles to ≥1 notification per conversation per recipient per 60s (not one per message) and suppresses pushes while the recipient is actively reading. If you want raw per-message pushes, delete the two suppression checks in `_notifyRecipients` — one-line change, but expect noisy inboxes.
+- **‼️ Partner DM scope:** partners can DM same-company partners + president/manager only. Say the word to widen (e.g. any staff member assigned to their projects) — it's a `dmCandidates()` filter change only; rules already permit any participant set.
+- **Group edit powers:** only the group creator or an admin can rename/add members (v1). Member-initiated adds can be granted later by widening one rules branch.
+
+---
+
+*Grounding research below — facts current as of 2026-07-10; verified line numbers may drift after implementation.*
 
 ## Current state
 
