@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.23';
+window.APP_VERSION = '12.0.24';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -280,6 +280,7 @@ window.BOTTOM_NAV_ITEMS = [
   { icon: 'home',         label: 'Home',    page: 'dashboard'        },
   { icon: 'check-square', label: 'Tasks',   page: 'tasks'            },
   { icon: 'megaphone',    label: 'Posts',   page: 'posts'            },
+  { icon: 'message-circle', label: 'Chat',  page: 'chat'             },
   { icon: 'banknote',     label: 'Cash',    page: 'cash-advances'    },
   { icon: 'credit-card',  label: 'Finance', page: 'personal-finance' }
 ];
@@ -289,6 +290,7 @@ window.PRESIDENT_BOTTOM_NAV = [
   { icon: 'home',         label: 'Home',    page: 'dashboard'      },
   { icon: 'check-square', label: 'Tasks',   page: 'tasks'          },
   { icon: 'megaphone',    label: 'Posts',   page: 'posts'          },
+  { icon: 'message-circle', label: 'Chat',  page: 'chat'           },
   { icon: 'users',        label: 'Team',    page: 'team-directory' },
   { icon: 'shield-check', label: 'Approve', page: 'approvals'      }
 ];
@@ -297,6 +299,7 @@ window.PRESIDENT_BOTTOM_NAV = [
 window.PARTNER_BOTTOM_NAV = [
   { icon: 'home',         label: 'Home',     page: 'dashboard'        },
   { icon: 'briefcase',    label: 'Projects', page: 'partner-projects' },
+  { icon: 'message-circle', label: 'Chat',   page: 'chat'             },
   { icon: 'calculator',   label: 'Quotes',   page: 'bs-quote-builder' },
   { icon: 'file-text',    label: 'Summary',  page: 'bs-quotations'    }
 ];
@@ -307,6 +310,7 @@ window.PARTNER_BOTTOM_NAV = [
 window.PARTNER_GENERIC_BOTTOM_NAV = [
   { icon: 'home',         label: 'Home',     page: 'dashboard'        },
   { icon: 'briefcase',    label: 'Projects', page: 'partner-projects' },
+  { icon: 'message-circle', label: 'Chat',   page: 'chat'             },
   { icon: 'calculator',   label: 'Quotes',   page: 'bs-quote-builder' },
   { icon: 'check-square', label: 'Tasks',    page: 'tasks'            }
 ];
@@ -315,6 +319,7 @@ window.PARTNER_GENERIC_BOTTOM_NAV = [
 window.BRILLIANT_BOTTOM_NAV = [
   { icon: 'home',       label: 'Home',     page: 'dashboard'        },
   { icon: 'briefcase',  label: 'Projects', page: 'partner-projects' },
+  { icon: 'message-circle', label: 'Chat', page: 'chat'             },
   { icon: 'calculator', label: 'Quotes',   page: 'bs-quote-builder' },
   { icon: 'file-text',  label: 'Summary',  page: 'bs-quotations'    },
   { icon: 'book-open',  label: 'Clients',  page: 'bs-clients'       }

@@ -928,6 +928,7 @@ function getSidebarItems() {
     items.push({ icon:'bar-chart-2',   label:'Analytics',        page:'analytics',       section:false });
     items.push({ icon:'check-square',  label:'Tasks',            page:'tasks'                          });
     items.push({ icon:'megaphone',     label:'Posts',            page:'posts'                          });
+    items.push({ icon:'message-circle',label:'Chat',             page:'chat'                           });
     items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
     items.push({ icon:'shield-check',  label:'Approvals',        page:'approvals',       section:true  });
     items.push({ icon:'trending-up',   label:'Progress Reports', page:'progress'                       });
@@ -955,6 +956,7 @@ function getSidebarItems() {
     items.push({ icon:'briefcase',    label:'My Projects',   page:'partner-projects' });
     items.push({ icon:'check-square', label:'My Tasks',      page:'tasks'            });
     items.push({ icon:'megaphone',    label:'Posts',         page:'posts'            });
+    items.push({ icon:'message-circle', label:'Chat',        page:'chat'             });
     items.push({ icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' });
     items.push({ icon:'file-text',    label:'Quotations',    page:'bs-quotations'    });
     items.push({ icon:'users',        label:'Team',          page:'team-directory',   section:true, sectionLabel:'Directory' });
@@ -963,6 +965,7 @@ function getSidebarItems() {
     // ── External Partner role (Brilliant Steel) ──
     items.push({ icon:'check-square', label:'My Tasks',      page:'tasks'            });
     items.push({ icon:'megaphone',    label:'Posts',         page:'posts'            });
+    items.push({ icon:'message-circle', label:'Chat',        page:'chat'             });
     items.push({ icon:'briefcase',    label:'My Projects',   page:'partner-projects' });
     items.push({ icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' });
     items.push({ icon:'file-text',    label:'Quotations',    page:'bs-quotations'    });
@@ -972,6 +975,7 @@ function getSidebarItems() {
   } else if (bsOnly) {
     // ── Partner — Brilliant Steel (ISOLATED) ──
     items.push({ icon:'briefcase',   label:'My Projects',   page:'partner-projects' });
+    items.push({ icon:'message-circle', label:'Chat',       page:'chat'             });
     items.push({ icon:'calculator',  label:'Quote Builder', page:'bs-quote-builder' });
     items.push({ icon:'file-text',   label:'Quotations',    page:'bs-quotations'    });
     items.push({ icon:'book-open',   label:'Client Data',   page:'bs-clients'       });
@@ -980,6 +984,7 @@ function getSidebarItems() {
     // ── Employee / Agent / Finance ──
     items.push({ icon:'check-square', label:'My Tasks', page:'tasks' });
     items.push({ icon:'megaphone',    label:'Posts',    page:'posts' });
+    items.push({ icon:'message-circle', label:'Chat',   page:'chat' });
     items.push({ icon:'building-2',   label:'Company',  page:'company' });
     // Departments — appear ABOVE management section.
     // The Accountant (finance role) always sees the Finance department even when she
@@ -1975,6 +1980,10 @@ function navigateTo(page, opts) {
   updateNavBackBtn();
   // Close task fullscreen panel if open
   if (typeof window.closeTaskPanel === 'function') window.closeTaskPanel();
+  // Team Chat (WS37): the inbox listener is page-scoped, not Overlay-scoped —
+  // detach it whenever any page other than chat renders. (The THREAD listeners
+  // are Overlay-scoped and already torn down by Overlay.clearAll() above.)
+  if (page !== 'chat' && window.Chat?.teardownInbox) window.Chat.teardownInbox();
   // Tear down the full-screen quote builder when navigating anywhere except back into it
   if (page !== 'bk-quote-builder' && page !== 'bs-quote-builder') {
     document.getElementById('qb-fullscreen')?.remove();
@@ -2025,6 +2034,7 @@ function navigateTo(page, opts) {
     case 'posts':            window.renderPosts?.(); break;
     case 'memos':            window.renderMemosPage?.(); break;
     case 'team-directory':   window.renderTeamTab?.(); break;
+    case 'chat':             window.renderChatPage?.(); break;
     case 'attendance':       window.renderAttendancePage?.(); break;
     case 'cash-advances':    window.renderCashAdvancePage?.(); break;
     case 'leave':            window.renderLeavePage?.(); break;

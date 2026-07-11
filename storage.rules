@@ -104,7 +104,8 @@ service firebase.storage {
       return seg == 'Finance'
         || seg == 'tasks' || seg == 'posts'
         || seg == 'general' || seg == 'General'
-        || seg == 'profile-photos' || seg == 'task-comments';
+        || seg == 'profile-photos' || seg == 'task-comments'
+        || seg == 'chat-files';
     }
 
     // ── Profile photos — owner-scoped writes ─────────
@@ -138,6 +139,20 @@ service firebase.storage {
     // ── Task comment attachments (collaborative) ─────
     match /task-comments/{docId}/{fileName} {
       allow read: if isSignedIn();
+      allow write: if isSignedIn()
+        && (request.resource == null || isValidDocument());
+    }
+
+    // ── Team Chat attachments (v12 WS37) ─────────────
+    // Storage rules cannot read Firestore, so per-conversation participant
+    // checks are impossible here. Model: access truth lives on the Firestore-
+    // gated message doc that carries the URL. Direct GET is open to any
+    // signed-in user, but LIST is forbidden — DM conversation ids are
+    // derivable from uids (dm_{a}_{b}), so enumeration must be blocked; the
+    // Date.now()-prefixed filename keeps full paths unguessable.
+    match /chat-files/{convId}/{fileName} {
+      allow get:  if isSignedIn();
+      allow list: if false;
       allow write: if isSignedIn()
         && (request.resource == null || isValidDocument());
     }

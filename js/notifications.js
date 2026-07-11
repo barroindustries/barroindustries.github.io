@@ -64,9 +64,14 @@ window.Notifs = (() => {
     await Promise.all(unread.map(n => markRead(_lastUid, n.id)));
   }
 
-  function _navigateFromNotif(type, taskId) {
+  function _navigateFromNotif(type, taskId, chatId) {
     document.getElementById('notif-panel')?.classList.add('hidden');
     document.getElementById('notif-backdrop')?.classList.add('hidden');
+    if (type === 'chat_message') {
+      if (typeof navigateTo === 'function') navigateTo('chat');
+      if (chatId && window.Chat?.openConversation) window.Chat.openConversation(chatId);
+      return;
+    }
     if (taskId || type?.startsWith('task')) {
       if (taskId && typeof window.openTaskDetail === 'function') {
         window.openTaskDetail(taskId, window.currentUser, window.currentRole);
@@ -97,7 +102,7 @@ window.Notifs = (() => {
     const unreadCount = items.filter(n => !n.read).length;
     _updatePanelHint(unreadCount, items.length);
 
-    const NAV_TYPES = new Set(['task_assigned','task_status','task_message','task_comment','cash_advance','ca_approved','att_extension_approved','att_extension_denied','attendance','post','post_approval','memo','approval_result','payroll','kpi_grade','self_assessment']);
+    const NAV_TYPES = new Set(['task_assigned','task_status','task_message','task_comment','cash_advance','ca_approved','att_extension_approved','att_extension_denied','attendance','post','post_approval','memo','approval_result','payroll','kpi_grade','self_assessment','chat_message']);
     const isNavigable = n => n.taskId || NAV_TYPES.has(n.type) || n.type?.startsWith('task') || n.type?.startsWith('att');
 
     // Many notifications set BOTH an icon AND a title that starts with the same
@@ -113,7 +118,7 @@ window.Notifs = (() => {
       const titleText = rawTitle.replace(LEAD_EMOJI, '').trim() || rawTitle;
       const icon = n.icon || lead || 'bell';
       return `
-      <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${escHtml(n.id)}" data-type="${escHtml(n.type||'')}" data-task-id="${escHtml(n.taskId||'')}">
+      <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${escHtml(n.id)}" data-type="${escHtml(n.type||'')}" data-task-id="${escHtml(n.taskId||'')}" data-chat-id="${escHtml(n.chatId||'')}">
         <div class="notif-item-main">
           <div class="notif-item-emoji">${window.emojiIcon(icon, 20)}</div>
           <div class="notif-item-text">
@@ -216,6 +221,7 @@ window.Notifs = (() => {
         const item = btn.closest('.notif-item');
         const type = item?.dataset.type || '';
         const taskId = item?.dataset.taskId || '';
+        const chatId = item?.dataset.chatId || '';
         // Auto mark as read on view
         if (item?.classList.contains('unread')) {
           item.classList.remove('unread');
@@ -223,7 +229,7 @@ window.Notifs = (() => {
           item.querySelector('.notif-read-btn')?.remove();
           await markRead(uid, item.dataset.id);
         }
-        _navigateFromNotif(type, taskId);
+        _navigateFromNotif(type, taskId, chatId);
       });
     });
   }
@@ -249,7 +255,7 @@ window.Notifs = (() => {
   }
 
   // ── Send notification ─────────────────────────
-  async function send(targetUid, { title, body, icon = '🔔', type = 'general', link = null, dedupKey = null, taskId = null } = {}) {
+  async function send(targetUid, { title, body, icon = '🔔', type = 'general', link = null, dedupKey = null, taskId = null, chatId = null } = {}) {
     // If a dedupKey is provided, skip if a notif with that key already exists today
     if (dedupKey) {
       // Single-field query — no composite index required
@@ -262,7 +268,8 @@ window.Notifs = (() => {
       read:      false,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       ...(dedupKey ? { dedupKey } : {}),
-      ...(taskId ? { taskId } : {})
+      ...(taskId ? { taskId } : {}),
+      ...(chatId ? { chatId } : {})
     };
     await db.collection('notifications').doc(targetUid).collection('items').add(data);
 

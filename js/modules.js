@@ -847,6 +847,8 @@ function renderTeamCards(users, currentUser) {
         : lastSeenMs ? `<div class="team-status-pill">${lastActiveStr}</div>` : ''}
       <div class="team-card-actions">
         <button class="team-card-btn view-card-btn" data-uid="${u.id}" title="View calling card">📇</button>
+        ${!isMe && (!(typeof isPartner==='function'&&isPartner()) || u.role==='partner'&&(u.company||'').trim()===(window.userProfile?.company||'').trim())
+          ? `<button class="team-card-btn chat-dm-btn" data-uid="${u.id}" title="Message ${escHtml(u.displayName||u.email)}">💬</button>` : ''}
         ${!isMe ? `<button class="team-card-btn nudge-btn" data-uid="${u.id}" data-name="${(u.displayName||u.email).replace(/"/g,'&quot;')}" title="Nudge ${escHtml(u.displayName||u.email)}">👋</button>` : ''}
       </div>
     </div>`;
@@ -856,6 +858,11 @@ function renderTeamCards(users, currentUser) {
   grid.querySelectorAll('.view-card-btn').forEach(btn => {
     const u = users.find(x => x.id === btn.dataset.uid);
     if (u) btn.addEventListener('click', e => { e.stopPropagation(); showCallingCard(u); });
+  });
+
+  // Chat DM buttons
+  grid.querySelectorAll('.chat-dm-btn').forEach(btn => {
+    btn.addEventListener('click', e => { e.stopPropagation(); window.Chat?.openDM?.(btn.dataset.uid); });
   });
 
   // Nudge buttons

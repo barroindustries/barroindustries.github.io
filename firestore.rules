@@ -188,7 +188,7 @@ service cloud.firestore {
       //  • must start UNREAD with a server timestamp (no backdating / pre-read),
       //  • title/body length-capped so a sender can't blast oversized pushes.
       allow create: if isAuth()
-        && request.resource.data.keys().hasOnly(['title','body','icon','type','link','read','createdAt','dedupKey','taskId'])
+        && request.resource.data.keys().hasOnly(['title','body','icon','type','link','read','createdAt','dedupKey','taskId','chatId'])
         && request.resource.data.read == false
         && request.resource.data.createdAt == request.time
         && request.resource.data.get('title', '') is string
@@ -324,6 +324,93 @@ service cloud.firestore {
       match /readers/{readerUid} {
         allow read:  if isAuth() && (!isPartner() || taskAssignee());
         allow write: if isAuth() && isOwner(readerUid);
+      }
+    }
+
+    // ── Team Chat (v12 WS37) — conversations + messages/readers/typing ──
+    // One collection, three types: 'dm' | 'group' | 'dept'.
+    //  • dm/group: membership = the participants array. A partner may read/write
+    //    ONLY conversations they're a participant of (conditional wall, same
+    //    semantics as tasks/comments) — and unlike tasks, internal staff are
+    //    participant-scoped too (nobody reads a DM they're not in).
+    //  • dept: membership derived live via isAdmin() || inDept(department);
+    //    partners NEVER pass this branch. participants stays [] on dept docs.
+    // Rules do NOT cascade — messages/readers/typing each get an explicit match.
+    match /conversations/{convId} {
+      // Membership vs THIS doc (parent reads/updates — no extra get()).
+      function memberOfDoc() {
+        return (request.auth.uid in resource.data.get('participants', []))
+          || (resource.data.get('type','') == 'dept' && !isPartner()
+              && (isAdmin() || inDept(resource.data.get('department',''))));
+      }
+      // Membership via re-read, for subcollections (mirrors taskAssignee()).
+      function convMember() {
+        let c = get(/databases/$(database)/documents/conversations/$(convId)).data;
+        return (request.auth.uid in c.get('participants', []))
+          || (c.get('type','') == 'dept' && !isPartner()
+              && (isAdmin() || inDept(c.get('department',''))));
+      }
+
+      // get: any member. list: the inbox query is participants array-contains,
+      // provable from the first disjunct; dept docs are fetched by direct get.
+      allow read: if isAuth() && memberOfDoc();
+
+      // dm/group: creator must include themself. dept: lazy-create by any member;
+      // the doc ID must be exactly 'dept_<department>' and participants must be [].
+      allow create: if isAuth() && (
+        ( request.resource.data.get('type','') in ['dm','group']
+          && request.resource.data.get('createdBy','') == request.auth.uid
+          && request.auth.uid in request.resource.data.get('participants', []) )
+        ||
+        ( request.resource.data.get('type','') == 'dept' && !isPartner()
+          && (isAdmin() || inDept(request.resource.data.get('department','')))
+          && convId == 'dept_' + request.resource.data.get('department','')
+          && request.resource.data.get('participants', []).size() == 0 )
+      );
+
+      // Any member may bump ONLY the lastMessage* preview fields (the second
+      // write of every send). Creator/admin manage the doc (rename, members).
+      // A participant may remove exactly themself ("leave group").
+      allow update: if isAuth() && (
+        ( memberOfDoc() && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['lastMessageAt','lastMessageText','lastMessageBy','lastMessageByName']) )
+        || resource.data.get('createdBy','') == request.auth.uid
+        || isAdmin()
+        || ( request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants'])
+             && request.resource.data.get('participants', [])
+                == resource.data.get('participants', []).removeAll([request.auth.uid]) )
+      );
+
+      allow delete: if isAuth() && isPresident();   // records kept forever
+
+      match /messages/{messageId} {
+        allow read:   if isAuth() && convMember();
+        allow create: if isAuth() && convMember()
+          && request.resource.data.get('authorId','') == request.auth.uid;
+        // Author edits own message; admin moderates; any member may toggle
+        // their OWN key inside the reactions map — and nothing else.
+        allow update: if isAuth() && (
+          resource.data.get('authorId','') == request.auth.uid
+          || isAdmin()
+          || ( convMember()
+               && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+               && request.resource.data.get('reactions', {})
+                    .diff(resource.data.get('reactions', {})).affectedKeys()
+                    .hasOnly([request.auth.uid]) )
+        );
+        allow delete: if isAuth()
+          && (resource.data.get('authorId','') == request.auth.uid || isAdmin());
+      }
+      // Read receipts — per-viewer-writes-own-doc, verbatim tasks/readers shape
+      // (+ convMember so a non-participant can't plant a receipt).
+      match /readers/{readerUid} {
+        allow read:  if isAuth() && convMember();
+        allow write: if isAuth() && isOwner(readerUid) && convMember();
+      }
+      // Typing beacons — own doc only (write covers create/update/delete).
+      match /typing/{typerUid} {
+        allow read:  if isAuth() && convMember();
+        allow write: if isAuth() && isOwner(typerUid) && convMember();
       }
     }
 
