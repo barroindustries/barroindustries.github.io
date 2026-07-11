@@ -1229,3 +1229,101 @@ Steps, all date-range-bounded (WS39 discipline, no `.limit(N)`):
   unchanged. Plus the `dpSnap` fix can legitimately RAISE the receivables total by previously
   silently-dropped Design-board project balances. Both are correctness fixes, listed here so a
   changed number isn't mistaken for a regression.
+
+## RE-GROUNDED (Fable, 2026-07-11)
+
+Verified the DECIDED spec against the IMPLEMENTED WS29 (4446ab8), WS32 (31ced19), and WS36
+(6a3b151) — real code, not their plans. **Confirmed, no drift:** `window.isQuoteWon/
+isQuoteLost/isQuoteOpen` (config.js:396-398) are exact single-arg predicates and the digest's
+duplicated definition (Spec 7b step 4) matches them verbatim; `window.Clients.listAll(opts)`
+(cache key `'clients'`, 60s) and `quotesFor(client, quoteDocs)` match; `window.BankAccounts.
+cashPosition()` returns `{total, perAccount}` and `list({activeOnly=true})` returns an array
+(gate logic works as written); WS29 decision-12's turns formula matches Spec 2c exactly and the
+real consume write posts `accountType:'expense', category:'COS – Direct Material'` (en-dash,
+departments.js:14066-14068) with `inventory_items.qty/unitCost` intact; `settings_holidays`
+(firestore.rules:464) and `isFinanceOrAdmin()` (the president/manager/secretary/finance tier)
+exist as assumed; still exactly 13 `new Chart(` sites, all inside `renderAnalytics`; `dueFu` and
+the `wonMTD/wonPrev` ymOf pattern exist post-WS32. Everything in DECIDED stands EXCEPT the nine
+corrections below — apply them over the spec text where they conflict.
+
+### Spec corrections
+
+1. **Spec 4a is ALREADY IMPLEMENTED — skip it entirely.** WS32 shipped the dpSnap fix
+   differently: `cg('projects', db.collection('projects'))` is now the 12th `Promise.all` entry
+   (app.js:6386) and `allProjects` merges job + design via `Projects.normalize`
+   (app.js:6402-6405). The 13th entry is `window.Clients.listAll()` which resolves to an ARRAY,
+   not a snap (handled at app.js:6392). Do NOT remove `dpSnap` and do NOT add
+   `cg('projects-unified', …)` — that would double-read `job_projects` under a second cache key
+   while the raw `jobProjects` array is still needed. `M.aging = window.arAging(allProjects)`
+   simply uses the existing variable. Consequently: Spec-10 test #2's "dpSnap delta" clause and
+   the 4th Flag-for-Neil (dpSnap raising receivables) are MOOT — that change already shipped.
+2. **Spec 2a `payrollRatio` — corrected signature/return (real sites round and null-out):**
+   ```js
+   window.payrollRatio = function(totalPayroll, revenue){
+     return revenue > 0 ? Math.round(totalPayroll / revenue * 100) : null;
+   };
+   ```
+   (The spec's unrounded-float/`0` version would change displayed values — both live sites use
+   `Math.round(...)` and render `payrollPct==null?'—':payrollPct+'%'`.) **Decision 5's "same
+   denominator" claim is wrong in real code:** Overview divides by `revMTD = ledInP ||
+   wonQuotesP` (accepted-quote fallback, app.js:6466, 6479-6480); the Finance tab divides by
+   pure ledger income `finInP` (app.js:6677, 6680). To keep both displays byte-identical:
+   Overview calls `payrollRatio(totalPayroll, revMTD)`, Finance calls
+   `payrollRatio(totalPayroll, finInP)` — do NOT unify the denominators. `M.payrollRatio` is
+   the Overview (revMTD) figure. The `payrollHigh` rule works unchanged (`Math.round` of an
+   integer is a no-op; the `M.revP > 0` guard means it never sees null). Spec-10 test #1
+   corrected: the two KPIs match whenever the period has ledger income, and may legitimately
+   differ in sparse-ledger months (Overview's quote fallback) — a pre-existing difference, not
+   a WS40 regression.
+3. **Helper null vs the KPIs' 0 default.** Both live win-rate KPIs render `0%` when there are
+   no outcomes (app.js:6546 and 6756 end in `: 0`); the Spec-2a helpers correctly return
+   `winRate: null` (the insight rules need null to stay silent). When rewiring the KPI cards
+   onto the helpers, render `const winRate = q.winRate==null?0:q.winRate;` (same for
+   `bidWinStats` in renderGovernment) so displays stay byte-identical. renderSales variable
+   mapping: `wonQ→q.won`, `lostQ→q.lost`, `openQ→q.open`, `won2→q.wonVal`,
+   `pipeline→q.pipelineVal`, `wonCount/lostCount→q.wonCount/q.lostCount`; keep `avgDeal`
+   inline (`q.wonCount?q.wonVal/q.wonCount:0`); the `salesQuotes` filter (app.js:6539) is
+   unchanged.
+4. **All Spec line anchors drifted (+~15-30 lines) — locate by symbol, never by the spec's
+   numbers.** Current: `renderAnalytics` = app.js:6357-6810; sub-renderers: `renderOverview`
+   6451, `renderSales` 6538, `renderMarketing` 6613, `renderFinanceAnalytics` 6654,
+   `renderProduction` 6712, `renderGovernment` 6750; the 13 chart sites: 6525, 6531, 6602,
+   6610, 6649, 6651, 6705, 6707, 6709, 6744, 6747, 6786, 6789 (WS32's rewritten `sq-chart` is
+   already live at 6602 — no "when both land" caveat needed). Spec 1c's literal-count table is
+   stale: **`#FFAA00` no longer occurs anywhere in the function** (WS32's rewrite removed it —
+   `CHART_COLORS.warnAlt` keeps the key but has zero replacement sites); current in-function
+   totals: `#FF453A` ×7 (was 8), `#0A84FF` ×9 (was 8), `#636366` ×7 (was 10); others unchanged.
+   Do not chase counts — replace hex literals ONLY inside `new Chart(...)` argument objects;
+   the `delta()` helper (6431), quote `statusColor` (6596), gov `sc` map (6780), and `#8e8e93`
+   sub-lines are non-chart HTML and stay untouched.
+5. **Spec 1b theme listener — two fixes.** (a) There is no `#an-tabs` element and chips carry
+   `data-chip`, not `data-tab` (`chipTabs` config.js:621-635; `bindChipTabs` config.js:640-649
+   maintains `.active`). Corrected snippet:
+   ```js
+   const onTheme = () => {
+     const bar = c.querySelector('.an-subtabs');
+     if (!bar || !document.body.contains(bar)) { window.removeEventListener('bi-theme-change', onTheme); return; }
+     const active = bar.querySelector('.chip-tab.active')?.dataset.chip || 'overview';
+     (TAB_RENDERERS[active] || renderOverview)();
+   };
+   window.addEventListener('bi-theme-change', onTheme);
+   ```
+   (b) `initTheme` (app.js:842-850) ALREADY has the `auto` matchMedia listener and it routes
+   through `setTheme('auto', false)` — so dispatch
+   `window.dispatchEvent(new CustomEvent('bi-theme-change'))` as the LAST line of `setTheme`
+   (app.js:852-862, after `_syncThemeColorMeta()`) and add NO second listener.
+6. **Spec 4g SUBTABS shape:** the live array uses `{id, label}` mapped via
+   `SUBTABS.map(t=>({key:t.id,label:t.label}))` into `chipTabs` (app.js:6436-6447). Add
+   `{id:'strategy',label:'🎯 Strategy'}` — `id:`, not `key:`.
+7. **Spec 6a `perAccount` is an OBJECT keyed by accountId** (values `{account, balance, in,
+   out}` — config.js:490-509), not an array. Iterate `Object.values(cash.perAccount)` and
+   label each row with `escHtml(window.BankAccounts.label(x.account))` (handles a missing
+   `nickname` and masks the account number — config.js:467-471), NOT `x.account.nickname`.
+8. **Spec 4b TTL:** the canonical `inventory_items` cache key already exists at **45000ms**
+   (app.js:2397, notifications.js:615, departments.js:14114). Use
+   `cg('inventory_items', db.collection('inventory_items'), 45000)` to match, so Analytics
+   never holds a staler snapshot than the sites that invalidate it.
+9. **Spec 5 / Spec 9 step 5 backup edit is unnecessary:** `scripts/monthly-backup.js`
+   auto-discovers root collections via `db.listCollections()` (line ~305; comment at 109-111
+   says unlisted collections are auto-included). `strategy_notes` is backed up automatically —
+   drop that step (adding `csvFields` for it is optional polish, not required).

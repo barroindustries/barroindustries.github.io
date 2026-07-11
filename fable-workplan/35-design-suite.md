@@ -1212,3 +1212,84 @@ president/manager-only for orphaned projects; rules behave identically.)
   you want release hard-blocked until the project is linked.
 - **‼️ FLAG FOR NEIL — historical self-approved drawings keep their status** (records
   forever; no retroactive invalidation). The new gate applies from deploy onward.
+
+## RE-GROUNDED (Fable, 2026-07-11)
+
+Verified the DECIDED spec above against the REAL, now-implemented WS32 (commit 31ced19)
+and WS38 (commit 224dc6b) code — not their plans. **No load-bearing drift.** Every
+contract this spec builds on exists exactly as assumed:
+
+- `window.Clients` (departments.js:135) exposes exactly `nameKey, brandOf, deptOf,
+  normalize, listAll, findByName, upsertFromQuote, quotesFor, timelineFor`; `listAll()`
+  returns normalized docs with non-empty `brands[]` and a `_legacy` flag — Spec 6a's
+  usage (`c.brands.includes('design')`, `_legacy` check) is valid as written.
+- `window.migrateClientBooks` (departments.js:248) DOES stamp legacy docs with
+  `migratedTo: { coll:'clients', id:<clients docId> }` (departments.js:281) — Spec 2d's
+  `const m = d.data().migratedTo; if (m && m.id)` reads the real shape correctly. It
+  backfills `clientId` onto `sales_orders` + `job_projects` only, NOT `projects` —
+  the gap `remapDesignProjectClients()` closes is real. (Migration is triggered from a
+  `cl-migrate-btn` in `renderClientProfiles`; Rollout step 1's "run once" has a UI path.)
+- `openProjectEditModal` (now departments.js:7756) still reads raw `design_clients` —
+  Spec 6a's BEFORE block matches the live code verbatim, and its `<option>` template
+  ALREADY carries `data-name="${escHtml(c.name||c.company||'')}"`, so the change-listener
+  reading `dataset.name` works without touching the option markup.
+- `window.FilesHub` (drive.js:304): `loadFiles(scope, {includeDeleted})` and
+  `loadFolders(scope)` exist with those signatures; `window.openFilePreview` is at
+  drive.js:400. `scope` is a free string field (no enum anywhere); live scopes are
+  `personal, shared, all, advertising, designs, sss, accounting, proposals,
+  product_designs, references, files` + BS subtabs — `'projects'` is unused, no collision.
+- `hub_folders` rules (firestore.rules:1360): create = any non-partner with
+  `createdBy==uid`; update/delete = creator or admin — Spec 2c's get-then-create
+  `_ensure` + best-effort rename is correctly designed for exactly these rules.
+  WS38's own folders use auto-ids, but `folderId` is a plain string and the folder-chip
+  UI renders every `hub_folders` doc in a scope — deterministic `client__`/`proj__` ids
+  are compatible additions.
+- `hub_files` create rule (firestore.rules:1334) requires `uploadedBy==uid`,
+  `visibility in ['company','private']`, `deleted==false` — Spec 5b's write satisfies
+  all three, and its field list matches WS38's real upload write in
+  `bindFileCollection` (departments.js:12598+) field-for-field.
+- All BEFORE blocks quoted in Specs 3a-3d match the live drawing code verbatim
+  (`openDrawingCreateModal`'s `reviewer:null, reviewerName:null` line, `openDrawingDetail`
+  head + raw-slice date renders, `changeDrawingStatus` full body, revision-modal
+  approver reset). `renderDrawingsDashboard` has `projMap`/`counts`/`fStatus`/
+  `#dwg-f-status`/`renderList` exactly as Spec 6b assumes. `openProjectDetail`'s tabs
+  array and else-if `showTab` chain match Spec 5a. The `design_drawings` rules block
+  matches Spec 4's BEFORE byte-for-byte, and `getRole()`/`canDesign()`/`isPresident()`
+  all exist. `Clients.timelineFor` has three parallel fetches returning
+  `{quotes, orders, projects, payments, events}` — Spec 5c's "fourth fetch + `files:`
+  key" instruction applies cleanly. `Notifs.send(uid, payload)` with `dedupKey`,
+  `Notifs.sendToDept`, `confirmDialog({message})`, and
+  `Drive.renderUploadArea(containerId, onUpload, opts)` all exist as used.
+
+### Spec corrections
+
+Two cosmetic corrections only — nothing changes any decision, shape, or code block:
+
+1. **Line anchors have shifted** (WS32/WS38 added code above the Design suite and in
+   the shared-files region). Locate every edit by function name / quoted BEFORE text,
+   NOT by the line numbers cited in the spec. Current anchors (js/departments.js unless
+   noted): `backfillProjectKind`/`runProjectKindBackfill` 101-127 (unchanged — Specs
+   2c/2d still insert directly after 127, i.e. before the `window.Clients` block at
+   129); `window.Clients` 135; `migrateClientBooks` 248; `drawingTransitions` 7470
+   (Spec 2b inserts directly above it); `openProjectDetail` ~7502 (Spec 5a);
+   `renderProjActivity` 7740 (Spec 3a's date-render substitution); `openProjectEditModal`
+   7756 (Spec 6a; the `dbCacheInvalidate('projects-unified')` save-handler anchor is at
+   ~7846); `renderProjectDrawings` 7865 (Spec 5b places `renderProjectFiles` after it);
+   `openDrawingCreateModal` 7889 (create write ~7922-7930, Spec 3c); `openDrawingDetail`
+   7943 (Spec 3a); `changeDrawingStatus` 7983 (Spec 3b); `openDrawingRevisionModal` 8020
+   (Spec 3d — reset update at ~8043); `renderDrawingsDashboard` 8154 (Spec 6b);
+   `openClientHub` 12266 (Spec 5c); `bindFileCollection` 12598. In firestore.rules the
+   `design_drawings` block is now at **line 799** (spec says 709-720; text is identical);
+   `hub_files` 1334, `hub_folders` 1360. In js/drive.js: `FilesHub` 304,
+   `openFilePreview` 400.
+2. **Decision 5's aside misnames the flat-tab scopes.** It says Design's Product
+   Designs / References tabs use WS38 scopes `design_files`/`design_refs`; the real
+   implementation derives scope from `bindFileCollection`'s 4th arg
+   (`scope.toLowerCase().replace(/\s+/g,'_')` — call sites pass `'Product Designs'`/
+   `'References'`), so the live scopes are **`product_designs`** and **`references`**.
+   Irrelevant to WS35 (it never touches those tabs) — corrected only so nobody greps
+   for a scope string that doesn't exist.
+
+One optional equivalence (no action required): rules now define `isSeniorAdmin()`
+(firestore.rules:30) = `getRole() in ['president','manager']` — identical to the literal
+in Spec 4's `isDrawingApprover()`. Keep the spec's literal as written; do not refactor.

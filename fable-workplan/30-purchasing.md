@@ -1041,3 +1041,113 @@ path key off `approvalStatus` alone.
   ones yourself before ship if you want them re-checked.
 - ‼️ **VAT-inclusive stock valuation persists** (decision 13, second deferral) — becomes its
   own mini-workstream if you want VAT-exclusive/landed-cost WAC.
+
+## RE-GROUNDED (Fable, 2026-07-11)
+
+Verified this spec against the REAL WS29 implementation (commit 4446ab8, live in
+js/config.js + js/departments.js at HEAD 1beb814) — not the WS29 plan it was written from.
+Checked: `window.buildStockMovement`/`window.postStockMovement` (config.js:408/424),
+`receivePurchaseIntoInventory` (departments.js:15099), `receiveLineIntoItem` (15132),
+`openReceiveResolver` (15171), the live `pr-stat` handler, `bindRfqCard`'s convert handler,
+`renderPurchaseRequests`, `printPurchaseOrder`, `recordPurchaseDisbursement`,
+`APPROVAL_CAPS`/the Approvals queue, both firestore.rules blocks, and
+scripts/monthly-backup.js.
+
+**WS29's implemented surface matches this spec's assumptions exactly — no drift there:**
+`receiveLineIntoItem(p, it, lineIdx, itemRef)` signature; deterministic movement id
+`RECV_${p.id}_${lineIdx}`; movement rows written with `source:'receive'`,
+`refNumber: p.prNo || p.rfqNo || p.id`, `qty`, `unitCost` (null when the line had no
+positive price — Spec 6a's `||0` reducer already handles it), `qtyAfter`;
+`receivePurchaseIntoInventory` returns `{ matched, unmatched }` with
+`unmatched: [{ i, desc, qty, unit, unitPrice }]` (so `u.i` in Spec 7 is correct);
+`items[].itemId` from the RFQ picker; Spec 4e's BEFORE block is verbatim-identical to the
+live `pr-stat` received branch (15067-15078); Spec 3's and Spec 5a's BEFORE blocks are
+verbatim-identical to live code (14769-14778, 15351-15352); both quoted firestore.rules
+blocks are verbatim-identical to live (now at lines 978-985 and 987-1003);
+`isSeniorAdmin()` exists (rules:30, president+manager). Also confirmed present:
+`safeNotify`, `onClickSafe`, `confirmDialog`, `window.logAudit` (config.js:561),
+`window.currentUser`, `recVatPreview`, `redo` (15028), and hoisted file-local access to
+`printPurchaseOrder`/`purchTotal` from the Approvals region.
+
+### Spec corrections
+
+**C1 — Spec 4c's BEFORE block is stale: it omits WS29's `pr-resolve` button.** The live
+button row (departments.js 14987-14997) contains one extra line inside the `canEdit`
+block that the spec's BEFORE does not show. Use this as the true BEFORE, and this
+corrected AFTER (identical to Spec 4c's AFTER except the `pr-resolve` line is preserved,
+in the same position, inside the new `canEdit && poApproved(p)` block — a doc can only
+carry `receiveUnmatched` if it was legally received, i.e. approved or legacy, so gating it
+there changes nothing reachable):
+
+```js
+// TRUE BEFORE (live 14987-14997)
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
+            <button class="btn-secondary btn-sm pr-print" data-id="${p.id}">🖨 Print PO</button>
+            ${canEdit ? `
+              ${p.status !== 'ordered' && p.status !== 'received' ? `<button class="btn-secondary btn-sm pr-stat" data-id="${p.id}" data-stat="ordered">Mark Ordered</button>` : ''}
+              ${p.status !== 'received' ? `<button class="btn-primary btn-sm pr-stat" data-id="${p.id}" data-stat="received">Mark Received</button>` : ''}
+              ${(p.receiveUnmatched||[]).length ? `<button class="btn-secondary btn-sm pr-resolve" data-id="${p.id}">⚠ Resolve ${p.receiveUnmatched.length} unmatched</button>` : ''}
+              ${(p.status === 'ordered' || p.status === 'received') && !p.submittedToFinance ? `<button class="btn-primary btn-sm pr-submit-fin" data-id="${p.id}">📩 Submit to Finance</button>` : ''}
+            ` : ''}
+            ${canRecord && !p.recordedToFinance ? `<button class="btn-primary btn-sm pr-record" data-id="${p.id}">🧾 Record as Disbursement</button>` : ''}
+            ${p.recordedToFinance ? `<span style="font-size:11px;color:var(--success,#1b8a3a);align-self:center">✓ Recorded in journal</span>` : ''}
+          </div>
+// CORRECTED AFTER
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
+            ${poState(p) !== 'rejected' ? `<button class="btn-secondary btn-sm pr-print" data-id="${p.id}">🖨 Print PO</button>` : ''}
+            ${p.status === 'received' ? `<button class="btn-secondary btn-sm pr-rr" data-id="${p.id}">📦 Receiving Report</button>` : ''}
+            ${canApprovePO && poState(p) === 'pending' ? `
+              <button class="btn-success btn-sm po-approve" data-id="${p.id}">✓ Approve PO</button>
+              <button class="btn-danger btn-sm po-reject" data-id="${p.id}">✗ Reject</button>` : ''}
+            ${canEdit && poState(p) === 'rejected' ? `<button class="btn-secondary btn-sm po-revert" data-id="${p.id}">↩ Revert to RFQ</button>` : ''}
+            ${canEdit && poApproved(p) ? `
+              ${p.status !== 'ordered' && p.status !== 'received' ? `<button class="btn-secondary btn-sm pr-stat" data-id="${p.id}" data-stat="ordered">Mark Ordered</button>` : ''}
+              ${p.status !== 'received' ? `<button class="btn-primary btn-sm pr-stat" data-id="${p.id}" data-stat="received">Mark Received</button>` : ''}
+              ${(p.receiveUnmatched||[]).length ? `<button class="btn-secondary btn-sm pr-resolve" data-id="${p.id}">⚠ Resolve ${p.receiveUnmatched.length} unmatched</button>` : ''}
+              ${(p.status === 'ordered' || p.status === 'received') && !p.submittedToFinance ? `<button class="btn-primary btn-sm pr-submit-fin" data-id="${p.id}">📩 Submit to Finance</button>` : ''}
+            ` : ''}
+            ${canRecord && !p.recordedToFinance && poApproved(p) ? `<button class="btn-primary btn-sm pr-record" data-id="${p.id}">🧾 Record as Disbursement</button>` : ''}
+            ${p.recordedToFinance ? `<span style="font-size:11px;color:var(--success,#1b8a3a);align-self:center">✓ Recorded in journal</span>` : ''}
+          </div>
+```
+
+**C2 — Spec 10 checklist item 5 (backup EXPORTS) is wrong: make it a no-op.**
+`scripts/monthly-backup.js` has NO `EXPORTS` list. It auto-discovers every root collection
+via `db.listCollections()` and exports a complete JSON snapshot; the `OVERRIDES` map
+(~line 118) exists only for date-filter/CSV specials, and `EXCLUDE` (~167) skips only
+`presence`/`sessions`/`notifications`. `purchase_requisitions` and `stock_movements` are
+therefore ALREADY backed up automatically. Replace checklist item 10.5 with: "No
+backup-script change needed — do not edit scripts/monthly-backup.js."
+
+**C3 — Spec 6a's "Make the function `async`" is already true.** Live
+`recordPurchaseDisbursement` (15236) is declared `async` (it awaits
+`window.BankAccounts.optionsHTML()`). Skip that step; just insert the stocked-value block
+after `const ref = p.prNo || p.rfqNo || '';` (15238). Everything else in Spec 6 anchors
+correctly (`#rec-amt` 15248, `acctSel` 15269, `recVatPreview` 15273).
+
+**C4 — Every line number in the DECIDED spec has drifted (departments.js grew ~1.6k lines
+since the spec was written). Anchor by function name / exact code snippet, never by the
+spec's line numbers.** Current map (HEAD 1beb814), js/departments.js:
+`purchTotal` 14626 · `bindRfqCard` convert handler 14763-14781 · `PURCH_STAT` 14887
+(insert `poState`/`poApproved` directly above it) · `renderPurchaseRequests` 14911
+(`canRecord` 14913 — Spec 4a goes after it; financeView hint `<p>` 14953 — Spec 4f
+replaces it; badge column 14969-14972 — Spec 4b's badges go after the `${st.label}` span
+at 14970, KEEP the existing `🧾 Sent to Finance` badge line at 14971; notes line 14985;
+button row 14987-14997 = C1; `.pr-print` binding 15002; `const redo` 15028 — insert Spec
+4d's handlers AFTER this line; `pr-stat` handler 15058-15084, received branch 15067-15078)
+· `receivePurchaseIntoInventory` 15099 · `receiveLineIntoItem` 15132 ·
+`openReceiveResolver` 15171 · `notifyFinanceTeam` 15221 (Spec 2 inserts after it, ~15231)
+· `recordPurchaseDisbursement` 15236 · `printPurchaseOrder` 15345 (sig lines 15351-15352;
+`buildLetterhead` call 15353-15363; `<style>` closes at 15415 — Spec 5c CSS goes before
+`${_lh ? _lh.printCSS : ''}` at 15414; `<div class="page">` 15422; fallback header title
+15431; fallback sign block 15464-15465 for Spec 5d).
+Approvals queue: `APPROVAL_CAPS` 10673-10687 (`'quote-approval'` at 10682 — Spec 8a entry
+goes after it) · badge-count `Promise.all` 10705-10718 with `totalPending` 10728 (Spec 8b)
+· 'all' loader `Promise.all` 10785-10799 (append after the `pending_raises` query; Spec
+8c's mapping goes after the raise mapping at 10821) · card branch: insert Spec 8d before
+`:item.type==='leave'?` at 10878 · Spec 8e handlers next to `.rz-approve-btn` at 10949.
+firestore.rules: legacy `purchase_orders` block 978-985 (Spec 9a deletes it, including its
+2-line comment) · `purchase_requisitions` block 987-1003 (Spec 9b replaces it) ·
+`isSeniorAdmin()` rules:30.
+
+No other corrections — all remaining Spec 1-11 content stands as written.

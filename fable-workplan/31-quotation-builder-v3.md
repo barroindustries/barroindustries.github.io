@@ -1308,3 +1308,81 @@ badge palette; if not present in styles.css, reuse `badge-warn`.)
 - ‼️ **FLAG FOR NEIL — legacy `quotes` collection** stays read-only and still feeds dashboard
   history. Confirm at some later point whether its rows should be archived/migrated; nothing in
   v12 depends on deciding now.
+
+## RE-GROUNDED (Fable, 2026-07-11)
+
+Verification pass against the ACTUAL WS32 implementation (commit 31ced19) plus today's
+WS28/29/33/36/38 landings — this spec was originally written against WS32's *plan*, so every
+referenced function/shape was re-checked against live code. **Result: no structural drift.**
+Confirmed byte-for-byte or shape-for-shape: the post-WS32 bridge (Spec 2's BEFORE block matches
+js/app.js exactly, incl. `data.clientId = await upsertClient()` and the still-hardcoded
+`db.collection('bs_quotes').add(data)` in the `QUOTE_APPROVAL_REQUESTED` branch); the `coll`
+ternary; `window.Clients.upsertFromQuote(q)` (no `clientId` handling yet — Spec 2's patch still
+applies verbatim; `nameKey` query, `lastQuoteNumber`/`lastQuoteTotal` fields, and
+`dbCacheInvalidate('clients')` all as assumed); `isQuoteWon/isQuoteLost/isQuoteOpen`
+(config.js:396-398, `accepted` handled) + `clientNameKey` (400); `CRM_STAGES`/`crmStageOf`/
+`crmStageMeta` (departments.js:12070-12078); `openClientHub` (departments.js:12266 — the spec's
+DECIDED section already uses the real name, and its `.clq-reopen`/`.clq-rev` buttons are
+`_coll`-aware as the header contract requires; `openClientQuotesModal` appears only in the
+historical grounding text, which is fine); `clientId` stamped by the bridge on `bk_quotes`/
+`bs_quotes` and by `openSalesOrderModal` on `sales_orders`/`job_projects`; the four approval
+functions still hardcode `bs_quotes` with unchanged signatures (`approveQuoteApproval(quoteId,
+agentId, qno, name)`, `returnQuoteToPartner(..., notes)`, `openQuoteApprovalReview(ctx, onDone)`
+with exactly THREE `db.collection('bs_quotes')` sites, `saveReviewedPartnerQuote(ctx, action)`);
+the naive `'roa'` terminal-else handlers are still the quoted approve-without-filing code with no
+`ca_deduct` filter; `reopenQuoteFromDoc(collection, id, navTarget, opts)` matches Spec 3c's call;
+all six dead-code chains re-verified zero-caller today (`renderQuoteList` count 1; `openQuoteEditor`'s
+3 / `printQuote`'s 2 occurrences are all internal to the dead chain); letterhead.js has its own
+esc fallback + `opts.entity` and is in PRECACHE; `formRow`/`wireForm`/`pdbBom`/
+`collectAndSaveProduct` and `Drive.renderUploadArea` (result carries `.url` and `.name`;
+opts `{accept,label,dept,subfolder}`) as assumed; `quoteStateFields`/`QUOTE_STALE_DAYS` don't
+exist yet (no collision); the `bk_quotes` create clause matches Spec 8a's BEFORE verbatim; the
+new `clients` rules deny partner reads (Spec 5c's catch-to-empty is correct); every
+quote-builder-v2.html anchor (`buildQuotePayload` 2544, `fileQuotation` 2506, `doVerifyAndFile`
+2452, `attrEsc` 1019, `mmToFeetStr`/`feetStrToMm` 988/998, `loadDatabase` map, `applyPartnerMode`
+1135, `initUI` 1187, `setCompany` 1195, `doPrint` 2681, `#printHeader` 420, `CO` object fields
+`name/sub/addr/contact`, `phLogo`) exists as cited, and no `quickMode`/`qqWizard` code exists yet.
+
+### Spec corrections
+
+Three mechanical corrections Sonnet MUST apply (everything else in DECIDED stands as written):
+
+1. **Spec 10 badge class — `badge-amber` and `badge-warn` do NOT exist in css/styles.css.**
+   The available badge palette is `badge-blue/green/orange/red/gray/purple/teal/gold`
+   (styles.css:298-304,664). Use **`badge-orange`** for the staleness badge:
+   `<span class="badge badge-orange" style="font-size:9px" title="Filed but no Sales Order yet">⚠ ${staleDays}d no SO</span>`.
+   Do not invent a new class.
+2. **Approval-button wiring now uses `onClickSafe(btn, fn)`** (departments.js:31 — wraps the
+   handler in try/catch + error toast; added after this spec's grounding pass). The `'all'`-chip
+   `qa-*` wiring (departments.js:11039-11048) is already `wrap.querySelectorAll('.qa-review-btn')
+   .forEach(btn => onClickSafe(btn, () => {...}))` — Spec 3e's edits must PRESERVE that wrapper
+   (only add the `quoteColl`/`data-coll` threading). Spec 4's AFTER block must be adapted the
+   same way: replace each `btn.addEventListener('click', async () => {...})` /
+   `btn.addEventListener('click', () => ...)` with `onClickSafe(btn, async () => {...})` /
+   `onClickSafe(btn, () => ...)` for all four handler groups (`qa-review-btn`, `qa-approve-btn`,
+   `qa-return-btn`, `roa-resolve-btn`). Behavior otherwise identical to the printed AFTER.
+3. **Spec 3b cache invalidation — invalidate BOTH `'all-quotes'` AND `'approvals-pending'`** in
+   `approveQuoteApproval` and `returnQuoteToPartner` (after the `approval_requests` resolution):
+   `dbCacheInvalidate && dbCacheInvalidate('all-quotes'); dbCacheInvalidate && dbCacheInvalidate('approvals-pending');`
+   Rationale: `saveReviewedPartnerQuote` (app.js:1293-1294) already invalidates both, and the
+   pending-approvals badge counts are served from the cached `'approvals-pending'` key
+   (app.js:2391, 2603) — invalidating only `'all-quotes'` would leave a stale badge count for up
+   to 30s after an approve/return from the chips.
+
+Line-anchor refresh (informational — Spec 9's "re-locate by function name, not line" rule
+governs; these are the current positions after WS26-38 landed): bridge `else` branch
+app.js:8248-8274 (hardcoded add at 8256), `coll` ternary app.js:8215, `data={...}` literal
+app.js:8172-8211 (`company:` at 8174), `upsertClient` app.js:8230-8233 (note: it carries a
+partner guard returning null — consistent with decision on partners never writing the CRM),
+`upsertFromQuote` departments.js:173-193, `approveQuoteApproval` 11626, `returnQuoteToPartner`
+11637, `openQuoteApprovalReview` 11650 (bs_quotes sites 11653/11675/11685),
+`saveReviewedPartnerQuote` app.js:1258-1304 (bs_quotes at 1289), `roa` terminal else
+departments.js:11576-11616 (NOTE: it now sits after a new `else if (sub === 'quote-files')`
+branch at 11574 from WS38 — Spec 4 replaces ONLY the terminal `else`, leave `quote-files`
+untouched), `'all'`-chip qa templates 10866-10868 / wiring 11039-11048, APPROVAL_CAPS
+`'quote-approval'` 10682, dead code: `renderBKQuoteList` 6752, `renderBKQuotationsSummary` 7107
+(live), `renderBKPackages` 7303, `renderBSDashboard` 9092, `renderBSQuoteBuilder` 9145,
+`renderBSQuotationsSummary` 9694 (live), `renderQuoteList` 10491 / `openQuoteEditor` 10534 /
+`printQuote` 10636, `formRow` app.js:1613, `wireForm` 1715, `pdbBom` 1751,
+`collectAndSaveProduct` 1753, `getAllQuotes` app.js:2065, `bk_quotes` rules block
+firestore.rules:668-677, `clients` rules block firestore.rules:1278.
