@@ -66,7 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
           document.getElementById('password').value = '';
           setLoginLoading(false);
           setTimeout(() => {
-            showLoginError(`⚠️ Wrong login portal. This account is an ${actualLabel} account — please use ${actualLabel} login.`);
+            showLoginError(`${emojiIcon('⚠️',16)} Wrong login portal. This account is an ${actualLabel} account — please use ${actualLabel} login.`);
           }, 80);
           selectedLoginType = null;
           return;
@@ -198,8 +198,9 @@ function renderBackupHealthBanner(problems) {
   const div = document.createElement('div');
   div.id = 'backup-health-banner';
   div.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#b91c1c;color:#fff;padding:calc(10px + env(safe-area-inset-top,0px)) calc(44px + env(safe-area-inset-right,0px)) 10px calc(14px + env(safe-area-inset-left,0px));font-size:13px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.3)';
-  div.innerHTML = `🗄️ <strong>Records durability alert.</strong> ${problems.map(p => escHtml(p)).join(' ')}`
+  div.innerHTML = `${emojiIcon('🗄️',16)} <strong>Records durability alert.</strong> ${problems.map(p => escHtml(p)).join(' ')}`
     + `<button aria-label="Dismiss" style="position:absolute;right:calc(10px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px));background:none;border:none;color:#fff;font-size:18px;cursor:pointer">×</button>`;
+  if (window.lucide) lucide.createIcons({ nodes: [div] });
   div.querySelector('button').onclick = () => div.remove();
   document.body.appendChild(div);
 }
@@ -308,11 +309,11 @@ async function checkPayrollDuties(user) {
     const monthLabel = new Date(year, month, 1).toLocaleString('en-PH',{month:'long',year:'numeric'});
     const isUrgent = isFirstDay;
     await Notifs.send(user.uid, {
-      title: isUrgent ? '🚨 Self-Assessment Due Today' : '📋 Self-Assessment Reminder',
+      title: isUrgent ? `${emojiIcon('🚨',16)} Self-Assessment Due Today` : `${emojiIcon('📋',16)} Self-Assessment Reminder`,
       body: isUrgent
         ? `Please complete your self-assessment for ${monthLabel} today before payroll is finalized.`
         : `Reminder: Your self-assessment for ${monthLabel} is due tomorrow. Go to Personal Finance → Self Evaluate.`,
-      icon: isUrgent ? '🚨' : '📋', type: 'payroll_reminder',
+      icon: isUrgent ? `${emojiIcon('🚨',16)}` : `${emojiIcon('📋',16)}`, type: 'payroll_reminder',
       dedupKey: `selfassess-${user.uid}-${currentMonth}`
     });
     localStorage.setItem(dedupKey, '1');
@@ -586,12 +587,13 @@ function requireProfilePhoto() {
   ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(8,11,20,0.92);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:20px';
   ov.innerHTML = `
     <div style="max-width:380px;width:100%;background:var(--surface,#1e2433);border:1px solid var(--border);border-radius:18px;padding:26px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.5)">
-      <div style="width:84px;height:84px;border-radius:50%;background:var(--surface2,#252b3b);display:flex;align-items:center;justify-content:center;font-size:40px;margin:0 auto 14px">📷</div>
+      <div style="width:84px;height:84px;border-radius:50%;background:var(--surface2,#252b3b);display:flex;align-items:center;justify-content:center;font-size:40px;margin:0 auto 14px">${emojiIcon('📷',40)}</div>
       <h3 style="margin:0 0 8px;font-size:18px;color:var(--text)">Profile photo required</h3>
       <p style="font-size:13px;color:var(--text-muted);line-height:1.6;margin:0 0 18px">A clear photo of yourself is needed to generate your <strong>Barro Industries company ID</strong>. Please upload one to continue.</p>
-      <button id="req-photo-btn" class="btn-primary" style="width:100%">📤 Upload Photo</button>
+      <button id="req-photo-btn" class="btn-primary" style="width:100%">${emojiIcon('📤',16)} Upload Photo</button>
       <div id="req-photo-status" style="font-size:12px;color:var(--text-muted);margin-top:10px"></div>
     </div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [ov] });
   document.body.appendChild(ov);
   document.getElementById('req-photo-btn').onclick = () => {
     const input = document.createElement('input');
@@ -633,7 +635,7 @@ function showPhotoPrompt() {
       @keyframes slideUpIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
     </style>
     <div style="display:flex;align-items:center;gap:12px">
-      <div style="width:44px;height:44px;border-radius:50%;background:var(--surface3,#252b3b);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">📷</div>
+      <div style="width:44px;height:44px;border-radius:50%;background:var(--surface3,#252b3b);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${emojiIcon('📷',22)}</div>
       <div>
         <div style="font-weight:600;font-size:14px;color:var(--text,#e2e8f0)">Add a profile photo</div>
         <div style="font-size:12px;color:var(--text-muted,#8b9ab5);margin-top:2px">Help your teammates recognize you</div>
@@ -645,6 +647,7 @@ function showPhotoPrompt() {
       <button id="photo-prompt-later" style="flex:1;padding:8px;border-radius:10px;border:1px solid var(--border,#2a3147);background:transparent;color:var(--text-muted,#8b9ab5);font-size:13px;cursor:pointer">Later</button>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [banner] });
   document.body.appendChild(banner);
 
   document.getElementById('photo-prompt-close').onclick = () => banner.remove();
@@ -1009,7 +1012,9 @@ function getSidebarItems() {
       : currentDepts;
     navDepts.forEach((dept, i) => {
       const cfg = DEPARTMENTS[dept];
-      if (cfg) items.push({ icon: cfg.icon, iconHtml: `<span class="nav-icon">${emojiIcon(cfg.lucideIcon||cfg.icon,18)}</span>`, label: dept, page: `dept:${dept}`, section: i === 0, sectionLabel: 'My Departments' });
+      // v12 WS42 Phase 21 — dept nav items get their own harmonized color tile
+      // (inline background override beats the generic `dept:*` orange CSS rule).
+      if (cfg) items.push({ icon: cfg.icon, iconHtml: `<span class="nav-icon" style="background:${cfg.gradient}">${emojiIcon(cfg.lucideIcon||cfg.icon,18)}</span>`, label: dept, page: `dept:${dept}`, section: i === 0, sectionLabel: 'My Departments' });
     });
     // Management section below
     items.push({ icon:'users',       label:'Team',             page:'team-directory',    section:true, sectionLabel:'Management' });
@@ -1120,10 +1125,10 @@ function buildDeptsPanel(depts) {
   list.innerHTML = depts.map(d => {
     const cfg = DEPARTMENTS[d];
     return `<button class="depts-item pressable" data-page="dept:${escHtml(d)}">
-      ${emojiIcon(cfg.lucideIcon || cfg.icon, 18)}<span>${escHtml(d)}</span></button>`;
+      ${window.deptIconTile(cfg, 28)}<span>${escHtml(d)}</span></button>`;
   }).join('') + (admin
     ? `<button class="depts-item pressable" data-page="departments" style="color:var(--primary-light)">
-         ${emojiIcon('layout-grid',18)}<span>All departments →</span></button>` : '');
+         ${window.iconTile('layout-grid','var(--text-muted)',null,28)}<span>All departments →</span></button>` : '');
   if (window.lucide) lucide.createIcons({ nodes: [list] });
   const close = () => { panel.classList.add('hidden'); back.classList.add('hidden'); };
   list.querySelectorAll('.depts-item').forEach(b =>
@@ -1207,11 +1212,12 @@ function renderNotificationsPage() {
   const c = document.getElementById('page-content');
   c.innerHTML = `
     <div class="page-header">
-      <h2 style="font-size:18px;font-weight:800;color:var(--text)">🔔 Notifications</h2>
+      <h2 style="font-size:18px;font-weight:800;color:var(--text)">${emojiIcon('🔔',18)} Notifications</h2>
     </div>
     <div id="notif-page-list" class="notif-list" style="max-height:none;overflow:visible">
       <div class="empty-state">No notifications</div>
     </div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   window.Notifs?.renderPage?.();
 }
 
@@ -1249,7 +1255,7 @@ function renderQuoteBuilderIframe() {
     <div id="qb-review-bar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:linear-gradient(135deg,rgba(255,159,10,.12),transparent);border:1.5px solid var(--warning,#ff9f0a);border-radius:12px;padding:10px 14px;margin-bottom:10px">
       <div style="flex:1;min-width:180px;font-size:12px"><strong>Reviewing ${escHtml(reviewCtx.quoteNumber||'partner quote')}</strong> for ${escHtml(reviewCtx.clientName||'')} — edit the line items, then save it back to the partner.</div>
       <button class="btn-primary btn-sm" id="qb-return-edit">↩ Save edits &amp; Return to Partner</button>
-      <button class="btn-success btn-sm" id="qb-approve-edit">✅ Save edits &amp; Approve</button>
+      <button class="btn-success btn-sm" id="qb-approve-edit">${emojiIcon('✅',16)} Save edits &amp; Approve</button>
     </div>` : '';
   // On phones, drop the redundant "Quote Builder" heading (the builder shows its own
   // header) and give the iframe nearly the full viewport between the app's top bar and
@@ -1259,10 +1265,11 @@ function renderQuoteBuilderIframe() {
   c.innerHTML = `
     ${reviewBanner}
     ${isMobile ? '' : `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
-      <h2 style="font-size:16px;font-weight:800;color:var(--text)">🧮 Quote Builder${reviewCtx?' <span style="font-size:12px;font-weight:600;color:var(--warning,#ff9f0a)">(reviewing a partner quote)</span>':reopenState?` <span style="font-size:12px;font-weight:600;color:var(--text-muted)">(${reopenAsRevision?'new revision':'editing a copy'})</span>`:''}</h2>
+      <h2 style="font-size:16px;font-weight:800;color:var(--text)">${emojiIcon('🧮',16)} Quote Builder${reviewCtx?' <span style="font-size:12px;font-weight:600;color:var(--warning,#ff9f0a)">(reviewing a partner quote)</span>':reopenState?` <span style="font-size:12px;font-weight:600;color:var(--text-muted)">(${reopenAsRevision?'new revision':'editing a copy'})</span>`:''}</h2>
     </div>`}
     <iframe id="qb-frame" src="${qbSrc}" allow="print"
       style="width:100%;height:calc(100dvh - ${chrome}px);min-height:${isMobile?'420':'460'}px;border:none;border-radius:${isMobile?'10':'12'}px;background:#f5f6fa"></iframe>`;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   // On phones, PIN the iframe (position:fixed) to fill from just below the app's top
   // chrome to the bottom of the screen, edge-to-edge. The outer page no longer scrolls
   // the builder out of view — only the builder's own content scrolls inside it.
@@ -1577,7 +1584,8 @@ async function renderAuditLog() {
     const snap = await db.collection('audit_log').orderBy('ts','desc').limit(500).get();
     entries = snap.docs.map(d => ({ id:d.id, ...d.data() }));
   } catch (e) {
-    c.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Could not load audit log</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(e.message||'')}</p></div>`;
+    c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Could not load audit log</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(e.message||'')}</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
     return;
   }
   const entities = [...new Set(entries.map(e=>e.entity).filter(Boolean))].sort();
@@ -1586,7 +1594,7 @@ async function renderAuditLog() {
   const fmtTs = ts => { try { return ts?.toDate ? ts.toDate().toLocaleString('en-PH',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'; } catch(_) { return '—'; } };
 
   c.innerHTML = `
-    <div class="page-header"><h2>📜 Audit Log</h2><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="badge badge-gray">${entries.length} entr${entries.length===1?'y':'ies'}</span><button class="btn-secondary btn-sm" id="security-backfill-btn" title="One-time: backfill the username login map">🔧 Security backfill</button><button class="btn-secondary btn-sm" id="audit-csv">⬇ CSV</button></div></div>
+    <div class="page-header"><h2>${emojiIcon('📜',20)} Audit Log</h2><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="badge badge-gray">${entries.length} entr${entries.length===1?'y':'ies'}</span><button class="btn-secondary btn-sm" id="security-backfill-btn" title="One-time: backfill the username login map">${emojiIcon('🔧',16)} Security backfill</button><button class="btn-secondary btn-sm" id="audit-csv">${emojiIcon('⬇',16)} CSV</button></div></div>
     <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Append-only trail of changes to sensitive data (payroll, finance, inventory, products, production, deals, passwords). Newest first, last 500.</p>
     <div class="subtab-bar" style="flex-wrap:wrap;gap:8px;margin-bottom:12px">
       <select id="audit-entity" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">
@@ -1597,12 +1605,13 @@ async function renderAuditLog() {
       </select>
     </div>
     <div class="card"><div class="card-body" style="padding:0">
-      ${!entries.length ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">📜</div><h4>No audit entries yet</h4><p>Sensitive changes will be recorded here.</p></div>' :
+      ${!entries.length ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('📜',44)}</div><h4>No audit entries yet</h4><p>Sensitive changes will be recorded here.</p></div>` :
       `<div class="table-wrap"><table class="data-table">
         <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Entity</th><th>ID</th><th>Details</th></tr></thead>
         <tbody id="audit-tbody"></tbody>
       </table></div>`}
     </div></div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
 
   const draw = () => {
     const fe = document.getElementById('audit-entity')?.value || 'all';
@@ -1681,7 +1690,7 @@ async function renderProductDatabase() {
     <div class="form-group"><label>Capital — Materials (₱)</label>
       <div style="display:flex;gap:6px;align-items:center">
         <input type="number" inputmode="decimal" id="${prefix}-capmat" placeholder="0.00" min="0" step="0.01" value="${p.capitalMaterials||''}" style="flex:1">
-        <button type="button" class="btn-secondary btn-sm pdb-bom-btn" data-prefix="${prefix}" data-bom="${encodeURIComponent(JSON.stringify(p.bom||[]))}" title="Build from raw-material prices in Inventory">🧮 BOM</button>
+        <button type="button" class="btn-secondary btn-sm pdb-bom-btn" data-prefix="${prefix}" data-bom="${encodeURIComponent(JSON.stringify(p.bom||[]))}" title="Build from raw-material prices in Inventory">${emojiIcon('🧮',16)} BOM</button>
       </div>
       <div id="${prefix}-bom-note" style="font-size:11px;color:var(--text-muted);margin-top:3px">${(p.bom&&p.bom.length)?`${p.bom.length} material line(s) linked to inventory`:''}</div>
     </div>
@@ -1708,7 +1717,7 @@ async function renderProductDatabase() {
 
   c.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px">
-      <h2 style="font-size:20px;font-weight:800;color:var(--text)">📦 Product Database</h2>
+      <h2 style="font-size:20px;font-weight:800;color:var(--text)">${emojiIcon('📦',20)} Product Database</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn-secondary btn-sm" id="pdb-import-btn" title="Add any new items from products-database.json (e.g. the Baking line). Never overwrites your edits.">⟳ Import new from catalog</button>
         <button class="btn-primary btn-sm" id="pdb-add-btn">+ Add Product</button>
@@ -1743,7 +1752,7 @@ async function renderProductDatabase() {
                   ${prods.map(p => `
                     <tr data-pid="${p.id}">
                       <td><span style="font-family:monospace;font-size:12px">${p.id}</span></td>
-                      <td>${escHtml(p.title||'')}${!p.photoUrl?' <span title="No photo yet" style="opacity:.5">📷</span>':''}</td>
+                      <td>${escHtml(p.title||'')}${!p.photoUrl?` <span title="No photo yet" style="opacity:.5">${emojiIcon('📷',16)}</span>`:''}</td>
                       <td style="font-size:12px">${measureStr(p.measurement)}</td>
                       <td style="font-size:12px;max-width:220px">${escHtml(p.specifications||'—')}</td>
                       <td>${escHtml(p.unit||'—')}</td>
@@ -1770,6 +1779,7 @@ async function renderProductDatabase() {
     const wrap = document.getElementById(`${prefix}-coef-wrap`);
     const label = document.getElementById(`${prefix}-coef-label`);
     if (!wrap || !label) return;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
     wrap.style.display = ft === 'fixed' ? 'none' : '';
     label.textContent = coefLabelFor(ft);
   };
@@ -1871,7 +1881,7 @@ async function renderProductDatabase() {
   async function openBomModal(prefix, existingBom) {
     const target = document.getElementById(`${prefix}-capmat`);
     if (!target) return;
-    openModal('🧮 Materials from Inventory', '<div class="loading-placeholder" style="padding:24px">Loading raw materials…</div>',
+    openModal(`${emojiIcon('🧮',16)} Materials from Inventory`, '<div class="loading-placeholder" style="padding:24px">Loading raw materials…</div>',
       '<button class="btn-primary" id="bom-apply">Apply to Materials Cost</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>');
     const snap = await db.collection('inventory_items').orderBy('name').get().catch(() => ({ docs: [] }));
     const mats = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(i => (i.kind || 'material') === 'material');
@@ -1880,7 +1890,8 @@ async function renderProductDatabase() {
 
     const body = document.getElementById('modal-body') || document.querySelector('.modal-body');
     if (!mats.length) {
-      if (body) body.innerHTML = `<div class="empty-state" style="padding:20px"><div class="empty-icon">📦</div><h4>No raw materials in Inventory</h4><p>Add raw materials (with unit cost) in the Inventory module first, then build a BOM here.</p></div>`;
+      if (body) body.innerHTML = `<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('📦',44)}</div><h4>No raw materials in Inventory</h4><p>Add raw materials (with unit cost) in the Inventory module first, then build a BOM here.</p></div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [body] });
       return;
     }
     const rows = mats.map(m => `
@@ -2114,12 +2125,13 @@ function navigateTo(page, opts) {
     case 'leave':            window.renderLeavePage?.(); break;
     case 'holidays':         window.renderHolidaysAdmin?.(); break;
     case 'inventory':        window.renderInventory?.(); break;
-    case 'product-database': isPresident() ? renderProductDatabase() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔒</div><h4>Access Denied</h4></div>`); break;
-    case 'audit-log':        isPresident() ? renderAuditLog() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔒</div><h4>Access Denied</h4></div>`); break;
+    case 'product-database': isPresident() ? renderProductDatabase() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Access Denied</h4></div>`, window.lucide && lucide.createIcons({ nodes: [c] })); break;
+    case 'audit-log':        isPresident() ? renderAuditLog() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Access Denied</h4></div>`, window.lucide && lucide.createIcons({ nodes: [c] })); break;
     case 'search':           window.renderGlobalSearch?.(); break;
     case 'sales-orders':     window.renderSalesOrders?.(); break;
     case 'projects-lifecycle': window.renderProjectLifecycle?.(); break;
-    default: c.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><h4>Page not found</h4></div>`;
+    default: c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔍',44)}</div><h4>Page not found</h4></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
   }
 }
 
@@ -2188,10 +2200,11 @@ async function renderPartnerProjects() {
   const co = partnerCompanyName();
   const uid = currentUser.uid;
   c.innerHTML = `
-    <div class="page-header"><h2>💼 My Projects</h2></div>
+    <div class="page-header"><h2>${emojiIcon('💼',20)} My Projects</h2></div>
     <div style="font-size:12px;color:var(--text-muted);margin:-6px 0 12px;font-weight:600">Projects Barro Industries is running with ${escHtml(co)}</div>
     <div id="partner-projects-body"><div class="loading-placeholder">Loading projects…</div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   try {
     const [projSnap, dealSnap] = await Promise.all([
       db.collection('job_projects').where('partnerUid','==',uid).get().catch(()=>({docs:[]})),
@@ -2215,9 +2228,10 @@ async function renderPartnerProjects() {
     const body = document.getElementById('partner-projects-body');
     if (!body) return;
     if (!all.length) {
-      body.innerHTML = `<div class="empty-state" style="padding:40px 16px"><div class="empty-icon">💼</div>
+      body.innerHTML = `<div class="empty-state" style="padding:40px 16px"><div class="empty-icon">${emojiIcon('💼',44)}</div>
         <p>No projects yet</p>
         <p style="font-size:12px;color:var(--text-muted)">Barro Industries will tag projects to ${escHtml(co)} here as they come in.</p></div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [body] });
       return;
     }
     const active = all.filter(p=>p.stage!=='cancelled' && p.stage!=='paid');
@@ -2266,9 +2280,9 @@ async function renderPartnerDashboard() {
   // Brilliant Steel partners see the 50/50 steel-project walkthrough; a generic
   // company partner sees a neutral, company-branded intro.
   const introCard = genericP ? `
-    <div class="card" style="margin-bottom:14px;border:1.5px solid var(--primary);background:linear-gradient(135deg,rgba(10,132,255,.06),transparent)">
+    <div class="card dash-hero-card" style="margin-bottom:14px">
       <div class="card-body">
-        <div style="font-size:14px;font-weight:800;margin-bottom:8px">🤝 ${escHtml(co)} × Barro Industries — partner portal</div>
+        <div style="font-size:14px;font-weight:800;margin-bottom:8px">${emojiIcon('🤝',14)} ${escHtml(co)} × Barro Industries — partner portal</div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
           <div style="font-size:12px"><div style="font-size:18px">①</div><strong>Track your projects</strong><br><span style="color:var(--text-muted)">See every project Barro Industries is running with ${escHtml(co)} — status, scope &amp; timeline.</span></div>
           <div style="font-size:12px"><div style="font-size:18px">②</div><strong>Build a quote</strong><br><span style="color:var(--text-muted)">Generate quotes under <strong>${escHtml(co)}</strong> or Barro Kitchens branding.</span></div>
@@ -2276,9 +2290,9 @@ async function renderPartnerDashboard() {
         </div>
       </div>
     </div>` : `
-    <div class="card" style="margin-bottom:14px;border:1.5px solid var(--primary);background:linear-gradient(135deg,rgba(10,132,255,.06),transparent)">
+    <div class="card dash-hero-card" style="margin-bottom:14px">
       <div class="card-body">
-        <div style="font-size:14px;font-weight:800;margin-bottom:8px">🤝 How your Brilliant Steel partner portal works</div>
+        <div style="font-size:14px;font-weight:800;margin-bottom:8px">${emojiIcon('🤝',14)} How your Brilliant Steel partner portal works</div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
           <div style="font-size:12px"><div style="font-size:18px">①</div><strong>Build a quote</strong><br><span style="color:var(--text-muted)">Use the Quote Builder — it's pre-set to Brilliant Steel pricing.</span></div>
           <div style="font-size:12px"><div style="font-size:18px">②</div><strong>Submit for review</strong><br><span style="color:var(--text-muted)">Verify &amp; file your quote. Barro reviews and approves it with you.</span></div>
@@ -2288,7 +2302,7 @@ async function renderPartnerDashboard() {
       </div>
     </div>`;
   c.innerHTML = `
-    <div class="page-header"><h2>👋 Welcome, ${escHtml((u.displayName||'Partner').split(' ')[0])}!</h2></div>
+    <div class="page-header"><h2>${emojiIcon('👋',20)} Welcome, ${escHtml((u.displayName||'Partner').split(' ')[0])}!</h2></div>
     ${genericP ? `<div style="font-size:12px;color:var(--text-muted);margin:-6px 0 10px;font-weight:600">${escHtml(co)} · Partner</div>` : ''}
     <div id="live-clock" class="live-clock-line"></div>
     ${introCard}
@@ -2300,18 +2314,19 @@ async function renderPartnerDashboard() {
     </div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px">
       <button class="btn-secondary" onclick="navigateTo('bs-quote-builder')" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:14px;font-size:12px;font-weight:700">
-        <span style="font-size:24px">🧮</span>Quote Builder
+        <span style="font-size:24px">${emojiIcon('🧮',24)}</span>Quote Builder
       </button>
       <button class="btn-secondary" onclick="navigateTo('bs-quotations')" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:14px;font-size:12px;font-weight:700">
-        <span style="font-size:24px">📄</span>Quotations
+        <span style="font-size:24px">${emojiIcon('📄',24)}</span>Quotations
       </button>
       ${genericP ? `<button class="btn-secondary" onclick="navigateTo('partner-projects')" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:14px;font-size:12px;font-weight:700">
-        <span style="font-size:24px">💼</span>Projects
+        <span style="font-size:24px">${emojiIcon('💼',24)}</span>Projects
       </button>` : `<button class="btn-secondary" onclick="navigateTo('bs-clients')" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 8px;border-radius:14px;font-size:12px;font-weight:700">
-        <span style="font-size:24px">📋</span>Clients
+        <span style="font-size:24px">${emojiIcon('📋',24)}</span>Clients
       </button>`}
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   liveDateTime('live-clock');
 
   try {
@@ -2352,7 +2367,7 @@ async function renderPartnerDashboard() {
     const el = document.getElementById('partner-earnings-card');
     if (el) el.innerHTML = (sharedProjects.length||deals.length) ? `
       <div class="card" style="margin-bottom:14px;border:2px solid var(--primary)">
-        <div class="card-header"><h3>💰 My Earnings (50/50 Split)</h3><span style="font-size:11px;color:var(--text-muted)">From sales orders</span></div>
+        <div class="card-header"><h3>${emojiIcon('💰',20)} My Earnings (50/50 Split)</h3><span style="font-size:11px;color:var(--text-muted)">From sales orders</span></div>
         <div class="card-body">
           <div class="kpi-row" style="margin-bottom:12px">
             <div class="kpi-card accent"><div class="kpi-label">Active Projects</div><div class="kpi-value">${activeProjects.length}</div></div>
@@ -2362,13 +2377,14 @@ async function renderPartnerDashboard() {
           </div>
           ${sharedProjects.length?`<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
             ${sharedProjects.slice(0,6).map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;padding:6px 0;border-bottom:1px solid var(--border)">
-              <div style="min-width:0;flex:1"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(p.clientName||p.projectNo||'Project')}</div><div style="color:var(--text-muted);font-size:11px">${escHtml(p.projectNo||'')} · ${p.stage==='paid'?'✅ paid':'in progress'}</div></div>
+              <div style="min-width:0;flex:1"><div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(p.clientName||p.projectNo||'Project')}</div><div style="color:var(--text-muted);font-size:11px">${escHtml(p.projectNo||'')} · ${p.stage==='paid'?`${emojiIcon('✅',16)} paid`:'in progress'}</div></div>
               <div style="text-align:right;flex-shrink:0"><div style="font-weight:700;color:var(--success)">₱${fmt(partnerShare(p))}</div><div style="color:var(--text-muted);font-size:10px">of ₱${fmt(Math.max(0,(p.contractAmount||0)-(p.capital||0)))} margin</div></div>
             </div>`).join('')}
           </div>`:''}
           <div style="font-size:12px;color:var(--text-muted);text-align:center">Your share = 50% of (contract − capital) per project. Factors are set by Barro.</div>
         </div>
       </div>` : '';
+    if (window.lucide) lucide.createIcons({ nodes: [el] });
 
     const needsRevision   = quotes.filter(q=>q.status==='needs_revision'||q.approvalStatus==='needs_revision');
     const pendingApproval = quotes.filter(q=>q.status==='pending_approval'||q.approvalStatus==='pending_review'||q.status==='sent');
@@ -2377,16 +2393,16 @@ async function renderPartnerDashboard() {
 
     document.getElementById('partner-tasks-card').innerHTML = `
       <div class="card">
-        <div class="card-header"><h3>📋 My Tasks</h3><button class="btn-primary btn-sm" onclick="navigateTo('tasks')">All Tasks</button></div>
+        <div class="card-header"><h3>${emojiIcon('📋',20)} My Tasks</h3><button class="btn-primary btn-sm" onclick="navigateTo('tasks')">All Tasks</button></div>
         <div class="card-body" style="padding:0">
-          ${!open.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">✅</div><p>No open tasks</p></div>':
+          ${!open.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('✅',44)}</div><p>No open tasks</p></div>`:
             open.slice(0,5).map(t=>{
               const isOverdue = t.dueDate && t.dueDate < todayStr;
               return `<div class="task-feed-item" style="cursor:pointer" onclick="window.openTaskDetail&&window.openTaskDetail('${t.id}',window.currentUser,window.currentRole)">
                 <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
                 <div style="flex:1;min-width:0"><div class="task-feed-title">${escHtml(t.title)}</div>${t.dueDate?`<div class="task-feed-meta" style="color:${isOverdue?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</div>`:''}</div>
                 <span class="badge ${isOverdue?'badge-red':'badge-blue'}">${isOverdue?'Overdue':t.status||'open'}</span>
-                ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">📣 ${t.openFollowUpCount}</span>`:''}
+                ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">${emojiIcon('📣',16)} ${t.openFollowUpCount}</span>`:''}
               </div>`;
             }).join('')}
         </div>
@@ -2400,7 +2416,7 @@ async function renderPartnerDashboard() {
         </div>
         <div class="card-body" style="padding:0">
           ${needsRevision.map(q=>`<div style="display:flex;align-items:flex-start;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)">
-            <span style="font-size:18px">📝</span>
+            <span style="font-size:18px">${emojiIcon('📝',18)}</span>
             <div style="flex:1;min-width:0">
               <div style="font-size:13px;font-weight:600">${q.quoteNumber||q.id.slice(-8)} — ${escHtml(q.clientName||'Client')}</div>
               ${q.presidentNotes?`<div style="font-size:12px;color:var(--warning);margin-top:2px;font-style:italic">"${escHtml(q.presidentNotes)}"</div>`:'<div style="font-size:12px;color:var(--text-muted)">Open Quote Builder to revise and resubmit.</div>'}
@@ -2409,15 +2425,15 @@ async function renderPartnerDashboard() {
         </div>
       </div>`:''}
       <div class="card">
-        <div class="card-header"><h3>📋 My Quotations</h3><button class="btn-primary btn-sm" onclick="navigateTo('bs-quotations')">All Quotes</button></div>
+        <div class="card-header"><h3>${emojiIcon('📋',20)} My Quotations</h3><button class="btn-primary btn-sm" onclick="navigateTo('bs-quotations')">All Quotes</button></div>
         <div class="card-body" style="padding:0">
-          ${!quotes.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📄</div><p>No quotes yet. Use Quote Builder to create one.</p></div>':
+          ${!quotes.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📄',44)}</div><p>No quotes yet. Use Quote Builder to create one.</p></div>`:
             quotes.slice(0,5).map(q=>{
               const amt = q.total||q.grandTotal||0;
               const ts  = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric'}):'';
               const st  = q.status||q.approvalStatus||'draft';
               const bc  = st==='filed'||st==='approved'?'badge-green':st==='needs_revision'?'badge-orange':st==='pending_approval'||st==='pending_review'||st==='sent'?'badge-blue':'badge-gray';
-              const ico = st==='filed'||st==='approved'?'✅':st==='needs_revision'?'↩':st==='pending_approval'||st==='sent'?'⏳':'📄';
+              const ico = st==='filed'||st==='approved'?`${emojiIcon('✅',16)}`:st==='needs_revision'?'↩':st==='pending_approval'||st==='sent'?`${emojiIcon('⏳',16)}`:`${emojiIcon('📄',16)}`;
               return `<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border)">
                 <div style="font-size:20px">${ico}</div>
                 <div style="flex:1;min-width:0">
@@ -2540,13 +2556,13 @@ async function renderPresidentDashboard() {
 
       ${overdueTasks.length>0?`
       <div class="alert-banner alert-danger" onclick="navigateTo('tasks')">
-        <span>⚠️ <strong>${overdueTasks.length} overdue task${overdueTasks.length>1?'s':''}</strong> need immediate attention</span>
+        <span>${emojiIcon('⚠️',16)} <strong>${overdueTasks.length} overdue task${overdueTasks.length>1?'s':''}</strong> need immediate attention</span>
         <span class="alert-chevron">›</span>
       </div>`:''}
 
       ${totalPending>0?`
       <div class="alert-banner alert-warn" onclick="navigateTo('approvals')">
-        <span>📋 <strong>${totalPending} pending</strong> — ${[pendingSignups>0?pendingSignups+' signup'+(pendingSignups!==1?'s':''):'', pendingApprovals>0?pendingApprovals+' approval'+(pendingApprovals!==1?'s':''):'', pendingCA>0?pendingCA+' CA'+(pendingCA!==1?'s':''):'', pendingExtensions>0?pendingExtensions+' extension'+(pendingExtensions!==1?'s':''):'', pendingSubs>0?pendingSubs+' submission'+(pendingSubs!==1?'s':''):''].filter(Boolean).join(' · ')}</span>
+        <span>${emojiIcon('📋',16)} <strong>${totalPending} pending</strong> — ${[pendingSignups>0?pendingSignups+' signup'+(pendingSignups!==1?'s':''):'', pendingApprovals>0?pendingApprovals+' approval'+(pendingApprovals!==1?'s':''):'', pendingCA>0?pendingCA+' CA'+(pendingCA!==1?'s':''):'', pendingExtensions>0?pendingExtensions+' extension'+(pendingExtensions!==1?'s':''):'', pendingSubs>0?pendingSubs+' submission'+(pendingSubs!==1?'s':''):''].filter(Boolean).join(' · ')}</span>
         <span class="alert-chevron">›</span>
       </div>`:''}
 
@@ -2605,7 +2621,7 @@ async function renderPresidentDashboard() {
           </div>
           <div class="card-body" style="padding:0">
             ${!sortedOpen.length
-              ? '<div class="empty-state" style="padding:24px"><div class="empty-icon">✅</div><p>All tasks done!</p></div>'
+              ? `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('✅',44)}</div><p>All tasks done!</p></div>`
               : sortedOpen.slice(0,8).map(t=>{
                   const isOverdue = t.dueDate && t.dueDate < todayStr;
                   return `<div class="task-feed-item ${isOverdue?'task-overdue':''}">
@@ -2618,7 +2634,7 @@ async function renderPresidentDashboard() {
                         ${t.department?` · ${escHtml(t.department)}`:''}
                       </div>
                     </div>
-                    ${taskBadge(t)}${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">📣 ${t.openFollowUpCount}</span>`:''}
+                    ${taskBadge(t)}${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">${emojiIcon('📣',16)} ${t.openFollowUpCount}</span>`:''}
                   </div>`;
                 }).join('')}
           </div>
@@ -2626,7 +2642,7 @@ async function renderPresidentDashboard() {
 
         <div>
           <div class="card" style="margin-bottom:16px">
-            <div class="card-header"><h3>📅 Calendar</h3></div>
+            <div class="card-header"><h3>${emojiIcon('📅',20)} Calendar</h3></div>
             <div class="card-body" id="mini-cal"></div>
           </div>
           <div class="card">
@@ -2654,7 +2670,7 @@ async function renderPresidentDashboard() {
     renderMiniCal();
     if (window.lucide) lucide.createIcons({ nodes: [c] });
   } catch(err) {
-    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${err.message}</p></div>`;
+    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${err.message}</p></div>`;
   }
 }
 
@@ -2717,8 +2733,8 @@ async function renderManagerDashboard() {
     c.innerHTML = `
       <div class="page-header"><h2>Manager Dashboard</h2><span class="badge badge-purple">${escHtml(depts.join(' · ')||'Manager')}</span></div>
       <div id="live-clock" class="live-clock-line"></div>
-      ${overdueT.length?`<div class="alert-banner alert-danger" onclick="navigateTo('tasks')"><span>⚠️ <strong>${overdueT.length} overdue</strong> in your ${depts.length>1?'departments':'department'}</span><span class="alert-chevron">›</span></div>`:''}
-      ${deptPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>📋 <strong>${deptPending} pending</strong> approval${deptPending>1?'s':''} / request${deptPending>1?'s':''}</span><span class="alert-chevron">›</span></div>`:''}
+      ${overdueT.length?`<div class="alert-banner alert-danger" onclick="navigateTo('tasks')"><span>${emojiIcon('⚠️',16)} <strong>${overdueT.length} overdue</strong> in your ${depts.length>1?'departments':'department'}</span><span class="alert-chevron">›</span></div>`:''}
+      ${deptPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>${emojiIcon('📋',16)} <strong>${deptPending} pending</strong> approval${deptPending>1?'s':''} / request${deptPending>1?'s':''}</span><span class="alert-chevron">›</span></div>`:''}
       <div class="kpi-row">
         <div class="kpi-card"><div class="kpi-icon-wrap" style="background:rgba(10,132,255,0.12)"><i data-lucide="users" style="stroke:#0A84FF;width:18px"></i></div><div class="kpi-label">Team</div><div class="kpi-value">${team.length}</div></div>
         <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="user-check" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Present today</div><div class="kpi-value">${present}</div><div class="kpi-sub">${half} half · ${unmarked} not in yet</div></div>
@@ -2729,22 +2745,22 @@ async function renderManagerDashboard() {
         <div class="card">
           <div class="card-header"><h3>Department Tasks</h3><button class="btn-primary btn-sm" onclick="navigateTo('tasks')">All Tasks</button></div>
           <div class="card-body" style="padding:0">
-            ${!sortedOpen.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">✅</div><p>No open tasks in your department</p></div>':
+            ${!sortedOpen.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('✅',44)}</div><p>No open tasks in your department</p></div>`:
               sortedOpen.slice(0,8).map(t=>{const ov=t.dueDate&&t.dueDate<todayStr;return `<div class="task-feed-item ${ov?'task-overdue':''}">
                 <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
                 <div style="flex:1;min-width:0"><div class="task-feed-title">${escHtml(t.title)}</div><div class="task-feed-meta">${assignedNames(t)}${t.dueDate?` · <span style="color:${ov?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</span>`:''}</div></div>
-                <span class="badge ${ov?'badge-red':'badge-blue'}">${ov?'Overdue':t.status||'open'}</span>${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">📣 ${t.openFollowUpCount}</span>`:''}</div>`;}).join('')}
+                <span class="badge ${ov?'badge-red':'badge-blue'}">${ov?'Overdue':t.status||'open'}</span>${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">${emojiIcon('📣',16)} ${t.openFollowUpCount}</span>`:''}</div>`;}).join('')}
           </div>
         </div>
         <div>
           <div class="card" style="margin-bottom:16px">
-            <div class="card-header"><h3>👥 Team Today</h3><button class="btn-primary btn-sm" onclick="navigateTo('attendance')">Attendance</button></div>
+            <div class="card-header"><h3>${emojiIcon('👥',20)} Team Today</h3><button class="btn-primary btn-sm" onclick="navigateTo('attendance')">Attendance</button></div>
             <div class="card-body" style="padding:0">
               ${!team.length?'<div class="empty-state" style="padding:20px"><p>No team members assigned</p></div>':
                 att.slice(0,12).map(a=>{
                   const dot = { present:'var(--success)', half:'var(--warning)', absent:'var(--danger)', leave:'var(--success)', 'unpaid-leave':'var(--text-muted)' }[a.status] || 'var(--text-muted)';
                   const cls = { present:'badge-green', half:'badge-orange', absent:'badge-red', leave:'badge-green', 'unpaid-leave':'badge-gray' }[a.status] || 'badge-gray';
-                  const label = { present:'present', half:'half', absent:'absent', leave:'🌴 leave', 'unpaid-leave':'📅 unpaid leave', unmarked:'not in' }[a.status] || a.status;
+                  const label = { present:'present', half:'half', absent:'absent', leave:`${emojiIcon('🌴',16)} leave`, 'unpaid-leave':`${emojiIcon('📅',16)} unpaid leave`, unmarked:'not in' }[a.status] || a.status;
                   return `<div style="display:flex;align-items:center;gap:10px;padding:8px 16px;border-bottom:1px solid var(--border)">
                   <span style="width:8px;height:8px;border-radius:50%;background:${dot}"></span>
                   <span style="flex:1;font-size:13px">${escHtml(a.name)}</span>
@@ -2764,7 +2780,7 @@ async function renderManagerDashboard() {
     liveDateTime('live-clock');
     if (window.lucide) lucide.createIcons({ nodes: [c] });
   } catch(err) {
-    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
+    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
   }
 }
 
@@ -2803,22 +2819,22 @@ async function renderSecretaryDashboard() {
     const totalPending = (apprSnap.size||0)+(caSnap.size||0)+(extSnap.size||0)+(signupSnap.size||0)+(leaveSnap.size||0)+(reviewSnap.size||0)+pendingSubs+pendingDeletes;
     const activeStaff = users.filter(u=>u.role!=='partner').length;
     const rows = [
-      ['Sign-ups', signupSnap.size||0, '👤'],
-      ['Cash Advances', caSnap.size||0, '💸'],
-      ['Leave Requests', leaveSnap.size||0, '🌴'],
-      ['Attendance Extensions', extSnap.size||0, '⏰'],
-      ['Work Submissions', pendingSubs, '📤'],
-      ['Tasks for Review', reviewSnap.size||0, '📋'],
-      ['Quote Approvals', apprSnap.size||0, '📝'],
-      ['Deletion Requests', pendingDeletes, '🗑'],
+      ['Sign-ups', signupSnap.size||0, `${emojiIcon('👤',16)}`],
+      ['Cash Advances', caSnap.size||0, `${emojiIcon('💸',16)}`],
+      ['Leave Requests', leaveSnap.size||0, `${emojiIcon('🌴',16)}`],
+      ['Attendance Extensions', extSnap.size||0, `${emojiIcon('⏰',16)}`],
+      ['Work Submissions', pendingSubs, `${emojiIcon('📤',16)}`],
+      ['Tasks for Review', reviewSnap.size||0, `${emojiIcon('📋',16)}`],
+      ['Quote Approvals', apprSnap.size||0, `${emojiIcon('📝',16)}`],
+      ['Deletion Requests', pendingDeletes, `${emojiIcon('🗑',16)}`],
     ].filter(r=>r[1]>0);
 
     c.innerHTML = `
-      <div class="page-header"><h2>🗂 Corporate Secretary</h2><span class="badge badge-gold">Oversight</span></div>
+      <div class="page-header"><h2>${emojiIcon('🗂',20)} Corporate Secretary</h2><span class="badge badge-gold">Oversight</span></div>
       <div id="live-clock" class="live-clock-line"></div>
-      <div class="alert-banner" style="cursor:default"><span>👁 <strong>Oversight role.</strong> You can review everything across the company. The President approves all requests, and deletions of key records require President approval.</span></div>
-      ${totalPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>📋 <strong>${totalPending} request${totalPending>1?'s':''}</strong> awaiting the President's approval — review the queue</span><span class="alert-chevron">›</span></div>`:''}
-      ${pendingDeletes?`<div class="alert-banner alert-danger" onclick="navigateTo('approvals')"><span>🗑 <strong>${pendingDeletes} deletion request${pendingDeletes>1?'s':''}</strong> pending President approval</span><span class="alert-chevron">›</span></div>`:''}
+      <div class="alert-banner" style="cursor:default"><span>${emojiIcon('👁',16)} <strong>Oversight role.</strong> You can review everything across the company. The President approves all requests, and deletions of key records require President approval.</span></div>
+      ${totalPending?`<div class="alert-banner alert-warn" onclick="navigateTo('approvals')"><span>${emojiIcon('📋',16)} <strong>${totalPending} request${totalPending>1?'s':''}</strong> awaiting the President's approval — review the queue</span><span class="alert-chevron">›</span></div>`:''}
+      ${pendingDeletes?`<div class="alert-banner alert-danger" onclick="navigateTo('approvals')"><span>${emojiIcon('🗑',16)} <strong>${pendingDeletes} deletion request${pendingDeletes>1?'s':''}</strong> pending President approval</span><span class="alert-chevron">›</span></div>`:''}
       <div class="kpi-row">
         <div class="kpi-card"><div class="kpi-icon-wrap" style="background:rgba(10,132,255,0.12)"><i data-lucide="users" style="stroke:#0A84FF;width:18px"></i></div><div class="kpi-label">People</div><div class="kpi-value">${activeStaff}</div></div>
         <div class="kpi-card ${totalPending?'accent':''}" style="cursor:pointer" onclick="navigateTo('approvals')"><div class="kpi-icon-wrap" style="background:rgba(255,170,0,0.12)"><i data-lucide="shield-check" style="stroke:#FFAA00;width:18px"></i></div><div class="kpi-label">Pending Approvals</div><div class="kpi-value">${totalPending}</div></div>
@@ -2830,7 +2846,7 @@ async function renderSecretaryDashboard() {
           <div class="card-header"><h3>Pending Approval Queue</h3><button class="btn-primary btn-sm" onclick="navigateTo('approvals')">Open Approvals</button></div>
           <div class="card-body" style="padding:0">
             ${!rows.length
-              ? '<div class="empty-state" style="padding:24px"><div class="empty-icon">✅</div><p>No pending requests — all clear.</p></div>'
+              ? `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('✅',44)}</div><p>No pending requests — all clear.</p></div>`
               : rows.map(([label,n,ic])=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)"><span style="font-size:16px">${ic}</span><span style="flex:1;font-size:13px">${label}</span><span class="badge badge-orange">${n}</span></div>`).join('')}
           </div>
         </div>
@@ -2851,7 +2867,7 @@ async function renderSecretaryDashboard() {
     liveDateTime('live-clock');
     if (window.lucide) lucide.createIcons({ nodes: [c] });
   } catch(err) {
-    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
+    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
   }
 }
 
@@ -2932,7 +2948,7 @@ async function renderFinanceDashboard() {
       <div class="page-header"><h2>Finance Dashboard</h2><span class="badge badge-green">${ROLES[currentRole]?.label||'Finance'}</span></div>
       <div id="live-clock" class="live-clock-line"></div>
       <div id="fin-dash-period">${window.periodPicker(period, {closedBadge:true})}</div>
-      ${pendingExp.length?`<div class="alert-banner alert-warn" onclick="navigateTo('cash-advances')"><span>💸 <strong>${pendingExp.length} expense${pendingExp.length>1?'s':''}</strong> awaiting approval · ₱${formatNum(pendingExpTotal)}</span><span class="alert-chevron">›</span></div>`:''}
+      ${pendingExp.length?`<div class="alert-banner alert-warn" onclick="navigateTo('cash-advances')"><span>${emojiIcon('💸',16)} <strong>${pendingExp.length} expense${pendingExp.length>1?'s':''}</strong> awaiting approval · ₱${formatNum(pendingExpTotal)}</span><span class="alert-chevron">›</span></div>`:''}
       <div class="kpi-row">
         <div class="kpi-card green"><div class="kpi-icon-wrap" style="background:rgba(48,209,88,0.12)"><i data-lucide="trending-up" style="stroke:#30D158;width:18px"></i></div><div class="kpi-label">Income (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdIncome)}</div></div>
         <div class="kpi-card red"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="trending-down" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Expense (${plabel})</div><div class="kpi-value" style="font-size:15px">₱${formatNum(mtdExpense)}</div></div>
@@ -2942,9 +2958,9 @@ async function renderFinanceDashboard() {
         <div class="kpi-card ${lowStock>0?'red':''}" style="cursor:pointer" onclick="navigateTo('inventory')"><div class="kpi-icon-wrap" style="background:rgba(255,69,58,0.12)"><i data-lucide="boxes" style="stroke:#FF453A;width:18px"></i></div><div class="kpi-label">Low Stock</div><div class="kpi-value">${lowStock}</div></div>
       </div>
       <div class="card" style="margin-bottom:16px">
-        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3>📥 Receivables Aging <span style="font-size:11px;color:var(--text-muted);font-weight:400">· by invoice due date</span></h3><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:800">₱${formatNum(arTotal)}</span>${arTotal>0?'<button class="btn-secondary btn-sm" id="ar-drill-btn">By client ›</button>':''}</div></div>
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3>${emojiIcon('📥',20)} Receivables Aging <span style="font-size:11px;color:var(--text-muted);font-weight:400">· by invoice due date</span></h3><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:800">₱${formatNum(arTotal)}</span>${arTotal>0?'<button class="btn-secondary btn-sm" id="ar-drill-btn">By client ›</button>':''}</div></div>
         <div class="card-body">
-          ${arTotal===0?'<div class="empty-state" style="padding:16px"><p>No open receivables 🎉</p></div>':`
+          ${arTotal===0?`<div class="empty-state" style="padding:16px"><p>No open receivables ${emojiIcon('🎉',16)}</p></div>`:`
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px">
             ${[['Current ≤30d',aging.cur,'var(--success)'],['31–60d',aging.d3160,'#FFAA00'],['61–90d',aging.d6190,'#FF9500'],['90+ d',aging.d90,'var(--danger)']].map(([lbl,val,col])=>`
               <div style="background:var(--surface2);border-radius:10px;padding:10px 12px">
@@ -2960,7 +2976,7 @@ async function renderFinanceDashboard() {
         <div class="card">
           <div class="card-header"><h3>Expenses by Category (${plabel})</h3><button class="btn-primary btn-sm" onclick="navigateTo('dept:Finance')">Finance</button></div>
           <div class="card-body">
-            ${!catRows.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📊</div><p>No expenses recorded this month</p></div>':
+            ${!catRows.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📊',44)}</div><p>No expenses recorded this month</p></div>`:
               catRows.map(([k,v])=>`<div style="margin-bottom:10px">
                 <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span>${escHtml(k)}</span><span style="font-weight:700">₱${formatNum(v)}</span></div>
                 <div style="height:8px;background:var(--surface2);border-radius:4px;overflow:hidden"><div style="height:100%;width:${Math.round(v/catMax*100)}%;background:var(--primary);border-radius:4px"></div></div>
@@ -2969,7 +2985,7 @@ async function renderFinanceDashboard() {
         </div>
         <div>
           <div class="card" style="margin-bottom:16px">
-            <div class="card-header"><h3>💰 Payroll Summary</h3><button class="btn-primary btn-sm" onclick="navigateTo('dept:Finance')">Payroll</button></div>
+            <div class="card-header"><h3>${emojiIcon('💰',20)} Payroll Summary</h3><button class="btn-primary btn-sm" onclick="navigateTo('dept:Finance')">Payroll</button></div>
             <div class="card-body">
               <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px"><span>Gross (salary + allowance)</span><strong>₱${formatNum(payrollGross)}</strong></div>
               <div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px;color:var(--text-muted)"><span>Deductions</span><span>− ₱${formatNum(payrollDeduct)}</span></div>
@@ -2999,18 +3015,18 @@ async function renderFinanceDashboard() {
         <td style="text-align:center;color:${ageCol(g.oldest)};font-weight:600">${g.oldest}d</td>
         <td style="text-align:center">${g.count}</td>
       </tr>`).join('');
-      openModal('📥 Receivables by Client', `
+      openModal(`${emojiIcon('📥',16)} Receivables by Client`, `
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Open project balances, oldest first — chase the top of the list. Total <strong>₱${formatNum(arTotal)}</strong> across ${arClients.length} client${arClients.length===1?'':'s'}.</div>
         <div class="table-wrap" style="max-height:52vh;overflow:auto"><table class="data-table">
           <thead><tr><th>Client</th><th style="text-align:right">Outstanding</th><th style="text-align:center">Oldest</th><th style="text-align:center">Projects</th></tr></thead>
           <tbody>${rows||'<tr><td colspan="4">No open receivables</td></tr>'}</tbody>
         </table></div>`,
-        `<button class="btn-secondary" id="ar-csv-btn">⬇ CSV</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+        `<button class="btn-secondary" id="ar-csv-btn">${emojiIcon('⬇',16)} CSV</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
       document.getElementById('ar-csv-btn')?.addEventListener('click', ()=>window.exportCSV('receivables-by-client', arClients, [
         {key:'client',label:'Client'},{key:'total',label:'Outstanding',get:g=>g.total},{key:'oldest',label:'Oldest (days)',get:g=>g.oldest},{key:'count',label:'Open Projects',get:g=>g.count}]));
     });
   } catch(err) {
-    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
+    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Dashboard error</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p></div>`;
   }
 }
 
@@ -3090,7 +3106,7 @@ async function renderEmployeeDashboard() {
     const isLeaveToday       = attData.status === 'leave';
     const isUnpaidLeaveToday = attData.status === 'unpaid_leave';
     const attBadgeClass = isLeaveToday ? 'badge-green' : isUnpaidLeaveToday ? 'badge-gray' : isNoWorkDay ? 'badge-gray' : hasFull ? 'badge-green' : hasLogin ? 'badge-orange' : 'badge-gray';
-    const attLabel      = isLeaveToday ? '🌴 On Leave' : isUnpaidLeaveToday ? '📅 Unpaid Leave' : isNoWorkDay ? (isSundayToday?'Sunday':'Holiday') : hasFull ? '100% Full ✅' : hasLogin ? '50% Timed In 🟡' : 'Not Timed In';
+    const attLabel      = isLeaveToday ? `${emojiIcon('🌴',16)} On Leave` : isUnpaidLeaveToday ? `${emojiIcon('📅',16)} Unpaid Leave` : isNoWorkDay ? (isSundayToday?'Sunday':'Holiday') : hasFull ? `100% Full ${emojiIcon('✅',16)}` : hasLogin ? `50% Timed In ${emojiIcon('🟡',16)}` : 'Not Timed In';
 
     // Dept quick tab buttons
     const deptTabsHTML = currentDepts.length ? `
@@ -3111,11 +3127,11 @@ async function renderEmployeeDashboard() {
 
     c.innerHTML = `
       <div class="page-header">
-        <h2>👋 Hi, ${escHtml((u.displayName||'').split(' ')[0])}!</h2>
+        <h2>${emojiIcon('👋',20)} Hi, ${escHtml((u.displayName||'').split(' ')[0])}!</h2>
       </div>
       <div id="live-clock" class="live-clock-line"></div>
 
-      ${overdue.length>0?`<div class="alert-banner alert-danger" onclick="navigateTo('tasks')"><span>⚠️ <strong>${overdue.length} overdue task${overdue.length>1?'s':''}</strong></span><span class="alert-chevron">›</span></div>`:''}
+      ${overdue.length>0?`<div class="alert-banner alert-danger" onclick="navigateTo('tasks')"><span>${emojiIcon('⚠️',16)} <strong>${overdue.length} overdue task${overdue.length>1?'s':''}</strong></span><span class="alert-chevron">›</span></div>`:''}
 
       <!-- Departmental Tabs -->
       ${deptTabsHTML}
@@ -3123,30 +3139,30 @@ async function renderEmployeeDashboard() {
       <!-- KPI Stats Row -->
       <div class="kpi-row" style="margin-bottom:16px">
         <div class="kpi-card ${openTasks.length>0?'accent':''}">
-          <div class="kpi-label">Open Tasks</div>
+          <div class="kpi-card-top"><div class="kpi-label">Open Tasks</div>${window.iconTile('check-square','var(--warning)',null,28)}</div>
           <div class="kpi-value">${openTasks.length}</div>
           <div class="kpi-sub">${doneTasks.length} done · ${overdue.length} overdue</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-label">Task KPI</div>
+          <div class="kpi-card-top"><div class="kpi-label">Task KPI</div>${window.iconTile('target',kpiColor,null,28)}</div>
           <div class="kpi-value" style="color:${kpiColor}">${taskScore}%</div>
-          <div class="kpi-sub">${taskOutcomeMet?'✅ Target met':'❌ Below target'} (${targetScore}%)</div>
+          <div class="kpi-sub">${taskOutcomeMet?`${emojiIcon('✅',16)} Target met`:`${emojiIcon('❌',16)} Below target`} (${targetScore}%)</div>
         </div>
         <div class="kpi-card green">
-          <div class="kpi-label">Net Pay</div>
+          <div class="kpi-card-top"><div class="kpi-label">Net Pay</div>${window.iconTile('wallet','var(--success)',null,28)}</div>
           <div class="kpi-value" style="font-size:15px">₱${formatNum(net)}</div>
           <div class="kpi-sub">Base ₱${formatNum(u.salary)}</div>
         </div>
         <div class="kpi-card">
-          <div class="kpi-label">Department</div>
+          <div class="kpi-card-top"><div class="kpi-label">Department</div>${window.iconTile('building-2','var(--primary)',null,28)}</div>
           <div class="kpi-value" style="font-size:11px;line-height:1.4">${currentDepts.join(', ')||'Unassigned'}</div>
         </div>
       </div>
 
       <!-- Current Standing Card -->
-      <div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,var(--surface),var(--surface2));border:1.5px solid var(--primary-light)">
+      <div class="card dash-hero-card" style="margin-bottom:16px">
         <div class="card-header">
-          <h3>📊 Current Standing — ${now.toLocaleDateString('en-PH',{month:'long',year:'numeric'})}</h3>
+          <h3>${emojiIcon('📊',20)} Current Standing — ${now.toLocaleDateString('en-PH',{month:'long',year:'numeric'})}</h3>
         </div>
         <div class="card-body" style="display:flex;gap:16px;flex-wrap:wrap;padding:12px 16px">
           <div style="flex:1;min-width:120px;text-align:center;padding:10px;background:rgba(48,209,88,0.08);border-radius:10px">
@@ -3176,7 +3192,7 @@ async function renderEmployeeDashboard() {
         <div class="card-body">
           ${isNoWorkDay ? `
             <div style="display:flex;align-items:center;gap:14px;padding:4px 0">
-              <div style="font-size:32px">${isSundayToday?'😴':'🎌'}</div>
+              <div style="font-size:32px">${isSundayToday?`${emojiIcon('😴',16)}`:`${emojiIcon('🎌',16)}`}</div>
               <div>
                 <div style="font-size:14px;font-weight:700;color:var(--text)">${isSundayToday?'It\'s Sunday — rest day!':todayHoliday.name}</div>
                 <div style="font-size:12px;color:var(--text-muted);margin-top:3px">No attendance required today. Enjoy your ${isSundayToday?'day off':'holiday'}!</div>
@@ -3184,32 +3200,32 @@ async function renderEmployeeDashboard() {
             </div>`
           : hasFull ? `
             <div style="display:flex;align-items:center;gap:10px">
-              <div style="width:40px;height:40px;border-radius:50%;background:rgba(48,209,88,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">✅</div>
+              <div style="width:40px;height:40px;border-radius:50%;background:rgba(48,209,88,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">${emojiIcon('✅',20)}</div>
               <div>
                 <div style="font-size:13px;font-weight:600;color:var(--success)">Full attendance — 100%</div>
-                <div style="font-size:11px;color:var(--text-muted)">Timed in + all notifications checked ✓</div>
+                <div style="font-size:11px;color:var(--text-muted)">Timed in + all notifications checked ${emojiIcon('✓',16)}</div>
               </div>
             </div>
             ${(hasLogin && !hasLogout) ? `<button class="btn-secondary" id="time-out-btn" style="width:100%;margin-top:10px">
               <i data-lucide="log-out" style="width:14px;margin-right:6px"></i>Time Out</button>` : ''}
-            ${hasLogout ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">👋 Timed out · ${(attData.hoursWorked||0).toFixed(1)}h logged</div>` : ''}`
+            ${hasLogout ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">${emojiIcon('👋',11)} Timed out · ${(attData.hoursWorked||0).toFixed(1)}h logged</div>` : ''}`
           : hasLogin ? `
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-              <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,159,10,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">🟡</div>
+              <div style="width:40px;height:40px;border-radius:50%;background:rgba(255,159,10,0.15);display:flex;align-items:center;justify-content:center;font-size:20px">${emojiIcon('🟡',20)}</div>
               <div>
                 <div style="font-size:13px;font-weight:600;color:var(--warning)">50% — Timed In</div>
                 <div style="font-size:11px;color:var(--text-muted)">${extApproved?'Check notifications before '+extExpiresStr+' → 100%':'Check all notifications before 9:00 AM → 100%'}</div>
               </div>
             </div>
             ${!hasFull?`<div style="background:var(--surface2);border-radius:10px;padding:12px;font-size:12px;color:var(--text-muted)">
-              Tap the 🔔 bell → check <em>every</em> notification before 9:00 AM${extApproved?' (before '+extExpiresStr+')':''} → 100%.
+              Tap the ${emojiIcon('🔔',16)} bell → check <em>every</em> notification before 9:00 AM${extApproved?' (before '+extExpiresStr+')':''} → 100%.
             </div>`:''}
             ${(hasLogin && !hasLogout) ? `<button class="btn-secondary" id="time-out-btn" style="width:100%;margin-top:10px">
               <i data-lucide="log-out" style="width:14px;margin-right:6px"></i>Time Out</button>` : ''}
-            ${hasLogout ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">👋 Timed out · ${(attData.hoursWorked||0).toFixed(1)}h logged</div>` : ''}
+            ${hasLogout ? `<div style="font-size:11px;color:var(--text-muted);margin-top:8px">${emojiIcon('👋',11)} Timed out · ${(attData.hoursWorked||0).toFixed(1)}h logged</div>` : ''}
           ` : canTimeIn ? `
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
-              ${extApproved?`<span style="color:var(--warning)">⏰ Extension approved — expires ${extExpiresStr}</span><br>`:''}
+              ${extApproved?`<span style="color:var(--warning)">${emojiIcon('⏰',16)} Extension approved — expires ${extExpiresStr}</span><br>`:''}
               <strong>Step 1:</strong> Time in (7–9 AM) = 50%.<br>
               <strong>Step 2:</strong> Check every notification before 9:00 AM = 100%.
             </p>
@@ -3218,12 +3234,12 @@ async function renderEmployeeDashboard() {
             </button>`
           : beforeWindow ? `
             <div style="text-align:center;padding:10px 0;color:var(--text-muted);font-size:13px">
-              <div style="font-size:24px;margin-bottom:6px">⏳</div>
+              <div style="font-size:24px;margin-bottom:6px">${emojiIcon('⏳',24)}</div>
               Time In window opens at <strong>7:00 AM</strong>
             </div>`
           : extPending ? `
             <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
-              <div style="font-size:24px">⏳</div>
+              <div style="font-size:24px">${emojiIcon('⏳',24)}</div>
               <div>
                 <div style="font-size:13px;font-weight:600">Extension requested</div>
                 <div style="font-size:11px;color:var(--text-muted)">Waiting for president to approve. Refresh to check status.</div>
@@ -3231,7 +3247,7 @@ async function renderEmployeeDashboard() {
             </div>`
           : extDenied ? `
             <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
-              <div style="font-size:24px">❌</div>
+              <div style="font-size:24px">${emojiIcon('❌',24)}</div>
               <div>
                 <div style="font-size:13px;font-weight:600;color:var(--danger)">Extension denied</div>
                 <div style="font-size:11px;color:var(--text-muted)">Attendance marked absent for today.</div>
@@ -3239,7 +3255,7 @@ async function renderEmployeeDashboard() {
             </div>`
           : extExpired ? `
             <div style="display:flex;align-items:center;gap:10px;padding:4px 0">
-              <div style="font-size:24px">⌛</div>
+              <div style="font-size:24px">${emojiIcon('⌛',24)}</div>
               <div>
                 <div style="font-size:13px;font-weight:600;color:var(--text-muted)">Extension expired</div>
                 <div style="font-size:11px;color:var(--text-muted)">The 6-hour window has closed.</div>
@@ -3248,13 +3264,13 @@ async function renderEmployeeDashboard() {
           : `
             <div style="padding:4px 0">
               <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-                <div style="font-size:24px">⚠️</div>
+                <div style="font-size:24px">${emojiIcon('⚠️',24)}</div>
                 <div>
                   <div style="font-size:13px;font-weight:600;color:var(--warning)">Time window missed</div>
                   <div style="font-size:11px;color:var(--text-muted)">Time In window was 7:00–9:00 AM. You can request an extension.</div>
                 </div>
               </div>
-              <button class="btn-secondary" id="req-ext-btn" style="width:100%">⏰ Request Time Extension</button>
+              <button class="btn-secondary" id="req-ext-btn" style="width:100%">${emojiIcon('⏰',16)} Request Time Extension</button>
             </div>`}
         </div>
       </div>
@@ -3268,7 +3284,7 @@ async function renderEmployeeDashboard() {
           </div>
           <div class="card-body" style="padding:0">
             ${!myTasks.length
-              ? '<div class="empty-state" style="padding:20px"><div class="empty-icon">✅</div><p>No tasks assigned yet</p></div>'
+              ? `<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('✅',44)}</div><p>No tasks assigned yet</p></div>`
               : openTasks.slice(0,5).map(t=>{
                   const isOverdue = t.dueDate && t.dueDate < todayStr;
                   return `<div class="task-feed-item ${isOverdue?'task-overdue':''}">
@@ -3278,7 +3294,7 @@ async function renderEmployeeDashboard() {
                       ${t.dueDate?`<div class="task-feed-meta" style="color:${isOverdue?'var(--danger)':'var(--text-muted)'}">Due ${t.dueDate}</div>`:''}
                     </div>
                     <span class="badge ${isOverdue?'badge-red':t.priority==='high'?'badge-red':'badge-blue'}">${isOverdue?'Overdue':t.priority||'open'}</span>
-                    ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">📣 ${t.openFollowUpCount}</span>`:''}
+                    ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">${emojiIcon('📣',16)} ${t.openFollowUpCount}</span>`:''}
                   </div>`;
                 }).join('')}
           </div>
@@ -3296,7 +3312,7 @@ async function renderEmployeeDashboard() {
               </div>
               <div style="display:flex;justify-content:space-between;font-size:12px;margin-top:8px">
                 <span style="color:var(--text-muted)">Expected Outcome</span>
-                <strong style="color:${taskOutcomeMet?'var(--success)':'var(--danger)'}">${taskOutcomeMet?'✅ Met':'❌ Not Met'}</strong>
+                <strong style="color:${taskOutcomeMet?'var(--success)':'var(--danger)'}">${taskOutcomeMet?`${emojiIcon('✅',16)} Met`:`${emojiIcon('❌',16)} Not Met`}</strong>
               </div>
               <button class="btn-secondary btn-sm" style="margin-top:12px;width:100%" onclick="navigateTo('personal-finance')">
                 Full Payslip & KPI →
@@ -3304,7 +3320,7 @@ async function renderEmployeeDashboard() {
             </div>
           </div>
           <div class="card">
-            <div class="card-header"><h3>📅 Calendar</h3></div>
+            <div class="card-header"><h3>${emojiIcon('📅',20)} Calendar</h3></div>
             <div class="card-body" id="mini-cal"></div>
           </div>
         </div>
@@ -3335,8 +3351,8 @@ async function renderEmployeeDashboard() {
         autoFull
       }, { merge: true });
       Notifs.showToast(autoFull
-        ? '✅ Full attendance (100%) — no unchecked notifications!'
-        : `🟡 Timed in (50%). Open 🔔 and check off every notification before 9:00 AM for 100%.`);
+        ? `${emojiIcon('✅',16)} Full attendance (100%) — no unchecked notifications!`
+        : `${emojiIcon('🟡',16)} Timed in (50%). Open ${emojiIcon('🔔',16)} and check off every notification before 9:00 AM for 100%.`);
       renderEmployeeDashboard();
     });
 
@@ -3381,7 +3397,7 @@ async function renderEmployeeDashboard() {
     });
 
   } catch(err) {
-    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>${err.message}</h4></div>`;
+    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>${err.message}</h4></div>`;
   }
 }
 
@@ -3514,16 +3530,16 @@ function renderIDCard(containerId, u) {
       </div>
       <div class="id-card-body">
         <div class="id-card-photo" style="cursor:default">
-          ${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" alt="Photo"/>`:`<span style="font-size:32px">👤</span>`}
+          ${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" alt="Photo"/>`:`<span style="font-size:32px">${emojiIcon('👤',32)}</span>`}
         </div>
         <div class="id-card-info">
           <div class="id-card-name">${escHtml(u.displayName||u.email)}</div>
           <div class="id-card-title">${escHtml(roleLabel)}</div>
-          <div class="id-card-detail"><span>🗂</span><strong>${escHtml(deptLabel)}</strong></div>
-          <div class="id-card-detail"><span>✉️</span>${escHtml(u.email)}</div>
-          ${u.phone?`<div class="id-card-detail"><span>📞</span>${escHtml(u.phone)}</div>`:''}
-          ${empType?`<div class="id-card-detail"><span>💼</span>${escHtml(empType)}${workMode?' · '+escHtml(workMode):''}</div>`:''}
-          ${issuedOn?`<div class="id-card-detail"><span>📅</span>Issued: ${escHtml(issuedOn)}</div>`:''}
+          <div class="id-card-detail"><span>${emojiIcon('🗂',16)}</span><strong>${escHtml(deptLabel)}</strong></div>
+          <div class="id-card-detail"><span>${emojiIcon('✉️',16)}</span>${escHtml(u.email)}</div>
+          ${u.phone?`<div class="id-card-detail"><span>${emojiIcon('📞',16)}</span>${escHtml(u.phone)}</div>`:''}
+          ${empType?`<div class="id-card-detail"><span>${emojiIcon('💼',16)}</span>${escHtml(empType)}${workMode?' · '+escHtml(workMode):''}</div>`:''}
+          ${issuedOn?`<div class="id-card-detail"><span>${emojiIcon('📅',16)}</span>Issued: ${escHtml(issuedOn)}</div>`:''}
         </div>
       </div>
       <div class="id-card-footer">
@@ -3536,13 +3552,13 @@ function renderIDCard(containerId, u) {
   // Back / calling face — class-driven so the theme controls light vs dark.
   const callingHTML = `
     <div class="id-card id-card--calling">
-      <div class="idc-photo">${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" alt=""/>`:`<span>👤</span>`}</div>
+      <div class="idc-photo">${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" alt=""/>`:`<span>${emojiIcon('👤',16)}</span>`}</div>
       <div class="idc-name">${escHtml(u.displayName||u.email)}</div>
       <div class="idc-role">${escHtml(roleLabel)}</div>
       <div class="idc-dept">${escHtml(deptLabel)}</div>
       <div class="idc-divider"></div>
-      <div class="idc-contact">✉️ ${escHtml(u.email)}</div>
-      ${u.phone?`<div class="idc-contact">📞 ${escHtml(u.phone)}</div>`:''}
+      <div class="idc-contact">${emojiIcon('✉️',16)} ${escHtml(u.email)}</div>
+      ${u.phone?`<div class="idc-contact">${emojiIcon('📞',16)} ${escHtml(u.phone)}</div>`:''}
       <div class="idc-brand">BARRO INDUSTRIES</div>
     </div>`;
 
@@ -3596,7 +3612,8 @@ function renderIDCard(containerId, u) {
   const printBtn = document.createElement('button');
   printBtn.className = 'btn-secondary btn-sm';
   printBtn.style.marginTop = '12px';
-  printBtn.innerHTML = '🖨 Print / Save PDF';
+  printBtn.innerHTML = `${emojiIcon('🖨',16)} Print / Save PDF`;
+  if (window.lucide) lucide.createIcons({ nodes: [printBtn] });
   el.appendChild(printBtn);
 
   // Mint/refresh the verify token, then draw the on-card QR and wire printing.
@@ -3622,7 +3639,7 @@ window.printIDCards = function(data, tokens) {
     const qr = (window.buildQRSVG && tok) ? window.buildQRSVG(url, 84) : '';
     const photo = d.photoUrl
       ? `<img class="p" src="${esc(d.photoUrl)}" alt=""/>`
-      : `<div class="p ph">👤</div>`;
+      : `<div class="p ph">${emojiIcon('👤',16)}</div>`;
     return `<div class="cr80 front">
       <div class="top"><img class="logo" src="${esc(logoAbs)}" onerror="this.style.display='none'"/>
         <div><div class="co">${esc(B.name||'BARRO INDUSTRIES')}</div><div class="cosub">COMPANY ID</div></div></div>
@@ -3686,7 +3703,7 @@ window.printIDCards = function(data, tokens) {
 function renderMyDepartment() {
   if (!currentDepts.length) {
     document.getElementById('page-content').innerHTML = `
-      <div class="access-denied"><div class="ad-icon">🗂️</div>
+      <div class="access-denied"><div class="ad-icon">${emojiIcon('🗂️',16)}</div>
         <h3>No Department Assigned</h3>
         <p>Contact the President to set your department.</p>
       </div>`;
@@ -3702,12 +3719,12 @@ function renderMyDepartment() {
 function renderDualDeptPicker() {
   const c = document.getElementById('page-content');
   c.innerHTML = `
-    <div class="page-header"><h2>🗂️ My Departments</h2></div>
+    <div class="page-header"><h2>${emojiIcon('🗂️',20)} My Departments</h2></div>
     <div class="dept-grid">
       ${currentDepts.map(dept => {
-        const cfg = DEPARTMENTS[dept]||{icon:'🗂️',color:'var(--primary-light)'};
+        const cfg = DEPARTMENTS[dept]||{icon:'🗂️',color:'var(--primary-light)',lucideIcon:'folder-open'};
         return `<div class="dept-card" style="border-top-color:${cfg.color};cursor:pointer" onclick="renderDeptModule('${dept}')">
-          <div class="dept-name" style="font-size:20px;margin-bottom:6px">${emojiIcon(cfg.lucideIcon||cfg.icon,22)}</div>
+          <div class="dept-name" style="margin-bottom:6px">${window.deptIconTile(cfg, 36)}</div>
           <div class="dept-name">${dept}</div>
           <div class="dept-head" style="margin-top:6px">Tap to open →</div>
         </div>`;
@@ -3736,14 +3753,14 @@ function renderDeptModule(dept) {
 
 async function renderPartnersDept() {
   if (!isPresident() && currentRole !== 'manager') {
-    document.getElementById('page-content').innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><p>Admin access only</p></div>';
+    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><p>Admin access only</p></div>`;
     return;
   }
   const c = document.getElementById('page-content');
   const initSub = window.initialSubtab('overview');
   c.innerHTML = `
     <div class="page-header">
-      <h2>🤝 Partners</h2>
+      <h2>${emojiIcon('🤝',20)} Partners</h2>
     </div>
     ${window.chipTabs([
       {key:'overview',label:'Overview'},
@@ -3755,6 +3772,7 @@ async function renderPartnersDept() {
     ], initSub, {cls:'partners-dept-tabs'})}
     <div id="partners-dept-content"><div class="loading-placeholder">Loading…</div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   window.bindChipTabs(c.querySelector('.partners-dept-tabs'), (key)=>{ window.setSubroute(key); loadPartnersDeptTab(key); });
   loadPartnersDeptTab(initSub);
 }
@@ -3796,7 +3814,7 @@ async function loadPartnersDeptTab(sub) {
         <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
           <button class="btn-primary btn-sm" id="add-deal-btn">+ New Deal</button>
         </div>
-        ${!deals.length?'<div class="empty-state"><div class="empty-icon">🤝</div><p>No deals yet. Click "+ New Deal" to record a partner deal.</p></div>':
+        ${!deals.length?`<div class="empty-state"><div class="empty-icon">${emojiIcon('🤝',44)}</div><p>No deals yet. Click "+ New Deal" to record a partner deal.</p></div>`:
           `<div class="card"><div class="card-body" style="padding:0">
             <div class="table-wrap"><table class="data-table">
               <thead><tr><th>Client</th><th>Partner</th><th>Contract</th><th>Cost</th><th>Profit</th><th>Share (50%)</th><th>Status</th><th>Actions</th></tr></thead>
@@ -3821,6 +3839,7 @@ async function loadPartnersDeptTab(sub) {
             </table></div>
           </div></div>`}
       `;
+      if (window.lucide) lucide.createIcons({ nodes: [content] });
       document.getElementById('add-deal-btn')?.addEventListener('click', () => _showAddDealModal(partners, () => loadPartnersDeptTab('deals')));
       window._closeDeal   = async (id) => { if(!await confirmDialog({ message: 'Mark this deal as completed?' })) return; await db.collection('partner_deals').doc(id).update({status:'completed'}); loadPartnersDeptTab('deals'); };
       window._markDealPaid = async (id) => { if(!await confirmDialog({ message: 'Mark partner share as paid out?', danger: true })) return; await db.collection('partner_deals').doc(id).update({status:'paid', paidOutDate: firebase.firestore.FieldValue.serverTimestamp()}); loadPartnersDeptTab('deals'); };
@@ -3840,7 +3859,7 @@ async function loadPartnersDeptTab(sub) {
           <div class="kpi-card"><div class="kpi-label">Pending Quotes</div><div class="kpi-value">${pendingQuotes.length}</div></div>
         </div>
         <div class="card" style="margin-bottom:14px">
-          <div class="card-header"><h3>👥 Partner Accounts</h3>
+          <div class="card-header"><h3>${emojiIcon('👥',20)} Partner Accounts</h3>
             <button class="btn-primary btn-sm" onclick="navigateTo('team-directory')">Manage Team</button>
           </div>
           <div class="card-body" style="padding:0">
@@ -3873,7 +3892,7 @@ async function loadPartnersDeptTab(sub) {
           </div>
         </div>
         <div class="card">
-          <div class="card-header"><h3>📋 Recent Tasks</h3>
+          <div class="card-header"><h3>${emojiIcon('📋',20)} Recent Tasks</h3>
             <button class="btn-primary btn-sm" onclick="document.querySelector('[data-sub=tasks]').click()">All Tasks</button>
           </div>
           <div class="card-body" style="padding:0">
@@ -3883,11 +3902,12 @@ async function loadPartnersDeptTab(sub) {
                 <div style="flex:1;min-width:0"><div class="task-feed-title">${escHtml(t.title)}</div>
                 <div class="task-feed-meta">${t.dueDate?'Due '+t.dueDate:''}</div></div>
                 <span class="badge ${t.status==='done'||t.status==='approved'?'badge-green':t.status==='review'?'badge-orange':'badge-blue'}">${t.status||'open'}</span>
-                ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">📣 ${t.openFollowUpCount}</span>`:''}
+                ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">${emojiIcon('📣',16)} ${t.openFollowUpCount}</span>`:''}
               </div>`).join('')}
           </div>
         </div>
       `;
+      if (window.lucide) lucide.createIcons({ nodes: [content] });
       break;
     }
     case 'tasks': {
@@ -3896,19 +3916,20 @@ async function loadPartnersDeptTab(sub) {
           <span style="font-size:13px;color:var(--text-muted)">${tasks.length} task${tasks.length!==1?'s':''} in Partners dept</span>
           <button class="btn-primary btn-sm" onclick="navigateTo('tasks')">+ New Task</button>
         </div>
-        ${!tasks.length?'<div class="empty-state"><div class="empty-icon">📋</div><p>No tasks yet. Create tasks and set department to "Partners".</p></div>':
+        ${!tasks.length?`<div class="empty-state"><div class="empty-icon">${emojiIcon('📋',44)}</div><p>No tasks yet. Create tasks and set department to "Partners".</p></div>`:
           `<div class="card"><div class="card-body" style="padding:0">
             ${tasks.map(t=>`<div class="task-feed-item" style="cursor:pointer" onclick="window.openTaskDetail&&window.openTaskDetail('${t.id}',window.currentUser,window.currentRole)">
               <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
               <div style="flex:1;min-width:0">
                 <div class="task-feed-title">${escHtml(t.title)}</div>
-                <div class="task-feed-meta">${Array.isArray(t.assignedToNames)&&t.assignedToNames.length?'👥 '+escHtml(t.assignedToNames.join(', ')):''} ${t.dueDate?'· Due '+t.dueDate:''}</div>
+                <div class="task-feed-meta">${Array.isArray(t.assignedToNames)&&t.assignedToNames.length?`${emojiIcon('👥',16)} `+escHtml(t.assignedToNames.join(', ')):''} ${t.dueDate?'· Due '+t.dueDate:''}</div>
               </div>
               <span class="badge ${t.status==='done'||t.status==='approved'?'badge-green':t.status==='review'?'badge-orange':t.status==='overdue'?'badge-red':'badge-blue'}">${t.status||'open'}</span>
-              ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">📣 ${t.openFollowUpCount}</span>`:''}
+              ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">${emojiIcon('📣',16)} ${t.openFollowUpCount}</span>`:''}
             </div>`).join('')}
           </div></div>`}
       `;
+      if (window.lucide) lucide.createIcons({ nodes: [content] });
       break;
     }
     case 'quotes': {
@@ -3922,7 +3943,7 @@ async function loadPartnersDeptTab(sub) {
           <div class="kpi-card"><div class="kpi-label">Pending</div><div class="kpi-value">${pending.length}</div></div>
           <div class="kpi-card accent"><div class="kpi-label">Pipeline Value</div><div class="kpi-value" style="font-size:16px">₱${totalVal.toLocaleString()}</div></div>
         </div>
-        ${!quotes.length?'<div class="empty-state"><div class="empty-icon">📄</div><p>No quotes yet.</p></div>':
+        ${!quotes.length?`<div class="empty-state"><div class="empty-icon">${emojiIcon('📄',44)}</div><p>No quotes yet.</p></div>`:
           `<div class="card"><div class="card-body" style="padding:0">
             <div class="table-wrap"><table class="data-table">
               <thead><tr><th>Client</th><th>Created By</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
@@ -3942,17 +3963,19 @@ async function loadPartnersDeptTab(sub) {
             </table></div>
           </div></div>`}
       `;
+      if (window.lucide) lucide.createIcons({ nodes: [content] });
       break;
     }
     case 'quote-builder': {
       content.innerHTML = `
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
           <span style="font-size:13px;color:var(--text-muted)">Create quotes for partner projects. Print/PDF when ready.</span>
-          <button class="btn-secondary btn-sm" onclick="document.getElementById('partners-qb-frame').contentWindow.print()">🖨 Print / PDF</button>
+          <button class="btn-secondary btn-sm" onclick="document.getElementById('partners-qb-frame').contentWindow.print()">${emojiIcon('🖨',16)} Print / PDF</button>
         </div>
         <iframe id="partners-qb-frame" src="quote-builder-v2.html"
           style="width:100%;height:calc(100dvh - 200px);min-height:500px;border:none;border-radius:12px;background:#f5f6fa;"
           allow="print" loading="lazy"></iframe>`;
+      if (window.lucide) lucide.createIcons({ nodes: [content] });
       break;
     }
     case 'activity': {
@@ -3965,13 +3988,13 @@ async function loadPartnersDeptTab(sub) {
       const allNotifArrays = await Promise.all(notifPromises);
       const allActivity = allNotifArrays.flat().sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0)).slice(0,20);
       content.innerHTML = `
-        <div class="card"><div class="card-header"><h3>📡 Recent Partner Activity</h3></div>
+        <div class="card"><div class="card-header"><h3>${emojiIcon('📡',20)} Recent Partner Activity</h3></div>
           <div class="card-body" style="padding:0">
             ${!allActivity.length?'<div class="empty-state" style="padding:20px"><p>No recent activity.</p></div>':
               allActivity.map(n=>{
                 const ts = n.createdAt?.toDate?n.createdAt.toDate().toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
                 return `<div style="display:flex;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border);align-items:flex-start">
-                  <div style="font-size:20px">${n.icon||'🔔'}</div>
+                  <div style="font-size:20px">${n.icon||`${emojiIcon('🔔',16)}`}</div>
                   <div style="flex:1;min-width:0">
                     <div style="font-size:12px;font-weight:600;color:var(--primary-light)">${escHtml(n.partnerName)}</div>
                     <div style="font-size:13px;font-weight:600">${escHtml(n.title||'')}</div>
@@ -3983,6 +4006,7 @@ async function loadPartnersDeptTab(sub) {
           </div>
         </div>
       `;
+      if (window.lucide) lucide.createIcons({ nodes: [content] });
       break;
     }
   }
@@ -3995,7 +4019,7 @@ function _showAddDealModal(partners, onSaved) {
   modal.className = 'modal-overlay active';
   modal.innerHTML = `
     <div class="modal" style="max-width:480px">
-      <div class="modal-header"><h3>🤝 New Partner Deal</h3><button class="modal-close" id="deal-modal-close">✕</button></div>
+      <div class="modal-header"><h3>${emojiIcon('🤝',20)} New Partner Deal</h3><button class="modal-close" id="deal-modal-close">${emojiIcon('✕',16)}</button></div>
       <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
         <div><label class="form-label">Client Name *</label><input class="form-input" id="dl-client" placeholder="e.g. Gerry's Grill Bulacan"/></div>
         <div><label class="form-label">Project Description</label><input class="form-input" id="dl-desc" placeholder="e.g. Full kitchen setup with exhaust system"/></div>
@@ -4015,6 +4039,7 @@ function _showAddDealModal(partners, onSaved) {
         <button class="btn-primary" id="deal-modal-save">Save Deal</button>
       </div>
     </div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [modal] });
   document.body.appendChild(modal);
   const close = () => { modal.remove(); };
   document.getElementById('deal-modal-close').onclick = close;
@@ -4217,7 +4242,7 @@ async function renderSOPs() {
 
   c.innerHTML = `
     <div class="page-header">
-      <h2>📋 Standard Operating Procedures</h2>
+      <h2>${emojiIcon('📋',20)} Standard Operating Procedures</h2>
       <p style="font-size:13px;color:var(--text-muted);margin-top:4px">Barro Industries — Official SOPs for all staff and partners</p>
       ${canEditSOPs?`<button class="btn-primary btn-sm" id="sop-add-btn" style="margin-top:10px">＋ Add SOP</button>`:''}
     </div>
@@ -4227,7 +4252,7 @@ async function renderSOPs() {
           <div class="sop-header" style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;cursor:pointer;user-select:none" data-sop-idx="${i}">
             <div style="font-size:15px;font-weight:700">${s.title}</div>
             <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-              ${canEditSOPs&&s.id?`<button class="sop-edit-btn btn-secondary btn-sm" data-sop-id="${s.id}" onclick="event.stopPropagation()" title="Edit">✎</button>`:''}
+              ${canEditSOPs&&s.id?`<button class="sop-edit-btn btn-secondary btn-sm" data-sop-id="${s.id}" onclick="event.stopPropagation()" title="Edit">${emojiIcon('✎',16)}</button>`:''}
               <span class="sop-chevron" style="font-size:18px;transition:transform .2s">›</span>
             </div>
           </div>
@@ -4239,6 +4264,7 @@ async function renderSOPs() {
         </div>`).join('')}
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   // Accordion toggle
   c.querySelectorAll('.sop-header').forEach(hdr => {
     hdr.addEventListener('click', () => {
@@ -4264,7 +4290,7 @@ async function renderSOPs() {
 function openSOPEditor(id, sop) {
   sop = sop || { title:'', items:[], order:0 };
   openPage(id ? 'Edit SOP' : 'Add SOP', `
-    <div class="form-group"><label>Title (include an emoji, e.g. 📅 Daily Attendance)</label>
+    <div class="form-group"><label>Title (include an emoji, e.g. ${emojiIcon('📅',16)} Daily Attendance)</label>
       <input id="sop-e-title" value="${escHtml(sop.title||'')}" placeholder="📋 Procedure name"/></div>
     <div class="form-group"><label>Steps — one per line (you can use &lt;strong&gt; and &lt;em&gt;)</label>
       <textarea id="sop-e-items" rows="10" style="font-family:inherit">${(sop.items||[]).map(escHtml).join('\n')}</textarea></div>
@@ -4293,7 +4319,7 @@ function openSOPEditor(id, sop) {
 function renderGovBiddings() {
   const c = document.getElementById('page-content');
   c.innerHTML = `
-    <div class="page-header"><h2>🏛️ Government Biddings</h2></div>
+    <div class="page-header"><h2>${emojiIcon('🏛️',20)} Government Biddings</h2></div>
     ${window.sopPanel('How Government Biddings works', [
       'PhilGEPS holds the posted opportunities you are tracking.',
       'Move a live one to Active Bids while you prepare and submit the documents.',
@@ -4302,6 +4328,7 @@ function renderGovBiddings() {
     ${window.chipTabs(['PhilGEPS','Active Bids','Archive'].map(s=>({key:s,label:s})), 'PhilGEPS', {cls:'gov-tabs'})}
     <div id="gov-content"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   const loadGov = sub => renderDocCollection(document.getElementById('gov-content'), `gov_${sub.toLowerCase().replace(/\s+/g,'_')}`, sub, currentUser, currentRole, {icon:'🏛️', dept:'Government Biddings'});
   loadGov('PhilGEPS');
   window.bindChipTabs(c.querySelector('.gov-tabs'), (key)=>loadGov(key));
@@ -4311,8 +4338,8 @@ function renderGenericDept(dept) {
   const cfg = DEPARTMENTS[dept];
   const c = document.getElementById('page-content');
   c.innerHTML = `
-    <div class="page-header"><h2>${emojiIcon(cfg?.lucideIcon||cfg?.icon||'folder',24)} ${dept}</h2></div>
-    <div class="card"><div class="card-body"><div class="empty-state"><div class="empty-icon">${emojiIcon(cfg?.lucideIcon||cfg?.icon||'folder',24)}</div><h4>${dept}</h4><p>Module coming soon.</p></div></div></div>`;
+    <div class="page-header" style="display:flex;align-items:center;gap:10px">${window.deptIconTile(cfg||dept, 32)}<h2 style="margin:0">${dept}</h2></div>
+    <div class="card"><div class="card-body"><div class="empty-state">${window.deptIconTile(cfg||dept, 44)}<h4>${dept}</h4><p>Module coming soon.</p></div></div></div>`;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
 }
 
@@ -4323,10 +4350,11 @@ window.renderFiles = async function(currentUser, currentRole) {
   const fileTabs = [{key:'My Files',label:'My Files'},{key:'Department',label:'Department Files'}];
   if (isPresident()||currentRole==='manager') fileTabs.push({key:'All',label:'All Files'});
   c.innerHTML = `
-    <div class="page-header"><h2>📁 Files</h2></div>
+    <div class="page-header"><h2>${emojiIcon('📁',20)} Files</h2></div>
     ${window.chipTabs(fileTabs, 'My Files', {cls:'files-tabs'})}
     <div id="files-content"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   const loadFiles = (sub) => {
     const fc = document.getElementById('files-content');
     if (sub === 'My Files') {
@@ -4353,9 +4381,10 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   if (pres) {
     // President sees all employees' finance
     c.innerHTML = `
-      <div class="page-header"><h2>💳 Personal Finance — Team</h2></div>
+      <div class="page-header"><h2>${emojiIcon('💳',20)} Personal Finance — Team</h2></div>
       <div id="pf-content"><div class="loading-placeholder">Loading…</div></div>
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
     // Fetch users, all tasks, kpi_evals, and kpi_targets in parallel — single round trip
     // instead of up to 3 queries per user (N+1 fix).
     const [snap, tasksAllSnap, evalsSnap, kpiTargetsSnap] = await Promise.all([
@@ -4407,13 +4436,13 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <td><strong style="color:var(--primary-light)">₱${formatNum(computed)}</strong><br><span style="font-size:10px;color:var(--text-muted)">${daysElapsed2}/${daysInMonth2} days</span></td>
         <td style="text-align:center">
           ${selfDone2
-            ? `<span style="font-weight:700">${evalD.selfGrade!=null?evalD.selfGrade+'<small>/10</small>':'✅'}</span>
+            ? `<span style="font-weight:700">${evalD.selfGrade!=null?evalD.selfGrade+'<small>/10</small>':`${emojiIcon('✅',16)}`}</span>
                ${evalD.selfNotes?`<div style="font-size:10px;color:var(--text-muted);max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(evalD.selfNotes)}</div>`:''}`
-            : `<span style="color:var(--danger);font-size:11px;font-weight:700">⚠️ Pending</span>`
+            : `<span style="color:var(--danger);font-size:11px;font-weight:700">${emojiIcon('⚠️',11)} Pending</span>`
           }
         </td>
         <td style="text-align:center">
-          <span style="font-weight:700;color:var(--success)">${evalD.presidentGrade!=null?evalD.presidentGrade+'<small>/10</small>':evalD.presidentGradeFromTasks!=null?evalD.presidentGradeFromTasks+'<small>/10 🔒</small>':'—'}</span>
+          <span style="font-weight:700;color:var(--success)">${evalD.presidentGrade!=null?evalD.presidentGrade+'<small>/10</small>':evalD.presidentGradeFromTasks!=null?evalD.presidentGradeFromTasks+`<small>/10 ${emojiIcon('🔒',16)}</small>`:'—'}</span>
         </td>
         <td style="display:flex;gap:4px;flex-wrap:wrap">
           <button class="btn-secondary btn-sm view-profile-btn" data-uid="${u.id}" data-name="${(u.displayName||u.email).replace(/"/g,'&quot;')}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" data-mdone="${tasksDone}" data-mtotal="${tasksTotal}">Profile</button>
@@ -4473,7 +4502,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
             <textarea id="pres-grade-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Internal remarks…">${escHtml(presnotes||'')}</textarea>
           </div>
           <div class="form-group">
-            <label>📝 Development Areas <span style="font-size:11px;color:var(--primary-light)">(shown to employee)</span></label>
+            <label>${emojiIcon('📝',16)} Development Areas <span style="font-size:11px;color:var(--primary-light)">(shown to employee)</span></label>
             <textarea id="pres-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:2px solid var(--primary-light);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="What should this employee focus on improving? They will see this.">${escHtml(presimprove||'')}</textarea>
           </div>
         `, `<button class="btn-primary" id="save-pres-grade-btn">Save Grade</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -4608,7 +4637,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
 
     ${isPayrollWindow && !selfDoneThisMonth ? `
     <div style="background:linear-gradient(135deg,#b71c1c,#c62828);color:#fff;border-radius:12px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
-      <span style="font-size:24px">⚠️</span>
+      <span style="font-size:24px">${emojiIcon('⚠️',24)}</span>
       <div style="flex:1">
         <div style="font-weight:800;font-size:14px;margin-bottom:2px">Self-Assessment Required for ${monthLabel}</div>
         <div style="font-size:12px;opacity:0.9">Complete your self-evaluation before payroll is finalized. Click <strong>Self Evaluate</strong> in the KPI card below.</div>
@@ -4617,7 +4646,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
 
     ${presidentImprovements ? `
     <div style="background:linear-gradient(135deg,var(--surface2),var(--surface));border:2px solid var(--primary-light);border-radius:12px;padding:14px 18px;margin-bottom:16px">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--primary-light);margin-bottom:6px">📝 Your Development Areas — from President</div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--primary-light);margin-bottom:6px">${emojiIcon('📝',16)} Your Development Areas — from President</div>
       <div style="font-size:13px;line-height:1.6;color:var(--text);white-space:pre-wrap">${escHtml(presidentImprovements)}</div>
     </div>` : ''}
 
@@ -4648,7 +4677,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
     <!-- KPI Evaluation Card -->
     <div class="card" style="margin-bottom:16px">
       <div class="card-header">
-        <h3>📊 KPI Evaluation — ${monthLabel}</h3>
+        <h3>${emojiIcon('📊',20)} KPI Evaluation — ${monthLabel}</h3>
         <button class="btn-secondary btn-sm" id="self-eval-btn">Self Evaluate</button>
       </div>
       <div class="card-body">
@@ -4662,7 +4691,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
           <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12px;color:var(--text-muted)">
             <span>Target: ${targetScore}%</span>
             <strong style="color:${outcomeMet?'var(--success)':'var(--danger)'}">
-              ${outcomeMet?'✅ Expected Outcome Met':'❌ Expected Outcome Not Met'}
+              ${outcomeMet?`${emojiIcon('✅',16)} Expected Outcome Met`:`${emojiIcon('❌',16)} Expected Outcome Not Met`}
             </strong>
           </div>
         </div>
@@ -4783,7 +4812,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <h3>Cash Advances</h3>
         <div style="display:flex;gap:8px;align-items:center">
           ${cashAdvances.filter(a=>a.status==='pending').length?`<span class="badge badge-orange">${cashAdvances.filter(a=>a.status==='pending').length} pending</span>`:''}
-          ${totalAdvance>0?`<button class="btn-secondary btn-sm" id="ca-deduct-req-btn">💳 Set Deduction</button>`:''}
+          ${totalAdvance>0?`<button class="btn-secondary btn-sm" id="ca-deduct-req-btn">${emojiIcon('💳',16)} Set Deduction</button>`:''}
         </div>
       </div>
       ${totalAdvance>0?`<div style="background:rgba(255,100,0,0.08);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;gap:20px;font-size:13px">
@@ -4807,6 +4836,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       </div>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
 
   // Salary history delete (president) / request delete (finance)
   document.querySelectorAll('.ph-delete-btn').forEach(btn => {
@@ -5035,7 +5065,7 @@ async function getAttendanceScore(uid) {
 
 // ── Employee Standings Modal ───────────────────────
 async function openEmpStandingsModal(uid, name, preloaded) {
-  window.openModal(`📊 ${name} — Standings`, '<div class="loading-placeholder" style="padding:30px;text-align:center">Loading standings…</div>');
+  window.openModal(`${emojiIcon('📊',16)} ${name} — Standings`, '<div class="loading-placeholder" style="padding:30px;text-align:center">Loading standings…</div>');
   const body = document.getElementById('modal-body');
 
   try {
@@ -5072,7 +5102,7 @@ async function openEmpStandingsModal(uid, name, preloaded) {
       const ds = `${_bz.slice(0,7)}-${String(d).padStart(2,'0')}`;
       const rec = attRecords[ds];
       const dow = new Date(ds + 'T12:00:00').getDay(); // 0=Sun (noon avoids TZ rollover)
-      if (dow === 0) { dayBoxes.push(`<div class="att-day-box" style="background:rgba(100,100,100,0.15);border:1px solid rgba(100,100,100,0.2);opacity:0.5" title="${ds} — Sunday"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:10px">✗</span></div>`); continue; }
+      if (dow === 0) { dayBoxes.push(`<div class="att-day-box" style="background:rgba(100,100,100,0.15);border:1px solid rgba(100,100,100,0.2);opacity:0.5" title="${ds} — Sunday"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:10px">${emojiIcon('✗',10)}</span></div>`); continue; }
       const kind = window.attRecKind(rec);
       const score = window.attRecScore(rec);
       const dispKind = kind === 'none' ? 'absent' : kind; // no record for an elapsed workday = absent
@@ -5122,18 +5152,20 @@ async function openEmpStandingsModal(uid, name, preloaded) {
           <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Attendance This Month</div>
           <div style="display:flex;flex-wrap:wrap;gap:4px">${dayBoxes.join('')}</div>
           <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--text-muted);flex-wrap:wrap">
-            <span><span style="color:#30d158;font-weight:700">✓</span> Full</span>
+            <span><span style="color:#30d158;font-weight:700">${emojiIcon('✓',16)}</span> Full</span>
             <span><span style="color:#ffa040;font-weight:700">½</span> Half</span>
-            <span><span style="color:#ff6b6b;font-weight:700">✗</span> Absent</span>
-            <span>🌴 Leave</span>
-            <span>📅 Unpaid Leave</span>
-            <span style="opacity:.6">✗ Sundays</span>
+            <span><span style="color:#ff6b6b;font-weight:700">${emojiIcon('✗',16)}</span> Absent</span>
+            <span>${emojiIcon('🌴',16)} Leave</span>
+            <span>${emojiIcon('📅',16)} Unpaid Leave</span>
+            <span style="opacity:.6">${emojiIcon('✗',16)} Sundays</span>
           </div>
         </div>
       </div>
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [body] });
   } catch(err) {
-    body.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>${err.message}</p></div>`;
+    body.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><p>${err.message}</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [body] });
   }
 }
 
@@ -5151,7 +5183,7 @@ async function openWorkerProfilePanel(uid, name, preloaded) {
         <div style="font-size:16px;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(name)}</div>
         <div style="font-size:11px;color:var(--text-muted)" id="wp-subtitle">Worker Profile</div>
       </div>
-      <button class="btn-secondary btn-sm" id="wp-payslip-btn">🖨️ Payslip</button>
+      <button class="btn-secondary btn-sm" id="wp-payslip-btn">${emojiIcon('🖨️',16)} Payslip</button>
     </div>
     <div style="display:flex;border-bottom:1px solid var(--border);background:var(--bg);flex-shrink:0">
       ${['Overview','Salary','Tasks','Attendance'].map((t,i)=>`<button class="wp-tab" data-tab="${t.toLowerCase()}" style="flex:1;padding:11px 4px;border:none;background:none;font-size:12px;font-weight:600;cursor:pointer;color:${i===0?'var(--primary-light)':'var(--text-muted)'};border-bottom:${i===0?'2px solid var(--primary-light)':'2px solid transparent'};transition:color .15s,border-color .15s">${t}</button>`).join('')}
@@ -5159,6 +5191,7 @@ async function openWorkerProfilePanel(uid, name, preloaded) {
     <div id="wp-tab-content" style="flex:1;overflow-y:auto;padding:16px">
       <div class="loading-placeholder" style="text-align:center;padding:40px">Loading…</div>
     </div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [panel] });
   document.body.appendChild(panel);
   requestAnimationFrame(() => { panel.style.transform = 'translateY(0)'; });
 
@@ -5271,7 +5304,8 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
           </tr>`).join('')}</tbody>
         </table></div>
         <div style="margin-top:10px;font-size:12px;color:var(--text-muted)">Last ${history.length} recorded month${history.length!==1?'s':''}</div>
-      ` : '<div class="empty-state" style="padding:40px"><div class="empty-icon">📊</div><p>No salary records yet.</p></div>';
+      ` : `<div class="empty-state" style="padding:40px"><div class="empty-icon">${emojiIcon('📊',44)}</div><p>No salary records yet.</p></div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [content] });
 
     } else if (tabName === 'tasks') {
       subtitle.textContent = 'Task History';
@@ -5288,7 +5322,8 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
           <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800">${tasks.length}</div><div style="font-size:10px;color:var(--text-muted)">Total</div></div>
         </div>
         ${tasks.length ? tasks.map(t=>`<div style="background:var(--surface2);border-radius:10px;padding:11px 13px;margin-bottom:7px;border-left:3px solid ${SC[t.status]||'var(--border)'}"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div style="font-size:13px;font-weight:600;color:var(--text);flex:1">${esc(t.title||'Untitled')}</div><span class="badge" style="background:${SC[t.status]||'var(--surface2)'};color:#fff;font-size:10px;white-space:nowrap;flex-shrink:0">${t.status||'pending'}</span></div>${t.department?`<div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(t.department)}</div>`:''}</div>`).join('')
-          : '<div class="empty-state" style="padding:30px"><div class="empty-icon">✅</div><p>No tasks assigned.</p></div>'}`;
+          : `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('✅',44)}</div><p>No tasks assigned.</p></div>`}`;
+      if (window.lucide) lucide.createIcons({ nodes: [content] });
 
     } else if (tabName === 'attendance') {
       subtitle.textContent = 'Attendance';
@@ -5327,15 +5362,17 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:4px">${boxes.join('')}</div>
         <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--text-muted);flex-wrap:wrap">
-          <span><span style="color:#30d158;font-weight:700">✓</span> Full</span>
+          <span><span style="color:#30d158;font-weight:700">${emojiIcon('✓',16)}</span> Full</span>
           <span><span style="color:#ffa040;font-weight:700">½</span> Half</span>
-          <span><span style="color:#ff6b6b;font-weight:700">✗</span> Absent</span>
-          <span>🌴 Leave</span>
-          <span>📅 Unpaid Leave</span>
+          <span><span style="color:#ff6b6b;font-weight:700">${emojiIcon('✗',16)}</span> Absent</span>
+          <span>${emojiIcon('🌴',16)} Leave</span>
+          <span>${emojiIcon('📅',16)} Unpaid Leave</span>
         </div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [content] });
     }
   } catch(err) {
-    content.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>${err.message}</p></div>`;
+    content.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><p>${err.message}</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [content] });
   }
 }
 
@@ -5388,7 +5425,7 @@ async function renderProgressReports() {
     const isAssigned = (t, uid) => Array.isArray(t.assignedTo) ? t.assignedTo.includes(uid) : t.assignedTo === uid;
 
     c.innerHTML = `
-      <div class="page-header"><h2>📈 Progress Reports & KPIs</h2><span class="badge badge-blue">${monthLabel}</span></div>
+      <div class="page-header"><h2>${emojiIcon('📈',20)} Progress Reports & KPIs</h2><span class="badge badge-blue">${monthLabel}</span></div>
       <div class="kpi-row">
         <div class="kpi-card accent"><div class="kpi-label">All Tasks (Total)</div><div class="kpi-value">${tasks.length}</div><div class="kpi-sub">${tasks.filter(isDoneTask).length} done</div></div>
         <div class="kpi-card green"><div class="kpi-label">This Month Tasks</div><div class="kpi-value">${monthTasks.length}</div><div class="kpi-sub">${monthTasks.filter(isDoneTask).length} done</div></div>
@@ -5401,7 +5438,7 @@ async function renderProgressReports() {
       <div id="progress-dept-view"></div>
       <div id="progress-members-view" style="display:none">
         <div class="card">
-          <div class="card-header"><h3>👥 All Members Progress</h3></div>
+          <div class="card-header"><h3>${emojiIcon('👥',20)} All Members Progress</h3></div>
           <div class="card-body" style="padding:0">
             <div class="table-wrap"><table class="data-table">
               <thead><tr><th>Member</th><th>Department</th><th>This Month</th><th>All Time</th><th>KPI</th><th></th></tr></thead>
@@ -5429,7 +5466,7 @@ async function renderProgressReports() {
                     <td style="font-size:12px"><strong>${uMDone}</strong>/${uMTotal}</td>
                     <td style="font-size:12px"><strong>${uDone}</strong>/${uTotal}</td>
                     <td><span class="badge ${uPct>=80?'badge-green':uPct>=50?'badge-orange':'badge-red'}">${uPct}%</span></td>
-                    <td><button class="btn-sm btn-outline emp-standings-btn" data-uid="${u.id}" data-name="${encodeURIComponent(u.displayName||u.email)}" data-mdone="${uMDone}" data-mtotal="${uMTotal}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" style="font-size:11px;padding:3px 8px">📊 View</button></td>
+                    <td><button class="btn-sm btn-outline emp-standings-btn" data-uid="${u.id}" data-name="${encodeURIComponent(u.displayName||u.email)}" data-mdone="${uMDone}" data-mtotal="${uMTotal}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" style="font-size:11px;padding:3px 8px">${emojiIcon('📊',11)} View</button></td>
                   </tr>`;
                 }).join('')}
               </tbody>
@@ -5438,6 +5475,7 @@ async function renderProgressReports() {
         </div>
       </div>
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
     const deptView = document.getElementById('progress-dept-view');
     Object.entries(deptMap).forEach(([dept, data]) => {
       const cfg = DEPARTMENTS[dept]||{icon:'🗂️',color:'var(--primary-light)'};
@@ -5456,16 +5494,16 @@ async function renderProgressReports() {
           <div class="card-header" style="border-left:4px solid ${cfg.color}">
             <h3>${emojiIcon(cfg.lucideIcon||cfg.icon,20)} ${dept}</h3>
             <div style="display:flex;gap:8px;align-items:center">
-              <span class="badge ${mPct>=80?'badge-green':mPct>=50?'badge-orange':'badge-red'}" title="This month KPI">📅 ${mPct}%</span>
+              <span class="badge ${mPct>=80?'badge-green':mPct>=50?'badge-orange':'badge-red'}" title="This month KPI">${emojiIcon('📅',16)} ${mPct}%</span>
               <span class="badge ${pct>=80?'badge-green':pct>=50?'badge-orange':'badge-red'}" title="All-time KPI">Overall ${pct}%</span>
             </div>
           </div>
           <div class="card-body">
             <div class="progress-bar-wrap" style="margin-bottom:8px"><div class="progress-bar-fill" style="width:${pct}%;background:${cfg.color}"></div></div>
             <div style="display:flex;gap:20px;font-size:12px;color:var(--text-muted);margin-bottom:12px">
-              <span>👥 ${data.members.length} members</span>
-              <span>✅ ${done}/${total} tasks done (all time)</span>
-              <span>📅 ${mDone}/${mTasks.length} done this month</span>
+              <span>${emojiIcon('👥',16)} ${data.members.length} members</span>
+              <span>${emojiIcon('✅',16)} ${done}/${total} tasks done (all time)</span>
+              <span>${emojiIcon('📅',16)} ${mDone}/${mTasks.length} done this month</span>
             </div>
             <div class="subtab-bar" style="margin-bottom:8px">
               <button class="subtab-btn active" data-dt="${dept}-tasks">All Tasks</button>
@@ -5500,7 +5538,7 @@ async function renderProgressReports() {
                       <td>${uDone}/${uTotal}</td>
                       <td>${uMDone}/${uMTotal}</td>
                       <td><span class="badge ${uPct>=80?'badge-green':uPct>=50?'badge-orange':'badge-red'}">${uPct}%</span></td>
-                      <td><button class="btn-sm btn-outline emp-standings-btn" data-uid="${u.id}" data-name="${encodeURIComponent(u.displayName||u.email)}" data-mdone="${uMDone}" data-mtotal="${uMTotal}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" style="font-size:11px;padding:3px 8px">📊 View</button></td>
+                      <td><button class="btn-sm btn-outline emp-standings-btn" data-uid="${u.id}" data-name="${encodeURIComponent(u.displayName||u.email)}" data-mdone="${uMDone}" data-mtotal="${uMTotal}" data-salary="${u.salary||0}" data-allowance="${u.allowance||0}" data-deductions="${u.deductions||0}" style="font-size:11px;padding:3px 8px">${emojiIcon('📊',11)} View</button></td>
                     </tr>`;
                   }).join('')}
                 </tbody>
@@ -5546,7 +5584,7 @@ async function renderProgressReports() {
       ));
     });
   } catch(err) {
-    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>${err.message}</h4></div>`;
+    document.getElementById('page-content').innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>${err.message}</h4></div>`;
   }
 }
 
@@ -5555,7 +5593,7 @@ async function renderCompany() {
   const c = document.getElementById('page-content');
   const canAdd = isPresident();
   c.innerHTML = `
-    <div class="page-header"><h2>🏢 Company</h2></div>
+    <div class="page-header"><h2>${emojiIcon('🏢',20)} Company</h2></div>
     ${window.chipTabs([
       {key:'overview',label:'Overview'},
       {key:'memos',label:'Memos'},
@@ -5566,6 +5604,7 @@ async function renderCompany() {
     ], 'overview', {cls:'company-tabs'})}
     <div id="company-tab-content"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   function switchCompanyTab(tab) {
     const ct = document.getElementById('company-tab-content');
     if (tab==='overview')        renderCompanyOverview(ct, canAdd);
@@ -5816,7 +5855,7 @@ async function renderCompanyOverview(ct, canAdd) {
     ${canAdd ? `
     <!-- Admin Controls -->
     <div class="co-section">
-      <h3 class="co-section-title">⚙️ Admin Controls</h3>
+      <h3 class="co-section-title">${emojiIcon('⚙️',20)} Admin Controls</h3>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn-danger" id="co-force-logout-btn" style="display:flex;align-items:center;gap:6px">
           <i data-lucide="log-out" style="width:15px;height:15px;stroke:currentColor"></i> Force Logout All Members
@@ -5825,6 +5864,7 @@ async function renderCompanyOverview(ct, canAdd) {
       <p style="font-size:12px;color:var(--text-muted);margin-top:8px">Immediately signs out all active sessions. Use during security incidents or system updates.</p>
     </div>` : ''}
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [ct] });
   if (canAdd) {
     document.getElementById('co-force-logout-btn')?.addEventListener('click', async () => {
       if (!await confirmDialog({ message: 'This will immediately sign out ALL active members. Continue?', danger: true })) return;
@@ -5879,14 +5919,15 @@ async function renderCompanyMemos(ct, canAdd) {
   // Status chip shown on a memo card.
   const statusChip = (m) => {
     const cm = conformeMeta(m);
-    if (cm.iAmRecipient && !cm.iConformed) return `<span class="badge badge-orange" style="white-space:nowrap">⚠ Conforme needed</span>`;
-    if (cm.iAmRecipient && cm.iConformed)  return `<span class="badge badge-green" style="white-space:nowrap">✓ Conformed</span>`;
+    if (cm.iAmRecipient && !cm.iConformed) return `<span class="badge badge-orange" style="white-space:nowrap">${emojiIcon('⚠',16)} Conforme needed</span>`;
+    if (cm.iAmRecipient && cm.iConformed)  return `<span class="badge badge-green" style="white-space:nowrap">${emojiIcon('✓',16)} Conformed</span>`;
     if (canAdd && cm.total)                return `<span class="badge ${cm.done>=cm.total?'badge-green':'badge-blue'}" style="white-space:nowrap">${cm.done}/${cm.total} conformed</span>`;
     return '';
   };
 
   if (!memos.length) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><h4>No memos yet</h4><p>Management memos will appear here.</p></div>`;
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No memos yet</h4><p>Management memos will appear here.</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [list] });
   } else {
     list.innerHTML = memos.map(m=>{
       const d = m.createdAt?.toDate ? m.createdAt.toDate() : new Date();
@@ -6081,7 +6122,7 @@ function openMemoDetailModal(m, onChange) {
   if (cm.iAmRecipient) {
     if (cm.iConformed) {
       conformeBlock = `<div style="margin-top:16px;padding:12px 14px;border-radius:10px;background:rgba(52,199,89,0.10);border:1px solid rgba(52,199,89,0.35);font-size:13px;color:var(--text-2)">
-        ✓ You gave your conforme${conformeDate(cm.conformes[me])?` on <b>${conformeDate(cm.conformes[me])}</b>`:''}.</div>`;
+        ${emojiIcon('✓',16)} You gave your conforme${conformeDate(cm.conformes[me])?` on <b>${conformeDate(cm.conformes[me])}</b>`:''}.</div>`;
     } else {
       conformeBlock = `<div style="margin-top:16px;padding:14px;border-radius:10px;background:rgba(255,159,10,0.08);border:1px solid rgba(255,159,10,0.35)">
         <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;font-size:13px;line-height:1.5;color:var(--text)">
@@ -6100,7 +6141,7 @@ function openMemoDetailModal(m, onChange) {
       const nm = escHtml(names[uid] || uid);
       const entry = cm.conformes[uid];
       return entry
-        ? `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0"><span>${nm}</span><span style="color:var(--success,#34C759);white-space:nowrap">✓ ${escHtml(conformeDate(entry)||'Conformed')}</span></div>`
+        ? `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0"><span>${nm}</span><span style="color:var(--success,#34C759);white-space:nowrap">${emojiIcon('✓',16)} ${escHtml(conformeDate(entry)||'Conformed')}</span></div>`
         : `<div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:5px 0"><span>${nm}</span><span style="color:var(--text-muted);white-space:nowrap">Pending</span></div>`;
     }).join('');
     trackerBlock = `<hr class="divider"/>
@@ -6111,7 +6152,7 @@ function openMemoDetailModal(m, onChange) {
   openModal(m.title,`
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">From: ${escHtml(m.from||'Management')} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}</div>
     <p style="font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text-2)">${escHtml(m.content||'')}</p>
-    ${memoFile?`<a href="${escHtml(memoFile)}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="display:inline-block;margin-top:14px">📎 Open Attachment</a>`:''}
+    ${memoFile?`<a href="${escHtml(memoFile)}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="display:inline-block;margin-top:14px">${emojiIcon('📎',16)} Open Attachment</a>`:''}
     ${conformeBlock}
     ${trackerBlock}
     ${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-memo-btn" data-id="${m.id}">Delete Memo</button>`:''}
@@ -6178,7 +6219,8 @@ window.deleteMemo = async function(memoId) {
 // via the Company → Memos tab).
 async function renderMemosPage() {
   const c = document.getElementById('page-content');
-  c.innerHTML = `<div class="page-header"><h2>📋 Memos</h2></div><div id="memos-page-host"></div>`;
+  c.innerHTML = `<div class="page-header"><h2>${emojiIcon('📋',20)} Memos</h2></div><div id="memos-page-host"></div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   renderCompanyMemos(document.getElementById('memos-page-host'), isPresident() || currentRole==='manager' || currentRole==='secretary');
 }
 window.renderMemosPage = renderMemosPage;
@@ -6196,20 +6238,22 @@ async function renderCompanyPolicies(ct, canAdd) {
   const policies = snap.docs.map(d=>({id:d.id,...d.data()}));
   const grid = document.getElementById('policy-grid');
   if (!policies.length) {
-    grid.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">📄</div><h4>No policies yet</h4><p>Add company policies and they'll appear here.</p></div>`;
+    grid.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">${emojiIcon('📄',44)}</div><h4>No policies yet</h4><p>Add company policies and they'll appear here.</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [grid] });
   } else {
     grid.innerHTML = policies.map(p=>`
       <div class="policy-card" data-id="${p.id}">
-        <div class="policy-icon">${p.icon||'📄'}</div>
+        <div class="policy-icon">${p.icon||`${emojiIcon('📄',16)}`}</div>
         <div class="policy-title">${escHtml(p.title)}</div>
         <div class="policy-desc">${escHtml(p.description||'')}</div>
-        ${p.fileUrl?`<a href="${p.fileUrl}" target="_blank" class="btn-link" style="font-size:12px;margin-top:6px;display:block">📎 View Document</a>`:''}
+        ${p.fileUrl?`<a href="${p.fileUrl}" target="_blank" class="btn-link" style="font-size:12px;margin-top:6px;display:block">${emojiIcon('📎',12)} View Document</a>`:''}
       </div>`).join('');
+    if (window.lucide) lucide.createIcons({ nodes: [grid] });
     grid.querySelectorAll('.policy-card').forEach(card=>{
       card.addEventListener('click',e=>{
         if(e.target.tagName==='A') return;
         const p=policies.find(x=>x.id===card.dataset.id);
-        openModal(p.title,`<p style="font-size:14px;line-height:1.7;white-space:pre-wrap;color:var(--text-2)">${escHtml(p.content||'No content.')}</p>${p.fileUrl?`<a href="${p.fileUrl}" target="_blank" class="btn-secondary" style="display:inline-block;margin-top:14px">📎 Open File</a>`:''}${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-policy-btn" data-id="${p.id}">Delete</button>`:''}`);
+        openModal(p.title,`<p style="font-size:14px;line-height:1.7;white-space:pre-wrap;color:var(--text-2)">${escHtml(p.content||'No content.')}</p>${p.fileUrl?`<a href="${p.fileUrl}" target="_blank" class="btn-secondary" style="display:inline-block;margin-top:14px">${emojiIcon('📎',16)} Open File</a>`:''}${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-policy-btn" data-id="${p.id}">Delete</button>`:''}`);
         document.getElementById('del-policy-btn')?.addEventListener('click',async e2=>{if(await confirmDialog({message:'Delete this policy?', danger:true})){await db.collection('policies').doc(e2.currentTarget.dataset.id).delete();closeModal();renderCompanyPolicies(ct,canAdd);}});
       });
     });
@@ -6226,7 +6270,7 @@ async function renderCompanyPolicies(ct, canAdd) {
     Drive.renderUploadArea('pol-file-upload',r=>{uploadedFile=r;},{label:'Attach document',dept:'Admin',subfolder:'Policies'});
     document.getElementById('save-pol-btn').addEventListener('click',async()=>{
       const title=document.getElementById('pol-title').value.trim(); if(!title) return;
-      await db.collection('policies').add({title,icon:document.getElementById('pol-icon').value.trim()||'📄',description:document.getElementById('pol-desc').value.trim(),content:document.getElementById('pol-content').value,fileUrl:uploadedFile?.url||null,addedBy:currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+      await db.collection('policies').add({title,icon:document.getElementById('pol-icon').value.trim()||`${emojiIcon('📄',16)}`,description:document.getElementById('pol-desc').value.trim(),content:document.getElementById('pol-content').value,fileUrl:uploadedFile?.url||null,addedBy:currentUser.uid,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
       closeModal(); renderCompanyPolicies(ct,canAdd);
     });
   });
@@ -6249,7 +6293,8 @@ async function renderCompanyDownloads(ct, canAdd) {
   const catColors = { Forms:'#34C759', Templates:'#0A84FF', Reports:'#FF9500', Others:'#9e9e9e' };
 
   if (!docs.length) {
-    list.innerHTML = `<div class="empty-state"><div class="empty-icon">📥</div><h4>No downloads yet</h4><p>Upload forms, templates, and documents for the team.</p></div>`;
+    list.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('📥',44)}</div><h4>No downloads yet</h4><p>Upload forms, templates, and documents for the team.</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [list] });
   } else {
     // Group by category
     const cats = [...new Set(docs.map(d=>d.category||'Others'))];
@@ -6374,7 +6419,7 @@ async function renderDepartments() {
 
   c.innerHTML = `
     <div class="page-header">
-      <h2>🗂️ Departments</h2>
+      <h2>${emojiIcon('🗂️',20)} Departments</h2>
       <button class="btn-primary btn-sm" id="add-dept-btn">+ Add</button>
     </div>
     <div class="dept-grid" id="dept-grid">
@@ -6383,7 +6428,7 @@ async function renderDepartments() {
         const subtabs = (cfg.subtabs || []).slice(0, 4);
         return `
           <div class="dept-card dept-card-clickable" data-dept="${name}" style="border-top-color:${cfg.color||'var(--primary-light)'}; cursor:pointer">
-            <div class="dept-icon-large">${emojiIcon(cfg.lucideIcon||cfg.icon||'folder',32)}</div>
+            <div class="dept-icon-large">${window.deptIconTile(cfg, 44)}</div>
             <div class="dept-name" style="font-weight:700;font-size:14px;margin:4px 0">${name}</div>
             <div class="dept-subtabs-preview">
               ${subtabs.map(s => `<span class="dept-subtab-chip">${s}</span>`).join('')}
@@ -6563,20 +6608,21 @@ async function renderAnalytics() {
   } catch(_) { /* denied/offline → placeholder */ }
 
   const SUBTABS = [
-    {id:'overview',label:'📊 Overview'},
-    {id:'sales',label:'🛒 Sales'},
-    {id:'marketing',label:'📣 Marketing'},
-    {id:'finance',label:'💰 Finance'},
-    {id:'production',label:'🏭 Production'},
-    {id:'government',label:'🏛️ Gov. Biddings'},
-    {id:'strategy',label:'🎯 Strategy'},
+    {id:'overview',label:`${emojiIcon('📊',16)} Overview`},
+    {id:'sales',label:`${emojiIcon('🛒',16)} Sales`},
+    {id:'marketing',label:`${emojiIcon('📣',16)} Marketing`},
+    {id:'finance',label:`${emojiIcon('💰',16)} Finance`},
+    {id:'production',label:`${emojiIcon('🏭',16)} Production`},
+    {id:'government',label:`${emojiIcon('🏛️',16)} Gov. Biddings`},
+    {id:'strategy',label:`${emojiIcon('🎯',16)} Strategy`},
   ];
 
   c.innerHTML=`
-    <div class="page-header"><h2>📊 Analytics & Performance</h2></div>
+    <div class="page-header"><h2>${emojiIcon('📊',20)} Analytics & Performance</h2></div>
     ${window.chipTabs(SUBTABS.map(t=>({key:t.id,label:t.label})), 'overview', {cls:'an-subtabs'})}
     <div id="analytics-content"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
 
   const renderOverview = async () => {
     M = buildMetricsSync();   // v12 WS40 — refresh so the Conclusions card below never lags this tab's own period picker
@@ -6635,9 +6681,9 @@ async function renderAnalytics() {
         <div class="kpi-card accent"><div class="kpi-label">Gross Margin</div><div class="kpi-value">${grossMargin==null?'—':grossMargin+'%'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${grossMargin==null?'add job costs':'₱'+fmt(grossProfit)+' profit'}</div></div>
         <div class="kpi-card warn"><div class="kpi-label">Receivables</div><div class="kpi-value">₱${fmt(receivables)}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${openProjects.length} open job${openProjects.length===1?'':'s'}</div></div>
         <div class="kpi-card"><div class="kpi-label">Payroll % of Revenue</div><div class="kpi-value">${payrollPct==null?'—':payrollPct+'%'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">₱${fmt(totalPayroll)}/mo</div></div>
-        <div class="kpi-card ${M.cash?(M.cash.total>=window.ANALYTICS_POLICY.cashFloor?'green':'warn'):''}"><div class="kpi-label">🏦 Cash Position</div><div class="kpi-value">${M.cash?'₱'+fmt(M.cash.total):'—'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${M.cash?'Excludes statutory remittances until the WS39 remittance flow ships.':'Register bank accounts (Finance → Bank Accounts) to activate'}</div>${_cashAccts.length?`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:11px;color:var(--text-muted)">${_cashAccts.length} account${_cashAccts.length===1?'':'s'} ›</summary><div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">${_cashAccts.map(x=>`<div style="display:flex;justify-content:space-between;font-size:11px"><span>${escHtml(window.BankAccounts.label(x.account))}</span><span style="font-weight:600">₱${fmt(x.balance)}</span></div>`).join('')}</div></details>`:''}</div>
+        <div class="kpi-card ${M.cash?(M.cash.total>=window.ANALYTICS_POLICY.cashFloor?'green':'warn'):''}"><div class="kpi-label">${emojiIcon('🏦',16)} Cash Position</div><div class="kpi-value">${M.cash?'₱'+fmt(M.cash.total):'—'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${M.cash?'Excludes statutory remittances until the WS39 remittance flow ships.':'Register bank accounts (Finance → Bank Accounts) to activate'}</div>${_cashAccts.length?`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:11px;color:var(--text-muted)">${_cashAccts.length} account${_cashAccts.length===1?'':'s'} ›</summary><div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">${_cashAccts.map(x=>`<div style="display:flex;justify-content:space-between;font-size:11px"><span>${escHtml(window.BankAccounts.label(x.account))}</span><span style="font-weight:600">₱${fmt(x.balance)}</span></div>`).join('')}</div></details>`:''}</div>
       </div>
-      <div class="card" style="margin-bottom:16px"><div class="card-header"><h3>📌 Conclusions</h3></div><div class="card-body">${_insightsHtml}<div style="margin-top:8px;text-align:right"><a href="javascript:void(0)" id="an-see-strategy" style="font-size:12px;font-weight:600">See all → 🎯 Strategy</a></div></div></div>
+      <div class="card" style="margin-bottom:16px"><div class="card-header"><h3>${emojiIcon('📌',20)} Conclusions</h3></div><div class="card-body">${_insightsHtml}<div style="margin-top:8px;text-align:right"><a href="javascript:void(0)" id="an-see-strategy" style="font-size:12px;font-weight:600">See all → ${emojiIcon('🎯',16)} Strategy</a></div></div></div>
       <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-bottom:16px">
         <div class="card"><div class="card-header"><h3>Cash Flow — last 6 months</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="bh-cash-chart"></canvas></div></div></div>
         <div class="card"><div class="card-header"><h3>Revenue vs Cost</h3></div><div class="card-body"><div class="chart-wrap"><canvas id="bh-margin-chart"></canvas></div></div></div>
@@ -6662,6 +6708,7 @@ async function renderAnalytics() {
         }).join('')}</tbody>
       </table></div></div></div>
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
     document.getElementById('an-see-strategy')?.addEventListener('click', () => {
       c.querySelector('.an-subtabs .chip-tab[data-chip="strategy"]')?.click();
     });
@@ -6725,7 +6772,7 @@ async function renderAnalytics() {
           <div style="font-size:12px;color:var(--text-muted);margin-top:10px;border-top:1px solid var(--border);padding-top:8px">
             Client conversion: <strong>${clConv==null?'—':clConv+'%'}</strong> (won vs lost clients) ·
             Quote win rate: <strong>${winRate}%</strong> (won vs lost quotes — the authoritative KPI above).
-            Creating a Sales Order auto-moves the client to ✅ Won.
+            Creating a Sales Order auto-moves the client to ${emojiIcon('✅',16)} Won.
           </div>
         </div>
       </div>`:''}
@@ -6742,6 +6789,7 @@ async function renderAnalytics() {
         }).join('')}</tbody>
       </table></div></div></div>
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
     if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('sq-chart'),{type:'bar',data:{labels:['Open','Won','Lost'],
       datasets:[{data:[openQ.length,wonQ.length,lostQ.length],backgroundColor:[CT.neutral,CT.good,CT.bad]}]},
@@ -6850,12 +6898,12 @@ async function renderAnalytics() {
         <div class="kpi-card warn"><div class="kpi-label">CA Outstanding</div><div class="kpi-value">₱${fmt(caTotal)}</div></div>
         <div class="kpi-card"><div class="kpi-label">CA Pending</div><div class="kpi-value">${caPending}</div></div>
         <div class="kpi-card"><div class="kpi-label">Expenses (${finAnLabel})</div><div class="kpi-value">₱${fmt(expThisMonth)}</div></div>
-        <div class="kpi-card"><div class="kpi-label">📦 Inventory Turns</div><div class="kpi-value">${M.turns&&M.turns.turns!=null?M.turns.turns.toFixed(1)+'× /yr':'—'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${M.turns&&M.turns.turns!=null?'~'+M.turns.daysOnHand+'d on hand · WAC-costed, meaningful going-forward from WS29 ship date':'pending WS29 inventory movements'}</div></div>
+        <div class="kpi-card"><div class="kpi-label">${emojiIcon('📦',16)} Inventory Turns</div><div class="kpi-value">${M.turns&&M.turns.turns!=null?M.turns.turns.toFixed(1)+'× /yr':'—'}</div><div style="margin-top:4px;font-size:11px;color:#8e8e93">${M.turns&&M.turns.turns!=null?'~'+M.turns.daysOnHand+'d on hand · WAC-costed, meaningful going-forward from WS29 ship date':'pending WS29 inventory movements'}</div></div>
       </div>
       <div class="card" style="margin-bottom:16px">
-        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3>📥 Receivables Aging</h3><span style="font-weight:800">₱${fmt(M.aging.total)}</span></div>
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h3>${emojiIcon('📥',20)} Receivables Aging</h3><span style="font-weight:800">₱${fmt(M.aging.total)}</span></div>
         <div class="card-body">
-          ${M.aging.total===0?'<div class="empty-state" style="padding:16px"><p>No open receivables 🎉</p></div>':`
+          ${M.aging.total===0?`<div class="empty-state" style="padding:16px"><p>No open receivables ${emojiIcon('🎉',16)}</p></div>`:`
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px">
             ${[['0–30d',M.aging.cur,'var(--success)'],['31–60d',M.aging.d3160,'#FFAA00'],['61–90d',M.aging.d6190,'#FF9500'],['90+ d',M.aging.d90,'var(--danger)']].map(([lbl,val,col])=>`
               <div style="background:var(--surface2);border-radius:10px;padding:10px 12px">
@@ -6877,6 +6925,7 @@ async function renderAnalytics() {
         <tbody>${payslipsThisMonth.slice(0,20).map(p=>`<tr><td>${escHtml(p.workerName||'—')}</td><td>${escHtml(p.periodLabel||p.payPeriod||'—')}</td><td>₱${fmt(p.grossPay||0)}</td><td>₱${fmt(p.netPay||0)}</td><td>${escHtml(p.preparedBy||'—')}</td></tr>`).join('')||'<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">No payslips this month</td></tr>'}</tbody>
       </table></div></div></div>
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
     const cats=[...new Set(ledDebits.map(l=>l.category||'Other'))].slice(0,6);
     const catAmts=cats.map(cat=>ledDebits.filter(l=>(l.category||'Other')===cat).reduce((s,l)=>s+(l.amount||0),0));
     if (!window.Chart) { await window.ensureChart(); }
@@ -6986,20 +7035,20 @@ async function renderAnalytics() {
   // v1 ship matrix (Spec 8) — cross-referenced against V12-PLAN workstreams 28/29/30/32/36
   // so a later session knows exactly what "wires in" once each of those ships.
   const STRAT_SHIP_MATRIX = [
-    ['Quote win rate (+ prev-period delta rule)', '✅ live', 'now (post-WS32 helpers)'],
-    ['Bid win rate (Government)', '✅ live', 'now'],
-    ['Payroll ratio (% of revenue)', '✅ live', 'now'],
-    ['On-time task completion (Production)', '✅ live', 'now'],
-    ['AR aging (due-date anchor + fallback)', '✅ live', 'now'],
-    ['Conclusions card + Strategy tab + notes', '✅ live', 'now'],
-    ['Theme-aware charts (13 sites)', '✅ live', 'now'],
-    ['Daily digest (Actions cron → notif/push)', '✅ live', 'now (after secret check)'],
-    ['Cash Position KPI', '🔲 placeholder', 'WS36 implemented + ≥1 bank account registered'],
-    ['Inventory turns KPI + turns-slow rule', '🔲 "—" until COS rows exist', 'WS29 implemented (consume-time COS @ WAC)'],
-    ['On-time DELIVERY % (second KPI)', '⛔ not built', 'WS28 stageHistory (delivery enteredAt vs due date)'],
-    ['Material price-trend insights', '⛔ not built', 'WS29 movement cost trail + WS30 PO receiving'],
-    ['Purchasing recommendations', '⛔ not built', 'WS30 purchase_requisitions/receiving analytics'],
-    ['job_costs materials in any metric', '⛔ excluded', 'per WS29 decision 11(c) — third manual number, unreliable'],
+    ['Quote win rate (+ prev-period delta rule)', `${emojiIcon('✅',16)} live`, 'now (post-WS32 helpers)'],
+    ['Bid win rate (Government)', `${emojiIcon('✅',16)} live`, 'now'],
+    ['Payroll ratio (% of revenue)', `${emojiIcon('✅',16)} live`, 'now'],
+    ['On-time task completion (Production)', `${emojiIcon('✅',16)} live`, 'now'],
+    ['AR aging (due-date anchor + fallback)', `${emojiIcon('✅',16)} live`, 'now'],
+    ['Conclusions card + Strategy tab + notes', `${emojiIcon('✅',16)} live`, 'now'],
+    ['Theme-aware charts (13 sites)', `${emojiIcon('✅',16)} live`, 'now'],
+    ['Daily digest (Actions cron → notif/push)', `${emojiIcon('✅',16)} live`, 'now (after secret check)'],
+    ['Cash Position KPI', `${emojiIcon('🔲',16)} placeholder`, 'WS36 implemented + ≥1 bank account registered'],
+    ['Inventory turns KPI + turns-slow rule', `${emojiIcon('🔲',16)} "—" until COS rows exist`, 'WS29 implemented (consume-time COS @ WAC)'],
+    ['On-time DELIVERY % (second KPI)', `⛔ not built`, 'WS28 stageHistory (delivery enteredAt vs due date)'],
+    ['Material price-trend insights', `⛔ not built`, 'WS29 movement cost trail + WS30 PO receiving'],
+    ['Purchasing recommendations', `⛔ not built`, 'WS30 purchase_requisitions/receiving analytics'],
+    ['job_costs materials in any metric', `⛔ excluded`, 'per WS29 decision 11(c) — third manual number, unreliable'],
   ];
   const renderStrategy = async () => {
     const wrap=document.getElementById('analytics-content');
@@ -7012,7 +7061,7 @@ async function renderAnalytics() {
 
     const _sevColor = { bad: window.cssVar('--danger','#FF453A'), warn: window.cssVar('--warning','#FF9F0A'),
       info: window.cssVar('--text-muted','#8e8e93'), good: window.cssVar('--success','#30D158') };
-    const _sevLabel = { bad:'🔴 Needs attention', warn:'🟠 Watch', info:'🔵 Notable', good:'🟢 On track' };
+    const _sevLabel = { bad:`${emojiIcon('🔴',16)} Needs attention`, warn:`${emojiIcon('🟠',16)} Watch`, info:`${emojiIcon('🔵',16)} Notable`, good:`${emojiIcon('🟢',16)} On track` };
     const allInsights = window.Insights.compute(M);   // uncapped — Overview shows a capped preview of the same list
     const insightsHtml = ['bad','warn','info','good'].map(sev => {
       const rows = allInsights.filter(i=>i.severity===sev);
@@ -7040,16 +7089,17 @@ async function renderAnalytics() {
     };
 
     wrap.innerHTML = `
-      <div class="card" style="margin-top:16px;margin-bottom:16px"><div class="card-header"><h3>🎯 Full Conclusions</h3></div><div class="card-body">${insightsHtml || '<p style="color:var(--text-muted);text-align:center;padding:16px">No insights yet.</p>'}</div></div>
+      <div class="card" style="margin-top:16px;margin-bottom:16px"><div class="card-header"><h3>${emojiIcon('🎯',20)} Full Conclusions</h3></div><div class="card-body">${insightsHtml || '<p style="color:var(--text-muted);text-align:center;padding:16px">No insights yet.</p>'}</div></div>
       <div class="card" style="margin-bottom:16px"><div class="card-header"><h3>Wire-in status</h3></div><div class="card-body"><div class="table-wrap"><table class="data-table">
         <thead><tr><th>Metric / feature</th><th>v1 status</th><th>Activates when</th></tr></thead>
         <tbody>${shipRows}</tbody>
       </table></div></div></div>
-      <div class="card"><div class="card-header"><h3>📚 Market Research Notes</h3></div><div class="card-body">
+      <div class="card"><div class="card-header"><h3>${emojiIcon('📚',20)} Market Research Notes</h3></div><div class="card-body">
         <div id="strat-notes-tabs">${window.chipTabs(STRAT_DEPTS.map(d=>({key:d.id,label:d.label})), activeDept, {cls:'strat-notes-chips'})}</div>
         <div id="strat-notes-body" style="margin-top:10px">${renderNotesFor(activeDept)}</div>
       </div></div>
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
 
     const bindNoteAdd = () => {
       document.getElementById('strat-note-add')?.addEventListener('click', async () => {
@@ -7121,15 +7171,16 @@ async function renderTeam() {
   const c=document.getElementById('page-content');
   c.innerHTML=`
     <div class="page-header">
-      <h2>👥 Team & Payroll</h2>
+      <h2>${emojiIcon('👥',20)} Team & Payroll</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn-secondary btn-sm" id="team-csv-btn">⬇ CSV</button>
-        <button class="btn-secondary btn-sm" id="add-worker-btn">👷 Create Worker Account</button>
+        <button class="btn-secondary btn-sm" id="team-csv-btn">${emojiIcon('⬇',16)} CSV</button>
+        <button class="btn-secondary btn-sm" id="add-worker-btn">${emojiIcon('👷',16)} Create Worker Account</button>
         <button class="btn-primary btn-sm" id="add-emp-btn">+ Add Employee Profile</button>
-        ${(isPresident()||currentDepts.includes('IT'))?`<button class="btn-danger btn-sm" id="force-logout-all-btn">🔴 Logout All</button>`:''}
+        ${(isPresident()||currentDepts.includes('IT'))?`<button class="btn-danger btn-sm" id="force-logout-all-btn">${emojiIcon('🔴',16)} Logout All</button>`:''}
       </div>
     </div>
     <div id="team-table"><div class="loading-placeholder">Loading…</div></div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   // Short TTL here so the online/offline presence dots reflect "now", not a
   // stale snapshot left by another screen. Uses a DISTINCT key from the shared
   // 'users' cache (standardized at 30s) so its 8s freshness is deterministic.
@@ -7190,7 +7241,7 @@ async function renderTeam() {
 
 function openAddEmployeeModal() {
   openPage('Add Employee Profile',`
-    <p style="font-size:12px;color:var(--text-muted);background:var(--surface2);padding:10px;border-radius:8px;margin-bottom:14px">Adds a profile record only. Use <strong>👷 Create Worker Account</strong> to also create a username login.</p>
+    <p style="font-size:12px;color:var(--text-muted);background:var(--surface2);padding:10px;border-radius:8px;margin-bottom:14px">Adds a profile record only. Use <strong>${emojiIcon('👷',16)} Create Worker Account</strong> to also create a username login.</p>
     <div class="form-group"><label>Display Name</label><input id="emp-name"/></div>
     <div class="form-group"><label>Email (if they have one)</label><input id="emp-email" type="email"/></div>
     <div class="form-group"><label>Employee ID</label><input id="emp-eid" placeholder="e.g. BI-2026-001"/></div>
@@ -7253,7 +7304,7 @@ function openCreateWorkerModal() {
 
   const initialPw = generatePassword('worker');
 
-  openPage('👷 Create Worker Account', `
+  openPage(`${emojiIcon('👷',16)} Create Worker Account`, `
     <p style="font-size:12px;color:var(--text-muted);background:var(--surface2);padding:10px;border-radius:8px;margin-bottom:14px">
       Creates a username + password login. The worker does <strong>not</strong> need an email address.
       HR manages all credentials.
@@ -7272,7 +7323,7 @@ function openCreateWorkerModal() {
         <label>Initial Password <span style="color:var(--danger)">*</span></label>
         <div style="display:flex;gap:6px;align-items:center">
           <input id="cw-password" value="${initialPw}" autocomplete="off" style="flex:1"/>
-          <button type="button" class="btn-secondary btn-sm" id="cw-regen-pw" title="Generate new password">🔄</button>
+          <button type="button" class="btn-secondary btn-sm" id="cw-regen-pw" title="Generate new password">${emojiIcon('🔄',16)}</button>
         </div>
       </div>
     </div>
@@ -7360,13 +7411,13 @@ function openCreateWorkerModal() {
       dbCacheInvalidate('users'); dbCacheInvalidate('users-presence');
 
       // Show credentials to HR — only time the password is displayed in full
-      openModal('✅ Worker Account Created', `
+      openModal(`${emojiIcon('✅',16)} Worker Account Created`, `
         <p style="margin-bottom:12px">Hand these credentials to <strong>${escHtml(name)}</strong>:</p>
         <div style="background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:16px;font-family:monospace;font-size:15px;line-height:2">
           <div>Username: <strong style="color:var(--primary-light)">${escHtml(username)}</strong></div>
           <div>Password: <strong style="color:var(--primary-light)">${escHtml(password)}</strong></div>
         </div>
-        <p style="font-size:12px;color:var(--text-muted);margin-top:10px">⚠️ Write this down now. The password won't be shown again in plain text.</p>
+        <p style="font-size:12px;color:var(--text-muted);margin-top:10px">${emojiIcon('⚠️',12)} Write this down now. The password won't be shown again in plain text.</p>
       `, `<button class="btn-primary" onclick="closeModal();renderTeam()">Done</button>`);
     } catch(err) {
       btn.disabled = false; btn.textContent = 'Create Account';
@@ -7383,8 +7434,8 @@ function openEditEmployeeModal(u) {
   openPage(`Edit: ${u.displayName||u.email}`,`
     ${u.username ? `
     <div style="background:var(--surface2);border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <span style="font-size:13px">👷 Worker account — login: <strong style="color:var(--primary-light)">${escHtml(u.username)}</strong></span>
-      <button class="btn-secondary btn-sm" id="eu-reset-pw-btn" style="margin-left:auto">🔑 Reset Password</button>
+      <span style="font-size:13px">${emojiIcon('👷',13)} Worker account — login: <strong style="color:var(--primary-light)">${escHtml(u.username)}</strong></span>
+      <button class="btn-secondary btn-sm" id="eu-reset-pw-btn" style="margin-left:auto">${emojiIcon('🔑',16)} Reset Password</button>
     </div>` : ''}
     <div class="form-group"><label>Display Name</label><input id="eu-name" value="${escHtml(u.displayName||'')}"/></div>
     <div class="form-group"><label>Employee ID</label><input id="eu-eid" value="${escHtml(u.employeeId||'')}"/></div>
@@ -7425,13 +7476,13 @@ function openEditEmployeeModal(u) {
   // Reset Password (worker accounts only)
   document.getElementById('eu-reset-pw-btn')?.addEventListener('click', () => {
     const newPw = generatePassword(u.displayName||'worker');
-    openModal('🔑 Reset Password', `
+    openModal(`${emojiIcon('🔑',16)} Reset Password`, `
       <p style="margin-bottom:10px">Set a new password for <strong>${escHtml(u.displayName)}</strong> (username: <code>${escHtml(u.username)}</code>).</p>
       <div class="form-group">
         <label>New Password</label>
         <div style="display:flex;gap:6px">
           <input id="rp-newpw" value="${escHtml(newPw)}" style="flex:1" autocomplete="off"/>
-          <button type="button" class="btn-secondary btn-sm" id="rp-regen">🔄</button>
+          <button type="button" class="btn-secondary btn-sm" id="rp-regen">${emojiIcon('🔄',16)}</button>
         </div>
       </div>
       <div id="rp-error" class="error-msg hidden" style="margin-top:8px"></div>
@@ -7457,13 +7508,13 @@ function openEditEmployeeModal(u) {
         await resetFn({ targetUid: u.id, newPassword });
         window.logAudit && window.logAudit('reset','password',u.id,{ name:u.displayName||'' });  // never log the password
 
-        openModal('✅ Password Reset', `
+        openModal(`${emojiIcon('✅',16)} Password Reset`, `
           <p style="margin-bottom:12px">New credentials for <strong>${escHtml(u.displayName)}</strong>:</p>
           <div style="background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:16px;font-family:monospace;font-size:15px;line-height:2">
             <div>Username: <strong style="color:var(--primary-light)">${escHtml(u.username)}</strong></div>
             <div>Password: <strong style="color:var(--primary-light)">${escHtml(newPassword)}</strong></div>
           </div>
-          <p style="font-size:12px;color:var(--text-muted);margin-top:10px">⚠️ Write this down and hand it to the employee.</p>
+          <p style="font-size:12px;color:var(--text-muted);margin-top:10px">${emojiIcon('⚠️',12)} Write this down and hand it to the employee.</p>
         `, `<button class="btn-primary" onclick="closeModal()">Done</button>`);
       } catch(err) {
         saveBtn.disabled = false; saveBtn.textContent = 'Set Password';
@@ -7478,7 +7529,7 @@ function openEditEmployeeModal(u) {
 
 // ── Profile Drawer ────────────────────────────────
 function _promptPhoneNumber() {
-  openModal('📞 Add Your Phone Number',
+  openModal(`${emojiIcon('📞',16)} Add Your Phone Number`,
     `<p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Your phone number appears on your Digital ID and Calling Card so colleagues can reach you.</p>
      <div class="form-group">
        <label>Mobile Number</label>
@@ -7676,7 +7727,8 @@ function openProfileDrawer() {
   if (editPhoneBtn) {
     editPhoneBtn.addEventListener('click', () => {
       const wrap = editPhoneBtn.closest('div[style]');
-      if (wrap) wrap.innerHTML = `<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">📞 Phone Number</div><div style="display:flex;gap:8px"><input id="profile-phone" type="tel" value="${escHtml(userProfile.phone||'')}" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px"/><button class="btn-primary btn-sm" id="save-phone-btn2">Save</button></div>`;
+      if (wrap) wrap.innerHTML = `<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">${emojiIcon('📞',13)} Phone Number</div><div style="display:flex;gap:8px"><input id="profile-phone" type="tel" value="${escHtml(userProfile.phone||'')}" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px"/><button class="btn-primary btn-sm" id="save-phone-btn2">Save</button></div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
       document.getElementById('save-phone-btn2')?.addEventListener('click', async () => {
         const phone = (document.getElementById('profile-phone')?.value || '').trim();
         if (!phone) return;
@@ -8017,14 +8069,15 @@ async function renderMiniCal() {
     const day=parseInt(c.dataset.date.slice(8,10),10); const dayTasks=byDay[day]||[];
     const det=document.getElementById('cal-day-detail'); if(!det) return;
     det.innerHTML = dayTasks.length
-      ? `<div style="font-weight:700;color:var(--text);margin-bottom:3px">📅 ${c.dataset.date} — ${dayTasks.length} due</div>${dayTasks.slice(0,4).map(t=>`<div>• ${escHtml(t.title)}</div>`).join('')}<a style="color:var(--primary);cursor:pointer;font-weight:600" onclick="navigateTo('tasks')">View all tasks →</a>`
+      ? `<div style="font-weight:700;color:var(--text);margin-bottom:3px">${emojiIcon('📅',16)} ${c.dataset.date} — ${dayTasks.length} due</div>${dayTasks.slice(0,4).map(t=>`<div>• ${escHtml(t.title)}</div>`).join('')}<a style="color:var(--primary);cursor:pointer;font-weight:600" onclick="navigateTo('tasks')">View all tasks →</a>`
       : '';
+    if (window.lucide) lucide.createIcons({ nodes: [det] });
   }));
 }
 
 // ── Helpers ───────────────────────────────────────
 function renderAccessDenied(section) {
-  return `<div class="access-denied"><div class="ad-icon">🔒</div><h3>Access Restricted</h3><p>You don't have access to ${section}.</p></div>`;
+  return `<div class="access-denied"><div class="ad-icon">${emojiIcon('🔒',16)}</div><h3>Access Restricted</h3><p>You don't have access to ${section}.</p></div>`;
 }
 function formatNum(n) { return Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 
@@ -8034,7 +8087,7 @@ async function renderSuggestionBox(wrap) {
   wrap.innerHTML = `
     <div class="card" style="margin-bottom:16px">
       <div class="card-header" style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:20px">💡</span>
+        <span style="font-size:20px">${emojiIcon('💡',20)}</span>
         <div>
           <h3 style="margin:0">Suggestion Box</h3>
           <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Share ideas, feedback, or concerns — ${pres ? 'all submissions shown below' : 'submitted anonymously to the president'}</div>
@@ -8062,6 +8115,7 @@ async function renderSuggestionBox(wrap) {
     </div>
     ${pres ? `<div class="card"><div class="card-header"><h3>All Submissions</h3></div><div class="card-body" id="sug-list"><div class="loading-placeholder">Loading…</div></div></div>` : ''}
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [wrap] });
 
   document.getElementById('sug-submit-btn').addEventListener('click', async () => {
     const text = document.getElementById('sug-text').value.trim();
@@ -8135,15 +8189,16 @@ function renderHelp() {
            <button class="subtab-btn" data-sub="employee">Employee Guide</button>
            <button class="subtab-btn" data-sub="partner">Partner Guide</button>
            <button class="subtab-btn" data-sub="storage">Storage Setup</button>
-           <button class="subtab-btn" data-sub="suggestions">💡 Suggestion Box</button>`
+           <button class="subtab-btn" data-sub="suggestions">${emojiIcon('💡',16)} Suggestion Box</button>`
         : isAnyPartner
           ? `<button class="subtab-btn active" data-sub="partner">Partner Guide</button>
-             <button class="subtab-btn" data-sub="suggestions">💡 Suggestion Box</button>`
+             <button class="subtab-btn" data-sub="suggestions">${emojiIcon('💡',16)} Suggestion Box</button>`
           : `<button class="subtab-btn active" data-sub="employee">Your Guide</button>
-             <button class="subtab-btn" data-sub="suggestions">💡 Suggestion Box</button>`}
+             <button class="subtab-btn" data-sub="suggestions">${emojiIcon('💡',16)} Suggestion Box</button>`}
     </div>
     <div id="help-content"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
 
   const load = (sub) => {
     const wrap = document.getElementById('help-content');
@@ -8238,7 +8293,7 @@ function renderHelpAdmin() {
       <ol class="help-steps">
         <li>Go to <strong>Team &amp; Payroll</strong> in the sidebar</li>
         <li>See all employees with their salary breakdown (base, allowance, deductions, net)</li>
-        <li>Tap ✏️ to edit any employee's details, role, or pay</li>
+        <li>Tap ${emojiIcon('✏️',16)} to edit any employee's details, role, or pay</li>
         <li>Tap <strong>+ Add Employee</strong> → fill in their profile (create their login in Firebase Console first)</li>
         <li>Tap <strong>Record Payroll</strong> → select month → saves salary history for all employees</li>
       </ol>
@@ -8293,7 +8348,7 @@ function renderHelpEmployee() {
         <li>Enter your password → tap <strong>Sign In</strong></li>
         <li>If you forgot your password → tap <strong>Forgot password?</strong> to get a reset email</li>
       </ol>
-      <div class="help-tip">💡 <strong>Tip:</strong> On iPhone, go to Safari → Share button → "Add to Home Screen" to install the app like a native app.</div>
+      <div class="help-tip">${emojiIcon('💡',16)} <strong>Tip:</strong> On iPhone, go to Safari → Share button → "Add to Home Screen" to install the app like a native app.</div>
     </div>
 
     <div class="help-section">
@@ -8313,13 +8368,13 @@ function renderHelpEmployee() {
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Attendance is worth <strong>30%</strong> of your monthly pay. Both steps must be completed within the <strong>7:00–9:00 AM window</strong> each workday.</p>
       <ol class="help-steps">
         <li><strong>Step 1 — Time In (50%) · 7:00–9:00 AM:</strong> Open the app between 7am and 9am and tap <strong>Time In</strong> on your dashboard. This records that you showed up for work.</li>
-        <li><strong>Step 2 — Check Notifications (100%) · before 9:00 AM:</strong> Tap the 🔔 bell icon. Each notification has a checkbox — <strong>check every one individually.</strong> Once all are checked before 9am, your attendance automatically upgrades to 100%.</li>
-        <li>Your attendance badge turns green (✅) when both steps are done.</li>
-        <li><strong>Missed the window?</strong> If it is already past 9am and you have not yet timed in, tap <strong>⏰ Request Time Extension</strong> on your dashboard. This sends a request to the president.</li>
+        <li><strong>Step 2 — Check Notifications (100%) · before 9:00 AM:</strong> Tap the ${emojiIcon('🔔',16)} bell icon. Each notification has a checkbox — <strong>check every one individually.</strong> Once all are checked before 9am, your attendance automatically upgrades to 100%.</li>
+        <li>Your attendance badge turns green (${emojiIcon('✅',16)}) when both steps are done.</li>
+        <li><strong>Missed the window?</strong> If it is already past 9am and you have not yet timed in, tap <strong>${emojiIcon('⏰',16)} Request Time Extension</strong> on your dashboard. This sends a request to the president.</li>
         <li><strong>Extension approval:</strong> If the president approves, you will receive a notification and your dashboard will show a Time In button with an expiry time. You have <strong>6 hours from the time of approval</strong> to complete both steps.</li>
         <li><strong>Extension denied or expired:</strong> The day is recorded as absent. Maintain the habit of opening the app before 9am to avoid this.</li>
       </ol>
-      <div class="help-tip">⚠️ <strong>Key rules:</strong> The Time In window is <em>7:00–9:00 AM only</em>. You cannot time in before 7am or after 9am without an approved extension. Notifications must also be checked before 9am for full attendance. Always check each notification individually — there is no "mark all" shortcut.</div>
+      <div class="help-tip">${emojiIcon('⚠️',16)} <strong>Key rules:</strong> The Time In window is <em>7:00–9:00 AM only</em>. You cannot time in before 7am or after 9am without an approved extension. Notifications must also be checked before 9am for full attendance. Always check each notification individually — there is no "mark all" shortcut.</div>
     </div>
 
     <div class="help-section">
@@ -8332,7 +8387,7 @@ function renderHelpEmployee() {
         <li>Use the filter dropdown to view open, done, or all tasks</li>
         <li>Tap <strong>+ New Task</strong> to create a task yourself</li>
       </ol>
-      <div class="help-tip">💡 <strong>Your KPI score</strong> = tasks completed ÷ total tasks assigned. Higher score = higher computed pay.</div>
+      <div class="help-tip">${emojiIcon('💡',16)} <strong>Your KPI score</strong> = tasks completed ÷ total tasks assigned. Higher score = higher computed pay.</div>
     </div>
 
     <div class="help-section">
@@ -8407,7 +8462,7 @@ function renderHelpPartner() {
         <li>Enter your password → tap <strong>Sign In</strong></li>
         <li>Your account must be set up by Barro Industries admin first — contact them if you can't log in</li>
       </ol>
-      <div class="help-tip">💡 <strong>Tip:</strong> Save the app link to your phone's home screen for quick access. On iPhone: Safari → Share → "Add to Home Screen".</div>
+      <div class="help-tip">${emojiIcon('💡',16)} <strong>Tip:</strong> Save the app link to your phone's home screen for quick access. On iPhone: Safari → Share → "Add to Home Screen".</div>
     </div>
 
     <div class="help-section">
@@ -8430,7 +8485,7 @@ function renderHelpPartner() {
         <li>When ready, tap <strong>Submit for Approval</strong> — this sends the quote to Barro Industries president for review</li>
         <li>You'll receive a notification when it's approved or returned for revision</li>
       </ol>
-      <div class="help-tip">⚠️ <strong>Note:</strong> Quotes are not final until approved by the Barro Industries president.</div>
+      <div class="help-tip">${emojiIcon('⚠️',16)} <strong>Note:</strong> Quotes are not final until approved by the Barro Industries president.</div>
     </div>
 
     <div class="help-section">

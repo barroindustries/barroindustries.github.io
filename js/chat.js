@@ -92,7 +92,7 @@ window.Chat = (() => {
         await _refreshPresence();            // DM row presence dots (users-presence cache)
         _renderInbox();
       }, () => { const el = document.getElementById('chat-inbox');
-                 if (el) el.innerHTML = '<div class="empty-state"><div class="empty-icon">💬</div><h4>Chat unavailable</h4></div>'; });
+                 if (el) el.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('💬',44)}</div><h4>Chat unavailable</h4></div>`; });
   }
   async function _refreshDeptChannels() {
     _deptConvs = (await Promise.all(myDeptChannels().map(d =>
@@ -161,7 +161,7 @@ window.Chat = (() => {
       (b.lastMessageAt?.toMillis?.() || 0) - (a.lastMessageAt?.toMillis?.() || 0));
 
     if (!sorted.length) {
-      el.innerHTML = `<div class="empty-state"><div class="empty-icon">💬</div><h4>No conversations yet</h4><p>Tap "+ New Message" to start one.</p></div>`;
+      el.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('💬',44)}</div><h4>No conversations yet</h4><p>Tap "+ New Message" to start one.</p></div>`;
       return;
     }
     const myUid = currentUser.uid;
@@ -181,7 +181,7 @@ window.Chat = (() => {
     }).filter(r => !_searchQ || r.title.toLowerCase().includes(_searchQ));
 
     if (!rows.length) {
-      el.innerHTML = `<div class="empty-state"><div class="empty-icon">🔎</div><h4>No matches</h4></div>`;
+      el.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔎',44)}</div><h4>No matches</h4></div>`;
       return;
     }
     el.innerHTML = '<div class="item-list">' + rows.map(({ cv, title }) => {
@@ -196,7 +196,7 @@ window.Chat = (() => {
         avatarHtml = `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0">${initials(title)}</div>`;
       } else {
         const cfg = (window.DEPARTMENTS || {})[cv.department] || {};
-        avatarHtml = `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0;background:${cfg.color || 'var(--primary)'}">${cfg.icon || '💬'}</div>`;
+        avatarHtml = `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0;background:${cfg.color || 'var(--primary)'}">${cfg.icon || `${emojiIcon('💬',16)}`}</div>`;
       }
       const preview = cv.lastMessageText ? escHtml(cv.lastMessageText) : 'No messages yet';
       const ago = cv.lastMessageAt ? _timeAgo(cv.lastMessageAt) : '';
@@ -272,7 +272,7 @@ window.Chat = (() => {
     } else {
       const cfg = (window.DEPARTMENTS || {})[conv.department] || {};
       title = conv.name || conv.department || 'Channel';
-      avatarHtml = `<div class="ms-avatar ms-avatar-md" style="background:${cfg.color || 'var(--primary)'}">${cfg.icon || '💬'}</div>`;
+      avatarHtml = `<div class="ms-avatar ms-avatar-md" style="background:${cfg.color || 'var(--primary)'}">${cfg.icon || `${emojiIcon('💬',16)}`}</div>`;
     }
     return { title, avatarHtml };
   }
@@ -534,7 +534,7 @@ window.Chat = (() => {
       createdAt: FV.serverTimestamp()
     });
     const preview = text ? (text.length > 80 ? text.slice(0, 80) + '…' : text)
-                         : (fileSource === 'link' ? '🔗 Link' : `📎 ${fileName || 'File'}`);
+                         : (fileSource === 'link' ? `${emojiIcon('🔗',16)} Link` : `${emojiIcon('📎',16)} ${fileName || 'File'}`);
     // Second write — passes the affectedKeys([lastMessage*]) member branch.
     await db.collection('conversations').doc(conv.id).update({
       lastMessageAt: FV.serverTimestamp(), lastMessageText: preview,
@@ -787,7 +787,7 @@ window.Chat = (() => {
           ${reactionsHtml}
           ${pickerHtml}
           ${canEdit||canDelete ? `<div class="ms-actions">
-            ${canEdit?`<button class="ms-act-btn chat-msg-edit-btn" data-mid="${escHtml(m.id)}">✎</button>`:''}
+            ${canEdit?`<button class="ms-act-btn chat-msg-edit-btn" data-mid="${escHtml(m.id)}">${emojiIcon('✎',16)}</button>`:''}
             ${canDelete?`<button class="ms-act-btn ms-del-btn chat-msg-del-btn" data-mid="${escHtml(m.id)}">${emojiIcon('trash-2',14)}</button>`:''}
           </div>` : ''}
           ${seenHtml}
@@ -874,13 +874,14 @@ window.renderChatPage = async function() {
   c.innerHTML = `
     <div class="chat-page">
       <div class="chat-page-inbox">
-        <div class="page-header"><h2>💬 Chat</h2>
+        <div class="page-header"><h2>${emojiIcon('💬',20)} Chat</h2>
           <button class="btn-primary btn-sm" id="chat-new-btn">+ New Message</button></div>
         <div class="ms-search-wrap"><input id="chat-search-input" class="ms-search-input" placeholder="Search chats" /></div>
         <div id="chat-filter"></div>
         <div id="chat-inbox"><div class="loading-placeholder">Loading…</div></div>
       </div>
     </div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   const chips = [{ key: 'all', label: 'All' }, { key: 'dm', label: 'DMs' },
                  { key: 'group', label: 'Groups' }];
   if (window.Chat.myDeptChannels().length) chips.push({ key: 'dept', label: 'Channels' });
@@ -912,7 +913,7 @@ window.renderChatPage = async function() {
       <div id="chat-pick-list" class="item-list">${candidates.map(rowHtml).join('') || '<div class="empty-state" style="padding:16px"><p>No one to message yet.</p></div>'}</div>
       ${!isPtnr ? `
       <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
-        <div style="font-weight:700;margin-bottom:8px">👥 New Group</div>
+        <div style="font-weight:700;margin-bottom:8px">${emojiIcon('👥',16)} New Group</div>
         <input id="chat-group-name" class="ms-input" placeholder="Group name" style="width:100%;margin-bottom:8px"/>
         <div id="chat-group-members" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
           ${candidates.map(u => `<label style="display:flex;align-items:center;gap:8px;padding:4px 2px;cursor:pointer">

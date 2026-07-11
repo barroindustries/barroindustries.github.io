@@ -3,6 +3,23 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <!-- v12 WS42 Phase 25 — apply the persisted theme class BEFORE first paint so
+       splash/login never flash the wrong light/dark look. Mirrors initTheme()'s
+       migration mapping (js/app.js) exactly: office|pink|grey→light, midnight→dark,
+       missing→light (default). Kept tiny and synchronous on purpose — this runs
+       before css/styles.css and every deferred script. -->
+  <script>(function(){
+    try {
+      var MIGRATE = { office:'light', pink:'light', grey:'light', midnight:'dark' };
+      var stored = localStorage.getItem('bi-theme');
+      if (stored && MIGRATE[stored]) stored = MIGRATE[stored];
+      var theme = stored || 'light';
+      var cls = theme === 'auto'
+        ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'theme-dark' : 'light')
+        : (theme === 'dark' ? 'theme-dark' : theme === 'astral' ? 'theme-astral' : 'light');
+      document.documentElement.classList.add(cls);
+    } catch (_) { document.documentElement.classList.add('light'); }
+  })();</script>
   <title>Barro Industries Operating System</title>
   <meta name="description" content="Barro Industries Operating System — the company's central system"/>
   <meta name="theme-color" content="#FFFFFF"/>
@@ -61,35 +78,27 @@
     <h1 class="login-title">Barro Industries</h1>
     <p class="login-sub">Operating System</p>
 
-    <!-- ── Role Picker ── -->
+    <!-- ── Role Picker — segmented 3-portal control (v12 WS42 Phase 25) ── -->
     <div id="login-role-picker">
       <p class="login-pick-label">Sign in as</p>
-      <div class="login-role-cards">
-        <button class="login-role-card" data-type="admin">
+      <div class="login-role-cards" role="group" aria-label="Portal">
+        <button class="login-role-card" data-type="admin" title="President · Manager · Secretary · Accountant">
           <span class="lrc-icon"><i data-lucide="shield"></i></span>
           <span class="lrc-label">Admin</span>
-          <span class="lrc-sub">President · Manager · Secretary · Accountant</span>
         </button>
-        <button class="login-role-card" data-type="employee">
+        <button class="login-role-card" data-type="employee" title="Staff · Agent">
           <span class="lrc-icon"><i data-lucide="user"></i></span>
           <span class="lrc-label">Employee</span>
-          <span class="lrc-sub">Staff · Agent</span>
         </button>
-        <button class="login-role-card" data-type="partner">
+        <button class="login-role-card" data-type="partner" title="Projects · Quotes · Partner Portal">
           <span class="lrc-icon"><i data-lucide="handshake"></i></span>
           <span class="lrc-label">Partner</span>
-          <span class="lrc-sub">Projects · Quotes · Partner Portal</span>
         </button>
       </div>
-      <div style="margin-top:10px">
-        <button class="login-role-card" id="signup-btn" style="width:100%;justify-content:flex-start;gap:12px;border-color:rgba(48,209,88,0.35);background:rgba(48,209,88,0.06)">
-          <span class="lrc-icon" style="background:linear-gradient(135deg,#30D158,#00D4AA)"><i data-lucide="user-plus"></i></span>
-          <div style="text-align:left">
-            <span class="lrc-label">Sign Up / Apply</span>
-            <span class="lrc-sub" style="display:block">Request access · Pending president approval</span>
-          </div>
-        </button>
-      </div>
+      <button class="login-signup-link" id="signup-btn">
+        <i data-lucide="user-plus"></i>
+        <span>Sign Up / Apply</span>
+      </button>
     </div>
 
     <!-- ── Sign Up Form ── -->
@@ -154,7 +163,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.41 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.42 · Barro Industries</div>
   </div>
 </div>
 

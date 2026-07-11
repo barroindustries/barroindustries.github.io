@@ -613,7 +613,7 @@ function followUpCardInner(t, flags){
   return `
     <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted)">📣 Follow-up Requests</div>
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted)">${emojiIcon('📣',16)} Follow-up Requests</div>
         ${openFu?`<span class="badge badge-orange" style="font-size:10px">${openFu} pending</span>`:''}
       </div>
       ${fus.length ? `<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:${isAdmin?'10px':'0'}">
@@ -625,14 +625,14 @@ function followUpCardInner(t, flags){
               <span style="font-size:11px;color:var(--text-muted)">${escHtml(fu.byName||'')}${fuTime(fu.at)?' · '+fuTime(fu.at):''}</span>
             </div>
             <div style="font-size:13px;color:var(--text);line-height:1.4;white-space:pre-wrap">${escHtml(fu.message||'Update requested')}</div>
-            ${!pending&&fu.addressedByName?`<div style="font-size:11px;color:var(--success,#34c759);margin-top:4px">✓ ${escHtml(fu.addressedByName)}${fuTime(fu.addressedAt)?' · '+fuTime(fu.addressedAt):''}</div>`:''}
-            ${pending&&(isAdmin||isAssignee)?`<button class="btn-success btn-sm fu-addr-btn" data-fu="${escHtml(fu.id||'')}" style="margin-top:6px">✓ Mark addressed</button>`:''}
+            ${!pending&&fu.addressedByName?`<div style="font-size:11px;color:var(--success,#34c759);margin-top:4px">${emojiIcon('✓',11)} ${escHtml(fu.addressedByName)}${fuTime(fu.addressedAt)?' · '+fuTime(fu.addressedAt):''}</div>`:''}
+            ${pending&&(isAdmin||isAssignee)?`<button class="btn-success btn-sm fu-addr-btn" data-fu="${escHtml(fu.id||'')}" style="margin-top:6px">${emojiIcon('✓',16)} Mark addressed</button>`:''}
           </div>`;
         }).join('')}
       </div>` : `<div style="font-size:12px;color:var(--text-muted);margin-bottom:${isAdmin?'10px':'0'}">No follow-ups yet.</div>`}
       ${isAdmin?`<div style="display:flex;gap:6px">
         <input id="fu-input" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)" placeholder="Ask the assignee for an update…"/>
-        <button class="btn-primary btn-sm" id="fu-request-btn">📣 Request</button>
+        <button class="btn-primary btn-sm" id="fu-request-btn">${emojiIcon('📣',16)} Request</button>
       </div>`:''}
     </div>`;
 }
@@ -642,7 +642,7 @@ function updateCardFollowUpBadge(taskId, count){
   document.querySelectorAll(`.item-card[data-id="${taskId}"] .item-badges`).forEach(badges=>{
     const existing=badges.querySelector('.fu-card-badge');
     if(count>0){
-      const label=`📣 ${count} follow-up${count>1?'s':''}`;
+      const label=`${emojiIcon('📣',16)} ${count} follow-up${count>1?'s':''}`;
       if(existing) existing.textContent=label;
       else { const s=document.createElement('span'); s.className='badge badge-orange fu-card-badge'; s.textContent=label; badges.appendChild(s); }
     } else if(existing){ existing.remove(); }
@@ -661,13 +661,13 @@ function taskCard(t) {
       <div class="item-badges">
         <span class="badge ${priorityBadge(t.priority)}">${t.priority||'med'}</span>
         <span class="badge ${statusBadge(t.status)}">${statusLabel(t.status)}</span>
-        ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange fu-card-badge">📣 ${t.openFollowUpCount} follow-up${t.openFollowUpCount>1?'s':''}</span>`:''}
+        ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange fu-card-badge">${emojiIcon('📣',16)} ${t.openFollowUpCount} follow-up${t.openFollowUpCount>1?'s':''}</span>`:''}
       </div>
     </div>
     <div class="item-meta" style="gap:6px;flex-wrap:wrap">
       ${assigneeChips(t)}
-      ${t.dueDate?`<span>📅 ${t.dueDate}</span>`:''}
-      ${t.department?`<span>🗂 ${t.department}</span>`:''}
+      ${t.dueDate?`<span>${emojiIcon('📅',16)} ${t.dueDate}</span>`:''}
+      ${t.department?`<span>${emojiIcon('🗂',16)} ${t.department}</span>`:''}
     </div>
   </div>`;
 }
@@ -694,7 +694,8 @@ async function renderDeptTasks(container, deptName, currentUser, currentRole) {
     tasks.sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
 
     if (!tasks.length) {
-      container.innerHTML = `<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks for ${deptName}</h4></div>`;
+      container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No tasks for ${deptName}</h4></div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [container] });
       return;
     }
 
@@ -711,7 +712,7 @@ async function renderDeptTasks(container, deptName, currentUser, currentRole) {
     const canAdd = isAdmin;
     container.innerHTML = `
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
-        <button class="btn-secondary btn-sm" id="dept-tasks-csv">⬇ CSV</button>
+        <button class="btn-secondary btn-sm" id="dept-tasks-csv">${emojiIcon('⬇',16)} CSV</button>
         ${canAdd?`<button class="btn-primary btn-sm" id="dept-add-task-btn">+ New Task</button>`:''}
       </div>
       ${groups.map(g=>`
@@ -726,6 +727,7 @@ async function renderDeptTasks(container, deptName, currentUser, currentRole) {
         </div>
       `).join('')}
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [container] });
     container.querySelector('#dept-tasks-csv')?.addEventListener('click',()=>window.exportCSV(deptName+'-tasks', tasks, [
       {key:'title',label:'Title'},{key:'status',label:'Status',get:t=>(typeof statusLabel==='function'?statusLabel(t.status):t.status)},
       {key:'priority',label:'Priority'},{key:'department',label:'Department'},{key:'dueDate',label:'Due'},{key:'createdByName',label:'Created By'}]));
@@ -736,7 +738,8 @@ async function renderDeptTasks(container, deptName, currentUser, currentRole) {
       container.querySelector('#dept-add-task-btn')?.addEventListener('click',()=>openAddTaskModal(currentUser,currentRole,deptName));
     }
   } catch(e) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Error loading tasks</h4></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Error loading tasks</h4></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [container] });
     console.error('renderDeptTasks error',e);
   }
 }
@@ -751,17 +754,18 @@ window.renderTasks = async function(currentUser, currentRole, currentDept) {
   if (currentRole === 'president' || currentRole === 'owner' || currentRole === 'finance') {
     c.innerHTML = `
       <div class="page-header">
-        <h2>✅ Tasks</h2>
+        <h2>${emojiIcon('✅',20)} Tasks</h2>
         <button class="btn-primary btn-sm" id="add-task-btn">+ New Task</button>
       </div>
       <div class="subtab-bar">
-        <button class="subtab-btn active" data-sub="departmental">📂 Departmental</button>
-        <button class="subtab-btn" data-sub="overdue">🔴 Overdue</button>
-        <button class="subtab-btn" data-sub="neardue">🟡 Near Due</button>
-        <button class="subtab-btn" data-sub="mine">👤 My Tasks</button>
+        <button class="subtab-btn active" data-sub="departmental">${emojiIcon('📂',16)} Departmental</button>
+        <button class="subtab-btn" data-sub="overdue">${emojiIcon('🔴',16)} Overdue</button>
+        <button class="subtab-btn" data-sub="neardue">${emojiIcon('🟡',16)} Near Due</button>
+        <button class="subtab-btn" data-sub="mine">${emojiIcon('👤',16)} My Tasks</button>
       </div>
       <div id="tasks-subtab-content"></div>
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
     loadPresidentTasks('departmental', currentUser, currentRole);
     c.querySelectorAll('.subtab-btn').forEach(btn=>{
       btn.addEventListener('click',()=>{
@@ -777,12 +781,12 @@ window.renderTasks = async function(currentUser, currentRole, currentDept) {
   const hasDept = (window.currentDepts||[]).length > 0;
   c.innerHTML = `
     <div class="page-header">
-      <h2>✅ Tasks</h2>
+      <h2>${emojiIcon('✅',20)} Tasks</h2>
       <div class="page-actions">
         <select id="task-filter" class="select-sm">
           <option value="mine">My Tasks</option>
           ${isAdmin?'<option value="all">All Tasks</option>':''}
-          ${hasDept||isAdmin?`<option value="dept">📂 Dept Tasks</option>`:''}
+          ${hasDept||isAdmin?`<option value="dept">${emojiIcon('📂',16)} Dept Tasks</option>`:''}
           ${TASK_STATUSES.map(s=>`<option value="${s.value}">${s.label}</option>`).join('')}
         </select>
         <button class="btn-primary btn-sm" id="add-task-btn">+ New Task</button>
@@ -790,6 +794,7 @@ window.renderTasks = async function(currentUser, currentRole, currentDept) {
     </div>
     <div id="tasks-list" class="item-list"><div class="loading-placeholder">Loading…</div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadTasksList(currentUser,currentRole,currentDept);
   document.getElementById('task-filter').onchange = () => loadTasksList(currentUser,currentRole,currentDept);
   document.getElementById('add-task-btn').onclick  = () => openAddTaskModal(currentUser,currentRole);
@@ -811,12 +816,14 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
     if (sub === 'overdue') {
       tasks = tasks.filter(t=>t.dueDate && t.dueDate < todayStr)
         .sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||''));
-      if (!tasks.length) { wrap.innerHTML='<div class="empty-state"><div class="empty-icon">✅</div><h4>No overdue tasks</h4></div>'; return; }
+      if (!tasks.length) { wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No overdue tasks</h4></div>`; return; }
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
       wrap.innerHTML = `<div style="margin-bottom:10px"><span class="badge badge-red" style="font-size:13px">${tasks.length} overdue task${tasks.length>1?'s':''}</span></div><div class="item-list">${tasks.map(t=>taskCard(t)).join('')}</div>`;
     } else {
       tasks = tasks.filter(t=>t.dueDate && t.dueDate >= todayStr && t.dueDate <= in3Str)
         .sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||''));
-      if (!tasks.length) { wrap.innerHTML='<div class="empty-state"><div class="empty-icon">🟡</div><h4>No tasks due in the next 3 days</h4></div>'; return; }
+      if (!tasks.length) { wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('🟡',44)}</div><h4>No tasks due in the next 3 days</h4></div>`; return; }
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
       wrap.innerHTML = `<div style="margin-bottom:10px"><span class="badge badge-orange" style="font-size:13px">${tasks.length} task${tasks.length>1?'s':''} due within 3 days</span></div><div class="item-list">${tasks.map(t=>taskCard(t)).join('')}</div>`;
     }
     wrap.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole)));
@@ -840,7 +847,8 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
         .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get());
       let tasks = snap.docs.map(d=>normTask(d.data(),d.id)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
       if (filter!=='all') tasks = tasks.filter(t=>t.status===filter);
-      if (!tasks.length) { list.innerHTML='<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks</h4></div>'; return; }
+      if (!tasks.length) { list.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No tasks</h4></div>`; return; }
+      if (window.lucide) lucide.createIcons({ nodes: [list] });
       list.innerHTML = tasks.map(t=>taskCard(t)).join('');
       list.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole)));
     };
@@ -855,7 +863,8 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
       ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000)
       : await db.collection('tasks').get();
     const tasks = snap.docs.map(d=>normTask(d.data(),d.id)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-    if (!tasks.length) { wrap.innerHTML='<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks yet</h4></div>'; return; }
+    if (!tasks.length) { wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No tasks yet</h4></div>`; return; }
+    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
 
     const deptGroups={};
     tasks.forEach(t=>{ const d=t.department||'Unassigned'; if(!deptGroups[d])deptGroups[d]=[]; deptGroups[d].push(t); });
@@ -877,7 +886,8 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
     if (window.lucide) lucide.createIcons({ nodes: [wrap] });
     wrap.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole)));
   } catch(err) {
-    wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">⚠️</div><h4>${err.message}</h4></div>`;
+    wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>${err.message}</h4></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
   }
 }
 
@@ -918,7 +928,8 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
     );
   }
   if (filter!=='mine'&&filter!=='all'&&filter!=='dept') tasks=tasks.filter(t=>t.status===filter);
-  if (!tasks.length) { list.innerHTML=`<div class="empty-state"><div class="empty-icon">✅</div><h4>No tasks found</h4></div>`; return; }
+  if (!tasks.length) { list.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No tasks found</h4></div>`; return; }
+  if (window.lucide) lucide.createIcons({ nodes: [list] });
 
   // For employees in "My Tasks" view, group into active and completed sections
   const COMPLETED_STATUSES = ['approved','archived','on-hold'];
@@ -929,12 +940,13 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
       ${active.length ? `
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:8px">Active (${active.length})</div>
         <div class="item-list" style="margin-bottom:20px">${active.map(t=>taskCard(t)).join('')}</div>
-      ` : '<div class="empty-state" style="padding:16px"><div class="empty-icon">✅</div><p>No active tasks</p></div>'}
+      ` : `<div class="empty-state" style="padding:16px"><div class="empty-icon">${emojiIcon('✅',44)}</div><p>No active tasks</p></div>`}
       ${completed.length ? `
         <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:8px;margin-top:8px">Completed / On Hold (${completed.length})</div>
         <div class="item-list">${completed.map(t=>taskCard(t)).join('')}</div>
       ` : ''}
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [list] });
   } else {
     list.innerHTML = tasks.map(t=>taskCard(t)).join('');
   }
@@ -999,12 +1011,12 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
         <div style="display:flex;gap:6px;margin-top:3px;flex-wrap:wrap">
           <span class="badge ${priorityBadge(t.priority)}" style="font-size:10px">${t.priority||'medium'}</span>
           <span class="badge ${statusBadge(t.status)}" style="font-size:10px">${statusLabel(t.status)}</span>
-          ${t.department?`<span class="badge badge-gray" style="font-size:10px">🗂 ${t.department}</span>`:''}
+          ${t.department?`<span class="badge badge-gray" style="font-size:10px">${emojiIcon('🗂',10)} ${t.department}</span>`:''}
         </div>
       </div>
       <div style="display:flex;gap:6px;flex-shrink:0">
-        ${canSubmit?`<button class="btn-success btn-sm" id="submit-task-btn">📤 Submit</button>`:''}
-        ${canEdit?`<button class="btn-secondary btn-sm" id="edit-task-btn">✎</button>`:''}
+        ${canSubmit?`<button class="btn-success btn-sm" id="submit-task-btn">${emojiIcon('📤',16)} Submit</button>`:''}
+        ${canEdit?`<button class="btn-secondary btn-sm" id="edit-task-btn">${emojiIcon('✎',16)}</button>`:''}
         ${isAdmin||isCreator?`<button class="btn-danger btn-sm" id="del-task-btn">${emojiIcon('trash-2',14)}</button>`:''}
       </div>
     </div>
@@ -1015,24 +1027,24 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
       <div style="flex:0 0 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;max-height:42%;padding:16px;border-bottom:1px solid var(--border)" id="task-info-scroll">
 
         <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap">
-          ${t.assignedToNames?.length?`<span>👥 <strong>${escHtml(t.assignedToNames.join(', '))}</strong></span>`:''}
-          ${t.dueDate?`<span>📅 Due: <strong style="color:${t.dueDate<today()?'var(--danger)':'inherit'}">${t.dueDate}</strong></span>`:''}
-          ${t.createdByName?`<span>🖊 By: ${escHtml(t.createdByName)}</span>`:''}
+          ${t.assignedToNames?.length?`<span>${emojiIcon('👥',16)} <strong>${escHtml(t.assignedToNames.join(', '))}</strong></span>`:''}
+          ${t.dueDate?`<span>${emojiIcon('📅',16)} Due: <strong style="color:${t.dueDate<today()?'var(--danger)':'inherit'}">${t.dueDate}</strong></span>`:''}
+          ${t.createdByName?`<span>${emojiIcon('🖊',16)} By: ${escHtml(t.createdByName)}</span>`:''}
         </div>
 
         ${t.description?`<p style="font-size:14px;line-height:1.6;margin-bottom:12px;white-space:pre-wrap;color:var(--text)">${escHtml(t.description)}</p>`:''}
 
         ${Array.isArray(t.attachments)&&t.attachments.length?`
         <div style="margin-bottom:12px">
-          <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);margin-bottom:6px">📎 Attachments</div>
+          <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);margin-bottom:6px">${emojiIcon('📎',16)} Attachments</div>
           <div style="display:flex;flex-wrap:wrap;gap:6px">
-            ${t.attachments.map(a=>{const isLink=a&&(a.source==='link'||a.kind==='link');const url=a&&(a.url||a.driveUrl)||'';return url?`<a href="${escHtml(url)}" target="_blank" rel="noopener" class="file-chip">${isLink?'🔗':'📎'} <span>${escHtml(a.name||(isLink?'Link':'File'))}</span></a>`:'';}).join('')}
+            ${t.attachments.map(a=>{const isLink=a&&(a.source==='link'||a.kind==='link');const url=a&&(a.url||a.driveUrl)||'';return url?`<a href="${escHtml(url)}" target="_blank" rel="noopener" class="file-chip">${isLink?`${emojiIcon('🔗',16)}`:`${emojiIcon('📎',16)}`} <span>${escHtml(a.name||(isLink?'Link':'File'))}</span></a>`:'';}).join('')}
           </div>
         </div>`:''}
 
         <!-- Current Standing -->
         <div style="background:rgba(255,159,10,0.08);border:1.5px solid rgba(255,159,10,0.28);border-radius:10px;padding:12px 14px;margin-bottom:12px">
-          <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,159,10,0.9);margin-bottom:6px">📍 Current Standing</div>
+          <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,159,10,0.9);margin-bottom:6px">${emojiIcon('📍',16)} Current Standing</div>
           ${t.currentStanding
             ? `<p style="font-size:13px;line-height:1.5;margin:0 0 ${canEdit?'10px':'0'};color:var(--text)">${escHtml(t.currentStanding)}</p>`
             : `<p style="font-size:12px;color:var(--text-muted);margin:0 0 ${canEdit?'10px':'0'}">No standing set yet.</p>`}
@@ -1055,7 +1067,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
         </div>`:''}
 
         ${isAdmin?`<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:10px">👥 Add Assignee</div>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:10px">${emojiIcon('👥',16)} Add Assignee</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <select id="reassign-sel" style="flex:1;min-width:180px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)">
               <option value="">— Loading… —</option>
@@ -1068,7 +1080,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
         ${followUpSectionHtml}
 
         ${currentRole==='president'&&SCORE_STATUSES.includes(t.status)?`<div style="background:var(--surface2);border:1.5px solid var(--primary-light);border-radius:10px;padding:12px;margin-bottom:10px">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--primary-light);margin-bottom:8px">🔒 President Score</div>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--primary-light);margin-bottom:8px">${emojiIcon('🔒',16)} President Score</div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <input id="pres-score" type="number" min="1" max="10" step="0.5" value="${t.presidentScore||''}" placeholder="1–10" style="width:80px;padding:8px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text)" inputmode="decimal"/>
             <span style="font-size:12px;color:var(--text-muted)">/ 10</span>
@@ -1168,7 +1180,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
     const update={assignedTo:[...t.assignedTo,newUid],assignedToNames:[...t.assignedToNames,newName],lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()};
-    if (note) update.description=(t.description||'')+`\n\n📝 ${actorName}: ${note}`;
+    if (note) update.description=(t.description||'')+`\n\n${emojiIcon('📝',16)} ${actorName}: ${note}`;
     await db.collection('tasks').doc(taskId).update(update);
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     await Notifs.send(newUid,{title:'🎯 Task Assigned to You',body:`"${t.title}" assigned by ${actorName}${note?' — '+note:''}`,icon:'🎯',type:'task_designated',taskId});
@@ -1318,7 +1330,7 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
     ${isAdmin?`<div class="form-group">
       <label>Assignees (remove: click chip; add: select below)</label>
       <div id="assignee-chips" style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap">
-        ${t.assignedToNames.map((name,i)=>`<span class="badge badge-blue" style="cursor:pointer" data-uid="${t.assignedTo[i]}">${escHtml(name)} ✕</span>`).join('')}
+        ${t.assignedToNames.map((name,i)=>`<span class="badge badge-blue" style="cursor:pointer" data-uid="${t.assignedTo[i]}">${escHtml(name)} ${emojiIcon('✕',16)}</span>`).join('')}
       </div>
       <select id="et-add-assignee" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
         <option value="">— Add assignee —</option>
@@ -1391,8 +1403,8 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
     <div class="form-row">
       <div class="form-group"><label>Priority</label>
         <select id="t-priority">
-          <option value="low">🟢 Low</option><option value="medium" selected>🟡 Medium</option>
-          <option value="high">🔴 High</option><option value="urgent">🚨 Urgent</option>
+          <option value="low">${emojiIcon('🟢',16)} Low</option><option value="medium" selected>${emojiIcon('🟡',16)} Medium</option>
+          <option value="high">${emojiIcon('🔴',16)} High</option><option value="urgent">${emojiIcon('🚨',16)} Urgent</option>
         </select>
       </div>
       <div class="form-group"><label>Status</label>
@@ -1422,7 +1434,7 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
   `, `<button class="btn-primary" id="create-task-btn">Create Task</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   let taskAttachments=[];
-  Drive.renderUploadArea('task-attach-area',r=>{taskAttachments.push(r);},{label:'📎 Attach file or link',dept:'tasks',subfolder:'attachments'});
+  Drive.renderUploadArea('task-attach-area',r=>{taskAttachments.push(r);},{label:`${emojiIcon('📎',16)} Attach file or link`,dept:'tasks',subfolder:'attachments'});
 
   let newAssignees=[];
   document.getElementById('t-assignee-sel').addEventListener('change',e=>{
@@ -1444,7 +1456,7 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
     const desc=document.getElementById('t-desc').value.trim();
     const notes=document.getElementById('t-notes').value.trim();
     const taskRef = await db.collection('tasks').add({
-      title, description:notes?`${desc}\n\n📝 Instructions: ${notes}`:desc,
+      title, description:notes?`${desc}\n\n${emojiIcon('📝',16)} Instructions: ${notes}`:desc,
       priority:document.getElementById('t-priority').value,
       status:document.getElementById('t-status').value,
       dueDate:document.getElementById('t-due').value,
@@ -1492,7 +1504,8 @@ async function loadSubsList(currentUser, currentRole, currentDept) {
     : await db.collection('submissions').where('createdBy','==',currentUser.uid).get();
 
   const subs = snap.docs.map(d => ({id:d.id,...d.data()})).sort((a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-  if (!subs.length) { list.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><h4>No submissions yet</h4></div>`; return; }
+  if (!subs.length) { list.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No submissions yet</h4></div>`; return; }
+  if (window.lucide) lucide.createIcons({ nodes: [list] });
 
   list.innerHTML = subs.map(s => `
     <div class="item-card" data-id="${s.id}">
@@ -1502,11 +1515,12 @@ async function loadSubsList(currentUser, currentRole, currentDept) {
       </div>
       <div class="item-meta">
         <span class="badge badge-gray">${escHtml(s.type||'General')}</span>
-        ${s.submittedByName?`<span>👤 ${escHtml(s.submittedByName)}</span>`:''}
-        ${s.createdAt?`<span>📅 ${new Date(s.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
+        ${s.submittedByName?`<span>${emojiIcon('👤',16)} ${escHtml(s.submittedByName)}</span>`:''}
+        ${s.createdAt?`<span>${emojiIcon('📅',16)} ${new Date(s.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
       </div>
     </div>
   `).join('');
+  if (window.lucide) lucide.createIcons({ nodes: [list] });
   list.querySelectorAll('.item-card').forEach(card => {
     card.addEventListener('click', () => openSubDetail(card.dataset.id, currentUser, currentRole));
   });
@@ -1523,10 +1537,10 @@ async function openSubDetail(subId, currentUser, currentRole) {
       <span class="badge badge-gray" style="margin-left:6px">${escHtml(s.type||'General')}</span>
     </div>
     <p style="font-size:14px;line-height:1.6;margin-bottom:12px">${escHtml(s.description||'No details.')}</p>
-    ${s.fileUrl?`<a href="${escHtml(s.fileUrl)}" target="_blank" rel="noopener" class="btn-secondary" style="display:inline-flex;gap:6px;margin-bottom:14px">${s.fileSource==='link'?'🔗':'📎'} ${escHtml(s.fileName||(s.fileSource==='link'?'Open Link':'View Attachment'))}</a>`:''}
+    ${s.fileUrl?`<a href="${escHtml(s.fileUrl)}" target="_blank" rel="noopener" class="btn-secondary" style="display:inline-flex;gap:6px;margin-bottom:14px">${s.fileSource==='link'?`${emojiIcon('🔗',16)}`:`${emojiIcon('📎',16)}`} ${escHtml(s.fileName||(s.fileSource==='link'?'Open Link':'View Attachment'))}</a>`:''}
     ${isPrivileged?`<div style="display:flex;gap:8px;margin-bottom:14px">
-      <button class="btn-success" id="approve-btn" data-id="${s.id}">✅ Approve</button>
-      <button class="btn-danger" id="reject-btn" data-id="${s.id}">❌ Reject</button>
+      <button class="btn-success" id="approve-btn" data-id="${s.id}">${emojiIcon('✅',16)} Approve</button>
+      <button class="btn-danger" id="reject-btn" data-id="${s.id}">${emojiIcon('❌',16)} Reject</button>
     </div>`:''}
     <hr class="divider"/>
     <div id="sub-comments-wrap"></div>
@@ -1593,7 +1607,7 @@ window.renderCash = async function(currentUser, currentRole) {
   const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'finance';
 
   c.innerHTML = `
-    <div class="page-header"><h2>💸 Cash & Expenses</h2>
+    <div class="page-header"><h2>${emojiIcon('💸',20)} Cash & Expenses</h2>
       <button class="btn-primary btn-sm" id="add-expense-btn">+ Add Expense</button>
     </div>
     ${isPrivileged?`
@@ -1605,6 +1619,7 @@ window.renderCash = async function(currentUser, currentRole) {
     `:''}
     <div id="cash-content"><div class="loading-placeholder">Loading…</div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
 
   loadCashContent(currentUser, currentRole, 'my-expenses');
   document.getElementById('add-expense-btn').onclick = () => openAddExpenseModal(currentUser);
@@ -1626,7 +1641,8 @@ async function loadCashContent(currentUser, currentRole, sub) {
   if (sub === 'my-expenses' || !isPrivileged) {
     const snap = await db.collection('expenses').where('createdBy','==',currentUser.uid).get();
     const expenses = snap.docs.map(d => ({id:d.id,...d.data()})).sort((a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-    if (!expenses.length) { content.innerHTML = `<div class="empty-state"><div class="empty-icon">💸</div><h4>No expenses yet</h4></div>`; return; }
+    if (!expenses.length) { content.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('💸',44)}</div><h4>No expenses yet</h4></div>`; return; }
+    if (window.lucide) lucide.createIcons({ nodes: [content] });
     content.innerHTML = expenseTable(expenses, isPrivileged);
     if (window.lucide) lucide.createIcons({ nodes: [content] });
     bindExpenseActions(content, currentUser, currentRole, sub);
@@ -1669,7 +1685,7 @@ function expenseTable(expenses, showActions) {
                 <td><span class="badge ${statusBadge(e.status)}">${e.status||'pending'}</span></td>
                 ${showActions?`<td>
                   ${e.status==='pending'?`<button class="btn-icon approve-expense" data-id="${e.id}">${emojiIcon('check-circle',14)}</button><button class="btn-icon reject-expense" data-id="${e.id}">${emojiIcon('x-circle',14)}</button>`:''}
-                  ${e.fileUrl?`<a href="${safeHttpUrl(e.fileUrl)}" target="_blank" class="btn-icon">📎</a>`:''}
+                  ${e.fileUrl?`<a href="${safeHttpUrl(e.fileUrl)}" target="_blank" class="btn-icon">${emojiIcon('📎',16)}</a>`:''}
                 </td>`:''}
               </tr>
             `).join('')}
@@ -2141,7 +2157,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
   container.innerHTML = `
     <div class="messenger-wrap">
       <div class="messenger-header">
-        <span style="font-weight:700">💬 Messages</span>
+        <span style="font-weight:700">${emojiIcon('💬',16)} Messages</span>
         <span style="font-size:11px;color:var(--text-muted)">${comments.length} message${comments.length!==1?'s':''}</span>
       </div>
       <div class="messenger-body" id="msbody-${docId}">
@@ -2169,7 +2185,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
                   </div>
                 </div>
                 ${canEdit||canDelete ? `<div class="ms-actions">
-                  ${canEdit?`<button class="ms-act-btn comment-edit-btn" data-id="${c.id}">✎</button>`:''}
+                  ${canEdit?`<button class="ms-act-btn comment-edit-btn" data-id="${c.id}">${emojiIcon('✎',16)}</button>`:''}
                   ${canDelete?`<button class="ms-act-btn ms-del-btn comment-del-btn" data-id="${c.id}">${emojiIcon('trash-2',14)}</button>`:''}
                 </div>` : ''}
                 ${isLast && seenBy.length ? `<div class="ms-seen">Seen by ${escHtml(seenBy.map(r=>r.name.split(' ')[0]).join(', '))}</div>` : ''}
@@ -2307,7 +2323,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
           const task = taskSnap.data();
           const involved = new Set([...(task.assignedTo||[]), task.createdBy].filter(Boolean));
           involved.delete(currentUser.uid);
-          const preview = text ? (text.length>60?text.slice(0,60)+'…':text) : `${fileSource==='link'?'🔗':'📎'} ${fileName||'File'}`;
+          const preview = text ? (text.length>60?text.slice(0,60)+'…':text) : `${fileSource==='link'?`${emojiIcon('🔗',16)}`:`${emojiIcon('📎',16)}`} ${fileName||'File'}`;
           for (const uid of involved) {
             await Notifs.send(uid, {
               title: `💬 New message on "${task.title}"`,
@@ -2342,7 +2358,7 @@ window.renderMarketing = async function(currentUser, currentRole, subtab = 'Camp
   const tabs = (window.DEPARTMENTS?.Marketing?.subtabs) ||
     ['Campaigns','Leads','Promos','Insights','Advertising','Marketing Designs','Plan','Strategy','Budgeting','Proposals','Tasks'];
   c.innerHTML = `
-    <div class="page-header"><h2>📢 Marketing</h2></div>
+    <div class="page-header"><h2>${emojiIcon('📢',20)} Marketing</h2></div>
     ${window.sopPanel('How Marketing works', [
       'Campaigns tracks each push: budget vs actual, dates, channels, and its materials.',
       'Leads is the capture inbox — new prospects land here, then hand off to Sales.',
@@ -2353,6 +2369,7 @@ window.renderMarketing = async function(currentUser, currentRole, subtab = 'Camp
     ${window.chipTabs(tabs.map(s => ({ key:s, label:s })), subtab)}
     <div id="mkt-content"><div class="loading-placeholder">Loading…</div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadMarketingContent(currentUser, currentRole, subtab);
   window.bindChipTabs(c, (key) => loadMarketingContent(currentUser, currentRole, key));
 };
@@ -2415,14 +2432,14 @@ async function renderMktCampaigns(content, currentUser, currentRole) {
   const canEdit = canEditDept('Marketing');
   const camps = await fetchCampaigns();
   const today = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
-  const stBadge = c0 => ({ planned:['badge-gray','🗓 Planned'], active:['badge-green','▶ Active'],
-    done:['badge-blue','✔ Done'], cancelled:['badge-red','✖ Cancelled'] })[c0.status] || ['badge-gray', c0.status||'—'];
+  const stBadge = c0 => ({ planned:['badge-gray',`${emojiIcon('🗓',16)} Planned`], active:['badge-green','▶ Active'],
+    done:['badge-blue',`✔ Done`], cancelled:['badge-red',`${emojiIcon('✖',16)} Cancelled`] })[c0.status] || ['badge-gray', c0.status||'—'];
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <h3 style="font-size:14px;margin:0">📣 Campaigns (${camps.length})</h3>
+      <h3 style="font-size:14px;margin:0">${emojiIcon('📣',14)} Campaigns (${camps.length})</h3>
       ${canEdit ? `<button class="btn-primary btn-sm" id="mkt-camp-add">＋ New Campaign</button>` : ''}
     </div>
-    ${!camps.length ? `<div class="empty-state"><div class="empty-icon">📣</div><p>No campaigns yet.</p></div>`
+    ${!camps.length ? `<div class="empty-state"><div class="empty-icon">${emojiIcon('📣',44)}</div><p>No campaigns yet.</p></div>`
       : `<div style="display:flex;flex-direction:column;gap:8px">${camps.map(c0 => { const [bc,bl]=stBadge(c0); return `
         <div class="item-card mkt-camp-row" data-id="${c0.id}" style="cursor:pointer">
           <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
@@ -2431,14 +2448,15 @@ async function renderMktCampaigns(content, currentUser, currentRole) {
                 <span class="badge ${bc}" style="font-size:9px">${bl}</span>
                 ${(c0.endDate && c0.endDate < today && c0.status==='active') ? '<span class="badge badge-amber" style="font-size:9px">past end date</span>' : ''}</div>
               <div class="item-meta">
-                <span>📅 ${escHtml(c0.startDate||'—')} → ${escHtml(c0.endDate||'—')}</span>
-                ${(c0.channels||[]).length ? `<span>📡 ${c0.channels.map(ch=>escHtml(window.leadSourceLabel(ch))).join(', ')}</span>` : ''}
+                <span>${emojiIcon('📅',16)} ${escHtml(c0.startDate||'—')} → ${escHtml(c0.endDate||'—')}</span>
+                ${(c0.channels||[]).length ? `<span>${emojiIcon('📡',16)} ${c0.channels.map(ch=>escHtml(window.leadSourceLabel(ch))).join(', ')}</span>` : ''}
               </div>
             </div>
             <div style="font-size:12px;flex-shrink:0;text-align:right">Budget<br><strong>₱${fmt(c0.budget||0)}</strong></div>
           </div>
         </div>`; }).join('')}</div>`}
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [content] });
   document.getElementById('mkt-camp-add')?.addEventListener('click', () =>
     openCampaignModal(null, () => renderMktCampaigns(content, currentUser, currentRole)));
   content.querySelectorAll('.mkt-camp-row').forEach(row => row.addEventListener('click', () =>
@@ -2547,7 +2565,8 @@ async function renderCampaignMaterialsPanel(camp) {
   const wrap = document.getElementById('mc-materials');
   if (!wrap) return;
   if (typeof window.FilesHub === 'undefined') {
-    wrap.innerHTML = `<div style="font-size:11px;color:var(--text-muted);margin-top:10px">📁 Materials arrive with the Files Hub (WS38).</div>`;
+    wrap.innerHTML = `<div style="font-size:11px;color:var(--text-muted);margin-top:10px">${emojiIcon('📁',11)} Materials arrive with the Files Hub (WS38).</div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
     return;
   }
   const folderId = `materials__${camp.id}`;
@@ -2566,17 +2585,18 @@ async function renderCampaignMaterialsPanel(camp) {
   const renderList = async () => {
     const files = (await FilesHub.loadFiles('materials')).filter(f => f.folderId === folderId);
     wrap.innerHTML = `
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:10px 0 4px">📁 Materials (${files.length})</div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:10px 0 4px">${emojiIcon('📁',16)} Materials (${files.length})</div>
       ${files.length ? `<div class="item-list">${files.map(f => `
         <div class="item-card" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-          <span style="font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.kind==='link'?'🔗':'📄'} ${escHtml(f.name||'File')}</span>
+          <span style="font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.kind==='link'?`${emojiIcon('🔗',16)}`:`${emojiIcon('📄',16)}`} ${escHtml(f.name||'File')}</span>
           <span style="display:flex;gap:6px;flex-shrink:0">
-            <button class="btn-secondary btn-sm mc-mat-preview" data-id="${f.id}" title="Preview">👁</button>
-            ${FilesHub.canEdit(f) ? `<button class="btn-secondary btn-sm mc-mat-del" data-id="${f.id}" title="Remove">🗑</button>` : ''}
+            <button class="btn-secondary btn-sm mc-mat-preview" data-id="${f.id}" title="Preview">${emojiIcon('👁',16)}</button>
+            ${FilesHub.canEdit(f) ? `<button class="btn-secondary btn-sm mc-mat-del" data-id="${f.id}" title="Remove">${emojiIcon('🗑',16)}</button>` : ''}
           </span>
         </div>`).join('')}</div>` : `<div style="font-size:12px;color:var(--text-muted)">No materials yet.</div>`}
       ${canEditDept('Marketing') ? `<div id="mc-mat-upload" style="margin-top:8px"></div>` : ''}
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
     wrap.querySelectorAll('.mc-mat-preview').forEach(b => b.addEventListener('click', () => {
       const f = files.find(x => x.id === b.dataset.id); if (f) window.openFilePreview(f);
     }));
@@ -2615,7 +2635,8 @@ async function renderMktLeads(content, currentUser, currentRole) {
   const canEdit = canEditDept('Marketing');
   const all = await window.Clients.listAll({ brand: 'sales' });      // cached 'clients' key (WS32)
   if (all.some(c => c._legacy)) {                                     // WS32 migration not yet run
-    content.innerHTML = `<div class="alert-banner alert-warn">🧭 Run the client-book unification (Sales → Clients) before using the Leads inbox.</div>`;
+    content.innerHTML = `<div class="alert-banner alert-warn">${emojiIcon('🧭',16)} Run the client-book unification (Sales → Clients) before using the Leads inbox.</div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [content] });
     return;
   }
   const camps = await fetchCampaigns();
@@ -2629,12 +2650,12 @@ async function renderMktLeads(content, currentUser, currentRole) {
         <div style="min-width:0">
           <div style="font-weight:700;font-size:13px">${escHtml(c0.name||'')}
             <span class="badge badge-gray" style="font-size:9px">${escHtml(window.leadSourceLabel(c0.source))}</span>
-            ${c0.campaignId ? `<span class="badge badge-blue" style="font-size:9px">📣 ${campName(c0.campaignId)}</span>` : ''}
+            ${c0.campaignId ? `<span class="badge badge-blue" style="font-size:9px">${emojiIcon('📣',9)} ${campName(c0.campaignId)}</span>` : ''}
             ${(() => { const st = crmStageMeta(crmStageOf(c0)); return `<span class="badge" style="font-size:9px;background:${st.color};color:#fff">${st.icon} ${st.label}</span>`; })()}</div>
           <div class="item-meta">
-            ${c0.company ? `<span>🏢 ${escHtml(c0.company)}</span>` : ''}
-            ${c0.phone ? `<span>📞 ${escHtml(c0.phone)}</span>` : ''}
-            ${c0.email ? `<span>✉️ ${escHtml(c0.email)}</span>` : ''}
+            ${c0.company ? `<span>${emojiIcon('🏢',16)} ${escHtml(c0.company)}</span>` : ''}
+            ${c0.phone ? `<span>${emojiIcon('📞',16)} ${escHtml(c0.phone)}</span>` : ''}
+            ${c0.email ? `<span>${emojiIcon('✉️',16)} ${escHtml(c0.email)}</span>` : ''}
           </div>
         </div>
         ${showHandoff && canEdit ? `<button class="btn-primary btn-sm mkt-lead-handoff" data-id="${c0.id}">→ Send to Sales</button>` : ''}
@@ -2642,14 +2663,15 @@ async function renderMktLeads(content, currentUser, currentRole) {
     </div>`;
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <h3 style="font-size:14px;margin:0">📥 Leads Inbox (${inbox.length})</h3>
+      <h3 style="font-size:14px;margin:0">${emojiIcon('📥',14)} Leads Inbox (${inbox.length})</h3>
       ${canEdit ? `<button class="btn-primary btn-sm" id="mkt-lead-add">＋ Capture Lead</button>` : ''}
     </div>
     ${!inbox.length ? `<div class="empty-state" style="padding:18px"><p>No leads awaiting handoff.</p></div>`
       : `<div style="display:flex;flex-direction:column;gap:8px">${inbox.map(c0 => row(c0, true)).join('')}</div>`}
-    ${handed.length ? `<h4 style="font-size:13px;margin:16px 0 6px">✅ Handed to Sales (${handed.length})</h4>
+    ${handed.length ? `<h4 style="font-size:13px;margin:16px 0 6px">${emojiIcon('✅',13)} Handed to Sales (${handed.length})</h4>
       <div style="display:flex;flex-direction:column;gap:8px">${handed.slice(0,30).map(c0 => row(c0, false)).join('')}</div>` : ''}
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [content] });
   document.getElementById('mkt-lead-add')?.addEventListener('click', () =>
     openLeadCaptureModal(camps, () => renderMktLeads(content, currentUser, currentRole)));
   content.querySelectorAll('.mkt-lead-handoff').forEach(btn => btn.addEventListener('click', async () => {
@@ -2767,7 +2789,7 @@ async function renderMktPromos(content, currentUser, currentRole) {
 
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <h3 style="font-size:14px;margin:0">🗓 ${months[month]} ${year}</h3>
+      <h3 style="font-size:14px;margin:0">${emojiIcon('🗓',14)} ${months[month]} ${year}</h3>
       <div style="display:flex;align-items:center;gap:6px">
         <button class="btn-secondary btn-sm mkt-promo-nav" data-dir="-1">‹</button>
         <button class="btn-secondary btn-sm mkt-promo-nav" data-dir="1">›</button>
@@ -2794,18 +2816,19 @@ async function renderMktPromos(content, currentUser, currentRole) {
             <div style="min-width:0">
               <div style="font-weight:700;font-size:13px">${escHtml(p.title||'')}</div>
               <div class="item-meta">
-                <span>📅 ${escHtml(p.startDate||'—')} → ${escHtml(p.endDate||p.startDate||'—')}</span>
-                ${p.channel ? `<span>📡 ${escHtml(window.leadSourceLabel(p.channel))}</span>` : ''}
-                ${p.campaignId ? `<span>📣 ${campName(p.campaignId)}</span>` : ''}
+                <span>${emojiIcon('📅',16)} ${escHtml(p.startDate||'—')} → ${escHtml(p.endDate||p.startDate||'—')}</span>
+                ${p.channel ? `<span>${emojiIcon('📡',16)} ${escHtml(window.leadSourceLabel(p.channel))}</span>` : ''}
+                ${p.campaignId ? `<span>${emojiIcon('📣',16)} ${campName(p.campaignId)}</span>` : ''}
               </div>
             </div>
             ${canEdit ? `<span style="display:flex;gap:4px;flex-shrink:0">
-              <button class="btn-secondary btn-sm mkt-promo-edit" data-id="${p.id}">✏️</button>
-              <button class="btn-secondary btn-sm mkt-promo-del" data-id="${p.id}">🗑</button>
+              <button class="btn-secondary btn-sm mkt-promo-edit" data-id="${p.id}">${emojiIcon('✏️',16)}</button>
+              <button class="btn-secondary btn-sm mkt-promo-del" data-id="${p.id}">${emojiIcon('🗑',16)}</button>
             </span>` : ''}
           </div>
         </div>`).join('')}</div>`}
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [content] });
   content.querySelectorAll('.mkt-promo-nav').forEach(b => b.addEventListener('click', () => {
     _promoMonthOffset += parseInt(b.dataset.dir,10); renderMktPromos(content, currentUser, currentRole);
   }));
@@ -2813,8 +2836,9 @@ async function renderMktPromos(content, currentUser, currentRole) {
     const ds = c.dataset.date; const dayPromos = onDay(ds);
     const det = document.getElementById('mkt-promo-day-detail'); if (!det) return;
     det.innerHTML = dayPromos.length
-      ? `<div style="font-weight:700;color:var(--text);margin-bottom:3px">📅 ${escHtml(ds)} — ${dayPromos.length} promo${dayPromos.length>1?'s':''}</div>${dayPromos.map(p=>`<div>• ${escHtml(p.title||'')}</div>`).join('')}`
+      ? `<div style="font-weight:700;color:var(--text);margin-bottom:3px">${emojiIcon('📅',16)} ${escHtml(ds)} — ${dayPromos.length} promo${dayPromos.length>1?'s':''}</div>${dayPromos.map(p=>`<div>• ${escHtml(p.title||'')}</div>`).join('')}`
       : '';
+    if (window.lucide) lucide.createIcons({ nodes: [det] });
   }));
   document.getElementById('mkt-promo-add')?.addEventListener('click', () =>
     openPromoModal(null, camps, () => renderMktPromos(content, currentUser, currentRole)));
@@ -2916,8 +2940,8 @@ async function renderMktInsights(content, currentUser, currentRole) {
   const totalSpend = canSpend ? rows.reduce((s,r) => s + (r.spend||0), 0) : null;
   const totalLeads = rows.reduce((s,r) => s + r.leads, 0);
   const totalWonVal = rows.reduce((s,r) => s + r.wonVal, 0);
-  const stBadge = st => ({ planned:['badge-gray','🗓 Planned'], active:['badge-green','▶ Active'],
-    done:['badge-blue','✔ Done'], cancelled:['badge-red','✖ Cancelled'] })[st] || ['badge-gray', st||'—'];
+  const stBadge = st => ({ planned:['badge-gray',`${emojiIcon('🗓',16)} Planned`], active:['badge-green','▶ Active'],
+    done:['badge-blue',`✔ Done`], cancelled:['badge-red',`${emojiIcon('✖',16)} Cancelled`] })[st] || ['badge-gray', st||'—'];
 
   content.innerHTML = `
     <div class="kpi-row" style="margin-bottom:14px">
@@ -2925,7 +2949,7 @@ async function renderMktInsights(content, currentUser, currentRole) {
       <div class="kpi-card"><div class="kpi-label">Total Leads</div><div class="kpi-value">${totalLeads}</div></div>
       <div class="kpi-card green"><div class="kpi-label">Total Wins ₱</div><div class="kpi-value">₱${fmt(totalWonVal)}</div></div>
     </div>
-    ${!camps.length ? `<div class="empty-state" style="padding:20px"><div class="empty-icon">📈</div><p>No campaigns yet.</p></div>` : `
+    ${!camps.length ? `<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('📈',44)}</div><p>No campaigns yet.</p></div>` : `
     <div class="table-wrap" style="overflow-x:auto">
       <table class="data-table">
         <thead><tr><th>Campaign</th><th>Status</th><th>Spend</th><th>Leads</th><th>CPL</th><th>Quotes</th><th>Quoted ₱</th><th>Wins</th><th>Won ₱</th></tr></thead>
@@ -2935,9 +2959,9 @@ async function renderMktInsights(content, currentUser, currentRole) {
             return `<tr>
               <td style="font-weight:600">${escHtml(r.camp.name||'')}</td>
               <td><span class="badge ${bc}" style="font-size:9px">${bl}</span></td>
-              <td style="${overBudget?'color:var(--danger)':''}">${r.spend!=null?'₱'+fmt(r.spend):'<span title="finance-visible">🔒 —</span>'}</td>
+              <td style="${overBudget?'color:var(--danger)':''}">${r.spend!=null?'₱'+fmt(r.spend):`<span title="finance-visible">${emojiIcon('🔒',16)} —</span>`}</td>
               <td>${r.leads}</td>
-              <td>${r.cpl!=null?'₱'+fmt(r.cpl):'<span title="finance-visible">🔒 —</span>'}</td>
+              <td>${r.cpl!=null?'₱'+fmt(r.cpl):`<span title="finance-visible">${emojiIcon('🔒',16)} —</span>`}</td>
               <td>${r.quotes}</td>
               <td>₱${fmt(r.quoted)}</td>
               <td>${r.wins}</td>
@@ -2946,8 +2970,9 @@ async function renderMktInsights(content, currentUser, currentRole) {
         </tbody>
       </table>
     </div>`}
-    ${unattributed > 0 ? `<div style="font-size:11px;color:var(--text-muted);margin-top:10px">💡 ${unattributed} marketing lead${unattributed>1?'s have':' has'} no campaign tag.</div>` : ''}
+    ${unattributed > 0 ? `<div style="font-size:11px;color:var(--text-muted);margin-top:10px">${emojiIcon('💡',11)} ${unattributed} marketing lead${unattributed>1?'s have':' has'} no campaign tag.</div>` : ''}
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [content] });
 }
 
 // ══════════════════════════════════════════════════
@@ -2960,12 +2985,12 @@ window.renderFinance = async function(currentUser, currentRole, subtab = window.
   const hrTabs  = ['Payroll','HR Profiles','Cash Advances'];
   const allTabs = [...finTabs, ...hrTabs];
   c.innerHTML = `
-    <div class="page-header"><h2>💰 Finance & HR</h2></div>
+    <div class="page-header"><h2>${emojiIcon('💰',20)} Finance & HR</h2></div>
     ${window.sopPanel('How Finance works', [
       'The ledger is the single source of truth — approved expenses, cash journals and payroll all post into it automatically.',
       'Record income/expense via the Accounting, Cash Receipts and Cash Disbursements tabs; Reports reads the ledger for the P&L and VAT.',
       'Payroll runs through Compute → Verify → Disburse; HR Profiles handles weekly worker payslips.',
-      'Deleting any finance record needs President approval (the 🗑 button files a request).'
+      `Deleting any finance record needs President approval (the ${emojiIcon('🗑',16)} button files a request).`
     ])}
     <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--text-muted);padding:0 4px 4px;text-transform:uppercase">Finance</div>
     ${window.chipTabs(finTabs.map(s=>({key:s,label:s})), subtab)}
@@ -2973,6 +2998,7 @@ window.renderFinance = async function(currentUser, currentRole, subtab = window.
     ${window.chipTabs(hrTabs.map(s=>({key:s,label:s})), subtab)}
     <div id="fin-content"><div class="loading-placeholder">Loading…</div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadFinanceContent(currentUser, currentRole, subtab);
   window.bindChipTabs(c, (key) => { window.setSubroute(key); loadFinanceContent(currentUser, currentRole, key); });
 };
@@ -3021,7 +3047,7 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
 function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel, targetField, current }, currentUser, onDone) {
   const cur = parseFloat(current) || 0;
   const _isPres = typeof isRealPresident === 'function' && isRealPresident();
-  openPage(`💸 Give Raise — ${escHtml(subjectName||'')}`, `
+  openPage(`${emojiIcon('💸',16)} Give Raise — ${escHtml(subjectName||'')}`, `
     <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px">
       Current ${escHtml(fieldLabel)}: <strong style="color:var(--text)">₱${fmt(cur)}</strong>
     </div>
@@ -3102,7 +3128,7 @@ async function openRaiseHistory(opts = {}) {
   let list = snap.docs.map(d=>({id:d.id,...d.data()}));
   if (opts.subjectId) list = list.filter(r => r.subjectId === opts.subjectId);
   const rows = !list.length
-    ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">💸</div><p>No salary raises recorded yet.</p></div>'
+    ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('💸',44)}</div><p>No salary raises recorded yet.</p></div>`
     : `<div class="table-wrap"><table class="data-table">
         <thead><tr><th>Effective</th><th>Employee</th><th>Type</th><th>Old → New</th><th>Change</th><th>Reason</th><th>By</th></tr></thead>
         <tbody>${list.map(r=>{
@@ -3118,7 +3144,7 @@ async function openRaiseHistory(opts = {}) {
           </tr>`;
         }).join('')}</tbody>
       </table></div>`;
-  openModal(`💸 Salary Raise History${opts.subjectName?` — ${escHtml(opts.subjectName)}`:''}`, rows,
+  openModal(`${emojiIcon('💸',16)} Salary Raise History${opts.subjectName?` — ${escHtml(opts.subjectName)}`:''}`, rows,
     `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
 }
 
@@ -3271,7 +3297,7 @@ window.openScheduledRaises = async function() {
   const isPres = typeof isRealPresident === 'function' && isRealPresident();
   const render = () => {
     const rows = !list.length
-      ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">💸</div><p>No scheduled or pending raises.</p></div>'
+      ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('💸',44)}</div><p>No scheduled or pending raises.</p></div>`
       : `<div class="table-wrap"><table class="data-table">
           <thead><tr><th>Effective</th><th>Employee</th><th>Old → New</th><th>Status</th><th>By</th><th></th></tr></thead>
           <tbody>${list.map(r=>`<tr data-id="${r.id}">
@@ -3281,11 +3307,11 @@ window.openScheduledRaises = async function() {
             <td><span class="badge ${r.status==='scheduled'?'badge-blue':'badge-orange'}">${r.status==='scheduled'?'Scheduled':'Pending Approval'}</span></td>
             <td style="font-size:12px;color:var(--text-muted)">${escHtml(r.requestedByName||'—')}</td>
             <td style="white-space:nowrap">
-              ${(r.status==='pending_approval'&&isPres)?`<button class="btn-success btn-sm sr-approve-btn" data-id="${r.id}">✓ Approve</button> <button class="btn-danger btn-sm sr-reject-btn" data-id="${r.id}">✗ Reject</button>`:''}
+              ${(r.status==='pending_approval'&&isPres)?`<button class="btn-success btn-sm sr-approve-btn" data-id="${r.id}">${emojiIcon('✓',16)} Approve</button> <button class="btn-danger btn-sm sr-reject-btn" data-id="${r.id}">${emojiIcon('✗',16)} Reject</button>`:''}
             </td>
           </tr>`).join('')}</tbody>
         </table></div>`;
-    openModal('💸 Scheduled &amp; Pending Raises', rows, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    openModal(`${emojiIcon('💸',16)} Scheduled &amp; Pending Raises`, rows, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
     document.querySelectorAll('.sr-approve-btn').forEach(btn=>btn.addEventListener('click', async ()=>{
       const r = await window.RaiseFlow.approve(btn.dataset.id);
       Notifs.showToast(r==='approved'?'Raise approved.':'Already resolved.');
@@ -3311,7 +3337,8 @@ window.renderHR = async function(currentUser, currentRole){
   const c = deptContainer();
   const role = window.currentRole || currentRole || '';
   if (!['president','manager','secretary','finance'].includes(role)) {
-    c.innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><h4>HR is management &amp; finance only</h4></div>';
+    c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>HR is management &amp; finance only</h4></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
     return;
   }
   const canAccounts = ['president','manager'].includes(role);   // renderTeam gate parity
@@ -3324,7 +3351,7 @@ window.renderHR = async function(currentUser, currentRole){
     { icon:'🕐', title:'Attendance',     desc:'Daily attendance & time-extension requests', go:()=>navigateTo('attendance') },
   ];
   c.innerHTML = `
-    <div class="page-header"><h2>👥 Human Resources</h2></div>
+    <div class="page-header"><h2>${emojiIcon('👥',20)} Human Resources</h2></div>
     ${window.sopPanel('How HR works', [
       'People & Roles — set each person’s role, department(s) and employee class (Regular monthly vs Production weekly).',
       'Payroll — run the monthly cycle: Compute the figures, Verify them, then mark Disbursed once salaries are released (finalize by the 5th).',
@@ -3340,6 +3367,7 @@ window.renderHR = async function(currentUser, currentRole){
           <span style="font-size:12px;color:var(--text-muted)">${card.desc}</span>
         </button>`).join('')}
     </div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   c.querySelectorAll('.hr-card').forEach(b=>{
     b.addEventListener('click', ()=>cards[+b.dataset.i].go());
     b.addEventListener('mouseenter', ()=>{ b.style.borderColor='var(--primary-light)'; b.style.background='var(--surface2)'; });
@@ -3672,7 +3700,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   const _upcomingRaises = _prSnap.docs.filter(d=>d.data().status==='scheduled' && (d.data().effectiveMonth||'') > _nm).length;
   const _pendingRaises  = _prSnap.docs.filter(d=>d.data().status==='pending_approval').length;
   const raiseBanner = (_upcomingRaises||_pendingRaises)
-    ? `<div class="info-banner" style="margin:8px 0">💸 ${_upcomingRaises} scheduled raise(s) upcoming${_pendingRaises?` · ${_pendingRaises} awaiting President approval`:''}. <button class="btn-secondary btn-sm" id="pr-view-raises">View</button></div>`
+    ? `<div class="info-banner" style="margin:8px 0">${emojiIcon('💸',16)} ${_upcomingRaises} scheduled raise(s) upcoming${_pendingRaises?` · ${_pendingRaises} awaiting President approval`:''}. <button class="btn-secondary btn-sm" id="pr-view-raises">View</button></div>`
     : '';
 
   container.innerHTML = `
@@ -3683,13 +3711,13 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       </select>
       <div style="display:flex;gap:8px">
         <button class="btn-primary btn-sm" id="gen-payroll-btn">Compute Payroll</button>
-        <button class="btn-secondary btn-sm" id="raise-history-btn">💸 Raise History</button>
-        <button class="btn-secondary btn-sm" id="print-payroll-btn">🖨 Print All</button>
+        <button class="btn-secondary btn-sm" id="raise-history-btn">${emojiIcon('💸',16)} Raise History</button>
+        <button class="btn-secondary btn-sm" id="print-payroll-btn">${emojiIcon('🖨',16)} Print All</button>
       </div>
     </div>
     ${raiseBanner}
     <div id="pay-run-strip" style="margin-bottom:14px"></div>
-    ${productionStaff.length?`<div style="font-size:12px;color:var(--text-2);background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:12px">🏭 <strong>${productionStaff.length}</strong> production-class worker${productionStaff.length!==1?'s are':' is'} paid <strong>weekly</strong> via Worker Payslips (HR → Payslips) and ${productionStaff.length!==1?'are':'is'} excluded from this monthly run to avoid double payment.</div>`:''}
+    ${productionStaff.length?`<div style="font-size:12px;color:var(--text-2);background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:12px">${emojiIcon('🏭',16)} <strong>${productionStaff.length}</strong> production-class worker${productionStaff.length!==1?'s are':' is'} paid <strong>weekly</strong> via Worker Payslips (HR → Payslips) and ${productionStaff.length!==1?'are':'is'} excluded from this monthly run to avoid double payment.</div>`:''}
     <div class="card">
       <div class="card-body" style="padding:0">
         <div class="table-wrap">
@@ -3707,7 +3735,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     </div>
     ${isPres && delReqs.length ? `
     <div class="card" style="margin-top:14px;border:2px solid var(--danger)">
-      <div class="card-header" style="background:rgba(220,53,69,0.08)"><h3 style="color:var(--danger)">⚠️ Pending Payroll Delete Approvals (${delReqs.length})</h3></div>
+      <div class="card-header" style="background:rgba(220,53,69,0.08)"><h3 style="color:var(--danger)">${emojiIcon('⚠️',20)} Pending Payroll Delete Approvals (${delReqs.length})</h3></div>
       <div class="card-body" style="padding:0">
         <div class="table-wrap"><table class="data-table" id="del-req-table">
           <thead><tr><th>Month</th><th>Employee</th><th>Requested By</th><th>Reason</th><th></th></tr></thead>
@@ -3717,8 +3745,8 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             <td style="font-size:11px">${escHtml(r.requestedByName||'—')}</td>
             <td style="font-size:11px;color:var(--text-muted)">${escHtml(r.reason||'—')}</td>
             <td style="white-space:nowrap">
-              <button class="btn-primary btn-sm del-req-approve" data-req-id="${r.id}" data-hist-id="${r.historyId}" title="Approve deletion">✓ Approve</button>
-              <button class="btn-secondary btn-sm del-req-deny" data-req-id="${r.id}" data-req-by="${r.requestedBy}" style="margin-left:4px" title="Deny">✕ Deny</button>
+              <button class="btn-primary btn-sm del-req-approve" data-req-id="${r.id}" data-hist-id="${r.historyId}" title="Approve deletion">${emojiIcon('✓',16)} Approve</button>
+              <button class="btn-secondary btn-sm del-req-deny" data-req-id="${r.id}" data-req-by="${r.requestedBy}" style="margin-left:4px" title="Deny">${emojiIcon('✕',16)} Deny</button>
             </td>
           </tr>`).join('')}</tbody>
         </table></div>
@@ -3740,10 +3768,10 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               <td><strong>₱${fmt(h.finalPay)}</strong></td>
               <td><span class="badge badge-blue" style="font-size:10px">Expense</span></td>
               ${canFinance?`<td style="white-space:nowrap">
-                <button class="btn-secondary btn-sm hist-edit-btn" data-id="${h.id}" title="Edit">✎</button>
+                <button class="btn-secondary btn-sm hist-edit-btn" data-id="${h.id}" title="Edit">${emojiIcon('✎',16)}</button>
                 ${pendingDelIds.has(h.id)
-                  ? `<button class="btn-secondary btn-sm" style="margin-left:4px;opacity:0.6;cursor:default" disabled title="Awaiting president approval">⏳</button>`
-                  : `<button class="btn-danger btn-sm hist-del-btn" data-id="${h.id}" data-name="${escHtml(h.userName||'')}" data-month="${h.month||''}" title="${isPres?'Delete':'Request deletion'}" style="margin-left:4px">${isPres?'✕':'🗑'}</button>`
+                  ? `<button class="btn-secondary btn-sm" style="margin-left:4px;opacity:0.6;cursor:default" disabled title="Awaiting president approval">${emojiIcon('⏳',16)}</button>`
+                  : `<button class="btn-danger btn-sm hist-del-btn" data-id="${h.id}" data-name="${escHtml(h.userName||'')}" data-month="${h.month||''}" title="${isPres?'Delete':'Request deletion'}" style="margin-left:4px">${isPres?`${emojiIcon('✕',16)}`:`${emojiIcon('🗑',16)}`}</button>`
                 }
               </td>`:''}
             </tr>`).join('')}</tbody>
@@ -3751,6 +3779,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       </div>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   // ── History edit (Finance & above) ──────────────
   if (canFinance) {
@@ -3966,9 +3995,9 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         <td>${caCell}</td>
         <td><strong style="color:${net>=0?'var(--success)':'var(--danger)'}">₱${fmt(net)}</strong></td>
         <td>
-          <button class="btn-secondary btn-sm edit-emp-pay-btn" data-uid="${u.id}" title="Edit">✎</button>
+          <button class="btn-secondary btn-sm edit-emp-pay-btn" data-uid="${u.id}" title="Edit">${emojiIcon('✎',16)}</button>
           ${canFinance ? `<button class="btn-secondary btn-sm raise-emp-btn" data-uid="${u.id}" title="Give raise">${emojiIcon('banknote',14)}</button>` : ''}
-          <button class="btn-secondary btn-sm print-slip-btn" data-uid="${u.id}" title="Payslip">🖨</button>
+          <button class="btn-secondary btn-sm print-slip-btn" data-uid="${u.id}" title="Payslip">${emojiIcon('🖨',16)}</button>
         </td>
       </tr>`;
     }).join('');
@@ -3999,7 +4028,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 
         const statYear = window.bizYear ? window.bizYear() : new Date().getFullYear();
         const sug = window.computeStatutory ? window.computeStatutory({ grossPay: (emp.salary||0)+(emp.allowance||0), year: statYear }) : null;
-        const unverifiedBadge = sug && sug.unverified ? ` <span style="font-size:10px;color:var(--warning)">⚠ unverified rates</span>` : '';
+        const unverifiedBadge = sug && sug.unverified ? ` <span style="font-size:10px;color:var(--warning)">${emojiIcon('⚠',10)} unverified rates</span>` : '';
         const inst = plan.plan[0]; // first CA in the plan, for the "installment N of M" label
 
         const _payClass = emp.payClass==='production' ? 'production' : 'regular';
@@ -4014,7 +4043,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           <div class="form-row">
             <div class="form-group"><label>${_payClass==='production'?'Weekly Rate':'Base Salary'}</label>
               <div style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface2,var(--surface));color:var(--text-muted)">
-                ₱${fmt(emp.salary||0)} · <span style="font-size:11px">change via 💸 Give Raise (approval-routed)</span>
+                ₱${fmt(emp.salary||0)} · <span style="font-size:11px">change via ${emojiIcon('💸',16)} Give Raise (approval-routed)</span>
               </div>
             </div>
             <div class="form-group"><label>Allowance</label><input id="ep-allow" type="number" value="${emp.allowance||0}" inputmode="decimal"/></div>
@@ -4029,7 +4058,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           </div>
           <div class="form-group"><label>Tax</label><input id="ep-tax" type="number" value="${emp.tax||0}" placeholder="Computed: ₱${sug?fmt(sug.ee.tax):'0.00'}" inputmode="decimal"/></div>
           <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-            <label style="font-weight:600">🪪 Statutory IDs <span style="font-size:11px;color:var(--text-muted)">(required for Alphalist / BIR 2316)</span></label>
+            <label style="font-weight:600">${emojiIcon('🪪',16)} Statutory IDs <span style="font-size:11px;color:var(--text-muted)">(required for Alphalist / BIR 2316)</span></label>
             <div class="form-row">
               <div class="form-group"><label>TIN</label><input id="ep-tin" value="${escHtml(emp.tinNum||'')}" placeholder="000-000-000-000"/></div>
               <div class="form-group"><label>SSS No.</label><input id="ep-ssnum" value="${escHtml(emp.ssNum||'')}" placeholder="00-0000000-0"/></div>
@@ -4041,7 +4070,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           </div>
           ${caBalance > 0 ? `
           <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-            <label style="font-weight:600">💳 Cash Advance — Outstanding ₱${fmt(caBalance)}${inst?` · Installment ${inst.installmentNo} of ${inst.terms}`:''}</label>
+            <label style="font-weight:600">${emojiIcon('💳',16)} Cash Advance — Outstanding ₱${fmt(caBalance)}${inst?` · Installment ${inst.installmentNo} of ${inst.terms}`:''}</label>
             <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
               <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
                 <input type="radio" name="ep-ca-mode" value="installment" ${plan.mode!=='full'?'checked':''}/>
@@ -4154,18 +4183,19 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     wrap.innerHTML = `
       <div class="card"><div class="card-body" style="display:flex;flex-direction:column;gap:10px">
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-          ${PR_STATES.map((s,i)=>`<span class="badge ${i<idx?'badge-blue':i===idx?'badge-green':'badge-gray'}" style="font-size:11px">${i<=idx?'✓ ':''}${PR_LABEL[s]}</span>${i<PR_STATES.length-1?'<span style="color:var(--text-muted)">→</span>':''}`).join('')}
+          ${PR_STATES.map((s,i)=>`<span class="badge ${i<idx?'badge-blue':i===idx?'badge-green':'badge-gray'}" style="font-size:11px">${i<=idx?`${emojiIcon('✓',16)} `:''}${PR_LABEL[s]}</span>${i<PR_STATES.length-1?'<span style="color:var(--text-muted)">→</span>':''}`).join('')}
           <span style="flex:1"></span>
           ${data.totalNet!=null?`<span style="font-size:12px;color:var(--text-muted)">Net ₱${fmt(data.totalNet)} · ${data.employeeCount||0} staff</span>`:''}
         </div>
-        ${grace?`<div style="font-size:12px;color:var(--text-muted)">⏳ ${grace}</div>`:''}
+        ${grace?`<div style="font-size:12px;color:var(--text-muted)">${emojiIcon('⏳',12)} ${grace}</div>`:''}
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          ${(canFinance && state==='computed')?`<button class="btn-secondary btn-sm" id="pr-verify-btn">✓ Mark Verified</button>`:''}
-          ${(isPres && state==='verified')?`<button class="btn-primary btn-sm" id="pr-disburse-btn">💵 Disburse</button><button class="btn-secondary btn-sm" id="pr-reopen-btn">↺ Reopen</button>`:''}
+          ${(canFinance && state==='computed')?`<button class="btn-secondary btn-sm" id="pr-verify-btn">${emojiIcon('✓',16)} Mark Verified</button>`:''}
+          ${(isPres && state==='verified')?`<button class="btn-primary btn-sm" id="pr-disburse-btn">${emojiIcon('💵',16)} Disburse</button><button class="btn-secondary btn-sm" id="pr-reopen-btn">↺ Reopen</button>`:''}
           ${state==='draft'?`<span style="font-size:12px;color:var(--text-muted)">Use <strong>Compute Payroll</strong> to start this month's run.</span>`:''}
-          ${state==='disbursed'&&data.disbursedAt?`<span style="font-size:12px;color:var(--success)">💵 Disbursed${data.disbursedByName?` by ${escHtml(data.disbursedByName)}`:''}</span>`:''}
+          ${state==='disbursed'&&data.disbursedAt?`<span style="font-size:12px;color:var(--success)">${emojiIcon('💵',12)} Disbursed${data.disbursedByName?` by ${escHtml(data.disbursedByName)}`:''}</span>`:''}
         </div>
       </div></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
     // Verify — only from 'computed' (re-checked here, not just hidden by the UI,
     // since a stale page could still fire a click after someone else acted).
     document.getElementById('pr-verify-btn')?.addEventListener('click', async ()=>{
@@ -4281,9 +4311,10 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     host.innerHTML = `
       <div class="no-print" style="display:flex;gap:8px;align-items:center;margin-bottom:14px">
         <button class="btn-secondary btn-sm" id="ps-back-btn">← Back</button>
-        <button class="btn-primary btn-sm" onclick="window.print()">🖨 Print All</button>
+        <button class="btn-primary btn-sm" onclick="window.print()">${emojiIcon('🖨',16)} Print All</button>
       </div>
       ${models.map(mdl => `<div class="payslip-print" style="page-break-after:always">${window.buildPayslipHTML(mdl)}</div>`).join('')}`;
+    if (window.lucide) lucide.createIcons({ nodes: [host] });
     document.getElementById('ps-back-btn').addEventListener('click', () => window.renderFinance(currentUser, currentRole, 'Payroll'));
   });
 }
@@ -4299,7 +4330,7 @@ async function renderTaxesTab(container, currentUser, currentRole) {
     </div>
     <div class="card">
       <div class="card-body" style="padding:0">
-        ${!records.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📊</div><h4>No tax records yet</h4></div>':
+        ${!records.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📊',44)}</div><h4>No tax records yet</h4></div>`:
           `<div class="table-wrap"><table class="data-table">
             <thead><tr><th>Period</th><th>Type</th><th>Amount</th><th>Status</th><th>Due Date</th><th>Filed By</th><th></th></tr></thead>
             <tbody>${records.map(r=>`<tr>
@@ -4310,9 +4341,9 @@ async function renderTaxesTab(container, currentUser, currentRole) {
               <td>${r.dueDate||'—'}</td>
               <td>${escHtml(r.filedBy||'—')}</td>
               <td style="white-space:nowrap">
-                ${isPriv?`<button class="btn-secondary btn-sm tax-edit-btn" data-id="${r.id}">✎</button>`:''}
+                ${isPriv?`<button class="btn-secondary btn-sm tax-edit-btn" data-id="${r.id}">${emojiIcon('✎',16)}</button>`:''}
                 ${isPriv?`<button class="btn-danger btn-sm tax-del-btn" data-id="${r.id}" data-label="${escHtml((r.type||'Tax')+' — '+(r.period||r.id.slice(-5)))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>`:''}
-                ${r.fileUrl?`<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm" style="margin-left:4px">📎</a>`:''}
+                ${r.fileUrl?`<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm" style="margin-left:4px">${emojiIcon('📎',16)}</a>`:''}
               </td>
             </tr>`).join('')}</tbody>
           </table></div>`}
@@ -4449,18 +4480,18 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
   container.innerHTML = `
     <div id="finrep-period">${window.periodPicker(periodKey, {})}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-      <div style="font-size:12px;color:var(--text-muted)">${label}${periodClosed?' &nbsp;<span class="badge badge-gray">🔒 Closed</span>':''}</div>
+      <div style="font-size:12px;color:var(--text-muted)">${label}${periodClosed?` &nbsp;<span class="badge badge-gray">${emojiIcon('🔒',16)} Closed</span>`:''}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${isFinancePriv()?`<button class="btn-secondary btn-sm" onclick="window.runLedgerBackfill()" title="Post approved expenses + cash journals into the ledger">🔄 Sync to ledger</button>`:''}
-        ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runTagAccountTypes()" title="Backfill accountType on legacy ledger rows">🏷 Tag account types</button>`:''}
-        ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runRestateMaterialCosts()" title="Fix the double material-expensing bug on historical rows">🧾 Restate material costs</button>`:''}
-        ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runFixUndatedRows()" title="Repair ledger rows with a missing/malformed date">🩹 Fix undated rows</button>`:''}
+        ${isFinancePriv()?`<button class="btn-secondary btn-sm" onclick="window.runLedgerBackfill()" title="Post approved expenses + cash journals into the ledger">${emojiIcon('🔄',16)} Sync to ledger</button>`:''}
+        ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runTagAccountTypes()" title="Backfill accountType on legacy ledger rows">${emojiIcon('🏷',16)} Tag account types</button>`:''}
+        ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runRestateMaterialCosts()" title="Fix the double material-expensing bug on historical rows">${emojiIcon('🧾',16)} Restate material costs</button>`:''}
+        ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runFixUndatedRows()" title="Repair ledger rows with a missing/malformed date">${emojiIcon('🩹',16)} Fix undated rows</button>`:''}
         ${isPres&&isClosableMonth?(periodClosed
-            ? `<button class="btn-secondary btn-sm" id="finrep-reopen-btn" data-month="${pParsed.key.slice(6)}">🔓 Reopen ${pParsed.label}</button>`
-            : `<button class="btn-secondary btn-sm" id="finrep-close-btn" data-month="${pParsed.key.slice(6)}" data-label="${escHtml(pParsed.label)}">🔒 Close ${pParsed.label}</button>`
+            ? `<button class="btn-secondary btn-sm" id="finrep-reopen-btn" data-month="${pParsed.key.slice(6)}">${emojiIcon('🔓',16)} Reopen ${pParsed.label}</button>`
+            : `<button class="btn-secondary btn-sm" id="finrep-close-btn" data-month="${pParsed.key.slice(6)}" data-label="${escHtml(pParsed.label)}">${emojiIcon('🔒',16)} Close ${pParsed.label}</button>`
           ):''}
-        <button class="btn-secondary btn-sm" onclick="window.exportFinReportCSV()" title="Export this period's ledger to CSV">⬇ CSV</button>
-        <button class="btn-secondary btn-sm" onclick="window.print()">🖨 Print</button>
+        <button class="btn-secondary btn-sm" onclick="window.exportFinReportCSV()" title="Export this period's ledger to CSV">${emojiIcon('⬇',16)} CSV</button>
+        <button class="btn-secondary btn-sm" onclick="window.print()">${emojiIcon('🖨',16)} Print</button>
       </div>
     </div>
     <div class="kpi-row" style="margin-bottom:14px">
@@ -4470,7 +4501,7 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
     </div>
 
     <div class="card" style="margin-bottom:14px">
-      <div class="card-header"><h3>📈 Income Statement</h3></div>
+      <div class="card-header"><h3>${emojiIcon('📈',20)} Income Statement</h3></div>
       <div class="card-body" style="padding:0"><div class="table-wrap"><table class="data-table">
         <thead><tr><th>Account / Category</th><th style="text-align:right">Amount</th></tr></thead>
         <tbody>
@@ -4486,7 +4517,7 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
     </div>
 
     <div class="card">
-      <div class="card-header"><h3>🧾 Tax / VAT Reference</h3></div>
+      <div class="card-header"><h3>${emojiIcon('🧾',20)} Tax / VAT Reference</h3></div>
       <div class="card-body">
         <div style="display:flex;justify-content:space-between;padding:6px 0"><span>Sales Revenue (recorded total)</span><strong>₱${fmt(sales)}</strong></div>
         <div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border)"><span>Output VAT (on sales)</span><strong>₱${fmt(outputVat)}</strong></div>
@@ -4496,6 +4527,7 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
       </div>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
   window.bindPeriodPicker(document.getElementById('finrep-period'), (newKey) => {
     // periodPicker/Period use canonical keys; renderFinancialReports keeps its
     // legacy 'year' spelling for the YTD case so its own external callers
@@ -4686,12 +4718,12 @@ async function renderLedgerTab(container, currentUser, currentRole) {
       <div class="kpi-card ${balance>=0?'accent':'red'}"><div class="kpi-label">Balance</div><div class="kpi-value">₱${fmt(balance)}</div></div>
     </div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px">
-      ${entries.length?'<button class="btn-secondary btn-sm" id="ledger-csv-btn">⬇ CSV</button>':''}
+      ${entries.length?`<button class="btn-secondary btn-sm" id="ledger-csv-btn">${emojiIcon('⬇',16)} CSV</button>`:''}
       <button class="btn-primary btn-sm" id="add-ledger-btn">+ New Entry</button>
     </div>
     <div class="card">
       <div class="card-body" style="padding:0">
-        ${!entries.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📒</div><h4>No ledger entries yet</h4></div>':
+        ${!entries.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📒',44)}</div><h4>No ledger entries yet</h4></div>`:
           `<div class="table-wrap"><table class="data-table">
             <thead><tr><th>Date</th><th>Description / Account</th><th>Category</th><th>Source</th><th>Debit</th><th>Credit</th><th>Ref #</th><th>By</th>${canFin?'<th></th>':''}</tr></thead>
             <tbody>${entries.map(e=>`<tr>
@@ -4704,7 +4736,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
               <td><code>${escHtml(e.refNumber||'—')}</code></td>
               <td style="font-size:11px">${escHtml(e.addedByName||'—')}</td>
               ${canFin?`<td style="white-space:nowrap">
-                <button class="btn-secondary btn-sm led-edit-btn" data-id="${e.id}" data-src="${e._src}">✎</button>
+                <button class="btn-secondary btn-sm led-edit-btn" data-id="${e.id}" data-src="${e._src}">${emojiIcon('✎',16)}</button>
                 <button class="btn-danger btn-sm led-del-btn" data-id="${e.id}" data-src="${e._src}" data-label="${escHtml((e.description||'entry')+' — ₱'+fmt(e.amount))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
               </td>`:''}
             </tr>`).join('')}</tbody>
@@ -4843,10 +4875,10 @@ window.renderBankAccounts = async function(container) {
   const recBal  = window.BankAccounts.computeBalances(accounts, rows, { reconciledOnly:true });
   const cashTotal = accounts.filter(a=>a.active!==false).reduce((s,a)=>s+(bookBal[a.id]?bookBal[a.id].balance:0),0);
   const unreconciled = rows.filter(r=>r.bankAccountId && !r.reconciled).length;
-  const typeIcon = t => t==='ewallet' ? '📱' : t==='cash' ? '💵' : '🏦';
+  const typeIcon = t => t==='ewallet' ? `${emojiIcon('📱',16)}` : t==='cash' ? `${emojiIcon('💵',16)}` : `${emojiIcon('🏦',16)}`;
 
   c.innerHTML = `
-    <div class="page-header"><h2>🏦 Bank Accounts</h2><span style="font-size:12px;color:var(--text-muted)">Company cash locations — balances derive from opening anchor + tagged ledger flows</span></div>
+    <div class="page-header"><h2>${emojiIcon('🏦',20)} Bank Accounts</h2><span style="font-size:12px;color:var(--text-muted)">Company cash locations — balances derive from opening anchor + tagged ledger flows</span></div>
     <div class="kpi-row" style="margin-bottom:14px">
       <div class="kpi-card green"><div class="kpi-label">Cash Position</div><div class="kpi-value" style="font-size:15px">₱${fmt(cashTotal)}</div></div>
       <div class="kpi-card"><div class="kpi-label">Active Accounts</div><div class="kpi-value">${accounts.filter(a=>a.active!==false).length}</div></div>
@@ -4854,7 +4886,7 @@ window.renderBankAccounts = async function(container) {
     </div>
     ${canWrite?`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn-primary btn-sm" id="ba-add-btn">+ Add Account</button></div>`:''}
     <div class="card"><div class="card-body" style="padding:0">
-    ${!accounts.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🏦</div><h4>No bank accounts registered</h4><p>Add every real company account (bank / e-wallet / petty cash) to start tracking balances.</p></div>':
+    ${!accounts.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🏦',44)}</div><h4>No bank accounts registered</h4><p>Add every real company account (bank / e-wallet / petty cash) to start tracking balances.</p></div>`:
     `<div class="table-wrap"><table class="data-table">
       <thead><tr><th></th><th>Account</th><th>Opening</th><th>Book Balance</th><th>Reconciled Balance</th><th>Status</th>${canWrite?'<th></th>':''}</tr></thead>
       <tbody>${accounts.map(a=>{
@@ -4867,7 +4899,7 @@ window.renderBankAccounts = async function(container) {
         <td>₱${fmt(rb)}</td>
         <td><span class="badge ${a.active!==false?'badge-green':'badge-gray'}">${a.active!==false?'active':'closed'}</span></td>
         ${canWrite?`<td style="white-space:nowrap">
-          <button class="btn-secondary btn-sm ba-edit-btn" data-id="${escHtml(a.id)}">✎</button>
+          <button class="btn-secondary btn-sm ba-edit-btn" data-id="${escHtml(a.id)}">${emojiIcon('✎',16)}</button>
           <button class="btn-danger btn-sm ba-del-btn" data-id="${escHtml(a.id)}" data-label="${escHtml(a.nickname||'bank account')}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
         </td>`:''}
       </tr>`;}).join('')}</tbody>
@@ -4991,9 +5023,9 @@ async function renderBankAccountDrilldown(a) {
     <div class="card" style="margin-top:14px"><div class="card-body">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <strong>${escHtml(window.BankAccounts.label(a))} — transactions since ${escHtml(a.openingDate||'—')}</strong>
-        <button class="btn-secondary btn-sm" id="ba-dd-close">✕ Close</button>
+        <button class="btn-secondary btn-sm" id="ba-dd-close">${emojiIcon('✕',16)} Close</button>
       </div>
-      ${!rows.length?'<div class="empty-state" style="padding:16px"><div class="empty-icon">📭</div><h4>No tagged transactions yet</h4></div>':
+      ${!rows.length?`<div class="empty-state" style="padding:16px"><div class="empty-icon">${emojiIcon('📭',44)}</div><h4>No tagged transactions yet</h4></div>`:
       `<div class="table-wrap"><table class="data-table">
         <thead><tr><th>Date</th><th>Description</th><th>Ref #</th><th>Amount</th><th>Running Balance</th><th>Reconciled</th><th>Re-tag to</th></tr></thead>
         <tbody>${rows.map(r=>{
@@ -5010,6 +5042,7 @@ async function renderBankAccountDrilldown(a) {
       </table></div>`}
     </div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [wrap] });
   document.getElementById('ba-dd-close')?.addEventListener('click', () => { wrap.innerHTML=''; });
   wrap.querySelectorAll('.ba-recon-chk').forEach(chk => chk.addEventListener('change', async () => {
     try {
@@ -5054,7 +5087,7 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
     </div>
     <div class="card">
       <div class="card-body" style="padding:0">
-        ${!entries.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧾</div><h4>No cash receipt entries yet</h4></div>':
+        ${!entries.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🧾',44)}</div><h4>No cash receipt entries yet</h4></div>`:
           `<div class="table-wrap"><table class="data-table">
             <thead><tr><th>Reference</th><th>Date</th><th>Customer</th><th>Debit Cash</th><th>Debit Sales Discount</th><th>Credit A/R</th><th>Credit Sales Revenue</th><th>Credit Sundry (Acct)</th><th>Credit Sundry (Amount)</th>${isPriv?'<th></th>':''}</tr></thead>
             <tbody>${entries.map(e=>`<tr>
@@ -5068,7 +5101,7 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
               <td>${escHtml(e.creditSundryAcct||'—')}</td>
               <td>${e.creditSundryAmount?'₱'+fmt(e.creditSundryAmount):'—'}</td>
               ${isPriv?`<td style="white-space:nowrap">
-                <button class="btn-secondary btn-sm crj-edit-btn" data-id="${e.id}">✎</button>
+                <button class="btn-secondary btn-sm crj-edit-btn" data-id="${e.id}">${emojiIcon('✎',16)}</button>
                 <button class="btn-danger btn-sm crj-del-btn" data-id="${e.id}" data-label="${escHtml((e.customer||'receipt')+' — ₱'+fmt(e.debitCash))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
               </td>`:''}
             </tr>`).join('')}</tbody>
@@ -5174,7 +5207,7 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
     </div>
     <div class="card">
       <div class="card-body" style="padding:0">
-        ${!entries.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧾</div><h4>No cash disbursement entries yet</h4></div>':
+        ${!entries.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🧾',44)}</div><h4>No cash disbursement entries yet</h4></div>`:
           `<div class="table-wrap"><table class="data-table">
             <thead><tr><th>Reference</th><th>Date</th><th>Payee</th><th>Credit Cash</th><th>Debit COS–Direct Material</th><th>Debit Accounts Payable</th><th>Debit COS–Direct Labor</th><th>Debit Sundry (Acct)</th><th>Debit Sundry (Amount)</th>${isPriv?'<th></th>':''}</tr></thead>
             <tbody>${entries.map(e=>`<tr>
@@ -5188,7 +5221,7 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
               <td>${escHtml(e.debitSundryAcct||'—')}</td>
               <td>${e.debitSundryAmount?'₱'+fmt(e.debitSundryAmount):'—'}</td>
               ${isPriv?`<td style="white-space:nowrap">
-                <button class="btn-secondary btn-sm cdj-edit-btn" data-id="${e.id}">✎</button>
+                <button class="btn-secondary btn-sm cdj-edit-btn" data-id="${e.id}">${emojiIcon('✎',16)}</button>
                 <button class="btn-danger btn-sm cdj-del-btn" data-id="${e.id}" data-label="${escHtml((e.payee||'disbursement')+' — ₱'+fmt(e.creditCash))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
               </td>`:''}
             </tr>`).join('')}</tbody>
@@ -5306,7 +5339,7 @@ async function renderRecordsTab(container, currentUser, currentRole) {
     </div>
     <div class="card">
       <div class="card-body" style="padding:0">
-        ${!records.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧾</div><h4>No records yet</h4></div>':
+        ${!records.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🧾',44)}</div><h4>No records yet</h4></div>`:
           `<div class="table-wrap"><table class="data-table">
             <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>From/To</th><th>File</th><th>By</th>${isPriv?'<th></th>':''}</tr></thead>
             <tbody id="rec-tbody">${records.map(r=>`<tr>
@@ -5315,10 +5348,10 @@ async function renderRecordsTab(container, currentUser, currentRole) {
               <td>${escHtml(r.description||'—')}</td>
               <td>₱${fmt(r.amount)}</td>
               <td>${escHtml(r.party||'—')}</td>
-              <td>${r.fileUrl?`<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm">📎 View</a>`:'-'}</td>
+              <td>${r.fileUrl?`<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm">${emojiIcon('📎',16)} View</a>`:'-'}</td>
               <td style="font-size:11px">${escHtml(r.encodedByName||'—')}</td>
               ${isPriv?`<td style="white-space:nowrap">
-                <button class="btn-secondary btn-sm rec-edit-btn" data-id="${r.id}">✎</button>
+                <button class="btn-secondary btn-sm rec-edit-btn" data-id="${r.id}">${emojiIcon('✎',16)}</button>
                 <button class="btn-danger btn-sm rec-del-btn" data-id="${r.id}" data-label="${escHtml((r.type||'record')+' — '+(r.description||r.id.slice(-5)))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
               </td>`:''}
             </tr>`).join('')}</tbody>
@@ -5444,11 +5477,11 @@ function openCADataRepairModal(onDone) {
     const listRows = (arr, cols) => arr.length
       ? arr.map(r => `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">${escHtml(r.userName)} — ${cols(r)}</div>`).join('')
       : `<div style="font-size:12px;color:var(--text-muted)">None found.</div>`;
-    openModal('🔄 Cash Advance Data Repair — Dry Run', `
+    openModal(`${emojiIcon('🔄',16)} Cash Advance Data Repair — Dry Run`, `
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Scanned every cash_advances record. Nothing has been written yet.</p>
       <div style="margin-bottom:14px"><strong>Status 'active' → 'approved'</strong> (${report.normalizedActive.length})${listRows(report.normalizedActive, r=>`will be normalized`)}</div>
       <div style="margin-bottom:14px"><strong>Interest restored</strong> (${report.interestRestored.length})${listRows(report.interestRestored, r=>`₱${fmt(r.from)} → ₱${fmt(r.to)}`)}</div>
-      <div style="margin-bottom:14px"><strong>⚠️ Mid-repayment — needs your call, NOT auto-fixed</strong> (${report.midRepaymentFlagged.length})${listRows(report.midRepaymentFlagged, r=>`balance ₱${fmt(r.balance)}, paid ₱${fmt(r.paidSoFar)}, totalPayable ₱${fmt(r.totalPayable)}`)}</div>
+      <div style="margin-bottom:14px"><strong>${emojiIcon('⚠️',16)} Mid-repayment — needs your call, NOT auto-fixed</strong> (${report.midRepaymentFlagged.length})${listRows(report.midRepaymentFlagged, r=>`balance ₱${fmt(r.balance)}, paid ₱${fmt(r.paidSoFar)}, totalPayable ₱${fmt(r.totalPayable)}`)}</div>
       <div style="margin-bottom:14px"><strong>Legacy docs — explicit single-payment plan</strong> (${report.legacyTermsBackfilled.length})${listRows(report.legacyTermsBackfilled, r=>`terms:1 added`)}</div>
     `, total
       ? `<button class="btn-primary" id="ca-repair-apply-btn">Apply ${total} Fix${total>1?'es':''}</button><button class="btn-secondary" onclick="closeModal()">Close</button>`
@@ -5488,7 +5521,7 @@ async function renderFinanceCA(container, currentUser, currentRole) {
     </div>
     ${isPrivileged?`<div style="display:flex;gap:8px;margin-bottom:14px">
       <button class="btn-primary btn-sm" id="fin-ca-add-btn">+ Add CA Record</button>
-      ${isRealPresident()?`<button class="btn-secondary btn-sm" id="fin-ca-repair-btn">🔄 Data Repair</button>`:''}
+      ${isRealPresident()?`<button class="btn-secondary btn-sm" id="fin-ca-repair-btn">${emojiIcon('🔄',16)} Data Repair</button>`:''}
     </div>`:''}
     <div class="subtab-bar" id="fin-ca-tabs" style="margin-bottom:14px">
       <button class="subtab-btn active" data-sub="pending">Pending (${pending.length})</button>
@@ -5497,10 +5530,12 @@ async function renderFinanceCA(container, currentUser, currentRole) {
     </div>
     <div id="fin-ca-list"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   const renderFinCAList = (records) => {
     const list = document.getElementById('fin-ca-list');
-    if (!records.length) { list.innerHTML = '<div class="empty-state"><div class="empty-icon">💸</div><p>None.</p></div>'; return; }
+    if (!records.length) { list.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('💸',44)}</div><p>None.</p></div>`; return; }
+    if (window.lucide) lucide.createIcons({ nodes: [list] });
     list.innerHTML = records.map(a=>`
       <div class="ca-card" data-id="${a.id}">
         <div class="ca-card-header">
@@ -5516,12 +5551,12 @@ async function renderFinanceCA(container, currentUser, currentRole) {
         ${a.reason?`<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">${escHtml(a.reason)}</div>`:''}
         ${a.status==='pending'&&isPrivileged?`
         <div style="display:flex;gap:8px">
-          <button class="btn-success btn-sm fin-ca-approve" data-id="${a.id}" data-uid="${a.userId}" data-amount="${a.amount}" data-name="${escHtml(a.userName||'')}">✓ Approve</button>
-          <button class="btn-danger btn-sm fin-ca-reject" data-id="${a.id}" data-uid="${a.userId}" data-name="${escHtml(a.userName||'')}">✗ Reject</button>
+          <button class="btn-success btn-sm fin-ca-approve" data-id="${a.id}" data-uid="${a.userId}" data-amount="${a.amount}" data-name="${escHtml(a.userName||'')}">${emojiIcon('✓',16)} Approve</button>
+          <button class="btn-danger btn-sm fin-ca-reject" data-id="${a.id}" data-uid="${a.userId}" data-name="${escHtml(a.userName||'')}">${emojiIcon('✗',16)} Reject</button>
         </div>`:''}
         ${a.status==='approved'&&(a.balance||0)>0&&isPrivileged?`
-        <button class="btn-secondary btn-sm fin-ca-pay" data-id="${a.id}" data-balance="${a.balance||0}" data-monthly="${a.monthlyPayment||0}" data-uid="${a.userId||''}" data-name="${escHtml(a.userName||'')}">💳 Record Payment</button>`:''}
-        ${isPrivileged?`<button class="btn-secondary btn-sm fin-ca-edit" data-id="${a.id}" style="margin-left:4px" title="Edit">✎</button>`:''}
+        <button class="btn-secondary btn-sm fin-ca-pay" data-id="${a.id}" data-balance="${a.balance||0}" data-monthly="${a.monthlyPayment||0}" data-uid="${a.userId||''}" data-name="${escHtml(a.userName||'')}">${emojiIcon('💳',16)} Record Payment</button>`:''}
+        ${isPrivileged?`<button class="btn-secondary btn-sm fin-ca-edit" data-id="${a.id}" style="margin-left:4px" title="Edit">${emojiIcon('✎',16)}</button>`:''}
         ${isPrivileged?`<button class="btn-secondary btn-sm fin-ca-del" data-id="${a.id}" data-label="${escHtml((a.userName||'CA')+' — ₱'+fmt(a.amount))}" style="color:var(--danger);margin-left:4px" title="${isRealPresident()?'Delete':'Request deletion'}">${emojiIcon('trash-2',14)}</button>`:''}
       </div>`).join('');
     if (window.lucide) lucide.createIcons({ nodes: [list] });
@@ -5628,10 +5663,10 @@ window.openWorkerIDModal = async function(profile, onDone) {
   const token = await ensureWorkerVerifyToken(profile).catch(()=>null);
   const url = (window.BRAND?.verifyBase || '/v/') + '?' + encodeURIComponent(token||'');
   const qr = (window.buildQRSVG && token) ? window.buildQRSVG(url, 120) : '';
-  openModal('🪪 Worker ID — ' + escHtml(profile.name||''), `
+  openModal(`${emojiIcon('🪪',16)} Worker ID — ` + escHtml(profile.name||''), `
     <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
       <div style="width:90px;height:110px;border:1px solid var(--border);border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2);font-size:34px">
-        ${profile.photoUrl?`<img src="${escHtml(profile.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:'👤'}</div>
+        ${profile.photoUrl?`<img src="${escHtml(profile.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:`${emojiIcon('👤',16)}`}</div>
       <div style="flex:1;min-width:160px">
         <div style="font-size:17px;font-weight:800">${escHtml(profile.name||'')}</div>
         <div style="font-size:12px;color:var(--text-muted)">${escHtml(profile.jobTitle||'')}</div>
@@ -5641,7 +5676,7 @@ window.openWorkerIDModal = async function(profile, onDone) {
       <div style="width:120px;height:120px">${qr||`<div style="font-size:10px;word-break:break-all">${escHtml(url)}</div>`}</div>
     </div>
     ${token?`<p style="font-size:11px;color:var(--text-muted);margin-top:12px">Verify link: <a href="${escHtml(url)}" target="_blank" rel="noopener">${escHtml(url)}</a></p>`:'<p style="font-size:11px;color:var(--danger);margin-top:12px">Could not create a verify link (permission). The card will print without a QR.</p>'}
-  `, `<button class="btn-primary" id="wid-print">🖨 Print / Save PDF</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  `, `<button class="btn-primary" id="wid-print">${emojiIcon('🖨',16)} Print / Save PDF</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
   document.getElementById('wid-print')?.addEventListener('click', () => {
     window.printIDCards([window.buildIdVerifyDoc('worker', profile, null)], [token||'']);
   });
@@ -5682,15 +5717,15 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
     </div>
     ${isPriv?`<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
       <button class="btn-primary btn-sm" id="hrp-add-btn">+ Add Worker Profile</button>
-      <button class="btn-secondary btn-sm" id="hrp-payslip-history-btn">📄 All Payslips</button>
-      <button class="btn-secondary btn-sm" id="hrp-raise-history-btn">💸 Raise History</button>
-      <button class="btn-secondary btn-sm" id="hrp-batch-id-btn">🪪 Batch Print IDs</button>
+      <button class="btn-secondary btn-sm" id="hrp-payslip-history-btn">${emojiIcon('📄',16)} All Payslips</button>
+      <button class="btn-secondary btn-sm" id="hrp-raise-history-btn">${emojiIcon('💸',16)} Raise History</button>
+      <button class="btn-secondary btn-sm" id="hrp-batch-id-btn">${emojiIcon('🪪',16)} Batch Print IDs</button>
       <button class="btn-secondary btn-sm" id="hrp-sync-dir-btn">↻ Sync Directory</button>
     </div>`:''}
     <div class="card">
-      <div class="card-header"><h3>👷 Worker Profiles</h3></div>
+      <div class="card-header"><h3>${emojiIcon('👷',20)} Worker Profiles</h3></div>
       <div class="card-body" style="padding:0">
-        ${!profiles.length ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">👷</div><p>No worker profiles yet. Add one to start generating payslips.</p></div>' :
+        ${!profiles.length ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('👷',44)}</div><p>No worker profiles yet. Add one to start generating payslips.</p></div>` :
         `<div class="table-wrap"><table class="data-table">
           <thead><tr><th>Name</th><th>Job Title</th><th>Dept</th><th>Type</th><th>Daily Rate</th><th>CA Balance</th><th>Payroll</th><th>Status</th><th></th></tr></thead>
           <tbody>
@@ -5704,11 +5739,11 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
               <td><span class="badge ${p.includeInPayroll!==false?'badge-green':'badge-gray'}">${p.includeInPayroll!==false?'Included':'Excluded'}</span></td>
               <td><span class="badge ${p.status==='active'?'badge-green':'badge-gray'}">${p.status||'active'}</span></td>
               <td style="white-space:nowrap">
-                <button class="btn-primary btn-sm hrp-gen-btn" data-id="${p.id}" style="margin-right:4px">📄 Payslip</button>
-                <button class="btn-secondary btn-sm hrp-id-btn" data-id="${p.id}" style="margin-right:4px">🪪 ID</button>
-                ${isPriv?`<button class="btn-secondary btn-sm hrp-kiosk-btn" data-id="${p.id}" title="Record today's time in/out" style="margin-right:4px">⏱ Clock</button>`:''}
-                ${isPriv?`<button class="btn-secondary btn-sm hrp-raise-btn" data-id="${p.id}" title="Give raise" style="margin-right:4px">💸 Raise</button>`:''}
-                ${isPriv?`<button class="btn-secondary btn-sm hrp-edit-btn" data-id="${p.id}">✎ Edit</button>`:''}
+                <button class="btn-primary btn-sm hrp-gen-btn" data-id="${p.id}" style="margin-right:4px">${emojiIcon('📄',16)} Payslip</button>
+                <button class="btn-secondary btn-sm hrp-id-btn" data-id="${p.id}" style="margin-right:4px">${emojiIcon('🪪',16)} ID</button>
+                ${isPriv?`<button class="btn-secondary btn-sm hrp-kiosk-btn" data-id="${p.id}" title="Record today's time in/out" style="margin-right:4px">${emojiIcon('⏱',16)} Clock</button>`:''}
+                ${isPriv?`<button class="btn-secondary btn-sm hrp-raise-btn" data-id="${p.id}" title="Give raise" style="margin-right:4px">${emojiIcon('💸',16)} Raise</button>`:''}
+                ${isPriv?`<button class="btn-secondary btn-sm hrp-edit-btn" data-id="${p.id}">${emojiIcon('✎',16)} Edit</button>`:''}
                 ${isPriv?`<button class="btn-danger btn-sm hrp-del-btn" data-id="${p.id}" data-label="${escHtml(p.name||p.id.slice(-5))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>`:''}
               </td>
             </tr>`).join('')}
@@ -5793,7 +5828,7 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       <label>ID Photo</label>
       <div style="display:flex;gap:12px;align-items:center">
         <div id="hrp-photo-prev" style="width:64px;height:78px;border:1px solid var(--border);border-radius:6px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2);font-size:26px">
-          ${profile?.photoUrl?`<img src="${escHtml(profile.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:'👤'}</div>
+          ${profile?.photoUrl?`<img src="${escHtml(profile.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:`${emojiIcon('👤',16)}`}</div>
         <div><input type="file" id="hrp-photo-file" accept="image/*"/>
           <div id="hrp-photo-status" style="font-size:11px;color:var(--text-muted);margin-top:4px"></div></div>
       </div>
@@ -5819,7 +5854,7 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
         <div style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface2,var(--surface));color:var(--text-muted)">₱${fmt(profile?.hourlyRate||(profile?.dailyRate?profile.dailyRate/8:0))}</div>
       </div>
       <div class="form-group"><label>Daily Rate (₱)</label>
-        <div style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface2,var(--surface));color:var(--text-muted)">₱${fmt(profile?.dailyRate||0)} · <span style="font-size:11px">change via 💸 Raise (approval-routed)</span></div>
+        <div style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface2,var(--surface));color:var(--text-muted)">₱${fmt(profile?.dailyRate||0)} · <span style="font-size:11px">change via ${emojiIcon('💸',16)} Raise (approval-routed)</span></div>
       </div>` : `
       <div class="form-group"><label>Hourly Rate (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">used to compute pay</span></label><input id="hrp-hourly" type="number" inputmode="decimal" step="0.01" value="0"/></div>
       <div class="form-group"><label>Daily Rate (₱) <span style="font-size:9px;color:var(--text-muted);font-weight:400">reference</span></label><input id="hrp-daily" type="number" inputmode="decimal" value="0"/></div>`}
@@ -5944,7 +5979,7 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
 // the hours math never drifts between kiosk entry and manual payslip entry.
 function openWorkerKioskModal(profile, currentUser) {
   const label = escHtml(profile.name || 'Worker');
-  openModal(`⏱ Clock — ${label}`, `
+  openModal(`${emojiIcon('⏱',16)} Clock — ${label}`, `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Recording time for <strong>${label}</strong> on ${bizDate()}.</div>
     <div class="form-row">
       <div class="form-group"><label>Time In</label><input id="kiosk-time-in" type="time" value="07:00"/></div>
@@ -5982,7 +6017,7 @@ async function openPayslipHistory(currentUser, currentRole) {
     const status = p.status || 'draft';
     const stageIdx = PAYSLIP_STAGES.indexOf(status);
     const nextStage = PAYSLIP_STAGES[stageIdx+1];
-    const nextLabel = { verified:'✓ Verify', filed:'📁 File', submitted:'📤 Submit' }[nextStage];
+    const nextLabel = { verified:`${emojiIcon('✓',16)} Verify`, filed:`${emojiIcon('📁',16)} File`, submitted:`${emojiIcon('📤',16)} Submit` }[nextStage];
     return `<tr>
       <td style="font-weight:600">${escHtml(p.workerName||'—')}</td>
       <td style="font-size:12px">${p.payPeriodStart||''} – ${p.payPeriodEnd||''}</td>
@@ -5991,7 +6026,7 @@ async function openPayslipHistory(currentUser, currentRole) {
       <td style="white-space:nowrap">
         <button class="btn-secondary btn-sm ps-view-btn" data-id="${p.id}" style="font-size:11px">View</button>
         ${canAct && nextStage ? `<button class="btn-success btn-sm ps-advance-btn" data-id="${p.id}" data-next="${nextStage}" style="font-size:11px;margin-left:4px">${nextLabel}</button>` : ''}
-        ${canAct ? `<button class="btn-secondary btn-sm ps-edit-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px" title="Edit amounts">✎</button>` : ''}
+        ${canAct ? `<button class="btn-secondary btn-sm ps-edit-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px" title="Edit amounts">${emojiIcon('✎',11)}</button>` : ''}
         ${canAct && status!=='draft' ? `<button class="btn-secondary btn-sm ps-override-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px" title="Manually set status">${emojiIcon('settings',14)}</button>` : ''}
         ${canAct ? `<button class="btn-danger btn-sm ps-del-btn" data-id="${p.id}" style="font-size:11px;margin-left:4px" title="Delete">${emojiIcon('trash-2',14)}</button>` : ''}
       </td>
@@ -6001,7 +6036,7 @@ async function openPayslipHistory(currentUser, currentRole) {
   const renderModal = () => {
     const totalNet = list.reduce((s,p)=>s+(p.netPay||0),0);
     const filedCount = list.filter(p=>['filed','submitted'].includes(p.status)).length;
-    openModal('📄 Payslip Summary', `
+    openModal(`${emojiIcon('📄',16)} Payslip Summary`, `
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--text-muted)">
         <span><strong style="color:var(--text)">${list.length}</strong> payslips</span>
         <span><strong style="color:var(--text)">${filedCount}</strong> filed/submitted</span>
@@ -6116,7 +6151,7 @@ async function openPayslipHistory(currentUser, currentRole) {
 // Compact edit of a filed payslip's amounts (recomputes net; keeps ledger in sync).
 function openPayslipEdit(ps, currentUser, onSave) {
   const r = ps.regular||{}, ot = ps.overtime||{}, al = ps.allowances||{}, g = ps.deductions?.govt||{}, o = ps.deductions?.other||{};
-  openPage(`✎ Edit Payslip — ${escHtml(ps.workerName||'')}`, `
+  openPage(`${emojiIcon('✎',16)} Edit Payslip — ${escHtml(ps.workerName||'')}`, `
     <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">${ps.payPeriodStart||''} – ${ps.payPeriodEnd||''}</div>
     <div class="form-row">
       <div class="form-group"><label>Rate / HR (₱)</label><input id="pe-rph" type="number" step="0.01" value="${r.ratePerHr||0}" inputmode="decimal"/></div>
@@ -6202,7 +6237,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
   const periodEnd   = addDays(todayISO, (6 - dow + 7) % 7);  // upcoming/this Saturday
   const periodStart = addDays(periodEnd, -5);                // Monday of that pay week
 
-  openPage(`📄 Generate Payslip — ${profile.name}`, `
+  openPage(`${emojiIcon('📄',16)} Generate Payslip — ${profile.name}`, `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
       <div class="form-group"><label>Pay Period Start</label><input id="ps-start" type="date" value="${periodStart}"/></div>
       <div class="form-group"><label>Pay Period End (Sat)</label><input id="ps-end" type="date" value="${periodEnd}"/></div>
@@ -6288,8 +6323,8 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     </div>
   `, `
     <button class="btn-secondary" onclick="closeModal()">Cancel</button>
-    <button class="btn-secondary" id="ps-preview-btn">👁 Preview</button>
-    <button class="btn-primary" id="ps-save-btn">💾 Save &amp; Generate</button>
+    <button class="btn-secondary" id="ps-preview-btn">${emojiIcon('👁',16)} Preview</button>
+    <button class="btn-primary" id="ps-save-btn">${emojiIcon('💾',16)} Save &amp; Generate</button>
   `);
 
   // Bind proof upload area
@@ -6654,9 +6689,9 @@ window.renderPayslipPage = function(model, backFn) {
   host.innerHTML = `
     <div class="no-print" style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
       <button class="btn-secondary btn-sm" id="ps-back-btn">← Back</button>
-      <button class="btn-primary btn-sm" onclick="window.print()">🖨 Print / Save PDF</button>
-      <button class="btn-secondary btn-sm" id="ps-jpeg-btn">📷 Save as JPEG</button>
-      ${model.proofUrl?`<a class="btn-secondary btn-sm" href="${safeHttpUrl(model.proofUrl)}" target="_blank">📎 Transfer Proof</a>`:''}
+      <button class="btn-primary btn-sm" onclick="window.print()">${emojiIcon('🖨',16)} Print / Save PDF</button>
+      <button class="btn-secondary btn-sm" id="ps-jpeg-btn">${emojiIcon('📷',16)} Save as JPEG</button>
+      ${model.proofUrl?`<a class="btn-secondary btn-sm" href="${safeHttpUrl(model.proofUrl)}" target="_blank">${emojiIcon('📎',16)} Transfer Proof</a>`:''}
     </div>
     <div class="payslip-print">${buildPayslipHTML(model)}</div>`;
   document.getElementById('ps-back-btn').addEventListener('click', ()=> (backFn ? backFn() : history.back()));
@@ -6708,7 +6743,7 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
       <div class="kpi-card accent"><div class="kpi-label">Pending Expenses</div><div class="kpi-value">₱${fmt(pendingExp)}</div></div>
     </div>
     <div class="card">
-      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3>Recent Expenses</h3>${expenses.length?'<button class="btn-secondary btn-sm" id="exp-csv-btn">⬇ CSV</button>':''}</div>
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3>Recent Expenses</h3>${expenses.length?`<button class="btn-secondary btn-sm" id="exp-csv-btn">${emojiIcon('⬇',16)} CSV</button>`:''}</div>
       <div class="card-body">
         <div class="table-wrap">
           <table class="data-table">
@@ -6718,7 +6753,7 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
                 <td>${escHtml(e.description)}</td><td>₱${fmt(e.amount)}</td>
                 <td>${escHtml(e.submittedByName||'—')}</td>
                 <td><span class="badge ${statusBadge(e.status)}">${e.status||'pending'}</span></td>
-                <td style="white-space:nowrap">${e.fileUrl?`<a href="${safeHttpUrl(e.fileUrl)}" target="_blank" class="btn-icon">📎</a>`:''}${isPriv?`<button class="btn-secondary btn-sm exp-edit-btn" data-id="${e.id}" style="margin-left:4px">✎</button><button class="btn-danger btn-sm exp-del-btn" data-id="${e.id}" data-label="${escHtml(e.description||e.id.slice(-5))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>`:''}</td>
+                <td style="white-space:nowrap">${e.fileUrl?`<a href="${safeHttpUrl(e.fileUrl)}" target="_blank" class="btn-icon">${emojiIcon('📎',16)}</a>`:''}${isPriv?`<button class="btn-secondary btn-sm exp-edit-btn" data-id="${e.id}" style="margin-left:4px">${emojiIcon('✎',16)}</button><button class="btn-danger btn-sm exp-del-btn" data-id="${e.id}" data-label="${escHtml(e.description||e.id.slice(-5))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>`:''}</td>
               </tr>`).join('')}
             </tbody>
           </table>
@@ -6769,13 +6804,14 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
   c.innerHTML = `
     <div class="page-header">
       <div>
-        <h2>🍽️ Barro Kitchens — Sales</h2>
+        <h2>${emojiIcon('🍽️',20)} Barro Kitchens — Sales</h2>
         <p style="font-size:12px;color:var(--text-muted);margin:2px 0 0">One-stop kitchen design &amp; build · Inquiry → Quote → Order</p>
       </div>
     </div>
     ${window.chipTabs(salesTabs.map(s=>({key:s,label:s})), subtab)}
     <div id="sales-content"><div class="loading-placeholder">Loading…</div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadSalesContent(currentUser, currentRole, subtab);
   window.bindChipTabs(c, (key) => { window.setSubroute(key); loadSalesContent(currentUser, currentRole, key); });
 };
@@ -6831,7 +6867,7 @@ async function loadSalesContent(currentUser, currentRole, sub) {
 
     case 'Partner':
       salesSubNav(content, ['Quotes','Files'], 'Quotes',
-        `<div style="font-size:12px;color:var(--text-muted);background:rgba(15,108,189,.06);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:12px">🤝 Brilliant Steel partner — quotes &amp; files shared with Sales for coordination.</div>`,
+        `<div style="font-size:12px;color:var(--text-muted);background:rgba(15,108,189,.06);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:12px">${emojiIcon('🤝',16)} Brilliant Steel partner — quotes &amp; files shared with Sales for coordination.</div>`,
         (key, view) => {
           if (key === 'Files') renderBSFiles(view, currentUser, currentRole);
           else renderSalesPartnerQuotes(view, currentUser, currentRole);
@@ -7048,7 +7084,7 @@ function qeRenderItems() {
       </td>
       <td style="padding:8px 6px;text-align:right;font-weight:700;white-space:nowrap">${qePeso(it.amount)}</td>
       <td style="padding:8px 2px;text-align:center">
-        <button onclick="qeRemoveItem(${i})" title="Remove" style="background:none;border:none;cursor:pointer;color:var(--danger,#e53935);font-size:15px;line-height:1">✕</button>
+        <button onclick="qeRemoveItem(${i})" title="Remove" style="background:none;border:none;cursor:pointer;color:var(--danger,#e53935);font-size:15px;line-height:1">${emojiIcon('✕',15)}</button>
       </td>
     </tr>`).join('');
   wrap.innerHTML = `
@@ -7115,7 +7151,7 @@ async function renderQuickEstimate(container, currentUser, currentRole) {
 
   container.innerHTML = `
     <div style="font-size:12px;color:var(--text-muted);background:rgba(230,81,0,.07);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:14px">
-      ⚡ <strong>Quick Estimate</strong> — check & total prices fast using the live product database. Add as many items as you like, then create a formal quotation when the client is ready.
+      ${emojiIcon('⚡',16)} <strong>Quick Estimate</strong> — check & total prices fast using the live product database. Add as many items as you like, then create a formal quotation when the client is ready.
     </div>
 
     <!-- Picker -->
@@ -7163,10 +7199,11 @@ async function renderQuickEstimate(container, currentUser, currentRole) {
     <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:14px">
       <label style="font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.03em">Client name (optional — carried into the quote)</label>
       <input type="text" id="qe-client" placeholder="e.g. Juan Dela Cruz / ABC Restaurant" style="${ctrlStyle};width:100%;margin:5px 0 12px;box-sizing:border-box">
-      <button class="btn-primary" onclick="qeCreateFormalQuote()" style="width:100%;padding:13px;font-weight:800;font-size:14px">📄 Create Formal Quotation →</button>
+      <button class="btn-primary" onclick="qeCreateFormalQuote()" style="width:100%;padding:13px;font-weight:800;font-size:14px">${emojiIcon('📄',14)} Create Formal Quotation →</button>
       <p style="font-size:11px;color:var(--text-muted);margin:8px 0 0;text-align:center">Opens the full Quote Builder pre-filled with these items, where you can refine, file, and export a PDF.</p>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   qeRenderItems();   // render any items already in the session basket
 }
@@ -7298,10 +7335,10 @@ function renderSalesSOPView(container, data) {
     <div style="background:linear-gradient(135deg,rgba(230,81,0,.14),rgba(230,81,0,.04));border:1px solid rgba(230,81,0,.35);border-radius:14px;padding:16px 18px;margin-bottom:16px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:6px">
         <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:24px">📖</span>
+          <span style="font-size:24px">${emojiIcon('📖',24)}</span>
           <h3 style="margin:0;font-size:17px;color:var(--text)">Sales SOP — Inquiry to Sales Order</h3>
         </div>
-        ${canEdit?`<button class="btn-secondary btn-sm" id="sop-edit-btn" style="flex-shrink:0">✏️ Edit SOP</button>`:''}
+        ${canEdit?`<button class="btn-secondary btn-sm" id="sop-edit-btn" style="flex-shrink:0">${emojiIcon('✏️',16)} Edit SOP</button>`:''}
       </div>
       <p style="margin:0;font-size:12.5px;color:var(--text-muted);line-height:1.6">${sopFmt(data.intro||'')}</p>
       ${updated}
@@ -7326,14 +7363,14 @@ function renderSalesSOPView(container, data) {
           <div style="flex:1;min-width:0">
             <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:4px">
               <h4 style="margin:0;font-size:15px;color:var(--text)">${escHtml(s.title||'')}</h4>
-              ${s.owner?`<span style="font-size:10.5px;font-weight:700;color:${O};background:rgba(230,81,0,.12);border:1px solid rgba(230,81,0,.3);border-radius:999px;padding:2px 9px">👤 ${escHtml(s.owner)}</span>`:''}
-              ${s.tab?`<span style="font-size:10.5px;font-weight:700;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:2px 9px">📍 ${escHtml(s.tab)}</span>`:''}
+              ${s.owner?`<span style="font-size:10.5px;font-weight:700;color:${O};background:rgba(230,81,0,.12);border:1px solid rgba(230,81,0,.3);border-radius:999px;padding:2px 9px">${emojiIcon('👤',16)} ${escHtml(s.owner)}</span>`:''}
+              ${s.tab?`<span style="font-size:10.5px;font-weight:700;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:2px 9px">${emojiIcon('📍',16)} ${escHtml(s.tab)}</span>`:''}
             </div>
             ${s.desc?`<p style="margin:0 0 8px;font-size:12.5px;color:var(--text-muted);line-height:1.55">${sopFmt(s.desc)}</p>`:''}
             ${(Array.isArray(s.actions)&&s.actions.length)?`<ul style="margin:0 0 10px;padding-left:18px;font-size:12.5px;color:var(--text);line-height:1.7">
               ${s.actions.map(a=>`<li>${sopFmt(a)}</li>`).join('')}
             </ul>`:''}
-            ${s.out?`<div style="font-size:11.5px;color:var(--success);font-weight:700;background:rgba(48,209,88,.1);border-radius:8px;padding:6px 10px;display:inline-block">✓ Output: ${sopFmt(s.out)}</div>`:''}
+            ${s.out?`<div style="font-size:11.5px;color:var(--success);font-weight:700;background:rgba(48,209,88,.1);border-radius:8px;padding:6px 10px;display:inline-block">${emojiIcon('✓',16)} Output: ${sopFmt(s.out)}</div>`:''}
           </div>
         </div>
       `).join('')}
@@ -7341,7 +7378,7 @@ function renderSalesSOPView(container, data) {
 
     ${rules.length?`<!-- Golden rules -->
     <div style="margin-top:18px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px">
-      <h4 style="margin:0 0 10px;font-size:14px;color:var(--text)">⭐ Golden Rules</h4>
+      <h4 style="margin:0 0 10px;font-size:14px;color:var(--text)">${emojiIcon('⭐',14)} Golden Rules</h4>
       <ul style="margin:0;padding-left:18px;font-size:12.5px;color:var(--text);line-height:1.8">
         ${rules.map(r=>`<li>${sopFmt(r)}</li>`).join('')}
       </ul>
@@ -7351,6 +7388,7 @@ function renderSalesSOPView(container, data) {
       Barro Industries · Sales Department · Standard Operating Procedure
     </p>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   if (canEdit) document.getElementById('sop-edit-btn')?.addEventListener('click', () => renderSalesSOPEditor(container, data));
 }
@@ -7401,7 +7439,7 @@ function drawSalesSOPEditor(container) {
 
   container.innerHTML = `
     <div style="background:rgba(230,81,0,.08);border:1px solid rgba(230,81,0,.3);border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--text-muted)">
-      ✏️ <b style="color:var(--text)">Editing Sales SOP.</b> Changes are visible to everyone once saved. Use <code>**bold**</code> for emphasis.
+      ${emojiIcon('✏️',16)} <b style="color:var(--text)">Editing Sales SOP.</b> Changes are visible to everyone once saved. Use <code>**bold**</code> for emphasis.
     </div>
 
     <label style="${lbl}">Intro</label>
@@ -7419,7 +7457,7 @@ function drawSalesSOPEditor(container) {
     <textarea id="sop-rules" rows="6" style="${fld};resize:vertical">${escHtml((d.rules||[]).join('\n'))}</textarea>
 
     <div style="display:flex;gap:8px;margin-top:18px;position:sticky;bottom:0;background:var(--bg);padding:10px 0">
-      <button class="btn-primary btn-sm" id="sop-save">💾 Save SOP</button>
+      <button class="btn-primary btn-sm" id="sop-save">${emojiIcon('💾',16)} Save SOP</button>
       <button class="btn-secondary btn-sm" id="sop-cancel">Cancel</button>
     </div>
   `;
@@ -7547,19 +7585,19 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
             <span>${escHtml(q.scope||'Custom')}</span>
             <span>${escHtml(q.agentName||'—')}</span>
             ${q.date?`<span>${q.date}</span>`:''}
-            ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px" title="Filed but no Sales Order yet">⚠ ${staleDays}d no SO</span>` : ''}
+            ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px" title="Filed but no Sales Order yet">${emojiIcon('⚠',9)} ${staleDays}d no SO</span>` : ''}
           </div>
         </div>
         <div style="text-align:right">
           <div style="font-weight:700${superseded?';text-decoration:line-through;color:var(--text-muted)':''}">₱${fmt(q.total||0)}</div>
           <span class="badge ${statusBadge(q.status)}" style="margin-top:4px">${q.salesOrderId?'won':q.status||'draft'}</span>
-          ${q.deleteRequested?`<span class="badge badge-red" style="font-size:10px;margin-left:4px">🗑 del req</span>`:''}
+          ${q.deleteRequested?`<span class="badge badge-red" style="font-size:10px;margin-left:4px">${emojiIcon('🗑',10)} del req</span>`:''}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;justify-content:flex-end">
           ${q.editableState?`<button class="btn-secondary btn-sm bk-reopen-btn" data-id="${q.id}">↻ Reopen</button>`:''}
-          ${q.editableState?`<button class="btn-secondary btn-sm bk-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">⎘ New Revision</button>`:''}
-          ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${q.total||0}" data-co="BK" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?'✓ Ordered':'🧾 Sales Order'}</button>`:''}
-          ${(canDel && !q.deleteRequested)?`<button class="btn-secondary btn-sm bk-del-btn" data-id="${q.id}" data-label="${escHtml(label)}" data-by="${q.createdBy||''}">🗑 Delete</button>`:''}
+          ${q.editableState?`<button class="btn-secondary btn-sm bk-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
+          ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${q.total||0}" data-co="BK" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('🧾',16)} Sales Order`}</button>`:''}
+          ${(canDel && !q.deleteRequested)?`<button class="btn-secondary btn-sm bk-del-btn" data-id="${q.id}" data-label="${escHtml(label)}" data-by="${q.createdBy||''}">${emojiIcon('🗑',16)} Delete</button>`:''}
         </div>
       </div>`;
   };
@@ -7574,11 +7612,12 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       <div class="stat-card"><div class="stat-num">${draft}</div><div class="stat-label">Drafts</div></div>
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-      <h4 style="font-weight:700;margin:0">All Quotations${staleCount?` <span class="badge badge-orange" style="font-size:10px;font-weight:700">⚠ ${staleCount} stale</span>`:''}</h4>
+      <h4 style="font-weight:700;margin:0">All Quotations${staleCount?` <span class="badge badge-orange" style="font-size:10px;font-weight:700">${emojiIcon('⚠',10)} ${staleCount} stale</span>`:''}</h4>
       ${window.chipTabs([{key:'list',label:'List'},{key:'customer',label:'By Customer'}],'list',{cls:'bkq-view'})}
     </div>
     <div id="bkq-body"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   const bindCardActions = () => {
     container.querySelectorAll('.bk-so-btn').forEach(b=>b.addEventListener('click', e=>openSalesOrderModal(e.currentTarget.dataset, currentUser, currentRole, container)));
@@ -7599,7 +7638,8 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
   const renderBody = (view) => {
     const body = container.querySelector('#bkq-body');
     if (!body) return;
-    if (!quotes.length) { body.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><h4>No quotations yet</h4></div>`; return; }
+    if (!quotes.length) { body.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No quotations yet</h4></div>`; return; }
+    if (window.lucide) lucide.createIcons({ nodes: [body] });
     if (view === 'customer') {
       const groups = {};
       quotes.forEach(q=>{ const k=((q.clientName||'').trim())||'Unnamed'; (groups[k]=groups[k]||[]).push(q); });
@@ -7635,7 +7675,8 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       const bar = document.createElement('div');
       bar.className = 'alert-banner';
       bar.style.cssText = 'margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap';
-      bar.innerHTML = `<span>🧭 ${n} Barro Kitchens quote(s) are stranded in the Brilliant Steel collection.</span><button class="btn-primary btn-sm" id="bkq-repair-btn">Repair now</button>`;
+      bar.innerHTML = `<span>${emojiIcon('🧭',16)} ${n} Barro Kitchens quote(s) are stranded in the Brilliant Steel collection.</span><button class="btn-primary btn-sm" id="bkq-repair-btn">Repair now</button>`;
+      if (window.lucide) lucide.createIcons({ nodes: [bar] });
       container.prepend(bar);
       document.getElementById('bkq-repair-btn').addEventListener('click', async () => {
         const btn = document.getElementById('bkq-repair-btn');
@@ -7665,7 +7706,7 @@ async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
   const accepted = quotes.filter(q=>['accepted','filed','approved'].includes(q.status));
   container.innerHTML = `
     <div style="font-size:12px;color:var(--text-muted);background:rgba(10,132,255,.07);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:14px">
-      🤝 Read-only view of <strong>Brilliant Steel</strong> partner quotes (50/50 collaborative projects). Sales can see these for coordination; partners cannot see Barro Kitchens quotes.
+      ${emojiIcon('🤝',16)} Read-only view of <strong>Brilliant Steel</strong> partner quotes (50/50 collaborative projects). Sales can see these for coordination; partners cannot see Barro Kitchens quotes.
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin-bottom:20px">
       <div class="stat-card"><div class="stat-num">${quotes.length}</div><div class="stat-label">Partner Quotes</div></div>
@@ -7674,13 +7715,13 @@ async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
     </div>
     <div class="item-list">
       ${!quotes.length
-        ? `<div class="empty-state"><div class="empty-icon">📋</div><h4>No partner quotes yet</h4><p>Brilliant Steel quotes will appear here as they're created.</p></div>`
+        ? `<div class="empty-state"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No partner quotes yet</h4><p>Brilliant Steel quotes will appear here as they're created.</p></div>`
         : quotes.map(q=>`
         <div class="item-card" style="display:flex;align-items:center;gap:12px">
           <div style="flex:1;min-width:0">
             <div class="item-title" style="font-size:13px">${escHtml(q.quoteNumber||q.id.slice(-6).toUpperCase())} — ${escHtml(q.clientName||'Unnamed')}</div>
             <div class="item-meta" style="margin-top:4px">
-              <span>👤 ${escHtml(q.createdByName||q.agentName||'Partner')}</span>
+              <span>${emojiIcon('👤',16)} ${escHtml(q.createdByName||q.agentName||'Partner')}</span>
               ${q.date?`<span>${escHtml(q.date)}</span>`:''}
             </div>
           </div>
@@ -7690,6 +7731,7 @@ async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
           </div>
         </div>`).join('')}
     </div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 }
 
 
@@ -7699,7 +7741,7 @@ async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
 window.renderDesign = async function(currentUser, currentRole, subtab = 'Projects') {
   const c = deptContainer();
   c.innerHTML = `
-    <div class="page-header"><h2>🎨 Design</h2></div>
+    <div class="page-header"><h2>${emojiIcon('🎨',20)} Design</h2></div>
     ${window.sopPanel('How Design works', [
       'Projects tracks each design job; Drawings holds the working files.',
       'Clients keeps the design client book; Product Designs and References are the asset libraries.',
@@ -7708,6 +7750,7 @@ window.renderDesign = async function(currentUser, currentRole, subtab = 'Project
     ${window.chipTabs(['Projects','Drawings','Clients','Product Designs','References','Tasks'].map(s=>({key:s,label:s})), subtab)}
     <div id="design-content"><div class="loading-placeholder">Loading…</div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadDesignContent(currentUser, currentRole, subtab);
   window.bindChipTabs(c, (key) => loadDesignContent(currentUser, currentRole, key));
 };
@@ -7749,7 +7792,7 @@ async function renderProjects(container, currentUser, currentRole) {
     </div>
     <div class="item-list">
       ${!projects.length
-        ? `<div class="empty-state"><div class="empty-icon">🎨</div><h4>No projects yet</h4></div>`
+        ? `<div class="empty-state"><div class="empty-icon">${emojiIcon('🎨',44)}</div><h4>No projects yet</h4></div>`
         : projects.map(p => {
           const contract = Number(p.contractAmount) || 0;
           const paid     = projectPaid(p);
@@ -7761,17 +7804,18 @@ async function renderProjects(container, currentUser, currentRole) {
               <span class="badge ${statusBadge(p.status)}">${p.status||'active'}</span>
             </div>
             <div class="item-meta">
-              ${p.client?`<span>👤 ${escHtml(p.client)}</span>`:''}
-              ${p.dueDate?`<span>📅 ${p.dueDate}</span>`:''}
+              ${p.client?`<span>${emojiIcon('👤',16)} ${escHtml(p.client)}</span>`:''}
+              ${p.dueDate?`<span>${emojiIcon('📅',16)} ${p.dueDate}</span>`:''}
             </div>
             ${contract>0?`<div class="item-meta" style="margin-top:6px">
-              <span>💰 Contract ₱${fmt(contract)}</span>
-              <span>✅ Paid ₱${fmt(paid)}</span>
+              <span>${emojiIcon('💰',16)} Contract ₱${fmt(contract)}</span>
+              <span>${emojiIcon('✅',16)} Paid ₱${fmt(paid)}</span>
               <span style="font-weight:700;color:${balance>0.005?'#FF453A':'#30D158'}">${balance>0.005?`Balance ₱${fmt(balance)}`:'Fully Paid'}</span>
             </div>`:''}
           </div>`;}).join('')}
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   container.querySelectorAll('.item-card').forEach(card => {
     card.addEventListener('click', () => {
@@ -7822,7 +7866,7 @@ const DRAWING_STATUSES = [
 ];
 function drawingStatus(id){ return DRAWING_STATUSES.find(s=>s.id===id) || DRAWING_STATUSES[0]; }
 function nextRev(letter){ return letter ? String.fromCharCode((''+letter).toUpperCase().charCodeAt(0)+1) : 'A'; }
-function drawingTypeIcon(t){ return ({DWG:'📐',PDF:'📄',Drawing:'✏️','3D':'🧊',Render:'🖼'})[t] || '📄'; }
+function drawingTypeIcon(t){ return ({DWG:`${emojiIcon('📐',16)}`,PDF:`${emojiIcon('📄',16)}`,Drawing:`${emojiIcon('✏️',16)}`,'3D':`${emojiIcon('🧊',16)}`,Render:`${emojiIcon('🖼',16)}`})[t] || `${emojiIcon('📄',16)}`; }
 // Approval capability (v12 WS35) — MUST stay in lockstep with the design_drawings
 // update rule (firestore.rules). Approver = president/manager, or the parent
 // project's designLead — NEVER 'secretary' (view-only approvals directive) and
@@ -7839,8 +7883,8 @@ window.canApproveDrawing = function(d, project){
 function drawingTransitions(status){
   switch(status){
     case 'draft':      return [{to:'for_review',label:'Submit for Review',cls:'btn-primary'}];
-    case 'for_review': return [{to:'approved',label:'✅ Approve',cls:'btn-success'},{to:'draft',label:'Back to Draft',cls:'btn-secondary'}];
-    case 'approved':   return [{to:'released',label:'🚀 Release',cls:'btn-success'},{to:'for_review',label:'Back to Review',cls:'btn-secondary'}];
+    case 'for_review': return [{to:'approved',label:`${emojiIcon('✅',16)} Approve`,cls:'btn-success'},{to:'draft',label:'Back to Draft',cls:'btn-secondary'}];
+    case 'approved':   return [{to:'released',label:`${emojiIcon('🚀',16)} Release`,cls:'btn-success'},{to:'for_review',label:'Back to Review',cls:'btn-secondary'}];
     case 'released':   return [{to:'superseded',label:'Supersede',cls:'btn-secondary'}];
     case 'superseded': return [{to:'draft',label:'Reactivate',cls:'btn-secondary'}];
     default:           return [];
@@ -7855,9 +7899,9 @@ function drawingCard(d){
     </div>
     <div class="item-meta" style="gap:6px;flex-wrap:wrap">
       <span>${escHtml(d.type||'File')}</span>
-      ${d.projectName?`<span>🗂 ${escHtml(d.projectName)}</span>`:''}
-      ${d.assignedToName?`<span>👤 ${escHtml(d.assignedToName)}</span>`:''}
-      ${d.fileName?`<span>📎 ${escHtml(d.fileName)}</span>`:''}
+      ${d.projectName?`<span>${emojiIcon('🗂',16)} ${escHtml(d.projectName)}</span>`:''}
+      ${d.assignedToName?`<span>${emojiIcon('👤',16)} ${escHtml(d.assignedToName)}</span>`:''}
+      ${d.fileName?`<span>${emojiIcon('📎',16)} ${escHtml(d.fileName)}</span>`:''}
     </div>
   </div>`;
 }
@@ -7874,9 +7918,9 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill, initia
   openModal(escHtml(p.name||'Project'), `
     <div class="item-meta" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <span class="badge ${statusBadge(p.status)}">${escHtml(p.status||'active')}</span>
-      ${p.client?`<span>👤 ${escHtml(p.client)}</span>`:''}
-      ${p.dueDate?`<span>📅 Due ${escHtml(p.dueDate)}</span>`:''}
-      ${p.jobProjectNo?`<span class="badge badge-blue" title="Linked job project">🔗 ${escHtml(p.jobProjectNo)}</span>`:''}
+      ${p.client?`<span>${emojiIcon('👤',16)} ${escHtml(p.client)}</span>`:''}
+      ${p.dueDate?`<span>${emojiIcon('📅',16)} Due ${escHtml(p.dueDate)}</span>`:''}
+      ${p.jobProjectNo?`<span class="badge badge-blue" title="Linked job project">${emojiIcon('🔗',16)} ${escHtml(p.jobProjectNo)}</span>`:''}
     </div>
     <div class="subtab-bar" id="pd-tabs" style="margin-bottom:12px">
       ${tabs.map(t=>`<button class="subtab-btn ${t===initialTab?'active':''}" data-pd="${t}">${t}</button>`).join('')}
@@ -7910,15 +7954,16 @@ function renderProjOverview(host, p, currentUser, currentRole, canBill){
       <span style="color:var(--text-muted)">Start</span><span>${escHtml(p.startDate||'—')}</span>
       <span style="color:var(--text-muted)">Due</span><span>${escHtml(p.dueDate||'—')}</span>
       <span style="color:var(--text-muted)">Design Lead</span><span>${p.designLeadName?escHtml(p.designLeadName):'<span style="color:var(--text-muted)">Unassigned</span>'}</span>
-      <span style="color:var(--text-muted)">Job Project</span><span>${p.jobProjectNo?`<span class="badge badge-blue">🔗 ${escHtml(p.jobProjectNo)}</span>`:'<span style="color:var(--text-muted)">Not linked</span>'}</span>
+      <span style="color:var(--text-muted)">Job Project</span><span>${p.jobProjectNo?`<span class="badge badge-blue">${emojiIcon('🔗',16)} ${escHtml(p.jobProjectNo)}</span>`:'<span style="color:var(--text-muted)">Not linked</span>'}</span>
     </div></div>
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:12px 14px">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">👥 Team</div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">${emojiIcon('👥',16)} Team</div>
       ${team.length?`<div style="display:flex;gap:6px;flex-wrap:wrap">${team.map(n=>`<span class="badge badge-blue">${escHtml(n)}</span>`).join('')}</div>`:'<div style="font-size:12px;color:var(--text-muted)">No members delegated yet.</div>'}
     </div></div>
-    ${p.notes?`<div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:12px 14px;font-size:13px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">📝 Notes</div>${escHtml(p.notes)}</div></div>`:''}
-    ${canManage?`<button class="btn-primary btn-sm" id="proj-edit-btn">✏️ Edit / Link / Delegate</button>`:''}
+    ${p.notes?`<div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:12px 14px;font-size:13px"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:6px">${emojiIcon('📝',16)} Notes</div>${escHtml(p.notes)}</div></div>`:''}
+    ${canManage?`<button class="btn-primary btn-sm" id="proj-edit-btn">${emojiIcon('✏️',16)} Edit / Link / Delegate</button>`:''}
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
   document.getElementById('proj-edit-btn')?.addEventListener('click',()=>openProjectEditModal(p, currentUser, currentRole, canBill));
 }
 
@@ -7933,7 +7978,7 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
 
   host.innerHTML = `
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-      ${canBill && contract>0 ? `<button class="btn-primary btn-sm" id="proj-invoice-btn">🧾 Create Billing Invoice</button>` : ''}
+      ${canBill && contract>0 ? `<button class="btn-primary btn-sm" id="proj-invoice-btn">${emojiIcon('🧾',16)} Create Billing Invoice</button>` : ''}
       ${canBill ? `<button class="btn-secondary btn-sm" id="proj-payment-btn">+ Record Payment</button>` : ''}
     </div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px">
@@ -7948,10 +7993,11 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
     <h4 style="margin:16px 0 8px;font-size:13px">Billing Invoices</h4>
     ${invoices.length ? `<div class="item-list">${invoices.map(inv=>`
       <div class="item-card" style="cursor:pointer" data-inv="${escHtml(inv.no)}">
-        <div class="item-top"><div class="item-title" style="font-size:13px">🧾 ${escHtml(inv.no)}</div><span>₱${fmt(inv.amount)}</span></div>
-        <div class="item-meta"><span>📅 ${escHtml(inv.date||'')}</span>${inv.due?`<span>Due ${escHtml(inv.due)}</span>`:''}<span>${escHtml(inv.desc||'')}</span></div>
+        <div class="item-top"><div class="item-title" style="font-size:13px">${emojiIcon('🧾',13)} ${escHtml(inv.no)}</div><span>₱${fmt(inv.amount)}</span></div>
+        <div class="item-meta"><span>${emojiIcon('📅',16)} ${escHtml(inv.date||'')}</span>${inv.due?`<span>Due ${escHtml(inv.due)}</span>`:''}<span>${escHtml(inv.desc||'')}</span></div>
       </div>`).join('')}</div>` : `<div style="font-size:12px;color:var(--text-muted)">No invoices issued yet.</div>`}
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
 
   // Re-open a previously issued invoice (printable)
   host.querySelectorAll('.item-card[data-inv]').forEach(card => {
@@ -8100,8 +8146,9 @@ async function renderProjectTasks(host, p, currentUser, currentRole, canBill){
     <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
       ${canManage?`<button class="btn-primary btn-sm" id="proj-add-task-btn">+ Delegate Task</button>`:''}
     </div>
-    ${tasks.length?`<div class="item-list">${tasks.map(taskCard).join('')}</div>`:'<div class="empty-state" style="padding:20px"><div class="empty-icon">📋</div><h4>No tasks for this project</h4></div>'}
+    ${tasks.length?`<div class="item-list">${tasks.map(taskCard).join('')}</div>`:`<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No tasks for this project</h4></div>`}
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
   host.querySelectorAll('.item-card[data-id]').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id, currentUser, currentRole)));
   document.getElementById('proj-add-task-btn')?.addEventListener('click',()=>openAddProjectTaskModal(p, currentUser, currentRole, canBill));
 }
@@ -8110,16 +8157,17 @@ async function renderProjectTasks(host, p, currentUser, currentRole, canBill){
 async function renderProjActivity(host, p, currentUser, currentRole){
   host.innerHTML = '<div class="loading-placeholder">Loading activity…</div>';
   const events = [];
-  (p.payments||[]).forEach(x=>events.push({at:x.date||'', html:`💵 Payment <strong>₱${fmt(x.amount)}</strong>`, by:x.byName||''}));
-  (p.invoices||[]).forEach(x=>events.push({at:x.date||x.createdAt||'', html:`🧾 Invoice ${escHtml(x.no||'')} <strong>₱${fmt(x.amount)}</strong>`, by:x.issuedBy||''}));
+  (p.payments||[]).forEach(x=>events.push({at:x.date||'', html:`${emojiIcon('💵',16)} Payment <strong>₱${fmt(x.amount)}</strong>`, by:x.byName||''}));
+  (p.invoices||[]).forEach(x=>events.push({at:x.date||x.createdAt||'', html:`${emojiIcon('🧾',16)} Invoice ${escHtml(x.no||'')} <strong>₱${fmt(x.amount)}</strong>`, by:x.issuedBy||''}));
   try {
     const snap = await db.collection('design_drawings').where('projectId','==',p.id).get();
-    snap.docs.forEach(d=>{ const dr=d.data(); (dr.activity||[]).forEach(a=>events.push({at:a.at||'', html:`📐 ${escHtml(dr.title||'Drawing')}: ${escHtml(a.event||'')}`, by:a.byName||''})); });
+    snap.docs.forEach(d=>{ const dr=d.data(); (dr.activity||[]).forEach(a=>events.push({at:a.at||'', html:`${emojiIcon('📐',16)} ${escHtml(dr.title||'Drawing')}: ${escHtml(a.event||'')}`, by:a.byName||''})); });
   } catch(e){ console.warn(e); }
   events.sort((a,b)=>(''+(b.at)).localeCompare(''+(a.at)));
   host.innerHTML = events.length
     ? `<div style="font-size:12px">${events.map(e=>`<div style="padding:6px 0;border-bottom:1px solid var(--border)"><div>${e.html}</div><div style="font-size:11px;color:var(--text-muted)">${escHtml(window.fmtManila(e.at))}${e.by?' · '+escHtml(e.by):''}</div></div>`).join('')}</div>`
-    : '<div class="empty-state" style="padding:20px"><div class="empty-icon">🕘</div><h4>No activity yet</h4></div>';
+    : `<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('🕘',44)}</div><h4>No activity yet</h4></div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
 }
 
 // ── Edit project: rename, status, client link, team delegation, job-project link ──
@@ -8180,7 +8228,8 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
 
   const renderChips = () => {
     const wrap = document.getElementById('pe-team-chips');
-    wrap.innerHTML = team.map(a=>`<span class="badge badge-blue team-chip" data-uid="${a.uid}" style="cursor:pointer">${escHtml(a.name)} ✕</span>`).join('');
+    wrap.innerHTML = team.map(a=>`<span class="badge badge-blue team-chip" data-uid="${a.uid}" style="cursor:pointer">${escHtml(a.name)} ${emojiIcon('✕',16)}</span>`).join('');
+    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
     wrap.querySelectorAll('.team-chip').forEach(ch=>ch.addEventListener('click',()=>{ team=team.filter(x=>x.uid!==ch.dataset.uid); renderChips(); }));
   };
   renderChips();
@@ -8265,8 +8314,9 @@ async function renderProjectDrawings(host, p, currentUser, currentRole, canBill)
       <span style="font-size:12px;color:var(--text-muted)">${drawings.length} drawing${drawings.length===1?'':'s'}</span>
       ${canManage?`<button class="btn-primary btn-sm" id="proj-add-dwg-btn">+ New Drawing</button>`:''}
     </div>
-    ${drawings.length?`<div class="item-list">${drawings.map(drawingCard).join('')}</div>`:'<div class="empty-state" style="padding:20px"><div class="empty-icon">📐</div><h4>No drawings yet</h4><p>Attach DWG, PDF or drawings to this project.</p></div>'}
+    ${drawings.length?`<div class="item-list">${drawings.map(drawingCard).join('')}</div>`:`<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('📐',44)}</div><h4>No drawings yet</h4><p>Attach DWG, PDF or drawings to this project.</p></div>`}
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
   host.querySelectorAll('.item-card[data-dwg]').forEach(card=>card.addEventListener('click',()=>{
     const d = drawings.find(x=>x.id===card.dataset.dwg);
     if (d) openDrawingDetail(d, p, currentUser, currentRole, canBill);
@@ -8285,7 +8335,7 @@ async function renderProjectFiles(host, p, currentUser, currentRole){
   const files = all.filter(f => f.projectId === p.id || f.folderId === folderId);
   host.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted)">📁 Project folder${p.clientId?` · client folder: ${escHtml(p.client||'Client')}`:''}</div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted)">${emojiIcon('📁',16)} Project folder${p.clientId?` · client folder: ${escHtml(p.client||'Client')}`:''}</div>
       ${canManage?`<button class="btn-primary btn-sm" id="pf-upload-btn">＋ Upload</button>`:''}
     </div>
     ${files.length ? `<div class="table-wrap"><table class="data-table">
@@ -8295,10 +8345,11 @@ async function renderProjectFiles(host, p, currentUser, currentRole){
         <td style="font-size:11px">${escHtml(f.uploaderName||'')}</td>
         <td style="font-size:11px;color:var(--text-muted)">${f.createdAt&&f.createdAt.toDate?f.createdAt.toDate().toLocaleDateString('en-PH'):''}</td>
         <td><span class="badge badge-gray">v${f.currentV||1}</span></td>
-        <td><button class="btn-secondary btn-sm pf-view-btn" data-id="${f.id}">👁</button></td>
+        <td><button class="btn-secondary btn-sm pf-view-btn" data-id="${f.id}">${emojiIcon('👁',16)}</button></td>
       </tr>`).join('')}</tbody></table></div>`
-    : '<div class="empty-state" style="padding:20px"><div class="empty-icon">📁</div><h4>No files in this project folder yet</h4></div>'}
+    : `<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('📁',44)}</div><h4>No files in this project folder yet</h4></div>`}
     <div id="pf-upload-area" style="margin-top:10px;display:none"></div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [host] });
   host.querySelectorAll('.pf-view-btn').forEach(b=>b.addEventListener('click',()=>{
     const f = files.find(x=>x.id===b.dataset.id); if (f) window.openFilePreview(f);
   }));
@@ -8389,7 +8440,7 @@ function openDrawingDetail(d, project, currentUser, currentRole, canBill){
   const revs = (d.revisions||[]).slice().reverse();
   const acts = (d.activity||[]).slice().reverse();
   const fileLink = d.fileUrl
-    ? `<a href="${escHtml(d.fileUrl||d.driveUrl)}" target="_blank" class="btn-secondary btn-sm">⬇ ${escHtml(d.fileName||'Open file')}</a>`
+    ? `<a href="${escHtml(d.fileUrl||d.driveUrl)}" target="_blank" class="btn-secondary btn-sm">${emojiIcon('⬇',16)} ${escHtml(d.fileName||'Open file')}</a>`
     : '<span style="font-size:12px;color:var(--text-muted)">No file attached</span>';
   const trans = (canManage || cap.isApprover) ? drawingTransitions(d.status).filter(t =>
     t.to === 'approved' ? cap.approve : t.to === 'released' ? cap.release : canManage) : [];
@@ -8398,25 +8449,25 @@ function openDrawingDetail(d, project, currentUser, currentRole, canBill){
       <span class="badge badge-gray">Rev ${escHtml(d.currentRev||'A')}</span>
       <span class="badge ${st.badge}">${st.label}</span>
       <span>${escHtml(d.type||'')}</span>
-      ${d.drawingNo?`<span>🔖 ${escHtml(d.drawingNo)}</span>`:''}
+      ${d.drawingNo?`<span>${emojiIcon('🔖',16)} ${escHtml(d.drawingNo)}</span>`:''}
     </div>
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:12px 14px;font-size:13px;display:grid;grid-template-columns:auto 1fr;gap:6px 12px">
       <span style="color:var(--text-muted)">Project</span><span>${escHtml(d.projectName||project?.name||'')}</span>
       <span style="color:var(--text-muted)">Designer</span><span>${d.assignedToName?escHtml(d.assignedToName):'<span style="color:var(--text-muted)">Unassigned</span>'}</span>
       <span style="color:var(--text-muted)">Approved by</span><span>${d.approverName?escHtml(d.approverName):'<span style="color:var(--text-muted)">—</span>'}</span>
       <span style="color:var(--text-muted)">Current file</span><span>${fileLink}</span>
-      ${d.status==='for_review' && !cap.approve ? `<span style="color:var(--text-muted)">Awaiting</span><span style="font-size:12px">🔏 Approval by ${project?.designLeadName ? escHtml(project.designLeadName) : 'a manager'}${(d.createdBy===currentUser?.uid||d.assignedTo===currentUser?.uid)?' — authors cannot approve their own drawing':''}</span>` : ''}
+      ${d.status==='for_review' && !cap.approve ? `<span style="color:var(--text-muted)">Awaiting</span><span style="font-size:12px">${emojiIcon('🔏',12)} Approval by ${project?.designLeadName ? escHtml(project.designLeadName) : 'a manager'}${(d.createdBy===currentUser?.uid||d.assignedTo===currentUser?.uid)?' — authors cannot approve their own drawing':''}</span>` : ''}
       ${d.releasedByName ? `<span style="color:var(--text-muted)">Released by</span><span>${escHtml(d.releasedByName)}</span>` : ''}
     </div></div>
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">📑 Revision History</div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('📑',16)} Revision History</div>
     <div class="table-wrap"><table class="data-table"><thead><tr><th>Rev</th><th>Status</th><th>Note</th><th>By</th><th>Date</th><th>File</th></tr></thead><tbody>
-      ${revs.length?revs.map(r=>`<tr><td><strong>${escHtml(r.rev||'')}</strong></td><td>${escHtml(drawingStatus(r.status).label)}</td><td style="font-size:11px">${escHtml(r.note||'')}</td><td style="font-size:11px">${escHtml(r.byName||'')}</td><td style="font-size:11px;color:var(--text-muted)">${escHtml(window.fmtManila(r.at).slice(0,10))}</td><td>${r.fileUrl?`<a href="${escHtml(r.fileUrl||r.driveUrl)}" target="_blank">⬇</a>`:'—'}</td></tr>`).join(''):'<tr><td colspan="6" style="font-size:12px;color:var(--text-muted)">No revisions.</td></tr>'}
+      ${revs.length?revs.map(r=>`<tr><td><strong>${escHtml(r.rev||'')}</strong></td><td>${escHtml(drawingStatus(r.status).label)}</td><td style="font-size:11px">${escHtml(r.note||'')}</td><td style="font-size:11px">${escHtml(r.byName||'')}</td><td style="font-size:11px;color:var(--text-muted)">${escHtml(window.fmtManila(r.at).slice(0,10))}</td><td>${r.fileUrl?`<a href="${escHtml(r.fileUrl||r.driveUrl)}" target="_blank">${emojiIcon('⬇',16)}</a>`:'—'}</td></tr>`).join(''):'<tr><td colspan="6" style="font-size:12px;color:var(--text-muted)">No revisions.</td></tr>'}
     </tbody></table></div>
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:12px 0 4px">🕘 Activity</div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:12px 0 4px">${emojiIcon('🕘',16)} Activity</div>
     <div style="max-height:150px;overflow:auto;font-size:12px">${acts.length?acts.map(a=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)"><strong>${escHtml(a.event||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(window.fmtManila(a.at))} · ${escHtml(a.byName||'')}</div></div>`).join(''):'<div style="color:var(--text-muted)">No activity.</div>'}</div>
   `, `
     ${canManage?`<button class="btn-secondary btn-sm" id="dwg-rev-btn">+ New Revision</button>`:''}
-    ${canManage?`<button class="btn-secondary btn-sm" id="dwg-edit-btn">✏️ Edit</button>`:''}
+    ${canManage?`<button class="btn-secondary btn-sm" id="dwg-edit-btn">${emojiIcon('✏️',16)} Edit</button>`:''}
     ${trans.map(t=>`<button class="${t.cls} btn-sm dwg-trans-btn" data-to="${t.to}">${t.label}</button>`).join('')}
     <button class="btn-secondary" id="dwg-back-btn">Back</button>
   `);
@@ -8581,7 +8632,7 @@ async function openAddProjectTaskModal(project, currentUser, currentRole, canBil
     <div class="form-group"><label>Title</label><input id="pt-title" placeholder="Task name"/></div>
     <div class="form-group"><label>Description</label><textarea id="pt-desc" rows="2"></textarea></div>
     <div class="form-row">
-      <div class="form-group"><label>Priority</label><select id="pt-priority"><option value="low">🟢 Low</option><option value="medium" selected>🟡 Medium</option><option value="high">🔴 High</option><option value="urgent">🚨 Urgent</option></select></div>
+      <div class="form-group"><label>Priority</label><select id="pt-priority"><option value="low">${emojiIcon('🟢',16)} Low</option><option value="medium" selected>${emojiIcon('🟡',16)} Medium</option><option value="high">${emojiIcon('🔴',16)} High</option><option value="urgent">${emojiIcon('🚨',16)} Urgent</option></select></div>
       <div class="form-group"><label>Due Date</label><input id="pt-due" type="date" value="${today()}"/></div>
     </div>
     <div class="form-group"><label>Assign To (add multiple)</label>
@@ -8593,7 +8644,8 @@ async function openAddProjectTaskModal(project, currentUser, currentRole, canBil
   let picks = [];
   const renderPicks = () => {
     const wrap = document.getElementById('pt-chips');
-    wrap.innerHTML = picks.map(a=>`<span class="badge badge-blue pt-chip" data-uid="${a.uid}" style="cursor:pointer">${escHtml(a.name)} ✕</span>`).join('');
+    wrap.innerHTML = picks.map(a=>`<span class="badge badge-blue pt-chip" data-uid="${a.uid}" style="cursor:pointer">${escHtml(a.name)} ${emojiIcon('✕',16)}</span>`).join('');
+    if (window.lucide) lucide.createIcons({ nodes: [wrap] });
     wrap.querySelectorAll('.pt-chip').forEach(ch=>ch.addEventListener('click',()=>{ picks=picks.filter(x=>x.uid!==ch.dataset.uid); renderPicks(); }));
   };
   document.getElementById('pt-assignee-sel').addEventListener('change',e=>{
@@ -8656,7 +8708,8 @@ async function renderDrawingsDashboard(container, currentUser, currentRole){
     const listEl = document.getElementById('dwg-dash-list');
     listEl.innerHTML = showing.length
       ? `<div class="item-list">${showing.map(drawingCard).join('')}</div>`
-      : '<div class="empty-state" style="padding:20px"><div class="empty-icon">📐</div><h4>No drawings match</h4></div>';
+      : `<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('📐',44)}</div><h4>No drawings match</h4></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [listEl] });
     listEl.querySelectorAll('.item-card[data-dwg]').forEach(card=>card.addEventListener('click',()=>{
       const d = drawings.find(x=>x.id===card.dataset.dwg);
       if (d) openDrawingDetail(d, projMap[d.projectId] || {id:d.projectId, name:d.projectName}, currentUser, currentRole, false);
@@ -8665,7 +8718,7 @@ async function renderDrawingsDashboard(container, currentUser, currentRole){
 
   container.innerHTML = `
     <div class="kpi-row" style="margin-bottom:12px">
-      <div class="kpi-card" id="dwg-kpi-mine" style="cursor:pointer;border-color:var(--accent)"><div class="kpi-label">🔏 For my approval</div><div class="kpi-value">${mine.length}</div></div>
+      <div class="kpi-card" id="dwg-kpi-mine" style="cursor:pointer;border-color:var(--accent)"><div class="kpi-label">${emojiIcon('🔏',16)} For my approval</div><div class="kpi-value">${mine.length}</div></div>
       ${DRAWING_STATUSES.map(s=>`<div class="kpi-card"><div class="kpi-label">${s.label}</div><div class="kpi-value">${counts[s.id]||0}</div></div>`).join('')}
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
@@ -8675,6 +8728,7 @@ async function renderDrawingsDashboard(container, currentUser, currentRole){
     </div>
     <div id="dwg-dash-list"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
   document.getElementById('dwg-f-status').addEventListener('change',e=>{ fStatus=e.target.value; renderList(); });
   document.getElementById('dwg-f-designer').addEventListener('change',e=>{ fDesigner=e.target.value; renderList(); });
   document.getElementById('dwg-f-project').addEventListener('change',e=>{ fProject=e.target.value; renderList(); });
@@ -8743,10 +8797,10 @@ ${_lh ? _lh.printCSS : ''}
 </style>
 </head><body>
 <div class="export-bar">
-  <span style="font-weight:700">🧾 ${docTitle} — ${escHtml(inv.no||'')}</span>
-  <button onclick="window.print()">🖨 Save as PDF / Print</button>
-  <button onclick="downloadJPEG()">📷 Save as JPEG</button>
-  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,0.15);color:#fff">✕ Close</button>
+  <span style="font-weight:700">${emojiIcon('🧾',16)} ${docTitle} — ${escHtml(inv.no||'')}</span>
+  <button onclick="window.print()">${emojiIcon('🖨',16)} Save as PDF / Print</button>
+  <button onclick="downloadJPEG()">${emojiIcon('📷',16)} Save as JPEG</button>
+  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,0.15);color:#fff">${emojiIcon('✕',16)} Close</button>
 </div>
 <div style="height:48px"></div>
 <div class="page" id="invoice-page">
@@ -8863,7 +8917,7 @@ window.renderIT = async function(currentUser, currentRole, subtab = 'Overview') 
     : ['Overview','IT Tickets','Assets','Software','Tasks'];
   if (!itAdmin && (subtab === 'Access Control' || subtab === 'Network')) subtab = 'Overview';
   c.innerHTML = `
-    <div class="page-header"><h2>💻 IT Department</h2></div>
+    <div class="page-header"><h2>${emojiIcon('💻',20)} IT Department</h2></div>
     ${window.sopPanel('How IT works', [
       'Staff raise issues in IT Tickets; IT works them to resolution.',
       'Assets and Software track company hardware and licences.',
@@ -8872,6 +8926,7 @@ window.renderIT = async function(currentUser, currentRole, subtab = 'Overview') 
     ${window.chipTabs(subtabs.map(s=>({key:s,label:s})), subtab)}
     <div id="it-content"><div class="loading-placeholder">Loading…</div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadITContent(currentUser, currentRole, subtab, canEdit);
   window.bindChipTabs(c, (key) => loadITContent(currentUser, currentRole, key, canEdit));
 };
@@ -8895,22 +8950,22 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
     content.innerHTML = `
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-bottom:20px">
         <div class="card" style="text-align:center;padding:16px">
-          <div style="font-size:28px;margin-bottom:4px">🎫</div>
+          <div style="font-size:28px;margin-bottom:4px">${emojiIcon('🎫',28)}</div>
           <div style="font-size:22px;font-weight:700;color:var(--accent)">${openT}</div>
           <div style="font-size:12px;color:var(--text-muted)">Open Tickets</div>
         </div>
         <div class="card" style="text-align:center;padding:16px">
-          <div style="font-size:28px;margin-bottom:4px">⏳</div>
+          <div style="font-size:28px;margin-bottom:4px">${emojiIcon('⏳',28)}</div>
           <div style="font-size:22px;font-weight:700;color:#FF9F0A">${inProgT}</div>
           <div style="font-size:12px;color:var(--text-muted)">In Progress</div>
         </div>
         <div class="card" style="text-align:center;padding:16px">
-          <div style="font-size:28px;margin-bottom:4px">🖥️</div>
+          <div style="font-size:28px;margin-bottom:4px">${emojiIcon('🖥️',28)}</div>
           <div style="font-size:22px;font-weight:700;color:var(--text)">${totalA}</div>
           <div style="font-size:12px;color:var(--text-muted)">Total Assets</div>
         </div>
         <div class="card" style="text-align:center;padding:16px">
-          <div style="font-size:28px;margin-bottom:4px">✅</div>
+          <div style="font-size:28px;margin-bottom:4px">${emojiIcon('✅',28)}</div>
           <div style="font-size:22px;font-weight:700;color:#30D158">${activeA}</div>
           <div style="font-size:12px;color:var(--text-muted)">Active Assets</div>
         </div>
@@ -8926,12 +8981,13 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
               </div>
               <div class="item-meta">
                 <span>${escHtml(t.category||'General')}</span>
-                ${t.requestedBy?`<span>👤 ${escHtml(t.requestedBy)}</span>`:''}
+                ${t.requestedBy?`<span>${emojiIcon('👤',16)} ${escHtml(t.requestedBy)}</span>`:''}
                 ${t.createdAt?`<span>${new Date(t.createdAt.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric'})}</span>`:''}
               </div>
-            </div>`).join('') || '<div class="empty-state" style="padding:16px"><div class="empty-icon">✅</div><p>No open tickets</p></div>'}
+            </div>`).join('') || `<div class="empty-state" style="padding:16px"><div class="empty-icon">${emojiIcon('✅',44)}</div><p>No open tickets</p></div>`}
         </div>
       </div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [content] });
     return;
   }
 
@@ -8954,7 +9010,8 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
     function renderTickets(filter) {
       const list = document.getElementById('it-ticket-list');
       const shown = filter==='all' ? tickets : tickets.filter(t=>t.status===filter);
-      if (!shown.length) { list.innerHTML='<div class="empty-state"><div class="empty-icon">🎫</div><h4>No tickets</h4></div>'; return; }
+      if (!shown.length) { list.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('🎫',44)}</div><h4>No tickets</h4></div>`; return; }
+      if (window.lucide) lucide.createIcons({ nodes: [list] });
       list.innerHTML = shown.map(t=>`
         <div class="item-card it-ticket-card" data-id="${t.id}" style="cursor:pointer">
           <div class="item-top">
@@ -8964,10 +9021,11 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           <div class="item-meta">
             <span class="badge badge-blue" style="font-size:10px">${escHtml(t.category||'General')}</span>
             <span class="badge ${t.priority==='high'?'badge-red':t.priority==='medium'?'badge-orange':'badge-gray'}" style="font-size:10px">${t.priority||'low'} priority</span>
-            ${t.requestedBy?`<span>👤 ${escHtml(t.requestedBy)}</span>`:''}
-            ${t.assignedTo?`<span>🔧 ${escHtml(t.assignedTo)}</span>`:''}
+            ${t.requestedBy?`<span>${emojiIcon('👤',16)} ${escHtml(t.requestedBy)}</span>`:''}
+            ${t.assignedTo?`<span>${emojiIcon('🔧',16)} ${escHtml(t.assignedTo)}</span>`:''}
           </div>
         </div>`).join('');
+      if (window.lucide) lucide.createIcons({ nodes: [list] });
       list.querySelectorAll('.it-ticket-card').forEach(card => {
         card.addEventListener('click', () => {
           const t = tickets.find(x=>x.id===card.dataset.id);
@@ -9130,13 +9188,14 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
                 <td>${escHtml(s.licenseType||'—')}</td>
                 <td><code style="font-size:10px">${escHtml(s.licenseKey||'—')}</code></td>
                 <td>${s.seats||'—'}</td>
-                <td style="color:${isExp?'var(--danger)':isSoon?'#FF9F0A':'inherit'}">${s.expiryDate||'—'}${isExp?' ⚠️':isSoon?' 🔔':''}</td>
+                <td style="color:${isExp?'var(--danger)':isSoon?'#FF9F0A':'inherit'}">${s.expiryDate||'—'}${isExp?` ${emojiIcon('⚠️',16)}`:isSoon?` ${emojiIcon('🔔',16)}`:''}</td>
                 <td><span class="badge ${s.status==='active'?'badge-green':s.status==='expired'?'badge-red':'badge-gray'}">${s.status||'active'}</span></td>
                 ${canEdit?`<td><button class="btn-icon edit-sw-btn" data-id="${s.id}"><i data-lucide="pencil" style="width:14px;height:14px"></i></button></td>`:''}
               </tr>`;
             }).join('')}
         </tbody>
       </table></div></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [content] });
     document.getElementById('new-sw-btn')?.addEventListener('click', () => {
       openPage('Add Software / License', `
         <div class="form-row">
@@ -9302,11 +9361,11 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         ${canEdit?`<button class="btn-primary btn-sm" id="new-net-btn">+ Add Network Note</button>`:''}
       </div>
       <div style="display:flex;flex-direction:column;gap:12px">
-        ${!notes.length?`<div class="empty-state"><div class="empty-icon">🌐</div><h4>No network notes yet</h4></div>`
+        ${!notes.length?`<div class="empty-state"><div class="empty-icon">${emojiIcon('🌐',44)}</div><h4>No network notes yet</h4></div>`
           :notes.map(n=>`
             <div class="card">
               <div class="card-header">
-                <h3>🌐 ${escHtml(n.title||'Untitled')}</h3>
+                <h3>${emojiIcon('🌐',20)} ${escHtml(n.title||'Untitled')}</h3>
                 <span class="badge badge-blue" style="font-size:10px">${escHtml(n.type||'General')}</span>
               </div>
               <div style="padding:0 16px 16px;font-size:13px;white-space:pre-wrap;color:var(--text)">${escHtml(n.content||'')}</div>
@@ -9317,6 +9376,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
               </div>`:''}
             </div>`).join('')}
       </div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [content] });
     const netModal = (existing) => {
       openPage(existing?'Edit Network Note':'Add Network Note', `
         <div class="form-row">
@@ -9366,7 +9426,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
 
 function openITTicketModal(ticket, currentUser, canEdit, onRefresh) {
   const isAssigned = canEdit || ticket.createdBy === currentUser.uid;
-  openPage(`🎫 ${escHtml(ticket.title||'Ticket')}`, `
+  openPage(`${emojiIcon('🎫',16)} ${escHtml(ticket.title||'Ticket')}`, `
     <div style="margin-bottom:12px">
       <div class="item-meta" style="gap:8px;margin-bottom:8px">
         <span class="badge ${ticket.status==='open'?'badge-orange':ticket.status==='in-progress'?'badge-blue':ticket.status==='resolved'?'badge-green':'badge-gray'}">${ticket.status||'open'}</span>
@@ -9416,7 +9476,7 @@ window.renderBrilliantSteel = async function(currentUser, currentRole, subtab = 
   const tabs = ['Quote Builder','Quotations Summary','Client Data','Files'];
   c.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
-      <span style="font-size:22px">⚙️</span>
+      <span style="font-size:22px">${emojiIcon('⚙️',22)}</span>
       <div>
         <h2 style="font-size:18px;font-weight:800;color:#37474f">Brilliant Steel</h2>
         <p style="font-size:11px;color:var(--text-muted)">Partner Company Operations</p>
@@ -9427,6 +9487,7 @@ window.renderBrilliantSteel = async function(currentUser, currentRole, subtab = 
     </div>
     <div id="bs-content"><div class="loading-placeholder">Loading…</div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadBSContent(currentUser, currentRole, subtab);
   c.querySelectorAll('.subtab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -9458,13 +9519,14 @@ async function loadBSContent(currentUser, currentRole, sub) {
 function renderBSFiles(container, currentUser, currentRole) {
   container.innerHTML = `
     <div class="subtab-bar" id="bs-files-tabs" style="margin-bottom:14px">
-      <button class="subtab-btn active" data-sub="Quotations">📋 Quotations</button>
-      <button class="subtab-btn" data-sub="Images">🖼 Images</button>
-      <button class="subtab-btn" data-sub="Drawings">📐 Drawings</button>
-      <button class="subtab-btn" data-sub="Documents">📄 Documents</button>
+      <button class="subtab-btn active" data-sub="Quotations">${emojiIcon('📋',16)} Quotations</button>
+      <button class="subtab-btn" data-sub="Images">${emojiIcon('🖼',16)} Images</button>
+      <button class="subtab-btn" data-sub="Drawings">${emojiIcon('📐',16)} Drawings</button>
+      <button class="subtab-btn" data-sub="Documents">${emojiIcon('📄',16)} Documents</button>
     </div>
     <div id="bs-files-content"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
   const load = async sub => {
     const fc = document.getElementById('bs-files-content');
     if (sub === 'Quotations') {
@@ -9508,7 +9570,8 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
     });
 
     if (!folders.length) {
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">📁</div><h4>No quotation files yet</h4><p style="color:var(--text-muted);font-size:13px">Filed quotations will appear here, organized by client.</p></div>';
+      container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('📁',44)}</div><h4>No quotation files yet</h4><p style="color:var(--text-muted);font-size:13px">Filed quotations will appear here, organized by client.</p></div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [container] });
       return;
     }
 
@@ -9528,7 +9591,7 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
         return `
           <div class="card bs-qfolder-card" style="cursor:pointer" onclick="this.querySelector('.bs-qfolder-body').style.display=this.querySelector('.bs-qfolder-body').style.display==='block'?'none':'block'">
             <div class="card-header" style="gap:10px">
-              <div style="font-size:28px;flex-shrink:0">📁</div>
+              <div style="font-size:28px;flex-shrink:0">${emojiIcon('📁',28)}</div>
               <div style="flex:1;min-width:0">
                 <div style="font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(clientName)}</div>
                 <div style="font-size:11px;color:var(--text-muted)">${qs.length} file${qs.length!==1?'s':''} · ₱${total.toLocaleString()} · Last: ${latestDate}</div>
@@ -9541,7 +9604,7 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
                 const badge = status==='filed'||status==='approved'?'badge-green':status==='pending_approval'||status==='pending_review'||status==='sent'?'badge-orange':status==='rejected'?'badge-red':'badge-gray';
                 return `
                   <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
-                    <span style="font-size:18px">📄</span>
+                    <span style="font-size:18px">${emojiIcon('📄',18)}</span>
                     <div style="flex:1;min-width:0">
                       <div style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(q.quoteNumber||q.id.slice(-8))}</div>
                       <div style="font-size:11px;color:var(--text-muted)">${ts}${isPrivileged&&q.agentName?' · '+escHtml(q.agentName):''}</div>
@@ -9555,6 +9618,7 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
             </div>
           </div>`;
       }).join('');
+      if (window.lucide) lucide.createIcons({ nodes: [grid] });
     };
 
     renderFolders(folders);
@@ -9598,7 +9662,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
   const staleCount = all.filter(q => staleDaysOf(q) > window.QUOTE_STALE_DAYS).length;
 
   const renderList = (quotes) => !quotes.length
-    ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">📋</div><h4>No quotations here</h4></div>'
+    ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No quotations here</h4></div>`
     : `<div class="card"><div class="table-wrap"><table class="data-table">
         <thead><tr><th>Quote #</th><th>Client</th><th>Total</th><th>Agent</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>${quotes.map(q=>{
@@ -9614,22 +9678,22 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
             <td>${escHtml(q.agentName||q.createdByName||'—')}</td>
             <td>
               <span class="badge ${badge}">${status}</span>
-              ${q.deleteRequested?'<span class="badge badge-red" style="font-size:9px;margin-left:4px">🗑 del req</span>':''}
-              ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px;margin-left:4px" title="Filed but no Sales Order yet">⚠ ${staleDays}d no SO</span>` : ''}
+              ${q.deleteRequested?`<span class="badge badge-red" style="font-size:9px;margin-left:4px">${emojiIcon('🗑',9)} del req</span>`:''}
+              ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px;margin-left:4px" title="Filed but no Sales Order yet">${emojiIcon('⚠',9)} ${staleDays}d no SO</span>` : ''}
               <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${ts}</div>
             </td>
             <td style="white-space:nowrap;display:flex;gap:6px;flex-wrap:wrap">
               ${isPrivileged&&(status==='pending_approval'||status==='pending_review'||status==='sent')?`
-                <button class="btn-primary btn-sm bs-approve-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">✅ Approve</button>
-                <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">❌ Reject</button>
-                <button class="btn-secondary btn-sm bs-edit-return-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">✎ Edit &amp; Return</button>
+                <button class="btn-primary btn-sm bs-approve-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">${emojiIcon('✅',16)} Approve</button>
+                <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">${emojiIcon('❌',16)} Reject</button>
+                <button class="btn-secondary btn-sm bs-edit-return-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">${emojiIcon('✎',16)} Edit &amp; Return</button>
               `:''}
               ${(status==='filed'||status==='approved')?`<button class="btn-secondary btn-sm bs-reopen-btn" data-id="${q.id}" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen</button>`:''}
-              ${(status==='filed'||status==='approved')&&q.editableState?`<button class="btn-secondary btn-sm bs-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">⎘ New Revision</button>`:''}
-              ${(status==='filed'||status==='approved')?`<button class="btn-success btn-sm bs-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${q.total||q.grandTotal||0}" data-co="${escHtml(q.company||'BS')}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?'✓ Ordered':'🧾 Sales Order'}</button>`:''}
+              ${(status==='filed'||status==='approved')&&q.editableState?`<button class="btn-secondary btn-sm bs-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
+              ${(status==='filed'||status==='approved')?`<button class="btn-success btn-sm bs-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${q.total||q.grandTotal||0}" data-co="${escHtml(q.company||'BS')}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('🧾',16)} Sales Order`}</button>`:''}
               ${canDeleteDirect
-                ? `<button class="btn-secondary btn-sm bs-del-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" style="color:var(--danger)">🗑 Delete</button>`
-                : `<button class="btn-secondary btn-sm bs-delreq-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" ${q.deleteRequested?'disabled':''}>${q.deleteRequested?'⏳ Requested':'🗑 Request Delete'}</button>`}
+                ? `<button class="btn-secondary btn-sm bs-del-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" style="color:var(--danger)">${emojiIcon('🗑',16)} Delete</button>`
+                : `<button class="btn-secondary btn-sm bs-delreq-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" ${q.deleteRequested?'disabled':''}>${q.deleteRequested?`${emojiIcon('⏳',16)} Requested`:`${emojiIcon('🗑',16)} Request Delete`}</button>`}
             </td>
           </tr>`;
         }).join('')}</tbody>
@@ -9649,7 +9713,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
   const pipelineVal = bsActive.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
   const analytics = `
     <div class="card" style="margin-bottom:14px;border:1.5px solid var(--primary)">
-      <div class="card-header"><h3>📊 Quote Analytics</h3></div>
+      <div class="card-header"><h3>${emojiIcon('📊',20)} Quote Analytics</h3></div>
       <div class="card-body">
         <div class="kpi-row">
           <div class="kpi-card"><div class="kpi-label">Quotes Made</div><div class="kpi-value">${totalMade}</div></div>
@@ -9677,10 +9741,11 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
       ${needsRevision.length?`<button class="subtab-btn" data-qsub="needs-revision" style="border-color:var(--warning);color:var(--warning)">↩ Needs Revision (${needsRevision.length})</button>`:''}
       <button class="subtab-btn" data-qsub="drafts">Drafts (${drafts.length})</button>
       <button class="subtab-btn" data-qsub="rejected">Rejected (${rejected.length})</button>
-      ${staleCount?`<span class="badge badge-orange" style="align-self:center;font-size:11px;font-weight:700">⚠ ${staleCount} stale</span>`:''}
+      ${staleCount?`<span class="badge badge-orange" style="align-self:center;font-size:11px;font-weight:700">${emojiIcon('⚠',11)} ${staleCount} stale</span>`:''}
     </div>
     <div id="qs-content">${renderList(filed)}</div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   const qsContent = container.querySelector('#qs-content');
   container.querySelectorAll('[data-qsub]').forEach(btn => {
@@ -9720,7 +9785,7 @@ async function uniqueTrackCode(){
   return window.makeTrackCode(11);
 }
 window.showOrderTrackModal = function(url, orderNo){
-  openModal('🔗 Client Order-Tracking Link', `
+  openModal(`${emojiIcon('🔗',16)} Client Order-Tracking Link`, `
     <p style="font-size:13px;color:var(--text-2);margin-bottom:12px">Share this link with the client for <strong>${escHtml(orderNo||'their order')}</strong>. They can open it any time — <strong>no login needed</strong> — to see their order status, dates and balance. Internal costs are never shown.</p>
     <div style="display:flex;gap:8px;align-items:center">
       <input id="track-url" readonly value="${escHtml(url)}" style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px" onclick="this.select()"/>
@@ -9790,7 +9855,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
         ? (total > 0 ? +(100*(quotePay.downPayment||0)/total).toFixed(1) : '')
         : (parseFloat(quotePay.downPaymentMode) || ''))
     : '';
-  openPage('🧾 Create Sales Order', `
+  openPage(`${emojiIcon('🧾',16)} Create Sales Order`, `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Client <strong>${escHtml(d.client||'')}</strong> · Quote ${escHtml(d.qno||'')}</div>
     <div class="form-group"><label>Project / Scope</label><input id="so-project" value="${escHtml((d.client||'')+' — '+(d.qno||''))}"/></div>
     <div class="form-row">
@@ -9898,7 +9963,7 @@ window.renderSalesOrders = async function(container){
   const totalContract = orders.reduce((s,o)=>s+(o.contractAmount||0),0);
   const totalRecorded = orders.filter(o=>o.status==='recorded').reduce((s,o)=>s+(o.recordedAmount||o.paymentReceived||0),0);
   c.innerHTML = `
-    <div class="page-header"><h2>🧾 Sales Orders</h2><span style="font-size:12px;color:var(--text-muted)">Record the sale &amp; payment, then hand off to Production</span></div>
+    <div class="page-header"><h2>${emojiIcon('🧾',20)} Sales Orders</h2><span style="font-size:12px;color:var(--text-muted)">Record the sale &amp; payment, then hand off to Production</span></div>
     <div class="kpi-row" style="margin-bottom:14px">
       <div class="kpi-card"><div class="kpi-label">Orders</div><div class="kpi-value">${orders.length}</div></div>
       <div class="kpi-card warn"><div class="kpi-label">To Record</div><div class="kpi-value">${pending.length}</div></div>
@@ -9906,7 +9971,7 @@ window.renderSalesOrders = async function(container){
       <div class="kpi-card"><div class="kpi-label">Recorded ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(totalRecorded)}</div></div>
     </div>
     <div class="card"><div class="card-body" style="padding:0">
-    ${!orders.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧾</div><h4>No sales orders yet</h4><p>They appear here when a won quote is converted to a sales order.</p></div>':
+    ${!orders.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🧾',44)}</div><h4>No sales orders yet</h4><p>They appear here when a won quote is converted to a sales order.</p></div>`:
     `<div class="table-wrap"><table class="data-table">
       <thead><tr><th>Date</th><th>Client / Project</th><th>Contract</th><th>Received</th><th>Method</th><th>Receipt</th><th>By</th><th>Status</th><th></th></tr></thead>
       <tbody>${orders.map(o=>`<tr>
@@ -9915,13 +9980,14 @@ window.renderSalesOrders = async function(container){
         <td>₱${fmt(o.contractAmount||0)}</td>
         <td>₱${fmt(o.recordedAmount||o.paymentReceived||0)}</td>
         <td style="font-size:12px">${escHtml(o.paymentMethod||'')}</td>
-        <td>${o.receiptUrl?`<a href="${escHtml(o.receiptUrl)}" target="_blank" class="btn-icon">📎</a>`:'—'}</td>
+        <td>${o.receiptUrl?`<a href="${escHtml(o.receiptUrl)}" target="_blank" class="btn-icon">${emojiIcon('📎',16)}</a>`:'—'}</td>
         <td style="font-size:11px">${escHtml(o.createdByName||'')}</td>
-        <td><span class="badge ${o.status==='recorded'?'badge-green':'badge-orange'}">${escHtml(o.status||'pending')}</span>${o.sentToProduction?'<span class="badge badge-blue" style="font-size:9px;margin-left:4px">🏭 in production</span>':''}</td>
-        <td style="white-space:nowrap"><button class="btn-secondary btn-sm so-link-btn" data-id="${o.id}" title="Copy the client order-tracking link">🔗 Link</button>${isFin?` ${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}">Record Sale</button>`:(!o.sentToProduction?`<button class="btn-secondary btn-sm so-prod-btn" data-id="${o.id}">🏭 To Production</button>`:'✓')}`:''}</td>
+        <td><span class="badge ${o.status==='recorded'?'badge-green':'badge-orange'}">${escHtml(o.status||'pending')}</span>${o.sentToProduction?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px">${emojiIcon('🏭',9)} in production</span>`:''}</td>
+        <td style="white-space:nowrap"><button class="btn-secondary btn-sm so-link-btn" data-id="${o.id}" title="Copy the client order-tracking link">${emojiIcon('🔗',16)} Link</button>${isFin?` ${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}">Record Sale</button>`:(!o.sentToProduction?`<button class="btn-secondary btn-sm so-prod-btn" data-id="${o.id}">${emojiIcon('🏭',16)} To Production</button>`:`${emojiIcon('✓',16)}`)}`:''}</td>
       </tr>`).join('')}</tbody>
     </table></div>`}
     </div></div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   // Tracking link is available to every viewer of this list (non-partner).
   c.querySelectorAll('.so-link-btn').forEach(b=>b.addEventListener('click', async ()=>{
     const o = orders.find(x=>x.id===b.dataset.id); if(!o) return;
@@ -9970,19 +10036,19 @@ async function openRecordSaleModal(o, container){
   const salesNoted = o.paymentReceived||0;
   const defaultAmt = o.recordedAmount||salesNoted||0;
   const bankOpts = await window.BankAccounts.optionsHTML(o.bankAccountId);
-  openPage('💵 Register Sale — '+escHtml(o.clientName||''), `
+  openPage(`${emojiIcon('💵',16)} Register Sale — `+escHtml(o.clientName||''), `
     <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:10px 14px;font-size:12px">
-      <div style="font-weight:700;margin-bottom:6px">📋 Sales Order Terms</div>
+      <div style="font-weight:700;margin-bottom:6px">${emojiIcon('📋',16)} Sales Order Terms</div>
       <div style="display:grid;grid-template-columns:1fr auto;gap:3px 12px">
         <span style="color:var(--text-muted)">Client / Project</span><span style="text-align:right">${escHtml(o.clientName||'')}${o.project?' · '+escHtml(o.project):''}</span>
         <span style="color:var(--text-muted)">Quote</span><span style="text-align:right">${escHtml(o.quoteNumber||'—')}</span>
         <span style="color:var(--text-muted)">Contract amount</span><span style="text-align:right;font-weight:700">₱${fmt(contract)}</span>
         <span style="color:var(--text-muted)">Payment noted by Sales</span><span style="text-align:right">₱${fmt(salesNoted)} ${o.paymentMethod?'· '+escHtml(o.paymentMethod):''}</span>
         ${o.notes?`<span style="color:var(--text-muted)">Terms / notes</span><span style="text-align:right">${escHtml(o.notes)}</span>`:''}
-        ${o.receiptUrl?`<span style="color:var(--text-muted)">Receipt</span><span style="text-align:right"><a href="${escHtml(o.receiptUrl)}" target="_blank">📎 View proof</a></span>`:''}
+        ${o.receiptUrl?`<span style="color:var(--text-muted)">Receipt</span><span style="text-align:right"><a href="${escHtml(o.receiptUrl)}" target="_blank">${emojiIcon('📎',16)} View proof</a></span>`:''}
       </div>
     </div></div>
-    <div style="font-size:12px;font-weight:700;margin-bottom:6px">✅ Approve the collected amount</div>
+    <div style="font-size:12px;font-weight:700;margin-bottom:6px">${emojiIcon('✅',12)} Approve the collected amount</div>
     <div class="form-row">
       <div class="form-group"><label>Approved collected (₱)</label><input id="rs-amount" type="number" step="0.01" min="0" value="${defaultAmt}" inputmode="decimal"/>
         <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Confirm what Finance actually received per the order terms.</div></div>
@@ -9992,7 +10058,7 @@ async function openRecordSaleModal(o, container){
     </div>
     <div class="form-group"><label>Deposited to (company account)</label>
       <select id="rs-bankacct" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Which company account received the cash — feeds the Bank Accounts balance. Further collections for this job are recorded on the linked Project (Projects → 💵 Record Payment).</div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Which company account received the cash — feeds the Bank Accounts balance. Further collections for this job are recorded on the linked Project (Projects → ${emojiIcon('💵',16)} Record Payment).</div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>VAT treatment</label>
@@ -10192,7 +10258,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
       const b = e.currentTarget;
       const snap = await db.collection('bs_quotes').doc(b.dataset.id).get();
       const q = snap.data();
-      openPage(`✎ Edit Quote — ${b.dataset.qno}`, `
+      openPage(`${emojiIcon('✎',16)} Edit Quote — ${b.dataset.qno}`, `
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Edit this quotation directly. You can approve after editing, or return it to the submitter.</p>
         <div class="form-group"><label>Client Name</label>
           <input id="pres-client" type="text" value="${(q.clientName||'').replace(/"/g,'&quot;')}" style="width:100%"/>
@@ -10210,7 +10276,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
           <textarea id="pres-notes" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Optional notes for the submitter…">${escHtml(q.presidentNotes||'')}</textarea>
         </div>
       `, `
-        <button class="btn-success" id="pres-approve-edit-btn">✅ Save &amp; Approve</button>
+        <button class="btn-success" id="pres-approve-edit-btn">${emojiIcon('✅',16)} Save &amp; Approve</button>
         <button class="btn-primary" id="pres-return-btn">↩ Save &amp; Return</button>
         <button class="btn-secondary" onclick="closeModal()">Cancel</button>
       `);
@@ -10300,7 +10366,8 @@ async function renderBSClientData(container, currentUser, currentRole) {
     const clients = Object.values(clientMap).sort((a,b) => b.lastActivity - a.lastActivity);
 
     if (!clients.length) {
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">👤</div><h4>No client data yet</h4><p style="color:var(--text-muted);font-size:13px">Clients will appear here once quotations are filed.</p></div>';
+      container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('👤',44)}</div><h4>No client data yet</h4><p style="color:var(--text-muted);font-size:13px">Clients will appear here once quotations are filed.</p></div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [container] });
       return;
     }
 
@@ -10345,22 +10412,24 @@ async function renderBSClientData(container, currentUser, currentRole) {
                   <td><span class="badge ${badge}">${status}</span></td>
                   <td style="color:var(--text-muted);font-size:11px">${ts}</td>
                   ${isPrivileged?`<td style="font-size:12px;color:var(--text-muted)">${escHtml(q.agentName||q.createdByName||'—')}</td>`:''}
-                  <td style="white-space:nowrap">${q.editableState?`<button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.reopenQuoteFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen &amp; Edit</button> <button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.newRevisionFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Start a new revision (R2, R3…) with today's date">⎘ New Revision</button>`:'<span style="font-size:10px;color:var(--text-muted)">no snapshot</span>'}</td>
+                  <td style="white-space:nowrap">${q.editableState?`<button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.reopenQuoteFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen &amp; Edit</button> <button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.newRevisionFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Start a new revision (R2, R3…) with today's date">${emojiIcon('⎘',16)} New Revision</button>`:'<span style="font-size:10px;color:var(--text-muted)">no snapshot</span>'}</td>
                 </tr>`;
               }).join('')}</tbody>
             </table></div>
           </div>
         </div>
       `).join('');
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
     };
 
     container.innerHTML = `
       <div class="page-header" style="margin-bottom:14px">
-        <h3 style="font-size:15px;font-weight:700">👤 Client Data <span style="font-size:12px;font-weight:400;color:var(--text-muted)">${clients.length} client${clients.length!==1?'s':''}</span></h3>
+        <h3 style="font-size:15px;font-weight:700">${emojiIcon('👤',15)} Client Data <span style="font-size:12px;font-weight:400;color:var(--text-muted)">${clients.length} client${clients.length!==1?'s':''}</span></h3>
         <input id="bs-client-search" placeholder="Search clients…" class="ms-input" style="max-width:260px"/>
       </div>
       <div id="bs-client-list"></div>
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [container] });
     render(clients);
 
     container.querySelector('#bs-client-search').addEventListener('input', e => {
@@ -10486,13 +10555,14 @@ window.renderApprovals = async function(currentUser) {
   ].filter(Boolean);
 
   c.innerHTML = `
-    <div class="page-header"><h2>✅ Approvals</h2>${totalPending>0?`<span class="badge badge-red" style="font-size:13px">${totalPending} pending</span>`:''}</div>
-    ${_role==='secretary'?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>👁 <strong>Secretary oversight.</strong> You can approve everyday items (sign-ups, attendance, leave, submissions, task reviews); money-moving and deletion requests go to the President.</span></div>`
-      :!canAct?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>👁 <strong>Oversight view.</strong> You can review every request here, but only the President approves.</span></div>`
+    <div class="page-header"><h2>${emojiIcon('✅',20)} Approvals</h2>${totalPending>0?`<span class="badge badge-red" style="font-size:13px">${totalPending} pending</span>`:''}</div>
+    ${_role==='secretary'?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Secretary oversight.</strong> You can approve everyday items (sign-ups, attendance, leave, submissions, task reviews); money-moving and deletion requests go to the President.</span></div>`
+      :!canAct?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Oversight view.</strong> You can review every request here, but only the President approves.</span></div>`
       :!canDelete?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>ℹ️ Deletion of key records requires <strong>President</strong> approval.</span></div>`:''}
     ${window.chipTabs(approvalChips, 'all')}
     <div id="approvals-content"><div class="loading-placeholder">Loading…</div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
 
   const loadApprovalsSub = async (sub) => {
     const wrap = document.getElementById('approvals-content');
@@ -10553,16 +10623,29 @@ window.renderApprovals = async function(currentUser) {
       ].sort((a,b)=>(b.ts?.seconds||0)-(a.ts?.seconds||0));
 
       if (!allPending.length) {
-        wrap.innerHTML = '<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">✅</div><h4>All clear!</h4><p>No pending requests at the moment.</p></div>';
+        wrap.innerHTML = `<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>All clear!</h4><p>No pending requests at the moment.</p></div>`;
+        if (window.lucide) lucide.createIcons({ nodes: [wrap] });
         return;
       }
 
+      // v12 WS42 Phase 21 — approvals type badges get a colored icon-tile instead
+      // of a bare emoji (color keyed by request type; money-moving = warning/danger
+      // hues, everyday items = primary/info).
+      const APPROVAL_TYPE_COLOR = {
+        'signup':'#1971C2','attendance':'#0CA678','ca':'#F76707','ca_deduct':'#F76707',
+        'submission':'#3B5BDB','review-task':'#3B5BDB','finance-req':'#D92D20','finance-del':'#D92D20',
+        'quote-approval':'#7048E8','po-approval':'#099268','leave':'#2F9E44','raise':'#E64980',
+        'delete-quote':'#D92D20','delete-client':'#D92D20'
+      };
       wrap.innerHTML = `
         <div style="display:flex;flex-direction:column;gap:10px">
-          ${allPending.map(item => `
+          ${allPending.map(item => {
+            const tileColor = APPROVAL_TYPE_COLOR[item.type] || 'var(--primary)';
+            const tileIcon = window.LUCIDE_EMOJI_MAP[item.icon] || 'file-text';
+            return `
           <div class="item-card pending-req-card" data-type="${item.type}" data-id="${item.id}" style="cursor:default">
             <div class="item-top">
-              <div class="item-title">${item.icon} ${escHtml(item.name)}</div>
+              <div class="item-title" style="display:flex;align-items:center;gap:8px">${window.iconTile(tileIcon, tileColor, window.lightenHex(tileColor,18), 28)} ${escHtml(item.name)}</div>
               <span class="badge badge-warn">Pending</span>
             </div>
             <div class="item-meta" style="margin-top:4px">
@@ -10572,56 +10655,58 @@ window.renderApprovals = async function(currentUser) {
             </div>
             <div style="display:flex;gap:8px;margin-top:10px" class="req-actions">
               ${ canActOn(item.type) ? (item.type==='signup'?`
-                <button class="btn-success btn-sm sg-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}" data-email="${escHtml(item.email||'')}" data-phone="${escHtml(item.phone||'')}">✓ Approve</button>
-                <button class="btn-danger btn-sm sg-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✗ Reject</button>
+                <button class="btn-success btn-sm sg-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}" data-email="${escHtml(item.email||'')}" data-phone="${escHtml(item.phone||'')}">${emojiIcon('✓',16)} Approve</button>
+                <button class="btn-danger btn-sm sg-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✗',16)} Reject</button>
               `:item.type==='attendance'?`
-                <button class="btn-success btn-sm at-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✓ Approve</button>
-                <button class="btn-danger btn-sm at-deny-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✗ Deny</button>
+                <button class="btn-success btn-sm at-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✓',16)} Approve</button>
+                <button class="btn-danger btn-sm at-deny-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✗',16)} Deny</button>
               `:item.type==='ca'?`
-                <button class="btn-success btn-sm ca-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}" data-amount="${item.amount||0}" data-uid="${item.userId||''}">✓ Approve CA</button>
-                <button class="btn-danger btn-sm ca-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✗ Reject</button>
+                <button class="btn-success btn-sm ca-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}" data-amount="${item.amount||0}" data-uid="${item.userId||''}">${emojiIcon('✓',16)} Approve CA</button>
+                <button class="btn-danger btn-sm ca-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✗',16)} Reject</button>
               `:item.type==='ca_deduct'?`
-                <button class="btn-success btn-sm cad-approve-btn" data-id="${item.id}">✓ Approve</button>
-                <button class="btn-danger btn-sm cad-reject-btn" data-id="${item.id}">✗ Reject</button>
+                <button class="btn-success btn-sm cad-approve-btn" data-id="${item.id}">${emojiIcon('✓',16)} Approve</button>
+                <button class="btn-danger btn-sm cad-reject-btn" data-id="${item.id}">${emojiIcon('✗',16)} Reject</button>
               `:item.type==='review-task'?`
-                <button class="btn-primary btn-sm rt-view-btn" data-id="${item.id}">👁 View Task</button>
-                <button class="btn-success btn-sm rt-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✓ Approve</button>
-                <button class="btn-danger btn-sm rt-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">✗ Send Back</button>
+                <button class="btn-primary btn-sm rt-view-btn" data-id="${item.id}">${emojiIcon('👁',16)} View Task</button>
+                <button class="btn-success btn-sm rt-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✓',16)} Approve</button>
+                <button class="btn-danger btn-sm rt-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name)}">${emojiIcon('✗',16)} Send Back</button>
               `:item.type==='finance-req'?`
-                <button class="btn-success btn-sm fr-approve-btn" data-id="${item.id}" data-hist-id="${item.historyId||''}" data-name="${escHtml(item.userName||'')}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">✓ Approve Deletion</button>
-                <button class="btn-danger btn-sm fr-deny-btn" data-id="${item.id}" data-name="${escHtml(item.userName||'')}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">✗ Deny</button>
+                <button class="btn-success btn-sm fr-approve-btn" data-id="${item.id}" data-hist-id="${item.historyId||''}" data-name="${escHtml(item.userName||'')}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">${emojiIcon('✓',16)} Approve Deletion</button>
+                <button class="btn-danger btn-sm fr-deny-btn" data-id="${item.id}" data-name="${escHtml(item.userName||'')}" data-month="${item.month||''}" data-req-by="${item.requestedBy||''}">${emojiIcon('✗',16)} Deny</button>
               `:item.type==='finance-del'?`
-                <button class="btn-success btn-sm fdel-approve-btn" data-id="${item.id}" data-coll="${escHtml(item.collection||'')}" data-doc="${escHtml(item.docId||'')}" data-label="${escHtml(item.recLabel||'record')}" data-req-by="${item.requestedBy||''}">✓ Approve Deletion</button>
-                <button class="btn-danger btn-sm fdel-deny-btn" data-id="${item.id}" data-label="${escHtml(item.recLabel||'record')}" data-req-by="${item.requestedBy||''}">✗ Deny</button>
+                <button class="btn-success btn-sm fdel-approve-btn" data-id="${item.id}" data-coll="${escHtml(item.collection||'')}" data-doc="${escHtml(item.docId||'')}" data-label="${escHtml(item.recLabel||'record')}" data-req-by="${item.requestedBy||''}">${emojiIcon('✓',16)} Approve Deletion</button>
+                <button class="btn-danger btn-sm fdel-deny-btn" data-id="${item.id}" data-label="${escHtml(item.recLabel||'record')}" data-req-by="${item.requestedBy||''}">${emojiIcon('✗',16)} Deny</button>
               `:item.type==='quote-approval'?`
-                <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">📝 Open &amp; Edit</button>
-                <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">✓ Approve</button>
+                <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('📝',16)} Open &amp; Edit</button>
+                <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('✓',16)} Approve</button>
                 <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return to Partner</button>
               `:item.type==='delete-quote'?`
-                <button class="btn-danger btn-sm dq-approve-btn" data-id="${item.id}" data-coll="${item.coll||'bs_quotes'}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">✓ Approve Delete</button>
-                <button class="btn-secondary btn-sm dq-deny-btn" data-id="${item.id}" data-coll="${item.coll||'bs_quotes'}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">✗ Deny</button>
+                <button class="btn-danger btn-sm dq-approve-btn" data-id="${item.id}" data-coll="${item.coll||'bs_quotes'}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">${emojiIcon('✓',16)} Approve Delete</button>
+                <button class="btn-secondary btn-sm dq-deny-btn" data-id="${item.id}" data-coll="${item.coll||'bs_quotes'}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">${emojiIcon('✗',16)} Deny</button>
               `:item.type==='delete-client'?`
-                <button class="btn-danger btn-sm dc-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${item.deleteRequestedBy||''}">✓ Approve Delete</button>
-                <button class="btn-secondary btn-sm dc-deny-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${item.deleteRequestedBy||''}">✗ Deny</button>
+                <button class="btn-danger btn-sm dc-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${item.deleteRequestedBy||''}">${emojiIcon('✓',16)} Approve Delete</button>
+                <button class="btn-secondary btn-sm dc-deny-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}" data-by="${item.deleteRequestedBy||''}">${emojiIcon('✗',16)} Deny</button>
               `:item.type==='raise'?`
-                <button class="btn-success btn-sm rz-approve-btn" data-id="${item.id}">✓ Approve</button>
-                <button class="btn-danger btn-sm rz-reject-btn" data-id="${item.id}">✗ Reject</button>
+                <button class="btn-success btn-sm rz-approve-btn" data-id="${item.id}">${emojiIcon('✓',16)} Approve</button>
+                <button class="btn-danger btn-sm rz-reject-btn" data-id="${item.id}">${emojiIcon('✗',16)} Reject</button>
               `:item.type==='po-approval'?`
-                <button class="btn-primary btn-sm po-view-btn" data-id="${item.id}">👁 View PO</button>
-                <button class="btn-success btn-sm po-approve-btn" data-id="${item.id}" data-no="${escHtml(item.prNo||'')}">✓ Approve</button>
-                <button class="btn-danger btn-sm po-reject-btn" data-id="${item.id}" data-no="${escHtml(item.prNo||'')}">✗ Reject</button>
+                <button class="btn-primary btn-sm po-view-btn" data-id="${item.id}">${emojiIcon('👁',16)} View PO</button>
+                <button class="btn-success btn-sm po-approve-btn" data-id="${item.id}" data-no="${escHtml(item.prNo||'')}">${emojiIcon('✓',16)} Approve</button>
+                <button class="btn-danger btn-sm po-reject-btn" data-id="${item.id}" data-no="${escHtml(item.prNo||'')}">${emojiIcon('✗',16)} Reject</button>
               `:item.type==='leave'?`
-                <button class="btn-success btn-sm lv-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}">✓ Approve</button>
-                <button class="btn-danger btn-sm lv-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}">✗ Reject</button>
+                <button class="btn-success btn-sm lv-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}">${emojiIcon('✓',16)} Approve</button>
+                <button class="btn-danger btn-sm lv-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}">${emojiIcon('✗',16)} Reject</button>
               `:`
-                <button class="btn-success btn-sm sub-approve-btn" data-id="${item.id}">✓ Approve</button>
-                <button class="btn-danger btn-sm sub-reject-btn" data-id="${item.id}">✗ Reject</button>
+                <button class="btn-success btn-sm sub-approve-btn" data-id="${item.id}">${emojiIcon('✓',16)} Approve</button>
+                <button class="btn-danger btn-sm sub-reject-btn" data-id="${item.id}">${emojiIcon('✗',16)} Reject</button>
               `) : ( canEscalate(item.type)
-                ? `<button class="btn-secondary btn-sm esc-btn" data-label="${escHtml(item.label+' — '+item.name)}">🙋 Request President approval</button>`
-                : `<span class="badge badge-gray" style="font-size:11px">🔒 ${['finance-req','finance-del','delete-quote','delete-client'].includes(item.type)?'President approval required':'President / Manager approves'}</span>`)}
+                ? `<button class="btn-secondary btn-sm esc-btn" data-label="${escHtml(item.label+' — '+item.name)}">${emojiIcon('🙋',16)} Request President approval</button>`
+                : `<span class="badge badge-gray" style="font-size:11px">${emojiIcon('🔒',11)} ${['finance-req','finance-del','delete-quote','delete-client'].includes(item.type)?'President approval required':'President / Manager approves'}</span>`)}
             </div>
-          </div>`).join('')}
+          </div>`;
+          }).join('')}
         </div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
 
       // Signup approve
       wrap.querySelectorAll('.sg-approve-btn').forEach(btn => onClickSafe(btn, async () => {
@@ -10870,7 +10955,8 @@ window.renderApprovals = async function(currentUser) {
       //  1. Completed/approved tasks with no presidentScore (quality 1–10).
       //  2. Employees whose monthly self-assessment (selfGrade) awaits the
       //     president's KPI grade (presidentGrade).
-      if (!_showGrading) { wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><h4>Grading is President / Manager only</h4></div>'; return; }
+      if (!_showGrading) { wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Grading is President / Manager only</h4></div>`; return; }
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
       const [taskSnap, evalSnap, usersSnap] = await Promise.all([
         db.collection('tasks').where('status','in',['approved','completed','done']).get().catch(()=>({docs:[]})),
         db.collection('kpi_evals').get().catch(()=>({docs:[]})),
@@ -10887,55 +10973,57 @@ window.renderApprovals = async function(currentUser) {
         .filter(e=>e.selfGrade!=null && e.presidentGrade==null);
 
       if (!ungradedTasks.length && !ungradedKpi.length) {
-        wrap.innerHTML = '<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">⭐</div><h4>Nothing to grade</h4><p>All completed tasks are scored and every self-assessment is graded.</p></div>';
+        wrap.innerHTML = `<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">${emojiIcon('⭐',44)}</div><h4>Nothing to grade</h4><p>All completed tasks are scored and every self-assessment is graded.</p></div>`;
+        if (window.lucide) lucide.createIcons({ nodes: [wrap] });
         return;
       }
       const canGrade = (_role === 'president'); // KPI grade write is President's call
       wrap.innerHTML = `
         ${ungradedKpi.length?`
-        <h4 style="margin:4px 0 8px;font-size:14px">📊 Self-assessments awaiting your grade (${ungradedKpi.length})</h4>
+        <h4 style="margin:4px 0 8px;font-size:14px">${emojiIcon('📊',14)} Self-assessments awaiting your grade (${ungradedKpi.length})</h4>
         <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
           ${ungradedKpi.map(e=>`
             <div class="item-card" style="cursor:default">
               <div class="item-top">
-                <div class="item-title">📊 ${escHtml(userName[e.uid]||'Employee')}</div>
+                <div class="item-title">${emojiIcon('📊',16)} ${escHtml(userName[e.uid]||'Employee')}</div>
                 <span class="badge badge-warn">Self: ${escHtml(e.selfGrade)}/10</span>
               </div>
               <div class="item-meta" style="margin-top:4px">
                 ${e.selfNotes?`<span style="font-size:12px;color:var(--text-muted)">${escHtml(e.selfNotes)}</span>`:'<span style="font-size:12px;color:var(--text-muted)">No notes</span>'}
               </div>
-              ${canGrade?`<div style="margin-top:10px"><button class="btn-primary btn-sm grade-kpi-btn" data-uid="${e.uid}" data-name="${escHtml(userName[e.uid]||'Employee')}">⭐ Grade</button></div>`:''}
+              ${canGrade?`<div style="margin-top:10px"><button class="btn-primary btn-sm grade-kpi-btn" data-uid="${e.uid}" data-name="${escHtml(userName[e.uid]||'Employee')}">${emojiIcon('⭐',16)} Grade</button></div>`:''}
             </div>`).join('')}
         </div>`:''}
         ${ungradedTasks.length?`
-        <h4 style="margin:4px 0 8px;font-size:14px">📋 Completed tasks awaiting a score (${ungradedTasks.length})</h4>
+        <h4 style="margin:4px 0 8px;font-size:14px">${emojiIcon('📋',14)} Completed tasks awaiting a score (${ungradedTasks.length})</h4>
         <div style="display:flex;flex-direction:column;gap:8px">
           ${ungradedTasks.map(t=>{
             const names = (t.assignedToNames||[]).join(', ') || 'Unassigned';
             return `<div class="item-card" style="cursor:default">
               <div class="item-top">
-                <div class="item-title">📋 ${escHtml(t.title||'Untitled Task')}</div>
+                <div class="item-title">${emojiIcon('📋',16)} ${escHtml(t.title||'Untitled Task')}</div>
                 <span class="badge badge-gray">Unscored</span>
               </div>
               <div class="item-meta" style="margin-top:4px;gap:6px">
                 ${t.department?`<span class="badge badge-blue" style="font-size:10px">${escHtml(t.department)}</span>`:''}
                 <span style="font-size:12px;color:var(--text-muted)">by ${escHtml(names)}</span>
               </div>
-              <div style="margin-top:10px"><button class="btn-primary btn-sm grade-task-btn" data-id="${t.id}">⭐ Open &amp; Score</button></div>
+              <div style="margin-top:10px"><button class="btn-primary btn-sm grade-task-btn" data-id="${t.id}">${emojiIcon('⭐',16)} Open &amp; Score</button></div>
             </div>`;
           }).join('')}
         </div>`:''}`;
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
 
       wrap.querySelectorAll('.grade-task-btn').forEach(btn=>btn.addEventListener('click',()=>openTaskDetail(btn.dataset.id, currentUser, _role)));
       wrap.querySelectorAll('.grade-kpi-btn').forEach(btn=>btn.addEventListener('click',()=>{
         const { uid, name } = btn.dataset;
-        openPage(`⭐ Grade: ${name}`, `
+        openPage(`${emojiIcon('⭐',16)} Grade: ${name}`, `
           <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Assign a performance grade for ${escHtml(name)} (1 = poor, 10 = outstanding). Development areas are shown to the employee.</p>
           <div class="form-group"><label>President Grade (1–10)</label>
             <input id="ap-grade-input" type="number" inputmode="numeric" min="1" max="10" step="1" placeholder="e.g. 8"/></div>
           <div class="form-group"><label>General Notes (internal only)</label>
             <textarea id="ap-grade-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Internal remarks…"></textarea></div>
-          <div class="form-group"><label>📝 Development Areas <span style="font-size:11px;color:var(--primary-light)">(shown to employee)</span></label>
+          <div class="form-group"><label>${emojiIcon('📝',16)} Development Areas <span style="font-size:11px;color:var(--primary-light)">(shown to employee)</span></label>
             <textarea id="ap-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="What should this employee focus on improving?"></textarea></div>
         `, `<button class="btn-primary" id="ap-save-grade-btn">Save Grade</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
         document.getElementById('ap-save-grade-btn')?.addEventListener('click', async ()=>{
@@ -10969,13 +11057,13 @@ window.renderApprovals = async function(currentUser) {
       const resolved = reqs.filter(r=>r.status!=='pending');
 
       const titleOf = r => r.kind==='payroll'
-        ? `🗑 Delete Payroll Record — ${escHtml(r.userName||'?')} (${r.month||'?'})`
-        : `🗑 Delete — ${escHtml(r.label||'record')}`;
+        ? `${emojiIcon('🗑',16)} Delete Payroll Record — ${escHtml(r.userName||'?')} (${r.month||'?'})`
+        : `${emojiIcon('🗑',16)} Delete — ${escHtml(r.label||'record')}`;
       const actionsOf = r => r.kind==='payroll'
-        ? `<button class="btn-success btn-sm fr-approve-btn" data-id="${r.id}" data-hist-id="${r.historyId||''}" data-name="${escHtml(r.userName||'')}" data-month="${r.month||''}" data-req-by="${r.requestedBy||''}">✓ Approve Deletion</button>
-           <button class="btn-danger btn-sm fr-deny-btn" data-id="${r.id}" data-name="${escHtml(r.userName||'')}" data-month="${r.month||''}" data-req-by="${r.requestedBy||''}">✗ Deny</button>`
-        : `<button class="btn-success btn-sm fdel-approve-btn" data-id="${r.id}" data-coll="${escHtml(r.collection||'')}" data-doc="${escHtml(r.docId||'')}" data-label="${escHtml(r.label||'record')}" data-req-by="${r.requestedBy||''}">✓ Approve Deletion</button>
-           <button class="btn-danger btn-sm fdel-deny-btn" data-id="${r.id}" data-label="${escHtml(r.label||'record')}" data-req-by="${r.requestedBy||''}">✗ Deny</button>`;
+        ? `<button class="btn-success btn-sm fr-approve-btn" data-id="${r.id}" data-hist-id="${r.historyId||''}" data-name="${escHtml(r.userName||'')}" data-month="${r.month||''}" data-req-by="${r.requestedBy||''}">${emojiIcon('✓',16)} Approve Deletion</button>
+           <button class="btn-danger btn-sm fr-deny-btn" data-id="${r.id}" data-name="${escHtml(r.userName||'')}" data-month="${r.month||''}" data-req-by="${r.requestedBy||''}">${emojiIcon('✗',16)} Deny</button>`
+        : `<button class="btn-success btn-sm fdel-approve-btn" data-id="${r.id}" data-coll="${escHtml(r.collection||'')}" data-doc="${escHtml(r.docId||'')}" data-label="${escHtml(r.label||'record')}" data-req-by="${r.requestedBy||''}">${emojiIcon('✓',16)} Approve Deletion</button>
+           <button class="btn-danger btn-sm fdel-deny-btn" data-id="${r.id}" data-label="${escHtml(r.label||'record')}" data-req-by="${r.requestedBy||''}">${emojiIcon('✗',16)} Deny</button>`;
       const reqCard = (r, showActions) => `
         <div class="item-card" style="cursor:default">
           <div class="item-top">
@@ -10992,7 +11080,7 @@ window.renderApprovals = async function(currentUser) {
         </div>`;
 
       wrap.innerHTML = `
-        ${!pending.length && !resolved.length ? '<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">💼</div><h4>No finance requests</h4></div>' : ''}
+        ${!pending.length && !resolved.length ? `<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">${emojiIcon('💼',44)}</div><h4>No finance requests</h4></div>` : ''}
         ${pending.length ? `<h4 style="margin:0 0 10px;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Pending (${pending.length})</h4>
           <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
             ${pending.map(r=>reqCard(r,canDelete)).join('')}
@@ -11002,6 +11090,7 @@ window.renderApprovals = async function(currentUser) {
             ${resolved.slice(0,20).map(r=>reqCard(r,false)).join('')}
           </div>` : ''}
       `;
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
 
       wrap.querySelectorAll('.fr-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!(await confirmDialog({message:`Approve deletion of ${escHtml(btn.dataset.name)} (${btn.dataset.month}) payroll record?`, danger:true, html:true}))) return;
@@ -11055,7 +11144,7 @@ window.renderApprovals = async function(currentUser) {
       const card = (r, showActions) => `
         <div class="item-card" style="cursor:default">
           <div class="item-top">
-            <div class="item-title">🌴 ${escHtml(r.userName||'Employee')}</div>
+            <div class="item-title">${emojiIcon('🌴',16)} ${escHtml(r.userName||'Employee')}</div>
             <span class="badge ${r.status==='pending'?'badge-warn':r.status==='approved'?'badge-green':'badge-red'}">${r.status==='pending'?'Pending':r.status==='approved'?'Approved':'Rejected'}</span>
           </div>
           <div class="item-meta" style="margin-top:4px;flex-wrap:wrap;gap:6px">
@@ -11064,16 +11153,17 @@ window.renderApprovals = async function(currentUser) {
             ${r.reason?`<span style="font-size:12px;color:var(--text-muted)">${escHtml(r.reason)}</span>`:''}
           </div>
           ${showActions?`<div style="display:flex;gap:8px;margin-top:10px">
-            <button class="btn-success btn-sm lv-approve-btn" data-id="${r.id}" data-name="${escHtml(r.userName||'')}">✓ Approve</button>
-            <button class="btn-danger btn-sm lv-reject-btn" data-id="${r.id}" data-name="${escHtml(r.userName||'')}">✗ Reject</button>
+            <button class="btn-success btn-sm lv-approve-btn" data-id="${r.id}" data-name="${escHtml(r.userName||'')}">${emojiIcon('✓',16)} Approve</button>
+            <button class="btn-danger btn-sm lv-reject-btn" data-id="${r.id}" data-name="${escHtml(r.userName||'')}">${emojiIcon('✗',16)} Reject</button>
           </div>`:''}
         </div>`;
       wrap.innerHTML = `
-        ${!pending.length && !resolved.length ? '<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">🌴</div><h4>No leave requests</h4></div>' : ''}
+        ${!pending.length && !resolved.length ? `<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">${emojiIcon('🌴',44)}</div><h4>No leave requests</h4></div>` : ''}
         ${pending.length?`<h4 style="margin:0 0 10px;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Pending (${pending.length})</h4>
           <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">${pending.map(r=>card(r,canAct)).join('')}</div>`:''}
         ${resolved.length?`<h4 style="margin:0 0 10px;font-size:13px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">History</h4>
           <div style="display:flex;flex-direction:column;gap:10px">${resolved.slice(0,20).map(r=>card(r,false)).join('')}</div>`:''}`;
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
       wrap.querySelectorAll('.lv-approve-btn').forEach(btn => onClickSafe(btn, async () => {
         await window.approveLeaveRequest(btn.dataset.id);
         Notifs.showToast(`Leave approved for ${btn.dataset.name}`);
@@ -11092,7 +11182,8 @@ window.renderApprovals = async function(currentUser) {
       const snap = await db.collection('tasks').where('status','==','review').orderBy('lastModifiedAt','desc').get().catch(()=>({docs:[]}));
       const tasks = snap.docs.map(d=>({id:d.id,...d.data()}));
       if (!tasks.length) {
-        wrap.innerHTML = '<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">✅</div><h4>No tasks awaiting review</h4></div>';
+        wrap.innerHTML = `<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No tasks awaiting review</h4></div>`;
+        if (window.lucide) lucide.createIcons({ nodes: [wrap] });
         return;
       }
       wrap.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px">
@@ -11102,7 +11193,7 @@ window.renderApprovals = async function(currentUser) {
           const ts    = t.lastModifiedAt||t.createdAt;
           return `<div class="item-card" style="cursor:default">
             <div class="item-top">
-              <div class="item-title">📋 ${escHtml(t.title||'Untitled Task')}</div>
+              <div class="item-title">${emojiIcon('📋',16)} ${escHtml(t.title||'Untitled Task')}</div>
               <span class="badge badge-warn">For Review</span>
             </div>
             <div class="item-meta" style="margin-top:4px;gap:6px">
@@ -11111,13 +11202,14 @@ window.renderApprovals = async function(currentUser) {
               ${ts?`<span style="font-size:11px;color:var(--text-muted)">${new Date(ts.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric'})}</span>`:''}
             </div>
             <div style="display:flex;gap:8px;margin-top:10px">
-              <button class="btn-primary btn-sm rt-view-btn" data-id="${t.id}">👁 View</button>
-              ${canActOn('review-task')?`<button class="btn-success btn-sm rt-approve-btn" data-id="${t.id}" data-name="${escHtml(t.title||'Task')}">✓ Approve</button>
-              <button class="btn-danger btn-sm rt-reject-btn" data-id="${t.id}" data-name="${escHtml(t.title||'Task')}">✗ Send Back</button>`:''}
+              <button class="btn-primary btn-sm rt-view-btn" data-id="${t.id}">${emojiIcon('👁',16)} View</button>
+              ${canActOn('review-task')?`<button class="btn-success btn-sm rt-approve-btn" data-id="${t.id}" data-name="${escHtml(t.title||'Task')}">${emojiIcon('✓',16)} Approve</button>
+              <button class="btn-danger btn-sm rt-reject-btn" data-id="${t.id}" data-name="${escHtml(t.title||'Task')}">${emojiIcon('✗',16)} Send Back</button>`:''}
             </div>
           </div>`;
         }).join('')}
       </div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
       wrap.querySelectorAll('.rt-view-btn').forEach(btn=>btn.addEventListener('click',()=>openTaskDetail(btn.dataset.id,currentUser,window.currentRole||'president')));
       wrap.querySelectorAll('.rt-approve-btn').forEach(btn=>btn.addEventListener('click',async()=>{
         if (!(await confirmDialog({message:`Approve "${escHtml(btn.dataset.name)}"?`, html:true}))) return;
@@ -11141,32 +11233,34 @@ window.renderApprovals = async function(currentUser) {
       const snap = await db.collection('signup_requests').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
       const items = snap.docs.map(d=>({id:d.id,...d.data()}));
       if (!items.length) {
-        wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><h4>No signup requests yet</h4></div>';
+        wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No signup requests yet</h4></div>`;
+        if (window.lucide) lucide.createIcons({ nodes: [wrap] });
         return;
       }
       const pending = items.filter(i=>i.status==='pending');
       wrap.innerHTML = `
-        ${pending.length?`<div class="alert-banner alert-warn" style="margin-bottom:12px">⚠️ ${pending.length} pending request${pending.length>1?'s':''}</div>`:''}
+        ${pending.length?`<div class="alert-banner alert-warn" style="margin-bottom:12px">${emojiIcon('⚠️',16)} ${pending.length} pending request${pending.length>1?'s':''}</div>`:''}
         <div class="item-list">
           ${items.map(item=>`
           <div class="item-card" data-id="${item.id}">
             <div class="item-top">
-              <div class="item-title">👤 ${escHtml(item.fullName||'Unknown')}</div>
+              <div class="item-title">${emojiIcon('👤',16)} ${escHtml(item.fullName||'Unknown')}</div>
               <span class="badge ${item.status==='approved'?'badge-green':item.status==='rejected'?'badge-red':'badge-warn'}">${item.status||'pending'}</span>
             </div>
             <div class="item-meta">
-              <span>✉️ ${escHtml(item.email||'—')}</span>
-              <span>📱 ${escHtml(item.phone||'—')}</span>
-              ${item.createdAt?`<span>📅 ${new Date(item.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
+              <span>${emojiIcon('✉️',16)} ${escHtml(item.email||'—')}</span>
+              <span>${emojiIcon('📱',16)} ${escHtml(item.phone||'—')}</span>
+              ${item.createdAt?`<span>${emojiIcon('📅',16)} ${new Date(item.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
             </div>
-            ${item.generatedPassword?`<div style="font-size:12px;margin-top:8px;padding:8px 10px;background:rgba(48,209,88,.1);border:1px solid rgba(48,209,88,.3);border-radius:8px;font-family:monospace">🔑 Generated Password: <strong>${escHtml(item.generatedPassword)}</strong><br><span style="font-size:10px;color:var(--text-muted)">Create Firebase Auth user with this password</span></div>`:''}
+            ${item.generatedPassword?`<div style="font-size:12px;margin-top:8px;padding:8px 10px;background:rgba(48,209,88,.1);border:1px solid rgba(48,209,88,.3);border-radius:8px;font-family:monospace">${emojiIcon('🔑',16)} Generated Password: <strong>${escHtml(item.generatedPassword)}</strong><br><span style="font-size:10px;color:var(--text-muted)">Create Firebase Auth user with this password</span></div>`:''}
             ${(item.status==='pending'&&canActOn('signup'))?`
             <div style="display:flex;gap:8px;margin-top:12px">
-              <button class="btn-success signup-approve" data-id="${item.id}" data-name="${escHtml(item.fullName)}" data-email="${escHtml(item.email)}" data-phone="${escHtml(item.phone||'')}">✓ Approve & Generate Password</button>
-              <button class="btn-danger signup-reject" data-id="${item.id}" data-name="${escHtml(item.fullName)}">✗ Reject</button>
+              <button class="btn-success signup-approve" data-id="${item.id}" data-name="${escHtml(item.fullName)}" data-email="${escHtml(item.email)}" data-phone="${escHtml(item.phone||'')}">${emojiIcon('✓',16)} Approve & Generate Password</button>
+              <button class="btn-danger signup-reject" data-id="${item.id}" data-name="${escHtml(item.fullName)}">${emojiIcon('✗',16)} Reject</button>
             </div>`:''}
           </div>`).join('')}
         </div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
 
       wrap.querySelectorAll('.signup-approve').forEach(btn => {
         btn.addEventListener('click', async () => {
@@ -11194,7 +11288,7 @@ window.renderApprovals = async function(currentUser) {
             approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
             approvedBy: currentUser.uid
           });
-          openModal('✓ Approved — Action Required', `
+          openModal(`${emojiIcon('✓',16)} Approved — Action Required`, `
             <p style="margin-bottom:14px;font-size:14px">Profile created for <strong>${escHtml(name)}</strong>.</p>
             <div style="padding:14px;background:rgba(48,209,88,.1);border:1.5px solid rgba(48,209,88,.4);border-radius:10px;margin-bottom:14px">
               <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">Generated Password</div>
@@ -11234,31 +11328,33 @@ window.renderApprovals = async function(currentUser) {
       const pending = items.filter(i=>i.status==='pending');
 
       if (!items.length) {
-        wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">⏰</div><h4>No extension requests</h4></div>';
+        wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⏰',44)}</div><h4>No extension requests</h4></div>`;
+        if (window.lucide) lucide.createIcons({ nodes: [wrap] });
         return;
       }
       wrap.innerHTML = `
-        ${pending.length?`<div class="alert-banner alert-warn" style="margin-bottom:12px">⚠️ ${pending.length} pending request${pending.length>1?'s':''}</div>`:''}
+        ${pending.length?`<div class="alert-banner alert-warn" style="margin-bottom:12px">${emojiIcon('⚠️',16)} ${pending.length} pending request${pending.length>1?'s':''}</div>`:''}
         <div class="item-list">
           ${items.map(item=>`
           <div class="item-card" data-id="${item.id}">
             <div class="item-top">
-              <div class="item-title">⏰ ${escHtml(item.userName||'Unknown')}</div>
+              <div class="item-title">${emojiIcon('⏰',16)} ${escHtml(item.userName||'Unknown')}</div>
               <span class="badge ${item.status==='approved'?'badge-green':item.status==='denied'?'badge-red':'badge-warn'}">${item.status||'pending'}</span>
             </div>
             <div class="item-meta">
-              <span>📅 ${item.date||'—'}</span>
+              <span>${emojiIcon('📅',16)} ${item.date||'—'}</span>
               ${item.requestedAt?`<span>Requested: ${new Date(item.requestedAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})}</span>`:''}
               ${item.status==='approved'&&item.expiresAt?`<span>Expires: ${new Date(item.expiresAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'})}</span>`:''}
             </div>
             ${(item.status==='pending'&&canActOn('attendance'))?`
             <div style="display:flex;gap:8px;margin-top:12px">
-              <button class="btn-success ext-approve" data-id="${item.id}" data-uid="${item.uid}" data-name="${escHtml(item.userName||'')}">✓ Approve (6-hr)</button>
-              <button class="btn-danger ext-deny" data-id="${item.id}" data-uid="${item.uid}" data-name="${escHtml(item.userName||'')}">✗ Deny</button>
+              <button class="btn-success ext-approve" data-id="${item.id}" data-uid="${item.uid}" data-name="${escHtml(item.userName||'')}">${emojiIcon('✓',16)} Approve (6-hr)</button>
+              <button class="btn-danger ext-deny" data-id="${item.id}" data-uid="${item.uid}" data-name="${escHtml(item.userName||'')}">${emojiIcon('✗',16)} Deny</button>
             </div>`:''}
           </div>`).join('')}
         </div>
       `;
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
 
       wrap.querySelectorAll('.ext-approve').forEach(btn => {
         btn.addEventListener('click', async e => {
@@ -11286,14 +11382,15 @@ window.renderApprovals = async function(currentUser) {
       const items = snap.docs.map(d=>({id:d.id,...d.data()}));
       const pending = items.filter(i=>i.status==='pending');
 
-      if (!items.length) { wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">💸</div><h4>No cash advance requests</h4></div>'; return; }
+      if (!items.length) { wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('💸',44)}</div><h4>No cash advance requests</h4></div>`; return; }
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
       wrap.innerHTML = `
-        ${pending.length?`<p style="font-size:12px;color:var(--warning);font-weight:600;margin-bottom:12px">⚠️ ${pending.length} pending request${pending.length>1?'s':''}</p>`:''}
+        ${pending.length?`<p style="font-size:12px;color:var(--warning);font-weight:600;margin-bottom:12px">${emojiIcon('⚠️',16)} ${pending.length} pending request${pending.length>1?'s':''}</p>`:''}
         <div class="item-list">
           ${items.map(item=>`
           <div class="item-card" data-id="${item.id}">
             <div class="item-top">
-              <div class="item-title">💸 Cash Advance — ${escHtml(item.userName||'Unknown')}</div>
+              <div class="item-title">${emojiIcon('💸',16)} Cash Advance — ${escHtml(item.userName||'Unknown')}</div>
               <span class="badge ${statusBadge(item.status)}">${item.status||'pending'}</span>
             </div>
             <div class="item-meta">
@@ -11310,6 +11407,7 @@ window.renderApprovals = async function(currentUser) {
           </div>`).join('')}
         </div>
       `;
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
 
       // v12 WS22 — this was the site with the "balance never set" bug: it flipped
       // status to 'approved' without ever writing a balance, so an advance
@@ -11332,7 +11430,7 @@ window.renderApprovals = async function(currentUser) {
       // the old inline approve/reject here never touched the quote doc at all).
       const snap = await db.collection('approval_requests').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
       const items = snap.docs.map(d => ({id:d.id,...d.data()})).filter(i => i.type !== 'ca_deduct');
-      if (!items.length) { wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">✔️</div><h4>No quote approvals</h4></div>'; return; }
+      if (!items.length) { wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">✔️</div><h4>No quote approvals</h4></div>`; return; }
       wrap.innerHTML = `<div class="item-list">${items.map(item => `
         <div class="item-card" data-id="${item.id}">
           <div class="item-top">
@@ -11347,8 +11445,8 @@ window.renderApprovals = async function(currentUser) {
           </div>
           ${(item.status==='pending'&&canActOn('quote-approval')) ? (item.quoteId ? `
           <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-            <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">📝 Open &amp; Edit</button>
-            <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">✓ Approve</button>
+            <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('📝',16)} Open &amp; Edit</button>
+            <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">${emojiIcon('✓',16)} Approve</button>
             <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return to Partner</button>
           </div>` : `
           <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
@@ -11357,6 +11455,7 @@ window.renderApprovals = async function(currentUser) {
             <button class="btn-secondary btn-sm roa-resolve-btn" data-id="${item.id}" data-agent="${item.agentId||''}" data-status="rejected">Mark Rejected</button>
           </div>`) : ''}
         </div>`).join('')}</div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
       wrap.querySelectorAll('.qa-review-btn').forEach(btn => onClickSafe(btn, () =>
         openQuoteApprovalReview({ quoteId:btn.dataset.quote, agentId:btn.dataset.by, quoteNumber:btn.dataset.qno,
           clientName:btn.dataset.name, quoteColl:btn.dataset.coll }, () => loadApprovalsSub('roa'))));
@@ -11422,14 +11521,14 @@ async function openQuoteApprovalReview(ctx, onDone){
   const q = snap.data();
   const ta = 'width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical';
   const hasSnapshot = !!q.editableState;
-  openPage(`📝 Review Quote — ${escHtml(quoteNumber||q.quoteNumber||'')}`, `
+  openPage(`${emojiIcon('📝',16)} Review Quote — ${escHtml(quoteNumber||q.quoteNumber||'')}`, `
     <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Open the full quote in the builder to review/edit line items (saved back to the partner's quote), or adjust the key fields below, then approve or return it to the partner.</p>
-    <button class="btn-secondary btn-sm" id="qar-open-builder" style="margin-bottom:14px" ${hasSnapshot?'':'disabled title="No editable snapshot for this quote"'}>🔧 Open full quote in Builder${hasSnapshot?'':' (no snapshot)'}</button>
+    <button class="btn-secondary btn-sm" id="qar-open-builder" style="margin-bottom:14px" ${hasSnapshot?'':'disabled title="No editable snapshot for this quote"'}>${emojiIcon('🔧',16)} Open full quote in Builder${hasSnapshot?'':' (no snapshot)'}</button>
     <div class="form-group"><label>Client Name</label><input id="qar-client" value="${(q.clientName||'').replace(/"/g,'&quot;')}"/></div>
     <div class="form-group"><label>Scope / Description</label><textarea id="qar-scope" rows="3" style="${ta}">${escHtml(q.scope||q.description||'')}</textarea></div>
     <div class="form-group"><label>Adjusted Total (₱)</label><input id="qar-total" type="number" value="${q.total||q.grandTotal||0}" inputmode="decimal"/></div>
     <div class="form-group"><label>Notes for Partner</label><textarea id="qar-notes" rows="2" placeholder="What to revise, or why approved…" style="${ta}">${escHtml(q.presidentNotes||'')}</textarea></div>
-  `, `<button class="btn-success" id="qar-approve">✅ Save &amp; Approve</button><button class="btn-primary" id="qar-return">↩ Save &amp; Return to Partner</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  `, `<button class="btn-success" id="qar-approve">${emojiIcon('✅',16)} Save &amp; Approve</button><button class="btn-primary" id="qar-return">↩ Save &amp; Return to Partner</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   if (hasSnapshot) document.getElementById('qar-open-builder').addEventListener('click', ()=>{
     window._qbReviewContext = { quoteId, partnerUid: agentId, quoteNumber: quoteNumber||q.quoteNumber,
       clientName: q.clientName||clientName, quoteColl: QC };
@@ -11552,13 +11651,13 @@ async function renderAECDirectory(container, currentUser, currentRole) {
       #aec-tbl td.c,#aec-tbl th.c{text-align:center}
       #aec-tbl tbody tr{cursor:pointer}
     </style>
-    ${dueCount ? `<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>⏰ <strong>${dueCount}</strong> AEC follow-up${dueCount>1?'s':''} due</span></div>` : ''}
+    ${dueCount ? `<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>${emojiIcon('⏰',16)} <strong>${dueCount}</strong> AEC follow-up${dueCount>1?'s':''} due</span></div>` : ''}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       ${window.chipTabs([{key:'all',label:'All',count:typeCounts.all}, ...window.AEC_TYPES.map(t=>({key:t.key,label:t.label,count:typeCounts[t.key]}))], 'all', {cls:'aec-type-tabs'})}
       <div style="display:flex;gap:6px;flex-wrap:wrap">
         ${canEdit ? `<button class="btn-primary btn-sm" id="aec-add-btn">+ Add Contact</button>` : ''}
-        <button class="btn-secondary btn-sm" id="aec-csv-btn">⬇ CSV</button>
-        <button class="btn-secondary btn-sm" id="aec-print-btn">🖨 Print</button>
+        <button class="btn-secondary btn-sm" id="aec-csv-btn">${emojiIcon('⬇',16)} CSV</button>
+        <button class="btn-secondary btn-sm" id="aec-print-btn">${emojiIcon('🖨',16)} Print</button>
       </div>
     </div>
     ${window.chipTabs([{key:'all',label:'All Stages'}, ...window.AEC_STAGES.map(s=>({key:s.key,label:s.label,icon:s.icon,count:stageCounts[s.key]}))], 'all', {cls:'aec-stage-tabs'})}
@@ -11571,6 +11670,7 @@ async function renderAECDirectory(container, currentUser, currentRole) {
     </div>
     <div id="aec-table"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   // AND-composed filter predicate — the one place all four dimensions combine.
   const shownRows = () => contacts.filter(c =>
@@ -11590,13 +11690,13 @@ async function renderAECDirectory(container, currentUser, currentRole) {
       <td class="c">${typeChip(c)}</td>
       <td><strong>${escHtml(c.company || '')}</strong>${c.address ? `<div style="font-size:10px;color:var(--text-muted)">${escHtml(c.address)}</div>` : ''}</td>
       <td>${escHtml(c.contactPerson || '')}</td>
-      <td style="font-size:11px">${c.phone ? `📞 ${escHtml(c.phone)}<br>` : ''}${c.email ? `✉️ ${escHtml(c.email)}` : ''}</td>
+      <td style="font-size:11px">${c.phone ? `${emojiIcon('📞',16)} ${escHtml(c.phone)}<br>` : ''}${c.email ? `${emojiIcon('✉️',16)} ${escHtml(c.email)}` : ''}</td>
       <td style="font-size:11px">${escHtml((c.region || '').split(' — ')[0])}</td>
       <td><span class="badge" style="font-size:9px;background:${st.color};color:#fff">${st.icon} ${st.label}</span></td>
-      <td class="c">${c.quoteSent ? `✅${c.quoteSentDate ? `<div style="font-size:9px;color:var(--text-muted)">${escHtml(c.quoteSentDate)}</div>` : ''}` : '—'}</td>
-      <td style="font-size:11px;color:${od ? 'var(--danger)' : 'var(--text-muted)'}">${c.followUpDate ? `⏰ ${escHtml(c.followUpDate)}${od ? ' · due' : ''}` : ''}</td>
+      <td class="c">${c.quoteSent ? `${emojiIcon('✅',16)}${c.quoteSentDate ? `<div style="font-size:9px;color:var(--text-muted)">${escHtml(c.quoteSentDate)}</div>` : ''}` : '—'}</td>
+      <td style="font-size:11px;color:${od ? 'var(--danger)' : 'var(--text-muted)'}">${c.followUpDate ? `${emojiIcon('⏰',16)} ${escHtml(c.followUpDate)}${od ? ' · due' : ''}` : ''}</td>
       <td class="c" style="white-space:nowrap">
-        ${canEdit ? `<button class="btn-secondary btn-sm aec-edit-btn" data-id="${c.id}" title="Edit">✎</button>` : ''}
+        ${canEdit ? `<button class="btn-secondary btn-sm aec-edit-btn" data-id="${c.id}" title="Edit">${emojiIcon('✎',16)}</button>` : ''}
         ${canDeleteDirect ? `<button class="btn-secondary btn-sm aec-del-btn" data-id="${c.id}" data-company="${escHtml(c.company || '')}" style="color:var(--danger)">${emojiIcon('trash-2',13)}</button>` : ''}
       </td></tr>`; };
 
@@ -11605,17 +11705,17 @@ async function renderAECDirectory(container, currentUser, currentRole) {
     openModal(`${t.letter} · ${escHtml(c.company || 'AEC Contact')}`, `
       <div style="display:flex;flex-direction:column;gap:6px;font-size:13px">
         <div>#${c.itemNo || ''} · <span class="badge" style="background:${t.color};color:#fff;font-size:9px">${escHtml(t.label)}</span> <span class="badge" style="background:${st.color};color:#fff;font-size:9px">${st.icon} ${st.label}</span></div>
-        ${c.contactPerson ? `<div>👤 ${escHtml(c.contactPerson)}</div>` : ''}
-        ${c.phone ? `<div>📞 ${escHtml(c.phone)}</div>` : ''}
-        ${c.email ? `<div>✉️ ${escHtml(c.email)}</div>` : ''}
-        ${c.region ? `<div>📍 ${escHtml(c.region)}</div>` : ''}
-        ${c.address ? `<div>🏠 ${escHtml(c.address)}</div>` : ''}
-        <div>📄 Quotation: ${c.quoteSent ? `sent${c.quoteSentDate ? ' ' + escHtml(c.quoteSentDate) : ''}${c.quoteRef ? ' · ' + escHtml(c.quoteRef) : ''}` : 'not sent'}</div>
-        ${c.followUpDate ? `<div>⏰ Follow-up: ${escHtml(c.followUpDate)}</div>` : ''}
-        ${c.lastContact ? `<div>🕓 Last contact: ${escHtml(c.lastContact)}</div>` : ''}
-        ${c.potential ? `<div style="margin-top:4px;padding:8px;background:rgba(128,128,128,.08);border-radius:8px">💬 ${escHtml(c.potential)}</div>` : ''}
+        ${c.contactPerson ? `<div>${emojiIcon('👤',16)} ${escHtml(c.contactPerson)}</div>` : ''}
+        ${c.phone ? `<div>${emojiIcon('📞',16)} ${escHtml(c.phone)}</div>` : ''}
+        ${c.email ? `<div>${emojiIcon('✉️',16)} ${escHtml(c.email)}</div>` : ''}
+        ${c.region ? `<div>${emojiIcon('📍',16)} ${escHtml(c.region)}</div>` : ''}
+        ${c.address ? `<div>${emojiIcon('🏠',16)} ${escHtml(c.address)}</div>` : ''}
+        <div>${emojiIcon('📄',16)} Quotation: ${c.quoteSent ? `sent${c.quoteSentDate ? ' ' + escHtml(c.quoteSentDate) : ''}${c.quoteRef ? ' · ' + escHtml(c.quoteRef) : ''}` : 'not sent'}</div>
+        ${c.followUpDate ? `<div>${emojiIcon('⏰',16)} Follow-up: ${escHtml(c.followUpDate)}</div>` : ''}
+        ${c.lastContact ? `<div>${emojiIcon('🕓',16)} Last contact: ${escHtml(c.lastContact)}</div>` : ''}
+        ${c.potential ? `<div style="margin-top:4px;padding:8px;background:rgba(128,128,128,.08);border-radius:8px">${emojiIcon('💬',16)} ${escHtml(c.potential)}</div>` : ''}
       </div>
-    `, `${canEdit ? `<button class="btn-primary" id="aec-detail-edit">✎ Edit</button>` : ''}<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    `, `${canEdit ? `<button class="btn-primary" id="aec-detail-edit">${emojiIcon('✎',16)} Edit</button>` : ''}<button class="btn-secondary" onclick="closeModal()">Close</button>`);
     document.getElementById('aec-detail-edit')?.addEventListener('click', () => { closeModal(); openAECEditor(c); });
   };
 
@@ -11708,13 +11808,14 @@ async function renderAECDirectory(container, currentUser, currentRole) {
     const rows = shownRows();
     const el = document.getElementById('aec-table'); if (!el) return;
     el.innerHTML = !rows.length
-      ? `<div class="empty-state"><div class="empty-icon">📇</div><h4>No AEC contacts${contacts.length ? ' match the filters' : ' yet'}</h4>${canEdit && !contacts.length ? '<p style="font-size:12px;color:var(--text-muted)">Add architects, engineers and contractors to start the partnership pipeline.</p>' : ''}</div>`
+      ? `<div class="empty-state"><div class="empty-icon">${emojiIcon('📇',44)}</div><h4>No AEC contacts${contacts.length ? ' match the filters' : ' yet'}</h4>${canEdit && !contacts.length ? '<p style="font-size:12px;color:var(--text-muted)">Add architects, engineers and contractors to start the partnership pipeline.</p>' : ''}</div>`
       : `<div style="overflow-x:auto"><table id="aec-tbl" style="width:100%;min-width:860px;border-collapse:collapse">
           <thead><tr>
             <th class="c" style="width:36px">#</th><th class="c" style="width:40px">Type</th><th>Company</th><th>Contact Person</th>
             <th>Contact Info</th><th style="width:80px">Region</th><th style="width:120px">Stage</th>
             <th class="c" style="width:70px">Quote</th><th style="width:110px">Follow-up</th><th style="width:80px"></th>
           </tr></thead><tbody>${rows.map(rowHtml).join('')}</tbody></table></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [el] });
     bindRows();
   };
 
@@ -11788,7 +11889,7 @@ function openAECPrintSheet(rows, scopeLabel){
       <td>${e((c.region || '').split(' — ')[0])}</td>
       <td>${e(c.address || '')}</td>
       <td class="c">${st.label}</td>
-      <td class="c">${c.quoteSent ? '✔ ' + e(c.quoteSentDate || '') : '—'}</td>
+      <td class="c">${c.quoteSent ? `✔ ` + e(c.quoteSentDate || '') : '—'}</td>
       <td class="c">${e(c.followUpDate || '')}</td>
     </tr>`; }).join('');
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
@@ -11809,9 +11910,9 @@ ${_lh ? _lh.printCSS : ''}
   @media print{ .bar,.barpad{display:none!important} body{background:#fff} .page{padding:0;width:auto;min-height:0} .tchip,th{-webkit-print-color-adjust:exact;print-color-adjust:exact} }
 </style></head><body>
 <div class="bar">
-  <span style="font-weight:700">📇 AEC Partner Contact Sheet</span>
-  <button onclick="window.print()">🖨 Print / Save as PDF</button>
-  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">✕ Close</button>
+  <span style="font-weight:700">${emojiIcon('📇',16)} AEC Partner Contact Sheet</span>
+  <button onclick="window.print()">${emojiIcon('🖨',16)} Print / Save as PDF</button>
+  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">${emojiIcon('✕',16)} Close</button>
 </div>
 <div class="barpad" style="height:46px"></div>
 <div class="page">
@@ -11871,16 +11972,17 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
   container.innerHTML = `
     ${legacyMode && ['president','manager'].includes(currentRole) ? `
       <div class="alert-banner alert-warn" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px">
-        <span>🧭 Client books not yet unified — showing the legacy read-only view.</span>
+        <span>${emojiIcon('🧭',16)} Client books not yet unified — showing the legacy read-only view.</span>
         <button class="btn-primary btn-sm" id="cl-migrate-btn">Unify client books</button>
-      </div>` : legacyMode ? `<div class="alert-banner" style="margin-bottom:10px">🧭 Read-only until an admin unifies the client books.</div>` : ''}
-    ${dueFollowups?`<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>⏰ <strong>${dueFollowups}</strong> follow-up${dueFollowups>1?'s':''} due</span></div>`:''}
+      </div>` : legacyMode ? `<div class="alert-banner" style="margin-bottom:10px">${emojiIcon('🧭',16)} Read-only until an admin unifies the client books.</div>` : ''}
+    ${dueFollowups?`<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>${emojiIcon('⏰',16)} <strong>${dueFollowups}</strong> follow-up${dueFollowups>1?'s':''} due</span></div>`:''}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
       ${window.chipTabs(chips, 'all', {cls:'cl-stage-tabs'})}
       ${canAdd?`<button class="btn-primary btn-sm" id="add-client-btn">+ Add Client</button>`:''}
     </div>
     <div id="cl-list"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   const clientCard = cl => {
     const st = crmStageMeta(crmStageOf(cl));
@@ -11888,21 +11990,21 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
     const fuOverdue = fu && fu <= today && isOpen(cl);
     return `<div class="item-card cl-card" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;cursor:pointer">
       <div style="flex:1;min-width:0">
-        <div class="item-title">${escHtml(cl.name)} <span class="badge" style="font-size:9px;background:${st.color};color:#fff">${st.icon} ${st.label}</span>${cl.deleteRequested?' <span class="badge badge-red" style="font-size:9px">🗑 del req</span>':''}</div>
+        <div class="item-title">${escHtml(cl.name)} <span class="badge" style="font-size:9px;background:${st.color};color:#fff">${st.icon} ${st.label}</span>${cl.deleteRequested?` <span class="badge badge-red" style="font-size:9px">${emojiIcon('🗑',9)} del req</span>`:''}</div>
         <div class="item-meta">
-          ${cl.company?`<span>🏢 ${escHtml(cl.company)}</span>`:''}
-          ${cl.email?`<span>✉️ ${escHtml(cl.email)}</span>`:''}
-          ${cl.phone?`<span>📞 ${escHtml(cl.phone)}</span>`:''}
-          ${cl.lastQuoteNumber?`<span>📄 ${escHtml(cl.lastQuoteNumber)}</span>`:''}
-          ${fu?`<span style="color:${fuOverdue?'var(--danger)':'var(--text-muted)'}">⏰ ${escHtml(fu)}${fuOverdue?' · due':''}</span>`:''}
+          ${cl.company?`<span>${emojiIcon('🏢',16)} ${escHtml(cl.company)}</span>`:''}
+          ${cl.email?`<span>${emojiIcon('✉️',16)} ${escHtml(cl.email)}</span>`:''}
+          ${cl.phone?`<span>${emojiIcon('📞',16)} ${escHtml(cl.phone)}</span>`:''}
+          ${cl.lastQuoteNumber?`<span>${emojiIcon('📄',16)} ${escHtml(cl.lastQuoteNumber)}</span>`:''}
+          ${fu?`<span style="color:${fuOverdue?'var(--danger)':'var(--text-muted)'}">${emojiIcon('⏰',16)} ${escHtml(fu)}${fuOverdue?' · due':''}</span>`:''}
         </div>
-        <div style="font-size:11px;color:var(--primary);margin-top:4px">📄 View quotes / reopen →</div>
+        <div style="font-size:11px;color:var(--primary);margin-top:4px">${emojiIcon('📄',11)} View quotes / reopen →</div>
       </div>
       <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
-        ${canAdd?`<button class="btn-secondary btn-sm cl-edit-btn" data-id="${cl.id}" title="Edit / set stage">✎</button>`:''}
+        ${canAdd?`<button class="btn-secondary btn-sm cl-edit-btn" data-id="${cl.id}" title="Edit / set stage">${emojiIcon('✎',16)}</button>`:''}
         ${canDeleteDirect
           ? `<button class="btn-secondary btn-sm cl-del-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="color:var(--danger)">${emojiIcon('trash-2',14)}</button>`
-          : `<button class="btn-secondary btn-sm cl-delreq-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" ${cl.deleteRequested?'disabled':''}>${cl.deleteRequested?'⏳':emojiIcon('trash-2',14)}</button>`}
+          : `<button class="btn-secondary btn-sm cl-delreq-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" ${cl.deleteRequested?'disabled':''}>${cl.deleteRequested?`${emojiIcon('⏳',16)}`:emojiIcon('trash-2',14)}</button>`}
       </div>
     </div>`;
   };
@@ -11978,7 +12080,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
     const shown = stageFilter==='all' ? clients : clients.filter(c=>crmStageOf(c)===stageFilter);
     const el = document.getElementById('cl-list'); if(!el) return;
     el.innerHTML = !shown.length
-      ? `<div class="empty-state"><div class="empty-icon">👤</div><h4>No clients${stageFilter!=='all'?' in this stage':' yet'}</h4></div>`
+      ? `<div class="empty-state"><div class="empty-icon">${emojiIcon('👤',44)}</div><h4>No clients${stageFilter!=='all'?' in this stage':' yet'}</h4></div>`
       : `<div class="item-list">${shown.map(clientCard).join('')}</div>`;
     if (window.lucide) lucide.createIcons({ nodes: [el] });
     bindCards();
@@ -12015,7 +12117,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
       const list = Object.values(un); if (!list.length) return;
       const el = document.getElementById('cl-list'); if (!el) return;
       el.insertAdjacentHTML('beforeend', `
-        <div class="card" style="margin-top:14px"><div class="card-header"><h3 style="font-size:13px">📄 From quotes — not yet in CRM (${list.length})</h3></div>
+        <div class="card" style="margin-top:14px"><div class="card-header"><h3 style="font-size:13px">${emojiIcon('📄',13)} From quotes — not yet in CRM (${list.length})</h3></div>
         <div class="card-body">${list.map((u,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
           <div style="min-width:0"><div style="font-size:13px;font-weight:600">${escHtml(u.clientName)}</div>
           <div style="font-size:11px;color:var(--text-muted)">${u.n} quote${u.n>1?'s':''}${u.quoteNumber?' · last '+escHtml(u.quoteNumber):''}</div></div>
@@ -12035,7 +12137,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
 // never reach this — decision 10), so no partner query-scoping is needed here.
 async function openClientHub(cl, opts) {
   opts = opts || {};
-  openModal(`👤 ${escHtml(cl.name || 'Client')}`, '<div class="loading-placeholder">Loading client…</div>',
+  openModal(`${emojiIcon('👤',16)} ${escHtml(cl.name || 'Client')}`, '<div class="loading-placeholder">Loading client…</div>',
     `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
   const body = document.getElementById('modal-body');
   const t = await window.Clients.timelineFor(cl);
@@ -12064,22 +12166,22 @@ async function openClientHub(cl, opts) {
           ? `<select id="ch-stage" style="padding:4px 8px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
               ${CRM_STAGES.map(s=>`<option value="${s.key}" ${crmStageOf(cl)===s.key?'selected':''}>${s.icon} ${s.label}</option>`).join('')}</select>`
           : `<span class="badge" style="font-size:10px;background:${st.color};color:#fff">${st.icon} ${st.label}</span>`}
-        ${cl.company?`<span style="font-size:12px;color:var(--text-muted)">🏢 ${escHtml(cl.company)}</span>`:''}
+        ${cl.company?`<span style="font-size:12px;color:var(--text-muted)">${emojiIcon('🏢',12)} ${escHtml(cl.company)}</span>`:''}
         ${(cl.brands||[]).map(b=>`<span class="badge badge-gray" style="font-size:9px">${b==='sales'?'Sales':b==='design'?'Design':'Brilliant Steel'}</span>`).join('')}
       </div>
       <div class="item-meta">
-        ${cl.email?`<span>✉️ ${escHtml(cl.email)}</span>`:''}
-        ${cl.phone?`<span>📞 ${escHtml(cl.phone)}</span>`:''}
-        ${cl.address?`<span>📍 ${escHtml(cl.address)}</span>`:''}
+        ${cl.email?`<span>${emojiIcon('✉️',16)} ${escHtml(cl.email)}</span>`:''}
+        ${cl.phone?`<span>${emojiIcon('📞',16)} ${escHtml(cl.phone)}</span>`:''}
+        ${cl.address?`<span>${emojiIcon('📍',16)} ${escHtml(cl.address)}</span>`:''}
       </div>
       <div style="font-size:12px;margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         ${cl.followUpDate
-          ? `<span style="color:${fuOverdue?'var(--danger)':'var(--text-muted)'}">⏰ Follow-up: <strong>${escHtml(cl.followUpDate)}</strong>${fuOverdue?' · due':''}</span>
-             ${opts.canEdit?`<button class="btn-secondary btn-sm" id="ch-fu-done">✓ Done</button>`:''}`
-          : (opts.canEdit?`<button class="btn-secondary btn-sm" id="ch-fu-set">⏰ Set follow-up</button>`:'')}
-        ${opts.canEdit?`<button class="btn-secondary btn-sm" id="ch-log">📞 Log contact</button>`:''}
+          ? `<span style="color:${fuOverdue?'var(--danger)':'var(--text-muted)'}">${emojiIcon('⏰',16)} Follow-up: <strong>${escHtml(cl.followUpDate)}</strong>${fuOverdue?' · due':''}</span>
+             ${opts.canEdit?`<button class="btn-secondary btn-sm" id="ch-fu-done">${emojiIcon('✓',16)} Done</button>`:''}`
+          : (opts.canEdit?`<button class="btn-secondary btn-sm" id="ch-fu-set">${emojiIcon('⏰',16)} Set follow-up</button>`:'')}
+        ${opts.canEdit?`<button class="btn-secondary btn-sm" id="ch-log">${emojiIcon('📞',16)} Log contact</button>`:''}
       </div>
-      ${cl.notes?`<div style="font-size:12px;color:var(--text-muted);margin-top:6px">📝 ${escHtml(cl.notes)}</div>`:''}
+      ${cl.notes?`<div style="font-size:12px;color:var(--text-muted);margin-top:6px">${emojiIcon('📝',12)} ${escHtml(cl.notes)}</div>`:''}
       <div style="display:flex;gap:14px;margin-top:8px;font-size:12px;border-top:1px solid var(--border);padding-top:8px;flex-wrap:wrap">
         <span>Quotes: <strong>${t.quotes.length}</strong></span>
         <span>Quoted: <strong>₱${fmt(totalQuoted)}</strong></span>
@@ -12088,11 +12190,11 @@ async function openClientHub(cl, opts) {
         ${ar>0?`<span>AR: <strong style="color:var(--danger)">₱${fmt(ar)}</strong></span>`:''}
       </div>
     </div>
-    ${t.events.length?`<h4 style="font-size:13px;margin:0 0 6px">🕓 Timeline</h4>
+    ${t.events.length?`<h4 style="font-size:13px;margin:0 0 6px">${emojiIcon('🕓',13)} Timeline</h4>
     <div style="border-left:2px solid var(--border);margin:0 0 14px 6px;padding-left:12px;display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto">
       ${t.events.map(e=>`<div style="display:flex;gap:8px;align-items:baseline"><span style="flex-shrink:0">${e.icon}</span><span style="font-size:12px;flex:1">${escHtml(e.text)}</span><span style="font-size:11px;color:var(--text-muted);flex-shrink:0">${fmtD(e.ts)}</span></div>`).join('')}
     </div>`:''}
-    ${t.projects.length?`<h4 style="font-size:13px;margin:0 0 6px">🏗 Projects (${t.projects.length})</h4>
+    ${t.projects.length?`<h4 style="font-size:13px;margin:0 0 6px">${emojiIcon('🏗',13)} Projects (${t.projects.length})</h4>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
       ${t.projects.map(p=>`<div class="item-card" style="display:flex;justify-content:space-between;gap:10px;align-items:center">
         <div style="min-width:0"><span style="font-weight:700;font-size:12px;font-family:monospace">${escHtml(p.no||p.id.slice(-6))}</span>
@@ -12100,25 +12202,26 @@ async function openClientHub(cl, opts) {
         <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">₱${fmt(p.contractAmount)}${p.arBalance>0?` · AR ₱${fmt(p.arBalance)}`:' · paid'}</div>
       </div>`).join('')}
     </div>`:''}
-    ${t.files.length?`<h4 style="font-size:13px;margin:0 0 6px">📁 Files (${t.files.length})</h4>
+    ${t.files.length?`<h4 style="font-size:13px;margin:0 0 6px">${emojiIcon('📁',13)} Files (${t.files.length})</h4>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
       ${t.files.map(f=>`<div class="item-card ch-file-row" data-id="${f.id}" style="cursor:pointer;display:flex;justify-content:space-between;gap:10px;align-items:center">
         <div style="min-width:0"><span style="font-weight:600;font-size:12px">${escHtml(f.name||'File')}</span>
-          ${f.projectId?`<span class="badge badge-gray" style="font-size:9px">🏗 ${escHtml((t.projects.find(p=>p.id===f.projectId)||{}).no||'Project')}</span>`:''}</div>
-        <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">👁 ${f.createdAt&&f.createdAt.toDate?f.createdAt.toDate().toLocaleDateString('en-PH'):''}</div>
+          ${f.projectId?`<span class="badge badge-gray" style="font-size:9px">${emojiIcon('🏗',9)} ${escHtml((t.projects.find(p=>p.id===f.projectId)||{}).no||'Project')}</span>`:''}</div>
+        <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">${emojiIcon('👁',11)} ${f.createdAt&&f.createdAt.toDate?f.createdAt.toDate().toLocaleDateString('en-PH'):''}</div>
       </div>`).join('')}
     </div>`:''}
-    <h4 style="font-size:13px;margin:0 0 6px">📄 Quotes (${t.quotes.length})</h4>
+    <h4 style="font-size:13px;margin:0 0 6px">${emojiIcon('📄',13)} Quotes (${t.quotes.length})</h4>
     ${!t.quotes.length?'<div class="empty-state" style="padding:18px"><p>No quotes recorded for this client yet.</p></div>':`<div style="display:flex;flex-direction:column;gap:8px">
       ${t.quotes.map(q=>`<div class="item-card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
         <div style="flex:1;min-width:0">
           <div style="font-weight:700;font-size:13px;font-family:monospace">${escHtml(q.quoteNumber||q.id.slice(-8))}</div>
           <div style="font-size:11px;color:var(--text-muted);margin-top:2px">₱${fmt(q.total||q.grandTotal||0)} ${statusBadge(q)} ${q.salesOrderId?'<span class="badge badge-green" style="font-size:9px">→ Sales Order</span>':''} ${q.createdAt?'· '+fmtD(q.createdAt.seconds?q.createdAt.seconds*1000:Date.parse(q.createdAt)||0):''}</div>
         </div>
-        ${q.editableState?`<div style="display:flex;gap:6px;flex-shrink:0"><button class="btn-secondary btn-sm clq-reopen" data-id="${q.id}" data-coll="${q._coll}" data-co="${escHtml(q.company||'BS')}">↻ Reopen</button><button class="btn-secondary btn-sm clq-rev" data-id="${q.id}" data-coll="${q._coll}" data-co="${escHtml(q.company||'BS')}" title="Start a new revision (R2, R3…) with today's date">⎘ New Revision</button></div>`:'<span style="font-size:10px;color:var(--text-muted);flex-shrink:0">no snapshot</span>'}
+        ${q.editableState?`<div style="display:flex;gap:6px;flex-shrink:0"><button class="btn-secondary btn-sm clq-reopen" data-id="${q.id}" data-coll="${q._coll}" data-co="${escHtml(q.company||'BS')}">↻ Reopen</button><button class="btn-secondary btn-sm clq-rev" data-id="${q.id}" data-coll="${q._coll}" data-co="${escHtml(q.company||'BS')}" title="Start a new revision (R2, R3…) with today's date">${emojiIcon('⎘',16)} New Revision</button></div>`:'<span style="font-size:10px;color:var(--text-muted);flex-shrink:0">no snapshot</span>'}
       </div>`).join('')}
     </div>`}
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [body] });
   const nav = co => co==='BK' ? 'bk-quote-builder' : 'bs-quote-builder';
   body.querySelectorAll('.clq-reopen').forEach(btn=>btn.addEventListener('click',()=>{ closeModal(); window.reopenQuoteFromDoc(btn.dataset.coll, btn.dataset.id, nav(btn.dataset.co)); }));
   body.querySelectorAll('.clq-rev').forEach(btn=>btn.addEventListener('click',()=>{ closeModal(); window.newRevisionFromDoc(btn.dataset.coll, btn.dataset.id, nav(btn.dataset.co)); }));
@@ -12141,7 +12244,7 @@ async function openClientHub(cl, opts) {
     try { await patch({ lastContact: today }, { date: today, by: who(), note: note.trim() }); Notifs.showToast('Contact logged'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
   document.getElementById('ch-fu-done')?.addEventListener('click', async () => {
-    const next = ((await promptDialog({message:'Follow-up done ✓ — schedule the next one? (YYYY-MM-DD, blank = none)'}))||'').trim();
+    const next = ((await promptDialog({message:`Follow-up done ${emojiIcon('✓',16)} — schedule the next one? (YYYY-MM-DD, blank = none)`}))||'').trim();
     try { await patch({ followUpDate: next, lastContact: today }, { date: today, by: who(), note: 'Follow-up done' + (next ? ' → next ' + next : '') }); Notifs.showToast('Follow-up updated'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
   document.getElementById('ch-fu-set')?.addEventListener('click', async () => {
@@ -12196,17 +12299,17 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
       <div class="kpi-card green"><div class="kpi-label">Remaining</div><div class="kpi-value">${canSeeSpend?'₱'+fmt(totalBudget-totalSpent):'—'}</div></div>
       ${canSeeSpend&&totalIncome>0?`<div class="kpi-card accent"><div class="kpi-label">Income</div><div class="kpi-value">₱${fmt(totalIncome)}</div></div>`:''}
     </div>
-    ${!canSeeSpend?`<div style="font-size:11px;color:var(--text-muted);margin:-6px 0 12px;display:flex;align-items:center;gap:6px"><span>💡</span> Spend tracking is visible to Finance &amp; Management.</div>`:''}
+    ${!canSeeSpend?`<div style="font-size:11px;color:var(--text-muted);margin:-6px 0 12px;display:flex;align-items:center;gap:6px"><span>${emojiIcon('💡',16)}</span> Spend tracking is visible to Finance &amp; Management.</div>`:''}
     ${(canEdit||canSeeSpend)?`<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:12px">
       ${canEdit?`<button class="btn-secondary btn-sm" id="add-budget-line-btn">+ Budget Line</button>`:''}
-      ${canSeeSpend?`<button class="btn-primary btn-sm" id="log-expense-btn">📤 Log Expense / Income</button>`:''}
+      ${canSeeSpend?`<button class="btn-primary btn-sm" id="log-expense-btn">${emojiIcon('📤',16)} Log Expense / Income</button>`:''}
     </div>`:''}
 
     <!-- Budget allocations -->
     <div class="card" style="margin-bottom:14px">
-      <div class="card-header"><h3>📊 Budget Allocation</h3></div>
+      <div class="card-header"><h3>${emojiIcon('📊',20)} Budget Allocation</h3></div>
       <div class="card-body" style="padding:0">
-        ${!items.length?'<div class="empty-state" style="padding:20px"><div class="empty-icon">📊</div><p>No budget lines yet.</p></div>':
+        ${!items.length?`<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('📊',44)}</div><p>No budget lines yet.</p></div>`:
           `<div class="table-wrap"><table class="data-table">
             <thead><tr><th>Item</th><th>Allocated</th><th>Spent</th><th>Remaining</th><th>%</th></tr></thead>
             <tbody>
@@ -12236,11 +12339,11 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
     <!-- Expense log (synced with Finance Ledger) -->
     <div class="card">
       <div class="card-header">
-        <h3>🧾 Expense / Income Log</h3>
+        <h3>${emojiIcon('🧾',20)} Expense / Income Log</h3>
         <span style="font-size:11px;color:var(--text-muted)">Synced with Finance Ledger</span>
       </div>
       <div class="card-body" style="padding:0">
-        ${!expenses.length?'<div class="empty-state" style="padding:20px"><div class="empty-icon">🧾</div><p>No expenses logged yet.</p></div>':
+        ${!expenses.length?`<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('🧾',44)}</div><p>No expenses logged yet.</p></div>`:
           `<div class="table-wrap"><table class="data-table">
             <thead><tr><th>Date</th><th>Description</th><th>Line Item</th><th>Type</th><th>Amount</th><th>By</th></tr></thead>
             <tbody>
@@ -12257,6 +12360,7 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
       </div>
     </div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   // Add budget line
   document.getElementById('add-budget-line-btn')?.addEventListener('click', () => {
@@ -12303,7 +12407,7 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
       <div class="form-group"><label>Reference # (optional)</label><input id="exp-ref" placeholder="OR #, Invoice #…"/></div>
       <div id="exp-vat-wrap" style="display:none">${window.vatFieldHTML ? window.vatFieldHTML('exp-vat','exempt') : ''}</div>
       <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:10px;background:rgba(155,168,255,0.08);border-radius:8px;font-size:12px;color:var(--text-muted)">
-        🔗 This entry will also appear in Finance → Ledger
+        ${emojiIcon('🔗',16)} This entry will also appear in Finance → Ledger
       </div>
     `, `<button class="btn-primary" id="save-exp-btn">Save & Sync to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
@@ -12355,7 +12459,7 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
       await Notifs.sendToDept('Finance', {
         title: `💸 ${dept} logged a ${type==='debit'?'expense':'income'}`,
         body:  `${uName}: ${desc} — ₱${amount.toLocaleString()}`,
-        icon:  type==='debit'?'📤':'📥',
+        icon:  type==='debit'?`${emojiIcon('📤',16)}`:`${emojiIcon('📥',16)}`,
         type:  'finance_entry'
       }).catch(()=>{});
 
@@ -12373,10 +12477,10 @@ window.renderFileCollection = function(title, containerId, currentRole) {
   return `
     <div class="card">
       <div class="card-header" style="flex-wrap:wrap;gap:6px">
-        <h3>📁 ${title}</h3>
+        <h3>${emojiIcon('📁',20)} ${title}</h3>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="btn-secondary btn-sm" id="newfolder-btn-${containerId}">📁 New Folder</button>
-          <button class="btn-secondary btn-sm" id="addlink-btn-${containerId}">🔗 Add Link</button>
+          <button class="btn-secondary btn-sm" id="newfolder-btn-${containerId}">${emojiIcon('📁',16)} New Folder</button>
+          <button class="btn-secondary btn-sm" id="addlink-btn-${containerId}">${emojiIcon('🔗',16)} Add Link</button>
           <button class="btn-primary btn-sm" id="upload-btn-${containerId}">+ Upload File</button>
         </div>
       </div>
@@ -12415,7 +12519,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
 
   const cardHtml = (f, isBin) => {
     const isLink = f.kind === 'link';
-    const icon = isLink ? '🔗' : (/^image\//.test(f.contentType||'') ? '🖼️' : /pdf/.test(f.contentType||'') ? '📕' : '📄');
+    const icon = isLink ? `${emojiIcon('🔗',16)}` : (/^image\//.test(f.contentType||'') ? `${emojiIcon('🖼️',16)}` : /pdf/.test(f.contentType||'') ? `${emojiIcon('📕',16)}` : `${emojiIcon('📄',16)}`);
     return `<div class="item-card fh-card" data-id="${f.id}" draggable="${(!isBin && FilesHub.canEdit(f))?'true':'false'}" data-file-row="${f.id}" style="cursor:pointer;text-align:center;padding:14px 8px">
       <div style="font-size:28px">${icon}</div>
       <div style="font-weight:600;font-size:12px;margin-top:6px;word-break:break-word">${escHtml(f.name||'File')}</div>
@@ -12438,10 +12542,10 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
         : allFiles.filter(f=>!f.archived && (activeFolder==='All' || (f.folderId||null)===activeFolder));
 
     const chips = [
-      { key:'All', label:'📁 All' },
-      ...foldersToShow.map(fo => ({ key:fo.id, label:`📁 ${escHtml(fo.name)}` })),
-      ...(archivedCount ? [{ key:'__archived__', label:`🗄 Archived (${archivedCount})` }] : []),
-      { key:'__bin__', label:`🗑 Recycle Bin (${binFiles.length})` }
+      { key:'All', label:`${emojiIcon('📁',16)} All` },
+      ...foldersToShow.map(fo => ({ key:fo.id, label:`${emojiIcon('📁',16)} ${escHtml(fo.name)}` })),
+      ...(archivedCount ? [{ key:'__archived__', label:`${emojiIcon('🗄',16)} Archived (${archivedCount})` }] : []),
+      { key:'__bin__', label:`${emojiIcon('🗑',16)} Recycle Bin (${binFiles.length})` }
     ];
     const chipBar = `<div class="subtab-bar" style="margin-bottom:10px">
       ${chips.map(c=>`<button class="subtab-btn file-folder-chip ${activeFolder===c.key?'active':''}" data-folder="${escHtml(c.key)}">${c.label}</button>`).join('')}
@@ -12457,36 +12561,36 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
       const verBadge = (f.versions && f.versions.length > 1) ? `<span class="badge badge-gray" style="margin-left:6px;font-size:10px">v${f.currentV||1}</span>` : '';
       return `<tr draggable="${(!isBin && canEdit)?'true':'false'}" data-file-row="${f.id}">
         <td>
-          <a href="#" class="fh-preview-link" data-id="${f.id}" style="color:var(--primary);font-weight:600">${isLink?'🔗 ':'📄 '}${escHtml(f.name||'File')}</a>${mirrored}${verBadge}
+          <a href="#" class="fh-preview-link" data-id="${f.id}" style="color:var(--primary);font-weight:600">${isLink?`${emojiIcon('🔗',16)} `:`${emojiIcon('📄',16)} `}${escHtml(f.name||'File')}</a>${mirrored}${verBadge}
           ${f.description?`<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(f.description)}</div>`:''}
         </td>
         <td><span class="badge badge-gray">${escHtml(folderName(f.folderId))}</span></td>
         <td>${escHtml(f.uploaderName||'—')}</td>
         <td style="font-size:11px;color:var(--text-muted)">${f.createdAt?new Date(f.createdAt.toDate()).toLocaleDateString('en-PH'):''}</td>
         <td style="white-space:nowrap">${isBin ? `
-          ${canEdit?`<button class="btn-secondary btn-sm fh-restore" data-id="${f.id}">♻️ Restore</button>`:''}
-          ${window.currentRole==='president'?`<button class="btn-danger btn-sm fh-purge" data-id="${f.id}" data-name="${escHtml(f.name||'File')}">🗑 Delete forever</button>`:''}
+          ${canEdit?`<button class="btn-secondary btn-sm fh-restore" data-id="${f.id}">${emojiIcon('♻️',16)} Restore</button>`:''}
+          ${window.currentRole==='president'?`<button class="btn-danger btn-sm fh-purge" data-id="${f.id}" data-name="${escHtml(f.name||'File')}">${emojiIcon('🗑',16)} Delete forever</button>`:''}
         ` : `
-          <a href="${safeHttpUrl(f.url)}" target="_blank" class="btn-secondary btn-sm" title="${isLink?'Open link':'Download'}">${isLink?'↗':'⬇'}</a>
-          <button class="btn-secondary btn-sm fh-preview" data-id="${f.id}" title="Preview">👁</button>
-          ${canEdit?`<button class="btn-secondary btn-sm fh-version" data-id="${f.id}" title="Upload new version">⬆</button>`:''}
-          ${canShare(f)?`<button class="btn-secondary btn-sm fh-share" data-id="${f.id}" title="Share">🔀</button>`:''}
-          <button class="btn-secondary btn-sm file-arch-btn" data-id="${f.id}" data-arch="${f.archived?'0':'1'}" title="${f.archived?'Restore':'Archive'}">${f.archived?'♻️':'🗄'}</button>
-          ${canEdit?`<button class="btn-danger btn-sm fh-delete" data-id="${f.id}" data-name="${escHtml(f.name||'File')}" title="Move to Recycle Bin">🗑</button>`:''}
+          <a href="${safeHttpUrl(f.url)}" target="_blank" class="btn-secondary btn-sm" title="${isLink?'Open link':'Download'}">${isLink?'↗':`${emojiIcon('⬇',16)}`}</a>
+          <button class="btn-secondary btn-sm fh-preview" data-id="${f.id}" title="Preview">${emojiIcon('👁',16)}</button>
+          ${canEdit?`<button class="btn-secondary btn-sm fh-version" data-id="${f.id}" title="Upload new version">${emojiIcon('⬆',16)}</button>`:''}
+          ${canShare(f)?`<button class="btn-secondary btn-sm fh-share" data-id="${f.id}" title="Share">${emojiIcon('🔀',16)}</button>`:''}
+          <button class="btn-secondary btn-sm file-arch-btn" data-id="${f.id}" data-arch="${f.archived?'0':'1'}" title="${f.archived?'Restore':'Archive'}">${f.archived?`${emojiIcon('♻️',16)}`:`${emojiIcon('🗄',16)}`}</button>
+          ${canEdit?`<button class="btn-danger btn-sm fh-delete" data-id="${f.id}" data-name="${escHtml(f.name||'File')}" title="Move to Recycle Bin">${emojiIcon('🗑',16)}</button>`:''}
         `}</td>
       </tr>`;
-    }).join('') : `<tr><td colspan="5"><div class="empty-state" style="padding:18px"><div class="empty-icon">📁</div><h4>${emptyMsg}</h4></div></td></tr>`;
+    }).join('') : `<tr><td colspan="5"><div class="empty-state" style="padding:18px"><div class="empty-icon">${emojiIcon('📁',44)}</div><h4>${emptyMsg}</h4></div></td></tr>`;
 
     const bodyHtml = viewMode === 'grid'
       ? `<div class="fh-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">${
-          showing.length ? showing.map(f=>cardHtml(f,isBin)).join('') : `<div class="empty-state" style="grid-column:1/-1;padding:18px"><div class="empty-icon">📁</div><h4>${emptyMsg}</h4></div>`
+          showing.length ? showing.map(f=>cardHtml(f,isBin)).join('') : `<div class="empty-state" style="grid-column:1/-1;padding:18px"><div class="empty-icon">${emojiIcon('📁',44)}</div><h4>${emptyMsg}</h4></div>`
         }</div>`
       : `<div class="table-wrap"><table class="data-table">
           <thead><tr><th>Name</th><th>Folder</th><th>Added By</th><th>Date</th><th></th></tr></thead>
           <tbody>${rows}</tbody></table></div>`;
 
     listEl.innerHTML =
-      window.chipTabs([{key:'list',label:'☰ List'},{key:'grid',label:'▦ Grid'}], viewMode, {cls:'fh-view'}) +
+      window.chipTabs([{key:'list',label:`☰ List`},{key:'grid',label:'▦ Grid'}], viewMode, {cls:'fh-view'}) +
       chipBar + bodyHtml;
     if (window.lucide) lucide.createIcons({ nodes: [listEl] });
 
@@ -12801,7 +12905,8 @@ window.renderDocCollection = function(container, collection, title, currentUser,
     const snap = await db.collection(collection).get().catch(() => ({ docs: [] }));
     const docs = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     const list = document.getElementById(`doc-list-${collection}`);
-    if (!docs.length) { list.innerHTML=`<div class="empty-state" style="padding:20px"><div class="empty-icon">${cfg?.icon||'📄'}</div><h4>No ${title} yet</h4></div>`; return; }
+    if (!docs.length) { list.innerHTML=`<div class="empty-state" style="padding:20px"><div class="empty-icon">${cfg?.icon||`${emojiIcon('📄',44)}`}</div><h4>No ${title} yet</h4></div>`; return; }
+    if (window.lucide) lucide.createIcons({ nodes: [list] });
     list.innerHTML = `<div class="item-list">${docs.map(d=>`
       <div class="item-card"${isGov?` data-gov-id="${d.id}" style="cursor:pointer"`:''}>
         <div class="item-top"><div class="item-title">${escHtml(d.title||d.name||'Untitled')}</div>
@@ -12809,10 +12914,11 @@ window.renderDocCollection = function(container, collection, title, currentUser,
         </div>
         <div class="item-meta">
           ${d.description?`<span>${escHtml(d.description)}</span>`:''}
-          ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:11px" onclick="event.stopPropagation()">📎 View File</a>`:''}
+          ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:11px" onclick="event.stopPropagation()">${emojiIcon('📎',11)} View File</a>`:''}
           ${d.createdAt?`<span style="font-size:11px;color:var(--text-muted)">${new Date(d.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
         </div>
       </div>`).join('')}</div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [list] });
     if (isGov) {
       list.querySelectorAll('.item-card[data-gov-id]').forEach(card => {
         card.addEventListener('click', () => {
@@ -12837,11 +12943,11 @@ window.renderDocCollection = function(container, collection, title, currentUser,
           <select id="gb-bucket">${GOV_BUCKETS.map(b=>`<option value="${b.collection}" ${b.collection===collection?'selected':''}>${b.label}</option>`).join('')}</select>
         </div>
       </div>
-      ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:12px;display:block;margin-bottom:8px">📎 View File</a>`:''}
+      ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:12px;display:block;margin-bottom:8px">${emojiIcon('📎',12)} View File</a>`:''}
     ` : `
       <div style="margin-bottom:10px"><span class="badge ${statusBadge(d.status)}">${d.status||'active'}</span></div>
       <p style="font-size:14px;line-height:1.6;margin-bottom:10px">${escHtml(d.description||'No details.')}</p>
-      ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:12px;display:block">📎 View File</a>`:''}
+      ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:12px;display:block">${emojiIcon('📎',12)} View File</a>`:''}
     `;
     openPage(escHtml(d.title||d.name||'Bidding'), body,
       canManageGov
@@ -12958,14 +13064,14 @@ const QC_CHECKLIST = [
 function openQCModal(order, onSaved){
   const prev = order.qc || null;
   const stateOf = id => prev?.items?.find(i=>i.id===id)?.state || '';
-  openModal('🔍 Quality Checking — '+escHtml(order.orderNo||order.title||''), `
+  openModal(`${emojiIcon('🔍',16)} Quality Checking — `+escHtml(order.orderNo||order.title||''), `
     ${prev?`<div style="font-size:11px;margin-bottom:8px;color:${prev.result==='passed'?'var(--success)':'var(--danger)'}">Last inspection: <b>${prev.result}</b> · ${escHtml(prev.byName||'')} · ${prev.at?new Date(prev.at).toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''}</div>`:''}
     <div style="display:flex;flex-direction:column">
       ${QC_CHECKLIST.map(it=>`
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;border-bottom:1px solid var(--border);padding:7px 0">
           <span style="font-size:12px;flex:1">${escHtml(it.label)}</span>
           <span style="display:flex;gap:8px;flex-shrink:0">
-            ${['pass','fail','na'].map(s=>`<label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="qc-${it.id}" value="${s}" ${stateOf(it.id)===s?'checked':''}/>${s==='pass'?'✅':s==='fail'?'❌':'N/A'}</label>`).join('')}
+            ${['pass','fail','na'].map(s=>`<label style="font-size:11px;display:flex;align-items:center;gap:3px;cursor:pointer"><input type="radio" name="qc-${it.id}" value="${s}" ${stateOf(it.id)===s?'checked':''}/>${s==='pass'?`${emojiIcon('✅',16)}`:s==='fail'?`${emojiIcon('❌',16)}`:'N/A'}</label>`).join('')}
           </span>
         </div>`).join('')}
     </div>
@@ -12993,7 +13099,7 @@ function openQCModal(order, onSaved){
 function openDeliveryReceiptModal(order, onSaved){
   const dr = order.deliveryReceipt || null;
   if (dr) {   // view / reprint mode
-    openModal('🧾 Delivery Receipt — '+escHtml(dr.no||''), `
+    openModal(`${emojiIcon('🧾',16)} Delivery Receipt — `+escHtml(dr.no||''), `
       <div style="font-size:12px;display:grid;grid-template-columns:auto 1fr;gap:4px 12px">
         <span style="color:var(--text-muted)">Receipt #</span><b>${escHtml(dr.no||'')}</b>
         <span style="color:var(--text-muted)">Received by</span><span>${escHtml(dr.receivedBy||'')}</span>
@@ -13001,12 +13107,12 @@ function openDeliveryReceiptModal(order, onSaved){
         ${dr.notes?`<span style="color:var(--text-muted)">Notes</span><span>${escHtml(dr.notes)}</span>`:''}
         <span style="color:var(--text-muted)">Recorded by</span><span>${escHtml(dr.byName||'')}</span>
       </div>`,
-      `<button class="btn-primary" id="dr-print">🖨 Print</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+      `<button class="btn-primary" id="dr-print">${emojiIcon('🖨',16)} Print</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
     document.getElementById('dr-print')?.addEventListener('click', ()=>printDeliveryReceipt(order));
     return;
   }
   const dayStr = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
-  openModal('🧾 Record Delivery Receipt — '+escHtml(order.orderNo||order.title||''), `
+  openModal(`${emojiIcon('🧾',16)} Record Delivery Receipt — `+escHtml(order.orderNo||order.title||''), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Required before this order can be marked <b>Delivered</b>. Fill it in with the client's receiving rep at handover.</div>
     <div class="form-row">
       <div class="form-group"><label>Received by (client rep)</label><input id="dr-name" placeholder="e.g. Maria Santos — Purchasing"/></div>
@@ -13086,9 +13192,9 @@ function printDeliveryReceipt(order) {
 ${_lh ? _lh.printCSS : ''}
 </style></head><body>
 <div class="bar">
-  <span style="font-weight:700">🧾 Delivery Receipt — ${e(dr.no || '')}</span>
-  <button onclick="window.print()">🖨 Print / Save as PDF</button>
-  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">✕ Close</button>
+  <span style="font-weight:700">${emojiIcon('🧾',16)} Delivery Receipt — ${e(dr.no || '')}</span>
+  <button onclick="window.print()">${emojiIcon('🖨',16)} Print / Save as PDF</button>
+  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">${emojiIcon('✕',16)} Close</button>
 </div>
 <div class="barpad" style="height:46px"></div>
 <div class="page">
@@ -13201,7 +13307,7 @@ window.renderProjectLifecycle = async function(){
     </div></div>`; };
 
   c.innerHTML = `
-    <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2>📈 Projects</h2><div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:var(--text-muted)">Quote → Order → Production → Delivery → Paid</span>${canTagProjects?`<button class="btn-secondary btn-sm" onclick="window.runProjectKindBackfill()" title="Tag projects with kind (job/design)">🔖 Tag</button>`:''}</div></div>
+    <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap"><h2>${emojiIcon('📈',20)} Projects</h2><div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:var(--text-muted)">Quote → Order → Production → Delivery → Paid</span>${canTagProjects?`<button class="btn-secondary btn-sm" onclick="window.runProjectKindBackfill()" title="Tag projects with kind (job/design)">${emojiIcon('🔖',16)} Tag</button>`:''}</div></div>
     <div class="kpi-row" style="margin-bottom:14px">
       <div class="kpi-card"><div class="kpi-label">Active</div><div class="kpi-value">${active.length}</div></div>
       <div class="kpi-card accent"><div class="kpi-label">In Production</div><div class="kpi-value">${inProd}</div></div>
@@ -13209,12 +13315,12 @@ window.renderProjectLifecycle = async function(){
       <div class="kpi-card ${arTotal>0?'warn':''}"><div class="kpi-label">Receivables ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(arTotal)}</div></div>
       <div class="kpi-card green"><div class="kpi-label">Collected ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(collected)}</div></div>
     </div>
-    ${!projects.length?'<div class="empty-state" style="padding:30px"><div class="empty-icon">📈</div><h4>No projects yet</h4><p>A project is created when a quote is converted to a Sales Order.</p></div>':''}
+    ${!projects.length?`<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('📈',44)}</div><h4>No projects yet</h4><p>A project is created when a quote is converted to a Sales Order.</p></div>`:''}
     ${JOB_STAGES.filter(s=>!['paid','cancelled'].includes(s.id) && (byStage[s.id]||[]).length).map(s=>`
       <div class="card" style="margin-bottom:12px"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3 style="font-size:13px">${s.icon} ${s.label}</h3><span class="badge" style="background:${s.color};color:#fff">${(byStage[s.id]||[]).length}</span></div>
         <div class="card-body" style="display:flex;flex-direction:column;gap:8px">${(byStage[s.id]||[]).map(card).join('')}</div></div>`).join('')}
-    ${done.length?`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">💰 Paid / Closed (${done.length})</summary><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${done.slice(0,30).map(card).join('')}</div></details>`:''}
-    ${designList.length?`<details style="margin-top:10px" open><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">🎨 Design Projects (${designList.length})</summary>
+    ${done.length?`<details style="margin-top:6px"><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">${emojiIcon('💰',13)} Paid / Closed (${done.length})</summary><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${done.slice(0,30).map(card).join('')}</div></details>`:''}
+    ${designList.length?`<details style="margin-top:10px" open><summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">${emojiIcon('🎨',13)} Design Projects (${designList.length})</summary>
       <div style="font-size:11px;color:var(--text-muted);margin:2px 0 8px">From the Design board — manage in Design → Projects.</div>
       <div style="display:flex;flex-direction:column;gap:8px">${designList.map(d=>`<div class="item-card" style="border-left:3px solid #4a148c">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
@@ -13225,6 +13331,7 @@ window.renderProjectLifecycle = async function(){
           </div>
           <span class="badge badge-purple" style="font-size:9px;flex-shrink:0">DESIGN</span>
         </div></div>`).join('')}</div></details>`:''}`;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   c.querySelectorAll('.proj-card').forEach(el=>el.addEventListener('click',()=>openJobProjectDetail(projects.find(p=>p.id===el.dataset.id))));
 };
 
@@ -13249,7 +13356,7 @@ function openJobProjectDetail(p){
       <div class="kpi-card ${Math.max(0,(p.contractAmount||0)-(p.amountCollected||0))>0?'warn':''}"><div class="kpi-label">Balance (AR)</div><div class="kpi-value" style="font-size:14px">₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}</div></div>
     </div>
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:10px 14px">
-      <div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:12px">💰 Margin &amp; Split</strong>${(!isPartnerU && (canEditDept('Sales')||_isFinAdmin()))?`<button class="btn-secondary btn-sm" id="proj-margin-btn">Edit factors</button>`:''}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:12px">${emojiIcon('💰',12)} Margin &amp; Split</strong>${(!isPartnerU && (canEditDept('Sales')||_isFinAdmin()))?`<button class="btn-secondary btn-sm" id="proj-margin-btn">Edit factors</button>`:''}</div>
       <div style="font-size:12px;margin-top:6px;display:grid;grid-template-columns:1fr auto;gap:3px 12px">
         <span style="color:var(--text-muted)">Contract</span><span style="text-align:right">₱${fmt(p.contractAmount||0)}</span>
         <span style="color:var(--text-muted)">Capital (cost)</span><span style="text-align:right">₱${fmt(p.capital||0)}</span>
@@ -13257,24 +13364,24 @@ function openJobProjectDetail(p){
         ${p.split?.isShared?`<span style="color:var(--text-muted)">Partner share (${p.split?.partnerPct||50}%)</span><span style="text-align:right;font-weight:700;color:var(--success)">₱${fmt(((p.contractAmount||0)-(p.capital||0))*((p.split?.partnerPct||50)/100))}</span>`:''}
       </div>
     </div></div>
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">📄 Document Register</div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('📄',16)} Document Register</div>
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:0">
       ${(p.documents||[]).length?`<div class="table-wrap"><table class="data-table"><tbody>${(p.documents||[]).map(dc=>`<tr><td style="font-weight:600;font-size:12px">${escHtml(dc.type||'')}</td><td style="font-size:11px">${escHtml(dc.ref||'')}</td><td style="font-size:11px;color:var(--text-muted)">${dc.at?new Date(dc.at).toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''} · ${escHtml(dc.by||'')}</td></tr>`).join('')}</tbody></table></div>`:'<div style="padding:12px;font-size:12px;color:var(--text-muted)">No documents yet.</div>'}
     </div></div>
     ${(p.invoices||[]).length?`
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">🧾 Billing Invoices</div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('🧾',16)} Billing Invoices</div>
     <div class="item-list" style="margin-bottom:10px">${(p.invoices||[]).slice().reverse().map(inv=>`
       <div class="item-card jinv-card" style="cursor:pointer" data-inv="${escHtml(inv.no)}">
-        <div class="item-top"><div class="item-title" style="font-size:13px">🧾 ${escHtml(inv.no)}</div><span>₱${fmt(inv.amount)}</span></div>
-        <div class="item-meta"><span>📅 ${escHtml(inv.date||'')}</span>${inv.due?`<span>Due ${escHtml(inv.due)}</span>`:''}${inv.desc?`<span>${escHtml(inv.desc)}</span>`:''}</div>
+        <div class="item-top"><div class="item-title" style="font-size:13px">${emojiIcon('🧾',13)} ${escHtml(inv.no)}</div><span>₱${fmt(inv.amount)}</span></div>
+        <div class="item-meta"><span>${emojiIcon('📅',16)} ${escHtml(inv.date||'')}</span>${inv.due?`<span>Due ${escHtml(inv.due)}</span>`:''}${inv.desc?`<span>${escHtml(inv.desc)}</span>`:''}</div>
       </div>`).join('')}</div>`:''}
-    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">🕘 Timeline</div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('🕘',16)} Timeline</div>
     <div style="max-height:160px;overflow:auto;font-size:12px">${(p.timeline||[]).slice().reverse().map(t=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)"><strong>${escHtml(t.event||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${t.at?new Date(t.at).toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''} · ${escHtml(t.by||'')}</div></div>`).join('')||'<div style="color:var(--text-muted)">No activity yet.</div>'}</div>
     <div id="proj-detail-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `
-    ${_isFinAdmin()&&!isPartnerU?'<button class="btn-primary" id="proj-bill-btn">💵 Record Payment</button>':''}
-    ${_isFinAdmin()&&!isPartnerU&&(Number(p.contractAmount)||0)>0?'<button class="btn-secondary" id="proj-invoice-btn">🧾 Billing Invoice</button>':''}
-    ${!isPartnerU && (canEditDept('Production')||canEditDept('Sales')) && ['won','in_production'].includes(p.stage)?'<button class="btn-secondary" id="proj-job-btn">🏭 Job Order</button>':''}
+    ${_isFinAdmin()&&!isPartnerU?`<button class="btn-primary" id="proj-bill-btn">${emojiIcon('💵',16)} Record Payment</button>`:''}
+    ${_isFinAdmin()&&!isPartnerU&&(Number(p.contractAmount)||0)>0?`<button class="btn-secondary" id="proj-invoice-btn">${emojiIcon('🧾',16)} Billing Invoice</button>`:''}
+    ${!isPartnerU && (canEditDept('Production')||canEditDept('Sales')) && ['won','in_production'].includes(p.stage)?`<button class="btn-secondary" id="proj-job-btn">${emojiIcon('🏭',16)} Job Order</button>`:''}
     ${canAdvance&&next?`<button class="btn-success" id="proj-advance-btn">Advance → ${next.label}</button>`:''}
     <button class="btn-secondary" onclick="closeModal()">Close</button>`);
   document.getElementById('proj-advance-btn')?.addEventListener('click',()=>advanceProjectStage(p, next.id));
@@ -13294,7 +13401,7 @@ function openJobProjectDetail(p){
 function openProjectMarginModal(p){
   const isShared = !!(p.split&&p.split.isShared);
   const pct = (p.split&&typeof p.split.partnerPct==='number')?p.split.partnerPct:50;
-  openPage('💰 Edit Profit Factors — '+(escHtml(p.clientName||p.projectNo||'Project')), `
+  openPage(`${emojiIcon('💰',16)} Edit Profit Factors — `+(escHtml(p.clientName||p.projectNo||'Project')), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract value <strong>₱${fmt(p.contractAmount||0)}</strong>. Expected earnings = (Contract − Capital) × split%.</div>
     <div class="form-group"><label>Capital / cost (₱)</label><input id="pm-capital" type="number" step="0.01" min="0" value="${p.capital||0}" inputmode="decimal"/>
       <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Total material + labor + overhead to produce this job.</div></div>
@@ -13364,7 +13471,7 @@ async function advanceProjectStage(p, nextId){
 async function openProjectBillingModal(p){
   const bal=p.arBalance||0;
   const bankOpts = await window.BankAccounts.optionsHTML();
-  openPage('💵 Record Payment — '+(p.clientName||''), `
+  openPage(`${emojiIcon('💵',16)} Record Payment — `+(p.clientName||''), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract ₱${fmt(p.contractAmount||0)} · Collected ₱${fmt(p.amountCollected||0)} · <strong>Balance ₱${fmt(bal)}</strong></div>
     <div class="form-row">
       <div class="form-group"><label>Payment Type</label><select id="pb-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Downpayment</option><option>Progress Billing</option><option>Final Balance</option></select></div>
@@ -13451,7 +13558,7 @@ async function openJobBillingInvoiceModal(p){
   const paid     = Number(p.amountCollected)||0;
   const bal      = Math.max(0, contract - paid);
   const bankOpts = await window.BankAccounts.optionsHTML();
-  openPage('🧾 Billing Invoice — '+escHtml(p.clientName||''), `
+  openPage(`${emojiIcon('🧾',16)} Billing Invoice — `+escHtml(p.clientName||''), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract ₱${fmt(contract)} · Collected ₱${fmt(paid)} · <strong>Balance ₱${fmt(bal)}</strong></div>
     <div class="form-group"><label>Bill To</label><input id="jinv-billto" value="${escHtml(p.clientName||'')}"/></div>
     <div class="form-row">
@@ -13590,19 +13697,20 @@ window.renderProductionDept = async function(currentUser, currentRole, subtab = 
   c.innerHTML = `
     <div class="page-header">
       <div>
-        <h2>🏭 Production</h2>
+        <h2>${emojiIcon('🏭',20)} Production</h2>
         <p style="font-size:12px;color:var(--text-muted);margin:2px 0 0">Shop-floor work orders, materials & output</p>
       </div>
     </div>
     ${window.sopPanel('How Production works', [
       'Orders is the shop-floor pipeline: '+PROD_STAGES.map(s=>s.label).join(' → ')+'.',
-      'Quality Checking requires a passed 🔍 QC checklist before an order can go Out for Delivery.',
-      'Marking Delivered requires a 🧾 Delivery Receipt (received-by + date) — printable on letterhead.',
+      `Quality Checking requires a passed ${emojiIcon('🔍',16)} QC checklist before an order can go Out for Delivery.`,
+      `Marking Delivered requires a ${emojiIcon('🧾',16)} Delivery Receipt (received-by + date) — printable on letterhead.`,
       'Materials and Inventory track raw stock; "Consume → stock & COS" deducts inventory and posts material cost.',
       'Count Form records physical counts; Tasks and Files hold the department board and documents.'
     ])}
     ${window.chipTabs(subs.map(s=>({key:s,label:s})), subtab)}
     <div id="prod-content"><div class="loading-placeholder">Loading…</div></div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadProdContent(currentUser, currentRole, subtab);
   window.bindChipTabs(c, (key) => loadProdContent(currentUser, currentRole, key));
 };
@@ -13655,18 +13763,18 @@ async function renderProdOrders(el, currentUser, currentRole) {
             ${o.orderNo?`<span style="font-family:monospace">${escHtml(o.orderNo)}</span> · `:''}${escHtml(o.client||'—')}${o.quoteRef?` · ${escHtml(o.quoteRef)}`:''}
           </div>
           <div style="font-size:11px;margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">
-            ${o.dueDate?`<span style="color:${od?'var(--danger)':'var(--text-muted)'}">📅 ${escHtml(o.dueDate)}${od?' ⚠️':''}</span>`:''}
+            ${o.dueDate?`<span style="color:${od?'var(--danger)':'var(--text-muted)'}">${emojiIcon('📅',16)} ${escHtml(o.dueDate)}${od?` ${emojiIcon('⚠️',16)}`:''}</span>`:''}
             ${(()=>{ const w=(o.assignments?.[normProdStageId(o.stage)]?.workerNames)||[];
-              return w.length?`<span style="color:var(--text-muted)">👷 ${escHtml(w.join(', '))}</span>`
-                : (o.team?`<span style="color:var(--text-muted)">👷 ${escHtml(o.team)}</span>`:''); })()}
-            ${o.qc?`<span class="badge ${o.qc.result==='passed'?'badge-green':'badge-red'}" style="font-size:9px">${o.qc.result==='passed'?'✅ QC':'❌ QC'}</span>`:''}
-            ${o.deliveryReceipt?`<span class="badge badge-blue" style="font-size:9px">🧾 ${escHtml(o.deliveryReceipt.no||'DR')}</span>`:''}
+              return w.length?`<span style="color:var(--text-muted)">${emojiIcon('👷',16)} ${escHtml(w.join(', '))}</span>`
+                : (o.team?`<span style="color:var(--text-muted)">${emojiIcon('👷',16)} ${escHtml(o.team)}</span>`:''); })()}
+            ${o.qc?`<span class="badge ${o.qc.result==='passed'?'badge-green':'badge-red'}" style="font-size:9px">${o.qc.result==='passed'?`${emojiIcon('✅',16)} QC`:`${emojiIcon('❌',16)} QC`}</span>`:''}
+            ${o.deliveryReceipt?`<span class="badge badge-blue" style="font-size:9px">${emojiIcon('🧾',9)} ${escHtml(o.deliveryReceipt.no||'DR')}</span>`:''}
             <span class="badge ${pr==='high'||pr==='urgent'?'badge-red':pr==='low'?'badge-green':'badge-orange'}" style="font-size:9px">${pr}</span>
           </div>
         </div>
         ${canEdit?`<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
           ${normProdStageId(o.stage)!=='delivered'?`<button class="btn-success btn-sm prod-advance" data-id="${o.id}">Advance →</button>`:''}
-          ${normProdStageId(o.stage)==='qc'?`<button class="btn-secondary btn-sm prod-qc" data-id="${o.id}">🔍 QC</button>`:''}
+          ${normProdStageId(o.stage)==='qc'?`<button class="btn-secondary btn-sm prod-qc" data-id="${o.id}">${emojiIcon('🔍',16)} QC</button>`:''}
           <button class="btn-secondary btn-sm prod-edit" data-id="${o.id}">Edit</button>
         </div>`:''}
       </div>
@@ -13683,13 +13791,13 @@ async function renderProdOrders(el, currentUser, currentRole) {
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
       <span style="font-size:12px;color:var(--text-muted);flex:1;min-width:180px">Pipeline: ${PROD_STAGES.map(s=>s.label).join(' → ')}</span>
-      <button class="btn-secondary btn-sm" id="prod-csv" style="flex-shrink:0;white-space:nowrap">⬇ CSV</button>
+      <button class="btn-secondary btn-sm" id="prod-csv" style="flex-shrink:0;white-space:nowrap">${emojiIcon('⬇',16)} CSV</button>
       ${canEdit?'<button class="btn-primary btn-sm" id="prod-add-btn" style="flex-shrink:0;white-space:nowrap">＋ New Order</button>':''}
     </div>
     ${incoming.length?`
       <div class="card" style="margin-bottom:12px;border:1.5px solid var(--warning)">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
-          <h3 style="font-size:13px">📥 Incoming jobs — needs a work order</h3>
+          <h3 style="font-size:13px">${emojiIcon('📥',13)} Incoming jobs — needs a work order</h3>
           <span class="badge badge-orange">${incoming.length}</span>
         </div>
         <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
@@ -13705,7 +13813,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
           </div>`).join('')}
         </div>
       </div>`:''}
-    ${!active.length && !delivered.length && !incoming.length ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">🏭</div><h4>No production orders yet</h4><p>Create a work order to track a job through the shop floor.</p></div>' : ''}
+    ${!active.length && !delivered.length && !incoming.length ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('🏭',44)}</div><h4>No production orders yet</h4><p>Create a work order to track a job through the shop floor.</p></div>` : ''}
     ${PROD_STAGES.filter(s=>s.id!=='delivered' && (byStage[s.id]||[]).length).map(s=>`
       <div class="card" style="margin-bottom:12px">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
@@ -13718,10 +13826,11 @@ async function renderProdOrders(el, currentUser, currentRole) {
       </div>`).join('')}
     ${delivered.length?`
       <details style="margin-top:6px">
-        <summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">🚚 Delivered (${delivered.length})</summary>
+        <summary style="cursor:pointer;font-size:13px;font-weight:700;color:var(--text-muted);padding:6px 0">${emojiIcon('🚚',13)} Delivered (${delivered.length})</summary>
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${delivered.slice(0,30).map(orderCard).join('')}</div>
       </details>`:''}
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [el] });
 
   document.getElementById('prod-csv')?.addEventListener('click', ()=>window.exportCSV('production-orders', orders, [
     {key:'orderNo',label:'Order #'},{key:'title',label:'Product'},{key:'client',label:'Client'},{key:'qty',label:'Qty'},
@@ -13916,7 +14025,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
   const pf = (!order && prefillProjectId) ? projs.find(p=>p.id===prefillProjectId) : null;
   const dfClient = e.client || pf?.clientName || '';
   const dfQuote  = e.quoteRef || pf?.quoteNumber || '';
-  openPage(order ? `Edit Order ${e.orderNo||''}` : '🏭 New Production Order', `
+  openPage(order ? `Edit Order ${e.orderNo||''}` : `${emojiIcon('🏭',16)} New Production Order`, `
     <div class="form-group"><label>Linked Project (job)</label>
       <select id="po-project" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${projOpts}</select>
     </div>
@@ -13957,14 +14066,14 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
       <div class="form-group"><label>Target Date</label><input id="po-due" type="date" value="${e.dueDate||''}"/></div>
     </div>
     <div class="form-group"><label>Notes</label><textarea id="po-notes" rows="2" placeholder="Special instructions, etc.">${escHtml(e.notes||'')}</textarea></div>
-    <label style="font-size:12px;font-weight:700;display:block;margin:8px 0 4px">Materials consumed ${e.materialsConsumed?'<span style="color:var(--success);font-weight:600">· ✓ consumed</span>':'(optional)'}</label>
+    <label style="font-size:12px;font-weight:700;display:block;margin:8px 0 4px">Materials consumed ${e.materialsConsumed?`<span style="color:var(--success);font-weight:600">· ${emojiIcon('✓',16)} consumed</span>`:'(optional)'}</label>
     <div id="po-mats"></div>
     ${e.materialsConsumed
-      ? `<div style="font-size:11px;color:var(--success);margin-top:6px">✓ Stock deducted · COS ₱${fmt(e.materialsCost||0)} posted to ledger.</div>`
+      ? `<div style="font-size:11px;color:var(--success);margin-top:6px">${emojiIcon('✓',11)} Stock deducted · COS ₱${fmt(e.materialsCost||0)} posted to ledger.</div>`
       : `<button class="btn-secondary btn-sm" id="po-add-mat" type="button" style="margin-top:6px">+ Add material</button>
-         ${order?`<button class="btn-primary btn-sm" id="po-consume" type="button" style="margin-top:6px;margin-left:6px">📦 Consume → stock & COS</button>`:'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Save the order first, then reopen to consume materials.</div>'}`}
+         ${order?`<button class="btn-primary btn-sm" id="po-consume" type="button" style="margin-top:6px;margin-left:6px">${emojiIcon('📦',16)} Consume → stock & COS</button>`:'<div style="font-size:11px;color:var(--text-muted);margin-top:4px">Save the order first, then reopen to consume materials.</div>'}`}
     <div id="po-err" class="error-msg hidden"></div>
-  `, `<button class="btn-primary" id="po-save">Save</button>${order && ['out_for_delivery','delivered'].includes(normProdStageId(e.stage))?'<button class="btn-secondary" id="po-dr">🧾 Delivery Receipt</button>':''}${order?'<button class="btn-danger" id="po-del">Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  `, `<button class="btn-primary" id="po-save">Save</button>${order && ['out_for_delivery','delivered'].includes(normProdStageId(e.stage))?`<button class="btn-secondary" id="po-dr">${emojiIcon('🧾',16)} Delivery Receipt</button>`:''}${order?'<button class="btn-danger" id="po-del">Delete</button>':''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
   // Materials editor (dynamic rows)
   const matsWrap = document.getElementById('po-mats');
@@ -13977,7 +14086,8 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
     row.innerHTML = `
       <select class="pm-item" ${consumed?'disabled':''} style="flex:1;min-width:0;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">${matItemOpts(itemId)}</select>
       <input class="pm-qty" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Qty" value="${qty}" ${consumed?'disabled':''} style="flex:0 0 70px;width:70px"/>
-      ${consumed?'':'<button class="btn-danger btn-sm pm-del" type="button">✕</button>'}`;
+      ${consumed?'':`<button class="btn-danger btn-sm pm-del" type="button">${emojiIcon('✕',16)}</button>`}`;
+    if (window.lucide) lucide.createIcons({ nodes: [row] });
     row.querySelector('.pm-del')?.addEventListener('click', ()=>row.remove());
     matsWrap.appendChild(row);
   };
@@ -13990,7 +14100,8 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
   { const cur = e.assignments?.[normProdStageId(e.stage)];
     if (cur) asgSel = (cur.workerIds||[]).map((id,i)=>({ id, name:(cur.workerNames||[])[i]||id })); }
   const renderWChips = () => { const w=document.getElementById('po-workers-chips'); if(!w) return;
-    w.innerHTML = asgSel.map(x=>`<span class="badge badge-blue" style="cursor:pointer" data-uid="${escHtml(x.id)}">👷 ${escHtml(x.name)} ✕</span>`).join('')||'<span style="font-size:11px;color:var(--text-muted)">No workers assigned to this stage yet.</span>';
+    w.innerHTML = asgSel.map(x=>`<span class="badge badge-blue" style="cursor:pointer" data-uid="${escHtml(x.id)}">${emojiIcon('👷',16)} ${escHtml(x.name)} ${emojiIcon('✕',16)}</span>`).join('')||'<span style="font-size:11px;color:var(--text-muted)">No workers assigned to this stage yet.</span>';
+    if (window.lucide) lucide.createIcons({ nodes: [w] });
     w.querySelectorAll('[data-uid]').forEach(ch=>ch.addEventListener('click',()=>{ asgSel=asgSel.filter(x=>x.id!==ch.dataset.uid); renderWChips(); })); };
   renderWChips();
   document.getElementById('po-worker-add')?.addEventListener('click', ()=>{
@@ -14155,8 +14266,8 @@ async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
       ${[['all','All'],['material','Raw Materials'],['product','Finished Goods']].map(([k,l])=>`<button class="subtab-btn cf-kind-chip ${kindFilter===k?'active':''}" data-kind="${k}">${l}</button>`).join('')}
       <button class="btn-secondary btn-sm" id="cf-clear" style="margin-left:auto">↺ Clear</button>
       <button class="btn-secondary btn-sm" id="cf-addrow">＋ Blank row</button>
-      ${canPost?`<button class="btn-primary btn-sm" id="cf-post">✓ Post Variances</button>`:''}
-      <button class="btn-secondary btn-sm" id="cf-print">🖨 Print / PDF</button>
+      ${canPost?`<button class="btn-primary btn-sm" id="cf-post">${emojiIcon('✓',16)} Post Variances</button>`:''}
+      <button class="btn-secondary btn-sm" id="cf-print">${emojiIcon('🖨',16)} Print / PDF</button>
     </div>
 
     <div class="card"><div class="card-body" style="padding:0">
@@ -14167,7 +14278,7 @@ async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
           <th style="text-align:right;width:90px">Variance</th><th style="width:24%">Remarks</th>
         </tr></thead>
         <tbody>
-          ${!shown.length && !draft.extras.length ? `<tr><td colspan="7"><div class="empty-state" style="padding:24px"><div class="empty-icon">📦</div><h4>No items in inventory</h4><p>Add items in the Inventory module, or use “＋ Blank row” for a write-in sheet.</p></div></td></tr>` :
+          ${!shown.length && !draft.extras.length ? `<tr><td colspan="7"><div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📦',44)}</div><h4>No items in inventory</h4><p>Add items in the Inventory module, or use “＋ Blank row” for a write-in sheet.</p></div></td></tr>` :
           shown.map((i,idx)=>{
             const c = counts[i.id] || {};
             return `<tr>
@@ -14193,6 +14304,7 @@ async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
       </table></div>
     </div></div>
     <p style="font-size:11px;color:var(--text-muted);margin-top:8px">Entries autosave on this device. “Print / PDF” opens a clean A4 form with whatever you’ve entered — print it blank to count by hand, or fill it in first.</p>`;
+  if (window.lucide) lucide.createIcons({ nodes: [el] });
 
   const persist = () => saveCountDraft(draft);
   const hb = (id,key)=>{ const n=document.getElementById(id); n && n.addEventListener('input',()=>{ draft.header[key]=n.value; persist(); }); };
@@ -14255,7 +14367,7 @@ async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
     window.logAudit && window.logAudit('adjust', 'inventory_count', formNo, { posted, failed: failed.length });
     Notifs.showToast(failed.length
-      ? `Posted ${posted}; failed: ${failed.join(', ')}` : `Posted ${posted} variance correction${posted===1?'':'s'} ✓`);
+      ? `Posted ${posted}; failed: ${failed.join(', ')}` : `Posted ${posted} variance correction${posted===1?'':'s'} ${emojiIcon('✓',16)}`);
     renderProdInventoryForm(el, currentRole, kindFilter);
   });
 }
@@ -14334,9 +14446,9 @@ function openInventoryCountForm(items, draft, kindFilter){
 ${_lh ? _lh.printCSS : ''}
 </style></head><body>
 <div class="bar">
-  <span style="font-weight:700">📋 Inventory Count Form — ${e(h.formNo||'')}</span>
-  <button onclick="window.print()">🖨 Print / Save as PDF</button>
-  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">✕ Close</button>
+  <span style="font-weight:700">${emojiIcon('📋',16)} Inventory Count Form — ${e(h.formNo||'')}</span>
+  <button onclick="window.print()">${emojiIcon('🖨',16)} Print / Save as PDF</button>
+  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">${emojiIcon('✕',16)} Close</button>
 </div>
 <div class="barpad" style="height:46px"></div>
 <div class="page">
@@ -14387,25 +14499,26 @@ async function renderProdMaterials(el, currentRole) {
       <div class="kpi-card accent"><div class="kpi-label">Stock Value</div><div class="kpi-value" style="font-size:15px">₱${fmt(stockValue)}</div></div>
       <div class="kpi-card ${low.length?'red':''}"><div class="kpi-label">Low Stock</div><div class="kpi-value">${low.length}</div></div>
     </div>
-    ${low.length?`<div class="alert-banner alert-warn"><span>⚠️ <strong>${low.length} material${low.length>1?'s':''}</strong> at or below reorder level — flag Purchasing.</span></div>`:''}
+    ${low.length?`<div class="alert-banner alert-warn"><span>${emojiIcon('⚠️',16)} <strong>${low.length} material${low.length>1?'s':''}</strong> at or below reorder level — flag Purchasing.</span></div>`:''}
     <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
       <button class="btn-secondary btn-sm" onclick="navigateTo('inventory')">Open full Inventory →</button>
     </div>
     <div class="card"><div class="card-body" style="padding:0">
-      ${!mats.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📦</div><h4>No materials in inventory yet</h4><p>Add raw materials in the Inventory module.</p></div>':
+      ${!mats.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📦',44)}</div><h4>No materials in inventory yet</h4><p>Add raw materials in the Inventory module.</p></div>`:
       `<div class="table-wrap"><table class="data-table">
         <thead><tr><th>Material</th><th>On Hand</th><th>Reorder</th><th>Unit Cost</th><th>Supplier</th></tr></thead>
         <tbody>${mats.map(i=>{
           const lowItem=(i.reorderLevel||0)>0 && (i.qty||0)<=(i.reorderLevel||0);
           return `<tr>
             <td style="font-weight:600">${escHtml(i.name||'—')}${i.category?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(i.category)}</div>`:''}</td>
-            <td style="font-weight:700;color:${lowItem?'var(--danger)':'inherit'}">${Number(i.qty||0).toLocaleString('en-PH')} ${escHtml(i.unit||'')}${lowItem?' ⚠️':''}</td>
+            <td style="font-weight:700;color:${lowItem?'var(--danger)':'inherit'}">${Number(i.qty||0).toLocaleString('en-PH')} ${escHtml(i.unit||'')}${lowItem?` ${emojiIcon('⚠️',16)}`:''}</td>
             <td style="font-size:12px;color:var(--text-muted)">${Number(i.reorderLevel||0).toLocaleString('en-PH')}</td>
             <td>₱${fmt(i.unitCost||0)}</td>
             <td style="font-size:12px">${escHtml(i.supplier||'—')}</td>
           </tr>`;}).join('')}</tbody>
       </table></div>`}
     </div></div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [el] });
 }
 
 // ══════════════════════════════════════════════════
@@ -14425,7 +14538,7 @@ window.renderPurchasing = async function(currentUser, currentRole, subtab = 'Req
   const c = deptContainer();
   const tabs = ['Request for Quotation', 'Purchase Requests', 'Tasks'];
   c.innerHTML = `
-    <div class="page-header"><h2>🛒 Purchasing</h2></div>
+    <div class="page-header"><h2>${emojiIcon('🛒',20)} Purchasing</h2></div>
     ${window.sopPanel('How Purchasing works', [
       'Raise a Request for Quotation (or pre-fill one "From low stock"); enter supplier prices.',
       'Convert the RFQ to a Purchase Request, print the branded PO, and submit it to Finance.',
@@ -14434,6 +14547,7 @@ window.renderPurchasing = async function(currentUser, currentRole, subtab = 'Req
     ${window.chipTabs(tabs.map(s=>({key:s,label:s})), subtab)}
     <div id="purch-content"><div class="loading-placeholder">Loading…</div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadPurchasingContent(currentUser, currentRole, subtab);
   window.bindChipTabs(c, (key) => loadPurchasingContent(currentUser, currentRole, key));
 };
@@ -14446,7 +14560,8 @@ async function loadPurchasingContent(currentUser, currentRole, sub) {
     return await renderRFQs(content, currentUser, currentRole);
   } catch (e) {
     console.error('Purchasing load error', e);
-    content.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><h4>Couldn't load</h4><p>${escHtml(e.message||String(e))}</p></div>`;
+    content.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load</h4><p>${escHtml(e.message||String(e))}</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [content] });
   }
 }
 
@@ -14457,10 +14572,10 @@ async function renderRFQs(content, currentUser, currentRole) {
   const rfqs = snap.docs.map(d => ({ id:d.id, ...d.data() })).filter(d => (d.stage||'rfq') === 'rfq');
 
   content.innerHTML = `
-    ${canEdit ? `<div style="display:flex;gap:6px;justify-content:flex-end;margin-bottom:8px;flex-wrap:wrap"><button class="btn-secondary btn-sm" id="rfq-lowstock-btn">📉 From low stock</button><button class="btn-primary btn-sm" id="new-rfq-btn">+ New RFQ</button></div>` : ''}
+    ${canEdit ? `<div style="display:flex;gap:6px;justify-content:flex-end;margin-bottom:8px;flex-wrap:wrap"><button class="btn-secondary btn-sm" id="rfq-lowstock-btn">${emojiIcon('📉',16)} From low stock</button><button class="btn-primary btn-sm" id="new-rfq-btn">+ New RFQ</button></div>` : ''}
     <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Create a Request for Quotation, enter the supplier's prices, then convert it into a Purchase Request.</p>
     ${!rfqs.length
-      ? `<div class="empty-state"><div class="empty-icon">📋</div><h4>No open RFQs</h4><p>Create one to request supplier pricing.</p></div>`
+      ? `<div class="empty-state"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No open RFQs</h4><p>Create one to request supplier pricing.</p></div>`
       : rfqs.map(r => purchRfqCard(r, canEdit)).join('')}
   `;
   if (window.lucide) lucide.createIcons({ nodes: [content] });
@@ -14599,7 +14714,7 @@ async function openRfqModal(currentUser, onDone, prefill) {
   const deptOpts = Object.keys(window.DEPARTMENTS || {})
     .filter(k => k !== 'Brilliant Steel' && k !== 'Partners')
     .map(k => `<option>${escHtml(k)}</option>`).join('');
-  openPage('🛒 New Request for Quotation', `
+  openPage(`${emojiIcon('🛒',16)} New Request for Quotation`, `
     <div class="form-row">
       <div class="form-group"><label>Title / Purpose *</label><input id="rfq-title" value="${escHtml(prefill.title||'')}" placeholder="e.g. Steel sheets for Job #123"/></div>
       <div class="form-group"><label>Supplier</label><input id="rfq-supplier" placeholder="Supplier name (optional)"/></div>
@@ -14625,7 +14740,8 @@ async function openRfqModal(currentUser, onDone, prefill) {
       <input class="ri-desc" placeholder="Item description (supplier wording ok)" value="${escHtml(desc)}" style="flex:2;min-width:0"/>
       <input class="ri-qty" type="number" inputmode="decimal" min="0" placeholder="Qty" value="${qty}" style="flex:0 0 60px;width:60px"/>
       <input class="ri-unit" placeholder="Unit" value="${escHtml(unit)}" style="flex:0 0 64px;width:64px"/>
-      <button class="btn-danger btn-sm ri-del" type="button" title="Remove">✕</button>`;
+      <button class="btn-danger btn-sm ri-del" type="button" title="Remove">${emojiIcon('✕',16)}</button>`;
+    if (window.lucide) lucide.createIcons({ nodes: [row] });
     row.querySelector('.ri-del').addEventListener('click', () => row.remove());
     row.querySelector('.ri-item').addEventListener('change', e => {
       const opt = e.target.selectedOptions[0];
@@ -14728,7 +14844,7 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
   const supMax = topSup.reduce((m,[,v])=>Math.max(m,v),0)||1;
   window._purchPRs = prs; // for CSV export
   const summary = prs.length ? `
-    <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="btn-secondary btn-sm" onclick="window.exportPurchasesCSV()" title="Export all purchase requests to CSV">⬇ CSV</button></div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:6px"><button class="btn-secondary btn-sm" onclick="window.exportPurchasesCSV()" title="Export all purchase requests to CSV">${emojiIcon('⬇',16)} CSV</button></div>
     <div class="kpi-row" style="margin-bottom:10px">
       <div class="kpi-card"><div class="kpi-label">Purchase Requests</div><div class="kpi-value">${prs.length}</div></div>
       <div class="kpi-card warn"><div class="kpi-label">Open (not received)</div><div class="kpi-value" style="font-size:15px">₱${fmt(openSpend)}</div></div>
@@ -14754,13 +14870,13 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
     ${summary}
     ${opts.financeView ? (() => {
       const unrec = prs.filter(x => x.status === 'received' && !x.recordedToFinance).length;
-      return `${unrec ? `<div class="alert-banner" style="margin-bottom:10px"><span>⏳ <strong>${unrec} received purchase${unrec>1?'s':''} not yet recorded</strong> — stock has landed but the books haven't. Use Record as Disbursement below.</span></div>` : ''}
+      return `${unrec ? `<div class="alert-banner" style="margin-bottom:10px"><span>${emojiIcon('⏳',16)} <strong>${unrec} received purchase${unrec>1?'s':''} not yet recorded</strong> — stock has landed but the books haven't. Use Record as Disbursement below.</span></div>` : ''}
       <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Purchases raised by the Purchasing department. Use <strong>Record as Disbursement</strong> to post one into the Cash Disbursement Journal.</p>`;
     })() : ''}
     ${filterBar}
     <div id="pr-empty-note" style="display:none;font-size:12px;color:var(--text-muted);padding:12px">No purchase requests match.</div>
     ${!prs.length
-      ? `<div class="empty-state"><div class="empty-icon">🧾</div><h4>No purchase requests yet</h4><p>${canEdit ? 'Convert a priced RFQ into a purchase request.' : 'None have been raised yet.'}</p></div>`
+      ? `<div class="empty-state"><div class="empty-icon">${emojiIcon('🧾',44)}</div><h4>No purchase requests yet</h4><p>${canEdit ? 'Convert a priced RFQ into a purchase request.' : 'None have been raised yet.'}</p></div>`
       : prs.map(p => {
         const st = PURCH_STAT[p.status || 'pending'] || PURCH_STAT.pending;
         const searchStr = ((p.title||'')+' '+(p.supplier||'')+' '+(p.prNo||p.rfqNo||'')+' '+(p.requestingDept||'')).toLowerCase().replace(/"/g,'');
@@ -14774,11 +14890,11 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
             </div>
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
               <span class="badge ${st.badge}">${st.label}</span>
-              ${p.submittedToFinance ? `<span class="badge badge-green" style="font-size:9px">🧾 Sent to Finance</span>` : ''}
-              ${poState(p)==='pending' ? `<span class="badge badge-orange" style="font-size:9px">🔒 Awaiting approval</span>`
-                : poState(p)==='rejected' ? `<span class="badge badge-red" style="font-size:9px">✗ Rejected</span>`
-                : poState(p)==='approved' ? `<span class="badge badge-green" style="font-size:9px">✓ Approved · ${escHtml(p.approvedByName||'')}</span>` : ''}
-              ${p.status==='received' && !p.recordedToFinance ? `<span class="badge badge-orange" style="font-size:9px">⏳ Awaiting Finance record</span>` : ''}
+              ${p.submittedToFinance ? `<span class="badge badge-green" style="font-size:9px">${emojiIcon('🧾',9)} Sent to Finance</span>` : ''}
+              ${poState(p)==='pending' ? `<span class="badge badge-orange" style="font-size:9px">${emojiIcon('🔒',9)} Awaiting approval</span>`
+                : poState(p)==='rejected' ? `<span class="badge badge-red" style="font-size:9px">${emojiIcon('✗',9)} Rejected</span>`
+                : poState(p)==='approved' ? `<span class="badge badge-green" style="font-size:9px">${emojiIcon('✓',9)} Approved · ${escHtml(p.approvedByName||'')}</span>` : ''}
+              ${p.status==='received' && !p.recordedToFinance ? `<span class="badge badge-orange" style="font-size:9px">${emojiIcon('⏳',9)} Awaiting Finance record</span>` : ''}
             </div>
           </div>
           <div class="table-wrap" style="margin-top:10px"><table class="data-table">
@@ -14793,27 +14909,28 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
             <tfoot><tr><td colspan="4" style="text-align:right;font-weight:700">Total</td><td style="text-align:right;font-weight:700">₱${fmt(p.total != null ? p.total : purchTotal(p.items))}</td></tr></tfoot>
           </table></div>
           ${p.notes ? `<div style="font-size:12px;margin-top:6px;color:var(--text-muted)">${escHtml(p.notes)}</div>` : ''}
-          ${poState(p)==='rejected' && p.rejectedReason ? `<div style="font-size:12px;margin-top:6px;color:var(--danger,#c0392b)">✗ Rejected by ${escHtml(p.rejectedByName||'')}: ${escHtml(p.rejectedReason)}</div>` : ''}
-          ${p.submittedToFinance && p.submittedToFinanceByName ? `<div style="font-size:11px;margin-top:6px;color:var(--success,#1b8a3a)">🧾 Submitted to Finance by ${escHtml(p.submittedToFinanceByName)}${p.submittedToFinanceAt && p.submittedToFinanceAt.toDate ? ` · ${p.submittedToFinanceAt.toDate().toLocaleDateString('en-PH')}` : ''}</div>` : ''}
+          ${poState(p)==='rejected' && p.rejectedReason ? `<div style="font-size:12px;margin-top:6px;color:var(--danger,#c0392b)">${emojiIcon('✗',12)} Rejected by ${escHtml(p.rejectedByName||'')}: ${escHtml(p.rejectedReason)}</div>` : ''}
+          ${p.submittedToFinance && p.submittedToFinanceByName ? `<div style="font-size:11px;margin-top:6px;color:var(--success,#1b8a3a)">${emojiIcon('🧾',11)} Submitted to Finance by ${escHtml(p.submittedToFinanceByName)}${p.submittedToFinanceAt && p.submittedToFinanceAt.toDate ? ` · ${p.submittedToFinanceAt.toDate().toLocaleDateString('en-PH')}` : ''}</div>` : ''}
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
-            ${poState(p) !== 'rejected' ? `<button class="btn-secondary btn-sm pr-print" data-id="${p.id}">🖨 Print PO</button>` : ''}
-            ${p.status === 'received' ? `<button class="btn-secondary btn-sm pr-rr" data-id="${p.id}">📦 Receiving Report</button>` : ''}
+            ${poState(p) !== 'rejected' ? `<button class="btn-secondary btn-sm pr-print" data-id="${p.id}">${emojiIcon('🖨',16)} Print PO</button>` : ''}
+            ${p.status === 'received' ? `<button class="btn-secondary btn-sm pr-rr" data-id="${p.id}">${emojiIcon('📦',16)} Receiving Report</button>` : ''}
             ${canApprovePO && poState(p) === 'pending' ? `
-              <button class="btn-success btn-sm po-approve" data-id="${p.id}">✓ Approve PO</button>
-              <button class="btn-danger btn-sm po-reject" data-id="${p.id}">✗ Reject</button>` : ''}
+              <button class="btn-success btn-sm po-approve" data-id="${p.id}">${emojiIcon('✓',16)} Approve PO</button>
+              <button class="btn-danger btn-sm po-reject" data-id="${p.id}">${emojiIcon('✗',16)} Reject</button>` : ''}
             ${canEdit && poState(p) === 'rejected' ? `<button class="btn-secondary btn-sm po-revert" data-id="${p.id}">↩ Revert to RFQ</button>` : ''}
             ${canEdit && poApproved(p) ? `
               ${p.status !== 'ordered' && p.status !== 'received' ? `<button class="btn-secondary btn-sm pr-stat" data-id="${p.id}" data-stat="ordered">Mark Ordered</button>` : ''}
               ${p.status !== 'received' ? `<button class="btn-primary btn-sm pr-stat" data-id="${p.id}" data-stat="received">Mark Received</button>` : ''}
-              ${(p.receiveUnmatched||[]).length ? `<button class="btn-secondary btn-sm pr-resolve" data-id="${p.id}">⚠ Resolve ${p.receiveUnmatched.length} unmatched</button>` : ''}
-              ${(p.status === 'ordered' || p.status === 'received') && !p.submittedToFinance ? `<button class="btn-primary btn-sm pr-submit-fin" data-id="${p.id}">📩 Submit to Finance</button>` : ''}
+              ${(p.receiveUnmatched||[]).length ? `<button class="btn-secondary btn-sm pr-resolve" data-id="${p.id}">${emojiIcon('⚠',16)} Resolve ${p.receiveUnmatched.length} unmatched</button>` : ''}
+              ${(p.status === 'ordered' || p.status === 'received') && !p.submittedToFinance ? `<button class="btn-primary btn-sm pr-submit-fin" data-id="${p.id}">${emojiIcon('📩',16)} Submit to Finance</button>` : ''}
             ` : ''}
-            ${canRecord && !p.recordedToFinance && poApproved(p) ? `<button class="btn-primary btn-sm pr-record" data-id="${p.id}">🧾 Record as Disbursement</button>` : ''}
-            ${p.recordedToFinance ? `<span style="font-size:11px;color:var(--success,#1b8a3a);align-self:center">✓ Recorded in journal</span>` : ''}
+            ${canRecord && !p.recordedToFinance && poApproved(p) ? `<button class="btn-primary btn-sm pr-record" data-id="${p.id}">${emojiIcon('🧾',16)} Record as Disbursement</button>` : ''}
+            ${p.recordedToFinance ? `<span style="font-size:11px;color:var(--success,#1b8a3a);align-self:center">${emojiIcon('✓',11)} Recorded in journal</span>` : ''}
           </div>
         </div></div>`;
       }).join('')}
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [content] });
 
   content.querySelectorAll('.pr-print').forEach(btn => btn.addEventListener('click', () => {
     const p = prs.find(x => x.id === btn.dataset.id);
@@ -14945,8 +15062,8 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
             }).catch(()=>{});
           }
           Notifs.showToast(res.unmatched.length
-            ? `Received ${res.matched} line${res.matched===1?'':'s'} into stock — ${res.unmatched.length} not in inventory. Tap “⚠ Resolve” on the PR.`
-            : `Received. ${res.matched} item${res.matched===1?'':'s'} added to inventory ✓`);
+            ? `Received ${res.matched} line${res.matched===1?'':'s'} into stock — ${res.unmatched.length} not in inventory. Tap “${emojiIcon('⚠',16)} Resolve” on the PR.`
+            : `Received. ${res.matched} item${res.matched===1?'':'s'} added to inventory ${emojiIcon('✓',16)}`);
         } else { Notifs.showToast('Status updated.'); }
       } else {
         Notifs.showToast('Status updated.');
@@ -15047,7 +15164,7 @@ async function openReceiveResolver(p, currentUser, onDone) {
   const inv = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   const opts = sel => `<option value="">— Choose action —</option><option value="__new__">＋ Create new inventory item</option>` +
     inv.map(i => `<option value="${i.id}" ${sel===i.id?'selected':''}>${escHtml(i.name||'')} (${Number(i.qty||0).toLocaleString('en-PH')} ${escHtml(i.unit||'')})</option>`).join('');
-  openPage(`⚠ Resolve receipt — ${escHtml(p.prNo || p.rfqNo || '')}`, `
+  openPage(`${emojiIcon('⚠',16)} Resolve receipt — ${escHtml(p.prNo || p.rfqNo || '')}`, `
     <p style="font-size:12px;color:var(--text-muted)">These purchased lines matched no inventory item by name. Bind each to an existing item, or create a new one — quantities and weighted-average cost post the moment you resolve a line.</p>
     ${rows.map((r, k) => `<div class="rcv-row" data-k="${k}" style="border:1px solid var(--border);border-radius:9px;padding:10px;margin-bottom:8px">
       <div style="font-weight:600">${escHtml(r.desc || '—')} <span style="font-weight:400;color:var(--text-muted)">· ${Number(r.qty||0)} ${escHtml(r.unit||'')}${r.unitPrice!=null?` @ ₱${fmt(r.unitPrice)}`:''}</span></div>
@@ -15187,7 +15304,7 @@ async function recordPurchaseDisbursement(p, currentUser, onDone) {
     }, 0);
   } catch (_) { /* movements unreadable — reconciliation line simply hidden */ }
   const bankOpts = await window.BankAccounts.optionsHTML();
-  openPage('🧾 Record Purchase — Cash Disbursement', `
+  openPage(`${emojiIcon('🧾',16)} Record Purchase — Cash Disbursement`, `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Posting <strong>${escHtml(p.title || ref)}</strong> to the Cash Disbursement Journal.</div>
     <div class="form-row">
       <div class="form-group"><label>Reference</label><input id="rec-ref" value="${escHtml(ref)}"/></div>
@@ -15204,7 +15321,7 @@ async function recordPurchaseDisbursement(p, currentUser, onDone) {
       </select></div>
     </div>
     ${stockedValue != null ? `<div class="alert-banner" style="cursor:default;margin-bottom:8px;font-size:12px"><span>
-      📦 Stocked into inventory: <strong>₱${fmt(stockedValue)}</strong> of ₱${fmt(total)} PR total${unresolved ? ` · <strong>${unresolved} line${unresolved>1?'s':''} unresolved</strong> (Purchasing must resolve them)` : ''}.
+      ${emojiIcon('📦',16)} Stocked into inventory: <strong>₱${fmt(stockedValue)}</strong> of ₱${fmt(total)} PR total${unresolved ? ` · <strong>${unresolved} line${unresolved>1?'s':''} unresolved</strong> (Purchasing must resolve them)` : ''}.
       <button class="btn-secondary btn-sm" id="rec-use-stocked" style="margin-left:6px">Use stocked value</button>
       <span id="rec-acct-warn" style="display:block;color:var(--danger,#c0392b)"></span></span></div>` : ''}
     <div class="form-group"><label>Paid from (company account)</label>
@@ -15335,7 +15452,7 @@ function printPurchaseOrder(p) {
     docTitle: isPending ? 'PURCHASE ORDER (PENDING APPROVAL)' : 'PURCHASE ORDER',
     docNumber: p.prNo || p.rfqNo || '',
     dateLabel: 'Date: ' + issuedStr,
-    extraMeta: [...(p.neededBy ? ['Needed by: ' + p.neededBy] : []), ...(isPending ? ['⚠ NOT VALID — awaiting management approval'] : [])],
+    extraMeta: [...(p.neededBy ? ['Needed by: ' + p.neededBy] : []), ...(isPending ? [`${emojiIcon('⚠',16)} NOT VALID — awaiting management approval`] : [])],
     signatures: [
       { label: 'Prepared by', name: preparedBy, title: 'Purchasing' },
       approvedSig
@@ -15399,9 +15516,9 @@ function printPurchaseOrder(p) {
 ${_lh ? _lh.printCSS : ''}
 </style></head><body>
 <div class="bar">
-  <span style="font-weight:700">🛒 Purchase Order — ${e(p.prNo || p.rfqNo || '')}</span>
-  <button onclick="window.print()">🖨 Print / Save as PDF</button>
-  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">✕ Close</button>
+  <span style="font-weight:700">${emojiIcon('🛒',16)} Purchase Order — ${e(p.prNo || p.rfqNo || '')}</span>
+  <button onclick="window.print()">${emojiIcon('🖨',16)} Print / Save as PDF</button>
+  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">${emojiIcon('✕',16)} Close</button>
 </div>
 <div class="barpad" style="height:46px"></div>
 <div class="page">
@@ -15480,7 +15597,7 @@ function printReceivingReport(p) {
   const rows = items.map((it, i) => `<tr>
       <td class="c">${i + 1}</td><td>${e(it.desc || '—')}</td>
       <td class="c">${Number(it.qty || 0).toLocaleString('en-PH')}</td><td class="c">${e(it.unit || '')}</td>
-      <td class="c">${unres.has(i) ? '⚠ Unresolved — not in stock' : '✓ Received into stock'}</td>
+      <td class="c">${unres.has(i) ? `${emojiIcon('⚠',16)} Unresolved — not in stock` : `${emojiIcon('✓',16)} Received into stock`}</td>
     </tr>`).join('');
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/><title>Receiving Report — ${e(p.prNo || '')}</title>
 <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background:#e8e8e8}
@@ -15491,9 +15608,9 @@ th{background:#1E3A5F;color:#fff;font-size:9px;text-transform:uppercase}td.c{tex
 .bar button{background:#fff;color:#1E3A5F;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
 @page{size:A4 portrait;margin:9mm}@media print{.bar,.barpad{display:none!important}body{background:#fff}.page{padding:0;width:auto;min-height:0}}
 ${_lh ? _lh.printCSS : ''}</style></head><body>
-<div class="bar"><span style="font-weight:700">📦 Receiving Report — ${e(p.prNo || '')}</span>
-<button onclick="window.print()">🖨 Print / Save as PDF</button>
-<button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">✕ Close</button></div>
+<div class="bar"><span style="font-weight:700">${emojiIcon('📦',16)} Receiving Report — ${e(p.prNo || '')}</span>
+<button onclick="window.print()">${emojiIcon('🖨',16)} Print / Save as PDF</button>
+<button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">${emojiIcon('✕',16)} Close</button></div>
 <div class="barpad" style="height:46px"></div>
 <div class="page">${_lh ? _lh.headerHTML : ''}
 <table><thead><tr><th style="width:32px">#</th><th>Item / Description</th><th style="width:60px">Qty</th><th style="width:64px">Unit</th><th style="width:170px">Stock Status</th></tr></thead>

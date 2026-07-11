@@ -519,22 +519,20 @@ html.theme-astral .btn-primary::before {
   flex-direction: column;
   align-items: center; justify-content: center;
   padding: 24px; position: relative; overflow: hidden;
-  background: var(--black);
+  background: var(--bg);
 }
 
-/* Large decorative orbs */
-.login-bg {
-  position: absolute; inset: 0; pointer-events: none;
-  overflow: hidden;
-}
-.login-bg::before {
+/* Large decorative orbs — Astral's aurora identity only; Light/Dark stay flat
+   per Phase 9 (no ambient glow, no continuous animation). */
+.login-bg { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+html.theme-astral .login-bg::before {
   content: '';
   position: absolute; top: -180px; left: -120px;
   width: 560px; height: 560px; border-radius: 50%;
   background: radial-gradient(circle, rgba(255,45,120,0.18) 0%, transparent 68%);
   animation: float 11s ease-in-out infinite;
 }
-.login-bg::after {
+html.theme-astral .login-bg::after {
   content: '';
   position: absolute; bottom: -160px; right: -100px;
   width: 500px; height: 500px; border-radius: 50%;
@@ -542,8 +540,9 @@ html.theme-astral .btn-primary::before {
   animation: floatB 14s ease-in-out infinite;
 }
 
-/* Gold orb center */
-#login-screen::before {
+/* Gold orb center — Astral only (Light/Dark: no pseudo-element content at all,
+   so #login-screen::before is free for Astral's starfield override below). */
+html.theme-astral #login-screen::before {
   content: '';
   position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
   width: 300px; height: 300px; border-radius: 50%;
@@ -553,23 +552,29 @@ html.theme-astral .btn-primary::before {
 }
 #login-screen::after { display: none; }
 
+/* Minimal Apple-style card: centered, ≤380px, flat + token-driven in Light/Dark.
+   Astral keeps the glass/gold-trim showpiece look. */
 .login-container {
   position: relative; z-index: 2;
   background: var(--login-card-bg);
-  backdrop-filter: blur(32px); -webkit-backdrop-filter: blur(32px);
   border-radius: var(--r-xl);
-  padding: 40px 32px 32px;
-  width: 100%; max-width: 388px;
+  padding: 36px 28px 28px;
+  width: 100%; max-width: 380px;
+  border: 1px solid var(--border);
+  box-shadow: var(--sh-lg);
+  text-align: center;
+  animation: fadeUp 0.5s var(--spring);
+}
+html.theme-astral .login-container {
+  backdrop-filter: blur(32px); -webkit-backdrop-filter: blur(32px);
   border: 1px solid rgba(255,255,255,0.09);
   box-shadow:
     0 0 0 1px rgba(255,214,10,0.10),
     0 20px 60px rgba(0,0,0,0.70),
     inset 0 1px 0 rgba(255,255,255,0.06);
-  text-align: center;
-  animation: fadeUp 0.5s var(--spring);
 }
-/* gold top trim */
-.login-container::before {
+/* gold top trim — Astral only */
+html.theme-astral .login-container::before {
   content: '';
   position: absolute; top: 0; left: 10%; right: 10%; height: 1.5px;
   background: var(--grad-gold);
@@ -577,25 +582,32 @@ html.theme-astral .btn-primary::before {
   opacity: 0.7;
 }
 
+/* Circular logo (Phase 25 spec). Light/Dark: flat surface + border. Astral
+   keeps the cosmic sheen/gold-trim/glow card. */
 .login-logo-wrap {
   position: relative; overflow: hidden;
-  width: 88px; height: 88px; margin: 0 auto 18px;
+  width: 80px; height: 80px; margin: 0 auto 18px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  padding: 6px;
+}
+html.theme-astral .login-logo-wrap {
   border-radius: 22px;
   background: linear-gradient(140deg, #0A0A1A 0%, #131330 60%, #1A0A2E 100%);
   border: 1px solid rgba(255,214,10,0.35);
   box-shadow: 0 0 18px rgba(255,214,10,0.18), inset 0 1px 0 rgba(255,255,255,0.06);
-  display: flex; align-items: center; justify-content: center;
-  padding: 6px;
 }
-/* top gold trim line */
-.login-logo-wrap::after {
+/* top gold trim line — Astral only */
+html.theme-astral .login-logo-wrap::after {
   content: '';
   position: absolute; top: 0; left: 12%; right: 12%; height: 1.5px;
   background: var(--grad-gold);
   border-radius: var(--pill); opacity: 0.80;
 }
-/* static inner sheen */
-.login-logo-wrap::before {
+/* static inner sheen — Astral only */
+html.theme-astral .login-logo-wrap::before {
   content: '';
   position: absolute; inset: 0;
   background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 60%);
@@ -603,24 +615,31 @@ html.theme-astral .btn-primary::before {
 }
 .login-logo-img {
   width: 100%; height: 100%; object-fit: contain;
-  border-radius: 16px; position: relative; z-index: 1;
+  border-radius: 50%; position: relative; z-index: 1;
 }
+html.theme-astral .login-logo-img { border-radius: 16px; }
 .login-logo-fallback {
   width: 100%; height: 100%;
-  background: var(--grad-pk-bl);
-  color: #fff; border-radius: 16px;
+  background: var(--primary);
+  color: var(--on-primary); border-radius: 50%;
   font-size: var(--fs-4xl); font-weight: 800;
   display: flex; align-items: center; justify-content: center; margin: 0 auto;
   position: relative; z-index: 1;
 }
+html.theme-astral .login-logo-fallback { background: var(--grad-pk-bl); border-radius: 16px; }
 .login-title {
   font-family: var(--font-display);
   font-size: var(--fs-3xl); font-weight: 800;
+  color: var(--text);
+  margin-bottom: 4px; letter-spacing: -0.4px;
+}
+/* Astral keeps its signature animated gradient title (continuous animation is
+   allowed only in Astral, per the WS42 performance budget). */
+html.theme-astral .login-title {
   background: var(--grad-pk-bl);
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   background-clip: text; background-size: 200% 200%;
   animation: gradRun 5s ease infinite;
-  margin-bottom: 4px; letter-spacing: -0.4px;
 }
 .login-sub { font-size: var(--fs-md); color: var(--text-muted); margin-bottom: 20px; }
 .login-form { text-align: left; }
@@ -830,44 +849,46 @@ html.light .handbook-text, html.theme-pink .handbook-text, html.theme-grey .hand
 .help-section p { font-size: var(--fs-md); color: var(--text-2); line-height: 1.7; }
 .help-section code { font-family: var(--font-mono); font-size: var(--fs-sm); background: var(--s2); padding: 1px 5px; border-radius: 4px; }
 
-/* ── Login Role Picker ── */
+/* ── Login Role Picker — segmented 3-portal control (v12 WS42 Phase 25) ── */
 .login-pick-label {
   font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.8px;
   text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px;
 }
 .login-role-cards {
-  display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px;
+  display: flex; gap: 6px; margin-bottom: 14px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 4px;
 }
 .login-role-card {
-  display: flex; align-items: center; gap: 14px;
-  padding: 14px 16px;
-  background: var(--s1); border: 1px solid var(--border);
-  border-radius: var(--r); cursor: pointer; text-align: left;
-  transition: background var(--t2), border-color var(--t2), transform var(--t1), box-shadow var(--t2);
-  width: 100%;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  flex: 1 1 0; min-width: 0;
+  padding: 12px 6px 10px;
+  background: transparent; border: none;
+  border-radius: var(--r-sm); cursor: pointer; text-align: center;
+  transition: background var(--t2), transform var(--t1);
 }
-.login-role-card:hover {
-  background: var(--s2); border-color: rgba(255,255,255,0.18);
-  transform: translateX(3px); box-shadow: var(--sh-sm);
-}
-.login-role-card:active { transform: scale(0.98); }
+@media (hover:hover) { .login-role-card:hover { background: var(--surface); } }
+.login-role-card:active { transform: scale(0.97); }
 .lrc-icon {
-  width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+  width: 36px; height: 36px; border-radius: var(--r-sm); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  background: var(--s2);
+  background: var(--primary-soft);
 }
-.lrc-icon svg { width: 20px; height: 20px; stroke: var(--text-2); }
-.login-role-card[data-type="admin"] .lrc-icon { background: rgba(255,45,120,0.12); }
-.login-role-card[data-type="admin"] .lrc-icon svg { stroke: var(--pink); }
-.login-role-card[data-type="employee"] .lrc-icon { background: rgba(10,132,255,0.12); }
-.login-role-card[data-type="employee"] .lrc-icon svg { stroke: var(--blue); }
-.login-role-card[data-type="partner"] .lrc-icon { background: rgba(255,214,10,0.10); }
-.login-role-card[data-type="partner"] .lrc-icon svg { stroke: var(--gold); }
+.lrc-icon svg { width: 18px; height: 18px; stroke: var(--primary); }
 .lrc-label {
-  font-size: var(--fs-base); font-weight: 700; color: var(--text);
-  display: block; line-height: 1.2;
+  font-size: var(--fs-xs); font-weight: 700; color: var(--text);
+  display: block; line-height: 1.2; white-space: nowrap;
 }
-.lrc-sub { font-size: var(--fs-xs); color: var(--text-muted); display: block; margin-top: 2px; }
+/* Sign Up / Apply — a quiet text link below the segmented control, not a card */
+.login-signup-link {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; background: none; border: none; cursor: pointer;
+  padding: 10px; font-size: var(--fs-sm); font-weight: 600;
+  color: var(--success); border-radius: var(--r-sm);
+  transition: background var(--t1);
+}
+.login-signup-link:hover { background: var(--success-soft); }
+.login-signup-link svg { width: 16px; height: 16px; stroke: currentColor; }
 
 /* ── Login Form Header (back + pill) ── */
 .login-form-header {
@@ -1095,7 +1116,7 @@ html.light .handbook-text, html.theme-pink .handbook-text, html.theme-grey .hand
 .notif-item.read { background: transparent; }
 .notif-item-emoji {
   font-size: var(--fs-2xl); flex-shrink: 0; line-height: 1;
-  width: 28px; text-align: center;
+  width: 32px; display: flex; align-items: center; justify-content: center;
 }
 .notif-item-text  { flex: 1; min-width: 0; }
 .notif-item-title { font-size: var(--fs-md); font-weight: 600; margin-bottom: 2px; color: var(--text); }
@@ -1356,47 +1377,54 @@ html.theme-astral .bottom-nav-item.active .bn-icon { transform: scale(1.15); fil
 /* ── KPI Cards ── */
 .kpi-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px; margin-bottom: 20px;
 }
 .kpi-card {
   position: relative; overflow: hidden;
   background: var(--surface); border-radius: var(--r);
-  padding: 18px 16px;
+  padding: 16px;
   border: 1px solid var(--border);
   box-shadow: var(--sh-sm);
   transition: transform var(--t2), box-shadow var(--t2), border-color var(--t2);
   animation: fadeUp 0.4s var(--ease) both;
 }
 @media (hover:hover) {
-  .kpi-card:hover { transform: translateY(-3px); box-shadow: var(--sh); border-color: var(--border-strong); }
+  .kpi-card:hover { box-shadow: var(--sh); border-color: var(--border-strong); }
+  /* Lift-on-hover + shimmer + glow stripe are showpiece-only (Astral); Light/Dark
+     stay flat per Phase 9 — no gradient/glow "hero" treatment on stat tiles. */
+  html.theme-astral .kpi-card:hover { transform: translateY(-3px); }
 }
-/* shimmer on hover */
-.kpi-card::before {
+/* shimmer on hover — Astral only */
+html.theme-astral .kpi-card::before {
   content: '';
   position: absolute; inset-y: 0; left: 0; width: 40%;
   background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent);
   transform: translateX(-100%) skewX(-12deg);
   transition: none;
 }
-.kpi-card:hover::before { animation: shimmer 0.7s ease forwards; }
-/* top gradient stripe */
-.kpi-card::after {
+html.theme-astral .kpi-card:hover::before { animation: shimmer 0.7s ease forwards; }
+/* top gradient stripe — Astral only; Light/Dark keep the plain bordered card */
+html.theme-astral .kpi-card::after {
   content: '';
   position: absolute; top: 0; left: 0; right: 0; height: 2px;
   background: var(--grad-pk-bl);
   border-radius: var(--r) var(--r) 0 0;
 }
-.kpi-card.accent::after { background: var(--grad-amber); box-shadow: 0 0 8px var(--gold-glow); }
-.kpi-card.green::after  { background: var(--grad-green);  box-shadow: 0 0 8px rgba(48,209,88,0.30); }
-.kpi-card.warn::after   { background: var(--grad-amber); }
-.kpi-card.red::after    { background: var(--grad-red);    box-shadow: 0 0 8px rgba(255,69,58,0.30); }
-
-/* Colour variants keep ONLY their top stripe (::after) for identity — the
-   box-shadow is intentionally NOT overridden, so every KPI card shares the same
-   elevation. (Previously accent/green/red got a flat coloured glow while
-   plain/warn got a real drop shadow, which read as "some cards have shadow, some
-   don't".) */
+html.theme-astral .kpi-card.accent::after { background: var(--grad-amber); box-shadow: 0 0 8px var(--gold-glow); }
+html.theme-astral .kpi-card.green::after  { background: var(--grad-green);  box-shadow: 0 0 8px rgba(48,209,88,0.30); }
+html.theme-astral .kpi-card.warn::after   { background: var(--grad-amber); }
+html.theme-astral .kpi-card.red::after    { background: var(--grad-red);    box-shadow: 0 0 8px rgba(255,69,58,0.30); }
+/* Light/Dark identity cue: a thin left border in the accent color instead of a
+   glow stripe — same "which stat is this" signal, zero glow/gradient. */
+.kpi-card.accent { border-left: 3px solid var(--warning); }
+.kpi-card.green  { border-left: 3px solid var(--success); }
+.kpi-card.warn   { border-left: 3px solid var(--warning); }
+.kpi-card.red    { border-left: 3px solid var(--danger); }
+html.theme-astral .kpi-card.accent,
+html.theme-astral .kpi-card.green,
+html.theme-astral .kpi-card.warn,
+html.theme-astral .kpi-card.red { border-left: 1px solid var(--border); }
 
 .kpi-label {
   font-size: var(--fs-2xs); font-weight: 600;
@@ -1410,6 +1438,11 @@ html.theme-astral .bottom-nav-item.active .bn-icon { transform: scale(1.15); fil
   display: flex; align-items: center; justify-content: center;
 }
 .kpi-icon-wrap svg { width: 18px; height: 18px; stroke: currentColor; }
+/* v12 WS42 Phase 24 — Apple-style stat tile: icon-tile pinned top-right,
+   number/label sit to its left so the tile never overlaps the figure. */
+.kpi-card { display: flex; flex-direction: column; }
+.kpi-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.kpi-card-top .bi-icon-tile { margin-top: -2px; }
 
 /* ── KPI Progress Bar ── */
 .kpi-bar-track {
@@ -2818,16 +2851,8 @@ html.theme-office .topbar-brand {
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
 
-/* login orbs */
-html.light .login-bg::before, html.theme-pink .login-bg::before, html.theme-grey .login-bg::before { background: radial-gradient(circle, rgba(255,45,120,0.06) 0%, transparent 68%); }
-html.light .login-bg::after, html.theme-pink .login-bg::after, html.theme-grey .login-bg::after { background: radial-gradient(circle, rgba(10,132,255,0.05) 0%, transparent 68%); }
-html.light #login-screen::before, html.theme-pink #login-screen::before, html.theme-grey #login-screen::before { background: radial-gradient(circle, rgba(255,214,10,0.04) 0%, transparent 70%); }
-
-/* login card */
-html.light .login-container, html.theme-pink .login-container, html.theme-grey .login-container {
-  border-color: rgba(0,0,0,0.08);
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.05), 0 20px 60px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.90);
-}
+/* login orbs / card — WS42 Phase 25: superseded by the token-driven base rules
+   in the main login block (Astral-only orbs + card glass now live there). */
 
 /* topbar — border/bg/rainbow-trim now read tokens directly (var(--topbar-bg)/var(--border));
    topbar-brand keeps its own gradient identity (not a plain token). */
@@ -2867,12 +2892,9 @@ html.light .badge-purple, html.theme-pink .badge-purple, html.theme-grey .badge-
 html.light ::-webkit-scrollbar-thumb, html.theme-pink ::-webkit-scrollbar-thumb, html.theme-grey ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.14); }
 html.light ::-webkit-scrollbar-thumb:hover, html.theme-pink ::-webkit-scrollbar-thumb:hover, html.theme-grey ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.24); }
 
-/* login role cards */
-html.light .login-role-card, html.theme-pink .login-role-card, html.theme-grey .login-role-card { color: #1D1D1F; }
-html.light .login-role-card:hover, html.theme-pink .login-role-card:hover, html.theme-grey .login-role-card:hover { background: rgba(0,0,0,0.06); }
-html.light .login-back-btn, html.theme-pink .login-back-btn, html.theme-grey .login-back-btn { color: rgba(29,29,31,0.55); }
-html.light .login-back-btn:hover, html.theme-pink .login-back-btn:hover, html.theme-grey .login-back-btn:hover { background: rgba(0,0,0,0.06); color: #1D1D1F; }
-html.light .login-type-pill, html.theme-pink .login-type-pill, html.theme-grey .login-type-pill { color: rgba(29,29,31,0.60); }
+/* login role cards / back-btn / type-pill — WS42 Phase 25: token-driven base
+   rules (var(--text)/var(--surface)/var(--text-muted)) already read correctly
+   in Light; these hardcoded overrides are superseded. */
 
 /* alert banners */
 html.light .alert-danger, html.theme-pink .alert-danger, html.theme-grey .alert-danger { background: rgba(255,69,58,0.08); color: #C42B22; }
@@ -3085,6 +3107,18 @@ html.theme-grey .bottom-nav-item.active { color: var(--primary); }
 /* ══════════════════════════════════════════════════
    LUCIDE ICON SIZING
 ══════════════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════════════
+   v12 WS42 Phase 21 — BI icon-tile system
+   Rounded squircle duotone tiles (window.iconTile / window.deptIconTile).
+   Size/radius/background/icon-size are per-call inline styles; this class only
+   supplies structural centering + a soft shadow so tiles read as one system.
+══════════════════════════════════════════════════ */
+.bi-icon-tile {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+}
+.bi-icon-tile i, .bi-icon-tile svg { display: block; fill: none; }
 
 /* nav-icon: colored rounded container holds Lucide svg */
 .nav-icon svg {
@@ -3301,11 +3335,21 @@ html.light .team-member-card, html.theme-pink .team-member-card, html.theme-grey
 html.light .team-member-card:hover, html.theme-pink .team-member-card:hover, html.theme-grey .team-member-card:hover { border-color: var(--primary); }
 
 /* ── Employee of the Month (Barro Industries) ── */
+/* v12 WS42 Phase 24 — Light/Dark: flat --surface card, a thin gold left-accent
+   border for identity (no gradient, no blur — Phase 9/performance-budget rule:
+   backdrop-filter is Astral-only). Astral keeps the full gold glass treatment. */
 .eom-banner {
   position: relative;
-  border-radius: 20px;
+  border-radius: var(--r-lg);
   margin-bottom: 18px;
   overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid #FFB800;
+  box-shadow: var(--sh-sm);
+}
+html.theme-astral .eom-banner {
+  border-radius: 20px;
   border: 1px solid rgba(255,196,0,0.35);
   background: linear-gradient(135deg, rgba(255,196,0,0.16) 0%, rgba(255,138,0,0.10) 45%, rgba(255,255,255,0.04) 100%);
   backdrop-filter: var(--glass-blur-sm, blur(16px) saturate(140%));
@@ -3640,6 +3684,15 @@ html.theme-astral .notif-panel {
   .card:hover { border-color: var(--border-strong); box-shadow: var(--sh); transform: translateY(-1px); }
 }
 .card::before { background: none; }
+/* v12 WS42 Phase 24 — shared "hero card" treatment for dashboard highlight
+   cards (Current Standing, partner intro cards, etc). Light/Dark: flat
+   --surface + a normal-weight primary border (no gradient/glow — Phase 9
+   rule). Astral keeps its signature soft gradient + glow identity. */
+.dash-hero-card { border: 1.5px solid var(--primary); }
+html.theme-astral .dash-hero-card {
+  background: linear-gradient(135deg, var(--surface), var(--surface-2));
+  box-shadow: var(--sh-sm), 0 0 20px rgba(139,92,246,0.12);
+}
 .card-header {
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
@@ -3666,16 +3719,16 @@ html.theme-astral .card-header {
   border-bottom: 1px solid var(--glass-border-sm);
 }
 
-/* ══════ KPI CARDS ══════ (no blur — token-driven; base rule sets surface/shadow above) */
-.kpi-card::before {
+/* ══════ KPI CARDS ══════ WS42 Phase 24 — sheen overlay is Astral-only now
+   (was unscoped, leaking a faint gradient sheen into Light/Dark — Phase 9/24
+   rule: no gradient/glow on stat tiles outside Astral). */
+html.theme-astral .kpi-card::before {
   background: linear-gradient(180deg,
     rgba(255,255,255,0.11) 0%,
     rgba(255,255,255,0.03) 38%,
     transparent 100%);
-  transform: none !important; animation: none !important;
   pointer-events: none; width: 100%;
 }
-.kpi-card:hover::before { animation: none !important; }
 html.theme-astral .kpi-card { background: var(--glass-surface); border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow), var(--glass-spec-sm); }
 @media (hover:hover) {
   html.theme-astral .kpi-card:hover { border-color: rgba(255,255,255,0.22); box-shadow: 0 18px 48px rgba(0,0,0,0.52), var(--glass-spec-sm); }
@@ -3864,8 +3917,12 @@ html.theme-dark .form-group input, html.theme-dark .form-group textarea, html.th
   box-shadow: 0 0 22px rgba(255,69,58,0.08), var(--glass-spec-sm);
 }
 
-/* ══════ LOGIN CARD ══════ */
-.login-container {
+/* ══════ LOGIN CARD ══════ WS42 Phase 25 — token-driven; glass chrome + the
+   animated iridescent trim are Astral-only now (perf budget: continuous
+   animation and backdrop-filter outside Astral are both prohibited). The
+   Light/Dark base card lives up in the main login block; this is Astral's
+   extra glass layer on top of it. */
+html.theme-astral .login-container {
   background: rgba(10,10,22,0.50);
   backdrop-filter: var(--glass-blur-lg);
   -webkit-backdrop-filter: var(--glass-blur-lg);
@@ -3873,7 +3930,7 @@ html.theme-dark .form-group input, html.theme-dark .form-group textarea, html.th
   box-shadow: var(--glass-shadow-lg), var(--glass-spec),
     0 0 0 1px rgba(255,214,10,0.12);
 }
-.login-container::before {
+html.theme-astral .login-container::before {
   background: linear-gradient(90deg,
     transparent,
     rgba(255,45,120,0.62),
@@ -3885,19 +3942,21 @@ html.theme-dark .form-group input, html.theme-dark .form-group textarea, html.th
   opacity: 0.80; height: 1.5px;
 }
 
-/* ══════ LOGIN ROLE CARDS ══════ */
-.login-role-card {
+/* ══════ LOGIN ROLE CARDS ══════ WS42 Phase 25 — Astral-only glass; Light/Dark
+   use the flat segmented-control styling defined in the main login block. */
+html.theme-astral .login-role-card {
   background: rgba(255,255,255,0.055);
   backdrop-filter: var(--glass-blur-sm);
   -webkit-backdrop-filter: var(--glass-blur-sm);
   border: 1px solid var(--glass-border-sm);
   box-shadow: var(--glass-spec-sm), 0 2px 10px rgba(0,0,0,0.24);
 }
-.login-role-card:hover {
-  background: rgba(255,255,255,0.09);
-  border-color: rgba(255,255,255,0.22);
-  box-shadow: var(--glass-spec-sm), 0 6px 28px rgba(0,0,0,0.36);
-  transform: translateX(4px);
+@media (hover:hover) {
+  html.theme-astral .login-role-card:hover {
+    background: rgba(255,255,255,0.09);
+    border-color: rgba(255,255,255,0.22);
+    box-shadow: var(--glass-spec-sm), 0 6px 28px rgba(0,0,0,0.36);
+  }
 }
 
 /* ══════ QUICK ACTION BUTTONS ══════ */
@@ -3963,8 +4022,8 @@ html.theme-dark .form-group input, html.theme-dark .form-group textarea, html.th
    input retired: all now read var(--topbar-bg|sidebar-bg|modal-bg|drawer-bg|notif-bg|
    bottom-nav-bg|surface|surface-2) directly. The malformed `html.light html.light`
    selectors previously here were dead (an html element can't nest inside another). */
-html.light .login-container, html.theme-pink .login-container, html.theme-grey .login-container { background: rgba(255,255,255,0.74); border-color: rgba(0,0,0,0.10); }
-html.light .login-role-card, html.theme-pink .login-role-card, html.theme-grey .login-role-card { background: rgba(255,255,255,0.55); border-color: rgba(0,0,0,0.08); }
+/* login-container / login-role-card glass tints — WS42 Phase 25: removed
+   (opaque token-driven card now lives in the main login block). */
 /* Tinted action buttons: the dark-theme light-green / light-red text is
    unreadable on a pale tint in light mode — use darker, WCAG-legible ink. */
 html.light .btn-success, html.theme-pink .btn-success, html.theme-grey .btn-success { background: rgba(16,124,65,0.10); color: #0E6B33; border-color: rgba(16,124,65,0.32); }
@@ -4541,7 +4600,7 @@ html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: v
   color: var(--text); line-height: 1;
   /* Responsive: 28px on desktop, scales down on phones so large peso figures
      (6-7 digits) don't clip in half-width cards. tabular-nums keeps alignment. */
-  font-size: clamp(15px, 4.6vw, 28px);
+  font-size: clamp(15px, 4.6vw, var(--fs-5xl));
   font-weight: 800;
   letter-spacing: -0.6px;
   font-variant-numeric: tabular-nums;
@@ -4727,15 +4786,20 @@ html.light .modal-box::after, html.theme-dark .modal-box::after { background: va
    TASK 4 — Splash + Topbar Logo + Light Mode
 ══════════════════════════════════════════ */
 
-/* ── Splash: circle logo + spinning ring ── */
-/* ── v12 splash: clean Fluent office look (light, matches the default theme) ── */
+/* ── Splash (v12 WS42 Phase 25) — token-driven; simple one-shot fade/scale in
+   Light/Dark (--bg canvas, matches whatever theme is persisted — the inline
+   <head> script in index.html applies that theme class before first paint, so
+   there's no light/dark flash). Astral keeps its own fancy cosmic treatment. */
 #splash-screen {
-  background:
-    radial-gradient(900px 480px at 50% -10%, rgba(15,108,189,0.08), transparent 65%),
-    #FAF9F8 !important;
+  background: var(--bg);
   display: flex;
   align-items: center;
   justify-content: center;
+}
+html.theme-astral #splash-screen {
+  background:
+    radial-gradient(900px 480px at 50% -10%, rgba(139,92,246,0.16), transparent 65%),
+    var(--bg);
 }
 
 .splash-inner {
@@ -4749,16 +4813,21 @@ html.light .modal-box::after, html.theme-dark .modal-box::after { background: va
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Logo in a Fluent card */
+/* Logo card — flat surface in Light/Dark; Astral gets the cosmic sheen card */
 .splash-logo-card {
   width: 96px; height: 96px;
   border-radius: 22px;
-  background: #fff;
+  background: var(--surface);
   display: flex; align-items: center; justify-content: center;
   overflow: hidden;
   margin-bottom: 22px;
-  border: 1px solid rgba(20,30,45,0.06);
-  box-shadow: 0 2px 6px rgba(15,108,189,0.08), 0 14px 36px rgba(20,30,45,0.10);
+  border: 1px solid var(--border);
+  box-shadow: var(--sh);
+}
+html.theme-astral .splash-logo-card {
+  background: linear-gradient(140deg, #0A0A1A 0%, #131330 60%, #1A0A2E 100%);
+  border: 1px solid rgba(255,214,10,0.35);
+  box-shadow: 0 0 18px rgba(255,214,10,0.18), inset 0 1px 0 rgba(255,255,255,0.06);
 }
 .splash-logo {
   width: 100%; height: 100%;
@@ -4767,11 +4836,12 @@ html.light .modal-box::after, html.theme-dark .modal-box::after { background: va
 }
 .splash-bi-fallback {
   width: 100%; height: 100%;
-  background: linear-gradient(140deg, #0F6CBD, #0A4E8A);
+  background: var(--primary);
   align-items: center; justify-content: center;
-  font-size: 38px; font-weight: 800; color: #fff;
+  font-size: 38px; font-weight: 800; color: var(--on-primary);
   letter-spacing: -2px;
 }
+html.theme-astral .splash-bi-fallback { background: var(--grad-pk-bl); }
 
 /* Wordmark */
 .splash-wordmark-stack {
@@ -4785,21 +4855,21 @@ html.light .modal-box::after, html.theme-dark .modal-box::after { background: va
   font-size: var(--fs-2xl);
   font-weight: 700;
   letter-spacing: -0.2px;
-  color: #1A2129;
+  color: var(--text);
 }
 .splash-word-sub {
   font-size: var(--fs-xs);
   font-weight: 600;
   letter-spacing: 0.22em;
   text-transform: uppercase;
-  color: #0F6CBD;
+  color: var(--primary);
 }
 
-/* Loading bar — thin, quiet, Fluent */
+/* Loading bar — thin, quiet */
 .splash-bar {
   position: relative;
   width: 148px; height: 3px;
-  background: rgba(20,30,45,0.08);
+  background: var(--surface-2);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -4808,7 +4878,7 @@ html.light .modal-box::after, html.theme-dark .modal-box::after { background: va
   position: absolute; top: 0; left: 0;
   width: 40%; height: 100%;
   border-radius: 2px;
-  background: #0F6CBD;
+  background: var(--primary);
   animation: splashBarRun 1.3s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {

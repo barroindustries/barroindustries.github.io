@@ -46,19 +46,20 @@ window.renderPosts = async function() {
 
   if (partner) {
     c.innerHTML = `
-      <div class="page-header"><h2>📣 Posts</h2></div>
+      <div class="page-header"><h2>${emojiIcon('📣',20)} Posts</h2></div>
       <div class="subtab-bar" id="posts-tabs">
         <button class="subtab-btn active" data-sub="Partners">Partners</button>
       </div>
       <div id="posts-content"></div>
     `;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
     loadPosts('Partners');
     return;
   }
 
   c.innerHTML = `
     <div class="page-header">
-      <h2>📣 Posts</h2>
+      <h2>${emojiIcon('📣',20)} Posts</h2>
       <button class="btn-primary btn-sm" id="new-post-btn">+ ${canPost ? 'New Post' : 'Submit Post'}</button>
     </div>
     <div class="subtab-bar" id="posts-tabs">
@@ -68,6 +69,7 @@ window.renderPosts = async function() {
     </div>
     <div id="posts-content"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadPosts('General');
   c.querySelectorAll('.subtab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -94,7 +96,8 @@ async function loadPosts(dept) {
     const snap = await q.limit(30).get();
     const posts = snap.docs.map(d => ({id:d.id,...d.data()}));
     if (!posts.length) {
-      container.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><h4>No posts yet</h4></div>';
+      container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('📭',44)}</div><h4>No posts yet</h4></div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [container] });
       return;
     }
     const canApprove = isRealPresident() || currentRole === 'manager';
@@ -112,21 +115,21 @@ async function loadPosts(dept) {
         return `
         <div class="post-card post-memo-card" data-id="${p.id}" data-memo-id="${escHtml(p.memoId)}" style="cursor:pointer;border-left:3px solid var(--primary,#0A84FF)">
           <div class="post-header">
-            <div class="post-avatar" style="background:rgba(10,132,255,0.12)">📋</div>
+            <div class="post-avatar" style="background:rgba(10,132,255,0.12)">${emojiIcon('📋',16)}</div>
             <div class="post-meta">
               <div class="post-author">${escHtml(p.authorName||'Management')}</div>
               <div class="post-time">${escHtml(ts)} · Memo</div>
             </div>
-            ${p.pinned ? '<span class="badge badge-blue">📌 Pinned</span>' : ''}
-            <span class="badge badge-blue">📋 Memo</span>
+            ${p.pinned ? `<span class="badge badge-blue">${emojiIcon('📌',16)} Pinned</span>` : ''}
+            <span class="badge badge-blue">${emojiIcon('📋',16)} Memo</span>
           </div>
           ${p.title ? `<div class="post-title">${escHtml(p.title)}</div>` : ''}
           <div class="post-body">${escHtml((p.content||'').slice(0,200))}${(p.content||'').length>200?'…':''}</div>
           <div class="post-actions">
-            <button class="btn-primary btn-sm post-memo-open" data-memo-id="${escHtml(p.memoId)}">📋 Read &amp; Conforme</button>
+            <button class="btn-primary btn-sm post-memo-open" data-memo-id="${escHtml(p.memoId)}">${emojiIcon('📋',16)} Read &amp; Conforme</button>
             <div style="display:flex;gap:6px;margin-left:auto">
               ${(canApprove || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="color:var(--danger)">Delete</button>` : ''}
-              ${canApprove ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':'📌 Pin'}</button>` : ''}
+              ${canApprove ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':`${emojiIcon('📌',16)} Pin`}</button>` : ''}
             </div>
           </div>
         </div>`;
@@ -139,13 +142,13 @@ async function loadPosts(dept) {
             <div class="post-author">${escHtml(p.authorName||'Unknown')}</div>
             <div class="post-time">${escHtml(ts)}${p.dept&&p.dept!=='General'?` · ${escHtml(p.dept)}`:''}</div>
           </div>
-          ${p.pinned ? '<span class="badge badge-blue">📌 Pinned</span>' : ''}
+          ${p.pinned ? `<span class="badge badge-blue">${emojiIcon('📌',16)} Pinned</span>` : ''}
           ${p.status==='pending' ? '<span class="badge badge-orange">Pending</span>' : ''}
         </div>
         ${p.title ? `<div class="post-title">${escHtml(p.title)}</div>` : ''}
         <div class="post-body">${escHtml(p.content||'')}</div>
         ${safeHttpUrl(p.imageUrl) ? `<img src="${escHtml(p.imageUrl)}" class="post-image" data-img="${escHtml(p.imageUrl)}" style="cursor:zoom-in"/>` : ''}
-        ${safeHttpUrl(p.fileUrl) ? `<a href="${escHtml(p.fileUrl)}" target="_blank" rel="noopener noreferrer" class="post-attachment">📎 ${escHtml(p.fileName||'Attachment')}</a>` : ''}
+        ${safeHttpUrl(p.fileUrl) ? `<a href="${escHtml(p.fileUrl)}" target="_blank" rel="noopener noreferrer" class="post-attachment">${emojiIcon('📎',16)} ${escHtml(p.fileName||'Attachment')}</a>` : ''}
         <div class="post-actions">
           ${p.status==='published' ? `
             <button class="post-heart-btn${hearted?' hearted':''}" data-id="${p.id}" title="${hearted?'Unlike':'Like'}">
@@ -155,13 +158,13 @@ async function loadPosts(dept) {
             ${hearts.length ? `<button class="post-likers-btn btn-link" data-id="${p.id}" data-hearts='${JSON.stringify(hearts)}' style="font-size:12px;color:var(--text-muted);padding:0 4px;background:none;border:none;cursor:pointer"></button>` : ''}
           ` : ''}
           ${canApprove && p.status==='pending' ? `
-            <button class="btn-primary btn-sm post-approve-btn" data-id="${p.id}">✓ Approve</button>
-            <button class="btn-secondary btn-sm post-reject-btn" data-id="${p.id}">✗ Reject</button>
+            <button class="btn-primary btn-sm post-approve-btn" data-id="${p.id}">${emojiIcon('✓',16)} Approve</button>
+            <button class="btn-secondary btn-sm post-reject-btn" data-id="${p.id}">${emojiIcon('✗',16)} Reject</button>
           ` : ''}
           <div style="display:flex;gap:6px;margin-left:auto">
-            ${isOwn ? `<button class="btn-secondary btn-sm post-edit-btn" data-id="${p.id}">✎ Edit</button>` : ''}
+            ${isOwn ? `<button class="btn-secondary btn-sm post-edit-btn" data-id="${p.id}">${emojiIcon('✎',16)} Edit</button>` : ''}
             ${(canApprove || isOwn) ? `<button class="btn-secondary btn-sm post-delete-btn" data-id="${p.id}" style="color:var(--danger)">Delete</button>` : ''}
-            ${canApprove && p.status==='published' ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':'📌 Pin'}</button>` : ''}
+            ${canApprove && p.status==='published' ? `<button class="btn-secondary btn-sm post-pin-btn" data-id="${p.id}">${p.pinned?'Unpin':`${emojiIcon('📌',16)} Pin`}</button>` : ''}
           </div>
         </div>
       </div>`;
@@ -259,7 +262,7 @@ async function loadPosts(dept) {
       const post    = postMap.get(id) || {};
       const oldTitle   = post.title || '';
       const oldContent = post.content || '';
-      openPage('✎ Edit Post', `
+      openPage(`${emojiIcon('✎',16)} Edit Post`, `
         <div class="form-group"><label>Title (optional)</label><input id="edit-post-title" placeholder="Post title…"/></div>
         <div class="form-group"><label>Content</label><textarea id="edit-post-content" rows="5" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea></div>
       `, `<button class="btn-primary" id="save-post-edit-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -354,16 +357,17 @@ window.renderTeamTab = async function() {
   const canManageEom = currentRole === 'president' && !viewingAsPartner;
   c.innerHTML = `
     <div class="page-header">
-      <h2>👥 Team</h2>
+      <h2>${emojiIcon('👥',20)} Team</h2>
       ${pres && !viewingAsPartner ? '<button class="btn-primary btn-sm" id="invite-user-btn">+ Invite Member</button>' : ''}
     </div>
     ${!viewingAsPartner ? '<div id="eom-banner"></div>' : ''}
     <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
       <input id="team-search" placeholder="Search name, role or department…" class="ms-input" style="max-width:320px"/>
-      <button class="btn-secondary btn-sm" id="set-note-btn" style="white-space:nowrap">✏️ Set My Note</button>
+      <button class="btn-secondary btn-sm" id="set-note-btn" style="white-space:nowrap">${emojiIcon('✏️',16)} Set My Note</button>
     </div>
     <div id="team-grid"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
 
   const snap = typeof dbCachedGet === 'function'
     ? await dbCachedGet('users', () => db.collection('users').get(), 60000)
@@ -402,7 +406,7 @@ window.renderTeamTab = async function() {
   document.getElementById('set-note-btn').addEventListener('click', () => {
     const me = users.find(u => u.id === currentUser.uid);
     const current = me?.statusNote || '';
-    openModal('✏️ Set Your Note', `
+    openModal(`${emojiIcon('✏️',16)} Set Your Note`, `
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Share a quick status — what you're working on, your mood, or a quick update. Visible to everyone.</p>
       <div class="form-group">
         <input id="note-input" maxlength="60" placeholder="e.g. In a meeting until 3pm…" value="${escHtml(current)}"/>
@@ -545,13 +549,14 @@ async function renderEomBanner(users, canManage) {
     if (!winner) {
       host.innerHTML = `
         <div class="eom-banner eom-banner--empty">
-          <div class="eom-empty-icon">🏆</div>
+          <div class="eom-empty-icon">${emojiIcon('🏆',16)}</div>
           <div class="eom-empty-text">
             <strong>Employee of the Month · ${escHtml(monthLbl)}</strong>
             <span>Auto-selected from KPI &amp; attendance, finalised and revealed on the 5th. No eligible activity recorded for ${escHtml(monthLbl)}.</span>
           </div>
-          <button class="btn-secondary btn-sm" id="eom-standings-btn">📊 Standings</button>
+          <button class="btn-secondary btn-sm" id="eom-standings-btn">${emojiIcon('📊',16)} Standings</button>
         </div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [host] });
       document.getElementById('eom-standings-btn')?.addEventListener('click', () => openEomStandingsModal(standings, month));
       return;
     }
@@ -615,7 +620,7 @@ function renderEomCard(host, data, users, canManage, standings, month) {
 
   host.innerHTML = `
     <div class="eom-banner">
-      <div class="eom-ribbon">🏆 Employee of the Month${data.month ? ` · ${escHtml(eomMonthLabel(data.month))}` : ''}</div>
+      <div class="eom-ribbon">${emojiIcon('🏆',16)} Employee of the Month${data.month ? ` · ${escHtml(eomMonthLabel(data.month))}` : ''}</div>
       <div class="eom-body">
         <div class="eom-avatar">
           ${photoUrl ? `<img src="${escHtml(photoUrl)}" alt="${escHtml(name)}"/>` : `<span>${escHtml(initials)}</span>`}
@@ -624,7 +629,7 @@ function renderEomCard(host, data, users, canManage, standings, month) {
           <div class="eom-name">${escHtml(name)}</div>
           <div class="eom-role">${escHtml(roleLabel)} · ${escHtml(depts)}</div>
           ${data.reason ? `<div class="eom-reason">${escHtml(data.reason)}</div>` : ''}
-          <div class="eom-auto-tag">⚙️ Auto-selected by performance${metrics}</div>
+          <div class="eom-auto-tag">${emojiIcon('⚙️',16)} Auto-selected by performance${metrics}</div>
         </div>
         ${canManage ? `<button class="eom-edit-btn" id="eom-standings-btn" title="View standings">${emojiIcon('bar-chart-3',16)}</button>` : ''}
       </div>
@@ -726,14 +731,14 @@ async function computeEomStandings(users, monthStr) {
 // announcing is an explicit, one-tap action so the congrats fires when intended.
 function openEomStandingsModal(standings, month) {
   if (!standings || !standings.length) {
-    openModal('📊 Employee of the Month — Standings',
-      `<div class="empty-state" style="padding:30px"><div class="empty-icon">📊</div><p>No eligible team members have logged attendance yet this month.</p></div>`,
+    openModal(`${emojiIcon('📊',16)} Employee of the Month — Standings`,
+      `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('📊',44)}</div><p>No eligible team members have logged attendance yet this month.</p></div>`,
       `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
     return;
   }
   const winner = standings[0];
   const rows = standings.map((s, i) => {
-    const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+    const medal = i === 0 ? `${emojiIcon('🥇',16)}` : i === 1 ? `${emojiIcon('🥈',16)}` : i === 2 ? `${emojiIcon('🥉',16)}` : `${i + 1}.`;
     const initials = (s.displayName || s.email || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
     return `<div style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;background:${i === 0 ? 'rgba(255,196,0,0.1)' : 'var(--surface2,rgba(255,255,255,0.04))'};margin-bottom:8px;border:1px solid ${i === 0 ? 'rgba(255,196,0,0.35)' : 'transparent'}">
       <div style="font-size:18px;width:28px;text-align:center;flex:0 0 auto">${medal}</div>
@@ -752,10 +757,10 @@ function openEomStandingsModal(standings, month) {
   const alreadyAnnounced = winner.announcedMonth === month;
   const firstName = (winner.displayName || winner.email || 'Winner').split(' ')[0];
   const footer = alreadyAnnounced
-    ? `<button class="btn-secondary" disabled style="opacity:.6">✓ Announced</button><button class="btn-secondary" onclick="closeModal()">Close</button>`
-    : `<button class="btn-primary" id="eom-announce-btn">📣 Announce ${escHtml(firstName)}</button><button class="btn-secondary" onclick="closeModal()">Close</button>`;
+    ? `<button class="btn-secondary" disabled style="opacity:.6">${emojiIcon('✓',16)} Announced</button><button class="btn-secondary" onclick="closeModal()">Close</button>`
+    : `<button class="btn-primary" id="eom-announce-btn">${emojiIcon('📣',16)} Announce ${escHtml(firstName)}</button><button class="btn-secondary" onclick="closeModal()">Close</button>`;
 
-  openModal('📊 Employee of the Month — Standings', `
+  openModal(`${emojiIcon('📊',16)} Employee of the Month — Standings`, `
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Final standings for <strong>${escHtml(eomMonthLabel(month) || 'last month')}</strong> — ranked by task KPI (50%), attendance (40%) and performance grade (10%). Revealed &amp; awarded on the 5th.</p>
     <div>${rows}</div>
   `, footer, {size:'wide'});
@@ -781,7 +786,7 @@ function showCallingCard(u) {
   const roleLabel = window.ROLES?.[u.role]?.label || u.role || 'Employee';
   const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(' · ') || 'Unassigned';
   const initials = (u.displayName||u.email||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
-  openModal(`📇 ${u.displayName||u.email}`, `
+  openModal(`${emojiIcon('📇',16)} ${u.displayName||u.email}`, `
     <div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);border-radius:16px;padding:28px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px">
       ${u.photoUrl
         ? `<img src="${escHtml(u.photoUrl)}" style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.3);margin-bottom:4px" alt=""/>`
@@ -790,8 +795,8 @@ function showCallingCard(u) {
       <div style="font-size:12px;color:rgba(255,255,255,0.7);font-weight:600;text-transform:uppercase;letter-spacing:.08em">${roleLabel}</div>
       <div style="font-size:11px;color:rgba(255,255,255,0.5)">${escHtml(depts)}</div>
       <div style="width:100%;height:1px;background:rgba(255,255,255,0.15);margin:8px 0"></div>
-      ${u.email?`<div style="font-size:13px;color:rgba(255,255,255,0.8)">✉️ ${escHtml(u.email)}</div>`:''}
-      ${u.phone?`<div style="font-size:13px;color:rgba(255,255,255,0.8)">📞 ${escHtml(u.phone)}</div>`:''}
+      ${u.email?`<div style="font-size:13px;color:rgba(255,255,255,0.8)">${emojiIcon('✉️',13)} ${escHtml(u.email)}</div>`:''}
+      ${u.phone?`<div style="font-size:13px;color:rgba(255,255,255,0.8)">${emojiIcon('📞',13)} ${escHtml(u.phone)}</div>`:''}
       ${u.employeeId?`<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px;letter-spacing:.1em">${u.employeeId}</div>`:''}
       <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-top:6px;letter-spacing:.15em">BARRO INDUSTRIES</div>
     </div>
@@ -802,7 +807,8 @@ function renderTeamCards(users, currentUser) {
   const grid = document.getElementById('team-grid');
   if (!grid) return;
   if (!users.length) {
-    grid.innerHTML = '<div class="empty-state"><div class="empty-icon">👥</div><h4>No team members found</h4></div>';
+    grid.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('👥',44)}</div><h4>No team members found</h4></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [grid] });
     return;
   }
   const now = Date.now();
@@ -846,13 +852,14 @@ function renderTeamCards(users, currentUser) {
         ? `<div class="team-status-pill team-status-pill--on">● Online</div>`
         : lastSeenMs ? `<div class="team-status-pill">${lastActiveStr}</div>` : ''}
       <div class="team-card-actions">
-        <button class="team-card-btn view-card-btn" data-uid="${u.id}" title="View calling card">📇</button>
+        <button class="team-card-btn view-card-btn" data-uid="${u.id}" title="View calling card">${emojiIcon('📇',16)}</button>
         ${!isMe && (!(typeof isPartner==='function'&&isPartner()) || u.role==='partner'&&(u.company||'').trim()===(window.userProfile?.company||'').trim())
-          ? `<button class="team-card-btn chat-dm-btn" data-uid="${u.id}" title="Message ${escHtml(u.displayName||u.email)}">💬</button>` : ''}
-        ${!isMe ? `<button class="team-card-btn nudge-btn" data-uid="${u.id}" data-name="${(u.displayName||u.email).replace(/"/g,'&quot;')}" title="Nudge ${escHtml(u.displayName||u.email)}">👋</button>` : ''}
+          ? `<button class="team-card-btn chat-dm-btn" data-uid="${u.id}" title="Message ${escHtml(u.displayName||u.email)}">${emojiIcon('💬',16)}</button>` : ''}
+        ${!isMe ? `<button class="team-card-btn nudge-btn" data-uid="${u.id}" data-name="${(u.displayName||u.email).replace(/"/g,'&quot;')}" title="Nudge ${escHtml(u.displayName||u.email)}">${emojiIcon('👋',16)}</button>` : ''}
       </div>
     </div>`;
   }).join('')}</div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [grid] });
 
   // Wire up calling card buttons
   grid.querySelectorAll('.view-card-btn').forEach(btn => {
@@ -996,7 +1003,7 @@ window.renderAttendancePage = async function() {
 
   c.innerHTML = `
     <div class="page-header">
-      <h2>📅 Attendance</h2>
+      <h2>${emojiIcon('📅',20)} Attendance</h2>
       ${pres ? `<select id="att-emp-select" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px"><option value="">Loading…</option></select>` : ''}
     </div>
     ${pres ? `<div id="att-ext-requests" style="margin-bottom:14px"></div>` : ''}
@@ -1016,6 +1023,7 @@ window.renderAttendancePage = async function() {
     <div id="att-calendar"></div>
     <div id="att-summary" class="card" style="margin-top:16px"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
 
   let targetUid = currentUser.uid;
   let targetName = userProfile.displayName || currentUser.email;
@@ -1056,7 +1064,7 @@ window.renderAttendancePage = async function() {
     const requests = snap.docs.map(d=>({id:d.id,...d.data()}));
     extEl.innerHTML = `
       <div class="card" style="border:1.5px solid rgba(255,159,10,.35);background:rgba(255,159,10,.05)">
-        <div class="card-header"><h3 style="color:rgba(255,159,10,.9)">⏰ Pending Extension Requests (${requests.length})</h3></div>
+        <div class="card-header"><h3 style="color:rgba(255,159,10,.9)">${emojiIcon('⏰',20)} Pending Extension Requests (${requests.length})</h3></div>
         <div class="card-body" style="padding:0">
           <div class="table-wrap"><table class="data-table">
             <thead><tr><th>Employee</th><th>Date</th><th>Requested</th><th></th></tr></thead>
@@ -1065,13 +1073,14 @@ window.renderAttendancePage = async function() {
               <td>${r.date||'—'}</td>
               <td>${r.requestedAt ? new Date(r.requestedAt.toDate()).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit'}) : '—'}</td>
               <td style="white-space:nowrap">
-                <button class="btn-primary btn-sm ext-approve-btn" data-id="${r.id}" data-uid="${r.uid}" data-name="${escHtml(r.userName||'')}">✓ Approve</button>
-                <button class="btn-danger btn-sm ext-deny-btn" data-id="${r.id}" data-uid="${r.uid}" data-name="${escHtml(r.userName||'')}" style="margin-left:4px">✕ Deny</button>
+                <button class="btn-primary btn-sm ext-approve-btn" data-id="${r.id}" data-uid="${r.uid}" data-name="${escHtml(r.userName||'')}">${emojiIcon('✓',16)} Approve</button>
+                <button class="btn-danger btn-sm ext-deny-btn" data-id="${r.id}" data-uid="${r.uid}" data-name="${escHtml(r.userName||'')}" style="margin-left:4px">${emojiIcon('✕',16)} Deny</button>
               </td>
             </tr>`).join('')}</tbody>
           </table></div>
         </div>
       </div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [extEl] });
 
     extEl.querySelectorAll('.ext-approve-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
@@ -1157,13 +1166,13 @@ window.renderAttendancePage = async function() {
       const holidayTitle = holiday ? ` title="${holiday.name}"` : '';
       html += `<div class="att-cal-day ${cls} ${isToday?'att-today':''}" data-date="${dateStr}" data-status="${status}"${holidayTitle}>
         <span class="att-day-num">${day}</span>
-        ${holiday?`<span class="att-mark" style="font-size:9px;color:rgba(180,140,0,1)">🎌</span>`:
+        ${holiday?`<span class="att-mark" style="font-size:9px;color:rgba(180,140,0,1)">${emojiIcon('🎌',9)}</span>`:
           status==='present'?`<span class="att-mark">${emojiIcon('check',14)}</span>`:
           status==='half'?'<span class="att-mark">½</span>':
           status==='absent'?`<span class="att-mark">${emojiIcon('x',14)}</span>`:
           status==='leave'?`<span class="att-mark" style="color:${window.attKindBadge('leave').c}">${window.attKindBadge('leave').m}</span>`:
           status==='unpaid-leave'?`<span class="att-mark" style="color:${window.attKindBadge('unpaid-leave').c}">${window.attKindBadge('unpaid-leave').m}</span>`:''}
-        ${canEdit&&!isNoWork?`<button class="att-edit-btn att-edit-visible" data-date="${dateStr}" title="Edit">✎</button>`:''}
+        ${canEdit&&!isNoWork?`<button class="att-edit-btn att-edit-visible" data-date="${dateStr}" title="Edit">${emojiIcon('✎',16)}</button>`:''}
       </div>`;
     }
     html += '</div>';
@@ -1189,13 +1198,13 @@ window.renderAttendancePage = async function() {
           const date = btn.dataset.date;
           const cur  = records[date];
           const curStatus = cur?.fullTime ? 'present' : cur?.loginTime ? 'half' : 'absent';
-          openModal(`✎ Attendance — ${date}`, `
+          openModal(`${emojiIcon('✎',16)} Attendance — ${date}`, `
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Employee: <strong>${escHtml(targetName)}</strong></p>
             <div class="form-group"><label>Status</label>
               <div style="display:flex;gap:8px;margin-top:4px">
-                <button class="att-status-opt ${curStatus==='present'?'att-opt-active':''}" data-val="present" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='present'?'#30d158':'var(--border)'};background:${curStatus==='present'?'rgba(48,209,88,.15)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">✓ Present</button>
+                <button class="att-status-opt ${curStatus==='present'?'att-opt-active':''}" data-val="present" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='present'?'#30d158':'var(--border)'};background:${curStatus==='present'?'rgba(48,209,88,.15)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">${emojiIcon('✓',13)} Present</button>
                 <button class="att-status-opt ${curStatus==='half'?'att-opt-active':''}" data-val="half" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='half'?'#ffaa00':'var(--border)'};background:${curStatus==='half'?'rgba(255,170,0,.15)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">½ Half Day</button>
-                <button class="att-status-opt ${curStatus==='absent'?'att-opt-active':''}" data-val="absent" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='absent'?'#ff453a':'var(--border)'};background:${curStatus==='absent'?'rgba(255,69,58,.12)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">✗ Absent</button>
+                <button class="att-status-opt ${curStatus==='absent'?'att-opt-active':''}" data-val="absent" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='absent'?'#ff453a':'var(--border)'};background:${curStatus==='absent'?'rgba(255,69,58,.12)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">${emojiIcon('✗',13)} Absent</button>
               </div>
               <input type="hidden" id="att-status-sel" value="${curStatus}"/>
             </div>
@@ -1265,7 +1274,8 @@ window.renderHolidaysAdmin = async function(container) {
   if (!c) return;
   const canEdit = ['president','manager','secretary','finance'].includes(currentRole);
   if (!canEdit) {
-    c.innerHTML = `<div class="empty-state" style="padding:24px"><div class="empty-icon">🔒</div><h4>Not available</h4><p>Holidays admin is finance/admin only.</p></div>`;
+    c.innerHTML = `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Not available</h4><p>Holidays admin is finance/admin only.</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
     return;
   }
 
@@ -1284,7 +1294,7 @@ window.renderHolidaysAdmin = async function(container) {
 
     c.innerHTML = `
       <div class="page-header">
-        <h2>📅 Holidays Admin</h2>
+        <h2>${emojiIcon('📅',20)} Holidays Admin</h2>
         <div style="display:flex;align-items:center;gap:8px">
           <button class="btn-secondary btn-sm" id="hol-prev-year">‹</button>
           <strong style="min-width:48px;text-align:center;display:inline-block">${y}</strong>
@@ -1315,6 +1325,7 @@ window.renderHolidaysAdmin = async function(container) {
           </table></div>
         </div>
       </div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
 
     document.getElementById('hol-prev-year').addEventListener('click', () => renderYear(y-1));
     document.getElementById('hol-next-year').addEventListener('click', () => renderYear(y+1));
@@ -1351,7 +1362,7 @@ window.renderHolidaysAdmin = async function(container) {
   }
 
   function openHolidayModal(date, existing) {
-    openModal(date ? '✏️ Edit Holiday' : '＋ Add Holiday', `
+    openModal(date ? `${emojiIcon('✏️',16)} Edit Holiday` : '＋ Add Holiday', `
       <div class="form-group"><label>Date</label><input id="hol-date" type="date" value="${escHtml(date||`${year}-01-01`)}" ${date?'disabled':''}/></div>
       <div class="form-group"><label>Name</label><input id="hol-name" type="text" value="${escHtml(existing?.name||'')}" placeholder="e.g. Maundy Thursday"/></div>
       <div class="form-group"><label>Type</label>
@@ -1408,7 +1419,7 @@ async function renderCashAdvanceEmployee(c) {
 
   c.innerHTML = `
     <div class="page-header">
-      <h2>💸 Cash Advance</h2>
+      <h2>${emojiIcon('💸',20)} Cash Advance</h2>
       <button class="btn-primary btn-sm" id="new-ca-btn">+ Request</button>
     </div>
     ${totalBalance>0?`
@@ -1424,6 +1435,7 @@ async function renderCashAdvanceEmployee(c) {
     </div>
     <div id="ca-list"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
 
   const renderTab = (sub) => {
     const list = sub === 'active'
@@ -1531,7 +1543,7 @@ async function renderCashAdvanceAdmin(c) {
 
   c.innerHTML = `
     <div class="page-header">
-      <h2>💸 Cash Advances</h2>
+      <h2>${emojiIcon('💸',20)} Cash Advances</h2>
       ${currentRole==='president'?`<button class="btn-primary btn-sm" id="add-ca-for-btn">+ Add Record</button>`:''}
     </div>
     <div class="kpi-row">
@@ -1541,6 +1553,7 @@ async function renderCashAdvanceAdmin(c) {
     </div>
     <div id="ca-list"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   renderCAList(advances, document.getElementById('ca-list'), true);
 
   document.getElementById('add-ca-for-btn')?.addEventListener('click', () => openPresidentCashAdvanceModal(users));
@@ -1548,7 +1561,8 @@ async function renderCashAdvanceAdmin(c) {
 
 function renderCAList(advances, container, isAdmin) {
   if (!advances.length) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">💸</div><h4>No cash advances yet</h4></div>';
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('💸',44)}</div><h4>No cash advances yet</h4></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [container] });
     return;
   }
   container.innerHTML = advances.map(a => {
@@ -1562,7 +1576,7 @@ function renderCAList(advances, container, isAdmin) {
     return `
     <div class="ca-card">
       <div class="ca-card-header">
-        ${isAdmin?`<div class="ca-card-name">${escHtml(a.userName||'Employee')} <span style="font-size:11px;color:var(--text-muted)">${a.employeeId||''}</span>${a.private?'<span class="badge badge-red" style="font-size:10px;margin-left:4px">🔒 Private</span>':''}</div>`:''}
+        ${isAdmin?`<div class="ca-card-name">${escHtml(a.userName||'Employee')} <span style="font-size:11px;color:var(--text-muted)">${a.employeeId||''}</span>${a.private?`<span class="badge badge-red" style="font-size:10px;margin-left:4px">${emojiIcon('🔒',10)} Private</span>`:''}</div>`:''}
         <div class="ca-amount">₱${fmtN(a.amount)}</div>
         <span class="badge ${statusBadgeClass}">${a.status||'pending'}</span>
       </div>
@@ -1583,21 +1597,22 @@ function renderCAList(advances, container, isAdmin) {
       </div>
       ${isAdmin&&a.status==='pending'?`
       <div class="ca-card-actions">
-        <button class="btn-primary btn-sm ca-approve-btn" data-id="${a.id}">✓ Approve</button>
-        <button class="btn-secondary btn-sm ca-reject-btn" data-id="${a.id}" style="color:var(--danger)">✗ Reject</button>
-        ${isRealPresident()?`<button class="btn-secondary btn-sm ca-delete-btn" data-id="${a.id}" style="color:var(--danger);margin-left:auto">🗑 Delete</button>`:''}
+        <button class="btn-primary btn-sm ca-approve-btn" data-id="${a.id}">${emojiIcon('✓',16)} Approve</button>
+        <button class="btn-secondary btn-sm ca-reject-btn" data-id="${a.id}" style="color:var(--danger)">${emojiIcon('✗',16)} Reject</button>
+        ${isRealPresident()?`<button class="btn-secondary btn-sm ca-delete-btn" data-id="${a.id}" style="color:var(--danger);margin-left:auto">${emojiIcon('🗑',16)} Delete</button>`:''}
       </div>`:''}
       ${isAdmin&&a.status==='approved'&&(a.balance||0)>0?`
       <div class="ca-card-actions">
         <button class="btn-secondary btn-sm ca-payment-btn" data-id="${a.id}">Record Payment</button>
-        ${isRealPresident()?`<button class="btn-secondary btn-sm ca-delete-btn" data-id="${a.id}" style="color:var(--danger);margin-left:auto">🗑 Delete</button>`:''}
+        ${isRealPresident()?`<button class="btn-secondary btn-sm ca-delete-btn" data-id="${a.id}" style="color:var(--danger);margin-left:auto">${emojiIcon('🗑',16)} Delete</button>`:''}
       </div>`:''}
       ${isAdmin&&(a.status==='rejected'||a.status==='paid')&&isRealPresident()?`
       <div class="ca-card-actions" style="justify-content:flex-end">
-        <button class="btn-secondary btn-sm ca-delete-btn" data-id="${a.id}" style="color:var(--danger)">🗑 Delete</button>
+        <button class="btn-secondary btn-sm ca-delete-btn" data-id="${a.id}" style="color:var(--danger)">${emojiIcon('🗑',16)} Delete</button>
       </div>`:''}
     </div>`;
   }).join('');
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   // v12 WS22 — all three route through the one shared CashAdvance service
   // (this page already had the safest transaction-guarded versions; now every
@@ -1672,7 +1687,7 @@ function openPresidentCashAdvanceModal(users) {
     </div>
     <label style="display:flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer">
       <input type="checkbox" id="pca-private" checked/>
-      <span style="font-size:13px">🔒 Private — visible only to this employee, president &amp; finance</span>
+      <span style="font-size:13px">${emojiIcon('🔒',13)} Private — visible only to this employee, president &amp; finance</span>
     </label>
   `, `<button class="btn-primary" id="save-pca-btn">Save Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
@@ -1744,7 +1759,7 @@ window.renderCompanyOverviewNew = function(ct, canAdd) {
     </div>
 
     <div class="card" style="margin-bottom:14px">
-      <div class="card-header"><h3>🏢 About the Company</h3></div>
+      <div class="card-header"><h3>${emojiIcon('🏢',20)} About the Company</h3></div>
       <div class="card-body">
         <p style="font-size:14px;line-height:1.7;color:var(--text)">
           <strong>Barro Industries OPC</strong> is a SEC-registered One Person Corporation in the Philippines. The company's current active trademark is <strong>Barro Kitchens</strong> — a one-stop shop for kitchen design and build, covering the manufacturing industry from fabrication to full installation.
@@ -1759,7 +1774,7 @@ window.renderCompanyOverviewNew = function(ct, canAdd) {
       <div class="card-header"><h3>™ Trademarks & Brands</h3></div>
       <div class="card-body">
         <div class="trademark-card">
-          <div class="trademark-icon">🍳</div>
+          <div class="trademark-icon">${emojiIcon('🍳',16)}</div>
           <div>
             <div class="trademark-name">Barro Kitchens</div>
             <div class="trademark-desc">One-stop shop for kitchen design and build · Manufacturing industry · Full fabrication and installation services. R&D coming soon.</div>
@@ -1767,7 +1782,7 @@ window.renderCompanyOverviewNew = function(ct, canAdd) {
           </div>
         </div>
         <div class="trademark-card" style="opacity:0.6;margin-top:10px">
-          <div class="trademark-icon">🔬</div>
+          <div class="trademark-icon">${emojiIcon('🔬',16)}</div>
           <div>
             <div class="trademark-name">More trademarks coming soon</div>
             <div class="trademark-desc">Barro Industries OPC is SEC registered and will expand its brand portfolio under different trademarks.</div>
@@ -1779,6 +1794,7 @@ window.renderCompanyOverviewNew = function(ct, canAdd) {
 
     <div class="card" style="margin-bottom:14px" id="president-message-card"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [ct] });
   renderPresidentMessageCard();
 };
 
@@ -1848,9 +1864,10 @@ async function renderPresidentMessageCard() {
     const tabs = ['Stock','Movements'];
     if (isFinAdmin()) tabs.push('Job Costing');
     c.innerHTML = `
-      <div class="page-header"><h2>📦 Inventory</h2></div>
+      <div class="page-header"><h2>${emojiIcon('📦',20)} Inventory</h2></div>
       ${window.chipTabs(tabs.map(s=>({key:s,label:s})), sub, {cls:'inv-tabs'})}
       <div id="inv-content"><div class="loading-placeholder">Loading…</div></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
     loadInv(sub);
     window.bindChipTabs(c.querySelector('.inv-tabs'), (key)=>loadInv(key));
   };
@@ -1881,15 +1898,16 @@ async function renderPresidentMessageCard() {
         <div class="kpi-card green"><div class="kpi-label">Stock Value</div><div class="kpi-value">${peso(totalValue)}</div></div>
       </div>
       <div style="font-size:12px;color:var(--text-muted);margin:0 2px 10px">Materials ${peso(matValue)} · Finished goods ${peso(prodValue)}</div>
-      ${low.length?`<div class="alert-banner alert-warn" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>⚠️ <strong>${low.length} item${low.length>1?'s':''}</strong> at or below reorder level</span>${ce?`<button class="btn-secondary btn-sm" id="inv-reorder-btn" title="Open Purchasing to raise an RFQ for low-stock materials">📉 Reorder via RFQ</button>`:''}</div>`:''}
+      ${low.length?`<div class="alert-banner alert-warn" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${emojiIcon('⚠️',16)} <strong>${low.length} item${low.length>1?'s':''}</strong> at or below reorder level</span>${ce?`<button class="btn-secondary btn-sm" id="inv-reorder-btn" title="Open Purchasing to raise an RFQ for low-stock materials">${emojiIcon('📉',16)} Reorder via RFQ</button>`:''}</div>`:''}
       ${window.chipTabs([{key:'all',label:'All'},{key:'material',label:'Raw Materials'},{key:'product',label:'Finished Goods'}],'all',{cls:'inv-kind'})}
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
         <input id="inv-search" placeholder="🔎 Search item, supplier, category…" style="flex:1;min-width:160px;padding:8px 12px;border:1.5px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-size:13px"/>
         ${cats.length?`<select id="inv-cat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-size:13px"><option value="all">All categories</option>${cats.map(c=>`<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('')}</select>`:''}
-        <button class="btn-secondary btn-sm" id="inv-csv">⬇ CSV</button>
+        <button class="btn-secondary btn-sm" id="inv-csv">${emojiIcon('⬇',16)} CSV</button>
         ${ce?'<button class="btn-primary btn-sm" id="inv-add-btn">＋ Add Item</button>':''}
       </div>
       <div class="card"><div class="card-body" style="padding:0"><div id="inv-table"></div></div></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [el] });
 
     const filtered = () => items.filter(i=>{
       if (kindFilter!=='all' && (i.kind||'material')!==kindFilter) return false;
@@ -1903,7 +1921,7 @@ async function renderPresidentMessageCard() {
       const shownValue = shown.reduce((s,i)=>s+((i.qty||0)*(i.unitCost||0)),0);
       const tbl = document.getElementById('inv-table');
       if (!tbl) return;
-      tbl.innerHTML = !shown.length ? '<div class="empty-state" style="padding:24px"><div class="empty-icon">📦</div><h4>No items match</h4></div>' :
+      tbl.innerHTML = !shown.length ? `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📦',44)}</div><h4>No items match</h4></div>` :
         `<div class="table-wrap"><table class="data-table">
           <thead><tr><th>Item</th><th>Type</th><th>On Hand</th><th>Reorder</th><th>Unit Cost</th><th>Value</th><th>Supplier</th><th></th></tr></thead>
           <tbody>${shown.map(i=>{
@@ -1911,20 +1929,21 @@ async function renderPresidentMessageCard() {
             return `<tr>
               <td style="font-weight:600">${escHtml(i.name||'—')}${i.category?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(i.category)}</div>`:''}</td>
               <td><span class="badge ${(i.kind||'material')==='product'?'badge-blue':'badge-gray'}">${(i.kind||'material')==='product'?'Finished':'Material'}</span></td>
-              <td style="font-weight:700;color:${lowItem?'var(--danger)':'inherit'}">${num(i.qty||0)} ${escHtml(i.unit||'')}${lowItem?' ⚠️':''}</td>
+              <td style="font-weight:700;color:${lowItem?'var(--danger)':'inherit'}">${num(i.qty||0)} ${escHtml(i.unit||'')}${lowItem?` ${emojiIcon('⚠️',16)}`:''}</td>
               <td style="font-size:12px;color:var(--text-muted)">${num(i.reorderLevel||0)}</td>
               <td>${peso(i.unitCost||0)}</td>
               <td>${peso((i.qty||0)*(i.unitCost||0))}</td>
               <td style="font-size:12px">${escHtml(i.supplier||'—')}</td>
               <td style="white-space:nowrap">
-                <button class="btn-secondary btn-sm inv-hist-btn" data-id="${i.id}" title="Movement history">📜</button>
+                <button class="btn-secondary btn-sm inv-hist-btn" data-id="${i.id}" title="Movement history">${emojiIcon('📜',16)}</button>
                 ${ce?`<button class="btn-success btn-sm inv-in-btn" data-id="${i.id}" title="Stock In">＋</button>
                 <button class="btn-secondary btn-sm inv-out-btn" data-id="${i.id}" title="Stock Out">−</button>
-                <button class="btn-secondary btn-sm inv-edit-btn" data-id="${i.id}" title="Edit">✎</button>`:''}
+                <button class="btn-secondary btn-sm inv-edit-btn" data-id="${i.id}" title="Edit">${emojiIcon('✎',16)}</button>`:''}
               </td>
             </tr>`;}).join('')}</tbody>
           <tfoot><tr><td colspan="5" style="text-align:right;font-weight:700;color:var(--text-muted)">Shown value</td><td style="font-weight:700">${peso(shownValue)}</td><td colspan="2"></td></tr></tfoot>
         </table></div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [tbl] });
       // Row actions
       tbl.querySelectorAll('.inv-hist-btn').forEach(b=>b.addEventListener('click',()=>itemHistoryModal(items.find(i=>i.id===b.dataset.id))));
       if(ce){
@@ -1949,12 +1968,12 @@ async function renderPresidentMessageCard() {
   // Per-item movement history — equality query (no composite index), sorted client-side.
   async function itemHistoryModal(item){
     if(!item) return;
-    openModal('📜 '+(item.name||'Item')+' — Movement History', '<div class="loading-placeholder">Loading…</div>',
+    openModal(`${emojiIcon('📜',16)} `+(item.name||'Item')+' — Movement History', '<div class="loading-placeholder">Loading…</div>',
       `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
     const snap = await db.collection('stock_movements').where('itemId','==',item.id).get().catch(()=>({docs:[]}));
     const mv = snap.docs.map(d=>d.data()).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     const body = document.getElementById('modal-body');
-    const html = !mv.length ? '<div class="empty-state" style="padding:18px"><div class="empty-icon">📋</div><h4>No movements recorded</h4></div>' :
+    const html = !mv.length ? `<div class="empty-state" style="padding:18px"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No movements recorded</h4></div>` :
       `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">On-hand now: <strong>${num(item.qty||0)} ${escHtml(item.unit||'')}</strong></div>
        <div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Project / Note</th><th>By</th></tr></thead>
        <tbody>${mv.map(m=>`<tr>
@@ -2024,7 +2043,7 @@ async function renderPresidentMessageCard() {
 
   function moveModal(item, type, onSaved){
     if(!item) return;
-    openPage((type==='in'?'➕ Stock In — ':'➖ Stock Out — ')+(item.name||''), `
+    openPage((type==='in'?`${emojiIcon('➕',16)} Stock In — `:`${emojiIcon('➖',16)} Stock Out — `)+(item.name||''), `
       <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Current on-hand: <strong>${num(item.qty||0)} ${escHtml(item.unit||'')}</strong></div>
       <div class="form-group"><label>Quantity to ${type==='in'?'add':'remove'}</label><input id="mv-qty" type="number" inputmode="decimal" step="0.01" min="0"/></div>
       ${type==='out'?`<div class="form-group"><label>Project / Job (optional)</label><input id="mv-project" placeholder="e.g. Gerry's Grill — Bulacan"/></div>`:''}
@@ -2055,13 +2074,14 @@ async function renderPresidentMessageCard() {
     const mv=snap.docs.map(d=>d.data());
     const typeBadge = t => t==='in'?'<span class="badge badge-green">IN</span>':t==='adjust'?'<span class="badge badge-blue">ADJ</span>':'<span class="badge badge-orange">OUT</span>';
     let typeFilter='all', search='';
-    el.innerHTML=`<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3>📋 Stock Movement Log</h3>${mv.length?'<button class="btn-secondary btn-sm" id="mv-csv">⬇ CSV</button>':''}</div>
+    el.innerHTML=`<div class="card"><div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3>${emojiIcon('📋',20)} Stock Movement Log</h3>${mv.length?`<button class="btn-secondary btn-sm" id="mv-csv">${emojiIcon('⬇',16)} CSV</button>`:''}</div>
       <div class="card-body">
-      ${!mv.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">📋</div><h4>No movements yet</h4></div>':`
+      ${!mv.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No movements yet</h4></div>`:`
       ${window.chipTabs([{key:'all',label:'All'},{key:'in',label:'In'},{key:'out',label:'Out'},{key:'adjust',label:'Adjust'}],'all',{cls:'mv-type'})}
       <input id="mv-search" placeholder="🔎 Search item, project, note…" style="width:100%;padding:8px 12px;border:1.5px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-size:13px;margin-bottom:10px"/>
       <div id="mv-table"></div>`}
       </div></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [el] });
     const filtered = () => mv.filter(m=>{
       if (typeFilter!=='all' && (m.type||'out')!==typeFilter) return false;
       if (search){ const s=search.toLowerCase(); if(!((m.itemName||'').toLowerCase().includes(s)||(m.project||'').toLowerCase().includes(s)||(m.note||'').toLowerCase().includes(s)||(m.refNumber||'').toLowerCase().includes(s))) return false; }
@@ -2069,7 +2089,7 @@ async function renderPresidentMessageCard() {
     });
     const renderRows = () => {
       const rows = filtered(); const tbl=document.getElementById('mv-table'); if(!tbl) return;
-      tbl.innerHTML = !rows.length ? '<div class="empty-state" style="padding:18px"><div class="empty-icon">🔎</div><h4>No movements match</h4></div>' :
+      tbl.innerHTML = !rows.length ? `<div class="empty-state" style="padding:18px"><div class="empty-icon">${emojiIcon('🔎',44)}</div><h4>No movements match</h4></div>` :
         `<div class="table-wrap"><table class="data-table">
           <thead><tr><th>Date</th><th>Item</th><th>Type</th><th>Source</th><th>Qty</th><th>Project</th><th>Note</th><th>By</th></tr></thead>
           <tbody>${rows.map(m=>`<tr>
@@ -2082,6 +2102,7 @@ async function renderPresidentMessageCard() {
             <td style="font-size:12px">${escHtml(m.note||'—')}</td>
             <td style="font-size:11px">${escHtml(m.byName||'—')}</td>
           </tr>`).join('')}</tbody></table></div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [tbl] });
     };
     if (mv.length){
       window.bindChipTabs(el.querySelector('.mv-type'), (key)=>{ typeFilter=key; renderRows(); });
@@ -2103,11 +2124,11 @@ async function renderPresidentMessageCard() {
     el.innerHTML=`
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px">
         <div style="font-size:12px;color:var(--text-muted);flex:1">Materials + labor vs revenue = margin per project</div>
-        ${jobs.length?'<button class="btn-secondary btn-sm" id="jobs-csv">⬇ CSV</button>':''}
+        ${jobs.length?`<button class="btn-secondary btn-sm" id="jobs-csv">${emojiIcon('⬇',16)} CSV</button>`:''}
         ${ce?'<button class="btn-primary btn-sm" id="job-add-btn">＋ New Job</button>':''}
       </div>
       <div class="card"><div class="card-body" style="padding:0">
-      ${!jobs.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🧮</div><h4>No job costs yet</h4></div>':
+      ${!jobs.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🧮',44)}</div><h4>No job costs yet</h4></div>`:
       `<div class="table-wrap"><table class="data-table">
         <thead><tr><th>Project</th><th>Revenue</th><th>Materials</th><th>Labor</th><th>Other</th><th>Cost</th><th>Margin</th>${ce?'<th></th>':''}</tr></thead>
         <tbody>${jobs.map(j=>{const cost=(j.materialsCost||0)+(j.laborCost||0)+(j.otherCost||0);const margin=(j.revenue||0)-cost;const pct=j.revenue?Math.round(margin/j.revenue*100):0;return `<tr>
@@ -2115,9 +2136,10 @@ async function renderPresidentMessageCard() {
           <td>${peso(j.revenue||0)}</td><td>${peso(j.materialsCost||0)}</td><td>${peso(j.laborCost||0)}</td><td>${peso(j.otherCost||0)}</td>
           <td>${peso(cost)}</td>
           <td style="font-weight:700;color:${margin>=0?'var(--success)':'var(--danger)'}">${peso(margin)}<div style="font-size:11px">${pct}%</div></td>
-          ${ce?`<td><button class="btn-secondary btn-sm job-edit-btn" data-id="${j.id}" title="Edit">✎</button></td>`:''}
+          ${ce?`<td><button class="btn-secondary btn-sm job-edit-btn" data-id="${j.id}" title="Edit">${emojiIcon('✎',16)}</button></td>`:''}
         </tr>`;}).join('')}</tbody></table></div>`}
       </div></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [el] });
     document.getElementById('jobs-csv')?.addEventListener('click',()=>window.exportCSV('job-costing', jobs, [
       {key:'project',label:'Project'},{key:'quoteRef',label:'Quote Ref'},{key:'revenue',label:'Revenue',get:j=>j.revenue||0},
       {key:'materialsCost',label:'Materials',get:j=>j.materialsCost||0},{key:'laborCost',label:'Labor',get:j=>j.laborCost||0},{key:'otherCost',label:'Other',get:j=>j.otherCost||0},
@@ -2242,16 +2264,17 @@ async function renderPresidentMessageCard() {
     const reqs = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     const pending = reqs.filter(r=>r.status==='pending').length;
     c.innerHTML = `
-      <div class="page-header"><h2>🌴 My Leave</h2><button class="btn-primary btn-sm" id="new-leave-btn">+ Request Leave</button></div>
+      <div class="page-header"><h2>${emojiIcon('🌴',20)} My Leave</h2><button class="btn-primary btn-sm" id="new-leave-btn">+ Request Leave</button></div>
       <div class="kpi-row" style="margin-bottom:14px">
         <div class="kpi-card green"><div class="kpi-label">Vacation left</div><div class="kpi-value">${bal.vacation||0}<span style="font-size:12px;font-weight:500"> days</span></div></div>
         <div class="kpi-card"><div class="kpi-label">Sick left</div><div class="kpi-value">${bal.sick||0}<span style="font-size:12px;font-weight:500"> days</span></div></div>
         <div class="kpi-card ${pending?'accent':''}"><div class="kpi-label">Pending</div><div class="kpi-value">${pending}</div></div>
       </div>
       <div class="card"><div class="card-header"><h3>My Requests</h3></div><div class="card-body" style="padding:0">
-        ${!reqs.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🌴</div><h4>No leave requests yet</h4><p>Tap "Request Leave" to file one.</p></div>':
+        ${!reqs.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🌴',44)}</div><h4>No leave requests yet</h4><p>Tap "Request Leave" to file one.</p></div>`:
           reqs.map(r=>leaveRow(r,false)).join('')}
       </div></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
     document.getElementById('new-leave-btn').onclick = ()=>openLeaveModal(bal, c);
   }
 
@@ -2266,13 +2289,13 @@ async function renderPresidentMessageCard() {
     // path per rules, but the direct grant/accrual buttons stay finance/admin-only).
     const canGrant = ['president','manager','finance'].includes(currentRole);
     c.innerHTML = `
-      <div class="page-header"><h2>🌴 Leave Management</h2><div style="display:flex;gap:8px;flex-wrap:wrap">${canGrant?`<button class="btn-secondary btn-sm" id="lv-accrue">↻ Run Annual Accrual</button><button class="btn-secondary btn-sm" id="lv-grant">＋ Adjust Balance</button>`:''}<button class="btn-secondary btn-sm" id="leave-csv">⬇ CSV</button><button class="btn-secondary btn-sm" id="my-leave-btn">My Leave</button></div></div>
+      <div class="page-header"><h2>${emojiIcon('🌴',20)} Leave Management</h2><div style="display:flex;gap:8px;flex-wrap:wrap">${canGrant?`<button class="btn-secondary btn-sm" id="lv-accrue">↻ Run Annual Accrual</button><button class="btn-secondary btn-sm" id="lv-grant">＋ Adjust Balance</button>`:''}<button class="btn-secondary btn-sm" id="leave-csv">${emojiIcon('⬇',16)} CSV</button><button class="btn-secondary btn-sm" id="my-leave-btn">My Leave</button></div></div>
       <div class="kpi-row" style="margin-bottom:14px">
         <div class="kpi-card ${pending.length?'accent':''}"><div class="kpi-label">Pending</div><div class="kpi-value">${pending.length}</div></div>
         <div class="kpi-card green"><div class="kpi-label">Approved</div><div class="kpi-value">${approved}</div></div>
         <div class="kpi-card"><div class="kpi-label">Total Requests</div><div class="kpi-value">${reqs.length}</div></div>
       </div>
-      ${pending.length?`<div class="card" style="margin-bottom:14px;border:1.5px solid var(--warning)"><div class="card-header"><h3>⏳ Pending Approval</h3></div><div class="card-body" style="padding:0">
+      ${pending.length?`<div class="card" style="margin-bottom:14px;border:1.5px solid var(--warning)"><div class="card-header"><h3>${emojiIcon('⏳',20)} Pending Approval</h3></div><div class="card-body" style="padding:0">
         ${pending.map(r=>`<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap">
           <span style="font-size:20px">${leaveType(r.type).icon}</span>
           <div style="flex:1;min-width:160px">
@@ -2284,9 +2307,10 @@ async function renderPresidentMessageCard() {
         </div>`).join('')}
       </div></div>`:''}
       <div class="card"><div class="card-header"><h3>All Requests</h3></div><div class="card-body" style="padding:0">
-        ${!reqs.length?'<div class="empty-state" style="padding:24px"><div class="empty-icon">🌴</div><h4>No leave requests</h4></div>':
+        ${!reqs.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🌴',44)}</div><h4>No leave requests</h4></div>`:
           reqs.map(r=>leaveRow(r,true)).join('')}
       </div></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
     document.getElementById('my-leave-btn').onclick = ()=>renderLeaveEmployee(c);
     document.getElementById('leave-csv')?.addEventListener('click',()=>window.exportCSV('leave-requests', reqs, [
       {key:'userName',label:'Employee'},{key:'type',label:'Type',get:r=>leaveType(r.type).label},{key:'days',label:'Days'},
@@ -2346,7 +2370,7 @@ async function renderPresidentMessageCard() {
 
   function openLeaveModal(bal, c){
     const today = window.bizDate?window.bizDate():new Date().toISOString().slice(0,10);
-    openPage('🌴 Request Leave', `
+    openPage(`${emojiIcon('🌴',16)} Request Leave`, `
       <div class="form-group"><label>Leave Type</label>
         <select id="lv-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
           ${LEAVE_TYPES.map(t=>`<option value="${t.id}">${t.icon} ${t.label}${t.drawsBalance?` (${bal[t.id]||0} left)`:''}</option>`).join('')}
@@ -2488,13 +2512,15 @@ async function renderPresidentMessageCard() {
     const c = document.getElementById('page-content');
     if(!c) return;
     const blocked = (typeof isPartner==='function' && isPartner()) || (typeof isBrilliantOnly==='function' && isBrilliantOnly());
-    if(blocked){ c.innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><h4>Search is not available for this account</h4></div>'; return; }
+    if(blocked){ c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Search is not available for this account</h4></div>`; return; }
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
 
     c.innerHTML = `
-      <div class="page-header"><h2>🔎 Search</h2></div>
+      <div class="page-header"><h2>${emojiIcon('🔎',20)} Search</h2></div>
       <input id="gsearch-input" placeholder="Search tasks, clients, inventory, products, quotes, files…" value="${(initialQuery||'').replace(/"/g,'&quot;')}"
         style="width:100%;padding:12px 14px;border:1.5px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);font-size:15px;margin-bottom:14px"/>
-      <div id="gsearch-results"><div class="empty-state" style="padding:30px"><div class="empty-icon">🔎</div><p>Type to search across the company.</p></div></div>`;
+      <div id="gsearch-results"><div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('🔎',44)}</div><p>Type to search across the company.</p></div></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
     const input = document.getElementById('gsearch-input');
     const out = document.getElementById('gsearch-results');
 
@@ -2526,7 +2552,8 @@ async function renderPresidentMessageCard() {
 
     async function runSearch(qRaw){
       const q = (qRaw||'').trim().toLowerCase();
-      if(!q){ out.innerHTML = '<div class="empty-state" style="padding:30px"><div class="empty-icon">🔎</div><p>Type to search across the company.</p></div>'; return; }
+      if(!q){ out.innerHTML = `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('🔎',44)}</div><p>Type to search across the company.</p></div>`; return; }
+      if (window.lucide) lucide.createIcons({ nodes: [out] });
       out.innerHTML = '<div class="loading-placeholder">Searching…</div>';
       const S = await load();
       const tasks   = S.tasks.filter(t=>hit(q,t.title,t.description,t.department));
@@ -2539,12 +2566,13 @@ async function renderPresidentMessageCard() {
       if(!total){ out.innerHTML = `<div class="empty-state" style="padding:30px"><div class="empty-icon">🤷</div><h4>No results for "${esc(qRaw)}"</h4></div>`; return; }
       _gsFilesStash = {}; files.forEach(f=>{ _gsFilesStash[f.id]=f; });
       out.innerHTML =
-        groupHtml('✅','Tasks',tasks,t=>rowItem('📋',t.title||'(untitled)',(t.department||'')+(t.status?' · '+t.status:''),`window.openTaskDetail&&window.openTaskDetail('${t.id}',window.currentUser,window.currentRole)`)) +
-        groupHtml('👤','Clients',clients,x=>rowItem('👤',x.name||x.company||'Client',(x.company||'')+(x.phone?' · '+x.phone:''),`navigateTo('${x._brand==='design'?'dept:Design':x._brand==='bs'?'bs-clients':'dept:Sales'}')`)) +
-        groupHtml('📦','Inventory',inv,i=>rowItem('📦',i.name||'(item)',(i.category||'')+' · '+(i.qty||0)+' '+(i.unit||''),`navigateTo('inventory')`)) +
-        groupHtml('🛒','Products',prod,p=>rowItem('🛒',p.title||p.name||p.id,(p.id||'')+(p.category?' · '+p.category:''),`navigateTo('product-database')`)) +
-        groupHtml('📄','Quotes',quotes,qt=>rowItem('📄',(qt.quoteNumber||'Quote')+(qt.clientName?' — '+qt.clientName:''),(qt.status||'draft'),`navigateTo('${(qt.quoteNumber||'').toString().toUpperCase().startsWith('BS')?'bs-quotations':'dept:Sales'}')`)) +
-        groupHtml('📁','Files',files,f=>rowItem(f.kind==='link'?'🔗':'📄',f.name||'File',(f.scope||'')+(f.department?' · '+f.department:''),`window.__gsOpenFile('${f.id}')`));
+        groupHtml(`${emojiIcon('✅',16)}`,'Tasks',tasks,t=>rowItem(`${emojiIcon('📋',16)}`,t.title||'(untitled)',(t.department||'')+(t.status?' · '+t.status:''),`window.openTaskDetail&&window.openTaskDetail('${t.id}',window.currentUser,window.currentRole)`)) +
+        groupHtml(`${emojiIcon('👤',16)}`,'Clients',clients,x=>rowItem(`${emojiIcon('👤',16)}`,x.name||x.company||'Client',(x.company||'')+(x.phone?' · '+x.phone:''),`navigateTo('${x._brand==='design'?'dept:Design':x._brand==='bs'?'bs-clients':'dept:Sales'}')`)) +
+        groupHtml(`${emojiIcon('📦',16)}`,'Inventory',inv,i=>rowItem(`${emojiIcon('📦',16)}`,i.name||'(item)',(i.category||'')+' · '+(i.qty||0)+' '+(i.unit||''),`navigateTo('inventory')`)) +
+        groupHtml(`${emojiIcon('🛒',16)}`,'Products',prod,p=>rowItem(`${emojiIcon('🛒',16)}`,p.title||p.name||p.id,(p.id||'')+(p.category?' · '+p.category:''),`navigateTo('product-database')`)) +
+        groupHtml(`${emojiIcon('📄',16)}`,'Quotes',quotes,qt=>rowItem(`${emojiIcon('📄',16)}`,(qt.quoteNumber||'Quote')+(qt.clientName?' — '+qt.clientName:''),(qt.status||'draft'),`navigateTo('${(qt.quoteNumber||'').toString().toUpperCase().startsWith('BS')?'bs-quotations':'dept:Sales'}')`)) +
+        groupHtml(`${emojiIcon('📁',16)}`,'Files',files,f=>rowItem(f.kind==='link'?`${emojiIcon('🔗',16)}`:`${emojiIcon('📄',16)}`,f.name||'File',(f.scope||'')+(f.department?' · '+f.department:''),`window.__gsOpenFile('${f.id}')`));
+      if (window.lucide) lucide.createIcons({ nodes: [out] });
     }
 
     let _t; input.addEventListener('input',()=>{ clearTimeout(_t); _t=setTimeout(()=>runSearch(input.value),220); });
@@ -2563,7 +2591,8 @@ window.renderFilesHub = function(){
   const c = document.getElementById('page-content');
   if(!c) return;
   const blocked = (typeof isPartner==='function' && isPartner()) || (typeof isBrilliantOnly==='function' && isBrilliantOnly());
-  if(blocked){ c.innerHTML = '<div class="empty-state"><div class="empty-icon">🔒</div><h4>Files Hub is not available for this account</h4></div>'; return; }
+  if(blocked){ c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Files Hub is not available for this account</h4></div>`; return; }
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
   const isAdminRole = ['president','manager','owner','secretary'].includes(window.currentRole);
 
   // Seed list of the 12 known pre-WS38 scopes (Spec 9) — Brilliant Steel's
@@ -2584,17 +2613,18 @@ window.renderFilesHub = function(){
   ];
   const scopeByKey = {}; SEED_SCOPES.forEach(s=>{ scopeByKey[s.key]=s; });
   const chips = [
-    ...(isAdminRole ? [{ key:'__all__', label:'🌐 All Scopes' }] : []),
+    ...(isAdminRole ? [{ key:'__all__', label:`${emojiIcon('🌐',16)} All Scopes` }] : []),
     ...SEED_SCOPES.map(s=>({ key:s.key, label:s.label }))
   ];
   const defaultKey = isAdminRole ? '__all__' : SEED_SCOPES[0].key;
 
   c.innerHTML = `
-    <div class="page-header"><h2>📁 Files Hub</h2></div>
+    <div class="page-header"><h2>${emojiIcon('📁',20)} Files Hub</h2></div>
     <input id="fh-hub-search" placeholder="Search my files…" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font-size:14px;margin-bottom:12px"/>
     ${window.chipTabs(chips, defaultKey, {cls:'fh-hub-scope-tabs'})}
     <div id="fh-hub-content"></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
 
   let allScopeFiles = [];
   let _gsFilesStashHub = {};
@@ -2618,18 +2648,20 @@ window.renderFilesHub = function(){
     const fc = document.getElementById('fh-hub-content');
     const q = (document.getElementById('fh-hub-search')?.value||'').trim().toLowerCase();
     const showing = q ? allScopeFiles.filter(f=>hit(q,f.name,f.description,f.scope,f.department)) : allScopeFiles;
-    if (!showing.length) { fc.innerHTML = '<div class="empty-state" style="padding:24px"><div class="empty-icon">📁</div><h4>No files found</h4></div>'; return; }
+    if (!showing.length) { fc.innerHTML = `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📁',44)}</div><h4>No files found</h4></div>`; return; }
+    if (window.lucide) lucide.createIcons({ nodes: [fc] });
     _gsFilesStashHub = {}; showing.forEach(f=>{ _gsFilesStashHub[f.id]=f; });
     fc.innerHTML = `<div class="table-wrap"><table class="data-table">
       <thead><tr><th>Name</th><th>Scope</th><th>Dept</th><th>Uploader</th><th>Date</th><th></th></tr></thead>
       <tbody>${showing.map(f=>`<tr>
-        <td><a href="#" class="fh-hub-open" data-id="${f.id}" style="color:var(--primary);font-weight:600">${f.kind==='link'?'🔗 ':'📄 '}${escHtml(f.name||'File')}</a></td>
+        <td><a href="#" class="fh-hub-open" data-id="${f.id}" style="color:var(--primary);font-weight:600">${f.kind==='link'?`${emojiIcon('🔗',16)} `:`${emojiIcon('📄',16)} `}${escHtml(f.name||'File')}</a></td>
         <td><span class="badge badge-gray">${escHtml(f.scope||'—')}</span></td>
         <td style="font-size:12px">${escHtml(f.department||'—')}</td>
         <td style="font-size:12px">${escHtml(f.uploaderName||'—')}</td>
         <td style="font-size:11px;color:var(--text-muted)">${f.createdAt?new Date(f.createdAt.toDate()).toLocaleDateString('en-PH'):''}</td>
-        <td><a href="${safeHttpUrl(f.url)}" target="_blank" class="btn-secondary btn-sm">⬇</a></td>
+        <td><a href="${safeHttpUrl(f.url)}" target="_blank" class="btn-secondary btn-sm">${emojiIcon('⬇',16)}</a></td>
       </tr>`).join('')}</tbody></table></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [fc] });
     fc.querySelectorAll('.fh-hub-open').forEach(el=>el.addEventListener('click', e=>{
       e.preventDefault(); const f = _gsFilesStashHub[el.dataset.id]; if (f) window.openFilePreview(f);
     }));
@@ -2652,14 +2684,14 @@ window.renderMyProfile = async function() {
   const partner = (typeof isPartner === 'function' && isPartner()) ||
                   (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
   const tabs = partner
-    ? [ {key:'account',   label:'👤 Account'},
-        {key:'tasks',     label:'✅ Tasks'},
-        {key:'activity',  label:'🕘 Recent Activity'} ]
-    : [ {key:'id',        label:'🪪 ID'},
-        {key:'finance',   label:'💳 Finance & Performance'},
-        {key:'analytics', label:'📊 My Analytics'},
-        {key:'tasks',     label:'✅ Tasks'},
-        {key:'activity',  label:'🕘 Recent Activity'} ];
+    ? [ {key:'account',   label:`${emojiIcon('👤',16)} Account`},
+        {key:'tasks',     label:`${emojiIcon('✅',16)} Tasks`},
+        {key:'activity',  label:`${emojiIcon('🕘',16)} Recent Activity`} ]
+    : [ {key:'id',        label:`${emojiIcon('🪪',16)} ID`},
+        {key:'finance',   label:`${emojiIcon('💳',16)} Finance & Performance`},
+        {key:'analytics', label:`${emojiIcon('📊',16)} My Analytics`},
+        {key:'tasks',     label:`${emojiIcon('✅',16)} Tasks`},
+        {key:'activity',  label:`${emojiIcon('🕘',16)} Recent Activity`} ];
   const initial = window.initialSubtab(partner ? 'account' : 'id');
   const depts = (Array.isArray(u.departments) && u.departments.length ? u.departments
                  : u.department ? [u.department] : []).join(', ');
@@ -2768,11 +2800,11 @@ window.renderPersonalAnalytics = async function(host, uid) {
     </div>
     ${hist.length === 0 ? '' : `
     <div class="card" style="margin-top:14px">
-      <div class="card-header"><h3>💵 Net Pay — last ${hist.length} month${hist.length === 1 ? '' : 's'}</h3></div>
+      <div class="card-header"><h3>${emojiIcon('💵',20)} Net Pay — last ${hist.length} month${hist.length === 1 ? '' : 's'}</h3></div>
       <div class="card-body"><div class="chart-wrap"><canvas id="mp-pay-trend"></canvas></div></div>
     </div>`}
     <div class="card" style="margin-top:14px">
-      <div class="card-header"><h3>📝 Performance Evaluation</h3></div>
+      <div class="card-header"><h3>${emojiIcon('📝',20)} Performance Evaluation</h3></div>
       <div class="card-body">
         <div class="profile-info-row${(presGrade == null && !evalData.presidentImprovements) ? ' no-border' : ''}">
           <span class="pir-label">Self Grade</span>
@@ -2818,8 +2850,8 @@ window.renderMyProfileTasksList = async function(host, uid) {
   const DONE = ['done', 'approved', 'archived'];
   const todayStr = window.bizDate();
   const STATUS_EMOJI = {
-    backlog: '📥', brainstorm: '💭', 'in-progress': '🔧', submitted: '📤', review: '👀',
-    returned: '↩️', approved: '✅', done: '✅', 'on-hold': '⏸️', archived: '🗄️'
+    backlog: `${emojiIcon('📥',16)}`, brainstorm: `${emojiIcon('💭',16)}`, 'in-progress': `${emojiIcon('🔧',16)}`, submitted: `${emojiIcon('📤',16)}`, review: `${emojiIcon('👀',16)}`,
+    returned: `↩️`, approved: `${emojiIcon('✅',16)}`, done: `${emojiIcon('✅',16)}`, 'on-hold': `${emojiIcon('⏸️',16)}`, archived: `${emojiIcon('🗄️',16)}`
   };
   const tasks = snap.docs.map(d => ({ id: d.id, ...d.data() }))
     .sort((a, b) => {
@@ -2835,16 +2867,16 @@ window.renderMyProfileTasksList = async function(host, uid) {
   host.innerHTML = `
     <div class="card">
       <div class="card-header">
-        <h3>✅ My Tasks</h3>
+        <h3>${emojiIcon('✅',20)} My Tasks</h3>
         <button class="btn-primary btn-sm" onclick="navigateTo('tasks')">Open full Tasks →</button>
       </div>
       <div class="card-body" style="padding:0">
         ${!tasks.length
-          ? '<div class="empty-state" style="padding:20px"><div class="empty-icon">✅</div><p>No tasks assigned</p></div>'
+          ? `<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('✅',44)}</div><p>No tasks assigned</p></div>`
           : tasks.map(t => {
               const isOverdue = t.dueDate && t.dueDate < todayStr && !DONE.includes(t.status);
               return `<div class="task-feed-item mp-task-row ${isOverdue ? 'task-overdue' : ''}" data-id="${escHtml(t.id)}">
-                <span style="font-size:16px;flex-shrink:0">${STATUS_EMOJI[t.status] || '📌'}</span>
+                <span style="font-size:16px;flex-shrink:0">${STATUS_EMOJI[t.status] || `${emojiIcon('📌',16)}`}</span>
                 <div style="flex:1;min-width:0">
                   <div class="task-feed-title">${escHtml(t.title || 'Untitled')}</div>
                   ${t.dueDate ? `<div class="task-feed-meta" style="color:${isOverdue ? 'var(--danger)' : 'var(--text-muted)'}">${isOverdue ? 'Overdue' : 'Due'} ${escHtml(t.dueDate)}</div>` : ''}
@@ -2947,7 +2979,7 @@ window.renderRecentActivity = async function(host, uid) {
   const feed = events.filter(e => e.ts > 0).sort((a, b) => b.ts - a.ts).slice(0, 60);
 
   host.innerHTML = !feed.length
-    ? '<div class="empty-state" style="padding:24px"><div class="empty-icon">🕘</div><p>No recent activity yet</p></div>'
+    ? `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🕘',44)}</div><p>No recent activity yet</p></div>`
     : `<div class="card"><div class="card-body" style="padding:0">
         ${feed.map(e => `
           <div class="notif-item" style="cursor:default">

@@ -94,7 +94,7 @@ window.Notifs = (() => {
   function _renderIntoList(list, items, uid) {
     if (!list) return;
     if (items.length === 0) {
-      list.innerHTML = '<div class="empty-state" style="padding:30px"><div class="empty-icon">🔔</div><p>No notifications</p></div>';
+      list.innerHTML = `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('🔔',44)}</div><p>No notifications</p></div>`;
       _updatePanelHint(0, 0);
       return;
     }
@@ -110,6 +110,16 @@ window.Notifs = (() => {
     // twice. Strip a leading emoji from the title (the emoji column shows it),
     // and fall back to that emoji as the icon when none was set.
     const LEAD_EMOJI = /^[\p{Extended_Pictographic}️‍♀♂]+\s*/u;
+    // v12 WS42 Phase 23 — notification inbox icon column becomes a colored
+    // icon-tile keyed off the notification `type` (falls back to a neutral tile
+    // for unrecognized/legacy types instead of a bare emoji glyph).
+    const NOTIF_TYPE_COLOR = {
+      task_assigned:'#3B5BDB', task_status:'#3B5BDB', task_message:'#1C7ED6', task_comment:'#1C7ED6',
+      chat_message:'#0866FF', cash_advance:'#F76707', ca_approved:'#F76707',
+      att_extension_approved:'#0CA678', att_extension_denied:'#D92D20', attendance:'#0CA678',
+      post:'#D6336C', post_approval:'#D6336C', memo:'#7048E8', approval_result:'#2F9E44',
+      payroll:'#2F9E44', kpi_grade:'#E64980', self_assessment:'#E64980', drawing_for_review:'#7048E8'
+    };
     list.innerHTML = items.map(n => {
       const nav = isNavigable(n);
       const hasActions = !n.read || nav;
@@ -117,10 +127,12 @@ window.Notifs = (() => {
       const lead = (rawTitle.match(LEAD_EMOJI) || [''])[0].trim();
       const titleText = rawTitle.replace(LEAD_EMOJI, '').trim() || rawTitle;
       const icon = n.icon || lead || 'bell';
+      const tileIcon = window.LUCIDE_EMOJI_MAP[icon] || (/^[a-z0-9-]+$/.test(icon) ? icon : 'bell');
+      const tileColor = NOTIF_TYPE_COLOR[n.type] || 'var(--primary)';
       return `
       <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${escHtml(n.id)}" data-type="${escHtml(n.type||'')}" data-task-id="${escHtml(n.taskId||'')}" data-chat-id="${escHtml(n.chatId||'')}">
         <div class="notif-item-main">
-          <div class="notif-item-emoji">${window.emojiIcon(icon, 20)}</div>
+          <div class="notif-item-emoji">${window.iconTile(tileIcon, tileColor, window.lightenHex(tileColor,18), 32)}</div>
           <div class="notif-item-text">
             <div class="notif-item-title">${escHtml(titleText)}</div>
             <div class="notif-item-body">${escHtml(n.body || '')}</div>
@@ -255,7 +267,7 @@ window.Notifs = (() => {
   }
 
   // ── Send notification ─────────────────────────
-  async function send(targetUid, { title, body, icon = '🔔', type = 'general', link = null, dedupKey = null, taskId = null, chatId = null } = {}) {
+  async function send(targetUid, { title, body, icon = `${emojiIcon('🔔',16)}`, type = 'general', link = null, dedupKey = null, taskId = null, chatId = null } = {}) {
     // If a dedupKey is provided, skip if a notif with that key already exists today
     if (dedupKey) {
       // Single-field query — no composite index required
@@ -404,18 +416,18 @@ window.Notifs = (() => {
         animation:slideUp .28s cubic-bezier(.22,.68,0,1.2);
       ">
         <div style="text-align:center;margin-bottom:20px">
-          <div style="font-size:44px;margin-bottom:10px">🔔</div>
+          <div style="font-size:44px;margin-bottom:10px">${emojiIcon('🔔',44)}</div>
           <div style="font-size:18px;font-weight:800;color:var(--text,#e8eaf0);margin-bottom:8px">Allow Notifications</div>
           <div style="font-size:13px;color:var(--text-muted,#8a9bc0);line-height:1.6">
             Please allow notifications so you can receive alerts for:
           </div>
           <div style="margin:14px 0;display:flex;flex-direction:column;gap:8px;text-align:left">
             ${[
-              ['✅','Task assignments & status updates'],
-              ['💬','New messages & comments'],
-              ['📋','Self-assessment & payroll reminders'],
-              ['⏰','Attendance & deadline alerts'],
-              ['💸','Cash advance approvals'],
+              [`${emojiIcon('✅',16)}`,'Task assignments & status updates'],
+              [`${emojiIcon('💬',16)}`,'New messages & comments'],
+              [`${emojiIcon('📋',16)}`,'Self-assessment & payroll reminders'],
+              [`${emojiIcon('⏰',16)}`,'Attendance & deadline alerts'],
+              [`${emojiIcon('💸',16)}`,'Cash advance approvals'],
             ].map(([icon,text])=>`
               <div style="display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text,#e8eaf0)">
                 <span style="font-size:16px;flex-shrink:0">${icon}</span>${text}
@@ -426,7 +438,7 @@ window.Notifs = (() => {
           width:100%;padding:14px;background:var(--primary-light,#3d5afe);color:#fff;
           border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;
           margin-bottom:10px;letter-spacing:.02em;
-        ">🔔 Allow Notifications</button>
+        ">${emojiIcon('🔔',16)} Allow Notifications</button>
         <button id="push-deny-btn" style="
           width:100%;padding:11px;background:transparent;color:var(--text-muted,#8a9bc0);
           border:1.5px solid var(--border,#2a3a52);border-radius:12px;font-size:13px;cursor:pointer;

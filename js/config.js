@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.41';
+window.APP_VERSION = '12.0.42';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -134,70 +134,131 @@ window.FCM_CONFIG = { VAPID_KEY: 'BOA1XyfiU9FmeTyy-4XqRD6-JOh_vNyqHwbwhiBkS2gTyU
 window.AUTO_LOGOUT_MS = 10 * 24 * 60 * 60 * 1000;
 
 // ── Department Definitions ───────────────────────
+// v12 WS42 Phase 21 — harmonized modern color set (keeps each dept's hue identity
+// while normalizing saturation/lightness so the icon-tile gradients read as one
+// coherent system instead of the old ad-hoc material-design swatches).
 window.DEPARTMENTS = {
   'Admin': {
-    key: 'Admin', icon: '🏢', lucideIcon: 'building-2', color: '#1a237e',
+    key: 'Admin', icon: '🏢', lucideIcon: 'building-2', color: '#3B5BDB',
     subtabs: ['Policies', 'HR Documents', 'Authorization'], navOrder: 1
   },
   'Finance': {
-    key: 'Finance', icon: '💰', lucideIcon: 'wallet', color: '#1b5e20',
+    key: 'Finance', icon: '💰', lucideIcon: 'wallet', color: '#2F9E44',
     subtabs: ['Overview', 'Accounting', 'Purchases', 'SSS / Gov'], navOrder: 2
   },
   'HR': {
-    key: 'HR', icon: '👥', lucideIcon: 'users', color: '#ad1457',
+    key: 'HR', icon: '👥', lucideIcon: 'users', color: '#E64980',
     subtabs: ['People & Roles', 'Payroll', 'Worker Payslips', 'Leave', 'Attendance'], navOrder: 2
   },
   'Sales': {
-    key: 'Sales', icon: '🤝', lucideIcon: 'handshake', color: '#e65100',
+    key: 'Sales', icon: '🤝', lucideIcon: 'handshake', color: '#F76707',
     subtabs: ['BK Quotes', 'Quotations', 'Clients', 'Work Plans', 'Proposals', 'SOP'], navOrder: 3
   },
   'Marketing': {
-    key: 'Marketing', icon: '📢', lucideIcon: 'megaphone', color: '#880e4f',
+    key: 'Marketing', icon: '📢', lucideIcon: 'megaphone', color: '#D6336C',
     subtabs: ['Campaigns', 'Leads', 'Promos', 'Insights', 'Advertising', 'Marketing Designs',
               'Plan', 'Strategy', 'Budgeting', 'Proposals', 'Tasks'], navOrder: 4
   },
   'Government Biddings': {
-    key: 'Government Biddings', icon: '🏛️', lucideIcon: 'landmark', color: '#004d40',
+    key: 'Government Biddings', icon: '🏛️', lucideIcon: 'landmark', color: '#0CA678',
     subtabs: ['PhilGEPS', 'Active Bids', 'Archive'], navOrder: 5
   },
   'IT': {
-    key: 'IT', icon: '💻', lucideIcon: 'laptop', color: '#0d47a1',
+    key: 'IT', icon: '💻', lucideIcon: 'laptop', color: '#1C7ED6',
     subtabs: ['Overview', 'IT Tickets', 'Assets', 'Software', 'Access Control', 'Network', 'Tasks'], navOrder: 6
   },
   'Design': {
-    key: 'Design', icon: '🎨', lucideIcon: 'palette', color: '#4a148c',
+    key: 'Design', icon: '🎨', lucideIcon: 'palette', color: '#7048E8',
     subtabs: ['Projects', 'Drawings', 'Clients', 'Product Designs', 'References', 'Tasks'], navOrder: 6
   },
   'Production': {
-    key: 'Production', icon: '🏭', lucideIcon: 'factory', color: '#5d4037',
+    key: 'Production', icon: '🏭', lucideIcon: 'factory', color: '#A05A2C',
     subtabs: ['Orders', 'Materials', 'Tasks', 'Files'], navOrder: 7
   },
   'Purchasing': {
-    key: 'Purchasing', icon: '🛒', lucideIcon: 'shopping-cart', color: '#00695c',
+    key: 'Purchasing', icon: '🛒', lucideIcon: 'shopping-cart', color: '#099268',
     subtabs: ['Request for Quotation', 'Purchase Requests', 'Tasks'], navOrder: 8
   },
   'Brilliant Steel': {
-    key: 'Brilliant Steel', icon: '⚙️', lucideIcon: 'settings', color: '#37474f',
+    key: 'Brilliant Steel', icon: '⚙️', lucideIcon: 'settings', color: '#495057',
     subtabs: ['Dashboard', 'Quote Builder', 'Quotations Summary', 'Client Data'],
     navOrder: 7, isSeparate: true
   },
   'Partners': {
-    key: 'Partners', icon: '🤝', lucideIcon: 'handshake', color: '#0a84ff',
+    key: 'Partners', icon: '🤝', lucideIcon: 'handshake', color: '#1971C2',
     subtabs: ['Overview', 'Tasks', 'Quotes', 'Activity'],
     navOrder: 8, isPartnerDept: true
   }
 };
 
+// ── v12 WS42 Phase 21 — BI icon-tile system ──────────────────────────────
+// Small hex-lighten helper (used once at load to precompute each dept's
+// duotone gradient — never recomputed at render time).
+window.lightenHex = function(hex, pct){
+  const h = (hex||'#888888').replace('#','');
+  const full = h.length===3 ? h.split('').map(c=>c+c).join('') : h;
+  const num = parseInt(full,16);
+  if (isNaN(num)) return hex;
+  const r = (num>>16)&255, g = (num>>8)&255, b = num&255;
+  const lift = (c) => Math.round(c + (255-c)*(pct/100));
+  const toHex = (c) => c.toString(16).padStart(2,'0');
+  return `#${toHex(lift(r))}${toHex(lift(g))}${toHex(lift(b))}`;
+};
+// Precompute a `gradient` (color → lightened color, ~18%) for every department —
+// this is the "unique to BI" duotone used by deptIconTile below.
+Object.keys(window.DEPARTMENTS).forEach(k => {
+  const cfg = window.DEPARTMENTS[k];
+  cfg.gradient = `linear-gradient(135deg, ${cfg.color}, ${window.lightenHex(cfg.color, 18)})`;
+});
+
+// Generic rounded-squircle duotone icon tile: any Lucide icon + a 2-color gradient.
+// size: 28 | 36 | 44 (px). Returns a self-contained <span> — call lucide.createIcons()
+// after injecting into the DOM (same rule as emojiIcon()).
+window.iconTile = function(lucideName, colorA, colorB, size){
+  const s = size || 36;
+  const grad = colorB ? `linear-gradient(135deg, ${colorA}, ${colorB})` : (colorA || 'var(--primary)');
+  const r = Math.round(s * 0.32); // --r-sm-ish proportion, squircle feel at any size
+  const strokeW = s >= 40 ? 2.25 : 2;
+  const iconSize = Math.round(s * 0.56);
+  return `<span class="bi-icon-tile" style="width:${s}px;height:${s}px;min-width:${s}px;border-radius:${r}px;background:${grad}">` +
+    `<i data-lucide="${lucideName||'square'}" style="width:${iconSize}px;height:${iconSize}px;stroke:#fff;stroke-width:${strokeW}"></i></span>`;
+};
+// Department icon tile — resolves a dept key (string) OR an already-fetched
+// DEPARTMENTS[...] config object, using its precomputed gradient + lucideIcon.
+window.deptIconTile = function(deptKeyOrObj, size){
+  const cfg = (typeof deptKeyOrObj === 'string') ? window.DEPARTMENTS[deptKeyOrObj] : deptKeyOrObj;
+  if (!cfg) return window.iconTile('folder', 'var(--text-muted)', null, size);
+  const grad = cfg.gradient || `linear-gradient(135deg, ${cfg.color||'#888'}, ${window.lightenHex(cfg.color||'#888',18)})`;
+  const s = size || 36;
+  const r = Math.round(s * 0.32);
+  const strokeW = s >= 40 ? 2.25 : 2;
+  const iconSize = Math.round(s * 0.56);
+  return `<span class="bi-icon-tile" style="width:${s}px;height:${s}px;min-width:${s}px;border-radius:${r}px;background:${grad}">` +
+    `<i data-lucide="${cfg.lucideIcon||'folder'}" style="width:${iconSize}px;height:${iconSize}px;stroke:#fff;stroke-width:${strokeW}"></i></span>`;
+};
+
 // ── Emoji → Lucide icon-name map (UI chrome). Extend as new glyphs appear. ──
 window.LUCIDE_EMOJI_MAP = {
-  '✅':'check-circle','✓':'check','☑':'check-square','❌':'x-circle','✗':'x','⚠':'alert-triangle','⚠️':'alert-triangle',
+  '✅':'check-circle','✓':'check','☑':'check-square','❌':'x-circle','✗':'x','✕':'x','✖':'x','✖️':'x','⚠':'alert-triangle','⚠️':'alert-triangle',
   '📋':'clipboard-list','🗑':'trash-2','🗑️':'trash-2','📄':'file-text','🧾':'receipt','📊':'bar-chart-3','📈':'trending-up','📉':'trending-down',
-  '📅':'calendar','🕐':'clock','⏰':'alarm-clock','🌅':'sunrise','📦':'package','💸':'banknote','💰':'wallet','💵':'banknote',
-  '🔔':'bell','🔒':'lock','🔓':'unlock','🔑':'key','⚙️':'settings','⚙':'settings','🔧':'wrench','🔍':'search','➕':'plus','➖':'minus',
-  '✏️':'pencil','✏':'pencil','📝':'file-pen-line','📌':'pin','📎':'paperclip','🏢':'building-2','🏭':'factory','🏛️':'landmark','🏛':'landmark',
-  '👥':'users','👤':'user','🤝':'handshake','📢':'megaphone','💻':'laptop','🎨':'palette','🛒':'shopping-cart','📁':'folder','📂':'folder-open',
-  '🚀':'rocket','⭐':'star','🌟':'star','❓':'help-circle','ℹ️':'info','💡':'lightbulb','🎯':'target','🔗':'link','📧':'mail','📞':'phone',
-  '🌴':'palm-tree','📖':'book-open','🖨️':'printer','⬇️':'download','⬆️':'upload','🔄':'refresh-cw','▶️':'play','⏸️':'pause','🏆':'trophy','🎁':'gift'
+  '📅':'calendar','🗓':'calendar','🗓️':'calendar','🕐':'clock','🕘':'clock','🕓':'clock','⏰':'alarm-clock','⏱':'timer','⏱️':'timer','⌛':'hourglass',
+  '🌅':'sunrise','📦':'package','💸':'banknote','💰':'wallet','💵':'banknote','💳':'credit-card','🏦':'landmark',
+  '🔔':'bell','🔒':'lock','🔓':'unlock','🔏':'lock','🔑':'key','⚙️':'settings','⚙':'settings','🔧':'wrench','🛠':'wrench','🛠️':'wrench','🩹':'wrench',
+  '🔍':'search','🔎':'search','➕':'plus','➖':'minus',
+  '✏️':'pencil','✏':'pencil','✎':'pencil','📝':'file-pen-line','📌':'pin','📎':'paperclip','🏢':'building-2','🏭':'factory','🏛️':'landmark','🏛':'landmark',
+  '👥':'users','👤':'user','👁':'eye','👀':'eye','🤝':'handshake','📢':'megaphone','💻':'laptop','🎨':'palette','🛒':'shopping-cart','📁':'folder','📂':'folder-open',
+  '🗂':'folder-open','🗂️':'folder-open','🗄':'archive','🗄️':'archive',
+  '🚀':'rocket','⭐':'star','🌟':'star','❓':'help-circle','ℹ️':'info','💡':'lightbulb','🎯':'target','🔗':'link','📧':'mail','📩':'mail','📭':'inbox','📞':'phone',
+  '🌴':'palm-tree','📖':'book-open','📚':'book-open','📒':'book','📕':'book','🖨️':'printer','🖨':'printer','⬇️':'download','⬇':'download','⬆️':'upload','⬆':'upload',
+  '📥':'download','📤':'upload','🔄':'refresh-cw','🔁':'repeat','🔀':'shuffle','▶️':'play','⏸️':'pause','🏆':'trophy','🥇':'award','🥈':'award','🥉':'award','🎁':'gift',
+  '👷':'hard-hat','🏗':'construction','🏗️':'construction','🧭':'compass','📐':'ruler','📍':'map-pin','🚨':'siren','🖥️':'monitor','🖥':'monitor','📱':'smartphone',
+  '🔲':'square','🟡':'circle','🟠':'circle','🔴':'circle','🟢':'circle','🔵':'circle','🔖':'bookmark','🔥':'flame','♻️':'recycle','🎌':'flag','🎉':'party-popper',
+  '✨':'sparkles','✂️':'scissors','🍽️':'utensils','⚡':'zap','🧊':'box','📑':'files','💤':'moon','😴':'moon','🏠':'home','🌱':'sprout','🤒':'thermometer',
+  '🤷':'help-circle','💭':'message-circle','🖼':'image','🖼️':'image','📇':'id-card','💼':'briefcase','🧮':'calculator','🎫':'ticket','📡':'wifi','💾':'save',
+  '🌐':'globe','↩':'undo-2','↩️':'undo-2','↻':'refresh-cw','↺':'refresh-cw',
+  '📣':'megaphone','🖊':'pen-line','💬':'message-circle','✉️':'mail','✉':'mail','⏳':'hourglass',
+  '🪪':'id-card','🏷':'tag','📷':'camera','⎘':'copy','🙋':'hand','🚚':'truck','🔬':'microscope',
+  '📜':'scroll-text','👋':'hand','ℹ':'info'
 };
 // Render helper: emoji OR a Lucide name -> Lucide <i>. Falls back to the raw emoji if unmapped.
 // size in px (optional). ALWAYS follow an innerHTML write that uses this with lucide.createIcons(...).
@@ -208,6 +269,9 @@ window.emojiIcon = function(glyph, size){
   const s = size ? ` style=\"width:${size}px;height:${size}px\"` : '';
   return `<i data-lucide=\"${name}\"${s}></i>`;
 };
+// Back-compat alias — the WS42 spec refers to this helper as lucideIconHtml();
+// keep both names pointing at the same implementation so either call-site works.
+window.lucideIconHtml = window.emojiIcon;
 
 // ── Role Definitions ─────────────────────────────
 // `secretary` (Corporate Secretary) is an admin-portal oversight role: manager-level
