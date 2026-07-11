@@ -367,7 +367,7 @@ body::after { content: none; }
 /* ── Buttons ── WS42 Phase 9: solid --primary/--on-primary in Light/Dark; Astral keeps gradient */
 .btn-primary {
   position: relative; overflow: hidden;
-  background: var(--primary);
+  background: var(--primary-fill, var(--primary));
   color: var(--on-primary); border: none;
   border-radius: var(--r-sm);
   min-height: 36px;
@@ -620,7 +620,7 @@ html.theme-astral .login-logo-wrap::before {
 html.theme-astral .login-logo-img { border-radius: 16px; }
 .login-logo-fallback {
   width: 100%; height: 100%;
-  background: var(--primary);
+  background: var(--primary-fill, var(--primary));
   color: var(--on-primary); border-radius: 50%;
   font-size: var(--fs-4xl); font-weight: 800;
   display: flex; align-items: center; justify-content: center; margin: 0 auto;
@@ -1970,7 +1970,7 @@ html.theme-astral .subtab-btn.active { animation: gradRun 5s ease infinite; will
   font-size: var(--fs-xs); font-weight: 700; line-height: 1;
   background: var(--surface-3); color: var(--text-muted);
 }
-.chip-tab.active .chip-count { background: var(--primary); color: var(--on-primary); }
+.chip-tab.active .chip-count { background: var(--primary-fill, var(--primary)); color: var(--on-primary); }
 .chip-count.on { background: var(--danger, #e5484d); color: #fff; }
 .chip-tab.active .chip-count.on { background: var(--danger, #e5484d); color: #fff; }
 @media (pointer:coarse){ .chip-tab { min-height: 38px; } }
@@ -2361,7 +2361,7 @@ html.theme-astral .progress-bar-fill {
 #mini-cal th { padding: 5px; text-align: center; color: var(--text-muted); font-size: var(--fs-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
 #mini-cal td { padding: 5px; text-align: center; border-radius: 6px; cursor: default; color: var(--text-2); transition: background var(--t1); }
 #mini-cal td.today {
-  background: var(--primary);
+  background: var(--primary-fill, var(--primary));
   color: var(--on-primary); font-weight: 700; border-radius: 50%;
   box-shadow: var(--sh-pink);
 }
@@ -2598,6 +2598,7 @@ html.theme-dark {
   --text-2:          rgba(228,230,235,0.72);
   --text-muted:      rgba(228,230,235,0.45);
   --primary:         #4599FF;
+  --primary-fill:    #0866FF;
   --primary-soft:    rgba(69,153,255,0.14);
   --on-primary:      #FFFFFF;
   --success:         #31A24C;
@@ -4088,7 +4089,7 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 .ms-input:focus { box-shadow: 0 0 0 3px var(--primary-soft); }
 .ms-send-btn {
   width: 36px; height: 36px; border-radius: 50%;
-  background: var(--primary); color: var(--on-primary, #fff); border: none;
+  background: var(--primary-fill, var(--primary)); color: var(--on-primary, #fff); border: none;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; flex-shrink: 0; transition: background .15s, transform .1s;
 }
