@@ -1926,12 +1926,7 @@ html.light .id-card--calling .idc-brand, html.theme-pink .id-card--calling .idc-
   backdrop-filter: blur(20px);
 }
 .quote-sheet h3 { font-size: 17px; font-weight: 800; color: var(--text); margin-bottom: 18px; display: flex; align-items: center; gap: 8px; }
-.line-items-header { display: grid; grid-template-columns: 3fr 70px 100px 36px; gap: 8px; font-size: var(--fs-xs); font-weight: 700; color: var(--text-muted); text-transform: uppercase; padding: 0 4px; margin-bottom: 8px; }
-.line-item-row { display: grid; grid-template-columns: 3fr 70px 100px 36px; gap: 8px; margin-bottom: 6px; align-items: center; }
-.line-item-row input { padding: 8px 10px; border: 1.5px solid var(--border); border-radius: var(--r-sm); font-size: var(--fs-md); outline: none; width: 100%; background: var(--s1); color: var(--text); transition: border-color var(--t2); }
-.line-item-row input:focus { border-color: var(--pink); }
 .quote-subtotal { display: flex; justify-content: flex-end; gap: 16px; padding: 12px 0; border-top: 1px solid var(--border); margin-top: 8px; font-size: var(--fs-base); color: var(--text); }
-.quote-total { font-size: var(--fs-2xl); font-weight: 800; color: var(--gold); text-align: right; padding: 10px 0; border-top: 1px solid var(--border-gold); letter-spacing: -0.3px; }
 .quote-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; flex-wrap: wrap; }
 
 .approval-request-bar {
@@ -2238,8 +2233,6 @@ html.light .id-card--calling .idc-brand, html.theme-pink .id-card--calling .idc-
   .dashboard-grid { grid-template-columns: 1fr; }
   .kpi-row { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .form-row { grid-template-columns: 1fr; }
-  .line-item-row     { grid-template-columns: 2fr 55px 80px 32px; }
-  .line-items-header { grid-template-columns: 2fr 55px 80px 32px; }
   .topbar-brand-wrap { display: none; }
   /* Bell navigates to page on mobile — panel/backdrop never show */
   .notif-panel, .notif-backdrop { display: none !important; }
@@ -3141,11 +3134,6 @@ html.light .team-member-card:hover, html.theme-pink .team-member-card:hover, htm
 /* ── Payroll table photo ────────────────────── */
 .payroll-photo { width:32px; height:32px; border-radius:50%; object-fit:cover; }
 
-
-/* ── BK Quote Builder ───────────────────────────── */
-.bk-line-row input[type="text"],
-.bk-line-row input[type="number"],
-.bk-line-row select { box-sizing: border-box; }
 
 /* ── Stat cards (quotations summary) ──────────────── */
 .stat-card {

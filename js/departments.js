@@ -171,6 +171,17 @@ window.Clients = (function () {
   // indexed nameKey query). Never touches stage/followUpDate on existing docs.
   // Returns the clientId (the FK the bridge stamps onto the quote) or null.
   async function upsertFromQuote(q) {
+    // A builder-picked clientId is authoritative — update that doc directly and
+    // skip the nameKey lookup (closes the typo-duplicate path, v12 WS31 Spec 2).
+    if (q.clientId) {
+      try {
+        await db.collection('clients').doc(q.clientId).set({
+          lastQuoteNumber: q.quoteNumber || '', lastQuoteTotal: q.total || 0,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
+        return q.clientId;
+      } catch (_) { /* fall through to nameKey path */ }
+    }
     const name = (q.clientName || '').trim(); if (!name) return null;
     const key = nameKey(name), brand = (q.company === 'BK') ? 'sales' : 'bs';
     try {
@@ -6816,336 +6827,6 @@ async function salesSopSave(container) {
   }
 }
 
-// ── BK Quote List ────────────────────────────────
-function renderBKQuoteList(container, currentUser, currentRole) {
-  const isPrivileged = ['president','manager','finance'].includes(currentRole);
-  container.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-      <div id="bk-quote-stats" style="font-size:13px;color:var(--text-muted)"></div>
-      <button class="btn-primary btn-sm" id="new-bk-quote-btn">+ New BK Quote</button>
-    </div>
-    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-      <select id="bk-filter-status" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
-        <option value="">All Status</option>
-        <option value="draft">Draft</option>
-        <option value="sent">Sent</option>
-        <option value="accepted">Accepted</option>
-        <option value="rejected">Rejected</option>
-      </select>
-    </div>
-    <div id="bk-quote-list"><div class="loading-placeholder">Loading quotes…</div></div>
-  `;
-
-  const loadBKQuotes = async () => {
-    const wrap = document.getElementById('bk-quote-list');
-    const filterStatus = document.getElementById('bk-filter-status')?.value || '';
-    let q = db.collection('bk_quotes').orderBy('createdAt','desc');
-    if (!isPrivileged) q = q.where('createdBy','==',currentUser.uid);
-    const snap = await q.get().catch(()=>({docs:[]}));
-    let quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
-    if (filterStatus) quotes = quotes.filter(q=>q.status===filterStatus);
-
-    const statsEl = document.getElementById('bk-quote-stats');
-    if (statsEl) {
-      const total = quotes.reduce((s,q)=>s+(q.total||0),0);
-      const accepted = quotes.filter(q=>q.status==='accepted').length;
-      statsEl.textContent = `${quotes.length} quote${quotes.length!==1?'s':''} · ₱${fmt(total)} · ${accepted} accepted`;
-    }
-
-    if (!quotes.length) {
-      wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">🍽️</div><h4>No BK quotes yet</h4><p>Create your first Barro Kitchens quote</p></div>`;
-      return;
-    }
-    wrap.innerHTML = `<div class="item-list">${quotes.map(q=>`
-      <div class="item-card bk-quote-item" data-id="${q.id}" style="cursor:pointer">
-        <div class="item-top">
-          <div class="item-title">BK-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${escHtml(q.clientName||'Unnamed')}</div>
-          <span class="badge ${statusBadge(q.status)}">${q.status||'draft'}</span>
-        </div>
-        <div class="item-meta">
-          <span>💰 ₱${fmt(q.total||0)}</span>
-          <span>📦 ${escHtml(q.packageName||q.scope||'Custom')}</span>
-          <span>👤 ${escHtml(q.agentName||'—')}</span>
-          ${q.createdAt?`<span>📅 ${new Date(q.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
-        </div>
-        ${q.notes?`<div style="font-size:12px;color:var(--text-muted);margin-top:6px;white-space:pre-line">${escHtml(q.notes.slice(0,80))}${q.notes.length>80?'…':''}</div>`:''}
-      </div>`).join('')}</div>`;
-
-    wrap.querySelectorAll('.bk-quote-item').forEach(item => {
-      item.addEventListener('click', async () => {
-        const s = await db.collection('bk_quotes').doc(item.dataset.id).get();
-        openBKQuoteEditor(currentUser, currentRole, {id:s.id,...s.data()}, loadBKQuotes);
-      });
-    });
-  };
-
-  loadBKQuotes();
-  document.getElementById('new-bk-quote-btn').onclick = () => openBKQuoteEditor(currentUser, currentRole, null, loadBKQuotes);
-  document.getElementById('bk-filter-status')?.addEventListener('change', loadBKQuotes);
-}
-
-// ── BK Quote Editor ──────────────────────────────
-const BK_CATEGORIES = ['Cabinets & Storage','Countertops','Backsplash & Tiles','Appliances','Hardware & Fixtures','Ventilation / Hood','Lighting','Plumbing','Labor & Installation','Delivery & Logistics','Other'];
-
-function openBKQuoteEditor(currentUser, currentRole, existing, onSave) {
-  let lines = existing ? JSON.parse(JSON.stringify(existing.lineItems||[])) : [{category:'Cabinets & Storage',description:'',qty:1,unit:'set',price:0}];
-
-  const lineHTML = (l,i) => `
-    <div class="bk-line-row" data-i="${i}" style="display:grid;grid-template-columns:130px 1fr 60px 60px 100px 34px;gap:5px;align-items:center;margin-bottom:6px">
-      <select data-i="${i}" data-f="category" style="padding:5px 6px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:12px">
-        ${BK_CATEGORIES.map(c=>`<option ${c===l.category?'selected':''}>${c}</option>`).join('')}
-      </select>
-      <input type="text" value="${escHtml(l.description||'')}" data-i="${i}" data-f="description" placeholder="Item description" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%"/>
-      <input type="number" value="${l.qty||1}" data-i="${i}" data-f="qty" min="1" style="padding:5px 6px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%" inputmode="numeric"/>
-      <select data-i="${i}" data-f="unit" style="padding:5px 4px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:11px">
-        ${['pc','set','lm','sqm','hr','lot','unit'].map(u=>`<option ${u===l.unit?'selected':''}>${u}</option>`).join('')}
-      </select>
-      <input type="number" value="${l.price||0}" data-i="${i}" data-f="price" min="0" step="0.01" placeholder="Unit price" style="padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:13px;width:100%" inputmode="decimal"/>
-      <button class="btn-icon" data-rm="${i}" style="color:#ff453a;font-size:16px;padding:4px 7px">${emojiIcon('trash-2',16)}</button>
-    </div>`;
-
-  openPage(existing ? `Edit Quote BK-${existing.quoteNumber||''}` : '🍽️ New Barro Kitchens Quote', `
-    <div class="form-row">
-      <div class="form-group"><label>Client Name</label><input id="bkq-client" value="${escHtml(existing?.clientName||'')}"/></div>
-      <div class="form-group"><label>Client Contact</label><input id="bkq-contact" value="${escHtml(existing?.clientContact||'')}"/></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Client Address</label><input id="bkq-address" value="${escHtml(existing?.clientAddress||'')}"/></div>
-      <div class="form-group"><label>Scope of Work</label>
-        <select id="bkq-scope" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-          ${['One-Stop-Shop (Design • Fabricate • Install)','Supply & Install','Supply Only','Fabrication Only','Custom Quote'].map(s=>`<option ${s===(existing?.scope||'One-Stop-Shop (Design • Fabricate • Install)')?'selected':''}>${s}</option>`).join('')}
-        </select>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Quote Date</label><input id="bkq-date" type="date" value="${existing?.date||today()}"/></div>
-      <div class="form-group"><label>Valid Until</label><input id="bkq-valid" type="date" value="${existing?.validUntil||''}"/></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group" style="flex:0 0 140px"><label>VAT</label>
-        <select id="bkq-vat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-          <option value="0" ${(existing?.vatRate||0)==0?'selected':''}>No VAT</option>
-          <option value="12" ${(existing?.vatRate||0)==12?'selected':''}>12% VAT</option>
-        </select>
-      </div>
-      <div class="form-group" style="flex:0 0 140px"><label>Discount (₱)</label>
-        <input id="bkq-discount" type="number" min="0" value="${existing?.discount||0}" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)" inputmode="decimal"/>
-      </div>
-      <div class="form-group"><label>Status</label>
-        <select id="bkq-status" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-          <option value="draft" ${(existing?.status||'draft')==='draft'?'selected':''}>Draft</option>
-          <option value="sent" ${existing?.status==='sent'?'selected':''}>Sent to Client</option>
-          <option value="accepted" ${existing?.status==='accepted'?'selected':''}>Accepted</option>
-          <option value="rejected" ${existing?.status==='rejected'?'selected':''}>Rejected</option>
-        </select>
-      </div>
-    </div>
-    <hr class="divider"/>
-    <div class="table-wrap"><div style="min-width:420px">
-    <div style="display:grid;grid-template-columns:130px 1fr 60px 60px 100px 34px;gap:5px;margin-bottom:6px">
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted)">CATEGORY</div>
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted)">DESCRIPTION</div>
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted)">QTY</div>
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted)">UNIT</div>
-      <div style="font-size:11px;font-weight:700;color:var(--text-muted)">UNIT PRICE</div>
-      <div></div>
-    </div>
-    <div id="bkq-lines"></div>
-    </div></div>
-    <button class="btn-secondary btn-sm" id="bkq-add-line" style="margin-top:6px;margin-bottom:8px">+ Add Line</button>
-    <div id="bkq-totals" class="quote-total" style="text-align:right;font-size:13px;line-height:1.8"></div>
-    <hr class="divider"/>
-    <div class="form-group"><label>Notes / Terms</label><textarea id="bkq-notes" rows="3" placeholder="Payment terms, delivery notes, etc.">${escHtml(existing?.notes||'')}</textarea></div>
-  `, `
-    <button class="btn-secondary" id="bkq-print-btn">🖨 Print / PDF</button>
-    <button class="btn-primary" id="bkq-save-btn">💾 Save Quote</button>
-    <button class="btn-secondary" onclick="closeModal()">Cancel</button>
-  `);
-
-  const calcTotals = () => {
-    const sub = lines.reduce((s,l) => s + (parseFloat(l.qty)||0)*(parseFloat(l.price)||0), 0);
-    const disc = parseFloat(document.getElementById('bkq-discount')?.value||0)||0;
-    const vatRate = parseFloat(document.getElementById('bkq-vat')?.value||0)||0;
-    const afterDisc = Math.max(sub - disc, 0);
-    const vat = afterDisc * vatRate / 100;
-    const grand = afterDisc + vat;
-    const el = document.getElementById('bkq-totals');
-    if (el) el.innerHTML = `
-      <span>Subtotal: ₱${fmt(sub)}</span><br>
-      ${disc>0?`<span>Discount: — ₱${fmt(disc)}</span><br>`:''}
-      ${vatRate>0?`<span>VAT (${vatRate}%): ₱${fmt(vat)}</span><br>`:''}
-      <strong style="font-size:16px">Total: ₱${fmt(grand)}</strong>`;
-    return grand;
-  };
-
-  const renderLines = () => {
-    const cont = document.getElementById('bkq-lines');
-    if (!cont) return;
-    cont.innerHTML = lines.map((l,i)=>lineHTML(l,i)).join('');
-    if (window.lucide) lucide.createIcons({ nodes: [cont] });
-    cont.querySelectorAll('input,select').forEach(inp => {
-      inp.addEventListener('input', e => {
-        const i=parseInt(e.target.dataset.i), f=e.target.dataset.f;
-        if (!f||i===undefined||isNaN(i)) return;
-        lines[i][f] = ['qty','price'].includes(f) ? (parseFloat(e.target.value)||0) : e.target.value;
-        calcTotals();
-      });
-    });
-    cont.querySelectorAll('[data-rm]').forEach(btn => {
-      btn.onclick = () => { lines.splice(parseInt(btn.dataset.rm),1); renderLines(); };
-    });
-    calcTotals();
-  };
-
-  renderLines();
-  document.getElementById('bkq-add-line').onclick = () => { lines.push({category:'Cabinets & Storage',description:'',qty:1,unit:'pc',price:0}); renderLines(); };
-  document.getElementById('bkq-discount')?.addEventListener('input', calcTotals);
-  document.getElementById('bkq-vat')?.addEventListener('change', calcTotals);
-
-  document.getElementById('bkq-save-btn').onclick = async () => {
-    const grand = calcTotals();
-    const chosenStatus = document.getElementById('bkq-status')?.value;
-    if (chosenStatus === 'accepted' && existing?.status !== 'accepted'
-        && !(await confirmDialog({message:`Mark this quote as ACCEPTED (₱${fmt(grand)})? This signals the client has agreed.`}))) return;
-    const sub    = lines.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.price)||0),0);
-    const disc   = parseFloat(document.getElementById('bkq-discount')?.value||0)||0;
-    const vatRate= parseFloat(document.getElementById('bkq-vat')?.value||0)||0;
-    const uSnap  = await db.collection('users').doc(currentUser.uid).get();
-    const agentName = uSnap.exists ? uSnap.data().displayName : currentUser.email;
-    const data = {
-      clientName:    document.getElementById('bkq-client').value.trim(),
-      clientContact: document.getElementById('bkq-contact').value.trim(),
-      clientAddress: document.getElementById('bkq-address').value.trim(),
-      scope:         document.getElementById('bkq-scope').value,
-      date:          document.getElementById('bkq-date').value,
-      validUntil:    document.getElementById('bkq-valid').value,
-      vatRate,
-      discount:      disc,
-      subtotal:      sub,
-      total:         grand,
-      status:        document.getElementById('bkq-status').value,
-      notes:         document.getElementById('bkq-notes').value.trim(),
-      lineItems:     lines,
-      agentName,     createdBy: currentUser.uid,
-      brand:         'barro-kitchens',
-      updatedAt:     firebase.firestore.FieldValue.serverTimestamp()
-    };
-    if (existing) {
-      await db.collection('bk_quotes').doc(existing.id).update(data);
-      Notifs.showToast('Quote updated!');
-    } else {
-      // A collection-wide count is only readable by finance/admin (rules); for
-      // other creators (e.g. agents) fall back to a collision-resistant
-      // time-based suffix so the quote still saves instead of silently failing.
-      let seq;
-      try {
-        const count = (await db.collection('bk_quotes').get()).size;
-        seq = String(count+1).padStart(4,'0');
-      } catch(e) {
-        seq = String(Date.now()).slice(-4);
-      }
-      data.quoteNumber = `BK${String(window.bizYear ? window.bizYear() : new Date().getFullYear()).slice(-2)}${seq}`;
-      data.createdAt   = firebase.firestore.FieldValue.serverTimestamp();
-      await db.collection('bk_quotes').add(data);
-      Notifs.showToast('BK Quote saved!');
-    }
-    closeModal();
-    if (onSave) onSave();
-  };
-
-  document.getElementById('bkq-print-btn').onclick = () => printBKQuote(lines, {
-    clientName:    document.getElementById('bkq-client').value,
-    clientContact: document.getElementById('bkq-contact').value,
-    clientAddress: document.getElementById('bkq-address').value,
-    scope:         document.getElementById('bkq-scope').value,
-    date:          document.getElementById('bkq-date').value,
-    validUntil:    document.getElementById('bkq-valid').value,
-    discount:      parseFloat(document.getElementById('bkq-discount')?.value||0),
-    vatRate:       parseFloat(document.getElementById('bkq-vat')?.value||0),
-    notes:         document.getElementById('bkq-notes').value,
-    quoteNumber:   existing?.quoteNumber||'—'
-  });
-}
-
-function printBKQuote(lines, q) {
-  const sub   = lines.reduce((s,l)=>s+(parseFloat(l.qty)||0)*(parseFloat(l.price)||0),0);
-  const disc  = q.discount||0;
-  const vatR  = q.vatRate||0;
-  const after = Math.max(sub-disc,0);
-  const vat   = after*vatR/100;
-  const grand = after+vat;
-  const byCategory = {};
-  lines.forEach(l => { if(!byCategory[l.category]) byCategory[l.category]=[]; byCategory[l.category].push(l); });
-
-  const w = window.open('','_blank');
-  w.document.write(`<!DOCTYPE html><html><head><title>Barro Kitchens — Quote ${escHtml(q.quoteNumber)}</title>
-  <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:'Segoe UI',Arial,sans-serif;padding:36px;color:#222;background:#fff;font-size:13px}
-    .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:16px;border-bottom:2px solid #c8a45a}
-    .brand{font-size:22px;font-weight:900;color:#c8a45a;letter-spacing:-0.5px}
-    .brand-sub{font-size:11px;color:#666;margin-top:2px}
-    .q-info{text-align:right;font-size:12px;color:#555;line-height:1.6}
-    .q-no{font-size:16px;font-weight:800;color:#222}
-    .client-box{background:#f9f7f2;border:1px solid #e8d9b5;border-radius:8px;padding:12px 16px;margin-bottom:20px}
-    .client-label{font-size:10px;font-weight:700;color:#c8a45a;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px}
-    .client-name{font-size:15px;font-weight:700}
-    table{width:100%;border-collapse:collapse;margin-bottom:16px}
-    .cat-header td{background:#f9f7f2;font-size:11px;font-weight:700;color:#c8a45a;text-transform:uppercase;letter-spacing:0.5px;padding:8px 10px;border-top:1px solid #e8d9b5}
-    th{background:#c8a45a;color:#fff;padding:8px 10px;text-align:left;font-size:11px}
-    td{padding:7px 10px;border-bottom:1px solid #f0ebe0;vertical-align:top}
-    .text-right{text-align:right}
-    .totals{width:280px;margin-left:auto;border:1px solid #e8d9b5;border-radius:8px;overflow:hidden}
-    .totals td{padding:6px 14px;border-bottom:1px solid #f0ebe0;font-size:12px}
-    .totals .grand td{background:#c8a45a;color:#fff;font-weight:800;font-size:14px;border:none}
-    .notes{margin-top:20px;font-size:11px;color:#666;border-top:1px solid #eee;padding-top:12px}
-    .footer{margin-top:28px;font-size:10px;color:#aaa;text-align:center;border-top:1px solid #eee;padding-top:10px}
-  </style>
-  </head><body>
-  <div class="header">
-    <div>
-      <div class="brand">🍽️ Barro Kitchens</div>
-      <div class="brand-sub">A Trademark of Barro Industries OPC</div>
-      <div class="brand-sub">One-stop kitchen design & build solution</div>
-    </div>
-    <div class="q-info">
-      <div class="q-no">Quote ${escHtml(q.quoteNumber)}</div>
-      <div>Date: ${escHtml(q.date)}</div>
-      <div>Valid Until: ${escHtml(q.validUntil||'—')}</div>
-      ${q.scope&&q.scope!=='Custom Quote'?`<div>Scope: <strong>${escHtml(q.scope)}</strong></div>`:''}
-    </div>
-  </div>
-  <div class="client-box">
-    <div class="client-label">Quote For</div>
-    <div class="client-name">${escHtml(q.clientName||'—')}</div>
-    ${q.clientContact?`<div style="font-size:12px;margin-top:2px;color:#555">${escHtml(q.clientContact)}</div>`:''}
-    ${q.clientAddress?`<div style="font-size:12px;margin-top:2px;color:#555">📍 ${escHtml(q.clientAddress)}</div>`:''}
-  </div>
-  <table>
-    <thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th class="text-right">Unit Price</th><th class="text-right">Amount</th></tr></thead>
-    <tbody>
-    ${Object.entries(byCategory).map(([cat,catLines])=>`
-      <tr class="cat-header"><td colspan="5">${cat}</td></tr>
-      ${catLines.map(l=>`<tr>
-        <td>${escHtml(l.description||'—')}</td>
-        <td>${l.qty}</td>
-        <td>${escHtml(l.unit||'pc')}</td>
-        <td class="text-right">₱${fmt(l.price)}</td>
-        <td class="text-right">₱${fmt((parseFloat(l.qty)||0)*(parseFloat(l.price)||0))}</td>
-      </tr>`).join('')}
-    `).join('')}
-    </tbody>
-  </table>
-  <table class="totals">
-    <tr><td>Subtotal</td><td class="text-right">₱${fmt(sub)}</td></tr>
-    ${disc>0?`<tr><td>Discount</td><td class="text-right">— ₱${fmt(disc)}</td></tr>`:''}
-    ${vatR>0?`<tr><td>VAT (${vatR}%)</td><td class="text-right">₱${fmt(after*vatR/100)}</td></tr>`:''}
-    <tr class="grand"><td>TOTAL</td><td class="text-right">₱${fmt(grand)}</td></tr>
-  </table>
-  ${q.notes?`<div class="notes"><strong>Notes / Terms:</strong><br>${escHtml(q.notes)}</div>`:''}
-  <div class="footer">Barro Kitchens · Barro Industries OPC · This quotation is valid until ${q.validUntil||'the stated date'}</div>
-  <script>window.print();<\/script></body></html>`);
-}
 
 // ── BK Quotations Summary ────────────────────────
 // Group quotes into revision lineages — base quote number (sans the -Rn suffix)
@@ -7190,6 +6871,11 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
   const acceptedT  = accepted.reduce((s,q)=>s+(q.total||0),0);
   const sent       = activeQuotes.filter(q=>q.status==='sent').length;
   const draft      = activeQuotes.filter(q=>q.status==='draft').length;
+  // v12 WS31 Spec 10 — "filed but no Sales Order yet" staleness, pure client-side
+  // over rows this screen already fetched. Zero new reads.
+  const staleDaysOf = q => (q.status==='filed' && !q.salesOrderId && q.createdAt)
+    ? Math.floor((Date.now() - (q.createdAt.seconds||0)*1000) / 86400000) : 0;
+  const staleCount = activeQuotes.filter(q => staleDaysOf(q) > window.QUOTE_STALE_DAYS).length;
 
   // Single quote card — reused by both the flat list and the by-customer view.
   const quoteCard = (q) => {
@@ -7197,6 +6883,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
     const wonish = !superseded && ['filed','accepted','won','approved'].includes(q.status);
     const canDel = isAdmin || currentRole==='finance' || q.createdBy===currentUser.uid;
     const label  = `BK quote ${q.quoteNumber||q.id.slice(-6).toUpperCase()} (${q.clientName||'Unnamed'})`;
+    const staleDays = staleDaysOf(q);
     return `
       <div class="item-card" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap${superseded?';opacity:.6':''}">
         <div style="flex:1;min-width:160px">
@@ -7205,6 +6892,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
             <span>${escHtml(q.scope||'Custom')}</span>
             <span>${escHtml(q.agentName||'—')}</span>
             ${q.date?`<span>${q.date}</span>`:''}
+            ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px" title="Filed but no Sales Order yet">⚠ ${staleDays}d no SO</span>` : ''}
           </div>
         </div>
         <div style="text-align:right">
@@ -7231,7 +6919,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       <div class="stat-card"><div class="stat-num">${draft}</div><div class="stat-label">Drafts</div></div>
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-      <h4 style="font-weight:700;margin:0">All Quotations</h4>
+      <h4 style="font-weight:700;margin:0">All Quotations${staleCount?` <span class="badge badge-orange" style="font-size:10px;font-weight:700">⚠ ${staleCount} stale</span>`:''}</h4>
       ${window.chipTabs([{key:'list',label:'List'},{key:'customer',label:'By Customer'}],'list',{cls:'bkq-view'})}
     </div>
     <div id="bkq-body"></div>
@@ -7280,6 +6968,35 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
 
   window.bindChipTabs(container.querySelector('.bkq-view'), (key)=>renderBody(key));
   renderBody('list');
+
+  // v12 WS31 — one-time stranding-repair banner (president only). Quotes filed
+  // with "Send to president for review first" on company:'BK' used to be
+  // hardcoded into bs_quotes (the old QUOTE_APPROVAL_REQUESTED bug); surface
+  // any still-stranded docs here with a one-click, idempotent repair.
+  if (currentRole === 'president') {
+    db.collection('bs_quotes').where('company','==','BK').get().then(strandedSnap => {
+      const n = strandedSnap.docs.length;
+      if (!n) return;
+      const bar = document.createElement('div');
+      bar.className = 'alert-banner';
+      bar.style.cssText = 'margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap';
+      bar.innerHTML = `<span>🧭 ${n} Barro Kitchens quote(s) are stranded in the Brilliant Steel collection.</span><button class="btn-primary btn-sm" id="bkq-repair-btn">Repair now</button>`;
+      container.prepend(bar);
+      document.getElementById('bkq-repair-btn').addEventListener('click', async () => {
+        const btn = document.getElementById('bkq-repair-btn');
+        btn.disabled = true; btn.textContent = 'Repairing…';
+        try {
+          const out = await window.migrateStrandedBKQuotes();
+          window.logAudit && window.logAudit('migrate','bk_quotes',null,out);
+          Notifs.showToast(`Moved ${out.moved} quote(s), patched ${out.reqsPatched} approval request(s)`);
+          renderBKQuotationsSummary(container, currentUser, currentRole);
+        } catch (ex) {
+          Notifs.showToast('Repair failed: '+(ex.message||ex.code),'error');
+          btn.disabled = false; btn.textContent = 'Repair now';
+        }
+      });
+    }).catch(()=>{});
+  }
 }
 
 // ── Partner Quotes (read-only window into Brilliant Steel quotes) ──
@@ -7320,89 +7037,6 @@ async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
     </div>`;
 }
 
-// ── BK Package Presets ───────────────────────────
-const BK_PACKAGES = [
-  {
-    name: '🥉 Basic Kitchen Package',
-    desc: 'Standard kitchen setup for small kitchens up to 8 sqm',
-    color: '#cd7f32',
-    items: [
-      {category:'Cabinets & Storage',description:'Base cabinets (melamine board)',qty:1,unit:'set',price:45000},
-      {category:'Cabinets & Storage',description:'Wall cabinets (melamine board)',qty:1,unit:'set',price:30000},
-      {category:'Countertops',description:'Granite countertop 2cm',qty:5,unit:'lm',price:3500},
-      {category:'Hardware & Fixtures',description:'Cabinet handles (stainless)',qty:1,unit:'set',price:4500},
-      {category:'Labor & Installation',description:'Installation & carpentry works',qty:1,unit:'lot',price:25000},
-    ]
-  },
-  {
-    name: '🥈 Standard Kitchen Package',
-    desc: 'Full kitchen for 10-15 sqm, includes sink & hood',
-    color: '#aaa',
-    items: [
-      {category:'Cabinets & Storage',description:'Base cabinets (18mm plywood + PVC)',qty:1,unit:'set',price:75000},
-      {category:'Cabinets & Storage',description:'Wall cabinets + island',qty:1,unit:'set',price:55000},
-      {category:'Countertops',description:'Engineered quartz countertop',qty:7,unit:'lm',price:5500},
-      {category:'Backsplash & Tiles',description:'Subway tile backsplash',qty:8,unit:'sqm',price:2200},
-      {category:'Appliances',description:'Kitchen sink (double bowl SS)',qty:1,unit:'pc',price:8500},
-      {category:'Ventilation / Hood',description:'Chimney range hood 90cm',qty:1,unit:'unit',price:18000},
-      {category:'Hardware & Fixtures',description:'Premium hardware set',qty:1,unit:'set',price:9500},
-      {category:'Labor & Installation',description:'Full installation & leveling',qty:1,unit:'lot',price:40000},
-    ]
-  },
-  {
-    name: '🥇 Premium Kitchen Package',
-    desc: 'High-end kitchen with imported materials, full appliances',
-    color: '#c8a45a',
-    items: [
-      {category:'Cabinets & Storage',description:'Custom solid wood base cabinets',qty:1,unit:'set',price:150000},
-      {category:'Cabinets & Storage',description:'Overhead cabinets + tall pantry',qty:1,unit:'set',price:95000},
-      {category:'Countertops',description:'Calacatta marble countertop',qty:8,unit:'lm',price:12000},
-      {category:'Backsplash & Tiles',description:'Large format porcelain tiles',qty:10,unit:'sqm',price:3800},
-      {category:'Appliances',description:'Farmhouse sink (fireclay)',qty:1,unit:'pc',price:28000},
-      {category:'Appliances',description:'Built-in dishwasher (60cm)',qty:1,unit:'unit',price:45000},
-      {category:'Ventilation / Hood',description:'Island range hood (designer)',qty:1,unit:'unit',price:55000},
-      {category:'Hardware & Fixtures',description:'Soft-close premium hardware',qty:1,unit:'set',price:22000},
-      {category:'Lighting',description:'LED under-cabinet lighting strip',qty:1,unit:'lot',price:12000},
-      {category:'Labor & Installation',description:'Full premium installation',qty:1,unit:'lot',price:80000},
-    ]
-  }
-];
-
-function renderBKPackages(container, currentUser, currentRole) {
-  container.innerHTML = `
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Click any package to create a pre-filled BK quote. You can edit all items after.</p>
-    <div style="display:flex;flex-direction:column;gap:16px">
-      ${BK_PACKAGES.map((pkg,i)=>`
-        <div class="item-card" style="border-left:4px solid ${pkg.color};padding:14px 16px">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
-            <div>
-              <div style="font-weight:700;font-size:15px">${pkg.name}</div>
-              <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${pkg.desc}</div>
-            </div>
-            <button class="btn-primary btn-sm use-pkg-btn" data-pkg="${i}" style="margin-left:12px;white-space:nowrap">Use Package</button>
-          </div>
-          <div style="font-size:12px;color:var(--text-muted)">
-            <strong>Estimated total:</strong> ₱${fmt(pkg.items.reduce((s,l)=>s+l.qty*l.price,0))}
-          </div>
-          <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:4px">
-            ${pkg.items.map(l=>`<span style="background:var(--s2);border:1px solid var(--border);border-radius:6px;padding:2px 8px;font-size:11px">${l.category}</span>`).join('')}
-          </div>
-        </div>`).join('')}
-    </div>
-  `;
-  container.querySelectorAll('.use-pkg-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const pkg = BK_PACKAGES[parseInt(btn.dataset.pkg)];
-      // We need currentUser/currentRole — grab from outer scope
-      openBKQuoteEditor(
-        currentUser,
-        currentRole,
-        { scope: pkg.name.replace(/^[^\s]+ /,''), lineItems: pkg.items.map(i=>({...i})) },
-        () => { Notifs.showToast('Quote created from package!'); }
-      );
-    });
-  });
-}
 
 // ══════════════════════════════════════════════════
 //  DESIGN DEPARTMENT
@@ -9157,606 +8791,6 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
   }
 }
 
-async function renderBSDashboard(container, currentUser, currentRole) {
-  const [snap, projSnap] = await Promise.all([
-    db.collection('bs_quotes').get(),
-    db.collection('job_projects').get().catch(()=>({docs:[]}))
-  ]);
-  const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
-  const total   = quotes.reduce((s,q)=>s+(q.total||0),0);
-  const pending = quotes.filter(q=>q.approvalStatus==='pending_review').length;
-  const approved= quotes.filter(q=>q.approvalStatus==='approved').length;
-  // 50/50 partner earnings, aggregated across ALL shared projects (company-wide view)
-  const shared = projSnap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>p.split&&p.split.isShared&&p.stage!=='cancelled');
-  const partnerShare = (p)=>{ const pct=(p.split&&typeof p.split.partnerPct==='number')?p.split.partnerPct:50; return Math.max(0,(p.contractAmount||0)-(p.capital||0))*(pct/100); };
-  const expected = shared.reduce((s,p)=>s+partnerShare(p),0);
-  const realized = shared.filter(p=>p.stage==='paid').reduce((s,p)=>s+partnerShare(p),0);
-  const pendingShare = Math.max(0, expected-realized);
-  container.innerHTML = `
-    <div class="kpi-row">
-      <div class="kpi-card"><div class="kpi-label">Total Quotes</div><div class="kpi-value">${quotes.length}</div></div>
-      <div class="kpi-card green"><div class="kpi-label">Pipeline Value</div><div class="kpi-value">₱${fmt(total)}</div></div>
-      <div class="kpi-card warn"><div class="kpi-label">Pending Approval</div><div class="kpi-value">${pending}</div></div>
-      <div class="kpi-card accent"><div class="kpi-label">Approved</div><div class="kpi-value">${approved}</div></div>
-    </div>
-    ${shared.length?`<div class="card" style="margin-bottom:14px;border:2px solid var(--primary)">
-      <div class="card-header"><h3>💰 Partner Earnings (50/50 Split)</h3><span style="font-size:11px;color:var(--text-muted)">From sales orders</span></div>
-      <div class="card-body"><div class="kpi-row">
-        <div class="kpi-card accent"><div class="kpi-label">Shared Projects</div><div class="kpi-value">${shared.length}</div></div>
-        <div class="kpi-card green"><div class="kpi-label">Expected ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(expected)}</div></div>
-        <div class="kpi-card"><div class="kpi-label">Realized ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(realized)}</div></div>
-        <div class="kpi-card" style="border-color:var(--warning)"><div class="kpi-label">Pending ₱</div><div class="kpi-value" style="font-size:15px;color:var(--warning)">₱${fmt(pendingShare)}</div></div>
-      </div></div>
-    </div>`:''}
-    <div class="card">
-      <div class="card-header"><h3>Recent Quotes</h3><button class="btn-primary btn-sm" onclick="loadBSContent(window.__bsUser,window.__bsRole,'Quote Builder')">+ New Quote</button></div>
-      <div class="card-body">
-        ${!quotes.length?'<div class="empty-state"><p>No quotes yet</p></div>':
-          `<div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Quote #</th><th>Client</th><th>Total</th><th>Status</th><th>Agent</th></tr></thead>
-            <tbody>${quotes.slice(0,8).map(q=>`<tr>
-              <td><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code></td>
-              <td>${escHtml(q.clientName||'—')}</td>
-              <td>₱${fmt(q.total)}</td>
-              <td><span class="badge ${statusBadge(q.approvalStatus||q.status)}">${q.approvalStatus||q.status||'draft'}</span></td>
-              <td>${escHtml(q.agentName||'—')}</td>
-            </tr>`).join('')}</tbody>
-          </table></div>`}
-      </div>
-    </div>
-  `;
-  window.__bsUser = currentUser;
-  window.__bsRole = currentRole;
-}
-
-// ── Brilliant Steel Quote Builder ─────────────────
-function renderBSQuoteBuilder(container, currentUser, currentRole) {
-  container.innerHTML = `
-  <style>
-  .bs-qb{font-family:var(--font-family,'Segoe UI',system-ui,sans-serif);color:var(--text);}
-  .bs-section{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin-bottom:12px;}
-  .bs-sec-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#37474f;margin-bottom:12px;border-bottom:2px solid #cfd8dc;padding-bottom:7px;}
-  .bs-fg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;}
-  .bs-fg{display:flex;flex-direction:column;gap:3px;}
-  .bs-fg.full{grid-column:1/-1;}
-  .bs-fg label{font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;}
-  .bs-fg input,.bs-fg select,.bs-fg textarea{border:1.5px solid var(--border);border-radius:6px;padding:7px 9px;font-size:13px;width:100%;background:var(--surface);color:var(--text);}
-  .bs-qno-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;}
-  .bs-qno-box{background:#cfd8dc;border-radius:7px;padding:8px 14px;font-size:15px;font-weight:800;color:#1a237e;letter-spacing:.8px;white-space:nowrap;align-self:flex-end;}
-  .bs-add-panel{display:grid;grid-template-columns:2fr 70px 70px 70px 80px 120px auto;gap:8px;align-items:end;background:#eceff1;border-radius:9px;padding:12px 14px;margin-bottom:10px;}
-  @media (max-width:640px){ .bs-add-panel{grid-template-columns:1fr 1fr;} .bs-add-panel>*:first-child{grid-column:1/-1;} }
-  .bs-search-wrap{position:relative;}
-  .bs-search-dropdown{position:absolute;top:calc(100% + 2px);left:0;right:0;background:var(--surface);border:1.5px solid #37474f;border-radius:7px;z-index:400;max-height:260px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.15);display:none;}
-  .bs-search-dropdown.open{display:block;}
-  .bs-sd-group{font-size:10px;font-weight:700;color:#37474f;text-transform:uppercase;letter-spacing:.6px;padding:6px 10px 3px;background:#eceff1;}
-  .bs-sd-item{padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border);}
-  .bs-sd-item:hover{background:#eceff1;}
-  .bs-sd-price{float:right;color:#37474f;font-weight:700;font-size:12px;}
-  .bs-items-table{width:100%;border-collapse:collapse;}
-  .bs-items-table th{background:#37474f;color:white;text-align:left;padding:7px 8px;font-size:11px;font-weight:700;text-transform:uppercase;}
-  .bs-items-table td{padding:8px 8px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle;}
-  .bs-cat-row td{background:#cfd8dc;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#37474f;padding:5px 8px;}
-  .bs-subtotal-row td{background:#e8eaf6;font-weight:700;font-size:12px;color:#1a237e;text-align:right;padding:5px 8px;border-bottom:2px solid #37474f;}
-  .bs-totals-box{display:flex;justify-content:flex-end;margin-top:10px;}
-  .bs-totals-tbl{min-width:290px;}
-  .bs-totals-tbl td{padding:5px 11px;font-size:13px;}
-  .bs-totals-tbl td:last-child{text-align:right;}
-  .bs-totals-tbl tr.grand td{font-weight:700;font-size:16px;border-top:2px solid #37474f;padding-top:9px;}
-  .bs-terms-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
-  .bs-terms-block{background:var(--surface2);border-radius:7px;padding:10px 13px;}
-  .bs-terms-block h4{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#37474f;margin-bottom:5px;}
-  .bs-terms-block p{font-size:12px;color:var(--text);line-height:1.5;}
-  .bs-sig-row{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:14px;}
-  .bs-sig-box{border-top:1.5px solid var(--border);padding-top:10px;text-align:center;}
-  .bs-sig-name{font-weight:700;font-size:14px;}
-  .bs-req-approval{background:#e65100;color:#fff;border:none;border-radius:8px;padding:12px 24px;font-size:15px;font-weight:700;cursor:pointer;width:100%;margin-top:10px;}
-  .bs-req-approval:hover{background:#bf360c;}
-  @media print{
-    .bs-qb .no-print{display:none!important;}
-    .bs-section{box-shadow:none;border:none;border-bottom:1px solid #ddd;margin-bottom:6px;padding:8px 0;border-radius:0;}
-    .bs-qb{padding:0;}
-    .bs-print-header{display:flex!important;justify-content:space-between;align-items:flex-start;margin-bottom:12px;padding-bottom:10px;border-bottom:2.5px solid #37474f;}
-    @page{margin:13mm 11mm 8mm;}
-  }
-  .bs-print-header{display:none;}
-  </style>
-
-  <div class="bs-qb" id="bs-qb-root">
-    <!-- Print Header -->
-    <div class="bs-print-header" id="bs-ph">
-      <div style="display:flex;align-items:flex-start;gap:12px">
-        <img src="icons/barro-industries.png" style="height:50px;flex-shrink:0" onerror="this.style.display='none'"/>
-        <div>
-          <div style="font-size:16pt;font-weight:900;color:#37474f;letter-spacing:.4px">BRILLIANT STEEL</div>
-          <div style="font-size:9pt;color:#555;margin-top:2px">Steel Fabrication &amp; Design</div>
-        </div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:14pt;font-weight:900;color:#37474f;letter-spacing:1px">PRICE QUOTATION</div>
-        <div id="bs-ph-qno" style="font-size:11pt;font-weight:700;color:#333;margin-top:4px"></div>
-        <div id="bs-ph-date" style="font-size:10pt;color:#555;margin-top:2px"></div>
-        <div id="bs-ph-agent" style="font-size:10pt;color:#555;margin-top:1px"></div>
-      </div>
-    </div>
-
-    <!-- Quote Number -->
-    <div class="bs-section no-print">
-      <div class="bs-sec-title">Quote Number</div>
-      <div class="bs-qno-row" id="bs-qno-row">
-        <div class="bs-fg"><label>Co.</label><input value="BS" style="width:55px;font-weight:700;text-align:center;background:#eceff1" readonly/></div>
-        <span style="padding-bottom:9px;font-size:16px;font-weight:700;color:var(--text-muted)">-</span>
-        <div class="bs-fg"><label>Location</label>
-          <select id="bs-qno-loc">
-            <option value="LU">LU — La Union</option><option value="BG">BG — Baguio</option>
-            <option value="ML">ML — Manila</option><option value="SB">SB — Subic</option>
-            <option value="CL">CL — Clark</option><option value="DA">DA — Davao</option>
-            <option value="CB">CB — Cebu</option><option value="IG">IG — Ilocos</option>
-            <option value="OT">OT — Other</option>
-          </select>
-        </div>
-        <span style="padding-bottom:9px;font-size:16px;font-weight:700;color:var(--text-muted)">-</span>
-        <div class="bs-fg"><label>Lead Source</label>
-          <select id="bs-qno-method">
-            <option value="FB">FB — Facebook</option><option value="VB">VB — Viber</option>
-            <option value="OF">OF — In Office</option><option value="RF">RF — Referral</option>
-            <option value="IG">IG — Instagram</option><option value="WB">WB — Website</option>
-            <option value="EM">EM — Email</option><option value="TK">TK — TikTok</option>
-            <option value="EX">EX — Exhibition</option>
-          </select>
-        </div>
-        <span style="padding-bottom:9px;font-size:16px;font-weight:700;color:var(--text-muted)">-</span>
-        <div class="bs-fg"><label>Date</label><input type="date" id="bs-qno-date" style="max-width:165px"/></div>
-        <span style="padding-bottom:9px;font-size:16px;font-weight:700;color:var(--text-muted)">-</span>
-        <div class="bs-fg"><label>Client #</label><input type="number" id="bs-qno-seq" value="1" min="1" max="999" style="max-width:70px;text-align:center" inputmode="numeric"/></div>
-        <span style="padding-bottom:9px;font-size:16px;font-weight:700;color:var(--text-muted)">→</span>
-        <div class="bs-qno-box" id="bs-qno-preview">BS-LU-FB-YYMMDD-001</div>
-      </div>
-      <div style="display:flex;gap:10px;align-items:flex-end;margin-top:10px;flex-wrap:wrap">
-        <div class="bs-fg" style="flex:1;max-width:320px"><label>Quote Number</label>
-          <input type="text" id="bs-quote-no" placeholder="Auto-generated" readonly style="background:var(--surface2)"/>
-        </div>
-        <div class="bs-fg"><label>Salesperson</label><input type="text" id="bs-salesperson" placeholder="Name"/></div>
-        <div class="bs-fg"><label>Project Type</label>
-          <select id="bs-purpose">
-            <option>Fabrication</option><option>Installation</option><option>Repair / Maintenance</option>
-            <option>Custom Design</option><option>Government / Bidding</option><option>Other</option>
-          </select>
-        </div>
-      </div>
-    </div>
-
-    <!-- Client Info -->
-    <div class="bs-section">
-      <div class="bs-sec-title">Client Information</div>
-      <div class="bs-fg-grid">
-        <div class="bs-fg full"><label>Client Name</label><input id="bs-client-name" placeholder="Full name"/></div>
-        <div class="bs-fg full"><label>Company / Business Name</label><input id="bs-client-company" placeholder="Company name (if applicable)"/></div>
-        <div class="bs-fg full"><label>Project Address / Site</label><input id="bs-client-address" placeholder="Full address"/></div>
-        <div class="bs-fg"><label>Phone / Email</label><input id="bs-client-contact" placeholder="Contact details"/></div>
-        <div class="bs-fg"><label>TIN (optional)</label><input id="bs-client-tin" placeholder="Tax identification number"/></div>
-      </div>
-    </div>
-
-    <!-- Add Item -->
-    <div class="bs-section no-print">
-      <div class="bs-sec-title">Add Item</div>
-      <div class="bs-add-panel">
-        <div class="bs-fg">
-          <label>Search Product</label>
-          <div class="bs-search-wrap">
-            <input type="text" id="bs-product-search" placeholder="Type to search…" autocomplete="off"/>
-            <div class="bs-search-dropdown" id="bs-search-dd"></div>
-          </div>
-          <input type="hidden" id="bs-selected-code"/>
-        </div>
-        <div class="bs-fg"><label>W (mm)</label><input type="number" id="bs-dim-w" placeholder="—" inputmode="decimal"/></div>
-        <div class="bs-fg"><label>D (mm)</label><input type="number" id="bs-dim-d" placeholder="—" inputmode="decimal"/></div>
-        <div class="bs-fg"><label>H (mm)</label><input type="number" id="bs-dim-h" placeholder="—" inputmode="decimal"/></div>
-        <div class="bs-fg"><label>Qty</label><input type="number" id="bs-dim-qty" value="1" min="1" inputmode="numeric"/></div>
-        <div class="bs-fg"><label>Unit Price (₱)</label>
-          <input type="number" id="bs-unit-price" placeholder="Auto" style="background:#fffbf0;border-color:#f0d080" inputmode="decimal"/>
-          <div id="bs-price-preview" style="font-size:10px;color:#37474f;font-weight:600;margin-top:2px"></div>
-        </div>
-        <div class="bs-fg"><label>&nbsp;</label><button class="btn-primary" id="bs-add-item-btn">+ Add</button></div>
-      </div>
-      <p style="font-size:11px;color:var(--text-muted)">💡 Leave Unit Price blank for auto-calc from dimensions × base rate, or enter to override.</p>
-    </div>
-
-    <!-- Items Table -->
-    <div class="bs-section">
-      <div class="bs-sec-title" style="display:flex;justify-content:space-between">
-        <span>Quotation Items</span>
-        <span id="bs-item-count" style="font-size:11px;background:#cfd8dc;color:#37474f;padding:2px 8px;border-radius:10px;font-weight:700">0 items</span>
-      </div>
-      <div id="bs-empty-state" style="text-align:center;padding:28px;color:var(--text-muted)">No items added yet.</div>
-      <div id="bs-table-wrap" style="display:none;overflow-x:auto">
-        <table class="bs-items-table">
-          <thead><tr>
-            <th style="width:4%">#</th>
-            <th style="width:42%">Description</th>
-            <th style="width:13%">Dimensions</th>
-            <th style="width:5%;text-align:center">Qty</th>
-            <th style="width:8%;text-align:center">Unit</th>
-            <th style="width:13%;text-align:right">Unit Price</th>
-            <th style="width:13%;text-align:right">Amount</th>
-            <th style="width:4%" class="no-print"></th>
-          </tr></thead>
-          <tbody id="bs-items-body"></tbody>
-        </table>
-      </div>
-      <!-- Totals -->
-      <div id="bs-totals-wrap" style="display:none">
-        <div class="bs-totals-box">
-          <table class="bs-totals-tbl">
-            <tr><td>Subtotal</td><td id="bs-subtotal-display">₱0</td></tr>
-            <tr id="bs-disc-row" style="display:none"><td style="color:#e65100;font-weight:600">Discount (<span id="bs-disc-pct-lbl">0</span>%)</td><td id="bs-disc-display" style="color:#e65100;font-weight:600">–₱0</td></tr>
-            <tr id="bs-vat-row" style="display:none"><td>VAT (12%)</td><td id="bs-vat-display">₱0</td></tr>
-            <tr class="grand"><td>GRAND TOTAL</td><td id="bs-grand-display">₱0</td></tr>
-            <tr><td style="color:#2e7d32;font-weight:600">Downpayment (<span id="bs-dp-pct">65</span>%)</td><td id="bs-dp-display" style="color:#2e7d32;font-weight:600">₱0</td></tr>
-            <tr><td style="color:var(--text-muted)">Balance on Delivery</td><td id="bs-bal-display" style="color:var(--text-muted)">₱0</td></tr>
-          </table>
-        </div>
-        <div class="no-print" style="display:flex;gap:14px;align-items:center;margin-top:7px;flex-wrap:wrap">
-          <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
-            <input type="checkbox" id="bs-vat-check"/> Apply VAT (12%)
-          </label>
-          <div style="display:flex;align-items:center;gap:5px;font-size:12px">
-            Discount:
-            <select id="bs-disc-sel" style="width:75px;padding:3px;font-size:12px">
-              <option value="0">None</option><option value="5">5%</option>
-              <option value="10">10%</option><option value="15">15%</option>
-              <option value="20">20%</option>
-            </select>
-          </div>
-          <div style="display:flex;align-items:center;gap:5px;font-size:12px">
-            DP %: <input type="number" id="bs-dp-pct-input" value="65" min="0" max="100" style="width:55px;padding:3px;font-size:12px" inputmode="decimal"/>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Terms -->
-    <div class="bs-section">
-      <div class="bs-sec-title">Terms &amp; Conditions</div>
-      <div class="bs-terms-grid">
-        <div class="bs-terms-block">
-          <h4>Payment Terms</h4>
-          <p contenteditable="true" id="bs-term-payment">65% downpayment required before production. Balance due upon delivery.</p>
-        </div>
-        <div class="bs-terms-block">
-          <h4>Delivery</h4>
-          <p contenteditable="true" id="bs-term-delivery">Delivery schedule to be confirmed after downpayment. Estimated 3–6 weeks from production start.</p>
-        </div>
-        <div class="bs-terms-block">
-          <h4>Validity</h4>
-          <p contenteditable="true" id="bs-term-validity">This quotation is valid for 30 days from date of issuance.</p>
-        </div>
-        <div class="bs-terms-block">
-          <h4>Warranty</h4>
-          <p contenteditable="true" id="bs-term-warranty">One (1) year warranty on fabrication workmanship. Excludes normal wear and misuse.</p>
-        </div>
-        <div class="bs-terms-block" style="grid-column:1/-1">
-          <h4>Notes</h4>
-          <p contenteditable="true" id="bs-term-notes">All prices are VAT-exclusive unless stated. Prices are subject to change without prior notice.</p>
-        </div>
-      </div>
-      <!-- Signature -->
-      <div class="bs-sig-row">
-        <div class="bs-sig-box">
-          <div class="bs-sig-name" contenteditable="true">AGENT NAME</div>
-          <small>Sales Representative<br/>Brilliant Steel</small>
-        </div>
-        <div class="bs-sig-box">
-          <div class="bs-sig-name" contenteditable="true">CLIENT NAME</div>
-          <small>Conforme — Signature over Printed Name<br/>Date: _______________</small>
-        </div>
-      </div>
-    </div>
-
-    <!-- Action Buttons -->
-    <div class="bs-section no-print" style="display:flex;gap:10px;flex-wrap:wrap">
-      <button class="btn-secondary" onclick="window.print()">🖨️ Print / Save PDF</button>
-      <button class="btn-primary" id="bs-save-btn">💾 Save Draft</button>
-      <button class="bs-req-approval" id="bs-request-approval-btn">📤 Request for Approval</button>
-    </div>
-  </div>
-  `;
-
-  // ── Quote Builder Logic ──────────────────────────
-  let bsLines = [];
-  let bsRowCount = 0;
-  let allProds = []; // loaded from Firestore
-
-  // Load products from Firestore (seeded by renderProductDatabase if empty)
-  (async () => {
-    try {
-      const snap = await db.collection('products').get();
-      allProds = snap.docs.map(d => ({ ...d.data(), cat: d.data().category || 'Other' }));
-    } catch(e) { allProds = []; }
-  })();
-
-  // Quote number builder
-  const buildQno = () => {
-    const loc    = document.getElementById('bs-qno-loc')?.value || 'LU';
-    const method = document.getElementById('bs-qno-method')?.value || 'FB';
-    const dateEl = document.getElementById('bs-qno-date');
-    const seq    = String(document.getElementById('bs-qno-seq')?.value || '1').padStart(3,'0');
-    let datePart = 'YYMMDD';
-    if (dateEl?.value) {
-      const [y,m,d] = dateEl.value.split('-');
-      datePart = `${y.slice(2)}${m}${d}`;
-    }
-    const qno = `BS-${loc}-${method}-${datePart}-${seq}`;
-    const preview = document.getElementById('bs-qno-preview');
-    const qnoField= document.getElementById('bs-quote-no');
-    if (preview) preview.textContent = qno;
-    if (qnoField) qnoField.value = qno;
-    // update print header
-    const phQno = document.getElementById('bs-ph-qno');
-    if (phQno) phQno.textContent = qno;
-    const phDate = document.getElementById('bs-ph-date');
-    if (phDate) phDate.textContent = dateEl?.value ? new Date(dateEl.value+'T00:00:00').toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'}) : '';
-    const phAgent = document.getElementById('bs-ph-agent');
-    if (phAgent) phAgent.textContent = document.getElementById('bs-salesperson')?.value || '';
-    return qno;
-  };
-
-  // Set today's date
-  document.getElementById('bs-qno-date').value = today();
-  buildQno();
-
-  ['bs-qno-loc','bs-qno-method','bs-qno-date','bs-qno-seq'].forEach(id => {
-    document.getElementById(id)?.addEventListener('input', buildQno);
-    document.getElementById(id)?.addEventListener('change', buildQno);
-  });
-  document.getElementById('bs-salesperson')?.addEventListener('input', buildQno);
-
-  // Product search
-  const searchEl = document.getElementById('bs-product-search');
-  const dd       = document.getElementById('bs-search-dd');
-
-  const filterProds = (q) => {
-    const term = q.toLowerCase();
-    const matches = !term ? allProds : allProds.filter(p => p.name.toLowerCase().includes(term) || p.code.toLowerCase().includes(term));
-    if (!matches.length) { dd.innerHTML='<div style="padding:10px;color:var(--text-muted);font-size:12px">No products found</div>'; dd.classList.add('open'); return; }
-    const byCat = {};
-    matches.forEach(p => { if(!byCat[p.cat]) byCat[p.cat]=[]; byCat[p.cat].push(p); });
-    dd.innerHTML = Object.entries(byCat).map(([cat,prods])=>
-      `<div class="bs-sd-group">${escHtml(cat)}</div>` +
-      prods.map(p=>`<div class="bs-sd-item" data-code="${escHtml(p.code)}" data-name="${escHtml(p.name)}" data-unit="${escHtml(p.unit)}" data-rate="${p.baseRate}">
-        ${escHtml(p.name)} <span class="bs-sd-price">₱${p.baseRate.toLocaleString()}/${escHtml(p.unit)}</span></div>`).join('')
-    ).join('');
-    dd.classList.add('open');
-    dd.querySelectorAll('.bs-sd-item').forEach(item => {
-      item.addEventListener('click', () => {
-        document.getElementById('bs-product-search').value = item.dataset.name;
-        document.getElementById('bs-selected-code').value  = item.dataset.code;
-        document.getElementById('bs-unit-price').placeholder = `Auto (₱${Number(item.dataset.rate).toLocaleString()}/${item.dataset.unit})`;
-        document.getElementById('bs-unit-price').dataset.rate = item.dataset.rate;
-        document.getElementById('bs-unit-price').dataset.unit = item.dataset.unit;
-        dd.classList.remove('open');
-        calcPreviewBS();
-      });
-    });
-  };
-
-  searchEl?.addEventListener('input', e => filterProds(e.target.value));
-  searchEl?.addEventListener('focus', e => filterProds(e.target.value));
-  document.addEventListener('click', e => { if(!e.target.closest('.bs-search-wrap')) dd.classList.remove('open'); });
-
-  const calcPreviewBS = () => {
-    const w = parseFloat(document.getElementById('bs-dim-w')?.value)||0;
-    const d = parseFloat(document.getElementById('bs-dim-d')?.value)||0;
-    const h = parseFloat(document.getElementById('bs-dim-h')?.value)||0;
-    const qty = parseFloat(document.getElementById('bs-dim-qty')?.value)||1;
-    const override = parseFloat(document.getElementById('bs-unit-price')?.value)||0;
-    const rate     = parseFloat(document.getElementById('bs-unit-price')?.dataset?.rate)||0;
-    let unitPrice = override || (rate && (w||d||h) ? (w*d*h/1e9)*rate + rate : rate);
-    const preview = document.getElementById('bs-price-preview');
-    if (preview) preview.textContent = unitPrice ? `≈ ₱${(unitPrice*qty).toLocaleString(undefined,{maximumFractionDigits:2})}` : '';
-  };
-
-  ['bs-dim-w','bs-dim-d','bs-dim-h','bs-dim-qty','bs-unit-price'].forEach(id =>
-    document.getElementById(id)?.addEventListener('input', calcPreviewBS)
-  );
-
-  const recalcBS = () => {
-    // Group lines by category
-    const catGroups = {};
-    bsLines.forEach(line => {
-      if (!catGroups[line.cat]) catGroups[line.cat] = [];
-      catGroups[line.cat].push(line);
-    });
-    const tbody = document.getElementById('bs-items-body');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-    let grand = 0;
-    Object.entries(catGroups).forEach(([cat, lines]) => {
-      // category header row
-      const catTr = document.createElement('tr'); catTr.className='bs-cat-row';
-      catTr.innerHTML=`<td colspan="8">${escHtml(cat)}</td>`;
-      tbody.appendChild(catTr);
-      let catSubtotal = 0;
-      lines.forEach(line => {
-        catSubtotal += line.amount;
-        grand += line.amount;
-        const tr = document.createElement('tr');
-        tr.dataset.id = line.id;
-        const dimStr = [line.w?`W${line.w}`:null, line.d?`D${line.d}`:null, line.h?`H${line.h}`:null].filter(Boolean).join(' × ');
-        tr.innerHTML = `
-          <td>${bsRowCount}</td>
-          <td><div contenteditable="true" class="bs-desc-edit" data-id="${line.id}">${escHtml(line.name)}</div>${line.notes?`<div style="font-size:11px;color:var(--text-muted);margin-top:1px" contenteditable="true">${escHtml(line.notes)}</div>`:''}</td>
-          <td style="font-size:11px">${dimStr||'—'}</td>
-          <td style="text-align:center"><input type="number" class="bs-qty-inp" value="${line.qty}" min="1" data-id="${line.id}" style="width:50px;text-align:center;border:1.5px solid var(--border);border-radius:4px;padding:3px;font-size:12px" inputmode="decimal"/></td>
-          <td style="text-align:center">${escHtml(line.unit)}</td>
-          <td style="text-align:right">₱${fmt(line.unitPrice)}</td>
-          <td style="text-align:right">₱${fmt(line.amount)}</td>
-          <td class="no-print"><button class="btn-icon" style="color:#c62828;font-size:15px" data-del="${line.id}">✕</button></td>
-        `;
-        tbody.appendChild(tr);
-        // qty change
-        tr.querySelector('.bs-qty-inp').addEventListener('change', e => {
-          const l = bsLines.find(x=>x.id===line.id);
-          if (l) { l.qty=parseFloat(e.target.value)||1; l.amount=l.qty*l.unitPrice; recalcBS(); }
-        });
-        tr.querySelector('[data-del]').addEventListener('click', e => {
-          bsLines = bsLines.filter(x=>x.id!==e.currentTarget.dataset.del); recalcBS();
-        });
-      });
-      // subtotal row
-      const stTr = document.createElement('tr'); stTr.className='bs-subtotal-row';
-      stTr.innerHTML=`<td colspan="6">Subtotal — ${escHtml(cat)}</td><td>₱${fmt(catSubtotal)}</td><td class="no-print"></td>`;
-      tbody.appendChild(stTr);
-    });
-
-    // update count
-    document.getElementById('bs-item-count').textContent = `${bsLines.length} item${bsLines.length!==1?'s':''}`;
-    const empty = document.getElementById('bs-empty-state');
-    const tableWrap = document.getElementById('bs-table-wrap');
-    const totalsWrap= document.getElementById('bs-totals-wrap');
-    if (bsLines.length) { empty.style.display='none'; tableWrap.style.display=''; totalsWrap.style.display=''; }
-    else { empty.style.display=''; tableWrap.style.display='none'; totalsWrap.style.display='none'; return; }
-
-    // totals
-    const discPct = parseFloat(document.getElementById('bs-disc-sel')?.value)||0;
-    const vatCheck= document.getElementById('bs-vat-check')?.checked||false;
-    const dpPct   = parseFloat(document.getElementById('bs-dp-pct-input')?.value)||65;
-    const discount = grand * (discPct/100);
-    const afterDisc = grand - discount;
-    const vat = vatCheck ? afterDisc * 0.12 : 0;
-    const grandTotal = afterDisc + vat;
-    const dp  = grandTotal * (dpPct/100);
-    const bal = grandTotal - dp;
-
-    document.getElementById('bs-subtotal-display').textContent = `₱${fmt(grand)}`;
-    document.getElementById('bs-disc-pct-lbl').textContent = discPct;
-    document.getElementById('bs-disc-display').textContent  = `–₱${fmt(discount)}`;
-    document.getElementById('bs-disc-row').style.display    = discPct>0?'':'none';
-    document.getElementById('bs-vat-display').textContent   = `₱${fmt(vat)}`;
-    document.getElementById('bs-vat-row').style.display     = vatCheck?'':'none';
-    document.getElementById('bs-grand-display').textContent = `₱${fmt(grandTotal)}`;
-    document.getElementById('bs-dp-pct').textContent        = dpPct;
-    document.getElementById('bs-dp-display').textContent    = `₱${fmt(dp)}`;
-    document.getElementById('bs-bal-display').textContent   = `₱${fmt(bal)}`;
-
-    return grandTotal;
-  };
-
-  document.getElementById('bs-add-item-btn')?.addEventListener('click', () => {
-    const name = document.getElementById('bs-product-search')?.value?.trim();
-    const code = document.getElementById('bs-selected-code')?.value || '';
-    const unitPrice = parseFloat(document.getElementById('bs-unit-price')?.value)
-      || parseFloat(document.getElementById('bs-unit-price')?.dataset?.rate) || 0;
-    const qty  = parseFloat(document.getElementById('bs-dim-qty')?.value)||1;
-    const w    = document.getElementById('bs-dim-w')?.value || '';
-    const d    = document.getElementById('bs-dim-d')?.value || '';
-    const h    = document.getElementById('bs-dim-h')?.value || '';
-    const unit = document.getElementById('bs-unit-price')?.dataset?.unit || 'unit';
-    if (!name) { Notifs.showToast('Enter a product name','error'); return; }
-    // find category
-    const prod = allProds.find(p=>p.code===code);
-    const cat  = prod?.cat || 'Custom';
-    bsRowCount++;
-    bsLines.push({ id: Date.now().toString(), name, code, cat, w, d, h, qty, unit, unitPrice, amount: qty*unitPrice, notes:'' });
-    recalcBS();
-    // clear
-    document.getElementById('bs-product-search').value = '';
-    document.getElementById('bs-selected-code').value  = '';
-    document.getElementById('bs-unit-price').value     = '';
-    document.getElementById('bs-unit-price').dataset.rate = '';
-    document.getElementById('bs-unit-price').placeholder = 'Auto';
-    document.getElementById('bs-dim-w').value='';
-    document.getElementById('bs-dim-d').value='';
-    document.getElementById('bs-dim-h').value='';
-    document.getElementById('bs-dim-qty').value='1';
-    document.getElementById('bs-price-preview').textContent='';
-  });
-
-  ['bs-vat-check','bs-disc-sel','bs-dp-pct-input'].forEach(id =>
-    document.getElementById(id)?.addEventListener('change', recalcBS)
-  );
-
-  // Save Draft
-  document.getElementById('bs-save-btn')?.addEventListener('click', async () => {
-    const qno = document.getElementById('bs-quote-no')?.value || buildQno();
-    const clientName = document.getElementById('bs-client-name')?.value?.trim() || 'Client';
-    const total = recalcBS() || 0;
-    const s = await db.collection('users').doc(currentUser.uid).get();
-    const agentName = s.exists ? s.data().displayName : currentUser.email;
-    await db.collection('bs_quotes').add({
-      quoteNumber: qno,
-      clientName,
-      clientCompany: document.getElementById('bs-client-company')?.value?.trim()||'',
-      clientAddress: document.getElementById('bs-client-address')?.value?.trim()||'',
-      clientContact: document.getElementById('bs-client-contact')?.value?.trim()||'',
-      clientTin: document.getElementById('bs-client-tin')?.value?.trim()||'',
-      salesperson: document.getElementById('bs-salesperson')?.value?.trim()||'',
-      purpose: document.getElementById('bs-purpose')?.value||'',
-      lines: bsLines,
-      total,
-      status: 'draft',
-      approvalStatus: '',
-      agentName,
-      createdBy: currentUser.uid,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    Notifs.showToast('Quote saved as draft!');
-  });
-
-  // Request for Approval button
-  document.getElementById('bs-request-approval-btn')?.addEventListener('click', async () => {
-    const qno = document.getElementById('bs-quote-no')?.value || buildQno();
-    const clientName = document.getElementById('bs-client-name')?.value?.trim();
-    if (!clientName) { Notifs.showToast('Enter client name before requesting approval','error'); return; }
-    if (!bsLines.length) { Notifs.showToast('Add at least one item','error'); return; }
-    const total = recalcBS() || 0;
-    const filename = `quotation_${clientName.replace(/\s+/g,'_')}_${qno}`;
-    const s = await db.collection('users').doc(currentUser.uid).get();
-    const agentName = s.exists ? s.data().displayName : currentUser.email;
-    // Save quote with pending approval status
-    const docRef = await db.collection('bs_quotes').add({
-      quoteNumber: qno,
-      clientName,
-      clientCompany: document.getElementById('bs-client-company')?.value?.trim()||'',
-      clientAddress: document.getElementById('bs-client-address')?.value?.trim()||'',
-      clientContact: document.getElementById('bs-client-contact')?.value?.trim()||'',
-      salesperson: document.getElementById('bs-salesperson')?.value?.trim()||'',
-      purpose: document.getElementById('bs-purpose')?.value||'',
-      lines: bsLines, total,
-      status: 'sent',
-      approvalStatus: 'pending_review',
-      filename,
-      agentName,
-      createdBy: currentUser.uid,
-      reviewRequestedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    // Create approval request record
-    await db.collection('approval_requests').add({
-      type: 'bs_quote',
-      quoteId: docRef.id,
-      quoteNumber: qno,
-      clientName,
-      total,
-      filename,
-      agentName,
-      agentId: currentUser.uid,
-      status: 'pending',
-      createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
-    // Notify president
-    await Notifs.sendToOwner({
-      title: '⚙️ Brilliant Steel Quote — Approval Needed',
-      body: `${agentName} submitted "${qno}" for ${clientName} — ₱${fmt(total)}`,
-      icon: '⚙️', type: 'quote_review_request'
-    });
-    Notifs.showToast(`Approval request sent! File: ${filename}`);
-    // Switch to Quotations Summary
-    loadBSContent(currentUser, currentRole, 'Quotations Summary');
-    const activeBtns = document.querySelectorAll('.subtab-btn');
-    activeBtns.forEach(b => b.classList.toggle('active', b.dataset.sub === 'Quotations Summary'));
-  });
-}
 
 // ── Brilliant Steel Quotations Summary ────────────
 async function renderBSQuotationsSummary(container, currentUser, currentRole) {
@@ -9777,6 +8811,11 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
   const drafts        = all.filter(q=>!q.status||q.status==='draft');
   const needsRevision = all.filter(q=>q.status==='needs_revision'||q.approvalStatus==='needs_revision');
   const rejected      = all.filter(q=>q.approvalStatus==='rejected'||q.status==='rejected');
+  // v12 WS31 Spec 10 — "filed but no Sales Order yet" staleness, pure client-side
+  // over rows this screen already fetched. Zero new reads.
+  const staleDaysOf = q => (q.status==='filed' && !q.salesOrderId && q.createdAt)
+    ? Math.floor((Date.now() - (q.createdAt.seconds||0)*1000) / 86400000) : 0;
+  const staleCount = all.filter(q => staleDaysOf(q) > window.QUOTE_STALE_DAYS).length;
 
   const renderList = (quotes) => !quotes.length
     ? '<div class="empty-state" style="padding:30px"><div class="empty-icon">📋</div><h4>No quotations here</h4></div>'
@@ -9787,6 +8826,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
           const badge = status==='filed'||status==='approved'?'badge-green':status==='pending_approval'||status==='pending_review'||status==='sent'?'badge-orange':status==='rejected'?'badge-red':'badge-gray';
           const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
           const canDeleteDirect = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+          const staleDays = staleDaysOf(q);
           return `<tr>
             <td><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code></td>
             <td><strong>${escHtml(q.clientName||'—')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(q.clientCompany||'')}</div></td>
@@ -9795,6 +8835,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
             <td>
               <span class="badge ${badge}">${status}</span>
               ${q.deleteRequested?'<span class="badge badge-red" style="font-size:9px;margin-left:4px">🗑 del req</span>':''}
+              ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px;margin-left:4px" title="Filed but no Sales Order yet">⚠ ${staleDays}d no SO</span>` : ''}
               <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${ts}</div>
             </td>
             <td style="white-space:nowrap;display:flex;gap:6px;flex-wrap:wrap">
@@ -9856,6 +8897,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
       ${needsRevision.length?`<button class="subtab-btn" data-qsub="needs-revision" style="border-color:var(--warning);color:var(--warning)">↩ Needs Revision (${needsRevision.length})</button>`:''}
       <button class="subtab-btn" data-qsub="drafts">Drafts (${drafts.length})</button>
       <button class="subtab-btn" data-qsub="rejected">Rejected (${rejected.length})</button>
+      ${staleCount?`<span class="badge badge-orange" style="align-self:center;font-size:11px;font-weight:700">⚠ ${staleCount} stale</span>`:''}
     </div>
     <div id="qs-content">${renderList(filed)}</div>
   `;
@@ -10555,172 +9597,6 @@ async function renderBSClientData(container, currentUser, currentRole) {
 }
 
 // ══════════════════════════════════════════════════
-//  SHARED QUOTE BUILDER (Barro + Brilliant Steel)
-// ══════════════════════════════════════════════════
-function renderQuoteList(container, currentUser, currentRole, brand) {
-  const collection = brand === 'brilliant-steel' ? 'bs_quotes' : 'quotes';
-  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
-
-  container.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-      <div></div>
-      <button class="btn-primary btn-sm" id="new-quote-btn">+ New Quote</button>
-    </div>
-    <div id="quote-list-wrap"><div class="loading-placeholder">Loading quotes…</div></div>
-  `;
-
-  const loadList = async () => {
-    const wrap = document.getElementById('quote-list-wrap');
-    const snap = isPrivileged
-      ? await db.collection(collection).orderBy('createdAt','desc').get()
-      : await db.collection(collection).where('createdBy','==',currentUser.uid).get();
-    const quotes = snap.docs.map(d => ({id:d.id,...d.data()})).sort((a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-    if (!quotes.length) { wrap.innerHTML = `<div class="empty-state"><div class="empty-icon">💼</div><h4>No quotes yet</h4></div>`; return; }
-    wrap.innerHTML = `<div class="item-list">${quotes.map(q => `
-      <div class="item-card quote-item" data-id="${q.id}">
-        <div class="item-top">
-          <div class="item-title">${brand==='brilliant-steel'?'BS':'Q'}-${q.quoteNumber||q.id.slice(-6).toUpperCase()} — ${escHtml(q.clientName||'Unnamed')}</div>
-          <span class="badge ${statusBadge(q.status)}">${q.status||'draft'}</span>
-        </div>
-        <div class="item-meta">
-          <span>💰 ₱${fmt(q.total)}</span>
-          <span>👤 ${escHtml(q.agentName||'—')}</span>
-          ${q.createdAt?`<span>📅 ${new Date(q.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
-        </div>
-      </div>`).join('')}</div>`;
-    wrap.querySelectorAll('.quote-item').forEach(item => {
-      item.addEventListener('click', async () => {
-        const s = await db.collection(collection).doc(item.dataset.id).get();
-        openQuoteEditor(currentUser, currentRole, brand, collection, {id:s.id,...s.data()}, loadList);
-      });
-    });
-  };
-
-  loadList();
-  document.getElementById('new-quote-btn').onclick = () => openQuoteEditor(currentUser, currentRole, brand, collection, null, loadList);
-}
-
-function openQuoteEditor(currentUser, currentRole, brand, collection, existing, onSave) {
-  let lines = existing ? [...(existing.lineItems||[])] : [{description:'',qty:1,price:0}];
-  const isBS = brand === 'brilliant-steel';
-
-  openPage(existing ? `Edit Quote` : 'New Quote', `
-    <div class="form-row">
-      <div class="form-group"><label>Client Name</label><input id="q-client" value="${escHtml(existing?.clientName||'')}"/></div>
-      <div class="form-group"><label>Client Email</label><input id="q-client-email" type="email" value="${escHtml(existing?.clientEmail||'')}"/></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Quote Date</label><input id="q-date" type="date" value="${existing?.date||today()}"/></div>
-      <div class="form-group"><label>Valid Until</label><input id="q-valid" type="date" value="${existing?.validUntil||''}"/></div>
-    </div>
-    ${!isBS?`
-    <div class="form-group"><label>Product Line</label>
-      <select id="q-line">
-        <option>Barro Kitchens</option>
-        <option>Steel Fabrication</option>
-        <option>Fire Suppression</option>
-        <option>HVAC / Ventilation</option>
-        <option>General</option>
-      </select>
-    </div>`:''}
-    <div class="form-group"><label>Notes</label><textarea id="q-notes" rows="2">${escHtml(existing?.notes||'')}</textarea></div>
-    <hr class="divider"/>
-    <div class="line-items-header"><span>Description</span><span>Qty</span><span>Unit Price</span><span></span></div>
-    <div id="q-lines"></div>
-    <button class="btn-secondary" id="add-line-btn" style="margin-top:8px">+ Add Line</button>
-    <div id="q-total" class="quote-total"></div>
-    <div class="form-group" style="margin-top:12px"><label>Status</label>
-      <select id="q-status">
-        <option value="draft" ${existing?.status==='draft'?'selected':''}>Draft</option>
-        <option value="sent" ${existing?.status==='sent'?'selected':''}>Sent to Client</option>
-        <option value="accepted" ${existing?.status==='accepted'?'selected':''}>Accepted</option>
-        <option value="rejected" ${existing?.status==='rejected'?'selected':''}>Rejected</option>
-      </select>
-    </div>
-  `, `
-    <button class="btn-secondary" id="print-quote-btn">🖨 Print</button>
-    <button class="btn-primary" id="save-quote-btn">💾 Save</button>
-    <button class="btn-secondary" onclick="closeModal()">Cancel</button>
-  `);
-
-  const renderLines = () => {
-    const cont = document.getElementById('q-lines');
-    cont.innerHTML = lines.map((l,i) => `
-      <div class="line-item-row">
-        <input type="text" value="${escHtml(l.description)}" data-i="${i}" data-f="description" placeholder="Description"/>
-        <input type="number" value="${l.qty}" data-i="${i}" data-f="qty" min="1" inputmode="numeric"/>
-        <input type="number" value="${l.price}" data-i="${i}" data-f="price" min="0" step="0.01" inputmode="decimal"/>
-        <button class="btn-icon" data-rm="${i}">${emojiIcon('trash-2',16)}</button>
-      </div>`).join('');
-    if (window.lucide) lucide.createIcons({ nodes: [cont] });
-    cont.querySelectorAll('input').forEach(inp => {
-      inp.oninput = e => { const i=parseInt(e.target.dataset.i),f=e.target.dataset.f; lines[i][f]=f==='description'?e.target.value:parseFloat(e.target.value)||0; updateTotal(); };
-    });
-    cont.querySelectorAll('[data-rm]').forEach(btn => { btn.onclick = () => { lines.splice(parseInt(btn.dataset.rm),1); renderLines(); }; });
-    updateTotal();
-  };
-
-  const updateTotal = () => {
-    const t = lines.reduce((s,l) => s + (l.qty*l.price), 0);
-    const el = document.getElementById('q-total');
-    if(el) el.textContent = `Total: ₱${fmt(t)}`;
-  };
-
-  renderLines();
-  document.getElementById('add-line-btn').onclick = () => { lines.push({description:'',qty:1,price:0}); renderLines(); };
-
-  document.getElementById('save-quote-btn').onclick = async () => {
-    const total = lines.reduce((s,l) => s + l.qty*l.price, 0);
-    const chosenStatus = document.getElementById('q-status').value;
-    if (chosenStatus === 'accepted' && existing?.status !== 'accepted'
-        && !(await confirmDialog({message:`Mark this quote as ACCEPTED (₱${fmt(total)})? This signals the client has agreed.`}))) return;
-    const s = await db.collection('users').doc(currentUser.uid).get();
-    const agentName = s.exists ? s.data().displayName : currentUser.email;
-    const data = {
-      clientName:   document.getElementById('q-client').value.trim(),
-      clientEmail:  document.getElementById('q-client-email').value.trim(),
-      date:         document.getElementById('q-date').value,
-      validUntil:   document.getElementById('q-valid').value,
-      notes:        document.getElementById('q-notes').value,
-      productLine:  document.getElementById('q-line')?.value||'',
-      lineItems:    lines, total,
-      status:       document.getElementById('q-status').value,
-      agentName, createdBy: currentUser.uid,
-      updatedAt:    firebase.firestore.FieldValue.serverTimestamp()
-    };
-    if (existing) {
-      await db.collection(collection).doc(existing.id).update(data);
-    } else {
-      const count = (await db.collection(collection).get()).size;
-      data.quoteNumber = String(count+1).padStart(4,'0');
-      data.createdAt   = firebase.firestore.FieldValue.serverTimestamp();
-      await db.collection(collection).add(data);
-    }
-    closeModal(); Notifs.showToast('Quote saved!'); if(onSave) onSave();
-  };
-
-  document.getElementById('print-quote-btn').onclick = () => printQuote(lines, existing);
-}
-
-function printQuote(lines, q) {
-  const total = lines.reduce((s,l) => s + l.qty*l.price, 0);
-  const w = window.open('','_blank');
-  w.document.write(`<html><head><title>Quote — Barro Industries</title>
-  <style>body{font-family:sans-serif;padding:40px;color:#1a1d2e}h1{color:#1a237e}.logo{font-size:24px;font-weight:800;color:#1a237e}table{width:100%;border-collapse:collapse;margin:20px 0}th{background:#1a237e;color:#fff;padding:8px 12px;text-align:left}td{padding:8px 12px;border-bottom:1px solid #eee}.total{text-align:right;font-size:18px;font-weight:bold;margin-top:10px}.footer{margin-top:40px;font-size:12px;color:#999;border-top:1px solid #eee;padding-top:12px}</style>
-  </head><body>
-  <div class="logo">Barro Industries</div>
-  <p style="margin:4px 0;font-size:12px;color:#666">Professional Kitchen, Steel & Engineering Solutions</p>
-  <hr style="margin:14px 0;border:none;border-top:1px solid #eee"/>
-  <p><strong>Quote for:</strong> ${escHtml(q?.clientName||'Client')} &nbsp;&nbsp; <strong>Date:</strong> ${escHtml(q?.date||today())}</p>
-  <table><tr><th>Description</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr>
-  ${lines.map(l=>`<tr><td>${escHtml(l.description)}</td><td>${l.qty}</td><td>₱${fmt(l.price)}</td><td>₱${fmt(l.qty*l.price)}</td></tr>`).join('')}
-  </table>
-  <div class="total">Total: ₱${fmt(total)}</div>
-  <div class="footer">Valid until: ${escHtml(q?.validUntil||'N/A')} · ${escHtml(q?.notes||'')}</div>
-  <script>window.print();<\/script></body></html>`);
-}
-
-// ══════════════════════════════════════════════════
 //  OWNER — APPROVAL REQUESTS
 // ══════════════════════════════════════════════════
 window.renderApprovals = async function(currentUser) {
@@ -10938,9 +9814,9 @@ window.renderApprovals = async function(currentUser) {
                 <button class="btn-success btn-sm fdel-approve-btn" data-id="${item.id}" data-coll="${escHtml(item.collection||'')}" data-doc="${escHtml(item.docId||'')}" data-label="${escHtml(item.recLabel||'record')}" data-req-by="${item.requestedBy||''}">✓ Approve Deletion</button>
                 <button class="btn-danger btn-sm fdel-deny-btn" data-id="${item.id}" data-label="${escHtml(item.recLabel||'record')}" data-req-by="${item.requestedBy||''}">✗ Deny</button>
               `:item.type==='quote-approval'?`
-                <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">📝 Open &amp; Edit</button>
-                <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">✓ Approve</button>
-                <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return to Partner</button>
+                <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">📝 Open &amp; Edit</button>
+                <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">✓ Approve</button>
+                <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${item.quoteId||''}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return to Partner</button>
               `:item.type==='delete-quote'?`
                 <button class="btn-danger btn-sm dq-approve-btn" data-id="${item.id}" data-coll="${item.coll||'bs_quotes'}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">✓ Approve Delete</button>
                 <button class="btn-secondary btn-sm dq-deny-btn" data-id="${item.id}" data-coll="${item.coll||'bs_quotes'}" data-qno="${escHtml(item.quoteNumber||'')}" data-by="${item.deleteRequestedBy||''}">✗ Deny</button>
@@ -11135,15 +10011,15 @@ window.renderApprovals = async function(currentUser) {
 
       // ── Partner quote approvals — open & edit, approve, or return to partner ──
       wrap.querySelectorAll('.qa-review-btn').forEach(btn => onClickSafe(btn, () => {
-        openQuoteApprovalReview({ quoteId:btn.dataset.quote, agentId:btn.dataset.by, quoteNumber:btn.dataset.qno, clientName:btn.dataset.name }, ()=>loadApprovalsSub('all'));
+        openQuoteApprovalReview({ quoteId:btn.dataset.quote, agentId:btn.dataset.by, quoteNumber:btn.dataset.qno, clientName:btn.dataset.name, quoteColl:btn.dataset.coll }, ()=>loadApprovalsSub('all'));
       }));
       wrap.querySelectorAll('.qa-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-        await approveQuoteApproval(btn.dataset.quote, btn.dataset.by, btn.dataset.qno, btn.dataset.name);
+        await approveQuoteApproval(btn.dataset.quote, btn.dataset.by, btn.dataset.qno, btn.dataset.name, btn.dataset.coll);
         loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.qa-return-btn').forEach(btn => onClickSafe(btn, async () => {
         const notes = (await promptDialog({message:'Notes for the partner (what to revise)?', multiline:true}))||'';
-        await returnQuoteToPartner(btn.dataset.quote, btn.dataset.by, btn.dataset.qno, btn.dataset.name, notes);
+        await returnQuoteToPartner(btn.dataset.quote, btn.dataset.by, btn.dataset.qno, btn.dataset.name, notes, btn.dataset.coll);
         loadApprovalsSub('all');
       }));
 
@@ -11672,45 +10548,51 @@ window.renderApprovals = async function(currentUser) {
     } else if (sub === 'quote-files') {
       await renderBSQuotationFiles(wrap, currentUser, window.currentRole || 'president');
     } else {
-      // Quote / ROA approvals
+      // Quote / ROA approvals — same shared handlers as the 'all' chip (v12 WS31:
+      // the old inline approve/reject here never touched the quote doc at all).
       const snap = await db.collection('approval_requests').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
-      const items = snap.docs.map(d => ({id:d.id,...d.data()}));
+      const items = snap.docs.map(d => ({id:d.id,...d.data()})).filter(i => i.type !== 'ca_deduct');
       if (!items.length) { wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">✔️</div><h4>No quote approvals</h4></div>'; return; }
-
       wrap.innerHTML = `<div class="item-list">${items.map(item => `
         <div class="item-card" data-id="${item.id}">
           <div class="item-top">
-            <div class="item-title">${item.type==='bs_quote'?'Brilliant Steel Quote':'Quote'} — ${escHtml(item.clientName||'')}</div>
+            <div class="item-title">${item.type==='bs_quote'?'Quote Approval':'Quote'} — ${escHtml(item.clientName||'')}</div>
             <span class="badge ${statusBadge(item.status)}">${item.status||'pending'}</span>
           </div>
           <div class="item-meta">
             <span>${escHtml(item.agentName||'—')}</span>
             <span>₱${fmt(item.total)}</span>
+            ${item.quoteNumber?`<span style="font-family:monospace">${escHtml(item.quoteNumber)}</span>`:''}
             ${item.createdAt?`<span>${new Date(item.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
           </div>
-          ${(item.status==='pending'&&canActOn('quote-approval'))?`
-          <div style="display:flex;gap:8px;margin-top:12px">
-            <button class="btn-success approve-approval" data-id="${item.id}" data-agent="${item.agentId}" data-client="${escHtml(item.clientName)}">Approve</button>
-            <button class="btn-danger reject-approval"  data-id="${item.id}" data-agent="${item.agentId}" data-client="${escHtml(item.clientName)}">Reject</button>
-          </div>`:''}
+          ${(item.status==='pending'&&canActOn('quote-approval')) ? (item.quoteId ? `
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">📝 Open &amp; Edit</button>
+            <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">✓ Approve</button>
+            <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return to Partner</button>
+          </div>` : `
+          <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+            <span style="font-size:11px;color:var(--text-muted)">(no linked quote)</span>
+            <button class="btn-secondary btn-sm roa-resolve-btn" data-id="${item.id}" data-agent="${item.agentId||''}" data-status="approved">Mark Approved</button>
+            <button class="btn-secondary btn-sm roa-resolve-btn" data-id="${item.id}" data-agent="${item.agentId||''}" data-status="rejected">Mark Rejected</button>
+          </div>`) : ''}
         </div>`).join('')}</div>`;
-
-      wrap.querySelectorAll('.approve-approval').forEach(btn => {
-        btn.addEventListener('click', async e => {
-          const { id, agent: agentId, client } = e.currentTarget.dataset;
-          await db.collection('approval_requests').doc(id).update({ status: 'approved' });
-          await Notifs.send(agentId, { title:'Quote Approved', body:`Your quote for ${client} was approved.`, icon:'✅', type:'approval_result' });
-          Notifs.showToast('Quote approved!'); loadApprovalsSub('roa');
-        });
-      });
-      wrap.querySelectorAll('.reject-approval').forEach(btn => {
-        btn.addEventListener('click', async e => {
-          const { id, agent: agentId, client } = e.currentTarget.dataset;
-          await db.collection('approval_requests').doc(id).update({ status: 'rejected' });
-          await Notifs.send(agentId, { title:'Quote Rejected', body:`Your quote for ${client} was not approved.`, icon:'❌', type:'approval_result' });
-          Notifs.showToast('Quote rejected.'); loadApprovalsSub('roa');
-        });
-      });
+      wrap.querySelectorAll('.qa-review-btn').forEach(btn => onClickSafe(btn, () =>
+        openQuoteApprovalReview({ quoteId:btn.dataset.quote, agentId:btn.dataset.by, quoteNumber:btn.dataset.qno,
+          clientName:btn.dataset.name, quoteColl:btn.dataset.coll }, () => loadApprovalsSub('roa'))));
+      wrap.querySelectorAll('.qa-approve-btn').forEach(btn => onClickSafe(btn, async () => {
+        await approveQuoteApproval(btn.dataset.quote, btn.dataset.by, btn.dataset.qno, btn.dataset.name, btn.dataset.coll);
+        loadApprovalsSub('roa');
+      }));
+      wrap.querySelectorAll('.qa-return-btn').forEach(btn => onClickSafe(btn, async () => {
+        const notes = (await promptDialog({message:'Notes for the partner (what to revise)?', multiline:true}))||'';
+        await returnQuoteToPartner(btn.dataset.quote, btn.dataset.by, btn.dataset.qno, btn.dataset.name, notes, btn.dataset.coll);
+        loadApprovalsSub('roa');
+      }));
+      wrap.querySelectorAll('.roa-resolve-btn').forEach(btn => onClickSafe(btn, async () => {
+        await db.collection('approval_requests').doc(btn.dataset.id).update({ status: btn.dataset.status });
+        Notifs.showToast('Request resolved (no quote doc was linked).'); loadApprovalsSub('roa');
+      }));
     }
   };
 
@@ -11721,34 +10603,41 @@ window.renderApprovals = async function(currentUser) {
 
 // ── Partner quote-approval helpers (shared by Approvals page) ──────────
 // Approve a partner-submitted quote: file it + resolve its approval request + notify.
-async function approveQuoteApproval(quoteId, agentId, qno, name){
+async function approveQuoteApproval(quoteId, agentId, qno, name, coll){
+  coll = coll || 'bs_quotes';
   if(!quoteId){ Notifs.showToast('Quote not found','error'); return; }
   try{
-    await db.collection('bs_quotes').doc(quoteId).update({ status:'filed', approvalStatus:'approved', approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
+    await db.collection(coll).doc(quoteId).update({
+      ...window.quoteStateFields('approved'),
+      approvedAt: firebase.firestore.FieldValue.serverTimestamp(), approvedBy: currentUser.uid });
     await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'approved'}))));
     if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${qno}" for ${name} was approved and filed.`, icon:'✅', type:'quote_approved' });
     window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true });
+    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
     Notifs.showToast('Quote approved and filed!');
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
 }
 // Return a partner quote for revision: mark needs_revision + notify the partner.
-async function returnQuoteToPartner(quoteId, agentId, qno, name, notes){
+async function returnQuoteToPartner(quoteId, agentId, qno, name, notes, coll){
+  coll = coll || 'bs_quotes';
   if(!quoteId){ Notifs.showToast('Quote not found','error'); return; }
   try{
-    const upd={ status:'needs_revision', approvalStatus:'needs_revision', returnedAt:firebase.firestore.FieldValue.serverTimestamp(), returnedBy:currentUser.uid };
+    const upd={ ...window.quoteStateFields('needs_revision'), returnedAt:firebase.firestore.FieldValue.serverTimestamp(), returnedBy:currentUser.uid };
     if(notes) upd.presidentNotes=notes;
-    await db.collection('bs_quotes').doc(quoteId).update(upd);
+    await db.collection(coll).doc(quoteId).update(upd);
     await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'returned'}))));
     if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${qno}" for ${name} was reviewed and returned.${notes?' Notes: '+notes:''} Please revise and re-submit.`, icon:'✎', type:'quote_returned' });
     window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true });
+    if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
     Notifs.showToast('Quote returned to partner.');
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
 }
 // Open the full review modal: open in builder, edit key fields, then approve/return.
 async function openQuoteApprovalReview(ctx, onDone){
   const { quoteId, agentId, quoteNumber, clientName } = ctx;
+  const QC = ctx.quoteColl || 'bs_quotes';
   if(!quoteId){ Notifs.showToast('Quote not found','error'); return; }
-  const snap = await db.collection('bs_quotes').doc(quoteId).get().catch(()=>null);
+  const snap = await db.collection(QC).doc(quoteId).get().catch(()=>null);
   if(!snap || !snap.exists){ Notifs.showToast('Quote not found','error'); return; }
   const q = snap.data();
   const ta = 'width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical';
@@ -11762,28 +10651,31 @@ async function openQuoteApprovalReview(ctx, onDone){
     <div class="form-group"><label>Notes for Partner</label><textarea id="qar-notes" rows="2" placeholder="What to revise, or why approved…" style="${ta}">${escHtml(q.presidentNotes||'')}</textarea></div>
   `, `<button class="btn-success" id="qar-approve">✅ Save &amp; Approve</button><button class="btn-primary" id="qar-return">↩ Save &amp; Return to Partner</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   if (hasSnapshot) document.getElementById('qar-open-builder').addEventListener('click', ()=>{
-    window._qbReviewContext = { quoteId, partnerUid: agentId, quoteNumber: quoteNumber||q.quoteNumber, clientName: q.clientName||clientName };
+    window._qbReviewContext = { quoteId, partnerUid: agentId, quoteNumber: quoteNumber||q.quoteNumber,
+      clientName: q.clientName||clientName, quoteColl: QC };
     closeModal();
-    window.reopenQuoteFromDoc('bs_quotes', quoteId, 'bs-quote-builder');
+    window.reopenQuoteFromDoc(QC, quoteId, q.company === 'BK' ? 'bk-quote-builder' : 'bs-quote-builder');
   });
   const getEdits = ()=>({ clientName:document.getElementById('qar-client').value.trim(), scope:document.getElementById('qar-scope').value.trim(), total:parseFloat(document.getElementById('qar-total').value)||q.total||0, presidentNotes:document.getElementById('qar-notes').value.trim(), editedByPresident:true, editedAt:firebase.firestore.FieldValue.serverTimestamp(), editedBy:currentUser.uid });
   document.getElementById('qar-approve').addEventListener('click', async ()=>{
     const e=getEdits();
     try{
-      await db.collection('bs_quotes').doc(quoteId).update({ ...e, status:'filed', approvalStatus:'approved', approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
+      await db.collection(QC).doc(quoteId).update({ ...e, ...window.quoteStateFields('approved'), approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
       await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'approved'}))));
       if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${quoteNumber}" for ${e.clientName||clientName} was approved and filed.`, icon:'✅', type:'quote_approved' });
       window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true, edited:true });
+      if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
       closeModal(); Notifs.showToast('Quote edited, approved and filed!'); onDone&&onDone();
     }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
   document.getElementById('qar-return').addEventListener('click', async ()=>{
     const e=getEdits();
     try{
-      await db.collection('bs_quotes').doc(quoteId).update({ ...e, status:'needs_revision', approvalStatus:'needs_revision', returnedAt:firebase.firestore.FieldValue.serverTimestamp(), returnedBy:currentUser.uid });
+      await db.collection(QC).doc(quoteId).update({ ...e, ...window.quoteStateFields('needs_revision'), returnedAt:firebase.firestore.FieldValue.serverTimestamp(), returnedBy:currentUser.uid });
       await db.collection('approval_requests').where('quoteId','==',quoteId).get().then(s=>Promise.all(s.docs.map(d=>d.ref.update({status:'returned'}))));
       if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${quoteNumber}" for ${e.clientName||clientName} was reviewed and returned.${e.presidentNotes?' Notes: '+e.presidentNotes:''}`, icon:'✎', type:'quote_returned' });
       window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true, edited:true });
+      if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
       closeModal(); Notifs.showToast('Quote updated and returned to partner.'); onDone&&onDone();
     }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });

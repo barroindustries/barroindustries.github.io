@@ -1278,15 +1278,15 @@ async function saveReviewedPartnerQuote(ctx, action) {
     editedBy: currentUser.uid,
   };
   if (action === 'approve') {
-    update.status = 'filed'; update.approvalStatus = 'approved';
+    Object.assign(update, window.quoteStateFields('approved'));
     update.approvedAt = firebase.firestore.FieldValue.serverTimestamp(); update.approvedBy = currentUser.uid;
   } else {
-    update.status = 'needs_revision'; update.approvalStatus = 'needs_revision';
+    Object.assign(update, window.quoteStateFields('needs_revision'));
     update.presidentNotes = notes;
     update.returnedAt = firebase.firestore.FieldValue.serverTimestamp(); update.returnedBy = currentUser.uid;
   }
   try {
-    await db.collection('bs_quotes').doc(ctx.quoteId).update(update);
+    await db.collection(ctx.quoteColl || 'bs_quotes').doc(ctx.quoteId).update(update);
     await db.collection('approval_requests').where('quoteId','==',ctx.quoteId).get()
       .then(s => Promise.all(s.docs.map(d => d.ref.update({ status: action === 'approve' ? 'approved' : 'returned' }))))
       .catch(()=>{});
@@ -1642,6 +1642,12 @@ async function renderProductDatabase() {
     </div>
     <div class="form-group" id="${prefix}-coef-wrap"><label id="${prefix}-coef-label">Price per extra mm (₱)</label><input type="number" inputmode="decimal" id="${prefix}-coef" min="0" step="0.01" value="${p.formula?.pricePerExtraMm||p.formula?.pricePerSqm||''}"></div>
     <div class="form-group" style="grid-column:1/-1"><label>Specifications</label><textarea id="${prefix}-specs" rows="2" placeholder="Material grade, thickness, finish, etc.">${escHtml(p.specifications||'')}</textarea></div>
+    <div class="form-group" style="grid-column:1/-1"><label>Product Photo</label>
+      <div style="display:flex;gap:10px;align-items:center">
+        <img id="${prefix}-photo-prev" src="${(p.photoUrl||'').replace(/"/g,'&quot;')}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border);${p.photoUrl?'':'display:none'}">
+        <div id="${prefix}-photo-up" style="flex:1"></div>
+      </div>
+    </div>
   `;
 
   c.innerHTML = `
@@ -1681,7 +1687,7 @@ async function renderProductDatabase() {
                   ${prods.map(p => `
                     <tr data-pid="${p.id}">
                       <td><span style="font-family:monospace;font-size:12px">${p.id}</span></td>
-                      <td>${escHtml(p.title||'')}</td>
+                      <td>${escHtml(p.title||'')}${!p.photoUrl?' <span title="No photo yet" style="opacity:.5">📷</span>':''}</td>
                       <td style="font-size:12px">${measureStr(p.measurement)}</td>
                       <td style="font-size:12px;max-width:220px">${escHtml(p.specifications||'—')}</td>
                       <td>${escHtml(p.unit||'—')}</td>
@@ -1718,6 +1724,11 @@ async function renderProductDatabase() {
     });
     document.getElementById(`${prefix}-formula`).addEventListener('change', () => syncCoefLabel(prefix));
     syncCoefLabel(prefix);
+    if (window.Drive?.renderUploadArea) Drive.renderUploadArea(`${prefix}-photo-up`, r => {
+      pdbPhoto[prefix] = r.url;                                  // r = {url, name} per drive.js contract
+      const img = document.getElementById(`${prefix}-photo-prev`);
+      if (img) { img.src = r.url; img.style.display = ''; }
+    }, { accept:'image/*', label:'Upload photo (JPG/PNG)', dept:'Sales', subfolder:'Product Photos' });
   }
 
   // Add product toggle
@@ -1749,6 +1760,8 @@ async function renderProductDatabase() {
 
   // Bill-of-materials per open form (keyed by prefix), set when a BOM is applied.
   const pdbBom = {};
+  // Photo URL per open form (keyed by prefix), set when a photo is uploaded.
+  const pdbPhoto = {};
 
   async function collectAndSaveProduct(existingId, prefix = 'pdb-f') {
     const title   = document.getElementById(`${prefix}-title`).value.trim();
@@ -1781,12 +1794,16 @@ async function renderProductDatabase() {
       catch (_) { bom = []; }
     }
 
-    await db.collection('products').doc(code).set({
+    // Build the payload first, then only touch photoUrl if THIS session actually
+    // uploaded one — merge:true otherwise keeps the existing photo untouched.
+    const payload = {
       title, category, unit, basePrice, capitalMaterials, capitalLabor,
       measurement, specifications, formulaType, formula, bom: bom || [],
       updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       ...(existingId ? {} : { createdAt: firebase.firestore.FieldValue.serverTimestamp() }),
-    }, { merge: true });
+    };
+    if (pdbPhoto[prefix] !== undefined) payload.photoUrl = pdbPhoto[prefix];
+    await db.collection('products').doc(code).set(payload, { merge: true });
     window.logAudit && window.logAudit(existingId ? 'update' : 'create', 'product', code, { title, basePrice });
     return true;
   }
@@ -8172,6 +8189,7 @@ window.addEventListener('message', async (e) => {
     const data = {
       quoteNumber:    payload.quoteNumber || '',
       company:        payload.company || 'BK',
+      clientId:       payload.clientId || null,
       clientName:     payload.clientName || '',
       clientCompany:  payload.clientCompany || '',
       clientAddress:  payload.clientAddress || '',
@@ -8233,8 +8251,7 @@ window.addEventListener('message', async (e) => {
     };
 
     if (type === 'QUOTE_FILED') {
-      data.status = 'filed';
-      data.approvalStatus = 'filed';
+      Object.assign(data, window.quoteStateFields('filed'));
       data.filedAt = firebase.firestore.FieldValue.serverTimestamp();
       data.clientId = await upsertClient();        // FK stamped BEFORE the quote is written
       await db.collection(coll).add(data);
@@ -8246,17 +8263,18 @@ window.addEventListener('message', async (e) => {
       });
       if (typeof Notifs?.showToast === 'function') Notifs.showToast(`Quote filed${version>1?` as version ${version}`:''} + client saved!`);
     } else {
-      // QUOTE_APPROVAL_REQUESTED — the president's approve/reject handler reads
-      // bs_quotes by id, so the approval round-trip always lives in bs_quotes
-      // (regardless of company) to keep that flow working unchanged.
-      data.status = 'pending_approval';
-      data.approvalStatus = 'pending_review';
+      // QUOTE_APPROVAL_REQUESTED — route by company like QUOTE_FILED (v12 WS31:
+      // fixes "BK quotes stranded in bs_quotes"); the approval_requests doc
+      // records WHICH collection the quote lives in so the approve/return
+      // handlers update the right doc.
+      Object.assign(data, window.quoteStateFields('pending_approval'));
       data.reviewRequestedAt = firebase.firestore.FieldValue.serverTimestamp();
       data.clientId = await upsertClient();        // FK stamped BEFORE the quote is written
-      const docRef = await db.collection('bs_quotes').add(data);
+      const docRef = await db.collection(coll).add(data);
       await db.collection('approval_requests').add({
-        type: 'bs_quote',
+        type: 'bs_quote',            // legacy type value kept — readers filter on it
         quoteId: docRef.id,
+        quoteColl: coll,             // NEW (WS31 decision 14) — 'bk_quotes' | 'bs_quotes'
         quoteNumber: payload.quoteNumber,
         clientName: payload.clientName,
         total: payload.total || 0,
@@ -8276,6 +8294,26 @@ window.addEventListener('message', async (e) => {
     console.error('[QB bridge]', err);
   }
 });
+
+// One-click, idempotent: moves bs_quotes docs misfiled with company:'BK' (the old
+// QUOTE_APPROVAL_REQUESTED hardcode) into bk_quotes, PRESERVING each doc id so
+// sales_orders.quoteId / approval_requests.quoteId / clients joins stay valid.
+// company:'PT' rows are deliberately NOT moved (bs_quotes is the non-BK bucket).
+window.migrateStrandedBKQuotes = async function () {
+  const FV = firebase.firestore.FieldValue;
+  const out = { moved: 0, reqsPatched: 0 };
+  const snap = await db.collection('bs_quotes').where('company', '==', 'BK').get();
+  for (const d of snap.docs) {
+    await db.collection('bk_quotes').doc(d.id).set({ ...d.data(),
+      migratedFrom: 'bs_quotes', migratedAt: FV.serverTimestamp() });
+    const reqs = await db.collection('approval_requests').where('quoteId', '==', d.id).get().catch(() => ({ docs: [] }));
+    for (const r of reqs.docs) { await r.ref.update({ quoteColl: 'bk_quotes' }); out.reqsPatched++; }
+    await db.collection('bs_quotes').doc(d.id).delete();   // copy-first ordering: a crash mid-loop leaves a duplicate (re-run cleans it), never a loss
+    out.moved++;
+  }
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('all-quotes');
+  return out;
+};
 
 // ── Service Worker ────────────────────────────────
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(console.warn);

@@ -386,6 +386,47 @@ tr:hover td{background:#fafbff;}
 }
 .print-header{display:none;}
 @media print{.print-header{display:flex!important;}.no-print{display:none!important;}}
+
+/* Shared letterhead adoption (v12 WS31, Spec 7) — rendered into its OWN sibling
+   element rather than overwriting #printHeader's children, because
+   updatePrintHeader() writes directly into #phQuoteNo/#phDate/#phValid/
+   #phSalesperson (no null-guards) on nearly every keystroke in the form; wiping
+   those ids would throw on the next input event. #printHeader stays fully
+   live/untouched as the offline/file:// fallback (still built by setCompany()/
+   updatePrintHeader() exactly as before) — body.lh-active just decides which
+   of the two headers is the one that's actually shown at print time. */
+#lhPrintHeader{display:none;}
+@media print{
+  body.lh-active .print-header{display:none!important;}
+  body.lh-active #lhPrintHeader{display:block!important;}
+}
+
+/* Quick Quote wizard (v12 WS31) */
+.body-quick .section, .body-quick #btnAdmin { display:none!important; }
+.body-quick #qqWizard { display:block!important; }
+.qq-steps{display:flex;gap:8px;margin:10px 0 14px}
+.qq-step{padding:6px 14px;border-radius:20px;background:var(--gray-light,#eee);font-size:13px;font-weight:700;opacity:.55}
+.qq-step.on{background:#F0A500;color:#fff;opacity:1}
+.qq-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.qq-card{border:1.5px solid var(--gray,#ccc);border-radius:12px;overflow:hidden;cursor:pointer;background:#fff;text-align:left}
+.qq-card:active{transform:scale(.98)}
+.qq-photo{width:100%;height:100px;object-fit:cover;display:block;background:var(--gray-light,#f2f2f2)}
+.qq-photo-ph{width:100%;height:100px;display:flex;align-items:center;justify-content:center;font-size:34px;background:var(--gray-light,#f2f2f2)}
+.qq-card-name{font-size:12.5px;font-weight:700;padding:7px 9px 2px;line-height:1.25}
+.qq-card-price{font-size:12px;color:var(--gray-dark,#777);padding:0 9px 8px}
+.qq-nav{display:flex;justify-content:space-between;margin-top:16px}
+.qq-badge{position:sticky;bottom:8px;text-align:center;font-size:13px;font-weight:700;color:#F0A500}
+/* Step 2 needs the REAL calc panel (lives inside the "Add Items" section) so
+   selectProduct()/buildCalcPanel() work unforked — unhide just that section,
+   but hide ITS OWN search/cat-tabs UI (superseded by the qq-grid photo picker
+   above) so the two pickers aren't both visible at once. */
+.body-quick.qq-s2 #addItemsSection { display:block!important; }
+.body-quick.qq-s2 #addItemsSection > .sec-title,
+.body-quick.qq-s2 #addItemsSection > #catTabs,
+.body-quick.qq-s2 #productSearchRow { display:none!important; }
+/* Step 3 re-shows the real items table + totals (the "Quote Items" section). */
+.body-quick.qq-s3 #itemsSection { display:block!important; }
+@media print { #qqWizard{display:none!important} }
 </style>
 </head>
 <body>
@@ -403,6 +444,7 @@ tr:hover td{background:#fafbff;}
       <button id="btnInternal" onclick="setView('internal')">🔒 Internal</button>
       <button id="btnAdmin" onclick="setView('admin')">⚙ Admin</button>
     </div>
+    <button class="btn" id="btnQuick" onclick="toggleQuickMode()">⚡ Quick Quote</button>
   </div>
   <div class="topbar-right">
     <span class="filed-badge" id="filedBadge">✓ FILED</span>
@@ -442,6 +484,20 @@ tr:hover td{background:#fafbff;}
 
 <!-- Subject line (print) -->
 <div class="print-only" id="phSubject" style="display:none;font-size:10pt;color:#222;margin:6px 0 2px;"><strong>Subject:</strong> <span id="phSubjectVal"></span></div>
+
+<!-- ── QUICK QUOTE WIZARD (v12 WS31) ── -->
+<div id="qqWizard" class="no-print" style="display:none">
+  <div class="qq-steps">
+    <span class="qq-step" data-s="1">1 · Client</span>
+    <span class="qq-step" data-s="2">2 · Products</span>
+    <span class="qq-step" data-s="3">3 · Review &amp; Send</span>
+  </div>
+  <div id="qqBody"></div>
+  <div class="qq-nav">
+    <button class="btn" id="qqBack" onclick="qqGo(-1)">‹ Back</button>
+    <button class="btn btn-green" id="qqNext" onclick="qqGo(1)">Next ›</button>
+  </div>
+</div>
 
 <!-- ── DATA SOURCE STATUS ── -->
 <div class="section no-print" style="padding:12px 18px;">
@@ -592,7 +648,7 @@ tr:hover td{background:#fafbff;}
 </div>
 
 <!-- ── ADD ITEMS ── -->
-<div class="section no-print">
+<div class="section no-print" id="addItemsSection">
   <div class="sec-title">Add Items to Quote</div>
 
   <!-- Category filter tabs -->
@@ -610,7 +666,7 @@ tr:hover td{background:#fafbff;}
   </div>
 
   <!-- Product search -->
-  <div style="display:flex;gap:8px;align-items:stretch;margin-bottom:10px;flex-wrap:wrap;">
+  <div id="productSearchRow" style="display:flex;gap:8px;align-items:stretch;margin-bottom:10px;flex-wrap:wrap;">
     <div class="search-wrap" style="flex:1;min-width:200px;">
       <input id="searchInput" class="search-input" type="text" placeholder="Search products… (type to filter)"
         oninput="handleSearch()" onfocus="openDropdown()" autocomplete="off">
@@ -660,7 +716,7 @@ tr:hover td{background:#fafbff;}
 </div>
 
 <!-- ── QUOTE ITEMS TABLE ── -->
-<div class="section">
+<div class="section" id="itemsSection">
   <div class="sec-title">
     <span>Quote Items</span>
   </div>
@@ -932,6 +988,11 @@ tr:hover td{background:#fafbff;}
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 <script defer src="js/firebase-config.js"></script>
+<!-- v12 WS31 — shared letterhead engine. Self-contained (own esc fallback,
+     accepts opts.entity) so it works standalone in this iframe; already in
+     sw.js PRECACHE. Falls back to the legacy #printHeader if it fails to load
+     (offline/file://). -->
+<script defer src="js/letterhead.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
 //  COMPANY CONFIG
@@ -963,6 +1024,8 @@ let selectedProduct=null;
 // Imperial units (in/ft) display as fractions to the nearest 1/16".
 let measureUnit='mm';
 let dimsMm={}, runsVal=1;
+// Quick Quote wizard state (v12 WS31)
+let quickMode=false, qqStep=1, qqSelectedClientId=null, qqClients=null;
 function fmtNum(v,dec){ const n=parseFloat(Number(v).toFixed(dec)); return n.toString(); }
 function gcdInt(a,b){ return b?gcdInt(b,a%b):a; }
 // inches → "35 7/16" / "35" / "7/16" (nearest 1/16)
@@ -1017,6 +1080,9 @@ const MEASURE_UNITS={
 function dispVal(mm){ const u=MEASURE_UNITS[measureUnit]; return u.text? u.toStr(mm) : fmtNum(mm/u.f,u.dec); }
 function valToMm(str){ const u=MEASURE_UNITS[measureUnit]; return u.text? u.toMm(str) : parseFloat(str||0)*u.f; }
 function attrEsc(s){ return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;'); }
+// escHtml does NOT exist in this standalone document — text-node-safe escape for
+// Quick Quote markup (attribute escaping + angle-bracket escaping).
+function txtEsc(s){ return attrEsc(s).replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 let termsContent={}, termsEnabled={
   tc_completion:true,tc_payment:true,tc_warranty:true,
   tc_scope:true,tc_validity:true,tc_site:true,tc_acceptance:true
@@ -1071,6 +1137,7 @@ async function loadDatabase() {
           leadTime: p.leadTime || '',
           notes: p.specifications || p.notes || '',
           unit: p.unit || 'pc',
+          photoUrl: p.photoUrl || null,   // v12 WS31 — placeholder gracefully when absent
         };
       }),
       categories: meta.categories || [],
@@ -1152,6 +1219,7 @@ function applyPartnerMode(){
   // Agent Copy stays available to partners (restored per request).
   // If the Admin panel was open, fall back to client view
   if(typeof currentView!=='undefined' && currentView==='admin') setView('client');
+  applyLetterheadHeader();
 }
 
 document.addEventListener('DOMContentLoaded', ()=>{
@@ -1187,6 +1255,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
 function initUI(){
   buildCoefTable();
   renderItems();
+  // ?mode=quick — enable the Quick Quote wizard on load (v12 WS31).
+  if (!quickMode && new URLSearchParams(location.search).get('mode') === 'quick') toggleQuickMode();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1209,6 +1279,37 @@ function setCompany(co){
   const pft=document.getElementById('pfThanks'); if(pft) pft.textContent=c.thanks||'';
   const pfc=document.getElementById('pfCreds'); if(pfc) pfc.textContent=c.creds||'';
   buildQuoteNo();
+  applyLetterheadHeader();
+}
+
+// v12 WS31 Spec 7 — shared letterhead engine for the printed quote. Renders
+// into its own #lhPrintHeader sibling (see the CSS comment above) so the
+// legacy #printHeader + updatePrintHeader() keep working untouched; only
+// which header is VISIBLE at print time changes.
+function applyLetterheadHeader(){
+  if (typeof window.buildLetterhead !== 'function') return;   // offline/file:// → legacy header stays
+  const c = CO[currentCo] || CO.BK;
+  const bits = (c.contact||'').split('|').map(s=>s.trim());
+  buildQuoteNo();   // refresh #quoteNo first so the letterhead shows the current number
+  const lh = buildLetterhead({
+    entity: { name:c.name, registration:c.sub||'', address:c.addr||'', phone:bits[0]||'', email:bits[1]||'' },
+    docTitle: 'QUOTATION',
+    docNumber: document.getElementById('quoteNo')?.value || '',
+    dateLabel: new Date().toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'}),
+    accent: currentCo==='BS' ? '#37474F' : '#1E3A5F',
+    logo: (document.getElementById('phLogo')?.src) || undefined,   // reuse the per-company logo the legacy header already resolves
+  });
+  let lhBox = document.getElementById('lhPrintHeader');
+  if (!lhBox) {
+    lhBox = document.createElement('div');
+    lhBox.id = 'lhPrintHeader';
+    document.getElementById('printHeader')?.insertAdjacentElement('afterend', lhBox);
+  }
+  lhBox.innerHTML = lh.headerHTML;
+  let st = document.getElementById('lhPrintCss');
+  if (!st) { st = document.createElement('style'); st.id = 'lhPrintCss'; document.head.appendChild(st); }
+  st.textContent = lh.printCSS;
+  document.body.classList.add('lh-active');
 }
 
 function setView(v){
@@ -1221,6 +1322,134 @@ function setView(v){
   const ip=document.getElementById('internalPanel'); if(ip) ip.style.display=(v==='internal')?'block':'none';
   document.getElementById('adminPanel')?.classList.toggle('open',v==='admin');
   if(v==='internal') buildLaborTable();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  QUICK QUOTE WIZARD (v12 WS31) — guided client → products → review/send
+//  shell. UI-only: reuses the full builder's own pricing (buildCalcPanel/
+//  computePrice), items (renderItems), totals (computeTotals) and filing
+//  (doVerifyAndFile/fileQuotation/buildQuotePayload) machinery untouched.
+// ═══════════════════════════════════════════════════════════════════
+function toggleQuickMode(){
+  quickMode=!quickMode;
+  document.getElementById('btnQuick')?.classList.toggle('active',quickMode);
+  document.body.classList.toggle('body-quick',quickMode);
+  qqRender();
+}
+
+function qqRender(){
+  document.body.classList.remove('qq-s1','qq-s2','qq-s3');
+  document.body.classList.add('qq-s'+qqStep);
+  document.querySelectorAll('.qq-step').forEach(el=>el.classList.toggle('on',parseInt(el.dataset.s,10)===qqStep));
+  const back=document.getElementById('qqBack'), next=document.getElementById('qqNext');
+  if(back) back.style.visibility=qqStep>1?'visible':'hidden';
+  if(next) next.style.display=qqStep<3?'':'none';
+  const body=document.getElementById('qqBody');
+  if(!body) return;
+  if(qqStep===1) qqRenderStep1(body);
+  else if(qqStep===2) qqRenderStep2(body);
+  else qqRenderStep3(body);
+}
+
+// ── Step 1 — Client ──
+async function qqRenderStep1(body){
+  body.innerHTML=`
+    <div class="fg full"><label>Search existing clients…</label>
+      <input list="qqClientList" id="qq-pick" placeholder="Type a client name…" autocomplete="off">
+      <datalist id="qqClientList"></datalist>
+    </div>
+    <div class="fg-grid" style="margin-top:10px">
+      <div class="fg full"><label>Client Name</label><input id="qq-name" placeholder="Full name"></div>
+      <div class="fg full"><label>Company / Business Name</label><input id="qq-company" placeholder="Company name (if applicable)"></div>
+      <div class="fg full"><label>Project Address / Site</label><input id="qq-addr" placeholder="Full address"></div>
+      <div class="fg"><label>Contact Number</label><input id="qq-phone" placeholder="+63…"></div>
+      <div class="fg"><label>Email</label><input id="qq-email" type="email" placeholder="email@example.com"></div>
+    </div>`;
+  // Prefill FROM the main form's client fields — the main form stays the single
+  // source of truth (buildQuotePayload() reads clientName/clientCompany/…).
+  const map=[['qq-name','clientName'],['qq-company','clientCompany'],['qq-addr','clientAddress'],
+    ['qq-phone','clientPhone'],['qq-email','clientEmail']];
+  map.forEach(([qid,mainId])=>{
+    const el=document.getElementById(qid); if(el) el.value=document.getElementById(mainId)?.value||'';
+  });
+  document.getElementById('qq-name').addEventListener('input',()=>{ qqSelectedClientId=null; });
+
+  const clients=await qqLoadClients();
+  const dl=document.getElementById('qqClientList');
+  if(dl) dl.innerHTML=clients.map(c=>`<option value="${attrEsc(c.name||'')}">`).join('');
+  document.getElementById('qq-pick')?.addEventListener('input',e=>{
+    const typed=e.target.value.trim().toLowerCase();
+    const match=clients.find(c=>(c.name||'').trim().toLowerCase()===typed);
+    if(!match) return;
+    qqSelectedClientId=match.id;
+    document.getElementById('qq-name').value=match.name||'';
+    document.getElementById('qq-company').value=match.company||'';
+    document.getElementById('qq-addr').value=match.address||'';
+    document.getElementById('qq-phone').value=match.phone||'';
+    document.getElementById('qq-email').value=match.email||'';
+  });
+}
+
+// Lazily loads the unified `clients` collection once per session. Partner
+// sessions are denied by firestore.rules — caught, falls back to an empty list
+// (typed name still files fine; nameKey upsert still creates the client).
+async function qqLoadClients(){
+  if (qqClients) return qqClients;
+  try { const s = await db.collection('clients').limit(500).get();
+    qqClients = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  } catch(_) { qqClients = []; }
+  return qqClients;
+}
+
+// ── Step 2 — Products (photo catalog) ──
+function qqRenderStep2(body){
+  const cats=DB.categories||[];
+  const chipStyle=c=>currentCatFilter===c.id?`background:${c.color};color:white;border-color:${c.color};`:'';
+  const chips=`<div class="cat-tabs" style="margin-bottom:10px">
+    <button class="cat-tab${currentCatFilter==='all'?' active':''}" onclick="qqFilterCat('all')" style="${currentCatFilter==='all'?'background:var(--dark-blue);color:white;border-color:var(--dark-blue);':''}">All</button>
+    ${cats.map(c=>`<button class="cat-tab${currentCatFilter===c.id?' active':''}" onclick="qqFilterCat('${attrEsc(c.id)}')" style="${chipStyle(c)}">${c.icon||''} ${txtEsc(c.label||c.id)}</button>`).join('')}
+  </div>`;
+  const prods=filteredProducts('');
+  const grid=prods.length ? `<div class="qq-grid">${prods.map(p=>`<button class="qq-card" onclick="qqPick('${attrEsc(p.id)}')">
+      ${p.photoUrl ? `<img class="qq-photo" loading="lazy" src="${attrEsc(p.photoUrl)}" onerror="this.outerHTML='<div class=&quot;qq-photo-ph&quot;>🍳</div>'">`
+                   : `<div class="qq-photo-ph">🍳</div>`}
+      <div class="qq-card-name">${txtEsc(p.name)}</div>
+      <div class="qq-card-price">${p.formulaType==='fixed'?'':'from '}${formatPeso(p.basePrice)}</div>
+    </button>`).join('')}</div>`
+    : `<div class="empty-state" style="padding:24px;text-align:center;color:var(--gray-dark)">No products in this category.</div>`;
+  const badge = items.length ? `<div class="qq-badge">🧺 ${items.length} item(s) · ${formatPeso(computeTotals().grand)}</div>` : '';
+  body.innerHTML = chips + grid + badge;
+}
+function qqFilterCat(cat){ currentCatFilter=cat; qqRender(); }
+// Opens the REAL calc panel (dimensions/qty/computePrice) — no forked pricing.
+// The panel lives in the (otherwise quick-mode-hidden) "Add Items" section,
+// which the qq-s2 CSS unhides just for this step.
+function qqPick(id){ selectProduct(id); }
+
+// ── Step 3 — Review & Send ──
+function qqRenderStep3(body){
+  body.innerHTML = `
+    <div style="margin-bottom:10px;font-size:13px;color:var(--gray-dark)">Review the items and totals below (shown beneath this wizard), then verify &amp; file the quotation.</div>
+    <button class="btn btn-green" style="width:100%;margin-top:6px" id="qqVerifyBtn" onclick="doVerifyAndFile()">📋 Verify &amp; File</button>
+  `;
+}
+
+// ── Step navigation ──
+function qqGo(delta){
+  if(delta>0 && qqStep===1){
+    const name=(document.getElementById('qq-name')?.value||'').trim();
+    if(!name){ alert('Enter the client name first.'); return; }
+    // Copy Step 1 into the main form (single source of truth stays the main
+    // form — buildQuotePayload() reads these ids unchanged).
+    document.getElementById('clientName').value=name;
+    document.getElementById('clientCompany').value=(document.getElementById('qq-company')?.value||'').trim();
+    document.getElementById('clientAddress').value=(document.getElementById('qq-addr')?.value||'').trim();
+    document.getElementById('clientPhone').value=(document.getElementById('qq-phone')?.value||'').trim();
+    document.getElementById('clientEmail').value=(document.getElementById('qq-email')?.value||'').trim();
+    updatePrintHeader(); renderBillStrip(); saveToStorage();
+  }
+  qqStep=Math.max(1,Math.min(3,qqStep+delta));
+  qqRender();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1418,6 +1647,7 @@ function renderDropdown(prods){
     ps.forEach((p,i)=>{
       const baseP=formatPeso(p.basePrice);
       html+=`<div class="sd-item" data-id="${p.id}" onclick="selectProduct('${p.id}')">
+        ${p.photoUrl?`<img src="${attrEsc(p.photoUrl)}" loading="lazy" style="width:36px;height:36px;object-fit:cover;border-radius:6px;margin-right:8px;flex-shrink:0">`:''}
         <div class="sd-item-info">
           <div class="sd-item-name">${p.name}</div>
           <div class="sd-item-meta">${p.id} · ${p.formulaType==='fixed'?'Fixed price':p.formulaType==='per_length'?'Scales by length':p.formulaType==='per_area'?'Per sqm':p.formulaType==='per_run'?'Per run':'Configurable'}</div>
@@ -1679,6 +1909,7 @@ function addItemFromCalc(){
   renderItems();
   clearSearch();
   dismissCalc();
+  if (quickMode) qqRender();   // v12 WS31 — re-show the grid + sticky item-count badge
 }
 
 // Add a blank, fully-editable custom line item (not from the DB)
@@ -2570,6 +2801,7 @@ function buildQuotePayload(){
   return {
     quoteNumber:   quoteNo,
     company:       co,
+    clientId:      qqSelectedClientId || null,   // v12 WS31 — set by the Quick Quote client picker; null for full-builder filings (nameKey upsert unchanged)
     clientName:    document.getElementById('clientName')?.value?.trim()||'',
     clientCompany: document.getElementById('clientCompany')?.value?.trim()||'',
     clientAddress: document.getElementById('clientAddress')?.value?.trim()||'',
@@ -2679,6 +2911,7 @@ function buildAgentBox(){
 }
 
 function doPrint(){
+  applyLetterheadHeader();   // v12 WS31 — refresh the shared letterhead so the doc number is current
   if(quoteStatus!=='filed'){
     alert('Please file this quote before printing. Tap "Verify & File" to complete filing first.');
     doVerifyAndFile(); return;

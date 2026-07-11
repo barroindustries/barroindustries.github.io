@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.27';
+window.APP_VERSION = '12.0.28';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -398,6 +398,22 @@ window.isQuoteLost = q => !!(q && q.status === 'rejected');
 window.isQuoteOpen = q => !!q && !window.isQuoteWon(q) && !window.isQuoteLost(q);
 // THE one client-name normalizer — every join and dedupe uses this, nothing else.
 window.clientNameKey = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+// ── Canonical quote status/approvalStatus WRITE pairs (v12 WS31) ─────────
+// Both fields are kept for reader compatibility; every write site sets them
+// TOGETHER via this table so they can never drift again (the roa-chip bug was
+// enabled by independent, partial writes). Read-side truth stays
+// isQuoteWon/isQuoteLost/isQuoteOpen (WS32) — do not branch on raw strings.
+window.quoteStateFields = function (state) {
+  return ({
+    filed:            { status:'filed',            approvalStatus:'filed'          },
+    pending_approval: { status:'pending_approval', approvalStatus:'pending_review' },
+    approved:         { status:'filed',            approvalStatus:'approved'       },
+    needs_revision:   { status:'needs_revision',   approvalStatus:'needs_revision' },
+    rejected:         { status:'rejected',         approvalStatus:'rejected'       },
+  })[state] || { status: state, approvalStatus: state };
+};
+window.QUOTE_STALE_DAYS = 14;   // "filed but no Sales Order" badge threshold (WS31 decision 13)
 
 // ── Stock movement log — single shared shape (v12 WS29) ─────────────────────
 // buildStockMovement is PURE (returns the payload) so atomic call sites can
