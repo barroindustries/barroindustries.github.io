@@ -10749,6 +10749,7 @@ window.renderApprovals = async function(currentUser) {
     'ca_deduct':      ['president','manager'], // v12 WS22 — employee's CA-deduction-for-this-run request
     'raise':          ['president'], // v12 WS23 — only the President approves/rejects a raise request
     'quote-approval': ['president','manager'],
+    'po-approval':    ['president','manager'], // v12 WS30 — PO gate; money-moving → secretary escalates
     'finance-req':    ['president'],
     'finance-del':    ['president'],
     'delete-quote':   ['president'],
@@ -10771,7 +10772,7 @@ window.renderApprovals = async function(currentUser) {
     } catch (e) { Notifs.showToast('Could not send request', 'error'); }
   };
   // Check pending counts for badges
-  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap, finReqSnap, finDelSnap, qApprSnap, delQSnap, delBKQSnap, delCSnap, leaveSnap] = await Promise.all([
+  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap, finReqSnap, finDelSnap, qApprSnap, delQSnap, delBKQSnap, delCSnap, leaveSnap, poSnap] = await Promise.all([
     db.collection('signup_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('attendance_extensions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('cash_advances').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
@@ -10783,7 +10784,8 @@ window.renderApprovals = async function(currentUser) {
     db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
     db.collection('bk_quotes').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
     db.collection('clients').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
-    db.collection('leave_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]}))
+    db.collection('leave_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
+    db.collection('purchase_requisitions').where('approvalStatus','==','pending').get().catch(()=>({size:0,docs:[]}))
   ]);
   const pendingSignups = signupSnap.size || 0;
   const pendingExt     = extSnap.size || 0;
@@ -10794,7 +10796,8 @@ window.renderApprovals = async function(currentUser) {
   const pendingQApprovals = qApprSnap.size || 0;
   const pendingDeletes    = (delQSnap.size || 0) + (delBKQSnap.size || 0) + (delCSnap.size || 0);
   const pendingLeave      = leaveSnap.size || 0;
-  const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs + pendingReview + pendingFinReqs + pendingQApprovals + pendingDeletes + pendingLeave;
+  const pendingPO         = poSnap.size || 0;
+  const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs + pendingReview + pendingFinReqs + pendingQApprovals + pendingDeletes + pendingLeave + pendingPO;
 
   // ── Grading queue count (President's grading subtab) ──────────────────
   // Completed/approved tasks awaiting a presidentScore + employees whose
@@ -10851,7 +10854,7 @@ window.renderApprovals = async function(currentUser) {
       // index per-collection. If that index isn't provisioned, the query is rejected and
       // silently swallowed by .catch(), making items vanish from "All Requests". We sort
       // client-side instead so a missing index can never hide pending items.
-      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2] = await Promise.all([
+      const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2] = await Promise.all([
         db.collection('signup_requests').where('status','==','pending').get().catch(e=>{console.error('signup_requests query failed',e);return {docs:[]};}),
         db.collection('attendance_extensions').where('status','==','pending').get().catch(e=>{console.error('attendance_extensions query failed',e);return {docs:[]};}),
         db.collection('cash_advances').where('status','==','pending').get().catch(e=>{console.error('cash_advances query failed',e);return {docs:[]};}),
@@ -10864,7 +10867,8 @@ window.renderApprovals = async function(currentUser) {
         db.collection('bk_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('bk_quotes delete query failed',e);return {docs:[]};}),
         db.collection('clients').where('deleteRequested','==',true).get().catch(e=>{console.error('clients delete query failed',e);return {docs:[]};}),
         db.collection('leave_requests').where('status','==','pending').get().catch(e=>{console.error('leave_requests query failed',e);return {docs:[]};}),
-        db.collection('pending_raises').where('status','==','pending_approval').get().catch(e=>{console.error('pending_raises query failed',e);return {docs:[]};})
+        db.collection('pending_raises').where('status','==','pending_approval').get().catch(e=>{console.error('pending_raises query failed',e);return {docs:[]};}),
+        db.collection('purchase_requisitions').where('approvalStatus','==','pending').get().catch(e=>{console.error('purchase_requisitions query failed',e);return {docs:[]};})
       ]);
 
       const allPending = [
@@ -10887,7 +10891,9 @@ window.renderApprovals = async function(currentUser) {
         // Leave requests — surfaced here so every request type funnels through this page.
         ...leaveSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'leave',icon:'🌴',label:'Leave Request',name:x.userName||'Employee',detail:`${x.days||0}d ${x.type||'leave'} · ${x.startDate||''}→${x.endDate||''}${x.reason?' — '+x.reason:''}`,ts:x.createdAt};}),
         // v12 WS23 — raise requests from non-president finance/HR.
-        ...raiseSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'raise',icon:'💸',label:'Raise Request',name:x.subjectName||'Employee',detail:`₱${fmt(x.oldAmount||0)} → ₱${fmt(x.newAmount||0)} · eff ${x.effectiveDate||''}${x.reason?' — '+x.reason:''}`,ts:x.createdAt};})
+        ...raiseSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'raise',icon:'💸',label:'Raise Request',name:x.subjectName||'Employee',detail:`₱${fmt(x.oldAmount||0)} → ₱${fmt(x.newAmount||0)} · eff ${x.effectiveDate||''}${x.reason?' — '+x.reason:''}`,ts:x.createdAt};}),
+        // v12 WS30 — POs awaiting the approval gate.
+        ...poSnap2.docs.map(d=>{const x=d.data();return {id:d.id,...x,type:'po-approval',icon:'🛒',label:'PO Approval',name:`${x.prNo||x.rfqNo||'PO'} — ${x.supplier||'supplier'}`,detail:`${x.requestingDept||'Purchasing'} · ₱${fmt(x.total||0)}${x.title?' — '+x.title:''} · by ${x.convertedByName||x.createdByName||'?'}`,ts:x.convertedAt||x.createdAt};})
       ].sort((a,b)=>(b.ts?.seconds||0)-(a.ts?.seconds||0));
 
       if (!allPending.length) {
@@ -10944,6 +10950,10 @@ window.renderApprovals = async function(currentUser) {
               `:item.type==='raise'?`
                 <button class="btn-success btn-sm rz-approve-btn" data-id="${item.id}">✓ Approve</button>
                 <button class="btn-danger btn-sm rz-reject-btn" data-id="${item.id}">✗ Reject</button>
+              `:item.type==='po-approval'?`
+                <button class="btn-primary btn-sm po-view-btn" data-id="${item.id}">👁 View PO</button>
+                <button class="btn-success btn-sm po-approve-btn" data-id="${item.id}" data-no="${escHtml(item.prNo||'')}">✓ Approve</button>
+                <button class="btn-danger btn-sm po-reject-btn" data-id="${item.id}" data-no="${escHtml(item.prNo||'')}">✗ Reject</button>
               `:item.type==='leave'?`
                 <button class="btn-success btn-sm lv-approve-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}">✓ Approve</button>
                 <button class="btn-danger btn-sm lv-reject-btn" data-id="${item.id}" data-name="${escHtml(item.name||'')}">✗ Reject</button>
@@ -11024,6 +11034,25 @@ window.renderApprovals = async function(currentUser) {
           const reason = (await promptDialog({message:'Reason for declining (optional):', multiline:true}))||'';
           await window.RaiseFlow.reject(btn.dataset.id, reason);
           Notifs.showToast('Raise declined.');
+          loadApprovalsSub('all');
+      }));
+
+      // PO approvals (v12 WS30) — same canonical service the Purchasing tab uses.
+      wrap.querySelectorAll('.po-view-btn').forEach(btn => onClickSafe(btn, async () => {
+          const s = await db.collection('purchase_requisitions').doc(btn.dataset.id).get();
+          if (s.exists) printPurchaseOrder({ id: s.id, ...s.data() });   // pending → watermarked preview
+      }));
+      wrap.querySelectorAll('.po-approve-btn').forEach(btn => onClickSafe(btn, async () => {
+          if (!(await confirmDialog({ message: `Approve PO ${escHtml(btn.dataset.no)}? Your name will print on the "Approved by" line.`, html: true }))) return;
+          await window.approvePurchaseOrder(btn.dataset.id);
+          Notifs.showToast('PO approved ✓');
+          loadApprovalsSub('all');
+      }));
+      wrap.querySelectorAll('.po-reject-btn').forEach(btn => onClickSafe(btn, async () => {
+          const reason = prompt('Reason for rejection (shown to Purchasing):');
+          if (reason === null) return;
+          await window.rejectPurchaseOrder(btn.dataset.id, reason);
+          Notifs.showToast('PO rejected.');
           loadApprovalsSub('all');
       }));
 
@@ -14852,11 +14881,14 @@ function bindRfqCard(r, currentUser, currentRole, content) {
       const prNo = (r.rfqNo || '').replace(/^RFQ/, 'PR') || ('PR-' + today());
       await db.collection('purchase_requisitions').doc(r.id).update({
         items, total: purchTotal(items), stage: 'pr', status: 'pending', prNo,
+        approvalStatus: 'pending',            // v12 WS30 — enters the PO approval gate
         convertedAt: firebase.firestore.FieldValue.serverTimestamp(),
         convertedBy: currentUser.uid,
         convertedByName: window.userProfile?.displayName || currentUser.email
       });
-      Notifs.showToast('Converted to Purchase Request ✓');
+      await notifyPoApprovers({ id: r.id, ...r, items, total: purchTotal(items), prNo })
+        .catch(e2 => console.warn('[po notify]', e2));
+      Notifs.showToast('Converted to Purchase Request — awaiting President/Manager approval.');
       renderRFQs(content, currentUser, currentRole);
     } catch (err) { Notifs.showToast('Convert failed: ' + (err.message || err), 'error'); btn.disabled = false; }
   });
@@ -14962,6 +14994,11 @@ async function openRfqModal(currentUser, onDone, prefill) {
   });
 }
 
+// v12 WS30 — PO approval state with legacy grandfather: PRs converted before the
+// gate shipped carry no approvalStatus and stay valid ('legacy' ≈ approved).
+function poState(p) { return p.approvalStatus || ((p.stage === 'pr') ? 'legacy' : ''); }
+function poApproved(p) { const s = poState(p); return s === 'approved' || s === 'legacy'; }
+
 // ── Purchase Request list (stage === 'pr') ────────
 // Shared by the Purchasing dept (editable status) and the Finance → Purchases
 // tab (opts.viewOnly hides controls; Firestore rules also block Finance writes).
@@ -14992,6 +15029,7 @@ window.exportPurchasesCSV = function() {
 async function renderPurchaseRequests(content, currentUser, currentRole, opts = {}) {
   const canEdit = !opts.viewOnly && canEditDept('Purchasing');
   const canRecord = !!opts.financeView && isFinancePriv(); // Finance/admin may post to the books
+  const canApprovePO = ['president','manager'].includes(currentRole);   // mirrors APPROVAL_CAPS['po-approval']
   const snap = await db.collection('purchase_requisitions').orderBy('createdAt','desc').get();
   const prs = snap.docs.map(d => ({ id:d.id, ...d.data() })).filter(d => d.stage === 'pr');
 
@@ -15031,7 +15069,11 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
 
   content.innerHTML = `
     ${summary}
-    ${opts.financeView ? `<p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Purchases raised by the Purchasing department. Use <strong>Record as Disbursement</strong> to post one into the Cash Disbursement Journal.</p>` : ''}
+    ${opts.financeView ? (() => {
+      const unrec = prs.filter(x => x.status === 'received' && !x.recordedToFinance).length;
+      return `${unrec ? `<div class="alert-banner" style="margin-bottom:10px"><span>⏳ <strong>${unrec} received purchase${unrec>1?'s':''} not yet recorded</strong> — stock has landed but the books haven't. Use Record as Disbursement below.</span></div>` : ''}
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">Purchases raised by the Purchasing department. Use <strong>Record as Disbursement</strong> to post one into the Cash Disbursement Journal.</p>`;
+    })() : ''}
     ${filterBar}
     <div id="pr-empty-note" style="display:none;font-size:12px;color:var(--text-muted);padding:12px">No purchase requests match.</div>
     ${!prs.length
@@ -15050,6 +15092,10 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
             <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
               <span class="badge ${st.badge}">${st.label}</span>
               ${p.submittedToFinance ? `<span class="badge badge-green" style="font-size:9px">🧾 Sent to Finance</span>` : ''}
+              ${poState(p)==='pending' ? `<span class="badge badge-orange" style="font-size:9px">🔒 Awaiting approval</span>`
+                : poState(p)==='rejected' ? `<span class="badge badge-red" style="font-size:9px">✗ Rejected</span>`
+                : poState(p)==='approved' ? `<span class="badge badge-green" style="font-size:9px">✓ Approved · ${escHtml(p.approvedByName||'')}</span>` : ''}
+              ${p.status==='received' && !p.recordedToFinance ? `<span class="badge badge-orange" style="font-size:9px">⏳ Awaiting Finance record</span>` : ''}
             </div>
           </div>
           <div class="table-wrap" style="margin-top:10px"><table class="data-table">
@@ -15064,16 +15110,22 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
             <tfoot><tr><td colspan="4" style="text-align:right;font-weight:700">Total</td><td style="text-align:right;font-weight:700">₱${fmt(p.total != null ? p.total : purchTotal(p.items))}</td></tr></tfoot>
           </table></div>
           ${p.notes ? `<div style="font-size:12px;margin-top:6px;color:var(--text-muted)">${escHtml(p.notes)}</div>` : ''}
+          ${poState(p)==='rejected' && p.rejectedReason ? `<div style="font-size:12px;margin-top:6px;color:var(--danger,#c0392b)">✗ Rejected by ${escHtml(p.rejectedByName||'')}: ${escHtml(p.rejectedReason)}</div>` : ''}
           ${p.submittedToFinance && p.submittedToFinanceByName ? `<div style="font-size:11px;margin-top:6px;color:var(--success,#1b8a3a)">🧾 Submitted to Finance by ${escHtml(p.submittedToFinanceByName)}${p.submittedToFinanceAt && p.submittedToFinanceAt.toDate ? ` · ${p.submittedToFinanceAt.toDate().toLocaleDateString('en-PH')}` : ''}</div>` : ''}
           <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap">
-            <button class="btn-secondary btn-sm pr-print" data-id="${p.id}">🖨 Print PO</button>
-            ${canEdit ? `
+            ${poState(p) !== 'rejected' ? `<button class="btn-secondary btn-sm pr-print" data-id="${p.id}">🖨 Print PO</button>` : ''}
+            ${p.status === 'received' ? `<button class="btn-secondary btn-sm pr-rr" data-id="${p.id}">📦 Receiving Report</button>` : ''}
+            ${canApprovePO && poState(p) === 'pending' ? `
+              <button class="btn-success btn-sm po-approve" data-id="${p.id}">✓ Approve PO</button>
+              <button class="btn-danger btn-sm po-reject" data-id="${p.id}">✗ Reject</button>` : ''}
+            ${canEdit && poState(p) === 'rejected' ? `<button class="btn-secondary btn-sm po-revert" data-id="${p.id}">↩ Revert to RFQ</button>` : ''}
+            ${canEdit && poApproved(p) ? `
               ${p.status !== 'ordered' && p.status !== 'received' ? `<button class="btn-secondary btn-sm pr-stat" data-id="${p.id}" data-stat="ordered">Mark Ordered</button>` : ''}
               ${p.status !== 'received' ? `<button class="btn-primary btn-sm pr-stat" data-id="${p.id}" data-stat="received">Mark Received</button>` : ''}
               ${(p.receiveUnmatched||[]).length ? `<button class="btn-secondary btn-sm pr-resolve" data-id="${p.id}">⚠ Resolve ${p.receiveUnmatched.length} unmatched</button>` : ''}
               ${(p.status === 'ordered' || p.status === 'received') && !p.submittedToFinance ? `<button class="btn-primary btn-sm pr-submit-fin" data-id="${p.id}">📩 Submit to Finance</button>` : ''}
             ` : ''}
-            ${canRecord && !p.recordedToFinance ? `<button class="btn-primary btn-sm pr-record" data-id="${p.id}">🧾 Record as Disbursement</button>` : ''}
+            ${canRecord && !p.recordedToFinance && poApproved(p) ? `<button class="btn-primary btn-sm pr-record" data-id="${p.id}">🧾 Record as Disbursement</button>` : ''}
             ${p.recordedToFinance ? `<span style="font-size:11px;color:var(--success,#1b8a3a);align-self:center">✓ Recorded in journal</span>` : ''}
           </div>
         </div></div>`;
@@ -15108,6 +15160,43 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
 
   const redo = () => renderPurchaseRequests(content, currentUser, currentRole, opts);
 
+  content.querySelectorAll('.po-approve').forEach(btn => btn.addEventListener('click', async () => {
+    const p = prs.find(x => x.id === btn.dataset.id); if (!p) return;
+    if (!(await confirmDialog({ message: `Approve ${escHtml(p.prNo || '')} — ${escHtml(p.supplier || '')} for ₱${fmt(p.total != null ? p.total : purchTotal(p.items))}? Your name will print on the "Approved by" line.`, html: true }))) return;
+    btn.disabled = true;
+    try { await window.approvePurchaseOrder(p.id); Notifs.showToast('PO approved ✓'); redo(); }
+    catch (err) { Notifs.showToast('Approve failed: ' + (err.message || err), 'error'); btn.disabled = false; }
+  }));
+  content.querySelectorAll('.po-reject').forEach(btn => btn.addEventListener('click', async () => {
+    const p = prs.find(x => x.id === btn.dataset.id); if (!p) return;
+    const reason = prompt('Reason for rejection (shown to Purchasing):') ;
+    if (reason === null) return;                       // cancelled
+    btn.disabled = true;
+    try { await window.rejectPurchaseOrder(p.id, reason); Notifs.showToast('PO rejected.'); redo(); }
+    catch (err) { Notifs.showToast('Reject failed: ' + (err.message || err), 'error'); btn.disabled = false; }
+  }));
+  content.querySelectorAll('.po-revert').forEach(btn => btn.addEventListener('click', async () => {
+    const p = prs.find(x => x.id === btn.dataset.id); if (!p) return;
+    if (!(await confirmDialog({ message: `Revert ${escHtml(p.prNo || '')} to an RFQ to fix and resubmit? The rejection note stays on record until re-converted.`, html: true }))) return;
+    btn.disabled = true;
+    try {
+      const FV = firebase.firestore.FieldValue;
+      await db.collection('purchase_requisitions').doc(p.id).update({
+        stage: 'rfq', status: 'quoting',
+        approvalStatus: FV.delete(), approvedBy: FV.delete(), approvedByName: FV.delete(),
+        approvedByTitle: FV.delete(), approvedAt: FV.delete(),
+        rejectedBy: FV.delete(), rejectedByName: FV.delete(), rejectedAt: FV.delete(), rejectedReason: FV.delete(),
+        updatedAt: FV.serverTimestamp()
+      });
+      Notifs.showToast('Reverted to RFQ — edit it in the Request for Quotation tab.');
+      redo();
+    } catch (err) { Notifs.showToast('Revert failed: ' + (err.message || err), 'error'); btn.disabled = false; }
+  }));
+  content.querySelectorAll('.pr-rr').forEach(btn => btn.addEventListener('click', () => {
+    const p = prs.find(x => x.id === btn.dataset.id);
+    if (p) printReceivingReport(p);
+  }));
+
   // Purchasing → hand the completed purchase to Finance for recordkeeping.
   if (canEdit) content.querySelectorAll('.pr-submit-fin').forEach(btn => btn.addEventListener('click', async () => {
     const p = prs.find(x => x.id === btn.dataset.id); if (!p) return;
@@ -15137,6 +15226,8 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
   }));
 
   if (canEdit) content.querySelectorAll('.pr-stat').forEach(btn => btn.addEventListener('click', async () => {
+    const p0 = prs.find(x => x.id === btn.dataset.id);
+    if (p0 && !poApproved(p0)) { Notifs.showToast('This PO needs President/Manager approval first.', 'error'); btn.disabled = false; return; }
     btn.disabled = true;
     try {
       const p = prs.find(x => x.id === btn.dataset.id);
@@ -15151,8 +15242,25 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
           // Only a FULLY-landed PR gets the done flag; leftovers go to the resolver.
           await db.collection('purchase_requisitions').doc(p.id).update({
             receivedToInventory: res.unmatched.length === 0,
-            receiveUnmatched: res.unmatched
+            receiveUnmatched: res.unmatched,
+            receivedAt: firebase.firestore.FieldValue.serverTimestamp(),      // WS30 — RR audit
+            receivedBy: currentUser.uid,                                       // WS30
+            receivedByName: window.userProfile?.displayName || currentUser.email // WS30
           }).catch(()=>{});
+          // WS30 — receiving is never silent to the books: auto-submit to Finance.
+          if (!p.submittedToFinance) {
+            await db.collection('purchase_requisitions').doc(p.id).update({
+              submittedToFinance: true,
+              submittedToFinanceAt: firebase.firestore.FieldValue.serverTimestamp(),
+              submittedToFinanceBy: currentUser.uid,
+              submittedToFinanceByName: window.userProfile?.displayName || currentUser.email
+            }).catch(()=>{});
+            await notifyFinanceTeam({
+              title: '📦 Purchase Received — record it',
+              body: `${p.prNo || p.rfqNo || 'A purchase'} — ${p.supplier || 'supplier'} · ₱${fmt(p.total != null ? p.total : purchTotal(p.items))} was received into stock. Record it in Finance → Purchases.`,
+              icon: '📦', type: 'purchase_submitted', dedupKey: `pr-fin-${p.id}`
+            }).catch(()=>{});
+          }
           Notifs.showToast(res.unmatched.length
             ? `Received ${res.matched} line${res.matched===1?'':'s'} into stock — ${res.unmatched.length} not in inventory. Tap “⚠ Resolve” on the PR.`
             : `Received. ${res.matched} item${res.matched===1?'':'s'} added to inventory ✓`);
@@ -15311,12 +15419,90 @@ async function notifyFinanceTeam(data) {
   await safeNotify(() => Notifs.sendToOwner(data));
 }
 
+// Notify the people who can approve POs (President + all managers). Deduped by dedupKey.
+async function notifyPoApprovers(p) {
+  const total = p.total != null ? p.total : purchTotal(p.items);
+  const data = {
+    title: '🛒 Purchase Order Awaiting Approval',
+    body: `${p.prNo || p.rfqNo || 'PO'} — ${p.supplier || 'supplier'} · ₱${fmt(total)} (${p.requestingDept || 'Purchasing'}). Approvals → All Requests.`,
+    icon: '🛒', type: 'po_approval', dedupKey: `po-appr-${p.id}`
+  };
+  const mgrs = await db.collection('users').where('role', '==', 'manager').get().catch(() => ({ docs: [] }));
+  await Promise.all(mgrs.docs.map(d => safeNotify(() => Notifs.send(d.id, data))));
+  await safeNotify(() => Notifs.sendToOwner(data));
+}
+
+// ── v12 WS30: the ONE approve/reject implementation. Both the Purchasing tab
+// and the unified Approvals queue call these — never inline the writes again.
+window.approvePurchaseOrder = async function(prId) {
+  const ref = db.collection('purchase_requisitions').doc(prId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('PO not found');
+  const p = { id: snap.id, ...snap.data() };
+  if (p.approvalStatus !== 'pending') throw new Error('This PO is not awaiting approval.');
+  const role = window.currentRole;
+  if (role !== 'president' && role !== 'manager') throw new Error('Only the President or a Manager can approve POs.');
+  const title = role === 'president'
+    ? ((window.BRAND && window.BRAND.legal.signatory.title) || 'President, Barro Industries OPC')
+    : 'Manager';
+  await ref.update({
+    approvalStatus: 'approved',
+    approvedBy: window.currentUser.uid,
+    approvedByName: window.userProfile?.displayName || window.currentUser.email,
+    approvedByTitle: title,
+    approvedAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  window.logAudit && window.logAudit('approve', 'purchase_order', prId, { prNo: p.prNo || '', total: p.total || 0 });
+  const notifyUid = p.convertedBy || p.createdBy;
+  if (notifyUid) await safeNotify(() => Notifs.send(notifyUid, {
+    title: '✅ PO Approved',
+    body: `${p.prNo || p.rfqNo || 'Your PO'} (${p.supplier || ''}) was approved — you can now print and order.`,
+    icon: '✅', type: 'po_approval_result', dedupKey: `po-appr-ok-${prId}`
+  }));
+  return p;
+};
+window.rejectPurchaseOrder = async function(prId, reason) {
+  const ref = db.collection('purchase_requisitions').doc(prId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new Error('PO not found');
+  const p = { id: snap.id, ...snap.data() };
+  if (p.approvalStatus !== 'pending') throw new Error('This PO is not awaiting approval.');
+  const role = window.currentRole;
+  if (role !== 'president' && role !== 'manager') throw new Error('Only the President or a Manager can reject POs.');
+  await ref.update({
+    approvalStatus: 'rejected',
+    rejectedBy: window.currentUser.uid,
+    rejectedByName: window.userProfile?.displayName || window.currentUser.email,
+    rejectedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    rejectedReason: (reason || '').trim()
+  });
+  window.logAudit && window.logAudit('reject', 'purchase_order', prId, { prNo: p.prNo || '', reason: (reason || '').slice(0, 200) });
+  const notifyUid = p.convertedBy || p.createdBy;
+  if (notifyUid) await safeNotify(() => Notifs.send(notifyUid, {
+    title: '❌ PO Rejected',
+    body: `${p.prNo || p.rfqNo || 'Your PO'} was rejected${reason ? ': ' + reason : ''}. Revert it to RFQ, adjust, and resubmit.`,
+    icon: '❌', type: 'po_approval_result', dedupKey: `po-appr-no-${prId}`
+  }));
+  return p;
+};
+
 // Finance posts a submitted purchase into the cash disbursement journal.
 // Pre-fills from the purchase request; the PR's PO number becomes the reference
 // so a double-entry is easy to spot.
 async function recordPurchaseDisbursement(p, currentUser, onDone) {
   const total = p.total != null ? p.total : purchTotal(p.items);
   const ref = p.prNo || p.rfqNo || '';
+  // v12 WS30 — reconcile the PR's paper total against what PHYSICALLY landed in
+  // stock (WS29's RECV_{prId}_{i} movement rows; resolver receipts included).
+  let stockedValue = null, unresolved = (p.receiveUnmatched || []).length;
+  try {
+    const mv = await db.collection('stock_movements')
+      .where('source', '==', 'receive')
+      .where('refNumber', '==', p.prNo || p.rfqNo || p.id).get();
+    if (!mv.empty) stockedValue = mv.docs.reduce((s, d) => {
+      const m = d.data(); return s + (Number(m.qty) || 0) * (Number(m.unitCost) || 0);
+    }, 0);
+  } catch (_) { /* movements unreadable — reconciliation line simply hidden */ }
   const bankOpts = await window.BankAccounts.optionsHTML();
   openPage('🧾 Record Purchase — Cash Disbursement', `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Posting <strong>${escHtml(p.title || ref)}</strong> to the Cash Disbursement Journal.</div>
@@ -15334,6 +15520,10 @@ async function recordPurchaseDisbursement(p, currentUser, onDone) {
         <option value="sundry">Sundry / Other</option>
       </select></div>
     </div>
+    ${stockedValue != null ? `<div class="alert-banner" style="cursor:default;margin-bottom:8px;font-size:12px"><span>
+      📦 Stocked into inventory: <strong>₱${fmt(stockedValue)}</strong> of ₱${fmt(total)} PR total${unresolved ? ` · <strong>${unresolved} line${unresolved>1?'s':''} unresolved</strong> (Purchasing must resolve them)` : ''}.
+      <button class="btn-secondary btn-sm" id="rec-use-stocked" style="margin-left:6px">Use stocked value</button>
+      <span id="rec-acct-warn" style="display:block;color:var(--danger,#c0392b)"></span></span></div>` : ''}
     <div class="form-group"><label>Paid from (company account)</label>
       <select id="rec-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select>
     </div>
@@ -15351,6 +15541,23 @@ async function recordPurchaseDisbursement(p, currentUser, onDone) {
   acctSel.addEventListener('change', () => {
     document.getElementById('rec-sundry-wrap').style.display = acctSel.value === 'sundry' ? '' : 'none';
   });
+  document.getElementById('rec-use-stocked')?.addEventListener('click', () => {
+    document.getElementById('rec-amt').value = stockedValue; recVatPreview(); acctWarn();
+  });
+  const acctWarn = () => {
+    const w = document.getElementById('rec-acct-warn'); if (!w || stockedValue == null) return;
+    const amt = parseFloat(document.getElementById('rec-amt').value) || 0;
+    if (acctSel.value === 'inventory' && stockedValue <= 0)
+      w.textContent = '⚠ Nothing from this PR landed in stock — booking it as an Inventory asset will overstate inventory.';
+    else if (acctSel.value === 'material' && stockedValue > 0)
+      w.textContent = `⚠ ₱${fmt(stockedValue)} of this PR WAS stocked — COS (skips stock) will double-count it when consumed.`;
+    else if (acctSel.value === 'inventory' && Math.abs(amt - stockedValue) > 0.5)
+      w.textContent = `ℹ Amount differs from the stocked value (₱${fmt(stockedValue)}) — post the difference to a second, correctly-classified entry.`;
+    else w.textContent = '';
+  };
+  acctSel.addEventListener('change', acctWarn);
+  document.getElementById('rec-amt').addEventListener('input', acctWarn);
+  acctWarn();
   const recVatPreview = () => {
     const amt = parseFloat(document.getElementById('rec-amt').value) || 0;
     const vat = document.getElementById('rec-vat').value === 'exempt' ? 0 : window.vatSplit(amt,'inclusive').vat;
@@ -15429,16 +15636,26 @@ function printPurchaseOrder(p) {
   const total = p.total != null ? p.total : purchTotal(items);
   const issued = p.convertedAt && p.convertedAt.toDate ? p.convertedAt.toDate() : new Date();
   const issuedStr = issued.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' });
+  const state = poState(p);
+  if (state === 'rejected') { Notifs.showToast('This PO was rejected — revert it to RFQ and resubmit before printing.', 'error'); return; }
+  const isPending = state === 'pending';
   const preparedBy = p.convertedByName || p.createdByName || '';
   const _sig = (window.BRAND && window.BRAND.legal.signatory) || { name: 'NEIL BARRO', title: 'President, Barro Industries OPC' };
+  // v12 WS30 — the "Approved by" line is the RECORDED approver. Pre-gate ('legacy')
+  // docs keep the historic static line; pending docs print a BLANK line + watermark.
+  const approvedSig = state === 'approved'
+    ? { label: 'Approved by', name: p.approvedByName || '', title: p.approvedByTitle || '' }
+    : state === 'legacy'
+      ? { label: 'Approved by', name: _sig.name, title: _sig.title }
+      : { label: 'Approved by', name: '', title: 'PENDING — not yet approved' };
   const _lh = window.buildLetterhead ? window.buildLetterhead({
-    docTitle: 'PURCHASE ORDER',
+    docTitle: isPending ? 'PURCHASE ORDER (PENDING APPROVAL)' : 'PURCHASE ORDER',
     docNumber: p.prNo || p.rfqNo || '',
     dateLabel: 'Date: ' + issuedStr,
-    extraMeta: p.neededBy ? ['Needed by: ' + p.neededBy] : [],
+    extraMeta: [...(p.neededBy ? ['Needed by: ' + p.neededBy] : []), ...(isPending ? ['⚠ NOT VALID — awaiting management approval'] : [])],
     signatures: [
       { label: 'Prepared by', name: preparedBy, title: 'Purchasing' },
-      { label: 'Approved by', name: _sig.name, title: _sig.title }
+      approvedSig
     ],
     footerNote: ((window.BRAND && window.BRAND.fullName) || 'Barro Industries Operating System') + ' · Generated ' + new Date().toLocaleString('en-PH')
   }) : null;
@@ -15492,6 +15709,10 @@ function printPurchaseOrder(p) {
   .bar button{background:#fff;color:#1E3A5F;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
   @page{size:A4 portrait;margin:9mm}
   @media print{ .bar,.barpad{display:none!important} body{background:#fff} .page{padding:0;width:auto;min-height:0} }
+  .wm{position:fixed;top:45%;left:0;right:0;text-align:center;transform:rotate(-24deg);
+      font-size:64px;font-weight:900;letter-spacing:6px;color:rgba(192,57,43,.13);
+      z-index:5;pointer-events:none}
+  @media print{.wm{color:rgba(192,57,43,.16)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 ${_lh ? _lh.printCSS : ''}
 </style></head><body>
 <div class="bar">
@@ -15501,6 +15722,7 @@ ${_lh ? _lh.printCSS : ''}
 </div>
 <div class="barpad" style="height:46px"></div>
 <div class="page">
+  ${isPending ? '<div class="wm">PENDING APPROVAL</div>' : ''}
   ${_lh ? _lh.headerHTML : `
   <div class="htop">
     <img src="${location.origin + location.pathname.replace(/[^/]*$/, '') + 'icons/barro-industries.png'}" class="logo" onerror="this.style.display='none'" alt=""/>
@@ -15509,7 +15731,7 @@ ${_lh ? _lh.printCSS : ''}
       <div class="csub">Barro Industries OPC · DTI / BIR Registered<br>hello@barroindustries.com · 0927 683 6300 · La Union | Baguio | Manila</div>
     </div>
     <div class="title">
-      <div class="t">Purchase Order</div>
+      <div class="t">Purchase Order${isPending ? ' (PENDING APPROVAL)' : ''}</div>
       <div class="no">${e(p.prNo || p.rfqNo || '')}</div>
       <div class="dt">Date: ${e(issuedStr)}${p.neededBy ? `<br>Needed by: ${e(p.neededBy)}` : ''}</div>
     </div>
@@ -15543,7 +15765,7 @@ ${_lh ? _lh.printCSS : ''}
   ${_lh ? _lh.footerHTML : `
   <div class="sign">
     <div class="sline"><b>${e(preparedBy)}</b>Prepared by — Purchasing</div>
-    <div class="sline"><b>${e(_sig.name)}</b>Approved by — ${e(_sig.title)}</div>
+    <div class="sline"><b>${e(approvedSig.name)}</b>Approved by — ${e(approvedSig.title)}</div>
   </div>
   <div class="foot">Barro Industries Operating System · Generated ${new Date().toLocaleString('en-PH')}</div>`}
 </div>
@@ -15551,5 +15773,51 @@ ${_lh ? _lh.printCSS : ''}
 
   const win = window.open('', '_blank', 'width=900,height=720');
   if (!win) { Notifs.showToast('Allow pop-ups to open the printable PO', 'error'); return; }
+  win.document.write(html); win.document.close();
+}
+
+// ── Printable Receiving Report (v12 WS30) — evidence trail for Finance ─────
+// Per line: received-into-stock vs unresolved (from WS29's receiveUnmatched).
+function printReceivingReport(p) {
+  const e = s => escHtml(s == null ? '' : String(s));
+  const items = p.items || [];
+  const unres = new Set((p.receiveUnmatched || []).map(u => u.i));
+  const rcvd = p.receivedAt && p.receivedAt.toDate ? p.receivedAt.toDate() : new Date();
+  const _lh = window.buildLetterhead ? window.buildLetterhead({
+    docTitle: 'RECEIVING REPORT',
+    docNumber: (p.prNo || p.rfqNo || '').replace(/^PR/, 'RR') || ('RR-' + today()),
+    dateLabel: 'Received: ' + rcvd.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' }),
+    extraMeta: ['PO ref: ' + (p.prNo || p.rfqNo || ''), 'Supplier: ' + (p.supplier || '—')],
+    signatures: [
+      { label: 'Received by', name: p.receivedByName || '', title: 'Purchasing / Warehouse' },
+      { label: 'Verified by', name: '', title: 'Finance' }
+    ],
+    footerNote: ((window.BRAND && window.BRAND.fullName) || 'Barro Industries Operating System') + ' · Generated ' + new Date().toLocaleString('en-PH')
+  }) : null;
+  const rows = items.map((it, i) => `<tr>
+      <td class="c">${i + 1}</td><td>${e(it.desc || '—')}</td>
+      <td class="c">${Number(it.qty || 0).toLocaleString('en-PH')}</td><td class="c">${e(it.unit || '')}</td>
+      <td class="c">${unres.has(i) ? '⚠ Unresolved — not in stock' : '✓ Received into stock'}</td>
+    </tr>`).join('');
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/><title>Receiving Report — ${e(p.prNo || '')}</title>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background:#e8e8e8}
+.page{width:210mm;min-height:297mm;margin:0 auto;background:#fff;padding:14mm}
+table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #444;padding:5px 7px;font-size:11px}
+th{background:#1E3A5F;color:#fff;font-size:9px;text-transform:uppercase}td.c{text-align:center}
+.bar{position:fixed;top:0;left:0;right:0;background:#1E3A5F;color:#fff;padding:9px 18px;display:flex;gap:10px;align-items:center;z-index:99}
+.bar button{background:#fff;color:#1E3A5F;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
+@page{size:A4 portrait;margin:9mm}@media print{.bar,.barpad{display:none!important}body{background:#fff}.page{padding:0;width:auto;min-height:0}}
+${_lh ? _lh.printCSS : ''}</style></head><body>
+<div class="bar"><span style="font-weight:700">📦 Receiving Report — ${e(p.prNo || '')}</span>
+<button onclick="window.print()">🖨 Print / Save as PDF</button>
+<button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">✕ Close</button></div>
+<div class="barpad" style="height:46px"></div>
+<div class="page">${_lh ? _lh.headerHTML : ''}
+<table><thead><tr><th style="width:32px">#</th><th>Item / Description</th><th style="width:60px">Qty</th><th style="width:64px">Unit</th><th style="width:170px">Stock Status</th></tr></thead>
+<tbody>${rows}</tbody></table>
+${p.notes ? `<div style="font-size:10px;color:#444;margin-bottom:10px"><b>Notes:</b> ${e(p.notes)}</div>` : ''}
+${_lh ? _lh.footerHTML : ''}</div></body></html>`;
+  const win = window.open('', '_blank', 'width=900,height=720');
+  if (!win) { Notifs.showToast('Allow pop-ups to open the Receiving Report', 'error'); return; }
   win.document.write(html); win.document.close();
 }

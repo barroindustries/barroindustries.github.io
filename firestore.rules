@@ -975,26 +975,39 @@ service cloud.firestore {
       allow create, update: if isAuth() && canFinance();
       allow delete: if isAuth() && isPresident();
     }
-    // Purchase orders (legacy Finance → Purchasing tab). Finance dept members
-    // maintain; only the President deletes (via the approval flow).
-    match /purchase_orders/{docId} {
-      allow read: if isAuth() && canFinance();
-      allow create, update: if isAuth() && canFinance();
-      allow delete: if isAuth() && isPresident();
-    }
-
     // Purchase requisitions — the Purchasing department's RFQ → Purchase Request
     // flow (stage: 'rfq' | 'pr'). Purchasing dept maintains them; Finance gets
     // read access to see committed purchases. Draft RFQs are freely deletable by
     // Purchasing; once converted to a PR, only the President may delete.
+    // v12 WS30 — PO approval gate: converting sets approvalStatus:'pending';
+    // ONLY president/manager may set 'approved'/'rejected'; Purchasing can never
+    // self-approve, and can't mark a PO ordered/received until it is approved.
+    // Docs converted BEFORE the gate have no approvalStatus at all and are
+    // grandfathered — .get(field,'legacy') per the missing-field-throws memory.
     match /purchase_requisitions/{docId} {
       allow read: if isAuth() && (canPurchasing() || canFinance());
       allow create: if isAuth() && canPurchasing();
-      // Purchasing edits the requisition freely. Finance may ONLY stamp the
-      // bookkeeping fields (mark a purchase as recorded into the journal) so a
-      // purchase can't be double-posted — not rewrite items/prices.
       allow update: if isAuth() && (
-        canPurchasing()
+        // (a) Purchasing edits freely EXCEPT the approval verdict: approval
+        //     fields are writable here only when the result is 'pending'
+        //     (convert / re-convert) or cleared by a revert back to stage 'rfq'
+        //     — so a rejected PR can't be laundered into a grandfathered one.
+        //     Marking ordered/received requires an approved (or pre-gate) PO.
+        (canPurchasing()
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(
+                ['approvalStatus','approvedBy','approvedByName','approvedByTitle','approvedAt',
+                 'rejectedBy','rejectedByName','rejectedAt','rejectedReason'])
+              || request.resource.data.get('approvalStatus','') == 'pending'
+              || (request.resource.data.get('approvalStatus','') == ''
+                  && request.resource.data.get('stage','pr') == 'rfq'))
+          && (!(request.resource.data.get('status','') in ['ordered','received'])
+              || resource.data.get('approvalStatus','legacy') in ['approved','legacy']))
+        // (b) President/Manager render the verdict — and may touch NOTHING else
+        //     in the same write (can't rewrite items/prices under cover of approving).
+        || (isSeniorAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+              ['approvalStatus','approvedBy','approvedByName','approvedByTitle','approvedAt',
+               'rejectedBy','rejectedByName','rejectedAt','rejectedReason','updatedAt']))
+        // (c) Finance may ONLY stamp the bookkeeping fields (unchanged from pre-WS30).
         || (canFinance() && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['recordedToFinance','recordedToFinanceAt','recordedBy','recordedByName','cdjEntryId']))
       );
