@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.28';
+window.APP_VERSION = '12.0.29';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -140,7 +140,8 @@ window.DEPARTMENTS = {
   },
   'Marketing': {
     key: 'Marketing', icon: '📢', lucideIcon: 'megaphone', color: '#880e4f',
-    subtabs: ['Advertising', 'Marketing Designs', 'Plan', 'Budgeting', 'Proposals'], navOrder: 4
+    subtabs: ['Campaigns', 'Leads', 'Promos', 'Insights', 'Advertising', 'Marketing Designs',
+              'Plan', 'Strategy', 'Budgeting', 'Proposals', 'Tasks'], navOrder: 4
   },
   'Government Biddings': {
     key: 'Government Biddings', icon: '🏛️', lucideIcon: 'landmark', color: '#004d40',
@@ -398,6 +399,17 @@ window.isQuoteLost = q => !!(q && q.status === 'rejected');
 window.isQuoteOpen = q => !!q && !window.isQuoteWon(q) && !window.isQuoteLost(q);
 // THE one client-name normalizer — every join and dedupe uses this, nothing else.
 window.clientNameKey = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+// ── Lead-source vocabulary (v12 WS34) — mirrors the BS quote-number codes ──
+window.LEAD_SOURCES = [
+  { code:'FB', label:'Facebook'   }, { code:'IG', label:'Instagram' },
+  { code:'TK', label:'TikTok'     }, { code:'WB', label:'Website'   },
+  { code:'VB', label:'Viber'      }, { code:'EM', label:'Email'     },
+  { code:'OF', label:'In-Office'  }, { code:'RF', label:'Referral'  },
+  { code:'EX', label:'Exhibition' },
+];
+window.leadSourceLabel = code =>
+  (window.LEAD_SOURCES.find(s => s.code === code) || {}).label || code || '—';
 
 // ── Canonical quote status/approvalStatus WRITE pairs (v12 WS31) ─────────
 // Both fields are kept for reader compatibility; every write site sets them

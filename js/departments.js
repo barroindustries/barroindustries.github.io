@@ -2253,16 +2253,20 @@ window.renderComments = async function(collection, docId, containerId, currentUs
 // ══════════════════════════════════════════════════
 //  MARKETING DEPARTMENT
 // ══════════════════════════════════════════════════
-window.renderMarketing = async function(currentUser, currentRole, subtab = 'Advertising') {
+window.renderMarketing = async function(currentUser, currentRole, subtab = 'Campaigns') {
   const c = deptContainer();
+  const tabs = (window.DEPARTMENTS?.Marketing?.subtabs) ||
+    ['Campaigns','Leads','Promos','Insights','Advertising','Marketing Designs','Plan','Strategy','Budgeting','Proposals','Tasks'];
   c.innerHTML = `
     <div class="page-header"><h2>📢 Marketing</h2></div>
     ${window.sopPanel('How Marketing works', [
+      'Campaigns tracks each push: budget vs actual, dates, channels, and its materials.',
+      'Leads is the capture inbox — new prospects land here, then hand off to Sales.',
+      'Promos is the promotions calendar; Insights shows spend vs leads vs quotes vs wins.',
       'Advertising and Marketing Designs hold the creative asset libraries.',
-      'Plan and Budgeting cover campaign planning and spend; Proposals stores pitches.',
-      'Tasks is the department board.'
+      'Plan, Strategy and Proposals store playbooks and pitches; Tasks is the department board.'
     ])}
-    ${window.chipTabs(['Advertising','Marketing Designs','Plan','Budgeting','Proposals','Tasks'].map(s=>({key:s,label:s})), subtab)}
+    ${window.chipTabs(tabs.map(s => ({ key:s, label:s })), subtab)}
     <div id="mkt-content"><div class="loading-placeholder">Loading…</div></div>
   `;
   loadMarketingContent(currentUser, currentRole, subtab);
@@ -2272,6 +2276,19 @@ window.renderMarketing = async function(currentUser, currentRole, subtab = 'Adve
 async function loadMarketingContent(currentUser, currentRole, sub) {
   const content = document.getElementById('mkt-content');
   switch(sub) {
+    case 'Campaigns': await renderMktCampaigns(content, currentUser, currentRole); break;
+    case 'Leads':     await renderMktLeads(content, currentUser, currentRole); break;
+    case 'Promos':    await renderMktPromos(content, currentUser, currentRole); break;
+    case 'Insights':  await renderMktInsights(content, currentUser, currentRole); break;
+    case 'Strategy':
+      content.innerHTML = window.sopPanel('Types of marketing (reference)', [
+        'Digital: social (FB/IG/TikTok), search, email, website content.',
+        'Field: exhibitions, in-office walk-ins, dealer visits, referral programs.',
+        'Trade: distributor co-marketing, government-bid positioning, partner catalogues.'
+      ]) + '<div id="mkt-strategy"></div>';
+      await renderDocCollection(document.getElementById('mkt-strategy'), 'marketing_templates',
+        'Strategy Templates', currentUser, currentRole, { icon:'🧭', color:'#880e4f', dept:'Marketing' });
+      break;
     case 'Advertising':
       content.innerHTML = renderFileCollection('Advertising Materials', 'mkt-ads', currentRole);
       bindFileCollection('mkt-ads', currentUser, 'Marketing', 'Advertising');
@@ -2293,6 +2310,560 @@ async function loadMarketingContent(currentUser, currentRole, sub) {
       await renderDeptTasks(content, 'Marketing', currentUser, currentRole);
       break;
   }
+}
+
+// ── Marketing suite (v12 WS34): campaigns, leads inbox, promotions calendar,
+// strategy templates, per-campaign insights. Builds on WS32's window.Clients
+// (clients collection) and WS38's window.FilesHub (hub_files/hub_folders).
+// Campaigns/promotions/marketing_templates are new literal-named root
+// collections; leads write straight into `clients` (no new collection) with
+// four additive fields — see fable-workplan/34-marketing.md.
+
+// ── Spec 5 — Campaigns ───────────────────────────────
+async function fetchCampaigns() {
+  const snap = await (typeof dbCachedGet === 'function'
+    ? dbCachedGet('campaigns', () => db.collection('campaigns').orderBy('createdAt','desc').get().catch(()=>({docs:[]})), 60000)
+    : db.collection('campaigns').orderBy('createdAt','desc').get().catch(()=>({docs:[]})));
+  return snap.docs.map(d => ({ id:d.id, ...d.data() }));
+}
+
+async function renderMktCampaigns(content, currentUser, currentRole) {
+  const canEdit = canEditDept('Marketing');
+  const camps = await fetchCampaigns();
+  const today = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
+  const stBadge = c0 => ({ planned:['badge-gray','🗓 Planned'], active:['badge-green','▶ Active'],
+    done:['badge-blue','✔ Done'], cancelled:['badge-red','✖ Cancelled'] })[c0.status] || ['badge-gray', c0.status||'—'];
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h3 style="font-size:14px;margin:0">📣 Campaigns (${camps.length})</h3>
+      ${canEdit ? `<button class="btn-primary btn-sm" id="mkt-camp-add">＋ New Campaign</button>` : ''}
+    </div>
+    ${!camps.length ? `<div class="empty-state"><div class="empty-icon">📣</div><p>No campaigns yet.</p></div>`
+      : `<div style="display:flex;flex-direction:column;gap:8px">${camps.map(c0 => { const [bc,bl]=stBadge(c0); return `
+        <div class="item-card mkt-camp-row" data-id="${c0.id}" style="cursor:pointer">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+            <div style="min-width:0">
+              <div style="font-weight:700;font-size:13px">${escHtml(c0.name||'')}
+                <span class="badge ${bc}" style="font-size:9px">${bl}</span>
+                ${(c0.endDate && c0.endDate < today && c0.status==='active') ? '<span class="badge badge-amber" style="font-size:9px">past end date</span>' : ''}</div>
+              <div class="item-meta">
+                <span>📅 ${escHtml(c0.startDate||'—')} → ${escHtml(c0.endDate||'—')}</span>
+                ${(c0.channels||[]).length ? `<span>📡 ${c0.channels.map(ch=>escHtml(window.leadSourceLabel(ch))).join(', ')}</span>` : ''}
+              </div>
+            </div>
+            <div style="font-size:12px;flex-shrink:0;text-align:right">Budget<br><strong>₱${fmt(c0.budget||0)}</strong></div>
+          </div>
+        </div>`; }).join('')}</div>`}
+  `;
+  document.getElementById('mkt-camp-add')?.addEventListener('click', () =>
+    openCampaignModal(null, () => renderMktCampaigns(content, currentUser, currentRole)));
+  content.querySelectorAll('.mkt-camp-row').forEach(row => row.addEventListener('click', () =>
+    openCampaignModal(camps.find(x => x.id === row.dataset.id), () => renderMktCampaigns(content, currentUser, currentRole))));
+}
+
+// One modal for create/edit/detail. Budget-line picker + actual-spend readout
+// are money-tier only (finance/manager/owner/president) — the ledger is
+// finance-gated in rules, so a non-money viewer sees "—", never a lying ₱0.
+async function openCampaignModal(camp, onChange) {
+  const isEdit = !!camp;
+  const canMoneyTier = ['president','owner','manager','finance'].includes(window.currentRole);
+
+  let lineOptions = '';
+  if (canMoneyTier) {
+    const linesSnap = await db.collection('budgets_marketing').get().catch(() => ({ docs: [] }));
+    lineOptions = linesSnap.docs.map(d => `<option value="${d.id}" ${camp?.budgetLineId===d.id?'selected':''}>${escHtml(d.data().name||'')}</option>`).join('');
+  }
+
+  let spendHtml = '';
+  if (isEdit) {
+    if (canMoneyTier) {
+      const ledgerSnap = await (typeof dbCachedGet === 'function'
+        ? dbCachedGet('ledger-marketing', () => db.collection('ledger').where('dept','==','Marketing').get().catch(()=>({docs:[]})), 60000)
+        : db.collection('ledger').where('dept','==','Marketing').get().catch(()=>({docs:[]})));
+      const ledger = ledgerSnap.docs.map(d => d.data());
+      const spent = camp.budgetLineId
+        ? ledger.filter(e => e.budgetLineId === camp.budgetLineId && ledgerKind(e) === 'expense').reduce((s,e) => s + (e.amount||0), 0)
+        : 0;
+      const over = (camp.budget||0) > 0 && spent > camp.budget;
+      spendHtml = `<div class="card" style="margin:10px 0"><div class="card-body" style="padding:10px 14px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:12px;color:var(--text-muted)">Actual spend</span>
+        <strong style="font-size:13px;${over?'color:var(--danger)':''}">₱${fmt(spent)} / ₱${fmt(camp.budget||0)}</strong>
+      </div></div>`;
+    } else {
+      spendHtml = `<div style="font-size:12px;color:var(--text-muted);margin:10px 0">Actual spend — (finance-visible)</div>`;
+    }
+  }
+
+  const chBoxes = (window.LEAD_SOURCES||[]).map(s => `<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;margin:2px 10px 2px 0">
+      <input type="checkbox" class="mc-channel" value="${s.code}" ${(camp?.channels||[]).includes(s.code)?'checked':''}/> ${escHtml(s.label)}
+    </label>`).join('');
+
+  openPage(isEdit ? 'Edit Campaign' : 'New Campaign', `
+    <div class="form-group"><label>Name</label><input id="mc-name" value="${escHtml(camp?.name||'')}" placeholder="e.g. Q3 High-Pressure Stove Push"/></div>
+    <div class="form-group"><label>Description</label><textarea id="mc-desc" rows="2">${escHtml(camp?.description||'')}</textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label>Start date</label><input id="mc-start" type="date" value="${escHtml(camp?.startDate||'')}"/></div>
+      <div class="form-group"><label>End date</label><input id="mc-end" type="date" value="${escHtml(camp?.endDate||'')}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Status</label>
+        <select id="mc-status">${['planned','active','done','cancelled'].map(s => `<option value="${s}" ${(camp?.status||'planned')===s?'selected':''}>${s}</option>`).join('')}</select>
+      </div>
+      <div class="form-group"><label>Budget (₱)</label><input id="mc-budget" type="number" step="0.01" min="0" value="${camp?.budget||0}" inputmode="decimal"/></div>
+    </div>
+    <div class="form-group"><label>Channels</label><div>${chBoxes}</div></div>
+    ${canMoneyTier ? `<div class="form-group"><label>Budget line (optional — links actual spend)</label>
+      <select id="mc-line"><option value="">— none —</option>${lineOptions}</select></div>` : ''}
+    ${spendHtml}
+    <div id="mc-materials"></div>
+    <div id="mc-err" class="error-msg hidden" style="margin-top:8px"></div>
+  `, `<button class="btn-primary" id="mc-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  document.getElementById('mc-save').addEventListener('click', async () => {
+    const err = document.getElementById('mc-err');
+    const name = document.getElementById('mc-name').value.trim();
+    const startDate = document.getElementById('mc-start').value || '';
+    const endDate = document.getElementById('mc-end').value || '';
+    if (!name) { err.textContent = 'Name is required.'; err.classList.remove('hidden'); return; }
+    if (startDate && endDate && endDate < startDate) { err.textContent = 'End date must be on or after start date.'; err.classList.remove('hidden'); return; }
+    const channels = Array.from(document.querySelectorAll('.mc-channel:checked')).map(cb => cb.value);
+    const FV = firebase.firestore.FieldValue;
+    const who = userProfile?.displayName || currentUser.email;
+    const data = {
+      name, description: document.getElementById('mc-desc').value.trim(),
+      channels, status: document.getElementById('mc-status').value,
+      startDate, endDate,
+      budget: Math.max(0, parseFloat(document.getElementById('mc-budget').value) || 0),
+      budgetLineId: canMoneyTier ? (document.getElementById('mc-line').value || null) : (camp?.budgetLineId ?? null),
+      updatedAt: FV.serverTimestamp()
+    };
+    try {
+      if (isEdit) {
+        await db.collection('campaigns').doc(camp.id).update(data);
+      } else {
+        data.createdBy = currentUser.uid; data.createdByName = who; data.createdAt = FV.serverTimestamp();
+        await db.collection('campaigns').add(data);
+      }
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('campaigns');
+      Notifs.showToast('Campaign saved');
+      closeModal(); onChange();
+    } catch (ex) { err.textContent = 'Save failed: ' + (ex.message||ex.code); err.classList.remove('hidden'); }
+  });
+
+  // Spec 5c — Materials panel (Phase B: real Hub data once WS38 ships; Phase A
+  // shows a placeholder). Only for an existing campaign being edited.
+  if (isEdit) await renderCampaignMaterialsPanel(camp);
+}
+
+// Phase B (WS38-coupled): one hub_folders doc per campaign (scope:'materials',
+// deterministic id `materials__<campaignId>`), files listed/uploaded through
+// window.FilesHub — ordinary Hub data, nothing throwaway. Phase A (FilesHub not
+// yet defined) shows a placeholder instead.
+async function renderCampaignMaterialsPanel(camp) {
+  const wrap = document.getElementById('mc-materials');
+  if (!wrap) return;
+  if (typeof window.FilesHub === 'undefined') {
+    wrap.innerHTML = `<div style="font-size:11px;color:var(--text-muted);margin-top:10px">📁 Materials arrive with the Files Hub (WS38).</div>`;
+    return;
+  }
+  const folderId = `materials__${camp.id}`;
+  // Ensure the campaign's hub folder exists (deterministic id ⇒ idempotent).
+  // hub_folders update is creator-or-admin only, so a second (non-creator,
+  // non-admin) Marketing user's merge-set here is a rules UPDATE that gets
+  // denied — the catch swallows it; the folder already exists, so behavior
+  // stays correct. Keep the catch — do not "fix" the denial.
+  await db.collection('hub_folders').doc(folderId).set({
+    name: camp.name || 'Campaign', parentId: null, scope: 'materials', department: 'Marketing',
+    campaignId: camp.id, createdBy: currentUser.uid,
+    createdByName: (userProfile?.displayName || currentUser.email),
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge: true }).catch(() => {});
+
+  const renderList = async () => {
+    const files = (await FilesHub.loadFiles('materials')).filter(f => f.folderId === folderId);
+    wrap.innerHTML = `
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:10px 0 4px">📁 Materials (${files.length})</div>
+      ${files.length ? `<div class="item-list">${files.map(f => `
+        <div class="item-card" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <span style="font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.kind==='link'?'🔗':'📄'} ${escHtml(f.name||'File')}</span>
+          <span style="display:flex;gap:6px;flex-shrink:0">
+            <button class="btn-secondary btn-sm mc-mat-preview" data-id="${f.id}" title="Preview">👁</button>
+            ${FilesHub.canEdit(f) ? `<button class="btn-secondary btn-sm mc-mat-del" data-id="${f.id}" title="Remove">🗑</button>` : ''}
+          </span>
+        </div>`).join('')}</div>` : `<div style="font-size:12px;color:var(--text-muted)">No materials yet.</div>`}
+      ${canEditDept('Marketing') ? `<div id="mc-mat-upload" style="margin-top:8px"></div>` : ''}
+    `;
+    wrap.querySelectorAll('.mc-mat-preview').forEach(b => b.addEventListener('click', () => {
+      const f = files.find(x => x.id === b.dataset.id); if (f) window.openFilePreview(f);
+    }));
+    wrap.querySelectorAll('.mc-mat-del').forEach(b => b.addEventListener('click', async () => {
+      if (!(await confirmDialog({ message: 'Remove this material?', danger: true }))) return;
+      try { await FilesHub.softDelete(b.dataset.id); Notifs.showToast('Removed'); renderList(); }
+      catch (ex) { Notifs.showToast('Remove failed: ' + (ex.message||ex.code), 'error'); }
+    }));
+    if (canEditDept('Marketing')) {
+      Drive.renderUploadArea('mc-mat-upload', async (result, file) => {
+        const FV = firebase.firestore.FieldValue, nowIso = new Date().toISOString();
+        await db.collection('hub_files').add({            // WS38 Spec-1 shape, verbatim
+          name: result.name, description: '', fileType: 'Other',
+          kind: result.source === 'link' ? 'link' : 'file',
+          scope: 'materials', department: 'Marketing', folderId,
+          url: result.url, driveUrl: null,
+          size: file?.size || null, contentType: file?.type || null,
+          source: result.source || 'firebase', currentV: 1,
+          versions: [{ v:1, url:result.url, name:result.name, size:file?.size||null,
+            contentType:file?.type||null, note:'', by:currentUser.uid,
+            byName:(userProfile?.displayName||currentUser.email), at: nowIso }],
+          archived:false, deleted:false, deletedAt:null, deletedBy:null,
+          visibility:'company', sharedUserIds:[], editorUserIds:[], shares:[],
+          uploadedBy: currentUser.uid, uploaderName:(userProfile?.displayName||currentUser.email),
+          createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp() });
+        Notifs.showToast('Material added');
+        renderList();
+      }, { dept:'Marketing', subfolder:'Files', allowLinks:true });
+    }
+  };
+  await renderList();
+}
+
+// ── Spec 6 — Leads inbox ─────────────────────────────
+async function renderMktLeads(content, currentUser, currentRole) {
+  const canEdit = canEditDept('Marketing');
+  const all = await window.Clients.listAll({ brand: 'sales' });      // cached 'clients' key (WS32)
+  if (all.some(c => c._legacy)) {                                     // WS32 migration not yet run
+    content.innerHTML = `<div class="alert-banner alert-warn">🧭 Run the client-book unification (Sales → Clients) before using the Leads inbox.</div>`;
+    return;
+  }
+  const camps = await fetchCampaigns();
+  const campName = id => escHtml((camps.find(c0 => c0.id === id) || {}).name || '');
+  const mine = all.filter(c0 => c0.leadOrigin === 'marketing');
+  const inbox = mine.filter(c0 => !c0.handedOffAt);
+  const handed = mine.filter(c0 => !!c0.handedOffAt);
+  const row = (c0, showHandoff) => `
+    <div class="item-card">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+        <div style="min-width:0">
+          <div style="font-weight:700;font-size:13px">${escHtml(c0.name||'')}
+            <span class="badge badge-gray" style="font-size:9px">${escHtml(window.leadSourceLabel(c0.source))}</span>
+            ${c0.campaignId ? `<span class="badge badge-blue" style="font-size:9px">📣 ${campName(c0.campaignId)}</span>` : ''}
+            ${(() => { const st = crmStageMeta(crmStageOf(c0)); return `<span class="badge" style="font-size:9px;background:${st.color};color:#fff">${st.icon} ${st.label}</span>`; })()}</div>
+          <div class="item-meta">
+            ${c0.company ? `<span>🏢 ${escHtml(c0.company)}</span>` : ''}
+            ${c0.phone ? `<span>📞 ${escHtml(c0.phone)}</span>` : ''}
+            ${c0.email ? `<span>✉️ ${escHtml(c0.email)}</span>` : ''}
+          </div>
+        </div>
+        ${showHandoff && canEdit ? `<button class="btn-primary btn-sm mkt-lead-handoff" data-id="${c0.id}">→ Send to Sales</button>` : ''}
+      </div>
+    </div>`;
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h3 style="font-size:14px;margin:0">📥 Leads Inbox (${inbox.length})</h3>
+      ${canEdit ? `<button class="btn-primary btn-sm" id="mkt-lead-add">＋ Capture Lead</button>` : ''}
+    </div>
+    ${!inbox.length ? `<div class="empty-state" style="padding:18px"><p>No leads awaiting handoff.</p></div>`
+      : `<div style="display:flex;flex-direction:column;gap:8px">${inbox.map(c0 => row(c0, true)).join('')}</div>`}
+    ${handed.length ? `<h4 style="font-size:13px;margin:16px 0 6px">✅ Handed to Sales (${handed.length})</h4>
+      <div style="display:flex;flex-direction:column;gap:8px">${handed.slice(0,30).map(c0 => row(c0, false)).join('')}</div>` : ''}
+  `;
+  document.getElementById('mkt-lead-add')?.addEventListener('click', () =>
+    openLeadCaptureModal(camps, () => renderMktLeads(content, currentUser, currentRole)));
+  content.querySelectorAll('.mkt-lead-handoff').forEach(btn => btn.addEventListener('click', async () => {
+    const cl = inbox.find(x => x.id === btn.dataset.id); if (!cl) return;
+    btn.disabled = true;
+    const FV = firebase.firestore.FieldValue;
+    const today = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
+    const who = userProfile?.displayName || currentUser.email;
+    try {
+      await db.collection('clients').doc(cl.id).update({
+        handedOffAt: FV.serverTimestamp(), handedOffBy: currentUser.uid, handedOffByName: who,
+        contactLog: FV.arrayUnion({ date: today, by: who,
+          note: 'Lead handed to Sales' + (cl.campaignId ? ' (campaign: ' + ((camps.find(c0=>c0.id===cl.campaignId)||{}).name || '') + ')' : '') }),
+        updatedAt: FV.serverTimestamp() });
+      await Notifs.sendToDept('Sales', {
+        title: '📥 New lead from Marketing',
+        body: `${cl.name}${cl.company ? ' · ' + cl.company : ''} — ${window.leadSourceLabel(cl.source)}${cl.campaignId ? ' · ' + ((camps.find(c0=>c0.id===cl.campaignId)||{}).name || '') : ''}. Open the Sales CRM to follow up.`,
+        icon: '📥', type: 'lead_handoff', link: 'Sales',
+        dedupKey: `lead_handoff_${cl.id}`
+      }, { fallbackToOwner: true });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
+      Notifs.showToast(`Lead sent to Sales: ${cl.name}`);
+      renderMktLeads(content, currentUser, currentRole);
+    } catch (ex) { btn.disabled = false; Notifs.showToast('Handoff failed: ' + (ex.message||ex.code), 'error'); }
+  }));
+}
+
+// Capture modal — nameKey dedupe, first-touch attribution (never overwrite an
+// existing campaignId once set), fill-empty-only on company/phone/email.
+function openLeadCaptureModal(camps, onSaved) {
+  const campOptions = camps.filter(c0 => c0.status !== 'cancelled')
+    .map(c0 => `<option value="${c0.id}">${escHtml(c0.name||'')}</option>`).join('');
+  openPage('Capture Lead', `
+    <div class="form-group"><label>Name</label><input id="lc-name" placeholder="Contact name"/></div>
+    <div class="form-group"><label>Company</label><input id="lc-company"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Phone</label><input id="lc-phone" type="tel"/></div>
+      <div class="form-group"><label>Email</label><input id="lc-email" type="email"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Source</label>
+        <select id="lc-source">${(window.LEAD_SOURCES||[]).map(s => `<option value="${s.code}">${escHtml(s.label)}</option>`).join('')}</select>
+      </div>
+      <div class="form-group"><label>Campaign</label>
+        <select id="lc-campaign"><option value="">— none —</option>${campOptions}</select>
+      </div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="lc-notes" rows="2"></textarea></div>
+    <div id="lc-err" class="error-msg hidden" style="margin-top:8px"></div>
+  `, `<button class="btn-primary" id="lc-save">Capture Lead</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  document.getElementById('lc-save').addEventListener('click', async () => {
+    const err = document.getElementById('lc-err');
+    const name = document.getElementById('lc-name').value.trim();
+    if (!name) { err.textContent = 'Name is required.'; err.classList.remove('hidden'); return; }
+    const vals = {
+      company: document.getElementById('lc-company').value.trim(),
+      phone: document.getElementById('lc-phone').value.trim(),
+      email: document.getElementById('lc-email').value.trim(),
+    };
+    const notes = document.getElementById('lc-notes').value.trim();
+    const source = document.getElementById('lc-source').value;
+    const campaignId = document.getElementById('lc-campaign').value || null;
+    try {
+      const existing = await window.Clients.findByName(name);
+      const FV = firebase.firestore.FieldValue;
+      if (existing) {
+        const upd = { updatedAt: FV.serverTimestamp(), leadOrigin: existing.leadOrigin || 'marketing',
+          source: existing.source || source, brands: FV.arrayUnion('sales') };
+        if (!existing.campaignId && campaignId) upd.campaignId = campaignId;   // first-touch: never overwrite
+        ['company','phone','email'].forEach(k => { if (!existing[k] && vals[k]) upd[k] = vals[k]; }); // fill-empty only
+        await db.collection('clients').doc(existing.id).update(upd);
+        Notifs.showToast(`Existing client updated: ${name}`);
+      } else {
+        await db.collection('clients').add({
+          name, nameKey: window.clientNameKey(name), brands: ['sales'], stage: 'lead',
+          company: vals.company, phone: vals.phone, email: vals.email, address: '', notes,
+          followUpDate: '', lastContact: '', contactLog: [],
+          leadOrigin: 'marketing', source, campaignId: campaignId || null,
+          handedOffAt: null,
+          addedBy: currentUser.uid, createdBy: currentUser.uid,
+          createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp() });
+        Notifs.showToast(`Lead captured: ${name}`);
+      }
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
+      closeModal(); onSaved();
+    } catch (ex) { err.textContent = 'Save failed: ' + (ex.message||ex.code); err.classList.remove('hidden'); }
+  });
+}
+
+// ── Spec 7 — Promotions calendar (miniCal-pattern month grid) ───────────
+let _promoMonthOffset = 0;
+async function renderMktPromos(content, currentUser, currentRole) {
+  const canEdit = canEditDept('Marketing');
+  const snap = await (typeof dbCachedGet === 'function'
+    ? dbCachedGet('promotions', () => db.collection('promotions').get().catch(()=>({docs:[]})), 60000)
+    : db.collection('promotions').get().catch(()=>({docs:[]})));
+  const promos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+  const camps = await fetchCampaigns();
+  const campName = id => escHtml((camps.find(c0 => c0.id === id) || {}).name || '');
+  const todayStr = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
+  // Manila-anchored month base — same technique as renderMiniCal (app.js)
+  const base = new Date(+todayStr.slice(0,4), +todayStr.slice(5,7)-1, 1);
+  base.setMonth(base.getMonth() + _promoMonthOffset);
+  const year = base.getFullYear(), month = base.getMonth();
+  const mStart = `${year}-${String(month+1).padStart(2,'0')}-01`;
+  const daysIn = new Date(year, month+1, 0).getDate();
+  const mEnd = `${year}-${String(month+1).padStart(2,'0')}-${String(daysIn).padStart(2,'0')}`;
+  // A promo is "on" a day when startDate<=day<=endDate (ISO strings compare lexically)
+  const monthPromos = promos.filter(p => (p.startDate||'') <= mEnd && (p.endDate||p.startDate||'') >= mStart)
+    .sort((a,b) => (a.startDate||'').localeCompare(b.startDate||''));
+  const onDay = ds => monthPromos.filter(p => (p.startDate||'') <= ds && (p.endDate||p.startDate||'') >= ds);
+  const firstDay = new Date(year, month, 1).getDay();
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const pad = n => String(n).padStart(2,'0');
+
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h3 style="font-size:14px;margin:0">🗓 ${months[month]} ${year}</h3>
+      <div style="display:flex;align-items:center;gap:6px">
+        <button class="btn-secondary btn-sm mkt-promo-nav" data-dir="-1">‹</button>
+        <button class="btn-secondary btn-sm mkt-promo-nav" data-dir="1">›</button>
+        ${canEdit ? `<button class="btn-primary btn-sm" id="mkt-promo-add" style="margin-left:6px">＋ New Promo</button>` : ''}
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:12px"><div class="card-body">
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center">
+        ${['Su','Mo','Tu','We','Th','Fr','Sa'].map(d=>`<div style="font-size:10px;font-weight:700;color:var(--text-muted);padding:4px">${d}</div>`).join('')}
+        ${Array(firstDay).fill('<div></div>').join('')}
+        ${Array.from({length:daysIn},(_,i)=>{
+          const day=i+1; const ds=`${mStart.slice(0,8)}${pad(day)}`; const isToday=ds===todayStr;
+          const cnt=onDay(ds).length;
+          return `<div class="mkt-promo-day" data-date="${ds}" style="position:relative;padding:6px 2px;border-radius:10px;font-size:12px;cursor:${cnt?'pointer':'default'};${isToday?'background:var(--primary);color:#fff;font-weight:700':cnt?'background:var(--surface2)':''}">${day}${cnt?`<div style="display:flex;gap:2px;justify-content:center;margin-top:2px">${Array(Math.min(cnt,3)).fill(0).map(()=>`<span style="width:4px;height:4px;border-radius:50%;background:${isToday?'#fff':'var(--danger)'}"></span>`).join('')}</div>`:''}</div>`;
+        }).join('')}
+      </div>
+      <div id="mkt-promo-day-detail" style="margin-top:10px;font-size:12px;color:var(--text-muted);min-height:16px"></div>
+    </div></div>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">This month (${monthPromos.length})</div>
+    ${!monthPromos.length ? `<div class="empty-state" style="padding:18px"><p>No promos this month.</p></div>`
+      : `<div style="display:flex;flex-direction:column;gap:8px">${monthPromos.map(p => `
+        <div class="item-card">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+            <div style="min-width:0">
+              <div style="font-weight:700;font-size:13px">${escHtml(p.title||'')}</div>
+              <div class="item-meta">
+                <span>📅 ${escHtml(p.startDate||'—')} → ${escHtml(p.endDate||p.startDate||'—')}</span>
+                ${p.channel ? `<span>📡 ${escHtml(window.leadSourceLabel(p.channel))}</span>` : ''}
+                ${p.campaignId ? `<span>📣 ${campName(p.campaignId)}</span>` : ''}
+              </div>
+            </div>
+            ${canEdit ? `<span style="display:flex;gap:4px;flex-shrink:0">
+              <button class="btn-secondary btn-sm mkt-promo-edit" data-id="${p.id}">✏️</button>
+              <button class="btn-secondary btn-sm mkt-promo-del" data-id="${p.id}">🗑</button>
+            </span>` : ''}
+          </div>
+        </div>`).join('')}</div>`}
+  `;
+  content.querySelectorAll('.mkt-promo-nav').forEach(b => b.addEventListener('click', () => {
+    _promoMonthOffset += parseInt(b.dataset.dir,10); renderMktPromos(content, currentUser, currentRole);
+  }));
+  content.querySelectorAll('.mkt-promo-day').forEach(c => c.addEventListener('click', () => {
+    const ds = c.dataset.date; const dayPromos = onDay(ds);
+    const det = document.getElementById('mkt-promo-day-detail'); if (!det) return;
+    det.innerHTML = dayPromos.length
+      ? `<div style="font-weight:700;color:var(--text);margin-bottom:3px">📅 ${escHtml(ds)} — ${dayPromos.length} promo${dayPromos.length>1?'s':''}</div>${dayPromos.map(p=>`<div>• ${escHtml(p.title||'')}</div>`).join('')}`
+      : '';
+  }));
+  document.getElementById('mkt-promo-add')?.addEventListener('click', () =>
+    openPromoModal(null, camps, () => renderMktPromos(content, currentUser, currentRole)));
+  content.querySelectorAll('.mkt-promo-edit').forEach(b => b.addEventListener('click', () =>
+    openPromoModal(monthPromos.find(x => x.id === b.dataset.id), camps, () => renderMktPromos(content, currentUser, currentRole))));
+  content.querySelectorAll('.mkt-promo-del').forEach(b => b.addEventListener('click', async () => {
+    if (!(await confirmDialog({ message: 'Delete this promo?', danger: true }))) return;
+    try {
+      await db.collection('promotions').doc(b.dataset.id).delete();
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('promotions');
+      Notifs.showToast('Promo deleted');
+      renderMktPromos(content, currentUser, currentRole);
+    } catch (ex) { Notifs.showToast('Delete failed: ' + (ex.message||ex.code), 'error'); }
+  }));
+}
+
+// title (required), start/end dates (end >= start, default end = start),
+// channel <select> (LEAD_SOURCES + blank), campaign <select>, notes.
+function openPromoModal(promo, camps, onSaved) {
+  const isEdit = !!promo;
+  const campOptions = camps.map(c0 => `<option value="${c0.id}" ${promo?.campaignId===c0.id?'selected':''}>${escHtml(c0.name||'')}</option>`).join('');
+  openPage(isEdit ? 'Edit Promo' : 'New Promo', `
+    <div class="form-group"><label>Title</label><input id="pm-title" value="${escHtml(promo?.title||'')}" placeholder="e.g. 10% off double-burner ranges"/></div>
+    <div class="form-row">
+      <div class="form-group"><label>Start date</label><input id="pm-start" type="date" value="${escHtml(promo?.startDate||'')}"/></div>
+      <div class="form-group"><label>End date</label><input id="pm-end" type="date" value="${escHtml(promo?.endDate||promo?.startDate||'')}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Channel</label>
+        <select id="pm-channel"><option value="">—</option>${(window.LEAD_SOURCES||[]).map(s => `<option value="${s.code}" ${promo?.channel===s.code?'selected':''}>${escHtml(s.label)}</option>`).join('')}</select>
+      </div>
+      <div class="form-group"><label>Campaign</label>
+        <select id="pm-campaign"><option value="">— none —</option>${campOptions}</select>
+      </div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="pm-notes" rows="2">${escHtml(promo?.notes||'')}</textarea></div>
+    <div id="pm-promo-err" class="error-msg hidden" style="margin-top:8px"></div>
+  `, `<button class="btn-primary" id="pm-promo-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+  document.getElementById('pm-promo-save').addEventListener('click', async () => {
+    const err = document.getElementById('pm-promo-err');
+    const title = document.getElementById('pm-title').value.trim();
+    if (!title) { err.textContent = 'Title is required.'; err.classList.remove('hidden'); return; }
+    const startDate = document.getElementById('pm-start').value || '';
+    const endDate = document.getElementById('pm-end').value || startDate;
+    if (startDate && endDate < startDate) { err.textContent = 'End date must be on or after start date.'; err.classList.remove('hidden'); return; }
+    const FV = firebase.firestore.FieldValue;
+    const who = userProfile?.displayName || currentUser.email;
+    const data = {
+      title, startDate, endDate,
+      channel: document.getElementById('pm-channel').value || '',
+      campaignId: document.getElementById('pm-campaign').value || null,
+      notes: document.getElementById('pm-notes').value.trim(),
+      updatedAt: FV.serverTimestamp()
+    };
+    try {
+      if (isEdit) { await db.collection('promotions').doc(promo.id).update(data); }
+      else { data.createdBy = currentUser.uid; data.createdByName = who; data.createdAt = FV.serverTimestamp();
+        await db.collection('promotions').add(data); }
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('promotions');
+      Notifs.showToast('Promo saved'); closeModal(); onSaved();
+    } catch (ex) { err.textContent = 'Save failed: ' + (ex.message||ex.code); err.classList.remove('hidden'); }
+  });
+}
+
+// ── Spec 8 — Insights (live rollup, no cache collection) ────────────────
+async function renderMktInsights(content, currentUser, currentRole) {
+  const canSpend = ['president','owner','manager','finance'].includes(currentRole);
+  const [camps, clientsAll, qSnap, ledgerSnap] = await Promise.all([
+    fetchCampaigns(),
+    window.Clients.listAll(),                                   // 'clients' cache key (WS32)
+    (typeof getAllQuotes === 'function' ? getAllQuotes() : Promise.resolve({ docs: [] })),  // 'all-quotes'
+    canSpend
+      ? (typeof dbCachedGet === 'function'
+          ? dbCachedGet('ledger-marketing', () => db.collection('ledger').where('dept','==','Marketing').get().catch(()=>({docs:[]})), 60000)
+          : db.collection('ledger').where('dept','==','Marketing').get().catch(()=>({docs:[]})))
+      : Promise.resolve({ docs: [] })
+  ]);
+  const quotes = qSnap.docs.map(d => ({ id:d.id, ...d.data() }));
+  const ledger = ledgerSnap.docs.map(d => d.data());
+  const rows = camps.map(camp => {
+    const leads = clientsAll.filter(c0 => c0.campaignId === camp.id);
+    const seen = {}; const cQuotes = [];
+    leads.forEach(c0 => window.Clients.quotesFor(c0, quotes)      // WS32 canonical join — clientId first, nameKey fallback
+      .forEach(q => { if (!seen[q.id]) { seen[q.id] = 1; cQuotes.push(q); } }));
+    const wins = cQuotes.filter(window.isQuoteWon);               // WS32 canonical outcome
+    const spend = (canSpend && camp.budgetLineId)
+      ? ledger.filter(e => e.budgetLineId === camp.budgetLineId && ledgerKind(e) === 'expense')
+              .reduce((s,e) => s + (e.amount||0), 0)
+      : null;                                                     // null ⇒ render '—', never ₱0
+    return { camp, leads: leads.length,
+      converted: leads.filter(c0 => crmStageOf(c0) === 'won').length,
+      quotes: cQuotes.length,
+      quoted: cQuotes.reduce((s,q) => s + (q.total||q.grandTotal||0), 0),
+      wins: wins.length,
+      wonVal: wins.reduce((s,q) => s + (q.total||q.grandTotal||0), 0),
+      spend, cpl: (spend != null && leads.length) ? spend / leads.length : null };
+  });
+  const unattributed = clientsAll.filter(c0 => c0.leadOrigin === 'marketing' && !c0.campaignId).length;
+  const totalSpend = canSpend ? rows.reduce((s,r) => s + (r.spend||0), 0) : null;
+  const totalLeads = rows.reduce((s,r) => s + r.leads, 0);
+  const totalWonVal = rows.reduce((s,r) => s + r.wonVal, 0);
+  const stBadge = st => ({ planned:['badge-gray','🗓 Planned'], active:['badge-green','▶ Active'],
+    done:['badge-blue','✔ Done'], cancelled:['badge-red','✖ Cancelled'] })[st] || ['badge-gray', st||'—'];
+
+  content.innerHTML = `
+    <div class="kpi-row" style="margin-bottom:14px">
+      <div class="kpi-card red"><div class="kpi-label">Total Spend</div><div class="kpi-value">${totalSpend!=null?'₱'+fmt(totalSpend):'—'}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Total Leads</div><div class="kpi-value">${totalLeads}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Total Wins ₱</div><div class="kpi-value">₱${fmt(totalWonVal)}</div></div>
+    </div>
+    ${!camps.length ? `<div class="empty-state" style="padding:20px"><div class="empty-icon">📈</div><p>No campaigns yet.</p></div>` : `
+    <div class="table-wrap" style="overflow-x:auto">
+      <table class="data-table">
+        <thead><tr><th>Campaign</th><th>Status</th><th>Spend</th><th>Leads</th><th>CPL</th><th>Quotes</th><th>Quoted ₱</th><th>Wins</th><th>Won ₱</th></tr></thead>
+        <tbody>
+          ${rows.map(r => { const [bc,bl] = stBadge(r.camp.status);
+            const overBudget = (r.spend!=null && (r.camp.budget||0)>0 && r.spend > r.camp.budget);
+            return `<tr>
+              <td style="font-weight:600">${escHtml(r.camp.name||'')}</td>
+              <td><span class="badge ${bc}" style="font-size:9px">${bl}</span></td>
+              <td style="${overBudget?'color:var(--danger)':''}">${r.spend!=null?'₱'+fmt(r.spend):'<span title="finance-visible">🔒 —</span>'}</td>
+              <td>${r.leads}</td>
+              <td>${r.cpl!=null?'₱'+fmt(r.cpl):'<span title="finance-visible">🔒 —</span>'}</td>
+              <td>${r.quotes}</td>
+              <td>₱${fmt(r.quoted)}</td>
+              <td>${r.wins}</td>
+              <td>₱${fmt(r.wonVal)}</td>
+            </tr>`; }).join('')}
+        </tbody>
+      </table>
+    </div>`}
+    ${unattributed > 0 ? `<div style="font-size:11px;color:var(--text-muted);margin-top:10px">💡 ${unattributed} marketing lead${unattributed>1?'s have':' has'} no campaign tag.</div>` : ''}
+  `;
 }
 
 // ══════════════════════════════════════════════════
@@ -11406,9 +11977,9 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
       ${canSeeSpend&&totalIncome>0?`<div class="kpi-card accent"><div class="kpi-label">Income</div><div class="kpi-value">₱${fmt(totalIncome)}</div></div>`:''}
     </div>
     ${!canSeeSpend?`<div style="font-size:11px;color:var(--text-muted);margin:-6px 0 12px;display:flex;align-items:center;gap:6px"><span>💡</span> Spend tracking is visible to Finance &amp; Management.</div>`:''}
-    ${canEdit?`<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:12px">
-      <button class="btn-secondary btn-sm" id="add-budget-line-btn">+ Budget Line</button>
-      <button class="btn-primary btn-sm" id="log-expense-btn">📤 Log Expense / Income</button>
+    ${(canEdit||canSeeSpend)?`<div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:12px">
+      ${canEdit?`<button class="btn-secondary btn-sm" id="add-budget-line-btn">+ Budget Line</button>`:''}
+      ${canSeeSpend?`<button class="btn-primary btn-sm" id="log-expense-btn">📤 Log Expense / Income</button>`:''}
     </div>`:''}
 
     <!-- Budget allocations -->

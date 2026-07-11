@@ -857,6 +857,39 @@ service cloud.firestore {
       allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && canDept('Marketing');
     }
+
+    // ── Marketing suite (v12 WS34): campaigns, promotions calendar, strategy
+    // templates. Literal-named root collections (the files_*/budgets_* wildcard
+    // deliberately does not apply). Read = internal staff; write = Marketing
+    // members or admins (canDept, same pattern as marketing_plans above).
+    // .get(field, default) everywhere per the missing-field-throws memory.
+    match /campaigns/{docId} {
+      allow read: if isAuth() && !isPartner();
+      allow create: if isAuth() && canDept('Marketing')
+        && request.resource.data.get('name', '') != ''
+        && request.resource.data.get('status', 'planned') in ['planned','active','done','cancelled']
+        && request.resource.data.get('budget', 0) is number
+        && request.resource.data.get('budget', 0) >= 0
+        && request.resource.data.get('createdBy', '') == request.auth.uid;
+      allow update: if isAuth() && canDept('Marketing')
+        && request.resource.data.get('status', 'planned') in ['planned','active','done','cancelled']
+        && request.resource.data.get('budget', 0) is number
+        && request.resource.data.get('budget', 0) >= 0;
+      // Delete is admin-only: clients.campaignId points here — cancel, don't delete.
+      allow delete: if isAuth() && isAdmin();
+    }
+    match /promotions/{docId} {
+      allow read: if isAuth() && !isPartner();
+      allow create: if isAuth() && canDept('Marketing')
+        && request.resource.data.get('title', '') != ''
+        && request.resource.data.get('createdBy', '') == request.auth.uid;
+      allow update, delete: if isAuth() && canDept('Marketing');
+    }
+    match /marketing_templates/{docId} {
+      allow read: if isAuth() && !isPartner();
+      allow write: if isAuth() && canDept('Marketing');
+    }
+
     match /gov_philgeps/{docId} {
       allow read: if isAuth() && !isPartner();
       allow write: if isAuth() && canDept('Government Biddings');
@@ -1338,7 +1371,18 @@ service cloud.firestore {
       // need a fragile dept-string parse — deferred, finance/admin is the safe
       // close of the hole now).
       allow read:  if isAuth() && coll.matches('budgets_.*') && !isPartner();
-      allow write: if isAuth() && coll.matches('budgets_.*') && isMoneyAdmin();
+      // v12 WS34: widened so a dept member can manage their OWN department's
+      // budget lines (renderBudgeting's canEdit gate always showed them these
+      // buttons; the rule silently denied — this closes that gap). Legacy lines
+      // (no `dept` field) stay money-admin-only: .get('dept','') → inDept('')
+      // is false, no backfill needed. create checks the incoming doc;
+      // update/delete check the EXISTING doc so a member can't re-dept a line.
+      allow create: if isAuth() && coll.matches('budgets_.*')
+        && ( isMoneyAdmin()
+          || (!isPartner() && inDept(request.resource.data.get('dept',''))) );
+      allow update, delete: if isAuth() && coll.matches('budgets_.*')
+        && ( isMoneyAdmin()
+          || (!isPartner() && inDept(resource.data.get('dept',''))) );
     }
 
     // ── Files Hub (WS38) — unified file metadata + folder tree ─────────
