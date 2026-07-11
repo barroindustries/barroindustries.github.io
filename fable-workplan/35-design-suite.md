@@ -586,3 +586,629 @@ backup.js` — EXPORTS list, if any collection is renamed or newly introduced. `
 > UI change to `openDrawingDetail`'s transition buttons, and the exact `firestore.rules`
 > tightening on `design_drawings`'s `allow update` clause so the gate cannot be bypassed via
 > direct API access even if the UI hides the button.
+
+## DECIDED — architecture spec (Fable, 2026-07-11)
+
+> **Sequencing gate (read first):** WS35 lands AFTER WS32 (unified `clients` collection +
+> `window.Clients` + `migrateClientBooks()`) and AFTER WS38 (`hub_files`/`hub_folders` +
+> `window.FilesHub`, rules + indexes deployed). Both are DECIDED; WS35 builds strictly on
+> their contracts and re-decides NOTHING they settled. WS35 deliberately does NOT wait for
+> WS28 (production stages) or WS31 (quote chain) — it writes nothing either owns.
+
+### Resolved decisions (numbered to match the Open Decisions list above)
+
+1. **Client unification → SETTLED BY WS32, not re-decided.** One physical `clients`
+   collection with `brands[]`; `design_clients` is a frozen read-only archive after
+   `migrateClientBooks()`. WS35's only client-identity work: (a) `openProjectEditModal`'s
+   client dropdown re-sources from `window.Clients.listAll()` (all brands, design-brand
+   group first) instead of raw `design_clients`; (b) selecting a client auto-fills the
+   display-name field and, on save, arrayUnions `'design'` into that client's `brands`
+   (linking a Design project to a Sales client legitimately makes them a design client —
+   that IS "per-dept views"); (c) a NEW idempotent backfill
+   `window.remapDesignProjectClients()` re-points existing `projects.clientId` values from
+   legacy `design_clients` ids to `clients` ids via the `migratedTo` stamp WS32's migration
+   writes (WS32 backfilled `sales_orders`/`job_projects` but NOT the Design board — this
+   closes that gap; it is WS35's one migration deliverable).
+2. **Partner visibility → SETTLED BY WS32 decision 10** (partners have NO client-book
+   access; their view derives from their own `bs_quotes`). WS35 adds no client rules. All
+   WS35 file surfaces inherit WS38's `hub_files` rules (partner sees nothing unless
+   explicitly uid-shared) and WS19's `!isPartner()` locks on `projects`/`design_drawings`
+   stay byte-identical.
+3. **Migration strategy → forward-only + one remap.** No fuzzy dedupe here (WS32's
+   nameKey-merge already did collection-level dedupe). `remapDesignProjectClients()` is the
+   only historical touch; unmatched/absent `clientId` projects keep their free-text
+   `client` string and keep working (display never depended on the FK).
+4. **Quote re-keying → NOT WS35's.** WS32 owns `clientId` on quotes (bridge stamping +
+   `Clients.quotesFor` fallback); WS31 owns the chain repair. WS35 never reads
+   `bk_quotes`/`bs_quotes`.
+5. **"Project folders + client folders" → real `hub_folders` rows under ONE new scope
+   `'projects'`, per WS38's WS34/WS35 contract — no bespoke folder system, no new
+   collections, no rules changes, no storage.rules changes.** Deterministic folder ids make
+   creation idempotent and cross-dept discoverable: client folder = `hub_folders/client__{clientId}`
+   (root, carries `clientId`), project folder = `hub_folders/proj__{projectId}` (parented
+   under its client folder when `clientId` is set, else root, carries `projectId`+`clientId`).
+   Files uploaded from a project land in `hub_files` with `scope:'projects'`,
+   `folderId:'proj__{id}'`, plus domain fields `projectId`/`clientId` (the Hub ignores them;
+   WS32's client hub joins on them — the exact optional-`clientId` field WS32's Spec 11
+   reserved for WS38-family docs). UI: a NEW **Files** tab in `openProjectDetail` (Design
+   side) and a NEW **📁 Files** section in WS32's `openClientHub` (Sales/Design/BS internal
+   views of the same client see the same files — "client folders synced with Sales client
+   files", delivered). Reads go through `FilesHub.loadFiles('projects')` (the mandated
+   rules-provable fan-out) filtered client-side by `projectId`/`clientId` — zero new
+   composite indexes, zero new match blocks. Design's existing flat Product Designs /
+   References tabs are WS38's migration territory (scopes `design_files`/`design_refs`) —
+   WS35 does not touch them.
+6. **Drawing approval → a REAL two-party gate, enforced in BOTH layers.** Approver =
+   **president, manager, or the parent project's `designLead`** (the dormant field finally
+   used for exactly what it sits next to). `secretary` is EXCLUDED (view-only approvals per
+   the corporate-secretary directive) even though rules-`isAdmin()` includes it — the
+   approve/release clauses use an explicit role list, not `isAdmin()`. Hard rule:
+   **the drawing's `createdBy` or `assignedTo` may NEVER approve it** — if the designLead
+   authored the drawing, a president/manager must approve. Release (`approved→released`)
+   requires the approver tier but NOT the not-author check (independence was already
+   established at approve; rules force `released` to be reachable only from a genuinely
+   `approved` doc, so author-release of an independently-approved drawing is safe).
+   Transition topology is rules-pinned: `approved` only from `for_review`, `released` only
+   from `approved`; create must start at `draft`. Demotions (back-to-draft/review,
+   supersede, reactivate) stay `canDesign()` — revoking approval is not a quality risk.
+   Dead `reviewer`/`reviewerName` fields: **removed from the create write** (never revived
+   — the approver is derived from the project at transition time, not assigned per
+   drawing). `approver/approverName/approvedAt` stay as the approve record; NEW
+   `releasedBy/releasedByName/releasedAt` mirror it on release.
+7. **Design → Production handoff → keep notify + `job_projects` append, HARDEN it; no
+   `production_orders` auto-create, no auto-task (WS28's territory — its stage vocabulary
+   is undecided and this spec must not hardcode today's).** Three fixes: (a) releasing a
+   drawing on a project with NO `jobProjectId` now shows a confirm dialog naming the
+   consequence ("Production gets a notification only — nothing lands in any Job Project
+   register") instead of silently no-opping; (b) the `documents[]` entry gains
+   `drawingId` + `url` (the WS15-preferred `fileUrl`) so Production can open the released
+   file from the Document Register — this is also the CONTRACT HOOK for WS28: its intake
+   reads `job_projects.documents` entries of `type:'Drawing'` (now self-sufficient with id
+   + file link), it does NOT query `design_drawings`; (c) `dbCacheInvalidate('projects-unified')`
+   fires after the `job_projects` append (closes brief item 8c for this write site).
+   Additionally, `for_review` submission now notifies the project's `designLead` directly
+   (fallback: Design dept) — today nobody is told an approval is waiting.
+8. **`projects` vs `job_projects` → stay physically separate, permanently.** `window.Projects`
+   + the `kind` tag remain the bridge. Rationale: disjoint lifecycles and rules audiences,
+   WS28 is about to restructure the production side, and WS32 already solved the only thing
+   a merge would have bought (one client identity across both via `clientId`).
+9. **Approval/handoff audit trail → stays ON the drawing doc** (`activity[]` + the
+   approve/release field pairs). No `design_approvals` collection: the Drawings dashboard
+   already does the one flat query; "pending my approval" is `status=='for_review'` filtered
+   by `canApproveDrawing()` client-side (a NEW "🔏 For my approval" KPI card, Spec 6). A
+   dedicated collection would add a rules block, a backup entry, and a second write to keep
+   consistent — for a volume of drawings that fits one query.
+10. **Manila-time → storage stays ISO instants (CORRECT and WS38-consistent — `arrayUnion`
+    cannot hold `serverTimestamp`, and WS38's `versions[]` deliberately uses the same
+    pattern); the actual bug is DISPLAY (`.slice(0,16)` shows UTC wall-clock).** Fix at
+    render: new `window.fmtManila(v)` in config.js replaces the raw-slice display sites in
+    the drawing detail + project activity feed. The three write sites keep
+    `new Date().toISOString()` — do NOT switch them to `bizDate()` (that would truncate to
+    a date and break the feed's time display).
+
+---
+
+### Spec 1 — Data shapes (annotated literals; deltas only — nothing else changes)
+
+```js
+// design_drawings/{docId} — field DELTAS (all other fields unchanged)
+{ // REMOVED from openDrawingCreateModal's create write (dead since birth, decision 6):
+  //   reviewer:null, reviewerName:null
+  approver:'<uid>', approverName:'…', approvedAt:Timestamp,   // as today — set on approve
+  releasedBy:'<uid>', releasedByName:'…', releasedAt:Timestamp } // NEW — set on release
+
+// projects/{docId} — NO shape change. clientId now points into `clients` (post-remap);
+// designLead/designLeadName become LOAD-BEARING (approval gate reads them).
+
+// hub_folders/{client__<clientId>} — client folder (deterministic id ⇒ idempotent ensure)
+{ name:'ABC Corp', parentId:null, scope:'projects', department:'Design',
+  clientId:'<clients docId>',                       // domain field (Hub ignores; WS32 joins)
+  createdBy:'<uid>', createdByName:'…', createdAt:serverTimestamp }
+
+// hub_folders/{proj__<projectId>} — project folder, nested under the client folder
+{ name:'Reyes Kitchen Reno', parentId:'client__<clientId>'|null, scope:'projects',
+  department:'Design', projectId:'<projects docId>', clientId:'<clients docId>'|null,
+  createdBy:'<uid>', createdByName:'…', createdAt:serverTimestamp }
+
+// hub_files/{auto-id} — uploads from the project Files tab: FULL WS38 Spec-1 shape
+// (kind:'file', visibility:'company', deleted:false, currentV:1, versions:[…],
+//  sharedUserIds:[], editorUserIds:[], shares:[]) PLUS the domain fields:
+{ ...WS38 Spec-1 shape..., scope:'projects', department:'Design',
+  folderId:'proj__<projectId>', projectId:'<projects docId>', clientId:'<clients docId>'|null }
+
+// job_projects.documents[] entry on drawing release — 2 NEW fields (arrayUnion, additive)
+{ type:'Drawing', ref:'Ground Floor Plan Rev B',
+  drawingId:'<design_drawings docId>', url:'<fileUrl or null>',   // NEW — WS28's intake hook
+  at:'<ISO>', by:'Neil Barro' }
+```
+
+### Spec 2 — Shared helpers
+
+**2a — `window.fmtManila` (js/config.js, next to the biz* helpers — loads before every caller):**
+```js
+// Manila wall-clock display for ISO-string/Timestamp instants. Storage stays ISO
+// (arrayUnion can't hold serverTimestamp — same pattern as WS38 versions[]).
+window.fmtManila = function(v){
+  try {
+    const d = (v && v.toDate) ? v.toDate() : new Date(v);
+    if (isNaN(d)) return '';
+    return d.toLocaleString('en-PH', { timeZone:'Asia/Manila',
+      year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false });
+  } catch(_) { return ''; }
+};
+```
+
+**2b — `window.canApproveDrawing` (js/departments.js, insert directly above `drawingTransitions` at ~6916).** Mirrors the rules clause EXACTLY — role list is president/manager (NOT secretary, NOT 'owner': rules `isAdmin()` has no owner and secretary is view-only per directive) plus the project's designLead:
+```js
+// Approval capability — MUST stay in lockstep with the design_drawings update rule.
+// { approve, release, isApprover } for the current user on drawing d of project.
+window.canApproveDrawing = function(d, project){
+  const uid = (window.currentUser && currentUser.uid) || '';
+  const isApprover = ['president','manager'].includes(window.currentRole || '')
+    || (!!project && !!project.designLead && project.designLead === uid);
+  const isAuthor = !!uid && (uid === d.createdBy || uid === d.assignedTo);
+  return { isApprover, approve: isApprover && !isAuthor, release: isApprover };
+};
+```
+
+**2c — `window.DesignFolders` (js/departments.js, insert after `runProjectKindBackfill` at ~127).** Get-then-create (a blind `set(..,{merge:true})` on an existing folder is an UPDATE, which WS38's `hub_folders` rule only grants to creator/admin — existence-check first so any Design member can "ensure"):
+```js
+// Project/client folders in the WS38 Files Hub (scope 'projects'). Deterministic
+// ids ⇒ idempotent + discoverable from the Sales side (client__{clientId}).
+window.DesignFolders = {
+  _who(){ return (window.userProfile && userProfile.displayName) || (currentUser && currentUser.email) || ''; },
+  async _ensure(id, data){
+    const ref = db.collection('hub_folders').doc(id);
+    const snap = await ref.get().catch(()=>({exists:false}));
+    if (!snap.exists) {
+      await ref.set({ ...data, createdBy: currentUser.uid, createdByName: this._who(),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    } else if (data.name && snap.data().name !== data.name) {
+      // best-effort rename sync (creator/admin only per rules) — never block on it
+      await ref.update({ name: data.name }).catch(()=>{});
+    }
+    return id;
+  },
+  ensureClientFolder(clientId, clientName){
+    return this._ensure(`client__${clientId}`,
+      { name: clientName || 'Client', parentId: null, scope:'projects', department:'Design', clientId });
+  },
+  async ensureProjectFolder(p){
+    const parentId = p.clientId
+      ? await this.ensureClientFolder(p.clientId, p.client || 'Client') : null;
+    return this._ensure(`proj__${p.id}`,
+      { name: p.name || 'Project', parentId, scope:'projects', department:'Design',
+        projectId: p.id, clientId: p.clientId || null });
+  }
+};
+```
+
+**2d — `window.remapDesignProjectClients` (js/departments.js, directly after `runProjectKindBackfill`, same batched-idempotent style as `backfillProjectKind` at 101-127).** Run ONCE after WS32's `migrateClientBooks()`:
+```js
+// One-time: re-point projects.clientId from legacy design_clients ids to the
+// unified clients ids via the migratedTo stamp WS32's migration writes.
+// Idempotent: a clientId that no longer matches a design_clients doc is skipped.
+window.remapDesignProjectClients = async function(){
+  const [pSnap, dcSnap] = await Promise.all([
+    db.collection('projects').get(), db.collection('design_clients').get().catch(()=>({docs:[]}))]);
+  const map = {};   // legacy design_clients id -> clients id
+  dcSnap.docs.forEach(d => { const m = d.data().migratedTo; if (m && m.id) map[d.id] = m.id; });
+  let batch = db.batch(), n = 0, done = 0;
+  for (const doc of pSnap.docs) {
+    const cid = doc.data().clientId;
+    if (!cid || !map[cid]) continue;
+    batch.update(doc.ref, { clientId: map[cid], updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    done++; if (++n === 400) { await batch.commit(); batch = db.batch(); n = 0; }
+  }
+  if (n) await batch.commit();
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects-unified');
+  console.log(`remapDesignProjectClients: ${done} project(s) re-pointed`);
+  return { remapped: done, scanned: pSnap.size };
+};
+```
+
+### Spec 3 — Approval gate, client side
+
+**3a — departments.js:7385-7393, `openDrawingDetail` head — BEFORE → AFTER.**
+```js
+// BEFORE (7386-7393)
+  const st = drawingStatus(d.status);
+  const canManage = canEditDept('Design');
+  const revs = (d.revisions||[]).slice().reverse();
+  const acts = (d.activity||[]).slice().reverse();
+  const fileLink = d.fileUrl
+    ? `<a href="${escHtml(d.fileUrl||d.driveUrl)}" target="_blank" class="btn-secondary btn-sm">⬇ ${escHtml(d.fileName||'Open file')}</a>`
+    : '<span style="font-size:12px;color:var(--text-muted)">No file attached</span>';
+  const trans = canManage ? drawingTransitions(d.status) : [];
+```
+```js
+// AFTER — per-transition capability gate (WS35). fileUrl-before-driveUrl (WS15) preserved.
+  const st = drawingStatus(d.status);
+  const canManage = canEditDept('Design');
+  const cap = window.canApproveDrawing(d, project);
+  const revs = (d.revisions||[]).slice().reverse();
+  const acts = (d.activity||[]).slice().reverse();
+  const fileLink = d.fileUrl
+    ? `<a href="${escHtml(d.fileUrl||d.driveUrl)}" target="_blank" class="btn-secondary btn-sm">⬇ ${escHtml(d.fileName||'Open file')}</a>`
+    : '<span style="font-size:12px;color:var(--text-muted)">No file attached</span>';
+  const trans = (canManage || cap.isApprover) ? drawingTransitions(d.status).filter(t =>
+    t.to === 'approved' ? cap.approve : t.to === 'released' ? cap.release : canManage) : [];
+```
+Plus, in the meta card grid (after the "Approved by" row at 7404), add a pending-approval hint and the release audit row:
+```js
+      ${d.status==='for_review' && !cap.approve ? `<span style="color:var(--text-muted)">Awaiting</span><span style="font-size:12px">🔏 Approval by ${project?.designLeadName ? escHtml(project.designLeadName) : 'a manager'}${(d.createdBy===currentUser?.uid||d.assignedTo===currentUser?.uid)?' — authors cannot approve their own drawing':''}</span>` : ''}
+      ${d.releasedByName ? `<span style="color:var(--text-muted)">Released by</span><span>${escHtml(d.releasedByName)}</span>` : ''}
+```
+Display fixes in the same template (decision 10): 7409 rev-date cell `${(''+(r.at||'')).slice(0,10)}` → `${escHtml(window.fmtManila(r.at).slice(0,10))}`; 7412 activity date `${(''+(a.at||'')).slice(0,16).replace('T',' ')}` → `${escHtml(window.fmtManila(a.at))}`. Apply the same substitution to the identical raw-slice date renders inside `renderProjActivity` (7182-7195 — grep `slice(0,16).replace('T'` within that function).
+
+**3b — departments.js:7425-7460, `changeDrawingStatus` — BEFORE → AFTER (full function).** BEFORE is quoted in the Current state (§3/§4) and at 7425-7460 verbatim. AFTER:
+```js
+async function changeDrawingStatus(d, to, project, currentUser, currentRole, canBill){
+  // ── WS35 approval gate (mirror of the firestore.rules clause — defense in depth) ──
+  const cap = window.canApproveDrawing(d, project);
+  if (to === 'approved' && !cap.approve) {
+    Notifs.showToast(d.createdBy===currentUser.uid||d.assignedTo===currentUser.uid
+      ? 'You cannot approve your own drawing — the Design Lead or a manager must approve it.'
+      : 'Only the project Design Lead or a manager can approve drawings.', 'error');
+    return;
+  }
+  if (to === 'released' && !cap.release) {
+    Notifs.showToast('Only the project Design Lead or a manager can release drawings.', 'error');
+    return;
+  }
+  // ── WS35 handoff hardening: never silently release into a void ──
+  if (to === 'released' && !project?.jobProjectId) {
+    const msg = 'This Design project is NOT linked to a Job Project — releasing will only notify the Production department; nothing will appear in any Job Project document register. Link it via Edit Project first, or release anyway?';
+    const ok = (typeof confirmDialog === 'function') ? await confirmDialog({ message: msg }) : confirm(msg);
+    if (!ok) return;
+  }
+  const who = window.userProfile?.displayName || currentUser.email || '';
+  const nowIso = new Date().toISOString();   // ISO instant — display via fmtManila (decision 10)
+  const st = drawingStatus(to);
+  const actEntry = { at:nowIso, event:`Status → ${st.label} (Rev ${d.currentRev||'A'})`, by:currentUser.uid, byName:who };
+  const update = {
+    status: to,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    activity: firebase.firestore.FieldValue.arrayUnion(actEntry),
+  };
+  if (to==='approved') { update.approver=currentUser.uid; update.approverName=who; update.approvedAt=firebase.firestore.FieldValue.serverTimestamp(); }
+  if (to==='released') { update.releasedBy=currentUser.uid; update.releasedByName=who; update.releasedAt=firebase.firestore.FieldValue.serverTimestamp(); }
+  try {
+    await db.collection('design_drawings').doc(d.id).update(update);
+    d.status = to;
+    d.activity = [...(d.activity||[]), actEntry];
+    if (to==='approved'){ d.approver=currentUser.uid; d.approverName=who; }
+    if (to==='released'){ d.releasedBy=currentUser.uid; d.releasedByName=who; }
+  } catch(e){ console.warn(e); Notifs.showToast('Could not update status','error'); return; }
+  // Cross-department side effects — best-effort; never block the status change.
+  try {
+    if (to==='for_review') {
+      // WS35: tell the approver an approval is waiting (nobody was notified before)
+      if (project?.designLead && project.designLead!==currentUser.uid) {
+        await Notifs.send(project.designLead,{title:'🔏 Drawing awaiting your approval',body:`"${d.title}" (${project?.name||d.projectName||''}) Rev ${d.currentRev||'A'} was submitted for review`,icon:'🔏',type:'drawing_for_review',dedupKey:`dwg-rev-${d.id}-${d.currentRev}`});
+      } else {
+        await Notifs.sendToDept('Design',{title:'🔏 Drawing awaiting approval',body:`"${d.title}" Rev ${d.currentRev||'A'} needs a Design Lead or manager to approve`,icon:'🔏',type:'drawing_for_review'});
+      }
+    }
+    if (to==='approved' && d.assignedTo && d.assignedTo!==currentUser.uid) {
+      await Notifs.send(d.assignedTo,{title:'✅ Drawing approved',body:`"${d.title}" was approved`,icon:'✅',type:'drawing_approved',dedupKey:`dwg-appr-${d.id}-${d.currentRev}`});
+    }
+    if (to==='released') {
+      await Notifs.sendToDept('Production',{title:'📐 Drawing released',body:`"${d.title}" (${project?.name||d.projectName||''}) is released for production`,icon:'📐',type:'drawing_released'});
+      if (project?.jobProjectId) {
+        await db.collection('job_projects').doc(project.jobProjectId).update({
+          // drawingId + url are WS28's intake hook — its future production flow reads
+          // this register, never design_drawings directly. url = fileUrl (WS15 precedence).
+          documents: firebase.firestore.FieldValue.arrayUnion({ type:'Drawing', ref:`${d.title} Rev ${d.currentRev||'A'}`, drawingId:d.id, url:d.fileUrl||null, at:nowIso, by:who }),
+          timeline:  firebase.firestore.FieldValue.arrayUnion({ at:nowIso, event:`Drawing released: ${d.title} Rev ${d.currentRev||'A'}`, by:who }),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('projects-unified');
+      }
+    }
+  } catch(e){ console.warn('drawing release side-effect failed', e); }
+  Notifs.showToast(`Drawing → ${st.label}`,'success');
+  openDrawingDetail(d, project, currentUser, currentRole, canBill);
+}
+```
+
+**3c — departments.js:7368, `openDrawingCreateModal` create write — one-line delta.**
+```js
+// BEFORE:  assignedTo, assignedToName, reviewer:null, reviewerName:null, approver:null, approverName:null, approvedAt:null,
+// AFTER:   assignedTo, assignedToName, approver:null, approverName:null, approvedAt:null,
+```
+(`reviewer`/`reviewerName` retired — decision 6. Existing docs' null fields are harmless leftovers; no backfill.)
+
+**3d — `openDrawingRevisionModal` (7462-7497): keep the approver-reset exactly as-is** (it already clears `approver/approverName/approvedAt` and resets to draft — the no-stale-approval property the brief confirmed). Add `releasedBy:null, releasedByName:null, releasedAt:null` to the same reset update (7485) so a superseded release stamp doesn't survive onto a new rev.
+
+### Spec 4 — Approval gate, rules side (firestore.rules `design_drawings`, 709-720 — BEFORE → AFTER)
+
+`isAdmin()` (rules:21) includes `secretary`, so the approver clause uses an explicit role
+list instead. All field reads `.get(field, default)` (missing-field-throws memory). The
+`get()` on the parent project costs one doc-read per gated write — approve/release are
+low-frequency. A drawing whose `projectId` is dangling (deleted project) fails the `get()`
+→ the approver clause denies → only nothing (not even president) can approve via designLead
+path, but president/manager pass via the role list, which is evaluated FIRST and
+short-circuits before the `get()`.
+
+```
+// BEFORE (709-720)
+    match /design_drawings/{docId} {
+      allow read:   if isAuth() && !isPartner();
+      allow create: if isAuth() && canDesign()
+                    && request.resource.data.get('createdBy', '') == request.auth.uid;
+      // Creator, assigned designer, Design-dept member, or admin may edit.
+      allow update: if isAuth() && (
+           resource.data.get('createdBy', '')  == request.auth.uid
+        || resource.data.get('assignedTo', '') == request.auth.uid
+        || canDesign()
+      );
+      allow delete: if isAuth() && isAdmin();
+    }
+```
+```
+// AFTER — v12 WS35: real approval gate. 'approved' and 'released' are privileged
+// transitions with a pinned topology (for_review→approved→released), approvable only
+// by president/manager or the parent project's designLead — and NEVER by the
+// drawing's own author/assignee (self-approval hole closed at the rules layer, not
+// just the UI). secretary is deliberately NOT an approver (view-only approvals
+// directive), which is why this uses an explicit role list instead of isAdmin().
+// Everything that is not a promotion to approved/released keeps the old gate.
+    match /design_drawings/{docId} {
+      // President/manager, or the designLead of the drawing's parent project.
+      // Role check FIRST so admins never depend on the project get() resolving.
+      function isDrawingApprover() {
+        return getRole() in ['president', 'manager']
+          || request.auth.uid == get(/databases/$(database)/documents/projects/$(resource.data.get('projectId', '_none_'))).data.get('designLead', '');
+      }
+      function statusNow()  { return resource.data.get('status', ''); }
+      function statusNext() { return request.resource.data.get('status', ''); }
+      // Promotion = the status field is CHANGING to approved/released.
+      function isPromotion() {
+        return statusNext() in ['approved', 'released'] && statusNext() != statusNow();
+      }
+      allow read:   if isAuth() && !isPartner();
+      // v12 WS35: new drawings must start at draft (no API-created pre-approved docs).
+      allow create: if isAuth() && canDesign()
+                    && request.resource.data.get('createdBy', '') == request.auth.uid
+                    && request.resource.data.get('status', 'draft') == 'draft';
+      allow update: if isAuth() && (
+        // (1) ordinary edits + demotions (revisions, back-to-draft/review, supersede,
+        //     reactivate, field edits with status unchanged) — the pre-WS35 gate
+        ( !isPromotion() && (
+             resource.data.get('createdBy', '')  == request.auth.uid
+          || resource.data.get('assignedTo', '') == request.auth.uid
+          || canDesign()
+        ))
+        // (2) APPROVE: for_review → approved, by an approver who is not the
+        //     drawing's author or assigned designer (two-party control)
+        || ( statusNext() == 'approved' && statusNow() == 'for_review'
+          && isDrawingApprover()
+          && request.auth.uid != resource.data.get('createdBy', '')
+          && request.auth.uid != resource.data.get('assignedTo', '') )
+        // (3) RELEASE: approved → released, by an approver (independence was
+        //     already enforced when 'approved' was reached — see clause 2)
+        || ( statusNext() == 'released' && statusNow() == 'approved'
+          && isDrawingApprover() )
+      );
+      allow delete: if isAuth() && isAdmin();
+    }
+```
+No other rules blocks change: `projects` (686-701) untouched (WS19 read-lock preserved);
+`hub_files`/`hub_folders` were deployed by WS38; `clients`/legacy books by WS32;
+`job_projects` (1036-1043) untouched — its already-broad non-partner write covers the
+release append (brief §8a), and narrowing it is out of scope here (WS28/WS36 territory).
+Deploy: `~/.npm-global/bin/firebase deploy --only firestore:rules`, block-scoped Edit only,
+fresh `git diff firestore.rules` immediately before (concurrent-session memory).
+
+### Spec 5 — Project Files tab + client Files section (the WS38-contract build)
+
+**5a — `openProjectDetail` (departments.js:6949-6977):** `const tabs = ['Overview','Drawings','Files','Tasks','Financials','Activity'];` and add to `showTab`: `else if (t==='Files') renderProjectFiles(host, p, currentUser, currentRole);` (insert after the Drawings branch at 6970).
+
+**5b — NEW `renderProjectFiles(host, p, currentUser, currentRole)` (departments.js, place after `renderProjectDrawings`).** All reads/mutations via `window.FilesHub` (WS38 Spec 4) — do NOT re-implement upload/version/share/bin logic:
+```js
+async function renderProjectFiles(host, p, currentUser, currentRole){
+  host.innerHTML = '<div class="loading-placeholder">Loading files…</div>';
+  const canManage = canEditDept('Design');
+  const folderId = `proj__${p.id}`;                       // deterministic (Spec 2c)
+  const all = await FilesHub.loadFiles('projects').catch(()=>[]);
+  const files = all.filter(f => f.projectId === p.id || f.folderId === folderId);
+  host.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted)">📁 Project folder${p.clientId?` · client folder: ${escHtml(p.client||'Client')}`:''}</div>
+      ${canManage?`<button class="btn-primary btn-sm" id="pf-upload-btn">＋ Upload</button>`:''}
+    </div>
+    ${files.length ? `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Name</th><th>By</th><th>Date</th><th>Ver</th><th></th></tr></thead><tbody>
+      ${files.map(f=>`<tr>
+        <td>${escHtml(f.name||'')}</td>
+        <td style="font-size:11px">${escHtml(f.uploaderName||'')}</td>
+        <td style="font-size:11px;color:var(--text-muted)">${f.createdAt?.toDate?f.createdAt.toDate().toLocaleDateString('en-PH'):''}</td>
+        <td><span class="badge badge-gray">v${f.currentV||1}</span></td>
+        <td><button class="btn-secondary btn-sm pf-view-btn" data-id="${f.id}">👁</button></td>
+      </tr>`).join('')}</tbody></table></div>`
+    : '<div class="empty-state" style="padding:20px"><div class="empty-icon">📁</div><h4>No files in this project folder yet</h4></div>'}
+    <div id="pf-upload-area" style="margin-top:10px;display:none"></div>`;
+  host.querySelectorAll('.pf-view-btn').forEach(b=>b.addEventListener('click',()=>{
+    const f = files.find(x=>x.id===b.dataset.id); if (f) window.openFilePreview(f);
+  }));
+  document.getElementById('pf-upload-btn')?.addEventListener('click', async () => {
+    const area = document.getElementById('pf-upload-area'); area.style.display='block';
+    const fid = await DesignFolders.ensureProjectFolder(p);   // lazy folder creation
+    Drive.renderUploadArea('pf-upload-area', async (r, file) => {
+      const FV = firebase.firestore.FieldValue;
+      const who = window.userProfile?.displayName || currentUser.email || '';
+      await db.collection('hub_files').add({           // FULL WS38 Spec-1 shape + domain fields
+        name: (file?.name || r.name || 'File'), description:'', fileType:'File', kind:'file',
+        scope:'projects', department:'Design', folderId: fid,
+        projectId: p.id, clientId: p.clientId || null,           // WS32/WS38 contract fields
+        url: r.url, driveUrl: null, size: file?.size || null, contentType: file?.type || null,
+        source:'firebase', currentV: 1,
+        versions: [{ v:1, url:r.url, name:(file?.name||r.name||''), size:file?.size||null,
+          contentType:file?.type||null, note:'', by:currentUser.uid, byName:who, at:new Date().toISOString() }],
+        archived:false, deleted:false, deletedAt:null, deletedBy:null,
+        visibility:'company', sharedUserIds:[], editorUserIds:[], shares:[],
+        uploadedBy: currentUser.uid, uploaderName: who,
+        createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp(),
+      });
+      Notifs.showToast('File added to the project folder','success');
+      renderProjectFiles(host, p, currentUser, currentRole);
+    }, { label:'Upload project file', dept:'Design', subfolder:'Files' });  // WS38 storage-path contract: 2 segments, never deeper
+  });
+}
+```
+
+**5c — client Files section (builds on WS32's `openClientHub` + `Clients.timelineFor`, exactly the panel WS32 Spec 11 deferred).** Inside `Clients.timelineFor` add a fourth parallel fetch: `const hubFiles = (window.FilesHub ? await FilesHub.loadFiles('projects').catch(()=>[]) : []);` and add to the return: `files: hubFiles.filter(f => f.clientId === client.id)`. In `openClientHub`'s body (WS32 Spec 4), render a `📁 Files (N)` section listing `t.files` rows (name / project badge via `f.projectId` / date / 👁 `openFilePreview`), `escHtml` everywhere. Internal-only surface (partners never reach `openClientHub` per WS32 decision 10). Zero new indexes: the fan-out is WS38's existing provable query set.
+
+### Spec 6 — Edit-modal client rework + dashboard approval chip
+
+**6a — departments.js:7199-7205, `openProjectEditModal` head — BEFORE → AFTER.**
+```js
+// BEFORE (7199-7205)
+  const [uSnap, cSnap, jSnap] = await Promise.all([
+    db.collection('users').get().catch(()=>({docs:[]})),
+    db.collection('design_clients').get().catch(()=>({docs:[]})),
+    db.collection('job_projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+  ]);
+  const users   = uSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+  const clients = cSnap.docs.map(d=>({id:d.id,...d.data()}));
+  const jobs    = jSnap.docs.map(d=>({id:d.id,...d.data()}));
+```
+```js
+// AFTER — unified client book (WS32). Design-brand clients listed first; linking a
+// project to any client makes them a design client (brands arrayUnion on save).
+  const [uSnap, allClients, jSnap] = await Promise.all([
+    db.collection('users').get().catch(()=>({docs:[]})),
+    window.Clients.listAll().catch(()=>[]),
+    db.collection('job_projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
+  ]);
+  const users   = uSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
+  const clients = [...allClients].sort((a,b)=>
+    (b.brands.includes('design')?1:0)-(a.brands.includes('design')?1:0) || (a.name||'').localeCompare(b.name||''));
+  const jobs    = jSnap.docs.map(d=>({id:d.id,...d.data()}));
+```
+Label at 7211 becomes `Client (unified CRM)`. The `<option>` template (7213) is unchanged
+structurally (`c.id`/`c.name`) — legacy-fallback docs from a pre-migration `listAll()` work
+too (their ids get fixed later by `remapDesignProjectClients`). Add a change-listener after
+the modal opens so picking a client auto-fills the display name (free text remains an
+override):
+```js
+  document.getElementById('pe-client').addEventListener('change', e => {
+    const nm = e.target.options[e.target.selectedIndex]?.dataset.name || '';
+    const disp = document.getElementById('pe-clientname');
+    if (nm && !disp.value.trim()) disp.value = nm;
+  });
+```
+In the save handler, after the `projects` update succeeds (insert directly after the
+`dbCacheInvalidate('projects-unified')` line at 7288):
+```js
+      // WS35: linking a project to a client marks them a design-brand client
+      if (clientId && clientId !== (p.clientId||null) && !allClients.find(c=>c.id===clientId)?._legacy) {
+        try { await db.collection('clients').doc(clientId).update({ brands: firebase.firestore.FieldValue.arrayUnion('design') });
+              if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients'); } catch(_){}
+      }
+```
+
+**6b — `renderDrawingsDashboard` (7596-7643): "For my approval" chip.** After `counts` is
+built (7606), add `const mine = drawings.filter(d => d.status==='for_review' && window.canApproveDrawing(d, projMap[d.projectId]).approve);`
+and prepend one KPI card to the `kpi-row` template (7630): `<div class="kpi-card" id="dwg-kpi-mine" style="cursor:pointer;border-color:var(--accent)"><div class="kpi-label">🔏 For my approval</div><div class="kpi-value">${mine.length}</div></div>`,
+bound after render: `document.getElementById('dwg-kpi-mine')?.addEventListener('click',()=>{ fStatus='for_review'; document.getElementById('dwg-f-status').value='for_review'; renderList(); });`
+(Note: `openDrawingDetail` from the dashboard receives `projMap[d.projectId] || {id,name}`
+— the stub has no `designLead`, so `canApproveDrawing` correctly degrades to
+president/manager-only for orphaned projects; rules behave identically.)
+
+### Spec 7 — Cross-workstream contract (explicit, per the Risks section)
+
+- **WS32 (clients — DECIDED, lands first):** WS35 consumes `window.Clients`, the `clients`
+  collection, and the `'clients'` cache key; never re-unifies, never queries
+  `design_clients` (except read-only inside `remapDesignProjectClients`, which exists
+  precisely to consume WS32's `migratedTo` stamps). `projects.clientId` → `clients` doc id
+  is the FK WS32's Spec 11 assigned to WS35 — delivered in Specs 2d/6a.
+- **WS38 (Files Hub — DECIDED, lands first):** WS35 uses `scope:'projects'`, ordinary
+  `hub_folders` rows with extra `clientId`/`projectId` fields, the 2-segment storage path
+  via `Drive.renderUploadArea({dept:'Design', subfolder:'Files'})`, and reads ONLY through
+  `FilesHub.loadFiles` (bare `.get()` on `hub_files` is rules-denied for non-admins). Zero
+  new rules blocks, indexes, sync LABELS, or backup entries (`hub_*` auto-discovered).
+  `design_drawings.revisions[]` stays untouched (WS38 decision 3's explicit carve-out).
+- **WS28 (production flow — undecided):** WS35 writes NO `production_orders` rows, no
+  stage transitions, no production tasks. Contract hook handed to WS28: `job_projects.documents[]`
+  entries of `type:'Drawing'` now carry `drawingId` + `url` — WS28's intake should read the
+  register, never query `design_drawings` directly.
+- **WS31 (quote chain — undecided):** untouched. WS35 never reads/writes `bk_quotes`/`bs_quotes`.
+- **WS15/WS19 (shipped):** `fileUrl`-before-`driveUrl` preserved at both drawing render
+  sites (Spec 3a keeps the exact expressions); `!isPartner()` read locks on
+  `projects`/`design_drawings` byte-preserved in the Spec 4 rules diff.
+
+### Spec 8 — Migration / rollout checklist (dependency order)
+
+1. **Precondition:** WS32 implemented AND `migrateClientBooks()` run; WS38 implemented
+   (rules + indexes deployed, `FilesHub`/`openFilePreview` live). Do not start WS35 before both.
+2. **Deploy rules** — the Spec 4 `design_drawings` block via `--only firestore:rules`
+   (fresh `git diff` first; block-scoped Edit, never full-file). Deploying BEFORE the JS is
+   safe: old clients' Approve button starts failing only for self-approvers/non-approvers —
+   which is the point — and all other edits keep working.
+3. **Ship the JS** (one commit): config.js (`fmtManila`), departments.js (Specs 2b/2c/2d,
+   3a-3d, 5a/5b, 6a/6b), plus the WS32-file touch for Spec 5c (`Clients.timelineFor` +
+   `openClientHub` section). `node --check` each file. CACHE_VER bump in sw.js (manual step).
+   No new script file → no index.html/PRECACHE change. No monthly-backup EXPORTS change
+   (no new collections; `hub_*` auto-discovered per WS38).
+4. **Run `window.remapDesignProjectClients()`** once from a president/manager console
+   session (idempotent; logs the count). Verify 2-3 projects' `clientId` now resolves in
+   the unified dropdown.
+5. **Set `designLead` on active projects** (Edit Project → Design Lead). Until set, only
+   president/manager can approve that project's drawings — by design, not a bug.
+6. **In-flight drawings:** docs already `for_review` flow into the new gate naturally;
+   docs already `approved`/`released` under the old self-service regime keep their status
+   (historical, records-forever — no retroactive invalidation).
+7. Update ROADMAP.md WS35 line + V12-PLAN Build Log.
+
+### Spec 9 — Manual test checklist
+
+1. **Self-approval closed (UI):** as the Design employee who created+is assigned a drawing,
+   submit it for review → the ✅ Approve button does NOT render; the meta card shows
+   "Awaiting approval by {lead} — authors cannot approve their own drawing".
+2. **Self-approval closed (rules):** same user, devtools:
+   `db.collection('design_drawings').doc(id).update({status:'approved'})` → **DENIED**.
+   Also try `update({status:'released'})` from `for_review` → DENIED (topology pin).
+3. **Lead approves:** as the project's `designLead` (non-author), Approve renders and works;
+   `approver/approverName/approvedAt` = the lead. As lead-who-is-author → blocked both layers;
+   president/manager can approve instead.
+4. **Secretary excluded:** as `secretary`, Approve/Release buttons absent AND a console
+   `update({status:'approved'})` is DENIED (explicit role list, not `isAdmin()`).
+5. **Release:** approver releases → `releasedBy/releasedAt` set; Production gets the dept
+   notification; linked project's `job_projects.documents[]` gains the entry WITH
+   `drawingId` + `url`, timeline updated, and the Projects pipeline view reflects it without
+   waiting 30s (cache invalidated).
+6. **Unlinked release warns:** project with no `jobProjectId` → confirm dialog appears;
+   Cancel aborts with no writes; Proceed releases with notification only.
+7. **Revision resets:** cut Rev B on a released drawing → status draft, `approver*` AND
+   `releasedBy*` all null; full cycle (submit→lead approve→release) required again.
+8. **Files tab:** upload from Project → Files → `hub_folders/proj__{id}` exists (nested
+   under `client__{clientId}` when linked), `hub_files` doc has scope `projects` +
+   `projectId`/`clientId`; the file appears in the Files Hub scope browser, previews via
+   the lightbox, and a second upload does NOT duplicate folders (deterministic ids).
+9. **Client sync:** open the same client in the Sales client hub → 📁 Files section lists
+   the project upload (joined on `clientId`). Partner account sees none of it.
+10. **Client remap:** after step 4, an old project whose `clientId` pointed at a migrated
+    `design_clients` doc shows the correct client pre-selected in the unified dropdown;
+    re-running the remap changes nothing.
+11. **Manila display:** a drawing approved at 22:10 Manila shows 22:10 in the activity feed
+    (previously showed the UTC 14:10). Stored `at` remains an ISO instant.
+12. **Regression:** create/edit/revise drawings as a plain Design employee still works
+    (clause 1); non-Design non-admin still cannot; partner reads still denied.
+
+### Flags for Neil
+
+- **‼️ FLAG FOR NEIL — approver policy.** Approve/Release = the project's **Design Lead, or
+  a president/manager**, and the drawing's author/assignee can NEVER approve their own
+  drawing (a manager must, if the lead drew it). `secretary` is excluded from approving.
+  Confirm this is the quality gate you want before it ships — it will genuinely block
+  designers who could previously self-release to the shop floor.
+- **‼️ FLAG FOR NEIL — projects without a Design Lead.** Until you assign `designLead` on
+  each active Design project (Edit Project), only you or a manager can approve those
+  projects' drawings. Rollout step 5 is a 5-minute manual pass.
+- **‼️ FLAG FOR NEIL — releasing without a Job Project link stays ALLOWED (with a loud
+  warning), not hard-blocked** — purely internal design work is legitimate. Say the word if
+  you want release hard-blocked until the project is linked.
+- **‼️ FLAG FOR NEIL — historical self-approved drawings keep their status** (records
+  forever; no retroactive invalidation). The new gate applies from deploy onward.

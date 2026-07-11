@@ -98,3 +98,521 @@ Quotes (merged by `getAllQuotes()`, app.js:2048-2060, cached under `dbCachedGet(
 ## Expected deliverable format
 
 > A numbered build spec Sonnet can execute without further judgment calls: one, the exact decision made for each open decision above, stated as a one-line policy (e.g. "leads inbox = new `marketing_leads` collection, promoted into `sales_clients` on handoff via a Cloud-Function-free client-side copy" or "campaigns = extended `budgets_marketing` line shape, no new collection"). Two, the exact new or changed Firestore document shapes — field name, type, default — for every collection this workstream touches or creates (campaigns, leads/inbox, promotions, insights cache if any), plus a literal `firestore.rules` diff, before-and-after blocks in the same comment-then-match style as the existing rules file, for every collection touched, explicitly NOT reusing the `files_.*`/`budgets_.*` wildcard pattern for any new literal-named collection. Three, exact function signatures and before/after code blocks: the new `window.render*` screen(s) wired into `navigateTo` and `DEPARTMENTS.Marketing.subtabs`/`renderMarketing`'s chip list in the same commit; the exact handoff call (e.g. the precise `Notifs.sendToDept('Sales', {...})` invocation and, if decided, the exact write that transfers or links a lead into `sales_clients`); and, if per-campaign insights are in scope, the exact new field(s) added to the quote-builder bridge (app.js:8130-8165) and/or Brilliant Steel quote-number generator (departments.js:8630-8660) that let a quote be attributed back to a campaign/lead-source in a queryable (not string-baked) way. Four, an explicit sequencing note addressing Open Decisions 8 and 9 head-on: whether this spec assumes WS32 and/or WS38 land first, ships fully independent of both with an explicitly-labeled interim mechanism, or takes some hybrid (e.g. independent leads collection now, formal Sales handoff deferred until WS32 defines client ownership). Five, a numbered migration/rollout checklist in dependency order, explicit about which steps are safe to ship standalone versus which are throwaway/interim pending WS32 or WS38. Six, if the `budgets_<dept>` `isMoneyAdmin()`/`isDeptMember` mismatch (Open Decision 11) is being fixed as part of this workstream, the exact rules diff and which roles the new campaign-budget write path should actually permit.
+
+
+## DECIDED — architecture spec (Fable, 2026-07-11)
+
+> **Binding upstream contracts (do not re-decide):** WS32's `## DECIDED` Spec 11 pins WS34's lead
+> and attribution model — the leads inbox WRITES `clients` docs (`stage:'lead'`, `brands:['sales']`,
+> plus reserved additive fields `campaignId`/`source`); campaign→quote attribution =
+> `clients.campaignId` + `quote.clientId` joined through `Clients.quotesFor` (never a new
+> name-match); wins = `window.isQuoteWon`. WS38's `## DECIDED` "CONTRACT for WS34/WS35" pins the
+> materials library — file metadata in `hub_files` (WS34 uses `scope:'materials'`), folders in
+> `hub_folders`, Storage path `${department}/Files/…` via `Drive.renderUploadArea({dept,'subfolder':'Files'})`,
+> all mutations through `window.FilesHub.*`. Everything below builds on those two contracts.
+
+### Resolved decisions (numbered to match the Open Decisions above)
+
+1. **Campaigns → NEW literal-named top-level `campaigns` collection; actual spend is READ through the existing `budgets_marketing`↔`ledger` plumbing via an optional `budgetLineId` link — campaigns do NOT extend the budget-line shape.** A campaign doc carries its own `budget` (planned ₱), dates, channels, status; if a money-admin links it to a `budgets_marketing` line (`budgetLineId`), "actual spend" is the exact same live client-side ledger filter `renderBudgeting` already computes (`dept==='Marketing' && budgetLineId===<lineId> && ledgerKind(e)==='expense'`, departments.js:11500-11503) — zero new spend-tracking mechanism, zero `ledger` schema change. Rejected: extending `budgets_marketing` lines (would trap campaign CRUD behind the `isMoneyAdmin()` wildcard write rule and stretch a money collection into a content-planning one); a `campaignId` field on `ledger` (touches finance write paths WS20/WS36 own).
+2. **Leads inbox → NO new collection. Marketing lead capture writes `clients` docs directly (per WS32 Spec 11), with three additive Marketing-owned fields: `leadOrigin:'marketing'`, `source:<LEAD_SOURCES code>`, `campaignId:<campaigns docId>|null`.** The "inbox" is a filtered view over `Clients.listAll({brand:'sales'})` — `leadOrigin==='marketing' && !handedOffAt` = awaiting handoff; `handedOffAt` set = handed off. One human = one doc survives: Sales sees the same record in its CRM the moment it's captured (that is WS32's whole point); the inbox is a Marketing-side lens, not a second copy. Dedupe on capture via `Clients.findByName` (nameKey) — an existing client gets `source`/`campaignId` merged in (first-touch: never overwrite an existing `campaignId`), not duplicated.
+3. **Handoff = marker + notification, no ownership transfer (there is nothing to transfer — the record is already shared).** "→ Send to Sales" sets `handedOffAt/handedOffBy/handedOffByName` on the client doc, appends a `contactLog` entry (WS32's array — reused, not a parallel log), and fires `Notifs.sendToDept('Sales', {…}, {fallbackToOwner:true})` (js/notifications.js:276-303, used verbatim, zero notification-plumbing changes). No `assignedTo`/claim field: WS32 deliberately has no per-record ownership in `clients` rules, and inventing one here would front-run any future Sales-side assignment feature. Handoff is idempotent by UI (button renders only while `!handedOffAt`).
+4. **Promotions calendar → NEW `promotions` collection + a bespoke month-grid renderer that copies `renderMiniCal`'s visual pattern (app.js:7621+: 7-column grid, `‹`/`›` month nav, per-day event dots) with `promotions` as the data source, plus a date-sorted list of the visible month's promos below the grid.** No attempt to build a generic pluggable calendar component (three bespoke calendars already coexist; a fourth generic one is WS-later scope creep). Month anchoring via `bizDate()` (Manila), same as miniCal.
+5. **Materials library → the department-wide mandate is ALREADY satisfied by the Advertising/Marketing Designs tabs, which WS38 migrates onto `hub_files` (scopes `advertising`/`designs`) with zero WS34 work. WS34 adds the per-CAMPAIGN granularity the old `files_<scope>` shape couldn't express: one `hub_folders` doc per campaign under `scope:'materials'` (deterministic id `materials__<campaignId>`, extra `campaignId` field — the Hub ignores unknown fields per the WS38 contract), and a "📁 Materials" panel inside the campaign detail modal that lists/uploads `hub_files` docs with `scope:'materials'`, `folderId:'materials__<campaignId>'`.** Nothing throwaway: no new collection, no new storage path, no new rules — it's ordinary Hub data. Pre-WS38 the panel degrades to a "Materials arrive with the Files Hub" placeholder (`typeof window.FilesHub === 'undefined'` check).
+6. **Strategy templates → a REAL editable collection `marketing_templates`, rendered by the existing generic `window.renderDocCollection` (the live departments.js:11852 version — exactly how Plan/Proposals already work, zero new renderer), under a new "Strategy" chip; plus a static `sopPanel` above it listing the standard types of marketing as reference copy.** Hardcoded-only was rejected (the mandate says "templates" — Marketing must be able to add/edit its own playbooks); a bespoke renderer was rejected (renderDocCollection's `{title, description, status, fileUrl}` shape is a perfect fit).
+7. **Per-campaign insights → ZERO new linking fields beyond WS32's. Attribution chain: `campaigns.id ← clients.campaignId` (leads) and `clients ← quotes` via `Clients.quotesFor(client, allQuotes)` (which is `quote.clientId === client.id` OR nameKey fallback — WS32's canonical join).** Quotes do NOT gain a `campaignId`; the quote-builder bridge (app.js:8130-8165) and the BS quote-number generator (departments.js:8630-8660) are NOT touched — both are WS31's live write paths, and WS32 already provides everything attribution needs. Insights = a live-computed table (no insights-cache collection): per campaign — Leads (clients w/ `campaignId`), Quotes/Quoted ₱ (union of `quotesFor` over those clients), Wins/Won ₱ (`isQuoteWon`), Spend (ledger via `budgetLineId`, decision 1), CPL (spend/leads). All reads through cached fetchers (`'clients'`, `'all-quotes'`, new `'campaigns'` + `'ledger-marketing'` keys — WS16 discipline).
+8. **Sequencing vs WS32 → HARD dependency, WS32 lands first (WS32's own decision 13 already ordered it first).** This spec assumes shipped: the `clients` collection + rules, `window.Clients` (listAll/findByName/quotesFor/nameKey), `window.CRM_STAGES/crmStageOf/crmStageMeta` exports, `window.isQuoteWon/isQuoteLost/isQuoteOpen`, and the `'clients'` cache key. Nothing in WS34 writes to `sales_clients` (frozen archive post-WS32). If WS34 is attempted before WS32's migration has run, the Leads tab must show a "run the client-book unification first" banner (Spec 6 handles this via `Clients.listAll`'s `_legacy` flag).
+9. **Sequencing vs WS38 → SOFT dependency, split shipping. Phase A (campaigns, leads, promos, insights, strategy, budget-gate fix) ships right after WS32 with no WS38 requirement. Phase B (the campaign Materials panel, Spec 5c) ships with/after WS38 and is the ONLY WS38-coupled piece** — it is 100% contract-conformant Hub data, explicitly not interim/throwaway. The existing Advertising/Designs tabs need no WS34 edits in either phase (WS38's rewritten `bindFileCollection` re-backs them transparently).
+10. **Access control → UI gate `canEditDept('Marketing')` (same as Plan/Proposals today); rules gate `canDept('Marketing')` (the EXISTING helper at firestore.rules:72-76, already the enforced pattern for `marketing_plans`/`marketing_proposals`/IT/gov collections).** All three new collections (`campaigns`, `promotions`, `marketing_templates`) use it: read = any internal staff (`!isPartner()`), create/update = `canDept('Marketing')` (+ createdBy/shape guards on create), delete = **admin-only** for `campaigns` (deleting one orphans every `clients.campaignId` pointing at it — use `status:'cancelled'` instead) and for consistency also `promotions`/`marketing_templates` deletes follow the write clause like `marketing_plans` does — see the exact blocks in Spec 2. Rejected: open-to-any-authed (the `sales_clients` legacy hole WS32 just closed) and money-tier-only (campaign planning is content work, not money movement).
+11. **`budgets_<dept>` mismatch → FIX IT NOW, in the direction the code's own intent comment points (departments.js:11479-11480: "Dept members … can still … edit budget allocations"): new budget lines get a `dept` field stamped at create, and the wildcard write rule widens to `isMoneyAdmin() OR (internal staff AND inDept(<the doc's dept field>))`.** Legacy lines (no `dept` field) stay money-admin-editable only — `.get('dept','')` fails `inDept('')` safely, no backfill required. Separately, the "📤 Log Expense / Income" button gets client-gated to `canFinance`-tier roles (it writes `ledger`, which stays `canFinance()` in rules — a dept member's click today is a guaranteed silent deny). Exact diffs in Spec 9. ‼️ FLAG FOR NEIL (below) to confirm dept members managing their own allocation lines is intended.
+12. **Chip-tab drift → fixed structurally: `renderMarketing`'s chip list is DERIVED from `DEPARTMENTS.Marketing.subtabs` (one source of truth), and `'Tasks'` is added to the config array where it always belonged.** Final tab order (both places, automatically in sync forever): `['Campaigns','Leads','Promos','Insights','Advertising','Marketing Designs','Plan','Strategy','Budgeting','Proposals','Tasks']`. Default landing subtab changes `'Advertising'` → `'Campaigns'` (‼️ flagged).
+
+**Scoping / sequencing:** requires **WS32 shipped** (hard, decision 8); Materials panel requires **WS38 shipped** (soft, decision 9, Phase B); no dependency on WS31/33/35/36 — but per WS32's Spec 11, WS33 must reuse `CRM_STAGES`/`clientId` (not WS34's concern to enforce), and WS31 must preserve `quote.clientId` stamping, which insights silently depends on for post-WS31 quotes. No Cloud Function, no storage.rules change, no new script file (no index.html/PRECACHE edits), no composite indexes (every new query is single-field or full-collection-get; verified per query in Specs 5-8).
+
+---
+
+### Spec 1 — Data shapes (annotated literals)
+
+```js
+// campaigns/{docId} — NEW root collection (literal name → own rules block, own backup
+// auto-discovery; NOT files_*/budgets_*-prefixed, so the wildcard never touches it).
+{ name: 'Q3 High-Pressure Stove Push',   // string, required (rules-guarded non-empty)
+  description: '',                        // objective / notes, optional
+  channels: ['FB','IG','EX'],             // array of LEAD_SOURCES codes (Spec 3) — multi-select
+  status: 'active',                       // 'planned'|'active'|'done'|'cancelled' (rules-guarded enum)
+  startDate: '2026-07-01',                // 'YYYY-MM-DD' (Manila; compare against bizDate())
+  endDate: '2026-09-30',                  // 'YYYY-MM-DD', >= startDate (client-validated)
+  budget: 50000,                          // number ≥ 0 — PLANNED spend (display only)
+  budgetLineId: null,                     // string|null — optional link to a budgets_marketing
+                                          //   line docId; when set, ACTUAL spend = the existing
+                                          //   ledger filter (decision 1). Set via the campaign
+                                          //   modal's line-picker (visible to money-tier only).
+  createdBy:'<uid>', createdByName:'…', createdAt: serverTimestamp, updatedAt: serverTimestamp }
+
+// promotions/{docId} — NEW root collection (calendar entries; may or may not belong to a campaign)
+{ title: '10% off double-burner ranges',  // string, required
+  startDate: '2026-07-15', endDate: '2026-07-31',   // 'YYYY-MM-DD' inclusive range
+  channel: 'FB',                          // ONE LEAD_SOURCES code ('' allowed = unspecified)
+  campaignId: null,                       // string|null — optional campaigns docId
+  notes: '',
+  createdBy:'<uid>', createdByName:'…', createdAt: serverTimestamp, updatedAt: serverTimestamp }
+
+// marketing_templates/{docId} — NEW root collection, renderDocCollection shape (same as
+// marketing_plans/marketing_proposals): { title, description, status:'active', fileUrl?, fileName?,
+// addedBy, createdAt } — written entirely by the existing generic renderer, nothing custom.
+
+// clients/{id} — WS32's collection; WS34 adds FOUR additive, optional fields (all reserved by
+// WS32 Spec 11's "campaignId/source … additive" clause; no rules change needed — the existing
+// non-empty-name guard is the only shape rule):
+{ ...WS32 Spec-1 shape...,
+  leadOrigin: 'marketing',                // present ⇢ captured via the Marketing inbox form
+  source: 'FB',                           // LEAD_SOURCES code (the BS 2-letter vocabulary, Spec 3)
+  campaignId: '<campaigns docId>'|null,   // first-touch attribution — NEVER overwritten once set
+  handedOffAt: Timestamp|null,            // set by "→ Send to Sales"; null/absent = still in inbox
+  handedOffBy: '<uid>', handedOffByName: '…' }
+
+// hub_folders/{materials__<campaignId>} — WS38 shape + one domain field (contract-allowed)
+{ name: '<campaign name>', parentId: null, scope: 'materials', department: 'Marketing',
+  campaignId: '<campaigns docId>',        // WS34 domain field; the Hub ignores it
+  createdBy:'<uid>', createdByName:'…', createdAt: serverTimestamp }
+
+// hub_files docs written by the Materials panel use WS38 Spec-1 EXACTLY, with
+// scope:'materials', department:'Marketing', folderId:'materials__<campaignId>'.
+
+// budgets_<dept>/{docId} — ONE new field on NEW lines only (decision 11; no backfill):
+{ name, budget, createdAt, dept: 'Marketing' }   // dept = the literal DEPARTMENTS key
+```
+
+Backup: `campaigns`/`promotions`/`marketing_templates` are root collections → auto-discovered by `scripts/monthly-backup.js` (zero registration). Drive sync: none of the three stores Storage URLs (`marketing_templates.fileUrl` CAN hold one via renderDocCollection's upload — the generic walker auto-mirrors it; `labelFor`'s `titleCase` fallback gives a "Marketing Templates" Drive folder, acceptable, no `LABELS` entry needed).
+
+### Spec 2 — firestore.rules diff (new blocks + one wildcard edit)
+
+**2a — three NEW blocks.** Insert immediately after the `marketing_proposals` block (firestore.rules:761-764), same comment-then-match style; uses the EXISTING `canDept()` helper (firestore.rules:76):
+
+```
+    // ── Marketing suite (v12 WS34): campaigns, promotions calendar, strategy
+    // templates. Literal-named root collections (the files_*/budgets_* wildcard
+    // deliberately does not apply). Read = internal staff; write = Marketing
+    // members or admins (canDept, same pattern as marketing_plans above).
+    // .get(field, default) everywhere per the missing-field-throws memory.
+    match /campaigns/{docId} {
+      allow read: if isAuth() && !isPartner();
+      allow create: if isAuth() && canDept('Marketing')
+        && request.resource.data.get('name', '') != ''
+        && request.resource.data.get('status', 'planned') in ['planned','active','done','cancelled']
+        && request.resource.data.get('budget', 0) is number
+        && request.resource.data.get('budget', 0) >= 0
+        && request.resource.data.get('createdBy', '') == request.auth.uid;
+      allow update: if isAuth() && canDept('Marketing')
+        && request.resource.data.get('status', 'planned') in ['planned','active','done','cancelled']
+        && request.resource.data.get('budget', 0) is number
+        && request.resource.data.get('budget', 0) >= 0;
+      // Delete is admin-only: clients.campaignId points here — cancel, don't delete.
+      allow delete: if isAuth() && isAdmin();
+    }
+    match /promotions/{docId} {
+      allow read: if isAuth() && !isPartner();
+      allow create: if isAuth() && canDept('Marketing')
+        && request.resource.data.get('title', '') != ''
+        && request.resource.data.get('createdBy', '') == request.auth.uid;
+      allow update, delete: if isAuth() && canDept('Marketing');
+    }
+    match /marketing_templates/{docId} {
+      allow read: if isAuth() && !isPartner();
+      allow write: if isAuth() && canDept('Marketing');
+    }
+```
+
+**2b — `budgets_.*` wildcard write widened (decision 11).** firestore.rules:1150-1157 BEFORE → AFTER (the `files_.*` half of the wildcard section and the read clause are untouched):
+
+```
+// BEFORE (write clause)
+      allow write: if isAuth() && coll.matches('budgets_.*') && isMoneyAdmin();
+// AFTER — money tier as before, OR an internal member of the dept stamped on the
+// doc. Legacy lines have no `dept` field → .get('dept','') → inDept('') is false
+// → they stay money-admin-only (no backfill needed). Create checks the incoming
+// doc; update/delete check the existing doc (so a member can't re-dept a line).
+      allow create: if isAuth() && coll.matches('budgets_.*')
+        && ( isMoneyAdmin()
+          || (!isPartner() && inDept(request.resource.data.get('dept',''))) );
+      allow update, delete: if isAuth() && coll.matches('budgets_.*')
+        && ( isMoneyAdmin()
+          || (!isPartner() && inDept(resource.data.get('dept',''))) );
+```
+
+**No `clients` rules change** (WS32's block already admits the additive fields — its only shape guard is non-empty name). **No storage.rules change** (Materials uses WS38's existing two-segment path). Deploy: `~/.npm-global/bin/firebase deploy --only firestore:rules`, after a fresh `git diff firestore.rules` (concurrent-session memory); block-scoped Edits only, never a full-file replace.
+
+### Spec 3 — js/config.js changes
+
+**3a — `DEPARTMENTS.Marketing.subtabs` (config.js:143) BEFORE → AFTER:**
+```js
+// BEFORE
+    subtabs: ['Advertising', 'Marketing Designs', 'Plan', 'Budgeting', 'Proposals'], navOrder: 4
+// AFTER  (adds the 4 new WS34 tabs + Strategy, and 'Tasks' which renderMarketing
+// always rendered but config never listed — the chip list now derives from THIS array)
+    subtabs: ['Campaigns', 'Leads', 'Promos', 'Insights', 'Advertising', 'Marketing Designs',
+              'Plan', 'Strategy', 'Budgeting', 'Proposals', 'Tasks'], navOrder: 4
+```
+
+**3b — shared lead-source vocabulary** (insert near the other shared constants; config.js loads before every caller). This is the SAME nine-code vocabulary the BS quote-number generator already bakes into quote numbers (departments.js:8630-8660) — now a queryable constant instead of a string fragment. The BS generator itself is NOT modified (WS31 territory); it can be pointed at this constant later.
+```js
+// ── Lead-source vocabulary (v12 WS34) — mirrors the BS quote-number codes ──
+window.LEAD_SOURCES = [
+  { code:'FB', label:'Facebook'   }, { code:'IG', label:'Instagram' },
+  { code:'TK', label:'TikTok'     }, { code:'WB', label:'Website'   },
+  { code:'VB', label:'Viber'      }, { code:'EM', label:'Email'     },
+  { code:'OF', label:'In-Office'  }, { code:'RF', label:'Referral'  },
+  { code:'EX', label:'Exhibition' },
+];
+window.leadSourceLabel = code =>
+  (window.LEAD_SOURCES.find(s => s.code === code) || {}).label || code || '—';
+```
+
+### Spec 4 — `renderMarketing` / `loadMarketingContent` rewiring (departments.js:1951-1992)
+
+**4a — `renderMarketing` BEFORE → AFTER** (chips derive from config — kills the drift class; default subtab → Campaigns; sopPanel copy refreshed):
+```js
+// BEFORE: window.renderMarketing = async function(currentUser, currentRole, subtab = 'Advertising') {
+//   …hardcoded chipTabs(['Advertising','Marketing Designs','Plan','Budgeting','Proposals','Tasks']…)
+// AFTER:
+window.renderMarketing = async function(currentUser, currentRole, subtab = 'Campaigns') {
+  const c = deptContainer();
+  const tabs = (window.DEPARTMENTS?.Marketing?.subtabs) ||
+    ['Campaigns','Leads','Promos','Insights','Advertising','Marketing Designs','Plan','Strategy','Budgeting','Proposals','Tasks'];
+  c.innerHTML = `
+    <div class="page-header"><h2>📢 Marketing</h2></div>
+    ${window.sopPanel('How Marketing works', [
+      'Campaigns tracks each push: budget vs actual, dates, channels, and its materials.',
+      'Leads is the capture inbox — new prospects land here, then hand off to Sales.',
+      'Promos is the promotions calendar; Insights shows spend vs leads vs quotes vs wins.',
+      'Advertising and Marketing Designs hold the creative asset libraries.',
+      'Plan, Strategy and Proposals store playbooks and pitches; Tasks is the department board.'
+    ])}
+    ${window.chipTabs(tabs.map(s => ({ key:s, label:s })), subtab)}
+    <div id="mkt-content"><div class="loading-placeholder">Loading…</div></div>
+  `;
+  loadMarketingContent(currentUser, currentRole, subtab);
+  window.bindChipTabs(c, (key) => loadMarketingContent(currentUser, currentRole, key));
+};
+```
+
+**4b — `loadMarketingContent`: FIVE new cases** (existing six cases unchanged; insert before `case 'Advertising'`):
+```js
+    case 'Campaigns': await renderMktCampaigns(content, currentUser, currentRole); break;
+    case 'Leads':     await renderMktLeads(content, currentUser, currentRole); break;
+    case 'Promos':    await renderMktPromos(content, currentUser, currentRole); break;
+    case 'Insights':  await renderMktInsights(content, currentUser, currentRole); break;
+    case 'Strategy':
+      content.innerHTML = window.sopPanel('Types of marketing (reference)', [
+        'Digital: social (FB/IG/TikTok), search, email, website content.',
+        'Field: exhibitions, in-office walk-ins, dealer visits, referral programs.',
+        'Trade: distributor co-marketing, government-bid positioning, partner catalogues.'
+      ]) + '<div id="mkt-strategy"></div>';
+      await renderDocCollection(document.getElementById('mkt-strategy'), 'marketing_templates',
+        'Strategy Templates', currentUser, currentRole, { icon:'🧭', color:'#880e4f', dept:'Marketing' });
+      break;
+```
+No `navigateTo` change in app.js: every new screen is a subtab of the existing `case 'Marketing'` route. No nav-array change beyond 3a.
+
+### Spec 5 — Campaigns screen (NEW `renderMktCampaigns` + modal, departments.js, place directly after `loadMarketingContent`)
+
+**5a — list.** Reads via a new cached key `'campaigns'` (60s, invalidate on every write):
+```js
+async function fetchCampaigns() {
+  const snap = await (typeof dbCachedGet === 'function'
+    ? dbCachedGet('campaigns', () => db.collection('campaigns').orderBy('createdAt','desc').get().catch(()=>({docs:[]})), 60000)
+    : db.collection('campaigns').orderBy('createdAt','desc').get().catch(()=>({docs:[]})));
+  return snap.docs.map(d => ({ id:d.id, ...d.data() }));
+}
+async function renderMktCampaigns(content, currentUser, currentRole) {
+  const canEdit = canEditDept('Marketing');
+  const camps = await fetchCampaigns();
+  const today = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
+  const stBadge = c0 => ({ planned:['badge-gray','🗓 Planned'], active:['badge-green','▶ Active'],
+    done:['badge-blue','✔ Done'], cancelled:['badge-red','✖ Cancelled'] })[c0.status] || ['badge-gray', c0.status||'—'];
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h3 style="font-size:14px;margin:0">📣 Campaigns (${camps.length})</h3>
+      ${canEdit ? `<button class="btn-primary btn-sm" id="mkt-camp-add">＋ New Campaign</button>` : ''}
+    </div>
+    ${!camps.length ? `<div class="empty-state"><div class="empty-icon">📣</div><p>No campaigns yet.</p></div>`
+      : `<div style="display:flex;flex-direction:column;gap:8px">${camps.map(c0 => { const [bc,bl]=stBadge(c0); return `
+        <div class="item-card mkt-camp-row" data-id="${c0.id}" style="cursor:pointer">
+          <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+            <div style="min-width:0">
+              <div style="font-weight:700;font-size:13px">${escHtml(c0.name||'')}
+                <span class="badge ${bc}" style="font-size:9px">${bl}</span>
+                ${(c0.endDate && c0.endDate < today && c0.status==='active') ? '<span class="badge badge-amber" style="font-size:9px">past end date</span>' : ''}</div>
+              <div class="item-meta">
+                <span>📅 ${escHtml(c0.startDate||'—')} → ${escHtml(c0.endDate||'—')}</span>
+                ${(c0.channels||[]).length ? `<span>📡 ${c0.channels.map(ch=>escHtml(window.leadSourceLabel(ch))).join(', ')}</span>` : ''}
+              </div>
+            </div>
+            <div style="font-size:12px;flex-shrink:0;text-align:right">Budget<br><strong>₱${fmt(c0.budget||0)}</strong></div>
+          </div>
+        </div>`; }).join('')}</div>`}
+  `;
+  document.getElementById('mkt-camp-add')?.addEventListener('click', () =>
+    openCampaignModal(null, () => renderMktCampaigns(content, currentUser, currentRole)));
+  content.querySelectorAll('.mkt-camp-row').forEach(row => row.addEventListener('click', () =>
+    openCampaignModal(camps.find(x => x.id === row.dataset.id), () => renderMktCampaigns(content, currentUser, currentRole))));
+}
+```
+
+**5b — `openCampaignModal(camp, onChange)`** — one modal for create/edit/detail. Form fields: name (required), description, start/end date inputs (validate `end >= start` client-side), status select, budget number (`Math.max(0, …)`), channels = LEAD_SOURCES checkbox chips. **Budget-line picker** (money-tier only — `['president','owner','manager','finance'].includes(currentRole)`): a `<select id="mc-line">` filled from `db.collection('budgets_marketing').get()` (readable by all internal staff) with a "— none —" option, saving `budgetLineId`. Detail extras when `camp` exists and viewer is money-tier: an "Actual spend" line computed with the exact `renderBudgeting` filter (`db.collection('ledger').where('dept','==','Marketing')` via a shared cached key `'ledger-marketing'` (60s), then `e.budgetLineId===camp.budgetLineId && ledgerKind(e)==='expense'`), rendered as `₱spent / ₱budget` with an over-budget red highlight; non-money viewers see `— (finance-visible)` — never a misleading ₱0 (same rationale as `canSeeSpend`, departments.js:11482-11485). Save writes the Spec-1 shape (`createdBy/createdByName/createdAt` on create only; `updatedAt` always), then `dbCacheInvalidate('campaigns')`, toast, `onChange()`. All user strings `escHtml`'d.
+
+**5c — Materials panel (Phase B, inside the same modal below the detail body):**
+```js
+// Inside openCampaignModal, after the detail body renders and only when editing an existing camp:
+if (camp && typeof window.FilesHub !== 'undefined') {
+  const folderId = `materials__${camp.id}`;
+  // Ensure the campaign's hub folder exists (deterministic id ⇒ idempotent; set = create-once)
+  await db.collection('hub_folders').doc(folderId).set({
+    name: camp.name || 'Campaign', parentId: null, scope: 'materials', department: 'Marketing',
+    campaignId: camp.id, createdBy: currentUser.uid,
+    createdByName: (userProfile?.displayName || currentUser.email),
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge: true }).catch(()=>{});
+  const files = (await FilesHub.loadFiles('materials')).filter(f => f.folderId === folderId);
+  // Render: "📁 Materials (N)" list — name (escHtml) + 👁 preview (openFilePreview(f)) +
+  // 🗑 soft-delete (FilesHub.softDelete, shown when FilesHub.canEdit(f)); below it, when
+  // canEditDept('Marketing'), an upload area:
+  Drive.renderUploadArea('mc-mat-upload', async (result, file) => {
+    const FV = firebase.firestore.FieldValue, nowIso = new Date().toISOString();
+    await db.collection('hub_files').add({            // WS38 Spec-1 shape, verbatim
+      name: result.name, description: '', fileType: 'Other',
+      kind: result.source === 'link' ? 'link' : 'file',
+      scope: 'materials', department: 'Marketing', folderId,
+      url: result.url, driveUrl: null,
+      size: file?.size || null, contentType: file?.type || null,
+      source: result.source || 'firebase', currentV: 1,
+      versions: [{ v:1, url:result.url, name:result.name, size:file?.size||null,
+        contentType:file?.type||null, note:'', by:currentUser.uid,
+        byName:(userProfile?.displayName||currentUser.email), at: nowIso }],
+      archived:false, deleted:false, deletedAt:null, deletedBy:null,
+      visibility:'company', sharedUserIds:[], editorUserIds:[], shares:[],
+      uploadedBy: currentUser.uid, uploaderName:(userProfile?.displayName||currentUser.email),
+      createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp() });
+    Notifs.showToast('Material added'); /* re-render the panel */
+  }, { dept:'Marketing', subfolder:'Files', allowLinks:true });
+} else if (camp) {
+  // Phase-A placeholder: '📁 Materials arrive with the Files Hub (WS38).'
+}
+```
+(Uploads use the contract Storage path `Marketing/Files/…` — covered by the existing storage.rules catch-all; the nightly sync auto-mirrors via the WS38 `LABELS` entry. No WS34 sync/backup work.)
+
+### Spec 6 — Leads inbox (NEW `renderMktLeads` + capture modal + handoff)
+
+```js
+async function renderMktLeads(content, currentUser, currentRole) {
+  const canEdit = canEditDept('Marketing');
+  const all = await window.Clients.listAll({ brand: 'sales' });      // cached 'clients' key (WS32)
+  if (all.some(c => c._legacy)) {                                     // WS32 migration not yet run
+    content.innerHTML = `<div class="alert-banner alert-warn">🧭 Run the client-book unification (Sales → Clients) before using the Leads inbox.</div>`;
+    return;
+  }
+  const camps = await fetchCampaigns();
+  const campName = id => escHtml((camps.find(c0 => c0.id === id) || {}).name || '');
+  const mine = all.filter(c0 => c0.leadOrigin === 'marketing');
+  const inbox = mine.filter(c0 => !c0.handedOffAt);
+  const handed = mine.filter(c0 => !!c0.handedOffAt);
+  const row = (c0, showHandoff) => `
+    <div class="item-card">
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+        <div style="min-width:0">
+          <div style="font-weight:700;font-size:13px">${escHtml(c0.name||'')}
+            <span class="badge badge-gray" style="font-size:9px">${escHtml(window.leadSourceLabel(c0.source))}</span>
+            ${c0.campaignId ? `<span class="badge badge-blue" style="font-size:9px">📣 ${campName(c0.campaignId)}</span>` : ''}
+            ${(() => { const st = crmStageMeta(crmStageOf(c0)); return `<span class="badge" style="font-size:9px;background:${st.color};color:#fff">${st.icon} ${st.label}</span>`; })()}</div>
+          <div class="item-meta">
+            ${c0.company ? `<span>🏢 ${escHtml(c0.company)}</span>` : ''}
+            ${c0.phone ? `<span>📞 ${escHtml(c0.phone)}</span>` : ''}
+            ${c0.email ? `<span>✉️ ${escHtml(c0.email)}</span>` : ''}
+          </div>
+        </div>
+        ${showHandoff && canEdit ? `<button class="btn-primary btn-sm mkt-lead-handoff" data-id="${c0.id}">→ Send to Sales</button>` : ''}
+      </div>
+    </div>`;
+  content.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h3 style="font-size:14px;margin:0">📥 Leads Inbox (${inbox.length})</h3>
+      ${canEdit ? `<button class="btn-primary btn-sm" id="mkt-lead-add">＋ Capture Lead</button>` : ''}
+    </div>
+    ${!inbox.length ? `<div class="empty-state" style="padding:18px"><p>No leads awaiting handoff.</p></div>`
+      : `<div style="display:flex;flex-direction:column;gap:8px">${inbox.map(c0 => row(c0, true)).join('')}</div>`}
+    ${handed.length ? `<h4 style="font-size:13px;margin:16px 0 6px">✅ Handed to Sales (${handed.length})</h4>
+      <div style="display:flex;flex-direction:column;gap:8px">${handed.slice(0,30).map(c0 => row(c0, false)).join('')}</div>` : ''}
+  `;
+  document.getElementById('mkt-lead-add')?.addEventListener('click', () =>
+    openLeadCaptureModal(camps, () => renderMktLeads(content, currentUser, currentRole)));
+  content.querySelectorAll('.mkt-lead-handoff').forEach(btn => btn.addEventListener('click', async () => {
+    const cl = inbox.find(x => x.id === btn.dataset.id); if (!cl) return;
+    btn.disabled = true;
+    const FV = firebase.firestore.FieldValue;
+    const today = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
+    const who = userProfile?.displayName || currentUser.email;
+    try {
+      await db.collection('clients').doc(cl.id).update({
+        handedOffAt: FV.serverTimestamp(), handedOffBy: currentUser.uid, handedOffByName: who,
+        contactLog: FV.arrayUnion({ date: today, by: who,
+          note: 'Lead handed to Sales' + (cl.campaignId ? ' (campaign: ' + ((camps.find(c0=>c0.id===cl.campaignId)||{}).name || '') + ')' : '') }),
+        updatedAt: FV.serverTimestamp() });
+      await Notifs.sendToDept('Sales', {
+        title: '📥 New lead from Marketing',
+        body: `${cl.name}${cl.company ? ' · ' + cl.company : ''} — ${window.leadSourceLabel(cl.source)}${cl.campaignId ? ' · ' + ((camps.find(c0=>c0.id===cl.campaignId)||{}).name || '') : ''}. Open the Sales CRM to follow up.`,
+        icon: '📥', type: 'lead_handoff', link: 'Sales',
+        dedupKey: `lead_handoff_${cl.id}`
+      }, { fallbackToOwner: true });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
+      Notifs.showToast(`Lead sent to Sales: ${cl.name}`);
+      renderMktLeads(content, currentUser, currentRole);
+    } catch (ex) { btn.disabled = false; Notifs.showToast('Handoff failed: ' + (ex.message||ex.code), 'error'); }
+  }));
+}
+```
+
+**Capture modal `openLeadCaptureModal(camps, onSaved)`** — fields: name (required), company, phone, email, notes, source `<select>` from `LEAD_SOURCES`, campaign `<select>` from non-cancelled `camps` + "— none —". Save logic (nameKey dedupe, first-touch attribution):
+```js
+const existing = await window.Clients.findByName(name);
+const FV = firebase.firestore.FieldValue;
+if (existing) {
+  const upd = { updatedAt: FV.serverTimestamp(), leadOrigin: existing.leadOrigin || 'marketing',
+    source: existing.source || source, brands: FV.arrayUnion('sales') };
+  if (!existing.campaignId && campaignId) upd.campaignId = campaignId;   // first-touch: never overwrite
+  ['company','phone','email'].forEach(k => { if (!existing[k] && vals[k]) upd[k] = vals[k]; }); // fill-empty only
+  await db.collection('clients').doc(existing.id).update(upd);
+  Notifs.showToast(`Existing client updated: ${name}`);
+} else {
+  await db.collection('clients').add({
+    name, nameKey: window.clientNameKey(name), brands: ['sales'], stage: 'lead',
+    company, phone, email, address: '', notes,
+    followUpDate: '', lastContact: '', contactLog: [],
+    leadOrigin: 'marketing', source, campaignId: campaignId || null,
+    handedOffAt: null,
+    addedBy: currentUser.uid, createdBy: currentUser.uid,
+    createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp() });
+  Notifs.showToast(`Lead captured: ${name}`);
+}
+if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
+closeModal(); onSaved();
+```
+(Writes satisfy WS32's `clients` rules — internal user, non-empty name. Stage/followUpDate on EXISTING clients are never touched, matching `upsertFromQuote`'s discipline.)
+
+### Spec 7 — Promotions calendar (NEW `renderMktPromos`, miniCal-pattern month grid)
+
+State: a module-scoped `let _promoMonthOffset = 0;` (mirrors `_calMonthOffset`, app.js:7622). Data: full `promotions` get via cached key `'promotions'` (60s; invalidate on write) — volume is tiny; client-side filter to the visible month.
+
+```js
+async function renderMktPromos(content, currentUser, currentRole) {
+  const canEdit = canEditDept('Marketing');
+  const snap = await (typeof dbCachedGet === 'function'
+    ? dbCachedGet('promotions', () => db.collection('promotions').get().catch(()=>({docs:[]})), 60000)
+    : db.collection('promotions').get().catch(()=>({docs:[]})));
+  const promos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+  const todayStr = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
+  // Manila-anchored month base — same technique as renderMiniCal (app.js:7638-7640)
+  const base = new Date(+todayStr.slice(0,4), +todayStr.slice(5,7)-1, 1);
+  base.setMonth(base.getMonth() + _promoMonthOffset);
+  const year = base.getFullYear(), month = base.getMonth();
+  const mStart = `${year}-${String(month+1).padStart(2,'0')}-01`;
+  const daysIn = new Date(year, month+1, 0).getDate();
+  const mEnd = `${year}-${String(month+1).padStart(2,'0')}-${String(daysIn).padStart(2,'0')}`;
+  // A promo is "on" a day when startDate<=day<=endDate (ISO strings compare lexically)
+  const monthPromos = promos.filter(p => (p.startDate||'') <= mEnd && (p.endDate||p.startDate||'') >= mStart)
+    .sort((a,b) => (a.startDate||'').localeCompare(b.startDate||''));
+  const onDay = ds => monthPromos.filter(p => (p.startDate||'') <= ds && (p.endDate||p.startDate||'') >= ds);
+  // Grid: Su..Sa header, leading blanks = new Date(year,month,1).getDay(), one cell per day —
+  // day number + up to 3 dots (•) when onDay(ds).length, today highlighted (ds===todayStr),
+  // cell click opens a small day-list popover/modal of that day's promos. ‹ › buttons adjust
+  // _promoMonthOffset and re-render. Below the grid: the monthPromos list —
+  // title (escHtml) + 📅 range + channel badge (leadSourceLabel) + campaign badge, with
+  // ✏️/🗑 for canEdit (delete via confirmDialog; both invalidate 'promotions' + re-render).
+  // Header row: `🗓 <MonthName Year>` + (canEdit ? '＋ New Promo' → openPromoModal(null, camps, rerender)).
+}
+```
+`openPromoModal(promo, camps, onSaved)`: title (required), start/end dates (`end >= start`, default end = start), channel `<select>` (LEAD_SOURCES + blank), campaign `<select>`, notes. Save = Spec-1 shape → `dbCacheInvalidate('promotions')` → toast → `onSaved()`. (Full-collection get + client filter ⇒ no index; no `orderBy` in the query.)
+
+### Spec 8 — Insights (NEW `renderMktInsights` — live rollup, no cache collection)
+
+```js
+async function renderMktInsights(content, currentUser, currentRole) {
+  const canSpend = ['president','owner','manager','finance'].includes(currentRole);
+  const [camps, clientsAll, qSnap, ledgerSnap] = await Promise.all([
+    fetchCampaigns(),
+    window.Clients.listAll(),                                   // 'clients' cache key (WS32)
+    (typeof getAllQuotes === 'function' ? getAllQuotes() : Promise.resolve({ docs: [] })),  // 'all-quotes'
+    canSpend
+      ? (typeof dbCachedGet === 'function'
+          ? dbCachedGet('ledger-marketing', () => db.collection('ledger').where('dept','==','Marketing').get().catch(()=>({docs:[]})), 60000)
+          : db.collection('ledger').where('dept','==','Marketing').get().catch(()=>({docs:[]})))
+      : Promise.resolve({ docs: [] })
+  ]);
+  const quotes = qSnap.docs.map(d => ({ id:d.id, ...d.data() }));
+  const ledger = ledgerSnap.docs.map(d => d.data());
+  const rows = camps.map(camp => {
+    const leads = clientsAll.filter(c0 => c0.campaignId === camp.id);
+    const seen = {}; const cQuotes = [];
+    leads.forEach(c0 => window.Clients.quotesFor(c0, quotes)      // WS32 canonical join — clientId first, nameKey fallback
+      .forEach(q => { if (!seen[q.id]) { seen[q.id] = 1; cQuotes.push(q); } }));
+    const wins = cQuotes.filter(window.isQuoteWon);               // WS32 canonical outcome
+    const spend = (canSpend && camp.budgetLineId)
+      ? ledger.filter(e => e.budgetLineId === camp.budgetLineId && ledgerKind(e) === 'expense')
+              .reduce((s,e) => s + (e.amount||0), 0)
+      : null;                                                     // null ⇒ render '—', never ₱0
+    return { camp, leads: leads.length,
+      converted: leads.filter(c0 => crmStageOf(c0) === 'won').length,
+      quotes: cQuotes.length,
+      quoted: cQuotes.reduce((s,q) => s + (q.total||q.grandTotal||0), 0),
+      wins: wins.length,
+      wonVal: wins.reduce((s,q) => s + (q.total||q.grandTotal||0), 0),
+      spend, cpl: (spend != null && leads.length) ? spend / leads.length : null };
+  });
+  const unattributed = clientsAll.filter(c0 => c0.leadOrigin === 'marketing' && !c0.campaignId).length;
+  // Render: KPI row (Total spend [money-tier] · Total leads · Total wins ₱), then a table
+  // wrapped in overflow-x:auto — columns: Campaign | Status | Spend | Leads | CPL | Quotes |
+  // Quoted ₱ | Wins | Won ₱ — spend/CPL cells show '—' + a 🔒 tooltip ('finance-visible')
+  // when null; an over-budget spend (spend > camp.budget > 0) renders in var(--danger).
+  // Footer note when unattributed > 0: 'N marketing leads have no campaign tag.'
+  // Empty state when !camps.length. All names escHtml'd.
+}
+```
+Reads: 4 fetches, all cached (WS16 discipline); no composite index (`ledger.dept` is a single-field where; clients/quotes are existing cached full reads). Spend semantics for non-money viewers deliberately match `renderBudgeting`'s `canSeeSpend` "— not ₱0" convention (departments.js:11482-11485).
+
+### Spec 9 — Budgeting mismatch fix (departments.js:11475-11530 + rules 2b)
+
+1. **Rules:** Spec 2b (create/update/delete split with the `dept`-field `inDept` clause).
+2. **Stamp `dept` on new lines** — in `renderBudgeting`'s "+ Budget Line" save handler, the create payload `{ name, budget, createdAt }` gains `dept` (the function's own `dept` argument): `{ name, budget, dept, createdAt: FV.serverTimestamp() }`.
+3. **Gate the ledger button honestly** — the "📤 Log Expense / Income" button (which writes `ledger`, `canFinance()`-gated in rules regardless of this fix) renders only when `canSeeSpend` (the money-tier flag ALREADY computed at departments.js:11482); `canEdit` (dept members included) keeps gating only the "+ Budget Line" button and line edit/delete, which now genuinely work for dept members on NEW lines.
+4. **Legacy lines:** no backfill. Old lines (no `dept` field) stay money-admin-editable; a money admin can re-save a legacy line with the `dept` field if a dept needs to manage it (optional, manual, no script).
+
+### Spec 10 — Migration / rollout checklist (dependency order)
+
+1. **Precondition:** WS32 deployed AND `window.migrateClientBooks()` has been run (the Leads tab hard-banners until then — Spec 6). WS38 NOT required for Phase A.
+2. **Deploy rules** (Spec 2a blocks + 2b wildcard edit) — fresh `git diff firestore.rules` first, block-scoped Edits, then `~/.npm-global/bin/firebase deploy --only firestore:rules`. Old clients unaffected (they don't touch the new collections; the budgets_ widening is strictly additive).
+3. **No index deploy** — zero composite indexes needed (verified per query, Specs 5-8).
+4. **Ship the JS** (one commit — Phase A): config.js (Spec 3a subtabs + 3b `LEAD_SOURCES`), departments.js (Spec 4 rewiring; Spec 5a/5b campaigns; Spec 6 leads; Spec 7 promos; Spec 8 insights; Spec 9.2/9.3 budgeting edits). `node --check` each file. **Bump `CACHE_VER` in sw.js by hand** (pre-commit hook covers APP_VERSION only). No new script file ⇒ no index.html/PRECACHE change.
+5. **No data migration** — all three new collections start empty; `clients` gains fields only on new capture writes; backup auto-discovers the new root collections (zero registration).
+6. **Phase B (after WS38 ships):** add the Materials panel (Spec 5c) inside `openCampaignModal` — one departments.js edit + CACHE_VER bump; no rules/index/sync work (all WS38's).
+7. Update ROADMAP.md: Marketing suite Phase A shipped; Materials panel pending WS38.
+
+### Spec 11 — Manual test checklist
+
+1. **Tabs:** Marketing opens on Campaigns; all 11 chips render and match `DEPARTMENTS.Marketing.subtabs` exactly (drift fix); Advertising/Designs/Plan/Budgeting/Proposals/Tasks behave as before.
+2. **Campaign CRUD:** Marketing employee creates a campaign (name/dates/channels/budget) → appears in list with status badge; `end < start` blocked client-side; a partner console `create` on `campaigns` → DENIED; a non-Marketing employee create → DENIED (`canDept`); president edit → allowed; employee delete → DENIED (admin-only), Cancel status works instead.
+3. **Budget link + spend:** as finance, link a campaign to a `budgets_marketing` line; post a Marketing ledger expense against that line → campaign detail "Actual spend" shows it (matches the Budgeting tab's number for the same line); as a plain Marketing employee the spend cell shows "—", not ₱0.
+4. **Lead capture:** capture "Juan Reyes / FB / campaign X" → one `clients` doc with `stage:'lead'`, `brands:['sales']`, `leadOrigin:'marketing'`, `source:'FB'`, `campaignId`; the SAME client is visible in Sales → Clients (shared record); capturing the same name again does NOT duplicate (nameKey) and does NOT overwrite the existing `campaignId` (first-touch).
+5. **Handoff:** "→ Send to Sales" → `handedOffAt` set, lead moves to the "Handed to Sales" section, a `contactLog` entry appears in the client's WS32 timeline, and every Sales-department user receives the 📥 notification (owner receives it if Sales is empty — `fallbackToOwner`). Button gone on re-render (idempotent).
+6. **Pre-migration guard:** with WS32's migration not yet run (legacy mode), the Leads tab shows the unify-first banner and no capture button.
+7. **Promos calendar:** create a promo spanning the 15th–31st → dots on each covered day of the month grid, promo listed below; `‹`/`›` nav moves months (Manila-anchored — test near UTC midnight); day click lists that day's promos; edit/delete work and refresh the grid.
+8. **Insights:** campaign X shows Leads=1 after test 4; file a quote for Juan via the builder (WS32 stamps `clientId`) → Quotes=1, Quoted ₱ correct; mark it won (or create its sales order) → Wins=1/Won ₱ via `isQuoteWon`; spend/CPL populate for finance viewers and show "—"+🔒 for a Marketing employee; a lead with no campaign shows in the "unattributed" footer count.
+9. **Strategy:** add a template doc → renders as a card (renderDocCollection); non-Marketing employee write → DENIED.
+10. **Budgeting fix:** as a plain Marketing employee, "+ Budget Line" now SUCCEEDS (new line carries `dept:'Marketing'`); editing a LEGACY line (no dept field) → DENIED for the employee, allowed for finance; the "📤 Log Expense / Income" button is hidden for the employee (no more silent deny); as an IT dept member, writing to `budgets_marketing` → DENIED (`inDept` mismatch).
+11. **Materials (Phase B):** upload a file in campaign X's Materials panel → `hub_files` doc with `scope:'materials'`, `folderId:'materials__<id>'`, full WS38 Spec-1 shape; it appears in the Files Hub under the materials scope inside the campaign-named folder; preview (👁) works; the panel shows the WS38 placeholder when `FilesHub` is absent.
+12. **Deploy hygiene:** `git diff firestore.rules` clean before deploy; CACHE_VER bumped; `node --check` passes on config.js/departments.js.
+
+### Flags for Neil
+
+- **‼️ FLAG FOR NEIL — Marketing landing tab changes to "Campaigns".** The department page now opens on the new Campaigns tab instead of Advertising. Say the word to keep Advertising as the default.
+- **‼️ FLAG FOR NEIL — dept members can now create/edit their own department's budget lines.** The code always SHOWED them the button but the rules silently blocked it; this spec makes it real (new lines only, money tier unaffected, expense logging stays finance-only). If you'd rather budget allocations stay finance-only, skip Spec 2b/9 and we hide the button instead.
+- **‼️ FLAG FOR NEIL — lead-source vocabulary.** The nine Brilliant-Steel codes (Facebook, Instagram, TikTok, Website, Viber, Email, In-Office, Referral, Exhibition) become the company-wide `LEAD_SOURCES` list for lead capture, campaign channels, and promos. Confirm the list or name additions.
+- **‼️ FLAG FOR NEIL — campaign spend is finance-visible only.** Marketing staff who aren't finance/manager/president see "—" for spend/CPL in Insights (the ledger is finance-gated in rules; showing ₱0 would lie). If Marketing should see its own spend numbers, that's a `ledger` read-rule widening — a separate security decision, not made here.
+- **‼️ FLAG FOR NEIL — first-touch attribution.** A client captured under campaign A and later touched by campaign B keeps `campaignId` = A forever (simple, no multi-touch model). Confirm this is acceptable for how you'll read the Insights table.

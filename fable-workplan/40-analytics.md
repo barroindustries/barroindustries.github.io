@@ -578,3 +578,654 @@ styles.css` (only if new chart-legend/UI chrome needs new tokens beyond the exis
 > legibility under BOTH the Office (light) and Obsidian (dark) themes plus a live `auto` OS-scheme
 > flip, and — if built — one real end-to-end firing of the scheduled digest with its
 > notification/push landing in the existing inbox UI.
+
+## DECIDED — architecture spec (Fable, 2026-07-11)
+
+> **Binding upstream contracts (this spec builds on, never re-decides):**
+> **WS32** — all win/loss math via `window.isQuoteWon/isQuoteLost/isQuoteOpen` (config.js), all
+> client rollups via `window.Clients.listAll()` (cache key `'clients'`), CRM stage funnel is a
+> separately-labeled "Client conversion" — NOT a win-rate input; revenue-per-client joins go
+> `ledger.projectId → job_projects.clientId`, never name-string scans (32-sales-crm.md:1206-1209).
+> **WS36** — cash position = `await window.BankAccounts.cashPosition()` → `{total, perAccount}`;
+> registry-empty IS the feature flag (empty → placeholder card, never a flow proxy)
+> (36-finance-additions.md:87). **WS29** — inventory turns = decision 12's formula verbatim
+> (29-inventory.md:694-703). **WS39** — period reads are date-range-bounded queries
+> (`ledgerForPeriod`/`ledgerSince`); fixed-row-count reads banned; `finance_rollup` declined —
+> WS40 likewise persists NO aggregation/snapshot doc.
+
+### Resolved decisions (numbered to match the 15 open decisions)
+
+1. **Cash position → option (b) placeholder now, WS36's `cashPosition()` on the same card once
+   accounts exist — exactly per the WS36 handoff.** The Overview gains ONE new KPI card "🏦 Cash
+   Position": if `window.BankAccounts?.cashPosition` is undefined OR `(await
+   BankAccounts.list()).length === 0`, the card renders "—" with sub-line "Register bank accounts
+   (Finance → Bank Accounts) to activate" (pending WS36 implementation); otherwise it renders
+   `fmt(total)` with a tap-to-expand per-account list from `perAccount`. It NEVER falls back to
+   the "Net Cash (period)" flow figure — that existing KPI stays as its own separate, unchanged
+   card (`netMTD`, app.js:6451/6477). Fine-print on the real card (WS36's accepted residual
+   gap): "excludes statutory remittances until WS39's remittance flow ships."
+2. **AR aging → invoice-due-date anchor with project-age fallback, computed by ONE shared
+   `window.arAging()` helper used by BOTH surfaces.** Anchor per project = the EARLIEST `due`
+   across `p.invoices[]` entries; when no invoice carries a `due` (the common legacy case),
+   fall back to project `createdAt` — i.e. today's Finance-Dashboard proxy IS the fallback, so
+   projects without due-dated invoices bucket identically to today. A new "📥 Receivables
+   Aging" card is added to the Analytics→Finance tab (`renderFinanceAnalytics`), and
+   `renderFinanceDashboard`'s existing card (app.js:2810-2861) is REWIRED onto the same helper
+   — no 4th independent AR number. **Money note:** total AR is unchanged by construction (same
+   `arBalance>0` set, same sum); per-BUCKET amounts MAY shift for projects that have due-dated
+   invoices — that is the deliberate correctness fix, and both surfaces shift together because
+   they share the helper. The hardcoded "Chase the 90+ day bucket first" copy (app.js:2860) is
+   replaced by a rule that names the actual largest bucket (Spec 3, rule `ar-largest`).
+3. **Win-rate → WS32's canonical quote-outcome definition, period; gov bids stay a separately
+   named metric.** WS40 adds `window.quoteWinStats(quotes)` and `window.bidWinStats(bids)`
+   (thin, pure wrappers in config.js) so the KPI cards and the insight sentences compute from
+   literally the same function. "Win Rate (quotes)" = WS32 Spec 7b's formula; "Bid win rate
+   (Government)" keeps its `won/lost` status basis but is ALWAYS rendered/spoken with the
+   "(Government)" qualifier. The BS quote-approvals card's third definition is already retired
+   by WS32 — WS40 touches nothing there. Insight rules name which rate they mean, always.
+4. **On-time % → ship the existing task-based definition, relabeled honestly; delivery on-time
+   is a documented WS28 wire-in.** The Production KPI copy becomes "On-time task completion"
+   (not "On-time delivery"). Once WS28's `production_orders.stageHistory` ships, a true
+   delivery metric (= delivery-stage `enteredAt` ≤ order due date) is added as a SECOND,
+   separately-labeled KPI — the task metric is not redefined in place (WS16 discipline: don't
+   silently change what a displayed number means).
+5. **Payroll ratio → confirmed as payroll ÷ period ledger revenue; the two duplicate call
+   sites consolidate onto one helper, formula byte-identical.** `window.payrollRatio(totalPayroll,
+   revenueForPeriod)` returns the same `totalPayroll/rev*100` (0 when rev ≤ 0). Overview
+   (app.js:6462-6463) and Finance tab (app.js:6648) both call it. No denominator change —
+   headcount-normalized/gross-margin variants declined (would violate "no displayed money
+   number changes" and the mandate names no such variant).
+6. **Inventory turns → implement WS29 decision 12's formula verbatim, self-gating on data
+   presence.** `window.inventoryTurns(ledgerRows, items, windowDays=365)` (Spec 2c). The KPI
+   renders on the Finance tab: when `annualizedCOGS === 0` (no `COS – Direct Material` rows in
+   the window — i.e. pre-WS29-consume-costing) it shows "—" with sub-line "pending WS29
+   inventory movements"; otherwise `X.X× /yr · ~N days on hand` with fine-print "meaningful
+   going-forward from WS29 ship date (WAC-costed)". Negative-qty items included as-is per
+   WS29 (they're data errors the count form fixes; hiding them would hide the error).
+7. **Insight engine → new `window.Insights` module + `window.ANALYTICS_POLICY` threshold
+   config, both in config.js; rules are pure functions over ONE metrics bag.** No per-tab
+   duplication. Thresholds are config (the `LEAVE_POLICY`/`STATUTORY` precedent) so Neil tunes
+   without code changes — shipped values are ‼️ PLACEHOLDERS (flag below). The engine does ZERO
+   fetching: it receives a `metrics` object assembled once per `renderAnalytics` fetch from the
+   SAME variables the KPI cards render (the WS16 sentence-equals-number guarantee, Spec 2d).
+8. **Conclusion block → computed LIVE on every render; NO persisted snapshot collection.**
+   Mirrors WS39's `finance_rollup` "declined" reasoning: a snapshot doc duplicates truth and
+   needs write-fanout/retention decisions for a "what did it say last Tuesday" feature nobody
+   asked for. The daily digest (decision 13) recomputes its own small number set server-side
+   from the same documented formulas — it does not need a snapshot either. If historical
+   conclusions are ever wanted, that's a future additive collection, not a v1 blocker.
+9. **Strategy page → a 7th Analytics subtab (`🎯 Strategy`), NOT a new nav item; same
+   four-role gate as Analytics.** It reuses the exact fetch/cache/`Period` context of
+   `renderAnalytics` (zero new reads beyond what Overview already triggers), inherits the
+   existing `isPresident()||manager||secretary||finance` gate (app.js:6341) — president/finance-
+   only was considered and rejected: managers already see every number the recommendations are
+   derived from, and secretary is a view-only oversight role by design. Contents: full insight
+   list (uncapped, grouped bad→warn→info→good, each with an action line), a "wire-in status"
+   card (the decision-14 stub table, visible in-product), and the market-research notes
+   (decision 10). Overview gets a compact "📌 Conclusions" card capped at
+   `ANALYTICS_POLICY.maxInsights` with a "See all → Strategy" link.
+10. **Market-research notes → NEW small collection `strategy_notes/{deptKey}` with an
+    append-only `entries[]` array (WS32 `contactLog` pattern); NOT a `settings/{docId}`
+    singleton.** Rationale: the settings match is president-only-write (loosening it would
+    loosen `sales_sop`/`employeeOfMonth` too — the exact trap WS26 dodged with
+    `settings_holidays`), and a single overwritten blob loses authorship/history. Six fixed doc
+    ids: `general`,`sales`,`marketing`,`production`,`finance`,`gov`. Rules read/write =
+    `isFinanceOrAdmin()`; the add-entry UI is client-gated to president/manager/finance
+    (secretary reads but doesn't write — same client-gate pattern as WS25 decision 9).
+11. **Theme-aware charts → promote `window.cssVar(name, fallback)` AND add
+    `window.chartTheme()` (option b), one call per sub-renderer; re-render on theme change via
+    one `bi-theme-change` event.** `cssVar` is `Notifs.showToast`'s proven closure
+    (notifications.js:508-512) promoted verbatim to config.js. `chartTheme()` returns
+    `{text, grid, ...CHART_COLORS}` where `text = cssVar('--text-muted','#ebebf5bb')` and
+    `grid = cssVar('--border','#ffffff18')` — so Office theme gets `#616161` ticks (legible)
+    and dark themes keep today's look. Each of the six sub-renderers opens with
+    `const CT = window.chartTheme();`; the 22 `'#ebebf5bb'` and 8 `'#ffffff18'` literals inside
+    app.js:6340-6778 become `CT.text`/`CT.grid` (mechanical, Spec 1c). Live re-theme:
+    `setTheme()` (and the `auto` matchMedia listener) dispatch `bi-theme-change`;
+    `renderAnalytics` installs a self-removing listener that re-runs the ACTIVE tab renderer
+    (charts are cheap to rebuild from the already-cached arrays; recoloring in place is more
+    code for no gain). `Notifs.showToast`'s local closure is left alone (working code, zero
+    benefit to touching it).
+12. **Dataset palette → consolidated into ONE `window.CHART_COLORS` constant with semantic
+    keys, keeping today's EXACT hex values; re-meaning colors is out of scope.** `{good:'#30D158',
+    bad:'#FF453A', neutral:'#0A84FF', warn:'#FF9F0A', muted:'#636366', accent:'#9BA8FF',
+    goodAlt:'#34C759', warnAlt:'#FFAA00', goodA:'#30D15822', neutralA:'#0A84FF22'}`. These read
+    fine on both themes (they're saturated data colors, not chrome), so they stay literal —
+    only the chrome (ticks/grid/legend) is theme-reactive. Zero visual change on dark themes;
+    the only intended visual change anywhere is chrome legibility on light themes.
+13. **Daily digest → GitHub Actions cron + a `scripts/daily-digest.js` admin-SDK runner
+    writing into `notifications/{uid}/items` — NOT a Cloud Scheduled Function.** Rationale:
+    (a) zero new billing dependency (Blaze not required; every existing automation runs on
+    Actions' free minutes — the brief's ⚠️ cost flag dissolves); (b) matches the
+    `sync-to-drive.yml` daily-cron precedent exactly; (c) the brief's objection that an Actions
+    script "cannot easily send a push" is wrong in this codebase — writing the notification doc
+    IS the push (the existing `sendPushOnNotification` trigger fires on the new doc, FCM logic
+    reused untouched). Cron `'0 0 * * *'` = 08:00 Asia/Manila (PH has no DST), plus
+    `workflow_dispatch` for manual test runs. Idempotency: deterministic doc id
+    `digest_{YYYY-MM-DD}` + a script-side exists-check skip, so a re-run/retry can never
+    double-send regardless of the Cloud Function's trigger semantics.
+14. **Scoping → v1 ships everything computable today; blocked metrics ship as honest,
+    self-activating stubs — nothing is sequenced-blocked.** The stub table (Spec 8) is also
+    rendered in-product on the Strategy tab so a later session (and Neil) sees exactly what
+    "wires in" when WS28/29/30/32/36 land. Feature detection is always data-shaped
+    (registry-empty, zero COS rows), never a hardcoded flag to flip.
+15. **Digest recipients → president + finance roles only, in-app notification + existing FCM
+    push; no email.** AR/collections and cash content is the sensitive tier (matches WS36's
+    `canFinance()`-only registry read). Managers/secretary see the same conclusions live in
+    Analytics; they don't get the morning push. No email dependency (zero precedent in
+    functions/package.json — correctly stays out). Dedup field `dedupKey:
+    'digest-'+uid+'-'+date` mirrors `checkLowStock`'s convention on top of the deterministic id.
+
+**Sequencing:** implement AFTER WS32's Analytics rewire (WS40's `quoteWinStats` wraps WS32's
+canonical helpers and its `renderSales` block; if WS40 is implemented first, lift
+`isQuoteWon/isQuoteLost/isQuoteOpen` + the Spec-7b block verbatim from 32-sales-crm.md — do not
+invent variants). WS36/WS29/WS28/WS30 are NOT blockers (stubs self-activate). The `dpSnap` bug
+fix (Spec 4a) is IN scope — one line, in the same function, and our AR/receivables sentences
+would otherwise inherit the undercount.
+
+---
+
+### Spec 1 — Theme-aware charts
+
+**1a — config.js additions** (place near `ledgerKind`; config.js loads before every caller):
+```js
+// ── Theme-aware chart chrome (v12 WS40) ─────────────────────────────
+// cssVar: promoted verbatim from Notifs.showToast's proven local closure
+// (notifications.js:508-512). Reads a CSS custom property off <html> live,
+// so it tracks THEMES switches including the 'auto' matchMedia flip.
+window.cssVar = function(name, fallback){
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  } catch(_) { return fallback; }
+};
+// Dataset palette — TODAY'S exact hexes, single source (decision 12). Not theme-reactive.
+window.CHART_COLORS = { good:'#30D158', bad:'#FF453A', neutral:'#0A84FF', warn:'#FF9F0A',
+  muted:'#636366', accent:'#9BA8FF', goodAlt:'#34C759', warnAlt:'#FFAA00',
+  goodA:'#30D15822', neutralA:'#0A84FF22' };
+// One call per chart-bearing render — chrome colors resolved against the LIVE theme.
+window.chartTheme = function(){
+  return { text: window.cssVar('--text-muted', '#ebebf5bb'),
+           grid: window.cssVar('--border',     '#ffffff18'),
+           ...window.CHART_COLORS };
+};
+```
+
+**1b — theme-change event.** In `setTheme` (app.js:~846-865), after the class/`<meta theme-color>`
+update: `window.dispatchEvent(new CustomEvent('bi-theme-change'));`. In `initTheme`
+(app.js:842-844), the `auto` entry's `matchMedia('(prefers-color-scheme: dark)')` listener (add
+one if none exists — today charts can't react anyway) dispatches the same event after
+re-resolving. In `renderAnalytics` (after the `bindChipTabs` wiring at 6770-6774):
+```js
+  const onTheme = () => {
+    const bar = document.getElementById('an-tabs') || wrap.querySelector('.chip-tabs');
+    if (!bar || !document.body.contains(bar)) { window.removeEventListener('bi-theme-change', onTheme); return; }
+    const active = bar.querySelector('.active')?.dataset.tab || 'overview';
+    (TAB_RENDERERS[active] || renderOverview)();   // rebuild charts with the new chrome colors
+  };
+  window.addEventListener('bi-theme-change', onTheme);
+```
+(Self-removing on the first event after navigation away — same lifecycle trick as the existing
+`Chart.getChart(cv).destroy()` swap logic, which continues to handle chart disposal.)
+
+**1c — the 13 `new Chart(` sites (app.js:6508, 6514, 6572, 6578, 6617, 6619, 6673, 6675, 6677,
+6712, 6715, 6754, 6757) — mechanical retrofit.** At the top of EACH of the six sub-renderers
+(`renderOverview` 6434, `renderSales` 6521, `renderMarketing` 6581, `renderFinanceAnalytics`
+6622, `renderProduction` 6680, `renderGovernment` 6718): `const CT = window.chartTheme();`.
+Then, within app.js:6340-6778 ONLY, replace inside `new Chart(...)` options/datasets:
+
+| Literal | Replacement | Count |
+|---|---|---|
+| `'#ebebf5bb'` (legend labels + axis ticks) | `CT.text` | 22 |
+| `'#ffffff18'` (grid lines) | `CT.grid` | 8 |
+| `'#30D158'` / `'#34C759'` | `CT.good` / `CT.goodAlt` | 15 / 1 |
+| `'#FF453A'` | `CT.bad` | 8 |
+| `'#0A84FF'` | `CT.neutral` | 8 |
+| `'#FF9F0A'` / `'#FFAA00'` | `CT.warn` / `CT.warnAlt` | 6 / 1 |
+| `'#636366'` | `CT.muted` | 10 |
+| `'#9BA8FF'` | `CT.accent` | 1 |
+| `'#30D15822'` / `'#0A84FF22'` | `CT.goodA` / `CT.neutralA` | — |
+
+Representative before/after (site 6508 pattern):
+```js
+// BEFORE
+plugins:{legend:{labels:{color:'#ebebf5bb'}}}, scales:{y:{ticks:{color:'#ebebf5bb'},grid:{color:'#ffffff18'}}}
+// AFTER
+plugins:{legend:{labels:{color:CT.text}}}, scales:{y:{ticks:{color:CT.text},grid:{color:CT.grid}}}
+```
+Hex literals OUTSIDE `new Chart(` calls (KPI-card HTML) are untouched. WS32's Spec 7d chart
+(the rewritten `sq-chart`) gets the same treatment when both land. Do NOT sweep other files —
+grep confirms all 13 chart sites live in this one range.
+
+### Spec 2 — Shared metric helpers (js/config.js)
+
+**2a — quote/bid outcome stats** (thin wrappers over WS32's canonical helpers — the ONE place
+both KPI cards and sentences compute from):
+```js
+// v12 WS40 — the single win-rate computation. KPI cards AND Insights read this.
+window.quoteWinStats = function(quotes){
+  const won  = quotes.filter(window.isQuoteWon), lost = quotes.filter(window.isQuoteLost),
+        open = quotes.filter(window.isQuoteOpen);
+  const val = q => q.total || q.grandTotal || 0;
+  return { won, lost, open, wonCount: won.length, lostCount: lost.length,
+    winRate: (won.length+lost.length) ? Math.round(won.length/(won.length+lost.length)*100) : null,
+    wonVal: won.reduce((s,q)=>s+val(q),0), pipelineVal: open.reduce((s,q)=>s+val(q),0) };
+};
+window.bidWinStats = function(bids){       // Government — ALWAYS labeled "(Government)"
+  const won = bids.filter(b=>b.status==='won'), lost = bids.filter(b=>b.status==='lost');
+  return { wonCount: won.length, lostCount: lost.length,
+    winRate: (won.length+lost.length) ? Math.round(won.length/(won.length+lost.length)*100) : null };
+};
+window.payrollRatio = function(totalPayroll, revenue){    // decision 5 — formula unchanged
+  return revenue > 0 ? (totalPayroll / revenue) * 100 : 0;
+};
+```
+
+**2b — AR aging engine** (decision 2; replaces the inline bucket loop at app.js:2810-2861 AND
+powers the new Analytics card):
+```js
+// ONE aging engine. Anchor = earliest invoices[].due, else project createdAt
+// (today's Finance-Dashboard proxy IS the fallback). projects = Projects.normalize shapes.
+window.arAging = function(projects, asOf){
+  asOf = asOf || window.bizDate();
+  const asOfT = new Date(asOf + 'T12:00:00').getTime();
+  const days = ymd => Math.floor((asOfT - new Date(ymd + 'T12:00:00').getTime()) / 86400000);
+  const toYmd = ts => { const d = ts?.toDate ? ts.toDate() : (ts ? new Date(ts) : null);
+    return (d && !isNaN(d)) ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` : null; };
+  const out = { cur:0, d3160:0, d6190:0, d90:0, total:0, topDebtor:null };
+  const perClient = {};
+  (projects||[]).forEach(p => {
+    const bal = +(p.arBalance || 0); if (bal <= 0) return;
+    let anchor = null;
+    (p.invoices||[]).forEach(inv => { if (inv && inv.due && (!anchor || inv.due < anchor)) anchor = inv.due; });
+    if (!anchor) anchor = toYmd(p.createdAt);
+    const d = anchor ? days(anchor) : 0;
+    out[d > 90 ? 'd90' : d > 60 ? 'd6190' : d > 30 ? 'd3160' : 'cur'] += bal;
+    out.total += bal;
+    const nm = p.clientName || p.name || '—';
+    perClient[nm] = (perClient[nm] || 0) + bal;
+  });
+  const top = Object.entries(perClient).sort((a,b)=>b[1]-a[1])[0];
+  if (top) out.topDebtor = { name: top[0], amount: top[1] };
+  return out;
+};
+```
+
+**2c — inventory turns** (WS29 decision 12, verbatim math; date-range discipline per WS39):
+```js
+// WS29 decision-12 formula — the canonical turns metric. ledgerRows must come from a
+// date-range-bounded read (ledgerSince) covering [asOf-windowDays, asOf]; NEVER .limit(N).
+window.inventoryTurns = function(ledgerRows, items, windowDays){
+  windowDays = windowDays || 365;
+  const end = window.bizDate();
+  const s = new Date(end + 'T12:00:00'); s.setDate(s.getDate() - windowDays);
+  const start = `${s.getFullYear()}-${String(s.getMonth()+1).padStart(2,'0')}-${String(s.getDate()).padStart(2,'0')}`;
+  const cos = (ledgerRows||[]).reduce((sum,r)=> sum + ((r && r.accountType==='expense'
+    && r.category==='COS – Direct Material' && r.date>=start && r.date<=end) ? +(r.amount||0) : 0), 0);
+  const annualizedCOGS = cos * (365/windowDays);
+  const invValue = (items||[]).reduce((sum,it)=> sum + (Number(it.qty)||0)*(Number(it.unitCost)||0), 0);
+  const turns = (invValue > 0 && annualizedCOGS > 0) ? annualizedCOGS/invValue : null;
+  return { turns, daysOnHand: turns ? Math.round(365/turns) : null, annualizedCOGS, invValue };
+};
+```
+
+**2d — the metrics bag** (assembled in a NEW closure fn `buildMetrics()` inside
+`renderAnalytics`, called once after the `Promise.all`, result stashed as `const M = ...` in
+the shared closure so ALL six sub-renderers + `renderStrategy` read the same object). **This is
+the WS16 guarantee: every field of `M` is either the exact variable a KPI card renders, or is
+rendered ONLY by cards this workstream adds.** Fields:
+```js
+M = { periodLabel,                                     // Period.parse(...).label
+  revP, ledOutP, netP,                                 // the existing Overview figures (6451/6477) — reused, not recomputed
+  payrollTotal, payrollRatio,                          // payrollRatio(payrollTotal, revP) — both call sites now read this
+  aging,                                               // window.arAging(allProjects) — Spec 2b
+  q: quoteWinStats(salesQuotes), qPrev,                // this period vs previous same-type period (WS32 wonMTD/wonPrev ymOf pattern)
+  bid: bidWinStats(govBiddings),
+  onTimeRate, prodDoneCount, prodOverdueCount,         // the existing renderProduction figures (6685-6693) — reused
+  dueFu,                                               // WS32 Spec 7b's due-follow-up count
+  cash: null | {total, perAccount},                    // WS36 gate (decision 1)
+  turns: null | {turns, daysOnHand, invValue}          // Spec 2c gate (decision 6)
+};
+```
+
+### Spec 3 — `window.ANALYTICS_POLICY` + `window.Insights` (js/config.js)
+
+```js
+// ── Analytics conclusions engine (v12 WS40) ─────────────────────────
+// ‼️ Every threshold below is a PLACEHOLDER for Neil to tune — see flags.
+window.ANALYTICS_POLICY = {
+  ar90SharePct: 25,        // warn when 90+ bucket ≥ this % of total AR…
+  arMinAlert: 50000,       // …AND ≥ this ₱ amount (both, to avoid noise on tiny AR)
+  winRateDropPts: 10,      // percentage-POINT drop vs previous period
+  minOutcomes: 3,          // min (won+lost) in BOTH periods before win-rate rules speak
+  payrollRatioWarnPct: 35, // payroll as % of period revenue
+  onTimeWarnPct: 80,       // production on-time task completion floor
+  minProdDone: 3,          // min completed tasks before the on-time rule speaks
+  cashFloor: 100000,       // ₱ — cash-position floor (only fires post-WS36)
+  turnsSlowBelow: 2,       // turns/yr — slow-stock advisory (only fires post-WS29)
+  maxInsights: 6           // Overview card cap (Strategy tab shows all)
+};
+// Pure rule engine: rules read ONLY the metrics bag M (Spec 2d) + POLICY. No fetches,
+// no Date.now() — 'as of' semantics live in M. Output: ordered insight objects.
+window.Insights = {
+  _esc(s){ return (window.escHtml || (x=>x))(s); },
+  rules: [
+    function netNegative(M, P){ if (M.netP >= 0) return null;
+      return { id:'net-negative', severity:'bad', icon:'📉',
+        text:`Expenses exceeded income by ₱${fmt(-M.netP)} ${M.periodLabel ? 'in '+M.periodLabel : 'this period'}.`,
+        action:'Review the Finance tab expense breakdown for the biggest categories.' }; },
+    function ar90(M, P){ const a = M.aging; if (!a || !a.total) return null;
+      const pct = Math.round(a.d90 / a.total * 100);
+      if (a.d90 < P.arMinAlert || pct < P.ar90SharePct) return null;
+      const top = a.topDebtor ? ` Largest balance: ${window.Insights._esc(a.topDebtor.name)} (₱${fmt(a.topDebtor.amount)}).` : '';
+      return { id:'ar-90', severity:'bad', icon:'📥',
+        text:`₱${fmt(a.d90)} (${pct}%) of receivables are over 90 days old.${top}`,
+        action:'Prioritize collection calls on the 90+ day bucket.' }; },
+    function arLargest(M, P){ const a = M.aging; if (!a || !a.total) return null;
+      const buckets = [['d90','90+ days'],['d6190','61–90 days'],['d3160','31–60 days'],['cur','0–30 days']];
+      const [k, label] = buckets.reduce((m,b)=> a[b[0]] > a[m[0]] ? b : m);
+      if (k === 'cur' || k === 'd90') return null;   // d90 already covered; current AR needs no chase note
+      return { id:'ar-largest', severity:'info', icon:'📬',
+        text:`The largest receivables bucket is ${label} (₱${fmt(a[k])} of ₱${fmt(a.total)}).`,
+        action:'Chase this bucket before it ages into 90+.' }; },
+    function winRateDrop(M, P){ const q = M.q, p = M.qPrev;
+      if (!q || !p || q.winRate == null || p.winRate == null) return null;
+      if (q.wonCount + q.lostCount < P.minOutcomes || p.wonCount + p.lostCount < P.minOutcomes) return null;
+      if (p.winRate - q.winRate < P.winRateDropPts) return null;
+      return { id:'win-rate-drop', severity:'warn', icon:'📊',
+        text:`Quote win rate fell from ${p.winRate}% to ${q.winRate}% vs the previous period.`,
+        action:'Review pricing and quote follow-ups on the Sales tab.' }; },
+    function payrollHigh(M, P){ if (!(M.revP > 0) || M.payrollRatio <= P.payrollRatioWarnPct) return null;
+      return { id:'payroll-ratio', severity:'warn', icon:'💼',
+        text:`Payroll is ${Math.round(M.payrollRatio)}% of period revenue (watch level: ${P.payrollRatioWarnPct}%).`,
+        action:'Compare headcount cost against the revenue trend before adding staff.' }; },
+    function onTimeLow(M, P){ if (M.prodDoneCount + M.prodOverdueCount < P.minProdDone) return null;
+      if (M.onTimeRate >= P.onTimeWarnPct) return null;
+      return { id:'on-time', severity:'warn', icon:'🏭',
+        text:`Production on-time task completion is ${Math.round(M.onTimeRate)}% (${M.prodOverdueCount} overdue).`,
+        action:'Rebalance due dates or assignments on the overdue production tasks.' }; },
+    function followUps(M, P){ if (!M.dueFu) return null;
+      return { id:'follow-ups', severity:'info', icon:'📞',
+        text:`${M.dueFu} client follow-up${M.dueFu===1?' is':'s are'} due.`,
+        action:'Open the Client Relations hub and log contact or reschedule.' }; },
+    function cashLow(M, P){ if (!M.cash || M.cash.total >= P.cashFloor) return null;
+      return { id:'cash-floor', severity:'bad', icon:'🏦',
+        text:`Cash position ₱${fmt(M.cash.total)} is below the ₱${fmt(P.cashFloor)} floor.`,
+        action:'Check the balance schedule and 90+ receivables for collectible cash.' }; },
+    function turnsSlow(M, P){ if (!M.turns || M.turns.turns == null || M.turns.turns >= P.turnsSlowBelow) return null;
+      return { id:'turns-slow', severity:'info', icon:'📦',
+        text:`Inventory turns ${M.turns.turns.toFixed(1)}×/yr (~${M.turns.daysOnHand} days on hand) — stock is slow-moving.`,
+        action:'Review slow items in Inventory before the next bulk purchase.' }; }
+  ],
+  compute(M, P){
+    P = P || window.ANALYTICS_POLICY;
+    const out = this.rules.map(r => { try { return r(M, P); } catch(_) { return null; } }).filter(Boolean);
+    if (!out.some(i => i.severity === 'bad' || i.severity === 'warn'))
+      out.push({ id:'all-clear', severity:'good', icon:'✅',
+        text:'No red flags this period — cash flow positive, receivables current, win rate steady.',
+        action:'' });
+    const rank = { bad:0, warn:1, info:2, good:3 };
+    return out.sort((a,b) => rank[a.severity] - rank[b.severity]);
+  }
+};
+```
+**Rendering (Overview "📌 Conclusions" card, inserted after the KPI grid in `renderOverview`):**
+severity chip colors via `cssVar('--danger'/'--warning'/'--text-muted'/'--success', …)`; list =
+`Insights.compute(M).slice(0, ANALYTICS_POLICY.maxInsights)`; each row = `icon + text` with the
+`action` as a muted sub-line; footer link `See all → 🎯 Strategy` that programmatically activates
+the strategy chip. All dynamic names are escaped INSIDE the rules (`_esc`), numbers via `fmt()` —
+render with template strings as usual.
+
+### Spec 4 — Analytics wiring changes (js/app.js)
+
+**4a — `dpSnap` bug fix (pre-existing, adopted here).** Replace the broken manual merge
+(app.js:6383-6388, `dpSnap?.docs||[]` never fetched) with the WS32-canonical unified read: in
+the `Promise.all` (6357-6371) REMOVE the phantom `dpSnap` binding and ADD
+`cg('projects-unified', () => window.Projects.listAll())` (the WS32-established cache key); then
+`const allProjects = <that result>;` deleting the normalize-merge block. Design-board projects
+enter Overview's Top-Clients/Receivables (and our `arAging`) for the first time — the
+receivables TOTAL may increase; this is the bug fix, called out in the test checklist, not a
+silent drift.
+
+**4b — new cached reads (Finance tab only, WS16-conformant).** For the turns KPI:
+`cg('inventory_items', db.collection('inventory_items'))` (reuse the existing key if one
+already exists — grep first) and `cg('ledger>='+turnsStart, () => window.ledgerSince(turnsStart))`
+where `turnsStart` = bizDate−365d (this reuses `ledgerSince`'s own canonical key shape,
+config.js:397-411, and the `ledger` alias invalidation reaches it). Both fetched INSIDE
+`renderFinanceAnalytics` (lazy — Overview doesn't pay for them), 60s TTL.
+
+**4c — Finance tab AR aging card** (`renderFinanceAnalytics`, 6622-6679): add a "📥
+Receivables Aging" card rendering `M.aging` — four bucket stat cells (labels 0–30 / 31–60 /
+61–90 / 90+, amounts via `fmt`) + the top-debtor line (escHtml). Same bucket cell markup as the
+Finance-Dashboard card for visual consistency.
+
+**4d — Finance-Dashboard card rewire** (app.js:2810-2861): delete the inline `_daysSince`
+bucket loop; compute `const a = window.arAging(openARProjects);` and render `a.cur/a.d3160/
+a.d6190/a.d90`. Replace the static line at 2860 with the dynamic largest-bucket copy
+(same logic as rule `ar-largest`, inline): `Chase the <strong>${label}</strong> bucket first
+(₱${fmt(a[k])}).` — falling back to a neutral "Receivables are current." when `cur` is largest.
+
+**4e — payroll-ratio consolidation:** app.js:6462-6463 and 6648 both become
+`window.payrollRatio(totalPayroll, revP)` — rendered values byte-identical to today.
+
+**4f — Production KPI relabel** (6693 card copy): "On-time Rate" → "On-time task completion".
+
+**4g — Strategy subtab:** `SUBTABS` (6419-6426) gains `{key:'strategy', label:'🎯 Strategy'}`
+(7th, last); `TAB_RENDERERS` (6760-6767) gains `strategy: renderStrategy`. `renderStrategy()`
+(new closure sibling of the six): (1) full `Insights.compute(M)` list grouped by severity with
+action lines; (2) "Wire-in status" card = the Spec 8 table rendered as rows
+(`metric · status · pending workstream`); (3) Market research notes: chip row over the six
+`strategy_notes` dept keys; active dept shows `entries` newest-first (cap 30, each
+`date · byName — note`, all through escHtml), plus, when
+`['president','manager','finance'].includes(currentRole)`, a textarea + "Add note" button:
+```js
+await db.collection('strategy_notes').doc(deptKey).set({
+  dept: deptKey,
+  entries: firebase.firestore.FieldValue.arrayUnion({
+    date: window.bizDate(), by: currentUser.uid,
+    byName: userProfile?.displayName || currentUser.email, note: noteText.trim() }),
+  updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+}, { merge: true });
+dbCacheInvalidate('strategy_notes');
+```
+Read via `cg('strategy_notes', db.collection('strategy_notes'))` (≤6 docs). No charts on this
+tab in v1 (no `ensureChart` needed there).
+
+### Spec 5 — firestore.rules diff (ONE new block)
+
+Insert near the other v12 collections (after `settings_holidays` if WS26's block exists, else
+after `settings/{docId}` ~372). Rules do not cascade — this is the only new collection.
+```
+    // ── Strategy / market-research notes (v12 WS40) ──────────────────
+    // docId ∈ {general,sales,marketing,production,finance,gov}. Read scoped to the
+    // Analytics tier (president/manager/secretary/finance); entries appended via
+    // arrayUnion. Secretary is view-only CLIENT-side (WS25 decision-9 pattern) —
+    // rules keep the tier uniform. .get() defaults per missing-field-throws memory.
+    match /strategy_notes/{deptKey} {
+      allow read:  if isAuth() && isFinanceOrAdmin();
+      allow write: if isAuth() && isFinanceOrAdmin()
+        && request.resource.data.get('entries', []) is list;
+      allow delete: if isAuth() && isPresident();
+    }
+```
+Deploy `~/.npm-global/bin/firebase deploy --only firestore:rules` — separate from `git push`;
+re-run `git diff firestore.rules` immediately before (concurrent-session memory). Add
+`strategy_notes` to `scripts/monthly-backup.js` EXPORTS in the same commit. No composite
+indexes (all reads are whole-tiny-collection or existing patterns) — firestore.indexes.json
+untouched.
+
+### Spec 6 — Cash-position + turns KPI wire-ins (feature-gated stubs)
+
+**6a — Cash Position (Overview KPI row, new card):**
+```js
+let cash = null;   // null = WS36 not live yet → placeholder card
+try {
+  if (window.BankAccounts?.cashPosition && (await window.BankAccounts.list()).length)
+    cash = await window.BankAccounts.cashPosition();
+} catch(_) {}
+M.cash = cash;
+// card: cash ? `₱${fmt(cash.total)}` (+ expandable perAccount rows, each
+//   `${escHtml(x.account.nickname)} · ₱${fmt(x.balance)}`)
+//      : `—` with sub-line `Register bank accounts to activate (WS36)`.
+// Fine print when live: `Excludes statutory remittances until the WS39 remittance flow ships.`
+```
+Note: `BankAccounts.list()` is `canFinance()`-gated in rules (WS36 decision 11) — for
+manager/secretary sessions the `.catch` collapses to the placeholder; the card sub-line for a
+denied-but-registry-exists case reads "Finance-only figure". (Acceptable: the same section of
+users who can see the ledger can see cash.)
+
+**6b — Inventory Turns (Finance tab, new KPI):** `M.turns = window.inventoryTurns(ledger365Rows,
+invItems)`; render `turns ? `${turns.toFixed(1)}× /yr · ~${daysOnHand}d on hand` : '—'` with the
+pending/fine-print copy per decision 6.
+
+### Spec 7 — Daily digest (GitHub Actions + scripts/daily-digest.js)
+
+**7a — `.github/workflows/daily-digest.yml` (NEW):**
+```yaml
+name: Daily ops digest
+on:
+  schedule:
+    - cron: '0 0 * * *'    # 00:00 UTC = 08:00 Asia/Manila (PH has no DST)
+  workflow_dispatch: {}     # manual test runs
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: cd scripts && npm ci && npm run digest
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+```
+`scripts/package.json` gains `"digest": "node daily-digest.js"`. Secret already exists (used by
+sync/backup).
+
+**7b — `scripts/daily-digest.js` (NEW, firebase-admin, mirrors `monthly-backup.js` boot).**
+Steps, all date-range-bounded (WS39 discipline, no `.limit(N)`):
+1. `today = new Date(Date.now() + 8*3600e3).toISOString().slice(0,10)` (Manila; PH has no DST —
+   the server-side equivalent of `bizDate()`); `monthStart = today.slice(0,8) + '01'`.
+2. **MTD net cash flow:** `ledger.where('date','>=',monthStart).where('date','<=',today)`;
+   classify each row exactly like `window.ledgerKind` (config.js:676-683): `accountType`
+   `'income'`→in / `'expense'`→out / `'asset'|'liability'`→SKIP (the WS13 leg exclusion);
+   rows with no `accountType` → `type==='credit'` ? in : out. (Legacy-category map omitted —
+   MTD rows post-date WS13 and always carry `accountType`; comment this in the script.)
+3. **AR:** `job_projects.where('arBalance','>',0)` → `arTotal`, `count` (stored `arBalance` is
+   kept in sync — departments.js:12297; totals only, no aging server-side in v1).
+4. **MTD quote outcomes:** `bk_quotes` + `bs_quotes` + `quotes` created since `monthStart`
+   (each `.where('createdAt','>=',<monthStart Timestamp>)`), WON/LOST per WS32's canonical
+   definition duplicated with a `// MUST match window.isQuoteWon/-Lost (32-sales-crm.md Spec 2a)`
+   comment: won = `salesOrderId || status==='won' || status==='accepted'`; lost =
+   `status==='rejected'`.
+5. **Recipients:** `users.where('role','==','president')` ∪ `users.where('role','==','finance')`.
+6. **Write (idempotent):** for each uid, `ref = notifications/{uid}/items/digest_{today}`;
+   `if ((await ref.get()).exists) continue;` then `ref.set({ title: '📊 Daily Ops Digest — '
+   + today, body: <two sentences: 'MTD: ₱X in / ₱Y out (net ₱Z). Receivables: ₱A across N
+   projects. Quotes MTD: WwW/LlL.'>, icon:'📊', type:'daily_digest', dedupKey:
+   'digest-'+uid+'-'+today, read:false, createdAt: FieldValue.serverTimestamp() })`. The
+   existing `sendPushOnNotification` Cloud Function fires on the new doc — push delivery reuses
+   the shipped FCM path with ZERO functions/ changes and NO Blaze requirement.
+7. Digest copy is COARSE by design (MTD totals + counts, labeled "MTD") so it can only be
+   compared against the Overview's month period — the two are computed from the same
+   definitions documented here; no per-insight sentences server-side in v1 (those live client-
+   side where the full metrics bag exists).
+
+### Spec 8 — v1 ship matrix (also rendered on the Strategy tab)
+
+| Metric / feature | v1 status | Activates when |
+|---|---|---|
+| Quote win rate (+ prev-period delta rule) | ✅ live (WS32 canonical) | now (post-WS32 helpers) |
+| Bid win rate (Government) | ✅ live, separately labeled | now |
+| Payroll ratio (% of revenue) | ✅ live (consolidated helper) | now |
+| On-time task completion (Production) | ✅ live (relabeled) | now |
+| AR aging (due-date anchor + fallback) | ✅ live, both surfaces unified | now |
+| Conclusions card + Strategy tab + notes | ✅ live | now |
+| Theme-aware charts (13 sites) | ✅ live | now |
+| Daily digest (Actions cron → notif/push) | ✅ live | now (after secret check) |
+| Cash Position KPI | 🔲 placeholder card | **WS36** implemented + ≥1 bank account registered |
+| Inventory turns KPI + turns-slow rule | 🔲 "—" until COS rows exist | **WS29** implemented (consume-time COS @ WAC) |
+| On-time DELIVERY % (second KPI) | ⛔ not built | **WS28** `stageHistory` (delivery `enteredAt` vs due date) |
+| Material price-trend insights | ⛔ not built | **WS29** movement cost trail + **WS30** PO receiving |
+| Purchasing recommendations | ⛔ not built | **WS30** `purchase_requisitions`/receiving analytics |
+| `job_costs` materials in any metric | ⛔ excluded | per WS29 decision 11(c) — third manual number, unreliable |
+
+### Spec 9 — Migration / rollout checklist (ordered)
+
+1. **Deploy rules** (Spec 5, `strategy_notes` only) via `--only firestore:rules`, re-diffing
+   first. Old clients unaffected (they never read the collection).
+2. **Ship config.js helpers** (Specs 1a, 2a-2c, 3) + the app.js wiring (Specs 1b-1c, 4a-4g) in
+   one commit. `node --check` each edited file; CACHE_VER/APP_VERSION bump via the pre-commit
+   hook (verify CACHE_VER moved — it is the one thing users' stale SW caches hinge on).
+3. **No data migration exists in this workstream** — no backfill, no snapshot seeding, no new
+   indexes. `strategy_notes` docs are created lazily on first note.
+4. **Digest:** add `daily-digest.yml` + `scripts/daily-digest.js` + the `digest` npm script;
+   trigger once via `workflow_dispatch` and verify the notification + push land (test №12)
+   BEFORE trusting the cron.
+5. **Backup coverage:** add `strategy_notes` to `scripts/monthly-backup.js` EXPORTS (same
+   commit as step 2).
+6. **Confirm ANALYTICS_POLICY numbers with Neil** (flags below) — the engine ships with
+   placeholders that only affect sentence copy, never money numbers, so this can follow ship.
+7. **Post-WS36 / post-WS29 wire-ins are ZERO-code activations** (data-shaped gates) — verify
+   each stub flips live during THOSE workstreams' test passes, per the Spec 8 matrix.
+
+### Spec 10 — Manual test checklist (no automated suite)
+
+1. **Payroll ratio consistency:** Overview KPI vs Finance-tab KPI show the identical % for the
+   same period (both now call `payrollRatio`) — byte-identical to pre-change values.
+2. **AR unification:** Finance Dashboard aging buckets == Analytics→Finance aging buckets
+   (same helper). Total AR == the pre-change total PLUS any Design-board project AR that the
+   `dpSnap` fix (4a) legitimately adds — spot-check one design project's `arBalance` explains
+   the delta exactly.
+3. **Due-date anchor:** on a test project, generate an invoice with `due` 100 days ago while
+   `createdAt` is recent → the balance moves to the 90+ bucket (due-date won); remove the due →
+   falls back to project-age bucketing.
+4. **Dynamic chase copy:** with the largest balance in 31–60, the Finance-Dashboard footer
+   names 31–60, not the old hardcoded 90+.
+5. **Insight threshold flip:** set `window.ANALYTICS_POLICY.payrollRatioWarnPct = 1` in the
+   console, re-open Analytics → the payroll warning appears with the same % as the KPI card;
+   restore to 35 → it disappears; with nothing firing, the ✅ all-clear line shows.
+6. **Win-rate sentence == KPI:** the win-rate-drop sentence's "to Y%" equals the Sales tab's
+   Win Rate KPI for the same period (both from `quoteWinStats`).
+7. **Theme legibility:** open each of the 7 subtabs under Office (light) → axis ticks/legends
+   are dark gray (`#616161`-ish), grid subtle; switch to Obsidian (dark) via the theme picker
+   WITHOUT reloading → charts on the open tab re-render with light ticks (the `bi-theme-change`
+   hook); set theme `auto` and flip the OS scheme → same live re-render. Navigate away, flip
+   theme again → no console errors (listener self-removed).
+8. **Strategy tab:** visible for president/manager/secretary/finance; absent for
+   employee/agent/partner (whole Analytics gate). Secretary sees notes but NO add-note form;
+   manager adds a note → entry appears with today's `bizDate()` + their name, escaped (test a
+   note containing `<b>`); rules: employee console-write to `strategy_notes/sales` → DENIED.
+9. **Cash Position stub:** pre-WS36 the card shows the placeholder (and no Net-Cash fallback
+   number on it); the existing "Net Cash (period)" card is unchanged.
+10. **Turns stub:** with zero `COS – Direct Material` rows in the last 365d the Finance-tab KPI
+    shows "—/pending WS29"; seed one COS row in a test ledger → KPI computes and the value
+    equals decision 12's formula by hand.
+11. **Read-cost regression guard:** Network tab on Analytics open — the only NEW Firestore
+    reads vs pre-WS40 are `strategy_notes` (≤6 docs), `inventory_items` + the 365d ledger range
+    (Finance tab only, cached 60s), and (post-WS36) `bank_accounts`. No uncached repeats on
+    tab-switching within 60s.
+12. **Digest end-to-end:** run the workflow via `workflow_dispatch` → president + finance users
+    each get ONE `digest_{today}` inbox item and an FCM push (existing pipeline); re-run the
+    workflow same day → NO duplicate (exists-check); digest MTD net matches the Overview
+    month-period Net Cash sign and magnitude; a manager gets NO digest.
+13. **Sentence escaping:** name a test client `<img src=x onerror=alert(1)>` with an AR balance
+    → the ar-90 sentence renders it inert.
+
+### Flags for Neil
+
+- **‼️ FLAG FOR NEIL — ANALYTICS_POLICY thresholds are placeholders.** `ar90SharePct:25`,
+  `arMinAlert:₱50k`, `winRateDropPts:10`, `payrollRatioWarnPct:35`, `onTimeWarnPct:80`,
+  `cashFloor:₱100k`, `turnsSlowBelow:2`. They gate SENTENCES only (never money numbers), so
+  wrong values are noisy, not harmful — but please set real ones (esp. `cashFloor` and
+  `payrollRatioWarnPct`, which are business judgments).
+- **‼️ FLAG FOR NEIL — digest recipients = president + finance only** (decision 15). Managers/
+  secretary see everything live in Analytics but get no 08:00 push. Say the word to widen (one
+  line in `daily-digest.js`).
+- **‼️ FLAG FOR NEIL — no Blaze billing needed.** The digest runs on GitHub Actions (free
+  minutes, same as Drive sync/backup); push reuses the existing Cloud Function. The brief's
+  Cloud-Scheduler/Blaze question is moot under this design.
+- **‼️ FLAG FOR NEIL — AR bucket amounts may shift** on projects that carry due-dated invoices
+  (decision 2): the buckets get MORE accurate (invoice due-date beats project age); totals are
+  unchanged. Plus the `dpSnap` fix can legitimately RAISE the receivables total by previously
+  silently-dropped Design-board project balances. Both are correctness fixes, listed here so a
+  changed number isn't mistaken for a regression.

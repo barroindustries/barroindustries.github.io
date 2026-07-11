@@ -640,3 +640,671 @@ against fable-workplan/32-sales-crm.md covering the shared BK/BS-unification que
 adjacent-file-region dead-code-deletion-before-32-lands point, so Sonnet does not implement one
 workstream's fix in a way that invalidates the other's line-number citations or data-shape
 assumptions.
+
+## DECIDED — architecture spec (Fable, 2026-07-11)
+
+> **READ FIRST — dependency contract:** WS32 (32-sales-crm.md, DECIDED 2026-07-10) has already
+> landed by the time this workstream is implemented. WS31 inherits and MUST preserve: (1) the
+> unified `clients` collection + `clientId` FK stamped by the bridge (`upsertClient = () =>
+> window.Clients.upsertFromQuote(data)`, upsert-BEFORE-add, WS32 Spec 5a) — every before/after
+> block below is written against the POST-WS32 bridge, not today's checkout; (2) the canonical
+> `window.isQuoteWon/isQuoteLost/isQuoteOpen` helpers in config.js — any status-vocabulary work
+> here updates those three helpers ONLY, never per-screen; (3) `openClientHub`'s `_coll`-aware
+> Reopen/New-Revision (WS32 Spec 4a) — collection routing changes here must keep that working.
+> WS32's Spec 11 contract explicitly assigns the `QUOTE_APPROVAL_REQUESTED`-always-into-
+> `bs_quotes` stranding fix to THIS workstream. Sequencing: WS32 ships + its client migration
+> runs FIRST; then WS31 in the order given in Spec 11 below.
+
+### Resolved decisions (numbered to match the open-decisions list above)
+
+1. **Stranding fix → the REAL fix: route `QUOTE_APPROVAL_REQUESTED` by `data.company` (reuse the
+   `coll` ternary already computed at app.js:8183) and thread the collection through every
+   downstream approval function via a new `quoteColl` field on `approval_requests`.** The
+   paper-over option (make the BK summary also read `bs_quotes`) was rejected: it leaves BK data
+   permanently in the wrong collection, silently breaks the partner-isolation intent of the
+   split (BK quotes would live in the collection partners can query their own rows of), and
+   every future reader (WS40 analytics, WS32 timelines) would have to know about the exception
+   forever. The downstream functions (`approveQuoteApproval`, `returnQuoteToPartner`,
+   `openQuoteApprovalReview`, `saveReviewedPartnerQuote`) gain a collection parameter defaulting
+   to `'bs_quotes'` — which makes every legacy pending `approval_requests` doc (no `quoteColl`
+   field) behave exactly as today, so no backfill is needed (decision 14).
+2. **Migration for already-stranded docs → one-click idempotent `window.migrateStrandedBKQuotes()`
+   that MOVES each `bs_quotes` doc with `company=='BK'` to `bk_quotes` PRESERVING THE DOC ID**
+   (`bk_quotes.doc(sameId).set(data)` then delete the original). Preserving the id means
+   `sales_orders.quoteId`, `approval_requests.quoteId`, and WS32's `clients`-side joins all stay
+   valid with zero reference rewrites; only `approval_requests.quoteColl` is stamped during the
+   move. `company=='PT'` docs are explicitly NOT moved (decision 12). Live count is unknown from
+   the static pass — the repair button reports it (‼️ FLAG FOR NEIL below). Requires one rules
+   clause so an admin can create the migrated doc (Spec 8).
+3. **"Approving without filing" → the naive `roa`-chip handlers (departments.js:10977-10992) are
+   RETIRED; the `'roa'` chip renders the SAME three actions as the `'all'` chip (📝 Open & Edit /
+   ✓ Approve / ↩ Return) wired to the SAME shared functions** (`openQuoteApprovalReview` /
+   `approveQuoteApproval` / `returnQuoteToPartner`). The bare "Reject" (which never touched the
+   quote) is replaced by "Return to Partner" — matching the `'all'` chip, which is the behavior
+   the notification copy already promises ("approved **and filed**"). One guarded fallback: an
+   `approval_requests` row with NO `quoteId` (malformed/legacy) renders resolve-only buttons that
+   update just the request doc, clearly labeled "(no linked quote)" — so old junk rows can still
+   be cleared without pretending a quote was filed. The `'roa'` list also gains the
+   `type!=='ca_deduct'` filter the `'all'` chip already applies (today a CA-deduction row in the
+   roa chip would render as a "Quote" — same-class bug, fixed in passing).
+4. **`status` vs `approvalStatus` → KEEP BOTH FIELDS (reader compatibility), but canonicalize
+   writes through one `window.quoteStateFields(state)` table in config.js** used by every write
+   site this workstream touches (bridge, the three approval functions,
+   `saveReviewedPartnerQuote`). Collapsing to one field was rejected: dozens of existing docs and
+   several readers (`statusBadge` maps at departments.js:11242/9829, `renderBSQuotationsSummary`'s
+   `forApproval` bucket at 9122, WS32's `openClientHub` badge) read both, and WS32 already
+   canonicalized the read side via `isQuoteWon/isQuoteLost/isQuoteOpen` — the remaining bug
+   surface is write-site drift, which the shared table closes. No migration of existing docs;
+   readers stay tolerant.
+5. **Quick Quote 3-step mode → lives INSIDE `quote-builder-v2.html` as a new `quickMode`
+   overlay**, reusing 100% of the existing pricing (`buildCalcPanel`/`computePrice`), items
+   (`renderItems`), totals (`computeTotals`), and filing (`doVerifyAndFile`/`fileQuotation`/
+   `buildQuotePayload`) machinery — the wizard is UI shell only, zero new pricing/filing logic.
+   A separate iframe or a parent-app overlay was rejected: both would need postMessage round-trips
+   into the pricing engine for every line item, duplicating exactly the logic this file owns.
+   Entered via a `⚡ Quick Quote` toggle in the builder's top bar or `?mode=quick`. Step 1 also
+   delivers WS32's contract item: a client picker reading the unified `clients` collection that
+   stamps `payload.clientId` (Spec 5e), closing the typo-duplicate-client path.
+6. **Product photos → ONE `photoUrl` string field on `products/{id}`** (single photo per product
+   — multiple photos is catalog-management scope creep with no consumer; revisit if Neil asks),
+   uploaded via `Drive.renderUploadArea` wired into `renderProductDatabase`'s existing
+   `formRow`/`collectAndSaveProduct` (mirroring the `pdbBom` per-prefix pattern).
+   `products-database.json` is NOT backfilled — it is a hand-synced offline fallback; all
+   photo-rendering surfaces MUST placeholder gracefully when `photoUrl` is absent, which also
+   covers the fallback path automatically. Re-exports via `exportDatabase()` carry the field for
+   free (it exports the in-memory `DB`, which now maps it). Backfilling photos onto the 165
+   existing products is a MANUAL data-entry task for Neil/staff via the edit form (not Sonnet
+   scope); a 📷 missing indicator in the Product Database list makes progress visible.
+7. **Photo display surfaces → Quick Quote step-2 grid (mandate) + full-builder search dropdown
+   (36px thumb). NOT the items table, NOT the printed quote.** The items table is a dense
+   9-column editable grid where thumbnails destroy row height for no decision value; printed
+   photos raise page-break/file-size/print-CSS work with real regression risk to a
+   client-facing document — deferred, ‼️ FLAG FOR NEIL (the mandate's "printed quote" phrase is
+   deliberately not shipped in v1; see Flags).
+8. **Letterhead → load `js/letterhead.js` into the iframe and pass the iframe's own `CO`
+   branding as `opts.entity`.** Verified against js/letterhead.js:12-16 and 24-26: the engine has
+   its OWN `escHtml` fallback and accepts `opts.entity`, bypassing `window.BRAND` entirely — so
+   NO port of config.js/escHtml into the iframe is needed (the brief's "duplicate ~100-200
+   lines" premise is avoidable). Moving printing to the parent app was rejected as a large
+   structural change to a working print path for the same visual result. The legacy
+   `#printHeader` markup stays as a graceful fallback for `file://`/offline (where the extra
+   script may not load). Footer (`thanks`/`creds` block) stays as-is — header unification only.
+9. **Dead code → delete ALL six confirmed zero-caller chains (~1,190 lines) in ONE dedicated
+   first commit, plus the orphaned CSS those chains' markup classes own** (`.bs-qb*`,
+   `.bs-section`, `.bs-items-table` etc. — Sonnet greps each class name across the repo before
+   deleting its rule). Do NOT chase the mandate's "~1,800" figure — 1,190 is the verified floor;
+   dead branches inside live functions are out of scope (too risky for a grep-driven pass).
+   Sonnet MUST re-run the zero-caller check (`grep -c 'name(' file` == 1) immediately before
+   deleting each function, per the concurrent-sessions constraint.
+10. **Legacy `quotes` collection → LEFT AS-IS (read-only rules, still merged by
+    `getAllQuotes()`).** Its dead reader chain (`renderQuoteList`+`openQuoteEditor`+`printQuote`)
+    is deleted, but the collection keeps feeding dashboards/Analytics historical rows and WS32's
+    `isQuoteWon` explicitly handles its `accepted` status. No migration (needs a live-data
+    audit nobody has done; records-forever directive applies) — ‼️ FLAG FOR NEIL as an eventual
+    archive candidate only.
+11. **`bk_quotes`/`bs_quotes` unification → NO — keep the two collections.** Aligned with WS32,
+    whose entire DECIDED spec assumes the split persists (its `_coll` field, `getAllQuotes`
+    merge, and partner-isolation reasoning are all built on it), and whose client-side answer to
+    the brand-taxonomy fork was "one collection with a brands[] tag" only because clients have no
+    partner-visibility split. Quotes DO: `bs_quotes` reads are partner-scoped
+    (`createdBy==uid || !isPartner()`), `bk_quotes` is partner-invisible — one merged collection
+    would force per-doc read rules keyed on `company`, a strictly worse rules surface for zero
+    UX gain (readers already merge via `getAllQuotes`). The stranding fix (decision 1) removes
+    the only actual pain the split causes.
+12. **`CO.PT` (generic-partner) quotes → stay in `bs_quotes`, deliberately.** This matches WS32's
+    shipped mapping (`company!=='BK'` → brand `'bs'` in `Clients.upsertFromQuote`) and the
+    partner rules already scope every partner to `createdBy==uid` regardless of company. A third
+    collection would need its own rules block, summary screen, delete-queue query, and
+    `getAllQuotes` merge for a handful of docs. The `company:'PT'` field on the doc remains the
+    discriminator for any future per-partner-company reporting.
+13. **Staleness surfacing → a lightweight render-time badge on the two Quotations summary
+    screens ONLY** (`⚠ filed Nd — no Sales Order` on quotes that are `isQuoteWon()===false`,
+    `status==='filed'`, no `salesOrderId`, and >14 days old, plus a header count chip). Pure
+    client-side logic over data those screens already fetch — zero new reads, no notifications,
+    no new collections. A cross-dept staleness Analytics card belongs to WS40; per-client
+    staleness is already visible in WS32's timeline. `window.QUOTE_STALE_DAYS = 14` in config.js
+    so the threshold is one constant.
+14. **`approval_requests.quoteColl` → required on all NEW docs (written by the bridge), absent
+    docs default to `'bs_quotes'` at read time (`item.quoteColl||'bs_quotes'`) — NO backfill.**
+    The default is exactly correct for every legacy doc, because before this fix every
+    approval-round-trip quote WAS written to `bs_quotes`; the stranded-quote migration (Spec 4)
+    re-stamps the moved ones to `'bk_quotes'`. No rules change (the `approval_requests` block
+    does no shape validation).
+
+---
+
+### Spec 1 — config.js additions (canonical write-side status table + staleness constant)
+
+Place next to the WS32 helpers (`isQuoteWon` etc.); config.js loads before every caller.
+
+```js
+// ── Canonical quote status/approvalStatus WRITE pairs (v12 WS31) ─────────
+// Both fields are kept for reader compatibility; every write site sets them
+// TOGETHER via this table so they can never drift again (the roa-chip bug was
+// enabled by independent, partial writes). Read-side truth stays
+// isQuoteWon/isQuoteLost/isQuoteOpen (WS32) — do not branch on raw strings.
+window.quoteStateFields = function (state) {
+  return ({
+    filed:            { status:'filed',            approvalStatus:'filed'          },
+    pending_approval: { status:'pending_approval', approvalStatus:'pending_review' },
+    approved:         { status:'filed',            approvalStatus:'approved'       },
+    needs_revision:   { status:'needs_revision',   approvalStatus:'needs_revision' },
+    rejected:         { status:'rejected',         approvalStatus:'rejected'       },
+  })[state] || { status: state, approvalStatus: state };
+};
+window.QUOTE_STALE_DAYS = 14;   // "filed but no Sales Order" badge threshold (decision 13)
+```
+
+### Spec 2 — Bridge fix (js/app.js, the `QUOTE_APPROVAL_REQUESTED` branch)
+
+Written against the POST-WS32 bridge (upsert-before-add, `data.clientId` stamped). The `coll`
+ternary at app.js:8183 (`const coll = (data.company === 'BK') ? 'bk_quotes' : 'bs_quotes';`) and
+the whole `QUOTE_FILED` branch are UNCHANGED.
+
+```js
+// BEFORE (the else branch — comment cites the old hardcoded round-trip design)
+    } else {
+      // QUOTE_APPROVAL_REQUESTED — the president's approve/reject handler reads
+      // bs_quotes by id, so the approval round-trip always lives in bs_quotes
+      // (regardless of company) to keep that flow working unchanged.
+      data.status = 'pending_approval';
+      data.approvalStatus = 'pending_review';
+      data.reviewRequestedAt = firebase.firestore.FieldValue.serverTimestamp();
+      data.clientId = await upsertClient();
+      const docRef = await db.collection('bs_quotes').add(data);
+      await db.collection('approval_requests').add({
+        type: 'bs_quote',
+        quoteId: docRef.id,
+        ...
+```
+```js
+// AFTER — route by company like QUOTE_FILED (v12 WS31: fixes "BK quotes stranded
+// in bs_quotes"); the approval_requests doc records WHICH collection the quote
+// lives in so the approve/return handlers update the right doc.
+    } else {
+      Object.assign(data, window.quoteStateFields('pending_approval'));
+      data.reviewRequestedAt = firebase.firestore.FieldValue.serverTimestamp();
+      data.clientId = await upsertClient();
+      const docRef = await db.collection(coll).add(data);
+      await db.collection('approval_requests').add({
+        type: 'bs_quote',            // legacy type value kept — readers filter on it
+        quoteId: docRef.id,
+        quoteColl: coll,             // NEW (decision 14) — 'bk_quotes' | 'bs_quotes'
+        quoteNumber: payload.quoteNumber,
+        clientName: payload.clientName,
+        total: payload.total || 0,
+        agentName,
+        agentId: currentUser.uid,
+        status: 'pending',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      ...   // sendToOwner + toast unchanged
+    }
+```
+Also in the `QUOTE_FILED` branch, replace the two manual lines `data.status='filed';
+data.approvalStatus='filed';` with `Object.assign(data, window.quoteStateFields('filed'));`
+(behavior-identical; adopts the canonical table).
+
+**WS32-contract patch — `Clients.upsertFromQuote` (departments.js, inside `window.Clients`)
+learns to trust a builder-supplied `clientId`** (Quick Quote's picker, Spec 5e). Insert at the
+top of `upsertFromQuote(q)`, before the `nameKey` query:
+```js
+    // A builder-picked clientId is authoritative — update that doc directly and
+    // skip the nameKey lookup (closes the typo-duplicate path, WS32 Spec 11).
+    if (q.clientId) {
+      try {
+        await db.collection('clients').doc(q.clientId).set({
+          lastQuoteNumber: q.quoteNumber || '', lastQuoteTotal: q.total || 0,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
+        return q.clientId;
+      } catch (_) { /* fall through to nameKey path */ }
+    }
+```
+And in the bridge, `data.clientId = await upsertClient();` needs no change — `data.clientId` is
+set from `payload.clientId` during the field-mapping block (add `clientId: payload.clientId ||
+null,` to the `data = {...}` literal near `company:`), and `upsertFromQuote` reads `q.clientId`
+from `data`, returning it back.
+
+### Spec 3 — Approval-side collection threading (departments.js + app.js)
+
+**3a — new signatures (default keeps legacy behavior):**
+```js
+async function approveQuoteApproval(quoteId, agentId, qno, name, coll)         // coll default 'bs_quotes'
+async function returnQuoteToPartner(quoteId, agentId, qno, name, notes, coll)  // coll default 'bs_quotes'
+async function openQuoteApprovalReview(ctx, onDone)   // ctx gains quoteColl ('bs_quotes' default)
+async function saveReviewedPartnerQuote(ctx, action)  // reads ctx.quoteColl||'bs_quotes'
+```
+
+**3b — `approveQuoteApproval` (departments.js:11003-11012) body changes:** first line becomes
+`coll = coll || 'bs_quotes';`; the update becomes
+```js
+    await db.collection(coll).doc(quoteId).update({
+      ...window.quoteStateFields('approved'),
+      approvedAt: firebase.firestore.FieldValue.serverTimestamp(), approvedBy: currentUser.uid });
+```
+plus `dbCacheInvalidate && dbCacheInvalidate('all-quotes');` after the approval_requests
+resolution (the WS32 hub reads through that cache). Same two changes (`coll` param +
+`quoteStateFields('needs_revision')` + cache invalidate) in `returnQuoteToPartner` (11014-11025).
+
+**3c — `openQuoteApprovalReview` (11027-11069):** add `const QC = ctx.quoteColl || 'bs_quotes';`
+at the top; ALL THREE `db.collection('bs_quotes')` sites inside it (the initial `.get()`, the
+approve handler's `.update()`, the return handler's `.update()`) become `db.collection(QC)`;
+the two handlers adopt `...window.quoteStateFields('approved')` / `('needs_revision')`; the
+Open-in-Builder handler becomes collection- and brand-aware:
+```js
+    window._qbReviewContext = { quoteId, partnerUid: agentId, quoteNumber: quoteNumber||q.quoteNumber,
+      clientName: q.clientName||clientName, quoteColl: QC };
+    closeModal();
+    window.reopenQuoteFromDoc(QC, quoteId, q.company === 'BK' ? 'bk-quote-builder' : 'bs-quote-builder');
+```
+
+**3d — `saveReviewedPartnerQuote` (js/app.js:1247-1295):**
+`db.collection('bs_quotes').doc(ctx.quoteId)` → `db.collection(ctx.quoteColl || 'bs_quotes')
+.doc(ctx.quoteId)`; the status assignments in both action branches adopt
+`Object.assign(update, window.quoteStateFields(action === 'approve' ? 'approved' : 'needs_revision'));`
+(the `approvedAt/approvedBy/returnedAt/returnedBy/presidentNotes` lines stay).
+
+**3e — `'all'`-chip call sites (departments.js:10245-10247 templates, 10418-10429 wiring):** the
+three `qa-*` button templates each gain `data-coll="${item.quoteColl||'bs_quotes'}"`; the wiring
+passes it: `openQuoteApprovalReview({ ..., quoteColl: btn.dataset.coll }, ...)`,
+`approveQuoteApproval(btn.dataset.quote, btn.dataset.by, btn.dataset.qno, btn.dataset.name,
+btn.dataset.coll)`, `returnQuoteToPartner(..., notes, btn.dataset.coll)`.
+
+### Spec 4 — The `'roa'` chip fix (departments.js:10953-10993, the terminal `else`)
+
+Replace the item mapping + handlers. BEFORE: renders `.approve-approval`/`.reject-approval`
+buttons whose handlers update ONLY `approval_requests` (quoted in Current-state point 4 —
+the literal "approving without filing" bug). AFTER:
+
+```js
+    } else {
+      // Quote / ROA approvals — same shared handlers as the 'all' chip (v12 WS31:
+      // the old inline approve/reject here never touched the quote doc at all).
+      const snap = await db.collection('approval_requests').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
+      const items = snap.docs.map(d => ({id:d.id,...d.data()})).filter(i => i.type !== 'ca_deduct');
+      if (!items.length) { wrap.innerHTML = '<div class="empty-state"><div class="empty-icon">✔️</div><h4>No quote approvals</h4></div>'; return; }
+      wrap.innerHTML = `<div class="item-list">${items.map(item => `
+        <div class="item-card" data-id="${item.id}">
+          <div class="item-top">
+            <div class="item-title">${item.type==='bs_quote'?'Quote Approval':'Quote'} — ${escHtml(item.clientName||'')}</div>
+            <span class="badge ${statusBadge(item.status)}">${item.status||'pending'}</span>
+          </div>
+          <div class="item-meta">
+            <span>${escHtml(item.agentName||'—')}</span>
+            <span>₱${fmt(item.total)}</span>
+            ${item.quoteNumber?`<span style="font-family:monospace">${escHtml(item.quoteNumber)}</span>`:''}
+            ${item.createdAt?`<span>${new Date(item.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
+          </div>
+          ${(item.status==='pending'&&canActOn('quote-approval')) ? (item.quoteId ? `
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+            <button class="btn-primary btn-sm qa-review-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">📝 Open &amp; Edit</button>
+            <button class="btn-success btn-sm qa-approve-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">✓ Approve</button>
+            <button class="btn-danger btn-sm qa-return-btn" data-id="${item.id}" data-quote="${item.quoteId}" data-coll="${item.quoteColl||'bs_quotes'}" data-by="${item.agentId||''}" data-qno="${escHtml(item.quoteNumber||'')}" data-name="${escHtml(item.clientName||'')}">↩ Return to Partner</button>
+          </div>` : `
+          <div style="display:flex;gap:8px;margin-top:12px;align-items:center">
+            <span style="font-size:11px;color:var(--text-muted)">(no linked quote)</span>
+            <button class="btn-secondary btn-sm roa-resolve-btn" data-id="${item.id}" data-agent="${item.agentId||''}" data-status="approved">Mark Approved</button>
+            <button class="btn-secondary btn-sm roa-resolve-btn" data-id="${item.id}" data-agent="${item.agentId||''}" data-status="rejected">Mark Rejected</button>
+          </div>`) : ''}
+        </div>`).join('')}</div>`;
+      wrap.querySelectorAll('.qa-review-btn').forEach(btn => btn.addEventListener('click', () =>
+        openQuoteApprovalReview({ quoteId:btn.dataset.quote, agentId:btn.dataset.by, quoteNumber:btn.dataset.qno,
+          clientName:btn.dataset.name, quoteColl:btn.dataset.coll }, () => loadApprovalsSub('roa'))));
+      wrap.querySelectorAll('.qa-approve-btn').forEach(btn => btn.addEventListener('click', async () => {
+        await approveQuoteApproval(btn.dataset.quote, btn.dataset.by, btn.dataset.qno, btn.dataset.name, btn.dataset.coll);
+        loadApprovalsSub('roa');
+      }));
+      wrap.querySelectorAll('.qa-return-btn').forEach(btn => btn.addEventListener('click', async () => {
+        const notes = (await promptDialog({message:'Notes for the partner (what to revise)?', multiline:true}))||'';
+        await returnQuoteToPartner(btn.dataset.quote, btn.dataset.by, btn.dataset.qno, btn.dataset.name, notes, btn.dataset.coll);
+        loadApprovalsSub('roa');
+      }));
+      wrap.querySelectorAll('.roa-resolve-btn').forEach(btn => btn.addEventListener('click', async () => {
+        await db.collection('approval_requests').doc(btn.dataset.id).update({ status: btn.dataset.status });
+        Notifs.showToast('Request resolved (no quote doc was linked).'); loadApprovalsSub('roa');
+      }));
+    }
+```
+Note: `approveQuoteApproval` sends the "approved and filed" notification itself — the naive
+handler's own `Notifs.send` disappears with it (no double-notify). No other caller depends on
+the deleted `.approve-approval`/`.reject-approval` classes (grep before deleting to confirm).
+
+### Spec 5 — Quick Quote 3-step mode (quote-builder-v2.html)
+
+**5a — state + entry.**
+```js
+let quickMode=false, qqStep=1, qqSelectedClientId=null, qqClients=null; // near the other state lets (~962)
+```
+Top bar gains a toggle button next to the view pills: `<button class="btn" id="btnQuick"
+onclick="toggleQuickMode()">⚡ Quick Quote</button>`. `toggleQuickMode()` flips `quickMode`,
+toggles `document.body.classList.toggle('body-quick', quickMode)`, and calls `qqRender()`.
+Startup: in the init path that already parses `?portal=partner`, also read
+`new URLSearchParams(location.search).get('mode')==='quick'` → enable quickMode after `initUI()`.
+`applyPartnerMode()` leaves the toggle visible (partners may use Quick mode; it files through the
+same `fileQuotation()` gate). The Admin pill stays hidden in quick mode via CSS.
+
+**5b — shell markup** (static, inserted once after the top bar in the HTML body):
+```html
+<div id="qqWizard" style="display:none">
+  <div class="qq-steps">
+    <span class="qq-step" data-s="1">1 · Client</span>
+    <span class="qq-step" data-s="2">2 · Products</span>
+    <span class="qq-step" data-s="3">3 · Review &amp; Send</span>
+  </div>
+  <div id="qqBody"></div>
+  <div class="qq-nav">
+    <button class="btn" id="qqBack" onclick="qqGo(-1)">‹ Back</button>
+    <button class="btn btn-green" id="qqNext" onclick="qqGo(1)">Next ›</button>
+  </div>
+</div>
+```
+```css
+/* Quick Quote wizard (v12 WS31) */
+.body-quick .section, .body-quick #btnAdmin { display:none!important; }
+.body-quick #qqWizard { display:block!important; }
+.qq-steps{display:flex;gap:8px;margin:10px 0 14px}
+.qq-step{padding:6px 14px;border-radius:20px;background:var(--gray-light,#eee);font-size:13px;font-weight:700;opacity:.55}
+.qq-step.on{background:#F0A500;color:#fff;opacity:1}
+.qq-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.qq-card{border:1.5px solid var(--gray,#ccc);border-radius:12px;overflow:hidden;cursor:pointer;background:#fff;text-align:left}
+.qq-card:active{transform:scale(.98)}
+.qq-photo{width:100%;height:100px;object-fit:cover;display:block;background:var(--gray-light,#f2f2f2)}
+.qq-photo-ph{width:100%;height:100px;display:flex;align-items:center;justify-content:center;font-size:34px;background:var(--gray-light,#f2f2f2)}
+.qq-card-name{font-size:12.5px;font-weight:700;padding:7px 9px 2px;line-height:1.25}
+.qq-card-price{font-size:12px;color:var(--gray-dark,#777);padding:0 9px 8px}
+.qq-nav{display:flex;justify-content:space-between;margin-top:16px}
+.qq-badge{position:sticky;bottom:8px;text-align:center;font-size:13px;font-weight:700;color:#F0A500}
+@media print { #qqWizard{display:none!important} }
+```
+
+**5c — `qqRender()` step panels.** All markup interpolating client-derived text uses `attrEsc()`
+for attributes and a local `txtEsc(s)` (`attrEsc` + `<`/`>` replacement — add it next to
+`attrEsc` at line 1019) for text nodes — `escHtml` does NOT exist in this document.
+- **Step 1 — Client:** inputs `qq-name/qq-company/qq-phone/qq-email/qq-addr`, prefilled FROM the
+  main form's client fields (Sonnet: reuse the exact element ids `buildQuotePayload()` reads —
+  grep `clientName` in the payload builder for the id list). Above them, a client picker:
+  `<input list="qqClientList" id="qq-pick" placeholder="Search existing clients…">` +
+  `<datalist id="qqClientList">`. Populate lazily once:
+  ```js
+  async function qqLoadClients(){
+    if (qqClients) return qqClients;
+    try { const s = await db.collection('clients').limit(500).get();       // partner sessions: rules deny → catch
+      qqClients = s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+    } catch(_) { qqClients = []; }
+    return qqClients;
+  }
+  ```
+  On picker match (exact name), set `qqSelectedClientId = c.id` and prefill the five fields from
+  the client doc; any manual edit to `qq-name` clears `qqSelectedClientId` (a typed-over name is
+  a different client). "Next" from step 1 requires non-empty `qq-name`, then copies the five
+  values into the main form's client inputs (single source of truth stays the main form —
+  `buildQuotePayload()` is untouched except 5e).
+- **Step 2 — Products:** category chip row (from `DB.categories`, reusing `currentCatFilter`) +
+  `.qq-grid` of `filteredProducts('')`:
+  ```js
+  html += prods.map(p=>`<button class="qq-card" onclick="qqPick('${attrEsc(p.id)}')">
+      ${p.photoUrl ? `<img class="qq-photo" loading="lazy" src="${attrEsc(p.photoUrl)}" onerror="this.outerHTML='<div class=&quot;qq-photo-ph&quot;>🍳</div>'">`
+                   : `<div class="qq-photo-ph">🍳</div>`}
+      <div class="qq-card-name">${txtEsc(p.name)}</div>
+      <div class="qq-card-price">${p.formulaType==='fixed'?'':'from '}${formatPeso(p.basePrice)}</div>
+    </button>`).join('');
+  ```
+  `qqPick(id)` calls the EXISTING `selectProduct(id)` so the real calc panel (dimensions, qty,
+  computePrice) opens exactly as in the full builder — no forked pricing; after the existing
+  "Add to quote" handler runs, quick mode re-renders step 2 with a sticky
+  `<div class="qq-badge">🧺 ${items.length} item(s) · ${formatPeso(computeTotals().grand)}</div>`.
+  (Sonnet: hook the existing add-item completion point — the same function that calls
+  `renderItems()` — with `if(quickMode) qqRender();`.)
+- **Step 3 — Review:** re-show the existing items table + totals sections inside the wizard
+  (`body-quick` CSS unhides `#itemsSection` and the totals block via an added
+  `.body-quick.qq-s3 #itemsSection{display:block!important}` pair — Sonnet greps the actual
+  section ids), plus the `reqApprovalCheck` checkbox row, plus one primary button `📁 Verify &
+  File` wired to the EXISTING `doVerifyAndFile()` — the existing verify modal and
+  `fileQuotation()` (including the approval-request path) run unchanged.
+
+**5d — `qqGo(delta)`**: bounds 1..3, validates step 1's name, toggles `.qq-step.on` and a
+`qq-s{n}` body class, `qqRender()`.
+
+**5e — payload FK.** In `buildQuotePayload()` (2544-2619) add one field to the returned object:
+`clientId: qqSelectedClientId || null,`. Bridge mapping + upsert trust: Spec 2. Full-builder
+filings simply carry `clientId:null` and keep today's nameKey upsert — unchanged behavior.
+
+### Spec 6 — Product photos
+
+**6a — write side (js/app.js, `renderProductDatabase`).** `formRow` (app.js:1602-1633) gains,
+after the Specifications group:
+```js
+    <div class="form-group" style="grid-column:1/-1"><label>Product Photo</label>
+      <div style="display:flex;gap:10px;align-items:center">
+        <img id="${prefix}-photo-prev" src="${(p.photoUrl||'').replace(/"/g,'&quot;')}" style="width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border);${p.photoUrl?'':'display:none'}">
+        <div id="${prefix}-photo-up" style="flex:1"></div>
+      </div>
+    </div>
+```
+`wireForm(prefix)` (app.js:1704-1710) adds:
+```js
+    if (window.Drive?.renderUploadArea) Drive.renderUploadArea(`${prefix}-photo-up`, r => {
+      pdbPhoto[prefix] = r.url;                                  // r = {url, name} per drive.js contract
+      const img = document.getElementById(`${prefix}-photo-prev`);
+      if (img) { img.src = r.url; img.style.display = ''; }
+    }, { accept:'image/*', label:'Upload photo (JPG/PNG)', dept:'Sales', subfolder:'Product Photos' });
+```
+`const pdbPhoto = {};` declared next to `const pdbBom = {}` (app.js:1740). In
+`collectAndSaveProduct` (1742-1783), add to the `.set()` payload:
+`photoUrl: pdbPhoto[prefix] !== undefined ? pdbPhoto[prefix] : (existingId ? (undefined) : null),`
+— implemented as: build the payload object first, then
+`if (pdbPhoto[prefix] !== undefined) payload.photoUrl = pdbPhoto[prefix];` so an edit that never
+touched the photo doesn't overwrite it (merge:true keeps the old value). Product list cards show
+`📷` when `!p.photoUrl` (one-line addition to the existing card template). Rules: NO change —
+`products` write is already `isAuth() && isAdmin()` (firestore.rules:633-636).
+
+**6b — read side.** `loadDatabase()`'s Firestore field map (quote-builder-v2.html:1054-1075) adds
+`photoUrl: p.photoUrl || null,` (the brief's warning: this map hand-copies every field — an
+unmapped field silently drops). `renderDropdown` (1409-1432) prepends a 36px thumb inside
+`.sd-item` before `.sd-item-info`:
+```js
+      html+=`<div class="sd-item" data-id="${p.id}" onclick="selectProduct('${p.id}')">
+        ${p.photoUrl?`<img src="${attrEsc(p.photoUrl)}" loading="lazy" style="width:36px;height:36px;object-fit:cover;border-radius:6px;margin-right:8px;flex-shrink:0">`:''}
+        <div class="sd-item-info">...
+```
+`products-database.json`: untouched (decision 6). Items table + print: untouched (decision 7).
+
+### Spec 7 — Letterhead adoption for the printed quote (quote-builder-v2.html)
+
+Add `<script defer src="js/letterhead.js"></script>` immediately after the
+`js/firebase-config.js` tag (~line 935). letterhead.js is self-contained (own esc fallback,
+js/letterhead.js:12-16; accepts `opts.entity`, line 26) and is already in sw.js PRECACHE — no
+new precache entry, no config.js port. New function, called at the end of `setCompany()`,
+`applyPartnerMode()`, and at the top of `doPrint()` (so the doc number is current):
+```js
+function applyLetterheadHeader(){
+  if (typeof window.buildLetterhead !== 'function') return;   // offline/file:// → legacy header stays
+  const c = CO[currentCo] || CO.BK;
+  const bits = (c.contact||'').split('|').map(s=>s.trim());
+  const lh = buildLetterhead({
+    entity: { name:c.name, registration:c.sub||'', address:c.addr||'', phone:bits[0]||'', email:bits[1]||'' },
+    docTitle: 'QUOTATION',
+    docNumber: buildQuoteNo(),
+    dateLabel: new Date().toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'}),
+    accent: currentCo==='BS' ? '#37474F' : '#1E3A5F',
+    logo: (document.getElementById('phLogo')?.src) || undefined,   // reuse the per-company logo the legacy header already resolves
+  });
+  const ph = document.getElementById('printHeader');
+  if (ph) ph.innerHTML = lh.headerHTML;
+  let st = document.getElementById('lhPrintCss');
+  if (!st) { st = document.createElement('style'); st.id = 'lhPrintCss'; document.head.appendChild(st); }
+  st.textContent = lh.printCSS;
+}
+```
+The legacy `#printHeader` static markup and its CSS remain in the file as the no-letterhead
+fallback; the existing print footer (`thanks`/`creds`) is untouched. `doPrintAgent()` inherits
+the header automatically (same `#printHeader`). Sonnet must verify one BK and one BS print
+preview against the current output before shipping (client-facing document).
+
+### Spec 8 — Migration for stranded quotes + firestore.rules diff
+
+**8a — the ONLY rules change this workstream needs** (everything else is additive fields on
+collections whose rules don't shape-validate; no new collections; no firestore.indexes.json
+change — `where('company','==','BK')` and `where('quoteId','==',…)` are single-field):
+```
+// BEFORE (bk_quotes create clause, firestore.rules ~583)
+      allow create: if isAuth() && !isPartner() && request.resource.data.createdBy == request.auth.uid;
+```
+```
+// AFTER — admins may also create with a DIFFERENT createdBy: required by the v12
+// WS31 stranded-quote migration, which moves misfiled BK docs out of bs_quotes
+// preserving the ORIGINAL creator for the audit trail. Partner isolation is
+// unchanged (partners still can never touch bk_quotes at all).
+      allow create: if isAuth() && !isPartner() &&
+        (request.resource.data.createdBy == request.auth.uid || isAdmin());
+```
+Deploy via `firebase deploy --only firestore:rules` (re-diff live first — concurrent-edits
+memory). Partner-isolation read rules for both collections: UNCHANGED.
+
+**8b — `window.migrateStrandedBKQuotes()`** (js/app.js, next to the bridge; president session):
+```js
+// One-click, idempotent: moves bs_quotes docs misfiled with company:'BK' (the old
+// QUOTE_APPROVAL_REQUESTED hardcode) into bk_quotes, PRESERVING each doc id so
+// sales_orders.quoteId / approval_requests.quoteId / clients joins stay valid.
+// company:'PT' rows are deliberately NOT moved (bs_quotes is the non-BK bucket).
+window.migrateStrandedBKQuotes = async function () {
+  const FV = firebase.firestore.FieldValue;
+  const out = { moved: 0, reqsPatched: 0 };
+  const snap = await db.collection('bs_quotes').where('company', '==', 'BK').get();
+  for (const d of snap.docs) {
+    await db.collection('bk_quotes').doc(d.id).set({ ...d.data(),
+      migratedFrom: 'bs_quotes', migratedAt: FV.serverTimestamp() });
+    const reqs = await db.collection('approval_requests').where('quoteId', '==', d.id).get().catch(() => ({ docs: [] }));
+    for (const r of reqs.docs) { await r.ref.update({ quoteColl: 'bk_quotes' }); out.reqsPatched++; }
+    await db.collection('bs_quotes').doc(d.id).delete();   // copy-first ordering: a crash mid-loop leaves a duplicate (re-run cleans it), never a loss
+    out.moved++;
+  }
+  if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('all-quotes');
+  return out;
+};
+```
+**Trigger UI:** in `renderBKQuotationsSummary` (departments.js:6554 on), president-only, after the
+list renders, run the count query (`bs_quotes where company=='BK'`, `.get()` in a try/catch);
+if `>0`, show a warning banner `🧭 N Barro Kitchens quote(s) are stranded in the Brilliant Steel
+collection — [Repair now]` whose button runs the migration, toasts
+`Moved N quote(s), patched M approval request(s)`, logs `window.logAudit('migrate','bk_quotes',
+null,out)`, and re-renders. Idempotent: after the move the count query returns 0 and the banner
+disappears. Re-run after a mid-loop crash: already-moved ids simply `set()` identical data again
+(merge-free set of the same payload) and delete the leftover original.
+
+### Spec 9 — Dead-code deletion list (ONE dedicated commit, FIRST)
+
+For each row: re-run the zero-caller check immediately before deleting
+(`grep -o 'name(' js/departments.js | wc -l` == 1, and `grep -rn 'name' --include='*.js'
+--include='*.html' .` shows only the definition). Line numbers are as-of the grounding pass —
+re-locate by function name, not line.
+
+| # | File | Function/chain | ~Lines |
+|---|------|----------------|--------|
+| 1 | js/departments.js | `renderBSDashboard` (8507-8559) | 53 |
+| 2 | js/departments.js | `renderBSQuoteBuilder` (8560-9108) — incl. its inline `<style>` block | 549 |
+| 3 | js/departments.js | `renderBKQuoteList` (6199-6553) | 355 |
+| 4 | js/departments.js | `renderBKPackages` (6750-6804) | 55 |
+| 5 | js/departments.js | `renderQuoteList` + `openQuoteEditor` + `printQuote` (9870-10031) | 162 |
+| 6 | quote-builder-v2.html | `mmToFeetStr` + `feetStrToMm` | ~15 |
+| 7 | (CSS sweep) | any rule whose ONLY selectors are classes emitted by #1-#5's markup (`.bs-qb*`, `.bs-section`, `.bs-items-table`, …) — grep each class name repo-wide first | TBD |
+
+Explicitly NOT deleted: the legacy `quotes` collection + its rules block (decision 10);
+`renderBKQuotationsSummary`/`renderBSQuotationsSummary` (live); `loadBSContent`'s switch
+(already never calls the dead builder — no case-list edit needed). After deletion,
+`node --check js/departments.js` must pass. This commit lands BEFORE the Spec 2-8 work so later
+diffs aren't tangled with a 1,200-line deletion, and its line-shifts are absorbed before any
+WS32-cited regions are touched again.
+
+### Spec 10 — Staleness badge (decision 13)
+
+In BOTH `renderBKQuotationsSummary` (departments.js:6554 on) and `renderBSQuotationsSummary`
+(9109 on), inside the per-quote card template:
+```js
+    const staleDays = (q.status==='filed' && !q.salesOrderId && q.createdAt)
+      ? Math.floor((Date.now() - (q.createdAt.seconds||0)*1000) / 86400000) : 0;
+    // in the card meta row:
+    ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-amber" style="font-size:9px" title="Filed but no Sales Order yet">⚠ ${staleDays}d no SO</span>` : ''}
+```
+plus a header count chip `⚠ N stale` next to the screens' existing bucket counts when N>0.
+Uses only rows the screens already fetched — zero new reads. (`badge-amber` exists in the app's
+badge palette; if not present in styles.css, reuse `badge-warn`.)
+
+### Spec 11 — Rollout order + cross-workstream contract (deliverable item 7)
+
+1. **WS32 first, fully** (its own Spec 9c order, including `migrateClientBooks()`), before any
+   WS31 commit — WS31's bridge edits are written against the post-WS32 bridge.
+2. **Commit A — dead-code deletion** (Spec 9). `node --check`; verify the pre-commit hook bumped
+   `APP_VERSION` AND `CACHE_VER` in the diff (sw.js must show a new `bi-ops-v*`).
+3. **Deploy rules** (Spec 8a) — the migration needs the admin-create clause live first.
+4. **Commit B — chain repair**: config.js (Spec 1), app.js (Spec 2 bridge + Spec 3d + Spec 8b),
+   departments.js (Spec 3a-3c/3e, Spec 4, Spec 10, the `upsertFromQuote` clientId patch from
+   Spec 2). Same hook checks.
+5. **Run `migrateStrandedBKQuotes`** via the banner in Sales → Quotations (president). Verify
+   toast counts; re-open the tab — banner gone (idempotency); spot-check one moved quote renders
+   in the BK summary and its approval request row still opens/approves correctly.
+6. **Commit C — Quick Quote + photos + letterhead**: quote-builder-v2.html (Spec 5, 6b, 7),
+   app.js (Spec 6a). quote-builder-v2.html is NOT precached (network-first) — no manual bump
+   needed for it, but the app.js edit triggers the hook anyway.
+7. **Contract for later workstreams:** WS36 — `sales_orders`/payment shapes untouched here; the
+   staleness badge reads `salesOrderId` only. WS38 — no file-linkage work done here (unchanged).
+   WS40 — quote analytics must use `isQuoteWon/isQuoteLost/isQuoteOpen` + `getAllQuotes` and may
+   rely on `approval_requests.quoteColl` existing on post-WS31 docs only. Anyone adding a quote
+   write site MUST set status via `window.quoteStateFields` and route the collection by
+   `data.company === 'BK' ? 'bk_quotes' : 'bs_quotes'` — no new hardcodes.
+
+### Spec 12 — Manual test checklist (no automated suite)
+
+1. **Stranding fixed forward:** internal Sales user files a BK quote with "Send to president for
+   review first" → doc lands in `bk_quotes` with `status:'pending_approval'`/
+   `approvalStatus:'pending_review'`; `approval_requests` row carries `quoteColl:'bk_quotes'`.
+2. **Approve round-trip (BK):** president approves it from the "All Requests" chip → the
+   `bk_quotes` doc flips to `filed`/`approved`, the request resolves, the agent gets the
+   notification, and the quote shows ✓ in Sales → Quotations with a working "Sales Order" button.
+3. **roa chip = all chip:** the SAME pending request approved from the "Quote / ROA" chip
+   produces the identical quote-doc update (spot-check `approvedAt`/`approvedBy` present) — the
+   old approve-without-filing path is gone. Return-to-Partner from the roa chip marks
+   `needs_revision` on the quote doc and `returned` on the request.
+4. **Legacy pending request (no `quoteColl`):** an approval_requests doc created before Commit B
+   still approves correctly (defaults to `bs_quotes`).
+5. **Open & Edit threading:** "📝 Open & Edit" on a BK request opens the BK builder;
+   `saveReviewedPartnerQuote` writes back to `bk_quotes` (check `_qbReviewContext.quoteColl`).
+6. **Migration:** with ≥1 stranded doc, the BK summary shows the repair banner; run → doc now in
+   `bk_quotes` under the SAME id, gone from `bs_quotes`, request row patched, sales_orders (if
+   any) still resolve by `quoteId`; banner gone on re-render; PT quotes untouched in `bs_quotes`.
+7. **Partner isolation unchanged:** partner console — `bk_quotes` read DENIED, own `bs_quotes`
+   read allowed, foreign `bs_quotes` doc DENIED; partner create with own uid allowed.
+8. **Quick Quote:** toggle ⚡ → step 1 picker lists existing clients, picking one prefills +
+   stamps `clientId` on the filed doc (check Firestore); typing a new name files with
+   `clientId:null` and the WS32 nameKey upsert still creates/updates the `clients` doc; step 2
+   grid shows photos (placeholder when absent), tapping opens the real calc panel, added items
+   accumulate in the badge; step 3 files via the normal verify modal (both plain-file and
+   send-for-approval paths); switching to the full builder mid-flow keeps all entered data.
+9. **Photos:** president uploads a photo in Product Database → `products/{id}.photoUrl` set;
+   quote-builder dropdown + quick grid show it after reload; editing the product WITHOUT
+   touching the photo preserves `photoUrl`; a product with no photo renders the 🍳 placeholder
+   everywhere (including the JSON-fallback offline path).
+10. **Letterhead:** BK and BS print previews show the shared letterhead header (correct entity
+    per company, live quote number); agent-copy print keeps the commission box; `file://` open
+    still prints with the legacy header (no JS error).
+11. **Dead code:** after Commit A, full app smoke test — Sales/BS/Design tabs, Approvals, quote
+    filing, Quotations summaries — zero console errors referencing deleted names
+    (`renderBSQuoteBuilder`, `renderBKQuoteList`, `renderQuoteList`, …).
+12. **Staleness:** a quote `filed` >14 days without `salesOrderId` shows `⚠ Nd no SO` in both
+    summaries; a won quote never does.
+
+### Flags for Neil
+
+- ‼️ **FLAG FOR NEIL — stranded-quote count unknown.** The static pass could not read live data;
+  the repair banner (Spec 8b) will report exactly how many BK quotes are sitting in `bs_quotes`.
+  If the count is large or any have live sales orders attached, eyeball a couple after the move.
+- ‼️ **FLAG FOR NEIL — product photos on the PRINTED quote are deliberately NOT in v1**
+  (decision 7): photos ship in the Quick Quote grid + builder search only. If you want them on
+  the client-facing printed document, that's a follow-up with real print-CSS/page-break work.
+- ‼️ **FLAG FOR NEIL — photo backfill is manual:** the 165 existing products get photos one-by-one
+  via the Product Database edit form (the 📷 indicator tracks progress). No bulk-upload tool is
+  being built unless you ask for one.
+- ‼️ **FLAG FOR NEIL — legacy `quotes` collection** stays read-only and still feeds dashboard
+  history. Confirm at some later point whether its rows should be archived/migrated; nothing in
+  v12 depends on deciding now.
