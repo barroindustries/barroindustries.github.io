@@ -2157,11 +2157,11 @@ window.renderComments = async function(collection, docId, containerId, currentUs
               ${!isMine ? `<div class="ms-avatar" title="${escHtml(c.authorName||'User')}">${c.photoUrl?`<img src="${c.photoUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(c.authorName||'U')}</div>` : ''}
               <div class="ms-bubble-wrap">
                 ${!isMine ? `<div class="ms-name">${escHtml(c.authorName||'User')}</div>` : ''}
-                <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'}">
+                <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'} comment-bubble-tap" data-id="${c.id}">
                   ${c.text?`<div class="ms-text">${escHtml(c.text).replace(/\n/g,'<br/>')}</div>`:''}
                   ${c.fileUrl ? (c.fileSource!=='link' && isImage(c.fileUrl)
-                    ? `<div style="margin-top:${c.text?'6':'0'}px"><img src="${safeHttpUrl(c.fileUrl)}" alt="${escHtml(c.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:8px;cursor:pointer" onclick="window.open('${safeHttpUrl(c.fileUrl)}','_blank')"/></div>`
-                    : `<a href="${safeHttpUrl(c.fileUrl)}" target="_blank" rel="noopener" class="ms-file-chip">${c.fileSource==='link'?'🔗':'📎'} ${escHtml(c.fileName||'Attachment')}</a>`
+                    ? `<div style="margin-top:${c.text?'6':'0'}px"><img src="${safeHttpUrl(c.fileUrl)}" alt="${escHtml(c.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);cursor:pointer" onclick="window.open('${safeHttpUrl(c.fileUrl)}','_blank')"/></div>`
+                    : `<a href="${safeHttpUrl(c.fileUrl)}" target="_blank" rel="noopener" class="ms-file-chip">${emojiIcon(c.fileSource==='link'?'link':'paperclip',14)}<span>${escHtml(c.fileName||'Attachment')}</span></a>`
                   ) : ''}
                   <div class="ms-meta">
                     <span class="ms-time">${timeLabel(c.createdAt)}</span>
@@ -2178,13 +2178,13 @@ window.renderComments = async function(collection, docId, containerId, currentUs
             </div>`;
           }).join('')}
       </div>
-      <div id="ms-file-preview-${docId}" style="font-size:11px;color:var(--primary-light);padding:0 12px 4px;min-height:16px"></div>
+      <div id="ms-file-preview-${docId}" style="font-size:11px;color:var(--primary);padding:0 12px 4px;min-height:16px"></div>
       <div class="messenger-input-row">
-        <label for="comment-file-${docId}" class="ms-attach-btn" title="Attach file">📎</label>
+        <label for="comment-file-${docId}" class="ms-attach-btn" title="Attach file">${emojiIcon('paperclip',18)}</label>
         <input type="file" id="comment-file-${docId}" style="display:none" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"/>
-        <button type="button" class="ms-attach-btn" id="comment-link-${docId}" title="Attach link">${emojiIcon('link',14)}</button>
-        <input id="comment-in-${docId}" class="ms-input" placeholder="Type a message…"/>
-        <button class="ms-send-btn" id="comment-send-${docId}">
+        <button type="button" class="ms-attach-btn" id="comment-link-${docId}" title="Attach link">${emojiIcon('link',18)}</button>
+        <textarea id="comment-in-${docId}" class="ms-input" rows="1" placeholder="Type a message…"></textarea>
+        <button class="ms-send-btn" id="comment-send-${docId}" disabled>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
         </button>
       </div>
@@ -2196,6 +2196,26 @@ window.renderComments = async function(collection, docId, containerId, currentUs
   const body = document.getElementById(`msbody-${docId}`);
   if (body) body.scrollTop = body.scrollHeight;
 
+  // WS42 Phase 17 — tap a bubble to reveal its timestamp/status line (hidden by
+  // default, hover reveals it on desktop via CSS `:hover`). Task chat has no
+  // reaction picker, so this handler only toggles the one class.
+  container.querySelectorAll('.comment-bubble-tap').forEach(b => {
+    b.addEventListener('click', e => {
+      if (e.target.closest('a') || e.target.closest('img')) return;
+      b.classList.toggle('ms-time-shown');
+    });
+  });
+
+  // WS42 Phase 19 — auto-grow the composer textarea up to the shared 5-line
+  // cap (`.ms-input { max-height }` in styles.css does the actual clamping).
+  const commentInput = document.getElementById(`comment-in-${docId}`);
+  const commentSendBtn = document.getElementById(`comment-send-${docId}`);
+  const autoGrowComment = () => { if (!commentInput) return; commentInput.style.height = 'auto'; commentInput.style.height = commentInput.scrollHeight + 'px'; };
+  const updateCommentSendState = () => {
+    if (!commentSendBtn) return;
+    commentSendBtn.disabled = !((commentInput?.value || '').trim() || pendingLink || document.getElementById(`comment-file-${docId}`)?.files?.[0]);
+  };
+
   // File attach preview
   let pendingLink = null;
   document.getElementById(`comment-file-${docId}`)?.addEventListener('change', e => {
@@ -2203,6 +2223,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
     if (f) pendingLink = null;   // a file replaces a pending link
     const prev = document.getElementById(`ms-file-preview-${docId}`);
     if (prev) prev.textContent = f ? `📎 ${f.name}` : '';
+    updateCommentSendState();
   });
 
   // Link attach
@@ -2215,6 +2236,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
     if (fileInp) fileInp.value = '';   // a link replaces a pending file
     const prev = document.getElementById(`ms-file-preview-${docId}`);
     if (prev) prev.textContent = `🔗 ${url}`;
+    updateCommentSendState();
   });
 
   // Edit message
@@ -2306,7 +2328,8 @@ window.renderComments = async function(collection, docId, containerId, currentUs
   };
 
   document.getElementById(`comment-send-${docId}`)?.addEventListener('click', sendComment);
-  document.getElementById(`comment-in-${docId}`)?.addEventListener('keydown', e => {
+  commentInput?.addEventListener('input', () => { autoGrowComment(); updateCommentSendState(); });
+  commentInput?.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendComment(); }
   });
 };

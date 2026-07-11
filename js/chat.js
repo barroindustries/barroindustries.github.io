@@ -13,6 +13,16 @@ window.Chat = (() => {
   const READ_FRESH_MS     = 45000;   // recipient read this recently → skip notif
   const NOTIF_THROTTLE_MS = 60000;   // per (conversation, recipient) notif spacing
   const REACTIONS = ['👍','❤️','😂','😮','😢','🙏'];
+  const GROUP_WINDOW_MS = 2 * 60 * 1000;     // WS42 Phase 17: consecutive-message grouping window
+  const TIME_GAP_MS     = 20 * 60 * 1000;    // WS42 Phase 17: time-gap separator threshold
+  // WS42 Phase 18 — chat wallpaper presets (pure CSS; keys map 1:1 to `.wp-<key>` on .messenger-body)
+  const WALLPAPERS = [
+    { key: 'default',         label: 'Default' },
+    { key: 'doodle',          label: 'Doodle' },
+    { key: 'gradient-blue',   label: 'Ocean Blue' },
+    { key: 'gradient-sunset', label: 'Sunset' },
+    { key: 'astral',          label: 'Astral' }
+  ];
 
   // ── Listener state — the ONLY live listeners this feature owns ──
   let _inboxUnsub = null;                    // (1) conversations array-contains
@@ -21,9 +31,11 @@ window.Chat = (() => {
   let _convs = [], _deptConvs = [], _myReads = {};   // inbox state
   let _msgs = [], _earlier = [], _readers = [], _typing = [];  // thread state
   let _presenceTimer = null, _typingExpireTimer = null, _markReadTimer = null;
-  let _lastTypingWrite = 0, _filter = 'all';
+  let _lastTypingWrite = 0, _filter = 'all', _searchQ = '';
   let _presenceByUid = {}, _usersByUid = {};  // small local caches (NOT extra listeners)
   const _notifLastSent = {};                 // `${convId}_${uid}` → ms epoch
+  let _lastMsgIds = null;                    // WS42 Phase 19: which bubble ids already animated in (send pop-in)
+  let _wpMenuOpen = false;                   // WS42 Phase 18: wallpaper popover state
 
   const _isAdminRole = () => ['president','manager','secretary'].includes(currentRole);
   const _myName = () => (window.userProfile?.displayName || currentUser.email);
@@ -56,12 +68,15 @@ window.Chat = (() => {
     if (_openConvId) _clearOwnTyping();      // Decision 8: beacon cleared on panel-close too
     _threadUnsubs.forEach(u => { try { u(); } catch(_){} });
     _threadUnsubs = []; _openConvId = null; _openConv = null;
-    _msgs = []; _earlier = []; _readers = []; _typing = [];
+    _msgs = []; _earlier = []; _readers = []; _typing = []; _lastMsgIds = null;
     if (_presenceTimer)     { clearInterval(_presenceTimer);     _presenceTimer = null; }
     if (_typingExpireTimer) { clearInterval(_typingExpireTimer); _typingExpireTimer = null; }
     if (_markReadTimer)     { clearTimeout(_markReadTimer);      _markReadTimer = null; }
+    if (window.visualViewport) window.visualViewport.removeEventListener('resize', _onViewportResize);
+    if (_wpMenuOpen) document.removeEventListener('click', _wpOutsideClick, true);
+    _wpMenuOpen = false;
     const p = document.getElementById('chat-thread-panel');
-    if (p) { p.style.transform = 'translateY(100%)'; p.style.opacity = '0';
+    if (p) { p.style.transform = 'translateY(100%)'; p.style.opacity = '0'; p.style.bottom = '0';
              setTimeout(() => p.remove(), 320); }          // mirrors closeTaskPanel
   }
 
@@ -119,6 +134,7 @@ window.Chat = (() => {
     return `${Math.floor(diff/86400)}d`;
   }
   function setFilter(k) { _filter = k; _renderInbox(); }
+  function setSearch(q) { _searchQ = (q || '').trim().toLowerCase(); _renderInbox(); }
 
   // Merge _convs (dm/group — the ONLY types the array-contains listener can
   // ever return, since dept docs keep participants:[]) with a dept-channel row
@@ -150,34 +166,49 @@ window.Chat = (() => {
     }
     const myUid = currentUser.uid;
     const initials = s => escHtml((s || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2));
-    el.innerHTML = '<div class="item-list">' + sorted.map(cv => {
-      const unread = _isUnread(cv);
-      let title, avatarHtml;
+    // WS42 Phase 16 — resolve title first (search needs it before the row markup exists).
+    const rows = sorted.map(cv => {
+      let title;
       if (cv.type === 'dm') {
         const otherUid = (cv.participants || []).find(u => u !== myUid);
         title = (cv.participantNames && cv.participantNames[otherUid]) || 'User';
-        const pres = _presenceBucket(_presenceByUid[otherUid]?.lastSeen);
-        const dotColor = { green: '#30D158', orange: '#FF9F0A', gray: '#8E8E93' }[pres.dot] || '#8E8E93';
-        avatarHtml = `<div class="ms-avatar" style="position:relative;flex-shrink:0">${initials(title)}<span style="position:absolute;bottom:-1px;right:-1px;width:9px;height:9px;border-radius:50%;background:${dotColor};border:1.5px solid var(--surface)"></span></div>`;
       } else if (cv.type === 'group') {
         title = cv.name || 'Group';
-        avatarHtml = `<div class="ms-avatar" style="flex-shrink:0">${initials(title)}</div>`;
+      } else {
+        title = cv.name || cv.department || 'Channel';
+      }
+      return { cv, title };
+    }).filter(r => !_searchQ || r.title.toLowerCase().includes(_searchQ));
+
+    if (!rows.length) {
+      el.innerHTML = `<div class="empty-state"><div class="empty-icon">🔎</div><h4>No matches</h4></div>`;
+      return;
+    }
+    el.innerHTML = '<div class="item-list">' + rows.map(({ cv, title }) => {
+      const unread = _isUnread(cv);
+      let avatarHtml;
+      if (cv.type === 'dm') {
+        const otherUid = (cv.participants || []).find(u => u !== myUid);
+        const pres = _presenceBucket(_presenceByUid[otherUid]?.lastSeen);
+        const dotColor = { green: '#30D158', orange: '#FF9F0A', gray: '#8E8E93' }[pres.dot] || '#8E8E93';
+        avatarHtml = `<div class="ms-avatar ms-avatar-lg" style="position:relative;flex-shrink:0">${initials(title)}<span class="ms-presence-dot" style="background:${dotColor}"></span></div>`;
+      } else if (cv.type === 'group') {
+        avatarHtml = `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0">${initials(title)}</div>`;
       } else {
         const cfg = (window.DEPARTMENTS || {})[cv.department] || {};
-        title = cv.name || cv.department || 'Channel';
-        avatarHtml = `<div class="ms-avatar" style="flex-shrink:0;background:${cfg.color || 'var(--primary-light)'}">${cfg.icon || '💬'}</div>`;
+        avatarHtml = `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0;background:${cfg.color || 'var(--primary)'}">${cfg.icon || '💬'}</div>`;
       }
       const preview = cv.lastMessageText ? escHtml(cv.lastMessageText) : 'No messages yet';
       const ago = cv.lastMessageAt ? _timeAgo(cv.lastMessageAt) : '';
       return `
-      <div class="item-card chat-inbox-row" data-cid="${escHtml(cv.id)}" data-unprov="${cv._unprovisioned?'1':''}" data-dept="${escHtml(cv.department||'')}" style="display:flex;align-items:center;gap:10px;cursor:pointer">
+      <div class="item-card chat-inbox-row pressable" data-cid="${escHtml(cv.id)}" data-unprov="${cv._unprovisioned?'1':''}" data-dept="${escHtml(cv.department||'')}" style="display:flex;align-items:center;gap:10px;cursor:pointer">
         ${avatarHtml}
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:6px">
             <span style="font-weight:${unread?'700':'500'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(title)}</span>
-            ${unread ? '<span style="width:8px;height:8px;border-radius:50%;background:var(--primary-light);flex-shrink:0"></span>' : ''}
+            ${unread ? '<span class="ms-unread-dot"></span>' : ''}
           </div>
-          <div style="font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${preview}</div>
+          <div style="font-size:12px;font-weight:${unread?'700':'400'};color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${preview}</div>
         </div>
         <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">${ago}</div>
       </div>`;
@@ -234,14 +265,14 @@ window.Chat = (() => {
     if (conv.type === 'dm') {
       const otherUid = (conv.participants || []).find(u => u !== currentUser.uid);
       title = (conv.participantNames && conv.participantNames[otherUid]) || 'User';
-      avatarHtml = `<div class="ms-avatar">${initials(title)}</div>`;
+      avatarHtml = `<div class="ms-avatar ms-avatar-md">${initials(title)}</div>`;
     } else if (conv.type === 'group') {
       title = conv.name || 'Group';
-      avatarHtml = `<div class="ms-avatar">${initials(title)}</div>`;
+      avatarHtml = `<div class="ms-avatar ms-avatar-md">${initials(title)}</div>`;
     } else {
       const cfg = (window.DEPARTMENTS || {})[conv.department] || {};
       title = conv.name || conv.department || 'Channel';
-      avatarHtml = `<div class="ms-avatar" style="background:${cfg.color || 'var(--primary-light)'}">${cfg.icon || '💬'}</div>`;
+      avatarHtml = `<div class="ms-avatar ms-avatar-md" style="background:${cfg.color || 'var(--primary)'}">${cfg.icon || '💬'}</div>`;
     }
     return { title, avatarHtml };
   }
@@ -261,6 +292,17 @@ window.Chat = (() => {
     // a small, self-contained addition, not an architecture call.
     const leaveBtnHtml = conv.type === 'group'
       ? `<button id="chat-leave-group-btn" class="btn-secondary btn-sm" style="flex-shrink:0">Leave</button>` : '';
+    // WS42 Phase 18 — ⋮ wallpaper menu (participants can already update the
+    // conv doc for lastMessage*; if a rules edge case denies it, the write
+    // below is wrapped in .catch() and localStorage carries the preference).
+    const wallpaperMenuHtml = `
+      <button id="chat-wallpaper-btn" class="ms-thread-menu-btn" title="Chat wallpaper" aria-haspopup="menu">${emojiIcon('more-vertical', 18)}</button>
+      <div id="chat-wallpaper-menu" class="ms-wallpaper-menu hidden" role="menu">
+        <div class="ms-wallpaper-menu-title">Chat wallpaper</div>
+        ${WALLPAPERS.map(w => `<button type="button" class="ms-wallpaper-opt" data-wp="${w.key}" role="menuitem">
+            <span class="ms-wallpaper-swatch wp-${w.key}"></span>${escHtml(w.label)}
+          </button>`).join('')}
+      </div>`;
     const p = document.createElement('div');
     p.id = 'chat-thread-panel';
     p.style.cssText = `
@@ -273,30 +315,34 @@ window.Chat = (() => {
       transition:transform 0.32s cubic-bezier(.4,0,.2,1),opacity 0.32s;
       overflow:hidden;`;                       // verbatim task-panel shell (departments.js:729-740)
     p.innerHTML = `
-      <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0">
-        <button id="chat-panel-back" style="background:none;border:none;color:var(--primary-light);font-size:22px;cursor:pointer;padding:0 4px;line-height:1">‹</button>
+      <div class="ms-thread-header">
+        <button id="chat-panel-back" class="ms-thread-back" title="Back">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+        </button>
         ${avatarHtml}
-        <div style="flex:1;min-width:0">
-          <div style="font-size:15px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(title)}</div>
-          <div>${subtitleHtml}</div>
+        <div class="ms-thread-info">
+          <div class="ms-thread-title">${escHtml(title)}</div>
+          <div class="ms-thread-subtitle">${subtitleHtml}</div>
         </div>
         ${leaveBtnHtml}
+        ${wallpaperMenuHtml}
       </div>
-      <div id="chat-thread-scroll" style="flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px"></div>
-      <div id="chat-typing-row" style="min-height:16px;font-size:11px;color:var(--text-muted);padding:0 14px"></div>
-      <div id="chat-file-preview" style="font-size:11px;color:var(--primary-light);padding:0 14px 4px;min-height:16px"></div>
+      <div id="chat-thread-scroll" class="messenger-body" style="padding:12px 14px"></div>
+      <div id="chat-typing-row"></div>
+      <div id="chat-file-preview" style="font-size:11px;color:var(--primary);padding:0 14px 4px;min-height:16px"></div>
       <div class="messenger-input-row">
-        <label for="chat-file" class="ms-attach-btn" title="Attach file">📎</label>
+        <label for="chat-file" class="ms-attach-btn" title="Attach file">${emojiIcon('paperclip', 18)}</label>
         <input type="file" id="chat-file" style="display:none" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"/>
-        <button type="button" class="ms-attach-btn" id="chat-link" title="Attach link">${emojiIcon('link',14)}</button>
-        <input id="chat-input" class="ms-input" placeholder="Type a message…"/>
-        <button class="ms-send-btn" id="chat-send">
+        <button type="button" class="ms-attach-btn" id="chat-link" title="Attach link">${emojiIcon('link',18)}</button>
+        <textarea id="chat-input" class="ms-input" rows="1" placeholder="Type a message…"></textarea>
+        <button class="ms-send-btn" id="chat-send" disabled>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
         </button>
       </div>`;
     document.body.appendChild(p);
     if (window.lucide) lucide.createIcons({ nodes: [p] });
     requestAnimationFrame(() => { p.style.transform = 'translateY(0)'; p.style.opacity = '1'; });
+    _applyWallpaper(conv);
     window.Overlay.push('chat', () => window.Chat.teardownThread());   // ONE history entry
     document.getElementById('chat-panel-back')
       .addEventListener('click', () => window.Overlay.dismissTop());   // Back = history.back()
@@ -308,16 +354,36 @@ window.Chat = (() => {
       window.Overlay.dismissTop();
     });
 
+    // Wallpaper popover — toggle + outside-click-to-close (Phase 18).
+    const wpBtn = document.getElementById('chat-wallpaper-btn');
+    const wpMenu = document.getElementById('chat-wallpaper-menu');
+    wpBtn?.addEventListener('click', e => {
+      e.stopPropagation();
+      if (!wpMenu) return;
+      const willOpen = wpMenu.classList.contains('hidden');
+      wpMenu.classList.toggle('hidden');
+      _wpMenuOpen = willOpen;
+      if (willOpen) document.addEventListener('click', _wpOutsideClick, true);
+      else document.removeEventListener('click', _wpOutsideClick, true);
+    });
+    wpMenu?.querySelectorAll('.ms-wallpaper-opt').forEach(btn => {
+      btn.addEventListener('click', () => { _setWallpaper(btn.dataset.wp); _closeWallpaperMenu(); });
+    });
+
     // composer wiring: send → Chat.sendMessage({text, file, link}) then clear
     // input/file/preview (NO re-render call — the messages listener repaints)
     let pendingFile = null, pendingLink = null;
     const fileInp = document.getElementById('chat-file');
     const filePreview = document.getElementById('chat-file-preview');
+    const input = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('chat-send');
+    const updateSendState = () => { sendBtn.disabled = !((input.value || '').trim() || pendingFile || pendingLink); };
     fileInp.addEventListener('change', e => {
       const f = e.target.files?.[0];
       if (f) pendingLink = null;   // a file replaces a pending link
       pendingFile = f || null;
       filePreview.textContent = f ? `📎 ${f.name}` : '';
+      updateSendState();
     });
     document.getElementById('chat-link').addEventListener('click', async () => {
       let url = ((await promptDialog({ message: 'Paste a link to attach:' })) || '').trim();
@@ -326,26 +392,78 @@ window.Chat = (() => {
       pendingLink = url; pendingFile = null;   // a link replaces a pending file
       fileInp.value = '';
       filePreview.textContent = `🔗 ${url}`;
+      updateSendState();
     });
-    const input = document.getElementById('chat-input');
-    const sendBtn = document.getElementById('chat-send');
     const doSend = async () => {
       const text = (input.value || '').trim();
       const file = pendingFile, link = pendingLink;
       if (!text && !file && !link) return;
-      sendBtn.disabled = true; sendBtn.style.opacity = '.5';
+      sendBtn.disabled = true;
       await window.Chat.sendMessage({ text, file, link });
       input.value = '';
+      _autoGrow(input);
       fileInp.value = '';
       pendingFile = null; pendingLink = null;
       filePreview.textContent = '';
-      sendBtn.disabled = false; sendBtn.style.opacity = '1';
+      updateSendState();
     };
-    input.addEventListener('input', () => window.Chat.onComposerInput());
+    input.addEventListener('input', () => { _autoGrow(input); updateSendState(); window.Chat.onComposerInput(); });
     input.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
     });
     sendBtn.addEventListener('click', doSend);
+
+    // On-screen-keyboard handling (Phase 19): keep the composer + last message
+    // visible without a layout jump when visualViewport resizes (keyboard open/close).
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', _onViewportResize, { passive: true });
+  }
+
+  // WS42 Phase 19 — auto-grow the composer textarea up to a 5-line cap (the
+  // cap itself lives in CSS as `.ms-input { max-height }`; this just measures
+  // scrollHeight so it grows/shrinks with content, transform/opacity untouched).
+  function _autoGrow(ta) {
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+  }
+  function _onViewportResize() {
+    const vv = window.visualViewport; if (!vv) return;
+    const panel = document.getElementById('chat-thread-panel'); if (!panel) return;
+    const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    panel.style.bottom = offset + 'px';
+    const scroll = document.getElementById('chat-thread-scroll');
+    if (scroll) scroll.scrollTop = scroll.scrollHeight;
+  }
+
+  // ── Wallpaper (Phase 18) — conv-doc field first, localStorage fallback;
+  // write attempts the conv doc and falls back silently on any denial. ──
+  function _wallpaperKeyFor(conv) {
+    if (conv && conv.wallpaper) return conv.wallpaper;
+    try { const v = localStorage.getItem('bi-chat-wp-' + conv.id); if (v) return v; } catch (_) {}
+    return 'default';
+  }
+  function _applyWallpaper(conv) {
+    const el = document.getElementById('chat-thread-scroll'); if (!el) return;
+    WALLPAPERS.forEach(w => el.classList.remove('wp-' + w.key));
+    el.classList.add('wp-' + _wallpaperKeyFor(conv));
+  }
+  async function _setWallpaper(key) {
+    if (!_openConvId || !_openConv) return;
+    _openConv.wallpaper = key;                 // optimistic local update
+    _applyWallpaper(_openConv);
+    try { localStorage.setItem('bi-chat-wp-' + _openConvId, key); } catch (_) {}
+    await db.collection('conversations').doc(_openConvId).update({ wallpaper: key })
+      .catch(() => { /* rules denial or offline — localStorage already holds the fallback */ });
+  }
+  function _wpOutsideClick(e) {
+    const menu = document.getElementById('chat-wallpaper-menu');
+    const btn = document.getElementById('chat-wallpaper-btn');
+    if (menu && !menu.contains(e.target) && e.target !== btn && !btn?.contains(e.target)) _closeWallpaperMenu();
+  }
+  function _closeWallpaperMenu() {
+    document.getElementById('chat-wallpaper-menu')?.classList.add('hidden');
+    document.removeEventListener('click', _wpOutsideClick, true);
+    _wpMenuOpen = false;
   }
 
   async function openConversation(convId, preloaded) {
@@ -477,6 +595,8 @@ window.Chat = (() => {
     db.collection('conversations').doc(_openConvId).collection('typing')
       .doc(currentUser.uid).delete().catch(() => {});
   }
+  // WS42 Phase 19 — typing indicator restyled as an incoming mini-bubble with
+  // 3 bouncing dots (CSS animation, reduced-motion aware — see msTypingBounce).
   function _renderTypingRow() {
     const el = document.getElementById('chat-typing-row'); if (!el) return;
     const now = Date.now();
@@ -484,7 +604,14 @@ window.Chat = (() => {
         && t.at?.toMillis && (now - t.at.toMillis()) < TYPING_TTL_MS)
       .map(t => escHtml((t.name || '').split(' ')[0]));
     el.innerHTML = names.length
-      ? `${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} typing…` : '';
+      ? `<div class="ms-row ms-row-theirs ms-typing-row">
+           <div class="ms-avatar-spacer"></div>
+           <div class="ms-bubble ms-bubble-theirs ms-typing-bubble">
+             <span class="ms-typing-dot"></span><span class="ms-typing-dot"></span><span class="ms-typing-dot"></span>
+           </div>
+         </div>
+         <div class="ms-typing-names">${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} typing…</div>`
+      : '';
   }
 
   // ── Pagination — one-shot older page, prepended (static; not live) ──
@@ -556,22 +683,54 @@ window.Chat = (() => {
 
   // ── Thread rendering — re-renders ONLY #chat-thread-scroll (composer lives
   // OUTSIDE it → input value survives every snapshot) ──
+  // WS42 Phase 17: consecutive same-sender messages within GROUP_WINDOW_MS form
+  // a "group" (own bubbles get right-side flat corners, incoming get left-side
+  // flat corners + the avatar shown only once, bottom-aligned). A day change or
+  // a >20min gap always breaks the group, even for the same sender.
+  function _withinGroup(a, b) {
+    if (!a || !b || a.authorId !== b.authorId) return false;
+    const ta = a.createdAt?.toMillis?.(), tb = b.createdAt?.toMillis?.();
+    if (!ta || !tb) return false;
+    return Math.abs(tb - ta) < GROUP_WINDOW_MS;
+  }
   function _threadHtml(list) {
-    if (!list.length) return '<div class="messenger-empty">No messages yet. Say hello!</div>';
+    if (!list.length) { _lastMsgIds = new Set(); return '<div class="messenger-empty">No messages yet. Say hello!</div>'; }
     const showEarlierBtn = (_earlier.length + _msgs.length) >= PAGE_SIZE;
     const initials = name => escHtml((name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2));
     const isImage = url => url && /\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(url);
+    const isFirstRender = _lastMsgIds === null;
+    const prevIds = _lastMsgIds || new Set();
+    const newIds = new Set();
 
     let html = showEarlierBtn
       ? `<div style="text-align:center;margin-bottom:10px"><button class="btn-secondary btn-sm" id="chat-load-earlier-btn">↑ Load earlier</button></div>`
       : '';
     let lastDay = null;
     list.forEach((m, idx) => {
+      newIds.add(m.id);
       const day = _manilaDay(m.createdAt);
-      if (day && day !== lastDay) {
-        html += `<div style="text-align:center;margin:14px 0 8px"><span style="font-size:11px;font-weight:700;color:var(--text-muted);background:var(--surface2);padding:3px 12px;border-radius:20px">${escHtml(_dayLabel(day))}</span></div>`;
+      const isNewDay = !!day && day !== lastDay;
+      if (isNewDay) {
+        html += `<div class="ms-day-sep"><span>${escHtml(_dayLabel(day))}</span></div>`;
         lastDay = day;
       }
+      const prevM = idx > 0 ? list[idx - 1] : null;
+      const nextM = idx < list.length - 1 ? list[idx + 1] : null;
+      const nextDay = nextM ? _manilaDay(nextM.createdAt) : null;
+      const gapMs = (!isNewDay && prevM && m.createdAt?.toMillis && prevM.createdAt?.toMillis)
+        ? m.createdAt.toMillis() - prevM.createdAt.toMillis() : Infinity;
+      if (!isNewDay && idx > 0 && gapMs > TIME_GAP_MS) {
+        const d0 = m.createdAt?.toDate ? m.createdAt.toDate() : null;
+        const gapLabel = d0 ? d0.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', timeZone: window.BIZ_TZ }) : '';
+        html += `<div class="ms-time-sep">${escHtml(gapLabel)}</div>`;
+      }
+      const brokenBefore = isNewDay || gapMs > TIME_GAP_MS || !_withinGroup(prevM, m);
+      const brokenAfter = !nextM || (nextDay && nextDay !== day) || !_withinGroup(m, nextM);
+      const grpClass = brokenBefore && brokenAfter ? 'ms-grp-single'
+        : brokenBefore ? 'ms-grp-first' : brokenAfter ? 'ms-grp-last' : 'ms-grp-mid';
+      const showAvatar = grpClass === 'ms-grp-last' || grpClass === 'ms-grp-single';
+      const showName = grpClass === 'ms-grp-first' || grpClass === 'ms-grp-single';
+
       const isMine = m.authorId === currentUser.uid;
       const info = _authorInfo(m.authorId, m.authorName);
       const canEdit = isMine;
@@ -586,7 +745,7 @@ window.Chat = (() => {
         ? `<div class="chat-reactions-row" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px">${
             Object.entries(grouped).map(([emoji, uids]) => {
               const mine = uids.includes(currentUser.uid);
-              return `<button class="chat-reaction-chip" data-mid="${escHtml(m.id)}" data-emoji="${escHtml(emoji)}" style="font-size:12px;border-radius:12px;padding:1px 7px;border:1px solid ${mine?'var(--primary-light)':'var(--border)'};background:${mine?'rgba(10,132,255,0.12)':'var(--surface2)'};cursor:pointer">${emoji} ${uids.length}</button>`;
+              return `<button class="chat-reaction-chip" data-mid="${escHtml(m.id)}" data-emoji="${escHtml(emoji)}" style="font-size:12px;border-radius:12px;padding:1px 7px;border:1px solid ${mine?'var(--primary)':'var(--border)'};background:${mine?'var(--primary-soft)':'var(--surface-2)'};cursor:pointer">${emoji} ${uids.length}</button>`;
             }).join('')
           }</div>`
         : '';
@@ -597,22 +756,28 @@ window.Chat = (() => {
       const isLast = idx === list.length - 1;
       const seenBy = isLast ? _readers.filter(r => r.uid !== m.authorId && r.uid !== currentUser.uid
         && r.readAt?.toMillis && m.createdAt?.toMillis && r.readAt.toMillis() >= m.createdAt.toMillis()) : [];
+      // Read receipts: reader avatars once the last message has been read;
+      // otherwise (own last message, unread) a single Lucide "check" (sent) —
+      // the avatar itself stands in for the "check-check/read" state once read.
       const seenHtml = seenBy.length
-        ? `<div class="ms-seen" style="display:flex;align-items:center;gap:3px" title="${escHtml(seenBy.map(r=>r.name).join(', '))}">${
-            seenBy.slice(0,5).map(r => `<span class="ms-avatar" style="width:16px;height:16px;font-size:8px">${initials(r.name)}</span>`).join('')
+        ? `<div class="ms-seen" title="${escHtml(seenBy.map(r=>r.name).join(', '))}">${
+            seenBy.slice(0,5).map(r => `<span class="ms-avatar">${initials(r.name)}</span>`).join('')
           }${seenBy.length>5?`<span style="font-size:10px;color:var(--text-muted)">+${seenBy.length-5}</span>`:''}</div>`
-        : '';
+        : (isLast && isMine ? `<div class="ms-status"><i data-lucide="check"></i></div>` : '');
+      const isNew = !isFirstRender && !prevIds.has(m.id);
 
       html += `
-      <div class="ms-row ${isMine?'ms-row-mine':'ms-row-theirs'}" data-mid="${escHtml(m.id)}">
-        ${!isMine ? `<div class="ms-avatar" title="${escHtml(info.name)}">${info.photoUrl?`<img src="${escHtml(info.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(info.name)}</div>` : ''}
+      <div class="ms-row ${isMine?'ms-row-mine':'ms-row-theirs'} ${grpClass}" data-mid="${escHtml(m.id)}">
+        ${!isMine ? (showAvatar
+            ? `<div class="ms-avatar" title="${escHtml(info.name)}">${info.photoUrl?`<img src="${escHtml(info.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(info.name)}</div>`
+            : `<div class="ms-avatar-spacer"></div>`) : ''}
         <div class="ms-bubble-wrap">
-          ${!isMine ? `<div class="ms-name">${escHtml(info.name)}</div>` : ''}
-          <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'} chat-bubble-tap" data-mid="${escHtml(m.id)}">
+          ${!isMine && showName ? `<div class="ms-name">${escHtml(info.name)}</div>` : ''}
+          <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'} ${grpClass} chat-bubble-tap ${isNew?'ms-pop-in':''}" data-mid="${escHtml(m.id)}">
             ${m.text ? `<div class="ms-text">${escHtml(m.text).replace(/\n/g,'<br/>')}</div>` : ''}
             ${m.fileUrl ? (m.fileSource!=='link' && isImage(m.fileUrl)
-              ? `<div style="margin-top:${m.text?'6':'0'}px"><img src="${safeHttpUrl(m.fileUrl)}" alt="${escHtml(m.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:8px;cursor:pointer" onclick="window.open('${safeHttpUrl(m.fileUrl)}','_blank')"/></div>`
-              : `<a href="${safeHttpUrl(m.fileUrl)}" target="_blank" rel="noopener" class="ms-file-chip">${m.fileSource==='link'?'🔗':'📎'} ${escHtml(m.fileName||'Attachment')}</a>`
+              ? `<div style="margin-top:${m.text?'6':'0'}px"><img src="${safeHttpUrl(m.fileUrl)}" alt="${escHtml(m.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);cursor:pointer" onclick="window.open('${safeHttpUrl(m.fileUrl)}','_blank')"/></div>`
+              : `<a href="${safeHttpUrl(m.fileUrl)}" target="_blank" rel="noopener" class="ms-file-chip">${emojiIcon(m.fileSource==='link'?'link':'paperclip',14)}<span>${escHtml(m.fileName||'Attachment')}</span></a>`
             ) : ''}
             <div class="ms-meta">
               <span class="ms-time">${timeLabel}</span>
@@ -627,9 +792,12 @@ window.Chat = (() => {
           </div>` : ''}
           ${seenHtml}
         </div>
-        ${isMine ? `<div class="ms-avatar ms-avatar-mine" title="You">${userProfile?.photoUrl?`<img src="${escHtml(userProfile.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(userProfile?.displayName||currentUser.email)}</div>` : ''}
+        ${isMine ? (showAvatar
+            ? `<div class="ms-avatar ms-avatar-mine" title="You">${userProfile?.photoUrl?`<img src="${escHtml(userProfile.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(userProfile?.displayName||currentUser.email)}</div>`
+            : `<div class="ms-avatar-spacer"></div>`) : ''}
       </div>`;
     });
+    _lastMsgIds = newIds;
     return html;
   }
 
@@ -644,10 +812,13 @@ window.Chat = (() => {
 
     document.getElementById('chat-load-earlier-btn')?.addEventListener('click', loadEarlier);
 
-    // Tapping a bubble toggles its 6-emoji reaction picker row.
+    // Tapping a bubble (Phase 17) toggles its timestamp/status line AND its
+    // 6-emoji reaction picker row — the same tap does both, so neither
+    // interaction is lost.
     el.querySelectorAll('.chat-bubble-tap').forEach(b => {
       b.addEventListener('click', e => {
         if (e.target.closest('a') || e.target.closest('img')) return;
+        b.classList.toggle('ms-time-shown');
         const mid = b.dataset.mid;
         const picker = Array.from(el.querySelectorAll('.chat-reaction-picker')).find(x => x.dataset.mid === mid);
         if (picker) picker.style.display = (picker.style.display === 'flex') ? 'none' : 'flex';
@@ -689,7 +860,7 @@ window.Chat = (() => {
 
   return { openDM, openConversation, openDeptChannel, sendMessage, toggleReaction,
            loadEarlier, onComposerInput, teardownInbox, teardownThread,
-           dmIdFor, myDeptChannels, dmCandidates, setFilter, _attachInbox };
+           dmIdFor, myDeptChannels, dmCandidates, setFilter, setSearch, _attachInbox };
 })();
 
 // ── Inbox page (router target: case 'chat') ──
@@ -705,6 +876,7 @@ window.renderChatPage = async function() {
       <div class="chat-page-inbox">
         <div class="page-header"><h2>💬 Chat</h2>
           <button class="btn-primary btn-sm" id="chat-new-btn">+ New Message</button></div>
+        <div class="ms-search-wrap"><input id="chat-search-input" class="ms-search-input" placeholder="Search chats" /></div>
         <div id="chat-filter"></div>
         <div id="chat-inbox"><div class="loading-placeholder">Loading…</div></div>
       </div>
@@ -715,6 +887,7 @@ window.renderChatPage = async function() {
   document.getElementById('chat-filter').innerHTML = window.chipTabs(chips, 'all');
   window.bindChipTabs(document.getElementById('chat-filter'),
     k => window.Chat?.setFilter(k));
+  document.getElementById('chat-search-input')?.addEventListener('input', e => window.Chat?.setSearch(e.target.value));
   document.getElementById('chat-new-btn').addEventListener('click', async () => {
     const snap = await dbCachedGet('users', () => db.collection('users').get(), 60000)
       .catch(() => ({ docs: [] }));
@@ -726,7 +899,7 @@ window.renderChatPage = async function() {
       const initials = (u.displayName || u.email || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
       const roleLabel = window.ROLES?.[u.role]?.label || u.role || '';
       return `<div class="item-card chat-pick-user" data-uid="${escHtml(u.id)}" style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px">
-        <div class="ms-avatar">${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:escHtml(initials)}</div>
+        <div class="ms-avatar ms-avatar-md">${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:escHtml(initials)}</div>
         <div style="flex:1;min-width:0">
           <div style="font-weight:600">${escHtml(u.displayName||u.email)}</div>
           <div style="font-size:11px;color:var(--text-muted)">${escHtml(roleLabel)}</div>
