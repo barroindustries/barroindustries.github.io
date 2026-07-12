@@ -60,6 +60,17 @@ typing app-wide: ~200 success/error conversions, zero untyped outside dev-warned
 Ph 63 (chat: no lost input, no dup sends, keyed patch render, typing cleanup, inbox debounce),
 Ph 121-122 (ui-states kit + first adoptions), Ph 118+66+30b in flight (badge truth, unread cap, SRI/CSP).
 
+**Waves 9-10 (shipped, prod v12.0.81):** Ph 118+66 (badge truth), Ph 30b (CSP+SRI — browser-verified,
+zero violations), version-hook skip-guard fix (now only skips pure version-string rewrites), Ph 67
+(scheduled reminders — CODE ONLY, functions NOT deployed), Ph 35 (window.Approvals service — deduped
+writes, single fetch), chip-tab live icons. NOTE: heavy multi-session concurrency in this shared tree
+caused commit-braiding via the version hook re-staging index.html/config.js/sw.js — see the
+version-hook-restage-footgun memory; protocol now: one agent per shared file, diff --cached before commit.
+
+**PENDING DEPLOY (Neil):** `cd functions && npm run deploy` for Phase 67's two Cloud Scheduler jobs
+(scheduledAttendanceReminder, scheduledDailyDigestChecks). Also still: Phase-9 one-time buttons +
+remapDesignProjectClients (president console).
+
 **Next up:** push+deploy session (Ph 1, 9) · Ph 105 (Overlay/Back part 2) · Ph 28 (plaintext passwords —
 needs flow decision) · Ph 12–14 (Ledger service) · Ph 19 (quote math — needs D4/D5 rulings).
 
