@@ -610,3 +610,173 @@ exports.scheduledDailyDigestChecks = functions
     await reportHealth(db, 'scheduledDailyDigestChecks', stats, 'Server-side deadline/low-stock/AEC digest');
     return null;
   });
+
+/**
+ * Phase 68 (V13-PLAN Part E, H3 completion) — server-side approval execution
+ * for ca_deduct requests.
+ *
+ * Client-side, CashAdvance.planFor() (js/config.js ~L1663) reads the most
+ * recent approved `approval_requests` doc of type 'ca_deduct' for
+ * {userId, month} and trusts that doc's own `amount` field (clamped against
+ * the user's live cash_advances balance at read time) to build the payroll
+ * deduction plan. That is a request-doc field, not an authoritative
+ * server-derived number — this trigger re-derives it the moment the request
+ * flips to 'approved' and stamps the outcome back onto the request so a
+ * tampered/stale `amount` can never reach payroll un-checked.
+ *
+ * ca_deduct request docs (client-created, js/departments.js Approvals flow)
+ * carry no caId — CashAdvance.planFor() itself resolves the user's advances
+ * by querying cash_advances where userId==uid && status=='approved' and
+ * summing `balance` across them (oldest-first). We mirror that exact lookup
+ * here rather than trusting any caId on the request.
+ *
+ * Idempotency: guarded by `appliedBy`. Once set (to 'server'), a re-fire of
+ * this trigger (e.g. an unrelated field update on the same doc, or a retry)
+ * is a no-op — the deduction is never re-applied or re-evaluated.
+ */
+exports.executeApprovalOnUpdate = functions
+  .region('asia-east1')
+  .firestore
+  .document('approval_requests/{id}')
+  .onUpdate(async (change, context) => {
+    const db = admin.firestore();
+    const { id } = context.params;
+    const before = change.before.data() || {};
+    const after  = change.after.data() || {};
+    const stats  = { errors: 0, notified: 0 };
+
+    try {
+      // Only act on a fresh approval of a ca_deduct request that hasn't
+      // already been server-applied.
+      const justApproved = before.status !== 'approved' && after.status === 'approved';
+      if (!justApproved || after.type !== 'ca_deduct' || after.appliedBy) {
+        return null;
+      }
+
+      const uid   = after.userId;
+      const month = after.month;
+      const requestedAmount = Number(after.amount) || 0;
+
+      if (!uid || !requestedAmount) {
+        // Nothing sane to apply — flag for human review, but still guard so
+        // we don't keep re-firing on this malformed doc.
+        await change.after.ref.update({
+          status: 'needs-review',
+          appliedBy: 'server',
+          appliedAmount: 0,
+          appliedAt: admin.firestore.FieldValue.serverTimestamp(),
+          reviewNote: 'ca_deduct approved with missing userId/amount — server declined to apply.'
+        });
+        stats.errors++;
+        await reportHealth(db, 'executeApprovalOnUpdate', stats, 'ca_deduct server re-derivation');
+        return null;
+      }
+
+      // Re-derive the authoritative balance the same way
+      // CashAdvance.planFor() does: every approved cash_advances doc for
+      // this user, balance summed (no caId trust).
+      const caSnap = await db.collection('cash_advances')
+        .where('userId', '==', uid).where('status', '==', 'approved').get();
+      const caBalance = caSnap.docs.reduce((s, d) => s + (Number(d.data().balance) || 0), 0);
+      const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+      if (requestedAmount > caBalance + 0.01) {
+        // Requested more than the authoritative balance covers — reject
+        // rather than over-deduct. Reviewer can re-submit a corrected amount.
+        await change.after.ref.update({
+          status: 'rejected',
+          appliedBy: 'server',
+          appliedAmount: 0,
+          appliedAt: admin.firestore.FieldValue.serverTimestamp(),
+          reviewNote: `Auto-rejected: requested ₱${requestedAmount.toFixed(2)} exceeds authoritative CA balance ₱${caBalance.toFixed(2)} for ${month || 'this month'}.`
+        });
+        console.warn(`[executeApprovalOnUpdate] ${id} rejected — requested ${requestedAmount} > balance ${caBalance} (uid ${uid})`);
+      } else {
+        const appliedAmount = round2(Math.min(requestedAmount, caBalance));
+        await change.after.ref.update({
+          appliedBy: 'server',
+          appliedAmount,
+          appliedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        stats.notified = 1;
+        console.log(`[executeApprovalOnUpdate] ${id} applied ${appliedAmount} for uid ${uid} (${month || 'no month'})`);
+      }
+    } catch (e) {
+      stats.errors++;
+      console.error(`[executeApprovalOnUpdate] ${id} failed:`, e.message);
+    }
+    await reportHealth(db, 'executeApprovalOnUpdate', stats, 'ca_deduct server re-derivation');
+    return null;
+  });
+
+/**
+ * Phase 68 item 3 (Phase 30's deferred server half) — per-sender notification
+ * rate observation.
+ *
+ * js/notifications.js `send()` (~L296) writes notifications/{targetUid}/items
+ * docs with {title, body, icon, type, link, read, createdAt, dedupKey?,
+ * taskId?, chatId?} — there is currently no sender/fromUid/createdBy field on
+ * the doc itself, so per-sender attribution isn't available from the
+ * notification doc alone in this release. We check a handful of plausible
+ * field names defensively (senderUid/fromUid/createdBy/senderId/authorUid)
+ * so this activates automatically if a future change adds one, and no-op
+ * quietly otherwise rather than guessing.
+ *
+ * This release is observe-only: it counts sends into an hourly bucket doc
+ * per sender and logs a system_health warning past the threshold. It does
+ * NOT delete or block notifications — enforcement is an explicit follow-up
+ * so we don't risk breaking legitimate broadcasts (digests, approvals) on a
+ * first pass.
+ */
+const NOTIF_QUOTA_PER_HOUR = 200;
+
+exports.sendNotificationQuota = functions
+  .region('asia-east1')
+  .firestore
+  .document('notifications/{uid}/items/{itemId}')
+  .onCreate(async (snap, context) => {
+    const db = admin.firestore();
+    const data = snap.data() || {};
+    const stats = { errors: 0, notified: 0 };
+    const senderUid = data.senderUid || data.fromUid || data.createdBy || data.senderId || data.authorUid || null;
+
+    if (!senderUid) {
+      // No sender attribution on this doc shape yet — nothing to rate-limit.
+      return null;
+    }
+
+    try {
+      const hourBucket = manilaDate().replace(/-/g, '') + '_' + new Date(Date.now() + 8 * 60 * 60 * 1000).getUTCHours();
+      const bucketRef = db.collection('notif_quota').doc(`${senderUid}_${hourBucket}`);
+
+      const count = await db.runTransaction(async (tx) => {
+        const doc = await tx.get(bucketRef);
+        const next = (doc.exists ? (doc.data().count || 0) : 0) + 1;
+        tx.set(bucketRef, {
+          senderUid, hourBucket, count: next,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        return next;
+      });
+
+      if (count > NOTIF_QUOTA_PER_HOUR) {
+        stats.errors = 0; // not a job error — a usage warning
+        console.warn(`[sendNotificationQuota] sender ${senderUid} sent ${count} notifications in bucket ${hourBucket} (threshold ${NOTIF_QUOTA_PER_HOUR})`);
+        await db.collection('system_health').doc('sendNotificationQuota').set({
+          job: 'sendNotificationQuota',
+          lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+          lastStatus: 'warn',
+          errors: 0,
+          notified: 0,
+          label: `sender ${senderUid} over quota: ${count}/${NOTIF_QUOTA_PER_HOUR} in ${hourBucket} (observe-only, not blocked)`
+        }, { merge: true });
+      } else {
+        stats.notified = 1;
+      }
+    } catch (e) {
+      stats.errors++;
+      console.error('[sendNotificationQuota] failed:', e.message);
+      await reportHealth(db, 'sendNotificationQuota', stats, 'Per-sender notification rate observation');
+    }
+    return null;
+  });
