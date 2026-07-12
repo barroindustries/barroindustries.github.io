@@ -1035,7 +1035,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
 
   // Load employees for designate
   if (isAdmin) {
-    db.collection('users').get().then(empSnap=>{
+    dbCachedGet('users', ()=>db.collection('users').get(), 60000).then(empSnap=>{
       const sel=document.getElementById('reassign-sel'); if(!sel)return;
       const emps=empSnap.docs.map(d=>({id:d.id,...d.data()})).filter(e=>!t.assignedTo.includes(e.id)).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
       sel.innerHTML=`<option value="">— Select employee —</option>`+emps.map(e=>`<option value="${e.id}" data-name="${escHtml(e.displayName||e.email)}">${escHtml(e.displayName||e.email)}</option>`).join('');
@@ -7870,7 +7870,7 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
   // on save). Falls back to legacy design_clients read-only compat until
   // migrateClientBooks() has run (window.Clients.listAll() handles that itself).
   const [uSnap, allClients, jSnap] = await Promise.all([
-    db.collection('users').get().catch(()=>({docs:[]})),
+    dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]})),
     window.Clients.listAll().catch(()=>[]),
     db.collection('job_projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
   ]);
@@ -8072,7 +8072,7 @@ async function renderProjectFiles(host, p, currentUser, currentRole){
 }
 
 async function openDrawingCreateModal(project, currentUser, currentRole, canBill){
-  const uSnap = await db.collection('users').get().catch(()=>({docs:[]}));
+  const uSnap = await dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]}));
   const users = uSnap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
   openPage('New Drawing', `
     <div class="form-group"><label>Title</label><input id="dw-title" placeholder="e.g. Ground Floor Plan"/></div>
@@ -8277,7 +8277,7 @@ function openDrawingRevisionModal(d, project, currentUser, currentRole, canBill)
 }
 
 async function openDrawingEditModal(d, project, currentUser, currentRole, canBill){
-  const uSnap = await db.collection('users').get().catch(()=>({docs:[]}));
+  const uSnap = await dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]}));
   const users = uSnap.docs.map(u=>({id:u.id,...u.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
   openPage('Edit Drawing', `
     <div class="form-group"><label>Title</label><input id="de-title" value="${escHtml(d.title||'')}"/></div>
@@ -8319,7 +8319,7 @@ async function openDrawingEditModal(d, project, currentUser, currentRole, canBil
 
 // Delegate a Design task scoped to a project (writes department:'Design' + projectId).
 async function openAddProjectTaskModal(project, currentUser, currentRole, canBill){
-  const uSnap = await db.collection('users').get().catch(()=>({docs:[]}));
+  const uSnap = await dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]}));
   const users = uSnap.docs.map(u=>({id:u.id,...u.data()})).sort((a,b)=>(a.displayName||'').localeCompare(b.displayName||''));
   openPage('Delegate Task — '+escHtml(project.name||''), `
     <div class="form-group"><label>Title</label><input id="pt-title" placeholder="Task name"/></div>
@@ -9263,13 +9263,39 @@ function renderBSFiles(container, currentUser, currentRole) {
   });
 }
 
+// Shared cached bs_quotes read (createdAt-desc, ordered) for the two BS tabs
+// that use the identical isPrivileged/query shape (Files + Client Data).
+// Keyed by exact scope so cached results are never shared across different
+// access scopes (privileged "all" vs a specific user's own-only query).
+// Clears every bs_quotes cache slot the acting user could be reading from
+// (both the ordered Files/Client-Data cache and the flat Summary cache, in
+// both their "all" and "own" scope) so a write is reflected immediately
+// instead of waiting out the TTL. Config.js's dbCacheInvalidate has no
+// wildcard/prefix support for this key (that alias list lives in config.js,
+// which is out of scope here), so the concrete keys are cleared by hand.
+window.invalidateBsQuotesCache = function(uid) {
+  if (typeof dbCacheInvalidate !== 'function') return;
+  dbCacheInvalidate('bs_quotes-ord-all');
+  dbCacheInvalidate('bs_quotes-flat-all');
+  if (uid) {
+    dbCacheInvalidate(`bs_quotes-ord-own-${uid}`);
+    dbCacheInvalidate(`bs_quotes-flat-own-${uid}`);
+  }
+};
+
+window.getBsQuotesOrdered = async function(currentUser, isPrivileged) {
+  const key = isPrivileged ? 'bs_quotes-ord-all' : `bs_quotes-ord-own-${currentUser.uid}`;
+  return dbCachedGet(key, () => isPrivileged
+    ? db.collection('bs_quotes').orderBy('createdAt','desc').get()
+    : db.collection('bs_quotes').where('createdBy','==',currentUser.uid).orderBy('createdAt','desc').get(),
+    50000);
+};
+
 async function renderBSQuotationFiles(container, currentUser, currentRole) {
   container.innerHTML = '<div class="loading-placeholder">Loading quotation files…</div>';
   const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'employee';
   try {
-    const snap = isPrivileged
-      ? await db.collection('bs_quotes').orderBy('createdAt','desc').get()
-      : await db.collection('bs_quotes').where('createdBy','==',currentUser.uid).orderBy('createdAt','desc').get();
+    const snap = await window.getBsQuotesOrdered(currentUser, isPrivileged);
     const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
 
     // Group quotes by client name (folder per client)
@@ -9360,9 +9386,15 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
   const canSeeAll = isPrivileged ||
     (currentRole === 'employee' && (window.currentDepts||[]).includes('Sales'));
   const isPartnerRole = currentRole === 'partner';
-  const snap = canSeeAll
-    ? await db.collection('bs_quotes').get()
-    : await db.collection('bs_quotes').where('createdBy','==',currentUser.uid).get();
+  // Cached read, scoped separately from getBsQuotesOrdered above — this tab's
+  // canSeeAll gate differs (Sales-dept employees only, not all employees) and
+  // the query has no orderBy, so it must not share a cache key with the
+  // ordered Files/Client-Data query (would leak scope-mismatched results).
+  const bsqKey = canSeeAll ? 'bs_quotes-flat-all' : `bs_quotes-flat-own-${currentUser.uid}`;
+  const snap = await dbCachedGet(bsqKey, () => canSeeAll
+    ? db.collection('bs_quotes').get()
+    : db.collection('bs_quotes').where('createdBy','==',currentUser.uid).get(),
+    50000);
   const all = snap.docs.map(d=>({id:d.id,...d.data()}))
     // Partners cannot see records created by Sales (non-partner) users
     .filter(q => !isPartnerRole || q.createdBy === currentUser.uid)
@@ -9615,7 +9647,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
       });
       // 3) stamp the back-links onto the quote IN THE CORRECT COLLECTION (BK or BS — was hardcoded to bs_quotes)
       const qc = (d.co==='BK') ? 'bk_quotes' : 'bs_quotes';
-      try{ await db.collection(qc).doc(d.id).update({ salesOrderId:ref.id, projectId:proj.id, status:'won' }); }catch(_){}
+      try{ await db.collection(qc).doc(d.id).update({ salesOrderId:ref.id, projectId:proj.id, status:'won' }); if (qc==='bs_quotes') window.invalidateBsQuotesCache(currentUser.uid); }catch(_){}
       // 4) record the Sales Order on the project's document register + link the SO id
       try{ await db.collection('job_projects').doc(proj.id).update({ salesOrderId:ref.id,
         documents:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order', ref:proj.projectNo, at:new Date().toISOString(), by:userProfile?.displayName||currentUser.email }) }); }catch(_){}
@@ -9914,6 +9946,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
         await db.collection('bs_quotes').doc(b.dataset.id).delete();
         window.logAudit && window.logAudit('delete','quote',b.dataset.id,{ quoteNo:b.dataset.qno });
         Notifs.success('Quote deleted');
+        window.invalidateBsQuotesCache(currentUser.uid);
         renderBSQuotationsSummary(container, currentUser, currentRole);
       } catch(ex){ Notifs.showToast('Delete failed','error'); }
     });
@@ -9930,6 +9963,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
         });
         await Notifs.sendToOwner({ title:'🗑 Quote Delete Requested', body:`${userProfile?.displayName||currentUser.email} requests deleting quote "${b.dataset.qno}".${reason?' Reason: '+reason:''}`, icon:'🗑', type:'quote_delete_request' });
         Notifs.success('Delete request sent to president');
+        window.invalidateBsQuotesCache(currentUser.uid);
         renderBSQuotationsSummary(container, currentUser, currentRole);
       } catch(ex){ Notifs.showToast('Request failed: '+(ex.message||ex.code),'error'); }
     });
@@ -9966,6 +10000,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
       await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'approved'})));
       if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'✅ Quote Approved!', body:`Quotation "${b.dataset.qno}" for ${b.dataset.name} was approved and filed.`, icon:'✅', type:'quote_approved' });
       Notifs.success('Quote approved and filed!');
+      window.invalidateBsQuotesCache(currentUser.uid);
       renderBSQuotationsSummary(container, currentUser, currentRole);
     });
   });
@@ -9979,6 +10014,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
       await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'rejected'})));
       if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'❌ Quote Not Approved', body:`Quotation "${b.dataset.qno}" for ${b.dataset.name} was not approved.`, icon:'❌', type:'quote_rejected' });
       Notifs.error('Quote rejected.');
+      window.invalidateBsQuotesCache(currentUser.uid);
       renderBSQuotationsSummary(container, currentUser, currentRole);
     });
   });
@@ -10031,6 +10067,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
         if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'✅ Quote Approved!', body:`Quotation "${b.dataset.qno}" for ${edits.clientName||b.dataset.name} was approved and filed.`, icon:'✅', type:'quote_approved' });
         closeModal();
         Notifs.success('Quote edited, approved and filed!');
+        window.invalidateBsQuotesCache(currentUser.uid);
         renderBSQuotationsSummary(container, currentUser, currentRole);
       });
 
@@ -10047,6 +10084,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
         });
         closeModal();
         Notifs.success('Quote updated and returned to submitter.');
+        window.invalidateBsQuotesCache(currentUser.uid);
         renderBSQuotationsSummary(container, currentUser, currentRole);
       });
     });
@@ -10058,9 +10096,7 @@ async function renderBSClientData(container, currentUser, currentRole) {
   container.innerHTML = '<div class="loading-placeholder">Loading client data…</div>';
   const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'employee';
   try {
-    const snap = isPrivileged
-      ? await db.collection('bs_quotes').orderBy('createdAt','desc').get()
-      : await db.collection('bs_quotes').where('createdBy','==',currentUser.uid).orderBy('createdAt','desc').get();
+    const snap = await window.getBsQuotesOrdered(currentUser, isPrivileged);
     const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
 
     // Build unique client map
@@ -11286,6 +11322,7 @@ async function approveQuoteApproval(quoteId, agentId, qno, name, coll){
     if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${qno}" for ${name} was approved and filed.`, icon:'✅', type:'quote_approved' });
     window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true });
     if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
+    if (coll === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
     Notifs.success('Quote approved and filed!');
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
 }
@@ -11301,6 +11338,7 @@ async function returnQuoteToPartner(quoteId, agentId, qno, name, notes, coll){
     if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${qno}" for ${name} was reviewed and returned.${notes?' Notes: '+notes:''} Please revise and re-submit.`, icon:'✎', type:'quote_returned' });
     window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true });
     if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
+    if (coll === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
     Notifs.error('Quote returned to partner.');
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
 }
@@ -11337,6 +11375,7 @@ async function openQuoteApprovalReview(ctx, onDone){
       if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${quoteNumber}" for ${e.clientName||clientName} was approved and filed.`, icon:'✅', type:'quote_approved' });
       window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true, edited:true });
       if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
+      if (QC === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
       closeModal(); Notifs.success('Quote edited, approved and filed!'); onDone&&onDone();
     }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
@@ -11348,6 +11387,7 @@ async function openQuoteApprovalReview(ctx, onDone){
       if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${quoteNumber}" for ${e.clientName||clientName} was reviewed and returned.${e.presidentNotes?' Notes: '+e.presidentNotes:''}`, icon:'✎', type:'quote_returned' });
       window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true, edited:true });
       if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
+      if (QC === 'bs_quotes') window.invalidateBsQuotesCache(currentUser.uid);
       closeModal(); Notifs.error('Quote updated and returned to partner.'); onDone&&onDone();
     }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
@@ -12477,7 +12517,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
     // ── Share ──
     listEl.querySelectorAll('.fh-share').forEach(b => b.addEventListener('click', async () => {
       const f = allFiles.find(x=>x.id===b.dataset.id); if (!f) return;
-      const usersSnap = await db.collection('users').get().catch(()=>({docs:[]}));
+      const usersSnap = await dbCachedGet('users', ()=>db.collection('users').get(), 60000).catch(()=>({docs:[]}));
       const userOpts = usersSnap.docs.map(d=>({id:d.id,...d.data()}))
         .map(u=>`<option value="${u.id}">${escHtml(u.displayName||u.email||u.id)}</option>`).join('');
       const deptOpts = Object.keys(window.DEPARTMENTS||{}).map(d=>`<option value="${escHtml(d)}">${escHtml(d)}</option>`).join('');
@@ -12890,6 +12930,7 @@ function openQCModal(order, onSaved){
       by: currentUser.uid, byName: userProfile?.displayName||currentUser.email||'', at: new Date().toISOString() };
     try {
       await db.collection('production_orders').doc(order.id).update({ qc, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('production_orders');
       window.logAudit && window.logAudit('update','production_order',order.id,{ qc: result });
       Notifs.showToast(result==='passed' ? 'QC passed — press Advance → to move the order on.' : 'QC failed — rework, then re-inspect.', result==='passed'?undefined:'error');
       closeModal(); onSaved && onSaved();
@@ -12933,6 +12974,7 @@ function openDeliveryReceiptModal(order, onSaved){
       const deliveryReceipt = { no, receivedBy, date: document.getElementById('dr-date').value || dayStr,
         notes: document.getElementById('dr-notes').value.trim(), by: currentUser.uid, byName, at: new Date().toISOString() };
       await db.collection('production_orders').doc(order.id).update({ deliveryReceipt, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('production_orders'); dbCacheInvalidate('job_projects'); }
       if (order.projectId) { try { await db.collection('job_projects').doc(order.projectId).update({
         documents: firebase.firestore.FieldValue.arrayUnion({ type:'Delivery Receipt', ref:no, at:new Date().toISOString(), by:byName }),
         timeline:  firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Delivery receipt '+no+' recorded', by:byName }),
@@ -13526,8 +13568,8 @@ async function renderProdOrders(el, currentUser, currentRole) {
   const canEdit = canEditDept('Production');
   el.innerHTML = '<div class="loading-placeholder">Loading orders…</div>';
   const [snap, projSnap] = await Promise.all([
-    db.collection('production_orders').orderBy('createdAt','desc').get().catch(()=>({docs:[]})),
-    db.collection('job_projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]}))
+    dbCachedGet('production_orders', ()=>db.collection('production_orders').orderBy('createdAt','desc').get(), 45000).catch(()=>({docs:[]})),
+    dbCachedGet('job_projects', ()=>db.collection('job_projects').orderBy('createdAt','desc').get(), 45000).catch(()=>({docs:[]}))
   ]);
   const orders = snap.docs.map(d=>({id:d.id,...d.data()}));
   // Incoming jobs = won / in-production projects that don't yet have a work order.
@@ -13671,6 +13713,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
           stageHistory: firebase.firestore.FieldValue.arrayUnion({
             stage: next.id, enteredAt: new Date().toISOString(),
             by: currentUser.uid, byName: userProfile?.displayName||currentUser.email||'' }) });
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('production_orders');
         // Keep the parent project's lifecycle stage in sync with production progress —
         // but only move it FORWARD. Never regress a job that's already further along
         // (e.g. delivered/paid) just because an early production sub-stage advanced.
@@ -13909,6 +13952,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
     const btn = document.getElementById('po-consume'); btn.disabled = true;
     try {
       await db.collection('production_orders').doc(order.id).update({ materials });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('production_orders');
       const res = await consumeProductionMaterials({ ...e, id: order.id, materials });
       if (res.ok) Notifs.success(res.cosPosted
         ? `Consumed ${res.count} material${res.count>1?'s':''} · COS ₱${fmt(res.cos)} posted to ledger.`
@@ -13981,12 +14025,13 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
           timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Production order '+data.orderNo+' created', by:data.createdByName }) }); } catch(_) {}
         }
       }
+      if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('production_orders'); dbCacheInvalidate('job_projects'); }
       closeModal(); Notifs.success('Order saved'); onSaved && onSaved();
     } catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
   });
   document.getElementById('po-del')?.addEventListener('click', async ()=>{
     if(!(await confirmDialog({message:'Delete this production order?', danger:true}))) return;
-    try { await db.collection('production_orders').doc(order.id).delete(); window.logAudit&&window.logAudit('delete','production_order',order.id,{orderNo:order.orderNo||''}); closeModal(); Notifs.success('Deleted'); onSaved && onSaved(); }
+    try { await db.collection('production_orders').doc(order.id).delete(); window.logAudit&&window.logAudit('delete','production_order',order.id,{orderNo:order.orderNo||''}); if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('production_orders'); closeModal(); Notifs.success('Deleted'); onSaved && onSaved(); }
     catch(ex){ Notifs.showToast('Delete failed (admin only)','error'); }
   });
 }
@@ -14340,6 +14385,11 @@ async function loadPurchasingContent(currentUser, currentRole, sub) {
 // ── RFQ list (stage === 'rfq') ────────────────────
 async function renderRFQs(content, currentUser, currentRole) {
   const canEdit = canEditDept('Purchasing');
+  // v13 review: client-side stage filter retained ON PURPOSE. A server-side
+  // where('stage','==','rfq') would drop any legacy doc with no stage field,
+  // whereas the original defaults a missing stage to 'rfq' (d.stage||'rfq').
+  // Until the live collection is verified stage-clean (Phase 87 follow-up),
+  // correctness beats the marginal read saving on this small collection.
   const snap = await db.collection('purchase_requisitions').orderBy('createdAt','desc').get();
   const rfqs = snap.docs.map(d => ({ id:d.id, ...d.data() })).filter(d => (d.stage||'rfq') === 'rfq');
 
@@ -14601,6 +14651,8 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
   const canEdit = !opts.viewOnly && canEditDept('Purchasing');
   const canRecord = !!opts.financeView && isFinancePriv(); // Finance/admin may post to the books
   const canApprovePO = ['president','manager'].includes(currentRole);   // mirrors APPROVAL_CAPS['po-approval']
+  // v13 review: client-side stage filter retained (see renderRFQs note) — a
+  // server where('stage','==','pr') would hide any stage-less legacy PR.
   const snap = await db.collection('purchase_requisitions').orderBy('createdAt','desc').get();
   const prs = snap.docs.map(d => ({ id:d.id, ...d.data() })).filter(d => d.stage === 'pr');
 
