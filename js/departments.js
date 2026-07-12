@@ -10405,10 +10405,17 @@ window.renderApprovals = async function(currentUser) {
     { key:'roa',              label:'Quote / ROA',                 count: pendingQApprovals },
     { key:'quote-files',      label:'Quote Files',      icon:'📁' },
     { key:'finance-requests', label:'Finance Requests', icon:'💼', count: pendingFinReqs },
+    { key:'history',          label:'History',          icon:'🗄️' },
   ].filter(Boolean);
 
   c.innerHTML = `
     <div class="page-header"><h2>${emojiIcon('✅',20)} Approvals</h2>${totalPending>0?`<span class="badge badge-red" style="font-size:13px">${totalPending} pending</span>`:''}</div>
+    ${window.sopPanel('How approvals work', [
+      'Every request (sign-ups, cash advances, leave, deletes, quotes, etc.) lands here as one unified queue — default view is All Requests, pending only.',
+      'Use the chips to filter by type; each chip shows a live pending count.',
+      _showGrading ? 'President/Manager: the Grading chip queues completed tasks and self-assessments waiting for a score — separate from routine approvals.' : 'Money-moving and deletion requests are President-only; the Secretary can act on everyday items and escalate the rest.',
+      'Already-decided items don\'t clutter the queue — find them under the History chip (last 30 days, read-only).'
+    ])}
     ${_role==='secretary'?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Secretary oversight.</strong> You can approve everyday items (sign-ups, attendance, leave, submissions, task reviews); money-moving and deletion requests go to the President.</span></div>`
       :!canAct?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Oversight view.</strong> You can review every request here, but only the President approves.</span></div>`
       :!canDelete?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>ℹ️ Deletion of key records requires <strong>President</strong> approval.</span></div>`:''}
@@ -10892,6 +10899,84 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('grading');
         });
       }));
+      return;
+    }
+
+    if (sub === 'history') {
+      // ── Unified History (read-only) ────────────────────────────────────
+      // Recently RESOLVED items (approved/rejected/denied) across the same
+      // collections the 'all' tab sources from, so decided items don't sit
+      // in the pending queue forever but are still auditable. Capped at 100,
+      // newest first, 30-day lookback, no action buttons.
+      const cutoff = new Date(Date.now() - 30*24*60*60*1000);
+      const RESOLVED = new Set(['approved','rejected','denied','applied']);
+      const [sgH, atH, caH, subH, frH, fdH, qaH, lvH, rzH, poH] = await Promise.all([
+        db.collection('signup_requests').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
+        db.collection('attendance_extensions').orderBy('requestedAt','desc').limit(150).get().catch(()=>({docs:[]})),
+        db.collection('cash_advances').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
+        db.collection('submissions').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
+        db.collection('payroll_delete_requests').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
+        db.collection('finance_delete_requests').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
+        db.collection('approval_requests').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
+        db.collection('leave_requests').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
+        db.collection('pending_raises').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]})),
+        db.collection('purchase_requisitions').orderBy('createdAt','desc').limit(150).get().catch(()=>({docs:[]}))
+      ]);
+      const tsOf = x => (x.resolvedAt || x.approvedAt || x.decidedAt || x.updatedAt || x.createdAt);
+      const mk = (d, type, icon, label, name, detail) => {
+        const x = d.data(); const ts = tsOf(x);
+        return { id:d.id, type, icon, label, name, detail, status:(x.status||x.approvalStatus||(x.deleteRequested===false?'approved':'')), ts };
+      };
+      const HIST_TYPE_COLOR = {
+        'signup':'#1971C2','attendance':'#0CA678','ca':'#F76707','ca_deduct':'#F76707',
+        'submission':'#3B5BDB','finance-req':'#D92D20','finance-del':'#D92D20',
+        'quote-approval':'#7048E8','po-approval':'#099268','leave':'#2F9E44','raise':'#E64980'
+      };
+      let items = [
+        ...sgH.docs.map(d=>mk(d,'signup','👤','Sign-up Request', d.data().fullName||d.data().email||'Unknown', d.data().email||'')),
+        ...atH.docs.map(d=>mk(d,'attendance','⏰','Attendance Extension', d.data().userName||'Unknown', d.data().date||'')),
+        ...caH.docs.map(d=>mk(d,'ca','💸','Cash Advance', d.data().userName||'Unknown', `₱${fmt(d.data().amount||0)}`)),
+        ...subH.docs.map(d=>mk(d,'submission','📤','Work Submission', d.data().submittedByName||d.data().userName||d.data().authorName||'Unknown', d.data().title||'')),
+        ...frH.docs.map(d=>mk(d,'finance-req','💼','Finance Request', `Delete: ${d.data().userName||'?'} (${d.data().month||'?'})`, `by ${d.data().requestedByName||'?'}`)),
+        ...fdH.docs.map(d=>mk(d,'finance-del','🗑','Finance Delete', `Delete: ${d.data().label||'record'}`, `by ${d.data().requestedByName||'?'}`)),
+        ...qaH.docs.filter(d=>d.data().type!=='ca_deduct').map(d=>mk(d,'quote-approval','📤','Quote Approval', `${d.data().quoteNumber||'Quote'} — ${d.data().clientName||''}`, `${d.data().agentName||'Partner'} · ₱${fmt(d.data().total||0)}`)),
+        ...qaH.docs.filter(d=>d.data().type==='ca_deduct').map(d=>mk(d,'ca_deduct','💳','CA Deduction Request', d.data().userName||'Employee', `₱${fmt(d.data().amount||0)}`)),
+        ...lvH.docs.map(d=>mk(d,'leave','🌴','Leave Request', d.data().userName||'Employee', `${d.data().days||0}d ${d.data().type||'leave'}`)),
+        ...rzH.docs.map(d=>mk(d,'raise','💸','Raise Request', d.data().subjectName||'Employee', `₱${fmt(d.data().oldAmount||0)} → ₱${fmt(d.data().newAmount||0)}`)),
+        ...poH.docs.map(d=>mk(d,'po-approval','🛒','PO Approval', `${d.data().prNo||d.data().rfqNo||'PO'} — ${d.data().supplier||'supplier'}`, `${d.data().requestingDept||'Purchasing'} · ₱${fmt(d.data().total||0)}`))
+      ]
+        .filter(it => RESOLVED.has((it.status||'').toLowerCase()) && it.ts && it.ts.toDate && it.ts.toDate() >= cutoff)
+        .sort((a,b)=>(b.ts?.seconds||0)-(a.ts?.seconds||0))
+        .slice(0,100);
+
+      if (!items.length) {
+        wrap.innerHTML = `<div class="empty-state" style="padding:48px 16px"><div class="empty-icon">${emojiIcon('🗄️',44)}</div><h4>Nothing resolved yet</h4><p>Approved, rejected, or denied requests from the last 30 days will show up here.</p></div>`;
+        if (window.lucide) lucide.createIcons({ nodes: [wrap] });
+        return;
+      }
+      wrap.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${items.map(item => {
+            const tileColor = HIST_TYPE_COLOR[item.type] || 'var(--primary)';
+            const tileIcon = window.LUCIDE_EMOJI_MAP[item.icon] || 'file-text';
+            const st = (item.status||'').toLowerCase();
+            const badgeCls = (st==='approved'||st==='applied') ? 'badge-green' : 'badge-red';
+            const badgeLbl = st==='applied' ? 'Approved' : st==='approved' ? 'Approved' : (st==='denied' ? 'Denied' : 'Rejected');
+            return `
+          <div class="item-card" style="cursor:default">
+            <div class="item-top">
+              <div class="item-title" style="display:flex;align-items:center;gap:8px">${window.iconTile(tileIcon, tileColor, window.lightenHex(tileColor,18), 28)} ${escHtml(item.name)}</div>
+              <span class="badge ${badgeCls}">${badgeLbl}</span>
+            </div>
+            <div class="item-meta" style="margin-top:4px">
+              <span class="badge badge-blue" style="font-size:10px">${escHtml(item.label)}</span>
+              ${item.detail?`<span style="font-size:12px;color:var(--text-muted)">${escHtml(item.detail)}</span>`:''}
+              ${item.ts?`<span style="font-size:11px;color:var(--text-muted)">${new Date(item.ts.toDate()).toLocaleDateString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>`:''}
+            </div>
+          </div>`;
+          }).join('')}
+        </div>`;
+      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
       return;
     }
 
