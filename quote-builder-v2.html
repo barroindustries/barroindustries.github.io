@@ -907,6 +907,7 @@ tr:hover td{background:#fafbff;}
   </div><!-- /laborTimelineWrap -->
 
   <!-- Cost of goods + margin (uses per-product Materials/Labor capital from the database) -->
+  <div id="costMarginWrap">
   <div class="sec-title" style="margin-top:14px;">💰 Cost &amp; Margin (Internal)</div>
   <p style="font-size:11px;color:var(--gray-dark);margin:-4px 0 8px;">
     Materials &amp; per-unit labor pull from each product's <em>capital cost</em> in the database. Edit them in the President's Product Database.
@@ -934,6 +935,7 @@ tr:hover td{background:#fafbff;}
   <div style="margin-top:10px;font-size:12px;color:var(--orange);">
     ⚠️ This panel is hidden in the client view and in print mode.
   </div>
+  </div><!-- /costMarginWrap -->
 </div>
 
 <!-- ── TERMS & CONDITIONS ── -->
@@ -1216,6 +1218,14 @@ function applyPartnerMode(){
   // partners — they keep the per-item Cost & Margin view for the 50/50 split.
   const lt=document.getElementById('laborTimelineWrap'); if(lt) lt.style.display='none';
   const mlr=document.getElementById('miLaborRow'); if(mlr) mlr.style.display='none';
+  // Generic CO.PT partners (not Brilliant Steel) never see internal cost/margin data —
+  // BS keeps it per the standing 50/50 arrangement, but a generic partner is a normal
+  // client and must not see Barro's cost basis. Remove the DOM nodes entirely (not
+  // display:none) so the data never round-trips into the page for that session.
+  if(GENERIC_PARTNER){
+    document.getElementById('btnInternal')?.remove();
+    document.getElementById('costMarginWrap')?.remove();
+  }
   // Agent Copy stays available to partners (restored per request).
   // If the Admin panel was open, fall back to client view
   if(typeof currentView!=='undefined' && currentView==='admin') setView('client');
@@ -1649,7 +1659,7 @@ function renderDropdown(prods){
       html+=`<div class="sd-item" data-id="${p.id}" onclick="selectProduct('${p.id}')">
         ${p.photoUrl?`<img src="${attrEsc(p.photoUrl)}" loading="lazy" style="width:36px;height:36px;object-fit:cover;border-radius:6px;margin-right:8px;flex-shrink:0">`:''}
         <div class="sd-item-info">
-          <div class="sd-item-name">${p.name}</div>
+          <div class="sd-item-name">${txtEsc(p.name)}</div>
           <div class="sd-item-meta">${p.id} · ${p.formulaType==='fixed'?'Fixed price':p.formulaType==='per_length'?'Scales by length':p.formulaType==='per_area'?'Per sqm':p.formulaType==='per_run'?'Per run':'Configurable'}</div>
         </div>
         <div class="sd-item-price">${p.formulaType==='fixed'?baseP:'from '+baseP}</div>
@@ -1702,7 +1712,7 @@ function selectProduct(id){
 
 function buildCalcPanel(p){
   const panel=document.getElementById('calcPanel');
-  document.getElementById('calcTitle').innerHTML=`⚙ Configure: <strong>${p.name}</strong> <span class="formula-badge">${p.id}</span>`;
+  document.getElementById('calcTitle').innerHTML=`⚙ Configure: <strong>${txtEsc(p.name)}</strong> <span class="formula-badge">${txtEsc(p.id)}</span>`;
   document.getElementById('calcUnit').value=p.unit||'pc';
   document.getElementById('calcQty').value=1;
 
@@ -1969,9 +1979,9 @@ function renderItems(){
       html+=`<tr>
         <td style="text-align:center;color:var(--gray-dark);font-size:12px;">${globalN++}</td>
         <td>
-          <div class="name-cell cell-edit" contenteditable="true" onblur="editName(${idx},this)">${item.name}</div>
-          <div class="spec-line"><span class="spec-tag no-print">Specs</span><span class="spec-edit cell-edit" contenteditable="true" data-ph="Click to add specifications…" onblur="editSpecs(${idx},this)">${specText}</span></div>
-          <div class="notes-cell cell-edit" contenteditable="true" onblur="editNotes(${idx},this)" data-ph="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${item.notes||''}</div>
+          <div class="name-cell cell-edit" contenteditable="true" onblur="editName(${idx},this)">${txtEsc(item.name)}</div>
+          <div class="spec-line"><span class="spec-tag no-print">Specs</span><span class="spec-edit cell-edit" contenteditable="true" data-ph="Click to add specifications…" onblur="editSpecs(${idx},this)">${txtEsc(specText)}</span></div>
+          <div class="notes-cell cell-edit" contenteditable="true" onblur="editNotes(${idx},this)" data-ph="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${txtEsc(item.notes||'')}</div>
         </td>
         <td style="font-size:11px;">${item.dims||'—'}</td>
         <td style="text-align:center;"><input class="cell-num" type="number" min="1" value="${item.qty}" onchange="updateQty(${idx},this)" style="width:50px;"></td>
@@ -2286,7 +2296,7 @@ function computeMarginSummary(laborEst){
   if(piBody){
     piBody.innerHTML = items.length ? items.map(i=>{
       const qty=i.qty||1, mat=(i.capitalMaterials||0)*qty, lab=(i.capitalLabor||0)*qty;
-      return `<tr><td style="font-size:12px;">${(i.name||'').replace(/</g,'&lt;')}</td><td style="text-align:center;">${qty}</td><td style="text-align:right;">${formatPeso(mat)}</td><td style="text-align:right;">${formatPeso(lab)}</td><td style="text-align:right;font-weight:600;">${formatPeso(mat+lab)}</td></tr>`;
+      return `<tr><td style="font-size:12px;">${txtEsc(i.name||'')}</td><td style="text-align:center;">${qty}</td><td style="text-align:right;">${formatPeso(mat)}</td><td style="text-align:right;">${formatPeso(lab)}</td><td style="text-align:right;font-weight:600;">${formatPeso(mat+lab)}</td></tr>`;
     }).join('') : '<tr><td colspan="5" style="text-align:center;color:var(--gray-dark);padding:8px;">Add items to see the capital &amp; labor breakdown.</td></tr>';
     const pm=document.getElementById('piMatTotal'); if(pm) pm.textContent=formatPeso(materials);
     const pl=document.getElementById('piLabTotal'); if(pl) pl.textContent=formatPeso(capLabor);
@@ -2744,7 +2754,7 @@ function fileQuotation(){
     quoteStatus='pending_approval';
     document.getElementById('verifyModal').style.display='none';
     saveToStorage();
-    window.parent.postMessage({ type:'QUOTE_APPROVAL_REQUESTED', payload: quotePayload }, '*');
+    window.parent.postMessage({ type:'QUOTE_APPROVAL_REQUESTED', payload: quotePayload }, window.location.origin);
     // Show feedback
     document.getElementById('filedBadge').textContent='⏳ Pending Approval';
     document.getElementById('filedBadge').classList.add('show');
@@ -2762,7 +2772,7 @@ function fileQuotation(){
   saveToStorage();
 
   // Notify parent app to save to Firestore
-  window.parent.postMessage({ type:'QUOTE_FILED', payload: quotePayload }, '*');
+  window.parent.postMessage({ type:'QUOTE_FILED', payload: quotePayload }, window.location.origin);
 
   // Local log for offline/standalone use
   try{
@@ -2884,7 +2894,7 @@ window.addEventListener('message',ev=>{
   if(d.type==='LOAD_QUOTE' && d.payload) loadEditableState(d.payload.editableState||d.payload, { asRevision: !!d.payload.asRevision });
   // Host (president review mode) asks for the current edited state to save it back
   // to the original quote without going through the File flow.
-  if(d.type==='REQUEST_STATE'){ try{ window.parent.postMessage({ type:'QUOTE_STATE', payload: buildQuotePayload() }, '*'); }catch(e){} }
+  if(d.type==='REQUEST_STATE'){ try{ window.parent.postMessage({ type:'QUOTE_STATE', payload: buildQuotePayload() }, window.location.origin); }catch(e){} }
 });
 
 function closeVerifyModal(e){
