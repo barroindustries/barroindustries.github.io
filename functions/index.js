@@ -871,3 +871,125 @@ exports.sendNotificationQuota = functions
     }
     return null;
   });
+
+/**
+ * Phase 74 (V13-PLAN, ROADMAP item 4) — quote acceptance -> job costing.
+ *
+ * Design constraint documented in ROADMAP.md item 4: `job_costs` read is
+ * finance/admin-only (margins) and `bk_quotes`/`bs_quotes` read is
+ * creator-or-admin only, so a sales user accepting a quote can neither
+ * dedup against job_costs nor would finance be able to read the quote
+ * client-side. This trigger runs server-side (admin SDK bypasses rules)
+ * so no client read friction is introduced and job_costs stays
+ * finance-read-only.
+ *
+ * Won-status evidence (js/departments.js ~L9650, the Sales "Create Sales
+ * Order" flow that is the actual quote-acceptance path):
+ *   await db.collection(qc).doc(d.id).update({ salesOrderId, projectId, status:'won' })
+ * `status: 'won'` is what gets WRITTEN on acceptance for both bk_quotes and
+ * bs_quotes. `status === 'accepted'` also appears (js/config.js L512,
+ * window.isQuoteWon) but per that same line's comment is "kept for legacy
+ * `quotes` docs only" (a different, older collection) — so both values are
+ * treated as terminal-win here defensively, matching the app's own
+ * canonical isQuoteWon() definition, while 'won' is the one this trigger
+ * will actually observe in practice.
+ *
+ * job_costs field names (js/modules.js jobModal/renderJobs, the only writer
+ * of this collection today) are: project, quoteRef, revenue, materialsCost,
+ * laborCost, otherCost. This trigger seeds those same field names so the
+ * existing Job Costing UI renders the doc with no changes.
+ *
+ * Idempotency:
+ *  - onUpdate guard: only fires when status transitions INTO won/accepted
+ *    (before wasn't already won/accepted) - re-fires on unrelated field
+ *    edits of an already-won quote are no-ops.
+ *  - Finance-data preservation: reads the existing job_costs/{quoteId} doc
+ *    first. If it already exists, this trigger updates ONLY the
+ *    quote-derived descriptive fields (project/quoteRef/revenue/
+ *    needsCosting) and never touches materialsCost/laborCost/otherCost, so
+ *    a finance user's entered costs survive any re-fire or re-acceptance.
+ *    If the doc doesn't exist yet, it seeds materialsCost/laborCost from
+ *    the quote's capitalMaterials/capitalLabor fields when present (else 0,
+ *    flagged needsCosting:true).
+ */
+function makeOnQuoteWonHandler(collectionName) {
+  return async (change, context) => {
+    const db = admin.firestore();
+    const { id } = context.params;
+    const before = change.before.data() || {};
+    const after = change.after.data() || {};
+    const stats = { errors: 0, notified: 0 };
+    const WON_VALUES = ['won', 'accepted'];
+
+    try {
+      const wasWon = WON_VALUES.includes(before.status);
+      const isWon = WON_VALUES.includes(after.status);
+      if (wasWon || !isWon) {
+        // Only act on a fresh transition INTO won/accepted.
+        return null;
+      }
+
+      const jobCostsRef = db.collection('job_costs').doc(id);
+      const existing = await jobCostsRef.get();
+
+      const revenue = Number(after.total) || 0;
+      const project = (after.client || '') + (after.qno ? ' — ' + after.qno : '');
+      const quoteRef = after.qno || '';
+      const hasCapital = (Number(after.capitalMaterials) || 0) > 0 || (Number(after.capitalLabor) || 0) > 0;
+
+      if (existing.exists) {
+        // Preserve any finance-entered costs — never touch cost fields on
+        // an existing doc, only the quote-derived descriptive fields.
+        await jobCostsRef.set({
+          quoteId: id,
+          quoteNumber: quoteRef,
+          clientName: after.client || '',
+          project,
+          quoteRef,
+          revenue,
+          source: 'quote-accept',
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      } else {
+        // No existing doc — seed it, including cost fields (0 / from
+        // capital fields if the quote carries them).
+        await jobCostsRef.set({
+          quoteId: id,
+          quoteNumber: quoteRef,
+          clientName: after.client || '',
+          project,
+          quoteRef,
+          revenue,
+          materialsCost: hasCapital ? (Number(after.capitalMaterials) || 0) : 0,
+          laborCost: hasCapital ? (Number(after.capitalLabor) || 0) : 0,
+          otherCost: 0,
+          needsCosting: !hasCapital,
+          source: 'quote-accept',
+          createdFrom: collectionName,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      }
+
+      stats.notified = 1;
+      console.log(`[onQuoteWon:${collectionName}] ${id} -> job_costs/${id} (${existing.exists ? 'preserved existing costs' : 'seeded new doc'})`);
+    } catch (e) {
+      stats.errors++;
+      console.error(`[onQuoteWon:${collectionName}] ${id} failed:`, e.message);
+    }
+    await reportHealth(db, 'onQuoteWon', stats, `Quote acceptance -> job_costs (${collectionName})`);
+    return null;
+  };
+}
+
+exports.onBkQuoteWon = functions
+  .region('asia-east1')
+  .firestore
+  .document('bk_quotes/{id}')
+  .onUpdate(makeOnQuoteWonHandler('bk_quotes'));
+
+exports.onBsQuoteWon = functions
+  .region('asia-east1')
+  .firestore
+  .document('bs_quotes/{id}')
+  .onUpdate(makeOnQuoteWonHandler('bs_quotes'));
