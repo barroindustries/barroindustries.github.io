@@ -141,6 +141,15 @@ async function main() {
     const basename = f.name.replace(/\.json$/, '');
     const entry = entries ? entries[basename] : null;
 
+    // v13 Phase 89 — month-activity report files (e.g. tasks_created_2026-06)
+    // are report:true in the manifest. They're CSV-only so this .json-only
+    // loop never actually sees them in practice — this check is a second,
+    // explicit guard in case a report is ever emitted as JSON.
+    if (entry && entry.report) {
+      console.log(`\n⏭️  ${entry.filename} (month-activity report, not a restore source) — skipped`);
+      continue;
+    }
+
     // v13 Phase 3/4 — {root}__{sub}.json subcollection export, manifest-driven.
     if (entry && entry.subcollection) {
       if (ONLY && ONLY !== entry.parentCollection &&

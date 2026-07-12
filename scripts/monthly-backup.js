@@ -115,7 +115,14 @@ function getPrevMonthRange() {
 //  and exported as a COMPLETE full-document JSON snapshot — no hand-registration,
 //  so new collections (pay_runs, it_*, aec_contacts, files_*, budgets_*, …) are
 //  covered automatically and this file never drifts again.
-//    dateField  — field to filter by prev month (absent/null = full snapshot)
+//    dateField  — v13 Phase 89: NO LONGER gates full-vs-filtered for the main
+//                 export (every collection below is now a FULL snapshot, same
+//                 as everything else, so restore reflects current state —
+//                 H12). When present, dateField instead drives an ADDITIONAL
+//                 "*_created_{month}.csv" MONTH-ACTIVITY REPORT (docs created
+//                 in the backed-up month, frozen at that moment) — a report,
+//                 not a restore source. See exportMonthReport() + restore's
+//                 mimeType-json-only file filter, which already skips CSVs.
 //    dateIsStr  — dateField is a 'YYYY-MM-DD' string, not a Timestamp
 //    csvFields  — also emit a CSV with these columns (JSON is always complete)
 //    filename   — output basename if different from the collection name
@@ -167,6 +174,12 @@ const OVERRIDES = {
   },
 };
 
+// Size guard (v13 Phase 89): any single collection's FULL export exceeding
+// this doc count gets a loud console warning + a system_health warning entry
+// so unbounded growth becomes visible before it becomes a Drive/runtime
+// problem. Not a hard cap — nothing is truncated, just flagged.
+const COLLECTION_SIZE_WARN_THRESHOLD = 50000;
+
 // Ephemeral / huge / per-user-subcollection roots we never snapshot to JSON.
 // (audit_log is intentionally NOT here — its off-site copy is the whole point.)
 // v13 Phase 2/3 cleanup: 'presence' and 'sessions' removed — neither is a real
@@ -215,10 +228,33 @@ async function fetchCollection(col, { start, end }) {
     return { docs: await fetchAttendanceSubcollection({ start, end }), refs: [] };
   }
 
+  // v13 Phase 89: FULL snapshot for every collection, always — no dateField
+  // filtering here anymore (that used to silently freeze docs at their
+  // creation-month state and made restore revert later edits — H12). The
+  // dateField, if present, is used ONLY by fetchMonthReport() below to build
+  // an additional, clearly-named month-activity report file.
+  const snap = await db.collection(col.name).get();
+
+  return {
+    docs: snap.docs.map(d => serialize({ id: d.id, ...d.data() })),
+    refs: snap.docs.map(d => d.ref),
+  };
+}
+
+// ── Month-activity report (v13 Phase 89) ───────────────────────────────────
+// For collections with a dateField, ALSO fetch the docs created in the
+// backed-up month specifically, and export them as an ADDITIONAL
+// "{filename}_created_{month}.csv" report file. This is a point-in-time
+// "what got created this month" report, NOT a restore source — the main
+// {filename}.json/.csv above is always the full current-state snapshot that
+// restore-from-backup.js reads. Emitted as CSV only (not JSON) so Drive's
+// mimeType='application/json' listing in restore-from-backup.js naturally
+// never sees it; the _manifest.json entry is also tagged report:true as a
+// second, explicit line of defense.
+async function fetchMonthReport(col, { start, end }) {
+  if (!col.dateField) return null;
   let snap;
-  if (!col.dateField) {
-    snap = await db.collection(col.name).get();
-  } else if (col.dateIsStr) {
+  if (col.dateIsStr) {
     const startStr = start.toISOString().slice(0, 10);
     const endStr   = end.toISOString().slice(0, 10);
     snap = await db.collection(col.name)
@@ -231,11 +267,7 @@ async function fetchCollection(col, { start, end }) {
       .where(col.dateField, '<',  admin.firestore.Timestamp.fromDate(end))
       .get();
   }
-
-  return {
-    docs: snap.docs.map(d => serialize({ id: d.id, ...d.data() })),
-    refs: snap.docs.map(d => d.ref),
-  };
+  return snap.docs.map(d => serialize({ id: d.id, ...d.data() }));
 }
 
 // ── Generic subcollection walker (v13 Phase 2 + 3) ─────────────────────────
@@ -332,6 +364,7 @@ async function exportSubcollections(rootName, refs, folderId, stats, manifest, s
 }
 
 // ── Upload a single export (JSON + optional CSV) ───────────────────────────
+// Returns the byte size of the JSON payload (used for the size guard/summary).
 async function exportCollection(col, docs, folderId, stats) {
   console.log(`   Exporting ${docs.length} records → ${col.filename}`);
 
@@ -351,6 +384,24 @@ async function exportCollection(col, docs, folderId, stats) {
     await uploadText(csvContent, `${col.filename}.csv`, 'text/csv', folderId);
     stats.files++;
   }
+
+  return Buffer.byteLength(jsonContent, 'utf-8');
+}
+
+// ── Upload the additional month-activity report (CSV only, v13 Phase 89) ───
+async function exportMonthReport(col, docs, label, folderId, stats) {
+  if (!docs || !col.csvFields) return null;
+  const reportFilename = `${col.filename}_created_${label}`;
+  console.log(`   Exporting ${docs.length} records → ${reportFilename}.csv (month-activity report, NOT a restore source)`);
+  const csvRows = docs.map(d => {
+    const row = {};
+    col.csvFields.forEach(k => { row[k] = d[k] ?? ''; });
+    return row;
+  });
+  const csvContent = toCSV(csvRows);
+  await uploadText(csvContent, `${reportFilename}.csv`, 'text/csv', folderId);
+  stats.files++;
+  return reportFilename;
 }
 
 // ── Heartbeat: write a status doc the app watches (see §F) ──────────────────
@@ -364,6 +415,7 @@ async function reportHealth(job, stats, label, durationSec) {
       filesWritten:    stats.files || 0,
       recordsExported: stats.exported || 0,
       unfetchable:     stats.unfetchable || 0,
+      warnings:        stats.warnings || 0,
       durationSec:     Number(durationSec) || 0,
       label:           label || '',
     }, { merge: true });
@@ -395,6 +447,16 @@ async function main() {
     `Month  : ${label}`,
     `Created: ${startedAt.toISOString()}`,
     ``,
+    `File semantics (v13 Phase 89):`,
+    `  {name}.json / {name}.csv           — FULL current-state snapshot, every root collection.`,
+    `                                        This is what restore-from-backup.js reads back.`,
+    `  {name}_created_{month}.csv         — MONTH-ACTIVITY REPORT: docs created in ${label} only,`,
+    `                                        frozen at that moment. NOT a restore source — CSV-only`,
+    `                                        (restore only looks at mimeType=json files) and flagged`,
+    `                                        report:true in _manifest.json as a second guard.`,
+    `  {root}__{subcollection}.json       — every subcollection doc under an exported root doc`,
+    `                                        (comments, messages, attendance records, …), full snapshot.`,
+    ``,
     `Collections exported:`,
   ];
 
@@ -402,6 +464,9 @@ async function main() {
   const manifest = [];
   const discovered = await db.listCollections();
   console.log(`\n📚 ${discovered.length} root collections discovered`);
+
+  stats.warnings = 0;
+  const sizeWarnings = [];
 
   for (const ref of discovered) {
     const name = ref.id;
@@ -412,11 +477,38 @@ async function main() {
                   type: ov.type };
     try {
       console.log(`\n📋 ${name}`);
+      // v13 Phase 89: main export is ALWAYS a full current-state snapshot
+      // now (fetchCollection no longer date-filters), so restore reflects
+      // edits made after a doc's creation month (H12).
       const { docs, refs } = await fetchCollection(col, { start, end });
-      await exportCollection(col, docs, monthFolder, stats);
+      const bytes = await exportCollection(col, docs, monthFolder, stats);
       stats.exported += docs.length;
       manifest.push({ collection: name, filename: col.filename, records: docs.length });
-      summaryLines.push(`  ${col.filename}: ${docs.length} records`);
+
+      const kb = bytes ? (bytes / 1024).toFixed(1) : '0.0';
+      let sizeNote = '';
+      if (docs.length > COLLECTION_SIZE_WARN_THRESHOLD) {
+        stats.warnings++;
+        sizeNote = `  ⚠️ EXCEEDS ${COLLECTION_SIZE_WARN_THRESHOLD.toLocaleString()}-doc size-guard threshold`;
+        sizeWarnings.push(`${col.filename}: ${docs.length} docs (${kb} KB)`);
+        console.warn(`   🚨 ${col.filename}: ${docs.length} docs exceeds size-guard threshold of ${COLLECTION_SIZE_WARN_THRESHOLD}`);
+      }
+      summaryLines.push(`  ${col.filename}: ${docs.length} records, ${kb} KB [full snapshot — restore source]${sizeNote}`);
+
+      // Additional, clearly-named month-activity report (v13 Phase 89) —
+      // ONLY for collections with a dateField. Report, not restore input;
+      // restore-from-backup.js skips it (CSV mimeType + manifest report:true).
+      if (col.dateField) {
+        const reportDocs = await fetchMonthReport(col, { start, end });
+        const reportFilename = await exportMonthReport(col, reportDocs, label, monthFolder, stats);
+        if (reportFilename) {
+          manifest.push({
+            collection: name, filename: reportFilename, records: reportDocs.length,
+            report: true, reportOf: col.filename, reportMonth: label,
+          });
+          summaryLines.push(`  ${reportFilename}.csv: ${reportDocs.length} records [month-activity report of ${col.filename}, created in ${label} — NOT a restore source]`);
+        }
+      }
 
       // Generic subcollection walker — comments/messages/etc. under this
       // root's docs (v13 Phase 2+3). No-op when refs is empty (attendance).
@@ -435,18 +527,43 @@ async function main() {
   // Upload summary file
   const duration = ((Date.now() - startedAt.getTime()) / 1000).toFixed(1);
   summaryLines.push('');
+  if (sizeWarnings.length) {
+    summaryLines.push(`⚠️  SIZE-GUARD WARNINGS (> ${COLLECTION_SIZE_WARN_THRESHOLD.toLocaleString()} docs):`);
+    sizeWarnings.forEach(w => summaryLines.push(`  - ${w}`));
+    summaryLines.push('');
+  }
   summaryLines.push(`Total records : ${stats.exported}`);
   summaryLines.push(`Total files   : ${stats.files}`);
   summaryLines.push(`Errors        : ${stats.errors}`);
+  summaryLines.push(`Warnings      : ${stats.warnings}`);
   summaryLines.push(`Duration      : ${duration}s`);
 
   await uploadText(summaryLines.join('\n'), '_summary.txt', 'text/plain', monthFolder);
+
+  // Size-guard → system_health, so unbounded growth is visible in-app, not
+  // just buried in a log file (v13 Phase 89).
+  if (sizeWarnings.length) {
+    try {
+      await db.collection('system_health').doc('monthly_backup_size_guard').set({
+        job: 'monthly_backup_size_guard',
+        lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastStatus: 'warning',
+        label,
+        thresholdDocs: COLLECTION_SIZE_WARN_THRESHOLD,
+        collections: sizeWarnings,
+      }, { merge: true });
+      console.warn(`   🫀 system_health/monthly_backup_size_guard warning written (${sizeWarnings.length} collection(s) over threshold)`);
+    } catch (e) {
+      console.warn(`   ⚠️  could not write system_health/monthly_backup_size_guard: ${e.message}`);
+    }
+  }
 
   console.log(`\n${'─'.repeat(50)}`);
   console.log(`✅ Monthly backup complete — ${label}`);
   console.log(`   Records exported: ${stats.exported}`);
   console.log(`   Files created   : ${stats.files}`);
   console.log(`   Errors          : ${stats.errors}`);
+  console.log(`   Warnings        : ${stats.warnings}`);
   console.log(`   Duration        : ${duration}s`);
   console.log(`${'─'.repeat(50)}\n`);
 
