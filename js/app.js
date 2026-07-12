@@ -243,6 +243,7 @@ const SYSTEM_HEALTH_JOBS = [
   { id: 'daily_sync',                  label: 'Daily file sync',            cadence: 'daily',   staleMs: 36 * 3600 * 1000 },
   { id: 'monthly_backup',              label: 'Monthly backup',             cadence: 'monthly', staleMs: 40 * 24 * 3600 * 1000 },
   { id: 'monthly_backup_size_guard',   label: 'Monthly backup size guard',  cadence: 'monthly', staleMs: 40 * 24 * 3600 * 1000 },
+  { id: 'daily_digest',                label: 'Daily ops digest',           cadence: 'daily',   staleMs: 36 * 3600 * 1000 },
   { id: 'scheduledAttendanceReminder', label: 'Attendance reminder',        cadence: 'daily',   staleMs: 36 * 3600 * 1000 },
   { id: 'scheduledDailyDigestChecks',  label: 'Daily digest checks',        cadence: 'daily',   staleMs: 36 * 3600 * 1000 },
   { id: 'executeApprovalOnUpdate',     label: 'Approval execution trigger', cadence: 'daily',   staleMs: 36 * 3600 * 1000 },
@@ -7000,7 +7001,7 @@ async function renderAnalytics() {
     new Chart(document.getElementById('bh-cash-chart'),{type:'bar',data:{labels:months6.map(m=>m.label),datasets:[
       {label:'Cash In',data:months6.map(m=>ledIn(m.ym)||wonQuotesMonth(m.ym)),backgroundColor:CT.good},
       {label:'Cash Out',data:months6.map(m=>ledOut(m.ym)),backgroundColor:CT.bad},
-    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:CT.text},grid:{color:CT.grid}},x:{ticks:{color:CT.text},grid:{display:false}}}}});
+    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}},tooltip:{callbacks:{label:c=>` ${c.dataset.label}: ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:CT.text,callback:v=>'₱'+window.fmtN2(v)},grid:{color:CT.grid}},x:{ticks:{color:CT.text},grid:{display:false}}}}});
     // Gross profit vs cost (profitability)
     if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('bh-margin-chart'),{type:'doughnut',data:{labels:['Gross Profit','Cost'],datasets:[{data:[Math.max(grossProfit,0),jcCost],backgroundColor:[CT.good,CT.muted],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}},tooltip:{callbacks:{label:c=>` ${c.label}: ₱${fmt(c.parsed)}`}}}}});
@@ -7214,11 +7215,11 @@ async function renderAnalytics() {
     const cats=[...new Set(ledDebits.map(l=>l.category||'Other'))].slice(0,6);
     const catAmts=cats.map(cat=>ledDebits.filter(l=>(l.category||'Other')===cat).reduce((s,l)=>s+(l.amount||0),0));
     if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('fin-exp-chart'),{type:'bar',data:{labels:cats,datasets:[{data:catAmts,backgroundColor:CT.neutral}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{ticks:{color:CT.text},grid:{color:CT.grid}},x:{ticks:{color:CT.text,font:{size:10}},grid:{display:false}}}}});
+    new Chart(document.getElementById('fin-exp-chart'),{type:'bar',data:{labels:cats,datasets:[{data:catAmts,backgroundColor:CT.neutral}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ₱${window.fmtN2(c.parsed.y)}`}}},scales:{y:{ticks:{color:CT.text,callback:v=>'₱'+window.fmtN2(v)},grid:{color:CT.grid}},x:{ticks:{color:CT.text,font:{size:10}},grid:{display:false}}}}});
     if (!window.Chart) { await window.ensureChart(); }
     new Chart(document.getElementById('fin-ca-chart'),{type:'doughnut',data:{labels:['Approved','Pending','Rejected'],datasets:[{data:[cas.filter(a=>a.status==='approved').length,cas.filter(a=>a.status==='pending').length,cas.filter(a=>a.status==='rejected').length],backgroundColor:[CT.good,CT.warn,CT.bad],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:CT.text}}}}});
     if (!window.Chart) { await window.ensureChart(); }
-    new Chart(document.getElementById('fin-net-chart'),{type:'line',data:{labels:months6.map(m=>m.label),datasets:[{label:'Net Income',data:months6.map(m=>finIn(m.ym)-finOut(m.ym)),borderColor:CT.good,backgroundColor:CT.goodA,fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:CT.text},grid:{color:CT.grid}},x:{ticks:{color:CT.text},grid:{display:false}}}}});
+    new Chart(document.getElementById('fin-net-chart'),{type:'line',data:{labels:months6.map(m=>m.label),datasets:[{label:'Net Income',data:months6.map(m=>finIn(m.ym)-finOut(m.ym)),borderColor:CT.good,backgroundColor:CT.goodA,fill:true,tension:0.4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>` ₱${fmt(c.parsed.y)}`}}},scales:{y:{ticks:{color:CT.text,callback:v=>'₱'+window.fmtN2(v)},grid:{color:CT.grid}},x:{ticks:{color:CT.text},grid:{display:false}}}}});
   };
 
   const renderProduction = async () => {

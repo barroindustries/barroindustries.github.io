@@ -142,6 +142,16 @@ async function main() {
     if (await writeDigest(uid, body)) sent++;
   }
   console.log(`[digest] Done. ${sent}/${recipients.length} sent (rest already had today's digest).`);
+
+  // v13 Phase 90b: success heartbeat so the in-app System Health page can show
+  // this job as healthy/stale (the workflow's if:failure step writes the error
+  // marker to the same doc id).
+  try {
+    await db.collection('system_health').doc('daily_digest').set({
+      job: 'daily_digest', lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastStatus: 'ok', errors: 0, sent, recipients: recipients.length,
+    }, { merge: true });
+  } catch (e) { console.warn(`[digest] system_health write: ${e.message}`); }
 }
 
 main().catch(err => {
