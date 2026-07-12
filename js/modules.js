@@ -1670,9 +1670,8 @@ function renderCAList(advances, container, isAdmin) {
 // The employee-facing interest checkbox is gone too: interest is now an
 // approval-time decision, never an employee choice (WS22 decision 3).
 
-function fmtN(n) {
-  return Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
-}
+// Canonical: delegates to window.fmtN2 (js/config.js). Same contract, unchanged output.
+const fmtN = window.fmtN2;
 
 // President-only: record a cash advance for any employee (pre-approved)
 function openPresidentCashAdvanceModal(users) {
@@ -2359,8 +2358,8 @@ async function renderPresidentMessageCard() {
         </select>
       </div>
       <div class="form-row">
-        <div class="form-group"><label>Vacation days</label><input id="lv-grant-vac" type="number" min="0" step="0.5" value="0"/></div>
-        <div class="form-group"><label>Sick days</label><input id="lv-grant-sick" type="number" min="0" step="0.5" value="0"/></div>
+        <div class="form-group"><label>Vacation days</label><input id="lv-grant-vac" type="number" inputmode="decimal" min="0" step="0.5" value="0"/></div>
+        <div class="form-group"><label>Sick days</label><input id="lv-grant-sick" type="number" inputmode="decimal" min="0" step="0.5" value="0"/></div>
       </div>
       <div id="lv-grant-err" class="error-msg hidden"></div>
     `, `<button class="btn-primary" id="lv-grant-save">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);

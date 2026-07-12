@@ -1665,11 +1665,19 @@ async function renderProductDatabase() {
   const c = document.getElementById('page-content');
   c.innerHTML = '<div class="loading-placeholder">Loading products…</div>';
 
-  await seedCatalogIfNeeded();
-  const [snap, metaSnap] = await Promise.all([
-    db.collection('products').limit(1000).get(),
-    db.collection('productMeta').doc('config').get(),
-  ]);
+  let snap, metaSnap;
+  try {
+    await seedCatalogIfNeeded();
+    [snap, metaSnap] = await Promise.all([
+      db.collection('products').limit(1000).get(),
+      db.collection('productMeta').doc('config').get(),
+    ]);
+  } catch (err) {
+    c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Could not load products</h4><p style="font-size:12px;color:var(--text-muted)">${escHtml(err.message||'')}</p><button class="btn-secondary" id="pdb-retry-btn" style="margin-top:10px">Retry</button></div>`;
+    document.getElementById('pdb-retry-btn')?.addEventListener('click', () => renderProductDatabase());
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
+    return;
+  }
   const products = snap.docs.map(d => normalizeProduct({ id: d.id, ...d.data() }));
   const meta = metaSnap.exists ? metaSnap.data() : { categories: [] };
   const categories = meta.categories || [];
@@ -1683,7 +1691,7 @@ async function renderProductDatabase() {
   });
   const allCatIds = [...new Set([...categories.map(c => c.id), ...Object.keys(byCategory)])];
 
-  const fmt = n => `₱${Number(n || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+  const fmt = n => `₱${window.fmtN2(n || 0)}`;
   const measureStr = m => (m && (m.W || m.D || m.H)) ? `${m.W || '—'} × ${m.D || '—'} × ${m.H || '—'} mm` : '—';
 
   // prefix scopes element IDs so the hidden "Add Product" form and an
@@ -1910,7 +1918,7 @@ async function renderProductDatabase() {
     }
     const rows = mats.map(m => `
       <tr>
-        <td style="font-weight:600">${escHtml(m.name || '—')}<div style="font-size:11px;color:var(--text-muted)">₱${Number(m.unitCost||0).toLocaleString('en-PH',{minimumFractionDigits:2})} / ${escHtml(m.unit||'unit')}</div></td>
+        <td style="font-weight:600">${escHtml(m.name || '—')}<div style="font-size:11px;color:var(--text-muted)">₱${window.fmtN2(m.unitCost||0)} / ${escHtml(m.unit||'unit')}</div></td>
         <td style="width:90px"><input type="number" inputmode="decimal" min="0" step="0.01" class="bom-qty" data-id="${m.id}" data-cost="${m.unitCost||0}" data-name="${escHtml(m.name||'')}" data-unit="${escHtml(m.unit||'')}" value="${qtyById[m.id]||''}" placeholder="0" style="width:100%;padding:5px;text-align:center"></td>
         <td class="bom-line-total" style="text-align:right;width:90px">₱0.00</td>
       </tr>`).join('');
@@ -1931,10 +1939,10 @@ async function renderProductDatabase() {
         const cost = parseFloat(inp.dataset.cost) || 0;
         const line = q * cost;
         total += line;
-        inp.closest('tr').querySelector('.bom-line-total').textContent = '₱' + line.toLocaleString('en-PH', { minimumFractionDigits: 2 });
+        inp.closest('tr').querySelector('.bom-line-total').textContent = '₱' + window.fmtN2(line);
       });
       const tEl = document.getElementById('bom-total');
-      if (tEl) tEl.textContent = '₱' + total.toLocaleString('en-PH', { minimumFractionDigits: 2 });
+      if (tEl) tEl.textContent = '₱' + window.fmtN2(total);
       return total;
     };
     body.querySelectorAll('.bom-qty').forEach(inp => inp.addEventListener('input', recompute));
@@ -1953,7 +1961,7 @@ async function renderProductDatabase() {
       pdbBom[prefix] = lines;
       target.value = total ? total.toFixed(2) : '';
       const note = document.getElementById(`${prefix}-bom-note`);
-      if (note) note.textContent = lines.length ? `${lines.length} material line(s) linked to inventory · ₱${total.toLocaleString('en-PH',{minimumFractionDigits:2})}` : '';
+      if (note) note.textContent = lines.length ? `${lines.length} material line(s) linked to inventory · ₱${window.fmtN2(total)}` : '';
       closeModal();
       Notifs.showToast('Materials cost computed from inventory', 'success');
     });
@@ -2451,7 +2459,7 @@ async function renderPartnerDashboard() {
                   <div style="font-size:11px;color:var(--text-muted)">${escHtml(q.quoteNumber||'')} · ${ts}</div>
                 </div>
                 <div style="text-align:right;flex-shrink:0">
-                  <div style="font-size:13px;font-weight:700">₱${amt.toLocaleString()}</div>
+                  <div style="font-size:13px;font-weight:700">₱${window.fmtN2(amt)}</div>
                   <span class="badge ${bc}" style="font-size:10px">${st}</span>
                 </div>
               </div>`;
@@ -3865,7 +3873,7 @@ async function loadPartnersDeptTab(sub) {
           <div class="kpi-card accent"><div class="kpi-label">Partners</div><div class="kpi-value">${partners.length}</div></div>
           <div class="kpi-card"><div class="kpi-label">Open Tasks</div><div class="kpi-value">${openTasks.length}</div></div>
           <div class="kpi-card green"><div class="kpi-label">Done Tasks</div><div class="kpi-value">${doneTasks.length}</div></div>
-          <div class="kpi-card accent"><div class="kpi-label">Total Quote Value</div><div class="kpi-value">₱${totalQuoteVal.toLocaleString()}</div></div>
+          <div class="kpi-card accent"><div class="kpi-label">Total Quote Value</div><div class="kpi-value">₱${window.fmtN2(totalQuoteVal)}</div></div>
           <div class="kpi-card"><div class="kpi-label">Pending Quotes</div><div class="kpi-value">${pendingQuotes.length}</div></div>
         </div>
         <div class="card" style="margin-bottom:14px">
@@ -3951,7 +3959,7 @@ async function loadPartnersDeptTab(sub) {
           <div class="kpi-card accent"><div class="kpi-label">Total Quotes</div><div class="kpi-value">${quotes.length}</div></div>
           <div class="kpi-card green"><div class="kpi-label">Approved</div><div class="kpi-value">${approved.length}</div></div>
           <div class="kpi-card"><div class="kpi-label">Pending</div><div class="kpi-value">${pending.length}</div></div>
-          <div class="kpi-card accent"><div class="kpi-label">Pipeline Value</div><div class="kpi-value" style="font-size:16px">₱${totalVal.toLocaleString()}</div></div>
+          <div class="kpi-card accent"><div class="kpi-label">Pipeline Value</div><div class="kpi-value" style="font-size:16px">₱${window.fmtN2(totalVal)}</div></div>
         </div>
         ${!quotes.length?`<div class="empty-state"><div class="empty-icon">${emojiIcon('📄',44)}</div><p>No quotes yet.</p></div>`:
           `<div class="card"><div class="card-body" style="padding:0">
@@ -3964,7 +3972,7 @@ async function loadPartnersDeptTab(sub) {
                   return `<tr>
                     <td style="font-size:13px;font-weight:600">${escHtml(q.clientName||q.client||'—')}</td>
                     <td style="font-size:12px;color:var(--text-muted)">${escHtml(q.createdByName||'—')}</td>
-                    <td style="font-size:13px;font-weight:600">₱${amt.toLocaleString()}</td>
+                    <td style="font-size:13px;font-weight:600">₱${window.fmtN2(amt)}</td>
                     <td><span class="badge ${q.status==='approved'?'badge-green':q.status==='pending'||q.status==='submitted'?'badge-orange':'badge-gray'}">${q.status||'draft'}</span></td>
                     <td style="font-size:11px;color:var(--text-muted)">${ts}</td>
                   </tr>`;
@@ -6557,7 +6565,7 @@ async function renderAnalytics() {
     : jobProjects.map(p=>({...p, arBalance:(p.arBalance!=null?p.arBalance:(+p.contractAmount||0)-(+p.amountCollected||0)), contractAmount:+p.contractAmount||0, stage:p.stage}));
   const jobCosts=jcSnap.docs.map(d=>({id:d.id,...d.data()}));
 
-  const fmt=n=>isNaN(n)?'0':Number(n).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const fmt=n=>isNaN(n)?'0':window.fmtN2(n);
   const thisMonth=bizDate().slice(0,7);   // Manila YYYY-MM
   const inMonth=(obj,field='createdAt')=>{
     const v=obj[field];
@@ -8677,7 +8685,7 @@ window.addEventListener('message', async (e) => {
       // Notify president so they're aware of filed quotes
       await Notifs.sendToOwner({
         title: '📋 Quote Filed',
-        body: `${agentName} filed "${data.fileName}" for ${payload.clientName} — ₱${(payload.total||0).toLocaleString()}`,
+        body: `${agentName} filed "${data.fileName}" for ${payload.clientName} — ₱${window.fmtN2(payload.total||0)}`,
         icon: '📋', type: 'quote_filed'
       });
       if (typeof Notifs?.showToast === 'function') Notifs.showToast(`Quote filed${version>1?` as version ${version}`:''} + client saved!`);
@@ -8704,7 +8712,7 @@ window.addEventListener('message', async (e) => {
       });
       await Notifs.sendToOwner({
         title: '📤 Quote Awaiting Approval',
-        body: `${agentName} submitted "${payload.quoteNumber}" for ${payload.clientName} — ₱${(payload.total||0).toLocaleString()} — please review.`,
+        body: `${agentName} submitted "${payload.quoteNumber}" for ${payload.clientName} — ₱${window.fmtN2(payload.total||0)} — please review.`,
         icon: '📤', type: 'quote_review_request'
       });
       if (typeof Notifs?.showToast === 'function') Notifs.showToast('Sent for approval!');
