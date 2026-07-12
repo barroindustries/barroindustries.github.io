@@ -35,7 +35,13 @@ window.Chat = (() => {
   let _presenceByUid = {}, _usersByUid = {};  // small local caches (NOT extra listeners)
   const _notifLastSent = {};                 // `${convId}_${uid}` → ms epoch
   let _lastMsgIds = null;                    // WS42 Phase 19: which bubble ids already animated in (send pop-in)
+  let _lastRenderOrder = null;               // Phase 63 #2: message-id order of the last DOM render (keyed-diff)
+  let _earlierCapped = false;                // Phase 63 #3: true once _earlier has been trimmed to the cap
   let _wpMenuOpen = false;                   // WS42 Phase 18: wallpaper popover state
+  let _isSending = false;                    // Phase 63 #1: shared guard — click AND Enter both route through doSend
+  // Phase 63 #5: inbox refresh cascade debounce (leading-immediate, 2s trailing coalesce)
+  let _inboxDebTimer = null, _inboxDebPendingSnap = null, _inboxWindowStart = 0;
+  const EARLIER_CAP = 300;                   // Phase 63 #3
 
   const _isAdminRole = () => ['president','manager','secretary'].includes(currentRole);
   const _myName = () => (window.userProfile?.displayName || currentUser.email);
@@ -63,12 +69,15 @@ window.Chat = (() => {
   // ── Teardown (exact lifecycle contract) ──
   function teardownInbox() {                 // called by navigateTo on ANY non-chat page
     if (_inboxUnsub) { try { _inboxUnsub(); } catch(_){} _inboxUnsub = null; }
+    if (_inboxDebTimer) { clearTimeout(_inboxDebTimer); _inboxDebTimer = null; }
+    _inboxDebPendingSnap = null; _inboxWindowStart = 0;
   }
   function teardownThread() {                // Overlay teardown callback — NEVER calls dismissTop
     if (_openConvId) _clearOwnTyping();      // Decision 8: beacon cleared on panel-close too
     _threadUnsubs.forEach(u => { try { u(); } catch(_){} });
     _threadUnsubs = []; _openConvId = null; _openConv = null;
     _msgs = []; _earlier = []; _readers = []; _typing = []; _lastMsgIds = null;
+    _lastRenderOrder = null; _earlierCapped = false; _isSending = false;
     if (_presenceTimer)     { clearInterval(_presenceTimer);     _presenceTimer = null; }
     if (_typingExpireTimer) { clearInterval(_typingExpireTimer); _typingExpireTimer = null; }
     if (_markReadTimer)     { clearTimeout(_markReadTimer);      _markReadTimer = null; }
@@ -85,14 +94,40 @@ window.Chat = (() => {
     teardownInbox();
     _inboxUnsub = db.collection('conversations')
       .where('participants', 'array-contains', currentUser.uid)
-      .onSnapshot(async snap => {
-        _convs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        await _refreshDeptChannels();        // deterministic-ID direct gets
-        await _refreshMyReads();             // one own-reader-doc get per conversation
-        await _refreshPresence();            // DM row presence dots (users-presence cache)
-        _renderInbox();
-      }, () => { const el = document.getElementById('chat-inbox');
+      .onSnapshot(snap => { _scheduleInboxRefresh(snap); },
+        () => { const el = document.getElementById('chat-inbox');
                  if (el) el.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('💬',44)}</div><h4>Chat unavailable</h4></div>`; });
+  }
+  // Phase 63 #5 — dept channels + readers + presence all re-fetch on every
+  // conversations snapshot; a burst of activity (several people posting, or
+  // a batch of reader-doc writes) used to fire that whole cascade once per
+  // snapshot. Leading-edge immediate (so the inbox never feels laggy on the
+  // FIRST event of a burst), then coalesce any further snapshots into a
+  // single trailing run at the end of a rolling 2s window.
+  async function _runInboxRefresh(snap) {
+    _convs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    await _refreshDeptChannels();            // deterministic-ID direct gets
+    await _refreshMyReads();                 // one own-reader-doc get per conversation
+    await _refreshPresence();                // DM row presence dots (users-presence cache)
+    _renderInbox();
+  }
+  function _scheduleInboxRefresh(snap) {
+    const now = Date.now();
+    if (!_inboxWindowStart || now - _inboxWindowStart >= 2000) {
+      _inboxWindowStart = now;
+      if (_inboxDebTimer) { clearTimeout(_inboxDebTimer); _inboxDebTimer = null; }
+      _inboxDebPendingSnap = null;
+      _runInboxRefresh(snap);
+      return;
+    }
+    _inboxDebPendingSnap = snap;             // coalesce: keep only the latest snapshot
+    if (_inboxDebTimer) return;              // a trailing run is already scheduled
+    _inboxDebTimer = setTimeout(() => {
+      _inboxDebTimer = null;
+      _inboxWindowStart = Date.now();
+      const s = _inboxDebPendingSnap; _inboxDebPendingSnap = null;
+      if (s) _runInboxRefresh(s);
+    }, 2000 - (now - _inboxWindowStart));
   }
   async function _refreshDeptChannels() {
     _deptConvs = (await Promise.all(myDeptChannels().map(d =>
@@ -394,18 +429,37 @@ window.Chat = (() => {
       filePreview.textContent = `🔗 ${url}`;
       updateSendState();
     });
+    // Phase 63 #1 — _isSending is a MODULE-scoped guard (not local to this
+    // panel instance) checked at the very top of doSend, before anything
+    // else runs. Both routes into doSend (the click handler and the Enter
+    // keydown handler below) call this SAME function, so one guard covers
+    // both — a double-Enter or an Enter-then-click during an in-flight send
+    // is a no-op rather than a duplicate message.
+    // Input/attachment state is only cleared on CONFIRMED success; on
+    // failure it's left exactly as the user typed it (no silent data loss),
+    // the button re-enables, and one error toast is shown here (the only
+    // place — sendMessage's own catches now just throw, no toast).
     const doSend = async () => {
+      if (_isSending) return;
       const text = (input.value || '').trim();
       const file = pendingFile, link = pendingLink;
       if (!text && !file && !link) return;
+      _isSending = true;
       sendBtn.disabled = true;
-      await window.Chat.sendMessage({ text, file, link });
-      input.value = '';
-      _autoGrow(input);
-      fileInp.value = '';
-      pendingFile = null; pendingLink = null;
-      filePreview.textContent = '';
-      updateSendState();
+      try {
+        await window.Chat.sendMessage({ text, file, link });
+        // ONLY clear on confirmed success.
+        input.value = '';
+        _autoGrow(input);
+        fileInp.value = '';
+        pendingFile = null; pendingLink = null;
+        filePreview.textContent = '';
+      } catch (e) {
+        Notifs.error((e && e.message) || 'Message not sent — retry.');
+      } finally {
+        _isSending = false;
+        updateSendState();               // re-enables Send whenever there's still text/attachment to retry
+      }
     };
     input.addEventListener('input', () => { _autoGrow(input); updateSendState(); window.Chat.onComposerInput(); });
     input.addEventListener('keydown', e => {
@@ -523,7 +577,13 @@ window.Chat = (() => {
       try {
         const sref = storage.ref(`chat-files/${conv.id}/${Date.now()}_${file.name}`);
         await sref.put(file, { customMetadata: { uploadedBy: (window.currentUser && currentUser.uid) || '' } }); fileUrl = await sref.getDownloadURL(); fileName = file.name;
-      } catch (_) { Notifs.showToast('File upload failed', 'error'); return; }
+      } catch (_) {
+        // Phase 63 #1: THROW instead of silently returning — a silent return
+        // here used to let the caller (doSend) clear the input/attachment as
+        // if the send had succeeded (silent data loss). All user-facing
+        // messaging for a failed send happens once, in doSend's catch.
+        throw new Error('File upload failed — message not sent.');
+      }
     } else if (link) {
       fileUrl = link; fileSource = 'link';
       try { fileName = new URL(link).hostname.replace(/^www\./, ''); } catch (_) { fileName = link; }
@@ -595,6 +655,18 @@ window.Chat = (() => {
     db.collection('conversations').doc(_openConvId).collection('typing')
       .doc(currentUser.uid).delete().catch(() => {});
   }
+  // Phase 63 #4 — typing docs were previously only cleaned by an explicit
+  // _clearOwnTyping() call (blur, send, panel-close). Killing the tab
+  // (closing it, navigating away, backgrounding on mobile) skipped all of
+  // those and left an orphaned "typing" doc that only stopped SHOWING once
+  // TYPING_TTL_MS elapsed (display-filtered) but never got deleted. These are
+  // best-effort, fire-and-forget (no await — the page may already be gone by
+  // the time the delete would resolve); residual orphans that still slip
+  // through are harmless (display-filtered forever, not read anywhere else).
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') _clearOwnTyping();
+  });
+  window.addEventListener('pagehide', () => { _clearOwnTyping(); });
   // WS42 Phase 19 — typing indicator restyled as an incoming mini-bubble with
   // 3 bouncing dots (CSS animation, reduced-motion aware — see msTypingBounce).
   function _renderTypingRow() {
@@ -621,6 +693,15 @@ window.Chat = (() => {
       .orderBy('createdAt', 'desc').startAfter(anchor._snap).limit(PAGE_SIZE).get()
       .catch(() => ({ docs: [] }));
     _earlier = [...s.docs.map(d => ({ id: d.id, ...d.data(), _snap: d })).reverse(), ..._earlier];
+    // Phase 63 #3 — _earlier only ever grows via "Load earlier" taps; without
+    // a cap a long scroll-back session holds every page ever fetched in
+    // memory/DOM forever. Trim to the newest EARLIER_CAP once exceeded (drop
+    // the oldest page) and show a small inline notice instead of the button
+    // — reopening the thread starts the window fresh from the live tail.
+    if (_earlier.length > EARLIER_CAP) {
+      _earlier = _earlier.slice(_earlier.length - EARLIER_CAP);
+      _earlierCapped = true;
+    }
     _renderThread({ keepScrollAnchor: true });
   }
 
@@ -693,81 +774,89 @@ window.Chat = (() => {
     if (!ta || !tb) return false;
     return Math.abs(tb - ta) < GROUP_WINDOW_MS;
   }
-  function _threadHtml(list) {
-    if (!list.length) { _lastMsgIds = new Set(); return '<div class="messenger-empty">No messages yet. Say hello!</div>'; }
-    const showEarlierBtn = (_earlier.length + _msgs.length) >= PAGE_SIZE;
+  // Phase 63 #2 — cheap content hash for a message, stored as data-rev on its
+  // row. Covers exactly what can change on an EXISTING message id: reactions,
+  // text edits, delete, and attachment swaps. createdAt/authorId never change
+  // for an existing doc, so they're deliberately excluded (day/gap/grouping
+  // are therefore stable for any row already in the DOM — see _patchThread).
+  function _msgRev(m) {
+    return JSON.stringify(m.reactions || {}) + '|' + (m.text || '') + '|' +
+      (m.deleted ? 1 : 0) + '|' + (m.editedAt ? 1 : 0) + '|' + (m.fileUrl || '');
+  }
+
+  // Renders ONE message: { sep, row }. `sep` is any day-divider/time-gap
+  // divider that belongs immediately before this message (context-derived
+  // from list[idx-1]/list[idx+1] only — no running "lastDay" state needed,
+  // since messages are strictly chronological, comparing a message's day to
+  // its immediate predecessor's day is equivalent to a running tracker).
+  // `row` is the single top-level `.ms-row[data-mid]` element's HTML — the
+  // unit _patchThread() replaces in place when only ITS content changed.
+  function _renderMessagePart(list, idx, isNew) {
+    const m = list[idx];
     const initials = name => escHtml((name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2));
     const isImage = url => url && /\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(url);
-    const isFirstRender = _lastMsgIds === null;
-    const prevIds = _lastMsgIds || new Set();
-    const newIds = new Set();
+    const day = _manilaDay(m.createdAt);
+    const prevM = idx > 0 ? list[idx - 1] : null;
+    const nextM = idx < list.length - 1 ? list[idx + 1] : null;
+    const prevDay = prevM ? _manilaDay(prevM.createdAt) : null;
+    const nextDay = nextM ? _manilaDay(nextM.createdAt) : null;
+    const isNewDay = !!day && day !== prevDay;
+    const gapMs = (!isNewDay && prevM && m.createdAt?.toMillis && prevM.createdAt?.toMillis)
+      ? m.createdAt.toMillis() - prevM.createdAt.toMillis() : Infinity;
 
-    let html = showEarlierBtn
-      ? `<div style="text-align:center;margin-bottom:10px"><button class="btn-secondary btn-sm" id="chat-load-earlier-btn">↑ Load earlier</button></div>`
+    let sep = '';
+    if (isNewDay) {
+      sep = `<div class="ms-day-sep"><span>${escHtml(_dayLabel(day))}</span></div>`;
+    } else if (idx > 0 && gapMs > TIME_GAP_MS) {
+      const d0 = m.createdAt?.toDate ? m.createdAt.toDate() : null;
+      const gapLabel = d0 ? d0.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', timeZone: window.BIZ_TZ }) : '';
+      sep = `<div class="ms-time-sep">${escHtml(gapLabel)}</div>`;
+    }
+
+    const brokenBefore = isNewDay || gapMs > TIME_GAP_MS || !_withinGroup(prevM, m);
+    const brokenAfter = !nextM || (nextDay && nextDay !== day) || !_withinGroup(m, nextM);
+    const grpClass = brokenBefore && brokenAfter ? 'ms-grp-single'
+      : brokenBefore ? 'ms-grp-first' : brokenAfter ? 'ms-grp-last' : 'ms-grp-mid';
+    const showAvatar = grpClass === 'ms-grp-last' || grpClass === 'ms-grp-single';
+    const showName = grpClass === 'ms-grp-first' || grpClass === 'ms-grp-single';
+
+    const isMine = m.authorId === currentUser.uid;
+    const info = _authorInfo(m.authorId, m.authorName);
+    const canEdit = isMine;
+    const canDelete = isMine || _isAdminRole();
+    const d = m.createdAt?.toDate ? m.createdAt.toDate() : null;
+    const timeLabel = d ? d.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', timeZone: window.BIZ_TZ }) : '';
+
+    const reactions = m.reactions || {};
+    const grouped = {};
+    Object.entries(reactions).forEach(([uid, emoji]) => { (grouped[emoji] = grouped[emoji] || []).push(uid); });
+    const reactionsHtml = Object.keys(grouped).length
+      ? `<div class="chat-reactions-row" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px">${
+          Object.entries(grouped).map(([emoji, uids]) => {
+            const mine = uids.includes(currentUser.uid);
+            return `<button class="chat-reaction-chip" data-mid="${escHtml(m.id)}" data-emoji="${escHtml(emoji)}" style="font-size:12px;border-radius:12px;padding:1px 7px;border:1px solid ${mine?'var(--primary)':'var(--border)'};background:${mine?'var(--primary-soft)':'var(--surface-2)'};cursor:pointer">${emoji} ${uids.length}</button>`;
+          }).join('')
+        }</div>`
       : '';
-    let lastDay = null;
-    list.forEach((m, idx) => {
-      newIds.add(m.id);
-      const day = _manilaDay(m.createdAt);
-      const isNewDay = !!day && day !== lastDay;
-      if (isNewDay) {
-        html += `<div class="ms-day-sep"><span>${escHtml(_dayLabel(day))}</span></div>`;
-        lastDay = day;
-      }
-      const prevM = idx > 0 ? list[idx - 1] : null;
-      const nextM = idx < list.length - 1 ? list[idx + 1] : null;
-      const nextDay = nextM ? _manilaDay(nextM.createdAt) : null;
-      const gapMs = (!isNewDay && prevM && m.createdAt?.toMillis && prevM.createdAt?.toMillis)
-        ? m.createdAt.toMillis() - prevM.createdAt.toMillis() : Infinity;
-      if (!isNewDay && idx > 0 && gapMs > TIME_GAP_MS) {
-        const d0 = m.createdAt?.toDate ? m.createdAt.toDate() : null;
-        const gapLabel = d0 ? d0.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', timeZone: window.BIZ_TZ }) : '';
-        html += `<div class="ms-time-sep">${escHtml(gapLabel)}</div>`;
-      }
-      const brokenBefore = isNewDay || gapMs > TIME_GAP_MS || !_withinGroup(prevM, m);
-      const brokenAfter = !nextM || (nextDay && nextDay !== day) || !_withinGroup(m, nextM);
-      const grpClass = brokenBefore && brokenAfter ? 'ms-grp-single'
-        : brokenBefore ? 'ms-grp-first' : brokenAfter ? 'ms-grp-last' : 'ms-grp-mid';
-      const showAvatar = grpClass === 'ms-grp-last' || grpClass === 'ms-grp-single';
-      const showName = grpClass === 'ms-grp-first' || grpClass === 'ms-grp-single';
+    const pickerHtml = `<div class="chat-reaction-picker" data-mid="${escHtml(m.id)}" style="display:none;gap:4px;margin-top:4px">${
+      REACTIONS.map(e => `<button class="chat-pick-emoji" data-mid="${escHtml(m.id)}" data-emoji="${e}" style="font-size:16px;background:none;border:none;cursor:pointer;padding:2px 4px">${e}</button>`).join('')
+    }</div>`;
 
-      const isMine = m.authorId === currentUser.uid;
-      const info = _authorInfo(m.authorId, m.authorName);
-      const canEdit = isMine;
-      const canDelete = isMine || _isAdminRole();
-      const d = m.createdAt?.toDate ? m.createdAt.toDate() : null;
-      const timeLabel = d ? d.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', timeZone: window.BIZ_TZ }) : '';
+    const isLast = idx === list.length - 1;
+    const seenBy = isLast ? _readers.filter(r => r.uid !== m.authorId && r.uid !== currentUser.uid
+      && r.readAt?.toMillis && m.createdAt?.toMillis && r.readAt.toMillis() >= m.createdAt.toMillis()) : [];
+    // Read receipts: reader avatars once the last message has been read;
+    // otherwise (own last message, unread) a single Lucide "check" (sent) —
+    // the avatar itself stands in for the "check-check/read" state once read.
+    const seenHtml = seenBy.length
+      ? `<div class="ms-seen" title="${escHtml(seenBy.map(r=>r.name).join(', '))}">${
+          seenBy.slice(0,5).map(r => `<span class="ms-avatar">${initials(r.name)}</span>`).join('')
+        }${seenBy.length>5?`<span style="font-size:10px;color:var(--text-muted)">+${seenBy.length-5}</span>`:''}</div>`
+      : (isLast && isMine ? `<div class="ms-status"><i data-lucide="check"></i></div>` : '');
 
-      const reactions = m.reactions || {};
-      const grouped = {};
-      Object.entries(reactions).forEach(([uid, emoji]) => { (grouped[emoji] = grouped[emoji] || []).push(uid); });
-      const reactionsHtml = Object.keys(grouped).length
-        ? `<div class="chat-reactions-row" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:3px">${
-            Object.entries(grouped).map(([emoji, uids]) => {
-              const mine = uids.includes(currentUser.uid);
-              return `<button class="chat-reaction-chip" data-mid="${escHtml(m.id)}" data-emoji="${escHtml(emoji)}" style="font-size:12px;border-radius:12px;padding:1px 7px;border:1px solid ${mine?'var(--primary)':'var(--border)'};background:${mine?'var(--primary-soft)':'var(--surface-2)'};cursor:pointer">${emoji} ${uids.length}</button>`;
-            }).join('')
-          }</div>`
-        : '';
-      const pickerHtml = `<div class="chat-reaction-picker" data-mid="${escHtml(m.id)}" style="display:none;gap:4px;margin-top:4px">${
-        REACTIONS.map(e => `<button class="chat-pick-emoji" data-mid="${escHtml(m.id)}" data-emoji="${e}" style="font-size:16px;background:none;border:none;cursor:pointer;padding:2px 4px">${e}</button>`).join('')
-      }</div>`;
-
-      const isLast = idx === list.length - 1;
-      const seenBy = isLast ? _readers.filter(r => r.uid !== m.authorId && r.uid !== currentUser.uid
-        && r.readAt?.toMillis && m.createdAt?.toMillis && r.readAt.toMillis() >= m.createdAt.toMillis()) : [];
-      // Read receipts: reader avatars once the last message has been read;
-      // otherwise (own last message, unread) a single Lucide "check" (sent) —
-      // the avatar itself stands in for the "check-check/read" state once read.
-      const seenHtml = seenBy.length
-        ? `<div class="ms-seen" title="${escHtml(seenBy.map(r=>r.name).join(', '))}">${
-            seenBy.slice(0,5).map(r => `<span class="ms-avatar">${initials(r.name)}</span>`).join('')
-          }${seenBy.length>5?`<span style="font-size:10px;color:var(--text-muted)">+${seenBy.length-5}</span>`:''}</div>`
-        : (isLast && isMine ? `<div class="ms-status"><i data-lucide="check"></i></div>` : '');
-      const isNew = !isFirstRender && !prevIds.has(m.id);
-
-      html += `
-      <div class="ms-row ${isMine?'ms-row-mine':'ms-row-theirs'} ${grpClass}" data-mid="${escHtml(m.id)}">
+    const rev = _msgRev(m);
+    const row = `
+      <div class="ms-row ${isMine?'ms-row-mine':'ms-row-theirs'} ${grpClass}" data-mid="${escHtml(m.id)}" data-rev="${escHtml(rev)}">
         ${!isMine ? (showAvatar
             ? `<div class="ms-avatar" title="${escHtml(info.name)}">${info.photoUrl?`<img src="${escHtml(info.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(info.name)}</div>`
             : `<div class="ms-avatar-spacer"></div>`) : ''}
@@ -796,60 +885,137 @@ window.Chat = (() => {
             ? `<div class="ms-avatar ms-avatar-mine" title="You">${userProfile?.photoUrl?`<img src="${escHtml(userProfile.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(userProfile?.displayName||currentUser.email)}</div>`
             : `<div class="ms-avatar-spacer"></div>`) : ''}
       </div>`;
+    return { sep, row };
+  }
+
+  function _threadHtml(list) {
+    if (!list.length) {
+      _lastMsgIds = new Set(); _lastRenderOrder = [];
+      return '<div class="messenger-empty">No messages yet. Say hello!</div>';
+    }
+    const showEarlierBtn = !_earlierCapped && (_earlier.length + _msgs.length) >= PAGE_SIZE;
+    const isFirstRender = _lastMsgIds === null;
+    const prevIds = _lastMsgIds || new Set();
+
+    let html = _earlierCapped
+      ? `<div style="text-align:center;margin-bottom:10px;font-size:11px;color:var(--text-muted)">Older messages hidden — reopen this chat to reload from the start</div>`
+      : showEarlierBtn
+        ? `<div style="text-align:center;margin-bottom:10px"><button class="btn-secondary btn-sm" id="chat-load-earlier-btn">↑ Load earlier</button></div>`
+        : '';
+    list.forEach((m, idx) => {
+      const isNew = !isFirstRender && !prevIds.has(m.id);
+      const { sep, row } = _renderMessagePart(list, idx, isNew);
+      html += sep + row;
     });
-    _lastMsgIds = newIds;
+    _lastMsgIds = new Set(list.map(m => m.id));
+    _lastRenderOrder = list.map(m => m.id);
     return html;
+  }
+
+  // Phase 63 #2 — patches the DOM in place instead of rebuilding it, so an
+  // open reaction picker / a tapped-open timestamp elsewhere in the thread
+  // survives. Only called when the id ORDER of the previous render is an
+  // exact prefix of the new order (i.e. the only change is messages added at
+  // the tail — new sends, or reactions/edits on already-rendered messages;
+  // see the caller for when this does/doesn't apply).
+  function _patchThread(el, list, oldOrder) {
+    const prevIds = _lastMsgIds || new Set();
+    // Revise rows within the shared prefix: rev mismatch (reaction/edit/
+    // delete/attachment change) OR the last old row specifically — its
+    // grpClass can flip (a newly-appended tail message may now group with
+    // it) and its seen-receipts can change from a readers-only snapshot,
+    // neither of which is captured by _msgRev.
+    for (let i = 0; i < oldOrder.length; i++) {
+      const m = list[i];
+      const rev = _msgRev(m);
+      const node = el.querySelector(`.ms-row[data-mid="${CSS.escape(m.id)}"]`);
+      if (!node) continue;                     // shouldn't happen — falls back to being a no-op patch
+      if (node.dataset.rev !== rev || i === oldOrder.length - 1) {
+        const { row } = _renderMessagePart(list, i, false);
+        node.outerHTML = row;
+      }
+    }
+    // Append any new tail messages (with their leading day/gap separators).
+    let appendHtml = '';
+    for (let i = oldOrder.length; i < list.length; i++) {
+      const isNew = !prevIds.has(list[i].id);
+      const { sep, row } = _renderMessagePart(list, i, isNew);
+      appendHtml += sep + row;
+    }
+    if (appendHtml) el.insertAdjacentHTML('beforeend', appendHtml);
+    _lastRenderOrder = list.map(m => m.id);
+    _lastMsgIds = new Set(_lastRenderOrder);
+  }
+
+  // Event delegation (Phase 63 #2) — bound ONCE per thread-panel DOM element
+  // (guarded by el.dataset.wired) rather than re-querySelectorAll+addEventListener
+  // on every render. This is what makes the patch path (above) work with zero
+  // extra wiring: new/replaced nodes are covered automatically because the
+  // listener lives on the stable parent, not on the rows themselves.
+  function _wireThreadDelegation(el) {
+    if (el.dataset.wired) return;
+    el.dataset.wired = '1';
+    el.addEventListener('click', e => {
+      if (e.target.closest('#chat-load-earlier-btn')) { loadEarlier(); return; }
+      const chip = e.target.closest('.chat-reaction-chip, .chat-pick-emoji');
+      if (chip) { e.stopPropagation(); toggleReaction(chip.dataset.mid, chip.dataset.emoji); return; }
+      const editBtn = e.target.closest('.chat-msg-edit-btn');
+      if (editBtn) { e.stopPropagation(); _onEditMessage(editBtn.dataset.mid); return; }
+      const delBtn = e.target.closest('.chat-msg-del-btn');
+      if (delBtn) { e.stopPropagation(); _onDeleteMessage(delBtn.dataset.mid); return; }
+      // Tapping a bubble (Phase 17) toggles its timestamp/status line AND its
+      // 6-emoji reaction picker row — the same tap does both, so neither
+      // interaction is lost.
+      const bubble = e.target.closest('.chat-bubble-tap');
+      if (bubble) {
+        if (e.target.closest('a') || e.target.closest('img')) return;
+        bubble.classList.toggle('ms-time-shown');
+        const mid = bubble.dataset.mid;
+        const picker = el.querySelector(`.chat-reaction-picker[data-mid="${CSS.escape(mid)}"]`);
+        if (picker) picker.style.display = (picker.style.display === 'flex') ? 'none' : 'flex';
+      }
+    });
+  }
+  // Own message → promptDialog edit; own/admin → confirmDialog delete. NO
+  // manual re-render calls here — the messages listener repaints (patched, per #2).
+  async function _onEditMessage(mid) {
+    const m = [..._earlier, ..._msgs].find(x => x.id === mid);
+    const newText = await promptDialog({ message: 'Edit message:', value: m?.text || '', multiline: true });
+    if (newText === null || newText === (m?.text || '')) return;
+    await db.collection('conversations').doc(_openConvId).collection('messages').doc(mid)
+      .update({ text: newText.trim(), editedAt: firebase.firestore.FieldValue.serverTimestamp() })
+      .catch(() => Notifs.showToast('Edit failed', 'error'));
+  }
+  async function _onDeleteMessage(mid) {
+    if (!(await confirmDialog({ message: 'Delete this message?', danger: true }))) return;
+    await db.collection('conversations').doc(_openConvId).collection('messages').doc(mid).delete()
+      .catch(() => Notifs.showToast('Delete failed', 'error'));
   }
 
   function _renderThread(opts) {
     opts = opts || {};
     const el = document.getElementById('chat-thread-scroll');
     if (!el) return;
+    _wireThreadDelegation(el);
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
     const prevScrollHeight = el.scrollHeight, prevScrollTop = el.scrollTop;
-    el.innerHTML = _threadHtml([..._earlier, ..._msgs]);
+    const list = [..._earlier, ..._msgs];
+    const newOrder = list.map(m => m.id);
+    const oldOrder = _lastRenderOrder;
+    // Patch path applies only when the previous render's id order is an
+    // exact PREFIX of the new order — i.e. nothing was inserted/removed
+    // anywhere except possibly new ids appended at the very end. loadEarlier
+    // prepends at the HEAD (opts.keepScrollAnchor is always set for it), so
+    // it's deliberately excluded here and always gets a full rebuild.
+    const canPatch = !opts.keepScrollAnchor && Array.isArray(oldOrder) && oldOrder.length > 0 &&
+      newOrder.length >= oldOrder.length && oldOrder.every((id, i) => newOrder[i] === id);
+
+    if (canPatch) {
+      _patchThread(el, list, oldOrder);
+    } else {
+      el.innerHTML = _threadHtml(list);
+    }
     if (window.lucide) lucide.createIcons({ nodes: [el] });
-
-    document.getElementById('chat-load-earlier-btn')?.addEventListener('click', loadEarlier);
-
-    // Tapping a bubble (Phase 17) toggles its timestamp/status line AND its
-    // 6-emoji reaction picker row — the same tap does both, so neither
-    // interaction is lost.
-    el.querySelectorAll('.chat-bubble-tap').forEach(b => {
-      b.addEventListener('click', e => {
-        if (e.target.closest('a') || e.target.closest('img')) return;
-        b.classList.toggle('ms-time-shown');
-        const mid = b.dataset.mid;
-        const picker = Array.from(el.querySelectorAll('.chat-reaction-picker')).find(x => x.dataset.mid === mid);
-        if (picker) picker.style.display = (picker.style.display === 'flex') ? 'none' : 'flex';
-      });
-    });
-    // Existing reaction chips + picker emoji both call toggleReaction (tap-again clears/changes).
-    el.querySelectorAll('.chat-reaction-chip, .chat-pick-emoji').forEach(b => {
-      b.addEventListener('click', e => { e.stopPropagation(); toggleReaction(b.dataset.mid, b.dataset.emoji); });
-    });
-    // Own message → promptDialog edit / confirmDialog delete; admin → delete.
-    // NO manual re-render calls here — the messages listener repaints.
-    el.querySelectorAll('.chat-msg-edit-btn').forEach(btn => {
-      btn.addEventListener('click', async e => {
-        e.stopPropagation();
-        const mid = btn.dataset.mid;
-        const m = [..._earlier, ..._msgs].find(x => x.id === mid);
-        const newText = await promptDialog({ message: 'Edit message:', value: m?.text || '', multiline: true });
-        if (newText === null || newText === (m?.text || '')) return;
-        await db.collection('conversations').doc(_openConvId).collection('messages').doc(mid)
-          .update({ text: newText.trim(), editedAt: firebase.firestore.FieldValue.serverTimestamp() })
-          .catch(() => Notifs.showToast('Edit failed', 'error'));
-      });
-    });
-    el.querySelectorAll('.chat-msg-del-btn').forEach(btn => {
-      btn.addEventListener('click', async e => {
-        e.stopPropagation();
-        if (!(await confirmDialog({ message: 'Delete this message?', danger: true }))) return;
-        await db.collection('conversations').doc(_openConvId).collection('messages').doc(btn.dataset.mid).delete()
-          .catch(() => Notifs.showToast('Delete failed', 'error'));
-      });
-    });
 
     if (opts.keepScrollAnchor) {
       el.scrollTop = el.scrollHeight - prevScrollHeight + prevScrollTop;   // preserve visual anchor
