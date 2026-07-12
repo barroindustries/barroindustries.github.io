@@ -8,7 +8,7 @@
 //    • HTML / API → Network-first, cache as offline fallback
 // ═══════════════════════════════════════════════════════
 
-const CACHE_VER   = 'bi-ops-v12.0.106';
+const CACHE_VER   = 'bi-ops-v12.0.107';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -22,6 +22,7 @@ const PRECACHE = [
   '/css/styles.css',
   '/manifest.json',
   '/js/firebase-config.js',
+  '/js/errlog.js',
   '/js/config.js',
   '/js/ui-states.js',
   '/js/ui-status-meta.js',

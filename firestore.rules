@@ -1309,6 +1309,29 @@ service cloud.firestore {
       allow delete: if isAuth() && isPresident();
     }
 
+    // ── Client error log (v13 Phase 8) ──────────────────
+    // window.onerror/onunhandledrejection (js/errlog.js) write here so production
+    // errors surface without a user report. Any signed-in client may append (the
+    // client is often broken/mid-error when it writes, so we don't gate on role),
+    // but the field set, sizes, and timestamp are locked down so a compromised/
+    // malicious client can't use this as a free-form write channel. uid is
+    // optional-but-truthful — same pattern as notifications' senderUid above —
+    // since boot-time errors can fire before currentUser exists. Only admins may
+    // read or prune; no update (append-only, like audit_log).
+    match /error_log/{docId} {
+      allow create: if isAuth()
+        && request.resource.data.keys().hasOnly(['message','stack','page','version','uid','ua','ts'])
+        && isBoundedString(request.resource.data.get('message', ''), 500)
+        && isBoundedString(request.resource.data.get('stack', ''), 2000)
+        && request.resource.data.ts == request.time
+        && (!request.resource.data.keys().hasAny(['uid'])
+            || request.resource.data.uid == null
+            || request.resource.data.uid == request.auth.uid);
+      allow read:   if isAuth() && isAdmin();
+      allow update: if false;
+      allow delete: if isAuth() && isAdmin();
+    }
+
     // ── Leave requests ──────────────────────────────────
     // Employees file their own request (pending only) and read their own;
     // finance/admin read all + approve/reject; only the president deletes.

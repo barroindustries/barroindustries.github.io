@@ -40,7 +40,7 @@ const BASELINE = [
   'bk_quotes', 'bs_clients', 'bs_quotes', 'budgets_marketing', 'campaigns',
   'cash_advances', 'cash_disbursement_journal', 'cash_receipt_journal',
   'clients', 'conversations', 'departments', 'design_clients',
-  'design_drawings', 'expenses', 'finance_delete_requests', 'finance_periods',
+  'design_drawings', 'error_log', 'expenses', 'finance_delete_requests', 'finance_periods',
   'finance_records', 'general_journal', 'gov_biddings', 'handbook',
   'hub_files', 'hub_folders', 'id_verify', 'inventory_items', 'it_access',
   'it_assets', 'it_network', 'it_software', 'it_tickets', 'job_costs',

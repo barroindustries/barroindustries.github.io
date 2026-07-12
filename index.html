@@ -176,7 +176,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.106 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.107 · Barro Industries</div>
   </div>
 </div>
 
@@ -341,6 +341,9 @@
      The CDN URL stays in sw.js's PRECACHE list so the on-demand fetch is instant/offline-safe. -->
 <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" integrity="sha384-uTYyvsSSUZeaPhb5RbKlQa0zY/WpX/QHfvg2mczXyBQOpkWPEDy9lczyp+w7SKXu" crossorigin="anonymous"></script>
 <script defer src="js/firebase-config.js"></script>
+<!-- v13 Phase 8 — client error logging. Loads right after firebase-config.js
+     so window.onerror/onunhandledrejection catch boot errors too. -->
+<script defer src="js/errlog.js"></script>
 <script defer src="js/config.js"></script>
 <!-- v13 WS-H Phase 121-122 — renderEmptyState/withLoadingAndError. Uses window.emojiIcon/
      window.escHtml only at CALL time; placed right after config.js for clarity. -->
