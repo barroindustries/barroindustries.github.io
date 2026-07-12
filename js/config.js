@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.48';
+window.APP_VERSION = '12.0.49';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -29,9 +29,13 @@ window.bizHour = function(date) {
   return parseInt(h, 10) % 24;
 };
 window.bizDow = function(date) {
-  // → 0–6 (0 = Sunday), the current day-of-week in Manila.
+  // → 0–6 (0 = Sunday), the day-of-week in Manila. Omit for today; pass a Date,
+  // or an ISO 'YYYY-MM-DD' string (noon-anchored to dodge TZ boundary rollover —
+  // v13 Phase 17).
+  let d = date;
+  if (typeof d === 'string') d = new Date(d.slice(0,10) + 'T12:00:00+08:00');
   const wd = new Intl.DateTimeFormat('en-US', { timeZone: window.BIZ_TZ, weekday: 'short' })
-    .format(date || new Date());
+    .format(d || new Date());
   return { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 }[wd];
 };
 window.bizYear = function() { return parseInt(window.bizDate().slice(0, 4), 10); };
@@ -46,6 +50,24 @@ window.fmtManila = function(v){
     if (isNaN(d)) return '';
     return d.toLocaleString('en-PH', { timeZone:'Asia/Manila',
       year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false });
+  } catch(_) { return ''; }
+};
+
+// Manila-correct "Month YYYY" label for a 'YYYY-MM' string or a Date (v13 Phase 17).
+// Noon-anchors YYYY-MM-01 to dodge UTC/Manila day-boundary rollover when the
+// device clock is in a different timezone.
+window.fmtMonthLabel = function(ymOrDate){
+  try {
+    let d;
+    if (ymOrDate instanceof Date) {
+      d = ymOrDate;
+    } else if (typeof ymOrDate === 'string' && /^\d{4}-\d{2}/.test(ymOrDate)) {
+      d = new Date(ymOrDate.slice(0,7) + '-01T12:00:00+08:00');
+    } else {
+      d = new Date(ymOrDate);
+    }
+    if (isNaN(d)) return '';
+    return d.toLocaleString('en-PH', { timeZone:'Asia/Manila', month:'long', year:'numeric' });
   } catch(_) { return ''; }
 };
 

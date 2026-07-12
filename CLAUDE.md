@@ -11,7 +11,7 @@ The app is an internal tool for a Philippine steel/appliance manufacturer: emplo
 ## Critical workflow rules
 
 - **Bump `CACHE_VER` in [sw.js](sw.js) on every JS/CSS edit.** The service worker caches static assets aggressively (cache-first / stale-while-revalidate). If you edit a `.js`/`.css` file without bumping `CACHE_VER` (e.g. `bi-ops-v16` → `v17`), users get stale code and the change appears broken/not deployed.
-- **Version is auto-bumped on commit.** A `.git/hooks/pre-commit` hook increments the patch in `window.APP_VERSION` in [js/config.js](js/config.js) and rewrites the `vX.Y.Z` strings in [index.html](index.html), then re-stages both. Do not hand-edit the version. (The comment in config.js referencing `scripts/bump-version.sh` is stale — the live hook is `.git/hooks/pre-commit`.)
+- **Version is auto-bumped on commit.** A `.git/hooks/pre-commit` hook increments the patch in `window.APP_VERSION` in [js/config.js](js/config.js) and rewrites the `vX.Y.Z` strings in [index.html](index.html), then re-stages both. Do not hand-edit the version. (The comment in config.js referencing `scripts/bump-version.sh` is stale — the live hook is `.git/hooks/pre-commit`.) `CACHE_VER` in sw.js is now derived from `APP_VERSION` (`bi-ops-vX.Y.Z`) rather than bumped as an independent counter. A tracked copy of the hook lives at [.githooks/pre-commit](.githooks/pre-commit) with hardening (loud `exit 1` on grep misses, amend-safe skip guard) — run `git config core.hooksPath .githooks` once per clone to use it.
 - **Script load order is load-bearing.** [index.html](index.html) loads all scripts with `defer` in a fixed order: Firebase SDK + Chart.js + Lucide → `firebase-config.js` → `config.js` → `drive.js` → `notifications.js` → `departments.js` → `app.js` → `modules.js`. Everything communicates through `window.*` globals; there are no ES module imports. A function must be defined (attached to `window`) before a later script calls it. If you add a file, add it to both index.html and the `PRECACHE` list in sw.js.
 
 ## Commands
@@ -51,7 +51,7 @@ Roles (`president`, `manager`, `employee`, `agent`, `finance`, `partner`) and de
 ### Standalone tools
 
 - **[quote-builder-v2.html](quote-builder-v2.html)** — a large self-contained HTML quote calculator for Brilliant Steel / Barro Kitchen products, embedded via `<iframe>` from the Sales/Partners tabs. Product data comes from [products-database.json](products-database.json). (`quote-builder.html` is the older v1, read-only.)
-- **[Barro_Operations_Tracker.html](Barro_Operations_Tracker.html)** — a separate self-contained client/biddings dashboard, generated from the `.xlsx` trackers in the repo root.
+- **archive/Barro_Operations_Tracker.html** — superseded June-2026 standalone dashboard (moved to `archive/`, v13 Phase 5); live equivalents are the in-app Gov Biddings screen and the `clients` collection.
 
 ### Automation (GitHub Actions, `.github/workflows/`)
 
