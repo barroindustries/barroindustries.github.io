@@ -26,32 +26,29 @@ jobs:
           fi
 
   node-version-pin:
+    name: All workflow node-version entries must be '20'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: All workflow node-version entries must be '20'
+      - name: Check node-version pins
         run: |
-          set -e
           fail=0
           for f in .github/workflows/*.yml; do
-            lines=$(grep -n "node-version:" "$f" || true)
-            if [ -n "$lines" ]; then
-              while IFS= read -r line; do
-                # normalize: strip key, quotes, and whitespace
-                val=$(echo "$line" | sed -E "s/^[0-9]+:.*node-version:[[:space:]]*//; s/[\"']//g; s/[[:space:]]+$//")
-                if [ "$val" != "20" ]; then
-                  echo "::error file=$f::node-version '$val' is not pinned to '20' ($line)"
-                  fail=1
-                fi
-              done <<< "$lines"
-            fi
+            [ "$f" = ".github/workflows/ci.yml" ] && continue
+            # Match real YAML keys only: 'node-version:' at start of a (possibly
+            # inline-braced) mapping entry; strip quotes/braces/space from value.
+            while IFS= read -r raw; do
+              [ -z "$raw" ] && continue
+              val=$(printf '%s' "$raw" | sed -E 's/.*node-version:[[:space:]]*//; s/[}"'"'"'[:space:]]//g')
+              if [ "$val" != "20" ]; then
+                echo "::error::$f pins node-version '$val' (must be 20)"
+                fail=1
+              fi
+            done <<EOF2
+$(grep -hoE "node-version:[[:space:]]*[^,}#]*" "$f" || true)
+EOF2
           done
-          if [ "$fail" -ne 0 ]; then
-            exit 1
-          fi
+          [ "$fail" -ne 0 ] && exit 1
           echo "All node-version entries are pinned to 20"
 
   backup-coverage:
