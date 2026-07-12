@@ -2167,6 +2167,41 @@ html.theme-astral .chip-tab.active {
 .table-wrap::-webkit-scrollbar, .table-scroll::-webkit-scrollbar { height: 6px; }
 .table-wrap::-webkit-scrollbar-thumb, .table-scroll::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--pill); }
 
+/* v13 Phase 126 — table kit (additive, opt-in; zero drift to existing tables).
+   1. Numeric-column utility: apply .num to a <td> (or .numeric-r to the table)
+      for right-aligned, tabular-figure number columns. Opt-in — no table is
+      affected unless it uses the class. */
+.data-table .num, .data-table.numeric-r td.num {
+  text-align: right; font-variant-numeric: tabular-nums;
+}
+/* 2. Sticky-header opt-in for wrappers that want an explicit sticky head
+   beyond the table's own default sticky th (useful when a wrapper itself
+   scrolls vertically, e.g. a fixed-height .table-scroll panel). Only fires
+   when .sticky-head is present on the wrapper. */
+.table-scroll.sticky-head thead th, .table-wrap.sticky-head thead th {
+  position: sticky; top: 0; z-index: 1; background: var(--surface, var(--bg-2));
+}
+/* 3. Mobile scroll affordance: a right-edge fade hint suggesting more
+   content is scrollable. Pure decoration — pointer-events:none so it never
+   blocks the existing overflow-x scroll gesture. Desktop untouched. */
+@media (max-width: 640px) {
+  .table-wrap, .table-scroll { position: relative; }
+  .table-wrap::after, .table-scroll::after {
+    content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 24px;
+    background: linear-gradient(to right, transparent, var(--bg, var(--bg-2)) 92%);
+    pointer-events: none;
+  }
+}
+/* 4. Row-action button set: consistent trailing action cluster for table
+   rows (icon buttons, right-aligned). Opt-in via .row-actions — existing
+   ad-hoc action cells are untouched. */
+.data-table .row-actions {
+  display: flex; gap: 4px; align-items: center; justify-content: flex-end;
+}
+.data-table .row-actions .icon-btn {
+  width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
+}
+
 /* ══════════════════════════════
    QUOTE BUILDER
 ══════════════════════════════ */
