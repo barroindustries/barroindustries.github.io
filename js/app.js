@@ -375,8 +375,6 @@ function showApp() {
   document.getElementById('app-shell').classList.remove('hidden');
   // Init Lucide icons for static topbar elements
   if (window.lucide) lucide.createIcons();
-  // Apply correct theme toggle icon
-  _applyThemeIcon(getTheme());
   // Reset any iOS zoom that happened during login input
   _resetViewportZoom();
   // Pull-to-refresh (init once)
@@ -868,7 +866,6 @@ function setTheme(theme, persist = true) {
   const cls = _themeCls(theme);
   if (cls) cls.split(' ').forEach(c => html.classList.add(c));
   if (persist) localStorage.setItem('bi-theme', theme);
-  _applyThemeIcon(theme);
   _syncThemeColorMeta();          // keep <meta name=theme-color> in step with the rendered theme
   // v12 WS40 — lets any open chart-bearing screen (Analytics) re-render its
   // chrome colors live, including the 'auto' matchMedia flip (initTheme already
@@ -889,20 +886,6 @@ function getTheme() {
   return (stored && THEME_MIGRATION[stored]) || stored || 'light';
 }
 
-function toggleTheme() {
-  const order = ['auto', 'light', 'dark'];
-  const next = order[(order.indexOf(getTheme()) + 1) % order.length];
-  setTheme(next);
-}
-
-function _applyThemeIcon(theme) {
-  const btn = document.getElementById('theme-toggle-btn');
-  if (!btn) return;
-  const iconName = theme === 'auto' ? 'monitor' : theme === 'dark' ? 'moon' : theme === 'astral' ? 'sparkles' : 'sun';
-  btn.innerHTML = `<i data-lucide="${iconName}"></i>`;
-  if (window.lucide) lucide.createIcons({ nodes: [btn] });
-}
-
 // ── Navigation ────────────────────────────────────
 function buildNav() {
   buildSidebarNav(); buildBottomNav(); buildTopNavStrip();
@@ -918,7 +901,6 @@ function buildNav() {
   buildDeptsPanel(switchable);
   // a11y: label icon-only topbar nav controls.
   document.getElementById('menu-toggle')?.setAttribute('aria-label', 'Open menu');
-  document.getElementById('theme-toggle-btn')?.setAttribute('aria-label', 'Toggle theme');
 }
 
 function isPresident() { return currentRole === 'president'; }
@@ -1225,7 +1207,6 @@ function renderNotificationsPage() {
 function renderQuoteBuilderIframe() {
   // Render the builder INSIDE the normal content area so the app's top bar and
   // navigation stay visible (navigateTo replaces this when leaving the builder).
-  document.getElementById('qb-fullscreen')?.remove(); // remove any legacy overlay
   const c = document.getElementById('page-content');
   if (!c) return;
   // Partners / Brilliant-Steel-only users get a locked-down builder (no Admin/labor).
@@ -2068,10 +2049,6 @@ function navigateTo(page, opts) {
   // detach it whenever any page other than chat renders. (The THREAD listeners
   // are Overlay-scoped and already torn down by Overlay.clearAll() above.)
   if (page !== 'chat' && window.Chat?.teardownInbox) window.Chat.teardownInbox();
-  // Tear down the full-screen quote builder when navigating anywhere except back into it
-  if (page !== 'bk-quote-builder' && page !== 'bs-quote-builder') {
-    document.getElementById('qb-fullscreen')?.remove();
-  }
   const c = document.getElementById('page-content');
   // Destroy any Chart.js instances before wiping the DOM to prevent memory leaks
   if (window.Chart) {

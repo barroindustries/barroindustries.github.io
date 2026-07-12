@@ -363,6 +363,8 @@ body::after { content: none; }
 .badge-gray   { background: rgba(255,255,255,0.06);  color: var(--text-muted); border-color: var(--border); }
 .badge-purple { background: rgba(139,92,246,0.14);   color: #B07EFF; border-color: rgba(139,92,246,0.20); }
 .badge-teal   { background: rgba(0,212,170,0.12);    color: #00DDB8; border-color: rgba(0,212,170,0.18); }
+.badge-warn,
+.badge-amber  { background: var(--warning-soft);     color: var(--warning); border-color: var(--warning-soft); }
 
 /* ── Buttons ── WS42 Phase 9: solid --primary/--on-primary in Light/Dark; Astral keeps gradient */
 .btn-primary {

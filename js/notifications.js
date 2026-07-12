@@ -28,14 +28,9 @@ window.Notifs = (() => {
   // ── Badge ─────────────────────────────────────
   function updateBadge(count) {
     const badge = document.getElementById('notif-badge');
-    const bn    = document.getElementById('bn-notif-badge');
     if (badge) {
       badge.textContent = count > 99 ? '99+' : count;
       badge.classList.toggle('hidden', count === 0);
-    }
-    if (bn) {
-      bn.textContent = count;
-      bn.style.display = count > 0 ? 'block' : 'none';
     }
     // Update top-nav-strip badge for notifications item
     const tnBadge = document.querySelector('.top-nav-item[data-page="notifications"] .tn-badge');
