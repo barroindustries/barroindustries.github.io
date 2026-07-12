@@ -4881,259 +4881,224 @@ async function renderBankAccountDrilldown(a) {
 
 // ── Cash Receipt Journal (for cash-based receipts only) ──
 async function renderCashReceiptJournal(container, currentUser, currentRole) {
-  const snap = await db.collection('cash_receipt_journal').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]}));
-  const entries = snap.docs.map(d=>({id:d.id,...d.data()}));
-  const totalCash = entries.reduce((s,e)=>s+(e.debitCash||0),0);
-  const isPriv = isFinancePriv();
-
-  container.innerHTML = `
-    <div class="kpi-row">
-      <div class="kpi-card green"><div class="kpi-label">Total Cash Received</div><div class="kpi-value">₱${fmt(totalCash)}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Entries</div><div class="kpi-value">${entries.length}</div></div>
-    </div>
-    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-      <button class="btn-primary btn-sm" id="add-crj-btn">+ New Receipt Entry</button>
-    </div>
-    <div class="card">
-      <div class="card-body" style="padding:0">
-        ${!entries.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🧾',44)}</div><h4>No cash receipt entries yet</h4></div>`:
-          `<div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Reference</th><th>Date</th><th>Customer</th><th>Debit Cash</th><th>Debit Sales Discount</th><th>Credit A/R</th><th>Credit Sales Revenue</th><th>Credit Sundry (Acct)</th><th>Credit Sundry (Amount)</th>${isPriv?'<th></th>':''}</tr></thead>
-            <tbody>${entries.map(e=>`<tr>
-              <td><code>${escHtml(e.reference||'—')}</code></td>
-              <td>${e.date||'—'}</td>
-              <td>${escHtml(e.customer||'—')}</td>
-              <td style="color:var(--success)">₱${fmt(e.debitCash)}</td>
-              <td>${e.debitSalesDiscount?'₱'+fmt(e.debitSalesDiscount):'—'}</td>
-              <td>${e.creditAR?'₱'+fmt(e.creditAR):'—'}</td>
-              <td>${e.creditSalesRevenue?'₱'+fmt(e.creditSalesRevenue):'—'}</td>
-              <td>${escHtml(e.creditSundryAcct||'—')}</td>
-              <td>${e.creditSundryAmount?'₱'+fmt(e.creditSundryAmount):'—'}</td>
-              ${isPriv?`<td style="white-space:nowrap">
-                <button class="btn-secondary btn-sm crj-edit-btn" data-id="${e.id}">${emojiIcon('✎',16)}</button>
-                <button class="btn-danger btn-sm crj-del-btn" data-id="${e.id}" data-label="${escHtml((e.customer||'receipt')+' — ₱'+fmt(e.debitCash))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
-              </td>`:''}
-            </tr>`).join('')}</tbody>
-          </table></div>`}
-      </div>
-    </div>
-  `;
-  if (window.lucide) lucide.createIcons({ nodes: [container] });
-
-  document.getElementById('add-crj-btn').addEventListener('click', async () => {
-    const bankOpts = await window.BankAccounts.optionsHTML();
-    openPage('New Cash Receipt Entry', `
-      <div class="form-row">
-        <div class="form-group"><label>Reference</label><input id="crj-ref" placeholder="OR #, Receipt #…"/>${window.birOrButtonHTML ? window.birOrButtonHTML('crj-ref') : ''}</div>
-        <div class="form-group"><label>Date</label><input id="crj-date" type="date" value="${today()}"/></div>
-      </div>
-      <div class="form-group"><label>Customer</label><input id="crj-customer" placeholder="Customer name"/></div>
-      <div class="form-row">
-        <div class="form-group"><label>Debit: Cash (₱)</label><input id="crj-cash" type="number" step="0.01" value="0" inputmode="decimal"/></div>
-        <div class="form-group"><label>Debit: Sales Discount (₱)</label><input id="crj-discount" type="number" step="0.01" value="0" inputmode="decimal"/></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Credit: Accounts Receivable (₱)</label><input id="crj-ar" type="number" step="0.01" value="0" inputmode="decimal"/></div>
-        <div class="form-group"><label>Credit: Sales Revenue (₱)</label><input id="crj-revenue" type="number" step="0.01" value="0" inputmode="decimal"/></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Credit: Sundry Account</label><input id="crj-sundry-acct" placeholder="e.g. Other Income"/></div>
-        <div class="form-group"><label>Credit: Sundry Amount (₱)</label><input id="crj-sundry-amt" type="number" step="0.01" value="0" inputmode="decimal"/></div>
-      </div>
-      <div class="form-group"><label>Received into (company account)</label>
-        <select id="crj-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
-    `, `<button class="btn-primary" id="save-crj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    window.wireBirOrButtons && window.wireBirOrButtons();
-
-    document.getElementById('save-crj-btn').addEventListener('click', () => window.busy(document.getElementById('save-crj-btn'), async () => {
-      const customer = document.getElementById('crj-customer').value.trim();
-      const debitCash = parseFloat(document.getElementById('crj-cash').value)||0;
-      if (!customer) { Notifs.showToast('Enter a customer name.','error'); return; }
-      if (!debitCash) { Notifs.showToast('Enter the cash amount received.','error'); return; }
-      const crjAcct = await window.BankAccounts.pick(document.getElementById('crj-bank').value);
-      const crjData = {
-        reference:           document.getElementById('crj-ref').value.trim(),
-        date:                document.getElementById('crj-date').value,
-        customer,
-        debitCash,
-        debitSalesDiscount:  parseFloat(document.getElementById('crj-discount').value)||0,
-        creditAR:            parseFloat(document.getElementById('crj-ar').value)||0,
-        creditSalesRevenue:  parseFloat(document.getElementById('crj-revenue').value)||0,
-        creditSundryAcct:    document.getElementById('crj-sundry-acct').value.trim(),
-        creditSundryAmount:  parseFloat(document.getElementById('crj-sundry-amt').value)||0,
-        bankAccountId:  crjAcct.bankAccountId||null,
-        bankAccountName: crjAcct.bankAccountName||null,
-        addedBy:    currentUser.uid,
-        addedByName: window.userProfile?.displayName || currentUser.email,
-        createdAt:  firebase.firestore.FieldValue.serverTimestamp()
-      };
-      try {
-        await window.assertPeriodOpen(crjData.date);
-      } catch (e) { return; } // toast already shown by assertPeriodOpen
-      const crjDoc = await db.collection('cash_receipt_journal').add(crjData);
-      await postCRJToLedger(crjDoc.id, crjData); // mirror new income into the ledger
-      closeModal(); Notifs.success('Cash receipt entry saved!');
-      renderCashReceiptJournal(container, currentUser, currentRole);
-    }));
+  return window.renderFinanceCrudTable(container, {
+    collection: 'cash_receipt_journal', currentUser, currentRole,
+    orderBy: ['date', 'desc'], limit: 100,
+    emptyIcon: '🧾', emptyLabel: 'No cash receipt entries yet',
+    addBtnLabel: '+ New Receipt Entry',
+    actionsMode: 'privOnly',
+    kpiHtml: (records) => {
+      const totalCash = records.reduce((s,e)=>s+(e.debitCash||0),0);
+      return `<div class="kpi-row">
+        <div class="kpi-card green"><div class="kpi-label">Total Cash Received</div><div class="kpi-value">₱${fmt(totalCash)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Entries</div><div class="kpi-value">${records.length}</div></div>
+      </div>`;
+    },
+    columns: [
+      { header: 'Reference', cell: e => `<code>${escHtml(e.reference||'—')}</code>` },
+      { header: 'Date', cell: e => e.date||'—' },
+      { header: 'Customer', cell: e => escHtml(e.customer||'—') },
+      { header: 'Debit Cash', style: 'color:var(--success)', cell: e => `₱${fmt(e.debitCash)}` },
+      { header: 'Debit Sales Discount', cell: e => e.debitSalesDiscount?'₱'+fmt(e.debitSalesDiscount):'—' },
+      { header: 'Credit A/R', cell: e => e.creditAR?'₱'+fmt(e.creditAR):'—' },
+      { header: 'Credit Sales Revenue', cell: e => e.creditSalesRevenue?'₱'+fmt(e.creditSalesRevenue):'—' },
+      { header: 'Credit Sundry (Acct)', cell: e => escHtml(e.creditSundryAcct||'—') },
+      { header: 'Credit Sundry (Amount)', cell: e => e.creditSundryAmount?'₱'+fmt(e.creditSundryAmount):'—' }
+    ],
+    editTitle: 'Cash Receipt',
+    deleteLabel: e => `cash receipt "${(e.customer||'receipt')+' — ₱'+fmt(e.debitCash)}"`,
+    editFields: e => [
+      { key:'reference', label:'Reference', type:'text', value:e.reference },
+      { key:'date', label:'Date', type:'date', value:e.date },
+      { key:'customer', label:'Customer', type:'text', value:e.customer, full:true },
+      { key:'debitCash', label:'Debit: Cash (₱)', type:'number', value:e.debitCash },
+      { key:'debitSalesDiscount', label:'Debit: Sales Discount (₱)', type:'number', value:e.debitSalesDiscount },
+      { key:'creditAR', label:'Credit: A/R (₱)', type:'number', value:e.creditAR },
+      { key:'creditSalesRevenue', label:'Credit: Sales Revenue (₱)', type:'number', value:e.creditSalesRevenue },
+      { key:'creditSundryAcct', label:'Credit: Sundry Account', type:'text', value:e.creditSundryAcct },
+      { key:'creditSundryAmount', label:'Credit: Sundry Amount (₱)', type:'number', value:e.creditSundryAmount }
+    ],
+    // Edit doesn't just .update() the doc — the mirrored ledger row must stay in
+    // sync, so onSaved chains resyncLedgerForSource(...).then(redo) instead of redo.
+    editOnSaved: (e, redo) => () => { resyncLedgerForSource('cash_receipt_journal', e.id).then(redo); },
+    addModal: {
+      title: 'New Cash Receipt Entry',
+      // beforeOpen fetches bankOpts BEFORE openPage() — same ordering as the
+      // pre-migration `const bankOpts = await BankAccounts.optionsHTML(); openPage(...)`.
+      beforeOpen: async () => ({ bankOpts: await window.BankAccounts.optionsHTML() }),
+      bodyHtml: (pre) => `
+        <div class="form-row">
+          <div class="form-group"><label>Reference</label><input id="crj-ref" placeholder="OR #, Receipt #…"/>${window.birOrButtonHTML ? window.birOrButtonHTML('crj-ref') : ''}</div>
+          <div class="form-group"><label>Date</label><input id="crj-date" type="date" value="${today()}"/></div>
+        </div>
+        <div class="form-group"><label>Customer</label><input id="crj-customer" placeholder="Customer name"/></div>
+        <div class="form-row">
+          <div class="form-group"><label>Debit: Cash (₱)</label><input id="crj-cash" type="number" step="0.01" value="0" inputmode="decimal"/></div>
+          <div class="form-group"><label>Debit: Sales Discount (₱)</label><input id="crj-discount" type="number" step="0.01" value="0" inputmode="decimal"/></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Credit: Accounts Receivable (₱)</label><input id="crj-ar" type="number" step="0.01" value="0" inputmode="decimal"/></div>
+          <div class="form-group"><label>Credit: Sales Revenue (₱)</label><input id="crj-revenue" type="number" step="0.01" value="0" inputmode="decimal"/></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Credit: Sundry Account</label><input id="crj-sundry-acct" placeholder="e.g. Other Income"/></div>
+          <div class="form-group"><label>Credit: Sundry Amount (₱)</label><input id="crj-sundry-amt" type="number" step="0.01" value="0" inputmode="decimal"/></div>
+        </div>
+        <div class="form-group"><label>Received into (company account)</label>
+          <select id="crj-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${pre.bankOpts}</select></div>
+      `,
+      footerHtml: `<button class="btn-primary" id="save-crj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`,
+      saveBtnId: 'save-crj-btn',
+      afterOpen: () => { window.wireBirOrButtons && window.wireBirOrButtons(); },
+      buildDoc: async (ctx) => {
+        const customer = document.getElementById('crj-customer').value.trim();
+        const debitCash = parseFloat(document.getElementById('crj-cash').value)||0;
+        if (!customer) { Notifs.showToast('Enter a customer name.','error'); return null; }
+        if (!debitCash) { Notifs.showToast('Enter the cash amount received.','error'); return null; }
+        const crjAcct = await window.BankAccounts.pick(document.getElementById('crj-bank').value);
+        const crjData = {
+          reference:           document.getElementById('crj-ref').value.trim(),
+          date:                document.getElementById('crj-date').value,
+          customer,
+          debitCash,
+          debitSalesDiscount:  parseFloat(document.getElementById('crj-discount').value)||0,
+          creditAR:            parseFloat(document.getElementById('crj-ar').value)||0,
+          creditSalesRevenue:  parseFloat(document.getElementById('crj-revenue').value)||0,
+          creditSundryAcct:    document.getElementById('crj-sundry-acct').value.trim(),
+          creditSundryAmount:  parseFloat(document.getElementById('crj-sundry-amt').value)||0,
+          bankAccountId:  crjAcct.bankAccountId||null,
+          bankAccountName: crjAcct.bankAccountName||null,
+          addedBy:    ctx.currentUser.uid,
+          addedByName: window.userProfile?.displayName || ctx.currentUser.email,
+          createdAt:  firebase.firestore.FieldValue.serverTimestamp()
+        };
+        try {
+          await window.assertPeriodOpen(crjData.date);
+        } catch (e) { return null; } // toast already shown by assertPeriodOpen
+        return crjData;
+      },
+      afterSave: async (docId, doc) => { await postCRJToLedger(docId, doc); }, // mirror new income into the ledger
+      successMsg: 'Cash receipt entry saved!'
+    }
   });
-
-  if (isPriv) {
-    const redo = () => renderCashReceiptJournal(container, currentUser, currentRole);
-    container.querySelectorAll('.crj-edit-btn').forEach(btn => btn.addEventListener('click', () => {
-      const e = entries.find(x=>x.id===btn.dataset.id); if (!e) return;
-      window.financeEditModal({ collection:'cash_receipt_journal', docId:e.id, title:'Cash Receipt', onSaved:()=>{ resyncLedgerForSource('cash_receipt_journal', e.id).then(redo); }, fields:[
-        { key:'reference', label:'Reference', type:'text', value:e.reference },
-        { key:'date', label:'Date', type:'date', value:e.date },
-        { key:'customer', label:'Customer', type:'text', value:e.customer, full:true },
-        { key:'debitCash', label:'Debit: Cash (₱)', type:'number', value:e.debitCash },
-        { key:'debitSalesDiscount', label:'Debit: Sales Discount (₱)', type:'number', value:e.debitSalesDiscount },
-        { key:'creditAR', label:'Credit: A/R (₱)', type:'number', value:e.creditAR },
-        { key:'creditSalesRevenue', label:'Credit: Sales Revenue (₱)', type:'number', value:e.creditSalesRevenue },
-        { key:'creditSundryAcct', label:'Credit: Sundry Account', type:'text', value:e.creditSundryAcct },
-        { key:'creditSundryAmount', label:'Credit: Sundry Amount (₱)', type:'number', value:e.creditSundryAmount }
-      ]});
-    }));
-    container.querySelectorAll('.crj-del-btn').forEach(btn => btn.addEventListener('click', () => {
-      window.financeDelete({ collection:'cash_receipt_journal', docId:btn.dataset.id, label:`cash receipt "${btn.dataset.label}"`, onDone:redo });
-    }));
-  }
 }
 
 // ── Cash Disbursement Journal (for cash-based expenses only) ──
 async function renderCashDisbursementJournal(container, currentUser, currentRole) {
-  const snap = await db.collection('cash_disbursement_journal').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]}));
-  const entries = snap.docs.map(d=>({id:d.id,...d.data()}));
-  const totalCash = entries.reduce((s,e)=>s+(e.creditCash||0),0);
-  const isPriv = isFinancePriv();
-
-  container.innerHTML = `
-    <div class="kpi-row">
-      <div class="kpi-card red"><div class="kpi-label">Total Cash Disbursed</div><div class="kpi-value">₱${fmt(totalCash)}</div></div>
-      <div class="kpi-card"><div class="kpi-label">Entries</div><div class="kpi-value">${entries.length}</div></div>
-    </div>
-    <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
-      <button class="btn-primary btn-sm" id="add-cdj-btn">+ New Disbursement Entry</button>
-    </div>
-    <div class="card">
-      <div class="card-body" style="padding:0">
-        ${!entries.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🧾',44)}</div><h4>No cash disbursement entries yet</h4></div>`:
-          `<div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Reference</th><th>Date</th><th>Payee</th><th>Credit Cash</th><th>Debit COS–Direct Material</th><th>Debit Accounts Payable</th><th>Debit COS–Direct Labor</th><th>Debit Sundry (Acct)</th><th>Debit Sundry (Amount)</th>${isPriv?'<th></th>':''}</tr></thead>
-            <tbody>${entries.map(e=>`<tr>
-              <td><code>${escHtml(e.reference||'—')}</code></td>
-              <td>${e.date||'—'}</td>
-              <td>${escHtml(e.payee||'—')}</td>
-              <td style="color:var(--danger)">₱${fmt(e.creditCash)}</td>
-              <td>${e.debitMaterial?'₱'+fmt(e.debitMaterial):'—'}</td>
-              <td>${e.debitAP?'₱'+fmt(e.debitAP):'—'}</td>
-              <td>${e.debitLabor?'₱'+fmt(e.debitLabor):'—'}</td>
-              <td>${escHtml(e.debitSundryAcct||'—')}</td>
-              <td>${e.debitSundryAmount?'₱'+fmt(e.debitSundryAmount):'—'}</td>
-              ${isPriv?`<td style="white-space:nowrap">
-                <button class="btn-secondary btn-sm cdj-edit-btn" data-id="${e.id}">${emojiIcon('✎',16)}</button>
-                <button class="btn-danger btn-sm cdj-del-btn" data-id="${e.id}" data-label="${escHtml((e.payee||'disbursement')+' — ₱'+fmt(e.creditCash))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
-              </td>`:''}
-            </tr>`).join('')}</tbody>
-          </table></div>`}
-      </div>
-    </div>
-  `;
-  if (window.lucide) lucide.createIcons({ nodes: [container] });
-
-  document.getElementById('add-cdj-btn').addEventListener('click', async () => {
-    const bankOpts = await window.BankAccounts.optionsHTML();
-    openPage('New Cash Disbursement Entry', `
-      <div class="form-row">
-        <div class="form-group"><label>Reference</label><input id="cdj-ref" placeholder="Voucher #, Check #…"/></div>
-        <div class="form-group"><label>Date</label><input id="cdj-date" type="date" value="${today()}"/></div>
-      </div>
-      <div class="form-group"><label>Payee</label><input id="cdj-payee" placeholder="Payee name"/></div>
-      <div class="form-group"><label>Credit: Cash (₱)</label><input id="cdj-cash" type="number" step="0.01" value="0" inputmode="decimal"/></div>
-      <div class="form-row">
-        <div class="form-group"><label>Debit: COS – Direct Material (₱)</label><input id="cdj-material" type="number" step="0.01" value="0" inputmode="decimal"/></div>
-        <div class="form-group"><label>Debit: Accounts Payable (₱)</label><input id="cdj-ap" type="number" step="0.01" value="0" inputmode="decimal"/></div>
-      </div>
-      <div class="form-group"><label>Debit: COS – Direct Labor (₱)</label><input id="cdj-labor" type="number" step="0.01" value="0" inputmode="decimal"/></div>
-      <div class="form-row">
-        <div class="form-group"><label>Debit: Sundry Account</label><input id="cdj-sundry-acct" placeholder="e.g. Utilities Expense"/></div>
-        <div class="form-group"><label>Debit: Sundry Amount (₱)</label><input id="cdj-sundry-amt" type="number" step="0.01" value="0" inputmode="decimal"/></div>
-      </div>
-      <div class="form-group"><label>Input VAT</label>
-        <select id="cdj-vat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-          <option value="inclusive" selected>VATable — 12% input VAT in the cash amount (claimable)</option>
-          <option value="exempt">No input VAT (exempt / non-VAT)</option>
-        </select>
-      </div>
-      <div class="form-group"><label>Paid from (company account)</label>
-        <select id="cdj-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
-    `, `<button class="btn-primary" id="save-cdj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-
-    document.getElementById('save-cdj-btn').addEventListener('click', () => window.busy(document.getElementById('save-cdj-btn'), async () => {
-      const payee = document.getElementById('cdj-payee').value.trim();
-      const creditCash = parseFloat(document.getElementById('cdj-cash').value)||0;
-      if (!payee) { Notifs.showToast('Enter a payee name.','error'); return; }
-      if (!creditCash) { Notifs.showToast('Enter the cash amount disbursed.','error'); return; }
-      // Input VAT only applies to VATable purchases (material + sundry). Direct labor
-      // carries no input VAT, so it's excluded from the VAT base.
-      const _cdjVatBase = (parseFloat(document.getElementById('cdj-material').value)||0)
-        + (parseFloat(document.getElementById('cdj-sundry-amt').value)||0);
-      const _cdjInputVat = document.getElementById('cdj-vat').value === 'exempt' ? 0 : window.vatSplit(_cdjVatBase,'inclusive').vat;
-      const cdjBankSel = document.getElementById('cdj-bank').value;
-      if (!cdjBankSel && (await window.BankAccounts.list()).length) { Notifs.showToast('Select the paying account.', 'error'); return; }
-      const cdjAcct = await window.BankAccounts.pick(cdjBankSel);
-      const cdjData = {
-        reference:         document.getElementById('cdj-ref').value.trim(),
-        date:              document.getElementById('cdj-date').value,
-        payee,
-        creditCash,
-        debitMaterial:     parseFloat(document.getElementById('cdj-material').value)||0,
-        debitAP:           parseFloat(document.getElementById('cdj-ap').value)||0,
-        debitLabor:        parseFloat(document.getElementById('cdj-labor').value)||0,
-        debitSundryAcct:   document.getElementById('cdj-sundry-acct').value.trim(),
-        debitSundryAmount: parseFloat(document.getElementById('cdj-sundry-amt').value)||0,
-        vatAmount: _cdjInputVat, vatTreatment: document.getElementById('cdj-vat').value,
-        bankAccountId:  cdjAcct.bankAccountId||null,
-        bankAccountName: cdjAcct.bankAccountName||null,
-        addedBy:    currentUser.uid,
-        addedByName: window.userProfile?.displayName || currentUser.email,
-        createdAt:  firebase.firestore.FieldValue.serverTimestamp()
-      };
-      try {
-        await window.assertPeriodOpen(cdjData.date);
-      } catch (e) { return; } // toast already shown by assertPeriodOpen
-      const cdjDoc = await db.collection('cash_disbursement_journal').add(cdjData);
-      await postCDJToLedger(cdjDoc.id, cdjData); // mirror the expense into the ledger
-      closeModal(); Notifs.success('Cash disbursement entry saved!');
-      renderCashDisbursementJournal(container, currentUser, currentRole);
-    }));
+  return window.renderFinanceCrudTable(container, {
+    collection: 'cash_disbursement_journal', currentUser, currentRole,
+    orderBy: ['date', 'desc'], limit: 100,
+    emptyIcon: '🧾', emptyLabel: 'No cash disbursement entries yet',
+    addBtnLabel: '+ New Disbursement Entry',
+    actionsMode: 'privOnly',
+    kpiHtml: (records) => {
+      const totalCash = records.reduce((s,e)=>s+(e.creditCash||0),0);
+      return `<div class="kpi-row">
+        <div class="kpi-card red"><div class="kpi-label">Total Cash Disbursed</div><div class="kpi-value">₱${fmt(totalCash)}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Entries</div><div class="kpi-value">${records.length}</div></div>
+      </div>`;
+    },
+    columns: [
+      { header: 'Reference', cell: e => `<code>${escHtml(e.reference||'—')}</code>` },
+      { header: 'Date', cell: e => e.date||'—' },
+      { header: 'Payee', cell: e => escHtml(e.payee||'—') },
+      { header: 'Credit Cash', style: 'color:var(--danger)', cell: e => `₱${fmt(e.creditCash)}` },
+      { header: 'Debit COS–Direct Material', cell: e => e.debitMaterial?'₱'+fmt(e.debitMaterial):'—' },
+      { header: 'Debit Accounts Payable', cell: e => e.debitAP?'₱'+fmt(e.debitAP):'—' },
+      { header: 'Debit COS–Direct Labor', cell: e => e.debitLabor?'₱'+fmt(e.debitLabor):'—' },
+      { header: 'Debit Sundry (Acct)', cell: e => escHtml(e.debitSundryAcct||'—') },
+      { header: 'Debit Sundry (Amount)', cell: e => e.debitSundryAmount?'₱'+fmt(e.debitSundryAmount):'—' }
+    ],
+    editTitle: 'Cash Disbursement',
+    deleteLabel: e => `cash disbursement "${(e.payee||'disbursement')+' — ₱'+fmt(e.creditCash)}"`,
+    editFields: e => [
+      { key:'reference', label:'Reference', type:'text', value:e.reference },
+      { key:'date', label:'Date', type:'date', value:e.date },
+      { key:'payee', label:'Payee', type:'text', value:e.payee, full:true },
+      { key:'creditCash', label:'Credit: Cash (₱)', type:'number', value:e.creditCash },
+      { key:'debitMaterial', label:'Debit: COS – Direct Material (₱)', type:'number', value:e.debitMaterial },
+      { key:'debitAP', label:'Debit: Accounts Payable (₱)', type:'number', value:e.debitAP },
+      { key:'debitLabor', label:'Debit: COS – Direct Labor (₱)', type:'number', value:e.debitLabor },
+      { key:'debitSundryAcct', label:'Debit: Sundry Account', type:'text', value:e.debitSundryAcct },
+      { key:'debitSundryAmount', label:'Debit: Sundry Amount (₱)', type:'number', value:e.debitSundryAmount }
+    ],
+    editOnSaved: (e, redo) => () => { resyncLedgerForSource('cash_disbursement_journal', e.id).then(redo); },
+    // Input VAT only applies to VATable purchases (material + sundry); mirrors the
+    // create-path calc so an edited CDJ carries correct input VAT (v13 Phase 16).
+    editTransform: (e) => (upd) => {
+      if (e.vatTreatment === 'exempt') { upd.vatAmount = 0; return; }
+      const base = (parseFloat(upd.debitMaterial)||0) + (parseFloat(upd.debitSundryAmount)||0);
+      upd.vatAmount = window.vatSplit(base, 'inclusive').vat;
+    },
+    addModal: {
+      title: 'New Cash Disbursement Entry',
+      beforeOpen: async () => ({ bankOpts: await window.BankAccounts.optionsHTML() }),
+      bodyHtml: (pre) => `
+        <div class="form-row">
+          <div class="form-group"><label>Reference</label><input id="cdj-ref" placeholder="Voucher #, Check #…"/></div>
+          <div class="form-group"><label>Date</label><input id="cdj-date" type="date" value="${today()}"/></div>
+        </div>
+        <div class="form-group"><label>Payee</label><input id="cdj-payee" placeholder="Payee name"/></div>
+        <div class="form-group"><label>Credit: Cash (₱)</label><input id="cdj-cash" type="number" step="0.01" value="0" inputmode="decimal"/></div>
+        <div class="form-row">
+          <div class="form-group"><label>Debit: COS – Direct Material (₱)</label><input id="cdj-material" type="number" step="0.01" value="0" inputmode="decimal"/></div>
+          <div class="form-group"><label>Debit: Accounts Payable (₱)</label><input id="cdj-ap" type="number" step="0.01" value="0" inputmode="decimal"/></div>
+        </div>
+        <div class="form-group"><label>Debit: COS – Direct Labor (₱)</label><input id="cdj-labor" type="number" step="0.01" value="0" inputmode="decimal"/></div>
+        <div class="form-row">
+          <div class="form-group"><label>Debit: Sundry Account</label><input id="cdj-sundry-acct" placeholder="e.g. Utilities Expense"/></div>
+          <div class="form-group"><label>Debit: Sundry Amount (₱)</label><input id="cdj-sundry-amt" type="number" step="0.01" value="0" inputmode="decimal"/></div>
+        </div>
+        <div class="form-group"><label>Input VAT</label>
+          <select id="cdj-vat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+            <option value="inclusive" selected>VATable — 12% input VAT in the cash amount (claimable)</option>
+            <option value="exempt">No input VAT (exempt / non-VAT)</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Paid from (company account)</label>
+          <select id="cdj-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${pre.bankOpts}</select></div>
+      `,
+      footerHtml: `<button class="btn-primary" id="save-cdj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`,
+      saveBtnId: 'save-cdj-btn',
+      buildDoc: async (ctx) => {
+        const payee = document.getElementById('cdj-payee').value.trim();
+        const creditCash = parseFloat(document.getElementById('cdj-cash').value)||0;
+        if (!payee) { Notifs.showToast('Enter a payee name.','error'); return null; }
+        if (!creditCash) { Notifs.showToast('Enter the cash amount disbursed.','error'); return null; }
+        // Input VAT only applies to VATable purchases (material + sundry). Direct labor
+        // carries no input VAT, so it's excluded from the VAT base.
+        const _cdjVatBase = (parseFloat(document.getElementById('cdj-material').value)||0)
+          + (parseFloat(document.getElementById('cdj-sundry-amt').value)||0);
+        const _cdjInputVat = document.getElementById('cdj-vat').value === 'exempt' ? 0 : window.vatSplit(_cdjVatBase,'inclusive').vat;
+        const cdjBankSel = document.getElementById('cdj-bank').value;
+        if (!cdjBankSel && (await window.BankAccounts.list()).length) { Notifs.showToast('Select the paying account.', 'error'); return null; }
+        const cdjAcct = await window.BankAccounts.pick(cdjBankSel);
+        const cdjData = {
+          reference:         document.getElementById('cdj-ref').value.trim(),
+          date:              document.getElementById('cdj-date').value,
+          payee,
+          creditCash,
+          debitMaterial:     parseFloat(document.getElementById('cdj-material').value)||0,
+          debitAP:           parseFloat(document.getElementById('cdj-ap').value)||0,
+          debitLabor:        parseFloat(document.getElementById('cdj-labor').value)||0,
+          debitSundryAcct:   document.getElementById('cdj-sundry-acct').value.trim(),
+          debitSundryAmount: parseFloat(document.getElementById('cdj-sundry-amt').value)||0,
+          vatAmount: _cdjInputVat, vatTreatment: document.getElementById('cdj-vat').value,
+          bankAccountId:  cdjAcct.bankAccountId||null,
+          bankAccountName: cdjAcct.bankAccountName||null,
+          addedBy:    ctx.currentUser.uid,
+          addedByName: window.userProfile?.displayName || ctx.currentUser.email,
+          createdAt:  firebase.firestore.FieldValue.serverTimestamp()
+        };
+        try {
+          await window.assertPeriodOpen(cdjData.date);
+        } catch (e) { return null; } // toast already shown by assertPeriodOpen
+        return cdjData;
+      },
+      afterSave: async (docId, doc) => { await postCDJToLedger(docId, doc); }, // mirror the expense into the ledger
+      successMsg: 'Cash disbursement entry saved!'
+    }
   });
-
-  if (isPriv) {
-    const redo = () => renderCashDisbursementJournal(container, currentUser, currentRole);
-    container.querySelectorAll('.cdj-edit-btn').forEach(btn => btn.addEventListener('click', () => {
-      const e = entries.find(x=>x.id===btn.dataset.id); if (!e) return;
-      window.financeEditModal({ collection:'cash_disbursement_journal', docId:e.id, title:'Cash Disbursement', onSaved:()=>{ resyncLedgerForSource('cash_disbursement_journal', e.id).then(redo); }, fields:[
-        { key:'reference', label:'Reference', type:'text', value:e.reference },
-        { key:'date', label:'Date', type:'date', value:e.date },
-        { key:'payee', label:'Payee', type:'text', value:e.payee, full:true },
-        { key:'creditCash', label:'Credit: Cash (₱)', type:'number', value:e.creditCash },
-        { key:'debitMaterial', label:'Debit: COS – Direct Material (₱)', type:'number', value:e.debitMaterial },
-        { key:'debitAP', label:'Debit: Accounts Payable (₱)', type:'number', value:e.debitAP },
-        { key:'debitLabor', label:'Debit: COS – Direct Labor (₱)', type:'number', value:e.debitLabor },
-        { key:'debitSundryAcct', label:'Debit: Sundry Account', type:'text', value:e.debitSundryAcct },
-        { key:'debitSundryAmount', label:'Debit: Sundry Amount (₱)', type:'number', value:e.debitSundryAmount }
-      ], transform: (upd) => {
-        // Input VAT only applies to VATable purchases (material + sundry); mirrors the
-        // create-path calc so an edited CDJ carries correct input VAT (v13 Phase 16).
-        if (e.vatTreatment === 'exempt') { upd.vatAmount = 0; return; }
-        const base = (parseFloat(upd.debitMaterial)||0) + (parseFloat(upd.debitSundryAmount)||0);
-        upd.vatAmount = window.vatSplit(base, 'inclusive').vat;
-      }});
-    }));
-    container.querySelectorAll('.cdj-del-btn').forEach(btn => btn.addEventListener('click', () => {
-      window.financeDelete({ collection:'cash_disbursement_journal', docId:btn.dataset.id, label:`cash disbursement "${btn.dataset.label}"`, onDone:redo });
-    }));
-  }
 }
 
 // ── Records & Receipts Tab ──────────────────────

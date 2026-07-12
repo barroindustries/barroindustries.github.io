@@ -15,11 +15,25 @@
 //     actionsExtra(r),                      // optional extra html inside the actions cell (e.g. file link)
 //     editFields(r) => [...] ,              // fields for window.financeEditModal
 //     editTitle,                            // title for financeEditModal
+//     editTransform(r) => (upd)=>{...},     // optional: per-record `transform` fn passed to financeEditModal
+//                                            // (e.g. CDJ recomputing vatAmount from edited legs)
+//     editOnSaved(r, redo) => fn,           // optional: custom onSaved for financeEditModal instead of the
+//                                            // default `redo` (e.g. CRJ/CDJ chaining resyncLedgerForSource(...).then(redo))
 //     deleteLabel(r) => string,             // label for window.financeDelete
+//     kpiHtml(records) => html,             // optional: KPI row rendered above the Add-button row
 //     addModal: {
-//       title, bodyHtml, footerHtml,
-//       afterOpen(ctx),                     // called after openPage(); ctx.setFile(f) helper provided
-//       buildDoc(ctx) => object,             // fields to .add() (createdAt/filedBy etc already merged by caller if needed)
+//       title,
+//       bodyHtml | bodyHtml(preData),        // string, or fn(preData) if beforeOpen is used
+//       footerHtml,
+//       beforeOpen() => Promise<preData>,    // optional: runs BEFORE openPage() (e.g. await BankAccounts.optionsHTML())
+//                                             // so bodyHtml can embed async-fetched markup with no loading flash
+//       afterOpen(ctx, preData),             // called after openPage(); ctx.setFile(f) helper provided
+//       buildDoc(ctx, preData) => object|Promise<object|null>,
+//                                             // fields to .add(); may be async. Return null/undefined to ABORT the
+//                                             // save silently (button re-enables, modal stays open) — used for
+//                                             // inline validation + assertPeriodOpen (which shows its own toast)
+//       afterSave(docId, doc, ctx, preData), // optional async hook run AFTER .add() succeeds, BEFORE closeModal/toast
+//                                             // (e.g. CRJ/CDJ mirroring the new doc into the ledger via postMulti)
 //       successMsg
 //     },
 //     afterRender(container, records)       // optional: append extra sections (e.g. file archive) after building the table
@@ -53,6 +67,7 @@ window.renderFinanceCrudTable = async function(container, cfg) {
   const headerRow = `<tr>${cfg.columns.map(c => `<th>${c.header}</th>`).join('')}${showActionsCol ? '<th></th>' : ''}</tr>`;
 
   container.innerHTML = `
+    ${cfg.kpiHtml ? cfg.kpiHtml(records) : ''}
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
       <div>${cfg.headerExtra ? cfg.headerExtra() : ''}</div>
       <button class="btn-primary btn-sm" id="crud-add-btn">${cfg.addBtnLabel}</button>
@@ -74,7 +89,12 @@ window.renderFinanceCrudTable = async function(container, cfg) {
     if (!isPriv) return;
     scopeEl.querySelectorAll('.crud-edit-btn').forEach(btn => btn.addEventListener('click', () => {
       const r = records.find(x => x.id === btn.dataset.id); if (!r) return;
-      window.financeEditModal({ collection, docId: r.id, title: cfg.editTitle, onSaved: redo, fields: cfg.editFields(r) });
+      window.financeEditModal({
+        collection, docId: r.id, title: cfg.editTitle,
+        onSaved: cfg.editOnSaved ? cfg.editOnSaved(r, redo) : redo,
+        fields: cfg.editFields(r),
+        transform: cfg.editTransform ? cfg.editTransform(r) : undefined
+      });
     }));
     scopeEl.querySelectorAll('.crud-del-btn').forEach(btn => btn.addEventListener('click', () => {
       window.financeDelete({ collection, docId: btn.dataset.id, label: btn.dataset.label, onDone: redo });
@@ -96,15 +116,22 @@ window.renderFinanceCrudTable = async function(container, cfg) {
     });
   }
 
-  document.getElementById('crud-add-btn').addEventListener('click', () => {
-    openPage(cfg.addModal.title, cfg.addModal.bodyHtml, cfg.addModal.footerHtml);
+  document.getElementById('crud-add-btn').addEventListener('click', async () => {
+    // beforeOpen runs BEFORE openPage() so async-fetched markup (e.g. a bank-account
+    // <select>) is already in bodyHtml with no loading flash — matches the pre-migration
+    // pattern of `const bankOpts = await BankAccounts.optionsHTML(); openPage(...)`.
+    const preData = cfg.addModal.beforeOpen ? await cfg.addModal.beforeOpen() : null;
+    const body = typeof cfg.addModal.bodyHtml === 'function' ? cfg.addModal.bodyHtml(preData) : cfg.addModal.bodyHtml;
+    openPage(cfg.addModal.title, body, cfg.addModal.footerHtml);
     let uploadedFile = null;
     const ctx = { setFile: (f) => { uploadedFile = f; }, getFile: () => uploadedFile, currentUser, currentRole };
-    if (cfg.addModal.afterOpen) cfg.addModal.afterOpen(ctx);
+    if (cfg.addModal.afterOpen) cfg.addModal.afterOpen(ctx, preData);
     const saveBtn = document.getElementById(cfg.addModal.saveBtnId);
     saveBtn && saveBtn.addEventListener('click', () => window.busy(saveBtn, async () => {
-      const doc = cfg.addModal.buildDoc(ctx);
-      await db.collection(collection).add(doc);
+      const doc = await cfg.addModal.buildDoc(ctx, preData);
+      if (!doc) return; // validation / assertPeriodOpen aborted — toast already shown by the caller
+      const ref = await db.collection(collection).add(doc);
+      if (cfg.addModal.afterSave) await cfg.addModal.afterSave(ref.id, doc, ctx, preData);
       closeModal();
       Notifs.success(cfg.addModal.successMsg);
       redo();
