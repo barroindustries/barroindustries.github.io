@@ -55,3 +55,14 @@ jobs:
           node-version: '20'
       - name: Check backup coverage
         run: node scripts/check-backup-coverage.js
+
+  ui-wiring:
+    name: UI-wiring guard (onclick -> window global, id lookups)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check UI wiring
+        run: node scripts/check-ui-wiring.js

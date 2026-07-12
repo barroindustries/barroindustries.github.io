@@ -1,0 +1,17 @@
+{
+  "_comment": "Phase 110 (V13-PLAN.md) UI-wiring CI guard allowlist. See scripts/check-ui-wiring.js and ARCHITECTURE.md for the wiring conventions this documents.",
+  "getElementById": {
+    "page-panel": "assigned via el.id = 'page-panel' in js/app.js:7857 (createElement pattern), never appears as a literal id= in a template",
+    "bi-toast": "assigned via el.id = 'bi-toast' in js/notifications.js:573 (createElement pattern)",
+    "worker-profile-panel": "assigned via el.id = 'worker-profile-panel' in js/app.js:5203 (createElement pattern)",
+    "bir-gj-csv": "id passed through window.birToolbarHTML({csvId}) (js/bir.js:123) which interpolates id=\"${csvId}\" — dynamic id, the static regex can't see it",
+    "bir-gl-csv": "same window.birToolbarHTML indirection as bir-gj-csv, js/bir.js:306-308",
+    "bir-crb-csv": "same window.birToolbarHTML indirection as bir-gj-csv, js/bir.js:348-350",
+    "bir-cdb-csv": "same window.birToolbarHTML indirection as bir-gj-csv, js/bir.js:385-387",
+    "bir-vat-csv": "same window.birToolbarHTML indirection as bir-gj-csv, js/bir.js:446-454",
+    "bir-wht-csv": "same window.birToolbarHTML indirection as bir-gj-csv, js/bir.js:554-556",
+    "bir-alpha-csv": "same window.birToolbarHTML indirection as bir-gj-csv, js/bir.js:644-646",
+    "e-vat": "id passed through window.vatFieldHTML(id, def) (js/bir.js:40) which interpolates id=\"${id}\" — dynamic id, same indirection class as the bir-*-csv entries"
+  },
+  "unboundControls": {}
+}
