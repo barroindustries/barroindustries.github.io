@@ -165,12 +165,31 @@ service cloud.firestore {
     // also fan out to partners; that's a different, notification-side fix).
     match /posts/{postId} {
       allow read: if isAuth() && !isPartner();
-      allow create: if isAuth();
-      // Author/admin may edit anything. Anyone may toggle their OWN like — an update
-      // that changes ONLY the `hearts` field (so likes persist for normal users).
+      // v13 Phase 22: enforce the publish/approval model server-side — matches
+      // modules.js openNewPostModal (authorId is the real field name; only the
+      // president gets publishDirectly, everyone else always lands 'pending').
+      allow create: if isAuth() && !isPartner() &&
+        request.resource.data.get('authorId', '') == request.auth.uid &&
+        request.resource.data.keys().hasOnly([
+          'title','content','dept','status','authorId','authorName','authorPhoto',
+          'pinned','imageUrl','fileName','fileUrl','createdAt'
+        ]) &&
+        (isPresident()
+          ? request.resource.data.get('status', '') in ['published', 'pending']
+          : request.resource.data.get('status', '') == 'pending');
+      // Author/admin may edit anything, EXCEPT the publish/reject status
+      // transition — decision D10 (modules.js:45 canApprove is president/manager
+      // only, secretary does NOT approve posts) is now mirrored server-side via
+      // isSeniorAdmin() instead of isAdmin() whenever `status` is in the diff.
+      // Anyone may toggle their OWN heart — scoped like the chat reactions
+      // pattern (~line 396) so a caller can only add/remove their own uid.
       allow update: if isAuth() && (
-        resource.data.authorId == request.auth.uid || isAdmin()
-        || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hearts'])
+        resource.data.authorId == request.auth.uid
+        || (isSeniorAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']))
+        || (isAdmin() && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']))
+        || ( request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hearts'])
+             && request.resource.data.get('hearts', []).removeAll(resource.data.get('hearts', [])).hasOnly([request.auth.uid])
+             && resource.data.get('hearts', []).removeAll(request.resource.data.get('hearts', [])).hasOnly([request.auth.uid]) )
       );
       allow delete: if isAuth() && (resource.data.authorId == request.auth.uid || isAdmin());
     }
@@ -704,7 +723,24 @@ service cloud.firestore {
     match /approval_requests/{docId} {
       // Internal workflow data — external partners excluded from reading.
       allow read: if isAuth() && !isPartner();
-      allow create: if isAuth();
+      // v13 Phase 21: the ONLY two client write sites into this collection are
+      // app.js's CA-deduction override modal (type 'ca_deduct', ownership via
+      // userId) and the BS-quote review flow (type 'bs_quote', ownership via
+      // agentId — that path has no userId field). Everything else that shows
+      // up in the "All Requests" dashboard (signup/attendance/submission/
+      // review-task/leave) lives in its own separate collection, not here —
+      // do not widen this list without a matching new .add() call site.
+      allow create: if isAuth() &&
+        (request.resource.data.get('userId', '') == request.auth.uid ||
+         request.resource.data.get('agentId', '') == request.auth.uid ||
+         isFinanceOrAdmin()) &&
+        request.resource.data.get('status', '') == 'pending' &&
+        request.resource.data.get('type', '') in ['ca_deduct', 'bs_quote'] &&
+        request.resource.data.keys().hasOnly([
+          'type','status','createdAt','userId','userName','month','amount','reason',
+          'quoteId','quoteColl','quoteNumber','clientName','total','agentName','agentId'
+        ]) &&
+        (request.resource.data.get('amount', 0) is number && request.resource.data.get('amount', 0) >= 0);
       // v12 WS19: the client's APPROVAL_CAPS table already hides money/quote
       // approve-buttons from secretary, but the rule itself allowed any isAdmin()
       // to approve them via a direct write — tightened to match: secretary
