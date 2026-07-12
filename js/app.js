@@ -8075,11 +8075,56 @@ function requestCloseProfileDrawer() {
 }
 window.requestCloseProfileDrawer = requestCloseProfileDrawer;
 
+// ── Focus trap / focus-return helpers (v13 Phase 125/144 — modal & page-panel a11y) ──
+// One implementation shared by openModal/openPage: capture the trigger on open,
+// move focus inside the overlay, trap Tab/Shift+Tab within it, and restore focus
+// to the trigger on every teardown path (X button, backdrop, Escape, device Back,
+// Overlay.clearAll()) since all of those tear down via the Overlay.push() callback.
+const FOCUSABLE_SEL = 'a[href],button:not([disabled]),textarea:not([disabled]),' +
+  'input:not([disabled]):not([type="hidden"]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
+function _focusableEls(container){
+  if (!container) return [];
+  return Array.from(container.querySelectorAll(FOCUSABLE_SEL))
+    .filter(el => el.offsetParent !== null || el === document.activeElement);
+}
+function _focusTrapAttach(container){
+  if (!container) return;
+  _focusTrapDetach(container); // guard: never stack two listeners on the same container
+  const handler = (e) => {
+    if (e.key !== 'Tab') return;
+    const items = _focusableEls(container);
+    if (!items.length){ e.preventDefault(); container.focus(); return; }
+    const first = items[0], last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+  };
+  container._focusTrapHandler = handler;
+  container.addEventListener('keydown', handler);
+}
+function _focusTrapDetach(container){
+  if (container && container._focusTrapHandler){
+    container.removeEventListener('keydown', container._focusTrapHandler);
+    container._focusTrapHandler = null;
+  }
+}
+function _focusEnter(container){
+  if (!container) return;
+  const items = _focusableEls(container);
+  if (items.length) items[0].focus();
+  else { if (!container.hasAttribute('tabindex')) container.setAttribute('tabindex','-1'); container.focus(); }
+}
+function _focusReturn(trigger){
+  if (trigger && document.contains(trigger) && typeof trigger.focus === 'function') {
+    try { trigger.focus(); } catch(_){}
+  }
+}
+
 // ── Modal / Page panel (v12 WS10/WS11 — Overlay-registered, device Back closes) ──
 // opts.size: 'wide' (~920px) or 'full' (up to 1200px / 94dvh) for content-heavy
 // popups so they don't render as a cramped small dialog. Default stays compact.
 window.openModal=function(title,bodyHTML,footerHTML='',opts){
   opts = opts || {};
+  const _trigger = document.activeElement;
   if (title !== 'Keyboard shortcuts') window._cheatSheetOpen = false;
   document.getElementById('modal-title').textContent=title;
   document.getElementById('modal-body').innerHTML=bodyHTML;
@@ -8089,21 +8134,29 @@ window.openModal=function(title,bodyHTML,footerHTML='',opts){
   const box=document.getElementById('modal-box');
   if(box){ box.classList.remove('modal-wide','modal-full');
     if(opts.size==='wide') box.classList.add('modal-wide');
-    else if(opts.size==='full') box.classList.add('modal-full'); }
+    else if(opts.size==='full') box.classList.add('modal-full');
+    box.setAttribute('role','dialog'); box.setAttribute('aria-modal','true'); }
   const ov = document.getElementById('modal-overlay');
   ov.classList.remove('hidden');
   ov.classList.add('active');
+  _focusTrapAttach(box);
+  requestAnimationFrame(() => _focusEnter(box));
   // Reset _cheatSheetOpen in the teardown itself (not just closeModal) so it clears
   // on EVERY dismissal path — Escape, backdrop click, and Overlay.clearAll() all
   // tear a modal down via this callback without necessarily going through closeModal().
-  window.Overlay.push('modal', () => { ov.classList.add('hidden'); ov.classList.remove('active'); window._cheatSheetOpen = false; });
+  window.Overlay.push('modal', () => {
+    ov.classList.add('hidden'); ov.classList.remove('active'); window._cheatSheetOpen = false;
+    _focusTrapDetach(box); _focusReturn(_trigger);
+  });
 };
 // Full-screen routed panel — SAME signature as openModal. Forms swap openModal→openPage.
 window.openPage = function(title, bodyHTML, footerHTML='', opts){
   opts = opts || {};
+  const _trigger = document.activeElement;
   document.getElementById('page-panel')?.remove();
   const p = document.createElement('div');
   p.id = 'page-panel'; p.className = 'page-panel overlay-active';
+  p.setAttribute('role','dialog'); p.setAttribute('aria-modal','true');
   p.innerHTML = `
     <div class="page-panel-head">
       <button class="page-panel-back" aria-label="Back"><i data-lucide="arrow-left"></i></button>
@@ -8118,8 +8171,12 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
   document.body.appendChild(p);
   p.querySelector('.page-panel-back').addEventListener('click', () => window.Overlay.dismissTop());
   window.lucide?.createIcons();
-  requestAnimationFrame(() => p.classList.add('open'));
-  window.Overlay.push('page', () => { p.classList.remove('open'); setTimeout(()=>p.remove(), 300); });
+  requestAnimationFrame(() => { p.classList.add('open'); _focusEnter(p); });
+  _focusTrapAttach(p);
+  window.Overlay.push('page', () => {
+    p.classList.remove('open'); _focusTrapDetach(p); _focusReturn(_trigger);
+    setTimeout(()=>p.remove(), 300);
+  });
 };
 // Generic dismiss — closes whatever overlay is on top (dialog | modal | page | panel).
 window.closeModal=function(){ window.Overlay.dismissTop(); };
