@@ -9174,71 +9174,40 @@ window.migrateStrandedBKQuotes = async function () {
 // swapping code out from under a live session (silent mid-session breakage — H14),
 // we let it sit "waiting" and prompt the user to reload — unless nobody's signed
 // in yet (login screen), in which case there's no session to disrupt.
-let _swReloading = false; // guards against a reload loop if controllerchange fires twice
-function renderSwUpdateBanner(reg, newWorker) {
-  if (document.getElementById('sw-update-banner')) return;
-  const div = document.createElement('div');
-  div.id = 'sw-update-banner';
-  div.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#1d4ed8;color:#fff;padding:calc(10px + env(safe-area-inset-top,0px)) calc(14px + env(safe-area-inset-right,0px)) 10px calc(14px + env(safe-area-inset-left,0px));font-size:13px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap';
-  div.innerHTML = `<span>${emojiIcon('🔄',16)} <strong>Update ready.</strong> Reload to get the latest version.</span>`
-    + `<button type="button" style="background:#fff;color:#1d4ed8;border:none;border-radius:6px;padding:5px 14px;font-size:13px;font-weight:700;cursor:pointer">Reload</button>`;
-  if (window.lucide) lucide.createIcons({ nodes: [div] });
-  div.querySelector('button').onclick = () => {
-    if (_swReloading) return;
-    // Target whichever worker is actually waiting right now — reg.waiting may not be
-    // populated yet in some browsers even though we captured newWorker earlier, so fall
-    // back to the captured reference.
-    const waitingWorker = reg.waiting || newWorker;
-    if (waitingWorker) {
-      _swReloading = true;
-      waitingWorker.postMessage({ type: 'SKIP_WAITING' });
-      // Safety net: if controllerchange never fires (e.g. the worker never actually
-      // takes control), don't leave the user stuck on a dead banner — reload anyway.
-      setTimeout(() => { if (_swReloading) location.reload(); }, 2000);
-    } else {
-      // No waiting worker to message — a plain reload picks up the new SW on next load.
-      location.reload();
-    }
-  };
-  document.body.appendChild(div);
+// No "update available" banner (owner preference). New versions apply silently
+// at the login screen (no session to disrupt); mid-session, the new SW simply
+// waits and activates on the next natural full load — the network-first strategy
+// already serves fresh JS/CSS on navigation, so the user is never nagged and
+// never interrupted by a forced mid-work reload.
+let _swReloading = false; // set only when WE trigger a silent login-screen apply
+function _atLoginScreen() {
+  const s = document.getElementById('login-screen');
+  return s && !s.classList.contains('hidden');
 }
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then(reg => {
-    // Case: a new SW finished installing and started waiting BEFORE this page loaded.
-    // The updatefound/statechange events below only fire for installs that happen
-    // AFTER we attach the listener, so this case is otherwise silently missed —
-    // leaving a banner that never appears or a stuck state.
-    if (reg.waiting && navigator.serviceWorker.controller) {
-      const loginScreen = document.getElementById('login-screen');
-      const atLogin = loginScreen && !loginScreen.classList.contains('hidden');
-      if (atLogin) {
-        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-      } else {
-        renderSwUpdateBanner(reg, reg.waiting);
-      }
+    // A new SW that finished installing before this page loaded is already waiting.
+    if (reg.waiting && navigator.serviceWorker.controller && _atLoginScreen()) {
+      _swReloading = true;
+      reg.waiting.postMessage({ type: 'SKIP_WAITING' });
     }
     reg.addEventListener('updatefound', () => {
       const newWorker = reg.installing;
       if (!newWorker) return;
       newWorker.addEventListener('statechange', () => {
-        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-          // A previous SW already controls this page → this is an UPDATE, not the first install.
-          const loginScreen = document.getElementById('login-screen');
-          const atLogin = loginScreen && !loginScreen.classList.contains('hidden');
-          if (atLogin) {
-            // Nobody's mid-session — apply silently, no banner.
-            newWorker.postMessage({ type: 'SKIP_WAITING' });
-          } else {
-            renderSwUpdateBanner(reg, newWorker);
-          }
+        // installed + already controlled → an UPDATE (not first install).
+        if (newWorker.state === 'installed' && navigator.serviceWorker.controller && _atLoginScreen()) {
+          _swReloading = true;
+          newWorker.postMessage({ type: 'SKIP_WAITING' }); // silent apply, login only
         }
+        // Mid-session: do nothing — the waiting SW activates on the next full load.
       });
     });
   }).catch(console.warn);
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (_swReloading) { location.reload(); return; }
-    // Controller changed without our banner click (e.g. silent login-screen apply) — reload is
-    // safe either way since the page has no unsaved session state at that point.
-    location.reload();
+    // Reload only for OUR silent login-screen apply. A controllerchange we didn't
+    // initiate (a waiting SW activating later, e.g. after other tabs close) must NOT
+    // force-reload a user who may be mid-task.
+    if (_swReloading) location.reload();
   });
 }
