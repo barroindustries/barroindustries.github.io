@@ -1097,6 +1097,20 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   box-sizing: border-box;
 }
 .top-nav-strip::-webkit-scrollbar { display: none; }
+/* v12 WS42 nav-consolidation — #top-nav-strip holds three zones: #tn-lead
+   (menu/back, mobile only), #tn-tabs (the scrollable page tabs — the only
+   thing buildTopNavStrip() writes into), and #tn-actions (search/notif/menu/
+   avatar, mobile only). On desktop tn-lead/tn-actions stay empty (their
+   controls live in #topbar) so this is a no-op there. */
+#tn-lead, #tn-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+#tn-lead:empty, #tn-actions:empty { display: none; }
+#tn-tabs {
+  display: flex; align-items: center; gap: 2px;
+  flex: 1 1 auto; min-width: 0;
+  overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+#tn-tabs::-webkit-scrollbar { display: none; }
 .top-nav-item {
   display: flex; flex-direction: column; align-items: center;
   gap: 2px; padding: 4px 10px;
@@ -1152,12 +1166,9 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 }
 .topbar-avatar:hover { transform: scale(1.08); box-shadow: var(--sh-pink); }
 
-/* v12 WS41 — topbar icon cluster */
-@media (max-width: 768px) {
-  /* Depts + Chats are desktop/iPad-only: mobile has the ☰ sidebar (depts) and
-     the top-nav-strip Chat item. Menu/avatar/bell/search stay. */
-  #topbar-depts-btn, #topbar-chat-btn { display: none !important; }
-}
+/* v12 WS41 topbar-depts-btn/topbar-chat-btn mobile-hide rule retired WS42
+   nav-consolidation — both buttons were removed from index.html (Chat lives
+   in the center top-nav-strip tab; Departments reachable via the sidebar). */
 #depts-panel .depts-item {
   display:flex; align-items:center; gap:10px; width:100%;
   padding:11px 14px; background:none; border:none; cursor:pointer;
@@ -2576,18 +2587,30 @@ html.theme-astral #mini-cal td.today {
    RESPONSIVE — MOBILE
 ══════════════════════════════ */
 @media (max-width: 768px) {
-  #sidebar { transform: translateX(-100%); }
+  /* v12 WS42 nav-consolidation — owner decision: "keep the central page-tab
+     strip; merge the topbar icons into it." The standalone 56px #topbar row
+     is dropped entirely on mobile; its controls (menu-toggle/nav-back-btn,
+     search/notif/menu/avatar) are relocated into #tn-lead/#tn-actions inside
+     #top-nav-strip by placeTopbarActions() (js/app.js). #top-nav-strip now
+     sits at the very top, reclaiming ~56px of vertical space. */
+  #topbar { display: none; }
+  #sidebar { transform: translateX(-100%); top: env(safe-area-inset-top, 0px); }
   /* z-index 96 = above top-nav-strip (94) so user info is fully visible */
   #sidebar.open { transform: translateX(0); box-shadow: 4px 0 48px rgba(0,0,0,0.60); z-index: var(--z-shell-open); }
   .menu-toggle { display: block; }
+  .top-nav-strip { top: env(safe-area-inset-top, 0px); }
   .main-content {
     margin-left: 0;
-    margin-top: calc(var(--topbar-h) + var(--top-nav-h) + env(safe-area-inset-top, 0px));
+    margin-top: calc(var(--top-nav-h) + env(safe-area-inset-top, 0px));
     padding: 14px;
     padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   }
   /* Top strip replaces bottom nav on mobile */
   .top-nav-strip { display: flex; }
+  /* Full-screen page panel (openPage) — was pinned below the old #topbar;
+     now covers from the very top, same as it used to cover the old
+     top-nav-strip underneath the topbar. */
+  .page-panel { top: env(safe-area-inset-top, 0px); }
   /* Bottom nav stays hidden on mobile */
   .bottom-nav { display: none !important; }
   .dashboard-grid { grid-template-columns: 1fr; }
@@ -4067,10 +4090,22 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   /* The thread panel already renders position:fixed (chat.js inline style)
      anchored below the topbar; once the topbar is hidden, reclaim that space
      so the slim .ms-thread-header becomes the only chrome on screen. */
+  /* Full-BLEED cover (edge to edge), so nothing behind — the chat inbox in
+     #page-content — can peek through. Insetting by the safe-area (the old bug)
+     left a strip at the notch/home-indicator where the inbox showed through.
+     Instead the panel covers the whole viewport and the header/composer below
+     pad themselves for the safe areas. */
   body.chat-fullscreen #chat-thread-panel {
-    top: env(safe-area-inset-top, 0px) !important;
-    bottom: env(safe-area-inset-bottom, 0px) !important;
+    top: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
     z-index: 5000;
+  }
+  /* Header clears the notch; composer already pads for the home indicator via
+     .messenger-input-row's own safe-area-bottom padding. */
+  body.chat-fullscreen #chat-thread-panel .ms-thread-header {
+    padding-top: calc(10px + env(safe-area-inset-top, 0px)) !important;
   }
 }
 

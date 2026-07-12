@@ -1089,15 +1089,15 @@ function buildNav() {
   // Global search is internal-only — show the topbar magnifier for everyone except partners / Brilliant-Steel-only
   const gs = document.getElementById('global-search-btn');
   if (gs) { gs.style.display = (isPartner() || isBrilliantOnly()) ? 'none' : ''; gs.setAttribute('aria-label', 'Global search'); }
-  // v12 WS41 — Departments switcher + Chats topbar buttons
-  const db_ = document.getElementById('topbar-depts-btn');
-  const cb_ = document.getElementById('topbar-chat-btn');
-  const switchable = deptsForSwitcher();                  // [] for partners/bsOnly
-  if (db_) db_.style.display = switchable.length ? '' : 'none';
-  if (cb_) cb_.style.display = '';                        // every role has Chat (WS37)
-  buildDeptsPanel(switchable);
+  // v12 WS42 nav-consolidation — the standalone topbar-depts-btn (grid icon)
+  // and topbar-chat-btn were removed: Chat is already a center top-nav-strip
+  // tab, and departments stay reachable via the persistent sidebar (each of
+  // currentDepts is listed there; admins get an explicit "All Departments"
+  // entry in getSidebarItems). deptsForSwitcher()/buildDeptsPanel() are kept
+  // defined but unused (dead-safe: buildDeptsPanel no-ops without its button).
   // a11y: label icon-only topbar nav controls.
   document.getElementById('menu-toggle')?.setAttribute('aria-label', 'Open menu');
+  placeTopbarActions();
 }
 
 function isPresident() { return currentRole === 'president'; }
@@ -1131,6 +1131,9 @@ function getSidebarItems() {
     items.push({ icon:'check-square',  label:'Tasks',            page:'tasks'                          });
     items.push({ icon:'megaphone',     label:'Posts',            page:'posts'                          });
     items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
+    // v12 WS42 nav-consolidation — replaces the removed topbar-depts-btn
+    // (grid icon) so the "All Departments" catalog page stays reachable.
+    items.push({ icon:'layout-grid',   label:'All Departments',  page:'departments'                    });
     items.push({ icon:'shield-check',  label:'Approvals',        page:'approvals',       section:true  });
     items.push({ icon:'trending-up',   label:'Progress Reports', page:'progress'                       });
     items.push({ icon:'users',         label:'Team Directory',   page:'team-directory',  section:true  });
@@ -1264,14 +1267,19 @@ function buildBottomNav() {
 
 function buildTopNavStrip() {
   const strip = document.getElementById('top-nav-strip');
-  if (!strip) return;
+  const tabs  = document.getElementById('tn-tabs') || strip; // fallback if markup is stale
+  if (!strip || !tabs) return;
   const isAdminRole = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
   const items = isAdminRole ? window.PRESIDENT_BOTTOM_NAV
     : isGenericPartner() ? (window.PARTNER_GENERIC_BOTTOM_NAV || window.BOTTOM_NAV_ITEMS)
     : isPartner() ? (window.PARTNER_BOTTOM_NAV || window.BOTTOM_NAV_ITEMS)
     : isBrilliantOnly() ? window.BRILLIANT_BOTTOM_NAV
     : window.BOTTOM_NAV_ITEMS;
-  strip.innerHTML = items.map(item =>
+  // v12 WS42 nav-consolidation — drop the Profile tab from the center strip:
+  // the topbar avatar (#topbar-avatar → 'my-profile', see applyUserUI) is now
+  // the single destination for Profile, so a duplicate center tab is redundant.
+  const visibleItems = items.filter(item => item.page !== 'my-profile');
+  tabs.innerHTML = visibleItems.map(item =>
     `<button class="top-nav-item pressable" data-page="${item.page}">
        <span class="tn-icon-wrap" style="position:relative;display:inline-flex">
          ${_bnIcon(item.icon)}
@@ -1280,11 +1288,45 @@ function buildTopNavStrip() {
        <span class="tn-label">${item.label}</span>
      </button>`
   ).join('');
-  strip.querySelectorAll('[data-page]').forEach(btn => {
+  tabs.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => navigateTo(btn.dataset.page));
   });
-  if (window.lucide) lucide.createIcons({ nodes: [strip] });
+  if (window.lucide) lucide.createIcons({ nodes: [tabs] });
 }
+
+// v12 WS42 nav-consolidation — the mobile top strip absorbs the standalone
+// topbar row (owner decision: "one slim top bar"). Rather than duplicating
+// markup/handlers, physically relocate the real topbar control nodes
+// (menu-toggle/nav-back-btn on the left, search/notif/menu/avatar on the
+// right) into the strip's pinned zones on mobile, and restore them to the
+// topbar on desktop/tablet-rail widths. All existing ids/handlers
+// (applyUserUI, buildNav, notifications.js initToggle) are untouched since
+// they resolve elements by getElementById regardless of DOM parent.
+const TOPBAR_MOBILE_MQ = (() => { try { return window.matchMedia('(max-width: 768px)'); } catch (_) { return null; } })();
+function placeTopbarActions() {
+  const topbar  = document.getElementById('topbar');
+  const lead    = document.getElementById('tn-lead');
+  const actions = document.getElementById('tn-actions');
+  if (!topbar || !lead || !actions) return;
+  const logoArea = topbar.querySelector('.topbar-logo-area');
+  const mobile = TOPBAR_MOBILE_MQ ? TOPBAR_MOBILE_MQ.matches : window.innerWidth <= 768;
+  const leadIds    = ['menu-toggle', 'nav-back-btn'];
+  const actionIds  = ['global-search-btn', 'notif-btn', 'topbar-menu-btn', 'topbar-avatar'];
+  if (mobile) {
+    leadIds.forEach(id => { const el = document.getElementById(id); if (el && el.parentElement !== lead) lead.appendChild(el); });
+    actionIds.forEach(id => { const el = document.getElementById(id); if (el && el.parentElement !== actions) actions.appendChild(el); });
+  } else {
+    leadIds.forEach(id => { const el = document.getElementById(id); if (el && el.parentElement !== topbar) topbar.insertBefore(el, logoArea || topbar.firstChild); });
+    actionIds.forEach(id => { const el = document.getElementById(id); const right = topbar.querySelector('.topbar-right'); if (el && right && el.parentElement !== right) right.appendChild(el); });
+  }
+}
+window.placeTopbarActions = placeTopbarActions;
+if (TOPBAR_MOBILE_MQ) {
+  const _onMqChange = () => placeTopbarActions();
+  if (TOPBAR_MOBILE_MQ.addEventListener) TOPBAR_MOBILE_MQ.addEventListener('change', _onMqChange);
+  else if (TOPBAR_MOBILE_MQ.addListener) TOPBAR_MOBILE_MQ.addListener(_onMqChange); // Safari <14 fallback
+}
+document.addEventListener('DOMContentLoaded', placeTopbarActions);
 
 // v12 WS41 — which departments the signed-in user can open from the topbar.
 // Mirrors getSidebarItems' derivation exactly (incl. the finance-role Finance

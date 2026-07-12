@@ -176,7 +176,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.134 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.135 · Barro Industries</div>
   </div>
 </div>
 
@@ -204,12 +204,6 @@
       <button class="notif-btn" id="global-search-btn" aria-label="Search" style="display:none" onclick="navigateTo('search')">
         <i data-lucide="search"></i>
       </button>
-      <button class="notif-btn tb-wide" id="topbar-depts-btn" aria-label="Departments" style="display:none">
-        <i data-lucide="layout-grid"></i>
-      </button>
-      <button class="notif-btn tb-wide" id="topbar-chat-btn" aria-label="Chats" style="display:none" onclick="navigateTo('chat')">
-        <i data-lucide="message-circle"></i>
-      </button>
       <button class="notif-btn" id="notif-btn" aria-label="Notifications">
         <i data-lucide="bell" aria-hidden="true"></i>
         <span class="notif-badge hidden" id="notif-badge">0</span>
@@ -221,8 +215,15 @@
     </div>
   </header>
 
-  <!-- Top nav strip (mobile only) — populated by JS -->
-  <div class="top-nav-strip" id="top-nav-strip"></div>
+  <!-- Top nav strip (mobile only) — center tabs populated by JS (#tn-tabs);
+       #tn-lead (menu/back) and #tn-actions (search/notif/menu/avatar) are
+       pinned zones that receive the relocated topbar controls on mobile via
+       placeTopbarActions() in app.js. -->
+  <div class="top-nav-strip" id="top-nav-strip">
+    <div class="tn-lead" id="tn-lead"></div>
+    <div class="tn-tabs" id="tn-tabs"></div>
+    <div class="tn-actions" id="tn-actions"></div>
+  </div>
 
   <!-- Notification Panel -->
   <div id="notif-panel" class="notif-panel hidden">
