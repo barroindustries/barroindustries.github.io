@@ -6602,41 +6602,80 @@ async function renderAnalytics() {
   const c=document.getElementById('page-content');
   c.innerHTML='<div class="loading-placeholder">Loading analytics…</div>';
   const safeGet = async (q) => { try { return await q.get(); } catch(e) { return {docs:[],size:0}; } };
-  // Analytics re-reads the same heavy collections on every visit — cache 60s. Uses the SAME
-  // canonical keys as dashboards/writers (no more 'an_' prefix) so a post-then-view sees fresh data.
+  // Analytics re-reads the same heavy collections on every visit — cache 60s, keyed by the
+  // active period so switching "This Month" ↔ "YTD" ↔ "All Time" doesn't serve stale rows
+  // from a differently-bounded query (Phase 86 item 3). Uses the SAME canonical unqualified
+  // keys as dashboards/writers for the 'all' case (no more 'an_' prefix) so a post-then-view
+  // still sees fresh data on the one path other screens' dbCacheInvalidate() calls target.
   const cg = (key,q,ttl=60000) => dbCachedGet(key, ()=>q.get(), ttl).catch(()=>({docs:[],size:0}));
 
-  // Bound the ledger read to the window Analytics actually needs (selected period, extended to
-  // cover the 6-month trend) instead of the whole collection. Full read only on explicit 'All Time'.
-  const _anP = Period.parse(window._AN_PERIOD || 'month');
-  const _sixStart = ymAddMonths(bizDate().slice(0,7), -5) + '-01';   // covers the 6-month trend
-  window._AN_LED_START = (window._AN_PERIOD === 'all') ? null
+  // ── Phase 86: period scope ──────────────────────────────────────────
+  // Chip/select on the Overview tab (This Month / Last Month / YTD / All Time), stored in
+  // window._AN_PERIOD so every subtab's fetch + KPI math reads the same value. Defaults to
+  // YTD per the phase spec (was implicitly "This Month" before).
+  const anKey = window._AN_PERIOD || 'ytd';
+  const _anP = Period.parse(anKey);
+  const _sixStart = ymAddMonths(bizDate().slice(0,7), -5) + '-01';   // covers the 6-month trend charts
+  // Bound = the EARLIER (more inclusive) of the selected period's start and 6-months-back, so
+  // month-over-month delta badges and the 6-month trend charts (which need last month / trailing
+  // 6mo data even when "This Month" is selected) never come up short. 'All Time' stays fully
+  // unbounded — this is the literal "All = today's behavior" requirement, and it's also the
+  // deliberate escape hatch for any explicitly all-time KPI (see notes below).
+  window._AN_FETCH_START = (anKey === 'all') ? null
     : ((_anP.start && _anP.start < _sixStart) ? _anP.start : _sixStart);
+  window._AN_LED_START = window._AN_FETCH_START;   // back-compat alias, same value
+  const _boundStart = window._AN_FETCH_START;                                     // 'YYYY-MM-DD' string, or null
+  const _boundTS = _boundStart ? firebase.firestore.Timestamp.fromDate(new Date(_boundStart+'T00:00:00')) : null;
 
-  // Fetch all data upfront
-  const [usersSnap,tasksSnap,quotesSnap,subsSnap,expSnap,caSnap,payslipSnap,ledgerSnap,govSnap,jpSnap,jcSnap,dpSnap,clientsSnap] = await Promise.all([
+  // Fetch upfront ONLY what Overview + the shared metrics bag (M) need — every subtab besides
+  // Overview reuses these same arrays for at least one KPI, so they aren't worth deferring.
+  // Deferred (see loadSubs/loadExpenses/loadFinanceExtras below): submissions, expenses,
+  // cash_advances, payslips — each consumed by exactly one or two subtabs, never Overview.
+  const [usersSnap,tasksSnap,quotesSnap,ledgerSnap,govSnap,jpSnap,jcSnap,dpSnap,clientsSnap] = await Promise.all([
     dbCachedGet('users', fetchUsersWithPayroll, 60000).catch(()=>({docs:[],size:0})),
-    cg('tasks-all', db.collection('tasks')),
+    cg('tasks-all:'+anKey, _boundTS ? db.collection('tasks').where('createdAt','>=',_boundTS) : db.collection('tasks')),
     dbCachedGet('all-quotes', getAllQuotes, 60000).catch(()=>({docs:[]})),
-    cg('submissions', db.collection('submissions')),
-    cg('expenses', db.collection('expenses')),
-    cg('cash_advances', db.collection('cash_advances')),
-    cg('payslips', db.collection('payslips')),
     (window._AN_LED_START ? ledgerSince(window._AN_LED_START) : dbCachedGet('ledger', ()=>db.collection('ledger').get().catch(()=>({docs:[]})), 60000)),
-    cg('gov_biddings', db.collection('gov_biddings').orderBy('createdAt','desc')),
-    cg('job_projects', db.collection('job_projects')),
-    cg('job_costs', db.collection('job_costs')),
-    cg('projects', db.collection('projects')),
+    cg('gov_biddings:'+anKey, _boundTS ? db.collection('gov_biddings').where('createdAt','>=',_boundTS).orderBy('createdAt','desc') : db.collection('gov_biddings').orderBy('createdAt','desc')),
+    cg('job_projects:'+anKey, _boundTS ? db.collection('job_projects').where('createdAt','>=',_boundTS) : db.collection('job_projects')),
+    cg('job_costs:'+anKey, _boundTS ? db.collection('job_costs').where('createdAt','>=',_boundTS) : db.collection('job_costs')),
+    cg('projects:'+anKey, _boundTS ? db.collection('projects').where('createdAt','>=',_boundTS) : db.collection('projects')),
     window.Clients.listAll().catch(()=>[]),
   ]);
   const users=usersSnap.docs.map(d=>({id:d.id,...d.data()}));
   const tasks=tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
   const quotes=quotesSnap.docs.map(d=>({id:d.id,...d.data()}));
   const allClients = Array.isArray(clientsSnap) ? clientsSnap : [];
-  const subs=subsSnap.docs.map(d=>({id:d.id,...d.data()}));
-  const expenses=expSnap.docs.map(d=>({id:d.id,...d.data()}));
-  const cas=caSnap.docs.map(d=>({id:d.id,...d.data()}));
-  const payslips=payslipSnap.docs.map(d=>({id:d.id,...d.data()}));
+  // Lazy per-subtab collections (Phase 86 item 2) — populated on first visit to the subtab
+  // that actually reads them, cached in these closure vars keyed by anKey via loadedFor.
+  let subs=[], expenses=[], cas=[], payslips=[];
+  let _loadedFor = { subs:null, expenses:null, finance:null };
+  const loadSubs = async () => {
+    if (_loadedFor.subs === anKey) return;
+    const q = _boundTS ? db.collection('submissions').where('createdAt','>=',_boundTS) : db.collection('submissions');
+    const snap = await cg('submissions:'+anKey, q);
+    subs = snap.docs.map(d=>({id:d.id,...d.data()}));
+    _loadedFor.subs = anKey;
+  };
+  const loadExpenses = async () => {
+    if (_loadedFor.expenses === anKey) return;
+    const q = _boundStart ? db.collection('expenses').where('date','>=',_boundStart) : db.collection('expenses');
+    const snap = await cg('expenses:'+anKey, q);
+    expenses = snap.docs.map(d=>({id:d.id,...d.data()}));
+    _loadedFor.expenses = anKey;
+  };
+  const loadFinanceExtras = async () => {
+    if (_loadedFor.finance === anKey) return;
+    // v13 review fix: CA Outstanding/Pending are BALANCE-BOOK metrics — an advance
+    // from last year that still carries a balance must always count. Never bound
+    // this fetch by period (the 60s cg cache keeps the cost acceptable).
+    const caQ = db.collection('cash_advances');
+    const psQ = _boundStart ? db.collection('payslips').where('payPeriodStart','>=',_boundStart) : db.collection('payslips');
+    const [caSnap, psSnap] = await Promise.all([cg('cash_advances:all', caQ), cg('payslips:'+anKey, psQ)]);
+    cas = caSnap.docs.map(d=>({id:d.id,...d.data()}));
+    payslips = psSnap.docs.map(d=>({id:d.id,...d.data()}));
+    _loadedFor.finance = anKey;
+  };
   const ledger=ledgerSnap.docs.map(d=>({id:d.id,...d.data()}));
   const govBids=govSnap.docs.map(d=>({id:d.id,...d.data()}));
   const jobProjects=jpSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -6687,7 +6726,7 @@ async function renderAnalytics() {
   // cash/turns are populated separately (cash: below, once, not period-scoped;
   // turns: Spec 4b, Finance-tab-only lazy fetch) and preserved across re-syncs.
   const buildMetricsSync = () => {
-    const anPeriod = window._AN_PERIOD || 'month';
+    const anPeriod = window._AN_PERIOD || 'ytd';
     const ledInP  = sum(ledger.filter(l=>ledgerKind(l)==='income'&&finPeriodMatch(l.date,anPeriod)), l=>l.amount);
     const ledOutP = sum(ledger.filter(l=>ledgerKind(l)==='expense'&&finPeriodMatch(l.date,anPeriod)), l=>l.amount);
     const wonQuotesP = sum(quotes.filter(q=>q.status==='accepted'&&finPeriodMatch(ymOf(q.createdAt),anPeriod)), q=>q.total);
@@ -6748,7 +6787,7 @@ async function renderAnalytics() {
   const renderOverview = async () => {
     M = buildMetricsSync();   // v12 WS40 — refresh so the Conclusions card below never lags this tab's own period picker
     const CT = window.chartTheme();
-    const anPeriod = window._AN_PERIOD || 'month';
+    const anPeriod = window._AN_PERIOD || 'ytd';
     const anPlabel = M.periodLabel;
     // ── Cash flow (canonical source = ledger) ──
     // ledgerKind() classifies income/expense (v12 WS13) — asset/liability rows
@@ -6924,6 +6963,7 @@ async function renderAnalytics() {
   };
 
   const renderMarketing = async () => {
+    await Promise.all([loadSubs(), loadExpenses()]);   // Phase 86 item 2 — lazy, Marketing-only reads
     const CT = window.chartTheme();
     const mktTasks=tasks.filter(t=>t.department==='Marketing'||t.category==='Marketing');
     const doneMkt=mktTasks.filter(t=>['done','approved','archived'].includes(t.status));
@@ -6966,11 +7006,12 @@ async function renderAnalytics() {
   };
 
   const renderFinanceAnalytics = async () => {
+    await loadFinanceExtras();   // Phase 86 item 2 — lazy, Finance-only reads (cash_advances + payslips)
     const CT = window.chartTheme();
     // Follows the SAME period as the Overview tab's picker (window._AN_PERIOD) —
     // showing "This Month" here while Overview shows "Last Month" would be a
     // confusing split-brain on one page (v12 WS12 D3).
-    const finAnPeriod = window._AN_PERIOD || 'month';
+    const finAnPeriod = window._AN_PERIOD || 'ytd';
     const finAnLabel = finPeriodLabel(finAnPeriod);
     const totalPayroll = M.payrollTotal;   // v12 WS40 — same formula, single source (Spec 2d)
     // Payroll is posted as type:'debit' category:'Payroll Expense' (no type:'payslip' exists).
@@ -7058,6 +7099,7 @@ async function renderAnalytics() {
   };
 
   const renderProduction = async () => {
+    await loadSubs();   // Phase 86 item 2 — lazy, shared with Marketing (prodSubs below)
     const CT = window.chartTheme();
     const prodTasks=tasks.filter(t=>t.department==='Production'||t.category==='Production');
     const prodUsers=users.filter(u=>(Array.isArray(u.departments)?u.departments:u.department?[u.department]:[]).includes('Production'));
