@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.51';
+window.APP_VERSION = '12.0.52';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1403,16 +1403,20 @@ window.CashAdvance = {
   },
 
   // ── Request (the ONE request form's data path) ──────────────────────
-  async request({ amount, terms, reason, dateNeeded }) {
+  // userId/userName/employeeId/private are optional overrides used by the
+  // president's "record CA for employee" admin flow (modules.js) — self-service
+  // employee requests never pass them and behave exactly as before.
+  async request({ amount, terms, reason, dateNeeded, userId, userName, employeeId, private: isPrivate }) {
     const amt = parseFloat(amount)||0;
-    if (!amt || amt < 100) throw new Error('Enter a valid amount (min ₱100).');
-    if (amt > 50000)       throw new Error('Maximum cash advance is ₱50,000.');
+    const isAdminIssued = !!userId;
+    if (!amt || (!isAdminIssued && amt < 100)) throw new Error('Enter a valid amount (min ₱100).');
+    if (!isAdminIssued && amt > 50000)          throw new Error('Maximum cash advance is ₱50,000.');
     const t    = parseInt(terms)||1;
-    const uid  = window.currentUser && window.currentUser.uid;
-    const name = (window.userProfile && window.userProfile.displayName) || (window.currentUser && window.currentUser.email) || '';
-    await db.collection('cash_advances').add({
+    const uid  = userId || (window.currentUser && window.currentUser.uid);
+    const name = userName || (window.userProfile && window.userProfile.displayName) || (window.currentUser && window.currentUser.email) || '';
+    const docData = {
       userId: uid, userName: name,
-      employeeId: (window.userProfile && window.userProfile.employeeId) || uid,
+      employeeId: employeeId || (window.userProfile && window.userProfile.employeeId) || uid,
       amount: amt, terms: t,
       // Interest/monthly/total are finalized at approval (v12 WS22 decision 3) —
       // the employee no longer picks whether interest applies.
@@ -1421,9 +1425,14 @@ window.CashAdvance = {
       date: dateNeeded || (window.bizDate ? window.bizDate() : today()),
       reason: (reason||'').trim(),
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
+    };
+    if (typeof isPrivate !== 'undefined') docData.private = isPrivate;
+    const ref = await db.collection('cash_advances').add(docData);
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
-    await Notifs.sendToOwner({ title:'Cash Advance Request', body:`${name} requests ₱${fmt(amt)} (${t}-month plan).`, icon:'💸', type:'cash_advance' });
+    // Admin-issued records are approved immediately by the same actor — the
+    // "requests approval" owner ping only makes sense for self-service requests.
+    if (!isAdminIssued) await Notifs.sendToOwner({ title:'Cash Advance Request', body:`${name} requests ₱${fmt(amt)} (${t}-month plan).`, icon:'💸', type:'cash_advance' });
+    return ref.id;
   },
 
   openRequestForm() {
@@ -1477,16 +1486,19 @@ window.CashAdvance = {
       const pct     = interestPct != null ? interestPct : (cur.interest || 0);
       const terms   = cur.terms || 1;
       const total   = pct > 0 ? cur.amount * Math.pow(1 + pct/100, terms) : cur.amount;
-      const monthly = total / terms;
+      // Round monthlyPayment FIRST, then derive totalPayable from the rounded
+      // monthly so sum-of-installments === totalPayable exactly (no centavo drift).
+      const monthly      = _caRound2(total / terms);
+      const totalPayable = _caRound2(monthly * terms);
       const uid     = window.currentUser && window.currentUser.uid;
       t.update(ref, {
         status: 'approved', interest: pct, interestCharged: pct > 0,
-        totalPayable: _caRound2(total), monthlyPayment: _caRound2(monthly), balance: _caRound2(total),
+        totalPayable, monthlyPayment: monthly, balance: totalPayable,
         bankAccountId: (bankAccount && bankAccount.bankAccountId) || null,
         bankAccountName: (bankAccount && bankAccount.bankAccountName) || null,
         approvedBy: uid, approvedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
-      result = { userId: cur.userId, amount: cur.amount, total: _caRound2(total), userName: cur.userName || '' };
+      result = { userId: cur.userId, amount: cur.amount, total: totalPayable, userName: cur.userName || '' };
     });
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
     if (result) {
@@ -1555,14 +1567,19 @@ window.CashAdvance = {
   },
 
   async reject(id, reason) {
-    const ref  = db.collection('cash_advances').doc(id);
-    const snap = await ref.get().catch(()=>null);
-    if (!snap || !snap.exists) throw new Error('Record no longer exists.');
-    const a   = snap.data();
-    const uid = window.currentUser && window.currentUser.uid;
-    await ref.update({
-      status: 'rejected', rejectedBy: uid, rejectedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      ...(reason ? { rejectReason: reason } : {})
+    const ref = db.collection('cash_advances').doc(id);
+    let a = null;
+    await db.runTransaction(async t => {
+      const fresh = await t.get(ref);
+      if (!fresh.exists) throw new Error('Record no longer exists.');
+      const cur = fresh.data();
+      if (cur.status !== 'pending') throw new Error('This request is no longer pending.');
+      const uid = window.currentUser && window.currentUser.uid;
+      t.update(ref, {
+        status: 'rejected', rejectedBy: uid, rejectedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        ...(reason ? { rejectReason: reason } : {})
+      });
+      a = cur;
     });
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
     await Notifs.send(a.userId, { title:'Cash Advance Rejected', body: reason ? `Your cash advance request was not approved: ${reason}` : 'Your cash advance request was not approved.', icon:'❌', type:'cash_advance', dedupKey:`ca-rejected-${id}` });

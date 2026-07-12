@@ -591,11 +591,18 @@ service cloud.firestore {
           request.resource.data.get('state','') in ['computed','verified'] )
         ||
         ( isPresident() && (
-            // verify → disburse (the only path to disbursed)
+            // verify → disbursing (transactional lock acquisition — Part E Phase 11)
             ( resource.data.get('state','')=='verified' &&
+              request.resource.data.get('state','')=='disbursing' ) ||
+            // disbursing → disbursed (lock release on success)
+            ( resource.data.get('state','')=='disbursing' &&
               request.resource.data.get('state','')=='disbursed' ) ||
             // president reopen: verified → computed
             ( resource.data.get('state','')=='verified' &&
+              request.resource.data.get('state','')=='computed' ) ||
+            // president manual unlock after investigating a stuck/partial
+            // disburse: disbursing → computed (Part E Phase 11)
+            ( resource.data.get('state','')=='disbursing' &&
               request.resource.data.get('state','')=='computed' ) ||
             // president may also perform the finance-tier transitions
             ( resource.data.get('state','draft') in ['draft','computed'] &&

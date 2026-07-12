@@ -446,18 +446,20 @@ window.financeExecuteDelete = async function(collection, docId) {
 // President → delete now (with confirm). Anyone else → file a delete request for
 // the President to approve. `label` is a human description of the record.
 // Resolves to 'deleted' | 'requested' | 'cancelled'. onDone(outcome) optional.
-window.financeDelete = function(opts) {
+window.financeDelete = async function(opts) {
   const { collection, docId, label } = opts;
   const onDone = opts.onDone || (()=>{});
   const u = window.currentUser || (typeof auth !== 'undefined' && auth.currentUser) || {};
-  return new Promise(async (resolve) => {
-    if (typeof isRealPresident === 'function' && isRealPresident()) {
-      if (!(await confirmDialog({ message: `Delete ${escHtml(label)}? This cannot be undone.`, danger:true, html:true }))) { resolve('cancelled'); return; }
-      window.financeExecuteDelete(collection, docId)
-        .then(() => { Notifs.showToast('Deleted.'); onDone('deleted'); resolve('deleted'); })
-        .catch(e => { Notifs.showToast('Delete failed: '+(e.message||e),'error'); resolve('cancelled'); });
-      return;
+  if (typeof isRealPresident === 'function' && isRealPresident()) {
+    if (!(await confirmDialog({ message: `Delete ${escHtml(label)}? This cannot be undone.`, danger:true, html:true }))) return 'cancelled';
+    try {
+      await window.financeExecuteDelete(collection, docId);
+      Notifs.showToast('Deleted.'); onDone('deleted'); return 'deleted';
+    } catch(e) {
+      Notifs.showToast('Delete failed: '+(e.message||e),'error'); return 'cancelled';
     }
+  }
+  return new Promise((resolve) => {
     openModal('Request Deletion — President Approval', `
       <p style="margin-bottom:12px;color:var(--text-muted);font-size:13px">Deleting <strong>${escHtml(label)}</strong> needs the President's approval. The record stays until it's approved.</p>
       <div class="form-group"><label>Reason for deletion</label><input id="fdr-reason" placeholder="e.g. Duplicate entry, wrong amount…"/></div>
@@ -3514,11 +3516,34 @@ window.disbursePayRun = async function(month, opts = {}) {
   if (typeof isRealPresident === 'function' && !isRealPresident()) {
     Notifs.showToast('Only the President can disburse payroll.','error'); return;
   }
-  const runRef  = db.collection('pay_runs').doc(month);
-  const runSnap = await runRef.get();
-  if (!runSnap.exists) { Notifs.showToast('No pay run found for this month.','error'); return; }
-  const run = runSnap.data();
-  if (run.state !== 'verified') { Notifs.showToast(`Run must be Verified before Disburse (currently ${run.state||'draft'}).`,'error'); return; }
+  const runRef = db.collection('pay_runs').doc(month);
+  const currentUser0 = window.currentUser;
+  // Transactional lock (Part E Phase 11): the transaction itself IS the lock —
+  // a concurrent second call re-reads the doc inside ITS OWN transaction, sees
+  // 'disbursing' (not 'verified'), and throws before any money write happens.
+  // A 'disbursing' run may be resumed by the same locker or the president —
+  // the deterministic PAY-{month}-{uid} refs below make re-running idempotent.
+  const run = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(runRef);
+    if (!snap.exists) throw new Error('No pay run found for this month.');
+    const d = snap.data();
+    if (d.state === 'verified') {
+      tx.update(runRef, {
+        state: 'disbursing',
+        disbursingAt: firebase.firestore.FieldValue.serverTimestamp(),
+        disbursingBy: currentUser0?.uid || null,
+        disbursingByName: window.userProfile?.displayName || currentUser0?.email || null
+      });
+      return d;
+    }
+    if (d.state === 'disbursing') {
+      const isLocker = d.disbursingBy === currentUser0?.uid;
+      const canResume = isLocker || (typeof isRealPresident === 'function' && isRealPresident());
+      if (canResume) return d; // resume — idempotent re-run, no re-lock write needed
+      throw new Error(`This run is locked mid-disbursement (started by ${d.disbursingByName||d.disbursingBy||'another session'}). Ask the President to Reopen it after investigating.`);
+    }
+    throw new Error(`This run is not in Verified state (currently: ${d.state||'draft'}).`);
+  });
   const lines = run.lines || [];
   if (!lines.length) { Notifs.showToast('This run has no computed lines.','error'); return; }
 
@@ -3642,7 +3667,9 @@ window.disbursePayRun = async function(month, opts = {}) {
   await runRef.set({
     state:'disbursed', disbursedBy: currentUser?.uid, disbursedByName: addedByName,
     disbursedAt: firebase.firestore.FieldValue.serverTimestamp(),
-    disbursedFrom: bankAcct.bankAccountId || null, disbursedFromName: bankAcct.bankAccountName || null
+    disbursedFrom: bankAcct.bankAccountId || null, disbursedFromName: bankAcct.bankAccountName || null,
+    disbursingAt: firebase.firestore.FieldValue.delete(), disbursingBy: firebase.firestore.FieldValue.delete(),
+    disbursingByName: firebase.firestore.FieldValue.delete()
   }, { merge:true });
   window.logAudit && window.logAudit('disburse-payrun','pay_run', month, { totalNet: run.totalNet, employeeCount: lines.length });
 };
@@ -3652,15 +3679,108 @@ window.disbursePayRun = async function(month, opts = {}) {
 window.reopenPayRun = async function(month) {
   const ref  = db.collection('pay_runs').doc(month);
   const snap = await ref.get();
-  if (!snap.exists || snap.data().state !== 'verified') { Notifs.showToast('Only a Verified run can be reopened.','error'); return; }
+  const st = snap.exists ? snap.data().state : null;
+  if (!['verified','disbursing'].includes(st)) { Notifs.showToast('Only a Verified (or a stuck Disbursing) run can be reopened.','error'); return; }
+  // Manual unlock of a 'disbursing' run is president-only — mirrors the
+  // disburse gate itself (Part E Phase 11). A normal verified→computed
+  // reopen stays open to any money-tier admin per existing behavior.
+  if (st === 'disbursing' && !(typeof isRealPresident === 'function' && isRealPresident())) {
+    Notifs.showToast('Only the President can unlock a run stuck mid-disbursement.','error'); return;
+  }
   const currentUser = window.currentUser;
   await ref.set({
     state:'computed', reopenedBy: currentUser?.uid, reopenedByName: window.userProfile?.displayName||currentUser?.email,
-    reopenedAt: firebase.firestore.FieldValue.serverTimestamp()
+    reopenedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    disbursingAt: firebase.firestore.FieldValue.delete(), disbursingBy: firebase.firestore.FieldValue.delete(),
+    disbursingByName: firebase.firestore.FieldValue.delete()
   }, { merge:true });
   window.logAudit && window.logAudit('reopen-payrun','pay_run', month, {});
   Notifs.showToast(`${month} payroll reopened — Compute is available again.`);
 };
+
+// ── Payroll reconciliation report (Part E Phase 20) — READ-ONLY. President-
+// only. For every pay_run month, diffs ledger PAY- rows against the frozen
+// run lines and salary_history mirror, flagging: (a) more than one PAY
+// ledger row for the same month+uid, (b) a ledger amount that doesn't match
+// the frozen run's netPay/finalPay, (c) salary_history rows with no
+// matching frozen line (the pre-lock era's Path-B fingerprint). No writes —
+// any fix routes through financeDelete / a manual ledger entry.
+async function openPayrollReconciliation() {
+  openModal(`${emojiIcon('🔍',16)} Payroll Reconciliation`, `<div id="recon-body" style="padding:20px;text-align:center;color:var(--text-muted)">Scanning payroll history…</div>`,
+    `<button class="btn-secondary" id="recon-csv-btn" disabled>Export CSV</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+
+  const runsSnap = await db.collection('pay_runs').get().catch(()=>({docs:[]}));
+  const runs = runsSnap.docs.map(d=>({ month:d.id, ...d.data() })).filter(r => r.lines && r.lines.length);
+  const flags = [];
+
+  for (const run of runs) {
+    const month = run.month;
+    const linesByUid = {};
+    (run.lines||[]).forEach(l => { linesByUid[l.uid] = l; });
+
+    // (a)/(b) — ledger PAY-{month}-* rows (excludes the -ER employer-share leg).
+    const ledgerSnap = await db.collection('ledger')
+      .where('refNumber','>=',`PAY-${month}-`)
+      .where('refNumber','<', `PAY-${month}-` + String.fromCharCode(0xf8ff))
+      .get().catch(()=>({docs:[]}));
+    const byUid = {};
+    ledgerSnap.docs.forEach(d => {
+      const row = d.data();
+      const ref = row.refNumber || '';
+      const m = ref.match(new RegExp(`^PAY-${month}-(.+?)(?:-ER)?$`));
+      if (!m || ref.endsWith('-ER')) return; // employer-share leg isn't the employee's net pay
+      const uid = m[1];
+      (byUid[uid] = byUid[uid] || []).push(row);
+    });
+    Object.keys(byUid).forEach(uid => {
+      const rows = byUid[uid];
+      const line = linesByUid[uid];
+      const name = line?.name || rows[0]?.description || uid;
+      if (rows.length > 1) {
+        flags.push({ month, uid, name, issue:'Multiple PAY ledger rows for one employee/month', detail:`${rows.length} rows`, ledgerAmt: rows.reduce((s,r)=>s+(r.amount||0),0), runAmt: line?.effectiveGross||null });
+      }
+      if (line && Math.abs((rows[0]?.amount||0) - (line.effectiveGross||0)) > 0.01) {
+        flags.push({ month, uid, name, issue:'Ledger amount ≠ frozen run amount', detail:`ledger ₱${fmt(rows[0]?.amount||0)} vs run ₱${fmt(line.effectiveGross||0)}`, ledgerAmt: rows[0]?.amount||0, runAmt: line.effectiveGross||0 });
+      }
+    });
+
+    // (c) — salary_history rows with no matching frozen run line.
+    const shSnap = await db.collection('salary_history').where('runMonth','==', month).get().catch(()=>({docs:[]}));
+    shSnap.docs.forEach(d => {
+      const sh = d.data();
+      if (!linesByUid[sh.userId]) {
+        flags.push({ month, uid: sh.userId, name: sh.userName||sh.userId, issue:'salary_history row with no matching run line', detail:'possible pre-lock (Path-B) double-write', ledgerAmt:null, runAmt:sh.finalPay||sh.netPay||null });
+      }
+    });
+  }
+
+  flags.sort((a,b) => (a.month<b.month?1:-1));
+  const body = document.getElementById('recon-body');
+  if (!body) return;
+  body.innerHTML = !flags.length
+    ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('✅',44)}</div><p>No discrepancies found across ${runs.length} pay run(s).</p></div>`
+    : `<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Month</th><th>Employee</th><th>Issue</th><th>Detail</th><th>Ledger</th><th>Run</th></tr></thead>
+        <tbody>${flags.map(f=>`<tr>
+          <td style="white-space:nowrap;font-size:12px">${escHtml(window.fmtMonthLabel ? window.fmtMonthLabel(f.month) : f.month)}</td>
+          <td style="font-weight:600">${escHtml(f.name)}</td>
+          <td><span class="badge badge-red">${escHtml(f.issue)}</span></td>
+          <td style="font-size:12px">${escHtml(f.detail)}</td>
+          <td style="white-space:nowrap;font-size:12px">${f.ledgerAmt!=null?`₱${fmt(f.ledgerAmt)}`:'—'}</td>
+          <td style="white-space:nowrap;font-size:12px">${f.runAmt!=null?`₱${fmt(f.runAmt)}`:'—'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [body] });
+
+  const csvBtn = document.getElementById('recon-csv-btn');
+  if (csvBtn) {
+    csvBtn.disabled = !flags.length;
+    csvBtn.addEventListener('click', () => window.exportCSV('payroll-reconciliation', flags, [
+      { key:'month', label:'Month' }, { key:'uid', label:'Employee UID' }, { key:'name', label:'Employee' },
+      { key:'issue', label:'Issue' }, { key:'detail', label:'Detail' }, { key:'ledgerAmt', label:'Ledger Amount' }, { key:'runAmt', label:'Run Amount' }
+    ]));
+  }
+}
 
 async function renderPayrollManagement(container, currentUser, currentRole) {
   // v12 WS23 — apply any due-dated raise BEFORE the base salary is read, so
@@ -3715,6 +3835,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         <button class="btn-primary btn-sm" id="gen-payroll-btn">Compute Payroll</button>
         <button class="btn-secondary btn-sm" id="raise-history-btn">${emojiIcon('💸',16)} Raise History</button>
         <button class="btn-secondary btn-sm" id="print-payroll-btn">${emojiIcon('🖨',16)} Print All</button>
+        ${(typeof isRealPresident === 'function' && isRealPresident()) ? `<button class="btn-secondary btn-sm" id="payroll-recon-btn">${emojiIcon('🔍',16)} Reconciliation</button>` : ''}
       </div>
     </div>
     ${raiseBanner}
@@ -4175,7 +4296,10 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     const wrap = document.getElementById('pay-run-strip'); if(!wrap) return;
     const doc  = await db.collection('pay_runs').doc(month).get().catch(()=>null);
     const data = (doc && doc.exists) ? doc.data() : {};
-    const state = PR_STATES.includes(data.state) ? data.state : 'draft';
+    // 'disbursing' is a transient lock state between verified and disbursed
+    // (Part E Phase 11) — treat it as 'verified' for the pipeline badge row;
+    // the dedicated amber badge below shows the lock explicitly.
+    const state = PR_STATES.includes(data.state) ? data.state : (data.state==='disbursing' ? 'verified' : 'draft');
     const idx   = PR_STATES.indexOf(state);
     const day   = parseInt((window.bizDate?window.bizDate():'0000-00-00').slice(8,10),10) || 0;
     const isCurrent = month === thisMonth;
@@ -4192,8 +4316,9 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         ${grace?`<div style="font-size:12px;color:var(--text-muted)">${emojiIcon('⏳',12)} ${grace}</div>`:''}
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
           ${(canFinance && state==='computed')?`<button class="btn-secondary btn-sm" id="pr-verify-btn">${emojiIcon('✓',16)} Mark Verified</button>`:''}
-          ${(isPres && state==='verified')?`<button class="btn-primary btn-sm" id="pr-disburse-btn">${emojiIcon('💵',16)} Disburse</button><button class="btn-secondary btn-sm" id="pr-reopen-btn">↺ Reopen</button>`:''}
+          ${(isPres && state==='verified' && data.state!=='disbursing')?`<button class="btn-primary btn-sm" id="pr-disburse-btn">${emojiIcon('💵',16)} Disburse</button><button class="btn-secondary btn-sm" id="pr-reopen-btn">↺ Reopen</button>`:''}
           ${state==='draft'?`<span style="font-size:12px;color:var(--text-muted)">Use <strong>Compute Payroll</strong> to start this month's run.</span>`:''}
+          ${data.state==='disbursing'?`<span class="badge badge-amber" style="font-size:11px">${emojiIcon('🔒',12)} Disbursing… (locked)${data.disbursingByName?` — started by ${escHtml(data.disbursingByName)}`:''}</span>${isPres?`<button class="btn-primary btn-sm" id="pr-resume-btn">Resume Disburse</button><button class="btn-secondary btn-sm" id="pr-unlock-btn">↺ Reopen (unlock)</button>`:''}`:''}
           ${state==='disbursed'&&data.disbursedAt?`<span style="font-size:12px;color:var(--success)">${emojiIcon('💵',12)} Disbursed${data.disbursedByName?` by ${escHtml(data.disbursedByName)}`:''}</span>`:''}
         </div>
       </div></div>`;
@@ -4240,12 +4365,30 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       await window.reopenPayRun(month);
       loadPayRunStrip(month);
     });
+    // Resume a stuck 'disbursing' run — idempotent re-run of disbursePayRun
+    // via the deterministic PAY-{month}-{uid} refs (Part E Phase 11).
+    document.getElementById('pr-resume-btn')?.addEventListener('click', async ()=>{
+      if(!(await confirmDialog({message:`Resume disbursing ${month} payroll? This safely re-runs the disburse step — already-posted rows are updated in place, not duplicated.`}))) return;
+      const acct = await window.BankAccounts.pick(null).catch(()=>({ bankAccountId:null, bankAccountName:null }));
+      try { await window.disbursePayRun(month, { bankAccount: acct }); Notifs.showToast('Payroll disbursed!'); }
+      catch (err) { Notifs.showToast(err.message || 'Could not resume disbursement.', 'error'); }
+      loadPayRunStrip(month);
+      loadFinanceContent(currentUser, currentRole, 'Payroll');
+    });
+    // Manual unlock of a stuck 'disbursing' run — president-only, routes
+    // through reopenPayRun's disbursing→computed branch (Part E Phase 11).
+    document.getElementById('pr-unlock-btn')?.addEventListener('click', async ()=>{
+      if(!(await confirmDialog({message:`Unlock ${month} payroll? Only do this after confirming the disburse step actually failed/stalled — this returns the run to Computed.`, danger:true}))) return;
+      await window.reopenPayRun(month);
+      loadPayRunStrip(month);
+    });
   }
 
   loadPayrollTable(thisMonth);
   loadPayRunStrip(thisMonth);
   document.getElementById('pr-month-sel').addEventListener('change', e => { loadPayrollTable(e.target.value); loadPayRunStrip(e.target.value); });
   document.getElementById('raise-history-btn')?.addEventListener('click', () => openRaiseHistory());
+  document.getElementById('payroll-recon-btn')?.addEventListener('click', () => openPayrollReconciliation());
   document.getElementById('pr-view-raises')?.addEventListener('click', () => window.openScheduledRaises());
 
   document.getElementById('gen-payroll-btn').addEventListener('click', async () => {
