@@ -1603,7 +1603,7 @@ function renderCAList(advances, container, isAdmin) {
         <div class="ca-detail"><span>Reason</span><span>${a.reason?escHtml(a.reason):'—'}</span></div>
         <div class="ca-detail"><span>Terms</span><span>${terms} month${terms>1?'s':''}${interest?` · ${interest}% interest/mo`:''}</span></div>
         <div class="ca-detail"><span>Monthly Payment</span><span style="font-weight:700">₱${fmtN(monthly)}</span></div>
-        <div class="ca-detail"><span>Total Payable</span><span>₱${fmtN(monthly*terms)}</span></div>
+        <div class="ca-detail"><span>Total Payable</span><span>₱${fmtN(a.totalPayable || a.amount || 0)}</span></div>
         ${a.status==='approved'&&a.amount?`
         <div style="margin-top:10px">
           <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
@@ -1723,35 +1723,27 @@ function openPresidentCashAdvanceModal(users) {
     if (!amount) { Notifs.showToast('Enter a valid amount.','error'); return; }
 
     const emp = employees.find(u => u.id === uid);
-    // Total to repay = monthly × terms (President sets these directly, so any
-    // interest is baked into the monthly figure). Balance starts at the full
-    // payable so the whole plan is collected — falls back to principal if no
-    // monthly was entered.
-    const totalPay = monthly > 0 ? Math.round(monthly * terms * 100) / 100 : amount;
-    await db.collection('cash_advances').add({
-      userId:         uid,
-      userName:       emp?.displayName || emp?.email || uid,
-      employeeId:     emp?.employeeId  || uid,
-      amount,
-      terms,
-      interest:       0,
-      monthlyPayment: monthly,
-      totalPayable:   totalPay,
-      balance:        totalPay,
-      date,
-      reason,
-      status:         'approved',
-      private:        isPriv,
-      addedBy:        currentUser.uid,
-      payments:       [],
-      createdAt:      firebase.firestore.FieldValue.serverTimestamp()
-    });
-    await Notifs.send(uid, {
-      title: '💸 Cash Advance Recorded',
-      body:  `A cash advance of ₱${fmtN(amount)} has been recorded for you — ${terms}-month plan at ₱${fmtN(monthly)}/mo. Check your Cash Advance tab to view details.`,
-      icon:  '💸',
-      type:  'cash_advance'
-    });
+    // Route through the single CA service (window.CashAdvance) instead of a
+    // hand-rolled write: request() creates the pending doc, approve() finalizes
+    // it (rounds monthly first, derives totalPayable from the rounded monthly —
+    // no centavo drift). The President's "Monthly Payment" field is preserved by
+    // reverse-deriving the interest rate that reproduces monthly×terms as the total.
+    const desiredTotal = monthly > 0 ? monthly * terms : amount;
+    let interestPct = 0;
+    if (desiredTotal > amount && amount > 0 && terms > 0) {
+      interestPct = (Math.pow(desiredTotal / amount, 1 / terms) - 1) * 100;
+    }
+    try {
+      const id = await window.CashAdvance.request({
+        amount, terms, reason, dateNeeded: date,
+        userId: uid, userName: emp?.displayName || emp?.email || uid,
+        employeeId: emp?.employeeId || uid, private: isPriv
+      });
+      await window.CashAdvance.approve(id, { interestPct });
+    } catch (err) {
+      Notifs.showToast(err.message || 'Could not record cash advance.', 'error');
+      return;
+    }
     closeModal();
     Notifs.showToast('Cash advance recorded!');
     window.renderCashAdvancePage();
