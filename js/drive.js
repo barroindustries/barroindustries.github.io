@@ -20,7 +20,7 @@ window.Drive = (() => {
     const ref  = storage.ref(path);
 
     return new Promise((resolve, reject) => {
-      const task = ref.put(file);
+      const task = ref.put(file, { customMetadata: { uploadedBy: (window.currentUser && currentUser.uid) || '' } });
       task.on('state_changed',
         null,
         reject,

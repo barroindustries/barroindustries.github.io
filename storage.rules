@@ -139,8 +139,8 @@ service firebase.storage {
     // ── Task comment attachments (collaborative) ─────
     match /task-comments/{docId}/{fileName} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn()
-        && (request.resource == null || isValidDocument());
+      allow create: if isSignedIn() && (request.resource == null || isValidDocument());
+      allow update, delete: if isSignedIn() && isOwnerOrAdmin();
     }
 
     // ── Team Chat attachments (v12 WS37) ─────────────
@@ -153,8 +153,8 @@ service firebase.storage {
     match /chat-files/{convId}/{fileName} {
       allow get:  if isSignedIn();
       allow list: if false;
-      allow write: if isSignedIn()
-        && (request.resource == null || isValidDocument());
+      allow create: if isSignedIn() && (request.resource == null || isValidDocument());
+      allow update, delete: if isSignedIn() && isOwnerOrAdmin();
     }
 
     // ── Finance / payslips — transfer proofs (crown jewels) ──
@@ -185,21 +185,36 @@ service firebase.storage {
     // Task/post attachments, the "All Company Files" tab (dept 'General') and
     // generic support-document uploads — readable/writable by any signed-in
     // user by design.
+    // Ownership on update/delete (H4): the uploader or an admin may overwrite
+    // or destroy an existing object. Legacy blobs (uploaded before this
+    // metadata existed) carry no 'uploadedBy' key at all — 'x in map.keys()'
+    // is the documented Storage-rules-safe way to test key presence without
+    // throwing, so legacy objects fall through to admin-only.
+    function isOwnerOrAdmin() {
+      return isAdminClaim()
+        || ('uploadedBy' in resource.metadata.keys()
+              && resource.metadata.uploadedBy == request.auth.uid);
+    }
+
     match /tasks/{subfolder}/{fileName} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && (request.resource == null || isValidDocument());
+      allow create: if isSignedIn() && (request.resource == null || isValidDocument());
+      allow update, delete: if isSignedIn() && isOwnerOrAdmin();
     }
     match /posts/{subfolder}/{fileName} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && (request.resource == null || isValidDocument());
+      allow create: if isSignedIn() && (request.resource == null || isValidDocument());
+      allow update, delete: if isSignedIn() && isOwnerOrAdmin();
     }
     match /general/{subfolder}/{fileName} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && (request.resource == null || isValidDocument());
+      allow create: if isSignedIn() && (request.resource == null || isValidDocument());
+      allow update, delete: if isSignedIn() && isOwnerOrAdmin();
     }
     match /General/{subfolder}/{fileName} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && (request.resource == null || isValidDocument());
+      allow create: if isSignedIn() && (request.resource == null || isValidDocument());
+      allow update, delete: if isSignedIn() && isOwnerOrAdmin();
     }
 
     // ── Other department folders ─────────────────────
@@ -212,10 +227,14 @@ service firebase.storage {
       allow read: if isSignedIn()
         && !isReservedTop(department)
         && (!isPartnerClaim() || isMemberOf(department));
-      allow write: if isSignedIn()
+      allow create: if isSignedIn()
         && !isReservedTop(department)
         && (request.resource == null || isValidDocument())
         && (!isPartnerClaim() || isMemberOf(department));
+      allow update, delete: if isSignedIn()
+        && !isReservedTop(department)
+        && (!isPartnerClaim() || isMemberOf(department))
+        && isOwnerOrAdmin();
     }
 
     // ── Deny everything else by default ──────────────

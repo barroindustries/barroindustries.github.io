@@ -522,7 +522,7 @@ window.Chat = (() => {
     if (file) {
       try {
         const sref = storage.ref(`chat-files/${conv.id}/${Date.now()}_${file.name}`);
-        await sref.put(file); fileUrl = await sref.getDownloadURL(); fileName = file.name;
+        await sref.put(file, { customMetadata: { uploadedBy: (window.currentUser && currentUser.uid) || '' } }); fileUrl = await sref.getDownloadURL(); fileName = file.name;
       } catch (_) { Notifs.showToast('File upload failed', 'error'); return; }
     } else if (link) {
       fileUrl = link; fileSource = 'link';
