@@ -561,6 +561,34 @@ html.theme-astral .btn-primary::before {
 label.check-row { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 8px; cursor: pointer; }
 .check-row input[type=checkbox] { width: 18px; height: 18px; }
 
+/* V13 Phase 124 — Form kit: required marker, hint/error slots, disabled/readonly/error
+   states. Purely additive: only fires on opt-in classes (.required, .has-error) or the
+   :disabled/[readonly] pseudo-states, so default-state forms render unchanged. */
+.form-group.required label::after { content: ' *'; color: var(--danger); }
+.form-hint {
+  display: block; margin-top: 5px;
+  font-size: var(--fs-sm); color: var(--text-muted);
+}
+.form-error {
+  display: none; margin-top: 5px;
+  font-size: var(--fs-sm); color: var(--danger);
+}
+.form-group.has-error .form-error { display: block; }
+.form-group.has-error input,
+.form-group.has-error textarea,
+.form-group.has-error select {
+  border-color: var(--danger);
+}
+.form-group input:disabled,
+.form-group textarea:disabled,
+.form-group select:disabled {
+  opacity: .6; cursor: not-allowed; background: var(--s2, var(--surface-2));
+}
+.form-group input[readonly]:not([type=checkbox]):not([type=radio]),
+.form-group textarea[readonly] {
+  background: var(--s2, var(--surface-2)); cursor: default;
+}
+
 .select-sm {
   padding: 7px 10px; border: 1px solid var(--border);
   border-radius: var(--r-xs); font-size: var(--fs-sm); font-weight: 500;
