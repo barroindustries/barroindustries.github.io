@@ -23,6 +23,24 @@ const ROLE_TYPE_MAP = {
 };
 const LOGIN_TYPE_LABELS = { admin: 'Admin', employee: 'Employee', partner: 'Partner' };
 
+// ── Session lifecycle registry (Phase 65) ─────────
+// Central place for anything tied to the signed-in session — timers, live
+// listeners, DOM handlers — so sign-out (or a different user signing back in)
+// can't leave stale work running in the background. Call addCleanup(fn) right
+// after starting anything session-scoped; runCleanups() fires on every path
+// that ends a session (explicit Sign Out, inactivity auto-logout, force-logout,
+// and the auth.onAuthStateChanged null-user branch that catches all of them).
+window.Session = {
+  _cleanups: [],
+  addCleanup(fn) { if (typeof fn === 'function') this._cleanups.push(fn); },
+  runCleanups() {
+    while (this._cleanups.length) {
+      const fn = this._cleanups.pop();
+      try { fn(); } catch (e) { console.warn('[Session.runCleanups]', e); }
+    }
+  }
+};
+
 // ── Boot ──────────────────────────────────────────
 // Tracks the uid we've already run the full disruptive bootstrap for, so token
 // refreshes (which re-fire onAuthStateChanged for the SAME user) don't yank the
@@ -91,6 +109,11 @@ document.addEventListener('DOMContentLoaded', () => {
       startPresenceHeartbeat(user.uid);
       startForceLogoutListener(user.uid);
       startClaimsListener(user.uid);
+      // Belt-and-braces: navigateTo() already tears down Chat's inbox listener
+      // whenever the page changes away from 'chat', but a sign-out that happens
+      // WHILE the chat page is open (no navigateTo call in between) would leave
+      // it running otherwise.
+      Session.addCleanup(() => { if (window.Chat?.teardownInbox) window.Chat.teardownInbox(); });
       checkBackupHealth();
       try { window.Keymap.maybeShowFirstRunHint(); } catch(_){}
       try { if (typeof loadHolidayOverrides==='function') loadHolidayOverrides(); } catch(_){}
@@ -102,11 +125,13 @@ document.addEventListener('DOMContentLoaded', () => {
       ensureClaimsFresh(user);
       // Prompt for phone number if missing
       if (!userProfile.phone) {
-        setTimeout(_promptPhoneNumber, 2000);
+        const _phoneTimer = setTimeout(_promptPhoneNumber, 2000);
+        Session.addCleanup(() => clearTimeout(_phoneTimer));
       }
     } else {
       _bootstrappedUid = null;
       stopClaimsListener();
+      Session.runCleanups();
       showLogin();
     }
   });
@@ -131,6 +156,10 @@ function startPresenceHeartbeat(uid) {
   document.addEventListener('visibilitychange', _presenceVisHandler);
   window.addEventListener('focus', _presenceVisHandler);
   _presenceInterval = setInterval(() => { if (document.visibilityState === 'visible') ping(); }, 60000); // every 60s while visible
+  Session.addCleanup(() => {
+    if (_presenceInterval) { clearInterval(_presenceInterval); _presenceInterval = null; }
+    if (_presenceVisHandler) { document.removeEventListener('visibilitychange', _presenceVisHandler); window.removeEventListener('focus', _presenceVisHandler); _presenceVisHandler = null; }
+  });
 }
 
 // ── Force Logout (president-triggered) ───────────
@@ -150,6 +179,7 @@ function startForceLogoutListener(uid) {
       Notifs.showToast('You have been signed out by an administrator.', 'info');
     }
   }, () => {});
+  Session.addCleanup(() => { if (_forceLogoutUnsub) { _forceLogoutUnsub(); _forceLogoutUnsub = null; } });
 }
 
 // ── Backup/sync health banner (finance/admin only) ───────────────────────
@@ -238,26 +268,52 @@ async function ensureClaimsFresh(user) {
   } catch (e) { /* non-fatal — rules fall back to deny on sensitive folders */ }
 }
 
+let _claimsBaselineRole = null;
+let _claimsBaselineDepts = null;
 function startClaimsListener(uid) {
   if (_claimsUnsub) { _claimsUnsub(); _claimsUnsub = null; }
   _claimsBaselineStamp = null;
+  _claimsBaselineRole = null;
+  _claimsBaselineDepts = null;
   _claimsUnsub = db.collection('users').doc(uid).onSnapshot(snap => {
     if (!snap.exists) return;
-    const ts = snap.data().claimsUpdatedAt;
+    const data = snap.data();
+    const ts = data.claimsUpdatedAt;
     const ms = (ts && ts.toMillis) ? ts.toMillis() : 0;
+    const role  = data.role || '';
+    const depts = (data.departments || []).slice().sort().join('|');
     // First snapshot just establishes a baseline (claims already on the token).
-    if (_claimsBaselineStamp === null) { _claimsBaselineStamp = ms; return; }
+    if (_claimsBaselineStamp === null) {
+      _claimsBaselineStamp = ms; _claimsBaselineRole = role; _claimsBaselineDepts = depts;
+      return;
+    }
     if (ms > _claimsBaselineStamp) {
       _claimsBaselineStamp = ms;
+      // Only role/departments actually differing counts as an access-relevant
+      // change — a claimsUpdatedAt bump from an unrelated field write must not
+      // re-trigger the re-gate below (loop guard).
+      const roleOrDeptsChanged = role !== _claimsBaselineRole || depts !== _claimsBaselineDepts;
+      _claimsBaselineRole = role; _claimsBaselineDepts = depts;
       if (auth.currentUser) auth.currentUser.getIdToken(true).catch(() => {});
+      // Phase 50/65 re-gate: a role/department change made mid-session (e.g.
+      // removed from Finance) can leave the currently-open page showing content
+      // the user no longer has access to. Re-run the page's own access gate
+      // once the forced token refresh has re-fired onAuthStateChanged and
+      // loadUserProfile has updated currentRole/currentDepts+buildNav.
+      if (roleOrDeptsChanged && window.currentPage) {
+        setTimeout(() => { if (window.currentPage) navigateTo(window.currentPage, { replace: true }); }, 800);
+      }
     }
   }, () => {});
+  Session.addCleanup(stopClaimsListener);
 }
 
 function stopClaimsListener() {
   if (_claimsUnsub) { _claimsUnsub(); _claimsUnsub = null; }
   _claimsCheckedUid = null;
   _claimsBaselineStamp = null;
+  _claimsBaselineRole = null;
+  _claimsBaselineDepts = null;
 }
 
 // ── Auto-Logout ───────────────────────────────────
@@ -266,6 +322,13 @@ function startAutoLogout() {
   ['click','keydown','mousemove','touchstart','scroll'].forEach(e =>
     document.addEventListener(e, resetLogoutTimer, { passive: true })
   );
+  Session.addCleanup(() => {
+    clearTimeout(logoutTimer);
+    logoutTimer = null;
+    ['click','keydown','mousemove','touchstart','scroll'].forEach(e =>
+      document.removeEventListener(e, resetLogoutTimer, { passive: true })
+    );
+  });
 }
 function resetLogoutTimer() {
   clearTimeout(logoutTimer);
@@ -1789,6 +1852,9 @@ async function renderProductDatabase() {
       }).join('')}
     </div>
   `;
+  // Icons render once at mount — syncCoefLabel toggles visibility/text only on
+  // each formula change, it must not re-scan the DOM for icons every time.
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
 
   const coefLabelFor = ft => ft === 'per_area' ? 'Price per extra sqm (₱)' : 'Price per extra mm (₱)';
   const syncCoefLabel = prefix => {
@@ -1796,7 +1862,6 @@ async function renderProductDatabase() {
     const wrap = document.getElementById(`${prefix}-coef-wrap`);
     const label = document.getElementById(`${prefix}-coef-label`);
     if (!wrap || !label) return;
-  if (window.lucide) lucide.createIcons({ nodes: [c] });
     wrap.style.display = ft === 'fixed' ? 'none' : '';
     label.textContent = coefLabelFor(ft);
   };
@@ -2099,6 +2164,7 @@ function navigateTo(page, opts) {
   if (page.startsWith('dept:')) {
     const dept = page.slice(5);
     renderDeptModule(dept);
+    _devCheckIconIntegrity(page);
     return;
   }
 
@@ -2146,6 +2212,25 @@ function navigateTo(page, opts) {
     default: c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔍',44)}</div><h4>Page not found</h4></div>`;
     if (window.lucide) lucide.createIcons({ nodes: [c] });
   }
+  _devCheckIconIntegrity(page);
+}
+
+// ── Phase 129: icon integrity dev-check ──────────
+// Most render* functions above are async/fire-and-forget, so this can't run
+// synchronously right after the switch — give the render a beat to finish,
+// then scan for <i data-lucide> tags Lucide never hydrated into an <svg>
+// (unmapped icon name, or a template that forgot the createIcons() call).
+// Dev-only (localStorage 'bi-dev'==='1') so production users never pay for it.
+function _devCheckIconIntegrity(page) {
+  if (localStorage.getItem('bi-dev') !== '1') return;
+  setTimeout(() => {
+    const c = document.getElementById('page-content');
+    if (!c) return;
+    const tags = c.querySelectorAll('i[data-lucide]');
+    let empty = 0;
+    tags.forEach(el => { if (el.childElementCount === 0) empty++; });
+    if (empty > 0) console.warn(`[icon-integrity] ${page}: ${empty} unhydrated <i data-lucide> tag(s) of ${tags.length}`);
+  }, 400);
 }
 
 function setActiveNav(page) {
@@ -2478,6 +2563,9 @@ function liveDateTime(elId) {
   };
   update();
   _liveDateInterval = setInterval(update, 1000);
+  // Belt-and-braces: dashboard re-renders already clear this on the next call,
+  // but a sign-out mid-dashboard shouldn't leave a clock ticking either.
+  Session.addCleanup(() => { if (_liveDateInterval) { clearInterval(_liveDateInterval); _liveDateInterval = null; } });
 }
 
 async function renderPresidentDashboard() {
@@ -5727,7 +5815,7 @@ function renderCompanyBiOps(ct) {
       </div>
     </div>
   `;
-  if (window.lucide) lucide.createIcons();
+  if (window.lucide) lucide.createIcons({ nodes: [ct] });
 }
 
 // ── Company: Overview ─────────────────────────────
