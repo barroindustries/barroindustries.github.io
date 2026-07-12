@@ -81,6 +81,15 @@ scaffolds→1), 37 (migrations.js extraction, -356 hot lines), 145 (Keymap: n, [
 59 (Approvals History chip + SOP panel), 65+129a (Session cleanup registry, claims re-gate, icon
 dev-check), 56 (unified print layer + dark-print fallback).
 
+**Waves 18–20 (shipped, prod v12.0.116; error_log rules + push relay + daily-digest fn all deployed):**
+Ph 8 (client error logging + error_log rules), 86 (Analytics period-bounding + lazy subtabs; CA exempted
+as balance-book), 123+128 (button-state kit + skeletons), 186 (notif inbox: type icons/day-grouping/
+caught-up/push deep-link handler), push-delivery polish (collapse tags + click-to-focus, relay deployed),
+89 (backup v2 — 6 collections full-snapshot, H12 closed), 124 (form kit CSS), 87 (read-pattern caching;
+RFQ/PR stage-filter kept client-side on review to protect stage-less legacy docs), 90 (in-app System
+Health page + heartbeats), 76a (gov deadline reminders — no-op until PhilGEPS date field), 127 (card/list
+consolidation AUDIT = no merges, all provably distinct). READ V13-STATUS.md for the authoritative ledger.
+
 **Next up:** push+deploy session (Ph 1, 9) · Ph 105 (Overlay/Back part 2) · Ph 28 (plaintext passwords —
 needs flow decision) · Ph 12–14 (Ledger service) · Ph 19 (quote math — needs D4/D5 rulings).
 

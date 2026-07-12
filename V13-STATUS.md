@@ -1,14 +1,14 @@
 # V13 Program Status — as of 2026-07-12 (waves 1–17)
 
 Legend: ✅ shipped+live · 🟨 partial (noted) · 🧭 needs-Neil · 🏗 planned-not-built (see V13-PLAN.md for full instructions)
-Production: **v12.0.105**, rules/storage/functions all deployed, CI green, zero boot errors.
+Production: **v12.0.116** (~97 phases materially done), rules/storage/functions all deployed, CI green, zero boot errors.
 
 ## Part E — system phases 1–100
 | Phases | Status |
 |---|---|
 | 1 (deploy gap) | ✅ push+rules+storage+functions live; 🧭 Phase-9 buttons remain |
 | 2–4 (backup/restore) | ✅ comments+chat+subcollections backed up (proven: 78 rescued records); restore dry-run passed; 🧭 committed staging-restore drill + RESTORE_RUNBOOK.md |
-| 5–8 | ✅ (hygiene, hardened tracked hook, CI, error logging? — **error_log = 🏗 Phase 8 not built**) |
+| 5–8 | ✅ all incl. Phase 8 client error logging (error_log live) |
 | 9 | 🧭 president-console one-time buttons + remapDesignProjectClients |
 | 10 | 🟨 QA-CHECKLIST.md not written; verification has been per-wave boot checks |
 | 11–18, 20 | ✅ (Disburse lock, Ledger service + all posters, atomic IDs, cache/VAT/Manila/leave-guard fixes, CA single-writer, financeDelete fix, reconciliation report) |
@@ -23,8 +23,8 @@ Production: **v12.0.105**, rules/storage/functions all deployed, CI green, zero 
 | 69–72 | 🧭 leave policy/statutory verification/production-pay rulings |
 | 73–78 | 🏗 feature buildouts (HR depth, quote→job-cost fn, inventory, PhilGEPS, CRM timeline, field ops) |
 | 79–83 | 🧭 accountant-gated (13th-month fix buildable but D6 entity/TIN pending; COA/BS/CF/BIR finalization) |
-| 84–86 | ✅ 84 journals backstop; 85–86 (finance_rollup, analytics bounding) 🏗 |
-| 87–91 | 🏗 read-sweep/cache-v2/backup-v2/observability panel/device perf baseline |
+| 84–86 | ✅ 84 journals backstop, 86 analytics bounding; 85 finance_rollup 🏗 |
+| 87–91 | ✅ 87 read-sweep, 89 backup-v2, 90 health panel; 88 cache-v2 + 91 device-baseline 🏗 |
 | 92 | 🟨 validators+headers done; wildcard retirement pending migration confirmation |
 | 93–95 | 🏗 docs rewrite, index reconciliation (ledger_entries branch 🧭), products pipeline |
 | 96–100 | 🧭 full-role QA, security re-verification, decision clearance, v13.0.0 cut, post-launch watch |
@@ -35,7 +35,7 @@ Production: **v12.0.105**, rules/storage/functions all deployed, CI green, zero 
 | 101–110 | ✅ all (dead controls, badges, guards, Back-button integrity, orphan-route work 🟨 106/107 partially — route deletions & role-mismatch retargets not all done, wiring CI ✅) |
 | 111–120 | ✅ all except 113 (🧭 rounding ruling) and 119 (glossary/naming sweep 🏗) |
 | 121–122, 129a | ✅ ui-states kit + adoptions + icon dev-check |
-| 123–128, 130 | 🏗 button/form/table/card kit codification + gallery |
+| 123–128, 130 | ✅ 123 buttons, 124 forms, 127 audit, 128 skeletons; 125/126/130 🏗 |
 | 131, 138 | ✅ touch targets, rem scale. 132–137, 139–140 🏗/🧭 (action bar D-U1, nav labels D-U2, orientation D-U3, device sweeps) |
 | 141, 143, 145, 149a | ✅ ultrawide cap, hover, Keymap, selection. 142, 144, 146–148, 150 🏗 |
 | 151–180 (screen passes) | 🟨 172a QB phone pass done; the rest need logged-in role/device QA — run as dedicated sessions with the Stage-U5 checklist |
