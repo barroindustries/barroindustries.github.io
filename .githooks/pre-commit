@@ -18,12 +18,29 @@ INDEX="index.html"
 SW="sw.js"
 
 # ── Skip-if-nothing-else-changed guard ──────────────────────────────────────
+# Skip the bump ONLY when the staged diff is purely a prior version-string
+# rewrite (an amend/merge of a bump commit). If the version files carry any
+# OTHER content change (e.g. an agent edited config.js logic or index.html
+# markup), we MUST still bump — otherwise real code ships under a stale
+# CACHE_VER and users get cached-old behaviour.
 STAGED=$(git diff --cached --name-only)
 if [ -n "$STAGED" ]; then
   OTHER=$(echo "$STAGED" | grep -v -E "^(${CONFIG}|${INDEX}|${SW})$")
   if [ -z "$OTHER" ]; then
-    echo "[version] Staged diff touches only version files — skipping bump"
-    exit 0
+    # Only version files staged — inspect their actual added/removed lines,
+    # dropping the three known version-string patterns. Anything left is a
+    # real content change that requires a bump.
+    REAL=$(git diff --cached -U0 -- "$CONFIG" "$INDEX" "$SW" \
+      | grep -E '^[+-]' \
+      | grep -v -E '^[+-]{3}' \
+      | grep -v -E "APP_VERSION = '[0-9]+\.[0-9]+\.[0-9]+'" \
+      | grep -v -E "v[0-9]+\.[0-9]+\.[0-9]+ · Barro Industries" \
+      | grep -v -E "CACHE_VER[[:space:]]*=[[:space:]]*'bi-ops-v[0-9]")
+    if [ -z "$REAL" ]; then
+      echo "[version] Staged diff is only a version-string rewrite — skipping bump"
+      exit 0
+    fi
+    echo "[version] Version files have real content changes — bumping"
   fi
 fi
 
