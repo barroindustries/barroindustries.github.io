@@ -593,24 +593,76 @@ window.Notifs = (() => {
   }
 
   // ── Push (FCM) — lazy-loads messaging SDK only when needed ──
+  const PUSH_SNOOZE_KEY   = 'bi_push_snooze_until';   // ms epoch; don't re-ask before this
+  const PUSH_SNOOZE_MS    = 3 * 24 * 3600 * 1000;     // 3 days after a dismissal
+  const PUSH_IOS_HINT_KEY = 'bi_push_ios_hint_shown'; // '1' once the install hint was shown
+
+  // Web push needs all three. iOS Safari exposes Notification but push only
+  // actually works from an installed (Home Screen) PWA — see _isIOS/_isStandalone.
+  function _pushSupported() {
+    return ('Notification' in window) && ('serviceWorker' in navigator) && ('PushManager' in window);
+  }
+  function _isIOS() {
+    return /iP(hone|ad|od)/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPadOS reports as Mac
+  }
+  function _isStandalone() {
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+      window.navigator.standalone === true;
+  }
+  function _pushSnoozed() {
+    try { return Date.now() < (+localStorage.getItem(PUSH_SNOOZE_KEY) || 0); } catch (_) { return false; }
+  }
+  function _snoozePush() {
+    try { localStorage.setItem(PUSH_SNOOZE_KEY, String(Date.now() + PUSH_SNOOZE_MS)); } catch (_) {}
+  }
+  function _clearPushSnooze() {
+    try { localStorage.removeItem(PUSH_SNOOZE_KEY); } catch (_) {}
+  }
+
   async function initPush(uid) {
     const vapidKey = window.FCM_CONFIG?.VAPID_KEY;
     if (!vapidKey || vapidKey === 'YOUR_VAPID_KEY_HERE') return;
     try {
-      if (!('Notification' in window)) return;
-      if (Notification.permission === 'denied') return;
+      if (!_pushSupported()) return;
 
-      // If not yet asked, show our own prompt button instead of the browser dialog
-      if (Notification.permission === 'default') {
-        _showPushPrompt(uid, vapidKey);
+      // iOS delivers web push ONLY from an installed Home-Screen PWA. In a plain
+      // Safari tab requestPermission() can never grant, so prompting on every
+      // launch just nags without ever working. Show a one-time install hint and
+      // stop — no permission card. (Once installed, _isStandalone() is true and
+      // the normal flow below runs.)
+      if (_isIOS() && !_isStandalone()) {
+        _maybeShowIosInstallHint();
         return;
       }
 
-      // Already granted — register silently
-      await _registerPush(uid, vapidKey);
+      if (Notification.permission === 'denied') return;
+
+      // Already granted — register silently every launch (token can rotate).
+      if (Notification.permission === 'granted') {
+        _clearPushSnooze();
+        await _registerPush(uid, vapidKey);
+        return;
+      }
+
+      // permission === 'default' — ask, but never more than once per session and
+      // not again for a few days after the user dismisses.
+      if (window._pushPromptShownThisSession || _pushSnoozed()) return;
+      window._pushPromptShownThisSession = true;
+      _showPushPrompt(uid, vapidKey);
     } catch (err) {
-      console.warn('Push notification init failed:', err);
+      console.warn('[FCM] Push init failed:', err);
     }
+  }
+
+  // iOS-Safari-only, at most once ever: nudge the user to install the PWA so
+  // notifications become available. Deliberately gentle (a toast, not a card).
+  function _maybeShowIosInstallHint() {
+    try {
+      if (localStorage.getItem(PUSH_IOS_HINT_KEY) === '1') return;
+      localStorage.setItem(PUSH_IOS_HINT_KEY, '1');
+    } catch (_) { return; }
+    setTimeout(() => showToast('To get notifications on iPhone, tap Share → “Add to Home Screen”, then open the app from there.', 'info'), 2500);
   }
 
   // Push notification permission prompt — full-screen card style
@@ -682,11 +734,14 @@ window.Notifs = (() => {
     document.getElementById('push-allow-btn').onclick = async () => {
       overlay.remove();
       const permission = await Notification.requestPermission();
-      if (permission === 'granted') await _registerPush(uid, vapidKey);
+      if (permission === 'granted') { _clearPushSnooze(); await _registerPush(uid, vapidKey); }
+      else { _snoozePush(); }   // 'denied' or 'default' (iOS quirk) — don't re-ask next launch
     };
-    document.getElementById('push-deny-btn').onclick = () => overlay.remove();
-    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-    setTimeout(() => overlay.remove(), 60000);
+    // Any dismissal snoozes the prompt so it doesn't reappear on every open.
+    const dismiss = () => { _snoozePush(); overlay.remove(); };
+    document.getElementById('push-deny-btn').onclick = dismiss;
+    overlay.addEventListener('click', e => { if (e.target === overlay) dismiss(); });
+    setTimeout(() => { if (document.body.contains(overlay)) dismiss(); }, 60000);
   }
 
   async function _registerPush(uid, vapidKey) {
@@ -721,6 +776,10 @@ window.Notifs = (() => {
       if (token) {
         await db.collection('users').doc(uid).update({ fcmToken: token });
         console.log('[FCM] Push token registered for', uid);
+      } else {
+        // Permission granted but no token — usually a VAPID-key mismatch or the
+        // messaging SW failing to activate. Surface it so it's not a silent no-op.
+        console.warn('[FCM] getToken returned empty — no push token issued (check VAPID key / SW activation).');
       }
       // Show in-app toast for foreground messages. Messages are data-only now
       // (see functions/index.js), so read title/body from payload.data — and
@@ -1006,8 +1065,15 @@ window.Notifs = (() => {
     requestPushPermission: (uid) => {
       const vapidKey = window.FCM_CONFIG?.VAPID_KEY;
       if (!vapidKey || vapidKey === 'YOUR_VAPID_KEY_HERE') { showToast('Push notifications not configured yet.','error'); return; }
-      if (Notification.permission === 'granted') { _registerPush(uid, vapidKey); }
-      else if (Notification.permission !== 'denied') { _showPushPrompt(uid, vapidKey); }
+      if (!_pushSupported()) { showToast('This browser doesn’t support push notifications.','error'); return; }
+      // Manual enable is a user gesture, so it bypasses the launch-time snooze —
+      // but on iOS Safari it still can't work until the app is installed.
+      if (_isIOS() && !_isStandalone()) {
+        showToast('On iPhone, first tap Share → “Add to Home Screen”, then open the app from your home screen to enable notifications.','info');
+        return;
+      }
+      if (Notification.permission === 'granted') { _clearPushSnooze(); _registerPush(uid, vapidKey); }
+      else if (Notification.permission !== 'denied') { window._pushPromptShownThisSession = true; _showPushPrompt(uid, vapidKey); }
       else { showToast('Notifications are blocked in your browser. Check site settings to re-enable.','error'); }
     }
   };
