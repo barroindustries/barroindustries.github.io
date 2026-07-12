@@ -251,6 +251,10 @@
   0%   { background-position: -400px 0; }
   100% { background-position: 400px 0; }
 }
+@keyframes statePulse {
+  0%, 100% { opacity: .45; }
+  50%      { opacity: 1; }
+}
 @keyframes iconPop {
   0%   { transform: scale(1); }
   40%  { transform: scale(1.18); }
@@ -261,8 +265,8 @@
   50%      { box-shadow: 0 0 0 4px var(--pink-glow); }
 }
 @keyframes goldShine {
-  0%   { left: -120%; }
-  100% { left: 200%; }
+  0%   { transform: skewX(-15deg) translateX(0%); }
+  100% { transform: skewX(-15deg) translateX(400%); }
 }
 
 /* ══════════════════════════════
@@ -394,7 +398,7 @@ body::after { content: none; }
 html.theme-astral .btn-primary {
   background: var(--grad-pk-bl); background-size: 200% 200%;
   box-shadow: var(--sh-pink);
-  animation: gradRun 4s ease infinite; will-change: background-position;
+  animation: gradRun 4s ease infinite;
 }
 html.theme-astral .btn-primary::before {
   content: '';
@@ -1582,7 +1586,7 @@ html.theme-astral .kpi-card.red { border-left: 1px solid var(--border); }
   content: '';
   position: absolute; top: -2px; left: -120%; width: 80%; height: calc(100% + 4px);
   background: linear-gradient(90deg, transparent, rgba(255,214,10,0.08), rgba(255,255,255,0.06), transparent);
-  transform: skewX(-15deg);
+  transform: skewX(-15deg) translateX(0%);
   border-radius: inherit;
 }
 html.theme-astral .id-card::before { animation: goldShine 4s ease-in-out infinite; }
@@ -1767,8 +1771,8 @@ html.light .id-card--calling .idc-brand { color: var(--text-muted); }
   pointer-events: none;
 }
 @keyframes splashBarRun {
-  0%   { left: -100%; }
-  100% { left: 200%; }
+  0%   { transform: translateX(-250%); }
+  100% { transform: translateX(500%); }
 }
 
 /* ══════════════════════════════
@@ -1940,7 +1944,7 @@ html.theme-astral .id-flip-hint span { animation: ptr-bounce 1.8s ease-in-out in
 }
 .subtab-btn:hover:not(.active) { background: rgba(255,255,255,0.06); color: var(--text); }
 /* Continuous gradient run is Astral-only (perf budget: no infinite animation outside Astral). */
-html.theme-astral .subtab-btn.active { animation: gradRun 5s ease infinite; will-change: background-position; }
+html.theme-astral .subtab-btn.active { animation: gradRun 5s ease infinite; }
 
 /* ── Chip-style subtabs (declutter pattern) ──────────────
    Wraps to multiple rows instead of horizontal-scrolling, with an
@@ -1974,7 +1978,7 @@ html.theme-astral .subtab-btn.active { animation: gradRun 5s ease infinite; will
 html.theme-astral .chip-tab.active {
   background: var(--grad-pk-bl); background-size: 200% 200%;
   color: #fff; box-shadow: 0 2px 12px rgba(155,168,255,0.35);
-  animation: gradRun 5s ease infinite; will-change: background-position;
+  animation: gradRun 5s ease infinite;
 }
 @media (prefers-reduced-motion: reduce) { html.theme-astral .chip-tab.active { animation: none; } }
 
@@ -2310,6 +2314,10 @@ html.theme-astral .dialog-overlay { backdrop-filter: blur(14px) saturate(120%); 
 .loading-placeholder {
   color: var(--text-muted); font-size: var(--fs-base);
   padding: 48px 20px; text-align: center;
+  animation: statePulse 1.8s ease-in-out infinite;
+}
+/* Astral keeps the showpiece text-shimmer (blur/motion budget exception). */
+html.theme-astral .loading-placeholder {
   background: linear-gradient(90deg, var(--text-muted) 25%, rgba(255,255,255,0.25) 50%, var(--text-muted) 75%);
   background-size: 800px 100%;
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
@@ -2333,7 +2341,6 @@ html.theme-astral .dialog-overlay { backdrop-filter: blur(14px) saturate(120%); 
 html.theme-astral .progress-bar-fill {
   background: var(--grad-pk-bl); background-size: 200% 200%;
   animation: gradRun 3s ease infinite;
-  will-change: background-position;
 }
 
 /* ══════════════════════════════
