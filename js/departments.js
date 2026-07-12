@@ -12030,39 +12030,52 @@ async function openClientHub(cl, opts) {
         ${ar>0?`<span>AR: <strong style="color:var(--danger)">₱${fmt(ar)}</strong></span>`:''}
       </div>
     </div>
-    ${t.events.length?`<h4 style="font-size:13px;margin:0 0 6px">${emojiIcon('🕓',13)} Timeline</h4>
-    <div style="border-left:2px solid var(--border);margin:0 0 14px 6px;padding-left:12px;display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto">
-      ${t.events.map(e=>`<div style="display:flex;gap:8px;align-items:baseline"><span style="flex-shrink:0">${e.icon}</span><span style="font-size:12px;flex:1">${escHtml(e.text)}</span><span style="font-size:11px;color:var(--text-muted);flex-shrink:0">${fmtD(e.ts)}</span></div>`).join('')}
-    </div>`:''}
-    ${t.projects.length?`<h4 style="font-size:13px;margin:0 0 6px">${emojiIcon('🏗',13)} Projects (${t.projects.length})</h4>
-    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
-      ${t.projects.map(p=>`<div class="item-card" style="display:flex;justify-content:space-between;gap:10px;align-items:center">
-        <div style="min-width:0"><span style="font-weight:700;font-size:12px;font-family:monospace">${escHtml(p.no||p.id.slice(-6))}</span>
-          <span class="badge badge-blue" style="font-size:9px">${escHtml((p.stage||'—').replace(/_/g,' '))}</span></div>
-        <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">₱${fmt(p.contractAmount)}${p.arBalance>0?` · AR ₱${fmt(p.arBalance)}`:' · paid'}</div>
-      </div>`).join('')}
-    </div>`:''}
-    ${t.files.length?`<h4 style="font-size:13px;margin:0 0 6px">${emojiIcon('📁',13)} Files (${t.files.length})</h4>
-    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
-      ${t.files.map(f=>`<div class="item-card ch-file-row" data-id="${f.id}" style="cursor:pointer;display:flex;justify-content:space-between;gap:10px;align-items:center">
-        <div style="min-width:0"><span style="font-weight:600;font-size:12px">${escHtml(f.name||'File')}</span>
-          ${f.projectId?`<span class="badge badge-gray" style="font-size:9px">${emojiIcon('🏗',9)} ${escHtml((t.projects.find(p=>p.id===f.projectId)||{}).no||'Project')}</span>`:''}</div>
-        <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">${emojiIcon('👁',11)} ${f.createdAt&&f.createdAt.toDate?f.createdAt.toDate().toLocaleDateString('en-PH'):''}</div>
-      </div>`).join('')}
-    </div>`:''}
-    <h4 style="font-size:13px;margin:0 0 6px">${emojiIcon('📄',13)} Quotes (${t.quotes.length})</h4>
-    ${!t.quotes.length?'<div class="empty-state" style="padding:18px"><p>No quotes recorded for this client yet.</p></div>':`<div style="display:flex;flex-direction:column;gap:8px">
-      ${t.quotes.map(q=>`<div class="item-card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
-        <div style="flex:1;min-width:0">
-          <div style="font-weight:700;font-size:13px;font-family:monospace">${escHtml(q.quoteNumber||q.id.slice(-8))}</div>
-          <div style="font-size:11px;color:var(--text-muted);margin-top:2px">₱${fmt(q.total||q.grandTotal||0)} ${statusBadge(q)} ${q.salesOrderId?'<span class="badge badge-green" style="font-size:9px">→ Sales Order</span>':''} ${q.createdAt?'· '+fmtD(q.createdAt.seconds?q.createdAt.seconds*1000:Date.parse(q.createdAt)||0):''}</div>
-        </div>
-        ${q.editableState?`<div style="display:flex;gap:6px;flex-shrink:0"><button class="btn-secondary btn-sm clq-reopen" data-id="${q.id}" data-coll="${q._coll}" data-co="${escHtml(q.company||'BS')}">↻ Reopen</button><button class="btn-secondary btn-sm clq-rev" data-id="${q.id}" data-coll="${q._coll}" data-co="${escHtml(q.company||'BS')}" title="Start a new revision (R2, R3…) with today's date">${emojiIcon('⎘',16)} New Revision</button></div>`:'<span style="font-size:10px;color:var(--text-muted);flex-shrink:0">no snapshot</span>'}
-      </div>`).join('')}
-    </div>`}
+    ${window.chipTabs ? window.chipTabs([{key:'timeline',label:`${emojiIcon('🕓',13)} Timeline`},{key:'details',label:`${emojiIcon('🗂',13)} Details`}], 'timeline', {cls:'ch-tabs'}) : ''}
+    <div class="ch-tab-pane" id="ch-tab-timeline">
+      ${t.events.length?`<div style="border-left:2px solid var(--border);margin:0 0 14px 6px;padding-left:12px;display:flex;flex-direction:column;gap:8px;max-height:420px;overflow-y:auto">
+        ${t.events.map(e=>`<div style="display:flex;gap:8px;align-items:baseline"><span style="flex-shrink:0">${e.icon}</span><span style="font-size:12px;flex:1">${escHtml(e.text)}</span><span style="font-size:11px;color:var(--text-muted);flex-shrink:0">${fmtD(e.ts)}</span></div>`).join('')}
+      </div>`:(window.renderEmptyState ? window.renderEmptyState({icon:'🕓', title:'No activity yet for this client', hint:'Quotes, orders, project events and payments will show up here.'}) : '<div class="empty-state" style="padding:18px"><p>No activity yet for this client.</p></div>')}
+    </div>
+    <div class="ch-tab-pane" id="ch-tab-details" style="display:none">
+      ${t.projects.length?`<h4 style="font-size:13px;margin:0 0 6px">${emojiIcon('🏗',13)} Projects (${t.projects.length})</h4>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+        ${t.projects.map(p=>`<div class="item-card" style="display:flex;justify-content:space-between;gap:10px;align-items:center">
+          <div style="min-width:0"><span style="font-weight:700;font-size:12px;font-family:monospace">${escHtml(p.no||p.id.slice(-6))}</span>
+            <span class="badge badge-blue" style="font-size:9px">${escHtml((p.stage||'—').replace(/_/g,' '))}</span></div>
+          <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">₱${fmt(p.contractAmount)}${p.arBalance>0?` · AR ₱${fmt(p.arBalance)}`:' · paid'}</div>
+        </div>`).join('')}
+      </div>`:''}
+      ${t.files.length?`<h4 style="font-size:13px;margin:0 0 6px">${emojiIcon('📁',13)} Files (${t.files.length})</h4>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px">
+        ${t.files.map(f=>`<div class="item-card ch-file-row" data-id="${f.id}" style="cursor:pointer;display:flex;justify-content:space-between;gap:10px;align-items:center">
+          <div style="min-width:0"><span style="font-weight:600;font-size:12px">${escHtml(f.name||'File')}</span>
+            ${f.projectId?`<span class="badge badge-gray" style="font-size:9px">${emojiIcon('🏗',9)} ${escHtml((t.projects.find(p=>p.id===f.projectId)||{}).no||'Project')}</span>`:''}</div>
+          <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">${emojiIcon('👁',11)} ${f.createdAt&&f.createdAt.toDate?f.createdAt.toDate().toLocaleDateString('en-PH'):''}</div>
+        </div>`).join('')}
+      </div>`:''}
+      <h4 style="font-size:13px;margin:0 0 6px">${emojiIcon('📄',13)} Quotes (${t.quotes.length})</h4>
+      ${!t.quotes.length?'<div class="empty-state" style="padding:18px"><p>No quotes recorded for this client yet.</p></div>':`<div style="display:flex;flex-direction:column;gap:8px">
+        ${t.quotes.map(q=>`<div class="item-card" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:700;font-size:13px;font-family:monospace">${escHtml(q.quoteNumber||q.id.slice(-8))}</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">₱${fmt(q.total||q.grandTotal||0)} ${statusBadge(q)} ${q.salesOrderId?'<span class="badge badge-green" style="font-size:9px">→ Sales Order</span>':''} ${q.createdAt?'· '+fmtD(q.createdAt.seconds?q.createdAt.seconds*1000:Date.parse(q.createdAt)||0):''}</div>
+          </div>
+          ${q.editableState?`<div style="display:flex;gap:6px;flex-shrink:0"><button class="btn-secondary btn-sm clq-reopen" data-id="${q.id}" data-coll="${q._coll}" data-co="${escHtml(q.company||'BS')}">↻ Reopen</button><button class="btn-secondary btn-sm clq-rev" data-id="${q.id}" data-coll="${q._coll}" data-co="${escHtml(q.company||'BS')}" title="Start a new revision (R2, R3…) with today's date">${emojiIcon('⎘',16)} New Revision</button></div>`:'<span style="font-size:10px;color:var(--text-muted);flex-shrink:0">no snapshot</span>'}
+        </div>`).join('')}
+      </div>`}
+    </div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [body] });
   const nav = co => co==='BK' ? 'bk-quote-builder' : 'bs-quote-builder';
+  const chTabs = body.querySelector('.ch-tabs');
+  if (chTabs && window.bindChipTabs) {
+    window.bindChipTabs(chTabs, (key) => {
+      const timelinePane = document.getElementById('ch-tab-timeline');
+      const detailsPane = document.getElementById('ch-tab-details');
+      if (timelinePane) timelinePane.style.display = key === 'timeline' ? '' : 'none';
+      if (detailsPane) detailsPane.style.display = key === 'details' ? '' : 'none';
+    });
+  }
   body.querySelectorAll('.clq-reopen').forEach(btn=>btn.addEventListener('click',()=>{ closeModal(); window.reopenQuoteFromDoc(btn.dataset.coll, btn.dataset.id, nav(btn.dataset.co)); }));
   body.querySelectorAll('.clq-rev').forEach(btn=>btn.addEventListener('click',()=>{ closeModal(); window.newRevisionFromDoc(btn.dataset.coll, btn.dataset.id, nav(btn.dataset.co)); }));
   body.querySelectorAll('.ch-file-row').forEach(row=>row.addEventListener('click',()=>{
