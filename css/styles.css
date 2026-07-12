@@ -98,6 +98,7 @@
   --sidebar-w:    264px;
   --bottom-nav-h: 56px;
   --top-nav-h:    50px;
+  --content-max:  1680px;
 
   /* ── Type ── */
   --font: 'Inter', -apple-system, 'SF Pro Text', system-ui, sans-serif;
@@ -302,11 +303,13 @@ button, a, input, select, textarea, summary,
    via an invisible ::after overlay rather than visually enlarging the icon
    (which would look oversized next to its siblings on a compact row). */
 @media (pointer: coarse) {
-  .modal-close, .ms-act-btn, .ms-attach-btn, .ms-send-btn, .drawer-back-btn {
+  .modal-close, .ms-act-btn, .ms-attach-btn, .ms-send-btn, .drawer-back-btn,
+  .topbar-avatar, .ms-thread-menu-btn {
     position: relative;
   }
   .modal-close::after, .ms-act-btn::after, .ms-attach-btn::after,
-  .ms-send-btn::after, .drawer-back-btn::after {
+  .ms-send-btn::after, .drawer-back-btn::after,
+  .topbar-avatar::after, .ms-thread-menu-btn::after {
     content: '';
     position: absolute;
     top: 50%; left: 50%;
@@ -387,7 +390,7 @@ body::after { content: none; }
 .btn-primary:active { transform: scale(0.97); }
 .btn-primary.btn-full { width: 100%; padding: 14px; font-size: 15px; border-radius: var(--r); }
 .btn-primary.btn-sm   { padding: 6px 13px; font-size: var(--fs-sm); border-radius: var(--r-xs); }
-@media (pointer:coarse) { .btn-primary, .btn-secondary, .btn-outline { min-height: 40px; } }
+@media (pointer:coarse) { .btn-primary, .btn-secondary, .btn-outline, .btn-danger, .btn-success { min-height: 40px; } }
 html.theme-astral .btn-primary {
   background: var(--grad-pk-bl); background-size: 200% 200%;
   box-shadow: var(--sh-pink);
@@ -485,6 +488,11 @@ html.theme-astral .btn-primary::before {
   .form-group input, .form-group textarea, .form-group select, .ms-input { font-size: 16px; }
 }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* V13 Phase 131 — 44px-tall label-wrap so bare checkboxes get a real tap
+   target on touch (checkbox itself stays visually small). */
+label.check-row { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 8px; cursor: pointer; }
+.check-row input[type=checkbox] { width: 18px; height: 18px; }
 
 .select-sm {
   padding: 7px 10px; border: 1px solid var(--border);
@@ -1323,6 +1331,11 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   margin-top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px)); margin-left: var(--sidebar-w);
   min-height: calc(100dvh - var(--topbar-h));
   padding: 20px;
+  /* V13 Phase 141: cap content width on ultrawide monitors. margin-inline:auto
+     would fight the sidebar's margin-left offset, so this intentionally hugs
+     the sidebar side rather than centering — true centering needs an inner
+     wrapper and is deferred (zero-risk variant chosen for this pass). */
+  max-width: var(--content-max);
 }
 /* WS42 Phase 14: global horizontal-overflow guard — never rely on this alone,
    per-widget fixes are the real fix, but this stops any stray offender from
