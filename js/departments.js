@@ -10710,7 +10710,7 @@ window.renderApprovals = async function(currentUser) {
     } catch (e) { Notifs.showToast('Could not send request', 'error'); }
   };
   // Check pending counts for badges
-  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap, finReqSnap, finDelSnap, qApprSnap, delQSnap, delBKQSnap, delCSnap, leaveSnap, poSnap] = await Promise.all([
+  const [signupSnap, extSnap, caSnap, subsSnap, reviewTasksCountSnap, finReqSnap, finDelSnap, qApprSnap, delQSnap, delBKQSnap, delCSnap, leaveSnap, poSnap, raiseCountSnap] = await Promise.all([
     db.collection('signup_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('attendance_extensions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
     db.collection('cash_advances').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
@@ -10723,7 +10723,8 @@ window.renderApprovals = async function(currentUser) {
     db.collection('bk_quotes').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
     db.collection('clients').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
     db.collection('leave_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
-    db.collection('purchase_requisitions').where('approvalStatus','==','pending').get().catch(()=>({size:0,docs:[]}))
+    db.collection('purchase_requisitions').where('approvalStatus','==','pending').get().catch(()=>({size:0,docs:[]})),
+    db.collection('pending_raises').where('status','==','pending_approval').get().catch(()=>({size:0,docs:[]}))
   ]);
   const pendingSignups = signupSnap.size || 0;
   const pendingExt     = extSnap.size || 0;
@@ -10735,7 +10736,8 @@ window.renderApprovals = async function(currentUser) {
   const pendingDeletes    = (delQSnap.size || 0) + (delBKQSnap.size || 0) + (delCSnap.size || 0);
   const pendingLeave      = leaveSnap.size || 0;
   const pendingPO         = poSnap.size || 0;
-  const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs + pendingReview + pendingFinReqs + pendingQApprovals + pendingDeletes + pendingLeave + pendingPO;
+  const pendingRaises     = raiseCountSnap.size || 0;
+  const totalPending   = pendingSignups + pendingExt + pendingCA + pendingSubs + pendingReview + pendingFinReqs + pendingQApprovals + pendingDeletes + pendingLeave + pendingPO + pendingRaises;
 
   // ── Grading queue count (President's grading subtab) ──────────────────
   // Completed/approved tasks awaiting a presidentScore + employees whose

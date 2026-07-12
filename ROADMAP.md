@@ -47,6 +47,19 @@ Ph 117+30a (Notifs.success/error/info + broadcast dedup doc-ids), Ph 120 (bir.js
 (touch targets + ultrawide cap). Runtime-verified: v12.0.66 boots with zero console errors, all globals
 live, formatter/vat/ledger self-checks pass. 22 commits ahead of origin.
 
+**DEPLOYED 2026-07-12 ~11:45am-12:15pm (Neil-approved):** firestore rules + storage rules released;
+all commits pushed; production at v12.0.7x on the custom domain. First-ever restore.yml run SUCCEEDED
+(dry-run vs 2026-06). Backup dispatch PROVED the comments fix live: tasks/*/comments — 78 records
+(never backed up before), conversations/*/messages exported, 0 errors. CI green after node-pin linter fix.
+STILL PENDING (president session): Phase 9 one-time buttons + remapDesignProjectClients.
+
+**Waves 7–9 (built+shipped same session):** Ph 14 (Ledger.migrateLegacyRows + president button),
+Ph 110 (UI-wiring CI guard), Ph 112 (departments fmt→fmtN2 + 15 bare-locale fixes), Ph 117 (toast
+typing app-wide: ~200 success/error conversions, zero untyped outside dev-warned ambiguous), Ph 62
+(SW update banner — no more silent mid-session code swaps), Ph 64 (single edge-swipe owner),
+Ph 63 (chat: no lost input, no dup sends, keyed patch render, typing cleanup, inbox debounce),
+Ph 121-122 (ui-states kit + first adoptions), Ph 118+66+30b in flight (badge truth, unread cap, SRI/CSP).
+
 **Next up:** push+deploy session (Ph 1, 9) · Ph 105 (Overlay/Back part 2) · Ph 28 (plaintext passwords —
 needs flow decision) · Ph 12–14 (Ledger service) · Ph 19 (quote math — needs D4/D5 rulings).
 

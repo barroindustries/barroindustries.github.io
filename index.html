@@ -3,6 +3,13 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <!-- v12/v13 Phase 30 — CSP: 'unsafe-inline' stays on script-src because the app
+       still relies on inline onclick=/onchange= handlers throughout departments.js/
+       app.js/modules.js (Phase-50 goal is to remove those, then tighten this).
+       style-src needs 'unsafe-inline' for the same reason (inline style="" attrs
+       used throughout for dynamic layout). Origins are the exact CDN/Firebase/Google
+       endpoints this app calls — see V13-PLAN.md Phase 30 for the full inventory. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://unpkg.com https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net wss://*.firebaseio.com; frame-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'"/>
   <!-- v12 WS42 Phase 25 — apply the persisted theme class BEFORE first paint so
        splash/login never flash the wrong light/dark look. Mirrors initTheme()'s
        migration mapping (js/app.js) exactly: office|pink|grey→light, midnight→dark,
@@ -169,7 +176,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.76 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.77 · Barro Industries</div>
   </div>
 </div>
 
@@ -325,14 +332,14 @@
 
 <!-- All scripts deferred — download in parallel, execute in order after HTML parse.
      Firebase messaging loaded lazily in notifications.js when FCM is configured. -->
-<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
-<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" integrity="sha384-AQ3POAMqIhwS81FrUH95ekxqBZHeP5tG2JfEL3+7GuTtfRLWnrRh32UxwzM+//A9" crossorigin="anonymous"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" integrity="sha384-TnlRYaR4JYz/lpaGuaiU61PjNberSA4vjLjtF+oRC/IkohkJqnWxw5EmDSOt1vA1" crossorigin="anonymous"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" integrity="sha384-qn4Jh88HhJA8dplNQyGjOh9OGI4izVhrfj/qIFgaKcdgOE06pXqIKGlsCILZcLAC" crossorigin="anonymous"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js" integrity="sha384-6I0gWsz4FIAr30c0TxIxJnPQuJiZ1FfILdZrgJdjxTH3R8dgPGTvexbyqTvReV6Z" crossorigin="anonymous"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-functions-compat.js" integrity="sha384-3IYu+dnH2y9gX1s6p9F4D55XbEmZBfJ3D1Ylh8J6bfdqnJCOmDVSRTq1yhJsBY1H" crossorigin="anonymous"></script>
 <!-- v12 WS16 — Chart.js loads on demand via window.ensureChart() (config.js), not eagerly here.
      The CDN URL stays in sw.js's PRECACHE list so the on-demand fetch is instant/offline-safe. -->
-<script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+<script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" integrity="sha384-uTYyvsSSUZeaPhb5RbKlQa0zY/WpX/QHfvg2mczXyBQOpkWPEDy9lczyp+w7SKXu" crossorigin="anonymous"></script>
 <script defer src="js/firebase-config.js"></script>
 <script defer src="js/config.js"></script>
 <!-- v13 WS-H Phase 121-122 — renderEmptyState/withLoadingAndError. Uses window.emojiIcon/

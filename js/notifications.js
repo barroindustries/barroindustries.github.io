@@ -7,6 +7,7 @@
 window.Notifs = (() => {
   let unsubscribe = null;
   let _fcmLoadingPromise = null; // serialises concurrent _registerPush calls
+  let _unreadDebounceTimer = null;
 
   // ── Start listener ────────────────────────────
   function startListener(uid) {
@@ -16,14 +17,44 @@ window.Notifs = (() => {
       .orderBy('createdAt', 'desc')
       .limit(30)
       .onSnapshot(snap => {
-        const all    = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        const unread = all.filter(n => !n.read).length;
-        updateBadge(unread);
+        const all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         renderPanel(all, uid);
+        // Badge must reflect true unread count, not just the 30-item live
+        // window (Phase 66 / U-M3) — a burst of >30 unread items would
+        // otherwise cap the badge at ~30 while more sit unseen. Debounced
+        // so a flurry of listener fires (bulk sends, mark-read taps) only
+        // triggers one extra read.
+        _scheduleUnreadRefresh(uid);
       });
   }
 
-  function stopListener() { if (unsubscribe) { unsubscribe(); unsubscribe = null; } }
+  // ── True unread count (not window-limited) ─────
+  function _scheduleUnreadRefresh(uid) {
+    if (_unreadDebounceTimer) clearTimeout(_unreadDebounceTimer);
+    _unreadDebounceTimer = setTimeout(() => _refreshUnreadCount(uid), 400);
+  }
+
+  async function _refreshUnreadCount(uid) {
+    try {
+      // Firestore compat SDK doesn't reliably expose count() aggregation on
+      // all deployed versions here, so fall back to a capped read: 100 docs
+      // is enough to distinguish "a lot" from "an exact small number", and
+      // updateBadge() already renders anything over 99 as '99+'.
+      const snap = await db.collection('notifications').doc(uid)
+        .collection('items')
+        .where('read', '==', false)
+        .limit(100)
+        .get();
+      updateBadge(snap.size);
+    } catch (e) {
+      console.error('unread count query failed', e);
+    }
+  }
+
+  function stopListener() {
+    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+    if (_unreadDebounceTimer) { clearTimeout(_unreadDebounceTimer); _unreadDebounceTimer = null; }
+  }
 
   // ── Badge ─────────────────────────────────────
   function updateBadge(count) {
