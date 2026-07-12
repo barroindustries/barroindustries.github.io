@@ -1132,7 +1132,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
       icon: '📍', type: 'task_standing', taskId: taskId
     }, currentUser.uid);
     Notifs.showToast('Standing updated!');
-    closeTaskPanel(); renderTasks(currentUser, currentRole, t.department);
+    window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser, currentRole, t.department);
   });
 
   // Load employees for designate
@@ -1153,7 +1153,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     await notifyTaskInvolved(t,{title:'📋 Task Status Updated',body:`"${t.title}" → ${statusLabel(newStatus)} (${actorName})`,icon:'📋',type:'task_status',taskId},currentUser.uid);
     Notifs.showToast(`Status → ${statusLabel(newStatus)}`);
-    closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
+    window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 
   document.getElementById('submit-task-btn')?.addEventListener('click', async()=>{
@@ -1163,16 +1163,28 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     await notifyTaskInvolved(t,{title:'📤 Task Submitted for Review',body:`"${t.title}" submitted by ${actorName}`,icon:'📤',type:'task_submitted',taskId},currentUser.uid);
     Notifs.showToast('Submitted for review!');
-    closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
+    window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 
-  document.getElementById('edit-task-btn')?.addEventListener('click',()=>{ closeTaskPanel(); openEditTaskModal(taskId,t,currentUser,currentRole); });
+  document.getElementById('edit-task-btn')?.addEventListener('click',()=>{
+    // v13 Phase 105 -- dismissTop()'s history.back() is async (popstate fires
+    // later); openEditTaskModal's openPage() does a synchronous pushState, so
+    // firing it immediately would race the pending back-traversal and could
+    // land on / immediately pop the Edit Task page we just pushed. Defer the
+    // modal open until this dismissal's popstate has actually been processed.
+    if (window.Overlay && window.Overlay.dismissTop) {
+      window.addEventListener('popstate', () => openEditTaskModal(taskId,t,currentUser,currentRole), { once: true });
+      window.Overlay.dismissTop();
+    } else {
+      closeTaskPanel(); openEditTaskModal(taskId,t,currentUser,currentRole);
+    }
+  });
 
   document.getElementById('del-task-btn')?.addEventListener('click', async()=>{
     if (!(await confirmDialog({message:'Delete this task?', danger:true}))) return;
     await db.collection('tasks').doc(taskId).delete();
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
-    closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
+    window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 
   document.getElementById('designate-btn')?.addEventListener('click', async()=>{
@@ -1189,7 +1201,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     await Notifs.send(newUid,{title:'🎯 Task Assigned to You',body:`"${t.title}" assigned by ${actorName}${note?' — '+note:''}`,icon:'🎯',type:'task_designated',taskId});
     await Notifs.sendToOwner({title:'👥 Task Assignee Added',body:`${actorName} added ${newName} to "${t.title}"`,icon:'👥',type:'task_modified',taskId});
     Notifs.showToast(`${newName} added`);
-    closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
+    window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 
   // Follow-up requests — re-render the #fu-section in place after each action
@@ -1281,7 +1293,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     for (const uid of t.assignedTo) await recomputePresidentTaskScore(uid);
     Notifs.showToast('Score saved & KPI updated!');
-    closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
+    window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 }
 
@@ -2299,7 +2311,7 @@ window.renderComments = async function(collection, docId, containerId, currentUs
       try {
         const path = `task-comments/${docId}/${Date.now()}_${file.name}`;
         const ref  = storage.ref(path);
-        await ref.put(file);
+        await ref.put(file, { customMetadata: { uploadedBy: (window.currentUser && currentUser.uid) || '' } });
         fileUrl  = await ref.getDownloadURL();
         fileName = file.name;
       } catch(err) {

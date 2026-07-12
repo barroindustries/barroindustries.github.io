@@ -1046,7 +1046,10 @@ function buildSidebarNav() {
   nav.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => {
       navigateTo(btn.dataset.page);
-      closeSidebar();
+      // navigateTo() already runs Overlay.clearAll() (tearing down + consuming
+      // the sidebar's history entry if one is open); this is a harmless no-op
+      // safety net for any path that reaches here without an Overlay entry.
+      requestCloseSidebar();
     });
   });
   if (window.lucide) lucide.createIcons({ nodes: [nav] });
@@ -1125,18 +1128,51 @@ function buildDeptsPanel(depts) {
 }
 
 function closeSidebar() {
-  document.getElementById('sidebar').classList.remove('open');
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar || !sidebar.classList.contains('open')) return;
+  sidebar.classList.remove('open');
   document.getElementById('sidebar-overlay')?.classList.add('hidden');
   document.body.classList.remove('sidebar-open');
 }
+window.closeSidebar = closeSidebar;
+
+// v13 Phase 105 -- open the off-canvas mobile sidebar and, on mobile/overlay
+// mode only, register it with the Overlay history stack so device Back closes
+// it instead of leaving it open while the page behind it navigates. The
+// desktop sidebar is persistent (CSS never applies the off-canvas transform
+// outside the <=768px breakpoint, see .menu-toggle{display:block} there) so
+// it must never push -- gated on the same breakpoint the CSS uses.
+function isMobileSidebarMode() {
+  try { return window.matchMedia('(max-width: 768px)').matches; } catch (_) { return window.innerWidth <= 768; }
+}
+function openSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar || sidebar.classList.contains('open')) return;
+  sidebar.classList.add('open');
+  document.getElementById('sidebar-overlay')?.classList.remove('hidden');
+  document.body.classList.add('sidebar-open');
+  if (window.Overlay && isMobileSidebarMode()) window.Overlay.push('sidebar', () => closeSidebar());
+}
+window.openSidebar = openSidebar;
+// Close path used by scrim/swipe/nav — routes through Overlay when the
+// sidebar owns the top of the stack so Back-consuming stays in sync;
+// falls back to a direct close for desktop (never pushed) or stale state.
+function requestCloseSidebar() {
+  if (window.Overlay && window.Overlay._stack.length &&
+      window.Overlay._stack[window.Overlay._stack.length - 1].kind === 'sidebar') {
+    window.Overlay.dismissTop();
+  } else {
+    closeSidebar();
+  }
+}
+window.requestCloseSidebar = requestCloseSidebar;
 
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('menu-toggle')?.addEventListener('click', () => {
-    const isOpen = document.getElementById('sidebar').classList.toggle('open');
-    document.getElementById('sidebar-overlay')?.classList.toggle('hidden', !isOpen);
-    document.body.classList.toggle('sidebar-open', isOpen);
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar?.classList.contains('open')) requestCloseSidebar(); else openSidebar();
   });
-  document.getElementById('sidebar-overlay')?.addEventListener('click', closeSidebar);
+  document.getElementById('sidebar-overlay')?.addEventListener('click', requestCloseSidebar);
 
   // ── Left-edge swipe to open / right-swipe-back to close sidebar ──────────
   (function initSidebarSwipe() {
@@ -1173,13 +1209,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (mode === 'open' && dx >= OPEN_DIST) {
         tracking = false;
-        const sidebar = document.getElementById('sidebar');
-        sidebar?.classList.add('open');
-        document.getElementById('sidebar-overlay')?.classList.remove('hidden');
-        document.body.classList.add('sidebar-open');
+        openSidebar();
       } else if (mode === 'close' && dx <= -CLOSE_DIST) {
         tracking = false;
-        closeSidebar();
+        requestCloseSidebar();
       }
     }, { passive: true });
 
@@ -5149,6 +5182,14 @@ async function openEmpStandingsModal(uid, name, preloaded) {
 // ── Worker Profile Panel ──────────────────────────
 async function openWorkerProfilePanel(uid, name, preloaded) {
   document.getElementById('worker-profile-panel')?.remove();
+  // v13 Phase 105 — guard against double-registration: if a worker-profile
+  // overlay entry is already on top (panel re-opened for another worker
+  // without closing first), drop the stale stack entry instead of stacking
+  // a second one on top of it (its DOM node was just removed above).
+  if (window.Overlay && window.Overlay._stack.length &&
+      window.Overlay._stack[window.Overlay._stack.length - 1].kind === 'worker-profile') {
+    window.Overlay._stack.pop();
+  }
   const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const panel = document.createElement('div');
   panel.id = 'worker-profile-panel';
@@ -5171,6 +5212,10 @@ async function openWorkerProfilePanel(uid, name, preloaded) {
   if (window.lucide) lucide.createIcons({ nodes: [panel] });
   document.body.appendChild(panel);
   requestAnimationFrame(() => { panel.style.transform = 'translateY(0)'; });
+  // v13 Phase 105 — register with the Overlay stack so device/browser Back
+  // closes this panel exactly once, mirroring openTaskDetail (departments.js).
+  const _wpClose = () => { panel.style.transform = 'translateY(100%)'; setTimeout(() => panel.remove(), 300); };
+  if (window.Overlay) window.Overlay.push('worker-profile', _wpClose);
 
   function activateTab(tabName) {
     panel.querySelectorAll('.wp-tab').forEach(t => {
@@ -5181,7 +5226,9 @@ async function openWorkerProfilePanel(uid, name, preloaded) {
     renderWorkerProfileTab(uid, name, preloaded, tabName, panel);
   }
   panel.querySelectorAll('.wp-tab').forEach(tab => { tab.addEventListener('click', () => activateTab(tab.dataset.tab)); });
-  panel.querySelector('#wp-back-btn')?.addEventListener('click', () => { panel.style.transform = 'translateY(100%)'; setTimeout(() => panel.remove(), 300); });
+  panel.querySelector('#wp-back-btn')?.addEventListener('click', () => {
+    if (window.Overlay && window.Overlay.dismissTop) window.Overlay.dismissTop(); else _wpClose();
+  });
   panel.querySelector('#wp-payslip-btn')?.addEventListener('click', async () => {
     const month = bizDate().slice(0,7);
     const year = (window.bizYear?bizYear():new Date().getFullYear());
@@ -5195,6 +5242,12 @@ async function openWorkerProfilePanel(uid, name, preloaded) {
       model.official = false;
     }
     model.ytd = await window.payslipYtdMonthly(uid, year);
+    // v13 Phase 105 — pop this panel's Overlay/history entry before swapping
+    // #page-content underneath, so the stack stays in sync with what's on screen.
+    if (window.Overlay && window.Overlay._stack.length &&
+        window.Overlay._stack[window.Overlay._stack.length - 1].kind === 'worker-profile') {
+      window.Overlay._stack.pop();
+    }
     panel.remove(); // dismiss the slide-up panel before replacing #page-content underneath
     window.renderPayslipPage(model, ()=>renderPersonalFinance(currentUser, currentRole));
   });
@@ -7662,9 +7715,16 @@ function openProfileDrawer() {
       <button class="btn-danger profile-signout-btn" onclick="auth.signOut()">Sign Out</button>
     </div>
   `;
+  const wasOpen = drawer.classList.contains('open');
   drawer.classList.remove('hidden');
   setTimeout(()=>drawer.classList.add('open'),10);
   overlay.classList.remove('hidden'); overlay.classList.add('active');
+  // v13 Phase 105 -- register with the Overlay history stack so device/browser
+  // Back closes the drawer instead of leaving it open while the page behind it
+  // navigates. openProfileDrawer() is also called to *re-render* the drawer
+  // in place (save-phone-btn handlers above) while it's already open+pushed --
+  // guard against double-pushing a second history entry in that case.
+  if (window.Overlay && !wasOpen) window.Overlay.push('drawer', () => closeProfileDrawer());
   if (window.lucide) lucide.createIcons({ nodes: [drawer] });
   document.getElementById('profile-photo-wrap').addEventListener('click',()=>{
     const input=document.createElement('input'); input.type='file'; input.accept='image/*';
@@ -7731,18 +7791,32 @@ function openProfileDrawer() {
     });
   });
 
-  document.getElementById('profile-close').onclick=closeProfileDrawer;
-  overlay.addEventListener('click',closeProfileDrawer);
-  drawer.querySelectorAll('.profile-shortcut-btn').forEach(b => b.onclick = () => { closeProfileDrawer(); navigateTo(b.dataset.page); });
+  document.getElementById('profile-close').onclick=requestCloseProfileDrawer;
+  overlay.addEventListener('click',requestCloseProfileDrawer);
+  drawer.querySelectorAll('.profile-shortcut-btn').forEach(b => b.onclick = () => { requestCloseProfileDrawer(); navigateTo(b.dataset.page); });
 }
 
 function closeProfileDrawer() {
   const drawer=document.getElementById('profile-drawer');
   const overlay=document.getElementById('drawer-overlay');
+  if (!drawer || !drawer.classList.contains('open')) return;
   drawer.classList.remove('open');
   overlay.classList.remove('active'); overlay.classList.add('hidden');
   setTimeout(()=>drawer.classList.add('hidden'),300);
 }
+window.closeProfileDrawer = closeProfileDrawer;
+// Close path used by the X button / scrim / shortcut links -- routes through
+// Overlay when the drawer owns the top of the stack so Back-consuming stays
+// in sync; falls back to a direct close if it's stale/unpushed.
+function requestCloseProfileDrawer() {
+  if (window.Overlay && window.Overlay._stack.length &&
+      window.Overlay._stack[window.Overlay._stack.length - 1].kind === 'drawer') {
+    window.Overlay.dismissTop();
+  } else {
+    closeProfileDrawer();
+  }
+}
+window.requestCloseProfileDrawer = requestCloseProfileDrawer;
 
 // ── Modal / Page panel (v12 WS10/WS11 — Overlay-registered, device Back closes) ──
 // opts.size: 'wide' (~920px) or 'full' (up to 1200px / 94dvh) for content-heavy
@@ -7820,8 +7894,10 @@ window.addEventListener('hashchange', () => {         // user typed/edited the U
 // Running both would race two independent "close on Escape" systems against the
 // same keypress, so this folds WS18's shortcuts into that ONE listener instead of
 // adding a second: the 'escape' entry below calls Overlay.dismissTop() first, and
-// only falls back to a DOM-class check for the two surfaces Overlay never tracked
-// (profile drawer, mobile sidebar — neither ever pushes a history entry).
+// only falls back to a DOM-class check as a defensive last resort. (v13 Phase 105:
+// profile drawer and mobile sidebar now push their own Overlay entries on open --
+// see openProfileDrawer/openSidebar -- so the dismissTop() branch handles them too;
+// the DOM-class fallback below is now purely a safety net, not the primary path.)
 window.Keymap = (function () {
   let _inited = false;
 
@@ -7857,6 +7933,11 @@ window.Keymap = (function () {
   }
 
   function closeTopOverlay() {
+    // v13 Phase 105 -- profile drawer and mobile sidebar now push Overlay
+    // entries on open, so the isOpen()/dismissTop() branch above handles
+    // Escape for them in the normal case. These direct-class checks remain
+    // only as a defensive fallback (e.g. a surface left open without a
+    // matching Overlay entry after a code path we haven't covered).
     if (window.Overlay && window.Overlay.isOpen()) { window.Overlay.dismissTop(); return true; }
     const drawer = document.getElementById('profile-drawer');
     if (drawer && drawer.classList.contains('open')) {
@@ -7865,7 +7946,7 @@ window.Keymap = (function () {
     }
     const sidebar = document.getElementById('sidebar');
     if (sidebar && sidebar.classList.contains('open')) {
-      if (typeof closeSidebar === 'function') closeSidebar();
+      if (typeof requestCloseSidebar === 'function') requestCloseSidebar();
       return true;
     }
     return false;
