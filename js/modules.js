@@ -368,10 +368,23 @@ window.renderTeamTab = async function() {
     <div id="team-grid"></div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
+  const teamGrid = document.getElementById('team-grid');
+  teamGrid.innerHTML = '<div class="loading-placeholder">Loading team…</div>';
 
-  const snap = typeof dbCachedGet === 'function'
-    ? await dbCachedGet('users', () => db.collection('users').get(), 60000)
-    : await db.collection('users').get();
+  let snap;
+  try {
+    snap = typeof dbCachedGet === 'function'
+      ? await dbCachedGet('users', () => db.collection('users').get(), 60000)
+      : await db.collection('users').get();
+  } catch (err) {
+    teamGrid.innerHTML =
+      '<div class="empty-state"><div class="empty-icon">' + (emojiIcon ? emojiIcon('⚠️',44) : '') + '</div>' +
+      '<h4>Something went wrong</h4><p>' + escHtml(err && err.message ? err.message : String(err)) + '</p>' +
+      '<button type="button" class="btn-secondary btn-sm" id="team-retry-btn" style="margin-top:14px">Retry</button></div>';
+    if (window.lucide) lucide.createIcons({ nodes: [teamGrid] });
+    document.getElementById('team-retry-btn')?.addEventListener('click', () => window.renderTeamTab());
+    return;
+  }
   const users = snap.docs.map(d=>({id:d.id,...d.data()}))
     .filter(u => {
       if (viewingAsPartner) {
@@ -1033,21 +1046,27 @@ window.renderAttendancePage = async function() {
   let viewYear  = parseInt(bizToday.slice(0,4), 10);
   let viewMonth = parseInt(bizToday.slice(5,7), 10) - 1;
 
+  let empList = [];
   if (pres) {
-    const usersSnap = typeof dbCachedGet === 'function'
-      ? await dbCachedGet('users', () => db.collection('users').get(), 60000)
-      : await db.collection('users').get();
-    const empList = usersSnap.docs.map(d=>({id:d.id,...d.data()}))
-      .filter(u => u.role !== 'partner');
     const sel = document.getElementById('att-emp-select');
-    sel.innerHTML = empList.map(u=>`<option value="${u.id}">${escHtml(u.displayName||u.email)}</option>`).join('');
-    sel.value = currentUser.uid;
-    sel.addEventListener('change', () => {
-      const picked = empList.find(u=>u.id===sel.value);
-      targetUid  = sel.value;
-      targetName = picked?.displayName || picked?.email || '';
-      renderAttMonth();
-    });
+    try {
+      const usersSnap = typeof dbCachedGet === 'function'
+        ? await dbCachedGet('users', () => db.collection('users').get(), 60000)
+        : await db.collection('users').get();
+      empList = usersSnap.docs.map(d=>({id:d.id,...d.data()}))
+        .filter(u => u.role !== 'partner');
+      sel.innerHTML = empList.map(u=>`<option value="${u.id}">${escHtml(u.displayName||u.email)}</option>`).join('');
+      sel.value = currentUser.uid;
+      sel.addEventListener('change', () => {
+        const picked = empList.find(u=>u.id===sel.value);
+        targetUid  = sel.value;
+        targetName = picked?.displayName || picked?.email || '';
+        renderAttMonth();
+      });
+    } catch (err) {
+      sel.innerHTML = '<option value="">Failed to load employees</option>';
+      Notifs.showToast('Could not load employee list: ' + (err.message||err), 'error');
+    }
   }
 
   // ── Extension requests (president/manager only) ──
@@ -1117,9 +1136,20 @@ window.renderAttendancePage = async function() {
     // Build the last-day string directly — toISOString() on a local midnight Date
     // shifts back a day in +offset timezones (Manila +8) and broke the range query.
     const monthEnd   = `${viewYear}-${mm}-${String(daysInMonth).padStart(2,'0')}`;
-    const snap = await db.collection('attendance').doc(targetUid).collection('records')
-      .where(firebase.firestore.FieldPath.documentId(),'>=',monthStart)
-      .where(firebase.firestore.FieldPath.documentId(),'<=',monthEnd).get();
+    let snap;
+    try {
+      snap = await db.collection('attendance').doc(targetUid).collection('records')
+        .where(firebase.firestore.FieldPath.documentId(),'>=',monthStart)
+        .where(firebase.firestore.FieldPath.documentId(),'<=',monthEnd).get();
+    } catch (err) {
+      calEl.innerHTML =
+        '<div class="empty-state"><div class="empty-icon">' + emojiIcon('⚠️',44) + '</div>' +
+        '<h4>Something went wrong</h4><p>' + escHtml(err && err.message ? err.message : String(err)) + '</p>' +
+        '<button type="button" class="btn-secondary btn-sm" id="att-retry-btn" style="margin-top:14px">Retry</button></div>';
+      if (window.lucide) lucide.createIcons({ nodes: [calEl] });
+      document.getElementById('att-retry-btn')?.addEventListener('click', () => renderAttMonth());
+      return;
+    }
     const records = {};
     snap.docs.forEach(d => { records[d.id] = d.data(); });
 
@@ -1416,11 +1446,21 @@ window.renderCashAdvancePage = async function() {
   // dashboard's cached pending CA count so it doesn't show stale items.
   if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
   const pres = currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance';
+  c.innerHTML = '<div class="loading-placeholder">Loading cash advances…</div>';
 
-  if (pres) {
-    await renderCashAdvanceAdmin(c);
-  } else {
-    await renderCashAdvanceEmployee(c);
+  try {
+    if (pres) {
+      await renderCashAdvanceAdmin(c);
+    } else {
+      await renderCashAdvanceEmployee(c);
+    }
+  } catch (err) {
+    c.innerHTML =
+      '<div class="empty-state"><div class="empty-icon">' + emojiIcon('⚠️',44) + '</div>' +
+      '<h4>Something went wrong</h4><p>' + escHtml(err && err.message ? err.message : String(err)) + '</p>' +
+      '<button type="button" class="btn-secondary btn-sm" id="ca-retry-btn" style="margin-top:14px">Retry</button></div>';
+    if (window.lucide) lucide.createIcons({ nodes: [c] });
+    document.getElementById('ca-retry-btn')?.addEventListener('click', () => window.renderCashAdvancePage());
   }
 };
 
@@ -2781,13 +2821,24 @@ async function loadMyProfileTab(key) {
 // salary_history). No new aggregation infrastructure, no writes.
 window.renderPersonalAnalytics = async function(host, uid) {
   const month = window.bizDate().slice(0, 7);
-  const [kpi, att, taskSnap, histSnap, evalSnap] = await Promise.all([
-    (typeof getKpiScore === 'function')        ? getKpiScore(uid)        : 0.5,
-    (typeof getAttendanceScore === 'function') ? getAttendanceScore(uid) : 0,
-    db.collection('tasks').where('assignedTo', 'array-contains', uid).get().catch(() => ({ docs: [] })),
-    db.collection('salary_history').where('userId', '==', uid).orderBy('month', 'desc').limit(6).get().catch(() => ({ docs: [] })),
-    db.collection('kpi_evals').doc(uid).get().catch(() => null)
-  ]);
+  let kpi, att, taskSnap, histSnap, evalSnap;
+  try {
+    [kpi, att, taskSnap, histSnap, evalSnap] = await Promise.all([
+      (typeof getKpiScore === 'function')        ? getKpiScore(uid)        : 0.5,
+      (typeof getAttendanceScore === 'function') ? getAttendanceScore(uid) : 0,
+      db.collection('tasks').where('assignedTo', 'array-contains', uid).get().catch(() => ({ docs: [] })),
+      db.collection('salary_history').where('userId', '==', uid).orderBy('month', 'desc').limit(6).get().catch(() => ({ docs: [] })),
+      db.collection('kpi_evals').doc(uid).get().catch(() => null)
+    ]);
+  } catch (err) {
+    host.innerHTML =
+      '<div class="empty-state"><div class="empty-icon">' + emojiIcon('⚠️',44) + '</div>' +
+      '<h4>Something went wrong</h4><p>' + escHtml(err && err.message ? err.message : String(err)) + '</p>' +
+      '<button type="button" class="btn-secondary btn-sm" id="mp-analytics-retry-btn" style="margin-top:14px">Retry</button></div>';
+    if (window.lucide) lucide.createIcons({ nodes: [host] });
+    document.getElementById('mp-analytics-retry-btn')?.addEventListener('click', () => window.renderPersonalAnalytics(host, uid));
+    return;
+  }
 
   // Same DONE set as getKpiScore / renderPersonalFinance (app.js).
   const DONE = ['done', 'approved', 'archived'];
