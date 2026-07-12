@@ -750,7 +750,15 @@ function applyUserUI() {
     ta.innerHTML = userProfile.photoUrl
       ? `<img src="${userProfile.photoUrl}" style="width:34px;height:34px;border-radius:50%;object-fit:cover"/>`
       : initial;
-    ta.onclick = () => navigateTo('my-profile');
+    // On mobile the avatar IS the profile menu (Facebook-style) — tapping your
+    // picture opens the drawer (settings, notification prefs, sign out, and a
+    // "View My Profile →" link). This lets us drop the redundant second
+    // hamburger from the top bar. On desktop it jumps straight to the page.
+    ta.onclick = () => {
+      const mobile = window.matchMedia ? window.matchMedia('(max-width:768px)').matches : window.innerWidth <= 768;
+      if (mobile && typeof openProfileDrawer === 'function') openProfileDrawer();
+      else navigateTo('my-profile');
+    };
   }
   const mb = document.getElementById('topbar-menu-btn');
   if (mb) mb.onclick = openProfileDrawer;
@@ -1257,41 +1265,47 @@ function buildSidebarNav() {
   if (window.lucide) lucide.createIcons({ nodes: [nav] });
 }
 
-function buildBottomNav() {
-  // Bottom nav is hidden on mobile (replaced by top-nav-strip).
-  // Keep function for desktop fallback compatibility.
-  const nav = document.getElementById('bottom-nav');
-  if (!nav) return;
-  // No-op on mobile — handled by buildTopNavStrip below
-}
-
-function buildTopNavStrip() {
-  const strip = document.getElementById('top-nav-strip');
-  const tabs  = document.getElementById('tn-tabs') || strip; // fallback if markup is stale
-  if (!strip || !tabs) return;
+// Primary navigation items for the current role, minus Profile (Profile lives
+// on the top-bar avatar → 'my-profile', so a duplicate tab is redundant).
+function _primaryNavItems() {
   const isAdminRole = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
   const items = isAdminRole ? window.PRESIDENT_BOTTOM_NAV
     : isGenericPartner() ? (window.PARTNER_GENERIC_BOTTOM_NAV || window.BOTTOM_NAV_ITEMS)
     : isPartner() ? (window.PARTNER_BOTTOM_NAV || window.BOTTOM_NAV_ITEMS)
     : isBrilliantOnly() ? window.BRILLIANT_BOTTOM_NAV
     : window.BOTTOM_NAV_ITEMS;
-  // v12 WS42 nav-consolidation — drop the Profile tab from the center strip:
-  // the topbar avatar (#topbar-avatar → 'my-profile', see applyUserUI) is now
-  // the single destination for Profile, so a duplicate center tab is redundant.
-  const visibleItems = items.filter(item => item.page !== 'my-profile');
-  tabs.innerHTML = visibleItems.map(item =>
-    `<button class="top-nav-item pressable" data-page="${item.page}">
-       <span class="tn-icon-wrap" style="position:relative;display:inline-flex">
+  return items.filter(item => item.page !== 'my-profile');
+}
+
+// Messenger/Facebook-style: primary tabs live in a full-width BOTTOM bar on
+// mobile (owner request 2026-07-12 — the crammed top tab strip was replaced by
+// this + a clean top bar). setActiveNav() highlights .bottom-nav-item by page.
+function buildBottomNav() {
+  const nav = document.getElementById('bottom-nav');
+  if (!nav) return;
+  const items = _primaryNavItems();
+  nav.innerHTML = items.map(item =>
+    `<button class="bottom-nav-item pressable" data-page="${item.page}">
+       <span class="bn-icon-wrap" style="position:relative;display:inline-flex">
          ${_bnIcon(item.icon)}
-         ${item.badge ? `<span class="tn-badge" style="display:none">0</span>` : ''}
+         ${item.badge ? `<span class="bn-badge" style="display:none">0</span>` : ''}
        </span>
-       <span class="tn-label">${item.label}</span>
+       <span class="bn-label">${item.label}</span>
      </button>`
   ).join('');
-  tabs.querySelectorAll('[data-page]').forEach(btn => {
+  nav.querySelectorAll('[data-page]').forEach(btn => {
     btn.addEventListener('click', () => navigateTo(btn.dataset.page));
   });
-  if (window.lucide) lucide.createIcons({ nodes: [tabs] });
+  if (window.lucide) lucide.createIcons({ nodes: [nav] });
+}
+
+// The mobile top strip is now just a brand wordmark (left) + the relocated
+// action icons (#tn-actions: search/notif/menu/avatar, moved in by
+// placeTopbarActions). No page tabs here anymore — those are the bottom bar.
+function buildTopNavStrip() {
+  const tabs = document.getElementById('tn-tabs');
+  if (!tabs) return;
+  tabs.innerHTML = `<span class="tn-brand">Barro Industries</span>`;
 }
 
 // v12 WS42 nav-consolidation — the mobile top strip absorbs the standalone

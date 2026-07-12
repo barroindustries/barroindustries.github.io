@@ -2594,6 +2594,10 @@ html.theme-astral #mini-cal td.today {
      #top-nav-strip by placeTopbarActions() (js/app.js). #top-nav-strip now
      sits at the very top, reclaiming ~56px of vertical space. */
   #topbar { display: none; }
+  /* Facebook-style top bar: one hamburger only (left → sidebar). The second
+     hamburger (#topbar-menu-btn → profile drawer) is redundant now that tapping
+     the avatar opens that same drawer — hide it to declutter the top. */
+  #topbar-menu-btn { display: none !important; }
   #sidebar { transform: translateX(-100%); top: env(safe-area-inset-top, 0px); }
   /* z-index 96 = above top-nav-strip (94) so user info is fully visible */
   #sidebar.open { transform: translateX(0); box-shadow: 4px 0 48px rgba(0,0,0,0.60); z-index: var(--z-shell-open); }
@@ -2603,16 +2607,34 @@ html.theme-astral #mini-cal td.today {
     margin-left: 0;
     margin-top: calc(var(--top-nav-h) + env(safe-area-inset-top, 0px));
     padding: 14px;
-    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    /* Clear the fixed bottom nav (Facebook-style) so content never hides under it. */
+    padding-bottom: calc(var(--bottom-nav-h) + 24px + env(safe-area-inset-bottom, 0px));
   }
-  /* Top strip replaces bottom nav on mobile */
+  /* Facebook-style shell: clean top bar (brand + action icons) + full-width
+     bottom nav for primary tabs. */
   .top-nav-strip { display: flex; }
+  /* Brand wordmark fills the top strip's center zone (left-aligned). */
+  .tn-tabs { justify-content: flex-start; overflow: hidden; }
+  .tn-brand {
+    font-size: var(--fs-lg); font-weight: 800; letter-spacing: -0.02em;
+    color: var(--text); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; padding-left: 4px;
+  }
   /* Full-screen page panel (openPage) — was pinned below the old #topbar;
      now covers from the very top, same as it used to cover the old
      top-nav-strip underneath the topbar. */
   .page-panel { top: env(safe-area-inset-top, 0px); }
-  /* Bottom nav stays hidden on mobile */
-  .bottom-nav { display: none !important; }
+  /* Primary nav bottom bar — shown on mobile, hidden on desktop. */
+  .bottom-nav { display: flex !important; }
+  /* Show the small tab labels (icon + label, like Facebook) — the base rule
+     hides them for the Astral icon-only pill; re-enable for light/dark bars. */
+  html:not(.theme-astral) .bottom-nav-item .bn-label {
+    display: block; font-size: 0.5625rem; font-weight: 600;
+    margin-top: 2px; line-height: 1; letter-spacing: -0.01em;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  html:not(.theme-astral) .bottom-nav-item .bn-icon { font-size: var(--fs-xl); }
+  html:not(.theme-astral) .bottom-nav-item .bn-icon svg { width: 22px; height: 22px; }
   .dashboard-grid { grid-template-columns: 1fr; }
   .kpi-row { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .form-row { grid-template-columns: 1fr; }
@@ -2653,9 +2675,17 @@ html.theme-astral #mini-cal td.today {
 @media (min-width: 769px) and (max-width: 819px) {
   #sidebar { transform: translateX(-100%); }
   .top-nav-strip { display: flex; }
+  /* Primary tabs moved to the bottom bar (same as phones) — show it here too,
+     otherwise this tier has no primary nav. The #topbar stays visible on this
+     tier, so tn-tabs just holds the brand wordmark. */
+  .bottom-nav { display: flex !important; }
+  html:not(.theme-astral) .bottom-nav-item .bn-label {
+    display: block; font-size: var(--fs-xs); font-weight: 600; margin-top: 2px; line-height: 1;
+  }
   .main-content {
     margin-left: 0;
     margin-top: calc(var(--topbar-h) + var(--top-nav-h) + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(var(--bottom-nav-h) + 24px + env(safe-area-inset-bottom, 0px));
   }
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
   .dashboard-grid { grid-template-columns: 1fr; }
