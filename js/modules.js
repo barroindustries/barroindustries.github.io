@@ -1484,8 +1484,13 @@ function renderCAEmployeeCards(advances, container) {
     const totalPay = a.totalPayable || a.amount || 0;
     const paidAmt  = Math.max(0, totalPay - (balance||0));
     const pct      = totalPay ? Math.min(100, Math.round((paidAmt/totalPay)*100)) : 0;
-    const statusColor = a.status==='approved'?'var(--success)':a.status==='paid'?'var(--primary-light)':a.status==='rejected'?'var(--danger)':'var(--warning)';
-    const statusLabel = a.status==='approved'&&(balance||0)>0?'Active':a.status==='paid'?'Paid Off':a.status==='pending'?'Pending Approval':'Rejected';
+    // Phase 116: unify onto the shared 'ca' vocab (js/ui-status-meta.js) —
+    // same branch order as the old statusColor/statusLabel ternaries, so a
+    // record hits the same bucket (and effectively the same color) as
+    // before: approved+balance>0 → 'active', paid → 'paid', pending →
+    // 'pending', anything else (rejected, or approved-with-zero-balance) →
+    // 'rejected'.
+    const caId = a.status==='approved'&&(balance||0)>0 ? 'active' : a.status==='paid' ? 'paid' : a.status==='pending' ? 'pending' : 'rejected';
     const payments = a.payments || [];
     const payRows = payments.map((p,i)=>`
       <tr>
@@ -1500,7 +1505,7 @@ function renderCAEmployeeCards(advances, container) {
           <div style="font-size:18px;font-weight:800;color:var(--text)">&#8369;${fmtN(a.amount)}</div>
           <div style="font-size:11px;color:var(--text-muted)">${a.date||''} &middot; ${a.terms||1}-month plan</div>
         </div>
-        <span style="background:${statusColor}1a;color:${statusColor};border:1px solid ${statusColor}44;font-size:11px;font-weight:700;padding:4px 10px;border-radius:20px;white-space:nowrap">${statusLabel}</span>
+        ${window.statusBadge2('ca', caId, {fontSize:'11px'})}
       </div>
       <div class="ca-card-body">
         <div class="ca-detail"><span>Reason</span><span>${a.reason?escHtml(a.reason):'&#x2014;'}</span></div>
@@ -1591,13 +1596,12 @@ function renderCAList(advances, container, isAdmin) {
     const balance   = typeof a.balance !== 'undefined' ? a.balance : a.amount;
     const paidAmt   = (a.amount||0) - (balance||0);
     const pct       = a.amount ? Math.round((paidAmt/(a.amount||1))*100) : 0;
-    const statusBadgeClass = a.status==='approved'?'badge-green':a.status==='rejected'?'badge-red':a.status==='paid'?'badge-blue':'badge-orange';
     return `
     <div class="ca-card">
       <div class="ca-card-header">
         ${isAdmin?`<div class="ca-card-name">${escHtml(a.userName||'Employee')} <span style="font-size:11px;color:var(--text-muted)">${a.employeeId||''}</span>${a.private?`<span class="badge badge-red" style="font-size:10px;margin-left:4px">${emojiIcon('🔒',10)} Private</span>`:''}</div>`:''}
         <div class="ca-amount">₱${fmtN(a.amount)}</div>
-        <span class="badge ${statusBadgeClass}">${a.status||'pending'}</span>
+        ${window.statusBadge2('ca', a.status||'pending')}
       </div>
       <div class="ca-card-body">
         <div class="ca-detail"><span>Reason</span><span>${a.reason?escHtml(a.reason):'—'}</span></div>
@@ -2212,7 +2216,9 @@ async function renderPresidentMessageCard() {
     { id:'unpaid',    label:'Unpaid Leave',    icon:'📅', drawsBalance:false, paid:false },
   ];
   const leaveType = id => LEAVE_TYPES.find(t=>t.id===id) || LEAVE_TYPES[0];
-  const lvBadge = s => s==='approved'?'badge-green':s==='rejected'?'badge-red':'badge-orange';
+  // Delegate to the unified status registry (Phase 116) — kept as a one-line
+  // shim in case another module still calls lvBadge() directly.
+  const lvBadge = s => window.statusBadgeClass('leave', s || 'pending');
   const esc = s => (window.escHtml ? window.escHtml(s) : (s==null?'':String(s)));
 
   // Inclusive working-day count, excluding Sundays (Manila "Sunday = no work").
@@ -2254,7 +2260,7 @@ async function renderPresidentMessageCard() {
         <div style="font-size:13px;font-weight:600">${t.label} · ${r.days||0} day${(r.days||0)!==1?'s':''}${showWho?` — ${esc(r.userName||'')}`:''}</div>
         <div style="font-size:11px;color:var(--text-muted)">${esc(r.startDate||'')} → ${esc(r.endDate||'')}${r.reason?` · ${esc(r.reason)}`:''}</div>
       </div>
-      <span class="badge ${lvBadge(r.status)}">${esc(r.status||'pending')}</span>
+      ${window.statusBadge2('leave', r.status||'pending')}
     </div>`;
   }
 
