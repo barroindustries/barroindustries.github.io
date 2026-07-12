@@ -754,6 +754,8 @@ window.Notifs = (() => {
 
     const toast = document.createElement('div');
     toast.id = 'bi-toast';
+    toast.setAttribute('role', 'status');       // v13 Phase 188: screen-reader
+    toast.setAttribute('aria-live', 'polite');  // announces toast text
     // Mobile (no bottom-nav) gets a smaller offset; desktop reserves bottom-nav space.
     const isMobile = window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
     const bottom = isMobile

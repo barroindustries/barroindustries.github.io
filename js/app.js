@@ -557,6 +557,19 @@ function showApp() {
   hideSplash();
   document.getElementById('login-screen').classList.add('hidden');
   document.getElementById('app-shell').classList.remove('hidden');
+  // a11y (Phase 188): explicit landmark roles on the shell — additive only,
+  // the underlying elements already are semantic <header>/<nav>/<main> tags in
+  // index.html, but explicit role+aria-label gives older/stricter AT a clean
+  // read (e.g. two <nav>s need distinguishing labels). Static index.html
+  // markup is a separate follow-up pass — this covers it via JS on load.
+  document.getElementById('topbar')?.setAttribute('role', 'banner');
+  document.getElementById('sidebar-nav')?.setAttribute('role', 'navigation');
+  document.getElementById('sidebar-nav')?.setAttribute('aria-label', 'Primary');
+  document.getElementById('bottom-nav')?.setAttribute('role', 'navigation');
+  document.getElementById('bottom-nav')?.setAttribute('aria-label', 'Bottom');
+  document.getElementById('top-nav-strip')?.setAttribute('role', 'navigation');
+  document.getElementById('top-nav-strip')?.setAttribute('aria-label', 'Bottom');
+  document.getElementById('page-content')?.setAttribute('role', 'main');
   // Init Lucide icons for static topbar elements
   if (window.lucide) lucide.createIcons();
   // Reset any iOS zoom that happened during login input
@@ -8135,7 +8148,8 @@ window.openModal=function(title,bodyHTML,footerHTML='',opts){
   if(box){ box.classList.remove('modal-wide','modal-full');
     if(opts.size==='wide') box.classList.add('modal-wide');
     else if(opts.size==='full') box.classList.add('modal-full');
-    box.setAttribute('role','dialog'); box.setAttribute('aria-modal','true'); }
+    box.setAttribute('role','dialog'); box.setAttribute('aria-modal','true');
+    box.setAttribute('aria-labelledby','modal-title'); }
   const ov = document.getElementById('modal-overlay');
   ov.classList.remove('hidden');
   ov.classList.add('active');
@@ -8157,10 +8171,11 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
   const p = document.createElement('div');
   p.id = 'page-panel'; p.className = 'page-panel overlay-active';
   p.setAttribute('role','dialog'); p.setAttribute('aria-modal','true');
+  p.setAttribute('aria-labelledby','page-panel-title');
   p.innerHTML = `
     <div class="page-panel-head">
       <button class="page-panel-back" aria-label="Back"><i data-lucide="arrow-left"></i></button>
-      <h3 class="page-panel-title"></h3><div style="width:40px"></div>
+      <h3 class="page-panel-title" id="page-panel-title"></h3><div style="width:40px"></div>
     </div>
     <div class="page-panel-body"></div>
     <div class="page-panel-foot"></div>`;
