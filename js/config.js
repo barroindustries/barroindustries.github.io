@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.44';
+window.APP_VERSION = '12.0.45';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1001,6 +1001,24 @@ window.promptDialog = function(opts){
     ov.onclick = (e) => { if (e.target === ov) window.Overlay.dismissTop(); };
     if (!opts.multiline) input.addEventListener('keydown', e => { if (e.key==='Enter') okBtn.click(); });
   });
+};
+
+// ── Double-click guard for money-writing buttons (v13 Phase 103) ───────────
+// Disables btn synchronously (before any await), swaps its label to
+// 'Working…' (icon-only buttons keep their icon), runs fn(), and always
+// restores the label + re-enables in finally. Rethrows fn's errors.
+window.busy = async function(btn, fn){
+  if (!btn) return fn();
+  const orig = btn.innerHTML;
+  const hasIcon = btn.querySelector && btn.querySelector('i,svg');
+  btn.disabled = true;
+  if (!hasIcon) btn.textContent = 'Working…';
+  try {
+    return await fn();
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
 };
 
 // ── Sub-tab routing helpers (v12 WS10, opt-in per screen) ──────────────────
