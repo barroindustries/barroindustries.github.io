@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.61';
+window.APP_VERSION = '12.0.62';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -52,6 +52,18 @@ window.fmtManila = function(v){
       year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', hour12:false });
   } catch(_) { return ''; }
 };
+
+// Canonical peso formatters (Part H Phase 111). Three flavors, pick by call site:
+//   fmtPeso(n, {dp})     -> '₱' + en-PH grouped number, default 2dp (symbol + 2dp)
+//   fmtPesoWhole(n)      -> '₱' + en-PH grouped number, rounded to 0dp (symbol + 0dp)
+//   fmtN2(n)             -> bare en-PH grouped number, 2dp, NO symbol (matches legacy
+//                            fmt()/fmtN() call sites that prepend '₱' themselves)
+window.fmtPeso = function(n, opts){
+  const dp = (opts && opts.dp != null) ? opts.dp : 2;
+  return '₱' + Number(n||0).toLocaleString('en-PH', {minimumFractionDigits: dp, maximumFractionDigits: dp});
+};
+window.fmtPesoWhole = n => window.fmtPeso(Math.round(Number(n)||0), {dp:0});
+window.fmtN2 = n => Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
 
 // Manila-correct "Month YYYY" label for a 'YYYY-MM' string or a Date (v13 Phase 17).
 // Noon-anchors YYYY-MM-01 to dodge UTC/Manila day-boundary rollover when the
