@@ -402,7 +402,7 @@ body::after { content: none; }
 .badge-green  { background: rgba(48,209,88,0.12);    color: #4DE87A; border-color: rgba(48,209,88,0.18); }
 .badge-orange { background: rgba(255,159,10,0.12);   color: #FFB830; border-color: rgba(255,159,10,0.18); }
 .badge-red    { background: rgba(255,69,58,0.12);    color: #FF7066; border-color: rgba(255,69,58,0.18); }
-.badge-gray   { background: rgba(255,255,255,0.06);  color: var(--text-muted); border-color: var(--border); }
+.badge-gray   { background: rgba(255,255,255,0.06);  color: var(--text-muted-strong, var(--text-muted)); border-color: var(--border); }
 .badge-purple { background: rgba(139,92,246,0.14);   color: #B07EFF; border-color: rgba(139,92,246,0.20); }
 .badge-teal   { background: rgba(0,212,170,0.12);    color: #00DDB8; border-color: rgba(0,212,170,0.18); }
 .badge-warn,
@@ -439,7 +439,7 @@ body::after { content: none; }
 @media (prefers-reduced-motion: reduce) { .btn-busy { animation: none; opacity: .7; } }
 @media (pointer:coarse) { .btn-primary, .btn-secondary, .btn-outline, .btn-danger, .btn-success { min-height: 40px; } }
 html.theme-astral .btn-primary {
-  background: var(--grad-pk-bl); background-size: 200% 200%;
+  background: var(--grad-pk-bl-btn, var(--grad-pk-bl)); background-size: 200% 200%;
   box-shadow: var(--sh-pink);
   animation: gradRun 4s ease infinite;
 }
@@ -2716,6 +2716,7 @@ html.light {
   --text:            #1C1E21;
   --text-2:          rgba(28,30,33,0.72);
   --text-muted:      rgba(28,30,33,0.48);
+  --text-muted-strong: rgba(28,30,33,0.62); /* Phase 187: badge-gray text, AA 4.5:1 min */
   --primary:         #0866FF;
   --primary-soft:    rgba(8,102,255,0.10);
   --on-primary:      #FFFFFF;
@@ -2781,6 +2782,7 @@ html.theme-dark {
   --text:            #E4E6EB;
   --text-2:          rgba(228,230,235,0.72);
   --text-muted:      rgba(228,230,235,0.45);
+  --text-muted-strong: rgba(228,230,235,0.55); /* Phase 187: badge-gray text, AA 4.5:1 min */
   --primary:         #4599FF;
   --primary-fill:    #0866FF;
   --primary-soft:    rgba(69,153,255,0.14);
@@ -2850,9 +2852,11 @@ html.theme-astral {
   --text:       #F0F0FA;
   --text-2:     rgba(240,240,250,0.80);
   --text-muted: rgba(240,240,250,0.45);
+  --text-muted-strong: rgba(240,240,250,0.50); /* Phase 187: badge-gray text, AA 4.5:1 min */
   --primary:      #9BA8FF;
   --primary-soft: rgba(155,168,255,0.14);
   --on-primary:   #FFFFFF;
+  --grad-pk-bl-btn: linear-gradient(135deg, #DF2769 0%, #0975E2 100%); /* Phase 187: darkened button-only variant so white --on-primary text clears AA 4.5:1 (decorative --grad-pk-bl left untouched) */
   --success: #30D158; --success-soft: rgba(48,209,88,0.16);
   --warning: #FFAA00; --warning-soft: rgba(255,170,0,0.16);
   --danger:  #FF453A; --danger-soft:  rgba(255,69,58,0.16);
@@ -2957,10 +2961,10 @@ html.light .sidebar-overlay { background: rgba(0,0,0,0.30); }
    var(--border)/var(--surface-2)/var(--bg-2) directly, no per-theme patch needed. */
 
 /* badges */
-html.light .badge-gray { background: rgba(0,0,0,0.06); border-color: rgba(0,0,0,0.10); color: rgba(29,29,31,0.55); }
+html.light .badge-gray { background: rgba(0,0,0,0.06); border-color: rgba(0,0,0,0.10); color: var(--text-muted-strong); }
 html.light .badge-blue { color: #0055CC; }
-html.light .badge-green { color: #1B8C3A; }
-html.light .badge-orange { color: #C06000; }
+html.light .badge-green { color: #1A8838; }
+html.light .badge-orange { color: #BA5D00; }
 html.light .badge-red { color: #C42B22; }
 html.light .badge-purple { color: #5C34B0; }
 
