@@ -5202,7 +5202,15 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   *::after {
     animation-iteration-count: 1 !important;
     animation-duration: 0.001ms !important;
-    transition-duration: var(--t1) !important;
+    animation-delay: 0.001ms !important;
+    /* WS42/v13 Phase 189: was var(--t1) (120ms) — still a visible slide/scale
+       for sheets, drawers, and chip presses. Reduced-motion means state
+       changes should be instant, not merely faster. Color/opacity end-states
+       are unaffected (only duration collapses), so hover/focus feedback and
+       pressed-state color changes still register — only the vestibular
+       transform/opacity motion (sheet slide-up, drawer slide-in, chip
+       press-scale) becomes a snap instead of an animated move. */
+    transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
 }
