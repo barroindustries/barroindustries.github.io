@@ -1020,13 +1020,21 @@ service cloud.firestore {
       return request.resource.data.get('date', '').matches('^\\d{4}-\\d{2}(-\\d{2})?$');
     }
     function ledgerPeriodOpen() {
+      return periodOpenFor(request.resource.data.get('date', ''));
+    }
+    // v13 Phase 84 — generalized period-close check, reusable by any money
+    // collection that carries a 'date' field. Same fail-open/fail-safe rules as
+    // the original ledger-only helper it replaces: President bypasses; a date
+    // that doesn't split into a real yyyy-mm (missing/malformed, e.g. '') maps
+    // to a finance_periods docId that will never exist, so the !exists() branch
+    // fires and the write is allowed — mirroring ledgerDateOk's separate check
+    // of date *format* rather than silently blocking on an unrelated field.
+    function periodOpenFor(dateStr) {
       return isPresident() ||
         !exists(/databases/$(database)/documents/finance_periods/$(
-          request.resource.data.get('date', '').split('-')[0] + '-' +
-          request.resource.data.get('date', '').split('-')[1])) ||
+          dateStr.split('-')[0] + '-' + dateStr.split('-')[1])) ||
         get(/databases/$(database)/documents/finance_periods/$(
-          request.resource.data.get('date', '').split('-')[0] + '-' +
-          request.resource.data.get('date', '').split('-')[1])).data.get('closed', false) == false;
+          dateStr.split('-')[0] + '-' + dateStr.split('-')[1])).data.get('closed', false) == false;
     }
     match /finance_periods/{month} {
       allow read: if isAuth() && canFinance();
@@ -1078,19 +1086,26 @@ service cloud.firestore {
       allow create, update: if isAuth() && canFinance();
       allow delete: if isAuth() && isPresident();
     }
+    // v13 Phase 84 — period-close backstop (RULES side of C6/Phase 13's
+    // client-side assertPeriodOpen). Every create/update from the CRJ/CDJ/GJ
+    // editors always sends a real 'date' (create forms require it; edit-modal
+    // fields always include the date key) so ledgerDateOk()'s format check
+    // never blocks a legit write — only a forged/malformed date. expenses and
+    // payslips are deliberately NOT covered this pass (their status-transition
+    // updates don't carry a date field) — see Phase 84 follow-up note.
     match /cash_receipt_journal/{docId} {
       allow read: if isAuth() && canFinance();
-      allow create, update: if isAuth() && canFinance();
+      allow create, update: if isAuth() && canFinance() && ledgerDateOk() && periodOpenFor(request.resource.data.get('date', ''));
       allow delete: if isAuth() && isPresident();
     }
     match /cash_disbursement_journal/{docId} {
       allow read: if isAuth() && canFinance();
-      allow create, update: if isAuth() && canFinance();
+      allow create, update: if isAuth() && canFinance() && ledgerDateOk() && periodOpenFor(request.resource.data.get('date', ''));
       allow delete: if isAuth() && isPresident();
     }
     match /general_journal/{docId} {
       allow read: if isAuth() && canFinance();
-      allow create, update: if isAuth() && canFinance();
+      allow create, update: if isAuth() && canFinance() && ledgerDateOk() && periodOpenFor(request.resource.data.get('date', ''));
       allow delete: if isAuth() && isPresident();
     }
     match /finance_records/{docId} {
