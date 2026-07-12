@@ -2550,9 +2550,9 @@ async function renderPresidentDashboard() {
     const taskBadge = (t) => {
       const isOverdue = t.dueDate && t.dueDate < todayStr;
       if (isOverdue) return `<span class="badge badge-red">Overdue</span>`;
-      if (t.status==='done') return `<span class="badge badge-green">Done</span>`;
+      if (t.status==='done') return window.statusBadge2 ? window.statusBadge2('task','done') : `<span class="badge badge-green">Done</span>`;
       if (t.priority==='high') return `<span class="badge badge-red">High</span>`;
-      return `<span class="badge badge-blue">${t.status||'open'}</span>`;
+      return window.statusBadge2 ? window.statusBadge2('task', t.status||'open') : `<span class="badge badge-blue">${t.status||'open'}</span>`;
     };
     const getAssignedNames = (t) => {
       const uids = Array.isArray(t.assignedTo) ? t.assignedTo : (t.assignedTo ? [t.assignedTo] : []);
@@ -3914,7 +3914,7 @@ async function loadPartnersDeptTab(sub) {
                 <div class="task-feed-dot priority-dot-${t.priority||'medium'}"></div>
                 <div style="flex:1;min-width:0"><div class="task-feed-title">${escHtml(t.title)}</div>
                 <div class="task-feed-meta">${t.dueDate?'Due '+t.dueDate:''}</div></div>
-                <span class="badge ${t.status==='done'||t.status==='approved'?'badge-green':t.status==='review'?'badge-orange':'badge-blue'}">${t.status||'open'}</span>
+                ${window.statusBadge2 ? window.statusBadge2('task', t.status||'open') : `<span class="badge ${t.status==='done'||t.status==='approved'?'badge-green':t.status==='review'?'badge-orange':'badge-blue'}">${t.status||'open'}</span>`}
                 ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">${emojiIcon('📣',16)} ${t.openFollowUpCount}</span>`:''}
               </div>`).join('')}
           </div>
@@ -3937,7 +3937,7 @@ async function loadPartnersDeptTab(sub) {
                 <div class="task-feed-title">${escHtml(t.title)}</div>
                 <div class="task-feed-meta">${Array.isArray(t.assignedToNames)&&t.assignedToNames.length?`${emojiIcon('👥',16)} `+escHtml(t.assignedToNames.join(', ')):''} ${t.dueDate?'· Due '+t.dueDate:''}</div>
               </div>
-              <span class="badge ${t.status==='done'||t.status==='approved'?'badge-green':t.status==='review'?'badge-orange':t.status==='overdue'?'badge-red':'badge-blue'}">${t.status||'open'}</span>
+              ${window.statusBadge2 ? window.statusBadge2('task', t.status||'open') : `<span class="badge ${t.status==='done'||t.status==='approved'?'badge-green':t.status==='review'?'badge-orange':t.status==='overdue'?'badge-red':'badge-blue'}">${t.status||'open'}</span>`}
               ${(t.openFollowUpCount||0)>0?`<span class="badge badge-orange" style="margin-left:4px">${emojiIcon('📣',16)} ${t.openFollowUpCount}</span>`:''}
             </div>`).join('')}
           </div></div>`}

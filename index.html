@@ -176,7 +176,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.91 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.92 · Barro Industries</div>
   </div>
 </div>
 
@@ -323,7 +323,7 @@
   </div>
   <div id="profile-body" class="drawer-body"></div>
 </div>
-<div id="drawer-overlay" class="modal-overlay hidden" style="z-index:190"></div>
+<div id="drawer-overlay" class="modal-overlay hidden"></div>
 
 <!-- v12 WS11 — confirm/prompt dialog host (higher z than #modal-overlay so it
      nests on top of a modal/page). Full-screen page panel (openPage) is
@@ -375,6 +375,11 @@
      before departments.js, which calls Approvals.dispatch() from renderApprovals. -->
 <script defer src="js/svc-approvals.js"></script>
 <script defer src="js/departments.js"></script>
+<!-- v13 Phase 37 — one-time/rare president maintenance tools, split out of
+     departments.js for hot-file size. Plain deferred script (not the
+     dynamic-import lazy-load V13-PLAN.md sketched) — simpler safe variant
+     for this pass; buttons in departments.js call these by window.* name. -->
+<script defer src="js/migrations.js"></script>
 <script defer src="js/app.js"></script>
 <script defer src="js/modules.js"></script>
 <script defer src="js/chat.js"></script>
