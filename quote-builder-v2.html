@@ -267,19 +267,27 @@ tr:hover td{background:#fafbff;}
   #tableWrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
   .items-table{min-width:700px;}
   td,th{padding:5px 5px!important;font-size:11px!important;}
-  .cell-num,.cell-unit,.edit-price{font-size:11px!important;}
-  .totals-box{justify-content:stretch;}
+  /* inputs inside the table keep a 16px floor even on a compact table so
+     iOS Safari doesn't auto-zoom the viewport when the field gets focus */
+  .cell-num,.cell-unit,.edit-price{font-size:16px!important;padding:4px 3px!important;}
+  .cell-num{min-height:38px;}
+  .totals-box{justify-content:stretch;position:sticky;bottom:0;background:white;
+    padding:8px 0 6px;box-shadow:0 -4px 10px rgba(0,0,0,.08);z-index:20;}
   .totals-tbl{width:100%;min-width:0;}
   .terms-grid{grid-template-columns:1fr;}
   .sig-row{grid-template-columns:1fr;gap:14px;}
-  .del-btn{padding:6px 10px;font-size:18px;}
+  /* del-btn is the primary row-action touch target — bring it to the
+     44px minimum instead of the old 30px hit area */
+  .del-btn{padding:6px 10px;font-size:18px;min-width:44px;min-height:44px;}
   .pricing-controls{flex-direction:column;align-items:stretch;gap:10px;}
   .pc-row{flex-wrap:wrap;}
-  .pricing-controls select{flex:1;min-width:0;}
+  .pc-check{min-height:44px;}
+  .pricing-controls select{flex:1;min-width:0;min-height:40px;}
   .pay-tbl td,.pay-tbl th{font-size:12px;padding:6px 7px;}
   .lead-in{width:100%!important;}
-  /* trimmed input size so the form isn't oversized on a phone */
-  input,select,textarea{font-size:14px!important;padding:6px 8px!important;}
+  /* 16px floor (not the old 14px) — anything smaller triggers iOS Safari's
+     auto-zoom-on-focus, which then leaves the layout zoomed in */
+  input,select,textarea{font-size:16px!important;padding:8px 8px!important;min-height:40px;}
   .toggle-pills button{font-size:10.5px;}
   .reload-btn,.btn{font-size:11px;}
   .qno-box{font-size:12px;padding:5px 9px;}
