@@ -3092,7 +3092,7 @@ async function renderEmployeeDashboard() {
         <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;padding-top:6px">
           ${currentDepts.map(dept => {
             const cfg = DEPARTMENTS[dept] || {};
-            return `<button class="dept-quick-tab" onclick="renderDeptModule('${dept}')">
+            return `<button class="dept-quick-tab" onclick="navigateTo('dept:${dept}')">
               <span style="font-size:18px">${emojiIcon(cfg.lucideIcon||cfg.icon||'folder',18)}</span>
               <span>${dept}</span>
             </button>`;
@@ -3700,7 +3700,7 @@ function renderDualDeptPicker() {
     <div class="dept-grid">
       ${currentDepts.map(dept => {
         const cfg = DEPARTMENTS[dept]||{icon:'🗂️',color:'var(--primary-light)',lucideIcon:'folder-open'};
-        return `<div class="dept-card" style="border-top-color:${cfg.color};cursor:pointer" onclick="renderDeptModule('${dept}')">
+        return `<div class="dept-card" style="border-top-color:${cfg.color};cursor:pointer" onclick="navigateTo('dept:${dept}')">
           <div class="dept-name" style="margin-bottom:6px">${window.deptIconTile(cfg, 36)}</div>
           <div class="dept-name">${dept}</div>
           <div class="dept-head" style="margin-top:6px">Tap to open →</div>
@@ -6223,14 +6223,14 @@ async function renderCompanyPolicies(ct, canAdd) {
         <div class="policy-icon">${p.icon||`${emojiIcon('📄',16)}`}</div>
         <div class="policy-title">${escHtml(p.title)}</div>
         <div class="policy-desc">${escHtml(p.description||'')}</div>
-        ${p.fileUrl?`<a href="${p.fileUrl}" target="_blank" class="btn-link" style="font-size:12px;margin-top:6px;display:block">${emojiIcon('📎',12)} View Document</a>`:''}
+        ${p.fileUrl?`<a href="${(typeof safeHttpUrl==='function')?safeHttpUrl(p.fileUrl):p.fileUrl}" target="_blank" rel="noopener noreferrer" class="btn-link" style="font-size:12px;margin-top:6px;display:block">${emojiIcon('📎',12)} View Document</a>`:''}
       </div>`).join('');
     if (window.lucide) lucide.createIcons({ nodes: [grid] });
     grid.querySelectorAll('.policy-card').forEach(card=>{
       card.addEventListener('click',e=>{
         if(e.target.tagName==='A') return;
         const p=policies.find(x=>x.id===card.dataset.id);
-        openModal(p.title,`<p style="font-size:14px;line-height:1.7;white-space:pre-wrap;color:var(--text-2)">${escHtml(p.content||'No content.')}</p>${p.fileUrl?`<a href="${p.fileUrl}" target="_blank" class="btn-secondary" style="display:inline-block;margin-top:14px">${emojiIcon('📎',16)} Open File</a>`:''}${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-policy-btn" data-id="${p.id}">Delete</button>`:''}`);
+        openModal(p.title,`<p style="font-size:14px;line-height:1.7;white-space:pre-wrap;color:var(--text-2)">${escHtml(p.content||'No content.')}</p>${p.fileUrl?`<a href="${(typeof safeHttpUrl==='function')?safeHttpUrl(p.fileUrl):p.fileUrl}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="display:inline-block;margin-top:14px">${emojiIcon('📎',16)} Open File</a>`:''}${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-policy-btn" data-id="${p.id}">Delete</button>`:''}`);
         document.getElementById('del-policy-btn')?.addEventListener('click',async e2=>{if(await confirmDialog({message:'Delete this policy?', danger:true})){await db.collection('policies').doc(e2.currentTarget.dataset.id).delete();closeModal();renderCompanyPolicies(ct,canAdd);}});
       });
     });
@@ -6282,7 +6282,7 @@ async function renderCompanyDownloads(ct, canAdd) {
       return `<div style="margin-bottom:20px">
         <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin-bottom:10px">${escHtml(cat)}</div>
         ${items.map(d=>`
-          <a href="${d.fileUrl||'#'}" target="_blank" rel="noopener" class="co-dl-row" data-id="${d.id}">
+          <a href="${(typeof safeHttpUrl==='function')?(safeHttpUrl(d.fileUrl)||'#'):(d.fileUrl||'#')}" target="_blank" rel="noopener noreferrer" class="co-dl-row" data-id="${d.id}">
             <div class="co-dl-icon" style="background:${color}18"><i data-lucide="${icon}" style="width:16px;height:16px;stroke:${color}"></i></div>
             <div class="co-dl-info">
               <div class="co-dl-name">${escHtml(d.title)}</div>
@@ -6419,7 +6419,7 @@ async function renderDepartments() {
 
   // Click → open full department module
   c.querySelectorAll('.dept-card-clickable').forEach(card => {
-    card.addEventListener('click', () => renderDeptModule(card.dataset.dept));
+    card.addEventListener('click', () => navigateTo('dept:' + card.dataset.dept));
   });
 
   document.getElementById('add-dept-btn')?.addEventListener('click', () => {

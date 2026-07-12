@@ -720,6 +720,12 @@ window.Notifs = (() => {
       }
     });
     backdrop?.addEventListener('click', closePanel);
+
+    document.getElementById('notif-see-all-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      closePanel();
+      if (typeof navigateTo === 'function') navigateTo('notifications');
+    });
   }
 
   return { startListener, stopListener, send, sendToDept, sendToAll, sendToOwner, showToast, initPush, checkDeadlines, checkAttendanceReminder, checkLowStock, checkAECFollowups, initToggle, renderPage, markAllRead,
