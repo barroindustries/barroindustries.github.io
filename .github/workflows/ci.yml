@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: node --check on every js/*.js and scripts/*.js
+        run: |
+          set -e
+          fail=0
+          for f in js/*.js scripts/*.js; do
+            echo "checking $f"
+            node --check "$f" || fail=1
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "One or more files failed node --check"
+            exit 1
+          fi
+
+  node-version-pin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: All workflow node-version entries must be '20'
+        run: |
+          set -e
+          fail=0
+          for f in .github/workflows/*.yml; do
+            lines=$(grep -n "node-version:" "$f" || true)
+            if [ -n "$lines" ]; then
+              while IFS= read -r line; do
+                # normalize: strip key, quotes, and whitespace
+                val=$(echo "$line" | sed -E "s/^[0-9]+:.*node-version:[[:space:]]*//; s/[\"']//g; s/[[:space:]]+$//")
+                if [ "$val" != "20" ]; then
+                  echo "::error file=$f::node-version '$val' is not pinned to '20' ($line)"
+                  fail=1
+                fi
+              done <<< "$lines"
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
+          echo "All node-version entries are pinned to 20"
+
+  backup-coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check backup coverage
+        run: node scripts/check-backup-coverage.js

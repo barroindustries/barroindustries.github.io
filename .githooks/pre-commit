@@ -1,0 +1,92 @@
+#!/bin/sh
+# Auto-increment patch version in js/config.js on every commit.
+# Tracked copy of the hook — set up once per clone with:
+#   git config core.hooksPath .githooks
+#
+# Hardened (v13 Phase 6) vs the old .git/hooks/pre-commit:
+#   - grep misses now BLOCK the commit (exit 1) instead of silently
+#     shipping a stale version.
+#   - CACHE_VER in sw.js is now DERIVED from APP_VERSION (bi-ops-vX.Y.Z)
+#     instead of an independent integer counter — one number tells one
+#     story.
+#   - Skips the bump entirely when the staged diff touches ONLY the three
+#     version files (js/config.js, index.html, sw.js) — prevents an
+#     amend/merge of a version-only commit from double-bumping.
+
+CONFIG="js/config.js"
+INDEX="index.html"
+SW="sw.js"
+
+# ── Skip-if-nothing-else-changed guard ──────────────────────────────────────
+STAGED=$(git diff --cached --name-only)
+if [ -n "$STAGED" ]; then
+  OTHER=$(echo "$STAGED" | grep -v -E "^(${CONFIG}|${INDEX}|${SW})$")
+  if [ -z "$OTHER" ]; then
+    echo "[version] Staged diff touches only version files — skipping bump"
+    exit 0
+  fi
+fi
+
+# Read current version
+CURRENT=$(grep -o "APP_VERSION = '[0-9]*\.[0-9]*\.[0-9]*'" "$CONFIG" | grep -o "[0-9]*\.[0-9]*\.[0-9]*")
+
+if [ -z "$CURRENT" ]; then
+  echo "[version] ERROR: Could not find APP_VERSION in $CONFIG — blocking commit"
+  echo "[version] Expected a line matching: APP_VERSION = 'X.Y.Z'"
+  exit 1
+fi
+
+# Split into parts
+MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+MINOR=$(echo "$CURRENT" | cut -d. -f2)
+PATCH=$(echo "$CURRENT" | cut -d. -f3)
+
+# Increment patch
+NEW_PATCH=$((PATCH + 1))
+NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+
+# Replace in config.js
+sed -i '' "s/APP_VERSION = '${CURRENT}'/APP_VERSION = '${NEW_VERSION}'/" "$CONFIG"
+if ! grep -q "APP_VERSION = '${NEW_VERSION}'" "$CONFIG"; then
+  echo "[version] ERROR: failed to write new APP_VERSION into $CONFIG — blocking commit"
+  exit 1
+fi
+
+# Also update hardcoded version strings in index.html (login fallback)
+if ! grep -q "v${CURRENT} · Barro Industries" "$INDEX"; then
+  echo "[version] ERROR: could not find 'v${CURRENT} · Barro Industries' in $INDEX — blocking commit"
+  exit 1
+fi
+sed -i '' "s/v${CURRENT} · Barro Industries/v${NEW_VERSION} · Barro Industries/g" "$INDEX"
+if ! grep -q "v${NEW_VERSION} · Barro Industries" "$INDEX"; then
+  echo "[version] ERROR: failed to rewrite version string in $INDEX — blocking commit"
+  exit 1
+fi
+
+# Stage both files
+git add "$CONFIG" "$INDEX"
+
+echo "[version] Bumped ${CURRENT} → ${NEW_VERSION}"
+
+# Derive the service-worker cache version from APP_VERSION so JS/CSS edits
+# never serve stale code to users, and the cache tag always reads the same
+# as the app version (bi-ops-vX.Y.Z) instead of an unrelated integer.
+if [ ! -f "$SW" ]; then
+  echo "[sw] ERROR: $SW not found — blocking commit"
+  exit 1
+fi
+
+if ! grep -qE "CACHE_VER[[:space:]]*=[[:space:]]*'bi-ops-v[0-9]+(\.[0-9]+){0,2}'" "$SW"; then
+  echo "[sw] ERROR: Could not find CACHE_VER = 'bi-ops-v...' pattern in $SW — blocking commit"
+  exit 1
+fi
+
+sed -i '' -E "s/CACHE_VER([[:space:]]*=[[:space:]]*)'bi-ops-v[0-9]+(\.[0-9]+){0,2}'/CACHE_VER\1'bi-ops-v${NEW_VERSION}'/" "$SW"
+
+if ! grep -qE "CACHE_VER[[:space:]]*=[[:space:]]*'bi-ops-v${NEW_VERSION}'" "$SW"; then
+  echo "[sw] ERROR: failed to write new CACHE_VER into $SW — blocking commit"
+  exit 1
+fi
+
+git add "$SW"
+echo "[sw] Cache version set to bi-ops-v${NEW_VERSION}"

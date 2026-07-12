@@ -2,6 +2,9 @@
   "name": "bi-sync",
   "version": "2.0.0",
   "description": "Barro Industries — Firebase to Google Drive sync & monthly backup",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "sync":              "node sync-to-drive.js",
     "backup":            "node monthly-backup.js",
