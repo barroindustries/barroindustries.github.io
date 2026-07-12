@@ -6,7 +6,10 @@
 // write can never drift apart. This file implements the SERVICE ONLY — Phase
 // 13 migrates the six existing posters onto it (see MIGRATION MAP below);
 // Phase 14 adds Ledger.upsertByRef's payroll wiring + the legacy-id backfill
-// tool. Nothing in departments.js/config.js is touched by this phase.
+// tool (window.Ledger.migrateLegacyRows — see its header comment above the
+// definition, near the bottom of this file). Nothing in departments.js/
+// config.js is touched by this phase (departments.js wires a president-only
+// button to call it separately).
 //
 // ── API CONTRACT ───────────────────────────────────────────────────────────
 // window.Ledger.post(entry) -> Promise<{existed, id, legacy?}>
@@ -117,6 +120,7 @@
 //   manual ledger save (save-led-btn handler, departments.js ~4951) → Ledger.post({ref: <user-entered led-ref>, ...}) — first caller to hand assertPeriodOpen's job fully to the service
 //   payslip submit poster ("WPAY-" ref, departments.js ~6273-6296)  → Ledger.upsertByRef(`WPAY-${ps.id}`, buildEntry)
 //   Production COS (V13-PLAN.md Phase 13 item, departments.js ~13913-13997, ref `POCOS-*` / `POCOS-*-INV`) → Ledger.postMulti([expense leg, Inventory contra leg]) — the rules' Production-shape special case (firestore.rules ~1050-1069) must keep matching this write shape unchanged.
+//   legacy random-id rows (all refNumber prefixes, five years of production data) → Ledger.migrateLegacyRows({dryRun}) [Phase 14 — one-time, president-only, run per environment after Phase 13 lands; see its header comment near the bottom of this file]
 //
 ;(function () {
   'use strict';
@@ -322,5 +326,113 @@
     console.log('[Ledger._selfTest] pure checks passed (sanitize/_mapEntry/vatSplit wiring). Transactional dedupe path NOT covered — requires the emulator.');
   }
 
-  window.Ledger = { post: post, upsertByRef: upsertByRef, postMulti: postMulti, remove: remove, _selfTest: _selfTest, _mapEntry: _mapEntry, _sanitize: sanitize };
+  // ── Phase 14: legacy-row migration tool ──────────────────────────────────
+  // window.Ledger.migrateLegacyRows({dryRun = true} = {}) -> Promise<report>
+  //   One-time, president-only tool that copies random-id ledger docs (rows
+  //   from before Phase 12's deterministic-id scheme — identified by a
+  //   `refNumber` field whose sanitized value doesn't match the doc's own id)
+  //   onto `ledger/{sanitize(refNumber)}`, then deletes the legacy doc. This
+  //   retires the extra _findLegacyRef query that .post/.upsertByRef pay for
+  //   on every call (see KEY DESIGN DECISIONS #2 above) once run across all
+  //   refNumber prefixes.
+  //
+  //   Full collection scan — acceptable for a one-time migration tool, NOT a
+  //   pattern to reuse for anything that runs repeatedly.
+  //
+  //   Per-row disposition:
+  //     - doc.id already === sanitize(refNumber)         -> already deterministic, skip (counted in `deterministic`).
+  //     - no refNumber field                              -> can't determine target id, skip (counted in `noRef`, reported for manual review).
+  //     - a doc ALREADY exists at the deterministic id     -> collision: this is
+  //       exactly the historical double-post the fail-open .where() guard was
+  //       replaced to prevent (see design decision #1). Both rows are left
+  //       untouched — do NOT silently merge/overwrite money data — and the
+  //       pair is recorded in the `collisions` report array for manual
+  //       resolution via financeDelete (see CLAUDE.md "Finance delete
+  //       approval") or Phase 20's reconciliation report.
+  //     - otherwise                                        -> migratable: copy
+  //       verbatim (including createdAt — do NOT re-timestamp, that would
+  //       corrupt reporting/aging that reads createdAt) to the deterministic
+  //       id, then delete the legacy doc.
+  //
+  //   dryRun (default true): read-only, zero writes — report the counts only.
+  //   dryRun:false: batched writes, 400 ops/batch (well under Firestore's
+  //   500-write limit, leaving headroom since each migrated row is a
+  //   set+delete pair = 2 ops), each batch committed as its own atomic unit.
+  //   Collisions are always skipped from writes, in both modes.
+  //
+  //   Return shape is a superset of what the president-button caller in
+  //   departments.js expects ({scanned, migratable, migrated, skipped, ...}):
+  //     { scanned, deterministic, migratable, migrated, collisions, noRef, skipped }
+  //   `migrated` is 0 in dry-run. `skipped` = deterministic + noRef + collisions.length.
+  async function migrateLegacyRows(opts) {
+    opts = opts || {};
+    var dryRun = opts.dryRun !== false; // default true
+    if (typeof isRealPresident !== 'function' || !isRealPresident()) {
+      throw new Error('Ledger.migrateLegacyRows: president-only');
+    }
+
+    var snap = await db.collection('ledger').get();
+    var scanned = snap.docs.length;
+    var deterministic = 0;
+    var noRef = 0;
+    var collisions = [];
+    var migratableDocs = []; // {id, ref (target docId), data}
+
+    // Build the set of existing doc ids up front so collision checks don't
+    // need a read per candidate.
+    var existingIds = {};
+    snap.docs.forEach(function (d) { existingIds[d.id] = true; });
+
+    snap.docs.forEach(function (d) {
+      var data = d.data();
+      var refNumber = data.refNumber;
+      if (!refNumber) { noRef++; return; }
+      var targetId = sanitize(refNumber);
+      if (d.id === targetId) { deterministic++; return; }
+      if (existingIds[targetId]) {
+        collisions.push({ ref: refNumber, legacyId: d.id, deterministicId: targetId, amount: data.amount, date: data.date, type: data.type });
+        return;
+      }
+      migratableDocs.push({ legacyId: d.id, targetId: targetId, data: data });
+    });
+
+    var migratable = migratableDocs.length;
+    var migrated = 0;
+
+    if (!dryRun && migratable) {
+      var BATCH_SIZE = 400;
+      for (var i = 0; i < migratableDocs.length; i += BATCH_SIZE) {
+        var chunk = migratableDocs.slice(i, i + BATCH_SIZE);
+        var batch = db.batch();
+        chunk.forEach(function (m) {
+          batch.set(ledgerRef(m.targetId), m.data); // verbatim copy, createdAt untouched
+          batch.delete(db.collection('ledger').doc(m.legacyId));
+        });
+        await batch.commit();
+        migrated += chunk.length;
+      }
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+    }
+
+    if (collisions.length && typeof console.table === 'function') {
+      console.table(collisions);
+    }
+
+    var skipped = deterministic + noRef + collisions.length;
+    return {
+      scanned: scanned,
+      deterministic: deterministic,
+      migratable: migratable,
+      migrated: migrated,
+      collisions: collisions,
+      noRef: noRef,
+      skipped: skipped
+    };
+  }
+
+  window.Ledger = {
+    post: post, upsertByRef: upsertByRef, postMulti: postMulti, remove: remove,
+    migrateLegacyRows: migrateLegacyRows,
+    _selfTest: _selfTest, _mapEntry: _mapEntry, _sanitize: sanitize
+  };
 })();
