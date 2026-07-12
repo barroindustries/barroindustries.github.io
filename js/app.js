@@ -1174,49 +1174,44 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('sidebar-overlay')?.addEventListener('click', requestCloseSidebar);
 
-  // ── Left-edge swipe to open / right-swipe-back to close sidebar ──────────
-  (function initSidebarSwipe() {
-    const EDGE_ZONE  = 22;  // px from left edge to start opening
-    const OPEN_DIST  = 72;  // px rightward drag needed to open
-    const CLOSE_DIST = 72;  // px leftward drag needed to close
-    const MAX_TRAVEL = 260; // don't track drags wider than this
+  // v13 Phase 64 — left-edge OPEN swipe now lives solely in gestures.js's edge
+  // handler (window.Overlay.isOpen() → dismissTop covers CLOSE for an open
+  // sidebar, since openSidebar() pushes it onto the Overlay stack in mobile
+  // mode). initSidebarSwipe (the old 22px-edge open/close tracker) is removed
+  // to avoid two listeners racing on the same left-edge gesture.
+  //
+  // What gestures.js's edge handler does NOT reproduce: dragging LEFT while
+  // already inside the open sidebar to close it (the edge handler only tracks
+  // rightward drags, dx>0). That's a distinct, non-edge gesture scoped to the
+  // sidebar element itself, so it's kept here as a minimal standalone listener
+  // rather than bolting leftward-drag logic onto the edge-swipe-back handler.
+  (function initSidebarCloseSwipe() {
+    const CLOSE_DIST = 72;
+    const MAX_TRAVEL  = 260;
+    let sx = 0, sy = 0, tracking = false;
+    const sidebar = document.getElementById('sidebar');
+    if (!sidebar) return;
 
-    let sx = 0, sy = 0, tracking = false, mode = null; // mode: 'open' | 'close'
-
-    document.addEventListener('touchstart', e => {
+    sidebar.addEventListener('touchstart', e => {
+      if (!sidebar.classList.contains('open')) { tracking = false; return; }
       const t = e.touches[0];
       sx = t.clientX; sy = t.clientY;
-      tracking = false; mode = null;
-
-      const sidebar = document.getElementById('sidebar');
-      const isOpen  = sidebar?.classList.contains('open');
-
-      if (!isOpen && sx <= EDGE_ZONE) {
-        tracking = true; mode = 'open';
-      } else if (isOpen && sx <= 60) {
-        // Allow close-drag from near the sidebar's left side too
-        tracking = true; mode = 'close';
-      }
+      tracking = true;
     }, { passive: true });
 
-    document.addEventListener('touchmove', e => {
+    sidebar.addEventListener('touchmove', e => {
       if (!tracking) return;
       const dx = e.touches[0].clientX - sx;
       const dy = Math.abs(e.touches[0].clientY - sy);
-      // If vertical movement dominates, bail out
       if (dy > Math.abs(dx) + 8) { tracking = false; return; }
       if (Math.abs(dx) > MAX_TRAVEL) { tracking = false; return; }
-
-      if (mode === 'open' && dx >= OPEN_DIST) {
-        tracking = false;
-        openSidebar();
-      } else if (mode === 'close' && dx <= -CLOSE_DIST) {
+      if (dx <= -CLOSE_DIST) {
         tracking = false;
         requestCloseSidebar();
       }
     }, { passive: true });
 
-    document.addEventListener('touchend', () => { tracking = false; mode = null; }, { passive: true });
+    sidebar.addEventListener('touchend', () => { tracking = false; }, { passive: true });
   })();
 });
 
@@ -8743,4 +8738,50 @@ window.migrateStrandedBKQuotes = async function () {
 };
 
 // ── Service Worker ────────────────────────────────
-if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(console.warn);
+// A new SW is installed in the background whenever CACHE_VER bumps. Rather than
+// swapping code out from under a live session (silent mid-session breakage — H14),
+// we let it sit "waiting" and prompt the user to reload — unless nobody's signed
+// in yet (login screen), in which case there's no session to disrupt.
+let _swReloading = false; // guards against a reload loop if controllerchange fires twice
+function renderSwUpdateBanner(reg) {
+  if (document.getElementById('sw-update-banner')) return;
+  const div = document.createElement('div');
+  div.id = 'sw-update-banner';
+  div.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#1d4ed8;color:#fff;padding:calc(10px + env(safe-area-inset-top,0px)) calc(14px + env(safe-area-inset-right,0px)) 10px calc(14px + env(safe-area-inset-left,0px));font-size:13px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap';
+  div.innerHTML = `<span>${emojiIcon('🔄',16)} <strong>Update ready.</strong> Reload to get the latest version.</span>`
+    + `<button type="button" style="background:#fff;color:#1d4ed8;border:none;border-radius:6px;padding:5px 14px;font-size:13px;font-weight:700;cursor:pointer">Reload</button>`;
+  if (window.lucide) lucide.createIcons({ nodes: [div] });
+  div.querySelector('button').onclick = () => {
+    if (_swReloading) return;
+    _swReloading = true;
+    reg.waiting?.postMessage({ type: 'SKIP_WAITING' });
+  };
+  document.body.appendChild(div);
+}
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    reg.addEventListener('updatefound', () => {
+      const newWorker = reg.installing;
+      if (!newWorker) return;
+      newWorker.addEventListener('statechange', () => {
+        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+          // A previous SW already controls this page → this is an UPDATE, not the first install.
+          const loginScreen = document.getElementById('login-screen');
+          const atLogin = loginScreen && !loginScreen.classList.contains('hidden');
+          if (atLogin) {
+            // Nobody's mid-session — apply silently, no banner.
+            newWorker.postMessage({ type: 'SKIP_WAITING' });
+          } else {
+            renderSwUpdateBanner(reg);
+          }
+        }
+      });
+    });
+  }).catch(console.warn);
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (_swReloading) { location.reload(); return; }
+    // Controller changed without our banner click (e.g. silent login-screen apply) — reload is
+    // safe either way since the page has no unsaved session state at that point.
+    location.reload();
+  });
+}

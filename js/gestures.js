@@ -71,9 +71,35 @@
       : 'translate3d(-40px,0,0) scale(0.8)';
   }
 
+  // v13 Phase 64 — sole owner of the left-edge swipe gesture (the old
+  // app.js initSidebarSwipe open-tracker was removed to stop two listeners
+  // racing on the same gesture). Decision order at commit time:
+  //   (a) an overlay/sheet/sidebar is on top of the Overlay stack → dismiss it
+  //       (this also covers closing an already-open mobile sidebar, since
+  //       openSidebar() pushes a 'sidebar' entry onto the stack)
+  //   (b) otherwise, on a mobile-sidebar viewport with the sidebar closed and
+  //       we're at a root page → open the sidebar (this is the "open" affordance
+  //       the old handler provided)
+  //   (c) otherwise → history.back()
+  function isMobileSidebarViewport() {
+    return !!(window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
+  }
+  function sidebarIsOpen() {
+    const sidebar = document.getElementById('sidebar');
+    return !!(sidebar && sidebar.classList.contains('open'));
+  }
+  function isRootPage() {
+    // "Root" = the dashboard landing page; anywhere else, an edge swipe means "back".
+    return window.currentPage === 'dashboard';
+  }
   function doBack() {
-    if (window.Overlay && window.Overlay.isOpen()) window.Overlay.dismissTop();
-    else history.back();
+    if (window.Overlay && window.Overlay.isOpen()) {
+      window.Overlay.dismissTop();
+    } else if (isMobileSidebarViewport() && !sidebarIsOpen() && isRootPage()) {
+      if (typeof window.openSidebar === 'function') window.openSidebar();
+    } else {
+      history.back();
+    }
   }
 
   // ── Edge swipe-back ─────────────────────────────────────────────────────
