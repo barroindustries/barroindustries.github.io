@@ -8,7 +8,7 @@
 //    • HTML / API → Network-first, cache as offline fallback
 // ═══════════════════════════════════════════════════════
 
-const CACHE_VER   = 'bi-ops-v12.0.88';
+const CACHE_VER   = 'bi-ops-v12.0.89';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -29,6 +29,7 @@ const PRECACHE = [
   '/js/qrcode.js',
   '/js/statutory-tables.js',
   '/js/letterhead.js',
+  '/js/print-docs.js',
   '/js/bir.js',
   '/js/finance-ledger.js',
   '/js/drive.js',

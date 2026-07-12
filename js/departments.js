@@ -574,6 +574,7 @@ const TASK_STATUSES = [
   { value:'on-hold',      label:'On Hold',               badge:'badge-orange' },
   { value:'archived',     label:'Archived',              badge:'badge-gray'   },
 ];
+window.TASK_STATUSES = TASK_STATUSES; // v13: STATUS_META 'task' passthrough
 const EMP_STATUSES   = ['backlog','brainstorm','in-progress','submitted'];
 const DONE_STATUSES  = ['approved','archived'];
 const SCORE_STATUSES = ['approved','on-hold','archived'];
@@ -8901,11 +8902,7 @@ async function renderDrawingsDashboard(container, currentUser, currentRole){
 
 // Open a billing invoice in a printable window
 window.openBillingInvoice = function(p, inv) {
-  const html = buildBillingInvoiceHTML(p, inv);
-  const win = window.open('','_blank','width=900,height=700');
-  if (!win) { Notifs.showToast('Allow popups to view the invoice','error'); return; }
-  win.document.write(html);
-  win.document.close();
+  buildBillingInvoiceHTML(p, inv);
 };
 
 function buildBillingInvoiceHTML(p, inv) {
@@ -8926,14 +8923,8 @@ function buildBillingInvoiceHTML(p, inv) {
     footerNote: 'System-generated invoice · ' + ((window.BRAND && window.BRAND.name) || 'Barro Industries') + ' · ' + new Date().toLocaleString('en-PH')
   }) : null;
 
-  return `<!DOCTYPE html><html><head>
-<meta charset="UTF-8"/>
-<title>${docTitle} — ${escHtml(inv.no||'')}</title>
-<style>
-  * { box-sizing:border-box; margin:0; padding:0; }
-  body { font-family: Arial, sans-serif; font-size: 11px; color:#000; background:#f0f0f0; }
+  const pageCss = `
   .page { width:210mm; min-height:297mm; margin:0 auto; background:#fff; padding:14mm; }
-  table { width:100%; border-collapse:collapse; }
   td, th { border:1px solid #000; padding:5px 7px; vertical-align:middle; font-size:11px; }
   .header-top { display:flex; align-items:center; gap:12px; margin-bottom:8px; }
   .company-logo { width:64px; height:64px; object-fit:contain; border:2px solid #000; padding:2px; flex-shrink:0; }
@@ -8948,25 +8939,11 @@ function buildBillingInvoiceHTML(p, inv) {
   .muted-row td { background:#f5f5f5; }
   .due-row td { font-weight:900; font-size:15px; background:#ffeb3b; color:#000; }
   .notes-box { border:1px solid #000; border-top:none; padding:10px; font-size:10px; line-height:1.6; }
-  .export-bar { position:fixed; top:0; left:0; right:0; background:#1a237e; color:#fff; padding:10px 20px; display:flex; gap:10px; align-items:center; z-index:999; }
-  .export-bar button { background:#fff; color:#1a237e; border:none; padding:6px 16px; border-radius:6px; font-weight:700; font-size:12px; cursor:pointer; }
-  .export-bar button:hover { background:#e3f2fd; }
   @media print {
-    .export-bar { display:none !important; }
-    body { background:#fff; }
     .page { padding:10mm; }
   }
-${_lh ? _lh.printCSS : ''}
-</style>
-</head><body>
-<div class="export-bar">
-  <span style="font-weight:700">${emojiIcon('🧾',16)} ${docTitle} — ${escHtml(inv.no||'')}</span>
-  <button onclick="window.print()">${emojiIcon('🖨',16)} Save as PDF / Print</button>
-  <button onclick="downloadJPEG()">${emojiIcon('📷',16)} Save as JPEG</button>
-  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,0.15);color:#fff">${emojiIcon('✕',16)} Close</button>
-</div>
-<div style="height:48px"></div>
-<div class="page" id="invoice-page">
+${_lh ? _lh.printCSS : ''}`;
+  const bodyHtml = `
   ${_lh ? _lh.headerHTML : `
   <div class="header-top">
     <img src="icons/barro-industries.png" class="company-logo" onerror="this.style.display='none'" alt=""/>
@@ -9044,11 +9021,11 @@ ${_lh ? _lh.printCSS : ''}
         <div style="font-size:9px;color:#555">Received By / Date</div>
       </td>
     </tr>
-  </table>`}
-</div>
-<script>
+  </table>`}`;
+
+  const extraScript = `
 async function downloadJPEG() {
-  const btn = document.querySelector('.export-bar button:nth-child(3)');
+  const btn = document.querySelector('.bar button:nth-child(3)');
   if(btn) { btn.textContent = 'Generating…'; btn.disabled = true; }
   if (!window.html2canvas) {
     await new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';s.onload=res;s.onerror=rej;document.head.appendChild(s);});
@@ -9060,9 +9037,19 @@ async function downloadJPEG() {
   link.href = canvas.toDataURL('image/jpeg', 0.95);
   link.click();
   if(btn) { btn.textContent = '📷 Save as JPEG'; btn.disabled = false; }
-}
-<\/script>
-</body></html>`;
+}`;
+
+  window.openPrintableDoc({
+    title: `${docTitle} — ${inv.no||''}`,
+    pageId: 'invoice-page',
+    barLabel: `${emojiIcon('🧾',16)} ${docTitle} — ${escHtml(inv.no||'')}`,
+    extraButtons: `<button onclick="downloadJPEG()">${emojiIcon('📷',16)} Save as JPEG</button>`,
+    extraScript,
+    bodyHtml, pageCss,
+    accent: '#1a237e',
+    bgColor: '#f0f0f0',
+    winFeatures: 'width=900,height=700'
+  });
 }
 
 // ══════════════════════════════════════════════════
@@ -12107,30 +12094,16 @@ function openAECPrintSheet(rows, scopeLabel){
       <td class="c">${c.quoteSent ? `✔ ` + e(c.quoteSentDate || '') : '—'}</td>
       <td class="c">${e(c.followUpDate || '')}</td>
     </tr>`; }).join('');
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
-<title>AEC Partner Contact Sheet — ${e(todayStr)}</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:Arial,Helvetica,sans-serif;font-size:10px;color:#000;background:#e8e8e8}
+  const pageCss = `
   .page{width:297mm;min-height:210mm;margin:0 auto;background:#fff;padding:10mm 12mm}
-  table{width:100%;border-collapse:collapse;margin-top:8px}
-  th,td{border:1px solid #444;padding:4px 6px;font-size:9.5px;vertical-align:top}
+  table{margin-top:8px}
+  th,td{font-size:9.5px}
   th{background:#1E3A5F;color:#fff;font-size:8px;text-transform:uppercase;letter-spacing:.04em}
-  td.c{text-align:center}td.b{font-weight:700}
   .tchip{display:inline-block;width:14px;height:14px;line-height:14px;border-radius:50%;color:#fff;font-weight:800;font-size:9px;text-align:center}
-  .bar{position:fixed;top:0;left:0;right:0;background:#1E3A5F;color:#fff;padding:9px 18px;display:flex;gap:10px;align-items:center;z-index:99}
-  .bar button{background:#fff;color:#1E3A5F;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
 ${_lh ? _lh.printCSS : ''}
   @page{size:A4 landscape;margin:8mm}
-  @media print{ .bar,.barpad{display:none!important} body{background:#fff} .page{padding:0;width:auto;min-height:0} .tchip,th{-webkit-print-color-adjust:exact;print-color-adjust:exact} }
-</style></head><body>
-<div class="bar">
-  <span style="font-weight:700">${emojiIcon('📇',16)} AEC Partner Contact Sheet</span>
-  <button onclick="window.print()">${emojiIcon('🖨',16)} Print / Save as PDF</button>
-  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">${emojiIcon('✕',16)} Close</button>
-</div>
-<div class="barpad" style="height:46px"></div>
-<div class="page">
+  @media print{ .page{padding:0;width:auto;min-height:0} .tchip,th{-webkit-print-color-adjust:exact;print-color-adjust:exact} }`;
+  const bodyHtml = `
   ${_lh ? _lh.headerHTML : `<div style="border-bottom:3px solid #1E3A5F;padding-bottom:8px;margin-bottom:8px"><div style="font-size:20px;font-weight:900;color:#1E3A5F">BARRO INDUSTRIES</div><div style="font-size:10px;color:#555">AEC Partner Contact Sheet · ${e(todayStr)}</div></div>`}
   <table>
     <thead><tr>
@@ -12141,12 +12114,13 @@ ${_lh ? _lh.printCSS : ''}
     </tr></thead>
     <tbody>${body || `<tr><td colspan="11" class="c" style="padding:14px">No contacts match the current filters.</td></tr>`}</tbody>
   </table>
-  ${_lh ? _lh.footerHTML : ''}
-</div>
-</body></html>`;
-  const win = window.open('','_blank','width=1100,height=720');
-  if (!win){ Notifs.showToast('Allow pop-ups to open the printable sheet','error'); return; }
-  win.document.write(html); win.document.close();
+  ${_lh ? _lh.footerHTML : ''}`;
+  window.openPrintableDoc({
+    title: `AEC Partner Contact Sheet — ${todayStr}`,
+    barLabel: `${emojiIcon('📇',16)} AEC Partner Contact Sheet`,
+    bodyHtml, pageCss,
+    winFeatures: 'width=1100,height=720'
+  });
 }
 
 // ══════════════════════════════════════════════════
@@ -13144,6 +13118,7 @@ window.renderDocCollection = function(container, collection, title, currentUser,
   // ── Gov bidding detail / edit / move / delete ───────────────────────
   function openGovBidDetail(d) {
     const GOV_STATUSES = ['active','submitted','won','lost','cancelled','archived'];
+window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
     const body = canManageGov ? `
       <div class="form-group"><label>Title</label><input id="gb-title" value="${escHtml(d.title||d.name||'')}"/></div>
       <div class="form-group"><label>Description</label><textarea id="gb-desc" rows="3">${escHtml(d.description||'')}</textarea></div>
@@ -13380,36 +13355,20 @@ function printDeliveryReceipt(order) {
     </tr>`;
   let blanks = ''; for (let k = 1; k < 4; k++) blanks += `<tr class="blank"><td class="c">${k + 1}</td><td></td><td></td></tr>`;
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
-<title>Delivery Receipt — ${e(dr.no || '')}</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background:#e8e8e8}
+  const pageCss = `
   .page{width:210mm;min-height:297mm;margin:0 auto;background:#fff;padding:14mm}
   .parties{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
   .pbox{border:1px solid #999;border-radius:6px;padding:8px 11px}
   .pbox .l{font-size:8px;text-transform:uppercase;letter-spacing:.6px;color:#1E3A5F;font-weight:800;margin-bottom:3px}
   .pbox .v{font-size:12px;font-weight:700;min-height:15px}
-  table{width:100%;border-collapse:collapse;margin-bottom:10px}
-  th,td{border:1px solid #444;padding:5px 7px;font-size:11px;vertical-align:top}
+  table{margin-bottom:10px}
   th{background:#1E3A5F;color:#fff;font-size:9px;text-transform:uppercase;letter-spacing:.04em}
-  td.c{text-align:center}
-  tr.blank td{height:22px}
   .note{font-size:10px;color:#444;margin:4px 0 10px;line-height:1.5}
   .note b{color:#1E3A5F}
-  .bar{position:fixed;top:0;left:0;right:0;background:#1E3A5F;color:#fff;padding:9px 18px;display:flex;gap:10px;align-items:center;z-index:99}
-  .bar button{background:#fff;color:#1E3A5F;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
   @page{size:A4 portrait;margin:9mm}
-  @media print{ .bar,.barpad{display:none!important} body{background:#fff} .page{padding:0;width:auto;min-height:0} }
-${_lh ? _lh.printCSS : ''}
-</style></head><body>
-<div class="bar">
-  <span style="font-weight:700">${emojiIcon('🧾',16)} Delivery Receipt — ${e(dr.no || '')}</span>
-  <button onclick="window.print()">${emojiIcon('🖨',16)} Print / Save as PDF</button>
-  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">${emojiIcon('✕',16)} Close</button>
-</div>
-<div class="barpad" style="height:46px"></div>
-<div class="page">
+  @media print{ .page{padding:0;width:auto;min-height:0} }
+${_lh ? _lh.printCSS : ''}`;
+  const bodyHtml = `
   ${_lh ? _lh.headerHTML : `<div style="font-size:20px;font-weight:900">DELIVERY RECEIPT ${e(dr.no || '')}</div>`}
   <div class="parties">
     <div class="pbox">
@@ -13426,13 +13385,14 @@ ${_lh ? _lh.printCSS : ''}
     <tbody>${rows}${blanks}</tbody>
   </table>
   ${dr.notes ? `<div class="note"><b>Notes:</b> ${e(dr.notes)}</div>` : ''}
-  ${_lh ? _lh.footerHTML : ''}
-</div>
-</body></html>`;
+  ${_lh ? _lh.footerHTML : ''}`;
 
-  const win = window.open('', '_blank', 'width=900,height=720');
-  if (!win) { Notifs.showToast('Allow pop-ups to open the printable Delivery Receipt', 'error'); return; }
-  win.document.write(html); win.document.close();
+  window.openPrintableDoc({
+    title: `Delivery Receipt — ${dr.no || ''}`,
+    barLabel: `${emojiIcon('🧾',16)} Delivery Receipt — ${e(dr.no || '')}`,
+    bodyHtml, pageCss,
+    winFeatures: 'width=900,height=720'
+  });
 }
 
 // ═══════════════════════════════════════════════════
@@ -14626,11 +14586,7 @@ function openInventoryCountForm(items, draft, kindFilter){
   const pad = filled < 12 ? 12 - filled : 2;
   let blanks=''; for(let k=0;k<pad;k++) blanks += `<tr class="blank"><td class="c">${filled+k+1}</td><td></td><td></td><td></td><td></td><td></td><td></td></tr>`;
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
-<title>Inventory Count Form — ${e(h.formNo||'')}</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background:#e8e8e8}
+  const pageCss = `
   .page{width:297mm;min-height:210mm;margin:0 auto;background:#fff;padding:12mm}
   .htop{display:flex;align-items:center;gap:12px;border-bottom:3px solid #1a237e;padding-bottom:10px;margin-bottom:10px}
   .logo{width:58px;height:58px;object-fit:contain;flex-shrink:0}
@@ -14643,28 +14599,15 @@ function openInventoryCountForm(items, draft, kindFilter){
   .mbox{border:1px solid #999;border-radius:5px;padding:6px 9px}
   .mbox .l{font-size:8px;text-transform:uppercase;letter-spacing:.5px;color:#888;font-weight:700}
   .mbox .v{font-size:12px;font-weight:700;margin-top:2px;min-height:15px}
-  table{width:100%;border-collapse:collapse}
-  th,td{border:1px solid #444;padding:5px 7px;font-size:11px;vertical-align:top}
   th{background:#1a237e;color:#fff;font-size:9px;text-transform:uppercase;letter-spacing:.04em}
-  td.c{text-align:center}td.r{text-align:right}td.b{font-weight:700}
   td .sub{font-size:9px;color:#777}
-  tr.blank td{height:22px}
   .sign{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:34px}
   .sline{border-top:1px solid #000;padding-top:5px;text-align:center;font-size:10px;color:#444}
   .foot{margin-top:18px;border-top:1px solid #ddd;padding-top:8px;font-size:9px;color:#999;text-align:center}
-  .bar{position:fixed;top:0;left:0;right:0;background:#1a237e;color:#fff;padding:9px 18px;display:flex;gap:10px;align-items:center;z-index:99}
-  .bar button{background:#fff;color:#1a237e;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
   @page{size:A4 landscape;margin:8mm}
-  @media print{ .bar,.barpad{display:none!important} body{background:#fff} .page{padding:0;width:auto;min-height:0} }
-${_lh ? _lh.printCSS : ''}
-</style></head><body>
-<div class="bar">
-  <span style="font-weight:700">${emojiIcon('📋',16)} Inventory Count Form — ${e(h.formNo||'')}</span>
-  <button onclick="window.print()">${emojiIcon('🖨',16)} Print / Save as PDF</button>
-  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">${emojiIcon('✕',16)} Close</button>
-</div>
-<div class="barpad" style="height:46px"></div>
-<div class="page">
+  @media print{ .page{padding:0;width:auto;min-height:0} }
+${_lh ? _lh.printCSS : ''}`;
+  const bodyHtml = `
   ${_lh ? _lh.headerHTML : `
   <div class="htop">
     <img src="${location.origin + location.pathname.replace(/[^/]*$/,'') + 'icons/barro-industries.png'}" class="logo" onerror="this.style.display='none'" alt=""/>
@@ -14691,13 +14634,15 @@ ${_lh ? _lh.printCSS : ''}
     <div class="sline">Verified by${h.verifiedBy?` — ${e(h.verifiedBy)}`:''}</div>
     <div class="sline">Approved by</div>
   </div>
-  <div class="foot">Barro Industries Operating System · Generated ${new Date().toLocaleString('en-PH')} · Physical count supersedes system quantity upon approval.</div>`}
-</div>
-</body></html>`;
+  <div class="foot">Barro Industries Operating System · Generated ${new Date().toLocaleString('en-PH')} · Physical count supersedes system quantity upon approval.</div>`}`;
 
-  const win = window.open('','_blank','width=1000,height=720');
-  if(!win){ Notifs.showToast('Allow pop-ups to open the printable form','error'); return; }
-  win.document.write(html); win.document.close();
+  window.openPrintableDoc({
+    title: `Inventory Count Form — ${h.formNo||''}`,
+    barLabel: `${emojiIcon('📋',16)} Inventory Count Form — ${e(h.formNo||'')}`,
+    bodyHtml, pageCss,
+    accent: '#1a237e',
+    winFeatures: 'width=1000,height=720'
+  });
 }
 
 async function renderProdMaterials(el, currentRole) {
@@ -15684,11 +15629,7 @@ function printPurchaseOrder(p) {
   const filled = items.length;
   let blanks = ''; for (let k = filled; k < Math.max(filled + 1, 6); k++) blanks += `<tr class="blank"><td class="c">${k + 1}</td><td></td><td></td><td></td><td></td><td></td></tr>`;
 
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
-<title>Purchase Order — ${e(p.prNo || p.rfqNo || '')}</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background:#e8e8e8}
+  const pageCss = `
   .page{width:210mm;min-height:297mm;margin:0 auto;background:#fff;padding:14mm}
   .htop{display:flex;align-items:center;gap:12px;border-bottom:3px solid #1E3A5F;padding-bottom:10px;margin-bottom:12px}
   .logo{width:58px;height:58px;object-fit:contain;flex-shrink:0}
@@ -15703,11 +15644,8 @@ function printPurchaseOrder(p) {
   .pbox .l{font-size:8px;text-transform:uppercase;letter-spacing:.6px;color:#1E3A5F;font-weight:800;margin-bottom:3px}
   .pbox .v{font-size:12px;font-weight:700;min-height:15px}
   .pbox .s{font-size:10px;color:#555;font-weight:400;margin-top:2px;line-height:1.45}
-  table{width:100%;border-collapse:collapse;margin-bottom:10px}
-  th,td{border:1px solid #444;padding:5px 7px;font-size:11px;vertical-align:top}
+  table{margin-bottom:10px}
   th{background:#1E3A5F;color:#fff;font-size:9px;text-transform:uppercase;letter-spacing:.04em}
-  td.c{text-align:center}td.r{text-align:right}td.b{font-weight:700}
-  tr.blank td{height:22px}
   tfoot td{font-weight:700;background:#f0f4ff}
   .note{font-size:10px;color:#444;margin:4px 0 10px;line-height:1.5}
   .note b{color:#1E3A5F}
@@ -15718,24 +15656,10 @@ function printPurchaseOrder(p) {
   .sline{border-top:1px solid #000;padding-top:5px;text-align:center;font-size:10px;color:#444}
   .sline b{display:block;font-size:11px;color:#000}
   .foot{margin-top:18px;border-top:1px solid #ddd;padding-top:8px;font-size:9px;color:#999;text-align:center}
-  .bar{position:fixed;top:0;left:0;right:0;background:#1E3A5F;color:#fff;padding:9px 18px;display:flex;gap:10px;align-items:center;z-index:99}
-  .bar button{background:#fff;color:#1E3A5F;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
   @page{size:A4 portrait;margin:9mm}
-  @media print{ .bar,.barpad{display:none!important} body{background:#fff} .page{padding:0;width:auto;min-height:0} }
-  .wm{position:fixed;top:45%;left:0;right:0;text-align:center;transform:rotate(-24deg);
-      font-size:64px;font-weight:900;letter-spacing:6px;color:rgba(192,57,43,.13);
-      z-index:5;pointer-events:none}
-  @media print{.wm{color:rgba(192,57,43,.16)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-${_lh ? _lh.printCSS : ''}
-</style></head><body>
-<div class="bar">
-  <span style="font-weight:700">${emojiIcon('🛒',16)} Purchase Order — ${e(p.prNo || p.rfqNo || '')}</span>
-  <button onclick="window.print()">${emojiIcon('🖨',16)} Print / Save as PDF</button>
-  <button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">${emojiIcon('✕',16)} Close</button>
-</div>
-<div class="barpad" style="height:46px"></div>
-<div class="page">
-  ${isPending ? '<div class="wm">PENDING APPROVAL</div>' : ''}
+  @media print{ .page{padding:0;width:auto;min-height:0} }
+${_lh ? _lh.printCSS : ''}`;
+  const bodyHtml = `
   ${_lh ? _lh.headerHTML : `
   <div class="htop">
     <img src="${location.origin + location.pathname.replace(/[^/]*$/, '') + 'icons/barro-industries.png'}" class="logo" onerror="this.style.display='none'" alt=""/>
@@ -15780,13 +15704,15 @@ ${_lh ? _lh.printCSS : ''}
     <div class="sline"><b>${e(preparedBy)}</b>Prepared by — Purchasing</div>
     <div class="sline"><b>${e(approvedSig.name)}</b>Approved by — ${e(approvedSig.title)}</div>
   </div>
-  <div class="foot">Barro Industries Operating System · Generated ${new Date().toLocaleString('en-PH')}</div>`}
-</div>
-</body></html>`;
+  <div class="foot">Barro Industries Operating System · Generated ${new Date().toLocaleString('en-PH')}</div>`}`;
 
-  const win = window.open('', '_blank', 'width=900,height=720');
-  if (!win) { Notifs.showToast('Allow pop-ups to open the printable PO', 'error'); return; }
-  win.document.write(html); win.document.close();
+  window.openPrintableDoc({
+    title: `Purchase Order — ${p.prNo || p.rfqNo || ''}`,
+    barLabel: `${emojiIcon('🛒',16)} Purchase Order — ${e(p.prNo || p.rfqNo || '')}`,
+    bodyHtml, pageCss,
+    watermark: isPending ? 'PENDING APPROVAL' : null,
+    winFeatures: 'width=900,height=720'
+  });
 }
 
 // ── Printable Receiving Report (v12 WS30) — evidence trail for Finance ─────
@@ -15812,25 +15738,21 @@ function printReceivingReport(p) {
       <td class="c">${Number(it.qty || 0).toLocaleString('en-PH')}</td><td class="c">${e(it.unit || '')}</td>
       <td class="c">${unres.has(i) ? `${emojiIcon('⚠',16)} Unresolved — not in stock` : `${emojiIcon('✓',16)} Received into stock`}</td>
     </tr>`).join('');
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/><title>Receiving Report — ${e(p.prNo || '')}</title>
-<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;background:#e8e8e8}
-.page{width:210mm;min-height:297mm;margin:0 auto;background:#fff;padding:14mm}
-table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #444;padding:5px 7px;font-size:11px}
-th{background:#1E3A5F;color:#fff;font-size:9px;text-transform:uppercase}td.c{text-align:center}
-.bar{position:fixed;top:0;left:0;right:0;background:#1E3A5F;color:#fff;padding:9px 18px;display:flex;gap:10px;align-items:center;z-index:99}
-.bar button{background:#fff;color:#1E3A5F;border:none;padding:6px 15px;border-radius:6px;font-weight:700;font-size:12px;cursor:pointer}
-@page{size:A4 portrait;margin:9mm}@media print{.bar,.barpad{display:none!important}body{background:#fff}.page{padding:0;width:auto;min-height:0}}
-${_lh ? _lh.printCSS : ''}</style></head><body>
-<div class="bar"><span style="font-weight:700">${emojiIcon('📦',16)} Receiving Report — ${e(p.prNo || '')}</span>
-<button onclick="window.print()">${emojiIcon('🖨',16)} Print / Save as PDF</button>
-<button onclick="window.close()" style="margin-left:auto;background:rgba(255,255,255,.15);color:#fff">${emojiIcon('✕',16)} Close</button></div>
-<div class="barpad" style="height:46px"></div>
-<div class="page">${_lh ? _lh.headerHTML : ''}
+  const pageCss = `.page{width:210mm;min-height:297mm;margin:0 auto;background:#fff;padding:14mm}
+table{margin:12px 0}
+th{background:#1E3A5F;color:#fff;font-size:9px;text-transform:uppercase}
+@page{size:A4 portrait;margin:9mm}@media print{.page{padding:0;width:auto;min-height:0}}
+${_lh ? _lh.printCSS : ''}`;
+  const bodyHtml = `${_lh ? _lh.headerHTML : ''}
 <table><thead><tr><th style="width:32px">#</th><th>Item / Description</th><th style="width:60px">Qty</th><th style="width:64px">Unit</th><th style="width:170px">Stock Status</th></tr></thead>
 <tbody>${rows}</tbody></table>
 ${p.notes ? `<div style="font-size:10px;color:#444;margin-bottom:10px"><b>Notes:</b> ${e(p.notes)}</div>` : ''}
-${_lh ? _lh.footerHTML : ''}</div></body></html>`;
-  const win = window.open('', '_blank', 'width=900,height=720');
-  if (!win) { Notifs.showToast('Allow pop-ups to open the Receiving Report', 'error'); return; }
-  win.document.write(html); win.document.close();
+${_lh ? _lh.footerHTML : ''}`;
+
+  window.openPrintableDoc({
+    title: `Receiving Report — ${p.prNo || ''}`,
+    barLabel: `${emojiIcon('📦',16)} Receiving Report — ${e(p.prNo || '')}`,
+    bodyHtml, pageCss,
+    winFeatures: 'width=900,height=720'
+  });
 }
