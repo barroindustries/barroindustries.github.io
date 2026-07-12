@@ -18,6 +18,7 @@ jobs:
         working-directory: scripts
         env:
           FIREBASE_SERVICE_ACCOUNT:   ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GOOGLE_SERVICE_ACCOUNT:     ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
           DRIVE_FOLDER_ID:            ${{ secrets.DRIVE_FOLDER_ID }}
           FIREBASE_STORAGE_BUCKET:    ${{ secrets.FIREBASE_STORAGE_BUCKET }}
           GOOGLE_OAUTH_CLIENT_ID:     ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}

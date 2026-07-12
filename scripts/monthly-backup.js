@@ -14,7 +14,8 @@
  *           ├── attendance.csv
  *           ├── tasks.json
  *           ├── tasks.csv
- *           ├── task_messages.json
+ *           ├── tasks__comments.json     ← subcollection walker (see below)
+ *           ├── conversations__messages.json
  *           ├── cash_advances.json
  *           ├── cash_advances.csv
  *           ├── users.json
@@ -27,6 +28,10 @@
  *           ├── payroll_overrides.json
  *           ├── attendance_extensions.json
  *           ├── suggestions.json
+ *           ├── {root}__{subcollection}.json  ← ANY subcollection of an exported
+ *           │                                    root doc (comments, messages, …),
+ *           │                                    entries keyed "{docId}/{subDocId}"
+ *           │                                    (v13 Phase 2+3 — generic walker)
  *           └── _summary.txt
  *
  * Required GitHub Secrets (same as sync-to-drive):
@@ -121,7 +126,7 @@ const OVERRIDES = {
     csvFields: ['userId','date','loginTime','timeOut','fullTime','attendanceScore','note','editedBy'],
   },
   tasks: {
-    dateField: 'createdAt', includeSubcol: true,
+    dateField: 'createdAt',
     csvFields: ['id','title','status','priority','dept','assignedToNames','createdAt','dueDate','presidentScore'],
   },
   cash_advances: {
@@ -164,7 +169,10 @@ const OVERRIDES = {
 
 // Ephemeral / huge / per-user-subcollection roots we never snapshot to JSON.
 // (audit_log is intentionally NOT here — its off-site copy is the whole point.)
-const EXCLUDE = new Set(['presence', 'sessions', 'notifications']);
+// v13 Phase 2/3 cleanup: 'presence' and 'sessions' removed — neither is a real
+// Firestore root collection (phantom entries; presence lives on user docs,
+// there is no 'sessions' collection at all), so they never excluded anything.
+const EXCLUDE = new Set(['notifications']);
 
 // ── Fetch attendance subcollections: attendance/{uid}/records/{date} ────────
 // The root 'attendance' collection holds one doc per user (uid as doc ID).
@@ -193,10 +201,18 @@ async function fetchAttendanceSubcollection({ start, end }) {
 }
 
 // ── Fetch and filter a collection ──────────────────────────────────────────
+// Returns { docs, refs }: `docs` is the serialized export payload (unchanged
+// shape/behavior); `refs` is the matching array of DocumentReferences for the
+// SAME doc set, used by exportSubcollections() below to walk each doc's
+// subcollections (comments, messages, …) without a second, possibly-stale
+// query. For the attendance special case (already flattened into per-record
+// rows, not per-user docs) refs is empty — see exportSubcollections' doc
+// comment for why that's also how attendance/{uid}/records avoids double
+// export.
 async function fetchCollection(col, { start, end }) {
   // Attendance is a subcollection — handled separately
   if (col.type === 'subcollection') {
-    return fetchAttendanceSubcollection({ start, end });
+    return { docs: await fetchAttendanceSubcollection({ start, end }), refs: [] };
   }
 
   let snap;
@@ -216,21 +232,103 @@ async function fetchCollection(col, { start, end }) {
       .get();
   }
 
-  return snap.docs.map(d => serialize({ id: d.id, ...d.data() }));
+  return {
+    docs: snap.docs.map(d => serialize({ id: d.id, ...d.data() })),
+    refs: snap.docs.map(d => d.ref),
+  };
 }
 
-// ── Export task comments as a separate JSON ────────────────────────────────
-async function fetchTaskComments() {
-  const tasksSnap = await db.collection('tasks').get();
-  const nested = await Promise.all(
-    tasksSnap.docs.map(async taskDoc => {
-      const commentsSnap = await taskDoc.ref.collection('task-comments').get();
-      return commentsSnap.docs.map(c =>
-        serialize({ id: c.id, taskId: taskDoc.id, ...c.data() })
-      );
-    })
-  );
-  return nested.flat();
+// ── Generic subcollection walker (v13 Phase 2 + 3) ─────────────────────────
+// One implementation covers every subcollection of every already-exported
+// root doc — task/submission comment threads (C1) AND chat messages (C2) —
+// instead of a hand-registered exporter per feature that silently drifts
+// (the old fetchTaskComments() read a subcollection name, 'task-comments',
+// that never actually existed; real threads live at {parent}/{docId}/comments).
+//
+// Ephemeral subcollections we deliberately never archive:
+//   'typing'  — chat typing beacons (conversations/{id}/typing); TTL ~6s,
+//               rewritten every keystroke, zero restore value.
+//   'readers' — read-receipt docs (tasks/{id}/readers, conversations/{id}/readers);
+//               overwritten on every view, last-read timestamps aren't data
+//               worth restoring and would double every doc count for nothing.
+const SUBCOLLECTION_SKIP = new Set(['typing', 'readers']);
+
+// Names we already know about — used only to annotate the console/summary
+// output ("(new)" tag on anything unexpected) so a human notices drift.
+// NOT a filter: unrecognized subcollection names are still exported.
+const KNOWN_SUBCOLLECTIONS = ['comments', 'messages', 'records'];
+
+// Loud, not silent: per (root, subcollection) pair across the whole run.
+const SUBCOLLECTION_DOC_CAP = 50000;
+
+async function exportSubcollections(rootName, refs, folderId, stats, manifest, summaryLines) {
+  if (!refs.length) return;
+
+  const bySub     = new Map(); // subName -> array of exported records
+  const truncated = new Map(); // subName -> count of docs dropped by the cap
+
+  for (const ref of refs) {
+    let subs;
+    try {
+      subs = await ref.listCollections();
+    } catch (err) {
+      console.warn(`   ⚠️  ${rootName}/${ref.id}: could not list subcollections — ${err.message}`);
+      continue;
+    }
+    for (const sub of subs) {
+      if (SUBCOLLECTION_SKIP.has(sub.id)) continue;
+
+      let snap;
+      try {
+        snap = await sub.get();
+      } catch (err) {
+        console.warn(`   ⚠️  ${rootName}/${ref.id}/${sub.id}: fetch failed — ${err.message}`);
+        continue;
+      }
+
+      const arr  = bySub.get(sub.id) || [];
+      bySub.set(sub.id, arr);
+      const room = SUBCOLLECTION_DOC_CAP - arr.length;
+      if (room <= 0) {
+        truncated.set(sub.id, (truncated.get(sub.id) || 0) + snap.docs.length);
+        continue;
+      }
+      const keep = snap.docs.slice(0, room);
+      if (keep.length < snap.docs.length) {
+        truncated.set(sub.id, (truncated.get(sub.id) || 0) + (snap.docs.length - keep.length));
+      }
+      for (const d of keep) {
+        arr.push(serialize({ id: `${ref.id}/${d.id}`, ...d.data() }));
+      }
+    }
+  }
+
+  for (const [subName, records] of bySub.entries()) {
+    const filename = `${rootName}__${subName}`;
+    const tag = KNOWN_SUBCOLLECTIONS.includes(subName) ? '' : ' (new)';
+    console.log(`   + ${rootName}/*/${subName}${tag} — ${records.length} records`);
+    await uploadText(JSON.stringify(records, null, 2), `${filename}.json`, 'application/json', folderId);
+    stats.files++;
+    stats.exported += records.length;
+    // parentCollection/subcollection let restore-from-backup.js reconstruct
+    // the write path (parentCollection/{docId}/subcollection/{subDocId})
+    // without re-deriving it from the filename.
+    manifest.push({
+      collection: `${rootName}/*/${subName}`,
+      filename,
+      records: records.length,
+      parentCollection: rootName,
+      subcollection: subName,
+    });
+    summaryLines.push(`  ${filename}: ${records.length} records (subcollection of ${rootName})`);
+
+    const dropped = truncated.get(subName) || 0;
+    if (dropped > 0) {
+      const msg = `${filename}: TRUNCATED at ${SUBCOLLECTION_DOC_CAP} docs — ${dropped} more record(s) dropped this run`;
+      console.warn(`   🚨 ${msg}`);
+      summaryLines.push(`  ⚠️  ${msg}`);
+    }
+  }
 }
 
 // ── Upload a single export (JSON + optional CSV) ───────────────────────────
@@ -311,29 +409,18 @@ async function main() {
     const ov  = OVERRIDES[name] || {};
     const col = { name, filename: ov.filename || name, dateField: ov.dateField ?? null,
                   dateIsStr: ov.dateIsStr, csvFields: ov.csvFields,
-                  type: ov.type, includeSubcol: ov.includeSubcol };
+                  type: ov.type };
     try {
       console.log(`\n📋 ${name}`);
-      const docs = await fetchCollection(col, { start, end });
+      const { docs, refs } = await fetchCollection(col, { start, end });
       await exportCollection(col, docs, monthFolder, stats);
       stats.exported += docs.length;
       manifest.push({ collection: name, filename: col.filename, records: docs.length });
       summaryLines.push(`  ${col.filename}: ${docs.length} records`);
 
-      // Task comments as extra JSON under tasks
-      if (col.includeSubcol) {
-        console.log(`   + task-comments (subcollection)`);
-        const comments = await fetchTaskComments();
-        await uploadText(
-          JSON.stringify(comments, null, 2),
-          'task_messages.json',
-          'application/json',
-          monthFolder
-        );
-        stats.files++;
-        manifest.push({ collection: 'tasks/task-comments', filename: 'task_messages', records: comments.length });
-        summaryLines.push(`  task_messages: ${comments.length} messages`);
-      }
+      // Generic subcollection walker — comments/messages/etc. under this
+      // root's docs (v13 Phase 2+3). No-op when refs is empty (attendance).
+      await exportSubcollections(name, refs, monthFolder, stats, manifest, summaryLines);
     } catch (err) {
       console.error(`  ❌ ${name}: ${err.message}`);
       stats.errors++;

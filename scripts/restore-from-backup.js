@@ -65,6 +65,29 @@ async function download(fileId) {
   return typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
 }
 
+// v13 Phase 3/4 — subcollection restore. `docs` entries are keyed
+// "{parentDocId}/{subDocId}" (see monthly-backup.js exportSubcollections);
+// Firestore doc IDs never contain '/', so splitting on the first one is safe.
+async function restoreSubcollection(parentCollection, subcollection, docs) {
+  let batch = db.batch(), n = 0, written = 0;
+  for (const d of docs) {
+    const { id, ...rest } = d;
+    const slash = typeof id === 'string' ? id.indexOf('/') : -1;
+    if (slash === -1) {
+      console.warn(`   ⚠️  ${parentCollection}/*/${subcollection}: skipping malformed id "${id}" (expected "parentDocId/subDocId")`);
+      continue;
+    }
+    const parentId = id.slice(0, slash);
+    const subId    = id.slice(slash + 1);
+    const ref = db.collection(parentCollection).doc(parentId).collection(subcollection).doc(subId);
+    if (COMMIT) { batch.set(ref, revive(rest), { merge: true }); n++; }
+    written++;
+    if (n >= 400) { await batch.commit(); batch = db.batch(); n = 0; }
+  }
+  if (COMMIT && n) await batch.commit();
+  return written;
+}
+
 async function restoreCollection(name, docs) {
   // _counters: never blind-overwrite a sequence — bump to max(current, restored).
   if (name === '_counters') {
@@ -103,21 +126,42 @@ async function main() {
 
   const files = await listJson(monthFolder.id);
   const manifestFile = files.find(f => f.name === '_manifest.json');
-  let map; // filename(no .json) → collection
+  let entries; // filename(no .json) → manifest entry {collection, filename, records, parentCollection?, subcollection?}
   if (manifestFile) {
-    map = {};
-    for (const m of JSON.parse(await download(manifestFile.id))) map[m.filename] = m.collection;
+    entries = {};
+    for (const m of JSON.parse(await download(manifestFile.id))) entries[m.filename] = m;
   } else {
     console.warn(`   ⚠️  no _manifest.json (pre-manifest backup) — assuming filename === collection`);
-    map = null;
+    entries = null;
   }
 
   let total = 0, cols = 0;
   for (const f of files) {
-    if (f.name === '_manifest.json' || f.name === 'task_messages.json') continue; // subcollection: manual
+    if (f.name === '_manifest.json') continue;
     const basename = f.name.replace(/\.json$/, '');
-    const collection = map ? (map[basename] || basename) : basename;
-    if (collection.includes('/')) continue;         // subcollection entries — skip
+    const entry = entries ? entries[basename] : null;
+
+    // v13 Phase 3/4 — {root}__{sub}.json subcollection export, manifest-driven.
+    if (entry && entry.subcollection) {
+      if (ONLY && ONLY !== entry.parentCollection &&
+          ONLY !== `${entry.parentCollection}/${entry.subcollection}`) continue;
+      const docs = JSON.parse(await download(f.id));
+      console.log(`\n📄 ${entry.parentCollection}/*/${entry.subcollection}: ${docs.length} docs`);
+      const written = await restoreSubcollection(entry.parentCollection, entry.subcollection, docs);
+      total += written; cols++;
+      continue;
+    }
+
+    const collection = entry ? entry.collection : basename;
+    if (collection.includes('/')) {
+      // Legacy pre-migration comment export (e.g. old 'tasks/task-comments'
+      // manifest entries from before the generic subcollection walker) —
+      // format predates restoreSubcollection's docId/subDocId keying, so it
+      // isn't auto-restorable. Re-run monthly-backup.js to regenerate this
+      // month's export in the new {root}__{sub}.json form, or restore by hand.
+      console.log(`\n⏭️  ${collection} (legacy comment export format) — restore manually`);
+      continue;
+    }
     if (ONLY && collection !== ONLY) continue;
     if (collection === 'attendance') { console.log(`\n⏭️  attendance (subcollection) — restore manually`); continue; }
     const docs = JSON.parse(await download(f.id));
