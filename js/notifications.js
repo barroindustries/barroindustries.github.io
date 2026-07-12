@@ -286,6 +286,23 @@ window.Notifs = (() => {
     }
   }
 
+  // ── Dedup helpers (Phase 30 item 1) ────────────
+  // send() dedups via a per-recipient query (where dedupKey == ...) before add().
+  // That's fine for single-recipient sends, but doing a query-per-recipient for
+  // broadcast fan-out (dept/all/owner) would blow the batch-write efficiency the
+  // comments below already call out. Instead: derive a deterministic Firestore
+  // doc id from the dedupKey and use batch.set() (idempotent) instead of
+  // batch.set() with an auto-id — re-running the same broadcast the same day
+  // overwrites the same doc rather than creating a duplicate.
+  function _defaultDedupKey(notifData) {
+    const day = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0, 10);
+    return [notifData.type || 'notif', notifData.title || '', day].join('|');
+  }
+  function _dedupDocId(dedupKey) {
+    // Firestore doc ids can't contain '/'; keep it deterministic + safe.
+    return 'dedup_' + dedupKey.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 400);
+  }
+
   // ── Send to department ────────────────────────
   async function sendToDept(department, notifData, opts = {}) {
     const [snap1, snap2] = await Promise.all([
@@ -303,14 +320,18 @@ window.Notifs = (() => {
       }
       return;
     }
-    // Use batch writes — avoids per-user dedupKey read + stays under Firestore write limits
+    // Use batch writes — avoids per-user dedupKey read + stays under Firestore write limits.
+    // Idempotency comes from a deterministic doc id (derived from dedupKey) instead of a
+    // per-recipient exists-check query: set() on the same id is a no-op re-write, not a dup.
+    const dedupKey = notifData.dedupKey || _defaultDedupKey(notifData);
+    const docId = _dedupDocId(dedupKey);
     const docs = allDocs.slice();
     while (docs.length) {
       const chunk = docs.splice(0, 499);
       const batch = db.batch();
       chunk.forEach(doc => {
-        const ref = db.collection('notifications').doc(doc.id).collection('items').doc();
-        batch.set(ref, { ...notifData, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+        const ref = db.collection('notifications').doc(doc.id).collection('items').doc(docId);
+        batch.set(ref, { ...notifData, dedupKey, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
       });
       await batch.commit();
     }
@@ -319,13 +340,15 @@ window.Notifs = (() => {
   // ── Send to all users ────────────────────────
   async function sendToAll(notifData) {
     const snap = await db.collection('users').get();
+    const dedupKey = notifData.dedupKey || _defaultDedupKey(notifData);
+    const docId = _dedupDocId(dedupKey);
     const docs = snap.docs.slice();
     while (docs.length) {
       const chunk = docs.splice(0, 499);
       const batch = db.batch();
       chunk.forEach(doc => {
-        const ref = db.collection('notifications').doc(doc.id).collection('items').doc();
-        batch.set(ref, { ...notifData, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+        const ref = db.collection('notifications').doc(doc.id).collection('items').doc(docId);
+        batch.set(ref, { ...notifData, dedupKey, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
       });
       await batch.commit();
     }
@@ -339,10 +362,12 @@ window.Notifs = (() => {
     ]);
     const allDocs = [...presSnap.docs, ...ownerSnap.docs];
     if (!allDocs.length) return;
+    const dedupKey = notifData.dedupKey || _defaultDedupKey(notifData);
+    const docId = _dedupDocId(dedupKey);
     const batch = db.batch();
     allDocs.forEach(d => {
-      const ref = db.collection('notifications').doc(d.id).collection('items').doc();
-      batch.set(ref, { ...notifData, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      const ref = db.collection('notifications').doc(d.id).collection('items').doc(docId);
+      batch.set(ref, { ...notifData, dedupKey, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
     });
     await batch.commit();
   }
@@ -505,7 +530,7 @@ window.Notifs = (() => {
         messaging.onMessage(payload => {
           const d = payload.data || payload.notification || {};
           const { title, body } = d;
-          if (title) showToast(`${title}${body ? ': '+body : ''}`);
+          if (title) showToast(`${title}${body ? ': '+body : ''}`, 'info');
         });
       }
     } catch (err) {
@@ -517,7 +542,11 @@ window.Notifs = (() => {
   // WS42 Phase 10: pill = --surface + border + --sh-lg; the colored bit is now a
   // small 10px status dot, not the whole pill background (perf/legibility —
   // matches the Light/Dark/Astral token system instead of a hardcoded color block).
-  function showToast(message, type = 'info') {
+  function showToast(message, type) {
+    if (type === undefined) {
+      console.warn('[Notifs] showToast without a type — use Notifs.success/error/info', String(message).slice(0, 60));
+    }
+    type = type || 'info';
     const existing = document.getElementById('bi-toast');
     if (existing) existing.remove();
 
@@ -728,7 +757,12 @@ window.Notifs = (() => {
     });
   }
 
-  return { startListener, stopListener, send, sendToDept, sendToAll, sendToOwner, showToast, initPush, checkDeadlines, checkAttendanceReminder, checkLowStock, checkAECFollowups, initToggle, renderPage, markAllRead,
+  // ── Toast semantics (Phase 117) — typed convenience wrappers around showToast ──
+  function success(message) { showToast(message, 'success'); }
+  function error(message)   { showToast(message, 'error'); }
+  function info(message)    { showToast(message, 'info'); }
+
+  return { startListener, stopListener, send, sendToDept, sendToAll, sendToOwner, showToast, success, error, info, initPush, checkDeadlines, checkAttendanceReminder, checkLowStock, checkAECFollowups, initToggle, renderPage, markAllRead,
     requestPushPermission: (uid) => {
       const vapidKey = window.FCM_CONFIG?.VAPID_KEY;
       if (!vapidKey || vapidKey === 'YOUR_VAPID_KEY_HERE') { showToast('Push notifications not configured yet.','error'); return; }
