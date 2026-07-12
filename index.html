@@ -9,7 +9,7 @@
        style-src needs 'unsafe-inline' for the same reason (inline style="" attrs
        used throughout for dynamic layout). Origins are the exact CDN/Firebase/Google
        endpoints this app calls — see V13-PLAN.md Phase 30 for the full inventory. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://unpkg.com https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com https://*.cloudfunctions.net wss://*.firebaseio.com; frame-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'"/>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://www.gstatic.com https://unpkg.com https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.googleapis.com https://*.cloudfunctions.net; frame-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'"/>
   <!-- v12 WS42 Phase 25 — apply the persisted theme class BEFORE first paint so
        splash/login never flash the wrong light/dark look. Mirrors initTheme()'s
        migration mapping (js/app.js) exactly: office|pink|grey→light, midnight→dark,

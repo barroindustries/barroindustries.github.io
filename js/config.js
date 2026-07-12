@@ -848,6 +848,10 @@ window.ensureChart = function() {
   window._chartLoading = new Promise((res, rej) => {
     const s = document.createElement('script');
     s.src = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
+    // SRI (v13 Phase 30) — pin the exact pinned-version file's hash so a
+    // compromised/altered CDN response is refused instead of silently executed.
+    s.integrity = 'sha384-e6nUZLBkQ86NJ6TVVKAeSaK8jWa3NhkYWZFomE39AvDbQWeie9PlQqM3pmYW5d1g';
+    s.crossOrigin = 'anonymous';
     s.onload = () => res(); s.onerror = rej; document.head.appendChild(s);
   });
   return window._chartLoading;
