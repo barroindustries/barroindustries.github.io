@@ -18,15 +18,25 @@ exports.sendPushOnNotification = functions
     // must not spam users or push an oversized FCM payload. Coerce to strings,
     // clamp to sane lengths, and treat an empty title+body as malformed.
     const asStr = (v) => (v == null ? '' : String(v));
-    const title = asStr(raw.title).slice(0, 200);
-    const body  = asStr(raw.body).slice(0, 1000);
-    const type  = asStr(raw.type).slice(0, 64);
+    const title  = asStr(raw.title).slice(0, 200);
+    const body   = asStr(raw.body).slice(0, 1000);
+    const type   = asStr(raw.type).slice(0, 64);
+    const link   = asStr(raw.link).slice(0, 300);
+    const chatId = asStr(raw.chatId).slice(0, 200);
+    const taskId = asStr(raw.taskId).slice(0, 200);
 
     // Malformed doc (no real content) — nothing worth pushing.
     if (!title.trim() && !body.trim()) {
       console.warn('[FCM] Skipping malformed notification (empty title and body) for', uid);
       return null;
     }
+
+    // Collapse tag: bursts of the same "kind" of push should collapse into one
+    // OS notification instead of stacking N of them. Default is per-type
+    // ('deadline', 'low_stock', ...). Chat messages are the obvious exception —
+    // different conversations must stack separately, so tag by chatId when
+    // present. The SW (firebase-messaging-sw.js) uses data.tag verbatim.
+    const tag = chatId ? `chat-${chatId}` : (type.trim() || 'general');
 
     const userDoc = await admin.firestore().collection('users').doc(uid).get();
     if (!userDoc.exists) return null;
@@ -52,6 +62,14 @@ exports.sendPushOnNotification = functions
         type:    type.trim()  || 'general',
         notifId: itemId,               // unique per notification doc — SW dedupes on this
         uid:     uid,
+        // Everything the SW needs for click-through — data-only messages mean
+        // the SW owns display AND click handling, so the deep-link target and
+        // collapse tag both have to ride in `data` (no top-level `notification`
+        // block; see the comment above on why that must stay true).
+        link:    link,                 // in-app nav target, e.g. 'projects-lifecycle', 'dept:Sales' — same string js/notifications.js already writes on the doc
+        chatId:  chatId,               // present for chat message notifs — lets the SW/app open the right conversation
+        taskId:  taskId,               // present for task/deadline notifs
+        tag:     tag,                  // OS-level collapse key: per-type by default, per-conversation for chat
       },
       webpush: {
         headers: { Urgency: 'high' },

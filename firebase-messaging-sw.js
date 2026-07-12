@@ -48,35 +48,67 @@ messaging.onBackgroundMessage(payload => {
     setTimeout(() => _shownNotifIds.delete(notifId), 60000);
   }
 
-  // Stable tag (one per notification doc) → even if a duplicate slips past the
-  // in-memory guard, the OS collapses it instead of stacking a second copy.
-  const tag = notifId || ('bi-' + (data.type || 'general'));
+  // Collapse tag: the relay (functions/index.js sendPushOnNotification) now
+  // computes this server-side — per-type by default, per-conversation
+  // (`chat-${chatId}`) for chat messages, so a burst of chat notifications
+  // from different conversations stacks while messages in the SAME
+  // conversation collapse into one OS notification. Fall back to the old
+  // per-doc/per-type scheme if an older relay payload lacks `data.tag`.
+  const tag = data.tag || notifId || ('bi-' + (data.type || 'general'));
 
-  // Belt-and-suspenders: close any already-visible notification with this tag
-  // before showing, so a redelivery can never leave two on screen.
+  // No badge asset exists yet (icons/ only has full-color app icons, no
+  // small monochrome badge) — FOLLOW-UP: add icons/badge-72.png (a
+  // transparent-background monochrome glyph) for a proper Android status-bar
+  // badge. Using the 192 icon for both icon and badge in the meantime.
   self.registration.getNotifications({ tag }).then(existing => {
+    // Belt-and-suspenders: close any already-visible notification with this
+    // tag before showing, so a redelivery can never leave two on screen.
     existing.forEach(n => n.close());
     self.registration.showNotification(notifTitle, {
       body:     notifBody,
       icon:     '/icons/icon-192.png',
       badge:    '/icons/icon-192.png',
       tag:      tag,
-      renotify: false,
-      data:     data,
+      // renotify: true — a replaced notification (new message on a
+      // conversation/type that already had one showing) still alerts
+      // (sound/vibrate/heads-up) instead of silently updating in place.
+      renotify: true,
+      data:     { link: data.link || '', type: data.type || '', chatId: data.chatId || '', taskId: data.taskId || '', notifId },
       vibrate:  [200, 100, 200],
       actions:  [{ action: 'open', title: 'Open App' }]
     });
   });
 });
 
-// When user taps the notification, open/focus the app
+// When user taps the notification: close it, then try to focus an existing
+// app tab and hand it the deep-link target via postMessage — the app-side
+// listener (js/notifications.js) is a follow-up, see notes below. If no tab
+// is open, fall back to opening one. The app has no URL/hash router (all
+// in-app navigation goes through window.navigateTo(page) — see js/app.js),
+// so there is no real "#route" to open a fresh window at; we can only pass
+// the link to a tab that is alive to receive postMessage.
 self.addEventListener('notificationclick', event => {
+  const data = event.notification.data || {};
+  const link = data.link || '';
   event.notification.close();
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
       for (const client of windowClients) {
-        if ('focus' in client) return client.focus();
+        if ('focus' in client) {
+          client.focus();
+          // App-side follow-up (js/notifications.js, OWNED by another agent):
+          // listen for this and route via navigateTo()/Chat.openConversation()
+          // the same way _navigateFromNotif() already does for in-app clicks.
+          client.postMessage({ type: 'PUSH_NAV', link, notifType: data.type || '', chatId: data.chatId || '', taskId: data.taskId || '', notifId: data.notifId || '' });
+          return client;
+        }
       }
+      // No app tab open — open one at the root. There is no hash route to
+      // target (see comment above), so a cold-start deep link is a follow-up:
+      // js/notifications.js could stash {link,chatId,taskId} e.g. in
+      // sessionStorage keyed by notifId and consume it on first load, or the
+      // app could add a lightweight query-param router. Not done here since
+      // js/notifications.js is out of scope for this change.
       return clients.openWindow('/');
     })
   );
