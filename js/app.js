@@ -235,6 +235,126 @@ function renderBackupHealthBanner(problems) {
   document.body.appendChild(div);
 }
 
+// ── System Health drill-down page (Phase 90, president + finance) ───────
+// checkBackupHealth() above is the at-a-glance banner (daily_sync +
+// monthly_backup only). This page is the full drill-down across every
+// system_health/{jobId} heartbeat doc plus a 7-day error_log summary.
+const SYSTEM_HEALTH_JOBS = [
+  { id: 'daily_sync',                  label: 'Daily file sync',            cadence: 'daily',   staleMs: 36 * 3600 * 1000 },
+  { id: 'monthly_backup',              label: 'Monthly backup',             cadence: 'monthly', staleMs: 40 * 24 * 3600 * 1000 },
+  { id: 'monthly_backup_size_guard',   label: 'Monthly backup size guard',  cadence: 'monthly', staleMs: 40 * 24 * 3600 * 1000 },
+  { id: 'scheduledAttendanceReminder', label: 'Attendance reminder',        cadence: 'daily',   staleMs: 36 * 3600 * 1000 },
+  { id: 'scheduledDailyDigestChecks',  label: 'Daily digest checks',        cadence: 'daily',   staleMs: 36 * 3600 * 1000 },
+  { id: 'executeApprovalOnUpdate',     label: 'Approval execution trigger', cadence: 'daily',   staleMs: 36 * 3600 * 1000 },
+  { id: 'sendNotificationQuota',       label: 'Notification send quota',    cadence: 'daily',   staleMs: 36 * 3600 * 1000 },
+];
+
+async function renderSystemHealth() {
+  if (!isPresident() && currentRole !== 'finance') return;
+  const c = document.getElementById('page-content');
+  c.innerHTML = '<div class="loading-placeholder">Loading system health…</div>';
+
+  const [healthDocs, errorRows] = await Promise.all([
+    Promise.all(SYSTEM_HEALTH_JOBS.map(job =>
+      db.collection('system_health').doc(job.id).get().catch(() => null)
+    )),
+    (async () => {
+      try {
+        const since = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+        const snap = await db.collection('error_log')
+          .where('ts', '>=', since)
+          .orderBy('ts', 'desc')
+          .limit(200)
+          .get();
+        return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      } catch (_) {
+        return [];
+      }
+    })(),
+  ]);
+
+  const now = Date.now();
+  const jobs = SYSTEM_HEALTH_JOBS.map((job, i) => {
+    const snap = healthDocs[i];
+    const d = snap && snap.exists ? snap.data() : null;
+    const lastMs = d?.lastRunAt?.toDate?.()?.getTime?.() || 0;
+    const stale = !lastMs || (now - lastMs) > job.staleMs;
+    const errored = d?.lastStatus === 'error';
+    const status = !d ? 'unknown' : errored ? 'error' : stale ? 'stale' : 'ok';
+    return { ...job, data: d, lastMs, status, errors: d?.errors || 0 };
+  });
+
+  const badge = (status) => {
+    if (window.statusBadge2) return window.statusBadge2('systemHealth', status);
+    const cls = status === 'ok' ? 'badge-green' : status === 'stale' ? 'badge-orange' : status === 'error' ? 'badge-red' : 'badge-gray';
+    const label = { ok: 'Healthy', stale: 'Stale', error: 'Error', unknown: 'No data' }[status] || status;
+    return `<span class="badge ${cls}">${escHtml(label)}</span>`;
+  };
+
+  const fmtAbs = (ms) => ms ? window.fmtManila(new Date(ms)) : '—';
+  const fmtRel = (ms) => {
+    if (!ms) return 'never';
+    const diffMs = now - ms;
+    const mins = Math.round(diffMs / 60000);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 48) return `${hrs}h ago`;
+    const days = Math.round(hrs / 24);
+    return `${days}d ago`;
+  };
+
+  const errorCount7d = errorRows.length;
+  const recentErrors = errorRows.slice(0, 10);
+
+  c.innerHTML = `
+    <div class="page-header"><h2>${emojiIcon('📡',20)} System Health</h2>
+      <span class="badge ${jobs.some(j=>j.status==='error'||j.status==='stale') ? 'badge-red' : 'badge-green'}">
+        ${jobs.filter(j=>j.status==='error'||j.status==='stale').length} of ${jobs.length} need attention
+      </span>
+    </div>
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px">
+      Heartbeat status for scheduled jobs and functions. Daily/attendance/digest jobs are flagged stale after 36h without a report; the monthly backup and its size guard after 40 days.
+    </p>
+    <div class="card"><div class="card-body" style="padding:0">
+      <div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Job</th><th>Cadence</th><th>Status</th><th>Last run (Manila)</th><th>Errors</th></tr></thead>
+        <tbody>
+          ${jobs.map(j => `
+            <tr>
+              <td>${escHtml(j.label)}</td>
+              <td style="font-size:12px;color:var(--text-muted)">${escHtml(j.cadence)}</td>
+              <td>${badge(j.status)}</td>
+              <td style="font-size:12px" title="${escHtml(fmtAbs(j.lastMs))}">${escHtml(fmtRel(j.lastMs))}${j.lastMs ? ` <span style="color:var(--text-muted)">(${escHtml(fmtAbs(j.lastMs))})</span>` : ''}</td>
+              <td style="font-size:12px">${j.errors ? `<span style="color:var(--danger,#b91c1c)">${j.errors}${j.data?.label ? ' — ' + escHtml(j.data.label) : ''}</span>` : '—'}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>
+    </div></div>
+
+    <h3 style="margin:20px 0 8px;font-size:15px">Error log (last 7 days)</h3>
+    <div class="card"><div class="card-body">
+      ${!errorRows.length
+        ? window.renderEmptyState({ icon: '✅', title: 'No errors logged', hint: 'error_log has been clean for the last 7 days.' })
+        : `
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px">${errorCount7d} error${errorCount7d===1?'':'s'} in the last 7 days. Showing the 10 most recent.</p>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>When</th><th>Page</th><th>Message</th><th>Version</th></tr></thead>
+          <tbody>
+            ${recentErrors.map(e => `
+              <tr>
+                <td style="white-space:nowrap;font-size:12px">${escHtml(e.ts?.toDate ? window.fmtManila(e.ts.toDate()) : '—')}</td>
+                <td style="font-size:12px">${escHtml(e.page || '—')}</td>
+                <td style="font-size:11px;color:var(--text-muted);max-width:340px;word-break:break-word">${escHtml(e.message || '—')}</td>
+                <td style="font-size:11px;color:var(--text-muted)">${escHtml(e.version || '—')}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table></div>`}
+    </div></div>
+    <p style="font-size:11px;color:var(--text-muted);margin-top:10px">Cloud Function errors (executeApprovalOnUpdate, sendNotificationQuota) beyond their own heartbeat entry require a manual check in the <a href="https://console.firebase.google.com/" target="_blank" rel="noopener">Firebase console</a> logs.</p>
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [c] });
+}
+
 // ── Custom-claims token refresh ───────────────────
 // Cloud Storage Security Rules gate sensitive folders (Finance/payslips,
 // receipts, department uploads) on request.auth.token.role / .departments,
@@ -1015,6 +1135,7 @@ function getSidebarItems() {
     if (isPresident()) {
       items.push({ icon:'package',       label:'Product Database', page:'product-database', section:true, sectionLabel:'Catalog' });
       items.push({ icon:'scroll-text',   label:'Audit Log',        page:'audit-log',       section:true, sectionLabel:'Security' });
+      items.push({ icon:'activity',      label:'System Health',    page:'system-health'                                          });
     }
     // (Leave, SOPs, Help moved into the profile drawer's "More" section)
   } else if (partner && isGenericPartner()) {
@@ -1068,6 +1189,7 @@ function getSidebarItems() {
     if ((currentDepts||[]).includes('Production')) items.push({ icon:'boxes', label:'Inventory', page:'inventory' });
     if ((currentDepts||[]).some(d=>['Sales','Production','Finance'].includes(d)) || currentRole==='finance') items.push({ icon:'trending-up', label:'Projects', page:'projects-lifecycle' });
     if ((currentDepts||[]).includes('Finance') || currentRole==='finance') items.push({ icon:'receipt', label:'Sales Orders', page:'sales-orders' });
+    if (currentRole === 'finance') items.push({ icon:'activity', label:'System Health', page:'system-health' });
     // (Leave, SOPs, Help moved into the profile drawer's "More" section)
   }
   return items;
@@ -2206,6 +2328,7 @@ function navigateTo(page, opts) {
     case 'inventory':        window.renderInventory?.(); break;
     case 'product-database': isPresident() ? renderProductDatabase() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Access Denied</h4></div>`, window.lucide && lucide.createIcons({ nodes: [c] })); break;
     case 'audit-log':        isPresident() ? renderAuditLog() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Access Denied</h4></div>`, window.lucide && lucide.createIcons({ nodes: [c] })); break;
+    case 'system-health':    (isPresident() || currentRole==='finance') ? renderSystemHealth() : (c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Access Denied</h4></div>`, window.lucide && lucide.createIcons({ nodes: [c] })); break;
     case 'search':           window.renderGlobalSearch?.(); break;
     case 'sales-orders':     window.renderSalesOrders?.(); break;
     case 'projects-lifecycle': window.renderProjectLifecycle?.(); break;
