@@ -431,6 +431,7 @@ async function reportHealth(db, job, stats, label) {
       job, lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
       lastStatus: stats.errors > 0 ? 'error' : 'ok',
       errors: stats.errors || 0, notified: stats.notified || 0,
+      ...(stats.govBidsFlagged !== undefined ? { govBidsFlagged: stats.govBidsFlagged } : {}),
       label: label || ''
     }, { merge: true });
   } catch (e) { console.warn(`[${job}] system_health write failed:`, e.message); }
@@ -618,14 +619,86 @@ exports.scheduledDailyDigestChecks = functions
       console.error('[scheduledDailyDigestChecks] AEC follow-ups failed:', e.message);
     }
 
+    // ── 4. Gov bidding deadlines (Phase 76) — 7/3/1 days out, dept-targeted ──
+    // Schema note: gov_philgeps/gov_active_bids/gov_archive docs today only
+    // carry {title, description, status, fileUrl, addedBy, createdAt} — no
+    // closing/deadline date field exists yet (that lands with the Phase 76
+    // PhilGEPS parse-paste helper, which is NOT part of this change). This
+    // check reads `closingDate` (falling back to `deadline`) defensively so
+    // it activates automatically once that field starts being written, and
+    // is a safe no-op (0 notified) until then. Accepts either a Firestore
+    // Timestamp or a 'YYYY-MM-DD' string, per the instruction to handle both.
+    // Bids "in play" live in gov_philgeps (intake/tracked) and gov_active_bids
+    // (actively pursued) — gov_archive is closed/done and excluded.
+    let govDeadlineCount = 0;
+    try {
+      const GOV_COLLECTIONS = ['gov_philgeps', 'gov_active_bids'];
+      const TERMINAL_GOV_STATUSES = ['won', 'lost', 'cancelled', 'archived'];
+      const DAY_MS = 24 * 60 * 60 * 1000;
+
+      const toDateStr = (v) => {
+        if (!v) return null;
+        if (typeof v === 'string') return /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null;
+        if (typeof v.toDate === 'function') return manilaDate(v.toDate());
+        if (v instanceof Date) return manilaDate(v);
+        return null;
+      };
+      const daysBetween = (fromStr, toStr) => {
+        const from = new Date(fromStr + 'T00:00:00Z').getTime();
+        const to = new Date(toStr + 'T00:00:00Z').getTime();
+        return Math.round((to - from) / DAY_MS);
+      };
+
+      const [usersSnap, ...govSnaps] = await Promise.all([
+        db.collection('users').get(),
+        ...GOV_COLLECTIONS.map(c => db.collection(c).get())
+      ]);
+
+      const recipients = usersSnap.docs.filter(doc => {
+        const u = doc.data();
+        if (u.status === 'inactive' || u.pendingPasswordSetup) return false;
+        const depts = Array.isArray(u.departments) ? u.departments
+          : (typeof u.department === 'string' && u.department ? [u.department] : []);
+        return ['president', 'manager'].includes(u.role) || depts.includes('Government Biddings');
+      });
+
+      GOV_COLLECTIONS.forEach((colName, ci) => {
+        govSnaps[ci].docs.forEach(d => {
+          const bid = { id: d.id, ...d.data() };
+          if (TERMINAL_GOV_STATUSES.includes(bid.status)) return;
+          const closingStr = toDateStr(bid.closingDate) || toDateStr(bid.deadline);
+          if (!closingStr) return;
+          const daysOut = daysBetween(todayStr, closingStr);
+          if (![7, 3, 1].includes(daysOut)) return;
+          const bidName = bid.title || bid.name || 'Untitled bid';
+          govDeadlineCount++;
+          recipients.forEach(doc => {
+            toNotify.push({
+              ref: db.collection('notifications').doc(doc.id).collection('items').doc(),
+              notifData: {
+                title: `🏛️ Bid closing in ${daysOut} day${daysOut > 1 ? 's' : ''}`,
+                body: `"${bidName}" closes ${closingStr}. Open Government Biddings to review.`,
+                icon: '🏛️', type: 'gov_deadline', link: 'dept:Government Biddings',
+                dedupKey: `gov-deadline-${bid.id}-${daysOut}-${todayStr}`
+              }
+            });
+          });
+        });
+      });
+    } catch (e) {
+      stats.errors++;
+      console.error('[scheduledDailyDigestChecks] gov bidding deadlines failed:', e.message);
+    }
+
     try {
       stats.notified = await commitInChunks(db, toNotify, null);
-      console.log(`[scheduledDailyDigestChecks] ${stats.notified} notification(s) queued for ${todayStr}`);
+      console.log(`[scheduledDailyDigestChecks] ${stats.notified} notification(s) queued for ${todayStr} (gov bids flagged: ${govDeadlineCount})`);
     } catch (err) {
       stats.errors++;
       console.error('[scheduledDailyDigestChecks] commit failed:', err);
     }
-    await reportHealth(db, 'scheduledDailyDigestChecks', stats, 'Server-side deadline/low-stock/AEC digest');
+    stats.govBidsFlagged = govDeadlineCount;
+    await reportHealth(db, 'scheduledDailyDigestChecks', stats, 'Server-side deadline/low-stock/AEC/gov-bid digest');
     return null;
   });
 
