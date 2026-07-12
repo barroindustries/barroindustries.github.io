@@ -87,7 +87,21 @@ window.Notifs = (() => {
   async function markAllRead() {
     if (!_lastUid || _lastItems.length === 0) return;
     const unread = _lastItems.filter(n => !n.read);
-    await Promise.all(unread.map(n => markRead(_lastUid, n.id)));
+    if (!unread.length) return;
+    // Phase 66 item 3: batch writes chunked at 499 (Firestore's 500-op batch
+    // cap) instead of one .update() per doc — matters once "See all"
+    // pagination (item 1) means _lastItems/mark-all can exceed the old
+    // 30-item panel window.
+    const docs = unread.slice();
+    while (docs.length) {
+      const chunk = docs.splice(0, 499);
+      const batch = db.batch();
+      chunk.forEach(n => {
+        const ref = db.collection('notifications').doc(_lastUid).collection('items').doc(n.id);
+        batch.update(ref, { read: true });
+      });
+      await batch.commit();
+    }
   }
 
   function _navigateFromNotif(type, taskId, chatId) {
@@ -117,10 +131,125 @@ window.Notifs = (() => {
     }
   }
 
+  // ── Phase 186: per-type icon + accent registry ─────────────────
+  // Enumerated by grepping every `Notifs.send*(...,{ type: '...' })` call
+  // site across js/*.js (task/finance/payroll/chat/quote/inventory/AEC/HR/
+  // drawing/leave families). Exact hits get a tuned icon+accent; anything
+  // outside this list falls through _typeMeta()'s prefix rules below so a
+  // future new `type` string still renders sensibly instead of a bare bell.
+  const NOTIF_TYPE_META = {
+    // Tasks
+    task_assigned:{icon:'✅',accent:'#3B5BDB'}, task_status:{icon:'📌',accent:'#3B5BDB'},
+    task_message:{icon:'💬',accent:'#1C7ED6'}, task_comment:{icon:'💬',accent:'#1C7ED6'},
+    task_created:{icon:'✨',accent:'#3B5BDB'}, task_designated:{icon:'📋',accent:'#3B5BDB'},
+    task_modified:{icon:'✏️',accent:'#3B5BDB'}, task_standing:{icon:'📋',accent:'#3B5BDB'},
+    task_followup:{icon:'🔔',accent:'#3B5BDB'}, task_followup_done:{icon:'✅',accent:'#3B5BDB'},
+    task_submitted:{icon:'📤',accent:'#3B5BDB'},
+    deadline:{icon:'⏰',accent:'#E8590C'},
+    // Chat
+    chat_message:{icon:'💬',accent:'#0866FF'},
+    // Cash advance / payroll
+    cash_advance:{icon:'💸',accent:'#F76707'}, ca_deduct:{icon:'💸',accent:'#F76707'},
+    ca_deduct_remind:{icon:'💸',accent:'#F76707'}, ca_deduct_req:{icon:'💸',accent:'#F76707'},
+    ca_approved:{icon:'💸',accent:'#F76707'},
+    payroll:{icon:'💰',accent:'#2F9E44'}, payroll_reminder:{icon:'💰',accent:'#2F9E44'},
+    payroll_delete_request:{icon:'🗑️',accent:'#D92D20'}, payroll_delete_approved:{icon:'🗑️',accent:'#2F9E44'},
+    payroll_delete_denied:{icon:'🗑️',accent:'#D92D20'},
+    raise_request:{icon:'📈',accent:'#2F9E44'}, raise_applied:{icon:'📈',accent:'#2F9E44'},
+    kpi_grade:{icon:'🎯',accent:'#E64980'}, self_assessment:{icon:'📝',accent:'#E64980'},
+    payslip:{icon:'🧾',accent:'#2F9E44'},
+    // Finance
+    finance_entry:{icon:'🧾',accent:'#2F9E44'}, expense_new:{icon:'🧾',accent:'#2F9E44'},
+    finance_delete_request:{icon:'🗑️',accent:'#D92D20'}, finance_delete_approved:{icon:'🗑️',accent:'#2F9E44'},
+    finance_delete_denied:{icon:'🗑️',accent:'#D92D20'},
+    // Attendance
+    attendance:{icon:'📅',accent:'#0CA678'}, att_morning_remind:{icon:'🌅',accent:'#0CA678'},
+    att_extension:{icon:'⏱️',accent:'#0CA678'}, att_extension_approved:{icon:'✅',accent:'#0CA678'},
+    att_extension_denied:{icon:'❌',accent:'#D92D20'},
+    leave:{icon:'🌴',accent:'#0CA678'},
+    // Posts / memos / company
+    post:{icon:'📣',accent:'#D6336C'}, post_approval:{icon:'📣',accent:'#D6336C'}, memo:{icon:'📄',accent:'#7048E8'},
+    award:{icon:'🏆',accent:'#F59F00'}, nudge:{icon:'👋',accent:'#7048E8'},
+    // Approvals / deletes (generic)
+    approval_result:{icon:'✅',accent:'#2F9E44'}, delete_approved:{icon:'🗑️',accent:'#2F9E44'},
+    delete_denied:{icon:'🗑️',accent:'#D92D20'}, client_delete_request:{icon:'🗑️',accent:'#D92D20'},
+    quote_delete_request:{icon:'🗑️',accent:'#D92D20'},
+    // Sales / quotes / partners
+    quote_filed:{icon:'📄',accent:'#1C7ED6'}, quote_returned:{icon:'↩️',accent:'#E8590C'},
+    quote_review_request:{icon:'👀',accent:'#1C7ED6'}, quote_approved:{icon:'✅',accent:'#2F9E44'},
+    quote_rejected:{icon:'❌',accent:'#D92D20'}, bs_quote:{icon:'📄',accent:'#1C7ED6'},
+    sales_order:{icon:'🛒',accent:'#1C7ED6'}, lead_handoff:{icon:'🤝',accent:'#1C7ED6'},
+    partner_deal:{icon:'🤝',accent:'#1C7ED6'},
+    // Purchasing / inventory
+    po_approval:{icon:'🧮',accent:'#F76707'}, po_approval_result:{icon:'🧮',accent:'#2F9E44'},
+    purchase_submitted:{icon:'🧮',accent:'#F76707'}, low_stock:{icon:'📦',accent:'#E8590C'},
+    // AEC / Sales pipeline
+    aec_followup:{icon:'📇',accent:'#1C7ED6'},
+    // Drawings / design
+    drawing_for_review:{icon:'📐',accent:'#7048E8'}, drawing_assigned:{icon:'📐',accent:'#7048E8'},
+    drawing_approved:{icon:'✅',accent:'#7048E8'}, drawing_released:{icon:'📐',accent:'#7048E8'},
+    // Projects
+    project_link:{icon:'🔗',accent:'#1C7ED6'}, project_paid:{icon:'💰',accent:'#2F9E44'},
+    project_stage:{icon:'📊',accent:'#1C7ED6'}, project_team:{icon:'👥',accent:'#1C7ED6'},
+    // Submissions / suggestions
+    submission_new:{icon:'📥',accent:'#1C7ED6'}, submission_reviewed:{icon:'✅',accent:'#2F9E44'},
+    suggestion:{icon:'💡',accent:'#F59F00'},
+    // System / general
+    system:{icon:'⚙️',accent:'var(--text-muted)'}, general:{icon:'🔔',accent:'var(--primary)'},
+  };
+  // Prefix fallback so an unenumerated/legacy `type` (or a future one) still
+  // gets a sensible family icon instead of a bare bell.
+  function _typeMeta(type) {
+    if (type && NOTIF_TYPE_META[type]) return NOTIF_TYPE_META[type];
+    const t = type || '';
+    if (t.startsWith('task'))     return {icon:'✅',accent:'#3B5BDB'};
+    if (t.startsWith('att'))      return {icon:'📅',accent:'#0CA678'};
+    if (t.startsWith('ca_') || t === 'cash_advance') return {icon:'💸',accent:'#F76707'};
+    if (t.startsWith('payroll'))  return {icon:'💰',accent:'#2F9E44'};
+    if (t.startsWith('finance'))  return {icon:'🧾',accent:'#2F9E44'};
+    if (t.startsWith('quote'))    return {icon:'📄',accent:'#1C7ED6'};
+    if (t.startsWith('drawing'))  return {icon:'📐',accent:'#7048E8'};
+    if (t.startsWith('project'))  return {icon:'📊',accent:'#1C7ED6'};
+    if (t.startsWith('po_') || t.startsWith('purchase')) return {icon:'🧮',accent:'#F76707'};
+    if (t.startsWith('delete'))   return {icon:'🗑️',accent:'#D92D20'};
+    if (t.startsWith('submission')) return {icon:'📥',accent:'#1C7ED6'};
+    return NOTIF_TYPE_META.general;
+  }
+
+  // ── Phase 186: Manila day grouping ──────────────────────────────
+  // Reimplemented locally (mirrors chat.js's _manilaDay pattern) rather than
+  // sharing code across files — small enough to duplicate, keeps this file
+  // self-contained per the task boundary.
+  function _manilaDayLabel(ts) {
+    if (!ts) return '';
+    const date = ts.toDate ? ts.toDate() : new Date(ts);
+    const day = window.bizDate ? window.bizDate(date) : date.toISOString().slice(0,10);
+    const today = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
+    const yesterday = window.bizDate ? window.bizDate(new Date(Date.now() - 24*60*60*1000)) : '';
+    if (day === today) return 'Today';
+    if (day === yesterday) return 'Yesterday';
+    try {
+      return date.toLocaleDateString('en-PH', { month:'short', day:'numeric', year: (day.slice(0,4) !== today.slice(0,4)) ? 'numeric' : undefined, timeZone:'Asia/Manila' });
+    } catch (_) { return day; }
+  }
+
+  function _groupByDay(items) {
+    const groups = [];
+    let cur = null;
+    items.forEach(n => {
+      const label = _manilaDayLabel(n.createdAt);
+      if (!cur || cur.label !== label) { cur = { label, items: [] }; groups.push(cur); }
+      cur.items.push(n);
+    });
+    return groups;
+  }
+
   function _renderIntoList(list, items, uid) {
     if (!list) return;
     if (items.length === 0) {
-      list.innerHTML = `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('🔔',44)}</div><p>No notifications</p></div>`;
+      list.innerHTML = window.renderEmptyState
+        ? window.renderEmptyState({ icon:'🎉', title:"You're all caught up", hint:'New notifications will show up here.' })
+        : `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('🎉',44)}</div><p>You're all caught up</p></div>`;
       _updatePanelHint(0, 0);
       return;
     }
@@ -136,33 +265,32 @@ window.Notifs = (() => {
     // twice. Strip a leading emoji from the title (the emoji column shows it),
     // and fall back to that emoji as the icon when none was set.
     const LEAD_EMOJI = /^[\p{Extended_Pictographic}️‍♀♂]+\s*/u;
-    // v12 WS42 Phase 23 — notification inbox icon column becomes a colored
-    // icon-tile keyed off the notification `type` (falls back to a neutral tile
-    // for unrecognized/legacy types instead of a bare emoji glyph).
-    const NOTIF_TYPE_COLOR = {
-      task_assigned:'#3B5BDB', task_status:'#3B5BDB', task_message:'#1C7ED6', task_comment:'#1C7ED6',
-      chat_message:'#0866FF', cash_advance:'#F76707', ca_approved:'#F76707',
-      att_extension_approved:'#0CA678', att_extension_denied:'#D92D20', attendance:'#0CA678',
-      post:'#D6336C', post_approval:'#D6336C', memo:'#7048E8', approval_result:'#2F9E44',
-      payroll:'#2F9E44', kpi_grade:'#E64980', self_assessment:'#E64980', drawing_for_review:'#7048E8'
-    };
-    list.innerHTML = items.map(n => {
+
+    // Group by Manila calendar day (Today / Yesterday / date) — cheap enough
+    // to do for both the panel dropdown and the full page (items.length is
+    // capped at the 30-item live window or one page of the paginated list).
+    const groups = _groupByDay(items);
+    const rowHtml = n => {
       const nav = isNavigable(n);
-      const hasActions = !n.read || nav;
       const rawTitle = n.title || '';
       const lead = (rawTitle.match(LEAD_EMOJI) || [''])[0].trim();
       const titleText = rawTitle.replace(LEAD_EMOJI, '').trim() || rawTitle;
-      const icon = n.icon || lead || 'bell';
-      const tileIcon = window.LUCIDE_EMOJI_MAP[icon] || (/^[a-z0-9-]+$/.test(icon) ? icon : 'bell');
-      const tileColor = NOTIF_TYPE_COLOR[n.type] || 'var(--primary)';
+      const meta = _typeMeta(n.type);
+      const icon = n.icon || lead || meta.icon;
+      const tileIcon = window.LUCIDE_EMOJI_MAP[icon] || (/^[a-z0-9-]+$/.test(icon) ? icon : (window.LUCIDE_EMOJI_MAP[meta.icon] || 'bell'));
+      const tileColor = meta.accent || 'var(--primary)';
+      const absTime = window.fmtManila ? window.fmtManila(n.createdAt) : '';
+      // v13 Phase 66: unread rows get a small accent dot + heavier title weight,
+      // inlined (not a styles.css class) per this file's existing toast precedent.
+      const unreadDot = !n.read ? `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${tileColor};margin-right:6px;flex-shrink:0;vertical-align:middle"></span>` : '';
       return `
       <div class="notif-item ${n.read ? 'read' : 'unread'}" data-id="${escHtml(n.id)}" data-type="${escHtml(n.type||'')}" data-task-id="${escHtml(n.taskId||'')}" data-chat-id="${escHtml(n.chatId||'')}">
         <div class="notif-item-main">
           <div class="notif-item-emoji">${window.iconTile(tileIcon, tileColor, window.lightenHex(tileColor,18), 32)}</div>
           <div class="notif-item-text">
-            <div class="notif-item-title">${escHtml(titleText)}</div>
+            <div class="notif-item-title" style="${n.read ? '' : 'font-weight:700'}">${unreadDot}${escHtml(titleText)}</div>
             <div class="notif-item-body">${escHtml(n.body || '')}</div>
-            <div class="notif-item-time">${timeAgo(n.createdAt)}</div>
+            <div class="notif-item-time" title="${escHtml(absTime)}">${timeAgo(n.createdAt)}</div>
           </div>
         </div>
         <div class="notif-item-actions">
@@ -181,7 +309,15 @@ window.Notifs = (() => {
           </button>` : ''}
         </div>
       </div>`;
-    }).join('');
+    };
+    const caughtUpBanner = unreadCount === 0
+      ? `<div class="notif-caughtup" style="text-align:center;padding:8px 12px;font-size:12px;color:var(--success,#2F9E44);font-weight:600">${emojiIcon('🎉',14)} All caught up</div>`
+      : '';
+    list.innerHTML = caughtUpBanner + groups.map(g => `
+      <div class="notif-day-group">
+        <div class="notif-day-header" style="padding:8px 12px 4px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.03em">${escHtml(g.label)}</div>
+        ${g.items.map(rowHtml).join('')}
+      </div>`).join('');
     if (window.lucide) lucide.createIcons({ nodes: [list] });
 
     // Mark-as-read buttons
@@ -568,6 +704,18 @@ window.Notifs = (() => {
           if (title) showToast(`${title}${body ? ': '+body : ''}`, 'info');
         });
       }
+      // Push-click deep-link: the background SW (firebase-messaging-sw.js)
+      // focuses this tab and postMessages PUSH_NAV; route it through the same
+      // in-app navigation the panel uses. Bound once.
+      if (!window._fcmNavBound && navigator.serviceWorker) {
+        window._fcmNavBound = true;
+        navigator.serviceWorker.addEventListener('message', ev => {
+          const m = ev.data || {};
+          if (m.type !== 'PUSH_NAV') return;
+          try { _navigateFromNotif(m.notifType, m.taskId, m.chatId); }
+          catch (e) { if (m.link && typeof navigateTo === 'function') navigateTo(m.link); }
+        });
+      }
     } catch (err) {
       console.warn('[FCM] Push registration failed:', err);
     }
@@ -790,6 +938,32 @@ window.Notifs = (() => {
       closePanel();
       if (typeof navigateTo === 'function') navigateTo('notifications');
     });
+
+    // Phase 186 item 4: settings surface. The real per-type reminder toggles
+    // already live in the profile drawer (js/app.js openProfileDrawer, the
+    // NOTIFICATIONS section) — not rebuilt here. Just surface a gear
+    // affordance in the panel footer that opens that existing drawer, since
+    // it was otherwise buried behind profile → scroll. index.html/styles.css
+    // are out of scope for this file, so the button is created and inserted
+    // here rather than hand-added to the static markup.
+    const footer = document.querySelector('#notif-panel .notif-footer');
+    if (footer && !document.getElementById('notif-settings-gear-btn')) {
+      const gear = document.createElement('button');
+      gear.type = 'button';
+      gear.id = 'notif-settings-gear-btn';
+      gear.title = 'Notification settings';
+      gear.setAttribute('aria-label', 'Notification settings');
+      gear.style.cssText = 'position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;line-height:0';
+      gear.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+      footer.style.position = 'relative';
+      footer.appendChild(gear);
+      gear.addEventListener('click', e => {
+        e.stopPropagation();
+        closePanel();
+        if (typeof window.openProfileDrawer === 'function') window.openProfileDrawer();
+        else if (typeof navigateTo === 'function') navigateTo('my-profile');
+      });
+    }
   }
 
   // ── Toast semantics (Phase 117) — typed convenience wrappers around showToast ──
