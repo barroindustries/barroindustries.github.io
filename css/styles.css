@@ -1459,6 +1459,9 @@ body.sidebar-open { overflow: hidden; }
 body.sidebar-open .main-content { pointer-events: none; user-select: none; }
 /* Hide top nav strip when sidebar is open — sidebar is the nav */
 body.sidebar-open .top-nav-strip { display: none !important; }
+/* Sidebar covers only the left column — hide the bottom nav so it doesn't peek
+   on the right while the sidebar is open. */
+body.sidebar-open .bottom-nav { display: none !important; }
 
 /* .bottom-nav base rule three-way merged into iOS-layer copy below (styles.css ~4050) */
 /* Shrunk state — triggered by JS scroll listener */
@@ -4135,7 +4138,13 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   /* Header clears the notch; composer already pads for the home indicator via
      .messenger-input-row's own safe-area-bottom padding. */
   body.chat-fullscreen #chat-thread-panel .ms-thread-header {
-    padding-top: calc(10px + env(safe-area-inset-top, 0px)) !important;
+    /* The base rule fixes height:56px; with box-sizing:border-box a large
+       padding-top would overflow upward and clip the title/Back/Leave under
+       the notch. Grow the header instead: min-height carries the inset. */
+    height: auto !important;
+    min-height: calc(56px + env(safe-area-inset-top, 0px)) !important;
+    padding-top: calc(8px + env(safe-area-inset-top, 0px)) !important;
+    padding-bottom: 8px !important;
   }
 }
 
@@ -4810,15 +4819,23 @@ html.theme-astral .subtab-btn.active {
     inset 0 -1px 0 rgba(0,0,0,0.10);
 }
 
-/* ── Drawer — full-screen on mobile (iOS sheet) ── */
+/* ── Drawer — full-screen slide-up on mobile ──
+   Decisively overrides the 639px bottom-sheet block above (both media queries
+   match on a phone): the sheet's capped max-height left a gap at the bottom
+   where the bottom nav peeked through, and its flat header padding clipped the
+   title under the notch. Make it a true full-screen panel instead. */
 @media (max-width: 768px) {
   .drawer {
-    top: 0;
-    border-left: none;
-    border-radius: 0;
-    width: 100%;
-    z-index: var(--z-drawer-2); /* above sidebar overlay (190) */
+    top: 0; bottom: 0; left: 0; right: 0;
+    width: 100%; height: auto; max-height: none;
+    border-left: none; border-radius: 0;
+    transform: translateY(100%);
+    z-index: var(--z-drawer-2); /* above sidebar overlay + bottom nav */
   }
+  .drawer.open { transform: translateY(0); }
+  .drawer::before { display: none; } /* no drag handle on a full-screen panel */
+  .drawer-header { padding-top: calc(14px + env(safe-area-inset-top, 0px)); }
+  .drawer-body { padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
 }
 
 /* ── Sidebar — full height on mobile, starts at top ── */
@@ -4859,7 +4876,9 @@ html.theme-astral .subtab-btn.active {
 @media (max-width: 768px) {
   .main-content {
     padding: 16px;
-    padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px));
+    /* Clear the fixed bottom nav (its height already includes the safe-area
+       inset) plus breathing room, so the last cards never hide under it. */
+    padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 28px);
   }
   .kpi-row { gap: 10px; }
 }
@@ -5478,8 +5497,13 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
 ══════════════════════════════════════════ */
 @media (max-width: 640px) {
 
-  /* 1 — SPACING RHYTHM: page padding, card/section vertical gap */
-  .main-content { padding: var(--space-4); }
+  /* 1 — SPACING RHYTHM: page padding, card/section vertical gap.
+     Keep the bottom clear of the fixed bottom nav (must not be reset by this
+     shorthand — it's the last .main-content rule in source order). */
+  .main-content {
+    padding: var(--space-4);
+    padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 28px);
+  }
   .card, .kpi-row { margin-bottom: var(--space-5); }
   .item-list { gap: var(--space-3); }
 
