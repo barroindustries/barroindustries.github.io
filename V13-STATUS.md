@@ -1,7 +1,7 @@
 # V13 Program Status — as of 2026-07-12 (waves 1–17)
 
 Legend: ✅ shipped+live · 🟨 partial (noted) · 🧭 needs-Neil · 🏗 planned-not-built (see V13-PLAN.md for full instructions)
-Production: **v12.0.116** (~97 phases materially done), rules/storage/functions all deployed, CI green, zero boot errors.
+Production: **v12.0.123** (~103 phases materially done), rules/storage/functions all deployed, CI green, zero boot errors.
 
 ## Part E — system phases 1–100
 | Phases | Status |
@@ -21,7 +21,7 @@ Production: **v12.0.116** (~97 phases materially done), rules/storage/functions 
 | 51, 56, 57, 58 | ✅ CSS: dead-code, print layer, motion, z-scale. 52–55 (tokens/@layer/astral split) 🏗 |
 | 59–68 | ✅ except 60 (secretary two-tier UI = 🧭 D9), 61 (SOP panels only on Approvals; per-dept rollout 🏗) |
 | 69–72 | 🧭 leave policy/statutory verification/production-pay rulings |
-| 73–78 | 🏗 feature buildouts (HR depth, quote→job-cost fn, inventory, PhilGEPS, CRM timeline, field ops) |
+| 73–78 | ✅ 74 (quote→job_cost fn deployed), 76a (gov reminders); 73/75/77/78 🏗 |
 | 79–83 | 🧭 accountant-gated (13th-month fix buildable but D6 entity/TIN pending; COA/BS/CF/BIR finalization) |
 | 84–86 | ✅ 84 journals backstop, 86 analytics bounding; 85 finance_rollup 🏗 |
 | 87–91 | ✅ 87 read-sweep, 89 backup-v2, 90 health panel; 88 cache-v2 + 91 device-baseline 🏗 |
@@ -37,9 +37,9 @@ Production: **v12.0.116** (~97 phases materially done), rules/storage/functions 
 | 121–122, 129a | ✅ ui-states kit + adoptions + icon dev-check |
 | 123–128, 130 | ✅ 123 buttons, 124 forms, 127 audit, 128 skeletons; 125/126/130 🏗 |
 | 131, 138 | ✅ touch targets, rem scale. 132–137, 139–140 🏗/🧭 (action bar D-U1, nav labels D-U2, orientation D-U3, device sweeps) |
-| 141, 143, 145, 149a | ✅ ultrawide cap, hover, Keymap, selection. 142, 144, 146–148, 150 🏗 |
+| 141–149 | ✅ ultrawide cap, density(part), hover, focus-trap(125/144), Keymap, charts(148), print(147), selection; 142/146/150 🏗 |
 | 151–180 (screen passes) | 🟨 172a QB phone pass done; the rest need logged-in role/device QA — run as dedicated sessions with the Stage-U5 checklist |
-| 181–190 | 🏗 (a11y/reliability depth) |
+| 181–190 | 🟨 189 (reduced-motion) done, 125 focus-trap done; 181–188,190 🏗 |
 | 191–200 | 🧭 verification matrices + sign-off (require devices, roles, Neil) |
 
 ## THE PUNCH-LIST (only you can do these)
