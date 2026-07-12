@@ -81,7 +81,7 @@ window.birUnverifiedBanner = function (year) {
 window.birOrButtonHTML = function (fieldId, seriesKey) {
   seriesKey = seriesKey || 'or';
   if (!(window.BIRCONFIG && window.BIRCONFIG.series && window.BIRCONFIG.series[seriesKey])) return '';
-  return ` <button type="button" class="btn-secondary btn-sm bir-or-btn" data-field="${escHtml(fieldId)}" data-series="${escHtml(seriesKey)}" style="margin-top:4px" title="Mint the next OR number from the registered ATP series">⚙ Next OR #</button>`;
+  return ` <button type="button" class="btn-secondary btn-sm bir-or-btn" data-field="${escHtml(fieldId)}" data-series="${escHtml(seriesKey)}" style="margin-top:4px" title="Mint the next OR number from the registered ATP series">${window.emojiIcon('⚙',14)} Next OR #</button>`;
 };
 window.wireBirOrButtons = function (scope) {
   (scope || document).querySelectorAll('.bir-or-btn').forEach(btn => {
@@ -123,8 +123,8 @@ window.nextSerialInRange = async function (seriesKey) {          // 'or' | 'si'
 window.birToolbarHTML = function (opts) {
   opts = opts || {};
   return `<div class="no-print" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-    <button class="btn-primary btn-sm" onclick="window.print()">🖨 Print</button>
-    ${opts.csvId ? `<button class="btn-secondary btn-sm" id="${opts.csvId}">⬇ CSV</button>` : ''}
+    <button class="btn-primary btn-sm" onclick="window.print()">${window.emojiIcon('🖨',14)} Print</button>
+    ${opts.csvId ? `<button class="btn-secondary btn-sm" id="${opts.csvId}">${window.emojiIcon('⬇',14)} CSV</button>` : ''}
     ${opts.extraButtons || ''}
   </div>`;
 };
@@ -160,12 +160,13 @@ window.renderBIRTab = async function (container, currentUser, currentRole) {
   ];
   container.innerHTML = `
     <div style="margin-bottom:10px">
-      <h3 style="margin:0 0 4px">🧾 BIR Suite</h3>
+      <h3 style="margin:0 0 4px">${window.emojiIcon('🧾',20)} BIR Suite</h3>
       <div style="font-size:11px;color:var(--text-muted)">Books of account, statutory worksheets &amp; the Financial Statement — figures for your accountant to transcribe into eBIRForms/eFPS. These are WORKSHEETS, not official filings.</div>
     </div>
     <div id="bir-doc-picker">${window.chipTabs(docs, activeDoc)}</div>
     <div id="bir-doc-area" style="margin-top:12px"><div class="loading-placeholder">Loading…</div></div>
   `;
+  if (window.lucide) lucide.createIcons({ nodes: [container] });
   const renderBirDoc = (key) => {
     window._birActiveDoc = key;
     const area = document.getElementById('bir-doc-area');
@@ -248,6 +249,7 @@ window.birRenderGJ = async function (bodyEl, pParsed) {
     <tfoot><tr class="bir-total-row"><td colspan="3">TOTAL</td><td class="num">₱${fmt(totDebit)}</td><td class="num">₱${fmt(totCredit)}</td></tr></tfoot></table>`;
   const printHTML = window.birBuildPrintHTML({ docTitle: 'GENERAL JOURNAL', dateLabel: pParsed.label, bodyHTML: table });
   bodyEl.innerHTML = window.birToolbarHTML({ csvId: 'bir-gj-csv' }) + printHTML;
+  if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
   document.getElementById('bir-gj-csv')?.addEventListener('click', () => window.exportCSV('general-journal-' + pParsed.key, rows, [
     { key: 'date', label: 'Date' }, { key: 'particulars', label: 'Particulars' }, { key: 'ref', label: 'Ref' },
     { key: 'debit', label: 'Debit' }, { key: 'credit', label: 'Credit' }, { key: 'legacy', label: 'Legacy?' }
@@ -298,10 +300,11 @@ window.birRenderGL = async function (bodyEl, pParsed) {
       <tbody>${rowsHTML}</tbody>
       <tfoot><tr class="bir-total-row"><td colspan="3">Section Total</td><td class="num">₱${fmt(secDebit)}</td><td class="num">₱${fmt(secCredit)}</td><td class="num">₱${fmt(bal)}</td></tr></tfoot></table>`;
   }).join('');
-  const body = sectionsHTML || '<div class="empty-state"><div class="empty-icon">📒</div><h4>No ledger entries this period</h4></div>';
+  const body = sectionsHTML || `<div class="empty-state"><div class="empty-icon">${window.emojiIcon('📒',44)}</div><h4>No ledger entries this period</h4></div>`;
   const grand = `<div class="bir-sec-h">GRAND TOTAL</div><table class="bir-t"><tbody><tr class="bir-total-row"><td>All accounts</td><td class="num">₱${fmt(grandDebit)}</td><td class="num">₱${fmt(grandCredit)}</td></tr></tbody></table>`;
   const printHTML = window.birBuildPrintHTML({ docTitle: 'GENERAL LEDGER', dateLabel: pParsed.label, bodyHTML: body + grand });
   bodyEl.innerHTML = window.birToolbarHTML({ csvId: 'bir-gl-csv' }) + printHTML;
+  if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
   document.getElementById('bir-gl-csv')?.addEventListener('click', () => window.exportCSV('general-ledger-' + pParsed.key, csvRows, [
     { key: 'account', label: 'Account' }, { key: 'kind', label: 'Kind' }, { key: 'date', label: 'Date' }, { key: 'particulars', label: 'Particulars' },
     { key: 'ref', label: 'Ref' }, { key: 'debit', label: 'Debit' }, { key: 'credit', label: 'Credit' }, { key: 'balance', label: 'Balance' }
@@ -343,6 +346,7 @@ window.birRenderCRB = async function (bodyEl, pParsed) {
     <tfoot><tr class="bir-total-row"><td colspan="3">TOTAL</td><td class="num">₱${fmt(totCash)}</td><td class="num">₱${fmt(totRev)}</td><td class="num">₱${fmt(totSundry)}</td><td class="num">₱${fmt(totVat)}</td></tr></tfoot></table>`;
   const printHTML = window.birBuildPrintHTML({ docTitle: 'CASH RECEIPTS BOOK', dateLabel: pParsed.label, bodyHTML: table });
   bodyEl.innerHTML = window.birToolbarHTML({ csvId: 'bir-crb-csv' }) + printHTML;
+  if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
   document.getElementById('bir-crb-csv')?.addEventListener('click', () => window.exportCSV('cash-receipts-book-' + pParsed.key, csvRows, [
     { key: 'date', label: 'Date' }, { key: 'ref', label: 'OR/Ref' }, { key: 'customer', label: 'Customer' }, { key: 'cash', label: 'Cash/Dr Total' },
     { key: 'revenue', label: 'Cr Sales Revenue' }, { key: 'sundryAcct', label: 'Cr Sundry Acct' }, { key: 'sundryAmt', label: 'Cr Sundry Amount' },
@@ -379,6 +383,7 @@ window.birRenderCDB = async function (bodyEl, pParsed) {
     <tfoot><tr class="bir-total-row"><td colspan="3">TOTAL</td><td class="num">₱${fmt(totCash)}</td><td class="num">₱${fmt(totMat)}</td><td class="num">₱${fmt(totLab)}</td><td class="num">₱${fmt(totAP)}</td><td class="num">₱${fmt(totSundry)}</td><td class="num">₱${fmt(totVat)}</td><td></td></tr></tfoot></table>`;
   const printHTML = window.birBuildPrintHTML({ docTitle: 'CASH DISBURSEMENTS BOOK', dateLabel: pParsed.label, bodyHTML: table });
   bodyEl.innerHTML = window.birToolbarHTML({ csvId: 'bir-cdb-csv' }) + printHTML;
+  if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
   document.getElementById('bir-cdb-csv')?.addEventListener('click', () => window.exportCSV('cash-disbursements-book-' + pParsed.key, csvRows, [
     { key: 'date', label: 'Date' }, { key: 'ref', label: 'Voucher/Ref' }, { key: 'payee', label: 'Payee' }, { key: 'cash', label: 'Cr Cash Total' },
     { key: 'material', label: 'Dr Materials' }, { key: 'labor', label: 'Dr Labor' }, { key: 'ap', label: 'Dr AP' }, { key: 'sundryAcct', label: 'Dr Sundry Acct' },
@@ -391,8 +396,9 @@ window.birRenderCDB = async function (bodyEl, pParsed) {
 // ═══════════════════════════════════════════════════════════
 window.renderBirVat = async function (container, currentUser, currentRole) {
   if (!window.BIRCONFIG || !window.BIRCONFIG.vatRegistered) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">🧾</div><h4>2551Q — not yet built</h4>
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${window.emojiIcon('🧾',44)}</div><h4>2551Q — not yet built</h4>
       <p style="color:var(--text-muted)">BIRCONFIG.vatRegistered is set to false — this entity is flagged Non-VAT / percentage-tax. The 2550 VAT worksheet does not apply and 2551Q has not been built. ‼️ Confirm the entity's actual VAT registration status with the accountant.</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [container] });
     return;
   }
   const state = window._birVatState || (window._birVatState = { period: 'month', priorCreditable: 0 });
@@ -410,7 +416,8 @@ window.birRenderVatBody = async function (bodyEl, state, currentUser) {
   if (!bodyEl) return;
   const pParsed = window.Period.parse(state.period);
   if (pParsed.type !== 'month' && pParsed.type !== 'quarter') {
-    bodyEl.innerHTML = `<div class="empty-state"><div class="empty-icon">📅</div><h4>Pick a month or a quarter</h4><p style="color:var(--text-muted)">2550M files monthly, 2550Q quarterly — use the Custom picker above to pick a specific month or quarter (not All Time / Year).</p></div>`;
+    bodyEl.innerHTML = `<div class="empty-state"><div class="empty-icon">${window.emojiIcon('📅',44)}</div><h4>Pick a month or a quarter</h4><p style="color:var(--text-muted)">2550M files monthly, 2550Q quarterly — use the Custom picker above to pick a specific month or quarter (not All Time / Year).</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
     return;
   }
   bodyEl.innerHTML = '<div class="loading-placeholder">Building…</div>';
@@ -437,8 +444,9 @@ window.birRenderVatBody = async function (bodyEl, state, currentUser) {
   const canSave = !!(window.isFinancePriv && window.isFinancePriv());
   bodyEl.innerHTML = window.birToolbarHTML({
     csvId: 'bir-vat-csv',
-    extraButtons: canSave ? '<button class="btn-secondary btn-sm" id="bir-vat-save-tax">💾 Save to Taxes tab</button>' : ''
+    extraButtons: canSave ? `<button class="btn-secondary btn-sm" id="bir-vat-save-tax">${window.emojiIcon('💾',14)} Save to Taxes tab</button>` : ''
   }) + printHTML;
+  if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
   document.getElementById('bir-vat-prior')?.addEventListener('input', (ev) => {
     state.priorCreditable = parseFloat(ev.target.value) || 0;
     window.birRenderVatBody(bodyEl, state, currentUser);
@@ -480,7 +488,8 @@ window.birRenderWhtBody = async function (bodyEl, state) {
   if (!bodyEl) return;
   const pParsed = window.Period.parse(state.period);
   if (pParsed.type !== 'month') {
-    bodyEl.innerHTML = `<div class="empty-state"><div class="empty-icon">📅</div><h4>Pick a month</h4><p style="color:var(--text-muted)">1601-C is a monthly remittance worksheet — use the Custom picker above to pick a specific month.</p></div>`;
+    bodyEl.innerHTML = `<div class="empty-state"><div class="empty-icon">${window.emojiIcon('📅',44)}</div><h4>Pick a month</h4><p style="color:var(--text-muted)">1601-C is a monthly remittance worksheet — use the Custom picker above to pick a specific month.</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
     return;
   }
   bodyEl.innerHTML = '<div class="loading-placeholder">Building…</div>';
@@ -543,6 +552,7 @@ window.birRenderWhtBody = async function (bodyEl, state) {
   });
   const csvRows = rows.map(r => ({ employee: r.name, weekly: r.weekly, gross: r.gross, sssEE: r.sssEE, sssER: r.sssER, phEE: r.phEE, phER: r.phER, hdmfEE: r.hdmfEE, hdmfER: r.hdmfER, tax: r.tax }));
   bodyEl.innerHTML = window.birToolbarHTML({ csvId: 'bir-wht-csv' }) + printHTML;
+  if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
   document.getElementById('bir-wht-csv')?.addEventListener('click', () => window.exportCSV('1601c-' + month, csvRows, [
     { key: 'employee', label: 'Employee' }, { key: 'weekly', label: 'Weekly?' }, { key: 'gross', label: 'Gross' },
     { key: 'sssEE', label: 'SSS EE' }, { key: 'sssER', label: 'SSS ER' }, { key: 'phEE', label: 'PhilHealth EE' }, { key: 'phER', label: 'PhilHealth ER' },
@@ -570,7 +580,8 @@ window.birRenderAlphaBody = async function (bodyEl, state, currentUser) {
   if (!bodyEl) return;
   const pParsed = window.Period.parse(state.period);
   if (pParsed.type !== 'year') {
-    bodyEl.innerHTML = `<div class="empty-state"><div class="empty-icon">📅</div><h4>Pick a year</h4><p style="color:var(--text-muted)">Alphalist / 2316 are annual documents — use the Custom picker above and pick a year (leave month/quarter blank).</p></div>`;
+    bodyEl.innerHTML = `<div class="empty-state"><div class="empty-icon">${window.emojiIcon('📅',44)}</div><h4>Pick a year</h4><p style="color:var(--text-muted)">Alphalist / 2316 are annual documents — use the Custom picker above and pick a year (leave month/quarter blank).</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
     return;
   }
   bodyEl.innerHTML = '<div class="loading-placeholder">Building…</div>';
@@ -625,12 +636,13 @@ window.birRenderAlphaBody = async function (bodyEl, state, currentUser) {
     <td class="num">₱${fmt(r.thirteenthAccrual)}</td>
     <td class="num">₱${fmt(r.taxableComp)}</td>
     <td class="num">₱${fmt(r.tax)}</td>
-    <td class="no-print"><button class="btn-secondary btn-sm bir-2316-btn" data-uid="${escHtml(r.uid)}">📄 2316</button></td>
+    <td class="no-print"><button class="btn-secondary btn-sm bir-2316-btn" data-uid="${escHtml(r.uid)}">${window.emojiIcon('📄',14)} 2316</button></td>
   </tr>`).join('');
   const table = `<table class="bir-t"><thead><tr><th>Employee</th><th>TIN</th><th>Gross Comp.</th><th>SSS+PH+HDMF</th><th>13th-Month Accrual</th><th>Taxable Comp.</th><th>Tax Withheld</th><th class="no-print"></th></tr></thead>
     <tbody>${bodyRows || '<tr><td colspan="8" style="text-align:center;color:var(--text-muted)">No payroll for this year</td></tr>'}</tbody></table>`;
   const printHTML = window.birBuildPrintHTML({ docTitle: 'ALPHALIST — ANNUAL COMPENSATION SUMMARY', dateLabel: 'Year ' + year, bodyHTML: wmBanner + missingBanner + table, watermark });
   bodyEl.innerHTML = window.birToolbarHTML({ csvId: 'bir-alpha-csv' }) + printHTML;
+  if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
   document.getElementById('bir-alpha-csv')?.addEventListener('click', () => window.exportCSV('alphalist-' + year, rows, [
     { key: 'name', label: 'Employee' }, { key: 'tin', label: 'TIN' }, { key: 'gross', label: 'Gross Compensation' },
     { key: 'statutory', label: 'SSS+PH+HDMF', get: r => r.sss + r.philhealth + r.pagibig }, { key: 'thirteenthAccrual', label: '13th-Month Accrual' },
@@ -662,8 +674,9 @@ window.birRender2316 = function (bodyEl, row, year, state) {
   });
   bodyEl.innerHTML = `<div class="no-print" style="display:flex;gap:8px;margin-bottom:10px">
     <button class="btn-secondary btn-sm" id="bir-2316-back">← Back to Alphalist</button>
-    <button class="btn-primary btn-sm" onclick="window.print()">🖨 Print</button>
+    <button class="btn-primary btn-sm" onclick="window.print()">${window.emojiIcon('🖨',14)} Print</button>
   </div>` + printHTML;
+  if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
   document.getElementById('bir-2316-back')?.addEventListener('click', () => window.birRenderAlphaBody(bodyEl, state));
 };
 
@@ -775,4 +788,5 @@ window.birRenderFSBody = async function (bodyEl, state) {
     </tbody></table>`;
   const printHTML = window.birBuildPrintHTML({ docTitle: 'FINANCIAL STATEMENT (WORKING PAPER)', dateLabel: pParsed.label, bodyHTML: body });
   bodyEl.innerHTML = window.birToolbarHTML({}) + printHTML;
+  if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
 };
