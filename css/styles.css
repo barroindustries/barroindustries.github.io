@@ -2084,6 +2084,13 @@ html.theme-astral .chip-tab.active {
 .data-table td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
 .data-table tr:last-child td { border-bottom: none; }
 @media (hover:hover) { .data-table tr:hover td { background: var(--surface-2); } }
+/* v13 Phase 149 — selection & copy ergonomics: explicitly re-enable text
+   selection on data surfaces. No broad user-select:none exists on body/table
+   ancestors today (audited — the only user-select:none rules in this file are
+   scoped to controls: sidebar-open lock, decorative pull-to-refresh icon, the
+   ID-card flip scene); this makes the "selectable" intent explicit and
+   future-proofs against a control-scoped rule accidentally widening later. */
+.data-table td, .mono, code { user-select: text; }
 .table-wrap, .table-scroll {
   overflow-x: auto; -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
@@ -4373,6 +4380,15 @@ html.theme-astral .top-nav-item.active .bn-icon { filter: drop-shadow(0 0 5px rg
   .nav-item:hover { background: var(--surface-2); }
 }
 html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: var(--pink); border-radius: 10px; }
+
+/* v13 Phase 143 — hover completeness: consolidated mouse-only hover affordances
+   for interactive classes that had no hover state at all. Matches the token
+   family already used by sibling hovers (.nav-item:hover / .data-table tr:hover
+   → var(--surface-2)). No transforms/shadows here — those are covered per-class
+   above and would fight the .pressable active-state feel. */
+@media (hover:hover) and (pointer:fine) {
+  .bottom-nav-item:hover { color: var(--text); }
+}
 
 /* ── Back buttons — iOS text+chevron style ── */
 .drawer-back-btn {
