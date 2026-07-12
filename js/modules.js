@@ -1902,7 +1902,14 @@ async function renderPresidentMessageCard() {
     const totalValue = items.reduce((s,i)=>s+((i.qty||0)*(i.unitCost||0)),0);
     const matValue  = items.filter(i=>(i.kind||'material')!=='product').reduce((s,i)=>s+((i.qty||0)*(i.unitCost||0)),0);
     const prodValue = totalValue - matValue;
-    const cats = Array.from(new Set(items.map(i=>(i.category||'').trim()).filter(Boolean))).sort();
+    // Category grouping — items without a category fall into "Uncategorized" so
+    // the value breakdown and filter chips never crash on missing data.
+    const catOf = i => (i.category||'').trim() || 'Uncategorized';
+    const catNames = Array.from(new Set(items.map(catOf))).sort((a,b)=> a==='Uncategorized'?1:b==='Uncategorized'?-1:a.localeCompare(b));
+    const catStats = catNames.map(cn=>{
+      const its = items.filter(i=>catOf(i)===cn);
+      return { name:cn, count:its.length, value: its.reduce((s,i)=>s+((i.qty||0)*(i.unitCost||0)),0) };
+    });
     let kindFilter='all', catFilter='all', search='';
 
     el.innerHTML = `
@@ -1911,12 +1918,13 @@ async function renderPresidentMessageCard() {
         <div class="kpi-card ${low.length?'red':''}"><div class="kpi-label">Low Stock</div><div class="kpi-value">${low.length}</div></div>
         <div class="kpi-card green"><div class="kpi-label">Stock Value</div><div class="kpi-value">${peso(totalValue)}</div></div>
       </div>
-      <div style="font-size:12px;color:var(--text-muted);margin:0 2px 10px">Materials ${peso(matValue)} · Finished goods ${peso(prodValue)}</div>
+      <div style="font-size:12px;color:var(--text-muted);margin:0 2px 6px">Materials ${peso(matValue)} · Finished goods ${peso(prodValue)}</div>
+      ${catStats.length?`<div style="font-size:12px;color:var(--text-muted);margin:0 2px 10px">By category: ${catStats.map(cs=>`${escHtml(cs.name)} ${peso(cs.value)}`).join(' · ')}</div>`:''}
       ${low.length?`<div class="alert-banner alert-warn" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${emojiIcon('⚠️',16)} <strong>${low.length} item${low.length>1?'s':''}</strong> at or below reorder level</span>${ce?`<button class="btn-secondary btn-sm" id="inv-reorder-btn" title="Open Purchasing to raise an RFQ for low-stock materials">${emojiIcon('📉',16)} Reorder via RFQ</button>`:''}</div>`:''}
       ${window.chipTabs([{key:'all',label:'All'},{key:'material',label:'Raw Materials'},{key:'product',label:'Finished Goods'}],'all',{cls:'inv-kind'})}
+      ${catStats.length?window.chipTabs([{key:'all',label:`All (${items.length})`}].concat(catStats.map(cs=>({key:cs.name,label:`${cs.name} (${cs.count})`}))),'all',{cls:'inv-cat-chips'}):''}
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
         <input id="inv-search" placeholder="🔎 Search item, supplier, category…" style="flex:1;min-width:160px;padding:8px 12px;border:1.5px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-size:13px"/>
-        ${cats.length?`<select id="inv-cat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font-size:13px"><option value="all">All categories</option>${cats.map(c=>`<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('')}</select>`:''}
         <button class="btn-secondary btn-sm" id="inv-csv">${emojiIcon('⬇',16)} CSV</button>
         ${ce?'<button class="btn-primary btn-sm" id="inv-add-btn">＋ Add Item</button>':''}
       </div>
@@ -1925,7 +1933,7 @@ async function renderPresidentMessageCard() {
 
     const filtered = () => items.filter(i=>{
       if (kindFilter!=='all' && (i.kind||'material')!==kindFilter) return false;
-      if (catFilter!=='all' && (i.category||'').trim()!==catFilter) return false;
+      if (catFilter!=='all' && catOf(i)!==catFilter) return false;
       if (search){ const s=search.toLowerCase(); if(!((i.name||'').toLowerCase().includes(s)||(i.supplier||'').toLowerCase().includes(s)||(i.category||'').toLowerCase().includes(s))) return false; }
       return true;
     });
@@ -1968,8 +1976,8 @@ async function renderPresidentMessageCard() {
     };
 
     window.bindChipTabs(el.querySelector('.inv-kind'), (key)=>{ kindFilter=key; renderTable(); });
+    if (catStats.length) window.bindChipTabs(el.querySelector('.inv-cat-chips'), (key)=>{ catFilter=key; renderTable(); });
     let _t; document.getElementById('inv-search')?.addEventListener('input', e=>{ clearTimeout(_t); const v=e.target.value; _t=setTimeout(()=>{ search=v.trim(); renderTable(); },180); });
-    document.getElementById('inv-cat')?.addEventListener('change', e=>{ catFilter=e.target.value; renderTable(); });
     document.getElementById('inv-reorder-btn')?.addEventListener('click', ()=>{ try{ Notifs.info('Opening Purchasing — use “From low stock” to raise an RFQ.'); }catch(_){} navigateTo('dept:Purchasing'); });
     document.getElementById('inv-csv')?.addEventListener('click',()=>window.exportCSV('inventory', filtered(), [
       {key:'name',label:'Item'},{key:'kind',label:'Type',get:i=>(i.kind||'material')},{key:'category',label:'Category'},
