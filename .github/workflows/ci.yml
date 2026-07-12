@@ -31,25 +31,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check node-version pins
+        shell: python
         run: |
-          fail=0
-          for f in .github/workflows/*.yml; do
-            [ "$f" = ".github/workflows/ci.yml" ] && continue
-            # Match real YAML keys only: 'node-version:' at start of a (possibly
-            # inline-braced) mapping entry; strip quotes/braces/space from value.
-            while IFS= read -r raw; do
-              [ -z "$raw" ] && continue
-              val=$(printf '%s' "$raw" | sed -E 's/.*node-version:[[:space:]]*//; s/[}"'"'"'[:space:]]//g')
-              if [ "$val" != "20" ]; then
-                echo "::error::$f pins node-version '$val' (must be 20)"
-                fail=1
-              fi
-            done <<EOF2
-$(grep -hoE "node-version:[[:space:]]*[^,}#]*" "$f" || true)
-EOF2
-          done
-          [ "$fail" -ne 0 ] && exit 1
-          echo "All node-version entries are pinned to 20"
+          import glob, re, sys
+          fail = False
+          for f in glob.glob('.github/workflows/*.yml'):
+              if f.endswith('ci.yml'):
+                  continue
+              for m in re.finditer(r"node-version:\s*['\"]?([^'\"\s,}#]+)", open(f).read()):
+                  if m.group(1) != '20':
+                      print(f"::error::{f} pins node-version '{m.group(1)}' (must be 20)")
+                      fail = True
+          if fail:
+              sys.exit(1)
+          print('All node-version entries are pinned to 20')
 
   backup-coverage:
     runs-on: ubuntu-latest
