@@ -137,7 +137,7 @@ async function loadPosts(dept) {
       return `
       <div class="post-card" data-id="${p.id}">
         <div class="post-header">
-          <div class="post-avatar">${p.authorPhoto ? `<img src="${escHtml(p.authorPhoto)}"/>` : escHtml((p.authorName||'?')[0])}</div>
+          <div class="post-avatar">${safeHttpUrl(p.authorPhoto) ? `<img src="${escHtml(p.authorPhoto)}"/>` : escHtml((p.authorName||'?')[0])}</div>
           <div class="post-meta">
             <div class="post-author">${escHtml(p.authorName||'Unknown')}</div>
             <div class="post-time">${escHtml(ts)}${p.dept&&p.dept!=='General'?` · ${escHtml(p.dept)}`:''}</div>
@@ -636,7 +636,7 @@ function renderEomCard(host, data, users, canManage, standings, month) {
       <div class="eom-ribbon">${emojiIcon('🏆',16)} Employee of the Month${data.month ? ` · ${escHtml(eomMonthLabel(data.month))}` : ''}</div>
       <div class="eom-body">
         <div class="eom-avatar">
-          ${photoUrl ? `<img src="${escHtml(photoUrl)}" alt="${escHtml(name)}"/>` : `<span>${escHtml(initials)}</span>`}
+          ${safeHttpUrl(photoUrl) ? `<img src="${escHtml(photoUrl)}" alt="${escHtml(name)}"/>` : `<span>${escHtml(initials)}</span>`}
         </div>
         <div class="eom-info">
           <div class="eom-name">${escHtml(name)}</div>
@@ -755,7 +755,7 @@ function openEomStandingsModal(standings, month) {
     const initials = (s.displayName || s.email || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
     return `<div style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;background:${i === 0 ? 'rgba(255,196,0,0.1)' : 'var(--surface2,rgba(255,255,255,0.04))'};margin-bottom:8px;border:1px solid ${i === 0 ? 'rgba(255,196,0,0.35)' : 'transparent'}">
       <div style="font-size:18px;width:28px;text-align:center;flex:0 0 auto">${medal}</div>
-      <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--primary-light));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px;flex:0 0 auto;overflow:hidden">${s.photoUrl ? `<img src="${escHtml(s.photoUrl)}" style="width:100%;height:100%;object-fit:cover" alt=""/>` : escHtml(initials)}</div>
+      <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--primary-light));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:14px;flex:0 0 auto;overflow:hidden">${safeHttpUrl(s.photoUrl) ? `<img src="${escHtml(s.photoUrl)}" style="width:100%;height:100%;object-fit:cover" alt=""/>` : escHtml(initials)}</div>
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(s.displayName || s.email)}</div>
         <div style="font-size:11px;color:var(--text-muted)">${s.attPct}% att · ${s.taskPct}% KPI${s.grade != null ? ` · grade ${s.grade}/10` : ''}</div>
@@ -801,7 +801,7 @@ function showCallingCard(u) {
   const initials = (u.displayName||u.email||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
   openModal(`${emojiIcon('📇',16)} ${u.displayName||u.email}`, `
     <div style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);border-radius:16px;padding:28px 20px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:8px">
-      ${u.photoUrl
+      ${safeHttpUrl(u.photoUrl)
         ? `<img src="${escHtml(u.photoUrl)}" style="width:80px;height:80px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.3);margin-bottom:4px" alt=""/>`
         : `<div style="width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:800;color:#fff;margin-bottom:4px">${escHtml(initials)}</div>`}
       <div style="font-size:20px;font-weight:800;color:#fff;letter-spacing:.5px">${escHtml(u.displayName||u.email)}</div>
@@ -852,7 +852,7 @@ function renderTeamCards(users, currentUser) {
         </div>` : ''}
       <div class="team-member-avatar-wrap">
         <div class="team-member-avatar">
-          ${u.photoUrl
+          ${safeHttpUrl(u.photoUrl)
             ? `<img src="${escHtml(u.photoUrl)}" alt="${escHtml(u.displayName||'')}"/>`
             : `<span>${escHtml(initial)}</span>`}
         </div>
@@ -1528,9 +1528,10 @@ function renderCAEmployeeCards(advances, container) {
     // same branch order as the old statusColor/statusLabel ternaries, so a
     // record hits the same bucket (and effectively the same color) as
     // before: approved+balance>0 → 'active', paid → 'paid', pending →
-    // 'pending', anything else (rejected, or approved-with-zero-balance) →
-    // 'rejected'.
-    const caId = a.status==='approved'&&(balance||0)>0 ? 'active' : a.status==='paid' ? 'paid' : a.status==='pending' ? 'pending' : 'rejected';
+    // 'pending', anything else → 'rejected'.
+    // M11 fix: approved+balance<=0 (fully paid but status never flipped to
+    // 'paid') now also buckets to 'paid' instead of falling through to 'rejected'.
+    const caId = a.status==='approved'&&(balance||0)>0 ? 'active' : (a.status==='paid'||(a.status==='approved'&&(balance||0)<=0)) ? 'paid' : a.status==='pending' ? 'pending' : 'rejected';
     const payments = a.payments || [];
     const payRows = payments.map((p,i)=>`
       <tr>
@@ -1634,8 +1635,9 @@ function renderCAList(advances, container, isAdmin) {
     const terms     = a.terms || 1;
     const monthly   = a.monthlyPayment || 0;
     const balance   = typeof a.balance !== 'undefined' ? a.balance : a.amount;
-    const paidAmt   = (a.amount||0) - (balance||0);
-    const pct       = a.amount ? Math.round((paidAmt/(a.amount||1))*100) : 0;
+    const totalPay  = a.totalPayable || a.amount || 0;
+    const paidAmt   = Math.max(0, totalPay - (balance||0));
+    const pct       = totalPay ? Math.min(100, Math.round((paidAmt/totalPay)*100)) : 0;
     return `
     <div class="ca-card">
       <div class="ca-card-header">
@@ -1874,7 +1876,7 @@ async function renderPresidentMessageCard() {
       <div class="card-body">
         <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
           <div style="width:54px;height:54px;border-radius:50%;overflow:hidden;background:var(--primary-light);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff">
-            ${pres.photoUrl?`<img src="${escHtml(pres.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:escHtml(presName[0]||'')}
+            ${safeHttpUrl(pres.photoUrl)?`<img src="${escHtml(pres.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:escHtml(presName[0]||'')}
           </div>
           <div>
             <div style="font-weight:700;font-size:15px">${escHtml(presName)}</div>
@@ -2510,10 +2512,11 @@ async function renderPresidentMessageCard() {
 
   async function approveLeave(r, c){
     if(!r) return;
+    if(r.status==='approved') return;   // idempotency guard — already applied; a retry must not re-decrement the balance
     try{
-      await db.collection('leave_requests').doc(r.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
       const lt=leaveType(r.type);
-      await applyLeaveApproval(r);   // decrement + write attendance (single source)
+      await applyLeaveApproval(r);   // decrement + write attendance FIRST (single source) — status flips only after this succeeds
+      await db.collection('leave_requests').doc(r.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
       window.logAudit && window.logAudit('approve','leave',r.id,{ user:r.userName, type:r.type, days:r.days });
       try{ Notifs.send(r.userId, { title:'Leave Approved ✅', body:`Your ${r.days}-day ${lt.label} (${r.startDate}→${r.endDate}) was approved.`, icon:'✅', type:'leave', dedupKey:`leave-ok-${r.id}` }); }catch(_){}
       Notifs.success('Leave approved'); window.renderLeavePage(c);
@@ -2538,9 +2541,10 @@ async function renderPresidentMessageCard() {
     const s = await db.collection('leave_requests').doc(id).get();
     if(!s.exists) throw new Error('Leave request not found');
     const r = { id:s.id, ...s.data() };
-    await db.collection('leave_requests').doc(r.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+    if(r.status==='approved') return r;   // idempotency guard — already applied; a retry must not re-decrement the balance
     const lt = leaveType(r.type);
-    await applyLeaveApproval(r);    // decrement + write attendance (single source)
+    await applyLeaveApproval(r);    // decrement + write attendance FIRST (single source) — status flips only after this succeeds
+    await db.collection('leave_requests').doc(r.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
     window.logAudit && window.logAudit('approve','leave',r.id,{ user:r.userName, type:r.type, days:r.days });
     try{ Notifs.send(r.userId, { title:'Leave Approved ✅', body:`Your ${r.days}-day ${lt.label} (${r.startDate}→${r.endDate}) was approved.`, icon:'✅', type:'leave', dedupKey:`leave-ok-${r.id}` }); }catch(_){}
     return r;
@@ -2769,7 +2773,7 @@ window.renderMyProfile = async function() {
   c.innerHTML = `
     <div class="profile-hero" style="margin-bottom:14px">
       <div class="profile-avatar-wrap" style="cursor:default">
-        ${u.photoUrl ? `<img src="${escHtml(u.photoUrl)}" class="profile-avatar-img"/>`
+        ${safeHttpUrl(u.photoUrl) ? `<img src="${escHtml(u.photoUrl)}" class="profile-avatar-img"/>`
                      : `<span class="profile-avatar-initials">${escHtml((u.displayName||'?')[0].toUpperCase())}</span>`}
       </div>
       <div class="profile-hero-name">${escHtml(u.displayName || u.email || 'User')}</div>
@@ -3006,13 +3010,13 @@ window.renderRecentActivity = async function(host, uid) {
     const none = Promise.resolve({ docs: [] });
     const [notif, tasks, leave, ca, att, posts, audit] = await Promise.all([
       db.collection('notifications').doc(uid).collection('items')
-        .orderBy('createdAt', 'desc').limit(30).get(),
-      db.collection('tasks').where('assignedTo', 'array-contains', uid).get(),
-      partner ? none : db.collection('leave_requests').where('userId', '==', uid).get(),
-      partner ? none : db.collection('cash_advances').where('userId', '==', uid).get(),
+        .orderBy('createdAt', 'desc').limit(30).get().catch(() => ({ docs: [] })),
+      db.collection('tasks').where('assignedTo', 'array-contains', uid).get().catch(() => ({ docs: [] })),
+      partner ? none : db.collection('leave_requests').where('userId', '==', uid).get().catch(() => ({ docs: [] })),
+      partner ? none : db.collection('cash_advances').where('userId', '==', uid).get().catch(() => ({ docs: [] })),
       partner ? none : db.collection('attendance').doc(uid).collection('records')
-        .orderBy(firebase.firestore.FieldPath.documentId(), 'desc').limit(14).get(),
-      partner ? none : db.collection('posts').where('authorId', '==', uid).get(),
+        .orderBy(firebase.firestore.FieldPath.documentId(), 'desc').limit(14).get().catch(() => ({ docs: [] })),
+      partner ? none : db.collection('posts').where('authorId', '==', uid).get().catch(() => ({ docs: [] })),
       db.collection('audit_log').where('actorUid', '==', uid)
         .orderBy('ts', 'desc').limit(50).get().catch(() => ({ docs: [] }))   // needs Spec 7 rules+index; degrades silently until deployed
     ]);

@@ -26,7 +26,15 @@ const storage = firebase.storage();
 
 // LOCAL persistence — session survives tab close/app restart for up to 10 days.
 // Background push notifications stay active without re-login.
-auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(err => {
+  // Safari Private Browsing and some in-app webviews reject LOCAL persistence —
+  // fall back to SESSION rather than silently leaving persistence undefined.
+  // Non-blocking either way: init must continue regardless of the outcome.
+  console.warn('[Auth] setPersistence(LOCAL) failed, falling back to SESSION:', err);
+  auth.setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(err2 => {
+    console.warn('[Auth] setPersistence(SESSION) fallback also failed:', err2);
+  });
+});
 
 // Firestore offline persistence — caches all reads to IndexedDB so the app
 // loads instantly from disk on the next visit while fresh data syncs in background.
@@ -42,6 +50,9 @@ if (typeof db.enableIndexedDbPersistence === 'function') {
     } else if (err.code === 'unimplemented') {
       // Browser doesn't support IndexedDB
       console.warn('[Firestore] Offline persistence not supported in this browser.');
+    } else {
+      // Any other failure (e.g. private-browsing IndexedDB quirks) — don't fail silently.
+      console.warn('[Firestore] Offline persistence failed to enable:', err.code || err);
     }
   });
 } else {

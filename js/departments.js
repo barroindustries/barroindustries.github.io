@@ -1614,6 +1614,13 @@ function expenseTable(expenses, showActions) {
 // `acct` (v12 WS36, optional) tags which company account paid it; callers that don't
 // pass one (resync, backfill) post untagged, which is correct for those paths.
 async function postExpenseToLedger(expId, e, acct) {
+  // M10 fix — a zero/NaN amount must never post a ₱0 EXP- entry; abort with a
+  // clear error instead (callers already surface it: the approve-expense click
+  // handler's try/catch toasts it, migrations.js's backfill catches it silently).
+  const amount = Number(e.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Expense amount must be greater than ₱0 — refusing to post a ₱0/invalid EXP- entry.');
+  }
   const ref = `EXP-${expId}`;
   const date = e.date || today();
   const category = e.category || 'General Expense';
@@ -1621,7 +1628,7 @@ async function postExpenseToLedger(expId, e, acct) {
     ref, date, kind: 'debit',
     accountType: 'expense', account: category, category,
     description: `Expense — ${e.description||''}${e.submittedByName?` (${e.submittedByName})`:''}`,
-    amount: e.amount || 0,
+    amount,
     source: 'Expense',
     // v12 WS39 — reclaimable input VAT (Add-Expense flow); legacy expenses with
     // no inputVat field fall back to 0, matching today's behavior exactly.
@@ -1776,7 +1783,14 @@ async function resyncLedgerForSource(collection, docId) {
 }
 async function _deleteLedgerByRef(ref) {
   const ls = await db.collection('ledger').where('refNumber', '==', ref).limit(1).get().catch(() => ({ docs: [] }));
-  if (ls.docs.length) { await ls.docs[0].ref.delete().catch(() => {}); if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger'); }
+  if (ls.docs.length) {
+    // H3 fix — this is a real (if indirect) finance delete: it fires whenever a
+    // user's own edit (un-approving an expense, zeroing a CRJ/CDJ) makes a mirrored
+    // ledger row no longer qualify. Route it through the same President-approval
+    // trail as every other finance delete instead of a direct .delete().
+    const outcome = await window.financeDelete({ collection: 'ledger', docId: ls.docs[0].id, label: `ledger entry "${ref}"` });
+    if (outcome === 'deleted' && typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+  }
 }
 // v12 WS36 — update / create / delete one keyed non-P&L settlement leg (A/R or A/P),
 // kept in step with its source CRJ/CDJ doc across edits. Shared by resyncLedgerForSource.
@@ -3428,6 +3442,10 @@ window.disbursePayRun = async function(month, opts = {}) {
   // Remove any old aggregate PAY-{month} leftover from pre-WS13 code (comment
   // preserved from the original: an aggregate on top of per-employee rows
   // double-counts payroll in every view that sums debits).
+  // H3 note — this direct .delete() is exempt from the financeDelete approval
+  // trail on purpose: it's automated legacy-row cleanup inside disbursePayRun's
+  // own atomic run, not a user-initiated finance delete (contrast with the
+  // user-facing _deleteLedgerByRef, which now routes through financeDelete).
   const _oldAgg = await db.collection('ledger').where('refNumber','==',`PAY-${month}`).limit(1).get().catch(()=>({docs:[]}));
   if (_oldAgg.docs.length) await _oldAgg.docs[0].ref.delete().catch(()=>{});
 
@@ -3722,6 +3740,11 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         `, `<button class="btn-primary" id="save-hpe-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
         document.getElementById('save-hpe-btn').addEventListener('click', async () => {
+          // H2 fix — every other money-posting path guards on assertPeriodOpen
+          // before writing; this edit modal didn't, so a closed month could be
+          // silently re-posted. Mirrors the try/catch-return pattern used elsewhere
+          // (assertPeriodOpen already shows its own toast on rejection).
+          try { await window.assertPeriodOpen(rec.month + '-01'); } catch (e) { return; }
           const salary    = parseFloat(document.getElementById('hpe-salary').value)||0;
           const allowance = parseFloat(document.getElementById('hpe-allow').value)||0;
           const deductions= parseFloat(document.getElementById('hpe-deduct').value)||0;
@@ -3734,6 +3757,14 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             editedBy: currentUser.uid,
             editedAt: firebase.firestore.FieldValue.serverTimestamp()
           });
+          // H1 fix — disbursePayRun posts this same PAY-{month}-{uid} row as
+          // line.effectiveGross (netBeforeCA + statutoryTotal + otherDeductions),
+          // a GROSS payroll-expense figure — NOT net finalPay. salary_history
+          // doesn't store effectiveGross directly, so rebuild it the same way from
+          // the record's own fields: sss/philhealth/pagibig/tax aren't editable in
+          // this form, so rec's already-frozen values are still correct post-edit.
+          const statutoryTotal = (rec.sss||0) + (rec.philhealth||0) + (rec.pagibig||0) + (rec.tax||0);
+          const effectiveGross = netPay + statutoryTotal + deductions;
           // Keep ledger entry in sync
           const ledgerRef = `PAY-${rec.month}-${rec.userId}`;
           const ledgerSnap = await db.collection('ledger').where('refNumber','==',ledgerRef).limit(1).get().catch(()=>({docs:[]}));
@@ -3743,7 +3774,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               date: rec.month + '-01',
               type: 'debit',
               description: `Payslip — ${rec.userName||'?'} (${window.fmtMonthLabel(rec.month)})`,
-              amount: finalPay,
+              amount: effectiveGross,
               category: 'Payroll Expense',
               source: 'Finance',
               refNumber: ledgerRef,
@@ -3752,7 +3783,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
             });
           } else if (ledgerSnap.docs.length) {
-            await ledgerSnap.docs[0].ref.update({ amount: finalPay });
+            await ledgerSnap.docs[0].ref.update({ amount: effectiveGross });
           }
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
           closeModal();
@@ -4497,15 +4528,20 @@ window.reopenFinancePeriod = async function(monthKey) {
 
 // ── Ledger Tab (includes merged General Journal entries) ─────
 async function renderLedgerTab(container, currentUser, currentRole) {
-  const [ledgerSnap, gjSnap] = await Promise.all([
+  const [ledgerSnap, gjSnap, ledgerAllSnap, gjAllSnap] = await Promise.all([
     db.collection('ledger').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]})),
-    db.collection('general_journal').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]}))
+    db.collection('general_journal').orderBy('date','desc').limit(100).get().catch(()=>({docs:[]})),
+    // M1 fix — the KPI headline totals must be all-time, not just the latest 100
+    // rows the list below shows. Reuse the existing unbounded/cached 'all' readers
+    // (same shared cache key Finance Overview's ledger total already relies on).
+    window.ledgerForPeriod('all'),
+    window.gjForPeriod('all')
   ]);
 
-  // Normalize ledger entries
+  // Normalize ledger entries (capped — drives the visible list only)
   const ledgerEntries = ledgerSnap.docs.map(d => ({id:d.id, _src:'ledger', ...d.data()}));
 
-  // Normalize general journal entries to ledger shape
+  // Normalize general journal entries to ledger shape (capped — visible list only)
   const gjEntries = gjSnap.docs.flatMap(d => {
     const e = {id:d.id, _src:'journal', ...d.data()};
     const rows = [];
@@ -4514,11 +4550,21 @@ async function renderLedgerTab(container, currentUser, currentRole) {
     return rows;
   });
 
-  // Merge and sort by date desc
+  // Merge and sort by date desc — feeds the visible table/CSV only, unchanged
   const entries = [...ledgerEntries, ...gjEntries].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
 
-  const totalDebit  = entries.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
-  const totalCredit = entries.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0);
+  // M1 fix — KPI totals from the UNBOUNDED all-time reads above, not the
+  // capped `entries` list, so Total Credits/Debits/Balance are all-time-correct.
+  const gjAllEntries = gjAllSnap.docs.flatMap(d => {
+    const e = d.data();
+    const rows = [];
+    if (e.debit)  rows.push({ type:'debit',  amount:e.debit });
+    if (e.credit) rows.push({ type:'credit', amount:e.credit });
+    return rows;
+  });
+  const allEntries  = [...ledgerAllSnap.docs.map(d=>d.data()), ...gjAllEntries];
+  const totalDebit  = allEntries.filter(e=>e.type==='debit').reduce((s,e)=>s+(e.amount||0),0);
+  const totalCredit = allEntries.filter(e=>e.type==='credit').reduce((s,e)=>s+(e.amount||0),0);
   const balance     = totalCredit - totalDebit;
   const canFin      = isFinancePriv();
 
@@ -7264,9 +7310,12 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
   // KPI totals count only the LATEST revision of each quote — older revisions
   // (R1 when an R2 exists) are superseded and must not inflate the value/counts.
   const { latest: activeQuotes, supersededIds } = window.latestQuoteRevisions(quotes);
-  const total      = activeQuotes.reduce((s,q)=>s+(q.total||0),0);
+  // H8 fix — some BK/BS quotes store the value under grandTotal (or amount), not
+  // total; a bare q.total silently reads as ₱0 for those. Same fallback chain as
+  // app.js's quote pipeline (~line 2815).
+  const total      = activeQuotes.reduce((s,q)=>s+(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0),0);
   const accepted   = activeQuotes.filter(q=>q.status==='accepted');
-  const acceptedT  = accepted.reduce((s,q)=>s+(q.total||0),0);
+  const acceptedT  = accepted.reduce((s,q)=>s+(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0),0);
   const sent       = activeQuotes.filter(q=>q.status==='sent').length;
   const draft      = activeQuotes.filter(q=>q.status==='draft').length;
   // v12 WS31 Spec 10 — "filed but no Sales Order yet" staleness, pure client-side
@@ -7294,14 +7343,14 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
           </div>
         </div>
         <div style="text-align:right">
-          <div style="font-weight:700${superseded?';text-decoration:line-through;color:var(--text-muted)':''}">₱${fmt(q.total||0)}</div>
+          <div style="font-weight:700${superseded?';text-decoration:line-through;color:var(--text-muted)':''}">₱${fmt(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0)}</div>
           <span class="badge ${window.statusBadgeClass('quote', q.salesOrderId?'won':(q.status||'draft'))}" style="margin-top:4px">${window.statusLabel2('quote', q.salesOrderId?'won':(q.status||'draft'))}</span>
           ${q.deleteRequested?`<span class="badge badge-red" style="font-size:10px;margin-left:4px">${emojiIcon('🗑',10)} del req</span>`:''}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;justify-content:flex-end">
           ${q.editableState?`<button class="btn-secondary btn-sm bk-reopen-btn" data-id="${q.id}">↻ Reopen</button>`:''}
           ${q.editableState?`<button class="btn-secondary btn-sm bk-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
-          ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${q.total||0}" data-co="BK" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('🧾',16)} Sales Order`}</button>`:''}
+          ${wonish?`<button class="btn-success btn-sm bk-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0}" data-co="BK" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('🧾',16)} Sales Order`}</button>`:''}
           ${(canDel && !q.deleteRequested)?`<button class="btn-secondary btn-sm bk-del-btn" data-id="${q.id}" data-label="${escHtml(label)}" data-by="${q.createdBy||''}">${emojiIcon('🗑',16)} Delete</button>`:''}
         </div>
       </div>`;
@@ -7351,7 +7400,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
       body.innerHTML = Object.keys(groups).sort((a,b)=>a.localeCompare(b)).map(name=>{
         const gq=groups[name];
         // Customer total = latest revisions only (superseded ones don't add up).
-        const active=gq.filter(x=>!supersededIds.has(x.id)); const gt=active.reduce((s,x)=>s+(x.total||0),0);
+        const active=gq.filter(x=>!supersededIds.has(x.id)); const gt=active.reduce((s,x)=>s+(Number(x.total)||Number(x.grandTotal)||Number(x.amount)||0),0);
         return `<details open style="background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:8px 12px;margin-bottom:10px">
           <summary style="cursor:pointer;font-weight:700;font-size:13px;display:flex;align-items:center;gap:8px">
             <span style="flex:1">${escHtml(name)} <span class="badge badge-gray" style="font-size:10px">${active.length}${gq.length!==active.length?` +${gq.length-active.length}`:''}</span></span>
@@ -9293,7 +9342,12 @@ window.getBsQuotesOrdered = async function(currentUser, isPrivileged) {
 
 async function renderBSQuotationFiles(container, currentUser, currentRole) {
   container.innerHTML = '<div class="loading-placeholder">Loading quotation files…</div>';
-  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'employee';
+  // H6 fix — a bare 'employee' role must NOT see every bs_quotes doc; only
+  // Sales-dept employees may (mirrors renderBSQuotationsSummary's canSeeAll
+  // below). The old unconditional `|| currentRole === 'employee'` exposed every
+  // partner's Brilliant Steel quote to any employee, regardless of department.
+  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' ||
+    (currentRole === 'employee' && (window.currentDepts||[]).includes('Sales'));
   try {
     const snap = await window.getBsQuotesOrdered(currentUser, isPrivileged);
     const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
@@ -9381,133 +9435,142 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
 
 // ── Brilliant Steel Quotations Summary ────────────
 async function renderBSQuotationsSummary(container, currentUser, currentRole) {
+  // H5 fix — set a loading state immediately (matches renderBSQuotationFiles) and
+  // wrap the whole body in try/catch so a read failure shows a friendly error
+  // instead of leaving the container stuck (previously: no loading state, no
+  // try/catch, and no .catch() on the reads at all).
+  container.innerHTML = '<div class="loading-placeholder">Loading quotations…</div>';
   const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
   // Sales dept employees can see all quotes (including partner-filed); partners only see their own
   const canSeeAll = isPrivileged ||
     (currentRole === 'employee' && (window.currentDepts||[]).includes('Sales'));
   const isPartnerRole = currentRole === 'partner';
-  // Cached read, scoped separately from getBsQuotesOrdered above — this tab's
-  // canSeeAll gate differs (Sales-dept employees only, not all employees) and
-  // the query has no orderBy, so it must not share a cache key with the
-  // ordered Files/Client-Data query (would leak scope-mismatched results).
-  const bsqKey = canSeeAll ? 'bs_quotes-flat-all' : `bs_quotes-flat-own-${currentUser.uid}`;
-  const snap = await dbCachedGet(bsqKey, () => canSeeAll
-    ? db.collection('bs_quotes').get()
-    : db.collection('bs_quotes').where('createdBy','==',currentUser.uid).get(),
-    50000);
-  const all = snap.docs.map(d=>({id:d.id,...d.data()}))
-    // Partners cannot see records created by Sales (non-partner) users
-    .filter(q => !isPartnerRole || q.createdBy === currentUser.uid)
-    .sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-  const forApproval   = all.filter(q=>q.status==='pending_approval'||q.approvalStatus==='pending_review'||q.status==='sent');
-  const filed         = all.filter(q=>q.status==='filed'||q.approvalStatus==='approved');
-  const drafts        = all.filter(q=>!q.status||q.status==='draft');
-  const needsRevision = all.filter(q=>q.status==='needs_revision'||q.approvalStatus==='needs_revision');
-  const rejected      = all.filter(q=>q.approvalStatus==='rejected'||q.status==='rejected');
-  // v12 WS31 Spec 10 — "filed but no Sales Order yet" staleness, pure client-side
-  // over rows this screen already fetched. Zero new reads.
-  const staleDaysOf = q => (q.status==='filed' && !q.salesOrderId && q.createdAt)
-    ? Math.floor((Date.now() - (q.createdAt.seconds||0)*1000) / 86400000) : 0;
-  const staleCount = all.filter(q => staleDaysOf(q) > window.QUOTE_STALE_DAYS).length;
+  try {
+    // Cached read, scoped separately from getBsQuotesOrdered above — this tab's
+    // canSeeAll gate differs (Sales-dept employees only, not all employees) and
+    // the query has no orderBy, so it must not share a cache key with the
+    // ordered Files/Client-Data query (would leak scope-mismatched results).
+    const bsqKey = canSeeAll ? 'bs_quotes-flat-all' : `bs_quotes-flat-own-${currentUser.uid}`;
+    const snap = await dbCachedGet(bsqKey, () => canSeeAll
+      ? db.collection('bs_quotes').get().catch(()=>({docs:[]}))
+      : db.collection('bs_quotes').where('createdBy','==',currentUser.uid).get().catch(()=>({docs:[]})),
+      50000);
+    const all = snap.docs.map(d=>({id:d.id,...d.data()}))
+      // Partners cannot see records created by Sales (non-partner) users
+      .filter(q => !isPartnerRole || q.createdBy === currentUser.uid)
+      .sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
+    const forApproval   = all.filter(q=>q.status==='pending_approval'||q.approvalStatus==='pending_review'||q.status==='sent');
+    const filed         = all.filter(q=>q.status==='filed'||q.approvalStatus==='approved');
+    const drafts        = all.filter(q=>!q.status||q.status==='draft');
+    const needsRevision = all.filter(q=>q.status==='needs_revision'||q.approvalStatus==='needs_revision');
+    const rejected      = all.filter(q=>q.approvalStatus==='rejected'||q.status==='rejected');
+    // v12 WS31 Spec 10 — "filed but no Sales Order yet" staleness, pure client-side
+    // over rows this screen already fetched. Zero new reads.
+    const staleDaysOf = q => (q.status==='filed' && !q.salesOrderId && q.createdAt)
+      ? Math.floor((Date.now() - (q.createdAt.seconds||0)*1000) / 86400000) : 0;
+    const staleCount = all.filter(q => staleDaysOf(q) > window.QUOTE_STALE_DAYS).length;
 
-  const renderList = (quotes) => !quotes.length
-    ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No quotations here</h4></div>`
-    : `<div class="card"><div class="table-wrap"><table class="data-table">
-        <thead><tr><th>Quote #</th><th>Client</th><th>Total</th><th>Agent</th><th>Status</th><th>Action</th></tr></thead>
-        <tbody>${quotes.map(q=>{
-          const status = q.status||q.approvalStatus||'draft';
-          const badge = window.statusBadgeClass('quote', status);
-          const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
-          const canDeleteDirect = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
-          const staleDays = staleDaysOf(q);
-          return `<tr>
-            <td><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code></td>
-            <td><strong>${escHtml(q.clientName||'—')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(q.clientCompany||'')}</div></td>
-            <td>₱${fmt(q.total||q.grandTotal||0)}</td>
-            <td>${escHtml(q.agentName||q.createdByName||'—')}</td>
-            <td>
-              <span class="badge ${badge}">${window.statusLabel2('quote', status)}</span>
-              ${q.deleteRequested?`<span class="badge badge-red" style="font-size:9px;margin-left:4px">${emojiIcon('🗑',9)} del req</span>`:''}
-              ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px;margin-left:4px" title="Filed but no Sales Order yet">${emojiIcon('⚠',9)} ${staleDays}d no SO</span>` : ''}
-              <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${ts}</div>
-            </td>
-            <td style="white-space:nowrap;display:flex;gap:6px;flex-wrap:wrap">
-              ${isPrivileged&&(status==='pending_approval'||status==='pending_review'||status==='sent')?`
-                <button class="btn-primary btn-sm bs-approve-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">${emojiIcon('✅',16)} Approve</button>
-                <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">${emojiIcon('❌',16)} Reject</button>
-                <button class="btn-secondary btn-sm bs-edit-return-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">${emojiIcon('✎',16)} Edit &amp; Return</button>
-              `:''}
-              ${(status==='filed'||status==='approved')?`<button class="btn-secondary btn-sm bs-reopen-btn" data-id="${q.id}" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen</button>`:''}
-              ${(status==='filed'||status==='approved')&&q.editableState?`<button class="btn-secondary btn-sm bs-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
-              ${(status==='filed'||status==='approved')?`<button class="btn-success btn-sm bs-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${q.total||q.grandTotal||0}" data-co="${escHtml(q.company||'BS')}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('🧾',16)} Sales Order`}</button>`:''}
-              ${canDeleteDirect
-                ? `<button class="btn-secondary btn-sm bs-del-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" style="color:var(--danger)">${emojiIcon('🗑',16)} Delete</button>`
-                : `<button class="btn-secondary btn-sm bs-delreq-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" ${q.deleteRequested?'disabled':''}>${q.deleteRequested?`${emojiIcon('⏳',16)} Requested`:`${emojiIcon('🗑',16)} Request Delete`}</button>`}
-            </td>
-          </tr>`;
-        }).join('')}</tbody>
-      </table></div></div>`;
+    const renderList = (quotes) => !quotes.length
+      ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No quotations here</h4></div>`
+      : `<div class="card"><div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Quote #</th><th>Client</th><th>Total</th><th>Agent</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody>${quotes.map(q=>{
+            const status = q.status||q.approvalStatus||'draft';
+            const badge = window.statusBadgeClass('quote', status);
+            const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
+            const canDeleteDirect = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
+            const staleDays = staleDaysOf(q);
+            return `<tr>
+              <td><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code></td>
+              <td><strong>${escHtml(q.clientName||'—')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(q.clientCompany||'')}</div></td>
+              <td>₱${fmt(q.total||q.grandTotal||0)}</td>
+              <td>${escHtml(q.agentName||q.createdByName||'—')}</td>
+              <td>
+                <span class="badge ${badge}">${window.statusLabel2('quote', status)}</span>
+                ${q.deleteRequested?`<span class="badge badge-red" style="font-size:9px;margin-left:4px">${emojiIcon('🗑',9)} del req</span>`:''}
+                ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px;margin-left:4px" title="Filed but no Sales Order yet">${emojiIcon('⚠',9)} ${staleDays}d no SO</span>` : ''}
+                <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${ts}</div>
+              </td>
+              <td style="white-space:nowrap;display:flex;gap:6px;flex-wrap:wrap">
+                ${isPrivileged&&(status==='pending_approval'||status==='pending_review'||status==='sent')?`
+                  <button class="btn-primary btn-sm bs-approve-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">${emojiIcon('✅',16)} Approve</button>
+                  <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">${emojiIcon('❌',16)} Reject</button>
+                  <button class="btn-secondary btn-sm bs-edit-return-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">${emojiIcon('✎',16)} Edit &amp; Return</button>
+                `:''}
+                ${(status==='filed'||status==='approved')?`<button class="btn-secondary btn-sm bs-reopen-btn" data-id="${q.id}" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen</button>`:''}
+                ${(status==='filed'||status==='approved')&&q.editableState?`<button class="btn-secondary btn-sm bs-rev-btn" data-id="${q.id}" title="Start a new revision (R2, R3…) for this client with today's date">${emojiIcon('⎘',16)} New Revision</button>`:''}
+                ${(status==='filed'||status==='approved')?`<button class="btn-success btn-sm bs-so-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" data-client="${escHtml(q.clientName||'')}" data-client-id="${q.clientId||''}" data-total="${q.total||q.grandTotal||0}" data-co="${escHtml(q.company||'BS')}" ${q.salesOrderId?'disabled':''}>${q.salesOrderId?`${emojiIcon('✓',16)} Ordered`:`${emojiIcon('🧾',16)} Sales Order`}</button>`:''}
+                ${canDeleteDirect
+                  ? `<button class="btn-secondary btn-sm bs-del-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" style="color:var(--danger)">${emojiIcon('🗑',16)} Delete</button>`
+                  : `<button class="btn-secondary btn-sm bs-delreq-btn" data-id="${q.id}" data-qno="${escHtml(q.quoteNumber||'')}" ${q.deleteRequested?'disabled':''}>${q.deleteRequested?`${emojiIcon('⏳',16)} Requested`:`${emojiIcon('🗑',16)} Request Delete`}</button>`}
+              </td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div></div>`;
 
-  // ── Quote analytics ──
-  // Successful = quotes that became SALES ORDERS (have salesOrderId). Pipeline =
-  // overall amount of ALL quotes produced. Won = total of those converted to orders.
-  // Count only the LATEST revision of each quote so R1+R2… don't inflate the
-  // pipeline value / quote count (same dedup as the BK summary).
-  const { latest: bsActive } = window.latestQuoteRevisions(all);
-  const totalMade   = bsActive.length;
-  const wonQuotes   = bsActive.filter(q=>q.salesOrderId);
-  const successful  = wonQuotes.length;
-  const winRate     = totalMade ? Math.round(successful/totalMade*100) : 0;
-  const wonValue    = wonQuotes.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
-  const pipelineVal = bsActive.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
-  const analytics = `
-    <div class="card" style="margin-bottom:14px;border:1.5px solid var(--primary)">
-      <div class="card-header"><h3>${emojiIcon('📊',20)} Quote Analytics</h3></div>
-      <div class="card-body">
-        <div class="kpi-row">
-          <div class="kpi-card"><div class="kpi-label">Quotes Made</div><div class="kpi-value">${totalMade}</div></div>
-          <div class="kpi-card green"><div class="kpi-label">Successful</div><div class="kpi-value">${successful}</div></div>
-          <div class="kpi-card accent"><div class="kpi-label">Win Rate</div><div class="kpi-value">${winRate}%</div></div>
-          <div class="kpi-card"><div class="kpi-label">Pipeline ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(pipelineVal)}</div></div>
-          <div class="kpi-card green"><div class="kpi-label">Won ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(wonValue)}</div></div>
+    // ── Quote analytics ──
+    // Successful = quotes that became SALES ORDERS (have salesOrderId). Pipeline =
+    // overall amount of ALL quotes produced. Won = total of those converted to orders.
+    // Count only the LATEST revision of each quote so R1+R2… don't inflate the
+    // pipeline value / quote count (same dedup as the BK summary).
+    const { latest: bsActive } = window.latestQuoteRevisions(all);
+    const totalMade   = bsActive.length;
+    const wonQuotes   = bsActive.filter(q=>q.salesOrderId);
+    const successful  = wonQuotes.length;
+    const winRate     = totalMade ? Math.round(successful/totalMade*100) : 0;
+    const wonValue    = wonQuotes.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+    const pipelineVal = bsActive.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+    const analytics = `
+      <div class="card" style="margin-bottom:14px;border:1.5px solid var(--primary)">
+        <div class="card-header"><h3>${emojiIcon('📊',20)} Quote Analytics</h3></div>
+        <div class="card-body">
+          <div class="kpi-row">
+            <div class="kpi-card"><div class="kpi-label">Quotes Made</div><div class="kpi-value">${totalMade}</div></div>
+            <div class="kpi-card green"><div class="kpi-label">Successful</div><div class="kpi-value">${successful}</div></div>
+            <div class="kpi-card accent"><div class="kpi-label">Win Rate</div><div class="kpi-value">${winRate}%</div></div>
+            <div class="kpi-card"><div class="kpi-label">Pipeline ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(pipelineVal)}</div></div>
+            <div class="kpi-card green"><div class="kpi-label">Won ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(wonValue)}</div></div>
+          </div>
         </div>
+      </div>`;
+    const kpiRow = `
+      ${analytics}
+      <div class="kpi-row" style="margin-bottom:14px">
+        <div class="kpi-card warn"><div class="kpi-label">Pending Approval</div><div class="kpi-value">${forApproval.length}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Filed / Approved</div><div class="kpi-value">${filed.length}</div></div>
+        <div class="kpi-card accent"><div class="kpi-label">Needs Revision</div><div class="kpi-value">${needsRevision.length}</div></div>
+        <div class="kpi-card red"><div class="kpi-label">Rejected</div><div class="kpi-value">${rejected.length}</div></div>
+      </div>`;
+
+    container.innerHTML = `
+      ${kpiRow}
+      <div class="subtab-bar" style="margin-top:0;flex-wrap:wrap">
+        <button class="subtab-btn active" data-qsub="filed">Filed / Approved (${filed.length})</button>
+        <button class="subtab-btn" data-qsub="for-approval">Pending Approval (${forApproval.length})</button>
+        ${needsRevision.length?`<button class="subtab-btn" data-qsub="needs-revision" style="border-color:var(--warning);color:var(--warning)">↩ Needs Revision (${needsRevision.length})</button>`:''}
+        <button class="subtab-btn" data-qsub="drafts">Drafts (${drafts.length})</button>
+        <button class="subtab-btn" data-qsub="rejected">Rejected (${rejected.length})</button>
+        ${staleCount?`<span class="badge badge-orange" style="align-self:center;font-size:11px;font-weight:700">${emojiIcon('⚠',11)} ${staleCount} stale</span>`:''}
       </div>
-    </div>`;
-  const kpiRow = `
-    ${analytics}
-    <div class="kpi-row" style="margin-bottom:14px">
-      <div class="kpi-card warn"><div class="kpi-label">Pending Approval</div><div class="kpi-value">${forApproval.length}</div></div>
-      <div class="kpi-card green"><div class="kpi-label">Filed / Approved</div><div class="kpi-value">${filed.length}</div></div>
-      <div class="kpi-card accent"><div class="kpi-label">Needs Revision</div><div class="kpi-value">${needsRevision.length}</div></div>
-      <div class="kpi-card red"><div class="kpi-label">Rejected</div><div class="kpi-value">${rejected.length}</div></div>
-    </div>`;
+      <div id="qs-content">${renderList(filed)}</div>
+    `;
+    if (window.lucide) lucide.createIcons({ nodes: [container] });
 
-  container.innerHTML = `
-    ${kpiRow}
-    <div class="subtab-bar" style="margin-top:0;flex-wrap:wrap">
-      <button class="subtab-btn active" data-qsub="filed">Filed / Approved (${filed.length})</button>
-      <button class="subtab-btn" data-qsub="for-approval">Pending Approval (${forApproval.length})</button>
-      ${needsRevision.length?`<button class="subtab-btn" data-qsub="needs-revision" style="border-color:var(--warning);color:var(--warning)">↩ Needs Revision (${needsRevision.length})</button>`:''}
-      <button class="subtab-btn" data-qsub="drafts">Drafts (${drafts.length})</button>
-      <button class="subtab-btn" data-qsub="rejected">Rejected (${rejected.length})</button>
-      ${staleCount?`<span class="badge badge-orange" style="align-self:center;font-size:11px;font-weight:700">${emojiIcon('⚠',11)} ${staleCount} stale</span>`:''}
-    </div>
-    <div id="qs-content">${renderList(filed)}</div>
-  `;
-  if (window.lucide) lucide.createIcons({ nodes: [container] });
-
-  const qsContent = container.querySelector('#qs-content');
-  container.querySelectorAll('[data-qsub]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      container.querySelectorAll('[data-qsub]').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      const which = btn.dataset.qsub;
-      const listMap = { 'filed': filed, 'for-approval': forApproval, 'drafts': drafts, 'rejected': rejected, 'needs-revision': needsRevision };
-      qsContent.innerHTML = renderList(listMap[which]||[]);
-      bindQuoteActions(qsContent, currentUser, currentRole, container);
+    const qsContent = container.querySelector('#qs-content');
+    container.querySelectorAll('[data-qsub]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        container.querySelectorAll('[data-qsub]').forEach(b=>b.classList.remove('active'));
+        btn.classList.add('active');
+        const which = btn.dataset.qsub;
+        const listMap = { 'filed': filed, 'for-approval': forApproval, 'drafts': drafts, 'rejected': rejected, 'needs-revision': needsRevision };
+        qsContent.innerHTML = renderList(listMap[which]||[]);
+        bindQuoteActions(qsContent, currentUser, currentRole, container);
+      });
     });
-  });
-  bindQuoteActions(qsContent, currentUser, currentRole, container);
+    bindQuoteActions(qsContent, currentUser, currentRole, container);
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state"><p>Error: ${err.message}</p></div>`;
+  }
 }
 
 // Show + copy the public client order-tracking link (reuses the shared modal).
@@ -10269,20 +10332,20 @@ window.renderApprovals = async function(currentUser) {
   // runs, which happens immediately below; any later re-visit to the 'all' tab
   // refetches fresh data the normal way.
   const [sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, poSnap2, raiseSnap2] = await Promise.all([
-    db.collection('signup_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
-    db.collection('attendance_extensions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
-    db.collection('cash_advances').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
-    db.collection('submissions').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
-    db.collection('tasks').where('status','==','review').get().catch(()=>({size:0,docs:[]})),
-    db.collection('payroll_delete_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
-    db.collection('finance_delete_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
-    db.collection('approval_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
-    db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
-    db.collection('bk_quotes').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
-    db.collection('clients').where('deleteRequested','==',true).get().catch(()=>({size:0,docs:[]})),
-    db.collection('leave_requests').where('status','==','pending').get().catch(()=>({size:0,docs:[]})),
-    db.collection('purchase_requisitions').where('approvalStatus','==','pending').get().catch(()=>({size:0,docs:[]})),
-    db.collection('pending_raises').where('status','==','pending_approval').get().catch(()=>({size:0,docs:[]}))
+    db.collection('signup_requests').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
+    db.collection('attendance_extensions').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
+    db.collection('cash_advances').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
+    db.collection('submissions').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
+    db.collection('tasks').where('status','==','review').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
+    db.collection('payroll_delete_requests').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
+    db.collection('finance_delete_requests').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
+    db.collection('approval_requests').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
+    db.collection('bs_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
+    db.collection('bk_quotes').where('deleteRequested','==',true).get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
+    db.collection('clients').where('deleteRequested','==',true).get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
+    db.collection('leave_requests').where('status','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
+    db.collection('purchase_requisitions').where('approvalStatus','==','pending').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};}),
+    db.collection('pending_raises').where('status','==','pending_approval').get().catch(e=>{console.error('approval count query failed',e);return {size:0,docs:[]};})
   ]);
   let _cachedAllSnaps = { sgSnap, atSnap, caSnap2, subSnap2, reviewTasksSnap, finReqSnap2, finDelSnap2, qApprSnap2, delQSnap2, delBKQSnap2, delCSnap2, leaveSnap2, raiseSnap2, poSnap2 };
   const pendingSignups = sgSnap.size || 0;
@@ -13313,7 +13376,11 @@ async function advanceProjectStage(p, nextId){
 }
 
 async function openProjectBillingModal(p){
-  const bal=p.arBalance||0;
+  // M7 fix — derive the balance the same way the KPI does (contract − collected,
+  // ~renderProjectLifecycle's arTotal), not the stored arBalance field (known to
+  // drift from the real payment history). Feeds both the displayed balance and
+  // the amount input's default below.
+  const bal=Math.max(0,(p.contractAmount||0)-(p.amountCollected||0));
   const bankOpts = await window.BankAccounts.optionsHTML();
   openPage(`${emojiIcon('💵',16)} Record Payment — `+escHtml(p.clientName||''), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract ₱${fmt(p.contractAmount||0)} · Collected ₱${fmt(p.amountCollected||0)} · <strong>Balance ₱${fmt(bal)}</strong></div>
@@ -13770,38 +13837,57 @@ async function consumeProductionMaterials(order) {
   rawMats.forEach(m => { (byItem[m.itemId] ||= { ...m, qty: 0 }).qty += Number(m.qty) || 0; });
   const mats = Object.values(byItem);
   if (!mats.length) return { ok: false, reason: 'No materials listed.' };
-  if (order.materialsConsumed) return { ok: false, reason: 'Already consumed.' };
-  // Resolve current unit costs from inventory
-  const snaps = await Promise.all(mats.map(m => db.collection('inventory_items').doc(m.itemId).get().catch(() => null)));
-  let cos = 0;
-  const batch = db.batch();
-  mats.forEach((m, i) => {
-    const s = snaps[i];
-    const unitCost = (s && s.exists) ? (Number(s.data().unitCost) || 0) : (Number(m.unitCost) || 0);
-    const q = Number(m.qty) || 0;
-    cos += unitCost * q;
-    if (s && s.exists) {
-      batch.update(db.collection('inventory_items').doc(m.itemId), { qty: firebase.firestore.FieldValue.increment(-q) });
-      // Movement row joins the SAME atomic batch — stock change and its log
-      // entry can never desync (v12 WS29). Deterministic id + the
-      // materialsConsumed flag (also in this batch) make re-runs impossible.
-      batch.set(db.collection('stock_movements').doc(`CONS_${order.id}_${m.itemId}`),
-        window.buildStockMovement({
-          itemId: m.itemId, itemName: (s.data().name) || m.name || '',
-          type: 'out', qty: q, source: 'consume',
-          refNumber: `POCOS-${order.id}`,
-          project: order.client || order.title || '',
-          note: `Production ${order.orderNo || order.id}`,
-          unitCost, qtyAfter: (Number(s.data().qty) || 0) - q
-        }));
+  if (order.materialsConsumed) return { ok: false, reason: 'Already consumed.' }; // fast pre-check — the transaction below re-checks authoritatively
+  // H11 fix — the stock decrement + materialsConsumed flag now commit inside ONE
+  // transaction (same idempotent-transaction shape as receiveLineIntoItem uses
+  // elsewhere in this file for stock receiving): a fresh re-read of
+  // production_orders catches a concurrent consume the
+  // caller's possibly-stale `order.materialsConsumed` flag can't, closing the
+  // double-decrement race a batch (built from a pre-transaction read) couldn't.
+  // Firestore transactions can't hold a batch, so this is read-then-write on `tx`
+  // instead — all reads (production_orders + every inventory_items doc) happen
+  // before any write, matching Ledger.postMulti's shape (finance-ledger.js).
+  const poRef = db.collection('production_orders').doc(order.id);
+  const cos = await db.runTransaction(async (tx) => {
+    const poSnap = await tx.get(poRef);
+    if (!poSnap.exists || poSnap.data().materialsConsumed) return null; // already consumed (or gone) — idempotent no-op
+
+    const reads = [];
+    for (const m of mats) {
+      const ref = db.collection('inventory_items').doc(m.itemId);
+      reads.push({ m, ref, snap: await tx.get(ref) });
     }
-  });
-  batch.update(db.collection('production_orders').doc(order.id), {
-    materialsConsumed: true,
-    materialsConsumedAt: firebase.firestore.FieldValue.serverTimestamp(),
-    materialsCost: cos
-  });
-  await batch.commit(); // stock + flag atomic — can't double-decrement
+
+    let txCos = 0;
+    reads.forEach(({ m, ref, snap: s }) => {
+      const unitCost = (s && s.exists) ? (Number(s.data().unitCost) || 0) : (Number(m.unitCost) || 0);
+      const q = Number(m.qty) || 0;
+      txCos += unitCost * q;
+      if (s && s.exists) {
+        tx.update(ref, { qty: firebase.firestore.FieldValue.increment(-q) });
+        // Movement row joins the SAME transaction — stock change and its log
+        // entry can never desync (v12 WS29). Deterministic id + the
+        // materialsConsumed flag (also in this transaction) make re-runs impossible.
+        tx.set(db.collection('stock_movements').doc(`CONS_${order.id}_${m.itemId}`),
+          window.buildStockMovement({
+            itemId: m.itemId, itemName: (s.data().name) || m.name || '',
+            type: 'out', qty: q, source: 'consume',
+            refNumber: `POCOS-${order.id}`,
+            project: order.client || order.title || '',
+            note: `Production ${order.orderNo || order.id}`,
+            unitCost, qtyAfter: (Number(s.data().qty) || 0) - q
+          }));
+      }
+    });
+
+    tx.update(poRef, {
+      materialsConsumed: true,
+      materialsConsumedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      materialsCost: txCos
+    });
+    return txCos;
+  }); // stock + flag atomic — can't double-decrement
+  if (cos == null) return { ok: false, reason: 'Already consumed.' };
   // Post COS to the ledger, idempotent by ref. Best-effort: the ledger is
   // finance-write-gated, so a plain Production employee can't post it — stock is
   // still deducted and materialsCost is recorded on the order for finance to see.
@@ -15222,6 +15308,32 @@ async function recordPurchaseDisbursement(p, currentUser, onDone) {
       }
       const dueDate = document.getElementById('rec-date').value;
       await window.assertPeriodOpen(dueDate);
+      // H10 fix — a fresh transactional re-check + claim of recordedToFinance, so
+      // two Finance users racing to post the same PR can't both create a CDJ row
+      // + ledger entry. The old flow only ever read the flag from the `p` object
+      // already in memory (never re-read), then wrote it AFTER the money had
+      // already moved, with its own write wrapped in .catch(()=>{}) — no guard
+      // at all. Claiming the flag INSIDE the transaction, before any CDJ/ledger
+      // write happens, closes the race; only one of two concurrent transactions
+      // can win it (Firestore retries the loser with a fresh read).
+      const prRef = db.collection('purchase_requisitions').doc(p.id);
+      const alreadyRecorded = await db.runTransaction(async (tx) => {
+        const prSnap = await tx.get(prRef);
+        if (prSnap.exists && prSnap.data().recordedToFinance) return true;
+        tx.update(prRef, {
+          recordedToFinance: true,
+          recordedToFinanceAt: firebase.firestore.FieldValue.serverTimestamp(),
+          recordedBy: currentUser.uid,
+          recordedByName: window.userProfile?.displayName || currentUser.email
+        });
+        return false;
+      });
+      if (alreadyRecorded) {
+        closeModal();
+        Notifs.showToast('This purchase was already recorded to Finance.', 'error');
+        onDone && onDone();
+        return;
+      }
       const vatTreatment = document.getElementById('rec-vat').value;
       const inputVat = vatTreatment === 'exempt' ? 0 : window.vatSplit(amt,'inclusive').vat;
       // acct==='inventory' still writes the amount into debitMaterial (so legacy
@@ -15246,15 +15358,12 @@ async function recordPurchaseDisbursement(p, currentUser, onDone) {
       };
       const cdjRef = await db.collection('cash_disbursement_journal').add(cdjData);
       await postCDJToLedger(cdjRef.id, cdjData); // also mirror into the ledger (unless pure A/P)
-      // Stamp the purchase as recorded so it can't be silently double-posted.
-      // (Rules let Finance write only these bookkeeping fields.)
+      // The recordedToFinance flag itself was already claimed transactionally
+      // above (before this write could race against anyone) — this just stamps
+      // the resulting CDJ id back onto the PR for cross-reference.
       await db.collection('purchase_requisitions').doc(p.id).update({
-        recordedToFinance: true,
-        recordedToFinanceAt: firebase.firestore.FieldValue.serverTimestamp(),
-        recordedBy: currentUser.uid,
-        recordedByName: window.userProfile?.displayName || currentUser.email,
         cdjEntryId: cdjRef.id
-      }).catch(() => {}); // journal post already succeeded — don't fail the action on the flag write
+      }).catch(() => {}); // journal post + the recordedToFinance claim already succeeded — don't fail the action over this cross-reference write
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
       closeModal();
       Notifs.success('Posted to Cash Disbursement Journal ✓');

@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.139';
+window.APP_VERSION = '12.0.140';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -468,6 +468,12 @@ window.fetchUsersWithPayroll = async function() {
 // Usage: window.dbCachedGet('users', () => db.collection('users').get(), 30000)
 ;(function() {
   const _store = {};
+  // Negative cache: brief backoff for keys whose fetch just failed (e.g.
+  // permission-denied), so a hot key isn't re-hit on every render/navigation.
+  // Never cached permanently — entries expire after FAIL_TTL and are cleared
+  // as soon as a fetch for that key succeeds or the key is explicitly invalidated.
+  const _failStore = {};
+  const FAIL_TTL = 4000;
   window.dbCachedGet = async function(key, fetcher, ttlMs = 30000) {
     // The 'users' key must always carry merged pay data — and consistently,
     // regardless of which call site populates the cache first — so force the
@@ -479,11 +485,17 @@ window.fetchUsersWithPayroll = async function() {
     if (entry && Date.now() - entry.ts < ttlMs) return entry.data;
     // Deduplicate concurrent requests for the same key
     if (entry && entry.pending) return entry.pending;
+    // Still within the post-failure backoff window — reject immediately
+    // instead of re-hitting Firestore for a key that just errored.
+    const fail = _failStore[key];
+    if (fail && Date.now() - fail.ts < FAIL_TTL) throw fail.err;
     const promise = fetcher().then(data => {
       _store[key] = { data, ts: Date.now(), pending: null };
+      delete _failStore[key];
       return data;
     }).catch(err => {
       delete _store[key];
+      _failStore[key] = { ts: Date.now(), err };
       throw err;
     });
     _store[key] = { data: null, ts: 0, pending: promise };
@@ -495,12 +507,18 @@ window.fetchUsersWithPayroll = async function() {
     'expenses': { alsoKeys: ['expenses-pending', 'expenses-recent'] },
   };
   window.dbCacheInvalidate = function(key) {
-    if (!key) { Object.keys(_store).forEach(k => delete _store[k]); return; }
+    if (!key) {
+      Object.keys(_store).forEach(k => delete _store[k]);
+      Object.keys(_failStore).forEach(k => delete _failStore[k]);
+      return;
+    }
     delete _store[key];
+    delete _failStore[key];
     const a = _alias[key];
     if (a) {
-      (a.alsoKeys || []).forEach(k => delete _store[k]);
+      (a.alsoKeys || []).forEach(k => { delete _store[k]; delete _failStore[k]; });
       (a.prefixes || []).forEach(pfx => Object.keys(_store).forEach(k => { if (k.indexOf(pfx) === 0) delete _store[k]; }));
+      (a.prefixes || []).forEach(pfx => Object.keys(_failStore).forEach(k => { if (k.indexOf(pfx) === 0) delete _failStore[k]; }));
     }
   };
 })();
@@ -510,7 +528,11 @@ window.fetchUsersWithPayroll = async function() {
 // win-rate calc, and the client modal's 'filed'/'approved'-as-won calc.
 // 'accepted' kept for legacy `quotes` docs only.
 window.isQuoteWon  = q => !!(q && (q.salesOrderId || q.status === 'won' || q.status === 'accepted'));
-window.isQuoteLost = q => !!(q && q.status === 'rejected');
+// isQuoteWon short-circuits true on salesOrderId regardless of status, so a doc
+// with BOTH salesOrderId and status:'rejected' would otherwise satisfy isQuoteLost
+// too (double-counted in win-rate). Excluding isQuoteWon(q) here keeps won/lost
+// mutually exclusive; isQuoteOpen's own won/lost exclusion is unaffected.
+window.isQuoteLost = q => !!(q && q.status === 'rejected' && !window.isQuoteWon(q));
 window.isQuoteOpen = q => !!q && !window.isQuoteWon(q) && !window.isQuoteLost(q);
 // THE one client-name normalizer — every join and dedupe uses this, nothing else.
 window.clientNameKey = s => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');

@@ -294,7 +294,14 @@
     if (typeof window.financeDelete !== 'function') {
       throw new Error('Ledger.remove: window.financeDelete is not loaded (script order — finance-ledger.js loads before departments.js, which defines it; call this after app init, not at module scope)');
     }
-    return window.financeDelete('ledger', sanitize(ref));
+    // financeDelete takes an OPTIONS OBJECT keyed by docId (not a positional
+    // collection+ref), so resolve the refNumber to its doc id first — same as
+    // departments.js _deleteLedgerByRef. (Was `financeDelete('ledger', ref)`,
+    // which passed the string 'ledger' as opts → collection/docId undefined.)
+    var r = sanitize(ref);
+    var ls = await db.collection('ledger').where('refNumber', '==', r).limit(1).get().catch(function () { return { docs: [] }; });
+    if (!ls.docs.length) return 'not_found';
+    return window.financeDelete({ collection: 'ledger', docId: ls.docs[0].id, label: 'ledger entry "' + r + '"' });
   }
 
   function _selfTest() {

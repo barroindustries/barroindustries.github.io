@@ -16,7 +16,9 @@ window.Drive = (() => {
   // ── Upload to Firebase Storage ─────────────────────
   async function uploadToFirebaseStorage(file, department, subfolder) {
     if (typeof storage === 'undefined') throw new Error('Firebase Storage not initialized');
-    const path = `${department || 'general'}/${subfolder || 'files'}/${Date.now()}_${file.name}`;
+    // Extra random token (not just Date.now()) so two same-named files picked
+    // in the same millisecond don't collide and silently overwrite each other.
+    const path = `${department || 'general'}/${subfolder || 'files'}/${Date.now()}_${Math.random().toString(36).slice(2,8)}_${file.name}`;
     const ref  = storage.ref(path);
 
     return new Promise((resolve, reject) => {

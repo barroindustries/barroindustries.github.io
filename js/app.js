@@ -166,17 +166,28 @@ function startPresenceHeartbeat(uid) {
 let _forceLogoutUnsub = null;
 function startForceLogoutListener(uid) {
   if (_forceLogoutUnsub) _forceLogoutUnsub();
-  // Record when this session started so we only react to NEW force-logout events
-  const sessionStart = Date.now();
+  // Change-detection instead of wall-clock comparison — comparing client
+  // Date.now() against the server forceLogoutAt timestamp is unreliable on
+  // clock-skewed devices. Capture the FIRST snapshot's forceLogoutAt as a
+  // baseline (no clocks involved), then only sign out when a LATER snapshot
+  // reports a strictly greater value — i.e. a force-logout event that
+  // arrived after this listener attached.
+  let baselineFL = undefined;
   _forceLogoutUnsub = db.collection('settings').doc('system').onSnapshot(snap => {
     const data = snap.data();
-    if (!data?.forceLogoutAt) return;
-    const flTime = data.forceLogoutAt.toDate?.()?.getTime?.() || 0;
-    // If the force-logout was triggered after this session started, sign out
-    if (flTime > sessionStart && data.excludeUid !== uid) {
-      Notifs.stopListener();
-      auth.signOut();
-      Notifs.showToast('You have been signed out by an administrator.', 'info');
+    const flTime = data?.forceLogoutAt?.toDate?.()?.getTime?.() || 0;
+    // First snapshot just establishes the baseline — never sign out on it.
+    if (baselineFL === undefined) {
+      baselineFL = flTime;
+      return;
+    }
+    if (flTime > baselineFL) {
+      baselineFL = flTime;
+      if (data?.excludeUid !== uid) {
+        Notifs.stopListener();
+        auth.signOut();
+        Notifs.showToast('You have been signed out by an administrator.', 'info');
+      }
     }
   }, () => {});
   Session.addCleanup(() => { if (_forceLogoutUnsub) { _forceLogoutUnsub(); _forceLogoutUnsub = null; } });
@@ -415,14 +426,21 @@ function startClaimsListener(uid) {
       // re-trigger the re-gate below (loop guard).
       const roleOrDeptsChanged = role !== _claimsBaselineRole || depts !== _claimsBaselineDepts;
       _claimsBaselineRole = role; _claimsBaselineDepts = depts;
-      if (auth.currentUser) auth.currentUser.getIdToken(true).catch(() => {});
-      // Phase 50/65 re-gate: a role/department change made mid-session (e.g.
-      // removed from Finance) can leave the currently-open page showing content
-      // the user no longer has access to. Re-run the page's own access gate
-      // once the forced token refresh has re-fired onAuthStateChanged and
-      // loadUserProfile has updated currentRole/currentDepts+buildNav.
-      if (roleOrDeptsChanged && window.currentPage) {
-        setTimeout(() => { if (window.currentPage) navigateTo(window.currentPage, { replace: true }); }, 800);
+      if (auth.currentUser) {
+        const refreshP = auth.currentUser.getIdToken(true).catch(() => {});
+        // Phase 50/65 re-gate: a role/department change made mid-session (e.g.
+        // removed from Finance) can leave the currently-open page showing content
+        // the user no longer has access to. Chain off the SAME token-refresh
+        // promise and explicitly await loadUserProfile() (the function that
+        // actually repopulates currentRole/currentDepts) before re-running the
+        // page's access gate — replaces a blind setTimeout(...,800) guess that
+        // could race slow networks and let navigateTo fire against stale
+        // currentRole/currentDepts, briefly showing a stale over-privileged page.
+        if (roleOrDeptsChanged && window.currentPage) {
+          refreshP
+            .then(() => auth.currentUser ? loadUserProfile(auth.currentUser) : null)
+            .then(() => { if (window.currentPage) navigateTo(window.currentPage, { replace: true }); });
+        }
       }
     }
   }, () => {});

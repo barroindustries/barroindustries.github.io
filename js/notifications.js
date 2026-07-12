@@ -474,11 +474,19 @@ window.Notifs = (() => {
       try {
         const snap = await db.collection('notifications').doc(uid).collection('items')
           .where('chatId', '==', chatId).where('type', '==', 'chat_message').get();
-        const matches = snap.docs.filter(d => {
+        // Chat throttles to one notif per 60s, so a 15s window can otherwise match a
+        // DIFFERENT still-live message's notif. Tighten: the chat notif is always
+        // written AFTER its message (same sendMessage() call), so require
+        // createdAt >= messageCreatedAtMs, and delete only the single CLOSEST match
+        // (min |ts - messageCreatedAtMs|) rather than every match in the window.
+        let closest = null, closestDelta = Infinity;
+        snap.docs.forEach(d => {
           const ts = d.data().createdAt?.toMillis?.();
-          return ts != null && Math.abs(ts - messageCreatedAtMs) <= DELETE_FOR_MESSAGE_WINDOW_MS;
+          if (ts == null || ts < messageCreatedAtMs) return;
+          const delta = Math.abs(ts - messageCreatedAtMs);
+          if (delta <= DELETE_FOR_MESSAGE_WINDOW_MS && delta < closestDelta) { closest = d; closestDelta = delta; }
         });
-        await Promise.all(matches.map(d => d.ref.delete().catch(() => {})));
+        if (closest) await closest.ref.delete().catch(() => {});
       } catch (_) { /* best-effort — a stray undeleted notif is harmless */ }
     }));
   }
@@ -502,9 +510,13 @@ window.Notifs = (() => {
 
   // ── Send to department ────────────────────────
   async function sendToDept(department, notifData, opts = {}) {
+    // Track whether either lookup query actually ERRORED (e.g. PERMISSION_DENIED),
+    // as distinct from a query that legitimately succeeded with zero results — an
+    // error must never be reported to the fallback recipient as "no user assigned".
+    let lookupError = null;
     const [snap1, snap2] = await Promise.all([
-      db.collection('users').where('department', '==', department).get().catch(()=>({docs:[]})),
-      db.collection('users').where('departments', 'array-contains', department).get().catch(()=>({docs:[]}))
+      db.collection('users').where('department', '==', department).get().catch(e => { lookupError = e; return {docs:[]}; }),
+      db.collection('users').where('departments', 'array-contains', department).get().catch(e => { lookupError = e; return {docs:[]}; })
     ]);
     const seen = new Set();
     const allDocs = [...snap1.docs, ...snap2.docs].filter(d => { if (seen.has(d.id)) return false; seen.add(d.id); return true; });
@@ -513,7 +525,15 @@ window.Notifs = (() => {
     // instead so e.g. a job sent to Production with no Production user is never lost.
     if (!allDocs.length) {
       if (opts.fallbackToOwner) {
-        await sendToOwner({ ...notifData, body: `[no ${department} user assigned] ${notifData.body || ''}`.slice(0, 2000) });
+        if (lookupError) {
+          // A failed lookup is NOT the same as a genuinely empty department — real
+          // members may exist and simply weren't readable here. Warn loudly and use
+          // a neutral note instead of falsely claiming no one is assigned.
+          console.warn(`sendToDept: user lookup for "${department}" failed — routing to owner without asserting no members exist`, lookupError);
+          await sendToOwner({ ...notifData, body: `[${department} recipient lookup failed] ${notifData.body || ''}`.slice(0, 2000) });
+        } else {
+          await sendToOwner({ ...notifData, body: `[no ${department} user assigned] ${notifData.body || ''}`.slice(0, 2000) });
+        }
       }
       return;
     }
@@ -537,7 +557,7 @@ window.Notifs = (() => {
 
   // ── Send to all users ────────────────────────
   async function sendToAll(notifData) {
-    const snap = await db.collection('users').get();
+    const snap = await db.collection('users').get().catch(()=>({docs:[]}));
     const dedupKey = notifData.dedupKey || _defaultDedupKey(notifData);
     const docId = _dedupDocId(dedupKey);
     const senderUid = (window.currentUser && window.currentUser.uid) ? { senderUid: window.currentUser.uid } : {};

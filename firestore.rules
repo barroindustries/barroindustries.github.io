@@ -1488,6 +1488,17 @@ service cloud.firestore {
     // a single-segment wildcard guarded by coll.matches(...). This only grants
     // access for those families; all explicitly-named collections above keep
     // their own (stricter) rules via the permissive union of matching rules.
+    //
+    // ⚠ WARNING — union-permit trap: Firestore grants a request if ANY match
+    // block for that path evaluates to true. That means ANY future collection
+    // whose name literally starts with "files_" or "budgets_" is automatically
+    // covered by the two wildcard blocks below (coll.matches('files_.*') /
+    // coll.matches('budgets_.*')), even if you intend it to be a separate,
+    // more-restricted collection — there is no way to "opt out" a same-prefixed
+    // collection from these rules. Before naming a new collection with either
+    // prefix, check whether the files_*/budgets_* read/write semantics below
+    // are actually what you want for it (see the Files Hub comment below for
+    // the pattern of deliberately AVOIDING the files_ prefix to escape this).
     match /{coll}/{docId} {
       // Files: readable by internal staff; you own what you upload; owner/admin
       // edit or remove. v12 WS19: added !isPartner() — a files_* doc's `url`
