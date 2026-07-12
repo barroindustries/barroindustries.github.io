@@ -2734,9 +2734,11 @@ async function renderPresidentDashboard() {
     const overdueTasks= openTasks.filter(t=>t.dueDate && t.dueDate < todayStr);
     const highPriority= openTasks.filter(t=>t.priority==='high').length;
     const pendingSubs = subsSnap.docs.filter(d=>d.data().status==='pending').length;
-    // Active pipeline = value of all non-rejected quotes (BK + BS), not the legacy `quotes` collection
+    // Active pipeline = value of all non-rejected quotes (BK + BS), not the legacy `quotes` collection.
+    // v13 fix: sum total||grandTotal||amount (many BS/BK quotes store the value under grandTotal,
+    // not total) — the old `q.total||0` counted those as zero, so the pipeline under-reflected reality.
     const activeQuotes = quotesSnap.docs.map(d=>d.data()).filter(q=>q.status!=='rejected');
-    const totalQuotes = activeQuotes.reduce((s,q)=>s+(q.total||0),0);
+    const totalQuotes = activeQuotes.reduce((s,q)=>s+(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0),0);
     const pendingApprovals = approvalsSnap.size;
     const pendingCA   = caSnap.size;
     const pendingExtensions = extSnap.size || 0;
@@ -9173,7 +9175,7 @@ window.migrateStrandedBKQuotes = async function () {
 // we let it sit "waiting" and prompt the user to reload — unless nobody's signed
 // in yet (login screen), in which case there's no session to disrupt.
 let _swReloading = false; // guards against a reload loop if controllerchange fires twice
-function renderSwUpdateBanner(reg) {
+function renderSwUpdateBanner(reg, newWorker) {
   if (document.getElementById('sw-update-banner')) return;
   const div = document.createElement('div');
   div.id = 'sw-update-banner';
@@ -9183,13 +9185,38 @@ function renderSwUpdateBanner(reg) {
   if (window.lucide) lucide.createIcons({ nodes: [div] });
   div.querySelector('button').onclick = () => {
     if (_swReloading) return;
-    _swReloading = true;
-    reg.waiting?.postMessage({ type: 'SKIP_WAITING' });
+    // Target whichever worker is actually waiting right now — reg.waiting may not be
+    // populated yet in some browsers even though we captured newWorker earlier, so fall
+    // back to the captured reference.
+    const waitingWorker = reg.waiting || newWorker;
+    if (waitingWorker) {
+      _swReloading = true;
+      waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+      // Safety net: if controllerchange never fires (e.g. the worker never actually
+      // takes control), don't leave the user stuck on a dead banner — reload anyway.
+      setTimeout(() => { if (_swReloading) location.reload(); }, 2000);
+    } else {
+      // No waiting worker to message — a plain reload picks up the new SW on next load.
+      location.reload();
+    }
   };
   document.body.appendChild(div);
 }
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then(reg => {
+    // Case: a new SW finished installing and started waiting BEFORE this page loaded.
+    // The updatefound/statechange events below only fire for installs that happen
+    // AFTER we attach the listener, so this case is otherwise silently missed —
+    // leaving a banner that never appears or a stuck state.
+    if (reg.waiting && navigator.serviceWorker.controller) {
+      const loginScreen = document.getElementById('login-screen');
+      const atLogin = loginScreen && !loginScreen.classList.contains('hidden');
+      if (atLogin) {
+        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      } else {
+        renderSwUpdateBanner(reg, reg.waiting);
+      }
+    }
     reg.addEventListener('updatefound', () => {
       const newWorker = reg.installing;
       if (!newWorker) return;
@@ -9202,7 +9229,7 @@ if ('serviceWorker' in navigator) {
             // Nobody's mid-session — apply silently, no banner.
             newWorker.postMessage({ type: 'SKIP_WAITING' });
           } else {
-            renderSwUpdateBanner(reg);
+            renderSwUpdateBanner(reg, newWorker);
           }
         }
       });

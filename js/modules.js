@@ -2720,8 +2720,7 @@ window.renderFilesHub = function(){
     const fc = document.getElementById('fh-hub-content');
     const q = (document.getElementById('fh-hub-search')?.value||'').trim().toLowerCase();
     const showing = q ? allScopeFiles.filter(f=>hit(q,f.name,f.description,f.scope,f.department)) : allScopeFiles;
-    if (!showing.length) { fc.innerHTML = window.renderEmptyState({icon:'📁', title:'No files found', hint:'Try a different scope, or upload the first file here.'}); return; }
-    if (window.lucide) lucide.createIcons({ nodes: [fc] });
+    if (!showing.length) { fc.innerHTML = window.renderEmptyState({icon:'📁', title:'No files found', hint:'Try a different scope, or upload the first file here.'}); if (window.lucide) lucide.createIcons({ nodes: [fc] }); return; }
     _gsFilesStashHub = {}; showing.forEach(f=>{ _gsFilesStashHub[f.id]=f; });
     fc.innerHTML = `<div class="table-wrap"><table class="data-table">
       <thead><tr><th>Name</th><th>Scope</th><th>Dept</th><th>Uploader</th><th>Date</th><th></th></tr></thead>
