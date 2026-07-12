@@ -4105,7 +4105,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           });
         }
 
-        document.getElementById('save-ep-btn').addEventListener('click', async () => {
+        document.getElementById('save-ep-btn').addEventListener('click', () => window.busy(document.getElementById('save-ep-btn'), async () => {
           // All pay — base, allowance, and government deductions — lives in the
           // protected payroll/{uid} doc (finance/admin write), not the users doc.
           // v12 WS23 — base salary is NOT writable here (approval-routed via 💸
@@ -4157,7 +4157,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 
           closeModal(); Notifs.showToast('Payroll updated!');
           loadPayrollTable(month);
-        });
+        }));
       });
     });
   }
@@ -4218,8 +4218,10 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           <select id="pr-bankacct" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
       `, `<button class="btn-danger" id="pr-disburse-go">Disburse</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
       document.getElementById('pr-disburse-go').addEventListener('click', async ()=>{
+        const goBtn = document.getElementById('pr-disburse-go');
+        goBtn.disabled = true; // synchronous UI-side lock (Part E Phase 11 covers the transactional half)
         const sel = document.getElementById('pr-bankacct').value;
-        if (!sel && (await window.BankAccounts.list()).length) { Notifs.showToast('Select the paying account.','error'); return; }
+        if (!sel && (await window.BankAccounts.list()).length) { Notifs.showToast('Select the paying account.','error'); goBtn.disabled = false; return; }
         const acct = await window.BankAccounts.pick(sel);
         closeModal();
         const dbtn = document.getElementById('pr-disburse-btn');
@@ -4375,7 +4377,7 @@ async function renderTaxesTab(container, currentUser, currentRole) {
     `, `<button class="btn-primary" id="save-tax-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     let taxFile = null;
     Drive.renderUploadArea('tax-file-area', r=>{taxFile=r;},{label:'Attach BIR receipt/form',dept:'Finance',subfolder:'Taxes'});
-    document.getElementById('save-tax-btn').addEventListener('click', async () => {
+    document.getElementById('save-tax-btn').addEventListener('click', () => window.busy(document.getElementById('save-tax-btn'), async () => {
       await db.collection('tax_records').add({
         period:   document.getElementById('tax-period').value.trim(),
         type:     document.getElementById('tax-type').value,
@@ -4388,7 +4390,7 @@ async function renderTaxesTab(container, currentUser, currentRole) {
       });
       closeModal(); Notifs.showToast('Tax record saved!');
       renderTaxesTab(container, currentUser, currentRole);
-    });
+    }));
   });
 
   // Edit (finance) / Delete (President approval)
@@ -4801,7 +4803,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
     });
     acctTypeSel.addEventListener('change', () => { acctSel.innerHTML = acctOptsFor(acctTypeSel.value); ledUpdateVatVisibility(); });
     ledUpdateVatVisibility();
-    document.getElementById('save-led-btn').addEventListener('click', async () => {
+    document.getElementById('save-led-btn').addEventListener('click', () => window.busy(document.getElementById('save-led-btn'), async () => {
       const date = document.getElementById('led-date').value;
       try { await window.assertPeriodOpen(date); } catch (e) { return; } // toast already shown
       await db.collection('ledger').add({
@@ -4823,7 +4825,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
       closeModal(); Notifs.showToast('Ledger entry saved!');
       renderLedgerTab(container, currentUser, currentRole);
-    });
+    }));
   });
 
   // Edit (finance) / Delete (President approval) — a row is either a Finance
@@ -5136,7 +5138,7 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
     `, `<button class="btn-primary" id="save-crj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     window.wireBirOrButtons && window.wireBirOrButtons();
 
-    document.getElementById('save-crj-btn').addEventListener('click', async () => {
+    document.getElementById('save-crj-btn').addEventListener('click', () => window.busy(document.getElementById('save-crj-btn'), async () => {
       const customer = document.getElementById('crj-customer').value.trim();
       const debitCash = parseFloat(document.getElementById('crj-cash').value)||0;
       if (!customer) { Notifs.showToast('Enter a customer name.','error'); return; }
@@ -5165,7 +5167,7 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
       await postCRJToLedger(crjDoc.id, crjData); // mirror new income into the ledger
       closeModal(); Notifs.showToast('Cash receipt entry saved!');
       renderCashReceiptJournal(container, currentUser, currentRole);
-    });
+    }));
   });
 
   if (isPriv) {
@@ -5259,7 +5261,7 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
         <select id="cdj-bank" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
     `, `<button class="btn-primary" id="save-cdj-btn">Save Entry</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
-    document.getElementById('save-cdj-btn').addEventListener('click', async () => {
+    document.getElementById('save-cdj-btn').addEventListener('click', () => window.busy(document.getElementById('save-cdj-btn'), async () => {
       const payee = document.getElementById('cdj-payee').value.trim();
       const creditCash = parseFloat(document.getElementById('cdj-cash').value)||0;
       if (!payee) { Notifs.showToast('Enter a payee name.','error'); return; }
@@ -5296,7 +5298,7 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
       await postCDJToLedger(cdjDoc.id, cdjData); // mirror the expense into the ledger
       closeModal(); Notifs.showToast('Cash disbursement entry saved!');
       renderCashDisbursementJournal(container, currentUser, currentRole);
-    });
+    }));
   });
 
   if (isPriv) {
@@ -5360,6 +5362,43 @@ async function renderRecordsTab(container, currentUser, currentRole) {
     </div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
+  document.getElementById('rec-filter').addEventListener('change', e => {
+    const fv = e.target.value;
+    const filtered = fv ? records.filter(r => (r.type||'')===fv) : records;
+    const tbody = document.getElementById('rec-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = filtered.map(r=>`<tr>
+              <td>${r.date||'—'}</td>
+              <td><span class="badge badge-blue">${escHtml(r.type||'—')}</span></td>
+              <td>${escHtml(r.description||'—')}</td>
+              <td>₱${fmt(r.amount)}</td>
+              <td>${escHtml(r.party||'—')}</td>
+              <td>${r.fileUrl?`<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm">${emojiIcon('📎',16)} View</a>`:'-'}</td>
+              <td style="font-size:11px">${escHtml(r.encodedByName||'—')}</td>
+              ${isPriv?`<td style="white-space:nowrap">
+                <button class="btn-secondary btn-sm rec-edit-btn" data-id="${r.id}">${emojiIcon('✎',16)}</button>
+                <button class="btn-danger btn-sm rec-del-btn" data-id="${r.id}" data-label="${escHtml((r.type||'record')+' — '+(r.description||r.id.slice(-5)))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
+              </td>`:''}
+            </tr>`).join('');
+    if (window.lucide) lucide.createIcons({ nodes: [tbody] });
+    if (isPriv) {
+      const redo = () => renderRecordsTab(container, currentUser, currentRole);
+      tbody.querySelectorAll('.rec-edit-btn').forEach(btn => btn.addEventListener('click', () => {
+        const r = records.find(x=>x.id===btn.dataset.id); if (!r) return;
+        window.financeEditModal({ collection:'finance_records', docId:r.id, title:'Record', onSaved:redo, fields:[
+          { key:'date', label:'Date', type:'date', value:r.date },
+          { key:'type', label:'Type', type:'select', value:r.type, options:['Receipt','Invoice','Official Receipt','Voucher','Contract','Other'] },
+          { key:'description', label:'Description', type:'text', value:r.description, full:true },
+          { key:'amount', label:'Amount (₱)', type:'number', value:r.amount },
+          { key:'party', label:'From / To', type:'text', value:r.party },
+          { key:'notes', label:'Notes', type:'textarea', value:r.notes, full:true }
+        ]});
+      }));
+      tbody.querySelectorAll('.rec-del-btn').forEach(btn => btn.addEventListener('click', () => {
+        window.financeDelete({ collection:'finance_records', docId:btn.dataset.id, label:`record "${btn.dataset.label}"`, onDone:redo });
+      }));
+    }
+  });
   document.getElementById('add-rec-btn').addEventListener('click', () => {
     openPage('Encode Record / Receipt', `
       <div class="form-row">
@@ -5381,7 +5420,7 @@ async function renderRecordsTab(container, currentUser, currentRole) {
     `, `<button class="btn-primary" id="save-rec-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     let recFile = null;
     Drive.renderUploadArea('rec-file-area', r=>{recFile=r;},{label:'Attach receipt scan / photo',dept:'Finance',subfolder:'Records'});
-    document.getElementById('save-rec-btn').addEventListener('click', async () => {
+    document.getElementById('save-rec-btn').addEventListener('click', () => window.busy(document.getElementById('save-rec-btn'), async () => {
       await db.collection('finance_records').add({
         date:         document.getElementById('rec-date').value,
         type:         document.getElementById('rec-type').value,
@@ -5396,7 +5435,7 @@ async function renderRecordsTab(container, currentUser, currentRole) {
       });
       closeModal(); Notifs.showToast('Record saved!');
       renderRecordsTab(container, currentUser, currentRole);
-    });
+    }));
   });
 
   if (isPriv) {
@@ -6186,7 +6225,7 @@ function openPayslipEdit(ps, currentUser, onSave) {
   ['pe-rph','pe-hrs','pe-ot','pe-allow','pe-sss','pe-ph','pe-pib','pe-ca','pe-loans','pe-tax','pe-paid']
     .forEach(id => document.getElementById(id).addEventListener('input', recompute));
 
-  document.getElementById('pe-save-btn').addEventListener('click', async () => {
+  document.getElementById('pe-save-btn').addEventListener('click', () => window.busy(document.getElementById('pe-save-btn'), async () => {
     const rph=num('pe-rph'), hrs=num('pe-hrs'), otT=num('pe-ot'), alT=num('pe-allow');
     const sss=num('pe-sss'), ph=num('pe-ph'), pib=num('pe-pib'), ca=num('pe-ca'), loans=num('pe-loans'), tax=num('pe-tax'), paid=num('pe-paid');
     const reg = parseFloat((rph*hrs).toFixed(2));
@@ -6224,7 +6263,7 @@ function openPayslipEdit(ps, currentUser, onSave) {
     closeModal();
     Notifs.showToast('Payslip updated.');
     onSave && onSave();
-  });
+  }));
 }
 
 function openPayslipGenerator(profile, currentUser, currentRole) {
@@ -8032,6 +8071,8 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
         by:     currentUser.uid
       };
       if (!(await confirmDialog({message:`Record payment of ₱${fmt(amt)} for "${escHtml(p.name)}"? This updates the project balance.`, html:true}))) return;
+      const payBtn = document.getElementById('save-pay-btn');
+      if (payBtn) payBtn.disabled = true; // guard against double-click double-posting
       try {
         const ref = db.collection('projects').doc(p.id);
         const saved = await db.runTransaction(async tx => {
@@ -8071,7 +8112,7 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
         } catch (ledErr) { console.warn('[design payment] ledger post skipped:', ledErr?.message||ledErr); }
         Notifs.showToast('Payment recorded','success');
         reopen();
-      } catch(e) { console.warn(e); Notifs.showToast('Could not save payment','error'); }
+      } catch(e) { console.warn(e); Notifs.showToast('Could not save payment','error'); if (payBtn) payBtn.disabled = false; }
     });
   });
 
@@ -8111,6 +8152,8 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
         createdAt:      today()
       };
       if (!(await confirmDialog({message:`Generate billing invoice ${inv.no} for ₱${fmt(amt)} (${escHtml(p.name||'')})?`, html:true}))) return;
+      const invBtn = document.getElementById('gen-inv-btn');
+      if (invBtn) invBtn.disabled = true; // guard against double-click double-posting
       try {
         const ref = db.collection('projects').doc(p.id);
         const saved = await db.runTransaction(async tx => {
@@ -8125,6 +8168,7 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
       } catch(e) {
         console.warn('Invoice not saved to project record:', e);
         Notifs.showToast('Could not save invoice — not recorded','error');
+        if (invBtn) invBtn.disabled = false;
         return;
       }
       openBillingInvoice(p, inv);
@@ -9131,7 +9175,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           closeModal(); loadITContent(currentUser, currentRole, 'Assets', canEdit);
         });
       });
-      document.querySelectorAll('.edit-asset-btn').forEach(btn => {
+      const bindAssetEditBtns = (scopeEl) => scopeEl.querySelectorAll('.edit-asset-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           const asset = assets.find(a=>a.id===btn.dataset.id);
           if (!asset) return;
@@ -9161,7 +9205,42 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           });
         });
       });
+      bindAssetEditBtns(content);
       if (window.lucide) lucide.createIcons({ nodes: [content] });
+      document.getElementById('it-asset-filter').addEventListener('change', e => {
+        const fv = e.target.value;
+        const filtered = fv==='all' ? assets : assets.filter(a => (a.status||'active')===fv);
+        const tbody = document.getElementById('it-asset-tbody');
+        if (!tbody) return;
+        tbody.innerHTML = !filtered.length ? `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px">No assets recorded</td></tr>`
+          : filtered.map(a=>`<tr>
+              <td>${escHtml(a.name||'—')}</td>
+              <td>${escHtml(a.type||'—')}</td>
+              <td><code style="font-size:11px">${escHtml(a.serial||'—')}</code></td>
+              <td>${escHtml(a.assignedTo||'—')}</td>
+              <td><span class="badge ${a.status==='active'?'badge-green':a.status==='maintenance'?'badge-orange':'badge-gray'}">${a.status||'active'}</span></td>
+              <td>${a.purchasedDate||'—'}</td>
+              <td><button class="btn-icon edit-asset-btn" data-id="${a.id}"><i data-lucide="pencil" style="width:14px;height:14px"></i></button></td>
+            </tr>`).join('');
+        if (window.lucide) lucide.createIcons({ nodes: [tbody] });
+        bindAssetEditBtns(tbody);
+      });
+    } else {
+      document.getElementById('it-asset-filter').addEventListener('change', e => {
+        const fv = e.target.value;
+        const filtered = fv==='all' ? assets : assets.filter(a => (a.status||'active')===fv);
+        const tbody = document.getElementById('it-asset-tbody');
+        if (!tbody) return;
+        tbody.innerHTML = !filtered.length ? `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">No assets recorded</td></tr>`
+          : filtered.map(a=>`<tr>
+              <td>${escHtml(a.name||'—')}</td>
+              <td>${escHtml(a.type||'—')}</td>
+              <td><code style="font-size:11px">${escHtml(a.serial||'—')}</code></td>
+              <td>${escHtml(a.assignedTo||'—')}</td>
+              <td><span class="badge ${a.status==='active'?'badge-green':a.status==='maintenance'?'badge-orange':'badge-gray'}">${a.status||'active'}</span></td>
+              <td>${a.purchasedDate||'—'}</td>
+            </tr>`).join('');
+      });
     }
     return;
   }
@@ -9875,7 +9954,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
   `, `<button class="btn-primary" id="so-save">Create &amp; Send to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
   let receipt=null;
   if(window.Drive?.renderUploadArea) Drive.renderUploadArea('so-receipt-upload',(r)=>{receipt=r;},{label:'Upload receipt (photo/PDF)',accept:'image/*,.pdf',dept:'Finance',subfolder:'SalesOrders'});
-  document.getElementById('so-save').addEventListener('click', async ()=>{
+  document.getElementById('so-save').addEventListener('click', () => window.busy(document.getElementById('so-save'), async ()=>{
     const err=document.getElementById('so-err');
     const contract=parseFloat(document.getElementById('so-contract').value)||0;
     const paid=parseFloat(document.getElementById('so-paid').value)||0;
@@ -9946,7 +10025,7 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
       if (trackUrl) window.showOrderTrackModal(trackUrl, proj.projectNo);
       else closeModal();
     }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
-  });
+  }));
 }
 
 // Finance/admin view of incoming sales orders — record income to the ledger.

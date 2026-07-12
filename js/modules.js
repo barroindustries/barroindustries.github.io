@@ -1691,7 +1691,7 @@ function openPresidentCashAdvanceModal(users) {
     </label>
   `, `<button class="btn-primary" id="save-pca-btn">Save Record</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
 
-  document.getElementById('save-pca-btn').addEventListener('click', async () => {
+  document.getElementById('save-pca-btn').addEventListener('click', () => window.busy(document.getElementById('save-pca-btn'), async () => {
     const uid     = document.getElementById('pca-uid').value;
     const amount  = parseFloat(document.getElementById('pca-amount').value)||0;
     const monthly = parseFloat(document.getElementById('pca-monthly').value)||0;
@@ -1736,7 +1736,7 @@ function openPresidentCashAdvanceModal(users) {
     closeModal();
     Notifs.showToast('Cash advance recorded!');
     window.renderCashAdvancePage();
-  });
+  }));
 }
 
 // ══════════════════════════════════════════════════
