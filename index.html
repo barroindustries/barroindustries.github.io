@@ -176,7 +176,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.85 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.86 · Barro Industries</div>
   </div>
 </div>
 
@@ -345,6 +345,9 @@
 <!-- v13 WS-H Phase 121-122 — renderEmptyState/withLoadingAndError. Uses window.emojiIcon/
      window.escHtml only at CALL time; placed right after config.js for clarity. -->
 <script defer src="js/ui-states.js"></script>
+<!-- v13 Part E Phase 40/115/116 — statusBadge2()/STATUS_META. Needs window.escHtml
+     (config.js) only; must load before departments.js, the first consumer. -->
+<script defer src="js/ui-status-meta.js"></script>
 <!-- v12 WS42 Phase 12 — edge swipe-back + sheet swipe-dismiss. Needs window.Overlay
      (config.js) only; must run before app.js's router/modal wiring uses it. -->
 <script defer src="js/gestures.js"></script>
