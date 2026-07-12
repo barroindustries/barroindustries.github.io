@@ -39,6 +39,14 @@ Read V13-PLAN.md before any v13 work.
 code push — pay_runs 'disbursing' + approval_requests + posts rules must land with (or ahead of) the JS,
 else Disburse breaks. Then Phase 9's one-time buttons + Phase 4's restore drill.
 
+**Waves 5–6 (same session, later):** Ph 105 (Overlay/Back part 2 — worker panel, task-panel bypasses,
+sidebar/drawer history), Ph 12–13 (window.Ledger service + ALL 11 money posters migrated — C5 fail-open
+dedupes and C6 period-lock gaps CLOSED; ledger+project updates now atomic), Ph 23 (Storage uploadedBy
+ownership, rules local), Ph 111 (fmtPeso/fmtN2 canonical formatters; device-locale money bugs dead),
+Ph 117+30a (Notifs.success/error/info + broadcast dedup doc-ids), Ph 120 (bir.js icon sweep), Ph 131+141
+(touch targets + ultrawide cap). Runtime-verified: v12.0.66 boots with zero console errors, all globals
+live, formatter/vat/ledger self-checks pass. 22 commits ahead of origin.
+
 **Next up:** push+deploy session (Ph 1, 9) · Ph 105 (Overlay/Back part 2) · Ph 28 (plaintext passwords —
 needs flow decision) · Ph 12–14 (Ledger service) · Ph 19 (quote math — needs D4/D5 rulings).
 
