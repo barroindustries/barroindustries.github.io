@@ -7964,6 +7964,14 @@ window.Keymap = (function () {
       [cmd + ' K', 'Open search'],
       ['/', 'Open search'],
       ['?', 'Show this cheat sheet'],
+      ['n', 'New item (context-aware)'],
+      ['[ / ]', 'Previous / next subtab'],
+      ['g d', 'Go to Dashboard'],
+      ['g t', 'Go to Tasks'],
+      ['g a', 'Go to Approvals'],
+      ['g c', 'Go to Chat'],
+      ['g p', 'Go to Posts'],
+      [cmd + ' Enter', 'Submit focused modal form'],
     ];
     let items = [];
     try { items = (typeof getSidebarItems === 'function') ? getSidebarItems() : []; } catch (_) {}
@@ -7984,6 +7992,70 @@ window.Keymap = (function () {
     }
     window.openModal('Keyboard shortcuts', buildCheatSheetHTML());
     window._cheatSheetOpen = true;
+  }
+
+  // v13 Phase 145 — Keymap expansion. No pageAction registry exists yet
+  // (Phase 132 not built), so 'n' uses a small ordered selector list of real
+  // "+Add" button ids gathered across the major screens instead.
+  const NEW_ITEM_SELECTOR = '[data-key-new], #add-task-btn, #add-expense-btn, ' +
+    '#add-client-btn, #add-ledger-btn, #add-deal-btn, #add-ca-for-btn';
+
+  function contextNew() {
+    const el = document.querySelector(NEW_ITEM_SELECTOR);
+    if (!el || el.offsetParent === null) return false; // not present / not visible
+    el.click();
+    return true;
+  }
+
+  function chipTabStep(dir) {
+    const active = document.querySelector('#page-content .chip-tab.active');
+    if (!active) return false;
+    const sib = dir > 0 ? active.nextElementSibling : active.previousElementSibling;
+    if (!sib || !sib.classList || !sib.classList.contains('chip-tab')) return false;
+    sib.click();
+    return true;
+  }
+
+  function submitFocusedModal() {
+    const overlay = document.getElementById('modal-overlay');
+    if (!overlay || !overlay.classList.contains('active')) return false;
+    const btn = document.querySelector('#modal-footer .btn-primary');
+    if (!btn) return false;
+    btn.click();
+    return true;
+  }
+
+  // 'g' two-key go-to sequences (g d / g t / g a / g c / g p): tiny pending-key
+  // state with a 1.5s window, cleared on any other keydown or timeout.
+  let _gPending = false, _gTimer = null;
+  const GO_TO_MAP = { d: 'dashboard', t: 'tasks', a: 'approvals', c: 'chat', p: 'posts' };
+
+  function clearGPending() {
+    _gPending = false;
+    if (_gTimer) { clearTimeout(_gTimer); _gTimer = null; }
+  }
+
+  function startGPending() {
+    _gPending = true;
+    if (_gTimer) clearTimeout(_gTimer);
+    _gTimer = setTimeout(clearGPending, 1500);
+  }
+
+  function tryGoToSequence(e) {
+    if (_gPending) {
+      const key = (e.key || '').toLowerCase();
+      clearGPending();
+      const page = GO_TO_MAP[key];
+      if (!page) return false;
+      e.preventDefault();
+      navigateTo(page);
+      return true;
+    }
+    if ((e.key === 'g' || e.key === 'G') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      startGPending();
+      return true; // consumed as the lead key of a possible sequence
+    }
+    return false;
   }
 
   // Each entry: match(e) predicate, allowInInput (fire even while a text field is
@@ -8015,11 +8087,43 @@ window.Keymap = (function () {
       allowInInput: false,
       match: e => e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[1-9]$/.test(e.code),
       run:   e => navByIndex(parseInt(e.code.slice(5), 10)) },
+
+    // v13 Phase 145 additions ------------------------------------------------
+    { id: 'context-new',
+      allowInInput: false,
+      match: e => (e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey && !e.altKey,
+      run:   () => contextNew() },
+
+    { id: 'chip-tab-prev',
+      allowInInput: false,
+      match: e => e.key === '[' && !e.ctrlKey && !e.metaKey && !e.altKey,
+      run:   () => chipTabStep(-1) },
+
+    { id: 'chip-tab-next',
+      allowInInput: false,
+      match: e => e.key === ']' && !e.ctrlKey && !e.metaKey && !e.altKey,
+      run:   () => chipTabStep(1) },
+
+    { id: 'modal-submit-cmdenter',
+      allowInInput: true, // must fire from inside a focused modal form field
+      match: e => e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey,
+      run:   e => { const acted = submitFocusedModal(); if (acted) e.preventDefault(); return acted; } },
   ];
 
   function onKeydown(e) {
     if (e.defaultPrevented) return;
     const typing = isTextInputFocused();
+
+    // 'g d' / 'g t' / 'g a' / 'g c' / 'g p' go-to sequences: stateful two-key
+    // combo, so it's handled ahead of the single-shot KEYMAP table. Suppressed
+    // while typing like the other bare-letter shortcuts.
+    if (!typing) {
+      let gHandled = false; try { gHandled = tryGoToSequence(e); } catch (_) {}
+      if (gHandled) { if (e.key !== 'g' && e.key !== 'G') e.preventDefault(); return; }
+    } else if (_gPending) {
+      clearGPending(); // typing into a field cancels a pending 'g' sequence
+    }
+
     for (const entry of KEYMAP) {
       let ok = false; try { ok = entry.match(e); } catch (_) {}
       if (!ok) continue;
