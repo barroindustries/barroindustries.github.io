@@ -305,6 +305,7 @@ window.Notifs = (() => {
       title, body, icon, type, link,
       read:      false,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      ...(window.currentUser && window.currentUser.uid ? { senderUid: window.currentUser.uid } : {}),
       ...(dedupKey ? { dedupKey } : {}),
       ...(taskId ? { taskId } : {}),
       ...(chatId ? { chatId } : {})
@@ -356,13 +357,14 @@ window.Notifs = (() => {
     // per-recipient exists-check query: set() on the same id is a no-op re-write, not a dup.
     const dedupKey = notifData.dedupKey || _defaultDedupKey(notifData);
     const docId = _dedupDocId(dedupKey);
+    const senderUid = (window.currentUser && window.currentUser.uid) ? { senderUid: window.currentUser.uid } : {};
     const docs = allDocs.slice();
     while (docs.length) {
       const chunk = docs.splice(0, 499);
       const batch = db.batch();
       chunk.forEach(doc => {
         const ref = db.collection('notifications').doc(doc.id).collection('items').doc(docId);
-        batch.set(ref, { ...notifData, dedupKey, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+        batch.set(ref, { ...notifData, dedupKey, ...senderUid, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
       });
       await batch.commit();
     }
@@ -373,13 +375,14 @@ window.Notifs = (() => {
     const snap = await db.collection('users').get();
     const dedupKey = notifData.dedupKey || _defaultDedupKey(notifData);
     const docId = _dedupDocId(dedupKey);
+    const senderUid = (window.currentUser && window.currentUser.uid) ? { senderUid: window.currentUser.uid } : {};
     const docs = snap.docs.slice();
     while (docs.length) {
       const chunk = docs.splice(0, 499);
       const batch = db.batch();
       chunk.forEach(doc => {
         const ref = db.collection('notifications').doc(doc.id).collection('items').doc(docId);
-        batch.set(ref, { ...notifData, dedupKey, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+        batch.set(ref, { ...notifData, dedupKey, ...senderUid, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
       });
       await batch.commit();
     }
@@ -395,10 +398,11 @@ window.Notifs = (() => {
     if (!allDocs.length) return;
     const dedupKey = notifData.dedupKey || _defaultDedupKey(notifData);
     const docId = _dedupDocId(dedupKey);
+    const senderUid = (window.currentUser && window.currentUser.uid) ? { senderUid: window.currentUser.uid } : {};
     const batch = db.batch();
     allDocs.forEach(d => {
       const ref = db.collection('notifications').doc(d.id).collection('items').doc(docId);
-      batch.set(ref, { ...notifData, dedupKey, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+      batch.set(ref, { ...notifData, dedupKey, ...senderUid, read: false, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
     });
     await batch.commit();
   }

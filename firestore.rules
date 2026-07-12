@@ -217,11 +217,16 @@ service cloud.firestore {
       //  • must start UNREAD with a server timestamp (no backdating / pre-read),
       //  • title/body length-capped so a sender can't blast oversized pushes.
       allow create: if isAuth()
-        && request.resource.data.keys().hasOnly(['title','body','icon','type','link','read','createdAt','dedupKey','taskId','chatId'])
+        && request.resource.data.keys().hasOnly(['title','body','icon','type','link','read','createdAt','dedupKey','taskId','chatId','senderUid'])
         && request.resource.data.read == false
         && request.resource.data.createdAt == request.time
         && isBoundedString(request.resource.data.get('title', ''), 200)
-        && isBoundedString(request.resource.data.get('body', ''), 2000);
+        && isBoundedString(request.resource.data.get('body', ''), 2000)
+        // Phase 68 quota observer (functions/index.js sendNotificationQuota) keys off
+        // senderUid — optional (system/scheduled sends omit it), but when present it
+        // must be truthful: a caller can't attribute a notif to another sender.
+        && (!request.resource.data.keys().hasAny(['senderUid'])
+            || request.resource.data.get('senderUid', '') == request.auth.uid);
     }
 
     // ── Attendance ─────────────────────────────────────
