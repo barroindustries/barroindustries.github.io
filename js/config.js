@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.78';
+window.APP_VERSION = '12.0.79';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -922,6 +922,9 @@ window.exportCSV = function(filename, rows, columns) {
 //
 // items: [{ key, label, count?, icon?, hidden? }]  — count omitted = no pill;
 //   count>0 renders a red "on" pill, count===0 a muted pill, count==null none.
+//   `icon` is TRUSTED (developer-authored constant) and rendered RAW so it may hold
+//   Lucide markup from emojiIcon(); `label` is always escaped. Never pass user content
+//   as `icon` — put it in `label`.
 // activeKey: the key to mark active. opts.cls: extra class on the wrapper.
 window.chipTabs = function(items, activeKey, opts) {
   opts = opts || {};
@@ -935,7 +938,7 @@ window.chipTabs = function(items, activeKey, opts) {
     }
     return '<button type="button" class="chip-tab' + (active ? ' active' : '') +
       '" data-chip="' + esc(it.key) + '">' +
-      (it.icon ? esc(it.icon) + ' ' : '') + esc(it.label) + pill + '</button>';
+      (it.icon ? it.icon + ' ' : '') + esc(it.label) + pill + '</button>';
   }).join('');
   return '<div class="chip-tabs' + (opts.cls ? ' ' + opts.cls : '') + '">' + html + '</div>';
 };

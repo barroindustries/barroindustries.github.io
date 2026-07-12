@@ -333,3 +333,280 @@ exports.backfillUserClaims = functions.https.onCall(async (data, context) => {
   }
   return { total: snap.size, ok, skipped, failed };
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+//  SCHEDULED REMINDERS (v13 Phase 67) — H11: reminders fire whether or not a
+//  tab is open. These write notification docs to notifications/{uid}/items/*;
+//  sendPushOnNotification (above) picks up each new doc and relays the FCM
+//  push, so these functions never touch messaging directly.
+//
+//  DEPLOY NOTE (loud, per instructions): these are net-new `functions.pubsub
+//  .schedule(...)` (v1) exports. They are NOT live until Neil runs
+//  `cd functions && npm run deploy` (== `firebase deploy --only functions`).
+//  On first deploy, Cloud Scheduler auto-creates one job per schedule in the
+//  GCP project (asia-east1), named:
+//    - firebase-schedule-scheduledAttendanceReminder-asia-east1
+//    - firebase-schedule-scheduledDailyDigestChecks-asia-east1
+//  Verify them under Cloud Scheduler in GCP console (or `gcloud scheduler jobs
+//  list`) after deploy, and watch the first firing in Cloud Functions logs.
+//
+//  DEDUP CONTRACT: js/notifications.js's client-side checks (checkDeadlines,
+//  checkAttendanceReminder, checkLowStock, checkAECFollowups) stay in place
+//  for one release as belt-and-braces. `send()` there dedups by querying
+//  `.where('dedupKey', '==', dedupKey)` before writing — it does NOT depend
+//  on a particular doc id. So as long as the *value* written to the
+//  `dedupKey` field matches exactly what the client computes, client and
+//  server can never double-send regardless of which one runs first or what
+//  doc id either uses. The functions below reproduce each client dedupKey
+//  string byte-for-byte:
+//    - attendance reminder : `bi-att-remind-${uid}-${todayStr}`
+//    - deadline (tomorrow) : `deadline-tmrw-${task.id}-${tomorrowStr}`
+//    - deadline (today)    : `deadline-today-${task.id}-${todayStr}`
+//    - low stock digest    : `lowstock-${uid}-${todayStr}`
+//    - AEC follow-up digest: `aec-fu-${uid}-${todayStr}`
+//  where todayStr/tomorrowStr are Manila "YYYY-MM-DD" (see manilaDate() below,
+//  matching window.bizDate() in js/config.js).
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Manila-local calendar date as "YYYY-MM-DD", independent of the Cloud
+ * Functions runner's own timezone (Cloud Functions run in UTC). Mirrors
+ * window.bizDate() in js/config.js: standard shift-then-slice using a fixed
+ * +08:00 offset (Asia/Manila has no DST, so this never drifts).
+ *
+ * RUNNER TZ ASSUMPTION: Cloud Functions v1 always execute in UTC regardless
+ * of the `timeZone()` set on the pubsub schedule — that setting only controls
+ * *when* Cloud Scheduler fires the job, not what `new Date()` returns inside
+ * it. So every date computation in these functions must go through this
+ * helper rather than a bare `new Date().toISOString()`.
+ */
+function manilaDate(date) {
+  const d = date || new Date();
+  const shifted = new Date(d.getTime() + 8 * 60 * 60 * 1000); // UTC+8, no DST
+  return shifted.toISOString().slice(0, 10);
+}
+
+/** Firestore batches cap at 500 writes; chunk and commit in groups of <=500. */
+async function commitInChunks(db, refs, dataFn, chunkSize = 499) {
+  const items = refs.slice();
+  let written = 0;
+  while (items.length) {
+    const chunk = items.splice(0, chunkSize);
+    const batch = db.batch();
+    chunk.forEach(({ ref, notifData }) => {
+      batch.set(ref, {
+        ...notifData,
+        read: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    });
+    await batch.commit();
+    written += chunk.length;
+  }
+  return written;
+}
+
+/** Heartbeat write, mirrors scripts/sync-to-drive.js's reportHealth() shape. */
+async function reportHealth(db, job, stats, label) {
+  try {
+    await db.collection('system_health').doc(job).set({
+      job, lastRunAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastStatus: stats.errors > 0 ? 'error' : 'ok',
+      errors: stats.errors || 0, notified: stats.notified || 0,
+      label: label || ''
+    }, { merge: true });
+  } catch (e) { console.warn(`[${job}] system_health write failed:`, e.message); }
+}
+
+/**
+ * Daily (Mon–Sat) 07:30 Manila — attendance morning reminder.
+ * Ports js/notifications.js checkAttendanceReminder() server-side: find every
+ * non-partner, non-inactive user with no attendance/{uid}/records/{today} doc,
+ * and write a reminder notification. dedupKey matches the client's exactly
+ * (`bi-att-remind-${uid}-${todayStr}`) so re-runs — and the still-live client
+ * check firing between 7-9am on an open tab — are no-ops on the loser side.
+ */
+exports.scheduledAttendanceReminder = functions
+  .region('asia-east1')
+  .pubsub.schedule('30 7 * * 1-6')
+  .timeZone('Asia/Manila')
+  .onRun(async () => {
+    const db = admin.firestore();
+    const stats = { errors: 0, notified: 0 };
+    try {
+      const todayStr = manilaDate();
+      const usersSnap = await db.collection('users').get();
+      const candidates = usersSnap.docs.filter(d => {
+        const u = d.data();
+        return u.role !== 'partner' && u.status !== 'inactive' && !u.pendingPasswordSetup;
+      });
+
+      // Attendance records live at attendance/{uid}/records/{date} — no
+      // collection-group query available for "has no record today" without
+      // scanning, so check each candidate's record doc individually.
+      const toNotify = [];
+      for (const doc of candidates) {
+        try {
+          const rec = await db.collection('attendance').doc(doc.id)
+            .collection('records').doc(todayStr).get();
+          if (rec.exists) continue;
+          const u = doc.data();
+          const name = u.displayName || 'there';
+          toNotify.push({
+            ref: db.collection('notifications').doc(doc.id).collection('items').doc(),
+            notifData: {
+              title: `🌅 Good morning, ${name}!`,
+              body: "Don't forget to time in today. Wishing you a productive day! 💪",
+              icon: '🌅', type: 'att_morning_remind', link: null,
+              dedupKey: `bi-att-remind-${doc.id}-${todayStr}`
+            }
+          });
+        } catch (e) {
+          stats.errors++;
+          console.error('[scheduledAttendanceReminder] attendance read failed for', doc.id, e.message);
+        }
+      }
+
+      stats.notified = await commitInChunks(db, toNotify, null);
+      console.log(`[scheduledAttendanceReminder] ${stats.notified} reminder(s) queued for ${todayStr}`);
+    } catch (err) {
+      stats.errors++;
+      console.error('[scheduledAttendanceReminder] failed:', err);
+    }
+    await reportHealth(db, 'scheduledAttendanceReminder', stats, 'Server-side attendance reminders');
+    return null;
+  });
+
+/**
+ * Daily 08:30 Manila — deadline / low-stock / AEC follow-up digest.
+ * Ports checkDeadlines, checkLowStock, checkAECFollowups from
+ * js/notifications.js server-side, each reusing the client's exact dedupKey
+ * scheme so the still-live client-side checks (fired on next login/open tab)
+ * are no-ops when this job already sent the same notification.
+ */
+exports.scheduledDailyDigestChecks = functions
+  .region('asia-east1')
+  .pubsub.schedule('30 8 * * *')
+  .timeZone('Asia/Manila')
+  .onRun(async () => {
+    const db = admin.firestore();
+    const stats = { errors: 0, notified: 0 };
+    const toNotify = [];
+    const todayStr = manilaDate();
+    const tomorrowStr = manilaDate(new Date(Date.now() + 24 * 60 * 60 * 1000));
+
+    // ── 1. Deadlines — port of checkDeadlines(uid) per assignee ──
+    try {
+      const DONE_STATUSES = ['done', 'approved', 'archived'];
+      const [tomorrowSnap, todaySnap] = await Promise.all([
+        db.collection('tasks').where('dueDate', '==', tomorrowStr).get(),
+        db.collection('tasks').where('dueDate', '==', todayStr).get()
+      ]);
+      const pushTaskNotifs = (snap, when, key, title, bodyFn) => {
+        snap.docs.forEach(d => {
+          const task = { id: d.id, ...d.data() };
+          if (DONE_STATUSES.includes(task.status)) return;
+          const assignees = Array.isArray(task.assignedTo) ? task.assignedTo : [];
+          assignees.forEach(uid => {
+            toNotify.push({
+              ref: db.collection('notifications').doc(uid).collection('items').doc(),
+              notifData: {
+                title, body: bodyFn(task), icon: '⏰', type: 'deadline', taskId: task.id, link: null,
+                dedupKey: `${key}-${task.id}-${when}`
+              }
+            });
+          });
+        });
+      };
+      pushTaskNotifs(tomorrowSnap, tomorrowStr, 'deadline-tmrw', '⏰ Due Tomorrow',
+        (task) => `"${task.title}" is due tomorrow.`);
+      pushTaskNotifs(todaySnap, todayStr, 'deadline-today', '🚨 Due Today',
+        (task) => `"${task.title}" is due today! Complete and submit it.`);
+    } catch (e) {
+      stats.errors++;
+      console.error('[scheduledDailyDigestChecks] deadlines failed:', e.message);
+    }
+
+    // ── 2. Low stock — port of checkLowStock(uid, role): daily digest to
+    //      president/manager/finance and Purchasing-dept members ──
+    try {
+      const [invSnap, usersSnap] = await Promise.all([
+        db.collection('inventory_items').get(),
+        db.collection('users').get()
+      ]);
+      const low = invSnap.docs.map(d => d.data())
+        .filter(i => (i.reorderLevel || 0) > 0 && (i.qty || 0) <= (i.reorderLevel || 0));
+      if (low.length) {
+        const names = low.slice(0, 5).map(i => i.name).filter(Boolean).join(', ');
+        const more = low.length > 5 ? ` +${low.length - 5} more` : '';
+        usersSnap.docs.forEach(doc => {
+          const u = doc.data();
+          if (u.status === 'inactive' || u.pendingPasswordSetup) return;
+          const depts = Array.isArray(u.departments) ? u.departments
+            : (typeof u.department === 'string' && u.department ? [u.department] : []);
+          const isPurchasing = depts.includes('Purchasing');
+          if (!['president', 'manager', 'finance'].includes(u.role) && !isPurchasing) return;
+          toNotify.push({
+            ref: db.collection('notifications').doc(doc.id).collection('items').doc(),
+            notifData: {
+              title: `📦 ${low.length} item${low.length > 1 ? 's' : ''} low on stock`,
+              body: isPurchasing
+                ? `At/below reorder level: ${names}${more}. Open Purchasing → RFQ → "From low stock".`
+                : `At/below reorder level: ${names}${more}. Tap to review Inventory.`,
+              icon: '📦', type: 'low_stock', link: isPurchasing ? 'dept:Purchasing' : 'inventory',
+              dedupKey: `lowstock-${doc.id}-${todayStr}`
+            }
+          });
+        });
+      }
+    } catch (e) {
+      stats.errors++;
+      console.error('[scheduledDailyDigestChecks] low stock failed:', e.message);
+    }
+
+    // ── 3. AEC follow-ups — port of checkAECFollowups(uid, role): daily
+    //      digest to president/manager and Sales-dept members ──
+    try {
+      const [aecSnap, usersSnap] = await Promise.all([
+        db.collection('aec_contacts').get(),
+        db.collection('users').get()
+      ]);
+      const terminal = ['partner', 'dormant'];
+      const due = aecSnap.docs.map(d => d.data())
+        .filter(c => c.followUpDate && c.followUpDate <= todayStr && !terminal.includes(c.stage || 'new'));
+      if (due.length) {
+        const names = due.slice(0, 5).map(c => c.company || c.contactPerson).filter(Boolean).join(', ');
+        const more = due.length > 5 ? ` +${due.length - 5} more` : '';
+        usersSnap.docs.forEach(doc => {
+          const u = doc.data();
+          if (u.status === 'inactive' || u.pendingPasswordSetup) return;
+          const depts = Array.isArray(u.departments) ? u.departments
+            : (typeof u.department === 'string' && u.department ? [u.department] : []);
+          const isSales = depts.includes('Sales');
+          if (!['president', 'manager'].includes(u.role) && !isSales) return;
+          toNotify.push({
+            ref: db.collection('notifications').doc(doc.id).collection('items').doc(),
+            notifData: {
+              title: `📇 ${due.length} AEC follow-up${due.length > 1 ? 's' : ''} due`,
+              body: `Overdue: ${names}${more}. Open Sales → AEC to follow up.`,
+              icon: '📇', type: 'aec_followup', link: 'dept:Sales',
+              dedupKey: `aec-fu-${doc.id}-${todayStr}`
+            }
+          });
+        });
+      }
+    } catch (e) {
+      stats.errors++;
+      console.error('[scheduledDailyDigestChecks] AEC follow-ups failed:', e.message);
+    }
+
+    try {
+      stats.notified = await commitInChunks(db, toNotify, null);
+      console.log(`[scheduledDailyDigestChecks] ${stats.notified} notification(s) queued for ${todayStr}`);
+    } catch (err) {
+      stats.errors++;
+      console.error('[scheduledDailyDigestChecks] commit failed:', err);
+    }
+    await reportHealth(db, 'scheduledDailyDigestChecks', stats, 'Server-side deadline/low-stock/AEC digest');
+    return null;
+  });

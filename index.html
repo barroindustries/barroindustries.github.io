@@ -176,7 +176,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.78 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.79 · Barro Industries</div>
   </div>
 </div>
 
@@ -367,6 +367,9 @@
 </script>
 <script defer src="js/drive.js"></script>
 <script defer src="js/notifications.js"></script>
+<!-- v13 Phase 35 — Approvals write-path registry (window.Approvals). Must load
+     before departments.js, which calls Approvals.dispatch() from renderApprovals. -->
+<script defer src="js/svc-approvals.js"></script>
 <script defer src="js/departments.js"></script>
 <script defer src="js/app.js"></script>
 <script defer src="js/modules.js"></script>
