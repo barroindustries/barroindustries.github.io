@@ -566,8 +566,8 @@ const TASK_STATUSES = [
   { value:'backlog',      label:'Backlog',               badge:'badge-gray'   },
   { value:'brainstorm',   label:'Brainstorming',         badge:'badge-purple' },
   { value:'in-progress',  label:'In Progress',           badge:'badge-blue'   },
-  { value:'submitted',    label:'Submitted for Review',  badge:'badge-orange' },
-  { value:'review',       label:'In Review',             badge:'badge-orange' }, // alias for submitted
+  { value:'submitted',    label:'In Review',             badge:'badge-orange' }, // 'review' is canonical; kept for read-compat with stragglers
+  { value:'review',       label:'In Review',             badge:'badge-orange' },
   { value:'returned',     label:'Returned for Revision', badge:'badge-red'    },
   { value:'approved',     label:'Approved',              badge:'badge-green'  },
   { value:'done',         label:'Done',                  badge:'badge-green'  },
@@ -7765,7 +7765,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
         </div>
         <div style="text-align:right">
           <div style="font-weight:700${superseded?';text-decoration:line-through;color:var(--text-muted)':''}">₱${fmt(q.total||0)}</div>
-          <span class="badge ${statusBadge(q.status)}" style="margin-top:4px">${q.salesOrderId?'won':q.status||'draft'}</span>
+          <span class="badge ${window.statusBadgeClass('quote', q.salesOrderId?'won':(q.status||'draft'))}" style="margin-top:4px">${window.statusLabel2('quote', q.salesOrderId?'won':(q.status||'draft'))}</span>
           ${q.deleteRequested?`<span class="badge badge-red" style="font-size:10px;margin-left:4px">${emojiIcon('🗑',10)} del req</span>`:''}
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;width:100%;justify-content:flex-end">
@@ -7902,7 +7902,7 @@ async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
           </div>
           <div style="text-align:right;flex-shrink:0">
             <div style="font-weight:700">₱${fmt(q.total||q.grandTotal||0)}</div>
-            <span class="badge ${statusBadge(q.status)}" style="margin-top:4px">${escHtml(q.status||'draft')}</span>
+            <span class="badge ${window.statusBadgeClass('quote', q.status||'draft')}" style="margin-top:4px">${window.statusLabel2('quote', q.status||'draft')}</span>
           </div>
         </div>`).join('')}
     </div>`;
@@ -9179,7 +9179,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         <div class="item-card it-ticket-card" data-id="${t.id}" style="cursor:pointer">
           <div class="item-top">
             <div class="item-title">${escHtml(t.title||'Untitled')}</div>
-            <span class="badge ${t.status==='open'?'badge-orange':t.status==='in-progress'?'badge-blue':t.status==='resolved'?'badge-green':'badge-gray'}">${t.status||'open'}</span>
+            <span class="badge ${window.statusBadgeClass('it_ticket', t.status||'open')}">${window.statusLabel2('it_ticket', t.status||'open')}</span>
           </div>
           <div class="item-meta">
             <span class="badge badge-blue" style="font-size:10px">${escHtml(t.category||'General')}</span>
@@ -9252,7 +9252,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
               <td>${escHtml(a.type||'—')}</td>
               <td><code style="font-size:11px">${escHtml(a.serial||'—')}</code></td>
               <td>${escHtml(a.assignedTo||'—')}</td>
-              <td><span class="badge ${a.status==='active'?'badge-green':a.status==='maintenance'?'badge-orange':'badge-gray'}">${a.status||'active'}</span></td>
+              <td><span class="badge ${window.statusBadgeClass('it_asset', a.status||'active')}">${window.statusLabel2('it_asset', a.status||'active')}</span></td>
               <td>${a.purchasedDate||'—'}</td>
               ${canEdit?`<td><button class="btn-icon edit-asset-btn" data-id="${a.id}"><i data-lucide="pencil" style="width:14px;height:14px"></i></button></td>`:''}
             </tr>`).join('')}
@@ -9337,7 +9337,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
               <td>${escHtml(a.type||'—')}</td>
               <td><code style="font-size:11px">${escHtml(a.serial||'—')}</code></td>
               <td>${escHtml(a.assignedTo||'—')}</td>
-              <td><span class="badge ${a.status==='active'?'badge-green':a.status==='maintenance'?'badge-orange':'badge-gray'}">${a.status||'active'}</span></td>
+              <td><span class="badge ${window.statusBadgeClass('it_asset', a.status||'active')}">${window.statusLabel2('it_asset', a.status||'active')}</span></td>
               <td>${a.purchasedDate||'—'}</td>
               <td><button class="btn-icon edit-asset-btn" data-id="${a.id}"><i data-lucide="pencil" style="width:14px;height:14px"></i></button></td>
             </tr>`).join('');
@@ -9356,7 +9356,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
               <td>${escHtml(a.type||'—')}</td>
               <td><code style="font-size:11px">${escHtml(a.serial||'—')}</code></td>
               <td>${escHtml(a.assignedTo||'—')}</td>
-              <td><span class="badge ${a.status==='active'?'badge-green':a.status==='maintenance'?'badge-orange':'badge-gray'}">${a.status||'active'}</span></td>
+              <td><span class="badge ${window.statusBadgeClass('it_asset', a.status||'active')}">${window.statusLabel2('it_asset', a.status||'active')}</span></td>
               <td>${a.purchasedDate||'—'}</td>
             </tr>`).join('');
       });
@@ -9390,7 +9390,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
                 <td><code style="font-size:10px">${escHtml(s.licenseKey||'—')}</code></td>
                 <td>${s.seats||'—'}</td>
                 <td style="color:${isExp?'var(--danger)':isSoon?'#FF9F0A':'inherit'}">${s.expiryDate||'—'}${isExp?` ${emojiIcon('⚠️',16)}`:isSoon?` ${emojiIcon('🔔',16)}`:''}</td>
-                <td><span class="badge ${s.status==='active'?'badge-green':s.status==='expired'?'badge-red':'badge-gray'}">${s.status||'active'}</span></td>
+                <td><span class="badge ${window.statusBadgeClass('it_software', s.status||'active')}">${window.statusLabel2('it_software', s.status||'active')}</span></td>
                 ${canEdit?`<td><button class="btn-icon edit-sw-btn" data-id="${s.id}"><i data-lucide="pencil" style="width:14px;height:14px"></i></button></td>`:''}
               </tr>`;
             }).join('')}
@@ -9630,7 +9630,7 @@ function openITTicketModal(ticket, currentUser, canEdit, onRefresh) {
   openPage(`${emojiIcon('🎫',16)} ${escHtml(ticket.title||'Ticket')}`, `
     <div style="margin-bottom:12px">
       <div class="item-meta" style="gap:8px;margin-bottom:8px">
-        <span class="badge ${ticket.status==='open'?'badge-orange':ticket.status==='in-progress'?'badge-blue':ticket.status==='resolved'?'badge-green':'badge-gray'}">${ticket.status||'open'}</span>
+        <span class="badge ${window.statusBadgeClass('it_ticket', ticket.status||'open')}">${window.statusLabel2('it_ticket', ticket.status||'open')}</span>
         <span class="badge ${ticket.priority==='high'?'badge-red':ticket.priority==='medium'?'badge-orange':'badge-gray'}">${ticket.priority||'low'} priority</span>
         <span class="badge badge-blue" style="font-size:10px">${escHtml(ticket.category||'General')}</span>
       </div>
@@ -9802,7 +9802,7 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
               ${qs.map(q => {
                 const ts = q.createdAt?.toDate?.()?.toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'})||'';
                 const status = q.status||q.approvalStatus||'draft';
-                const badge = status==='filed'||status==='approved'?'badge-green':status==='pending_approval'||status==='pending_review'||status==='sent'?'badge-orange':status==='rejected'?'badge-red':'badge-gray';
+                const badge = window.statusBadgeClass('quote', status);
                 return `
                   <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
                     <span style="font-size:18px">${emojiIcon('📄',18)}</span>
@@ -9812,7 +9812,7 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
                     </div>
                     <div style="text-align:right;flex-shrink:0">
                       <div style="font-size:12px;font-weight:700">₱${window.fmtN2(q.total||q.grandTotal||0)}</div>
-                      <span class="badge ${badge}" style="font-size:10px">${status}</span>
+                      <span class="badge ${badge}" style="font-size:10px">${window.statusLabel2('quote', status)}</span>
                     </div>
                   </div>`;
               }).join('')}
@@ -9868,7 +9868,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
         <thead><tr><th>Quote #</th><th>Client</th><th>Total</th><th>Agent</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>${quotes.map(q=>{
           const status = q.status||q.approvalStatus||'draft';
-          const badge = status==='filed'||status==='approved'?'badge-green':status==='pending_approval'||status==='pending_review'||status==='sent'?'badge-orange':status==='rejected'?'badge-red':'badge-gray';
+          const badge = window.statusBadgeClass('quote', status);
           const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
           const canDeleteDirect = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
           const staleDays = staleDaysOf(q);
@@ -9878,7 +9878,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
             <td>₱${fmt(q.total||q.grandTotal||0)}</td>
             <td>${escHtml(q.agentName||q.createdByName||'—')}</td>
             <td>
-              <span class="badge ${badge}">${status}</span>
+              <span class="badge ${badge}">${window.statusLabel2('quote', status)}</span>
               ${q.deleteRequested?`<span class="badge badge-red" style="font-size:9px;margin-left:4px">${emojiIcon('🗑',9)} del req</span>`:''}
               ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px;margin-left:4px" title="Filed but no Sales Order yet">${emojiIcon('⚠',9)} ${staleDays}d no SO</span>` : ''}
               <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${ts}</div>
@@ -10618,11 +10618,11 @@ async function renderBSClientData(container, currentUser, currentRole) {
               <tbody>${cl.quotes.map(q=>{
                 const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
                 const status = q.status||q.approvalStatus||'draft';
-                const badge = status==='filed'||status==='approved'?'badge-green':status==='pending_approval'||status==='pending_review'||status==='sent'?'badge-orange':status==='rejected'?'badge-red':'badge-gray';
+                const badge = window.statusBadgeClass('quote', status);
                 return `<tr>
                   <td><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code></td>
                   <td style="font-weight:600">₱${window.fmtN2(q.total||q.grandTotal||0)}</td>
-                  <td><span class="badge ${badge}">${status}</span></td>
+                  <td><span class="badge ${badge}">${window.statusLabel2('quote', status)}</span></td>
                   <td style="color:var(--text-muted);font-size:11px">${ts}</td>
                   ${isPrivileged?`<td style="font-size:12px;color:var(--text-muted)">${escHtml(q.agentName||q.createdByName||'—')}</td>`:''}
                   <td style="white-space:nowrap">${q.editableState?`<button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.reopenQuoteFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen &amp; Edit</button> <button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.newRevisionFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Start a new revision (R2, R3…) with today's date">${emojiIcon('⎘',16)} New Revision</button>`:'<span style="font-size:10px;color:var(--text-muted)">no snapshot</span>'}</td>
@@ -12367,13 +12367,10 @@ async function openClientHub(cl, opts) {
   const wonVal = t.quotes.filter(window.isQuoteWon).reduce((s,q)=>s+(q.total||q.grandTotal||0),0);   // canonical (decision 8)
   const collected = t.payments.reduce((s,p)=>s+(+p.amount||0),0);
   const ar = t.projects.reduce((s,p)=>s+(+p.arBalance||0),0);
-  const statusBadge = (q) => {
-    const s = q.status || q.approvalStatus || 'draft';
-    const map = { won:'badge-green', accepted:'badge-green', filed:'badge-blue', approved:'badge-green',
-      pending_approval:'badge-amber', pending_review:'badge-amber', needs_revision:'badge-amber',
-      rejected:'badge-red', sent:'badge-blue', draft:'badge-gray' };
-    return `<span class="badge ${map[s]||'badge-gray'}" style="font-size:9px">${escHtml(s)}</span>`;
-  };
+  // v13 Phase 40/115 -- local shadow of the global statusBadge() deleted; use the
+  // centralized quote vocabulary in js/ui-status-meta.js instead (one truth
+  // across files/summary/client-data/client-hub).
+  const statusBadge = (q) => window.statusBadge2('quote', q.status || q.approvalStatus || 'draft', { fontSize: '9px' });
   body.innerHTML = `
     <div class="item-card" style="margin-bottom:12px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
