@@ -156,18 +156,18 @@
   --toast-border:  var(--border);
 
   /* ── Typography scale (values == today's most-used px literals; no visual change on swap) ── */
-  --fs-2xs: 10px;   /* micro labels, badges */
-  --fs-xs:  11px;   /* captions, meta, timestamps */
-  --fs-sm:  12px;   /* secondary text, chips */
-  --fs-md:  13px;   /* dense body */
-  --fs-base:14px;   /* DEFAULT body */
-  --fs-lg:  16px;   /* emphasized body, inputs */
-  --fs-xl:  18px;   /* card titles */
-  --fs-2xl: 20px;   /* section headers */
-  --fs-3xl: 24px;   /* page sub-headers */
-  --fs-4xl: 28px;   /* page titles */
-  --fs-5xl: 34px;   /* large numeric displays */
-  --fs-6xl: 44px;   /* hero */
+  --fs-2xs: 0.625rem;   /* micro labels, badges */
+  --fs-xs:  0.6875rem;   /* captions, meta, timestamps */
+  --fs-sm:  0.75rem;   /* secondary text, chips */
+  --fs-md:  0.8125rem;   /* dense body */
+  --fs-base:0.875rem;   /* DEFAULT body */
+  --fs-lg:  1rem;   /* emphasized body, inputs */
+  --fs-xl:  1.125rem;   /* card titles */
+  --fs-2xl: 1.25rem;   /* section headers */
+  --fs-3xl: 1.5rem;   /* page sub-headers */
+  --fs-4xl: 1.75rem;   /* page titles */
+  --fs-5xl: 2.125rem;   /* large numeric displays */
+  --fs-6xl: 2.75rem;   /* hero */
   /* line-heights (unitless) */
   --lh-tight: 1.2;
   --lh-snug:  1.35;
@@ -414,7 +414,7 @@ body::after { content: none; }
   .btn-primary:hover { transform: translateY(-1px); box-shadow: var(--sh); }
 }
 .btn-primary:active { transform: scale(0.97); }
-.btn-primary.btn-full { width: 100%; padding: 14px; font-size: 15px; border-radius: var(--r); }
+.btn-primary.btn-full { width: 100%; padding: 14px; font-size: 0.9375rem; border-radius: var(--r); }
 .btn-primary.btn-sm   { padding: 6px 13px; font-size: var(--fs-sm); border-radius: var(--r-xs); }
 @media (pointer:coarse) { .btn-primary, .btn-secondary, .btn-outline, .btn-danger, .btn-success { min-height: 40px; } }
 html.theme-astral .btn-primary {
@@ -479,7 +479,7 @@ html.theme-astral .btn-primary::before {
 
 .btn-icon {
   background: none; border: none; cursor: pointer;
-  font-size: 15px; padding: 6px 8px; border-radius: var(--r-xs);
+  font-size: 0.9375rem; padding: 6px 8px; border-radius: var(--r-xs);
   transition: background var(--t1); color: var(--text-muted);
 }
 .btn-icon:hover { background: var(--s2); color: var(--text); }
@@ -511,7 +511,7 @@ html.theme-astral .btn-primary::before {
 .form-group textarea { resize: vertical; min-height: 80px; line-height: 1.6; }
 /* 16px stops iOS auto-zoom on focus */
 @media (pointer: coarse) {
-  .form-group input, .form-group textarea, .form-group select, .ms-input { font-size: 16px; }
+  .form-group input, .form-group textarea, .form-group select, .ms-input { font-size: 1rem; }
 }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
@@ -705,7 +705,7 @@ html.theme-astral .login-title {
 }
 .co-hero-logo { width: 60px; height: 60px; object-fit: contain; flex-shrink: 0; position: relative; z-index: 1; }
 .co-hero-text { position: relative; z-index: 1; }
-.co-hero-title { font-size: 22px; font-weight: 900; letter-spacing: 0.12em; color: #fff; margin-bottom: 6px; }
+.co-hero-title { font-size: 1.375rem; font-weight: 900; letter-spacing: 0.12em; color: #fff; margin-bottom: 6px; }
 .co-hero-tagline { font-size: var(--fs-md); color: var(--gold); font-style: italic; font-weight: 500; }
 
 .co-section { background: var(--s1); border: 1px solid var(--border); border-radius: var(--r); padding: 20px; margin-bottom: 16px; }
@@ -741,7 +741,7 @@ html.theme-astral .login-title {
 .co-president-title { font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.5; margin-top: 2px; }
 .co-president-msg { flex: 1; }
 .co-president-msg p { font-size: var(--fs-md); color: var(--text-2); line-height: 1.8; font-style: italic; margin-bottom: 10px; }
-.co-quote-mark { font-size: 48px; line-height: 1; color: var(--gold); opacity: 0.4; font-family: Georgia, serif; margin-bottom: -10px; }
+.co-quote-mark { font-size: 3rem; line-height: 1; color: var(--gold); opacity: 0.4; font-family: Georgia, serif; margin-bottom: -10px; }
 
 /* Core values */
 .co-values-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -1003,7 +1003,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 }
 
 .topbar-brand-sub {
-  font-size: 8px; font-weight: 600; letter-spacing: 2px;
+  font-size: 0.5rem; font-weight: 600; letter-spacing: 2px;
   color: rgba(255,255,255,0.38); line-height: 1;
   text-transform: uppercase;
 }
@@ -1034,7 +1034,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   border-radius: var(--r-sm);
   color: var(--text-muted); cursor: pointer;
   background: none; border: none;
-  font-size: 9px; font-weight: 600; white-space: nowrap;
+  font-size: 0.5625rem; font-weight: 600; white-space: nowrap;
   flex-shrink: 0;
   transition: color var(--t2), background var(--t1);
   -webkit-tap-highlight-color: transparent;
@@ -1049,7 +1049,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .top-nav-item .bn-badge,
 .top-nav-item .tn-badge {
   position: absolute; top: -2px; right: -4px;
-  background: var(--pink); color: #fff; font-size: 9px;
+  background: var(--pink); color: #fff; font-size: 0.5625rem;
   min-width: 14px; height: 14px; display: none;
   align-items: center; justify-content: center;
   padding: 0 3px; border-radius: var(--pill); font-weight: 700;
@@ -1060,14 +1060,14 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   position: relative; background: var(--s1);
   border: 1px solid var(--border); border-radius: var(--r-xs);
   padding: 7px 10px; cursor: pointer;
-  font-size: 17px; color: var(--text-muted);
+  font-size: 1.0625rem; color: var(--text-muted);
   transition: background var(--t1), color var(--t1), box-shadow var(--t2);
 }
 .notif-btn:hover { background: var(--s2); color: var(--text); box-shadow: var(--sh-pink); }
 .notif-badge {
   position: absolute; top: 1px; right: 1px;
   background: var(--grad-pk-bl);
-  color: #fff; font-size: 9px; font-weight: 700;
+  color: #fff; font-size: 0.5625rem; font-weight: 700;
   border-radius: var(--pill); padding: 1px 5px;
   min-width: 16px; text-align: center;
 }
@@ -1270,7 +1270,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .nav-icon {
   width: 30px; height: 30px;
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 8px; font-size: 15px; flex-shrink: 0;
+  border-radius: 8px; font-size: 0.9375rem; flex-shrink: 0;
   background: rgba(255,255,255,0.07);
   box-shadow: 0 1px 4px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.08);
   transition: background var(--t2), box-shadow var(--t2);
@@ -1397,7 +1397,7 @@ body.sidebar-open .top-nav-strip { display: none !important; }
   height: 100%; box-sizing: border-box;
 }
 .bottom-nav-item .bn-icon {
-  font-size: 22px; line-height: 1;
+  font-size: 1.375rem; line-height: 1;
   transition: transform var(--t2), font-size 0.25s var(--ease);
 }
 /* Shrunk state — smaller icons */
@@ -1410,7 +1410,7 @@ html.theme-astral .bottom-nav-item.active { color: var(--brand-primary); }
 html.theme-astral .bottom-nav-item.active .bn-icon { transform: scale(1.15); filter: drop-shadow(0 0 6px var(--pink-glow)); }
 .bottom-nav-item .bn-badge {
   position: absolute; top: 4px; right: 6px;
-  background: var(--pink); color: #fff; font-size: 9px;
+  background: var(--pink); color: #fff; font-size: 0.5625rem;
   padding: 1px 4px; border-radius: var(--pill); font-weight: 700;
   box-shadow: 0 0 8px var(--pink-glow);
 }
@@ -1650,7 +1650,7 @@ html.theme-astral .id-card::before { animation: goldShine 4s ease-in-out infinit
   background: linear-gradient(90deg, #FFFFFF, rgba(255,214,10,0.85));
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
-.id-card-company-sub { font-size: 9px; opacity: 0.55; letter-spacing: 2px; text-transform: uppercase; }
+.id-card-company-sub { font-size: 0.5625rem; opacity: 0.55; letter-spacing: 2px; text-transform: uppercase; }
 .id-card-body { display: flex; gap: 16px; align-items: flex-start; position: relative; z-index: 1; }
 .id-card-photo {
   width: 72px; height: 88px;
@@ -1667,7 +1667,7 @@ html.theme-astral .id-card::before { animation: goldShine 4s ease-in-out infinit
 .id-card-photo-hint {
   position: absolute; bottom: 0; left: 0; right: 0;
   background: rgba(0,0,0,0.60); color: rgba(255,255,255,0.80);
-  font-size: 8px; text-align: center; padding: 3px; letter-spacing: 0.3px;
+  font-size: 0.5rem; text-align: center; padding: 3px; letter-spacing: 0.3px;
 }
 .id-card-info { flex: 1; min-width: 0; }
 .id-card-name {
@@ -1692,7 +1692,7 @@ html.theme-astral .id-card::before { animation: goldShine 4s ease-in-out infinit
   -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
 }
 .id-card-status {
-  font-size: 9px; letter-spacing: 1px; text-transform: uppercase;
+  font-size: 0.5625rem; letter-spacing: 1px; text-transform: uppercase;
   font-weight: 700; padding: 3px 10px; border-radius: var(--pill);
   background: rgba(48,209,88,0.15); color: #4DE87A;
   border: 1px solid rgba(48,209,88,0.25);
@@ -1711,7 +1711,7 @@ html.theme-astral .id-card::before { animation: goldShine 4s ease-in-out infinit
 }
 .id-card--calling .idc-photo {
   width: 72px; height: 72px; border-radius: 50%; overflow: hidden; margin-bottom: 4px;
-  display: flex; align-items: center; justify-content: center; font-size: 36px;
+  display: flex; align-items: center; justify-content: center; font-size: 2.25rem;
   background: rgba(255,255,255,0.10); border: 3px solid rgba(255,255,255,0.30);
 }
 .id-card--calling .idc-photo img { width: 100%; height: 100%; object-fit: cover; }
@@ -1857,7 +1857,7 @@ html.light .id-card--calling .idc-brand { color: var(--text-muted); }
 /* Arrow icon in centre of ring */
 .ptr-ring-icon {
   position: absolute;
-  font-size: 15px;
+  font-size: 0.9375rem;
   line-height: 1;
   color: var(--text-1);
   transition: transform 0.22s cubic-bezier(0.34,1.28,0.64,1);
@@ -2100,7 +2100,7 @@ html.theme-astral .chip-tab.active {
 }
 /* Glass blur is Astral-only (perf budget: backdrop-filter restricted to topbar/modal/bottom-nav in Astral only). */
 html.theme-astral .quote-sheet { backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
-.quote-sheet h3 { font-size: 17px; font-weight: 800; color: var(--text); margin-bottom: 18px; display: flex; align-items: center; gap: 8px; }
+.quote-sheet h3 { font-size: 1.0625rem; font-weight: 800; color: var(--text); margin-bottom: 18px; display: flex; align-items: center; gap: 8px; }
 
 /* ══════════════════════════════
    CASH / EXPENSE
@@ -2182,7 +2182,7 @@ html.theme-astral .quote-sheet { backdrop-filter: blur(20px); -webkit-backdrop-f
   opacity: 0.7;
 }
 .dept-card:hover { box-shadow: var(--sh-sm), 0 0 24px rgba(255,45,120,0.08); transform: translateY(-2px); }
-.dept-name { font-size: 15px; font-weight: 700; margin-bottom: 4px; color: var(--text); }
+.dept-name { font-size: 0.9375rem; font-weight: 700; margin-bottom: 4px; color: var(--text); }
 .dept-head { font-size: var(--fs-sm); color: var(--text-muted); margin-bottom: 12px; }
 .dept-members { display: flex; flex-wrap: wrap; gap: 6px; }
 
@@ -2213,7 +2213,7 @@ html.theme-astral .quote-sheet { backdrop-filter: blur(20px); -webkit-backdrop-f
   padding: 64px 20px; text-align: center;
   background: var(--s1); border-radius: var(--r); border: 1px solid var(--border);
 }
-.access-denied .ad-icon { font-size: 56px; margin-bottom: 16px; opacity: 0.35; }
+.access-denied .ad-icon { font-size: 3.5rem; margin-bottom: 16px; opacity: 0.35; }
 .access-denied h3 { font-size: var(--fs-2xl); font-weight: 700; color: var(--text); margin-bottom: 8px; }
 .access-denied p { font-size: var(--fs-base); color: var(--text-muted); max-width: 280px; line-height: 1.6; }
 
@@ -2317,7 +2317,7 @@ html.theme-astral .dialog-overlay { backdrop-filter: blur(14px) saturate(120%); 
   background: var(--surface-2);
   gap: 8px;
 }
-.drawer-header h3 { font-size: 15px; font-weight: 700; color: var(--text); flex: 1; text-align: center; }
+.drawer-header h3 { font-size: 0.9375rem; font-weight: 700; color: var(--text); flex: 1; text-align: center; }
 
 .drawer-back-btn {
   display: flex; align-items: center; gap: 5px;
@@ -2349,7 +2349,7 @@ html.theme-astral .loading-placeholder {
 }
 
 .empty-state { text-align: center; padding: 56px 20px; color: var(--text-muted); }
-.empty-state .empty-icon { font-size: 52px; margin-bottom: 14px; opacity: 0.30; }
+.empty-state .empty-icon { font-size: 3.25rem; margin-bottom: 14px; opacity: 0.30; }
 .empty-state h4 { font-size: var(--fs-lg); font-weight: 700; margin-bottom: 6px; color: var(--text-2); }
 .empty-state p { font-size: var(--fs-md); line-height: 1.6; }
 
@@ -2394,7 +2394,7 @@ html.theme-astral #mini-cal td.today {
   width: 88px; height: 88px; border-radius: 50%;
   background: var(--grad-pk-bl); color: #fff;
   display: flex; align-items: center; justify-content: center;
-  font-size: 32px; font-weight: 700; overflow: hidden; cursor: pointer;
+  font-size: 2rem; font-weight: 700; overflow: hidden; cursor: pointer;
   box-shadow: var(--sh-pink), 0 0 0 2px rgba(255,45,120,0.25);
   transition: transform var(--t2), box-shadow var(--t2);
 }
@@ -2425,7 +2425,7 @@ html.theme-astral #mini-cal td.today {
   /* Bell navigates to page on mobile — panel/backdrop never show */
   .notif-panel, .notif-backdrop { display: none !important; }
   .modal-box { max-height: 94dvh; border-radius: var(--r-lg) var(--r-lg) 0 0; align-self: flex-end; margin-bottom: 0; margin-top: auto; }
-  .page-header h2 { font-size: 19px; }
+  .page-header h2 { font-size: 1.1875rem; }
   /* 44px minimum tap targets */
   .btn-primary, .btn-secondary, .btn-danger { min-height: 44px; }
   /* bottom-nav-item tap target provided by pill container height */
@@ -2482,7 +2482,7 @@ html.theme-astral #mini-cal td.today {
   .kpi-card { padding: 14px 12px; }
   /* .bn-label hidden globally via pill nav styles */
   .page-header { flex-wrap: wrap; gap: 8px; }
-  .page-header h2 { font-size: 17px; }
+  .page-header h2 { font-size: 1.0625rem; }
   .card-header h3 { font-size: var(--fs-md); }
   .login-role-cards { gap: 8px; }
   .login-role-card { padding: 12px 14px; }
@@ -2916,12 +2916,12 @@ html.light .help-section code { background: rgba(0,0,0,0.06); }
   display: block;
 }
 /* emoji fallback */
-.nav-icon.emoji-icon { font-size: 15px; }
+.nav-icon.emoji-icon { font-size: 0.9375rem; }
 
 /* bottom nav icon */
 .bn-icon {
   display: flex; align-items: center; justify-content: center;
-  font-size: 22px; line-height: 1;
+  font-size: 1.375rem; line-height: 1;
   transition: transform var(--t2);
 }
 .bn-icon svg {
@@ -2929,7 +2929,7 @@ html.light .help-section code { background: rgba(0,0,0,0.06); }
   stroke: currentColor; stroke-width: 2; fill: none;
   display: block;
 }
-.bn-icon.emoji-icon { font-size: 22px; display: block; }
+.bn-icon.emoji-icon { font-size: 1.375rem; display: block; }
 
 /* active bottom nav icon — lucide version */
 .bottom-nav-item.active .bn-icon svg {
@@ -2971,7 +2971,7 @@ html.light .topbar-brand-sub { color: rgba(29,29,31,0.35); }
 .post-avatar {
   width:38px; height:38px; border-radius:50%;
   background:var(--primary-light); display:flex; align-items:center;
-  justify-content:center; font-weight:700; color:#fff; font-size:15px;
+  justify-content:center; font-weight:700; color:#fff; font-size:0.9375rem;
   overflow:hidden; flex-shrink:0;
 }
 .post-avatar img { width:100%; height:100%; object-fit:cover; }
@@ -3083,7 +3083,7 @@ html.theme-astral .team-member-card:hover { box-shadow: 0 16px 40px rgba(0,0,0,0
   border-radius: 50%;
   background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
   display: flex; align-items: center; justify-content: center;
-  font-size: 22px; font-weight: 800; color: #fff;
+  font-size: 1.375rem; font-weight: 800; color: #fff;
   overflow: hidden;
   border: 2.5px solid rgba(255,255,255,0.15);
   box-shadow: 0 4px 16px rgba(0,0,0,0.3);
@@ -3109,7 +3109,7 @@ html.theme-astral .team-member-card:hover { box-shadow: 0 16px 40px rgba(0,0,0,0
   line-height: 1.4;
 }
 .team-status-pill {
-  font-size: 9px; font-weight: 700; padding: 2px 8px;
+  font-size: 0.5625rem; font-weight: 700; padding: 2px 8px;
   border-radius: 20px; margin-top: 2px;
   background: var(--surface2); color: var(--text-muted);
   letter-spacing: .04em;
@@ -3162,16 +3162,16 @@ html.theme-astral .eom-banner {
   width: 62px; height: 62px; border-radius: 50%;
   background: linear-gradient(135deg, #FFB800 0%, #FF8A00 100%);
   display: flex; align-items: center; justify-content: center;
-  font-size: 22px; font-weight: 800; color: #fff; overflow: hidden;
+  font-size: 1.375rem; font-weight: 800; color: #fff; overflow: hidden;
   border: 2.5px solid rgba(255,196,0,0.5);
   box-shadow: 0 6px 18px rgba(255,138,0,0.35);
 }
 .eom-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 .eom-info { flex: 1 1 auto; min-width: 0; }
-.eom-name { font-size: 17px; font-weight: 800; color: var(--text); line-height: 1.2; }
+.eom-name { font-size: 1.0625rem; font-weight: 800; color: var(--text); line-height: 1.2; }
 .eom-role { font-size: var(--fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-top: 3px; }
-.eom-reason { font-size: 12.5px; color: var(--text); opacity: .85; font-style: italic; margin-top: 6px; line-height: 1.4; }
-.eom-auto-tag { font-size: 10.5px; font-weight: 600; color: var(--text-muted); margin-top: 6px; opacity: .9; }
+.eom-reason { font-size: 0.78125rem; color: var(--text); opacity: .85; font-style: italic; margin-top: 6px; line-height: 1.4; }
+.eom-auto-tag { font-size: 0.65625rem; font-weight: 600; color: var(--text-muted); margin-top: 6px; opacity: .9; }
 .eom-edit-btn {
   flex: 0 0 auto; align-self: flex-start;
   background: rgba(255,255,255,0.1); border: 1px solid var(--glass-border, rgba(255,255,255,0.15));
@@ -3237,7 +3237,7 @@ html.theme-astral .eom-banner {
 }
 .ca-card-header { display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
 .ca-card-name { flex:1; font-weight:600; font-size:var(--fs-base); }
-.ca-amount { font-size:22px; font-weight:800; color:var(--text); }
+.ca-amount { font-size:1.375rem; font-weight:800; color:var(--text); }
 .ca-card-body { display:flex; flex-direction:column; gap:6px; }
 .ca-detail { display:flex; justify-content:space-between; font-size:var(--fs-md); color:var(--text); }
 .ca-detail span:first-child { color:var(--text-muted); }
@@ -3255,11 +3255,11 @@ html.theme-astral .eom-banner {
   border-radius:16px; margin-bottom:16px;
 }
 .company-hero-logo { width:80px; height:80px; border-radius:50%; object-fit:cover; margin-bottom:12px; }
-.company-hero-name { font-size:22px; font-weight:800; color:var(--text); margin:0 0 4px; }
+.company-hero-name { font-size:1.375rem; font-weight:800; color:var(--text); margin:0 0 4px; }
 .company-hero-tagline { font-size:var(--fs-md); color:var(--text-muted); margin:0; }
 .trademark-card { display:flex; align-items:flex-start; gap:14px; }
 .trademark-icon { font-size:var(--fs-4xl); flex-shrink:0; }
-.trademark-name { font-weight:700; font-size:15px; color:var(--text); margin-bottom:4px; }
+.trademark-name { font-weight:700; font-size:0.9375rem; color:var(--text); margin-bottom:4px; }
 .trademark-desc { font-size:var(--fs-md); color:var(--text-muted); line-height:1.5; }
 
 /* ── Subtab bar responsive (scrolls horizontally, no wrapping needed) ── */
@@ -3274,7 +3274,7 @@ html.theme-astral .eom-banner {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 12px; padding: 14px 16px; text-align: center;
 }
-.stat-num  { font-size: 22px; font-weight: 800; color: var(--text); }
+.stat-num  { font-size: 1.375rem; font-weight: 800; color: var(--text); }
 .stat-label{ font-size: var(--fs-xs); color: var(--text-muted); margin-top: 3px; }
 
 
@@ -3320,7 +3320,7 @@ html.theme-astral .bottom-nav-item.active .bn-icon svg { stroke: var(--pink) !im
   border-radius:6px; color:var(--text-muted);
 }
 .dept-open-hint { font-size:var(--fs-xs); color:var(--primary-light); margin-top:4px; font-weight:600; }
-.dept-icon-large { font-size:36px; line-height:1; margin-bottom:4px; }
+.dept-icon-large { font-size:2.25rem; line-height:1; margin-bottom:4px; }
 
 /* Dept quick-tab buttons on employee dashboard */
 .dept-quick-tab {
@@ -3953,7 +3953,7 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 .ms-avatar {
   width: 24px; height: 24px; border-radius: 50%;
   background: var(--bubble-out-bg); color: var(--bubble-out-text, #fff);
-  font-size: 9px; font-weight: 700;
+  font-size: 0.5625rem; font-weight: 700;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0; overflow: hidden;
 }
@@ -4025,7 +4025,7 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   font-size: var(--fs-2xs); color: var(--text-muted); margin-top: 2px;
   display: flex; align-items: center; gap: 4px;
 }
-.ms-seen .ms-avatar { width: 14px; height: 14px; font-size: 7px; }
+.ms-seen .ms-avatar { width: 14px; height: 14px; font-size: 0.4375rem; }
 .ms-seen::before { content: '✓✓'; font-size: var(--fs-xs); color: var(--primary); }
 .ms-status { display: flex; align-items: center; margin-top: 2px; color: var(--text-muted); }
 .ms-status svg { width: 13px; height: 13px; }
@@ -4034,10 +4034,10 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 /* Day / time-gap separators (Phase 17) */
 .ms-day-sep { text-align: center; margin: 14px 0 8px; }
 .ms-day-sep span {
-  font-size: 11px; font-weight: 700; color: var(--text-muted);
+  font-size: 0.6875rem; font-weight: 700; color: var(--text-muted);
   background: var(--surface-2); padding: 3px 12px; border-radius: var(--pill);
 }
-.ms-time-sep { text-align: center; margin: 10px 0 4px; font-size: 11px; color: var(--text-muted); }
+.ms-time-sep { text-align: center; margin: 10px 0 4px; font-size: 0.6875rem; color: var(--text-muted); }
 
 /* Send pop-in micro-interaction (Phase 19) — transform/opacity only, and only
    applied to genuinely-new bubbles (see chat.js _lastMsgIds bookkeeping), so a
@@ -4060,7 +4060,7 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   0%, 60%, 100% { transform: translateY(0); opacity: .5; }
   30% { transform: translateY(-4px); opacity: 1; }
 }
-.ms-typing-names { font-size: 11px; color: var(--text-muted); margin: 2px 0 0 32px; }
+.ms-typing-names { font-size: 0.6875rem; color: var(--text-muted); margin: 2px 0 0 32px; }
 @media (prefers-reduced-motion: reduce) { .ms-typing-dot { animation: none; opacity: .8; } }
 
 /* ── Composer (Phase 19) — pill auto-grow textarea + circular icon buttons ── */
@@ -4129,10 +4129,10 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 .ms-thread-back:hover { background: var(--surface-2); }
 .ms-thread-info { flex: 1; min-width: 0; }
 .ms-thread-title {
-  font-size: 15px; font-weight: 700; color: var(--text);
+  font-size: 0.9375rem; font-weight: 700; color: var(--text);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.ms-thread-subtitle { font-size: 11px; color: var(--text-muted); }
+.ms-thread-subtitle { font-size: 0.6875rem; color: var(--text-muted); }
 .ms-thread-menu-btn {
   width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%;
   background: none; border: none; cursor: pointer; color: var(--text-muted);
@@ -4147,7 +4147,7 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 }
 .ms-wallpaper-menu.hidden { display: none; }
 .ms-wallpaper-menu-title {
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
   color: var(--text-muted); padding: 6px 8px 4px;
 }
 .ms-wallpaper-opt {
@@ -4209,7 +4209,7 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 
 @media (max-width: 768px) {
   .page-header h2 {
-    font-size: 32px;
+    font-size: 2rem;
     font-weight: 800;
     letter-spacing: -1px;
     line-height: 1.1;
@@ -4422,7 +4422,7 @@ html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: v
 
 /* ── Card headers ── */
 .card-header h3 {
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 700;
   letter-spacing: -0.2px;
 }
@@ -4547,7 +4547,7 @@ html.theme-astral .subtab-btn.active {
 /* PTR arc ring styles are in the PULL-TO-REFRESH block */
 
 /* ── Item title — slightly larger ── */
-.item-title { font-size: 15px; font-weight: 600; }
+.item-title { font-size: 0.9375rem; font-weight: 600; }
 
 /* ── Badge — iOS red dot style ── */
 .nav-badge {
@@ -4646,7 +4646,7 @@ html.theme-astral .splash-logo-card {
   width: 100%; height: 100%;
   background: var(--primary);
   align-items: center; justify-content: center;
-  font-size: 38px; font-weight: 800; color: var(--on-primary);
+  font-size: 2.375rem; font-weight: 800; color: var(--on-primary);
   letter-spacing: -2px;
 }
 html.theme-astral .splash-bi-fallback { background: var(--grad-pk-bl); }
@@ -4849,7 +4849,7 @@ html.light .drawer-back-btn:hover { background: rgba(10,132,255,0.07); }
   width: 88px; height: 88px;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
-  font-size: 36px; font-weight: 700; color: #fff;
+  font-size: 2.25rem; font-weight: 700; color: #fff;
   background: linear-gradient(135deg, var(--primary-light), var(--pink));
   box-shadow: 0 4px 24px rgba(108,142,245,0.40);
 }
@@ -4868,7 +4868,7 @@ html.light .drawer-back-btn:hover { background: rgba(10,132,255,0.07); }
   fill: none; stroke-width: 2;
 }
 .profile-hero-name {
-  font-size: 22px; font-weight: 700; letter-spacing: -0.4px;
+  font-size: 1.375rem; font-weight: 700; letter-spacing: -0.4px;
   color: var(--text);
   margin-bottom: 4px;
 }
@@ -4955,7 +4955,7 @@ html.light .drawer-back-btn:hover { background: rgba(10,132,255,0.07); }
   margin: 16px 16px 0;
   display: block;
   padding: 14px;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
   border-radius: 14px;
 }
@@ -5137,7 +5137,7 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
 
 /* ── v12 WS18 — keyboard-shortcuts cheat sheet (? modal) ── */
 .kbd-cheatsheet .kbd-table { width:100%; border-collapse:collapse; }
-.kbd-cheatsheet .kbd-table td { padding:7px 10px; border-bottom:1px solid var(--border); font-size:14px; color:var(--text); }
+.kbd-cheatsheet .kbd-table td { padding:7px 10px; border-bottom:1px solid var(--border); font-size:0.875rem; color:var(--text); }
 .kbd-cheatsheet .kbd-cell { white-space:nowrap; width:1%; }
 .kbd-cheatsheet kbd {
   display:inline-block; min-width:22px; text-align:center; padding:2px 7px;
@@ -5145,5 +5145,5 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   background:var(--surface); color:var(--text);
   border:1px solid var(--border); border-bottom-width:2px; border-radius:6px;
 }
-.kbd-cheatsheet .kbd-subhead { margin:16px 0 6px; font-size:12px; text-transform:uppercase;
+.kbd-cheatsheet .kbd-subhead { margin:16px 0 6px; font-size:0.75rem; text-transform:uppercase;
   letter-spacing:.04em; color:var(--text-muted); }
