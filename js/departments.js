@@ -1534,7 +1534,7 @@ async function openSubDetail(subId, currentUser, currentRole) {
   const s = {id:snap.id,...snap.data()};
   const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'finance';
 
-  openModal(s.title, `
+  openModal(escHtml(s.title||''), `
     <div style="margin-bottom:10px">
       <span class="badge ${statusBadge(s.status)}">${s.status||'pending'}</span>
       <span class="badge badge-gray" style="margin-left:6px">${escHtml(s.type||'General')}</span>
@@ -3911,7 +3911,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         const hid = btn.dataset.id;
         const rec = history.find(h => h.id === hid);
         if (!rec) return;
-        openPage(`Edit Payroll Record — ${rec.userName||'?'} (${rec.month||'?'})`, `
+        openPage(`Edit Payroll Record — ${escHtml(rec.userName||'?')} (${escHtml(rec.month||'?')})`, `
           <div class="form-row">
             <div class="form-group"><label>Base Salary</label><input id="hpe-salary" type="number" value="${rec.salary||0}" inputmode="decimal"/></div>
             <div class="form-group"><label>Allowance</label><input id="hpe-allow" type="number" value="${rec.allowance||0}" inputmode="decimal"/></div>
@@ -4155,7 +4155,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         const inst = plan.plan[0]; // first CA in the plan, for the "installment N of M" label
 
         const _payClass = emp.payClass==='production' ? 'production' : 'regular';
-        openPage(`Edit Payroll — ${emp.displayName}`, `
+        openPage(`Edit Payroll — ${escHtml(emp.displayName||'')}`, `
           <div class="form-group"><label>Employee Class</label>
             <select id="ep-class" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
               <option value="regular" ${_payClass==='regular'?'selected':''}>Regular — monthly (KPI + attendance)</option>
@@ -6427,7 +6427,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
   const periodEnd   = addDays(todayISO, (6 - dow + 7) % 7);  // upcoming/this Saturday
   const periodStart = addDays(periodEnd, -5);                // Monday of that pay week
 
-  openPage(`${emojiIcon('📄',16)} Generate Payslip — ${profile.name}`, `
+  openPage(`${emojiIcon('📄',16)} Generate Payslip — ${escHtml(profile.name||'')}`, `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
       <div class="form-group"><label>Pay Period Start</label><input id="ps-start" type="date" value="${periodStart}"/></div>
       <div class="form-group"><label>Pay Period End (Sat)</label><input id="ps-end" type="date" value="${periodEnd}"/></div>
@@ -10944,8 +10944,9 @@ window.renderApprovals = async function(currentUser) {
       // Signup approve
       wrap.querySelectorAll('.sg-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           const pwd = generatePassword(btn.dataset.name);
-          const empCount = (await db.collection('users').get().catch(()=>({size:0}))).size;
-          const empId = `BI-${window.bizYear ? window.bizYear() : new Date().getFullYear()}-${String(empCount+1).padStart(3,'0')}`;
+          const empId = await nextCounterId('employees',
+            async () => (await db.collection('users').get().catch(()=>({size:0}))).size,
+            n => `BI-${window.bizYear ? window.bizYear() : new Date().getFullYear()}-${String(n).padStart(3,'0')}`);
           const newStartDate = today();
           const newUserRef = await db.collection('users').add({ displayName:btn.dataset.name, email:btn.dataset.email, phone:btn.dataset.phone, role:'employee', departments:[], employeeId:empId, photoUrl:'', startDate:newStartDate, createdAt:firebase.firestore.FieldValue.serverTimestamp(), pendingPasswordSetup:true });
           await window.LeaveAccrual.grantForYear(newUserRef.id, { startDate: newStartDate });
@@ -11250,7 +11251,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.grade-task-btn').forEach(btn=>btn.addEventListener('click',()=>openTaskDetail(btn.dataset.id, currentUser, _role)));
       wrap.querySelectorAll('.grade-kpi-btn').forEach(btn=>btn.addEventListener('click',()=>{
         const { uid, name } = btn.dataset;
-        openPage(`${emojiIcon('⭐',16)} Grade: ${name}`, `
+        openPage(`${emojiIcon('⭐',16)} Grade: ${escHtml(name||'')}`, `
           <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px">Assign a performance grade for ${escHtml(name)} (1 = poor, 10 = outstanding). Development areas are shown to the employee.</p>
           <div class="form-group"><label>President Grade (1–10)</label>
             <input id="ap-grade-input" type="number" inputmode="numeric" min="1" max="10" step="1" placeholder="e.g. 8"/></div>
@@ -11503,8 +11504,9 @@ window.renderApprovals = async function(currentUser) {
           const phone = btn.dataset.phone;
           const pwd   = generatePassword(name);
           // Create Firestore user profile (no uid yet — president creates Firebase Auth manually)
-          const empCount = (await db.collection('users').get().catch(()=>({size:0}))).size;
-          const empId    = `BI-${window.bizYear ? window.bizYear() : new Date().getFullYear()}-${String(empCount+1).padStart(3,'0')}`;
+          const empId = await nextCounterId('employees',
+            async () => (await db.collection('users').get().catch(()=>({size:0}))).size,
+            n => `BI-${window.bizYear ? window.bizYear() : new Date().getFullYear()}-${String(n).padStart(3,'0')}`);
           const newStartDate = today();
           const newUserRef = await db.collection('users').add({
             displayName: name, email, phone,
@@ -11845,6 +11847,29 @@ function aecStageMeta(k){ return window.AEC_STAGES.find(s => s.key === k) || win
 // The owner's two derived tracker columns (Decision 6):
 function aecContacted(c){ return aecStageOf(c) !== 'new'; }
 function aecProspected(c){ return ['prospect','partner'].includes(aecStageOf(c)); }
+
+// Generalized atomic sequence via _counters/{counterName} (Phase 15).
+// seedFn (optional): async () => number — a one-time floor computed BEFORE
+// the transaction (e.g. an existing collection's current row count), used
+// only the first time the counter doc doesn't exist yet, so IDs minted
+// pre-migration aren't reissued. formatFn (optional): number => value —
+// shapes the raw sequence integer into the caller's ID string; omit to get
+// the plain integer back (see nextAECNumber below).
+async function nextCounterId(counterName, seedFn, formatFn){
+  const ref = db.collection('_counters').doc(counterName);
+  let seed = 0;
+  try {
+    const pre = await ref.get();
+    if (!pre.exists && typeof seedFn === 'function') seed = (await seedFn()) || 0;
+  } catch(_) {}
+  return db.runTransaction(async t => {
+    const cur  = await t.get(ref);
+    const base = Math.max(cur.exists ? (cur.data().count || 0) : 0, seed);
+    const next = base + 1;
+    t.set(ref, { count: next }, { merge:true });
+    return typeof formatFn === 'function' ? formatFn(next) : next;
+  });
+}
 
 // Atomic directory number via _counters/aec_contacts — mirrors nextSerial's
 // transaction (letterhead.js) but returns the PLAIN integer (a citable
@@ -13476,10 +13501,13 @@ const _isFinAdmin = () => ['president','owner','manager','finance'].includes(win
 
 // Create the master project when a quote is won (called from the Sales Order flow).
 async function createJobProject(d){
-  let seq='001';
-  try { const cnt=(await db.collection('job_projects').get()).size; seq=String(cnt+1).padStart(3,'0'); } catch(_) { seq=String(Date.now()).slice(-3); }
   const ym=(window.bizDate?window.bizDate():new Date().toISOString().slice(0,10)).slice(2,7).replace('-','');
-  const projectNo=`JP-${ym}-${seq}`;
+  let projectNo;
+  try {
+    projectNo = await nextCounterId('job_projects',
+      async () => (await db.collection('job_projects').get()).size,
+      n => `JP-${ym}-${String(n).padStart(3,'0')}`);
+  } catch(_) { projectNo = `JP-${ym}-${String(Date.now()).slice(-3)}`; }
   const contract=parseFloat(d.total)||0;
   const company=d.co||'BS';
   const who=userProfile?.displayName||currentUser.email;
@@ -13704,7 +13732,7 @@ async function advanceProjectStage(p, nextId){
 async function openProjectBillingModal(p){
   const bal=p.arBalance||0;
   const bankOpts = await window.BankAccounts.optionsHTML();
-  openPage(`${emojiIcon('💵',16)} Record Payment — `+(p.clientName||''), `
+  openPage(`${emojiIcon('💵',16)} Record Payment — `+escHtml(p.clientName||''), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Contract ₱${fmt(p.contractAmount||0)} · Collected ₱${fmt(p.amountCollected||0)} · <strong>Balance ₱${fmt(bal)}</strong></div>
     <div class="form-row">
       <div class="form-group"><label>Payment Type</label><select id="pb-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Downpayment</option><option>Progress Billing</option><option>Final Balance</option></select></div>
@@ -14406,12 +14434,13 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
     try {
       if(order){ await db.collection('production_orders').doc(order.id).update(data); window.logAudit&&window.logAudit('update','production_order',order.id,{title:data.title,stage:data.stage}); }
       else {
-        // order number PO-YYMM-### (best-effort sequential; falls back to time suffix)
-        let seq = '001';
-        try { const cnt = (await db.collection('production_orders').get()).size; seq = String(cnt+1).padStart(3,'0'); }
-        catch(_) { seq = String(Date.now()).slice(-3); }
+        // order number PO-YYMM-### (atomic sequence; falls back to time suffix)
         const ym = (window.bizDate?window.bizDate():new Date().toISOString().slice(0,10)).slice(2,7).replace('-','');
-        data.orderNo = `PO-${ym}-${seq}`;
+        try {
+          data.orderNo = await nextCounterId('production_orders',
+            async () => (await db.collection('production_orders').get()).size,
+            n => `PO-${ym}-${String(n).padStart(3,'0')}`);
+        } catch(_) { data.orderNo = `PO-${ym}-${String(Date.now()).slice(-3)}`; }
         data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
         data.createdBy = currentUser.uid;
         data.createdByName = userProfile?.displayName || currentUser.email || '';
