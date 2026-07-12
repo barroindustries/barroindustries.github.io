@@ -100,6 +100,28 @@
   --top-nav-h:    50px;
   --content-max:  1680px;
 
+  /* ── Z-index scale — WS-Phase 58: designed stacking system, replaces ad-hoc literals.
+     Order (low→high): scrim < shell (sidebar/bottom-nav) < topbar < panel (notif) < ptr < drawer < modal < page-panel < dialog < splash.
+     Two deliberate fixes vs. the old inventory: ptr-indicator 300→180 (now under modal/drawer),
+     page-panel 4000→210 (now just above modal, so a modal opened over a page-panel still wins). ── */
+  --z-scrim:      85;   /* sidebar-overlay backdrop */
+  --z-shell:      90;   /* sidebar, bottom-nav base */
+  --z-shell-2:    94;   /* top-nav-strip */
+  --z-bottom-nav: 95;   /* bottom-nav */
+  --z-shell-open: 96;   /* sidebar.open (above top-nav-strip) */
+  --z-topbar:     100;  /* .topbar */
+  --z-topbar-2:   101;  /* top-nav desktop (above .topbar) */
+  --z-panel:      150;  /* notif-panel */
+  --z-panel-scrim:140;  /* notif-backdrop */
+  --z-ptr:        180;  /* pull-to-refresh indicator (below drawer/modal) */
+  --z-drawer-scrim:190; /* drawer-overlay backdrop */
+  --z-drawer:     195;  /* drawer panel */
+  --z-drawer-2:   198;  /* drawer content above its own overlay (190) */
+  --z-modal:      200;  /* modal-overlay */
+  --z-page-panel: 210;  /* full-screen page-panel — just above modal, was 4000 */
+  --z-dialog:     5000; /* dialog-overlay — always on top short of splash */
+  --z-splash:     9999; /* splash screen */
+
   /* ── Type ── */
   --font: 'Inter', -apple-system, 'SF Pro Text', system-ui, sans-serif;
   --font-display: 'Inter', -apple-system, 'SF Pro Display', system-ui, sans-serif;
@@ -996,7 +1018,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   height: var(--top-nav-h);
   background: var(--topbar-bg);
   border-bottom: 1px solid var(--border);
-  z-index: 94;
+  z-index: var(--z-shell-2);
   overflow-x: auto; overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
@@ -1084,7 +1106,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   background: var(--notif-bg);
   border-radius: var(--r-lg);
   border: 1px solid var(--border);
-  z-index: 150; display: flex; flex-direction: column; overflow: hidden; max-width: calc(100vw - 24px);
+  z-index: var(--z-panel); display: flex; flex-direction: column; overflow: hidden; max-width: calc(100vw - 24px);
   animation: dropDown 0.22s var(--spring);
 }
 .notif-panel-header {
@@ -1094,7 +1116,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   background: rgba(255,255,255,0.02);
 }
 .notif-list { overflow-y: auto; overflow-x: hidden; flex: 1; -webkit-overflow-scrolling: touch; }
-.notif-backdrop { position: fixed; inset: 0; z-index: 140; }
+.notif-backdrop { position: fixed; inset: 0; z-index: var(--z-panel-scrim); }
 .notif-item {
   padding: 11px 14px; border-bottom: 1px solid var(--border);
   cursor: default; transition: background var(--t1);
@@ -1167,7 +1189,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   background: var(--sidebar-bg);
   position: fixed; top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px)); bottom: 0; left: 0;
   padding-left: env(safe-area-inset-left, 0px);
-  z-index: 90; display: flex; flex-direction: column;
+  z-index: var(--z-shell); display: flex; flex-direction: column;
   overflow: hidden;
   transition: transform var(--t3) var(--ease);
 }
@@ -1307,7 +1329,7 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 
 .sidebar-overlay {
   position: fixed; inset: 0;
-  background: rgba(0,0,0,0.55); z-index: 85;
+  background: rgba(0,0,0,0.55); z-index: var(--z-scrim);
 }
 
 /* ══════════════════════════════
@@ -1762,7 +1784,7 @@ html.light .id-card--calling .idc-brand { color: var(--text-muted); }
      which stay. The dead .splash-wordmark rule and unused @keyframes splashIn
      were removed; @keyframes splashBarRun is kept — the new .splash-bar::after
      still references it by name. */
-  position: fixed; inset: 0; z-index: 9999;
+  position: fixed; inset: 0; z-index: var(--z-splash);
   transition: opacity 0.4s ease, visibility 0.4s ease;
 }
 #splash-screen.hiding {
@@ -1782,7 +1804,7 @@ html.light .id-card--calling .idc-brand { color: var(--text-muted); }
   position: fixed;
   top: calc(env(safe-area-inset-top, 0px) + 56px);
   left: 50%; transform: translateX(-50%) translateY(-90px);
-  z-index: 300;
+  z-index: var(--z-ptr);
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 0;
   background: transparent;
@@ -2200,7 +2222,7 @@ html.theme-astral .quote-sheet { backdrop-filter: blur(20px); -webkit-backdrop-f
 ══════════════════════════════ */
 .modal-overlay {
   position: fixed; inset: 0;
-  z-index: 200; display: flex; align-items: center; justify-content: center;
+  z-index: var(--z-modal); display: flex; align-items: center; justify-content: center;
   /* WS42 Phase 11: notch/home-indicator clearance (landscape phones, desktop unaffected
      since env() resolves to 0 there); mobile bottom-sheet breakpoint overrides this to 0. */
   padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px))
@@ -2218,7 +2240,7 @@ html.theme-astral .quote-sheet { backdrop-filter: blur(20px); -webkit-backdrop-f
 
 /* ── Full-screen page panel (v12 WS10 — openPage) ── */
 .page-panel{ position:fixed; top:calc(var(--topbar-h) + env(safe-area-inset-top,0px));
-  left:0; right:0; bottom:0; background:var(--bg); z-index:4000; display:flex; flex-direction:column;
+  left:0; right:0; bottom:0; background:var(--bg); z-index:var(--z-page-panel); display:flex; flex-direction:column;
   transform:translateY(100%); opacity:0; transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .3s; overflow:hidden; }
 .page-panel.open{ transform:translateY(0); opacity:1; }
 .page-panel-head{ display:flex; align-items:center; gap:12px;
@@ -2237,7 +2259,7 @@ html.theme-astral .quote-sheet { backdrop-filter: blur(20px); -webkit-backdrop-f
 
 /* ── Confirm / prompt dialog (v12 WS11 — confirmDialog/promptDialog) ── */
 .dialog-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.4);
-  z-index:5000; display:flex; align-items:center; justify-content:center;
+  z-index:var(--z-dialog); display:flex; align-items:center; justify-content:center;
   /* WS42 Phase 11: notch/home-indicator clearance in all four directions */
   padding:max(20px, env(safe-area-inset-top,0px)) max(20px, env(safe-area-inset-right,0px))
     max(20px, env(safe-area-inset-bottom,0px)) max(20px, env(safe-area-inset-left,0px)); }
@@ -2276,11 +2298,13 @@ html.theme-astral .dialog-overlay { backdrop-filter: blur(14px) saturate(120%); 
   width: min(400px, 100vw);
   background: var(--drawer-bg);
   border-left: 1px solid var(--border);
-  z-index: 195; display: flex; flex-direction: column;
+  z-index: var(--z-drawer); display: flex; flex-direction: column;
   transform: translateX(100%);
   transition: transform var(--t3) var(--ease);
 }
 .drawer.open { transform: translateX(0); }
+/* Phase 58: inline z-index moved out of index.html:326 (#drawer-overlay) — was a literal 190 override on .modal-overlay */
+#drawer-overlay.modal-overlay { z-index: var(--z-drawer-scrim); }
 /* WS42 Phase 11: right-edge notch clearance for the desktop/right-panel drawer only —
    scoped above the 639px bottom-sheet breakpoint so it never touches the mobile sheet. */
 @media (min-width: 640px) {
@@ -2383,7 +2407,7 @@ html.theme-astral #mini-cal td.today {
 @media (max-width: 768px) {
   #sidebar { transform: translateX(-100%); }
   /* z-index 96 = above top-nav-strip (94) so user info is fully visible */
-  #sidebar.open { transform: translateX(0); box-shadow: 4px 0 48px rgba(0,0,0,0.60); z-index: 96; }
+  #sidebar.open { transform: translateX(0); box-shadow: 4px 0 48px rgba(0,0,0,0.60); z-index: var(--z-shell-open); }
   .menu-toggle { display: block; }
   .main-content {
     margin-left: 0;
@@ -3386,7 +3410,7 @@ body::before {
   padding-left: max(16px, env(safe-area-inset-left, 0px));
   padding-right: max(16px, env(safe-area-inset-right, 0px));
   gap: 12px;
-  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  position: fixed; top: 0; left: 0; right: 0; z-index: var(--z-topbar);
   background: var(--topbar-bg);
   border-bottom: 1px solid var(--border);
   box-shadow: var(--sh-sm);
@@ -4251,7 +4275,7 @@ html.theme-astral .top-nav-item.active .bn-icon { filter: drop-shadow(0 0 5px rg
     width: max-content; max-width: 60vw;
     background: none; border: none; box-shadow: none;
     padding-top: env(safe-area-inset-top, 0px);
-    z-index: 101; /* above .topbar (100) so the centered icon-tabs are visible/clickable */
+    z-index: var(--z-topbar-2); /* above .topbar (100) so the centered icon-tabs are visible/clickable */
   }
   html.theme-astral .top-nav-strip { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; border: none; }
   .top-nav-item { flex-direction: column; width: 48px; min-height: auto; border-radius: 0; padding: 6px 0; }
@@ -4427,7 +4451,7 @@ html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: v
   border: none;
   border-top: 1px solid var(--border);
   box-shadow: none;
-  z-index: 95;
+  z-index: var(--z-bottom-nav);
   justify-content: space-around; align-items: center;
   box-sizing: border-box;
   transition: height 0.25s var(--ease), opacity 0.25s var(--ease);
@@ -4497,7 +4521,7 @@ html.theme-astral .subtab-btn.active {
     border-left: none;
     border-radius: 0;
     width: 100%;
-    z-index: 198; /* above sidebar overlay (190) */
+    z-index: var(--z-drawer-2); /* above sidebar overlay (190) */
   }
 }
 
