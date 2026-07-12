@@ -5087,8 +5087,24 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
 .payslip-print .ps-sig-line{border-top:1px solid #000;padding-top:5px;min-height:28px;font-weight:700;}
 .payslip-print .ps-sig-lbl{font-size:8pt;color:#666;margin-top:2px;}
 .payslip-print .ps-foot{margin-top:20px;padding-top:8px;border-top:1px solid #eee;font-size:8pt;color:#999;text-align:center;}
+/* ── Generic print system (v13 Phase 56) — shared visibility reset for any
+   .print-target plus the two existing print classes; keyed off existing
+   classes so no markup changes are needed. Also a global dark/Astral-theme
+   print fallback so Ctrl+P from any page/theme is legible. ─────────────── */
 @media print{
-  body *{visibility:hidden;} .payslip-print,.payslip-print *{visibility:visible;} .no-print{display:none!important;}
+  body *{visibility:hidden;}
+  .print-target,.print-target *,
+  .payslip-print,.payslip-print *,
+  .bir-print,.bir-print *{visibility:visible;}
+  .no-print{display:none!important;}
+
+  /* dark/Astral fallback: force light, legible chrome-free output everywhere */
+  body,#page-content,.card,.data-table,.data-table th,.data-table td,
+  table,th,td{background:#fff!important;color:#000!important;box-shadow:none!important;filter:none!important;}
+  .sidebar,.topbar,.top-nav,.bottom-nav,.chip-tabs,.chip-tab,.tabbar,
+  .fab,.no-print{display:none!important;}
+}
+@media print{
   .payslip-print{position:absolute;left:0;top:0;width:100%;padding:8mm;}
   /* two-tier page-break: tables flow, rows/headers stay whole (WS14 aab024a pattern) */
   .payslip-print table.ps-t{page-break-inside:auto;break-inside:auto;}
@@ -5112,7 +5128,6 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
 .bir-print .bir-banner{background:#fff3cd;border:1px solid #e0a800;color:#7a5b00;padding:8px 12px;border-radius:4px;font-size:10.5pt;margin-bottom:10px;}
 .bir-print .bir-watermark::before{content:"DRAFT — UNVERIFIED RATES";position:fixed;top:45%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:52px;font-weight:900;color:rgba(200,0,0,0.15);z-index:1;pointer-events:none;white-space:nowrap;}
 @media print{
-  body *{visibility:hidden;} .bir-print,.bir-print *{visibility:visible;} .no-print{display:none!important;}
   .bir-print{position:absolute;left:0;top:0;width:100%;padding:8mm;}
   .bir-print table.bir-t{page-break-inside:auto;break-inside:auto;}
   .bir-print thead{display:table-header-group;}
