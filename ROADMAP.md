@@ -8,6 +8,40 @@ _Last updated: 2026-07-01 — base version **v11.0.51**, cache `bi-ops-v136` (bo
 
 ---
 
+## 🆕 SESSION 2026-07-12 (early am) — v13 kickoff: full review, 200-phase plan, build waves 1–4
+
+**V13-PLAN.md created (repo root)** — line-by-line review of all ~45.5k lines by 14 audit agents; 200 phases
+(system 1–100 + UI/UX 101–200); findings registers Parts B & G; Neil decision register Part F2 (D1–D20).
+Read V13-PLAN.md before any v13 work.
+
+**Built & committed locally (13 commits, v12.0.45→57 — NOT pushed, deploys pending):**
+- Ph 2–4: backup fixes — phantom 'task-comments' name (comments were NEVER backed up), generic
+  subcollection walker (chat messages, attendance_worker/records now covered), restore.yml SA secret.
+- Ph 5: hygiene — PII file deleted, Netlify-era docs removed, trackers → archive/, PUBLISHING_GUIDE rewritten.
+- Ph 6–7: tracked hardened .githooks/pre-commit (ACTIVE on this machine via core.hooksPath; CACHE_VER now
+  derives from APP_VERSION) + ci.yml (node --check, Node-20 pin lint, backup-coverage check).
+- Ph 11+20: transactional Disburse lock (verified→disbursing→disbursed; resume/reopen), financeDelete
+  hang fix, president Payroll Reconciliation report (read-only + CSV).
+- Ph 15: atomic _counters IDs (employeeId ×2 shared with app.js sequence, JP-, PO- mints).
+- Ph 16–17: expense-reject cache invalidation, CDJ vatAmount recompute on edit (financeEditModal transform
+  hook), fmtMonthLabel Manila-pinned labels (incl. printed payslips), bizDow(dateStr), leave-day edit guard.
+- Ph 18: CashAdvance sole writer (president modal via request+approve; consistent rounding; txn reject).
+- Ph 21–22 (rules, LOCAL): approval_requests create validation; posts create/publish/hearts scoping (D10:
+  secretary excluded from post approval, matches UI).
+- Ph 26: quote-builder stored-XSS escaped; Internal cost/margin removed from DOM for generic CO.PT partners
+  (Brilliant Steel keeps it, D14); postMessage origins pinned.
+- Ph 27: safeHttpUrl on policies/downloads links; rel=noopener sweep; 6 title escapes.
+- Ph 101–104, 108–109 (UI/UX): dead filters wired (rec-filter, it-asset-filter); badge-warn/amber CSS
+  (Approvals pills were invisible); busy() double-click guards on 12 money buttons; 3 router bypasses →
+  navigateTo (Back button fixed on dashboard dept cards); notifications See-all on desktop; dead refs deleted.
+
+**⚠️ DEPLOY ORDER when Neil approves the push:** `firebase deploy --only firestore:rules` BEFORE/WITH the
+code push — pay_runs 'disbursing' + approval_requests + posts rules must land with (or ahead of) the JS,
+else Disburse breaks. Then Phase 9's one-time buttons + Phase 4's restore drill.
+
+**Next up:** push+deploy session (Ph 1, 9) · Ph 105 (Overlay/Back part 2) · Ph 28 (plaintext passwords —
+needs flow decision) · Ph 12–14 (Ledger service) · Ph 19 (quote math — needs D4/D5 rulings).
+
 ## 🆕 SESSION 2026-07-11/12 — WS42 Complete UI Overhaul, Batch F (FINAL batch): motion, performance, cross-theme/device QA, docs
 
 **v12 WS42** — see `V12-PLAN.md` item 42 and `fable-workplan/42-ui-overhaul.md` for the full
