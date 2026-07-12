@@ -8,7 +8,7 @@
 //    • HTML / API → Network-first, cache as offline fallback
 // ═══════════════════════════════════════════════════════
 
-const CACHE_VER   = 'bi-ops-v12.0.72';
+const CACHE_VER   = 'bi-ops-v12.0.73';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -56,8 +56,13 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(STATIC).then(cache =>
       cache.addAll(PRECACHE).catch(err => console.warn('[SW] Pre-cache partial fail:', err))
-    ).then(() => self.skipWaiting())
+    )
   );
+});
+
+// ── Message: let the page decide when to activate a waiting SW ──
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 // ── Activate: prune old caches ───────────────────────

@@ -7,7 +7,7 @@
 
 // ── Shared helpers ────────────────────────────────
 function deptContainer() { return document.getElementById('page-content'); }
-function fmt(n) { return Number(n||0).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function fmt(n) { return window.fmtN2(n); }
 function today() { return (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10)); }
 function priorityBadge(p) { return {high:'badge-red',medium:'badge-orange',low:'badge-green',urgent:'badge-red'}[p]||'badge-gray'; }
 
@@ -122,7 +122,7 @@ window.runProjectKindBackfill = async function() {
   if (!(await confirmDialog({message:'Tag existing projects with their kind (job / design)?\n\nSafe to run repeatedly — already-tagged projects are skipped.'}))) return;
   try {
     const r = await window.backfillProjectKind();
-    Notifs.showToast(`Tagged ✓ ${r.jobs} job + ${r.designs} design projects.`);
+    Notifs.success(`Tagged ✓ ${r.jobs} job + ${r.designs} design projects.`);
   } catch (e) { Notifs.showToast('Tagging failed: ' + (e.message || e), 'error'); }
 };
 
@@ -454,7 +454,7 @@ window.financeDelete = async function(opts) {
     if (!(await confirmDialog({ message: `Delete ${escHtml(label)}? This cannot be undone.`, danger:true, html:true }))) return 'cancelled';
     try {
       await window.financeExecuteDelete(collection, docId);
-      Notifs.showToast('Deleted.'); onDone('deleted'); return 'deleted';
+      Notifs.success('Deleted.'); onDone('deleted'); return 'deleted';
     } catch(e) {
       Notifs.showToast('Delete failed: '+(e.message||e),'error'); return 'cancelled';
     }
@@ -482,7 +482,7 @@ window.financeDelete = async function(opts) {
           icon: '🗑', type: 'finance_delete_request'
         }));
         closeModal();
-        Notifs.showToast('Deletion request sent to the President for approval.');
+        Notifs.success('Deletion request sent to the President for approval.');
         onDone('requested'); resolve('requested');
       } catch(e) {
         Notifs.showToast('Could not send request: '+(e.message||e),'error');
@@ -516,7 +516,7 @@ window.requestQuoteDelete = async function(collection, docId, label, createdBy, 
         body: `${(window.userProfile && window.userProfile.displayName) || u.email || 'A user'} requests deleting ${label}.${reason?' Reason: '+reason:''}`,
         icon: '🗑', type: 'quote_delete_request'
       }));
-      Notifs.showToast('Delete request sent to the President.'); onDone('requested');
+      Notifs.success('Delete request sent to the President.'); onDone('requested');
     }).catch(e => Notifs.showToast('Request failed: '+(e.message||e),'error'));
   }
   Notifs.showToast('You can only request deletion of your own quotes.', 'error');
@@ -556,7 +556,7 @@ window.financeEditModal = function({ collection, docId, title, fields, onSaved, 
     if (typeof transform === 'function') { try { transform(upd); } catch(_e) {} }
     try {
       await db.collection(collection).doc(docId).update(upd);
-      closeModal(); Notifs.showToast('Updated.'); onSaved && onSaved();
+      closeModal(); Notifs.success('Updated.'); onSaved && onSaved();
     } catch(e) { Notifs.showToast('Update failed: '+(e.message||e),'error'); }
   });
 };
@@ -1131,7 +1131,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
       body: `"${t.title}" — ${val||'(cleared)'}`,
       icon: '📍', type: 'task_standing', taskId: taskId
     }, currentUser.uid);
-    Notifs.showToast('Standing updated!');
+    Notifs.success('Standing updated!');
     window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser, currentRole, t.department);
   });
 
@@ -1152,7 +1152,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     await db.collection('tasks').doc(taskId).update({status:newStatus,lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()});
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     await notifyTaskInvolved(t,{title:'📋 Task Status Updated',body:`"${t.title}" → ${statusLabel(newStatus)} (${actorName})`,icon:'📋',type:'task_status',taskId},currentUser.uid);
-    Notifs.showToast(`Status → ${statusLabel(newStatus)}`);
+    Notifs.success(`Status → ${statusLabel(newStatus)}`);
     window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 
@@ -1162,7 +1162,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     await db.collection('tasks').doc(taskId).update({status:'review',submittedBy:currentUser.uid,submittedByName:actorName,submittedAt:firebase.firestore.FieldValue.serverTimestamp(),lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()});
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     await notifyTaskInvolved(t,{title:'📤 Task Submitted for Review',body:`"${t.title}" submitted by ${actorName}`,icon:'📤',type:'task_submitted',taskId},currentUser.uid);
-    Notifs.showToast('Submitted for review!');
+    Notifs.success('Submitted for review!');
     window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 
@@ -1200,7 +1200,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     await Notifs.send(newUid,{title:'🎯 Task Assigned to You',body:`"${t.title}" assigned by ${actorName}${note?' — '+note:''}`,icon:'🎯',type:'task_designated',taskId});
     await Notifs.sendToOwner({title:'👥 Task Assignee Added',body:`${actorName} added ${newName} to "${t.title}"`,icon:'👥',type:'task_modified',taskId});
-    Notifs.showToast(`${newName} added`);
+    Notifs.success(`${newName} added`);
     window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 
@@ -1244,7 +1244,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
       if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('tasks-all');
       await notifyTaskInvolved(ft,{title:'📣 Follow-up Requested',body:`"${ft.title}" — ${actorName}: ${entry.message}`,icon:'📣',type:'task_followup',taskId},currentUser.uid);
       if(input) input.value='';
-      Notifs.showToast('Follow-up sent');
+      Notifs.success('Follow-up sent');
       await reloadFollowUps();
     }catch(e){
       console.error('[followups] request failed',e);
@@ -1272,7 +1272,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
         await Notifs.send(target.byUid,{title:'✅ Follow-up Addressed',body:`${actorName} addressed your follow-up on "${t.title}"`,icon:'✅',type:'task_followup_done',taskId});
       }
       await Notifs.sendToOwner({title:'✅ Follow-up Addressed',body:`${actorName} addressed a follow-up on "${t.title}"`,icon:'✅',type:'task_followup_done',taskId});
-      Notifs.showToast('Marked addressed');
+      Notifs.success('Marked addressed');
       await reloadFollowUps();
     }catch(e){
       console.error('[followups] mark-addressed failed',e);
@@ -1292,7 +1292,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     await db.collection('tasks').doc(taskId).update({presidentScore:score});
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     for (const uid of t.assignedTo) await recomputePresidentTaskScore(uid);
-    Notifs.showToast('Score saved & KPI updated!');
+    Notifs.success('Score saved & KPI updated!');
     window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
   });
 }
@@ -1402,7 +1402,7 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
     }
     const summary = changes.length ? changes.join(', ') : 'edited';
     await notifyTaskInvolved(updatedTask,{title:'✏️ Task Updated',body:`"${title}" — ${summary} (by ${actorName})`,icon:'✏️',type:'task_edited',taskId},currentUser.uid);
-    Notifs.showToast('Task updated!');
+    Notifs.success('Task updated!');
     closeModal(); renderTasks(currentUser,currentRole,update.department||t.department);
   });
 }
@@ -1488,7 +1488,7 @@ async function openAddTaskModal(currentUser, currentRole, defaultDept) {
     }
     await Notifs.sendToOwner({title:'📌 New Task Created',body:`${creatorName} created "${title}"`,icon:'📌',type:'task_created',dedupKey:`task-created-${taskId}`});
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
-    closeModal(); Notifs.showToast('Task created!');
+    closeModal(); Notifs.success('Task created!');
     renderTasks(currentUser,currentRole,document.getElementById('t-dept')?.value||'');
   });
 }
@@ -1609,7 +1609,7 @@ function openAddSubModal(currentUser) {
     // Notify owner
     await Notifs.sendToOwner({ title:'📋 New Submission', body:`${name} submitted: "${document.getElementById('s-title').value.trim()}"`, icon:'📋', type:'submission_new' });
     closeModal();
-    Notifs.showToast('Submission sent!');
+    Notifs.success('Submission sent!');
     renderSubmissions(currentUser, window.currentRole || '', (window.currentDepts||[])[0] || '');
   });
 }
@@ -2007,7 +2007,7 @@ function bindExpenseActions(content, currentUser, currentRole, sub) {
       const acct = await promptBankAccount('Expense paid from which account?');
       await db.collection('expenses').doc(id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
       if (e) await postExpenseToLedger(id, e, acct);
-      Notifs.showToast('Expense approved & posted to ledger ✓');
+      Notifs.success('Expense approved & posted to ledger ✓');
       loadCashContent(currentUser, currentRole, sub);
     } catch (err) { Notifs.showToast('Approve failed: ' + (err.message||err), 'error'); btn.disabled = false; }
   }));
@@ -2016,7 +2016,7 @@ function bindExpenseActions(content, currentUser, currentRole, sub) {
     try {
       await db.collection('expenses').doc(btn.dataset.id).update({ status:'rejected', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
       window.dbCacheInvalidate('expenses');
-      Notifs.showToast('Expense rejected.');
+      Notifs.error('Expense rejected.');
       loadCashContent(currentUser, currentRole, sub);
     } catch (err) { Notifs.showToast('Reject failed: ' + (err.message||err), 'error'); }
   }));
@@ -2073,7 +2073,7 @@ function openAddExpenseModal(currentUser) {
     window.logAudit && window.logAudit('create','expense',null,{ amount:parseFloat(document.getElementById('e-amount').value)||0, description:document.getElementById('e-desc').value.trim() });
     await Notifs.sendToOwner({ title:'💸 New Expense Submitted', body:`${name} submitted an expense of ₱${document.getElementById('e-amount').value}`, icon:'💸', type:'expense_new' });
     closeModal();
-    Notifs.showToast('Expense submitted!');
+    Notifs.success('Expense submitted!');
     renderCash(currentUser, '');
   });
 }
@@ -2517,7 +2517,7 @@ async function openCampaignModal(camp, onChange) {
         await db.collection('campaigns').add(data);
       }
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('campaigns');
-      Notifs.showToast('Campaign saved');
+      Notifs.success('Campaign saved');
       closeModal(); onChange();
     } catch (ex) { err.textContent = 'Save failed: ' + (ex.message||ex.code); err.classList.remove('hidden'); }
   });
@@ -2572,7 +2572,7 @@ async function renderCampaignMaterialsPanel(camp) {
     }));
     wrap.querySelectorAll('.mc-mat-del').forEach(b => b.addEventListener('click', async () => {
       if (!(await confirmDialog({ message: 'Remove this material?', danger: true }))) return;
-      try { await FilesHub.softDelete(b.dataset.id); Notifs.showToast('Removed'); renderList(); }
+      try { await FilesHub.softDelete(b.dataset.id); Notifs.success('Removed'); renderList(); }
       catch (ex) { Notifs.showToast('Remove failed: ' + (ex.message||ex.code), 'error'); }
     }));
     if (canEditDept('Marketing')) {
@@ -2592,7 +2592,7 @@ async function renderCampaignMaterialsPanel(camp) {
           visibility:'company', sharedUserIds:[], editorUserIds:[], shares:[],
           uploadedBy: currentUser.uid, uploaderName:(userProfile?.displayName||currentUser.email),
           createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp() });
-        Notifs.showToast('Material added');
+        Notifs.success('Material added');
         renderList();
       }, { dept:'Marketing', subfolder:'Files', allowLinks:true });
     }
@@ -2663,7 +2663,7 @@ async function renderMktLeads(content, currentUser, currentRole) {
         dedupKey: `lead_handoff_${cl.id}`
       }, { fallbackToOwner: true });
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
-      Notifs.showToast(`Lead sent to Sales: ${cl.name}`);
+      Notifs.success(`Lead sent to Sales: ${cl.name}`);
       renderMktLeads(content, currentUser, currentRole);
     } catch (ex) { btn.disabled = false; Notifs.showToast('Handoff failed: ' + (ex.message||ex.code), 'error'); }
   }));
@@ -2713,7 +2713,7 @@ function openLeadCaptureModal(camps, onSaved) {
         if (!existing.campaignId && campaignId) upd.campaignId = campaignId;   // first-touch: never overwrite
         ['company','phone','email'].forEach(k => { if (!existing[k] && vals[k]) upd[k] = vals[k]; }); // fill-empty only
         await db.collection('clients').doc(existing.id).update(upd);
-        Notifs.showToast(`Existing client updated: ${name}`);
+        Notifs.success(`Existing client updated: ${name}`);
       } else {
         await db.collection('clients').add({
           name, nameKey: window.clientNameKey(name), brands: ['sales'], stage: 'lead',
@@ -2723,7 +2723,7 @@ function openLeadCaptureModal(camps, onSaved) {
           handedOffAt: null,
           addedBy: currentUser.uid, createdBy: currentUser.uid,
           createdAt: FV.serverTimestamp(), updatedAt: FV.serverTimestamp() });
-        Notifs.showToast(`Lead captured: ${name}`);
+        Notifs.success(`Lead captured: ${name}`);
       }
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
       closeModal(); onSaved();
@@ -2819,7 +2819,7 @@ async function renderMktPromos(content, currentUser, currentRole) {
     try {
       await db.collection('promotions').doc(b.dataset.id).delete();
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('promotions');
-      Notifs.showToast('Promo deleted');
+      Notifs.success('Promo deleted');
       renderMktPromos(content, currentUser, currentRole);
     } catch (ex) { Notifs.showToast('Delete failed: ' + (ex.message||ex.code), 'error'); }
   }));
@@ -2868,7 +2868,7 @@ function openPromoModal(promo, camps, onSaved) {
       else { data.createdBy = currentUser.uid; data.createdByName = who; data.createdAt = FV.serverTimestamp();
         await db.collection('promotions').add(data); }
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('promotions');
-      Notifs.showToast('Promo saved'); closeModal(); onSaved();
+      Notifs.success('Promo saved'); closeModal(); onSaved();
     } catch (ex) { err.textContent = 'Save failed: ' + (ex.message||ex.code); err.classList.remove('hidden'); }
   });
 }
@@ -3080,9 +3080,9 @@ function openSalaryRaiseModal({ subjectType, subjectId, subjectName, fieldLabel,
       );
       closeModal();
       if (res.outcome === 'requested')
-        Notifs.showToast('Raise sent to the President for approval.');
+        Notifs.success('Raise sent to the President for approval.');
       else
-        Notifs.showToast(`Raise ${eff.slice(0,7) <= today().slice(0,7) ? 'applied' : 'scheduled'}: ₱${fmt(cur)} → ₱${fmt(nv)}`);
+        Notifs.success(`Raise ${eff.slice(0,7) <= today().slice(0,7) ? 'applied' : 'scheduled'}: ₱${fmt(cur)} → ₱${fmt(nv)}`);
       onDone && onDone();
     } catch (e) {
       console.error('raise failed', e);
@@ -3290,7 +3290,7 @@ window.openScheduledRaises = async function() {
     document.querySelectorAll('.sr-reject-btn').forEach(btn=>btn.addEventListener('click', async ()=>{
       const reason = (await promptDialog({message:'Reason for declining (optional):', multiline:true}))||'';
       await window.RaiseFlow.reject(btn.dataset.id, reason);
-      Notifs.showToast('Raise declined.');
+      Notifs.error('Raise declined.');
       window.openScheduledRaises();
     }));
   };
@@ -3661,7 +3661,7 @@ window.reopenPayRun = async function(month) {
     disbursingByName: firebase.firestore.FieldValue.delete()
   }, { merge:true });
   window.logAudit && window.logAudit('reopen-payrun','pay_run', month, {});
-  Notifs.showToast(`${month} payroll reopened — Compute is available again.`);
+  Notifs.success(`${month} payroll reopened — Compute is available again.`);
 };
 
 // ── Payroll reconciliation report (Part E Phase 20) — READ-ONLY. President-
@@ -3925,7 +3925,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           }
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
           closeModal();
-          Notifs.showToast('Payroll record updated!');
+          Notifs.success('Payroll record updated!');
           loadFinanceContent(currentUser, currentRole, 'Payroll');
         });
       });
@@ -3944,7 +3944,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           // balances this run deducted (reads the doc's own fields — no fragile split).
           await window.financeExecuteDelete('salary_history', hid);
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
-          Notifs.showToast('Record deleted');
+          Notifs.success('Record deleted');
           loadFinanceContent(currentUser, currentRole, 'Payroll');
         } else {
           // Finance requests president approval
@@ -3973,7 +3973,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               icon: '🗑', type: 'payroll_delete_request'
             });
             closeModal();
-            Notifs.showToast('Deletion request sent to President for approval.');
+            Notifs.success('Deletion request sent to President for approval.');
             loadFinanceContent(currentUser, currentRole, 'Payroll');
           });
         }
@@ -4003,7 +4003,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               icon: '✅', type: 'payroll_delete_approved'
             });
           }
-          Notifs.showToast('Record deleted and requester notified.');
+          Notifs.success('Record deleted and requester notified.');
           loadFinanceContent(currentUser, currentRole, 'Payroll');
         });
       });
@@ -4021,7 +4021,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               icon: '❌', type: 'payroll_delete_denied'
             });
           }
-          Notifs.showToast('Request denied and requester notified.');
+          Notifs.error('Request denied and requester notified.');
           loadFinanceContent(currentUser, currentRole, 'Payroll');
         });
       });
@@ -4244,7 +4244,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             }
           }
 
-          closeModal(); Notifs.showToast('Payroll updated!');
+          closeModal(); Notifs.success('Payroll updated!');
           loadPayrollTable(month);
         }));
       });
@@ -4297,7 +4297,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       if(!(await confirmDialog({message:`Mark ${month} payroll as VERIFIED? This confirms the computed amounts have been checked.`}))) return;
       await db.collection('pay_runs').doc(month).set({ state:'verified', verifiedBy:currentUser.uid, verifiedByName:window.userProfile?.displayName||currentUser.email, verifiedAt:firebase.firestore.FieldValue.serverTimestamp() },{merge:true});
       window.logAudit && window.logAudit('update','pay_run',month,{state:'verified'});
-      Notifs.showToast('Payroll marked verified.'); loadPayRunStrip(month);
+      Notifs.success('Payroll marked verified.'); loadPayRunStrip(month);
     });
     // Disburse — v12 WS20 D6: THE single mutating step (CA deducted, ledger
     // posted, salary_history frozen, employees notified). Terminal afterward.
@@ -4319,7 +4319,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         closeModal();
         const dbtn = document.getElementById('pr-disburse-btn');
         if (dbtn) { dbtn.disabled = true; dbtn.textContent = 'Disbursing…'; }
-        try { await window.disbursePayRun(month, { bankAccount: acct }); Notifs.showToast('Payroll disbursed!'); }
+        try { await window.disbursePayRun(month, { bankAccount: acct }); Notifs.success('Payroll disbursed!'); }
         catch (err) { Notifs.showToast(err.message || 'Could not disburse payroll.', 'error'); }
         loadPayRunStrip(month);
         loadFinanceContent(currentUser, currentRole, 'Payroll');
@@ -4336,7 +4336,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     document.getElementById('pr-resume-btn')?.addEventListener('click', async ()=>{
       if(!(await confirmDialog({message:`Resume disbursing ${month} payroll? This safely re-runs the disburse step — already-posted rows are updated in place, not duplicated.`}))) return;
       const acct = await window.BankAccounts.pick(null).catch(()=>({ bankAccountId:null, bankAccountName:null }));
-      try { await window.disbursePayRun(month, { bankAccount: acct }); Notifs.showToast('Payroll disbursed!'); }
+      try { await window.disbursePayRun(month, { bankAccount: acct }); Notifs.success('Payroll disbursed!'); }
       catch (err) { Notifs.showToast(err.message || 'Could not resume disbursement.', 'error'); }
       loadPayRunStrip(month);
       loadFinanceContent(currentUser, currentRole, 'Payroll');
@@ -4378,7 +4378,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     btn.disabled = true; btn.textContent = 'Computing…';
     try {
       await window.computePayRun(month);
-      Notifs.showToast('Payroll computed!');
+      Notifs.success('Payroll computed!');
     } catch (err) {
       Notifs.showToast(err.message || 'Could not compute payroll.', 'error');
     }
@@ -4499,7 +4499,7 @@ async function renderTaxesTab(container, currentUser, currentRole) {
         filedBy:  currentUser.uid, filedByName: userProfile?.displayName||currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
-      closeModal(); Notifs.showToast('Tax record saved!');
+      closeModal(); Notifs.success('Tax record saved!');
       renderTaxesTab(container, currentUser, currentRole);
     }));
   });
@@ -4599,6 +4599,7 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
         ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runTagAccountTypes()" title="Backfill accountType on legacy ledger rows">${emojiIcon('🏷',16)} Tag account types</button>`:''}
         ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runRestateMaterialCosts()" title="Fix the double material-expensing bug on historical rows">${emojiIcon('🧾',16)} Restate material costs</button>`:''}
         ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runFixUndatedRows()" title="Repair ledger rows with a missing/malformed date">${emojiIcon('🩹',16)} Fix undated rows</button>`:''}
+        ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runMigrateLedgerIds(this)" title="Migrate legacy random-id ledger rows to deterministic ids (dry-run first)">${emojiIcon('🧭',16)} Migrate ledger ids</button>`:''}
         ${isPres&&isClosableMonth?(periodClosed
             ? `<button class="btn-secondary btn-sm" id="finrep-reopen-btn" data-month="${pParsed.key.slice(6)}">${emojiIcon('🔓',16)} Reopen ${pParsed.label}</button>`
             : `<button class="btn-secondary btn-sm" id="finrep-close-btn" data-month="${pParsed.key.slice(6)}" data-label="${escHtml(pParsed.label)}">${emojiIcon('🔒',16)} Close ${pParsed.label}</button>`
@@ -4670,7 +4671,7 @@ window.closeFinancePeriod = async function(monthKey) {
   }, { merge:true });
   window.logAudit && window.logAudit('close-period','finance_periods',monthKey,{});
   dbCacheInvalidate('finperiod-'+monthKey);
-  Notifs.showToast(`${monthKey} closed — no new entries can post until reopened.`);
+  Notifs.success(`${monthKey} closed — no new entries can post until reopened.`);
 };
 window.reopenFinancePeriod = async function(monthKey) {
   await db.collection('finance_periods').doc(monthKey).set({
@@ -4680,7 +4681,7 @@ window.reopenFinancePeriod = async function(monthKey) {
   }, { merge:true });
   window.logAudit && window.logAudit('reopen-period','finance_periods',monthKey,{});
   dbCacheInvalidate('finperiod-'+monthKey);
-  Notifs.showToast(`${monthKey} reopened.`);
+  Notifs.success(`${monthKey} reopened.`);
 };
 
 // ── One-time maintenance: Tag account types (v12 WS13, president, idempotent) ──
@@ -4703,7 +4704,7 @@ window.runTagAccountTypes = async function() {
     if (inBatch) await batch.commit();
     dbCacheInvalidate('ledger');
     window.logAudit && window.logAudit('tag-account-types','ledger',null,{tagged});
-    Notifs.showToast(`Tagged ${tagged} row${tagged===1?'':'s'} ✓`);
+    Notifs.success(`Tagged ${tagged} row${tagged===1?'':'s'} ✓`);
   } catch (e) { Notifs.showToast('Tagging failed: '+(e.message||e),'error'); }
 };
 
@@ -4756,7 +4757,7 @@ window.runRestateMaterialCosts = async function() {
     }
     dbCacheInvalidate('ledger');
     window.logAudit && window.logAudit('restate-materials','ledger',null,{reclassified, invLegsAdded});
-    Notifs.showToast(`Restated ${reclassified} purchase${reclassified===1?'':'s'}, added ${invLegsAdded} inventory leg${invLegsAdded===1?'':'s'} ✓`);
+    Notifs.success(`Restated ${reclassified} purchase${reclassified===1?'':'s'}, added ${invLegsAdded} inventory leg${invLegsAdded===1?'':'s'} ✓`);
     const el = document.getElementById('fin-content');
     if (el) window.renderFinancialReports(el, window.currentUser, window.currentRole, 'all');
   } catch (e) { Notifs.showToast('Restatement failed: '+(e.message||e),'error'); }
@@ -4791,10 +4792,41 @@ window.runFixUndatedRows = async function() {
     }
     dbCacheInvalidate('ledger');
     window.logAudit && window.logAudit('fix-undated','ledger',null,{fixed});
-    Notifs.showToast(`Fixed ${fixed} undated row${fixed===1?'':'s'} ✓`);
+    Notifs.success(`Fixed ${fixed} undated row${fixed===1?'':'s'} ✓`);
     const el = document.getElementById('fin-content');
     if (el) window.renderFinancialReports(el, window.currentUser, window.currentRole, 'all');
   } catch (e) { Notifs.showToast('Fix failed: '+(e.message||e),'error'); }
+};
+
+// ── One-time maintenance: Migrate ledger ids (v13 Phase 14, president) ────
+// Copies legacy random-id ledger docs to deterministic `ledger/{ref}` ids
+// (for refs matching the known prefixes) and deletes the originals. The
+// actual migration logic lives in window.Ledger.migrateLegacyRows (js/finance-ledger.js),
+// signature: Ledger.migrateLegacyRows({dryRun}) -> {scanned, migratable, migrated, skipped}.
+// Always dry-runs first and reports counts before offering to apply.
+window.runMigrateLedgerIds = async function(btn) {
+  if (!window.Ledger || typeof window.Ledger.migrateLegacyRows !== 'function') {
+    Notifs.error('Migration tool not loaded'); return;
+  }
+  if (!(await confirmDialog({message:'Run a dry-run scan for legacy random-id ledger rows?\n\nNo data will be changed yet.'}))) return;
+  await window.busy(btn, async () => {
+    let dry;
+    try {
+      dry = await window.Ledger.migrateLegacyRows({dryRun:true});
+    } catch (e) { Notifs.error('Dry-run failed: '+(e.message||e)); return; }
+    console.table([dry]);
+    const summary = `Scanned ${dry.scanned}, migratable ${dry.migratable}, already migrated ${dry.migrated}, skipped ${dry.skipped}.`;
+    Notifs.info(`Dry-run: ${summary}`);
+    if (!dry.migratable) { Notifs.info('Nothing to migrate.'); return; }
+    if (!(await confirmDialog({message:`${summary}\n\nApply the migration now? This copies rows to deterministic ids and deletes the originals.`, danger:true}))) return;
+    try {
+      const applied = await window.Ledger.migrateLegacyRows({dryRun:false});
+      console.table([applied]);
+      dbCacheInvalidate('ledger');
+      window.logAudit && window.logAudit('migrate-ledger-ids','ledger',null,applied);
+      Notifs.success(`Migrated ${applied.migrated} row${applied.migrated===1?'':'s'} ✓ (skipped ${applied.skipped})`);
+    } catch (e) { Notifs.error('Migration failed: '+(e.message||e)); }
+  });
 };
 
 // ── Ledger Tab (includes merged General Journal entries) ─────
@@ -4932,7 +4964,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
                ? window.readVatField('led-vat', amount) : {} )
         }
       });
-      closeModal(); Notifs.showToast('Ledger entry saved!');
+      closeModal(); Notifs.success('Ledger entry saved!');
       renderLedgerTab(container, currentUser, currentRole);
     }));
   });
@@ -5111,7 +5143,7 @@ function openBankAccountModal(a, onDone) {
       }
       window.BankAccounts.invalidate();
       closeModal();
-      Notifs.showToast(isEdit?'Bank account updated':'Bank account added');
+      Notifs.success(isEdit?'Bank account updated':'Bank account added');
       onDone && onDone();
     } catch (ex) { err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
   });
@@ -5163,7 +5195,7 @@ async function renderBankAccountDrilldown(a) {
         reconciledAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
-      Notifs.showToast(chk.checked?'Marked reconciled':'Marked unreconciled');
+      Notifs.success(chk.checked?'Marked reconciled':'Marked unreconciled');
     } catch (ex) { Notifs.showToast('Could not update: '+(ex.message||ex),'error'); chk.checked = !chk.checked; }
   }));
   wrap.querySelectorAll('.ba-retag-sel').forEach(sel => sel.addEventListener('change', async () => {
@@ -5175,7 +5207,7 @@ async function renderBankAccountDrilldown(a) {
         bankAccountId: acct.bankAccountId, bankAccountName: acct.bankAccountName
       });
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
-      Notifs.showToast('Row re-tagged to another account');
+      Notifs.success('Row re-tagged to another account');
       renderBankAccountDrilldown(a);
     } catch (ex) { Notifs.showToast('Could not re-tag: '+(ex.message||ex),'error'); }
   }));
@@ -5274,7 +5306,7 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
       } catch (e) { return; } // toast already shown by assertPeriodOpen
       const crjDoc = await db.collection('cash_receipt_journal').add(crjData);
       await postCRJToLedger(crjDoc.id, crjData); // mirror new income into the ledger
-      closeModal(); Notifs.showToast('Cash receipt entry saved!');
+      closeModal(); Notifs.success('Cash receipt entry saved!');
       renderCashReceiptJournal(container, currentUser, currentRole);
     }));
   });
@@ -5405,7 +5437,7 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
       } catch (e) { return; } // toast already shown by assertPeriodOpen
       const cdjDoc = await db.collection('cash_disbursement_journal').add(cdjData);
       await postCDJToLedger(cdjDoc.id, cdjData); // mirror the expense into the ledger
-      closeModal(); Notifs.showToast('Cash disbursement entry saved!');
+      closeModal(); Notifs.success('Cash disbursement entry saved!');
       renderCashDisbursementJournal(container, currentUser, currentRole);
     }));
   });
@@ -5548,7 +5580,7 @@ async function renderRecordsTab(container, currentUser, currentRole) {
         encodedByName:userProfile?.displayName||currentUser.email,
         createdAt:    firebase.firestore.FieldValue.serverTimestamp()
       });
-      closeModal(); Notifs.showToast('Record saved!');
+      closeModal(); Notifs.success('Record saved!');
       renderRecordsTab(container, currentUser, currentRole);
     }));
   });
@@ -5644,7 +5676,7 @@ function openCADataRepairModal(onDone) {
       if (!(await confirmDialog({message:`Apply ${total} cash-advance data fix(es)? This writes to live records.`}))) return;
       await window.runCADataRepair(false);
       closeModal();
-      Notifs.showToast('CA data repair applied.');
+      Notifs.success('CA data repair applied.');
       if (onDone) onDone();
     });
   });
@@ -5722,7 +5754,7 @@ async function renderFinanceCA(container, currentUser, currentRole) {
       window.CashAdvance.openApproveModal(e.currentTarget.dataset.id, () => renderFinanceCA(container,currentUser,currentRole));
     }));
     list.querySelectorAll('.fin-ca-reject').forEach(btn=>btn.addEventListener('click',async e=>{
-      try { await window.CashAdvance.reject(e.currentTarget.dataset.id); Notifs.showToast(`Rejected for ${e.currentTarget.dataset.name}`); }
+      try { await window.CashAdvance.reject(e.currentTarget.dataset.id); Notifs.error(`Rejected for ${e.currentTarget.dataset.name}`); }
       catch (err) { Notifs.showToast(err.message||'Could not reject.','error'); }
       renderFinanceCA(container,currentUser,currentRole);
     }));
@@ -5916,7 +5948,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
     document.getElementById('hrp-batch-id-btn')?.addEventListener('click', () => window.batchPrintWorkerIDs(profiles.filter(p=>p.status!=='inactive')));
     document.getElementById('hrp-sync-dir-btn')?.addEventListener('click', async ()=>{
       Notifs.showToast('Syncing worker directory…');
-      try { const n = await window.syncWorkerDirectory(); Notifs.showToast(`Directory synced — ${n} workers.`); }
+      try { const n = await window.syncWorkerDirectory(); Notifs.success(`Directory synced — ${n} workers.`); }
       catch(ex){ Notifs.showToast('Sync failed: '+(ex.message||ex.code),'error'); }
     });
     container.querySelectorAll('.hrp-id-btn').forEach(btn => {
@@ -6121,7 +6153,7 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
       photoUrl: data.photoUrl||'', updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge:true }).catch(()=>{});
     closeModal();
-    Notifs.showToast(isEdit ? 'Profile updated!' : 'Worker profile created!');
+    Notifs.success(isEdit ? 'Profile updated!' : 'Worker profile created!');
     onSave();
   });
 }
@@ -6152,7 +6184,7 @@ function openWorkerKioskModal(profile, currentUser) {
       recordedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
     closeModal();
-    Notifs.showToast(`Clocked ${label} — ${hrs.toFixed(1)}h logged.`);
+    Notifs.success(`Clocked ${label} — ${hrs.toFixed(1)}h logged.`);
   });
 }
 
@@ -6248,9 +6280,9 @@ async function openPayslipHistory(currentUser, currentRole) {
             description, amount: ps.netPay || 0, source: 'Finance',
             extra: { ...window.BankAccounts.tag(_acct, 'out') }
           }));
-          Notifs.showToast('Submitted & posted to General Ledger.');
+          Notifs.success('Submitted & posted to General Ledger.');
         } else {
-          Notifs.showToast(`Payslip marked as ${next}.`);
+          Notifs.success(`Payslip marked as ${next}.`);
         }
         ps.status = next;
         renderModal();
@@ -6283,7 +6315,7 @@ async function openPayslipHistory(currentUser, currentRole) {
           status: choice, overriddenBy: currentUser.uid, overriddenAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         ps.status = choice;
-        Notifs.showToast(`Status manually set to "${choice}".`);
+        Notifs.success(`Status manually set to "${choice}".`);
         renderModal();
     }));
   };
@@ -6365,7 +6397,7 @@ function openPayslipEdit(ps, currentUser, onSave) {
     ps.deductions= { govt:{sss,philhealth:ph,pagibig:pib,total:govTotal}, other:{cashAdvance:ca,loans,taxes:tax,total:otherTotal} };
     ps.grossPay=grossPay; ps.totalDeductions=totalDeductions; ps.totalPay=totalPay; ps.paid=paid; ps.netPay=netPay;
     closeModal();
-    Notifs.showToast('Payslip updated.');
+    Notifs.success('Payslip updated.');
     onSave && onSave();
   }));
 }
@@ -6555,7 +6587,7 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     }
     // Note: the general-ledger entry is posted when the payslip is "Submitted" (see openPayslipHistory).
     closeModal();
-    Notifs.showToast('Payslip saved as draft! Verify and file it from Payslip History.');
+    Notifs.success('Payslip saved as draft! Verify and file it from Payslip History.');
     const model = window.toPayslipModel({...d, id: ref.id}, 'weekly');
     model.ytd = await window.payslipYtdWeekly(profile.id, (d.payPeriodStart||'').slice(0,4) || (window.bizYear?window.bizYear():new Date().getFullYear()));
     setTimeout(() => window.renderPayslipPage(model, () => renderFinanceHRProfiles(deptContainer(), currentUser, currentRole)), 400);
@@ -7827,7 +7859,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
         try {
           const out = await window.migrateStrandedBKQuotes();
           window.logAudit && window.logAudit('migrate','bk_quotes',null,out);
-          Notifs.showToast(`Moved ${out.moved} quote(s), patched ${out.reqsPatched} approval request(s)`);
+          Notifs.success(`Moved ${out.moved} quote(s), patched ${out.reqsPatched} approval request(s)`);
           renderBKQuotationsSummary(container, currentUser, currentRole);
         } catch (ex) {
           Notifs.showToast('Repair failed: '+(ex.message||ex.code),'error');
@@ -9763,7 +9795,7 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
               <div style="font-size:28px;flex-shrink:0">${emojiIcon('📁',28)}</div>
               <div style="flex:1;min-width:0">
                 <div style="font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(clientName)}</div>
-                <div style="font-size:11px;color:var(--text-muted)">${qs.length} file${qs.length!==1?'s':''} · ₱${total.toLocaleString()} · Last: ${latestDate}</div>
+                <div style="font-size:11px;color:var(--text-muted)">${qs.length} file${qs.length!==1?'s':''} · ₱${window.fmtN2(total)} · Last: ${latestDate}</div>
               </div>
             </div>
             <div class="bs-qfolder-body" style="display:none;padding:10px 16px 14px;border-top:1px solid var(--border)">
@@ -9779,7 +9811,7 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
                       <div style="font-size:11px;color:var(--text-muted)">${ts}${isPrivileged&&q.agentName?' · '+escHtml(q.agentName):''}</div>
                     </div>
                     <div style="text-align:right;flex-shrink:0">
-                      <div style="font-size:12px;font-weight:700">₱${(q.total||q.grandTotal||0).toLocaleString()}</div>
+                      <div style="font-size:12px;font-weight:700">₱${window.fmtN2(q.total||q.grandTotal||0)}</div>
                       <span class="badge ${badge}" style="font-size:10px">${status}</span>
                     </div>
                   </div>`;
@@ -10103,10 +10135,10 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
       }catch(_){ /* tracking is best-effort — never block the order */ }
       window.logAudit&&window.logAudit('create','sales_order',ref.id,{client:d.client, contract, paid, projectNo:proj.projectNo});
       const who=userProfile?.displayName||currentUser.email;
-      try{ await Notifs.sendToDept('Finance',{ title:'🧾 New Sales Order', body:`${who}: ${d.client} — ₱${contract.toLocaleString()} (₱${paid.toLocaleString()} received). Project ${proj.projectNo}. Record income + verify receipt.`, icon:'🧾', type:'sales_order', link:'sales-orders' }); }catch(_){}
+      try{ await Notifs.sendToDept('Finance',{ title:'🧾 New Sales Order', body:`${who}: ${d.client} — ₱${window.fmtN2(contract)} (₱${window.fmtN2(paid)} received). Project ${proj.projectNo}. Record income + verify receipt.`, icon:'🧾', type:'sales_order', link:'sales-orders' }); }catch(_){}
       try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${d.client} (${proj.projectNo}) won — create the production order when ready.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
-      try{ await Notifs.sendToOwner({ title:'🤝 Quote won → Project '+proj.projectNo, body:`${d.client} — ₱${contract.toLocaleString()} closed by ${who}.`, icon:'🤝', type:'sales_order' }); }catch(_){}
-      Notifs.showToast('Sales order + project '+proj.projectNo+' created');
+      try{ await Notifs.sendToOwner({ title:'🤝 Quote won → Project '+proj.projectNo, body:`${d.client} — ₱${window.fmtN2(contract)} closed by ${who}.`, icon:'🤝', type:'sales_order' }); }catch(_){}
+      Notifs.success('Sales order + project '+proj.projectNo+' created');
       if (typeof container!=='undefined' && container) {
         if (d.co==='BK') renderBKQuotationsSummary(container, currentUser, currentRole);
         else renderBSQuotationsSummary(container, currentUser, currentRole);
@@ -10309,8 +10341,8 @@ async function openRecordSaleModal(o, container){
             const newAR = Math.max(0, (p.contractAmount||contract) - newCollected);
             const fields = { amountCollected:newCollected, arBalance:newAR, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
               payments:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order Payment', amount, vatAmount, net, method, orRef, date:today(), by:who, ledgerId:precomputedLedgerId, bankAccountId: acct.bankAccountId||null, bankAccountName: acct.bankAccountName||null }),
-              documents:firebase.firestore.FieldValue.arrayUnion({ type:'Official Receipt', ref:orRef||('₱'+amount.toLocaleString()), at:new Date().toISOString(), by:who }),
-              timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Sale recorded ₱${amount.toLocaleString()} by Finance`, by:who }) };
+              documents:firebase.firestore.FieldValue.arrayUnion({ type:'Official Receipt', ref:orRef||('₱'+window.fmtN2(amount)), at:new Date().toISOString(), by:who }),
+              timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Sale recorded ₱${window.fmtN2(amount)} by Finance`, by:who }) };
             if (newAR<=0) fields.stage='paid';
             projectSync = { collection:'job_projects', docId:o.projectId, fields };
             if (o.trackingToken) window.syncOrderTracking(o.trackingToken, { paid:newCollected, balance:newAR });
@@ -10332,7 +10364,7 @@ async function openRecordSaleModal(o, container){
       window.logAudit&&window.logAudit('create','ledger',ledgerId,{source:'sales_order', amount, client:o.clientName});
       // 4) optional handoff to Production
       if(toProd) await transferOrderToProduction({ ...o, status:'recorded' });
-      closeModal(); Notifs.showToast(toProd?'Sale recorded + sent to Production':'Sale recorded to ledger'); window.renderSalesOrders(container);
+      closeModal(); Notifs.success(toProd?'Sale recorded + sent to Production':'Sale recorded to ledger'); window.renderSalesOrders(container);
     }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); saveBtn.disabled=false; }
   });
 }
@@ -10365,7 +10397,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
       try {
         await db.collection('bs_quotes').doc(b.dataset.id).delete();
         window.logAudit && window.logAudit('delete','quote',b.dataset.id,{ quoteNo:b.dataset.qno });
-        Notifs.showToast('Quote deleted');
+        Notifs.success('Quote deleted');
         renderBSQuotationsSummary(container, currentUser, currentRole);
       } catch(ex){ Notifs.showToast('Delete failed','error'); }
     });
@@ -10381,7 +10413,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
           deleteRequestedBy:currentUser.uid, deleteRequestedAt:firebase.firestore.FieldValue.serverTimestamp()
         });
         await Notifs.sendToOwner({ title:'🗑 Quote Delete Requested', body:`${userProfile?.displayName||currentUser.email} requests deleting quote "${b.dataset.qno}".${reason?' Reason: '+reason:''}`, icon:'🗑', type:'quote_delete_request' });
-        Notifs.showToast('Delete request sent to president');
+        Notifs.success('Delete request sent to president');
         renderBSQuotationsSummary(container, currentUser, currentRole);
       } catch(ex){ Notifs.showToast('Request failed: '+(ex.message||ex.code),'error'); }
     });
@@ -10417,7 +10449,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
       });
       await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'approved'})));
       if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'✅ Quote Approved!', body:`Quotation "${b.dataset.qno}" for ${b.dataset.name} was approved and filed.`, icon:'✅', type:'quote_approved' });
-      Notifs.showToast('Quote approved and filed!');
+      Notifs.success('Quote approved and filed!');
       renderBSQuotationsSummary(container, currentUser, currentRole);
     });
   });
@@ -10430,7 +10462,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
       });
       await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'rejected'})));
       if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'❌ Quote Not Approved', body:`Quotation "${b.dataset.qno}" for ${b.dataset.name} was not approved.`, icon:'❌', type:'quote_rejected' });
-      Notifs.showToast('Quote rejected.');
+      Notifs.error('Quote rejected.');
       renderBSQuotationsSummary(container, currentUser, currentRole);
     });
   });
@@ -10482,7 +10514,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
         await db.collection('approval_requests').where('quoteId','==',b.dataset.id).get().then(s => s.docs.forEach(d => d.ref.update({status:'approved'})));
         if (b.dataset.by) await Notifs.send(b.dataset.by, { title:'✅ Quote Approved!', body:`Quotation "${b.dataset.qno}" for ${edits.clientName||b.dataset.name} was approved and filed.`, icon:'✅', type:'quote_approved' });
         closeModal();
-        Notifs.showToast('Quote edited, approved and filed!');
+        Notifs.success('Quote edited, approved and filed!');
         renderBSQuotationsSummary(container, currentUser, currentRole);
       });
 
@@ -10498,7 +10530,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
           icon: '✎', type: 'quote_returned'
         });
         closeModal();
-        Notifs.showToast('Quote updated and returned to submitter.');
+        Notifs.success('Quote updated and returned to submitter.');
         renderBSQuotationsSummary(container, currentUser, currentRole);
       });
     });
@@ -10569,7 +10601,7 @@ async function renderBSClientData(container, currentUser, currentRole) {
             </div>
             <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
               <span class="badge badge-blue">${cl.quotes.length} quote${cl.quotes.length!==1?'s':''}</span>
-              <span style="font-size:13px;font-weight:700;color:var(--success)">₱${cl.totalValue.toLocaleString()}</span>
+              <span style="font-size:13px;font-weight:700;color:var(--success)">₱${window.fmtN2(cl.totalValue)}</span>
               <span style="color:var(--text-muted);font-size:16px">›</span>
             </div>
           </div>
@@ -10589,7 +10621,7 @@ async function renderBSClientData(container, currentUser, currentRole) {
                 const badge = status==='filed'||status==='approved'?'badge-green':status==='pending_approval'||status==='pending_review'||status==='sent'?'badge-orange':status==='rejected'?'badge-red':'badge-gray';
                 return `<tr>
                   <td><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code></td>
-                  <td style="font-weight:600">₱${(q.total||q.grandTotal||0).toLocaleString()}</td>
+                  <td style="font-weight:600">₱${window.fmtN2(q.total||q.grandTotal||0)}</td>
                   <td><span class="badge ${badge}">${status}</span></td>
                   <td style="color:var(--text-muted);font-size:11px">${ts}</td>
                   ${isPrivileged?`<td style="font-size:12px;color:var(--text-muted)">${escHtml(q.agentName||q.createdByName||'—')}</td>`:''}
@@ -10674,7 +10706,7 @@ window.renderApprovals = async function(currentUser) {
         body: `${(window.userProfile && window.userProfile.displayName) || 'The Corporate Secretary'} asks you to review: ${label}.`,
         icon: '🙋', type: 'approval_result'
       });
-      Notifs.showToast('Sent to the President for approval.');
+      Notifs.success('Sent to the President for approval.');
     } catch (e) { Notifs.showToast('Could not send request', 'error'); }
   };
   // Check pending counts for badges
@@ -10899,7 +10931,7 @@ window.renderApprovals = async function(currentUser) {
           const newUserRef = await db.collection('users').add({ displayName:btn.dataset.name, email:btn.dataset.email, phone:btn.dataset.phone, role:'employee', departments:[], employeeId:empId, photoUrl:'', startDate:newStartDate, createdAt:firebase.firestore.FieldValue.serverTimestamp(), pendingPasswordSetup:true });
           await window.LeaveAccrual.grantForYear(newUserRef.id, { startDate: newStartDate });
           await db.collection('signup_requests').doc(btn.dataset.id).update({ status:'approved', generatedPassword:pwd, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), approvedBy:currentUser.uid });
-          Notifs.showToast(`${btn.dataset.name} approved! Password: ${pwd}`);
+          Notifs.success(`${btn.dataset.name} approved! Password: ${pwd}`);
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.sg-reject-btn').forEach(btn => onClickSafe(btn, async () => {
@@ -10912,12 +10944,12 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.at-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           const ext = new Date(); ext.setHours(ext.getHours()+2);
           await db.collection('attendance_extensions').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), expiresAt:firebase.firestore.Timestamp.fromDate(ext) });
-          Notifs.showToast(`Extension approved for ${btn.dataset.name}`);
+          Notifs.success(`Extension approved for ${btn.dataset.name}`);
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.at-deny-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('attendance_extensions').doc(btn.dataset.id).update({ status:'denied', deniedBy:currentUser.uid, deniedAt:firebase.firestore.FieldValue.serverTimestamp() });
-          Notifs.showToast(`Extension denied for ${btn.dataset.name}`);
+          Notifs.error(`Extension denied for ${btn.dataset.name}`);
           loadApprovalsSub('all');
       }));
 
@@ -10938,12 +10970,12 @@ window.renderApprovals = async function(currentUser) {
       // amount the next time Compute runs for that employee's month.
       wrap.querySelectorAll('.cad-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('approval_requests').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
-          Notifs.showToast('CA deduction request approved.');
+          Notifs.success('CA deduction request approved.');
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.cad-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('approval_requests').doc(btn.dataset.id).update({ status:'rejected', rejectedBy:currentUser.uid, rejectedAt:firebase.firestore.FieldValue.serverTimestamp() });
-          Notifs.showToast('CA deduction request rejected.');
+          Notifs.error('CA deduction request rejected.');
           loadApprovalsSub('all');
       }));
 
@@ -10956,7 +10988,7 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.rz-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           const reason = (await promptDialog({message:'Reason for declining (optional):', multiline:true}))||'';
           await window.RaiseFlow.reject(btn.dataset.id, reason);
-          Notifs.showToast('Raise declined.');
+          Notifs.error('Raise declined.');
           loadApprovalsSub('all');
       }));
 
@@ -10968,21 +11000,21 @@ window.renderApprovals = async function(currentUser) {
       wrap.querySelectorAll('.po-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           if (!(await confirmDialog({ message: `Approve PO ${escHtml(btn.dataset.no)}? Your name will print on the "Approved by" line.`, html: true }))) return;
           await window.approvePurchaseOrder(btn.dataset.id);
-          Notifs.showToast('PO approved ✓');
+          Notifs.success('PO approved ✓');
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.po-reject-btn').forEach(btn => onClickSafe(btn, async () => {
           const reason = prompt('Reason for rejection (shown to Purchasing):');
           if (reason === null) return;
           await window.rejectPurchaseOrder(btn.dataset.id, reason);
-          Notifs.showToast('PO rejected.');
+          Notifs.error('PO rejected.');
           loadApprovalsSub('all');
       }));
 
       // Submission approve/reject
       wrap.querySelectorAll('.sub-approve-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('submissions').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
-          Notifs.showToast('Submission approved!');
+          Notifs.success('Submission approved!');
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.sub-reject-btn').forEach(btn => onClickSafe(btn, async () => {
@@ -10999,7 +11031,7 @@ window.renderApprovals = async function(currentUser) {
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
           const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
           if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'✅ Task Approved',body:`"${btn.dataset.name}" has been approved!`,icon:'✅',type:'task_status'},currentUser.uid));}
-          Notifs.showToast(`"${btn.dataset.name}" approved!`);
+          Notifs.success(`"${btn.dataset.name}" approved!`);
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.rt-reject-btn').forEach(btn => onClickSafe(btn, async () => {
@@ -11007,7 +11039,7 @@ window.renderApprovals = async function(currentUser) {
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
           const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
           if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'🔁 Task Sent Back',body:`"${btn.dataset.name}" was sent back for revision.`,icon:'🔁',type:'task_status'},currentUser.uid));}
-          Notifs.showToast(`"${btn.dataset.name}" sent back for revision.`);
+          Notifs.error(`"${btn.dataset.name}" sent back for revision.`);
           loadApprovalsSub('all');
       }));
 
@@ -11025,13 +11057,13 @@ window.renderApprovals = async function(currentUser) {
           }
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'✅ Payroll Delete Approved', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record has been approved.`, icon:'✅', type:'payroll_delete_approved' }));
-          Notifs.showToast('Record deleted and requester notified.');
+          Notifs.success('Record deleted and requester notified.');
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.fr-deny-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'denied', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'❌ Payroll Delete Denied', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record was denied by the President.`, icon:'❌', type:'payroll_delete_denied' }));
-          Notifs.showToast('Request denied and requester notified.');
+          Notifs.error('Request denied and requester notified.');
           loadApprovalsSub('all');
       }));
 
@@ -11046,13 +11078,13 @@ window.renderApprovals = async function(currentUser) {
           if (btn.dataset.coll && btn.dataset.doc) await window.financeExecuteDelete(btn.dataset.coll, btn.dataset.doc);
           await db.collection('finance_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'✅ Delete Approved', body:`Your request to delete ${btn.dataset.label} was approved.`, icon:'✅', type:'finance_delete_approved' }));
-          Notifs.showToast('Deleted and requester notified.');
+          Notifs.success('Deleted and requester notified.');
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.fdel-deny-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('finance_delete_requests').doc(btn.dataset.id).update({ status:'denied', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'❌ Delete Denied', body:`Your request to delete ${btn.dataset.label} was denied by the President.`, icon:'❌', type:'finance_delete_denied' }));
-          Notifs.showToast('Request denied and requester notified.');
+          Notifs.error('Request denied and requester notified.');
           loadApprovalsSub('all');
       }));
 
@@ -11079,7 +11111,7 @@ window.renderApprovals = async function(currentUser) {
           await db.collection(coll).doc(btn.dataset.id).delete();
           window.logAudit && window.logAudit('delete','quote',btn.dataset.id,{ quoteNo:btn.dataset.qno, coll, viaApproval:true });
           if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'🗑 Quote Deletion Approved', body:`Your request to delete quote ${btn.dataset.qno} was approved.`, icon:'✅', type:'delete_approved' }));
-          Notifs.showToast('Quote deleted.'); loadApprovalsSub('all');
+          Notifs.success('Quote deleted.'); loadApprovalsSub('all');
         } catch(ex){ Notifs.showToast('Delete failed: '+(ex.message||ex.code),'error'); }
       }));
       wrap.querySelectorAll('.dq-deny-btn').forEach(btn => onClickSafe(btn, async () => {
@@ -11087,7 +11119,7 @@ window.renderApprovals = async function(currentUser) {
         try {
           await db.collection(coll).doc(btn.dataset.id).update({ deleteRequested:firebase.firestore.FieldValue.delete(), deleteReason:firebase.firestore.FieldValue.delete() });
           if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'Quote Deletion Denied', body:`Your request to delete quote ${btn.dataset.qno} was denied.`, icon:'❌', type:'delete_denied' }));
-          Notifs.showToast('Delete request denied.'); loadApprovalsSub('all');
+          Notifs.error('Delete request denied.'); loadApprovalsSub('all');
         } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
       }));
       wrap.querySelectorAll('.dc-approve-btn').forEach(btn => onClickSafe(btn, async () => {
@@ -11097,7 +11129,7 @@ window.renderApprovals = async function(currentUser) {
           if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
           window.logAudit && window.logAudit('delete','client',btn.dataset.id,{ name:btn.dataset.name, viaApproval:true });
           if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'🗑 Client Deletion Approved', body:`Your request to delete client "${btn.dataset.name}" was approved.`, icon:'✅', type:'delete_approved' }));
-          Notifs.showToast('Client deleted.'); loadApprovalsSub('all');
+          Notifs.success('Client deleted.'); loadApprovalsSub('all');
         } catch(ex){ Notifs.showToast('Delete failed: '+(ex.message||ex.code),'error'); }
       }));
       wrap.querySelectorAll('.dc-deny-btn').forEach(btn => onClickSafe(btn, async () => {
@@ -11105,7 +11137,7 @@ window.renderApprovals = async function(currentUser) {
           await db.collection('clients').doc(btn.dataset.id).update({ deleteRequested:firebase.firestore.FieldValue.delete(), deleteReason:firebase.firestore.FieldValue.delete() });
           if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
           if (btn.dataset.by) await safeNotify(()=>Notifs.send(btn.dataset.by, { title:'Client Deletion Denied', body:`Your request to delete client "${btn.dataset.name}" was denied.`, icon:'❌', type:'delete_denied' }));
-          Notifs.showToast('Delete request denied.'); loadApprovalsSub('all');
+          Notifs.error('Delete request denied.'); loadApprovalsSub('all');
         } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
       }));
 
@@ -11113,13 +11145,13 @@ window.renderApprovals = async function(currentUser) {
       // balances are debited consistently with the Leave Management screen.
       wrap.querySelectorAll('.lv-approve-btn').forEach(btn => onClickSafe(btn, async () => {
         await window.approveLeaveRequest(btn.dataset.id);
-        Notifs.showToast(`Leave approved for ${btn.dataset.name}`);
+        Notifs.success(`Leave approved for ${btn.dataset.name}`);
         loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.lv-reject-btn').forEach(btn => onClickSafe(btn, async () => {
         const reason = (await promptDialog({message:'Reason for rejection (optional):', multiline:true}))||'';
         await window.rejectLeaveRequest(btn.dataset.id, reason);
-        Notifs.showToast(`Leave rejected for ${btn.dataset.name}`);
+        Notifs.error(`Leave rejected for ${btn.dataset.name}`);
         loadApprovalsSub('all');
       }));
 
@@ -11219,7 +11251,7 @@ window.renderApprovals = async function(currentUser) {
           }, { merge: true });
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('kpi-evals');
           await safeNotify(()=>Notifs.send(uid, { title:'📊 KPI Grade Updated', body: improve?`The president graded your performance: ${grade}/10. See your Personal Finance page for development areas.`:`The president graded your performance: ${grade}/10.`, icon:'📊', type:'kpi_grade' }));
-          closeModal(); Notifs.showToast(`Grade ${grade}/10 saved for ${name}.`);
+          closeModal(); Notifs.success(`Grade ${grade}/10 saved for ${name}.`);
           loadApprovalsSub('grading');
         });
       }));
@@ -11287,13 +11319,13 @@ window.renderApprovals = async function(currentUser) {
           }
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'✅ Payroll Delete Approved', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record has been approved.`, icon:'✅', type:'payroll_delete_approved' }));
-          Notifs.showToast('Record deleted and requester notified.');
+          Notifs.success('Record deleted and requester notified.');
           loadApprovalsSub('finance-requests');
       }));
       wrap.querySelectorAll('.fr-deny-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('payroll_delete_requests').doc(btn.dataset.id).update({ status:'denied', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'❌ Payroll Delete Denied', body:`Your request to delete ${btn.dataset.name}'s ${btn.dataset.month} payroll record was denied.`, icon:'❌', type:'payroll_delete_denied' }));
-          Notifs.showToast('Request denied.');
+          Notifs.error('Request denied.');
           loadApprovalsSub('finance-requests');
       }));
       wrap.querySelectorAll('.fdel-approve-btn').forEach(btn => onClickSafe(btn, async () => {
@@ -11306,13 +11338,13 @@ window.renderApprovals = async function(currentUser) {
           if (btn.dataset.coll && btn.dataset.doc) await window.financeExecuteDelete(btn.dataset.coll, btn.dataset.doc);
           await db.collection('finance_delete_requests').doc(btn.dataset.id).update({ status:'approved', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'✅ Delete Approved', body:`Your request to delete ${btn.dataset.label} was approved.`, icon:'✅', type:'finance_delete_approved' }));
-          Notifs.showToast('Deleted and requester notified.');
+          Notifs.success('Deleted and requester notified.');
           loadApprovalsSub('finance-requests');
       }));
       wrap.querySelectorAll('.fdel-deny-btn').forEach(btn => onClickSafe(btn, async () => {
           await db.collection('finance_delete_requests').doc(btn.dataset.id).update({ status:'denied', resolvedBy:currentUser.uid, resolvedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (btn.dataset.reqBy) await safeNotify(() => Notifs.send(btn.dataset.reqBy, { title:'❌ Delete Denied', body:`Your request to delete ${btn.dataset.label} was denied by the President.`, icon:'❌', type:'finance_delete_denied' }));
-          Notifs.showToast('Request denied and requester notified.');
+          Notifs.error('Request denied and requester notified.');
           loadApprovalsSub('finance-requests');
       }));
       return;
@@ -11348,13 +11380,13 @@ window.renderApprovals = async function(currentUser) {
       if (window.lucide) lucide.createIcons({ nodes: [wrap] });
       wrap.querySelectorAll('.lv-approve-btn').forEach(btn => onClickSafe(btn, async () => {
         await window.approveLeaveRequest(btn.dataset.id);
-        Notifs.showToast(`Leave approved for ${btn.dataset.name}`);
+        Notifs.success(`Leave approved for ${btn.dataset.name}`);
         loadApprovalsSub('leave');
       }));
       wrap.querySelectorAll('.lv-reject-btn').forEach(btn => onClickSafe(btn, async () => {
         const reason = (await promptDialog({message:'Reason for rejection (optional):', multiline:true}))||'';
         await window.rejectLeaveRequest(btn.dataset.id, reason);
-        Notifs.showToast(`Leave rejected for ${btn.dataset.name}`);
+        Notifs.error(`Leave rejected for ${btn.dataset.name}`);
         loadApprovalsSub('leave');
       }));
       return;
@@ -11486,7 +11518,7 @@ window.renderApprovals = async function(currentUser) {
               <li>They can change it after first login</li>
             </ol>
           `, `<button class="btn-primary" onclick="closeModal()">Done</button>`);
-          Notifs.showToast(`${name} approved!`);
+          Notifs.success(`${name} approved!`);
           loadApprovalsSub('signups');
         });
       });
@@ -11497,7 +11529,7 @@ window.renderApprovals = async function(currentUser) {
           await db.collection('signup_requests').doc(btn.dataset.id).update({
             status: 'rejected', rejectedAt: firebase.firestore.FieldValue.serverTimestamp()
           });
-          Notifs.showToast('Request rejected.');
+          Notifs.error('Request rejected.');
           loadApprovalsSub('signups');
         });
       });
@@ -11543,7 +11575,7 @@ window.renderApprovals = async function(currentUser) {
         btn.addEventListener('click', async e => {
           const { id, uid, name } = e.currentTarget.dataset;
           await window.approveAttendanceExtension(id, uid, name);
-          Notifs.showToast(`Extension approved for ${name}`);
+          Notifs.success(`Extension approved for ${name}`);
           loadApprovalsSub('attendance');
         });
       });
@@ -11552,7 +11584,7 @@ window.renderApprovals = async function(currentUser) {
         btn.addEventListener('click', async e => {
           const { id, uid, name } = e.currentTarget.dataset;
           await window.denyAttendanceExtension(id, uid, name);
-          Notifs.showToast(`Extension denied for ${name}`);
+          Notifs.error(`Extension denied for ${name}`);
           loadApprovalsSub('attendance');
         });
       });
@@ -11600,7 +11632,7 @@ window.renderApprovals = async function(currentUser) {
       });
       wrap.querySelectorAll('.ca-reject').forEach(btn => {
         btn.addEventListener('click', async e => {
-          try { await window.CashAdvance.reject(e.currentTarget.dataset.id); Notifs.showToast('Request rejected.'); }
+          try { await window.CashAdvance.reject(e.currentTarget.dataset.id); Notifs.error('Request rejected.'); }
           catch (err) { Notifs.showToast(err.message||'Could not reject.','error'); }
           loadApprovalsSub('ca');
         });
@@ -11653,7 +11685,7 @@ window.renderApprovals = async function(currentUser) {
       }));
       wrap.querySelectorAll('.roa-resolve-btn').forEach(btn => onClickSafe(btn, async () => {
         await db.collection('approval_requests').doc(btn.dataset.id).update({ status: btn.dataset.status });
-        Notifs.showToast('Request resolved (no quote doc was linked).'); loadApprovalsSub('roa');
+        Notifs.success('Request resolved (no quote doc was linked).'); loadApprovalsSub('roa');
       }));
     }
   };
@@ -11676,7 +11708,7 @@ async function approveQuoteApproval(quoteId, agentId, qno, name, coll){
     if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${qno}" for ${name} was approved and filed.`, icon:'✅', type:'quote_approved' });
     window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true });
     if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
-    Notifs.showToast('Quote approved and filed!');
+    Notifs.success('Quote approved and filed!');
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
 }
 // Return a partner quote for revision: mark needs_revision + notify the partner.
@@ -11691,7 +11723,7 @@ async function returnQuoteToPartner(quoteId, agentId, qno, name, notes, coll){
     if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${qno}" for ${name} was reviewed and returned.${notes?' Notes: '+notes:''} Please revise and re-submit.`, icon:'✎', type:'quote_returned' });
     window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true });
     if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
-    Notifs.showToast('Quote returned to partner.');
+    Notifs.error('Quote returned to partner.');
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
 }
 // Open the full review modal: open in builder, edit key fields, then approve/return.
@@ -11727,7 +11759,7 @@ async function openQuoteApprovalReview(ctx, onDone){
       if(agentId) await Notifs.send(agentId, { title:'✅ Quote Approved!', body:`Quotation "${quoteNumber}" for ${e.clientName||clientName} was approved and filed.`, icon:'✅', type:'quote_approved' });
       window.logAudit && window.logAudit('update','quote',quoteId,{ approved:true, edited:true });
       if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
-      closeModal(); Notifs.showToast('Quote edited, approved and filed!'); onDone&&onDone();
+      closeModal(); Notifs.success('Quote edited, approved and filed!'); onDone&&onDone();
     }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
   document.getElementById('qar-return').addEventListener('click', async ()=>{
@@ -11738,7 +11770,7 @@ async function openQuoteApprovalReview(ctx, onDone){
       if(agentId) await Notifs.send(agentId, { title:'↩ Quote Returned for Revision', body:`"${quoteNumber}" for ${e.clientName||clientName} was reviewed and returned.${e.presidentNotes?' Notes: '+e.presidentNotes:''}`, icon:'✎', type:'quote_returned' });
       window.logAudit && window.logAudit('update','quote',quoteId,{ returned:true, edited:true });
       if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('all-quotes'); dbCacheInvalidate('approvals-pending'); }
-      closeModal(); Notifs.showToast('Quote updated and returned to partner.'); onDone&&onDone();
+      closeModal(); Notifs.error('Quote updated and returned to partner.'); onDone&&onDone();
     }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
 }
@@ -11986,7 +12018,7 @@ async function renderAECDirectory(container, currentUser, currentRole) {
           await db.collection('aec_contacts').add(data);
           window.logAudit && window.logAudit('create','aec_contact',String(data.itemNo),{company});
         }
-        closeModal(); Notifs.showToast('AEC contact saved');
+        closeModal(); Notifs.success('AEC contact saved');
         renderAECDirectory(container, currentUser, currentRole);
       } catch(ex){ Notifs.showToast('Save failed: ' + (ex.message||ex.code),'error'); }
     });
@@ -12004,7 +12036,7 @@ async function renderAECDirectory(container, currentUser, currentRole) {
       try {
         await db.collection('aec_contacts').doc(b.dataset.id).delete();
         window.logAudit && window.logAudit('delete','aec_contact',b.dataset.id,{company:b.dataset.company});
-        Notifs.showToast('AEC contact deleted');
+        Notifs.success('AEC contact deleted');
         renderAECDirectory(container, currentUser, currentRole);
       } catch(ex){ Notifs.showToast('Delete failed','error'); }
     }));
@@ -12250,7 +12282,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
         if (cl) { await db.collection(COLL).doc(cl.id).update(data); window.logAudit&&window.logAudit('update','client',cl.id,{name,stage:data.stage}); }
         else { data.addedBy=currentUser.uid; data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await db.collection(COLL).add(data); }
         if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
-        closeModal(); Notifs.showToast('Client saved'); renderClientProfiles(container, currentUser, currentRole, brand);
+        closeModal(); Notifs.success('Client saved'); renderClientProfiles(container, currentUser, currentRole, brand);
       } catch(ex){ Notifs.showToast('Save failed: '+(ex.message||ex.code),'error'); }
     });
   };
@@ -12267,7 +12299,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
       try {
         await db.collection(COLL).doc(b.dataset.id).delete(); window.logAudit&&window.logAudit('delete','client',b.dataset.id,{name:b.dataset.name});
         if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
-        Notifs.showToast('Client deleted'); renderClientProfiles(container, currentUser, currentRole, brand);
+        Notifs.success('Client deleted'); renderClientProfiles(container, currentUser, currentRole, brand);
       }
       catch(ex){ Notifs.showToast('Delete failed','error'); }
     }));
@@ -12277,7 +12309,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
         await db.collection(COLL).doc(b.dataset.id).update({ deleteRequested:true, deleteReason:reason, deleteRequestedBy:currentUser.uid, deleteRequestedAt:firebase.firestore.FieldValue.serverTimestamp() });
         if (typeof dbCacheInvalidate==='function') dbCacheInvalidate('clients');
         await Notifs.sendToOwner({ title:'🗑 Client Delete Requested', body:`${userProfile?.displayName||currentUser.email} requests deleting client "${b.dataset.name}".${reason?' Reason: '+reason:''}`, icon:'🗑', type:'client_delete_request' });
-        Notifs.showToast('Delete request sent to president'); renderClientProfiles(container, currentUser, currentRole, brand);
+        Notifs.success('Delete request sent to president'); renderClientProfiles(container, currentUser, currentRole, brand);
       } catch(ex){ Notifs.showToast('Request failed: '+(ex.message||ex.code),'error'); }
     }));
   };
@@ -12299,7 +12331,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
     Notifs.showToast('Migrating client books…');
     try { const r = await window.migrateClientBooks();
       window.logAudit && window.logAudit('migrate','clients',null,r);
-      Notifs.showToast(`Done: ${r.created} created, ${r.merged} merged, ${r.soTagged+r.jpTagged} records linked, ${r.unmatched} left name-matched.`);
+      Notifs.success(`Done: ${r.created} created, ${r.merged} merged, ${r.soTagged+r.jpTagged} records linked, ${r.unmatched} left name-matched.`);
       renderClientProfiles(container, currentUser, currentRole, brand);
     } catch (ex) { Notifs.showToast('Migration failed: ' + (ex.message||ex.code), 'error'); }
   });
@@ -12331,7 +12363,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
       el.querySelectorAll('.cl-promote').forEach(b => b.addEventListener('click', async () => {
         b.disabled = true;
         const id = await window.Clients.upsertFromQuote(list[+b.dataset.i]);
-        if (id) { Notifs.showToast('Client saved to CRM'); renderClientProfiles(container, currentUser, currentRole, brand); }
+        if (id) { Notifs.success('Client saved to CRM'); renderClientProfiles(container, currentUser, currentRole, brand); }
         else { b.disabled = false; Notifs.showToast('Save failed','error'); }
       }));
     } catch(_){}
@@ -12442,21 +12474,21 @@ async function openClientHub(cl, opts) {
     closeModal(); opts.onChange && opts.onChange();
   };
   document.getElementById('ch-stage')?.addEventListener('change', async e => {
-    try { await patch({ stage: e.target.value }); Notifs.showToast('Stage updated'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+    try { await patch({ stage: e.target.value }); Notifs.success('Stage updated'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
   document.getElementById('ch-log')?.addEventListener('click', async () => {
     const note = (await promptDialog({message:'What happened? (call, site visit, email…)', multiline:true}))||'';
     if (!note.trim()) return;
-    try { await patch({ lastContact: today }, { date: today, by: who(), note: note.trim() }); Notifs.showToast('Contact logged'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+    try { await patch({ lastContact: today }, { date: today, by: who(), note: note.trim() }); Notifs.success('Contact logged'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
   document.getElementById('ch-fu-done')?.addEventListener('click', async () => {
     const next = ((await promptDialog({message:`Follow-up done ${emojiIcon('✓',16)} — schedule the next one? (YYYY-MM-DD, blank = none)`}))||'').trim();
-    try { await patch({ followUpDate: next, lastContact: today }, { date: today, by: who(), note: 'Follow-up done' + (next ? ' → next ' + next : '') }); Notifs.showToast('Follow-up updated'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+    try { await patch({ followUpDate: next, lastContact: today }, { date: today, by: who(), note: 'Follow-up done' + (next ? ' → next ' + next : '') }); Notifs.success('Follow-up updated'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
   document.getElementById('ch-fu-set')?.addEventListener('click', async () => {
     const d = ((await promptDialog({message:'Follow-up date (YYYY-MM-DD)'}))||'').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { if (d) Notifs.showToast('Use YYYY-MM-DD','error'); return; }
-    try { await patch({ followUpDate: d }); Notifs.showToast('Follow-up set'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
+    try { await patch({ followUpDate: d }); Notifs.success('Follow-up set'); } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
   });
 }
 
@@ -12664,13 +12696,13 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
       // Notify finance dept
       await Notifs.sendToDept('Finance', {
         title: `💸 ${dept} logged a ${type==='debit'?'expense':'income'}`,
-        body:  `${uName}: ${desc} — ₱${amount.toLocaleString()}`,
+        body:  `${uName}: ${desc} — ₱${window.fmtN2(amount)}`,
         icon:  type==='debit'?`${emojiIcon('📤',16)}`:`${emojiIcon('📥',16)}`,
         type:  'finance_entry'
       }).catch(()=>{});
 
       closeModal();
-      Notifs.showToast('Entry saved and synced to Finance!');
+      Notifs.success('Entry saved and synced to Finance!');
       renderBudgeting(container, currentUser, currentRole, dept);
     });
   });
@@ -12813,7 +12845,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
           e.preventDefault(); b.classList.remove('drag-over');
           const fid = e.dataTransfer.getData('text/plain');
           if (!fid) return;
-          try { await FilesHub.moveToFolder(fid, key === 'All' ? null : key); Notifs.showToast('Moved.'); loadFiles(); }
+          try { await FilesHub.moveToFolder(fid, key === 'All' ? null : key); Notifs.success('Moved.'); loadFiles(); }
           catch (err) { Notifs.showToast('Move failed: ' + (err.message||err), 'error'); }
         });
       }
@@ -12849,11 +12881,11 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
     // ── Recycle Bin: soft-delete / restore / permanent delete ──
     listEl.querySelectorAll('.fh-delete').forEach(b => b.addEventListener('click', async () => {
       if (!(await confirmDialog({message:`Move "${escHtml(b.dataset.name)}" to the Recycle Bin?`, danger:true, html:true}))) return;
-      try { await FilesHub.softDelete(b.dataset.id); Notifs.showToast('Moved to Recycle Bin.'); loadFiles(); }
+      try { await FilesHub.softDelete(b.dataset.id); Notifs.success('Moved to Recycle Bin.'); loadFiles(); }
       catch(e) { Notifs.showToast('Delete failed: ' + (e.message||e), 'error'); }
     }));
     listEl.querySelectorAll('.fh-restore').forEach(b => b.addEventListener('click', async () => {
-      try { await FilesHub.restore(b.dataset.id); Notifs.showToast('Restored.'); loadFiles(); }
+      try { await FilesHub.restore(b.dataset.id); Notifs.success('Restored.'); loadFiles(); }
       catch(e) { Notifs.showToast('Restore failed: ' + (e.message||e), 'error'); }
     }));
     listEl.querySelectorAll('.fh-purge').forEach(b => b.addEventListener('click', async () => {
@@ -12861,7 +12893,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
       if ((typed||'').trim().toUpperCase() !== 'DELETE') { if (typed) Notifs.showToast('Type DELETE exactly to confirm.','error'); return; }
       const f = binFiles.find(x=>x.id===b.dataset.id);
       if (!f) return;
-      try { await FilesHub.purge(f); Notifs.showToast('Permanently deleted.'); loadFiles(); }
+      try { await FilesHub.purge(f); Notifs.success('Permanently deleted.'); loadFiles(); }
       catch(e) { Notifs.showToast('Delete failed: ' + (e.message||e), 'error'); }
     }));
 
@@ -12875,7 +12907,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
       Drive.renderUploadArea('fh-version-upload', async (result, file) => {
         try {
           await FilesHub.uploadNewVersion(f, result, file, document.getElementById('fh-version-note').value.trim());
-          Notifs.showToast('New version uploaded.'); closeModal(); loadFiles();
+          Notifs.success('New version uploaded.'); closeModal(); loadFiles();
         } catch(e) { Notifs.showToast('Upload failed: ' + (e.message||e), 'error'); }
       }, { label:'Choose new version', dept, subfolder:'Files', allowLinks:false });
     }));
@@ -12924,7 +12956,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
         if (!id) { Notifs.showToast('Choose a target','error'); return; }
         const label = type==='user' ? (sel.options[sel.selectedIndex]?.textContent||id) : id;
         const perm = document.getElementById('fh-share-perm').value;
-        try { await FilesHub.share(f, {type, id, label}, perm); Notifs.showToast('Shared.'); closeModal(); loadFiles(); }
+        try { await FilesHub.share(f, {type, id, label}, perm); Notifs.success('Shared.'); closeModal(); loadFiles(); }
         catch(e) { Notifs.showToast('Share failed: ' + (e.message||e), 'error'); }
       });
     }));
@@ -13180,17 +13212,17 @@ window.renderDocCollection = function(container, collection, title, currentUser,
         batch.set(newRef, { ...rest, ...payload, addedBy: d.addedBy||currentUser.uid, createdAt: d.createdAt||firebase.firestore.FieldValue.serverTimestamp() });
         batch.delete(db.collection(collection).doc(d.id));
         await batch.commit();
-        Notifs.showToast('Bid moved.');
+        Notifs.success('Bid moved.');
       } else {
         await db.collection(collection).doc(d.id).update(payload);
-        Notifs.showToast('Bid updated.');
+        Notifs.success('Bid updated.');
       }
       closeModal(); loadDocs();
     });
     document.getElementById('gb-del')?.addEventListener('click', async () => {
       if (!(await confirmDialog({message:`Delete "${escHtml(d.title||d.name||'this bid')}"? This cannot be undone.`, danger:true, html:true}))) return;
       await db.collection(collection).doc(d.id).delete();
-      closeModal(); Notifs.showToast('Bid deleted.'); loadDocs();
+      closeModal(); Notifs.success('Bid deleted.'); loadDocs();
     });
   }
 
@@ -13343,7 +13375,7 @@ function openDeliveryReceiptModal(order, onSaved){
         timeline:  firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Delivery receipt '+no+' recorded', by:byName }),
         updatedAt: firebase.firestore.FieldValue.serverTimestamp() }); } catch(_) {} }
       window.logAudit && window.logAudit('update','production_order',order.id,{ deliveryReceipt: no });
-      Notifs.showToast('Receipt '+no+' recorded — press Advance → again to mark Delivered.');
+      Notifs.success('Receipt '+no+' recorded — press Advance → again to mark Delivered.');
       closeModal(); onSaved && onSaved();
     } catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); btn.disabled=false; }
   });
@@ -13641,7 +13673,7 @@ function openProjectMarginModal(p){
     if(cap<0){ err.textContent='Capital cannot be negative.'; err.classList.remove('hidden'); return; }
     const who=userProfile?.displayName||currentUser.email;
     const update={ capital:cap, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
-      timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Profit factors updated (capital ₱${cap.toLocaleString()})`, by:who }) };
+      timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Profit factors updated (capital ₱${window.fmtN2(cap)})`, by:who }) };
     if(isShared){
       let pp=Math.max(0,Math.min(100,parseFloat(document.getElementById('pm-pct').value)||0));
       update['split.partnerPct']=pp; update['split.barroPct']=100-pp;
@@ -13651,7 +13683,7 @@ function openProjectMarginModal(p){
       window.logAudit && window.logAudit('update','project',p.id,{ capital:cap, partnerPct:update['split.partnerPct'] });
       // reflect locally so the reopened detail shows fresh numbers
       p.capital=cap; if(isShared){ p.split=p.split||{}; p.split.partnerPct=update['split.partnerPct']; p.split.barroPct=update['split.barroPct']; }
-      closeModal(); Notifs.showToast('Profit factors saved'); window.renderProjectLifecycle&&window.renderProjectLifecycle();
+      closeModal(); Notifs.success('Profit factors saved'); window.renderProjectLifecycle&&window.renderProjectLifecycle();
     }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
   });
 }
@@ -13673,7 +13705,7 @@ async function advanceProjectStage(p, nextId){
     if(nextId==='delivered') { try{ await Notifs.sendToDept('Finance',{ title:'📦 Ready to bill balance', body:`${p.clientName} (${p.projectNo}) delivered — collect balance ₱${fmt(p.arBalance||0)}.`, icon:'💵', type:'project_stage', link:'projects-lifecycle' }); }catch(_){} }
     if(nextId==='paid') { try{ await Notifs.sendToOwner({ title:'💰 Project paid', body:`${p.clientName} (${p.projectNo}) fully collected.`, icon:'💰', type:'project_paid' }); }catch(_){} }
     window.logAudit && window.logAudit('update','project',p.id,{ stage:nextId });
-    Notifs.showToast('Moved to '+ns.label); closeModal(); window.renderProjectLifecycle();
+    Notifs.success('Moved to '+ns.label); closeModal(); window.renderProjectLifecycle();
   }catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); }
 }
 
@@ -13747,8 +13779,8 @@ async function openProjectBillingModal(p){
       const payment={ type, amount, vatAmount, net, method, orRef, receiptUrl:receipt?.url||null, date:today(), by:who, ledgerId:precomputedLedgerId, bankAccountId: acct.bankAccountId||null, bankAccountName: acct.bankAccountName||null };
       const update={ amountCollected:newCollected, arBalance:newAR, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
         payments:firebase.firestore.FieldValue.arrayUnion(payment),
-        documents:firebase.firestore.FieldValue.arrayUnion({ type:'Official Receipt', ref:orRef||('₱'+amount.toLocaleString()), at:new Date().toISOString(), by:who }),
-        timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Payment ₱${amount.toLocaleString()} (${type})`, by:who }) };
+        documents:firebase.firestore.FieldValue.arrayUnion({ type:'Official Receipt', ref:orRef||('₱'+window.fmtN2(amount)), at:new Date().toISOString(), by:who }),
+        timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Payment ₱${window.fmtN2(amount)} (${type})`, by:who }) };
       if(newAR<=0) update.stage='paid';
       const res = await window.Ledger.post({
         ref: projLedgerRef, date: today(), kind: 'credit',
@@ -13760,8 +13792,8 @@ async function openProjectBillingModal(p){
       });
       if (res.existed) { closeModal(); Notifs.showToast('This payment was already posted.','error'); window.renderProjectLifecycle(); return; }
       window.logAudit && window.logAudit('create','payment',p.id,{ amount, type, projectNo:p.projectNo });
-      if(newAR<=0){ try{ await Notifs.sendToOwner({ title:'💰 Project fully paid', body:`${p.clientName} (${p.projectNo}) — ₱${(p.contractAmount||0).toLocaleString()} collected in full.`, icon:'💰', type:'project_paid' }); }catch(_){} }
-      closeModal(); Notifs.showToast('Payment recorded + posted to ledger'); window.renderProjectLifecycle();
+      if(newAR<=0){ try{ await Notifs.sendToOwner({ title:'💰 Project fully paid', body:`${p.clientName} (${p.projectNo}) — ₱${window.fmtN2(p.contractAmount||0)} collected in full.`, icon:'💰', type:'project_paid' }); }catch(_){} }
+      closeModal(); Notifs.success('Payment recorded + posted to ledger'); window.renderProjectLifecycle();
     }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); saveBtn.disabled=false; }
   });
 }
@@ -13890,7 +13922,7 @@ async function openJobBillingInvoiceModal(p){
         const upd={
           invoices:next,
           documents:firebase.firestore.FieldValue.arrayUnion({ type:'Billing Invoice', ref:inv.no, at:new Date().toISOString(), by:who }),
-          timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Billing invoice ${inv.no} issued (₱${amt.toLocaleString()})`, by:who }),
+          timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Billing invoice ${inv.no} issued (₱${window.fmtN2(amt)})`, by:who }),
           updatedAt:firebase.firestore.FieldValue.serverTimestamp()
         };
         if(kind==='downpayment'){ upd.dpPercent=pct; upd.balanceSchedule=schedule; }
@@ -14112,7 +14144,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
               if(_trk) window.syncOrderTracking(_tok, { status:_trk }); }
           } catch(_) {}
         }
-        Notifs.showToast(`Moved to ${next.label}`);
+        Notifs.success(`Moved to ${next.label}`);
         renderProdOrders(el, currentUser, currentRole);
       } catch(ex){ Notifs.showToast('Update failed','error'); b.disabled=false; }
     }));
@@ -14330,7 +14362,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
     try {
       await db.collection('production_orders').doc(order.id).update({ materials });
       const res = await consumeProductionMaterials({ ...e, id: order.id, materials });
-      if (res.ok) Notifs.showToast(res.cosPosted
+      if (res.ok) Notifs.success(res.cosPosted
         ? `Consumed ${res.count} material${res.count>1?'s':''} · COS ₱${fmt(res.cos)} posted to ledger.`
         : `Stock deducted (COS ₱${fmt(res.cos)} recorded; ask Finance to post it to the ledger).`);
       else Notifs.showToast(res.reason||'Nothing to consume.','error');
@@ -14401,12 +14433,12 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
           timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Production order '+data.orderNo+' created', by:data.createdByName }) }); } catch(_) {}
         }
       }
-      closeModal(); Notifs.showToast('Order saved'); onSaved && onSaved();
+      closeModal(); Notifs.success('Order saved'); onSaved && onSaved();
     } catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
   });
   document.getElementById('po-del')?.addEventListener('click', async ()=>{
     if(!(await confirmDialog({message:'Delete this production order?', danger:true}))) return;
-    try { await db.collection('production_orders').doc(order.id).delete(); window.logAudit&&window.logAudit('delete','production_order',order.id,{orderNo:order.orderNo||''}); closeModal(); Notifs.showToast('Deleted'); onSaved && onSaved(); }
+    try { await db.collection('production_orders').doc(order.id).delete(); window.logAudit&&window.logAudit('delete','production_order',order.id,{orderNo:order.orderNo||''}); closeModal(); Notifs.success('Deleted'); onSaved && onSaved(); }
     catch(ex){ Notifs.showToast('Delete failed (admin only)','error'); }
   });
 }
@@ -14531,7 +14563,7 @@ async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
   document.getElementById('cf-addrow')?.addEventListener('click',()=>{ draft.extras.push({}); persist(); renderProdInventoryForm(el,currentRole,kindFilter); });
   document.getElementById('cf-clear')?.addEventListener('click', async ()=>{
     if(!(await confirmDialog({message:'Clear all counts, remarks and header fields on this form?', danger:true}))) return;
-    localStorage.removeItem(PROD_COUNT_DRAFT_KEY); Notifs.showToast('Form cleared'); renderProdInventoryForm(el,currentRole,kindFilter);
+    localStorage.removeItem(PROD_COUNT_DRAFT_KEY); Notifs.success('Form cleared'); renderProdInventoryForm(el,currentRole,kindFilter);
   });
   document.getElementById('cf-print')?.addEventListener('click',()=>openInventoryCountForm(shown, loadCountDraft(), kindFilter));
 
@@ -14542,7 +14574,7 @@ async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
       const phys = parseFloat(c.physical);
       return { item: i, phys, remarks: c.remarks || '', v: varOf(i.qty, c.physical) };
     }).filter(l => l.v != null && l.v !== 0);
-    if (!lines.length) { Notifs.showToast('No non-zero variances to post.'); return; }
+    if (!lines.length) { Notifs.error('No non-zero variances to post.'); return; }
     const formNo = String(d.header?.formNo || 'IC').replace(/[^A-Za-z0-9-]/g, '') || 'IC';
     if (!(await confirmDialog({ message:
       `Post ${lines.length} variance correction${lines.length>1?'s':''}? On-hand quantities will be set to the physical count and each correction logged in the movement history. Write-in blank rows are not posted — add those items in Inventory first.`,
@@ -14870,7 +14902,7 @@ function bindRfqCard(r, currentUser, currentRole, content) {
         items, total: purchTotal(items),
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
-      Notifs.showToast('Prices saved.');
+      Notifs.success('Prices saved.');
     } catch (err) { Notifs.showToast('Save failed: ' + (err.message || err), 'error'); }
     finally { btn.disabled = false; }
   });
@@ -14893,7 +14925,7 @@ function bindRfqCard(r, currentUser, currentRole, content) {
       });
       await notifyPoApprovers({ id: r.id, ...r, items, total: purchTotal(items), prNo })
         .catch(e2 => console.warn('[po notify]', e2));
-      Notifs.showToast('Converted to Purchase Request — awaiting President/Manager approval.');
+      Notifs.success('Converted to Purchase Request — awaiting President/Manager approval.');
       renderRFQs(content, currentUser, currentRole);
     } catch (err) { Notifs.showToast('Convert failed: ' + (err.message || err), 'error'); btn.disabled = false; }
   });
@@ -14903,7 +14935,7 @@ function bindRfqCard(r, currentUser, currentRole, content) {
     if (!(await confirmDialog({message:`Delete RFQ "${escHtml(btn.dataset.label)}"? This cannot be undone.`, danger:true, html:true}))) return;
     try {
       await db.collection('purchase_requisitions').doc(btn.dataset.id).delete();
-      Notifs.showToast('Deleted.');
+      Notifs.success('Deleted.');
       renderRFQs(content, currentUser, currentRole);
     } catch (err) { Notifs.showToast('Delete failed: ' + (err.message || err), 'error'); }
   });
@@ -14994,7 +15026,7 @@ async function openRfqModal(currentUser, onDone, prefill) {
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       closeModal();
-      Notifs.showToast('RFQ created.');
+      Notifs.success('RFQ created.');
       onDone && onDone();
     } catch (err) { Notifs.showToast('Create failed: ' + (err.message || err), 'error'); btn.disabled = false; }
   });
@@ -15171,7 +15203,7 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
     const p = prs.find(x => x.id === btn.dataset.id); if (!p) return;
     if (!(await confirmDialog({ message: `Approve ${escHtml(p.prNo || '')} — ${escHtml(p.supplier || '')} for ₱${fmt(p.total != null ? p.total : purchTotal(p.items))}? Your name will print on the "Approved by" line.`, html: true }))) return;
     btn.disabled = true;
-    try { await window.approvePurchaseOrder(p.id); Notifs.showToast('PO approved ✓'); redo(); }
+    try { await window.approvePurchaseOrder(p.id); Notifs.success('PO approved ✓'); redo(); }
     catch (err) { Notifs.showToast('Approve failed: ' + (err.message || err), 'error'); btn.disabled = false; }
   }));
   content.querySelectorAll('.po-reject').forEach(btn => btn.addEventListener('click', async () => {
@@ -15179,7 +15211,7 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
     const reason = prompt('Reason for rejection (shown to Purchasing):') ;
     if (reason === null) return;                       // cancelled
     btn.disabled = true;
-    try { await window.rejectPurchaseOrder(p.id, reason); Notifs.showToast('PO rejected.'); redo(); }
+    try { await window.rejectPurchaseOrder(p.id, reason); Notifs.error('PO rejected.'); redo(); }
     catch (err) { Notifs.showToast('Reject failed: ' + (err.message || err), 'error'); btn.disabled = false; }
   }));
   content.querySelectorAll('.po-revert').forEach(btn => btn.addEventListener('click', async () => {
@@ -15195,7 +15227,7 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
         rejectedBy: FV.delete(), rejectedByName: FV.delete(), rejectedAt: FV.delete(), rejectedReason: FV.delete(),
         updatedAt: FV.serverTimestamp()
       });
-      Notifs.showToast('Reverted to RFQ — edit it in the Request for Quotation tab.');
+      Notifs.success('Reverted to RFQ — edit it in the Request for Quotation tab.');
       redo();
     } catch (err) { Notifs.showToast('Revert failed: ' + (err.message || err), 'error'); btn.disabled = false; }
   }));
@@ -15221,7 +15253,7 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
         body: `${p.prNo || p.rfqNo || 'A purchase'} — ${p.supplier || 'supplier'} · ₱${fmt(p.total != null ? p.total : purchTotal(p.items))}. See Finance → Purchases.`,
         icon: '🧾', type: 'purchase_submitted', dedupKey: `pr-fin-${p.id}`
       });
-      Notifs.showToast('Submitted to Finance ✓');
+      Notifs.success('Submitted to Finance ✓');
       redo();
     } catch (err) { Notifs.showToast('Submit failed: ' + (err.message || err), 'error'); btn.disabled = false; }
   }));
@@ -15268,12 +15300,12 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
               icon: '📦', type: 'purchase_submitted', dedupKey: `pr-fin-${p.id}`
             }).catch(()=>{});
           }
-          Notifs.showToast(res.unmatched.length
+          Notifs.success(res.unmatched.length
             ? `Received ${res.matched} line${res.matched===1?'':'s'} into stock — ${res.unmatched.length} not in inventory. Tap “${emojiIcon('⚠',16)} Resolve” on the PR.`
             : `Received. ${res.matched} item${res.matched===1?'':'s'} added to inventory ${emojiIcon('✓',16)}`);
-        } else { Notifs.showToast('Status updated.'); }
+        } else { Notifs.success('Status updated.'); }
       } else {
-        Notifs.showToast('Status updated.');
+        Notifs.success('Status updated.');
       }
       renderPurchaseRequests(content, currentUser, currentRole, opts);
     } catch (err) { Notifs.showToast('Update failed: ' + (err.message || err), 'error'); btn.disabled = false; }
@@ -15405,7 +15437,7 @@ async function openReceiveResolver(p, currentUser, onDone) {
         receiveUnmatched: remaining, receivedToInventory: remaining.length === 0
       });
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
-      Notifs.showToast('Line received into stock ✓');
+      Notifs.success('Line received into stock ✓');
       closeModal(); onDone && onDone();
       if (remaining.length) openReceiveResolver({ ...p, receiveUnmatched: remaining }, currentUser, onDone);
     } catch (ex) { Notifs.showToast('Failed: ' + (ex.message || ex), 'error'); e.currentTarget.disabled = false; }
@@ -15627,7 +15659,7 @@ async function recordPurchaseDisbursement(p, currentUser, onDone) {
       }).catch(() => {}); // journal post already succeeded — don't fail the action on the flag write
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
       closeModal();
-      Notifs.showToast('Posted to Cash Disbursement Journal ✓');
+      Notifs.success('Posted to Cash Disbursement Journal ✓');
       onDone && onDone();
     } catch (err) { Notifs.showToast('Post failed: ' + (err.message || err), 'error'); saveBtn.disabled = false; }
   });
