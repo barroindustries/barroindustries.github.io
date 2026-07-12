@@ -71,6 +71,16 @@ version-hook-restage-footgun memory; protocol now: one agent per shared file, di
 (scheduledAttendanceReminder, scheduledDailyDigestChecks). Also still: Phase-9 one-time buttons +
 remapDesignProjectClients (president console).
 
+**Waves 11–15 (shipped, prod v12.0.97; rules re-deployed with period backstop + validators; ALL 9
+Cloud Functions live incl. scheduled reminders + server ca_deduct execution):** Ph 68 (server approval
+exec + notif quota observer), 51 (CSS dead-code inventory tool + deletions), 84 (journals period-close
+rules backstop), 92a (rules validators), 57 (compositor-friendly motion), 40+115+116 (STATUS_META — 15
+domains, one badge truth app-wide incl. app.js/modules.js call sites), 39 (openPrintableDoc — 6 print
+scaffolds→1), 37 (migrations.js extraction, -356 hot lines), 145 (Keymap: n, [/], g-seqs, Cmd+Enter),
+58 (z-index token scale + PTR/page-panel stacking fixes), 116b/c (task/gov/leave/ca/expense vocabs),
+59 (Approvals History chip + SOP panel), 65+129a (Session cleanup registry, claims re-gate, icon
+dev-check), 56 (unified print layer + dark-print fallback).
+
 **Next up:** push+deploy session (Ph 1, 9) · Ph 105 (Overlay/Back part 2) · Ph 28 (plaintext passwords —
 needs flow decision) · Ph 12–14 (Ledger service) · Ph 19 (quote math — needs D4/D5 rulings).
 
