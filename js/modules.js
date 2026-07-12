@@ -807,7 +807,7 @@ function renderTeamCards(users, currentUser) {
   const grid = document.getElementById('team-grid');
   if (!grid) return;
   if (!users.length) {
-    grid.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('👥',44)}</div><h4>No team members found</h4></div>`;
+    grid.innerHTML = window.renderEmptyState({icon:'👥', title:'No team members found', hint:'Try clearing filters, or check back once accounts are added.'});
     if (window.lucide) lucide.createIcons({ nodes: [grid] });
     return;
   }
@@ -1580,7 +1580,7 @@ async function renderCashAdvanceAdmin(c) {
 
 function renderCAList(advances, container, isAdmin) {
   if (!advances.length) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('💸',44)}</div><h4>No cash advances yet</h4></div>`;
+    container.innerHTML = window.renderEmptyState({icon:'💸', title:'No cash advances yet', hint:'Requests you file, or your team files, will show up here for tracking.'});
     if (window.lucide) lucide.createIcons({ nodes: [container] });
     return;
   }
@@ -2522,14 +2522,14 @@ async function renderPresidentMessageCard() {
     const c = document.getElementById('page-content');
     if(!c) return;
     const blocked = (typeof isPartner==='function' && isPartner()) || (typeof isBrilliantOnly==='function' && isBrilliantOnly());
-    if(blocked){ c.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔒',44)}</div><h4>Search is not available for this account</h4></div>`; return; }
+    if(blocked){ c.innerHTML = window.renderEmptyState({icon:'🔒', title:'Search is not available for this account'}); return; }
     if (window.lucide) lucide.createIcons({ nodes: [c] });
 
     c.innerHTML = `
       <div class="page-header"><h2>${emojiIcon('🔎',20)} Search</h2></div>
       <input id="gsearch-input" placeholder="Search tasks, clients, inventory, products, quotes, files…" value="${(initialQuery||'').replace(/"/g,'&quot;')}"
         style="width:100%;padding:12px 14px;border:1.5px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);font-size:15px;margin-bottom:14px"/>
-      <div id="gsearch-results"><div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('🔎',44)}</div><p>Type to search across the company.</p></div></div>`;
+      <div id="gsearch-results">${window.renderEmptyState({icon:'🔎', title:'Type to search across the company.'})}</div>`;
     if (window.lucide) lucide.createIcons({ nodes: [c] });
     const input = document.getElementById('gsearch-input');
     const out = document.getElementById('gsearch-results');
@@ -2562,27 +2562,35 @@ async function renderPresidentMessageCard() {
 
     async function runSearch(qRaw){
       const q = (qRaw||'').trim().toLowerCase();
-      if(!q){ out.innerHTML = `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('🔎',44)}</div><p>Type to search across the company.</p></div>`; return; }
-      if (window.lucide) lucide.createIcons({ nodes: [out] });
-      out.innerHTML = '<div class="loading-placeholder">Searching…</div>';
-      const S = await load();
-      const tasks   = S.tasks.filter(t=>hit(q,t.title,t.description,t.department));
-      const clients = S.clients.filter(x=>hit(q,x.name,x.company,x.email,x.phone));
-      const inv     = S.inv.filter(i=>hit(q,i.name,i.category,i.supplier));
-      const prod    = S.prod.filter(p=>hit(q,p.title,p.name,p.shortName,p.id,p.category));
-      const quotes  = S.quotes.filter(qt=>hit(q,qt.quoteNumber,qt.clientName,qt.status));
-      const files   = S.files.filter(f=>hit(q,f.name,f.description,f.scope));
-      const total = tasks.length+clients.length+inv.length+prod.length+quotes.length+files.length;
-      if(!total){ out.innerHTML = `<div class="empty-state" style="padding:30px"><div class="empty-icon">🤷</div><h4>No results for "${esc(qRaw)}"</h4></div>`; return; }
-      _gsFilesStash = {}; files.forEach(f=>{ _gsFilesStash[f.id]=f; });
-      out.innerHTML =
-        groupHtml(`${emojiIcon('✅',16)}`,'Tasks',tasks,t=>rowItem(`${emojiIcon('📋',16)}`,t.title||'(untitled)',(t.department||'')+(t.status?' · '+t.status:''),`window.openTaskDetail&&window.openTaskDetail('${t.id}',window.currentUser,window.currentRole)`)) +
-        groupHtml(`${emojiIcon('👤',16)}`,'Clients',clients,x=>rowItem(`${emojiIcon('👤',16)}`,x.name||x.company||'Client',(x.company||'')+(x.phone?' · '+x.phone:''),`navigateTo('${x._brand==='design'?'dept:Design':x._brand==='bs'?'bs-clients':'dept:Sales'}')`)) +
-        groupHtml(`${emojiIcon('📦',16)}`,'Inventory',inv,i=>rowItem(`${emojiIcon('📦',16)}`,i.name||'(item)',(i.category||'')+' · '+(i.qty||0)+' '+(i.unit||''),`navigateTo('inventory')`)) +
-        groupHtml(`${emojiIcon('🛒',16)}`,'Products',prod,p=>rowItem(`${emojiIcon('🛒',16)}`,p.title||p.name||p.id,(p.id||'')+(p.category?' · '+p.category:''),`navigateTo('product-database')`)) +
-        groupHtml(`${emojiIcon('📄',16)}`,'Quotes',quotes,qt=>rowItem(`${emojiIcon('📄',16)}`,(qt.quoteNumber||'Quote')+(qt.clientName?' — '+qt.clientName:''),(qt.status||'draft'),`navigateTo('${(qt.quoteNumber||'').toString().toUpperCase().startsWith('BS')?'bs-quotations':'dept:Sales'}')`)) +
-        groupHtml(`${emojiIcon('📁',16)}`,'Files',files,f=>rowItem(f.kind==='link'?`${emojiIcon('🔗',16)}`:`${emojiIcon('📄',16)}`,f.name||'File',(f.scope||'')+(f.department?' · '+f.department:''),`window.__gsOpenFile('${f.id}')`));
-      if (window.lucide) lucide.createIcons({ nodes: [out] });
+      if(!q){ out.innerHTML = window.renderEmptyState({icon:'🔎', title:'Type to search across the company.'}); if (window.lucide) lucide.createIcons({ nodes: [out] }); return; }
+      // v13 WS-H Phase 122 adoption — the fetch+filter step (load() + per-source
+      // filtering) is the fetcher; the grouped result cards are the renderer.
+      // withLoadingAndError (js/ui-states.js) owns the "Searching…" placeholder,
+      // the no-results empty state, and error+Retry if load() ever rejects.
+      await window.withLoadingAndError(out, async () => {
+        const S = await load();
+        return {
+          tasks:   S.tasks.filter(t=>hit(q,t.title,t.description,t.department)),
+          clients: S.clients.filter(x=>hit(q,x.name,x.company,x.email,x.phone)),
+          inv:     S.inv.filter(i=>hit(q,i.name,i.category,i.supplier)),
+          prod:    S.prod.filter(p=>hit(q,p.title,p.name,p.shortName,p.id,p.category)),
+          quotes:  S.quotes.filter(qt=>hit(q,qt.quoteNumber,qt.clientName,qt.status)),
+          files:   S.files.filter(f=>hit(q,f.name,f.description,f.scope)),
+        };
+      }, (r) => {
+        _gsFilesStash = {}; r.files.forEach(f=>{ _gsFilesStash[f.id]=f; });
+        out.innerHTML =
+          groupHtml(`${emojiIcon('✅',16)}`,'Tasks',r.tasks,t=>rowItem(`${emojiIcon('📋',16)}`,t.title||'(untitled)',(t.department||'')+(t.status?' · '+t.status:''),`window.openTaskDetail&&window.openTaskDetail('${t.id}',window.currentUser,window.currentRole)`)) +
+          groupHtml(`${emojiIcon('👤',16)}`,'Clients',r.clients,x=>rowItem(`${emojiIcon('👤',16)}`,x.name||x.company||'Client',(x.company||'')+(x.phone?' · '+x.phone:''),`navigateTo('${x._brand==='design'?'dept:Design':x._brand==='bs'?'bs-clients':'dept:Sales'}')`)) +
+          groupHtml(`${emojiIcon('📦',16)}`,'Inventory',r.inv,i=>rowItem(`${emojiIcon('📦',16)}`,i.name||'(item)',(i.category||'')+' · '+(i.qty||0)+' '+(i.unit||''),`navigateTo('inventory')`)) +
+          groupHtml(`${emojiIcon('🛒',16)}`,'Products',r.prod,p=>rowItem(`${emojiIcon('🛒',16)}`,p.title||p.name||p.id,(p.id||'')+(p.category?' · '+p.category:''),`navigateTo('product-database')`)) +
+          groupHtml(`${emojiIcon('📄',16)}`,'Quotes',r.quotes,qt=>rowItem(`${emojiIcon('📄',16)}`,(qt.quoteNumber||'Quote')+(qt.clientName?' — '+qt.clientName:''),(qt.status||'draft'),`navigateTo('${(qt.quoteNumber||'').toString().toUpperCase().startsWith('BS')?'bs-quotations':'dept:Sales'}')`)) +
+          groupHtml(`${emojiIcon('📁',16)}`,'Files',r.files,f=>rowItem(f.kind==='link'?`${emojiIcon('🔗',16)}`:`${emojiIcon('📄',16)}`,f.name||'File',(f.scope||'')+(f.department?' · '+f.department:''),`window.__gsOpenFile('${f.id}')`));
+      }, {
+        loadingText: 'Searching…',
+        emptyCheck: r => (r.tasks.length+r.clients.length+r.inv.length+r.prod.length+r.quotes.length+r.files.length)===0,
+        emptyState: { icon: '🤷', title: `No results for "${qRaw}"`, hint: 'Try a different keyword, or check spelling.' }
+      });
     }
 
     let _t; input.addEventListener('input',()=>{ clearTimeout(_t); _t=setTimeout(()=>runSearch(input.value),220); });
@@ -2658,7 +2666,7 @@ window.renderFilesHub = function(){
     const fc = document.getElementById('fh-hub-content');
     const q = (document.getElementById('fh-hub-search')?.value||'').trim().toLowerCase();
     const showing = q ? allScopeFiles.filter(f=>hit(q,f.name,f.description,f.scope,f.department)) : allScopeFiles;
-    if (!showing.length) { fc.innerHTML = `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📁',44)}</div><h4>No files found</h4></div>`; return; }
+    if (!showing.length) { fc.innerHTML = window.renderEmptyState({icon:'📁', title:'No files found', hint:'Try a different scope, or upload the first file here.'}); return; }
     if (window.lucide) lucide.createIcons({ nodes: [fc] });
     _gsFilesStashHub = {}; showing.forEach(f=>{ _gsFilesStashHub[f.id]=f; });
     fc.innerHTML = `<div class="table-wrap"><table class="data-table">
@@ -2925,72 +2933,75 @@ function _mpTimeAgo(ms) {
 // audit_log source additionally needs Spec 7's rules+index (degrades to
 // silently-empty via .catch until that's deployed).
 window.renderRecentActivity = async function(host, uid) {
-  const partner = (typeof isPartner === 'function' && isPartner());
-  const none = Promise.resolve({ docs: [] });
-  const [notif, tasks, leave, ca, att, posts, audit] = await Promise.all([
-    db.collection('notifications').doc(uid).collection('items')
-      .orderBy('createdAt', 'desc').limit(30).get().catch(() => ({ docs: [] })),
-    db.collection('tasks').where('assignedTo', 'array-contains', uid).get().catch(() => ({ docs: [] })),
-    partner ? none : db.collection('leave_requests').where('userId', '==', uid).get().catch(() => ({ docs: [] })),
-    partner ? none : db.collection('cash_advances').where('userId', '==', uid).get().catch(() => ({ docs: [] })),
-    partner ? none : db.collection('attendance').doc(uid).collection('records')
-      .orderBy(firebase.firestore.FieldPath.documentId(), 'desc').limit(14).get().catch(() => ({ docs: [] })),
-    partner ? none : db.collection('posts').where('authorId', '==', uid).get().catch(() => ({ docs: [] })),
-    db.collection('audit_log').where('actorUid', '==', uid)
-      .orderBy('ts', 'desc').limit(50).get().catch(() => ({ docs: [] }))   // needs Spec 7 rules+index; degrades silently until deployed
-  ]);
+  // v13 WS-H Phase 122 adoption — fetch + build stays a pure fetcher (returns
+  // the sorted feed array), rendering stays a pure renderer; withLoadingAndError
+  // (js/ui-states.js) owns the loading placeholder, the empty state, and the
+  // error+Retry block so this screen can no longer get stuck or fail silently.
+  await window.withLoadingAndError(host, async () => {
+    const partner = (typeof isPartner === 'function' && isPartner());
+    const none = Promise.resolve({ docs: [] });
+    const [notif, tasks, leave, ca, att, posts, audit] = await Promise.all([
+      db.collection('notifications').doc(uid).collection('items')
+        .orderBy('createdAt', 'desc').limit(30).get(),
+      db.collection('tasks').where('assignedTo', 'array-contains', uid).get(),
+      partner ? none : db.collection('leave_requests').where('userId', '==', uid).get(),
+      partner ? none : db.collection('cash_advances').where('userId', '==', uid).get(),
+      partner ? none : db.collection('attendance').doc(uid).collection('records')
+        .orderBy(firebase.firestore.FieldPath.documentId(), 'desc').limit(14).get(),
+      partner ? none : db.collection('posts').where('authorId', '==', uid).get(),
+      db.collection('audit_log').where('actorUid', '==', uid)
+        .orderBy('ts', 'desc').limit(50).get().catch(() => ({ docs: [] }))   // needs Spec 7 rules+index; degrades silently until deployed
+    ]);
 
-  const DONE = ['done', 'approved', 'archived'];
-  const events = [];
+    const DONE = ['done', 'approved', 'archived'];
+    const events = [];
 
-  notif.docs.forEach(d => {
-    const n = d.data();
-    events.push({ ts: _mpTsMillis(n.createdAt), icon: '🔔', html: escHtml(n.title || 'Notification') });
-  });
+    notif.docs.forEach(d => {
+      const n = d.data();
+      events.push({ ts: _mpTsMillis(n.createdAt), icon: '🔔', html: escHtml(n.title || 'Notification') });
+    });
 
-  tasks.docs.forEach(d => {
-    const t = d.data();
-    if (DONE.includes(t.status)) {
-      // completedAt never existed in this schema; lastModifiedAt is the real
-      // generic "task last touched" timestamp set on every status transition
-      // (departments.js) — the closest live equivalent to a "completed at".
-      const doneTs = t.completedAt || t.lastModifiedAt;
-      if (doneTs) events.push({ ts: _mpTsMillis(doneTs), icon: '✅', html: `Completed “${escHtml(t.title || 'task')}”` });
-    }
-    if (t.createdAt) events.push({ ts: _mpTsMillis(t.createdAt), icon: '📋', html: `Assigned “${escHtml(t.title || 'task')}”` });
-  });
+    tasks.docs.forEach(d => {
+      const t = d.data();
+      if (DONE.includes(t.status)) {
+        // completedAt never existed in this schema; lastModifiedAt is the real
+        // generic "task last touched" timestamp set on every status transition
+        // (departments.js) — the closest live equivalent to a "completed at".
+        const doneTs = t.completedAt || t.lastModifiedAt;
+        if (doneTs) events.push({ ts: _mpTsMillis(doneTs), icon: '✅', html: `Completed “${escHtml(t.title || 'task')}”` });
+      }
+      if (t.createdAt) events.push({ ts: _mpTsMillis(t.createdAt), icon: '📋', html: `Assigned “${escHtml(t.title || 'task')}”` });
+    });
 
-  leave.docs.forEach(d => {
-    const l = d.data();
-    events.push({ ts: _mpTsMillis(l.createdAt), icon: '🌴', html: `${escHtml(l.type || 'Leave')} leave ${escHtml(l.status || 'pending')}` });
-  });
+    leave.docs.forEach(d => {
+      const l = d.data();
+      events.push({ ts: _mpTsMillis(l.createdAt), icon: '🌴', html: `${escHtml(l.type || 'Leave')} leave ${escHtml(l.status || 'pending')}` });
+    });
 
-  ca.docs.forEach(d => {
-    const a = d.data();
-    events.push({ ts: _mpTsMillis(a.createdAt), icon: '💸', html: `Cash advance ₱${fmt(a.amount || 0)} ${escHtml(a.status || 'pending')}` });
-  });
+    ca.docs.forEach(d => {
+      const a = d.data();
+      events.push({ ts: _mpTsMillis(a.createdAt), icon: '💸', html: `Cash advance ₱${fmt(a.amount || 0)} ${escHtml(a.status || 'pending')}` });
+    });
 
-  att.docs.forEach(d => {
-    const r = d.data();
-    if (!r.loginTime) return;   // admin-marked-absent shape (WS26) — no timed-in event
-    events.push({ ts: _mpTsMillis(r.loginTime), icon: '📅', html: `Timed in${r.status === 'leave' ? ' (leave)' : ''}` });
-  });
+    att.docs.forEach(d => {
+      const r = d.data();
+      if (!r.loginTime) return;   // admin-marked-absent shape (WS26) — no timed-in event
+      events.push({ ts: _mpTsMillis(r.loginTime), icon: '📅', html: `Timed in${r.status === 'leave' ? ' (leave)' : ''}` });
+    });
 
-  posts.docs.forEach(d => {
-    const p = d.data();
-    events.push({ ts: _mpTsMillis(p.createdAt), icon: '📢', html: `Posted “${escHtml(p.title || 'update')}”` });
-  });
+    posts.docs.forEach(d => {
+      const p = d.data();
+      events.push({ ts: _mpTsMillis(p.createdAt), icon: '📢', html: `Posted “${escHtml(p.title || 'update')}”` });
+    });
 
-  audit.docs.forEach(d => {
-    const a = d.data();
-    events.push({ ts: _mpTsMillis(a.ts), icon: '🛠', html: `${escHtml(a.action || 'update')} ${escHtml(a.entity || '')}` });
-  });
+    audit.docs.forEach(d => {
+      const a = d.data();
+      events.push({ ts: _mpTsMillis(a.ts), icon: '🛠', html: `${escHtml(a.action || 'update')} ${escHtml(a.entity || '')}` });
+    });
 
-  const feed = events.filter(e => e.ts > 0).sort((a, b) => b.ts - a.ts).slice(0, 60);
-
-  host.innerHTML = !feed.length
-    ? `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🕘',44)}</div><p>No recent activity yet</p></div>`
-    : `<div class="card"><div class="card-body" style="padding:0">
+    return events.filter(e => e.ts > 0).sort((a, b) => b.ts - a.ts).slice(0, 60);
+  }, (feed) => {
+    host.innerHTML = `<div class="card"><div class="card-body" style="padding:0">
         ${feed.map(e => `
           <div class="notif-item" style="cursor:default">
             <div class="notif-item-main">
@@ -3002,5 +3013,9 @@ window.renderRecentActivity = async function(host, uid) {
             </div>
           </div>`).join('')}
       </div></div>`;
-  if (window.lucide) lucide.createIcons({ nodes: [host] });
+  }, {
+    loadingText: 'Loading recent activity…',
+    emptyCheck: feed => !feed.length,
+    emptyState: { icon: '🕘', title: 'No recent activity yet', hint: 'Actions you take across the app — tasks, posts, leave, attendance — will show up here.' }
+  });
 };
