@@ -5249,7 +5249,8 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   body *{visibility:hidden;}
   .print-target,.print-target *,
   .payslip-print,.payslip-print *,
-  .bir-print,.bir-print *{visibility:visible;}
+  .bir-print,.bir-print *,
+  #page-content,#page-content *{visibility:visible;}
   .no-print{display:none!important;}
 
   /* dark/Astral fallback: force light, legible chrome-free output everywhere */
@@ -5257,6 +5258,22 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   table,th,td{background:#fff!important;color:#000!important;box-shadow:none!important;filter:none!important;}
   .sidebar,.topbar,.top-nav,.bottom-nav,.chip-tabs,.chip-tab,.tabbar,
   .fab,.no-print{display:none!important;}
+
+  /* v13 Phase 147 — on-screen Ctrl+P polish for #page-content screens
+     (ledger, income statement, approvals, team roster, inventory count
+     form). Payslip/BIR/inventory-generated docs print via a separate
+     window.open() document (their own .payslip-print/.bir-print root,
+     no nav chrome ever present) and are untouched by this block. */
+  #page-content{position:static!important;width:100%!important;padding:0!important;margin:0!important;}
+  .page-actions,.page-header .btn-primary,.page-header .btn-secondary,
+  .page-header .btn-outline,.page-header .btn-danger,
+  .btn,.btn-primary,.btn-secondary,.btn-outline,.btn-danger,.fab{display:none!important;}
+  #page-content .data-table{font-size:10pt;}
+  #page-content .data-table th{background:#eee!important;color:#000!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  #page-content .data-table thead{display:table-header-group;}
+  #page-content .data-table tr{page-break-inside:avoid;break-inside:avoid;}
+  #page-content .card{box-shadow:none!important;border:1px solid #ccc!important;}
+  @page{margin:12mm;}
 }
 @media print{
   .payslip-print{position:absolute;left:0;top:0;width:100%;padding:8mm;}
