@@ -185,19 +185,19 @@ async function loadPosts(dept) {
       const post = postSnap.data();
       await db.collection('posts').doc(id).update({status:'published'});
       await Notifs.send(post.authorId, {title:'Post Approved', body:`Your post "${post.title||post.content?.slice(0,30)}" was approved!`, icon:'✅', type:'post'});
-      Notifs.showToast('Post approved!');
+      Notifs.success('Post approved!');
       loadPosts(dept);
     }));
     container.querySelectorAll('.post-reject-btn').forEach(btn => btn.addEventListener('click', async e => {
       const id = e.target.dataset.id;
       await db.collection('posts').doc(id).update({status:'rejected'});
-      Notifs.showToast('Post rejected.');
+      Notifs.error('Post rejected.');
       loadPosts(dept);
     }));
     container.querySelectorAll('.post-delete-btn').forEach(btn => btn.addEventListener('click', async e => {
       if (!(await confirmDialog({ message: 'Delete this post?', danger: true }))) return;
       await db.collection('posts').doc(e.target.dataset.id).delete();
-      Notifs.showToast('Deleted.');
+      Notifs.success('Deleted.');
       loadPosts(dept);
     }));
     container.querySelectorAll('.post-pin-btn').forEach(btn => btn.addEventListener('click', async e => {
@@ -277,7 +277,7 @@ async function loadPosts(dept) {
           editedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         closeModal();
-        Notifs.showToast('Post updated!');
+        Notifs.success('Post updated!');
         loadPosts(dept);
       });
     }));
@@ -339,7 +339,7 @@ function openNewPostModal(publishDirectly) {
       await Notifs.sendToOwner({title:'New Post Awaiting Approval', body:`${userProfile.displayName} submitted a post for review.`, icon:'📋', type:'post_approval'});
     }
     closeModal();
-    Notifs.showToast(status==='published' ? 'Post published!' : 'Submitted for approval!');
+    Notifs.success(status==='published' ? 'Post published!' : 'Submitted for approval!');
     window.renderPosts();
   });
 }
@@ -420,14 +420,14 @@ window.renderTeamTab = async function() {
       const note = document.getElementById('note-input').value.trim();
       await db.collection('users').doc(currentUser.uid).update({ statusNote: note });
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users');
-      closeModal(); Notifs.showToast('Note updated!');
+      closeModal(); Notifs.success('Note updated!');
       window.renderTeamTab();
     });
     // "Clear Note" = close and clear
     document.querySelector('#modal-footer .btn-secondary').onclick = async () => {
       await db.collection('users').doc(currentUser.uid).update({ statusNote: '' });
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users');
-      closeModal(); Notifs.showToast('Note cleared');
+      closeModal(); Notifs.success('Note cleared');
       window.renderTeamTab();
     };
   });
@@ -494,7 +494,7 @@ window.renderTeamTab = async function() {
           await auth.sendPasswordResetEmail(email);
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users');
           closeModal();
-          Notifs.showToast(`Invite sent to ${email}!`);
+          Notifs.success(`Invite sent to ${email}!`);
           window.renderTeamTab();
         } catch(err) { Notifs.showToast('Error: '+err.message,'error'); }
       });
@@ -777,7 +777,7 @@ function openEomStandingsModal(standings, month) {
         });
       }
       closeModal();
-      Notifs.showToast(`Announced ${winner.displayName || winner.email} to the team! 🏆`);
+      Notifs.success(`Announced ${winner.displayName || winner.email} to the team! 🏆`);
     } catch (err) { Notifs.showToast('Error: ' + err.message, 'error'); }
   });
 }
@@ -887,7 +887,7 @@ function renderTeamCards(users, currentUser) {
         dedupKey: `nudge-${uid}-${window.bizDate()}-${currentUser?.uid}`
       });
       btn.textContent = '✅'; btn.title = 'Nudge sent!';
-      Notifs.showToast(`Nudge sent to ${name}!`);
+      Notifs.success(`Nudge sent to ${name}!`);
       setTimeout(() => { btn.disabled = false; btn.textContent = '👋'; btn.title = `Nudge ${name}`; }, 3000);
     });
   });
@@ -1086,7 +1086,7 @@ window.renderAttendancePage = async function() {
       btn.addEventListener('click', async () => {
         btn.disabled = true; btn.textContent = 'Approving…';
         await window.approveAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
-        Notifs.showToast(`Extension approved for ${btn.dataset.name||'employee'}`);
+        Notifs.success(`Extension approved for ${btn.dataset.name||'employee'}`);
         loadExtensionRequests();
       });
     });
@@ -1096,7 +1096,7 @@ window.renderAttendancePage = async function() {
         if (!(await confirmDialog({ message: 'Deny this extension request?' }))) return;
         btn.disabled = true;
         await window.denyAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
-        Notifs.showToast('Extension denied');
+        Notifs.error('Extension denied');
         loadExtensionRequests();
       });
     });
@@ -1265,7 +1265,7 @@ window.renderAttendancePage = async function() {
             // Refresh in-memory copy so the calendar re-renders with the new state
             renderAttMonth();
             closeModal();
-            Notifs.showToast('Attendance updated!');
+            Notifs.success('Attendance updated!');
           });
         });
       });
@@ -1373,7 +1373,7 @@ window.renderHolidaysAdmin = async function(container) {
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
       await window.loadHolidayOverrides([year]);
-      Notifs.showToast(value === null ? 'Holiday removed for '+year : 'Holiday saved for '+year);
+      Notifs.success(value === null ? 'Holiday removed for '+year : 'Holiday saved for '+year);
       renderYear(year);
     } catch (ex) {
       Notifs.showToast('Save failed: '+(ex.message||ex.code), 'error');
@@ -1642,7 +1642,7 @@ function renderCAList(advances, container, isAdmin) {
 
   container.querySelectorAll('.ca-reject-btn').forEach(btn => btn.addEventListener('click', async e => {
     e.currentTarget.disabled = true;
-    try { await window.CashAdvance.reject(e.currentTarget.dataset.id); Notifs.showToast('Rejected.'); }
+    try { await window.CashAdvance.reject(e.currentTarget.dataset.id); Notifs.error('Rejected.'); }
     catch (err) { Notifs.showToast(err.message||'Could not reject.','error'); }
     window.renderCashAdvancePage();
   }));
@@ -1660,7 +1660,7 @@ function renderCAList(advances, container, isAdmin) {
     const id = e.currentTarget.dataset.id;
     if (!(await confirmDialog({ message: 'Permanently delete this cash advance record? This cannot be undone.', danger: true }))) return;
     await db.collection('cash_advances').doc(id).delete();
-    Notifs.showToast('Record deleted.');
+    Notifs.success('Record deleted.');
     window.renderCashAdvancePage();
   }));
 }
@@ -1744,7 +1744,7 @@ function openPresidentCashAdvanceModal(users) {
       return;
     }
     closeModal();
-    Notifs.showToast('Cash advance recorded!');
+    Notifs.success('Cash advance recorded!');
     window.renderCashAdvancePage();
   }));
 }
@@ -1850,7 +1850,7 @@ async function renderPresidentMessageCard() {
           message: document.getElementById('pres-msg-input').value.trim(),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
-        closeModal(); Notifs.showToast('Message updated!');
+        closeModal(); Notifs.success('Message updated!');
         renderPresidentMessageCard();
       });
     });
@@ -1966,7 +1966,7 @@ async function renderPresidentMessageCard() {
     window.bindChipTabs(el.querySelector('.inv-kind'), (key)=>{ kindFilter=key; renderTable(); });
     let _t; document.getElementById('inv-search')?.addEventListener('input', e=>{ clearTimeout(_t); const v=e.target.value; _t=setTimeout(()=>{ search=v.trim(); renderTable(); },180); });
     document.getElementById('inv-cat')?.addEventListener('change', e=>{ catFilter=e.target.value; renderTable(); });
-    document.getElementById('inv-reorder-btn')?.addEventListener('click', ()=>{ try{ Notifs.showToast('Opening Purchasing — use “From low stock” to raise an RFQ.'); }catch(_){} navigateTo('dept:Purchasing'); });
+    document.getElementById('inv-reorder-btn')?.addEventListener('click', ()=>{ try{ Notifs.info('Opening Purchasing — use “From low stock” to raise an RFQ.'); }catch(_){} navigateTo('dept:Purchasing'); });
     document.getElementById('inv-csv')?.addEventListener('click',()=>window.exportCSV('inventory', filtered(), [
       {key:'name',label:'Item'},{key:'kind',label:'Type',get:i=>(i.kind||'material')},{key:'category',label:'Category'},
       {key:'qty',label:'On Hand',get:i=>i.qty||0},{key:'unit',label:'Unit'},{key:'reorderLevel',label:'Reorder',get:i=>i.reorderLevel||0},
@@ -2041,12 +2041,12 @@ async function renderPresidentMessageCard() {
         }
         else { data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); const _r=await db.collection('inventory_items').add(data); window.logAudit&&window.logAudit('create','inventory_item',_r.id,{name,qty:data.qty}); }
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
-        closeModal(); Notifs.showToast('Item saved'); onSaved&&onSaved();
+        closeModal(); Notifs.success('Item saved'); onSaved&&onSaved();
       }catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
     });
     document.getElementById('iv-del')?.addEventListener('click', async ()=>{
       if(!(await confirmDialog({ message: 'Delete this item?', danger: true }))) return;
-      try{ await db.collection('inventory_items').doc(item.id).delete(); window.logAudit&&window.logAudit('delete','inventory_item',item.id,{name:item.name||''}); if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items'); closeModal(); Notifs.showToast('Item deleted'); onSaved&&onSaved(); }
+      try{ await db.collection('inventory_items').doc(item.id).delete(); window.logAudit&&window.logAudit('delete','inventory_item',item.id,{name:item.name||''}); if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items'); closeModal(); Notifs.success('Item deleted'); onSaved&&onSaved(); }
       catch(ex){ Notifs.showToast('Delete failed','error'); }
     });
   }
@@ -2073,7 +2073,7 @@ async function renderPresidentMessageCard() {
           source:'manual', unitCost:item.unitCost||null, qtyAfter:(item.qty||0)+delta });
         window.logAudit&&window.logAudit('create','stock_movement',item.id,{itemName:item.name||'',type,qty,delta});
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
-        closeModal(); Notifs.showToast('Stock updated'); onSaved&&onSaved();
+        closeModal(); Notifs.success('Stock updated'); onSaved&&onSaved();
       }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
     });
   }
@@ -2187,12 +2187,12 @@ async function renderPresidentMessageCard() {
       try{
         if(job) await db.collection('job_costs').doc(job.id).update(data);
         else { data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await db.collection('job_costs').add(data); }
-        closeModal(); Notifs.showToast('Job cost saved'); onSaved&&onSaved();
+        closeModal(); Notifs.success('Job cost saved'); onSaved&&onSaved();
       }catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
     });
     document.getElementById('jb-del')?.addEventListener('click', async ()=>{
       if(!(await confirmDialog({ message: 'Delete this job cost?', danger: true }))) return;
-      try{ await db.collection('job_costs').doc(job.id).delete(); closeModal(); Notifs.showToast('Deleted'); onSaved&&onSaved(); }
+      try{ await db.collection('job_costs').doc(job.id).delete(); closeModal(); Notifs.success('Deleted'); onSaved&&onSaved(); }
       catch(ex){ Notifs.showToast('Delete failed','error'); }
     });
   }
@@ -2331,10 +2331,10 @@ async function renderPresidentMessageCard() {
       document.getElementById('lv-accrue')?.addEventListener('click', async ()=>{
         const yr = window.LeaveAccrual.policyYear();
         if(!confirm(`Grant / reset ${yr} leave balances for all employees?\nAlready-accrued employees are skipped (idempotent). Vacation ${window.LEAVE_POLICY.grants.vacation} / Sick ${window.LEAVE_POLICY.grants.sick} days.`)) return;
-        Notifs.showToast('Running annual accrual…');
+        Notifs.info('Running annual accrual…');
         try{ const res=await window.LeaveAccrual.runAnnualAccrual();
           window.logAudit && window.logAudit('accrue','leave',yr,res);
-          Notifs.showToast(`Accrual ${yr}: ${res.seeded} granted, ${res.skipped} skipped.`);
+          Notifs.success(`Accrual ${yr}: ${res.seeded} granted, ${res.skipped} skipped.`);
           renderLeaveAdmin(c);
         }catch(ex){ Notifs.showToast('Accrual failed: '+(ex.message||ex.code),'error'); }
       });
@@ -2373,7 +2373,7 @@ async function renderPresidentMessageCard() {
         await db.collection('leave_balances').doc(uid).set(
           { vacation, sick, year:window.LeaveAccrual.policyYear(), updatedAt:firebase.firestore.FieldValue.serverTimestamp() }, {merge:true});
         window.logAudit && window.logAudit('grant','leave',uid,{ vacation, sick });
-        closeModal(); Notifs.showToast('Balance updated!'); renderLeaveAdmin(c);
+        closeModal(); Notifs.success('Balance updated!'); renderLeaveAdmin(c);
       }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
     });
   }
@@ -2414,7 +2414,7 @@ async function renderPresidentMessageCard() {
         });
         window.logAudit && window.logAudit('create','leave',null,{ user:userProfile?.displayName||currentUser.email, type, days });
         try{ await Notifs.sendToOwner({ title:'🌴 Leave Request', body:`${userProfile?.displayName||currentUser.email} requests ${days}-day ${lt.label} (${startDate}→${endDate}).`, icon:'🌴', type:'leave' }); }catch(_){}
-        closeModal(); Notifs.showToast('Leave request submitted!'); window.renderLeavePage(c);
+        closeModal(); Notifs.success('Leave request submitted!'); window.renderLeavePage(c);
       }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
     });
   }
@@ -2462,7 +2462,7 @@ async function renderPresidentMessageCard() {
       await applyLeaveApproval(r);   // decrement + write attendance (single source)
       window.logAudit && window.logAudit('approve','leave',r.id,{ user:r.userName, type:r.type, days:r.days });
       try{ Notifs.send(r.userId, { title:'Leave Approved ✅', body:`Your ${r.days}-day ${lt.label} (${r.startDate}→${r.endDate}) was approved.`, icon:'✅', type:'leave', dedupKey:`leave-ok-${r.id}` }); }catch(_){}
-      Notifs.showToast('Leave approved'); window.renderLeavePage(c);
+      Notifs.success('Leave approved'); window.renderLeavePage(c);
     }catch(ex){ Notifs.showToast('Approve failed: '+(ex.message||ex.code),'error'); }
   }
 
@@ -2473,7 +2473,7 @@ async function renderPresidentMessageCard() {
       await db.collection('leave_requests').doc(r.id).update({ status:'rejected', approvedBy:currentUser.uid, rejectedReason:reason, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
       window.logAudit && window.logAudit('reject','leave',r.id,{ user:r.userName, type:r.type });
       try{ Notifs.send(r.userId, { title:'Leave Rejected', body:`Your ${leaveType(r.type).label} request was not approved.${reason?' Reason: '+reason:''}`, icon:'❌', type:'leave', dedupKey:`leave-no-${r.id}` }); }catch(_){}
-      Notifs.showToast('Leave rejected'); window.renderLeavePage(c);
+      Notifs.error('Leave rejected'); window.renderLeavePage(c);
     }catch(ex){ Notifs.showToast('Reject failed','error'); }
   }
 

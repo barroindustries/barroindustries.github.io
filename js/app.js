@@ -272,7 +272,7 @@ function resetLogoutTimer() {
   logoutTimer = setTimeout(() => {
     Notifs.stopListener();
     auth.signOut();
-    Notifs.showToast('Signed out due to inactivity.');
+    Notifs.info('Signed out due to inactivity.');
   }, window.AUTO_LOGOUT_MS);
 }
 
@@ -606,7 +606,7 @@ function requireProfilePhoto() {
         userProfile.photoUrl = url;
         applyUserUI();
         ov.remove();
-        Notifs.showToast('Photo saved — your company ID is ready!');
+        Notifs.success('Photo saved — your company ID is ready!');
       } catch (err) {
         if (st) st.textContent = 'Upload failed — please try again.';
         else Notifs.showToast('Upload failed','error');
@@ -1375,7 +1375,7 @@ async function saveReviewedPartnerQuote(ctx, action) {
         : { title:'↩ Quote Revised & Returned', body:`The president edited "${ctx.quoteNumber}" for ${update.clientName} and returned it.${notes?' Notes: '+notes:''} Open it to review the changes.`, icon:'✎', type:'quote_returned' }).catch(()=>{});
     }
     window.logAudit && window.logAudit('update','quote',ctx.quoteId,{ presidentEdited:true, action });
-    Notifs.showToast(action === 'approve' ? 'Approved with edits + partner notified' : 'Edited & returned to partner');
+    Notifs.success(action === 'approve' ? 'Approved with edits + partner notified' : 'Edited & returned to partner');
     navigateTo('approvals');
   } catch (ex) { Notifs.showToast('Save failed: '+(ex.message||ex.code), 'error'); }
 }
@@ -1569,7 +1569,7 @@ function normalizeProduct(p) {
 window.runSecurityBackfill = async function() {
   if (!isPresident()) return;
   if (!await confirmDialog({ message: 'Backfill the username login map from existing user accounts?\n\nSafe to run repeatedly.' })) return;
-  Notifs.showToast('Backfilling usernames…');
+  Notifs.info('Backfilling usernames…');
   try {
     const snap = await db.collection('users').get();
     let batch = db.batch(), inBatch = 0, seeded = 0;
@@ -1585,7 +1585,7 @@ window.runSecurityBackfill = async function() {
     }
     if (inBatch) await batch.commit();
     window.logAudit && window.logAudit('security-backfill', 'usernames', null, { seeded });
-    Notifs.showToast(`Seeded ${seeded} username${seeded===1?'':'s'} ✓`);
+    Notifs.success(`Seeded ${seeded} username${seeded===1?'':'s'} ✓`);
   } catch (e) { Notifs.showToast('Backfill failed: ' + (e.message||e), 'error'); }
 };
 
@@ -3368,7 +3368,7 @@ async function renderEmployeeDashboard() {
         fullTime: autoFull,
         autoFull
       }, { merge: true });
-      Notifs.showToast(autoFull
+      Notifs.info(autoFull
         ? `${emojiIcon('✅',16)} Full attendance (100%) — no unchecked notifications!`
         : `${emojiIcon('🟡',16)} Timed in (50%). Open ${emojiIcon('🔔',16)} and check off every notification before 9:00 AM for 100%.`);
       renderEmployeeDashboard();
@@ -3382,7 +3382,7 @@ async function renderEmployeeDashboard() {
         logoutTime: firebase.firestore.FieldValue.serverTimestamp(),
         hoursWorked: hrs
       }, { merge: true });
-      Notifs.showToast(`👋 Timed out — ${hrs.toFixed(1)}h logged.`);
+      Notifs.info(`👋 Timed out — ${hrs.toFixed(1)}h logged.`);
       renderEmployeeDashboard();
     });
 
@@ -3406,7 +3406,7 @@ async function renderEmployeeDashboard() {
           link:  'attendance'
         });
         dbCacheInvalidate && dbCacheInvalidate('att-ext-pending');
-        Notifs.showToast('Extension requested — waiting for president approval.');
+        Notifs.success('Extension requested — waiting for president approval.');
         renderEmployeeDashboard();
       } catch(err) {
         btn.disabled = false; btn.textContent = '⏰ Request Time Extension';
@@ -3447,7 +3447,7 @@ window.tryUpgradeAttendanceOnNotifRead = async function() {
       attendanceScore: 1.0, fullTime: true,
       fullTimeAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
-    Notifs.showToast('✅ Full attendance (100%) — all notifications checked!');
+    Notifs.success('✅ Full attendance (100%) — all notifications checked!');
   } catch(e) { /* WS19 rule denied (admin-edited day) — silently ignore */ }
 };
 
@@ -4540,7 +4540,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
             ? `The president graded your performance: ${grade}/10. Check your Personal Finance page for development areas.`
             : `The president graded your performance: ${grade}/10.`;
           await Notifs.send(uid, { title:'📊 KPI Grade Updated', body: notifBody, icon:'📊', type:'kpi_grade' });
-          closeModal(); Notifs.showToast(`Grade ${grade}/10 saved for ${name}.`);
+          closeModal(); Notifs.success(`Grade ${grade}/10 saved for ${name}.`);
           window.renderPersonalFinance(currentUser, currentRole, opts);
         });
       });
@@ -4861,7 +4861,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
     btn.addEventListener('click', async () => {
       if (!await confirmDialog({ message: `Delete payroll record for ${escHtml(btn.dataset.month)}? This cannot be undone.`, danger: true, html: true })) return;
       await db.collection('salary_history').doc(btn.dataset.id).delete();
-      Notifs.showToast('Record deleted.');
+      Notifs.success('Record deleted.');
       window.renderPersonalFinance(currentUser, currentRole, opts);
     });
   });
@@ -4876,7 +4876,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
           icon: '🗑️', type: 'payroll_delete_request'
         });
       }
-      Notifs.showToast('Deletion request sent to president.');
+      Notifs.success('Deletion request sent to president.');
       btn.disabled = true; btn.textContent = '⏳ Requested';
     });
   });
@@ -4920,7 +4920,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         icon: '📋', type: 'self_assessment'
       });
       closeModal();
-      Notifs.showToast('Self-assessment submitted!');
+      Notifs.success('Self-assessment submitted!');
       window.renderPersonalFinance(currentUser, currentRole, opts);
     });
   });
@@ -5004,7 +5004,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         icon: '💳', type: 'ca_deduct_req'
       });
       closeModal();
-      Notifs.showToast(`CA deduction request (₱${formatNum(amt)}) submitted!`);
+      Notifs.success(`CA deduction request (₱${formatNum(amt)}) submitted!`);
     });
   });
 };
@@ -6117,7 +6117,7 @@ async function renderCompanyMemos(ct, canAdd) {
           ));
         }
         closeModal();
-        Notifs.showToast(recipients.length ? `Memo published — ${recipients.length} tagged for conforme.` : 'Memo published.');
+        Notifs.success(recipients.length ? `Memo published — ${recipients.length} tagged for conforme.` : 'Memo published.');
         renderCompanyMemos(ct,canAdd);
       } catch(err) {
         saveBtn.disabled = false; saveBtn.textContent = 'Publish Memo';
@@ -6216,7 +6216,7 @@ function openMemoDetailModal(m, onChange) {
         if (m.addedBy && m.addedBy !== me) {
           try { await Notifs.send(m.addedBy, { title:'Conforme received', body:`${myName} acknowledged: ${m.title}`, icon:'✅', type:'memo' }); } catch(_) {}
         }
-        Notifs.showToast('Conforme recorded — thank you.');
+        Notifs.success('Conforme recorded — thank you.');
         closeModal();
         onChange?.();
       } catch(err) {
@@ -7153,7 +7153,7 @@ async function renderAnalytics() {
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           }, { merge: true });
           dbCacheInvalidate('strategy_notes');
-          Notifs.showToast('Note added');
+          Notifs.success('Note added');
           notesByDept[activeDept] = notesByDept[activeDept] || { entries: [] };
           notesByDept[activeDept].entries = [...(notesByDept[activeDept].entries||[]), entry];
           document.getElementById('strat-notes-body').innerHTML = renderNotesFor(activeDept);
@@ -7583,7 +7583,7 @@ function _promptPhoneNumber() {
     userProfile.phone = phone;
     window.userProfile = userProfile;
     closeModal();
-    Notifs.showToast('📞 Phone number saved!');
+    Notifs.success('📞 Phone number saved!');
   });
 }
 
@@ -7736,10 +7736,10 @@ function openProfileDrawer() {
   if (window.lucide) lucide.createIcons({ nodes: [drawer] });
   document.getElementById('profile-photo-wrap').addEventListener('click',()=>{
     const input=document.createElement('input'); input.type='file'; input.accept='image/*';
-    input.onchange=async e=>{const file=e.target.files[0];if(!file)return;Notifs.showToast('Uploading…');try{const url=await Drive.uploadProfilePhoto(file,currentUser.uid);await db.collection('users').doc(currentUser.uid).update({photoUrl:url});userProfile.photoUrl=url;applyUserUI();document.getElementById('profile-photo-wrap').innerHTML=`<img src="${url}" style="width:100%;height:100%;object-fit:cover"/>`;Notifs.showToast('Photo updated!');}catch(err){Notifs.showToast('Upload failed','error');}};
+    input.onchange=async e=>{const file=e.target.files[0];if(!file)return;Notifs.info('Uploading…');try{const url=await Drive.uploadProfilePhoto(file,currentUser.uid);await db.collection('users').doc(currentUser.uid).update({photoUrl:url});userProfile.photoUrl=url;applyUserUI();document.getElementById('profile-photo-wrap').innerHTML=`<img src="${url}" style="width:100%;height:100%;object-fit:cover"/>`;Notifs.success('Photo updated!');}catch(err){Notifs.showToast('Upload failed','error');}};
     input.click();
   });
-  document.getElementById('save-name-btn').addEventListener('click',async()=>{const name=document.getElementById('profile-name').value.trim();if(!name)return;await db.collection('users').doc(currentUser.uid).update({displayName:name});userProfile.displayName=name;applyUserUI();Notifs.showToast('Name updated!');});
+  document.getElementById('save-name-btn').addEventListener('click',async()=>{const name=document.getElementById('profile-name').value.trim();if(!name)return;await db.collection('users').doc(currentUser.uid).update({displayName:name});userProfile.displayName=name;applyUserUI();Notifs.success('Name updated!');});
 
   // Theme picker
   const themePicker = document.getElementById('drawer-theme-picker');
@@ -7764,7 +7764,7 @@ function openProfileDrawer() {
       if (!phone) return;
       await db.collection('users').doc(currentUser.uid).update({ phone });
       userProfile.phone = phone;
-      Notifs.showToast('Phone number saved!');
+      Notifs.success('Phone number saved!');
       openProfileDrawer(); // re-render drawer
     });
   }
@@ -7779,7 +7779,7 @@ function openProfileDrawer() {
         if (!phone) return;
         await db.collection('users').doc(currentUser.uid).update({ phone });
         userProfile.phone = phone;
-        Notifs.showToast('Phone number saved!');
+        Notifs.success('Phone number saved!');
         openProfileDrawer();
       });
     });
@@ -8688,7 +8688,7 @@ window.addEventListener('message', async (e) => {
         body: `${agentName} filed "${data.fileName}" for ${payload.clientName} — ₱${window.fmtN2(payload.total||0)}`,
         icon: '📋', type: 'quote_filed'
       });
-      if (typeof Notifs?.showToast === 'function') Notifs.showToast(`Quote filed${version>1?` as version ${version}`:''} + client saved!`);
+      if (typeof Notifs?.success === 'function') Notifs.success(`Quote filed${version>1?` as version ${version}`:''} + client saved!`);
     } else {
       // QUOTE_APPROVAL_REQUESTED — route by company like QUOTE_FILED (v12 WS31:
       // fixes "BK quotes stranded in bs_quotes"); the approval_requests doc
@@ -8715,7 +8715,7 @@ window.addEventListener('message', async (e) => {
         body: `${agentName} submitted "${payload.quoteNumber}" for ${payload.clientName} — ₱${window.fmtN2(payload.total||0)} — please review.`,
         icon: '📤', type: 'quote_review_request'
       });
-      if (typeof Notifs?.showToast === 'function') Notifs.showToast('Sent for approval!');
+      if (typeof Notifs?.success === 'function') Notifs.success('Sent for approval!');
     }
   } catch(err) {
     console.error('[QB bridge]', err);

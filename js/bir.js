@@ -465,7 +465,7 @@ window.birRenderVatBody = async function (bodyEl, state, currentUser) {
       sourceFigures: { ...f, priorCreditable: state.priorCreditable || 0 }, generatedBy: currentUser.uid,
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
-    if (window.Notifs) Notifs.showToast('Saved to Taxes tab.');
+    if (window.Notifs) Notifs.success('Saved to Taxes tab.');
   });
 };
 
