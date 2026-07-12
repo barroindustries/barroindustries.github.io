@@ -4265,92 +4265,69 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 
 // ── Taxes Tab ───────────────────────────────────
 async function renderTaxesTab(container, currentUser, currentRole) {
-  const snap = await db.collection('tax_records').orderBy('createdAt','desc').limit(50).get().catch(()=>({docs:[]}));
-  const records = snap.docs.map(d=>({id:d.id,...d.data()}));
-  const isPriv = isFinancePriv();
-  container.innerHTML = `
-    <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
-      <button class="btn-primary btn-sm" id="add-tax-btn">+ Add Tax Record</button>
-    </div>
-    <div class="card">
-      <div class="card-body" style="padding:0">
-        ${!records.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📊',44)}</div><h4>No tax records yet</h4></div>`:
-          `<div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Period</th><th>Type</th><th>Amount</th><th>Status</th><th>Due Date</th><th>Filed By</th><th></th></tr></thead>
-            <tbody>${records.map(r=>`<tr>
-              <td>${escHtml(r.period||'—')}</td>
-              <td><span class="badge badge-blue">${escHtml(r.type||'BIR')}</span></td>
-              <td><strong>₱${fmt(r.amount)}</strong></td>
-              <td><span class="badge ${r.status==='filed'?'badge-green':r.status==='paid'?'badge-blue':'badge-orange'}">${r.status||'pending'}</span></td>
-              <td>${r.dueDate||'—'}</td>
-              <td>${escHtml(r.filedBy||'—')}</td>
-              <td style="white-space:nowrap">
-                ${isPriv?`<button class="btn-secondary btn-sm tax-edit-btn" data-id="${r.id}">${emojiIcon('✎',16)}</button>`:''}
-                ${isPriv?`<button class="btn-danger btn-sm tax-del-btn" data-id="${r.id}" data-label="${escHtml((r.type||'Tax')+' — '+(r.period||r.id.slice(-5)))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>`:''}
-                ${r.fileUrl?`<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm" style="margin-left:4px">${emojiIcon('📎',16)}</a>`:''}
-              </td>
-            </tr>`).join('')}</tbody>
-          </table></div>`}
-      </div>
-    </div>
-  `;
-  if (window.lucide) lucide.createIcons({ nodes: [container] });
-  document.getElementById('add-tax-btn').addEventListener('click', () => {
-    openPage('Add Tax Record', `
-      <div class="form-row">
-        <div class="form-group"><label>Period</label><input id="tax-period" placeholder="e.g. Q1 2026"/></div>
-        <div class="form-group"><label>Type</label>
-          <select id="tax-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-            <option>BIR - Quarterly</option><option>BIR - Annual ITR</option>
-            <option>VAT</option><option>Withholding Tax</option><option>Percentage Tax</option>
+  return window.renderFinanceCrudTable(container, {
+    collection: 'tax_records', currentUser, currentRole,
+    orderBy: ['createdAt', 'desc'], limit: 50,
+    emptyIcon: '📊', emptyLabel: 'No tax records yet',
+    addBtnLabel: '+ Add Tax Record',
+    actionsMode: 'always',
+    columns: [
+      { header: 'Period', cell: r => escHtml(r.period||'—') },
+      { header: 'Type', cell: r => `<span class="badge badge-blue">${escHtml(r.type||'BIR')}</span>` },
+      { header: 'Amount', cell: r => `<strong>₱${fmt(r.amount)}</strong>` },
+      { header: 'Status', cell: r => `<span class="badge ${r.status==='filed'?'badge-green':r.status==='paid'?'badge-blue':'badge-orange'}">${r.status||'pending'}</span>` },
+      { header: 'Due Date', cell: r => r.dueDate||'—' },
+      { header: 'Filed By', cell: r => escHtml(r.filedBy||'—') }
+    ],
+    actionsExtra: r => r.fileUrl ? `<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm" style="margin-left:4px">${emojiIcon('📎',16)}</a>` : '',
+    editTitle: 'Tax Record',
+    deleteLabel: r => `tax record "${(r.type||'Tax')+' — '+(r.period||r.id.slice(-5))}"`,
+    editFields: r => [
+      { key:'period', label:'Period', type:'text', value:r.period },
+      { key:'type',   label:'Type',   type:'select', value:r.type, options:['BIR - Quarterly','BIR - Annual ITR','VAT','Withholding Tax','Percentage Tax'] },
+      { key:'amount', label:'Amount (₱)', type:'number', value:r.amount },
+      { key:'dueDate',label:'Due Date', type:'date', value:r.dueDate },
+      { key:'status', label:'Status', type:'select', value:r.status||'pending', options:['pending','filed','paid'] }
+    ],
+    addModal: {
+      title: 'Add Tax Record',
+      bodyHtml: `
+        <div class="form-row">
+          <div class="form-group"><label>Period</label><input id="tax-period" placeholder="e.g. Q1 2026"/></div>
+          <div class="form-group"><label>Type</label>
+            <select id="tax-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+              <option>BIR - Quarterly</option><option>BIR - Annual ITR</option>
+              <option>VAT</option><option>Withholding Tax</option><option>Percentage Tax</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Amount (₱)</label><input id="tax-amount" type="number" step="0.01" inputmode="decimal"/></div>
+          <div class="form-group"><label>Due Date</label><input id="tax-due" type="date"/></div>
+        </div>
+        <div class="form-group"><label>Status</label>
+          <select id="tax-status" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+            <option value="pending">Pending</option><option value="filed">Filed</option><option value="paid">Paid</option>
           </select>
         </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Amount (₱)</label><input id="tax-amount" type="number" step="0.01" inputmode="decimal"/></div>
-        <div class="form-group"><label>Due Date</label><input id="tax-due" type="date"/></div>
-      </div>
-      <div class="form-group"><label>Status</label>
-        <select id="tax-status" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-          <option value="pending">Pending</option><option value="filed">Filed</option><option value="paid">Paid</option>
-        </select>
-      </div>
-      <div id="tax-file-area"></div>
-    `, `<button class="btn-primary" id="save-tax-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    let taxFile = null;
-    Drive.renderUploadArea('tax-file-area', r=>{taxFile=r;},{label:'Attach BIR receipt/form',dept:'Finance',subfolder:'Taxes'});
-    document.getElementById('save-tax-btn').addEventListener('click', () => window.busy(document.getElementById('save-tax-btn'), async () => {
-      await db.collection('tax_records').add({
+        <div id="tax-file-area"></div>
+      `,
+      footerHtml: `<button class="btn-primary" id="save-tax-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`,
+      saveBtnId: 'save-tax-btn',
+      afterOpen: (ctx) => { Drive.renderUploadArea('tax-file-area', f => ctx.setFile(f), {label:'Attach BIR receipt/form',dept:'Finance',subfolder:'Taxes'}); },
+      buildDoc: (ctx) => ({
         period:   document.getElementById('tax-period').value.trim(),
         type:     document.getElementById('tax-type').value,
         amount:   parseFloat(document.getElementById('tax-amount').value)||0,
         dueDate:  document.getElementById('tax-due').value,
         status:   document.getElementById('tax-status').value,
-        fileUrl:  taxFile?.url||null, fileName: taxFile?.name||null,
-        filedBy:  currentUser.uid, filedByName: userProfile?.displayName||currentUser.email,
+        fileUrl:  ctx.getFile()?.url||null, fileName: ctx.getFile()?.name||null,
+        filedBy:  ctx.currentUser.uid, filedByName: userProfile?.displayName||ctx.currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-      closeModal(); Notifs.success('Tax record saved!');
-      renderTaxesTab(container, currentUser, currentRole);
-    }));
+      }),
+      successMsg: 'Tax record saved!'
+    }
   });
-
-  // Edit (finance) / Delete (President approval)
-  if (isPriv) {
-    container.querySelectorAll('.tax-edit-btn').forEach(btn => btn.addEventListener('click', () => {
-      const r = records.find(x=>x.id===btn.dataset.id); if (!r) return;
-      window.financeEditModal({ collection:'tax_records', docId:r.id, title:'Tax Record', onSaved:()=>renderTaxesTab(container,currentUser,currentRole), fields:[
-        { key:'period', label:'Period', type:'text', value:r.period },
-        { key:'type',   label:'Type',   type:'select', value:r.type, options:['BIR - Quarterly','BIR - Annual ITR','VAT','Withholding Tax','Percentage Tax'] },
-        { key:'amount', label:'Amount (₱)', type:'number', value:r.amount },
-        { key:'dueDate',label:'Due Date', type:'date', value:r.dueDate },
-        { key:'status', label:'Status', type:'select', value:r.status||'pending', options:['pending','filed','paid'] }
-      ]});
-    }));
-    container.querySelectorAll('.tax-del-btn').forEach(btn => btn.addEventListener('click', () => {
-      window.financeDelete({ collection:'tax_records', docId:btn.dataset.id, label:`tax record "${btn.dataset.label}"`, onDone:()=>renderTaxesTab(container,currentUser,currentRole) });
-    }));
-  }
 }
 
 // Export the currently-shown report period's ledger rows to CSV (accountant/BIR).
@@ -5161,143 +5138,86 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
 
 // ── Records & Receipts Tab ──────────────────────
 async function renderRecordsTab(container, currentUser, currentRole) {
-  const snap = await db.collection('finance_records').orderBy('createdAt','desc').limit(100).get().catch(()=>({docs:[]}));
-  const records = snap.docs.map(d=>({id:d.id,...d.data()}));
-  const isPriv = isFinancePriv();
-  container.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+  return window.renderFinanceCrudTable(container, {
+    collection: 'finance_records', currentUser, currentRole,
+    orderBy: ['createdAt', 'desc'], limit: 100,
+    emptyIcon: '🧾', emptyLabel: 'No records yet',
+    addBtnLabel: '+ Encode Record',
+    actionsMode: 'privOnly',
+    headerExtra: () => `
       <div style="display:flex;gap:8px">
         <select id="rec-filter" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px">
           <option value="">All Types</option>
           <option>Receipt</option><option>Invoice</option><option>Voucher</option>
           <option>Contract</option><option>Official Receipt</option><option>Other</option>
         </select>
-      </div>
-      <button class="btn-primary btn-sm" id="add-rec-btn">+ Encode Record</button>
-    </div>
-    <div class="card">
-      <div class="card-body" style="padding:0">
-        ${!records.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🧾',44)}</div><h4>No records yet</h4></div>`:
-          `<div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>From/To</th><th>File</th><th>By</th>${isPriv?'<th></th>':''}</tr></thead>
-            <tbody id="rec-tbody">${records.map(r=>`<tr>
-              <td>${r.date||'—'}</td>
-              <td><span class="badge badge-blue">${escHtml(r.type||'—')}</span></td>
-              <td>${escHtml(r.description||'—')}</td>
-              <td>₱${fmt(r.amount)}</td>
-              <td>${escHtml(r.party||'—')}</td>
-              <td>${r.fileUrl?`<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm">${emojiIcon('📎',16)} View</a>`:'-'}</td>
-              <td style="font-size:11px">${escHtml(r.encodedByName||'—')}</td>
-              ${isPriv?`<td style="white-space:nowrap">
-                <button class="btn-secondary btn-sm rec-edit-btn" data-id="${r.id}">${emojiIcon('✎',16)}</button>
-                <button class="btn-danger btn-sm rec-del-btn" data-id="${r.id}" data-label="${escHtml((r.type||'record')+' — '+(r.description||r.id.slice(-5)))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
-              </td>`:''}
-            </tr>`).join('')}</tbody>
-          </table></div>`}
-      </div>
-    </div>
-  `;
-  if (window.lucide) lucide.createIcons({ nodes: [container] });
-  document.getElementById('rec-filter').addEventListener('change', e => {
-    const fv = e.target.value;
-    const filtered = fv ? records.filter(r => (r.type||'')===fv) : records;
-    const tbody = document.getElementById('rec-tbody');
-    if (!tbody) return;
-    tbody.innerHTML = filtered.map(r=>`<tr>
-              <td>${r.date||'—'}</td>
-              <td><span class="badge badge-blue">${escHtml(r.type||'—')}</span></td>
-              <td>${escHtml(r.description||'—')}</td>
-              <td>₱${fmt(r.amount)}</td>
-              <td>${escHtml(r.party||'—')}</td>
-              <td>${r.fileUrl?`<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm">${emojiIcon('📎',16)} View</a>`:'-'}</td>
-              <td style="font-size:11px">${escHtml(r.encodedByName||'—')}</td>
-              ${isPriv?`<td style="white-space:nowrap">
-                <button class="btn-secondary btn-sm rec-edit-btn" data-id="${r.id}">${emojiIcon('✎',16)}</button>
-                <button class="btn-danger btn-sm rec-del-btn" data-id="${r.id}" data-label="${escHtml((r.type||'record')+' — '+(r.description||r.id.slice(-5)))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
-              </td>`:''}
-            </tr>`).join('');
-    if (window.lucide) lucide.createIcons({ nodes: [tbody] });
-    if (isPriv) {
-      const redo = () => renderRecordsTab(container, currentUser, currentRole);
-      tbody.querySelectorAll('.rec-edit-btn').forEach(btn => btn.addEventListener('click', () => {
-        const r = records.find(x=>x.id===btn.dataset.id); if (!r) return;
-        window.financeEditModal({ collection:'finance_records', docId:r.id, title:'Record', onSaved:redo, fields:[
-          { key:'date', label:'Date', type:'date', value:r.date },
-          { key:'type', label:'Type', type:'select', value:r.type, options:['Receipt','Invoice','Official Receipt','Voucher','Contract','Other'] },
-          { key:'description', label:'Description', type:'text', value:r.description, full:true },
-          { key:'amount', label:'Amount (₱)', type:'number', value:r.amount },
-          { key:'party', label:'From / To', type:'text', value:r.party },
-          { key:'notes', label:'Notes', type:'textarea', value:r.notes, full:true }
-        ]});
-      }));
-      tbody.querySelectorAll('.rec-del-btn').forEach(btn => btn.addEventListener('click', () => {
-        window.financeDelete({ collection:'finance_records', docId:btn.dataset.id, label:`record "${btn.dataset.label}"`, onDone:redo });
-      }));
-    }
-  });
-  document.getElementById('add-rec-btn').addEventListener('click', () => {
-    openPage('Encode Record / Receipt', `
-      <div class="form-row">
-        <div class="form-group"><label>Date</label><input id="rec-date" type="date" value="${today()}"/></div>
-        <div class="form-group"><label>Type</label>
-          <select id="rec-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
-            <option>Receipt</option><option>Invoice</option><option>Official Receipt</option>
-            <option>Voucher</option><option>Contract</option><option>Other</option>
-          </select>
+      </div>`,
+    filter: { id: 'rec-filter', matches: (r, fv) => (r.type||'')===fv },
+    columns: [
+      { header: 'Date', cell: r => r.date||'—' },
+      { header: 'Type', cell: r => `<span class="badge badge-blue">${escHtml(r.type||'—')}</span>` },
+      { header: 'Description', cell: r => escHtml(r.description||'—') },
+      { header: 'Amount', cell: r => `₱${fmt(r.amount)}` },
+      { header: 'From/To', cell: r => escHtml(r.party||'—') },
+      { header: 'File', cell: r => r.fileUrl?`<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm">${emojiIcon('📎',16)} View</a>`:'-' },
+      { header: 'By', style: 'font-size:11px', cell: r => escHtml(r.encodedByName||'—') }
+    ],
+    editTitle: 'Record',
+    deleteLabel: r => `record "${(r.type||'record')+' — '+(r.description||r.id.slice(-5))}"`,
+    editFields: r => [
+      { key:'date', label:'Date', type:'date', value:r.date },
+      { key:'type', label:'Type', type:'select', value:r.type, options:['Receipt','Invoice','Official Receipt','Voucher','Contract','Other'] },
+      { key:'description', label:'Description', type:'text', value:r.description, full:true },
+      { key:'amount', label:'Amount (₱)', type:'number', value:r.amount },
+      { key:'party', label:'From / To', type:'text', value:r.party },
+      { key:'notes', label:'Notes', type:'textarea', value:r.notes, full:true }
+    ],
+    addModal: {
+      title: 'Encode Record / Receipt',
+      bodyHtml: `
+        <div class="form-row">
+          <div class="form-group"><label>Date</label><input id="rec-date" type="date" value="${today()}"/></div>
+          <div class="form-group"><label>Type</label>
+            <select id="rec-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+              <option>Receipt</option><option>Invoice</option><option>Official Receipt</option>
+              <option>Voucher</option><option>Contract</option><option>Other</option>
+            </select>
+          </div>
         </div>
-      </div>
-      <div class="form-group"><label>Description</label><input id="rec-desc" placeholder="What is this for?"/></div>
-      <div class="form-row">
-        <div class="form-group"><label>Amount (₱)</label><input id="rec-amount" type="number" step="0.01" inputmode="decimal"/></div>
-        <div class="form-group"><label>From / To</label><input id="rec-party" placeholder="Supplier, client, or payee"/></div>
-      </div>
-      <div class="form-group"><label>Notes</label><textarea id="rec-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"></textarea></div>
-      <div id="rec-file-area"></div>
-    `, `<button class="btn-primary" id="save-rec-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-    let recFile = null;
-    Drive.renderUploadArea('rec-file-area', r=>{recFile=r;},{label:'Attach receipt scan / photo',dept:'Finance',subfolder:'Records'});
-    document.getElementById('save-rec-btn').addEventListener('click', () => window.busy(document.getElementById('save-rec-btn'), async () => {
-      await db.collection('finance_records').add({
+        <div class="form-group"><label>Description</label><input id="rec-desc" placeholder="What is this for?"/></div>
+        <div class="form-row">
+          <div class="form-group"><label>Amount (₱)</label><input id="rec-amount" type="number" step="0.01" inputmode="decimal"/></div>
+          <div class="form-group"><label>From / To</label><input id="rec-party" placeholder="Supplier, client, or payee"/></div>
+        </div>
+        <div class="form-group"><label>Notes</label><textarea id="rec-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"></textarea></div>
+        <div id="rec-file-area"></div>
+      `,
+      footerHtml: `<button class="btn-primary" id="save-rec-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`,
+      saveBtnId: 'save-rec-btn',
+      afterOpen: (ctx) => { Drive.renderUploadArea('rec-file-area', f => ctx.setFile(f), {label:'Attach receipt scan / photo',dept:'Finance',subfolder:'Records'}); },
+      buildDoc: (ctx) => ({
         date:         document.getElementById('rec-date').value,
         type:         document.getElementById('rec-type').value,
         description:  document.getElementById('rec-desc').value.trim(),
         amount:       parseFloat(document.getElementById('rec-amount').value)||0,
         party:        document.getElementById('rec-party').value.trim(),
         notes:        document.getElementById('rec-notes').value.trim(),
-        fileUrl:      recFile?.url||null, fileName: recFile?.name||null,
-        encodedBy:    currentUser.uid,
-        encodedByName:userProfile?.displayName||currentUser.email,
+        fileUrl:      ctx.getFile()?.url||null, fileName: ctx.getFile()?.name||null,
+        encodedBy:    ctx.currentUser.uid,
+        encodedByName:userProfile?.displayName||ctx.currentUser.email,
         createdAt:    firebase.firestore.FieldValue.serverTimestamp()
-      });
-      closeModal(); Notifs.success('Record saved!');
-      renderRecordsTab(container, currentUser, currentRole);
-    }));
+      }),
+      successMsg: 'Record saved!'
+    },
+    afterRender: (container, records) => {
+      // ── Accounting Documents (file archive) ──────────────
+      const acctSection = document.createElement('div');
+      acctSection.style.marginTop = '24px';
+      acctSection.innerHTML = renderFileCollection('Accounting Documents', 'fin-acct', currentRole);
+      container.appendChild(acctSection);
+      bindFileCollection('fin-acct', currentUser, 'Finance', 'Accounting');
+    }
   });
-
-  if (isPriv) {
-    const redo = () => renderRecordsTab(container, currentUser, currentRole);
-    container.querySelectorAll('.rec-edit-btn').forEach(btn => btn.addEventListener('click', () => {
-      const r = records.find(x=>x.id===btn.dataset.id); if (!r) return;
-      window.financeEditModal({ collection:'finance_records', docId:r.id, title:'Record', onSaved:redo, fields:[
-        { key:'date', label:'Date', type:'date', value:r.date },
-        { key:'type', label:'Type', type:'select', value:r.type, options:['Receipt','Invoice','Official Receipt','Voucher','Contract','Other'] },
-        { key:'description', label:'Description', type:'text', value:r.description, full:true },
-        { key:'amount', label:'Amount (₱)', type:'number', value:r.amount },
-        { key:'party', label:'From / To', type:'text', value:r.party },
-        { key:'notes', label:'Notes', type:'textarea', value:r.notes, full:true }
-      ]});
-    }));
-    container.querySelectorAll('.rec-del-btn').forEach(btn => btn.addEventListener('click', () => {
-      window.financeDelete({ collection:'finance_records', docId:btn.dataset.id, label:`record "${btn.dataset.label}"`, onDone:redo });
-    }));
-  }
-
-  // ── Accounting Documents (file archive) ──────────────
-  const acctSection = document.createElement('div');
-  acctSection.style.marginTop = '24px';
-  acctSection.innerHTML = renderFileCollection('Accounting Documents', 'fin-acct', currentRole);
-  container.appendChild(acctSection);
-  bindFileCollection('fin-acct', currentUser, 'Finance', 'Accounting');
 }
 
 // runCADataRepair moved to js/migrations.js (v13 Phase 37)
