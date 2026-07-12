@@ -1197,22 +1197,31 @@ window.renderAttendancePage = async function() {
           e.stopPropagation();
           const date = btn.dataset.date;
           const cur  = records[date];
-          const curStatus = cur?.fullTime ? 'present' : cur?.loginTime ? 'half' : 'absent';
+          // v13 Phase 17 — pre-fill via attRecKind so a leave/unpaid-leave day shows
+          // as 'leave' rather than silently pre-selecting 'present'/'absent'.
+          const recKind = window.attRecKind ? window.attRecKind(cur) : null;
+          const isLeaveDay = recKind === 'leave' || recKind === 'unpaid-leave';
+          const curStatus = isLeaveDay ? 'leave' : (cur?.fullTime ? 'present' : cur?.loginTime ? 'half' : 'absent');
           openModal(`${emojiIcon('✎',16)} Attendance — ${date}`, `
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Employee: <strong>${escHtml(targetName)}</strong></p>
             <div class="form-group"><label>Status</label>
-              <div style="display:flex;gap:8px;margin-top:4px">
+              <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
                 <button class="att-status-opt ${curStatus==='present'?'att-opt-active':''}" data-val="present" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='present'?'#30d158':'var(--border)'};background:${curStatus==='present'?'rgba(48,209,88,.15)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">${emojiIcon('✓',13)} Present</button>
                 <button class="att-status-opt ${curStatus==='half'?'att-opt-active':''}" data-val="half" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='half'?'#ffaa00':'var(--border)'};background:${curStatus==='half'?'rgba(255,170,0,.15)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">½ Half Day</button>
                 <button class="att-status-opt ${curStatus==='absent'?'att-opt-active':''}" data-val="absent" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='absent'?'#ff453a':'var(--border)'};background:${curStatus==='absent'?'rgba(255,69,58,.12)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">${emojiIcon('✗',13)} Absent</button>
+                ${isLeaveDay?`<button class="att-status-opt ${curStatus==='leave'?'att-opt-active':''}" data-val="leave" style="flex:1;padding:10px 6px;border-radius:10px;border:2px solid ${curStatus==='leave'?'#af52de':'var(--border)'};background:${curStatus==='leave'?'rgba(175,82,222,.15)':'var(--surface)'};color:var(--text);font-size:13px;cursor:pointer">${emojiIcon('calendar',13)} Leave</button>`:''}
               </div>
               <input type="hidden" id="att-status-sel" value="${curStatus}"/>
+              ${isLeaveDay?`<p style="font-size:11px;color:var(--text-muted);margin-top:6px">This is an approved leave day. Switching to Present/Half/Absent will convert it and clear the leave link.</p>`:''}
             </div>
             <div class="form-group" style="margin-top:12px"><label>Note (optional)</label><input id="att-note" value="${escHtml(cur?.note||'')}" placeholder="e.g. sick leave, official business"/></div>
             ${cur?.editedBy?`<p style="font-size:11px;color:var(--text-muted);margin-top:8px">Last edited by admin</p>`:''}
           `, `<button class="btn-primary" id="save-att-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+          if (window.lucide) lucide.createIcons();
 
           // Option button toggle
+          const colors = {present:'#30d158',half:'#ffaa00',absent:'#ff453a',leave:'#af52de'};
+          const bgs    = {present:'rgba(48,209,88,.15)',half:'rgba(255,170,0,.15)',absent:'rgba(255,69,58,.12)',leave:'rgba(175,82,222,.15)'};
           document.querySelectorAll('.att-status-opt').forEach(optBtn => {
             optBtn.addEventListener('click', () => {
               document.getElementById('att-status-sel').value = optBtn.dataset.val;
@@ -1220,8 +1229,6 @@ window.renderAttendancePage = async function() {
                 b.style.borderColor = 'var(--border)';
                 b.style.background = 'var(--surface)';
               });
-              const colors = {present:'#30d158',half:'#ffaa00',absent:'#ff453a'};
-              const bgs    = {present:'rgba(48,209,88,.15)',half:'rgba(255,170,0,.15)',absent:'rgba(255,69,58,.12)'};
               optBtn.style.borderColor = colors[optBtn.dataset.val];
               optBtn.style.background  = bgs[optBtn.dataset.val];
             });
@@ -1232,17 +1239,29 @@ window.renderAttendancePage = async function() {
             const note   = document.getElementById('att-note').value.trim();
             const ref = db.collection('attendance').doc(targetUid).collection('records').doc(date);
             const FV  = firebase.firestore.FieldValue;
+            // Guard: converting an approved leave day into a worked/absent day needs
+            // explicit confirmation, since it silently drops the leave link otherwise.
+            let clearLeaveFields = false;
+            if (isLeaveDay && status !== 'leave') {
+              const ok = await window.confirmDialog({ message: 'This day is an approved leave. Convert it to a worked/absent day? This clears the leave link.' });
+              if (!ok) return;
+              clearLeaveFields = true;
+            }
             // Always write attendanceScore too: payroll and EOM read it FIRST (before
             // the fullTime/loginTime fallbacks), so an edit that leaves an old score
             // behind silently never reaches pay.
+            const leaveClear = clearLeaveFields ? { leaveType: FV.delete(), leaveReqId: FV.delete() } : {};
             if (status==='present')
-              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:true,status:'present',attendanceScore:1.0,note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp()},{merge:true});
+              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:true,status:'present',attendanceScore:1.0,note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp(),...leaveClear},{merge:true});
             else if (status==='half')
-              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:false,status:'half',attendanceScore:0.5,note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp()},{merge:true});
+              await ref.set({date,uid:targetUid,loginTime:firebase.firestore.Timestamp.fromDate(new Date()),fullTime:false,status:'half',attendanceScore:0.5,note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp(),...leaveClear},{merge:true});
+            else if (status==='leave')
+              // Leave selected but unchanged (option only shown when already a leave day) — no-op besides note.
+              await ref.set({date,uid:targetUid,note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp()},{merge:true});
             else
               // Soft-archive instead of deleting: preserve the audit trail payroll
               // depends on. Clear time markers so downstream reads classify as absent.
-              await ref.set({date,uid:targetUid,status:'absent',fullTime:false,loginTime:FV.delete(),attendanceScore:0,note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp()},{merge:true});
+              await ref.set({date,uid:targetUid,status:'absent',fullTime:false,loginTime:FV.delete(),attendanceScore:0,note,editedBy:currentUser.uid,editedAt:FV.serverTimestamp(),...leaveClear},{merge:true});
             // Refresh in-memory copy so the calendar re-renders with the new state
             renderAttMonth();
             closeModal();

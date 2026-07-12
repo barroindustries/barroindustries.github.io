@@ -524,7 +524,7 @@ window.requestQuoteDelete = async function(collection, docId, label, createdBy, 
 // Generic edit modal for simple finance records. `fields` describe the form:
 //   { key, label, type:'text'|'number'|'date'|'select'|'textarea', options?, full? }
 // On save it .update()s the doc with the typed values + an edit audit stamp.
-window.financeEditModal = function({ collection, docId, title, fields, onSaved }) {
+window.financeEditModal = function({ collection, docId, title, fields, onSaved, transform }) {
   const u = window.currentUser || (typeof auth !== 'undefined' && auth.currentUser) || {};
   const selStyle = 'padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)';
   const taStyle  = 'width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)';
@@ -551,6 +551,7 @@ window.financeEditModal = function({ collection, docId, title, fields, onSaved }
     upd.editedBy     = u.uid || '';
     upd.editedByName = window.userProfile?.displayName || u.email || '';
     upd.editedAt     = firebase.firestore.FieldValue.serverTimestamp();
+    if (typeof transform === 'function') { try { transform(upd); } catch(_e) {} }
     try {
       await db.collection(collection).doc(docId).update(upd);
       closeModal(); Notifs.showToast('Updated.'); onSaved && onSaved();
@@ -807,8 +808,8 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
   if (sub === 'overdue' || sub === 'neardue') {
     wrap.innerHTML = '<div class="loading-placeholder">Loading…</div>';
     const todayStr = today();
-    const in3d = new Date(); in3d.setDate(in3d.getDate() + 3);
-    const in3Str   = window.bizDate ? window.bizDate(in3d) : in3d.toISOString().slice(0, 10);
+    const in3d = new Date(todayStr + 'T12:00:00Z'); in3d.setUTCDate(in3d.getUTCDate() + 3);
+    const in3Str   = in3d.toISOString().slice(0, 10);
     const snap = typeof dbCachedGet==='function'
       ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000).catch(()=>({docs:[]}))
       : await db.collection('tasks').get().catch(()=>({docs:[]}));
@@ -1977,7 +1978,7 @@ window.backfillPayrollLedger = async function() {
       date:        month + '-01',
       type:        'debit',
       accountType: 'expense', account: 'Payroll Expense',
-      description: `Payslip — ${h.userName||'?'} (${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})})`,
+      description: `Payslip — ${h.userName||'?'} (${window.fmtMonthLabel(month)})`,
       amount:      net,
       category:    'Payroll Expense',
       source:      'Finance',
@@ -2046,6 +2047,7 @@ function bindExpenseActions(content, currentUser, currentRole, sub) {
     if (!(await confirmDialog({message:'Reject this expense?'}))) return;
     try {
       await db.collection('expenses').doc(btn.dataset.id).update({ status:'rejected', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+      window.dbCacheInvalidate('expenses');
       Notifs.showToast('Expense rejected.');
       loadCashContent(currentUser, currentRole, sub);
     } catch (err) { Notifs.showToast('Reject failed: ' + (err.message||err), 'error'); }
@@ -3524,7 +3526,7 @@ window.disbursePayRun = async function(month, opts = {}) {
   await window.assertPeriodOpen(month + '-01');
 
   const currentUser = window.currentUser;
-  const monthLabel  = new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'});
+  const monthLabel  = window.fmtMonthLabel(month);
 
   // ── 1. Freeze the salary_history mirror (owner-readable, unlike pay_runs) ──
   const shBatch = db.batch();
@@ -3706,8 +3708,8 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   container.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
       <select id="pr-month-sel" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px">
-        <option value="${thisMonth}">${new Date(thisMonth+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})} (Current)</option>
-        ${months.filter(m=>m!==thisMonth).map(m=>`<option value="${m}">${new Date(m+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}</option>`).join('')}
+        <option value="${thisMonth}">${window.fmtMonthLabel(thisMonth)} (Current)</option>
+        ${months.filter(m=>m!==thisMonth).map(m=>`<option value="${m}">${window.fmtMonthLabel(m)}</option>`).join('')}
       </select>
       <div style="display:flex;gap:8px">
         <button class="btn-primary btn-sm" id="gen-payroll-btn">Compute Payroll</button>
@@ -3822,7 +3824,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             await db.collection('ledger').add({
               date: rec.month + '-01',
               type: 'debit',
-              description: `Payslip — ${rec.userName||'?'} (${new Date(rec.month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})})`,
+              description: `Payslip — ${rec.userName||'?'} (${window.fmtMonthLabel(rec.month)})`,
               amount: finalPay,
               category: 'Payroll Expense',
               source: 'Finance',
@@ -4258,7 +4260,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       Notifs.showToast(`Run is ${runState} — President must Reopen first.`, 'error');
       return;
     }
-    if (!(await confirmDialog({message:`Compute payroll for ${new Date(month+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'})}? Safe to re-run before Verify — no money moves until Disburse.`}))) return;
+    if (!(await confirmDialog({message:`Compute payroll for ${window.fmtMonthLabel(month)}? Safe to re-run before Verify — no money moves until Disburse.`}))) return;
     // Checked once, before any write — a closed month can't be (re)computed
     // (v12 WS12; toast shown by assertPeriodOpen if blocked).
     try { await window.assertPeriodOpen(month + '-01'); } catch (e) { return; }
@@ -5315,7 +5317,13 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
         { key:'debitLabor', label:'Debit: COS – Direct Labor (₱)', type:'number', value:e.debitLabor },
         { key:'debitSundryAcct', label:'Debit: Sundry Account', type:'text', value:e.debitSundryAcct },
         { key:'debitSundryAmount', label:'Debit: Sundry Amount (₱)', type:'number', value:e.debitSundryAmount }
-      ]});
+      ], transform: (upd) => {
+        // Input VAT only applies to VATable purchases (material + sundry); mirrors the
+        // create-path calc so an edited CDJ carries correct input VAT (v13 Phase 16).
+        if (e.vatTreatment === 'exempt') { upd.vatAmount = 0; return; }
+        const base = (parseFloat(upd.debitMaterial)||0) + (parseFloat(upd.debitSundryAmount)||0);
+        upd.vatAmount = window.vatSplit(base, 'inclusive').vat;
+      }});
     }));
     container.querySelectorAll('.cdj-del-btn').forEach(btn => btn.addEventListener('click', () => {
       window.financeDelete({ collection:'cash_disbursement_journal', docId:btn.dataset.id, label:`cash disbursement "${btn.dataset.label}"`, onDone:redo });
@@ -6570,7 +6578,7 @@ window.toPayslipModel = function(source, kind) {
     return {
       kind:'monthly', official:true,
       docNumber:`PS-${source.month || source.runMonth}-${source.uid || source.userId}`,
-      periodLabel:new Date((source.month||source.runMonth)+'-01').toLocaleString('en-PH',{month:'long',year:'numeric'}),
+      periodLabel:window.fmtMonthLabel(source.month||source.runMonth),
       payDateLabel: source.payDateLabel || '',
       // v12 WS39 — statutory IDs now live on payroll/{uid} (frozen onto the pay-
       // run line / salary_history mirror at Compute/Disburse); previously hard-
@@ -9258,9 +9266,12 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         <tbody>
           ${!items.length?`<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px">No software records</td></tr>`
             :items.map(s=>{
-              const expiry = s.expiryDate ? new Date(s.expiryDate) : null;
-              const isExp  = expiry && expiry < new Date();
-              const isSoon = expiry && !isExp && (expiry - new Date()) < 30*24*3600*1000;
+              // Compare date strings against today() (Manila-anchored) instead of raw
+              // new Date() math, which drifts a day when the device TZ isn't Manila
+              // (v13 Phase 17).
+              const _in30 = new Date(today() + 'T12:00:00Z'); _in30.setUTCDate(_in30.getUTCDate() + 30);
+              const isExp  = !!s.expiryDate && s.expiryDate < today();
+              const isSoon = !!s.expiryDate && !isExp && s.expiryDate <= _in30.toISOString().slice(0,10);
               return `<tr>
                 <td>${escHtml(s.name||'—')}</td>
                 <td>${escHtml(s.vendor||'—')}</td>

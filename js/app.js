@@ -4894,7 +4894,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
   // otherwise falls back to a labelled projection via the same computePayLine
   // the real engine uses (never the old KPI×Attendance multiplier).
   document.getElementById('my-payslip-btn')?.addEventListener('click', async () => {
-    const month = (window.bizDate?bizDate():new Date().toISOString().slice(0,10)).slice(0,7);
+    const month = bizDate().slice(0,7);
     const uid = currentUser.uid, year = (window.bizYear?bizYear():new Date().getFullYear());
     const shSnap = await db.collection('salary_history').doc(`${uid}_${month}`).get().catch(()=>null);
     let model;
@@ -5078,7 +5078,7 @@ async function openEmpStandingsModal(uid, name, preloaded) {
     for (let d = 1; d <= Math.min(bzD, daysInMonth); d++) {
       const ds = `${_bz.slice(0,7)}-${String(d).padStart(2,'0')}`;
       const rec = attRecords[ds];
-      const dow = new Date(ds + 'T12:00:00').getDay(); // 0=Sun (noon avoids TZ rollover)
+      const dow = bizDow(ds); // 0=Sun (Manila-anchored)
       if (dow === 0) { dayBoxes.push(`<div class="att-day-box" style="background:rgba(100,100,100,0.15);border:1px solid rgba(100,100,100,0.2);opacity:0.5" title="${ds} — Sunday"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:10px">${emojiIcon('✗',10)}</span></div>`); continue; }
       const kind = window.attRecKind(rec);
       const score = window.attRecScore(rec);
@@ -5183,7 +5183,7 @@ async function openWorkerProfilePanel(uid, name, preloaded) {
   panel.querySelectorAll('.wp-tab').forEach(tab => { tab.addEventListener('click', () => activateTab(tab.dataset.tab)); });
   panel.querySelector('#wp-back-btn')?.addEventListener('click', () => { panel.style.transform = 'translateY(100%)'; setTimeout(() => panel.remove(), 300); });
   panel.querySelector('#wp-payslip-btn')?.addEventListener('click', async () => {
-    const month = (window.bizDate?bizDate():new Date().toISOString().slice(0,10)).slice(0,7);
+    const month = bizDate().slice(0,7);
     const year = (window.bizYear?bizYear():new Date().getFullYear());
     const shSnap = await db.collection('salary_history').doc(`${uid}_${month}`).get().catch(()=>null);
     let model;
@@ -5316,7 +5316,7 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
       const boxes = [];
       for (let d=1; d<=Math.min(bzAD,daysInMonth); d++) {
         const ds = `${_bzA.slice(0,7)}-${String(d).padStart(2,'0')}`;
-        const dow = new Date(ds + 'T12:00:00').getDay();
+        const dow = bizDow(ds);
         if (dow===0) { boxes.push(`<div style="background:rgba(100,100,100,0.1);border:1px solid rgba(100,100,100,0.15);border-radius:5px;padding:3px 4px;text-align:center;min-width:28px;opacity:0.4"><span style="font-size:9px;color:var(--text-muted)">${d}</span><br><span style="font-size:10px">—</span></div>`); continue; }
         const rec = recs[ds];
         const kind = window.attRecKind(rec);
