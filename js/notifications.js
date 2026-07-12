@@ -85,22 +85,25 @@ window.Notifs = (() => {
   }
 
   async function markAllRead() {
-    if (!_lastUid || _lastItems.length === 0) return;
-    const unread = _lastItems.filter(n => !n.read);
-    if (!unread.length) return;
-    // Phase 66 item 3: batch writes chunked at 499 (Firestore's 500-op batch
-    // cap) instead of one .update() per doc — matters once "See all"
-    // pagination (item 1) means _lastItems/mark-all can exceed the old
-    // 30-item panel window.
-    const docs = unread.slice();
-    while (docs.length) {
-      const chunk = docs.splice(0, 499);
-      const batch = db.batch();
-      chunk.forEach(n => {
-        const ref = db.collection('notifications').doc(_lastUid).collection('items').doc(n.id);
-        batch.update(ref, { read: true });
-      });
-      await batch.commit();
+    if (!_lastUid) return;
+    // Mark EVERY unread item read — not just the ~30 in the live panel window.
+    // The badge counts true unread (up to 100), so clearing only the visible
+    // window left older unread items keeping the badge lit even after the user
+    // "read them all" (they've read everything they can see). Query unread
+    // directly and drain it in 400-doc batches (Firestore's 500-op cap).
+    try {
+      updateBadge(0);   // optimistic clear — the listener refresh confirms it
+      for (;;) {
+        const snap = await db.collection('notifications').doc(_lastUid)
+          .collection('items').where('read', '==', false).limit(400).get();
+        if (snap.empty) break;
+        const batch = db.batch();
+        snap.docs.forEach(d => batch.update(d.ref, { read: true }));
+        await batch.commit();
+        if (snap.size < 400) break;
+      }
+    } catch (e) {
+      console.error('markAllRead failed', e);
     }
   }
 
