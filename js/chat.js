@@ -84,6 +84,7 @@ window.Chat = (() => {
     if (window.visualViewport) window.visualViewport.removeEventListener('resize', _onViewportResize);
     if (_wpMenuOpen) document.removeEventListener('click', _wpOutsideClick, true);
     _wpMenuOpen = false;
+    _exitFullscreen();                       // owner req #2: restore app chrome on close
     const p = document.getElementById('chat-thread-panel');
     if (p) { p.style.transform = 'translateY(100%)'; p.style.opacity = '0'; p.style.bottom = '0';
              setTimeout(() => p.remove(), 320); }          // mirrors closeTaskPanel
@@ -378,6 +379,7 @@ window.Chat = (() => {
     if (window.lucide) lucide.createIcons({ nodes: [p] });
     requestAnimationFrame(() => { p.style.transform = 'translateY(0)'; p.style.opacity = '1'; });
     _applyWallpaper(conv);
+    _enterFullscreenIfPhone();               // owner req #2: Messenger-style full-screen on phone
     window.Overlay.push('chat', () => window.Chat.teardownThread());   // ONE history entry
     document.getElementById('chat-panel-back')
       .addEventListener('click', () => window.Overlay.dismissTop());   // Back = history.back()
@@ -479,6 +481,17 @@ window.Chat = (() => {
     if (!ta) return;
     ta.style.height = 'auto';
     ta.style.height = ta.scrollHeight + 'px';
+  }
+  // ── Full-screen thread on phone (owner req #2, Messenger-style) — ≤640px
+  // hides the app topbar/top-nav-strip/bottom-nav via a body class; CSS does
+  // the rest (see .chat-fullscreen rules in styles.css). Desktop (>640px)
+  // is untouched — the class is simply never applied there.
+  function _isPhoneWidth() { return window.innerWidth <= 640; }
+  function _enterFullscreenIfPhone() {
+    if (_isPhoneWidth()) document.body.classList.add('chat-fullscreen');
+  }
+  function _exitFullscreen() {
+    document.body.classList.remove('chat-fullscreen');
   }
   function _onViewportResize() {
     const vv = window.visualViewport; if (!vv) return;
@@ -604,18 +617,22 @@ window.Chat = (() => {
     _notifyRecipients(conv, preview);       // fire-and-forget
   }
 
-  // ── Message-arrived notifications (Decision 6 — NOT dedupKey) ──
-  async function _notifyRecipients(conv, preview) {
-    let targets;
+  // Recipient resolution shared by _notifyRecipients (send) and _onDeleteMessage
+  // (delete-the-notif, owner req #4) — same membership rule either way.
+  async function _targetsFor(conv) {
     if (conv.type === 'dept') {
       const snap = await dbCachedGet('users', () => db.collection('users').get(), 60000);
-      targets = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }))
         .filter(u => u.department === conv.department ||
                      (Array.isArray(u.departments) && u.departments.includes(conv.department)))
         .map(u => u.id);                    // actual members only — NOT implicit admins
-    } else {
-      targets = (conv.participants || []).slice();
     }
+    return (conv.participants || []).slice();
+  }
+
+  // ── Message-arrived notifications (Decision 6 — NOT dedupKey) ──
+  async function _notifyRecipients(conv, preview) {
+    const targets = await _targetsFor(conv);
     const now = Date.now();
     const label = conv.type === 'dm' ? _myName() : (conv.name || conv.department || 'Chat');
     for (const uid of targets) {
@@ -841,6 +858,12 @@ window.Chat = (() => {
     const pickerHtml = `<div class="chat-reaction-picker" data-mid="${escHtml(m.id)}" style="display:none;gap:4px;margin-top:4px">${
       REACTIONS.map(e => `<button class="chat-pick-emoji" data-mid="${escHtml(m.id)}" data-emoji="${e}" style="font-size:16px;background:none;border:none;cursor:pointer;padding:2px 4px">${e}</button>`).join('')
     }</div>`;
+    // Owner req #3 (Viber-style): a quick heart button beside the bubble —
+    // tap = instant ❤️ toggle (via the SAME toggleReaction data model), while
+    // long-press on the bubble OR the heart opens the full 6-emoji picker
+    // above. Affordance-only change — reactions storage is untouched.
+    const heartedByMe = reactions[currentUser.uid] === '❤️';
+    const heartHtml = `<button class="ms-heart-btn${heartedByMe?' ms-heart-active':''}" data-mid="${escHtml(m.id)}" title="React ❤️">${heartedByMe?'❤️':'🤍'}</button>`;
 
     const isLast = idx === list.length - 1;
     const seenBy = isLast ? _readers.filter(r => r.uid !== m.authorId && r.uid !== currentUser.uid
@@ -862,6 +885,8 @@ window.Chat = (() => {
             : `<div class="ms-avatar-spacer"></div>`) : ''}
         <div class="ms-bubble-wrap">
           ${!isMine && showName ? `<div class="ms-name">${escHtml(info.name)}</div>` : ''}
+          <div class="ms-bubble-row">
+          ${isMine ? heartHtml : ''}
           <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'} ${grpClass} chat-bubble-tap ${isNew?'ms-pop-in':''}" data-mid="${escHtml(m.id)}">
             ${m.text ? `<div class="ms-text">${escHtml(m.text).replace(/\n/g,'<br/>')}</div>` : ''}
             ${m.fileUrl ? (m.fileSource!=='link' && isImage(m.fileUrl)
@@ -873,6 +898,8 @@ window.Chat = (() => {
               ${m.editedAt?'<span class="ms-edited">(edited)</span>':''}
             </div>
           </div>
+          ${!isMine ? heartHtml : ''}
+          </div>
           ${reactionsHtml}
           ${pickerHtml}
           ${canEdit||canDelete ? `<div class="ms-actions">
@@ -881,9 +908,7 @@ window.Chat = (() => {
           </div>` : ''}
           ${seenHtml}
         </div>
-        ${isMine ? (showAvatar
-            ? `<div class="ms-avatar ms-avatar-mine" title="You">${userProfile?.photoUrl?`<img src="${escHtml(userProfile.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(userProfile?.displayName||currentUser.email)}</div>`
-            : `<div class="ms-avatar-spacer"></div>`) : ''}
+        ${''/* owner req #1: own messages never show the sender's own avatar (Messenger style) */}
       </div>`;
     return { sep, row };
   }
@@ -952,9 +977,43 @@ window.Chat = (() => {
   // on every render. This is what makes the patch path (above) work with zero
   // extra wiring: new/replaced nodes are covered automatically because the
   // listener lives on the stable parent, not on the rows themselves.
+  function _openPickerFor(el, mid) {
+    el.querySelectorAll('.chat-reaction-picker').forEach(p => { if (p.dataset.mid !== mid) p.style.display = 'none'; });
+    const picker = el.querySelector(`.chat-reaction-picker[data-mid="${CSS.escape(mid)}"]`);
+    if (picker) picker.style.display = 'flex';
+  }
+  // Owner req #3 — Viber-style: tap the heart = instant ❤️ toggle; LONG-PRESS
+  // (500ms) on the bubble OR the heart opens the full 6-emoji picker instead.
+  // touchstart/touchend timing covers mobile; mousedown/mouseup + contextmenu
+  // (right-click / long-press-as-contextmenu on some browsers) covers desktop.
+  const LONG_PRESS_MS = 500;
   function _wireThreadDelegation(el) {
     if (el.dataset.wired) return;
     el.dataset.wired = '1';
+    let pressTimer = null, longPressed = false, pressMid = null;
+    const clearPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
+    const startPress = (target, e) => {
+      const holder = target.closest('.chat-bubble-tap, .ms-heart-btn');
+      if (!holder) return;
+      pressMid = holder.dataset.mid; longPressed = false;
+      clearPress();
+      pressTimer = setTimeout(() => {
+        longPressed = true;
+        _openPickerFor(el, pressMid);
+        if (navigator.vibrate) { try { navigator.vibrate(15); } catch (_) {} }
+      }, LONG_PRESS_MS);
+    };
+    el.addEventListener('touchstart', e => startPress(e.target, e), { passive: true });
+    el.addEventListener('touchend', clearPress);
+    el.addEventListener('touchcancel', clearPress);
+    el.addEventListener('touchmove', clearPress);
+    el.addEventListener('mousedown', e => { if (e.button === 0) startPress(e.target, e); });
+    el.addEventListener('mouseup', clearPress);
+    el.addEventListener('mouseleave', clearPress);
+    el.addEventListener('contextmenu', e => {
+      const holder = e.target.closest('.chat-bubble-tap, .ms-heart-btn');
+      if (holder) { e.preventDefault(); _openPickerFor(el, holder.dataset.mid); }
+    });
     el.addEventListener('click', e => {
       if (e.target.closest('#chat-load-earlier-btn')) { loadEarlier(); return; }
       const chip = e.target.closest('.chat-reaction-chip, .chat-pick-emoji');
@@ -963,16 +1022,21 @@ window.Chat = (() => {
       if (editBtn) { e.stopPropagation(); _onEditMessage(editBtn.dataset.mid); return; }
       const delBtn = e.target.closest('.chat-msg-del-btn');
       if (delBtn) { e.stopPropagation(); _onDeleteMessage(delBtn.dataset.mid); return; }
-      // Tapping a bubble (Phase 17) toggles its timestamp/status line AND its
-      // 6-emoji reaction picker row — the same tap does both, so neither
-      // interaction is lost.
+      const heartBtn = e.target.closest('.ms-heart-btn');
+      if (heartBtn) {
+        e.stopPropagation();
+        if (longPressed) { longPressed = false; return; }   // long-press already opened the picker — don't also toggle
+        toggleReaction(heartBtn.dataset.mid, '❤️');
+        return;
+      }
+      // Tapping a bubble toggles its timestamp/status line. A short tap no
+      // longer opens the picker (that's now long-press-only, req #3) — but a
+      // long-press that just fired should also suppress the tap-toggle.
       const bubble = e.target.closest('.chat-bubble-tap');
       if (bubble) {
         if (e.target.closest('a') || e.target.closest('img')) return;
+        if (longPressed) { longPressed = false; return; }
         bubble.classList.toggle('ms-time-shown');
-        const mid = bubble.dataset.mid;
-        const picker = el.querySelector(`.chat-reaction-picker[data-mid="${CSS.escape(mid)}"]`);
-        if (picker) picker.style.display = (picker.style.display === 'flex') ? 'none' : 'flex';
       }
     });
   }
@@ -988,7 +1052,19 @@ window.Chat = (() => {
   }
   async function _onDeleteMessage(mid) {
     if (!(await confirmDialog({ message: 'Delete this message?', danger: true }))) return;
-    await db.collection('conversations').doc(_openConvId).collection('messages').doc(mid).delete()
+    const m = [..._earlier, ..._msgs].find(x => x.id === mid);
+    const conv = _openConv, convId = _openConvId;
+    const createdAtMs = m?.createdAt?.toMillis?.();
+    await db.collection('conversations').doc(convId).collection('messages').doc(mid).delete()
+      .then(async () => {
+        // owner req #4 — the notification(s) this message generated for
+        // recipients must be removed along with it. Best-effort/fire-and-forget:
+        // never blocks the delete UX on notif cleanup.
+        if (conv && createdAtMs) {
+          const targets = await _targetsFor(conv);
+          window.Notifs?.deleteForMessage(convId, createdAtMs, targets).catch(() => {});
+        }
+      })
       .catch(() => Notifs.showToast('Delete failed', 'error'));
   }
 

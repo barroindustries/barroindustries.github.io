@@ -4052,6 +4052,28 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   }
 }
 
+/* ── Owner req #2 — full-screen chat on phone (Facebook Messenger style).
+   chat.js toggles `body.chat-fullscreen` when a conversation opens/closes on
+   a ≤640px viewport (_enterFullscreenIfPhone/_exitFullscreen). Desktop/tablet
+   (>640px, the two-pane scaffolding above) is completely untouched — this
+   block only ever applies inside the same media query the rest of the
+   phone-tier CSS uses. */
+@media (max-width: 640px) {
+  body.chat-fullscreen #topbar,
+  body.chat-fullscreen #top-nav-strip,
+  body.chat-fullscreen #bottom-nav {
+    display: none !important;
+  }
+  /* The thread panel already renders position:fixed (chat.js inline style)
+     anchored below the topbar; once the topbar is hidden, reclaim that space
+     so the slim .ms-thread-header becomes the only chrome on screen. */
+  body.chat-fullscreen #chat-thread-panel {
+    top: env(safe-area-inset-top, 0px) !important;
+    bottom: env(safe-area-inset-bottom, 0px) !important;
+    z-index: 5000;
+  }
+}
+
 /* ── Messenger-style chat UI — WS42 Batch D (Phases 16–20) ──────────────────
    Shared by chat.js (#chat-thread-panel) AND the task-chat comment thread
    (departments.js renderComments, ~2098) — both consumers get this look for
@@ -4144,6 +4166,10 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 
 .ms-bubble-wrap { display: flex; flex-direction: column; gap: 3px; min-width: 0; max-width: 100%; }
 .ms-row-mine .ms-bubble-wrap { align-items: flex-end; }
+/* Owner req #3 — heart button sits BESIDE the bubble (row 4.a), not stacked
+   under it: reversed for own messages so the heart still reads "outward". */
+.ms-bubble-row { display: flex; align-items: flex-end; gap: 2px; min-width: 0; max-width: 100%; }
+.ms-row-mine .ms-bubble-row { flex-direction: row-reverse; }
 .ms-name { font-size: var(--fs-2xs); color: var(--text-muted); font-weight: 600; padding: 0 4px; }
 
 .ms-bubble {
@@ -4191,6 +4217,18 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 
 .ms-actions { display: none; gap: 4px; padding: 0 2px; }
 .ms-row:hover .ms-actions { display: flex; }
+
+/* Viber-style quick-heart button (owner req #3) — always visible next to the
+   bubble; tap = instant ❤️ toggle, long-press (bubble or heart) = full picker. */
+.ms-heart-btn {
+  background: none; border: none; cursor: pointer; padding: 2px 4px;
+  font-size: 14px; line-height: 1; flex-shrink: 0; align-self: flex-end;
+  opacity: .55; transition: opacity .15s, transform .1s;
+}
+.ms-heart-btn:hover { opacity: 1; }
+.ms-heart-btn:active { transform: scale(1.15); }
+.ms-heart-btn.ms-heart-active { opacity: 1; }
+
 .ms-act-btn {
   background: none; border: none; cursor: pointer; padding: 2px 5px;
   font-size: var(--fs-sm); color: var(--text-muted); border-radius: 6px;
