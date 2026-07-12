@@ -6690,7 +6690,7 @@ function qeRenderDims() {
   const wrap = (label, inner) => `<div style="display:flex;flex-direction:column;gap:3px"><label style="font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:.03em">${label}</label>${inner}</div>`;
 
   if (p.formulaType === 'per_length') {
-    html += wrap('Width (mm)', `<input type="number" id="qe-dim-W" value="${dd.W != null ? dd.W : 900}" oninput="qePreview()" style="${inputStyle}">`);
+    html += wrap('Length (mm)', `<input type="number" id="qe-dim-W" value="${dd.W != null ? dd.W : 900}" oninput="qePreview()" style="${inputStyle}">`);
   } else if (p.formulaType === 'per_area') {
     html += wrap('Width (mm)', `<input type="number" id="qe-dim-W" value="${dd.W != null ? dd.W : 1000}" oninput="qePreview()" style="${inputStyle}">`);
     html += wrap('Height (mm)', `<input type="number" id="qe-dim-H" value="${dd.H != null ? dd.H : 1000}" oninput="qePreview()" style="${inputStyle}">`);
@@ -6733,7 +6733,7 @@ function qeAddItem() {
   // dims display string + spec snapshot (matches the builder's line-item shape
   // so the formal-quote handoff loads cleanly)
   const dimParts = [];
-  if (ctx.W != null && document.getElementById('qe-dim-W')) dimParts.push('W' + qeNum(ctx.W, 0));
+  if (ctx.W != null && document.getElementById('qe-dim-W')) dimParts.push((p.formulaType === 'per_length' ? 'L' : 'W') + qeNum(ctx.W, 0));
   if (ctx.H != null && document.getElementById('qe-dim-H')) dimParts.push('H' + qeNum(ctx.H, 0));
   if (ctx.runs != null && document.getElementById('qe-dim-runs')) dimParts.push(qeNum(ctx.runs, 1) + ' run(s)');
   const specSnapshot = [];
