@@ -6641,18 +6641,18 @@ async function renderAnalytics() {
   } catch(_) { /* denied/offline → placeholder */ }
 
   const SUBTABS = [
-    {id:'overview',label:`${emojiIcon('📊',16)} Overview`},
-    {id:'sales',label:`${emojiIcon('🛒',16)} Sales`},
-    {id:'marketing',label:`${emojiIcon('📣',16)} Marketing`},
-    {id:'finance',label:`${emojiIcon('💰',16)} Finance`},
-    {id:'production',label:`${emojiIcon('🏭',16)} Production`},
-    {id:'government',label:`${emojiIcon('🏛️',16)} Gov. Biddings`},
-    {id:'strategy',label:`${emojiIcon('🎯',16)} Strategy`},
+    {id:'overview',label:'Overview',icon:emojiIcon('📊',16)},
+    {id:'sales',label:'Sales',icon:emojiIcon('🛒',16)},
+    {id:'marketing',label:'Marketing',icon:emojiIcon('📣',16)},
+    {id:'finance',label:'Finance',icon:emojiIcon('💰',16)},
+    {id:'production',label:'Production',icon:emojiIcon('🏭',16)},
+    {id:'government',label:'Gov. Biddings',icon:emojiIcon('🏛️',16)},
+    {id:'strategy',label:'Strategy',icon:emojiIcon('🎯',16)},
   ];
 
   c.innerHTML=`
     <div class="page-header"><h2>${emojiIcon('📊',20)} Analytics & Performance</h2></div>
-    ${window.chipTabs(SUBTABS.map(t=>({key:t.id,label:t.label})), 'overview', {cls:'an-subtabs'})}
+    ${window.chipTabs(SUBTABS.map(t=>({key:t.id,label:t.label,icon:t.icon})), 'overview', {cls:'an-subtabs'})}
     <div id="analytics-content"></div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });

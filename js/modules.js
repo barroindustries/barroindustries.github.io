@@ -2631,7 +2631,7 @@ window.renderFilesHub = function(){
   ];
   const scopeByKey = {}; SEED_SCOPES.forEach(s=>{ scopeByKey[s.key]=s; });
   const chips = [
-    ...(isAdminRole ? [{ key:'__all__', label:`${emojiIcon('🌐',16)} All Scopes` }] : []),
+    ...(isAdminRole ? [{ key:'__all__', label:'All Scopes', icon:emojiIcon('🌐',16) }] : []),
     ...SEED_SCOPES.map(s=>({ key:s.key, label:s.label }))
   ];
   const defaultKey = isAdminRole ? '__all__' : SEED_SCOPES[0].key;
@@ -2702,14 +2702,14 @@ window.renderMyProfile = async function() {
   const partner = (typeof isPartner === 'function' && isPartner()) ||
                   (typeof isBrilliantOnly === 'function' && isBrilliantOnly());
   const tabs = partner
-    ? [ {key:'account',   label:`${emojiIcon('👤',16)} Account`},
-        {key:'tasks',     label:`${emojiIcon('✅',16)} Tasks`},
-        {key:'activity',  label:`${emojiIcon('🕘',16)} Recent Activity`} ]
-    : [ {key:'id',        label:`${emojiIcon('🪪',16)} ID`},
-        {key:'finance',   label:`${emojiIcon('💳',16)} Finance & Performance`},
-        {key:'analytics', label:`${emojiIcon('📊',16)} My Analytics`},
-        {key:'tasks',     label:`${emojiIcon('✅',16)} Tasks`},
-        {key:'activity',  label:`${emojiIcon('🕘',16)} Recent Activity`} ];
+    ? [ {key:'account',   label:'Account',              icon:emojiIcon('👤',16)},
+        {key:'tasks',     label:'Tasks',                icon:emojiIcon('✅',16)},
+        {key:'activity',  label:'Recent Activity',      icon:emojiIcon('🕘',16)} ]
+    : [ {key:'id',        label:'ID',                   icon:emojiIcon('🪪',16)},
+        {key:'finance',   label:'Finance & Performance',icon:emojiIcon('💳',16)},
+        {key:'analytics', label:'My Analytics',         icon:emojiIcon('📊',16)},
+        {key:'tasks',     label:'Tasks',                icon:emojiIcon('✅',16)},
+        {key:'activity',  label:'Recent Activity',      icon:emojiIcon('🕘',16)} ];
   const initial = window.initialSubtab(partner ? 'account' : 'id');
   const depts = (Array.isArray(u.departments) && u.departments.length ? u.departments
                  : u.department ? [u.department] : []).join(', ');
