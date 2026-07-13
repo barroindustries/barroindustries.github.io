@@ -1150,6 +1150,11 @@ function getSidebarItems() {
   const items  = [];
 
   items.push({ icon:'home', label:'Dashboard', page:'dashboard' });
+  // Chat is universal (every role's bottom-nav has it) but was never in the
+  // desktop sidebar — so after the nav-consolidation moved the primary tabs to
+  // the mobile-only bottom bar and removed the topbar chat button, Chat became
+  // unreachable on desktop for everyone. Restore it here for all roles.
+  items.push({ icon:'message-circle', label:'Chat', page:'chat' });
 
   if (pres) {
     // ── Admin / President Command Center ──
@@ -1211,6 +1216,9 @@ function getSidebarItems() {
     // ── Employee / Agent / Finance ──
     items.push({ icon:'check-square', label:'My Tasks', page:'tasks' });
     items.push({ icon:'megaphone',    label:'Posts',    page:'posts' });
+    // Cash Advance is in the employee bottom-nav ("Cash") but was missing from
+    // the desktop sidebar — restore it so it's reachable without a phone.
+    items.push({ icon:'banknote',     label:'Cash Advance', page:'cash-advances' });
     items.push({ icon:'building-2',   label:'Company',  page:'company' });
     // Departments — appear ABOVE management section.
     // The Accountant (finance role) always sees the Finance department even when she
