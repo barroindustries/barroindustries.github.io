@@ -3679,9 +3679,10 @@ async function renderEmployeeDashboard() {
           : 'Time In failed to save: ' + (err?.message || err), 'error');
         return;
       }
+      // Toasts render via textContent — plain emoji only, never emojiIcon() HTML.
       Notifs.info(autoFull
-        ? `${emojiIcon('✅',16)} Full attendance (100%) — no unchecked notifications!`
-        : `${emojiIcon('🟡',16)} Timed in (50%). Open ${emojiIcon('🔔',16)} and check off every notification before 9:00 AM for 100%.`);
+        ? '✅ Full attendance (100%) — no unchecked notifications!'
+        : '🟡 Timed in (50%). Open 🔔 and check off every notification before 9:00 AM for 100%.');
       renderEmployeeDashboard();
     });
 

@@ -843,6 +843,10 @@ window.Notifs = (() => {
     if (type === undefined) {
       console.warn('[Notifs] showToast without a type — use Notifs.success/error/info', String(message).slice(0, 60));
     }
+    // The toast renders via textContent (plain text). emojiIcon()/lucideIconHtml()
+    // return HTML, and a message built with them would display the raw markup on
+    // screen — strip any <i data-lucide> tags defensively (seen in the wild).
+    message = String(message).replace(/<i\s+data-lucide=[^>]*>\s*<\/i>\s*/g, '').trim();
     type = type || 'info';
     const existing = document.getElementById('bi-toast');
     if (existing) existing.remove();

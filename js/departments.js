@@ -14298,7 +14298,8 @@ async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
     window.logAudit && window.logAudit('adjust', 'inventory_count', formNo, { posted, failed: failed.length });
     Notifs.showToast(failed.length
-      ? `Posted ${posted}; failed: ${failed.join(', ')}` : `Posted ${posted} variance correction${posted===1?'':'s'} ${emojiIcon('✓',16)}`);
+      ? `Posted ${posted}; failed: ${failed.join(', ')}` : `Posted ${posted} variance correction${posted===1?'':'s'} ✓`,
+      failed.length ? 'error' : 'success');
     renderProdInventoryForm(el, currentRole, kindFilter);
   });
 }
@@ -14985,8 +14986,8 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
             }).catch(()=>{});
           }
           Notifs.success(res.unmatched.length
-            ? `Received ${res.matched} line${res.matched===1?'':'s'} into stock — ${res.unmatched.length} not in inventory. Tap “${emojiIcon('⚠',16)} Resolve” on the PR.`
-            : `Received. ${res.matched} item${res.matched===1?'':'s'} added to inventory ${emojiIcon('✓',16)}`);
+            ? `Received ${res.matched} line${res.matched===1?'':'s'} into stock — ${res.unmatched.length} not in inventory. Tap “⚠ Resolve” on the PR.`
+            : `Received. ${res.matched} item${res.matched===1?'':'s'} added to inventory ✓`);
         } else { Notifs.success('Status updated.'); }
       } else {
         Notifs.success('Status updated.');
