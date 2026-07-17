@@ -435,6 +435,35 @@ tr:hover td{background:#fafbff;}
 /* Step 3 re-shows the real items table + totals (the "Quote Items" section). */
 .body-quick.qq-s3 #itemsSection { display:block!important; }
 @media print { #qqWizard{display:none!important} }
+
+/* ── PHOTO ATTACHMENTS (see specs/quote-builder-photos-spec.md) ── */
+.photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:10px;margin-top:8px;}
+.photo-card{border:1.5px solid var(--gray-mid);border-radius:8px;overflow:hidden;background:var(--gray-light);}
+.photo-card img{width:100%;height:110px;object-fit:cover;display:block;background:var(--gray-mid);}
+.photo-card-body{padding:6px;display:flex;flex-direction:column;gap:4px;}
+.photo-card-body input,.photo-card-body select{font-size:11px;padding:4px 6px;}
+.photo-offline-hint{font-size:10px;color:var(--orange);}
+.photo-del-btn{width:100%;background:var(--red);color:white;border:none;border-radius:5px;
+  padding:4px;font-size:11px;font-weight:600;cursor:pointer;}
+.photo-uploading{font-size:10px;color:var(--gray-dark);}
+
+/* ── PHOTO REFERENCE ANNEX (print-only) ── */
+#photoAnnex.has-photos{page-break-before:always;}
+.photo-annex-hdr{display:flex;justify-content:space-between;align-items:flex-start;
+  margin-bottom:10px;padding-bottom:7px;border-bottom:2.5px solid #1E3A5F;}
+.photo-annex-title{font-size:15px;font-weight:800;color:#1E3A5F;letter-spacing:.5px;}
+.photo-annex-meta{font-size:10px;color:#555;text-align:right;}
+.photo-annex-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.photo-annex-card{page-break-inside:avoid;break-inside:avoid;border:1px solid var(--gray-mid);
+  border-radius:6px;padding:6px;}
+.photo-annex-card img{width:100%;max-height:85mm;object-fit:contain;display:block;background:#f5f5f5;}
+.photo-annex-label{font-size:10pt;font-weight:700;color:#1E3A5F;margin-top:4px;}
+.photo-annex-caption{font-size:9pt;color:#333;margin-top:2px;}
+.photo-annex-link{font-size:8.5pt;color:var(--mid-blue);margin-top:2px;font-weight:600;}
+@media print {
+  #photoAnnex{display:none!important;}
+  #photoAnnex.has-photos{display:block!important;}
+}
 </style>
 </head>
 <body>
@@ -784,6 +813,16 @@ tr:hover td{background:#fafbff;}
   </div>
 </div>
 
+<!-- ── PHOTOS (see specs/quote-builder-photos-spec.md) ── -->
+<div class="section no-print" id="photoSection">
+  <div class="sec-title">
+    <span>📷 Photos</span>
+    <button class="btn btn-outline btn-sm" style="background:var(--dark-blue);" onclick="document.getElementById('photoInput').click();">＋ Add Photos</button>
+  </div>
+  <input type="file" id="photoInput" accept="image/*" multiple style="display:none;" onchange="handlePhotoInput(this)">
+  <div id="photoGrid"></div>
+</div>
+
 <!-- ── DELIVERY & INSTALLATION ── -->
 <div class="section" id="diSection">
   <div class="sec-title">Delivery &amp; Installation</div>
@@ -967,6 +1006,9 @@ tr:hover td{background:#fafbff;}
   </div>
 </div>
 
+<!-- ── PHOTO REFERENCE ANNEX (print only — trailing page, see specs/quote-builder-photos-spec.md) ── -->
+<div class="print-only" id="photoAnnex"></div>
+
 <!-- ── AGENT COMMISSION BOX (agent copy print only) ── -->
 <div class="print-only agent-box" id="agentBox"></div>
 
@@ -1036,6 +1078,10 @@ let measureUnit='mm';
 let dimsMm={}, runsVal=1;
 // Quick Quote wizard state (v12 WS31)
 let quickMode=false, qqStep=1, qqSelectedClientId=null, qqClients=null;
+// Photo attachments (reference photos + per-item photos) — see specs/quote-builder-photos-spec.md
+// {url, path, caption, itemIndex, dataUrl}. dataUrl is in-memory only (offline print fallback),
+// never persisted to localStorage or the Firestore payload.
+let quotePhotos=[];
 function fmtNum(v,dec){ const n=parseFloat(Number(v).toFixed(dec)); return n.toString(); }
 function gcdInt(a,b){ return b?gcdInt(b,a%b):a; }
 // inches → "35 7/16" / "35" / "7/16" (nearest 1/16)
@@ -1965,7 +2011,7 @@ function renderItems(){
   const tbody=document.getElementById('itemsTbody');
   if(!items.length){
     tbody.innerHTML='<tr><td colspan="9" class="empty-state">No items yet. Use the search above to add products.</td></tr>';
-    renderTotals(); return;
+    renderTotals(); renderQuotePhotos(); return;
   }
 
   // Group by category
@@ -2006,6 +2052,7 @@ function renderItems(){
 
   tbody.innerHTML=html;
   renderTotals();
+  renderQuotePhotos();
   if(currentView==='internal') buildLaborTable();
 }
 
@@ -2566,6 +2613,155 @@ function shareQuote(){
 }
 
 // ═══════════════════════════════════════════════════════════════════
+//  PHOTOS (reference / item photos — see specs/quote-builder-photos-spec.md)
+// ═══════════════════════════════════════════════════════════════════
+// Compress onto a canvas: max dimension 1400px, JPEG q=0.82. Skips files
+// already under 300 KB. Resolves with the ORIGINAL file if decoding fails
+// (e.g. HEIC the browser can't draw) so the raw file still gets uploaded.
+function compressPhoto(file){
+  return new Promise(resolve=>{
+    if(!file || file.size<300*1024 || !/^image\//.test(file.type)){ resolve(file); return; }
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const img=new Image();
+      img.onload=()=>{
+        let {width,height}=img;
+        const maxDim=1400;
+        if(width>maxDim||height>maxDim){
+          const scale=maxDim/Math.max(width,height);
+          width=Math.round(width*scale); height=Math.round(height*scale);
+        }
+        const canvas=document.createElement('canvas');
+        canvas.width=width; canvas.height=height;
+        canvas.getContext('2d').drawImage(img,0,0,width,height);
+        canvas.toBlob(blob=>resolve(blob||file),'image/jpeg',0.82);
+      };
+      img.onerror=()=>resolve(file);
+      img.src=e.target.result;
+    };
+    reader.onerror=()=>resolve(file);
+    reader.readAsDataURL(file);
+  });
+}
+function readPhotoAsDataUrl(file){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=e=>resolve(e.target.result);
+    reader.onerror=reject;
+    reader.readAsDataURL(file);
+  });
+}
+async function handlePhotoInput(input){
+  const files=Array.from(input.files||[]);
+  input.value=''; // allow re-selecting the same file(s) later
+  if(!files.length) return;
+  const online = typeof storage!=='undefined' && typeof auth!=='undefined' && !!auth.currentUser;
+  for(const file of files){
+    try{
+      if(online){
+        const blob=await compressPhoto(file);
+        const quoteNo=document.getElementById('quoteNo')?.value||'';
+        const quoteNoSafe=quoteNo.replace(/[^\w.-]/g,'_');
+        const safeName=(file.name||'photo').replace(/[^\w.-]/g,'_');
+        const path=`quote-photos/${quoteNoSafe||('draft-'+auth.currentUser.uid)}/${Date.now()}_${safeName}.jpg`;
+        const ref=storage.ref(path);
+        await ref.put(blob,{customMetadata:{uploadedBy:auth.currentUser.uid}});
+        const url=await ref.getDownloadURL();
+        quotePhotos.push({url,path,caption:'',itemIndex:null});
+      } else {
+        const dataUrl=await readPhotoAsDataUrl(file);
+        quotePhotos.push({dataUrl,caption:'',itemIndex:null});
+      }
+    }catch(e){
+      alert('Failed to attach photo "'+(file.name||'')+'": '+(e&&e.message||e));
+    }
+  }
+  renderQuotePhotos();
+  saveToStorage();
+}
+function deletePhoto(idx){
+  const p=quotePhotos[idx];
+  if(!p) return;
+  if(p.path && typeof storage!=='undefined') storage.ref(p.path).delete().catch(()=>{});
+  quotePhotos.splice(idx,1);
+  renderQuotePhotos();
+  saveToStorage();
+}
+function updatePhotoCaption(idx,val){
+  if(!quotePhotos[idx]) return;
+  quotePhotos[idx].caption=val;
+  saveToStorage();
+  renderPhotoAnnex();
+}
+function updatePhotoLink(idx,val){
+  if(!quotePhotos[idx]) return;
+  quotePhotos[idx].itemIndex = val===''?null:parseInt(val,10);
+  saveToStorage();
+  renderPhotoAnnex();
+}
+// Renders BOTH the on-screen editor grid (#photoGrid) and the printed annex
+// (#photoAnnex) — called from renderItems() whenever items change (so the
+// "Link to item" options stay in sync) and after any photo add/edit/delete.
+function renderQuotePhotos(){
+  // Item list may have shrunk — drop links pointing at items that no longer exist.
+  quotePhotos.forEach(p=>{ if(p.itemIndex!=null && !items[p.itemIndex]) p.itemIndex=null; });
+  renderPhotoGrid();
+  renderPhotoAnnex();
+}
+function renderPhotoGrid(){
+  const grid=document.getElementById('photoGrid');
+  if(!grid) return;
+  if(!quotePhotos.length){
+    grid.innerHTML='<div class="empty-state" style="padding:10px 0;color:var(--gray-dark);">No photos attached. Photos print on a separate reference page.</div>';
+    return;
+  }
+  grid.innerHTML=`<div class="photo-grid">${quotePhotos.map((p,i)=>{
+    const src=p.url||p.dataUrl||'';
+    const itemOptions=items.map((it,ii)=>`<option value="${ii}" ${p.itemIndex===ii?'selected':''}>#${ii+1} — ${txtEsc(it.name)}</option>`).join('');
+    return `<div class="photo-card">
+      <img src="${attrEsc(src)}" alt="Photo ${i+1}">
+      <div class="photo-card-body">
+        <input type="text" placeholder="Caption…" value="${attrEsc(p.caption||'')}" oninput="updatePhotoCaption(${i},this.value)">
+        <select onchange="updatePhotoLink(${i},this.value)">
+          <option value="" ${p.itemIndex==null?'selected':''}>Reference only</option>
+          ${itemOptions}
+        </select>
+        ${!p.url && p.dataUrl ? '<div class="photo-offline-hint">Not uploaded — will print only</div>' : ''}
+        <button type="button" class="photo-del-btn" onclick="deletePhoto(${i})">✕ Remove</button>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+}
+function renderPhotoAnnex(){
+  const annex=document.getElementById('photoAnnex');
+  if(!annex) return;
+  if(!quotePhotos.length){
+    annex.innerHTML='';
+    annex.classList.remove('has-photos');
+    return;
+  }
+  annex.classList.add('has-photos');
+  const co=CO[currentCo]||CO.BK;
+  const quoteNo=document.getElementById('quoteNo')?.value||'';
+  const clientName=document.getElementById('clientName')?.value||'';
+  const cards=quotePhotos.map((p,i)=>{
+    const src=p.url||p.dataUrl||'';
+    const linkedItem=(p.itemIndex!=null && items[p.itemIndex])?items[p.itemIndex]:null;
+    return `<div class="photo-annex-card">
+      <img src="${attrEsc(src)}" alt="Photo ${i+1}">
+      <div class="photo-annex-label">Photo ${i+1}</div>
+      ${p.caption?`<div class="photo-annex-caption">${txtEsc(p.caption)}</div>`:''}
+      ${linkedItem?`<div class="photo-annex-link">Item #${p.itemIndex+1} — ${txtEsc(linkedItem.name)}</div>`:''}
+    </div>`;
+  }).join('');
+  annex.innerHTML=`<div class="photo-annex-hdr">
+      <div class="photo-annex-title">PHOTO REFERENCE — Annex</div>
+      <div class="photo-annex-meta">${txtEsc(co.name)}<br>Quote ${txtEsc(quoteNo)}${clientName?' • '+txtEsc(clientName):''}</div>
+    </div>
+    <div class="photo-annex-grid">${cards}</div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 //  STORAGE
 // ═══════════════════════════════════════════════════════════════════
 function saveToStorage(){
@@ -2593,6 +2789,7 @@ function saveToStorage(){
     localStorage.setItem('bkqb_status',quoteStatus);
     localStorage.setItem('bkqb_filedAt',filedAt||'');
     localStorage.setItem('bkqb_pricing',JSON.stringify(getPricingFields()));
+    localStorage.setItem('bkqb_photos',JSON.stringify(quotePhotos.map(({dataUrl,...p})=>p)));
   }catch(e){}
 }
 
@@ -2642,6 +2839,7 @@ function loadFromStorage(){
       document.getElementById('subject').value=state.subject||'';
       termsContent=state.termsContent||{};
       termsEnabled=state.termsEnabled||{};
+      quotePhotos=state.photos||[];
       if(state.currentCo) setCompany(state.currentCo);
       if(state.quoteNo) document.getElementById('quoteNo').value=state.quoteNo;
       applyPricingFields(state.pricing);
@@ -2658,7 +2856,7 @@ function loadFromStorage(){
 
 function clearForm(){
   if(!confirm('Start a new quote? Current data will be cleared.')) return;
-  items=[];termsContent={};
+  items=[];termsContent={};quotePhotos=[];
   termsEnabled={tc_completion:true,tc_payment:true,tc_warranty:true,tc_scope:true,tc_validity:true,tc_site:true,tc_acceptance:true};
   laborState={};quoteStatus='draft';waiveFlags={};filedAt='';
   ['clientName','clientCompany','clientAddress','clientPhone','clientEmail','salesperson','subject'].forEach(id=>{
@@ -2801,6 +2999,7 @@ function buildQuotePayload(){
   const dpMode = document.getElementById('dpMode')?.value||'50';
   const balMode = document.getElementById('balMode')?.value||'lump';
   const pricing = getPricingFields();
+  const photos = quotePhotos.map(({dataUrl,...p})=>p); // never persist dataUrl (offline-only, in-memory)
 
   // Editable snapshot — lets the saved quotation be re-opened and edited later
   const editableState = {
@@ -2815,11 +3014,13 @@ function buildQuotePayload(){
     purpose:       document.getElementById('purpose')?.value||'',
     subject:       document.getElementById('subject')?.value||'',
     pricing,
+    photos,
   };
 
   return {
     quoteNumber:   quoteNo,
     company:       co,
+    photos,
     clientId:      qqSelectedClientId || null,   // v12 WS31 — set by the Quick Quote client picker; null for full-builder filings (nameKey upsert unchanged)
     clientName:    document.getElementById('clientName')?.value?.trim()||'',
     clientCompany: document.getElementById('clientCompany')?.value?.trim()||'',
@@ -2875,6 +3076,7 @@ function loadEditableState(state, opts){
     items=state.items||[];
     termsContent=state.termsContent||{};
     termsEnabled=state.termsEnabled||termsEnabled;
+    quotePhotos=state.photos||[];
     if(state.filedAt){ filedAt=state.filedAt; quoteStatus='filed'; }
     if(state.currentCo) setCompany(state.currentCo);
     if(state.quoteNo){setQnoMode('manual');document.getElementById('quoteNo').value=state.quoteNo;}

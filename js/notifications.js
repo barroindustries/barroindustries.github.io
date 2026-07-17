@@ -82,6 +82,7 @@ window.Notifs = (() => {
 
   function renderPage() {
     _renderIntoList(document.getElementById('notif-page-list'), _lastItems, _lastUid);
+    _renderPushStatus();
   }
 
   async function markAllRead() {
@@ -757,11 +758,14 @@ window.Notifs = (() => {
       if (permission === 'granted') { _clearPushSnooze(); await _registerPush(uid, vapidKey); }
       else { _snoozePush(); }   // 'denied' or 'default' (iOS quirk) — don't re-ask next launch
     };
-    // Any dismissal snoozes the prompt so it doesn't reappear on every open.
+    // An EXPLICIT dismissal (Not now / backdrop) snoozes the prompt so it
+    // doesn't reappear on every open. The 60s auto-timeout is NOT user intent —
+    // it just removes the card, so the user gets asked again next launch
+    // instead of silently losing push for 3 days.
     const dismiss = () => { _snoozePush(); overlay.remove(); };
     document.getElementById('push-deny-btn').onclick = dismiss;
     overlay.addEventListener('click', e => { if (e.target === overlay) dismiss(); });
-    setTimeout(() => { if (document.body.contains(overlay)) dismiss(); }, 60000);
+    setTimeout(() => { if (document.body.contains(overlay)) overlay.remove(); }, 60000);
   }
 
   async function _registerPush(uid, vapidKey) {
@@ -794,9 +798,11 @@ window.Notifs = (() => {
       const messaging = firebase.messaging();
       const token = await messaging.getToken({ vapidKey, serviceWorkerRegistration: swReg });
       if (token) {
+        window._fcmTokenIssued = true;
         await db.collection('users').doc(uid).update({ fcmToken: token });
         console.log('[FCM] Push token registered for', uid);
       } else {
+        window._fcmTokenIssued = false;
         // Permission granted but no token — usually a VAPID-key mismatch or the
         // messaging SW failing to activate. Surface it so it's not a silent no-op.
         console.warn('[FCM] getToken returned empty — no push token issued (check VAPID key / SW activation).');
@@ -1008,6 +1014,45 @@ window.Notifs = (() => {
   }
 
   // Panel toggle — on mobile navigates to the notifications page; on desktop shows the dropdown
+  // ── Push status strip — makes a silently-disabled push VISIBLE in the inbox ──
+  // "Notifications not working" almost always means device push never got
+  // enabled (prompt dismissed/snoozed, iOS not installed, blocked, or no FCM
+  // token). Surface that state at the top of the notification list with a
+  // one-tap Enable where possible, instead of leaving it a silent no-op.
+  function _pushStatusInfo() {
+    try {
+      if (!_pushSupported()) return { msg: 'Device push isn’t supported in this browser — in-app alerts only.', action: null };
+      if (_isIOS() && !_isStandalone()) return { msg: 'To get push on iPhone: Share → “Add to Home Screen”, then open the installed app.', action: null };
+      if (Notification.permission === 'denied') return { msg: 'Device push is blocked in your browser settings for this site.', action: null };
+      if (Notification.permission === 'default') return { msg: 'Device push is off — you’ll only see alerts while the app is open.', action: 'enable' };
+      if (window._fcmTokenIssued === false) return { msg: 'Push is allowed but no device token was issued — tap Enable to retry.', action: 'enable' };
+      return null;   // granted and (as far as we know) registered — say nothing
+    } catch (_) { return null; }
+  }
+  function _renderPushStatus() {
+    const info = _pushStatusInfo();
+    ['notif-list', 'notif-page-list'].forEach(id => {
+      const list = document.getElementById(id);
+      if (!list || !list.parentElement) return;
+      let strip = list.parentElement.querySelector('.notif-push-status');
+      if (!info) { strip?.remove(); return; }
+      if (!strip) {
+        strip = document.createElement('div');
+        strip.className = 'notif-push-status';
+        strip.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12px;color:var(--text-muted,#8a9bc0);border-bottom:1px solid var(--border,#2a3a52)';
+        list.parentElement.insertBefore(strip, list);
+      }
+      strip.innerHTML = `<span style="flex:1">🔕 ${info.msg}</span>` +
+        (info.action === 'enable'
+          ? '<button type="button" class="notif-push-enable" style="border:1px solid var(--border,#2a3a52);background:none;color:var(--primary-light,#3d5afe);border-radius:8px;padding:4px 10px;font-size:12px;cursor:pointer;font-weight:600;flex-shrink:0">Enable</button>'
+          : '');
+      strip.querySelector('.notif-push-enable')?.addEventListener('click', e => {
+        e.stopPropagation();
+        window.Notifs?.requestPushPermission?.(_lastUid);
+      });
+    });
+  }
+
   function initToggle() {
     const btn      = document.getElementById('notif-btn');
     const panel    = document.getElementById('notif-panel');
@@ -1020,6 +1065,7 @@ window.Notifs = (() => {
     const openPanel = () => {
       panel?.classList.remove('hidden');
       backdrop?.classList.remove('hidden');
+      _renderPushStatus();
     };
     const isPanelOpen = () => panel && !panel.classList.contains('hidden');
 

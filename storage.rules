@@ -47,6 +47,7 @@ rules_version = '2';
 //    task-comments/{docId}/{file}               — task comment files
 //    Finance/payslips/{file}                    — payslip transfer proofs
 //    Finance/{Receipts|Taxes|Ledger|…}/{file}   — financial docs
+//    quote-photos/{quoteRef}/{file}             — quote-builder-v2 photo attachments
 //    {department}/{subfolder}/{file}            — dept uploads, gov, Files
 //    tasks|posts|General/{subfolder}/{file}     — collaborative
 // ═══════════════════════════════════════════════════════════════════
@@ -105,7 +106,7 @@ service firebase.storage {
         || seg == 'tasks' || seg == 'posts'
         || seg == 'general' || seg == 'General'
         || seg == 'profile-photos' || seg == 'task-comments'
-        || seg == 'chat-files';
+        || seg == 'chat-files' || seg == 'quote-photos';
     }
 
     // ── Profile photos — owner-scoped writes ─────────
@@ -214,6 +215,15 @@ service firebase.storage {
     match /General/{subfolder}/{fileName} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && (request.resource == null || isValidDocument());
+      allow update, delete: if isSignedIn() && isOwnerOrAdmin();
+    }
+
+    // ── Quote-builder photo attachments (see specs/quote-builder-photos-spec.md) ──
+    // Attached from quote-builder-v2 (Sales staff AND the external partner both
+    // file quotes), so any signed-in user may upload/read. Images only.
+    match /quote-photos/{quoteRef}/{fileName} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (request.resource == null || isValidImage());
       allow update, delete: if isSignedIn() && isOwnerOrAdmin();
     }
 

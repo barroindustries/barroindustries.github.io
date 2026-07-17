@@ -3665,13 +3665,20 @@ async function renderEmployeeDashboard() {
         const todayNotifs = notifSnap.docs.map(d => d.data());
         autoFull = todayNotifs.length === 0 || todayNotifs.every(n => n.read);
       } catch {}
-      await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
-        loginTime: firebase.firestore.FieldValue.serverTimestamp(),
-        uid: currentUser.uid, date: todayStr,
-        attendanceScore: autoFull ? 1.0 : 0.5,
-        fullTime: autoFull,
-        autoFull
-      }, { merge: true });
+      try {
+        await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
+          loginTime: firebase.firestore.FieldValue.serverTimestamp(),
+          uid: currentUser.uid, date: todayStr,
+          attendanceScore: autoFull ? 1.0 : 0.5,
+          fullTime: autoFull,
+          autoFull
+        }, { merge: true });
+      } catch (err) {
+        Notifs.showToast(err?.code === 'permission-denied'
+          ? 'Time In was rejected — today\'s record is admin-managed or your account lacks permission. Ask an admin to record your attendance.'
+          : 'Time In failed to save: ' + (err?.message || err), 'error');
+        return;
+      }
       Notifs.info(autoFull
         ? `${emojiIcon('✅',16)} Full attendance (100%) — no unchecked notifications!`
         : `${emojiIcon('🟡',16)} Timed in (50%). Open ${emojiIcon('🔔',16)} and check off every notification before 9:00 AM for 100%.`);
@@ -3682,10 +3689,15 @@ async function renderEmployeeDashboard() {
     document.getElementById('time-out-btn')?.addEventListener('click', async () => {
       const inTs = attData.loginTime?.toDate ? attData.loginTime.toDate() : null;
       const hrs  = inTs ? window.computeHoursBetween(inTs, new Date()) : 0;
-      await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
-        logoutTime: firebase.firestore.FieldValue.serverTimestamp(),
-        hoursWorked: hrs
-      }, { merge: true });
+      try {
+        await db.collection('attendance').doc(currentUser.uid).collection('records').doc(todayStr).set({
+          logoutTime: firebase.firestore.FieldValue.serverTimestamp(),
+          hoursWorked: hrs
+        }, { merge: true });
+      } catch (err) {
+        Notifs.showToast('Time Out failed to save: ' + (err?.message || err), 'error');
+        return;
+      }
       Notifs.info(`👋 Timed out — ${hrs.toFixed(1)}h logged.`);
       renderEmployeeDashboard();
     });
