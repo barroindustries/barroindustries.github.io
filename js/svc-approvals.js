@@ -23,12 +23,25 @@
   // this function is just the write path).
   async function signupApprove(id, ctx) {
     const { name, email, phone, currentUser } = ctx;
+    const reqRef = db.collection('signup_requests').doc(id);
+    // Retry-safety: the old flow created the user doc FIRST and flipped the
+    // request 'approved' LAST — a failure in between left the request pending
+    // with a real account (and employeeId) already minted, so the admin's
+    // retry created a SECOND account for the same person. Resume from the
+    // stored uid instead, and commit user-create + request-approve atomically.
+    const prior = await reqRef.get().catch(() => null);
+    const priorData = (prior && prior.exists) ? prior.data() : {};
+    if (priorData.createdUid) {
+      return { password: priorData.generatedPassword, empId: priorData.createdEmpId, already: true };
+    }
     const pwd = generatePassword(name);
     const empId = await nextCounterId('employees',
       async () => (await db.collection('users').get().catch(() => ({ size: 0 }))).size,
       n => `BI-${window.bizYear ? window.bizYear() : new Date().getFullYear()}-${String(n).padStart(3, '0')}`);
     const newStartDate = today();
-    const newUserRef = await db.collection('users').add({
+    const newUserRef = db.collection('users').doc();
+    const batch = db.batch();
+    batch.set(newUserRef, {
       displayName: name, email, phone,
       role: 'employee', departments: [],
       employeeId: empId,
@@ -36,12 +49,19 @@
       createdAt: firebase.firestore.FieldValue.serverTimestamp(),
       pendingPasswordSetup: true
     });
-    await window.LeaveAccrual.grantForYear(newUserRef.id, { startDate: newStartDate });
-    await db.collection('signup_requests').doc(id).update({
+    batch.update(reqRef, {
       status: 'approved',
       generatedPassword: pwd,
+      createdUid: newUserRef.id,
+      createdEmpId: empId,
       approvedAt: firebase.firestore.FieldValue.serverTimestamp(),
       approvedBy: currentUser.uid
+    });
+    await batch.commit();
+    // After the atomic pair: a failed accrual no longer strands the request —
+    // the account exists and is resolvable; surface it for a manual grant.
+    await window.LeaveAccrual.grantForYear(newUserRef.id, { startDate: newStartDate }).catch(e => {
+      Notifs.showToast('Account created, but leave accrual failed: ' + (e && e.message || e) + ' — re-grant from HR.', 'error');
     });
     return { password: pwd, empId };
   }

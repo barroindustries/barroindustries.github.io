@@ -117,25 +117,34 @@ window.renderFinanceCrudTable = async function(container, cfg) {
   }
 
   document.getElementById('crud-add-btn').addEventListener('click', async () => {
-    // beforeOpen runs BEFORE openPage() so async-fetched markup (e.g. a bank-account
-    // <select>) is already in bodyHtml with no loading flash — matches the pre-migration
-    // pattern of `const bankOpts = await BankAccounts.optionsHTML(); openPage(...)`.
-    const preData = cfg.addModal.beforeOpen ? await cfg.addModal.beforeOpen() : null;
-    const body = typeof cfg.addModal.bodyHtml === 'function' ? cfg.addModal.bodyHtml(preData) : cfg.addModal.bodyHtml;
-    openPage(cfg.addModal.title, body, cfg.addModal.footerHtml);
-    let uploadedFile = null;
-    const ctx = { setFile: (f) => { uploadedFile = f; }, getFile: () => uploadedFile, currentUser, currentRole };
-    if (cfg.addModal.afterOpen) cfg.addModal.afterOpen(ctx, preData);
-    const saveBtn = document.getElementById(cfg.addModal.saveBtnId);
-    saveBtn && saveBtn.addEventListener('click', () => window.busy(saveBtn, async () => {
-      const doc = await cfg.addModal.buildDoc(ctx, preData);
-      if (!doc) return; // validation / assertPeriodOpen aborted — toast already shown by the caller
-      const ref = await db.collection(collection).add(doc);
-      if (cfg.addModal.afterSave) await cfg.addModal.afterSave(ref.id, doc, ctx, preData);
-      closeModal();
-      Notifs.success(cfg.addModal.successMsg);
-      redo();
-    }));
+    try {
+      // beforeOpen runs BEFORE openPage() so async-fetched markup (e.g. a bank-account
+      // <select>) is already in bodyHtml with no loading flash — matches the pre-migration
+      // pattern of `const bankOpts = await BankAccounts.optionsHTML(); openPage(...)`.
+      const preData = cfg.addModal.beforeOpen ? await cfg.addModal.beforeOpen() : null;
+      const body = typeof cfg.addModal.bodyHtml === 'function' ? cfg.addModal.bodyHtml(preData) : cfg.addModal.bodyHtml;
+      openPage(cfg.addModal.title, body, cfg.addModal.footerHtml);
+      let uploadedFile = null;
+      const ctx = { setFile: (f) => { uploadedFile = f; }, getFile: () => uploadedFile, currentUser, currentRole };
+      if (cfg.addModal.afterOpen) cfg.addModal.afterOpen(ctx, preData);
+      const saveBtn = document.getElementById(cfg.addModal.saveBtnId);
+      saveBtn && saveBtn.addEventListener('click', () => window.busy(saveBtn, async () => {
+        try {
+          const doc = await cfg.addModal.buildDoc(ctx, preData);
+          if (!doc) return; // validation / assertPeriodOpen aborted — toast already shown by the caller
+          const ref = await db.collection(collection).add(doc);
+          if (cfg.addModal.afterSave) await cfg.addModal.afterSave(ref.id, doc, ctx, preData);
+          closeModal();
+          Notifs.success(cfg.addModal.successMsg);
+          redo();
+        } catch (err) {
+          Notifs.showToast('Save failed: ' + (err && err.message || err), 'error');
+        }
+      }));
+    } catch (err) {
+      Notifs.showToast('Could not open the form: ' + (err && err.message || err), 'error');
+      return;
+    }
   });
 
   if (cfg.afterRender) cfg.afterRender(container, records);

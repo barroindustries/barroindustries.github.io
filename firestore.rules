@@ -401,11 +401,16 @@ service cloud.firestore {
       );
 
       // Any member may bump ONLY the lastMessage* preview fields (the second
-      // write of every send). Creator/admin manage the doc (rename, members).
+      // write of every send), or set the thread wallpaper (a thread-wide
+      // setting the chat UI writes for every participant — previously only
+      // creator/admin could, so a member's pick failed silently and reverted).
+      // Creator/admin manage the doc (rename, members).
       // A participant may remove exactly themself ("leave group").
       allow update: if isAuth() && (
         ( memberOfDoc() && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['lastMessageAt','lastMessageText','lastMessageBy','lastMessageByName']) )
+        || ( memberOfDoc() && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['wallpaper']) )
         || resource.data.get('createdBy','') == request.auth.uid
         || isAdmin()
         || ( request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants'])

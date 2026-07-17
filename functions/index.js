@@ -404,6 +404,15 @@ function manilaDate(date) {
   return shifted.toISOString().slice(0, 10);
 }
 
+/** Deterministic item id from a dedupKey (mirrors the client's _dedupDocId /
+ *  scripts/daily-digest.js writeDigest). Scheduled triggers are at-least-once
+ *  (and get re-run by hand), so a random .doc() id would mint a brand-new item
+ *  each run — a genuinely new onCreate → a duplicate push to every recipient.
+ *  Same-id set() is an overwrite: no onCreate, no duplicate. */
+function dedupDocId(key) {
+  return 'dedup_' + String(key).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 400);
+}
+
 /** Firestore batches cap at 500 writes; chunk and commit in groups of <=500. */
 async function commitInChunks(db, refs, dataFn, chunkSize = 499) {
   const items = refs.slice();
@@ -412,7 +421,10 @@ async function commitInChunks(db, refs, dataFn, chunkSize = 499) {
     const chunk = items.splice(0, chunkSize);
     const batch = db.batch();
     chunk.forEach(({ ref, notifData }) => {
-      batch.set(ref, {
+      const target = (notifData && notifData.dedupKey)
+        ? ref.parent.doc(dedupDocId(notifData.dedupKey))
+        : ref;
+      batch.set(target, {
         ...notifData,
         read: false,
         createdAt: admin.firestore.FieldValue.serverTimestamp()

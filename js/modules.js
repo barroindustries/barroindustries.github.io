@@ -1720,8 +1720,17 @@ function renderCAList(advances, container, isAdmin) {
 const fmtN = window.fmtN2;
 
 // President-only: record a cash advance for any employee (pre-approved)
-function openPresidentCashAdvanceModal(users) {
-  const employees = users.filter(u => u.role !== 'partner' && u.uid !== currentUser.uid);
+// `users` is optional — the Finance CA tab (departments.js) calls this with no
+// args, so fetch the directory ourselves when it's missing (same cached source
+// renderCashAdvanceAdmin uses).
+async function openPresidentCashAdvanceModal(users) {
+  if (!users) {
+    const usersSnap = typeof dbCachedGet === 'function'
+      ? await dbCachedGet('users', () => db.collection('users').get(), 60000)
+      : await db.collection('users').get().catch(() => ({ docs: [] }));
+    users = usersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  }
+  const employees = users.filter(u => u.role !== 'partner' && u.id !== currentUser.uid && u.uid !== currentUser.uid);
   const empOptions = employees.map(u =>
     `<option value="${u.id}">${escHtml(u.displayName||u.email)} (${u.role||'employee'})</option>`
   ).join('');

@@ -717,13 +717,13 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
     if (sub === 'overdue') {
       tasks = tasks.filter(t=>t.dueDate && t.dueDate < todayStr)
         .sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||''));
-      if (!tasks.length) { wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No overdue tasks</h4></div>`; return; }
+      if (!tasks.length) { wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No overdue tasks</h4></div>`; if (window.lucide) lucide.createIcons({ nodes: [wrap] }); return; }
       if (window.lucide) lucide.createIcons({ nodes: [wrap] });
       wrap.innerHTML = `<div style="margin-bottom:10px"><span class="badge badge-red" style="font-size:13px">${tasks.length} overdue task${tasks.length>1?'s':''}</span></div><div class="item-list">${tasks.map(t=>taskCard(t)).join('')}</div>`;
     } else {
       tasks = tasks.filter(t=>t.dueDate && t.dueDate >= todayStr && t.dueDate <= in3Str)
         .sort((a,b)=>(a.dueDate||'').localeCompare(b.dueDate||''));
-      if (!tasks.length) { wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('🟡',44)}</div><h4>No tasks due in the next 3 days</h4></div>`; return; }
+      if (!tasks.length) { wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('🟡',44)}</div><h4>No tasks due in the next 3 days</h4></div>`; if (window.lucide) lucide.createIcons({ nodes: [wrap] }); return; }
       if (window.lucide) lucide.createIcons({ nodes: [wrap] });
       wrap.innerHTML = `<div style="margin-bottom:10px"><span class="badge badge-orange" style="font-size:13px">${tasks.length} task${tasks.length>1?'s':''} due within 3 days</span></div><div class="item-list">${tasks.map(t=>taskCard(t)).join('')}</div>`;
     }
@@ -748,7 +748,7 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
         .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get());
       let tasks = snap.docs.map(d=>normTask(d.data(),d.id)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
       if (filter!=='all') tasks = tasks.filter(t=>t.status===filter);
-      if (!tasks.length) { list.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No tasks</h4></div>`; return; }
+      if (!tasks.length) { list.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No tasks</h4></div>`; if (window.lucide) lucide.createIcons({ nodes: [list] }); return; }
       if (window.lucide) lucide.createIcons({ nodes: [list] });
       list.innerHTML = tasks.map(t=>taskCard(t)).join('');
       list.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole)));
@@ -764,7 +764,7 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
       ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000)
       : await db.collection('tasks').get();
     const tasks = snap.docs.map(d=>normTask(d.data(),d.id)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-    if (!tasks.length) { wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No tasks yet</h4></div>`; return; }
+    if (!tasks.length) { wrap.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No tasks yet</h4></div>`; if (window.lucide) lucide.createIcons({ nodes: [wrap] }); return; }
     if (window.lucide) lucide.createIcons({ nodes: [wrap] });
 
     const deptGroups={};
@@ -805,18 +805,18 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
       .catch(()=>db.collection('tasks').where('assignedTo','==',currentUser.uid).get());
   } else if (isPriv||filter==='all') {
     snap = typeof dbCachedGet==='function'
-      ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000)
-      : await db.collection('tasks').get();
+      ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000).catch(()=>({docs:[]}))
+      : await db.collection('tasks').get().catch(()=>({docs:[]}));
   } else if (filter==='dept') {
     // Show all tasks from the user's departments
     snap = typeof dbCachedGet==='function'
-      ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000)
-      : await db.collection('tasks').get();
+      ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000).catch(()=>({docs:[]}))
+      : await db.collection('tasks').get().catch(()=>({docs:[]}));
   } else {
     // Status filter — fetch all dept tasks so employees can see overdue etc. across their dept
     snap = typeof dbCachedGet==='function'
-      ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000)
-      : await db.collection('tasks').get();
+      ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000).catch(()=>({docs:[]}))
+      : await db.collection('tasks').get().catch(()=>({docs:[]}));
   }
 
   let tasks = snap.docs.map(d=>normTask(d.data(),d.id)).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
@@ -829,7 +829,7 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
     );
   }
   if (filter!=='mine'&&filter!=='all'&&filter!=='dept') tasks=tasks.filter(t=>t.status===filter);
-  if (!tasks.length) { list.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No tasks found</h4></div>`; return; }
+  if (!tasks.length) { list.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('✅',44)}</div><h4>No tasks found</h4></div>`; if (window.lucide) lucide.createIcons({ nodes: [list] }); return; }
   if (window.lucide) lucide.createIcons({ nodes: [list] });
 
   // For employees in "My Tasks" view, group into active and completed sections
@@ -1413,8 +1413,8 @@ async function loadSubsList(currentUser, currentRole, currentDept) {
   const list = document.getElementById('subs-list');
   const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'finance';
   const snap = isPrivileged
-    ? await db.collection('submissions').get()
-    : await db.collection('submissions').where('createdBy','==',currentUser.uid).get();
+    ? await db.collection('submissions').get().catch(()=>({docs:[]}))
+    : await db.collection('submissions').where('createdBy','==',currentUser.uid).get().catch(()=>({docs:[]}));
 
   const subs = snap.docs.map(d => ({id:d.id,...d.data()})).sort((a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
   if (!subs.length) { list.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No submissions yet</h4></div>`; return; }
@@ -4662,8 +4662,14 @@ async function renderLedgerTab(container, currentUser, currentRole) {
       const date = document.getElementById('led-date').value;
       const amount = parseFloat(document.getElementById('led-amount').value)||0;
       const ref = document.getElementById('led-ref').value.trim();
+      // Guard like the CRJ/CDJ modals: a blank amount would post a ₱0 row, and a
+      // blank ref makes Ledger.post throw inside busy() (no catch) — the click
+      // would silently do nothing.
+      if (!ref)    { Notifs.showToast('Enter a reference number.', 'error'); return; }
+      if (!(amount > 0)) { Notifs.showToast('Enter a valid amount.', 'error'); return; }
       // v13 Phase 13 — first caller to hand assertPeriodOpen's job fully to the
       // service; Ledger.post checks the period itself, no separate pre-check here.
+      try {
       await window.Ledger.post({
         ref, date, kind: typeSel.value,
         accountType: acctTypeSel.value, account: acctSel.value, category: acctSel.value,
@@ -4678,6 +4684,11 @@ async function renderLedgerTab(container, currentUser, currentRole) {
       });
       closeModal(); Notifs.success('Ledger entry saved!');
       renderLedgerTab(container, currentUser, currentRole);
+      } catch (err) {
+        // busy() re-throws without any user feedback — surface the reason
+        // (closed period, missing ref, permission) instead of a dead button.
+        Notifs.showToast('Save failed: ' + (err && err.message || err), 'error');
+      }
     }));
   });
 
@@ -6586,6 +6597,7 @@ function salesSubNav(content, keys, active, headerHtml, onSelect) {
     onSelect(btn.dataset.chip, view);
   }));
   onSelect(active, view);
+  if (window.lucide) lucide.createIcons({ nodes: [content] });
 }
 
 async function loadSalesContent(currentUser, currentRole, sub) {
@@ -7456,7 +7468,7 @@ async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
   container.innerHTML = '<div class="loading-placeholder">Loading partner quotes…</div>';
   const snap = await db.collection('bs_quotes').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
   const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
-  const total = quotes.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+  const total = quotes.reduce((s,q)=>s+(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0),0);
   const accepted = quotes.filter(q=>['accepted','filed','approved'].includes(q.status));
   container.innerHTML = `
     <div style="font-size:12px;color:var(--text-muted);background:rgba(10,132,255,.07);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:14px">
@@ -7480,7 +7492,7 @@ async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
             </div>
           </div>
           <div style="text-align:right;flex-shrink:0">
-            <div style="font-weight:700">₱${fmt(q.total||q.grandTotal||0)}</div>
+            <div style="font-weight:700">₱${fmt(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0)}</div>
             <span class="badge ${window.statusBadgeClass('quote', q.status||'draft')}" style="margin-top:4px">${window.statusLabel2('quote', q.status||'draft')}</span>
           </div>
         </div>`).join('')}
@@ -8738,7 +8750,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
     function renderTickets(filter) {
       const list = document.getElementById('it-ticket-list');
       const shown = filter==='all' ? tickets : tickets.filter(t=>t.status===filter);
-      if (!shown.length) { list.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('🎫',44)}</div><h4>No tickets</h4></div>`; return; }
+      if (!shown.length) { list.innerHTML=`<div class="empty-state"><div class="empty-icon">${emojiIcon('🎫',44)}</div><h4>No tickets</h4></div>`; if (window.lucide) lucide.createIcons({ nodes: [list] }); return; }
       if (window.lucide) lucide.createIcons({ nodes: [list] });
       list.innerHTML = shown.map(t=>`
         <div class="item-card it-ticket-card" data-id="${t.id}" style="cursor:pointer">
@@ -9565,6 +9577,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
         const listMap = { 'filed': filed, 'for-approval': forApproval, 'drafts': drafts, 'rejected': rejected, 'needs-revision': needsRevision };
         qsContent.innerHTML = renderList(listMap[which]||[]);
         bindQuoteActions(qsContent, currentUser, currentRole, container);
+        if (window.lucide) lucide.createIcons({ nodes: [qsContent] }); // subtab re-render bypasses the outer pass — icons went blank
       });
     });
     bindQuoteActions(qsContent, currentUser, currentRole, container);
@@ -9803,10 +9816,10 @@ window.renderSalesOrders = async function(container){
   // Tracking link is available to every viewer of this list (non-partner).
   c.querySelectorAll('.so-link-btn').forEach(b=>b.addEventListener('click', async ()=>{
     const o = orders.find(x=>x.id===b.dataset.id); if(!o) return;
-    const orig=b.textContent; b.disabled=true; b.textContent='…';
+    const orig=b.innerHTML; b.disabled=true; b.textContent='…';
     try{ const tok = await window.ensureOrderTracking(o); window.showOrderTrackModal(window.orderTrackUrl(tok), o.clientName||o.project||''); }
     catch(e){ Notifs.showToast('Could not create link: '+(e.message||e.code),'error'); }
-    b.disabled=false; b.textContent=orig;
+    b.disabled=false; b.innerHTML=orig;
   }));
   if(isFin){
     c.querySelectorAll('.so-record-btn').forEach(b=>b.addEventListener('click', ()=>{
@@ -10157,7 +10170,11 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
 // ── Brilliant Steel Client Data ────────────────────
 async function renderBSClientData(container, currentUser, currentRole) {
   container.innerHTML = '<div class="loading-placeholder">Loading client data…</div>';
-  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'employee';
+  // See-everyone's-clients requires admin or Sales-dept membership — a bare
+  // 'employee' whose only dept is Brilliant Steel must NOT see every client's
+  // PII (mirrors renderBSQuotationFiles/renderBSQuotationsSummary's gate).
+  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager'
+    || (currentRole === 'employee' && (window.currentDepts || []).includes('Sales'));
   try {
     const snap = await window.getBsQuotesOrdered(currentUser, isPrivileged);
     const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
@@ -12826,7 +12843,7 @@ window.renderDocCollection = function(container, collection, title, currentUser,
     list.innerHTML = `<div class="item-list">${docs.map(d=>`
       <div class="item-card"${isGov?` data-gov-id="${d.id}" style="cursor:pointer"`:''}>
         <div class="item-top"><div class="item-title">${escHtml(d.title||d.name||'Untitled')}</div>
-          <span class="badge ${statusBadge(d.status)}">${d.status||'active'}</span>
+          ${window.statusBadge2 ? statusBadge2('gov', d.status||'active') : `<span class="badge ${statusBadge(d.status)}">${d.status||'active'}</span>`}
         </div>
         <div class="item-meta">
           ${d.description?`<span>${escHtml(d.description)}</span>`:''}
@@ -12862,7 +12879,7 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
       </div>
       ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:12px;display:block;margin-bottom:8px">${emojiIcon('📎',12)} View File</a>`:''}
     ` : `
-      <div style="margin-bottom:10px"><span class="badge ${statusBadge(d.status)}">${d.status||'active'}</span></div>
+      <div style="margin-bottom:10px">${window.statusBadge2 ? statusBadge2('gov', d.status||'active') : `<span class="badge ${statusBadge(d.status)}">${d.status||'active'}</span>`}</div>
       <p style="font-size:14px;line-height:1.6;margin-bottom:10px">${escHtml(d.description||'No details.')}</p>
       ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:12px;display:block">${emojiIcon('📎',12)} View File</a>`:''}
     `;
@@ -13368,7 +13385,7 @@ async function advanceProjectStage(p, nextId){
     // hand off to the owning department of the new stage
     const dept=ns.dept;
     try{ if(dept&&dept!=='Sales') await Notifs.sendToDept(dept,{ title:`📈 ${ns.label}: ${p.clientName||p.projectNo}`, body:`Project ${p.projectNo} is now "${ns.label}". Your team's action is needed.`, icon:ns.icon, type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
-    if(nextId==='delivered') { try{ await Notifs.sendToDept('Finance',{ title:'📦 Ready to bill balance', body:`${p.clientName} (${p.projectNo}) delivered — collect balance ₱${fmt(p.arBalance||0)}.`, icon:'💵', type:'project_stage', link:'projects-lifecycle' }); }catch(_){} }
+    if(nextId==='delivered') { try{ await Notifs.sendToDept('Finance',{ title:'📦 Ready to bill balance', body:`${p.clientName} (${p.projectNo}) delivered — collect balance ₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}.`, icon:'💵', type:'project_stage', link:'projects-lifecycle' }); }catch(_){} }
     if(nextId==='paid') { try{ await Notifs.sendToOwner({ title:'💰 Project paid', body:`${p.clientName} (${p.projectNo}) fully collected.`, icon:'💰', type:'project_paid' }); }catch(_){} }
     window.logAudit && window.logAudit('update','project',p.id,{ stage:nextId });
     Notifs.success('Moved to '+ns.label); closeModal(); window.renderProjectLifecycle();
@@ -13794,27 +13811,7 @@ async function renderProdOrders(el, currentUser, currentRole) {
             stage: next.id, enteredAt: new Date().toISOString(),
             by: currentUser.uid, byName: userProfile?.displayName||currentUser.email||'' }) });
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('production_orders');
-        // Keep the parent project's lifecycle stage in sync with production progress —
-        // but only move it FORWARD. Never regress a job that's already further along
-        // (e.g. delivered/paid) just because an early production sub-stage advanced.
-        if (o.projectId) {
-          const projStage = prodToJobStage(next.id);
-          try {
-            const jdoc = await db.collection('job_projects').doc(o.projectId).get();
-            const cur = jdoc.exists ? jdoc.data().stage : null;
-            const ord = s => JOB_STAGES.findIndex(x => x.id === s);
-            const evt = { at:new Date().toISOString(), event:`Production: ${next.label}`, by:userProfile?.displayName||currentUser.email };
-            const advance = cur !== 'paid' && cur !== 'cancelled' && ord(projStage) > ord(cur);
-            await db.collection('job_projects').doc(o.projectId).update({
-              ...(advance ? { stage: projStage } : {}),
-              updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-              timeline: firebase.firestore.FieldValue.arrayUnion(evt) });
-            // reflect the milestone on the client's public tracker (forward only)
-            const _tok = jdoc.exists ? jdoc.data().trackingToken : null;
-            if(_tok){ const _trk = trackerKeyFor(next.id) || (advance ? 'production' : null);
-              if(_trk) window.syncOrderTracking(_tok, { status:_trk }); }
-          } catch(_) {}
-        }
+        await syncJobFromProdStage(o.projectId, next.id);
         Notifs.success(`Moved to ${next.label}`);
         renderProdOrders(el, currentUser, currentRole);
       } catch(ex){ Notifs.showToast('Update failed','error'); b.disabled=false; }
@@ -13824,6 +13821,33 @@ async function renderProdOrders(el, currentUser, currentRole) {
     if(!canEdit) return;
     prodOrderModal(orders.find(o=>o.id===card.dataset.id), currentUser, currentRole, ()=>renderProdOrders(el, currentUser, currentRole));
   }));
+}
+
+// Keep the parent job_projects doc's lifecycle stage in sync with production
+// progress — FORWARD only (never regress delivered/paid work) — and reflect the
+// milestone on the client's public tracker. Shared by the card "Advance →"
+// button AND the Edit-modal Save (the stage <select> path used to skip this
+// entirely, so a job whose order was marked Delivered via Edit→Save looked
+// stuck in production forever).
+async function syncJobFromProdStage(projectId, prodStageId) {
+  if (!projectId) return;
+  const stageDef = PROD_STAGES.find(s => s.id === prodStageId);
+  const projStage = prodToJobStage(prodStageId);
+  try {
+    const jdoc = await db.collection('job_projects').doc(projectId).get();
+    const cur = jdoc.exists ? jdoc.data().stage : null;
+    const ord = s => JOB_STAGES.findIndex(x => x.id === s);
+    const evt = { at:new Date().toISOString(), event:`Production: ${stageDef?.label||prodStageId}`, by:userProfile?.displayName||currentUser.email };
+    const advance = cur !== 'paid' && cur !== 'cancelled' && ord(projStage) > ord(cur);
+    await db.collection('job_projects').doc(projectId).update({
+      ...(advance ? { stage: projStage } : {}),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      timeline: firebase.firestore.FieldValue.arrayUnion(evt) });
+    // reflect the milestone on the client's public tracker (forward only)
+    const _tok = jdoc.exists ? jdoc.data().trackingToken : null;
+    if(_tok){ const _trk = trackerKeyFor(prodStageId) || (advance ? 'production' : null);
+      if(_trk) window.syncOrderTracking(_tok, { status:_trk }); }
+  } catch(_) {}
 }
 
 // Consume a production order's materials: decrement inventory stock, post COS to
@@ -14100,7 +14124,13 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
     }
     if (!e.materialsConsumed) data.materials = collectMaterials(); // lock once consumed
     try {
-      if(order){ await db.collection('production_orders').doc(order.id).update(data); window.logAudit&&window.logAudit('update','production_order',order.id,{title:data.title,stage:data.stage}); }
+      if(order){
+        await db.collection('production_orders').doc(order.id).update(data);
+        window.logAudit&&window.logAudit('update','production_order',order.id,{title:data.title,stage:data.stage});
+        // Edit→Save is a fully valid stage-change path (same QC/DR gates as the
+        // Advance button) — sync the parent project + tracker here too.
+        if (data.stage !== _prevStage) await syncJobFromProdStage(data.projectId || order.projectId, data.stage);
+      }
       else {
         // order number PO-YYMM-### (atomic sequence; falls back to time suffix)
         const ym = (window.bizDate?window.bizDate():new Date().toISOString().slice(0,10)).slice(2,7).replace('-','');
@@ -15357,8 +15387,25 @@ async function recordPurchaseDisbursement(p, currentUser, onDone) {
         addedByName: window.userProfile?.displayName || currentUser.email,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
-      const cdjRef = await db.collection('cash_disbursement_journal').add(cdjData);
-      await postCDJToLedger(cdjRef.id, cdjData); // also mirror into the ledger (unless pure A/P)
+      // If the CDJ/ledger writes fail AFTER the claim above, the PR would be
+      // stuck recordedToFinance=true with no money movement and no retry button
+      // (silent under-count). Release the claim on failure so Finance can retry.
+      let cdjRef;
+      try {
+        cdjRef = await db.collection('cash_disbursement_journal').add(cdjData);
+        await postCDJToLedger(cdjRef.id, cdjData); // also mirror into the ledger (unless pure A/P)
+      } catch (postErr) {
+        await prRef.update({
+          recordedToFinance: false,
+          recordedToFinanceAt: firebase.firestore.FieldValue.delete(),
+          recordedBy: firebase.firestore.FieldValue.delete(),
+          recordedByName: firebase.firestore.FieldValue.delete()
+        }).catch(() => {
+          // Revert also failed (offline?) — surface the stuck state loudly.
+          Notifs.showToast(`URGENT: PR ${p.id} is marked recorded but the journal write failed AND the rollback failed. Ask IT to clear recordedToFinance on it.`, 'error');
+        });
+        throw postErr;   // outer catch shows the toast + re-enables Save
+      }
       // The recordedToFinance flag itself was already claimed transactionally
       // above (before this write could race against anyone) — this just stamps
       // the resulting CDJ id back onto the PR for cross-reference.

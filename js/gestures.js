@@ -32,7 +32,9 @@
     return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   }
   function insideHScroll(el) {
-    return !!(el && el.closest && el.closest('[data-hscroll], .table-scroll'));
+    // .table-wrap is the class the app's scrollable tables ACTUALLY use —
+    // .table-scroll matched nothing, so edge-swipe hijacked table scrolling.
+    return !!(el && el.closest && el.closest('[data-hscroll], .table-scroll, .table-wrap'));
   }
 
   // ── Shared chevron-pill affordance (single reused DOM node, transform-only) ──

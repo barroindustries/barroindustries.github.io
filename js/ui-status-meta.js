@@ -51,6 +51,7 @@
     { id: 'open',        label: 'Open',        badge: 'badge-orange' },
     { id: 'in-progress', label: 'In Progress', badge: 'badge-blue'   },
     { id: 'resolved',    label: 'Resolved',    badge: 'badge-green'  },
+    { id: 'closed',      label: 'Closed',      badge: 'badge-gray'   }, // settable in the ticket detail select — was missing here
   ];
   const IT_ASSET_STATUSES = [
     { id: 'active',      label: 'Active',      badge: 'badge-green'  },
@@ -60,6 +61,7 @@
   const IT_SOFTWARE_STATUSES = [
     { id: 'active',  label: 'Active',  badge: 'badge-green' },
     { id: 'expired', label: 'Expired', badge: 'badge-red'   },
+    { id: 'retired', label: 'Retired', badge: 'badge-gray'  }, // settable in the license edit modal — was missing here
   ];
 
   // ── Task status (Phase 116) ────────────────────────────────────────

@@ -7583,7 +7583,9 @@ async function renderTeam() {
   // 'users' cache (standardized at 30s) so its 8s freshness is deterministic.
   // Must use the payroll-aware fetcher so the Team table's Base/Allowance/Net
   // columns and the CSV export carry merged pay (pay lives in payroll/{uid}).
-  const snap=await dbCachedGet('users-presence', fetchUsersWithPayroll, 8000);
+  // A rejected users read must not strand the Team table on "Loading…" —
+  // every other fetchUsersWithPayroll call site catches; this one didn't.
+  const snap=await dbCachedGet('users-presence', fetchUsersWithPayroll, 8000).catch(()=>({docs:[]}));
   const users=snap.docs.map(d=>({id:d.id,...d.data()}));
   const now = Date.now();
   const onlineThresholdMs = 3 * 60 * 1000; // 3 min = online
@@ -8110,7 +8112,9 @@ function openProfileDrawer() {
       });
     };
     updateActive();
-    themePicker.querySelectorAll('.theme-swatch').forEach(btn => {
+    // Buttons render as .theme-card (WS42 rename) — the old .theme-swatch
+    // selector matched nothing, leaving the whole theme picker dead.
+    themePicker.querySelectorAll('.theme-card').forEach(btn => {
       btn.addEventListener('click', () => { setTheme(btn.dataset.theme); updateActive(); });
     });
   }
@@ -8232,15 +8236,40 @@ function _focusReturn(trigger){
 // ── Modal / Page panel (v12 WS10/WS11 — Overlay-registered, device Back closes) ──
 // opts.size: 'wide' (~920px) or 'full' (up to 1200px / 94dvh) for content-heavy
 // popups so they don't render as a cramped small dialog. Default stays compact.
+// Modal/page titles render as plain TEXT (they can embed user data — never
+// innerHTML them), but ~44 call sites prefix the title with emojiIcon()/
+// lucideIconHtml() output, which is HTML and used to show up on screen as
+// literal "<i data-lucide=...>" code. Extract that icon markup, render the
+// remainder as text, and prepend a real icon element instead.
+function _setPanelTitle(el, title){
+  title = String(title ?? '');
+  let iconName = null;
+  title = title.replace(/<i\s+data-lucide="([a-z0-9-]+)"[^>]*>\s*<\/i>/gi, (_, n) => { iconName = iconName || n; return ' '; });
+  title = title.replace(/<span class="emoji-icon">([^<]*)<\/span>/gi, '$1');
+  el.textContent = title.replace(/\s+/g, ' ').trim();
+  if (iconName) {
+    const i = document.createElement('i');
+    i.setAttribute('data-lucide', iconName);
+    i.style.cssText = 'width:18px;height:18px;vertical-align:-3px;margin-right:6px';
+    el.prepend(i);
+    if (el.isConnected && window.lucide) lucide.createIcons({ nodes: [el] });
+    // (detached panels get icons from the caller's later createIcons() pass)
+  }
+}
 window.openModal=function(title,bodyHTML,footerHTML='',opts){
   opts = opts || {};
   const _trigger = document.activeElement;
   if (title !== 'Keyboard shortcuts') window._cheatSheetOpen = false;
-  document.getElementById('modal-title').textContent=title;
-  document.getElementById('modal-body').innerHTML=bodyHTML;
+  _setPanelTitle(document.getElementById('modal-title'), title);
+  const modalBody=document.getElementById('modal-body');
+  modalBody.innerHTML=bodyHTML;
   const footer=document.getElementById('modal-footer');
   footer.innerHTML=footerHTML;
   footer.classList.toggle('hidden',!footerHTML);
+  // Render any <i data-lucide> the caller put in the body/footer — many call
+  // sites relied on this and their icons showed as blank gaps (openPage
+  // already does a createIcons pass; openModal never did).
+  if (window.lucide) lucide.createIcons({ nodes: [modalBody, footer] });
   const box=document.getElementById('modal-box');
   if(box){ box.classList.remove('modal-wide','modal-full');
     if(opts.size==='wide') box.classList.add('modal-wide');
@@ -8276,7 +8305,7 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
     </div>
     <div class="page-panel-body"></div>
     <div class="page-panel-foot"></div>`;
-  p.querySelector('.page-panel-title').textContent = title;
+  _setPanelTitle(p.querySelector('.page-panel-title'), title);
   p.querySelector('.page-panel-body').innerHTML = bodyHTML;
   const foot = p.querySelector('.page-panel-foot');
   foot.innerHTML = footerHTML; foot.classList.toggle('hidden', !footerHTML);
