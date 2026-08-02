@@ -4067,6 +4067,12 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   max-height: 380px; min-height: 120px;
   background: var(--chat-bg);
   position: relative;
+  /* Wave5 M2 — the swipe-to-reply gesture (chat.js _onSwipeMove) translates a
+     .ms-row up to SWIPE_REPLY_CAP (64px) right during the drag; own-message
+     rows already sit close to the right inner edge (margin-left:auto), so a
+     transient horizontal overflow is possible mid-drag. Clip it instead of
+     flashing a scrollbar — the transform always resets on release/abort. */
+  overflow-x: hidden;
 }
 #task-fullscreen-panel .messenger-body,
 #chat-thread-panel .messenger-body { max-height: none; }
@@ -4123,6 +4129,12 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 /* Grouped continuations (same sender, <2min apart) sit closer together */
 .ms-row.ms-grp-mid, .ms-row.ms-grp-last { margin-top: 2px; }
 .ms-row:first-child { margin-top: 0; }
+/* Wave5 M2 — swipe-to-reply drag (chat.js _onSwipeMove sets an inline
+   translateX up to 64px directly, per-frame; no base transition is declared
+   on .ms-row so the reset-on-release snap is instant by default — this class
+   only exists to defensively kill any transition a future rule might add
+   here, so the drag itself never fights a CSS animation mid-gesture). */
+.ms-row-swiping { transition: none; }
 
 .ms-avatar {
   width: 24px; height: 24px; border-radius: 50%;
@@ -4200,6 +4212,20 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 .ms-heart-btn:hover { opacity: 1; }
 .ms-heart-btn:active { transform: scale(1.15); }
 .ms-heart-btn.ms-heart-active { opacity: 1; }
+
+/* Wave5 M2 (J3) — hover-revealed reply button (desktop only, by design: touch
+   devices use the swipe-right gesture instead — see chat.js _onSwipeStart).
+   @media(hover:hover) means it never renders on a touch-only device, so it
+   doesn't compete with the swipe affordance there. */
+.ms-reply-btn {
+  background: none; border: none; cursor: pointer; padding: 2px 4px;
+  color: var(--text-muted); flex-shrink: 0; align-self: flex-end;
+  opacity: 0; transition: opacity .15s, color .15s;
+}
+@media (hover: hover) {
+  .ms-row:hover .ms-reply-btn { opacity: .6; }
+  .ms-reply-btn:hover { opacity: 1; color: var(--primary); }
+}
 
 .ms-act-btn {
   background: none; border: none; cursor: pointer; padding: 2px 5px;
@@ -4315,6 +4341,9 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--border);
   background: var(--chat-bg);
+  /* Wave5 M2 — positioning context for the @mention typeahead and emoji-grid
+     popovers (both anchor bottom:100% off THIS row, not the scroll container). */
+  position: relative;
 }
 .ms-attach-btn {
   width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
@@ -4340,6 +4369,109 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 }
 .ms-send-btn:hover:not(:disabled) { transform: scale(1.06); }
 .ms-send-btn:disabled { opacity: .4; cursor: default; }
+
+/* ══════════════════════════════
+   Wave5 Batch M2 — reply, forward, mentions, emoji
+══════════════════════════════ */
+
+/* Reply quote block — rendered INSIDE the bubble, above the text/attachment
+   (real messages: _renderMessagePart; optimistic bubbles: _renderPendingBubble
+   — both funnel through the SAME _replyQuoteHtml() so the markup matches).
+   mine/theirs variants: the accent bar reads against each bubble's own bg. */
+.ms-reply-quote {
+  display: block; margin-bottom: 5px; padding: 4px 8px;
+  border-left: 3px solid var(--primary); border-radius: 4px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  cursor: pointer; max-width: 100%;
+}
+.ms-bubble-mine .ms-reply-quote { border-left-color: rgba(255,255,255,.7); }
+.ms-reply-quote-author { font-size: var(--fs-2xs); font-weight: 700; opacity: .85; }
+.ms-reply-quote-snippet {
+  font-size: var(--fs-xs); opacity: .75;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Composer quoted-snippet chip (armed via swipe or the hover ↩ button). */
+.ms-reply-chip {
+  display: flex; align-items: stretch; gap: 8px;
+  margin: 0 14px 6px; padding: 6px 8px;
+  background: var(--surface-2); border-radius: var(--r-sm, 10px);
+}
+.ms-reply-chip.hidden { display: none; }
+.ms-reply-chip-bar { width: 3px; border-radius: 2px; background: var(--primary); flex-shrink: 0; }
+.ms-reply-chip-body { flex: 1; min-width: 0; }
+.ms-reply-chip-author { font-size: var(--fs-2xs); font-weight: 700; color: var(--primary); }
+.ms-reply-chip-snippet {
+  font-size: var(--fs-xs); color: var(--text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ms-reply-chip-close {
+  background: none; border: none; cursor: pointer; color: var(--text-muted);
+  font-size: var(--fs-sm); padding: 0 4px; flex-shrink: 0; align-self: center;
+}
+.ms-reply-chip-close:hover { color: var(--text); }
+
+/* "Tap the quote to jump there" flash (chat.js _scrollToMessage). */
+@keyframes msFlash {
+  0%, 100% { box-shadow: none; }
+  30% { box-shadow: 0 0 0 3px var(--primary-soft); }
+}
+.ms-flash { animation: msFlash .9s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .ms-flash { animation: none; box-shadow: 0 0 0 3px var(--primary-soft); }
+}
+
+/* "Forwarded" label — sits above the bubble like .ms-name, own messages
+   right-align to match the row's own alignment. */
+.ms-forwarded-label {
+  font-size: var(--fs-2xs); color: var(--text-muted); font-style: italic;
+  display: flex; align-items: center; gap: 3px; padding: 0 4px; margin-bottom: 1px;
+}
+.ms-forwarded-label svg { width: 10px; height: 10px; }
+.ms-row-mine .ms-forwarded-label { justify-content: flex-end; }
+
+/* @mention highlight — applied AFTER escHtml by chat.js _highlightMentions,
+   so this only ever wraps text that was already safely escaped. */
+.ms-mention {
+  font-weight: 700; color: var(--primary);
+  background: var(--primary-soft); border-radius: 4px; padding: 0 2px;
+}
+.ms-bubble-mine .ms-mention { color: inherit; background: rgba(255,255,255,.22); }
+
+/* @mention typeahead dropdown — anchored off .messenger-input-row (position:
+   relative, see above), opens UPWARD (bottom:100%) since the composer sits
+   at the bottom of the thread panel. Small local z-index scoped to that one
+   positioned ancestor's stacking context — not a new top-of-app layer,
+   mirrors .ms-wallpaper-menu's z-index:20 immediately above. */
+.ms-mention-dd {
+  position: absolute; left: 6px; right: 6px; bottom: calc(100% + 4px);
+  background: var(--modal-bg); border: 1px solid var(--border);
+  border-radius: var(--r, 14px); box-shadow: var(--sh-lg);
+  max-height: 200px; overflow-y: auto; padding: 4px; z-index: 5;
+}
+.ms-mention-dd.hidden { display: none; }
+.ms-mention-opt {
+  display: block; width: 100%; text-align: left;
+  padding: 7px 10px; border-radius: var(--r-sm, 10px); border: none;
+  background: none; color: var(--text); font-size: var(--fs-base); cursor: pointer;
+}
+.ms-mention-opt:hover { background: var(--surface-2); }
+
+/* Composer emoji picker — compact static grid (REACTIONS + EMOJI_GRID, no
+   library), same anchoring convention as the mention dropdown above. */
+.ms-emoji-grid {
+  position: absolute; left: 6px; bottom: calc(100% + 4px);
+  display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px;
+  background: var(--modal-bg); border: 1px solid var(--border);
+  border-radius: var(--r, 14px); box-shadow: var(--sh-lg);
+  padding: 8px; width: 264px; max-width: calc(100vw - 24px); z-index: 5;
+}
+.ms-emoji-grid.hidden { display: none; }
+.ms-emoji-opt {
+  background: none; border: none; cursor: pointer; font-size: 18px;
+  line-height: 1; padding: 5px; border-radius: 6px;
+}
+.ms-emoji-opt:hover { background: var(--surface-2); }
 
 /* ── Chat inbox rows (Phase 16) ── */
 .ms-search-wrap { margin: 10px 0; }

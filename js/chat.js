@@ -50,6 +50,15 @@ window.Chat = (() => {
                                               // data, BEFORE _markRead() overwrites it) — drives the new-msg divider
   let _threadInitialScrollDone = false;      // true once THIS thread-open's first populated render placed scroll
   let _scrollFabUnseen = 0;                  // messages that arrived while scrolled up (scroll-to-bottom FAB badge)
+  // Wave5 Batch M2 — reply / forward / mentions / emoji state.
+  let _replyTarget = null;                   // {mid, author, snippet} armed on the composer; rides the NEXT send
+                                              // (optimistic bubble AND the real doc), cleared on send/✕/thread-close.
+  let _swipe = null;                         // active swipe-to-reply touch-drag (see _onSwipeStart/Move/End)
+  let _emojiMenuOpen = false;                // composer emoji-grid popover open state (outside-click cleanup, mirrors _wpMenuOpen)
+  const SWIPE_REPLY_ARM = 56, SWIPE_REPLY_CAP = 64;   // px thresholds for the reply-swipe gesture
+  // Composer emoji grid (J6): REACTIONS + ~26 more common emoji, static list, no library.
+  const EMOJI_GRID = [...REACTIONS, '😀','😁','😅','😊','🙂','😉','😍','🤔','😴','😎','🥳','😭',
+    '😡','👏','🙌','🔥','🎉','✅','❌','💯','🤗','🤝','👀','💪','⭐','🚀'];
 
   const _isAdminRole = () => ['president','manager','secretary'].includes(currentRole);
   const _myName = () => (window.userProfile?.displayName || currentUser.email);
@@ -101,6 +110,7 @@ window.Chat = (() => {
     _pending.forEach(p => { if (p.previewUrl) { try { URL.revokeObjectURL(p.previewUrl); } catch (_) {} } });
     _pending = [];
     _threadOpenReadAtMs = 0; _threadInitialScrollDone = false; _scrollFabUnseen = 0;
+    _replyTarget = null; _swipe = null;      // Wave5 M2 — reply-arm + in-flight swipe never survive a thread close
     document.getElementById('chat-thread-scroll')?.removeEventListener('scroll', _onThreadScroll);
     if (_presenceTimer)     { clearInterval(_presenceTimer);     _presenceTimer = null; }
     if (_typingExpireTimer) { clearInterval(_typingExpireTimer); _typingExpireTimer = null; }
@@ -108,6 +118,8 @@ window.Chat = (() => {
     if (window.visualViewport) window.visualViewport.removeEventListener('resize', _onViewportResize);
     if (_wpMenuOpen) document.removeEventListener('click', _wpOutsideClick, true);
     _wpMenuOpen = false;
+    if (_emojiMenuOpen) document.removeEventListener('click', _emojiOutsideClick, true);   // Wave5 M2
+    _emojiMenuOpen = false;
     _exitFullscreen();                       // owner req #2: restore app chrome on close
     _threadPanelEl = null;
   }
@@ -260,6 +272,19 @@ window.Chat = (() => {
   function setFilter(k) { _filter = k; _renderInbox(); }
   function setSearch(q) { _searchQ = (q || '').trim().toLowerCase(); _renderInbox(); }
 
+  // Wave5 M2 — extracted from _renderInbox's inline title resolution (was
+  // duplicated ad hoc) so the Forward conversation picker (reuses "my
+  // conversations, sorted recent") can resolve the same row titles without
+  // re-deriving the dm/group/dept branching a second time.
+  function _convTitle(cv) {
+    if (cv.type === 'dm') {
+      const otherUid = (cv.participants || []).find(u => u !== currentUser.uid);
+      return (cv.participantNames && cv.participantNames[otherUid]) || 'User';
+    }
+    if (cv.type === 'group') return cv.name || 'Group';
+    return cv.name || cv.department || 'Channel';
+  }
+
   // Merge _convs (dm/group — the ONLY types the array-contains listener can
   // ever return, since dept docs keep participants:[]) with a dept-channel row
   // list DERIVED from myDeptChannels(), not solely from _deptConvs: a dept
@@ -294,18 +319,8 @@ window.Chat = (() => {
     const myUid = currentUser.uid;
     const initials = s => escHtml((s || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2));
     // WS42 Phase 16 — resolve title first (search needs it before the row markup exists).
-    const rows = sorted.map(cv => {
-      let title;
-      if (cv.type === 'dm') {
-        const otherUid = (cv.participants || []).find(u => u !== myUid);
-        title = (cv.participantNames && cv.participantNames[otherUid]) || 'User';
-      } else if (cv.type === 'group') {
-        title = cv.name || 'Group';
-      } else {
-        title = cv.name || cv.department || 'Channel';
-      }
-      return { cv, title };
-    }).filter(r => !_searchQ || r.title.toLowerCase().includes(_searchQ));
+    const rows = sorted.map(cv => ({ cv, title: _convTitle(cv) }))
+      .filter(r => !_searchQ || r.title.toLowerCase().includes(_searchQ));
 
     if (!rows.length) {
       el.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔎',44)}</div><h4>No matches</h4></div>`;
@@ -474,10 +489,16 @@ window.Chat = (() => {
       </div>
       <div id="chat-typing-row"></div>
       <div id="chat-file-preview" style="font-size:11px;color:var(--primary);padding:0 14px 4px;min-height:16px"></div>
+      <div id="chat-reply-chip" class="ms-reply-chip hidden"></div>
       <div class="messenger-input-row">
+        <div id="chat-mention-dd" class="ms-mention-dd hidden" role="listbox"></div>
+        <div id="chat-emoji-grid" class="ms-emoji-grid hidden" role="menu">${
+          EMOJI_GRID.map(e => `<button type="button" class="ms-emoji-opt" data-emoji="${e}">${e}</button>`).join('')
+        }</div>
         <label for="chat-file" class="ms-attach-btn" title="Attach file">${emojiIcon('paperclip', 18)}</label>
         <input type="file" id="chat-file" style="display:none" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"/>
         <button type="button" class="ms-attach-btn" id="chat-link" title="Attach link">${emojiIcon('link',18)}</button>
+        <button type="button" class="ms-attach-btn" id="chat-emoji-btn" title="Emoji">${emojiIcon('smile',18)}</button>
         <textarea id="chat-input" class="ms-input" rows="1" placeholder="Type a message…"></textarea>
         <button class="ms-send-btn" id="chat-send" disabled>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
@@ -579,6 +600,45 @@ window.Chat = (() => {
       filePreview.textContent = `🔗 ${url}`;
       updateSendState();
     });
+
+    // Wave5 M2 (J6) — composer emoji picker: toggle + outside-click-to-close
+    // (same pattern as the wallpaper popover; _emojiMenuOpen/_emojiOutsideClick
+    // are module-level so teardownThread can clean up the document listener
+    // if the panel closes while the grid is open).
+    document.getElementById('chat-emoji-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      const grid = document.getElementById('chat-emoji-grid'); if (!grid) return;
+      const willOpen = grid.classList.contains('hidden');
+      grid.classList.toggle('hidden');
+      _emojiMenuOpen = willOpen;
+      if (willOpen) document.addEventListener('click', _emojiOutsideClick, true);
+      else document.removeEventListener('click', _emojiOutsideClick, true);
+    });
+    document.getElementById('chat-emoji-grid')?.addEventListener('click', e => {
+      const opt = e.target.closest('.ms-emoji-opt'); if (!opt) return;
+      _insertEmojiAtCursor(input, opt.dataset.emoji);
+      updateSendState(); _autoGrow(input);
+      _closeEmojiGrid();
+    });
+
+    // Wave5 M2 (J6) — @mention typeahead: selecting a candidate replaces the
+    // in-progress "@query" token (from chat-mention-dd's data-atPos, set by
+    // _updateMentionTypeahead) with "@DisplayName " and restores focus/caret.
+    document.getElementById('chat-mention-dd')?.addEventListener('click', e => {
+      const opt = e.target.closest('.ms-mention-opt'); if (!opt) return;
+      const dd = document.getElementById('chat-mention-dd');
+      const at = parseInt(dd.dataset.atPos || '-1', 10);
+      if (at < 0) return;
+      const pos = input.selectionStart;
+      const before = input.value.slice(0, at), after = input.value.slice(pos);
+      const insertion = '@' + opt.dataset.name + ' ';
+      input.value = before + insertion + after;
+      const newPos = (before + insertion).length;
+      input.setSelectionRange(newPos, newPos);
+      input.focus();
+      dd.classList.add('hidden'); dd.innerHTML = '';
+      _autoGrow(input); updateSendState();
+    });
     // Phase 63 #1 — _isSending is a MODULE-scoped guard (not local to this
     // panel instance) checked at the very top of doSend, before anything
     // else runs. Both routes into doSend (the click handler and the Enter
@@ -604,6 +664,8 @@ window.Chat = (() => {
       if (_isSending) return;
       const text = (input.value || '').trim();
       const file = pendingFile, link = pendingLink;
+      const replyTo = _replyTarget;                        // Wave5 M2 — captured BEFORE clearing below
+      const mentions = _computeMentions(text, conv);        // Wave5 M2
       if (!text && !file && !link) return;
       _isSending = true;
       sendBtn.disabled = true;
@@ -612,15 +674,18 @@ window.Chat = (() => {
       input.value = ''; _autoGrow(input);
       fileInp.value = ''; pendingFile = null; pendingLink = null;
       filePreview.textContent = '';
+      _replyTarget = null; _renderReplyChip();               // Wave5 M2 — clears on optimistic send, like the composer text
+      document.getElementById('chat-mention-dd')?.classList.add('hidden');
       clearTimeout(_draftSaveTimer); _clearDraft(conv.id);
       updateSendState();
-      _addPendingMessage({ clientKey, text, file, link });
+      _addPendingMessage({ clientKey, text, file, link, replyTo });
       try {
-        await window.Chat.sendMessage({ text, file, link, clientKey });
+        await window.Chat.sendMessage({ text, file, link, clientKey, replyTo, mentions });
       } catch (e) {
         input.value = savedText; _autoGrow(input);
         if (file) { pendingFile = file; filePreview.textContent = savedFilePreview; }
         else if (link) { pendingLink = link; filePreview.textContent = savedFilePreview; }
+        if (replyTo) { _replyTarget = replyTo; _renderReplyChip(); }   // Wave5 M2 — restore reply-arm on failure too
         _saveDraft(conv.id, savedText);
         _markPendingFailed(clientKey);
         Notifs.error((e && e.message) || 'Message not sent — retry.');
@@ -631,6 +696,7 @@ window.Chat = (() => {
     };
     input.addEventListener('input', () => {
       _autoGrow(input); updateSendState(); window.Chat.onComposerInput();
+      _updateMentionTypeahead(input, conv);   // Wave5 M2 (J6)
       clearTimeout(_draftSaveTimer);
       _draftSaveTimer = setTimeout(() => _saveDraft(conv.id, input.value), 300);
     });
@@ -745,6 +811,7 @@ window.Chat = (() => {
     _scrollFabUnseen = 0;
     _pending.forEach(p => { if (p.previewUrl) { try { URL.revokeObjectURL(p.previewUrl); } catch (_) {} } });
     _pending = [];
+    _replyTarget = null;   // Wave5 M2 — a reply armed in a PREVIOUS thread never leaks into this one
     _refreshUsersCache().then(() => _renderThread());   // backfills avatar photos once cached
     const ref = db.collection('conversations').doc(convId);
     _threadUnsubs.push(ref.collection('messages')
@@ -785,8 +852,21 @@ window.Chat = (() => {
   }
 
   // ── Send (message add → parent preview bump → own receipt → notify) ──
-  async function sendMessage({ text, file, link, clientKey }) {
-    const conv = _openConv; if (!conv) return;
+  // Wave5 M2 — factored to accept an EXPLICIT `conv` (used by Forward to write
+  // into a conversation that may not be the one currently open) instead of
+  // always reading module-state `_openConv`. Every M1 call site (doSend,
+  // _retryPending) omits `conv`, so `conv = convParam || _openConv` keeps
+  // their behavior byte-identical — this is purely additive. The one place
+  // this changes existing behavior: `_markRead()`/`_clearOwnTyping()` used to
+  // run unconditionally after every send; they're now gated on
+  // `conv.id === _openConvId`, because for a Forward target that ISN'T the
+  // open thread, "mark MY read receipt" / "clear MY typing beacon" would be
+  // writing into the wrong conversation's subcollections. For every M1 caller
+  // conv.id === _openConvId is always true (conv came from _openConv itself),
+  // so nothing changes for them.
+  async function sendMessage({ text, file, link, clientKey, replyTo, forwardedFrom, mentions,
+                                conv: convParam, fileUrl: preFileUrl, fileName: preFileName, fileSource: preFileSource }) {
+    const conv = convParam || _openConv; if (!conv) return;
     const FV = firebase.firestore.FieldValue;
     let fileUrl = null, fileName = null, fileSource = null;
     if (file) {
@@ -803,13 +883,29 @@ window.Chat = (() => {
     } else if (link) {
       fileUrl = link; fileSource = 'link';
       try { fileName = new URL(link).hostname.replace(/^www\./, ''); } catch (_) { fileName = link; }
+    } else if (preFileUrl) {
+      // Wave5 M2 (Forward) — reuse an ALREADY-uploaded/-linked attachment by
+      // reference (the forwarded message's own fileUrl/fileName/fileSource);
+      // no re-upload, no duplicate Storage object.
+      fileUrl = preFileUrl; fileName = preFileName || null; fileSource = preFileSource || null;
     }
-    await db.collection('conversations').doc(conv.id).collection('messages').add({
+    const msgDoc = {
       text: text || '', authorId: currentUser.uid, authorName: _myName(),
       fileUrl: fileUrl || null, fileName: fileName || null, fileSource: fileSource || null,
       clientKey: clientKey || null,   // Wave5 M1 (J2) — lets _reconcilePending match this doc to its optimistic bubble
       createdAt: FV.serverTimestamp()
-    });
+    };
+    // Wave5 M2 — new fields are OMITTED entirely (not even written as null)
+    // when absent, so every doc written before this batch, and every doc
+    // written by this batch without a reply/forward/mention, is byte-for-byte
+    // the same shape as before. The renderer's `m.replyTo &&` / `m.forwardedFrom &&`
+    // / `(m.mentions||[]).length` guards (see _renderMessagePart) are what
+    // make that safe to render identically either way — this is the
+    // backward-compat contract, not just an optimization.
+    if (replyTo) msgDoc.replyTo = { mid: replyTo.mid, author: replyTo.author, snippet: replyTo.snippet };
+    if (forwardedFrom) msgDoc.forwardedFrom = { convId: forwardedFrom.convId, authorName: forwardedFrom.authorName };
+    if (mentions && mentions.length) msgDoc.mentions = mentions;
+    await db.collection('conversations').doc(conv.id).collection('messages').add(msgDoc);
     const preview = text ? (text.length > 80 ? text.slice(0, 80) + '…' : text)
                          : (fileSource === 'link' ? `${emojiIcon('🔗',16)} Link` : `${emojiIcon('📎',16)} ${fileName || 'File'}`);
     // Second write — passes the affectedKeys([lastMessage*]) member branch.
@@ -817,8 +913,8 @@ window.Chat = (() => {
       lastMessageAt: FV.serverTimestamp(), lastMessageText: preview,
       lastMessageBy: currentUser.uid, lastMessageByName: _myName()
     }).catch(() => {});
-    _markRead(); _clearOwnTyping();
-    _notifyRecipients(conv, preview);       // fire-and-forget
+    if (conv.id === _openConvId) { _markRead(); _clearOwnTyping(); }
+    _notifyRecipients(conv, preview, mentions);       // fire-and-forget
   }
 
   // Recipient resolution shared by _notifyRecipients (send) and _onDeleteMessage
@@ -835,18 +931,36 @@ window.Chat = (() => {
   }
 
   // ── Message-arrived notifications (Decision 6 — NOT dedupKey) ──
-  async function _notifyRecipients(conv, preview) {
+  // Wave5 M2 (J6) — `mentions` (the uids the message @-tagged) BYPASS both the
+  // READ_FRESH skip and the 60s NOTIF_THROTTLE: a mention is an explicit
+  // "you, specifically" summon and must always land, even if the recipient
+  // just read the thread or was already notified for this conversation in
+  // the last minute. Non-mentioned recipients keep the exact M1 behavior.
+  // Note: `_readers` is only ever populated for the CURRENTLY OPEN thread
+  // (module-state, one listener). For a Forward send to a conv that isn't
+  // open, `_readers.find` simply won't match any of that conv's uids, so the
+  // READ_FRESH short-circuit is a no-op there and every non-mentioned target
+  // falls through to the normal throttle check — i.e. it degrades to "notify
+  // as usual," never to "silently skip." Full read-state for non-open
+  // conversations is M4's reads-denormalization work, out of scope here.
+  async function _notifyRecipients(conv, preview, mentions) {
     const targets = await _targetsFor(conv);
+    const mentionSet = new Set(mentions || []);
     const now = Date.now();
     const label = conv.type === 'dm' ? _myName() : (conv.name || conv.department || 'Chat');
     for (const uid of targets) {
       if (uid === currentUser.uid) continue;
-      const r = _readers.find(x => x.uid === uid);        // live snapshot — zero extra reads
-      if (r && r.readAt?.toMillis && (now - r.readAt.toMillis()) < READ_FRESH_MS) continue;
-      const k = `${conv.id}_${uid}`;
-      if (_notifLastSent[k] && (now - _notifLastSent[k]) < NOTIF_THROTTLE_MS) continue;
-      _notifLastSent[k] = now;
-      await Notifs.send(uid, { title: `💬 ${label}`, body: `${_myName()}: ${preview}`,
+      const isMentioned = mentionSet.has(uid);
+      if (!isMentioned) {
+        const r = _readers.find(x => x.uid === uid);        // live snapshot — zero extra reads
+        if (r && r.readAt?.toMillis && (now - r.readAt.toMillis()) < READ_FRESH_MS) continue;
+        const k = `${conv.id}_${uid}`;
+        if (_notifLastSent[k] && (now - _notifLastSent[k]) < NOTIF_THROTTLE_MS) continue;
+      }
+      _notifLastSent[`${conv.id}_${uid}`] = now;
+      await Notifs.send(uid, {
+        title: `💬 ${label}`,
+        body: isMentioned ? `${_myName()} mentioned you: ${preview}` : `${_myName()}: ${preview}`,
         icon: '💬', type: 'chat_message', chatId: conv.id }).catch(() => {});
     }
   }
@@ -1003,6 +1117,44 @@ window.Chat = (() => {
   function _msgRev(m) {
     return JSON.stringify(m.reactions || {}) + '|' + (m.text || '') + '|' +
       (m.deleted ? 1 : 0) + '|' + (m.editedAt ? 1 : 0) + '|' + (m.fileUrl || '');
+    // replyTo/forwardedFrom/mentions deliberately excluded — like createdAt/
+    // authorId, they're set once at message CREATE and never mutated by any
+    // update() in this file, so they can never change for an existing id.
+  }
+
+  // Wave5 M2 (J3) — shared by both the real-message renderer (_renderMessagePart)
+  // and the optimistic pending bubble (_renderPendingBubble), so a reply rides
+  // the SAME quote markup whether the doc has landed yet or not. `replyTo` is
+  // `{mid, author, snippet}` — absent (undefined/null) on every message that
+  // isn't a reply, in which case this renders nothing (backward-compat: old
+  // docs, and non-reply new docs, are unaffected).
+  function _replyQuoteHtml(replyTo) {
+    if (!replyTo) return '';
+    return `<div class="ms-reply-quote" data-target-mid="${escHtml(replyTo.mid || '')}">
+      <div class="ms-reply-quote-author">${escHtml(replyTo.author || '')}</div>
+      <div class="ms-reply-quote-snippet">${escHtml(replyTo.snippet || '')}</div>
+    </div>`;
+  }
+  // Wave5 M2 (J6) — highlights @mentions in an ALREADY-escHtml'd string. Takes
+  // the message's `mentions:[uid]` array, resolves each uid to a display name
+  // via the same _authorInfo the rest of the renderer uses, HTML-escapes that
+  // name too, then does a plain substring split/join for "@EscapedName" →
+  // "<span class=ms-mention>@EscapedName</span>". No RegExp, so there's no
+  // metacharacter-escaping step to get wrong; it can only ever wrap text that
+  // was already run through escHtml, so it cannot introduce markup that
+  // wasn't already safely neutralized. Absent/empty `mentions` (every doc
+  // before this batch, and any doc that isn't a mention) is a no-op passthrough.
+  function _highlightMentions(escapedHtml, mentionUids) {
+    if (!mentionUids || !mentionUids.length) return escapedHtml;
+    let out = escapedHtml;
+    mentionUids.forEach(uid => {
+      const info = _authorInfo(uid, '');
+      if (!info.name) return;
+      const token = '@' + escHtml(info.name);
+      if (out.indexOf(token) === -1) return;
+      out = out.split(token).join(`<span class="ms-mention">${token}</span>`);
+    });
+    return out;
   }
 
   // Renders ONE message: { sep, row }. `sep` is any day-divider/time-gap
@@ -1090,15 +1242,31 @@ window.Chat = (() => {
     // Wave5 M1 (J3) — Copy joins the SAME long-press/context-menu picker as
     // the reactions (opened by _openPickerFor via startPress/contextmenu on
     // .chat-bubble-tap or .ms-heart-btn — unchanged), rather than a new menu.
+    // Wave5 M2 — Forward joins the same picker (same long-press/right-click
+    // reach, desktop AND mobile, so no separate hover-only affordance needed).
     const pickerHtml = `<div class="chat-reaction-picker" data-mid="${escHtml(m.id)}" style="display:none;gap:4px;margin-top:4px;align-items:center">${
       REACTIONS.map(e => `<button class="chat-pick-emoji" data-mid="${escHtml(m.id)}" data-emoji="${e}" style="font-size:16px;background:none;border:none;cursor:pointer;padding:2px 4px">${e}</button>`).join('')
-    }<button class="chat-copy-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Copy" style="border-left:1px solid var(--border);padding-left:6px;margin-left:2px">${emojiIcon('copy',14)}</button></div>`;
+    }<button class="chat-copy-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Copy" style="border-left:1px solid var(--border);padding-left:6px;margin-left:2px">${emojiIcon('copy',14)}</button><button class="chat-forward-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Forward">${emojiIcon('forward',14)}</button></div>`;
     // Owner req #3 (Viber-style): a quick heart button beside the bubble —
     // tap = instant ❤️ toggle (via the SAME toggleReaction data model), while
     // long-press on the bubble OR the heart opens the full 6-emoji picker
     // above. Affordance-only change — reactions storage is untouched.
     const heartedByMe = reactions[currentUser.uid] === '❤️';
     const heartHtml = `<button class="ms-heart-btn${heartedByMe?' ms-heart-active':''}" data-mid="${escHtml(m.id)}" title="React ❤️">${heartedByMe?'❤️':'🤍'}</button>`;
+    // Wave5 M2 (J3) — hover-only reply button (desktop; touch uses the
+    // swipe-right gesture wired in _wireThreadDelegation instead). Same
+    // affordance-only pattern as heartHtml — no storage change here, the
+    // click handler arms _replyTarget via _armReply().
+    const replyBtnHtml = `<button class="ms-reply-btn" data-mid="${escHtml(m.id)}" title="Reply">${emojiIcon('corner-up-left',13)}</button>`;
+    // Wave5 M2 (J3) — quote block rendered ABOVE the message content when
+    // this doc carries replyTo (absent on every pre-M2 doc → renders exactly
+    // as before). Tapping it scrolls-to + flashes the original (_scrollToMessage,
+    // wired in _wireThreadDelegation) or toasts "Message not loaded" if the
+    // original isn't in the currently-loaded window.
+    const replyQuoteHtml = _replyQuoteHtml(m.replyTo);
+    // Wave5 M2 (J3) — "Forwarded" label, absent on every doc without forwardedFrom.
+    const forwardedHtml = m.forwardedFrom
+      ? `<div class="ms-forwarded-label">${emojiIcon('forward',10)}<span>Forwarded</span></div>` : '';
 
     const isLast = idx === list.length - 1;
 
@@ -1119,11 +1287,13 @@ window.Chat = (() => {
             ? `<div class="ms-avatar" title="${escHtml(info.name)}">${info.photoUrl?`<img src="${escHtml(info.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(info.name)}</div>`
             : `<div class="ms-avatar-spacer"></div>`) : ''}
         <div class="ms-bubble-wrap">
+          ${forwardedHtml}
           ${!isMine && showName ? `<div class="ms-name">${escHtml(info.name)}</div>` : ''}
           <div class="ms-bubble-row">
-          ${isMine ? heartHtml : ''}
+          ${isMine ? heartHtml + replyBtnHtml : ''}
           <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'} ${grpClass} chat-bubble-tap ${isNew?'ms-pop-in':''}" data-mid="${escHtml(m.id)}">
-            ${m.text ? `<div class="ms-text">${escHtml(m.text).replace(/\n/g,'<br/>')}</div>` : ''}
+            ${replyQuoteHtml}
+            ${m.text ? `<div class="ms-text">${_highlightMentions(escHtml(m.text).replace(/\n/g,'<br/>'), m.mentions)}</div>` : ''}
             ${m.fileUrl ? (m.fileSource!=='link' && isImage(m.fileUrl)
               ? `<div style="margin-top:${m.text?'6':'0'}px"><img src="${safeHttpUrl(m.fileUrl)}" alt="${escHtml(m.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);cursor:pointer" onclick="window.open('${safeHttpUrl(m.fileUrl)}','_blank')"/></div>`
               : `<a href="${safeHttpUrl(m.fileUrl)}" target="_blank" rel="noopener" class="ms-file-chip">${emojiIcon(m.fileSource==='link'?'link':'paperclip',14)}<span>${escHtml(m.fileName||'Attachment')}</span></a>`
@@ -1133,7 +1303,7 @@ window.Chat = (() => {
               ${m.editedAt?'<span class="ms-edited">(edited)</span>':''}
             </div>
           </div>
-          ${!isMine ? heartHtml : ''}
+          ${!isMine ? replyBtnHtml + heartHtml : ''}
           </div>
           ${reactionsHtml}
           ${pickerHtml}
@@ -1270,12 +1440,31 @@ window.Chat = (() => {
       const holder = e.target.closest('.chat-bubble-tap, .ms-heart-btn');
       if (holder) { e.preventDefault(); _openPickerFor(el, holder.dataset.mid); }
     });
+    // Wave5 M2 (J3) — swipe-right-to-reply, ADDITIVE alongside the long-press
+    // listeners above (both sets fire off the same native touch events; this
+    // one never calls stopPropagation so the long-press timer's own
+    // touchmove→clearPress still runs too — any movement already meant "not a
+    // long press" before this batch). Slope-guarded exactly like gestures.js's
+    // own edge-swipe (DY_ABORT-style): nothing here calls preventDefault()
+    // until a drag has COMMITTED to horizontal (dx dominant, rightward, past
+    // an 8px noise floor) — so a vertical scroll gesture is never intercepted,
+    // it just runs the browser's native scroll untouched from the first
+    // pixel. gestures.js itself is not touched or reused directly (per spec);
+    // this is a local re-implementation of the same slope-guard PRINCIPLE.
+    el.addEventListener('touchstart', _onSwipeStart, { passive: true });
+    el.addEventListener('touchmove', _onSwipeMove, { passive: false });
+    el.addEventListener('touchend', _onSwipeEnd);
+    el.addEventListener('touchcancel', _onSwipeEnd);
     el.addEventListener('click', e => {
       if (e.target.closest('#chat-load-earlier-btn')) { loadEarlier(); return; }
       const chip = e.target.closest('.chat-reaction-chip, .chat-pick-emoji');
       if (chip) { e.stopPropagation(); toggleReaction(chip.dataset.mid, chip.dataset.emoji); return; }
       const copyBtn = e.target.closest('.chat-copy-btn');
       if (copyBtn) { e.stopPropagation(); _copyMessage(copyBtn.dataset.mid); return; }
+      const fwdBtn = e.target.closest('.chat-forward-btn');
+      if (fwdBtn) { e.stopPropagation(); _openForwardPicker(fwdBtn.dataset.mid); return; }
+      const replyBtn = e.target.closest('.ms-reply-btn');
+      if (replyBtn) { e.stopPropagation(); _armReply(replyBtn.dataset.mid); return; }
       const editBtn = e.target.closest('.chat-msg-edit-btn');
       if (editBtn) { e.stopPropagation(); _onEditMessage(editBtn.dataset.mid); return; }
       const delBtn = e.target.closest('.chat-msg-del-btn');
@@ -1295,10 +1484,49 @@ window.Chat = (() => {
       const bubble = e.target.closest('.chat-bubble-tap');
       if (bubble) {
         if (e.target.closest('a') || e.target.closest('img')) return;
+        // Wave5 M2 (J3) — tapping the quoted-reply block scrolls to (+
+        // flashes) the original instead of toggling the timestamp line.
+        const quote = e.target.closest('.ms-reply-quote');
+        if (quote) { _scrollToMessage(quote.dataset.targetMid); return; }
         if (longPressed) { longPressed = false; return; }
         bubble.classList.toggle('ms-time-shown');
       }
     });
+  }
+  // Wave5 M2 (J3) — swipe-right-to-reply gesture. Tracks one active drag at a
+  // time (module-scoped `_swipe`); reset defensively in teardownThread too.
+  function _onSwipeStart(e) {
+    const row = e.target.closest('.ms-row[data-mid]');   // pending/optimistic
+    if (!row) return;                                    // rows have no data-mid — excluded by construction
+    const t = e.touches && e.touches[0]; if (!t) return;
+    _swipe = { row, mid: row.dataset.mid, startX: t.clientX, startY: t.clientY, dx: 0, committed: false, aborted: false };
+  }
+  function _onSwipeMove(e) {
+    if (!_swipe || _swipe.aborted) return;
+    const t = e.touches && e.touches[0]; if (!t) return;
+    const dx = t.clientX - _swipe.startX, dy = t.clientY - _swipe.startY;
+    if (!_swipe.committed) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;         // noise floor — not enough movement to judge intent yet
+      // Slope guard: rightward AND horizontally-dominant, or this is a
+      // vertical scroll — abort permanently and never preventDefault again
+      // for the rest of this gesture (native scroll proceeds untouched).
+      if (dx <= 0 || Math.abs(dy) > Math.abs(dx) * 0.6) { _swipe.aborted = true; return; }
+      _swipe.committed = true;
+      _swipe.row.classList.add('ms-row-swiping');
+    }
+    e.preventDefault();      // only reached once horizontal intent is committed
+    _swipe.dx = Math.max(0, Math.min(dx, SWIPE_REPLY_CAP));
+    _swipe.row.style.transform = `translateX(${_swipe.dx}px)`;
+  }
+  function _onSwipeEnd() {
+    if (!_swipe) return;
+    const { row, dx, mid, committed } = _swipe;
+    if (committed) {
+      row.classList.remove('ms-row-swiping');
+      row.style.transform = '';
+      if (dx >= SWIPE_REPLY_ARM) _armReply(mid);
+    }
+    _swipe = null;
   }
   // Own message → promptDialog edit; own/admin → confirmDialog delete. NO
   // manual re-render calls here — the messages listener repaints (patched, per #2).
@@ -1379,12 +1607,15 @@ window.Chat = (() => {
   function _newClientKey() {
     return (currentUser?.uid || 'u') + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
   }
-  function _addPendingMessage({ clientKey, text, file, link }) {
+  function _addPendingMessage({ clientKey, text, file, link, replyTo }) {
     let previewUrl = null;
     if (file && /^image\//.test(file.type || '')) {
       try { previewUrl = URL.createObjectURL(file); } catch (_) {}
     }
-    _pending.push({ clientKey, text: text || '', file: file || null, link: link || null, previewUrl, status: 'sending' });
+    // Wave5 M2 — replyTo rides the pending bubble too (spec requirement):
+    // stored verbatim so _renderPendingBubble can show the SAME quote block
+    // the confirmed message will render once the snapshot echoes it back.
+    _pending.push({ clientKey, text: text || '', file: file || null, link: link || null, previewUrl, status: 'sending', replyTo: replyTo || null });
     _renderThread();
   }
   function _markPendingFailed(clientKey) {
@@ -1412,7 +1643,11 @@ window.Chat = (() => {
     p.status = 'sending';
     _renderPendingTail();
     try {
-      await sendMessage({ text: p.text, file: p.file, link: p.link, clientKey });
+      // Wave5 M2 — carry replyTo through the retry, and recompute mentions
+      // from the stored text (the retry always targets the currently open
+      // thread, same as the original send, so _openConv is the right conv).
+      const mentions = _computeMentions(p.text, _openConv);
+      await sendMessage({ text: p.text, file: p.file, link: p.link, clientKey, replyTo: p.replyTo, mentions });
     } catch (e) {
       p.status = 'failed';
       _renderPendingTail();
@@ -1435,6 +1670,9 @@ window.Chat = (() => {
     if (tail.dataset.wired) return;
     tail.dataset.wired = '1';
     tail.addEventListener('click', e => {
+      // Wave5 M2 — the pending bubble's quote block (if any) is tappable too.
+      const quote = e.target.closest('.ms-reply-quote');
+      if (quote) { _scrollToMessage(quote.dataset.targetMid); return; }
       const failed = e.target.closest('.ms-bubble-failed');
       if (failed) _retryPending(failed.dataset.clientKey);
     });
@@ -1459,6 +1697,7 @@ window.Chat = (() => {
         <div class="ms-bubble-wrap" style="align-items:flex-end">
           <div class="ms-bubble-row">
             <div class="ms-bubble ms-bubble-mine ms-grp-single ${failed?'ms-bubble-failed':'ms-bubble-pending'}" data-client-key="${escHtml(p.clientKey)}">
+              ${_replyQuoteHtml(p.replyTo)}
               ${p.text ? `<div class="ms-text">${escHtml(p.text).replace(/\n/g,'<br/>')}</div>` : ''}
               ${mediaHtml}${linkHtml}
               <div class="ms-meta" style="display:flex">${statusHtml}</div>
@@ -1507,6 +1746,200 @@ window.Chat = (() => {
         Notifs.showToast('Copy failed', 'error');
       }
     }
+  }
+
+  // ── Wave5 M2 (J3) — Reply-to ──
+  // Arms `_replyTarget` from ANY entry point (swipe-commit, hover ↩ button,
+  // long-press picker doesn't offer it — reply is swipe/hover only per spec).
+  // Looks the message up in the currently-loaded window only (_earlier/_msgs)
+  // — a message old enough to have scrolled out of that window can't be
+  // replied to without loading it first, same constraint _scrollToMessage has.
+  function _armReply(mid) {
+    const m = [..._earlier, ..._msgs].find(x => x.id === mid);
+    if (!m || m.deleted) return;
+    const info = _authorInfo(m.authorId, m.authorName);
+    const snippetSrc = (m.text || m.fileName || 'Attachment');
+    _replyTarget = { mid: m.id, author: info.name, snippet: snippetSrc.slice(0, 80) };
+    _renderReplyChip();
+    document.getElementById('chat-input')?.focus();
+  }
+  // Renders the composer's quoted-snippet chip from `_replyTarget` module
+  // state. Called on arm, on ✕, and on optimistic-send-clear/failure-restore
+  // (see doSend in _buildThreadPanel) — never on every _renderThread repaint,
+  // since the chip lives OUTSIDE the messages list (composer chrome).
+  function _renderReplyChip() {
+    const el = document.getElementById('chat-reply-chip');
+    if (!el) return;
+    if (!_replyTarget) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+    el.classList.remove('hidden');
+    el.innerHTML = `
+      <div class="ms-reply-chip-bar"></div>
+      <div class="ms-reply-chip-body">
+        <div class="ms-reply-chip-author">${escHtml(_replyTarget.author)}</div>
+        <div class="ms-reply-chip-snippet">${escHtml(_replyTarget.snippet)}</div>
+      </div>
+      <button type="button" id="chat-reply-chip-close" class="ms-reply-chip-close" title="Cancel reply">✕</button>`;
+    document.getElementById('chat-reply-chip-close')?.addEventListener('click', () => {
+      _replyTarget = null; _renderReplyChip();
+    });
+  }
+  // Tapping a quote block: scroll-to + flash if the original is in the
+  // currently-loaded window, else toast (spec: "Message not loaded").
+  function _scrollToMessage(mid) {
+    if (!mid) return;
+    const el = document.getElementById('chat-thread-scroll');
+    const node = el && el.querySelector(`.ms-row[data-mid="${CSS.escape(mid)}"]`);
+    if (!node) { Notifs.showToast('Message not loaded', 'error'); return; }
+    node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const bubble = node.querySelector('.ms-bubble');
+    if (bubble) {
+      bubble.classList.add('ms-flash');
+      setTimeout(() => bubble.classList.remove('ms-flash'), 900);
+    }
+  }
+
+  // ── Wave5 M2 (J6) — @mentions: composer-side candidate list + detection ──
+  // Group/dept ONLY (spec) — a dm returns [] here, so every mention code path
+  // (typeahead, _computeMentions) is naturally a no-op there without a
+  // separate conv.type guard at every call site.
+  function _mentionCandidatesFor(conv) {
+    if (!conv || (conv.type !== 'group' && conv.type !== 'dept')) return [];
+    if (conv.type === 'group') {
+      return (conv.participants || []).filter(uid => uid !== currentUser.uid).map(uid => ({
+        uid, name: (conv.participantNames && conv.participantNames[uid]) || _usersByUid[uid]?.displayName || 'User'
+      }));
+    }
+    // dept — membership mirrors _targetsFor's dept branch (department OR
+    // departments[] match), resolved from the SAME _usersByUid cache
+    // _refreshUsersCache already keeps warm for avatar/author-name lookups.
+    return Object.keys(_usersByUid).filter(uid => uid !== currentUser.uid).map(uid => {
+      const u = _usersByUid[uid];
+      const inDept = u.department === conv.department || (Array.isArray(u.departments) && u.departments.includes(conv.department));
+      return inDept ? { uid, name: u.displayName || u.email || 'User' } : null;
+    }).filter(Boolean);
+  }
+  // Scans the RAW (unescaped) composer text for literal "@Name" occurrences
+  // of each candidate's display name — the same literal-match convention the
+  // renderer's _highlightMentions uses on the escaped side, so "what got
+  // notified" and "what gets highlighted" can never disagree. Typing "@"
+  // followed by a name that ISN'T selected from the typeahead simply never
+  // matches here (no false-positive mention), matching Messenger's own
+  // "mention = a real selected token" semantics without needing separate
+  // insertion-position bookkeeping that free-form text edits could invalidate.
+  function _computeMentions(text, conv) {
+    if (!text) return [];
+    const candidates = _mentionCandidatesFor(conv);
+    if (!candidates.length) return [];
+    const out = [];
+    candidates.forEach(c => { if (c.name && text.indexOf('@' + c.name) !== -1) out.push(c.uid); });
+    return out;
+  }
+  // Composer input handler (wired in _buildThreadPanel, which owns `input`/
+  // `conv`) — detects an in-progress "@query" token ending at the caret and
+  // repaints the typeahead dropdown, or hides it when there's no active token.
+  function _updateMentionTypeahead(input, conv) {
+    const dd = document.getElementById('chat-mention-dd');
+    if (!dd) return;
+    const candidates = _mentionCandidatesFor(conv);
+    if (!candidates.length) { dd.classList.add('hidden'); dd.innerHTML = ''; return; }
+    const pos = input.selectionStart;
+    const uptoCaret = input.value.slice(0, pos);
+    const at = uptoCaret.lastIndexOf('@');
+    // A token only counts if the '@' starts a word (start-of-text or preceded
+    // by whitespace) — "user@x" mid-word never triggers it.
+    if (at === -1 || (at > 0 && !/\s/.test(uptoCaret[at - 1]))) { dd.classList.add('hidden'); dd.innerHTML = ''; return; }
+    const query = uptoCaret.slice(at + 1);
+    if (/\s/.test(query)) { dd.classList.add('hidden'); dd.innerHTML = ''; return; }   // a space ends the token
+    const q = query.toLowerCase();
+    const matches = candidates.filter(c => c.name.toLowerCase().includes(q)).slice(0, 8);
+    if (!matches.length) { dd.classList.add('hidden'); dd.innerHTML = ''; return; }
+    dd.innerHTML = matches.map(c =>
+      `<button type="button" class="ms-mention-opt" data-uid="${escHtml(c.uid)}" data-name="${escHtml(c.name)}">${escHtml(c.name)}</button>`
+    ).join('');
+    dd.dataset.atPos = String(at);
+    dd.classList.remove('hidden');
+  }
+
+  // ── Wave5 M2 (J3) — Forward ──
+  // Conversation picker = "my conversations, sorted recent" (dm/group/dept —
+  // the SAME merged+sorted list _renderInbox builds, reusing _convTitle for
+  // row labels), reached via openPage like every other secondary chat screen
+  // (New Message, per renderChatPage). Selecting a row writes a FRESH message
+  // to that conversation via the SAME sendMessage({conv}) machinery every
+  // other send uses — the target's lastMessage* preview bump and
+  // _notifyRecipients both come along for free, nothing duplicated here.
+  async function _openForwardPicker(mid) {
+    const m = [..._earlier, ..._msgs].find(x => x.id === mid);
+    if (!m || m.deleted) return;
+    const sourceConvId = _openConvId;
+    if (!sourceConvId) return;
+    const deptRows = myDeptChannels().map(d => {
+      const existing = _deptConvs.find(cv => cv.department === d);
+      return existing || { id: 'dept_' + d, type: 'dept', department: d, name: d, participants: [], lastMessageAt: null, _unprovisioned: true };
+    });
+    const all = [..._convs, ...deptRows].filter(cv => cv.id !== sourceConvId);
+    const sorted = all.slice().sort((a, b) => (b.lastMessageAt?.toMillis?.() || 0) - (a.lastMessageAt?.toMillis?.() || 0));
+    const initials = s => escHtml((s || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2));
+    const rowHtml = cv => {
+      const title = _convTitle(cv);
+      return `<div class="item-card chat-forward-target pressable" data-cid="${escHtml(cv.id)}" style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px">
+        <div class="ms-avatar ms-avatar-md">${initials(title)}</div>
+        <div style="flex:1;min-width:0;font-weight:600">${escHtml(title)}</div>
+      </div>`;
+    };
+    const body = `<div id="chat-forward-list" class="item-list">${
+      sorted.map(rowHtml).join('') || '<div class="empty-state" style="padding:16px"><p>No conversations yet.</p></div>'
+    }</div>`;
+    window.openPage('Forward to…', body);
+    document.getElementById('chat-forward-list')?.querySelectorAll('.chat-forward-target').forEach(row => {
+      row.addEventListener('click', async () => {
+        let target = sorted.find(x => x.id === row.dataset.cid);
+        if (!target) return;
+        window.Overlay.dismissTop();
+        try {
+          if (target._unprovisioned) {   // lazy-create, mirrors openDeptChannel
+            await db.collection('conversations').doc(target.id).set({
+              type: 'dept', department: target.department, name: target.department, participants: [],
+              participantNames: {}, createdBy: currentUser.uid, createdByName: _myName(),
+              createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+              lastMessageAt: null, lastMessageText: null, lastMessageBy: null, lastMessageByName: null
+            }).catch(() => {});
+          }
+          const forwardedFrom = { convId: sourceConvId, authorName: _authorInfo(m.authorId, m.authorName).name };
+          await sendMessage({
+            text: m.text || '', clientKey: _newClientKey(), conv: target, forwardedFrom,
+            fileUrl: m.fileUrl || null, fileName: m.fileName || null, fileSource: m.fileSource || null
+          });
+          Notifs.success('Forwarded');
+        } catch (_) {
+          Notifs.showToast('Forward failed', 'error');
+        }
+      });
+    });
+  }
+
+  // ── Wave5 M2 (J6) — composer emoji picker (REACTIONS + EMOJI_GRID; module-
+  // level so its outside-click listener can be torn down from teardownThread,
+  // mirroring the wallpaper popover's _wpMenuOpen/_wpOutsideClick pattern). ──
+  function _closeEmojiGrid() {
+    document.getElementById('chat-emoji-grid')?.classList.add('hidden');
+    document.removeEventListener('click', _emojiOutsideClick, true);
+    _emojiMenuOpen = false;
+  }
+  function _emojiOutsideClick(e) {
+    const grid = document.getElementById('chat-emoji-grid');
+    const btn = document.getElementById('chat-emoji-btn');
+    if (grid && !grid.contains(e.target) && e.target !== btn && !btn?.contains(e.target)) _closeEmojiGrid();
+  }
+  // selectionStart-aware insert (spec) — works whether or not the textarea
+  // currently has a selection (collapsed selection = plain cursor position).
+  function _insertEmojiAtCursor(input, emoji) {
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+    const newPos = start + emoji.length;
+    input.setSelectionRange(newPos, newPos);
+    input.focus();
   }
 
   function _renderThread(opts) {
