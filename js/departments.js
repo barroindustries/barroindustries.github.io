@@ -4477,10 +4477,16 @@ async function renderTaxesTab(container, currentUser, currentRole) {
 }
 
 // Export the currently-shown report period's ledger rows to CSV (accountant/BIR).
+// v14 Wave4 F3 — when the on-screen report has Compare ON, window._finReportCompare
+// (stashed by renderFinancialReports, same render pass — never recomputed here)
+// carries the category-total maps for the previous period + same period last
+// year, so each row also gets its category's Prev/YoY/Δ% context. Compare OFF
+// (the default / legacy behavior) exports exactly the columns it always has.
 window.exportFinReportCSV = function() {
   const rows = window._finReportRows || [];
   const slug = (window._finReportLabel || 'ledger').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
-  window.exportCSV('ledger-' + slug, rows, [
+  const cmp = window._finReportCompare || null;
+  const cols = [
     { key:'date', label:'Date' },
     { key:'type', label:'Type' },
     { key:'category', label:'Category' },
@@ -4490,23 +4496,37 @@ window.exportFinReportCSV = function() {
     { key:'vatAmount', label:'Output VAT', get:r=>r.vatAmount||0 },
     { key:'inputVat', label:'Input VAT', get:r=>r.inputVat||0 },
     { key:'source', label:'Source', get:r=>r.source||'' }
-  ]);
+  ];
+  if (cmp) {
+    const forRow = (r, curMap, prevMap, yoyMap) => {
+      const cat = r.category || 'Other';
+      return { cur: curMap[cat]||0, prev: prevMap[cat]||0, yoy: yoyMap[cat]||0 };
+    };
+    const pick = r => window.ledgerKind(r)==='income'
+      ? forRow(r, cmp.incCur, cmp.incPrev, cmp.incYoy)
+      : forRow(r, cmp.expCur, cmp.expPrev, cmp.expYoy);
+    cols.push(
+      { key:'catPrev', label:'Category Total — ' + cmp.prevLabel, get:r=>pick(r).prev },
+      { key:'catYoy',  label:'Category Total — ' + cmp.yoyLabel,  get:r=>pick(r).yoy },
+      { key:'catDeltaPct', label:'Category Δ% vs Previous', get:r=>{
+          const { cur, prev } = pick(r);
+          if (!prev) return '';
+          return Math.round(((cur - prev) / Math.abs(prev)) * 100);
+        } }
+    );
+  }
+  window.exportCSV('ledger-' + slug, rows, cols);
 };
 
-// ── Financial Reports (Income Statement + VAT/BIR reference) ─────
-// Computed from the ledger (ledgerKind() = income/expense, v12 WS13 chart-of-
-// accounts aware) + general journal. Read-only summary for finance/admin;
-// print-ready for filing. Period picker (v12 WS12) supports any month/quarter/
-// year, not just This-Month/YTD/All — see window.Period in config.js.
-window.renderFinancialReports = async function(container, currentUser, currentRole, range='month') {
-  container.innerHTML = '<div class="loading-placeholder">Building report…</div>';
-  // 'year' (legacy Reports spelling) is a Period alias for 'ytd' — same math.
-  const periodKey = (range === 'year') ? 'ytd' : range;
-  const pParsed = window.Period.parse(periodKey);
-  // v12 WS39 — period resolved FIRST, then date-range-bounded reads (WS16's
-  // ledgerForPeriod/gjForPeriod), NOT the old "3000 most recent rows of ALL
-  // TIME, then filter" pattern — that silently truncated any period older
-  // than the newest 3000 ledger docs (the BIR-suite compliance landmine).
+// v14 Wave4 F3 — ONE loader for every period-statement fetch the Reports
+// screen makes: the on-screen current period AND (when Compare is on) the
+// previous-period/same-period-last-year columns. Identical bounded reads
+// (ledgerForPeriod/gjForPeriod) + identical merge/filter/ledgerKind grouping
+// as the pre-F3 inline code, so a compare column can never be computed by a
+// different codepath than the current period's own numbers — same math,
+// different date range, guaranteed.
+async function loadFinStatement(periodKey) {
+  const parsed = window.Period.parse(periodKey);
   const [ledgerSnap, gjSnap] = await Promise.all([
     window.ledgerForPeriod(periodKey),
     window.gjForPeriod(periodKey)
@@ -4516,23 +4536,164 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
     if (e.debit)  rows.push({date:e.date, type:'debit',  amount:e.debit,  category:'Journal Entry'});
     if (e.credit) rows.push({date:e.date, type:'credit', amount:e.credit, category:'Journal Entry'});
     return rows; });
-  let all = [...led, ...gj];
+  let rows = [...led, ...gj];
   // Belt-and-braces client-side filter for rows with odd/legacy date strings
   // (e.g. month-level 'YYYY-MM' rows) that the bounded query's exact-string
   // range compare might not line up with the parsed period boundaries.
-  all = all.filter(e => window.Period.match(e.date, pParsed));
+  rows = rows.filter(e => window.Period.match(e.date, parsed));
+  const income  = rows.filter(e=>ledgerKind(e)==='income');
+  const expense = rows.filter(e=>ledgerKind(e)==='expense');
+  const totIncome  = income.reduce((s,e)=>s+(e.amount||0),0);
+  const totExpense = expense.reduce((s,e)=>s+(e.amount||0),0);
+  return { parsed, rows, income, expense, totIncome, totExpense };
+}
+
+// v14 Wave4 F3 — Manila-safe period-shift for the Compare toggle. Pure
+// integer arithmetic on the ALREADY Manila-resolved canonical period key
+// (window.Period itself resolves everything off window.bizDate()) — no
+// `new Date(...)`/UTC math, which is the exact class of bug the Manila-time
+// helpers memory warns about. Returns {prevKey, yoyKey} (canonical Period
+// keys, feedable straight back into ledgerForPeriod/gjForPeriod), or null
+// for 'all' (no meaningful previous period to shift to).
+function finCompareKeys(pParsed) {
+  if (pParsed.type === 'month') {
+    const [y, m] = pParsed.key.slice(6).split('-').map(Number);
+    const shift = delta => {
+      const idx = y * 12 + (m - 1) + delta;
+      const ny = Math.floor(idx / 12), nm = (idx % 12) + 1;
+      return 'month:' + ny + '-' + String(nm).padStart(2, '0');
+    };
+    return { prevKey: shift(-1), yoyKey: shift(-12) };
+  }
+  if (pParsed.type === 'quarter') {
+    const m = pParsed.key.match(/^quarter:(\d{4})-Q([1-4])$/);
+    const y = +m[1], q = +m[2];
+    const shift = delta => {
+      const idx = y * 4 + (q - 1) + delta;
+      const ny = Math.floor(idx / 4), nq = (idx % 4) + 1;
+      return 'quarter:' + ny + '-Q' + nq;
+    };
+    return { prevKey: shift(-1), yoyKey: shift(-4) };
+  }
+  if (pParsed.type === 'year') {
+    const y = +pParsed.key.slice(5);
+    // Year granularity: "previous period" and "same period last year" are
+    // mathematically the same calendar year (year - 1) — there's no narrower
+    // sub-period to distinguish them by. Both columns intentionally resolve
+    // to the same key; this is correct, not a bug.
+    return { prevKey: 'year:' + (y - 1), yoyKey: 'year:' + (y - 1) };
+  }
+  return null; // 'all' — Compare is disabled for this period type
+}
+
+// ── Financial Reports (Income Statement + VAT/BIR reference) ─────
+// Computed from the ledger (ledgerKind() = income/expense, v12 WS13 chart-of-
+// accounts aware) + general journal. Read-only summary for finance/admin;
+// print-ready for filing. Period picker (v12 WS12) supports any month/quarter/
+// year, not just This-Month/YTD/All — see window.Period in config.js.
+// v14 Wave4 F3 — `compare` (default off) turns on the Previous/Same-period-
+// last-year columns; every category row is also now a drill-down link (see
+// window.openFinCategoryDrill below).
+window.renderFinancialReports = async function(container, currentUser, currentRole, range='month', compare=false) {
+  container.innerHTML = '<div class="loading-placeholder">Building report…</div>';
+  // 'year' (legacy Reports spelling) is a Period alias for 'ytd' — same math.
+  const periodKey = (range === 'year') ? 'ytd' : range;
+  // v12 WS39 — period resolved FIRST, then date-range-bounded reads (WS16's
+  // ledgerForPeriod/gjForPeriod), NOT the old "3000 most recent rows of ALL
+  // TIME, then filter" pattern — that silently truncated any period older
+  // than the newest 3000 ledger docs (the BIR-suite compliance landmine).
+  const stmt = await loadFinStatement(periodKey);
+  const { parsed: pParsed, rows: all, income, expense, totIncome, totExpense } = stmt;
+  const net = totIncome - totExpense;
   const label = pParsed.type === 'all' ? 'All Time' : (periodKey === 'ytd' ? 'YTD ' + bizYear() : pParsed.label);
   // Stash the period's rows so the CSV export button (inline onclick) can reach them.
   window._finReportRows = all.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   window._finReportLabel = label;
 
-  const income  = all.filter(e=>ledgerKind(e)==='income');
-  const expense = all.filter(e=>ledgerKind(e)==='expense');
-  const totIncome  = income.reduce((s,e)=>s+(e.amount||0),0);
-  const totExpense = expense.reduce((s,e)=>s+(e.amount||0),0);
-  const net = totIncome - totExpense;
-  const byCat = arr => { const m={}; arr.forEach(e=>{const k=e.category||'Other'; m[k]=(m[k]||0)+(e.amount||0);}); return Object.entries(m).sort((a,b)=>b[1]-a[1]); };
-  const incCats = byCat(income), expCats = byCat(expense);
+  // Compare is meaningless for 'all' (no period boundary to shift) — force it
+  // off rather than silently ignore a stale `true` carried over from a prior
+  // period-picker selection.
+  const compareOn = !!compare && pParsed.type !== 'all';
+
+  // byCatWithRows groups by category AND keeps each category's row subset —
+  // that row subset is later handed VERBATIM to openFinCategoryDrill, so the
+  // drill page's total is computed from the exact same array this function
+  // sums for the on-screen category total. Same data, same math, by
+  // construction (no second fetch, no re-filter of a different row set).
+  const byCatWithRows = arr => {
+    const m = {};
+    arr.forEach(e => { const k = e.category || 'Other'; (m[k] = m[k] || []).push(e); });
+    return Object.entries(m)
+      .map(([k, rs]) => [k, rs.reduce((s,e)=>s+(e.amount||0),0), rs])
+      .sort((a,b) => b[1]-a[1]);
+  };
+  const incCats = byCatWithRows(income), expCats = byCatWithRows(expense);   // [category, total, rows]
+  // kind::category -> rows, for the click-to-drill handler wired after render.
+  const catRowMap = {};
+  incCats.forEach(([k,,rs]) => { catRowMap['income::'+k]  = rs; });
+  expCats.forEach(([k,,rs]) => { catRowMap['expense::'+k] = rs; });
+
+  // ── Compare fetch (two extra period-bounded reads, ONLY when Compare is on) ──
+  let cmp = null;
+  if (compareOn) {
+    const keys = finCompareKeys(pParsed);
+    if (keys) {
+      const [prevStmt, yoyStmt] = await Promise.all([
+        loadFinStatement(keys.prevKey),
+        loadFinStatement(keys.yoyKey)
+      ]);
+      const catTotalMap = arr => { const m={}; arr.forEach(e=>{const k=e.category||'Other'; m[k]=(m[k]||0)+(e.amount||0);}); return m; };
+      cmp = {
+        prevLabel: window.Period.parse(keys.prevKey).label,
+        yoyLabel:  window.Period.parse(keys.yoyKey).label,
+        incPrev: catTotalMap(prevStmt.income), expPrev: catTotalMap(prevStmt.expense),
+        incYoy:  catTotalMap(yoyStmt.income),  expYoy:  catTotalMap(yoyStmt.expense),
+        totIncomePrev: prevStmt.totIncome, totExpensePrev: prevStmt.totExpense,
+        totIncomeYoy:  yoyStmt.totIncome,  totExpenseYoy:  yoyStmt.totExpense,
+      };
+    }
+  }
+  // Stashed for window.exportFinReportCSV — incCur/expCur are the CURRENT
+  // period's own category totals (from incCats/expCats above), so the CSV's
+  // Δ% is computed from the identical numbers the on-screen table shows.
+  window._finReportCompare = (compareOn && cmp) ? {
+    prevLabel: cmp.prevLabel, yoyLabel: cmp.yoyLabel,
+    incCur: Object.fromEntries(incCats.map(([k,v])=>[k,v])),
+    expCur: Object.fromEntries(expCats.map(([k,v])=>[k,v])),
+    incPrev: cmp.incPrev, expPrev: cmp.expPrev,
+    incYoy: cmp.incYoy, expYoy: cmp.expYoy,
+  } : null;
+
+  const cmpCols = compareOn && cmp;   // shorthand for the template below
+  const catRow = (k, v, kind) => {
+    const goodUp = kind === 'income';
+    const chevron = `<i data-lucide="chevron-right" class="finrep-cat-chevron" style="width:13px;height:13px;vertical-align:-2px;opacity:.55;margin-right:4px"></i>`;
+    let extra = '';
+    if (cmpCols) {
+      const prevMap = kind==='income' ? cmp.incPrev : cmp.expPrev;
+      const yoyMap  = kind==='income' ? cmp.incYoy  : cmp.expYoy;
+      const prevV = prevMap[k]||0, yoyV = yoyMap[k]||0;
+      extra = `<td style="text-align:right;color:var(--text-muted)">₱${fmt(prevV)}</td>
+        <td style="text-align:right;color:var(--text-muted)">₱${fmt(yoyV)}</td>
+        <td style="text-align:right">${window.momDelta ? window.momDelta(v, prevV, goodUp) : ''}</td>`;
+    }
+    return `<tr class="finrep-cat-row" data-kind="${kind}" data-cat="${escHtml(k)}" tabindex="0" role="button" title="View ${escHtml(k)} entries for ${escHtml(label)}">
+      <td style="padding-left:24px">${chevron}${escHtml(k)}</td>
+      <td style="text-align:right">₱${fmt(v)}</td>
+      ${extra}
+    </tr>`;
+  };
+  const totalRow = (labelText, cur, prevVal, yoyVal, goodUp, color) => {
+    let extra = '';
+    if (cmpCols) {
+      extra = `<td style="text-align:right;font-weight:700;color:var(--text-muted)">₱${fmt(prevVal)}</td>
+        <td style="text-align:right;font-weight:700;color:var(--text-muted)">₱${fmt(yoyVal)}</td>
+        <td style="text-align:right;font-weight:700">${window.momDelta ? window.momDelta(cur, prevVal, goodUp) : ''}</td>`;
+    }
+    return `<tr><td style="font-weight:700">${labelText}</td><td style="text-align:right;font-weight:700;color:${color}">₱${fmt(cur)}</td>${extra}</tr>`;
+  };
+  const emptyRow = (text) => `<tr><td style="padding-left:24px;color:var(--text-muted)">${text}</td><td style="text-align:right">₱0.00</td>${cmpCols?'<td></td><td></td><td></td>':''}</tr>`;
+
   const salesRows = income.filter(e=>(e.category||'')==='Sales Revenue');
   const sales = salesRows.reduce((s,e)=>s+(e.amount||0),0);
   // Output/Input VAT — ONE shared computation (window.computeVatSummary, js/bir.js,
@@ -4560,15 +4721,22 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
   container.innerHTML = `
     ${_finLh ? `<style>.finrep-print-lh{display:none}@media print{.finrep-print-lh{display:block!important;margin-bottom:10px}}</style>
     <div class="finrep-print-lh">${_finLh.headerHTML}</div>` : ''}
+    <style>.finrep-cat-row:hover{background:var(--s1,rgba(255,255,255,0.04))}</style>
     <div id="finrep-period">${window.periodPicker(periodKey, {})}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <div style="font-size:12px;color:var(--text-muted)">${label}${periodClosed?` &nbsp;<span class="badge badge-gray">${emojiIcon('🔒',16)} Closed</span>`:''}</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
         ${isPres&&isClosableMonth?(periodClosed
             ? `<button class="btn-secondary btn-sm" id="finrep-reopen-btn" data-month="${pParsed.key.slice(6)}">${emojiIcon('🔓',16)} Reopen ${pParsed.label}</button>`
             : `<button class="btn-secondary btn-sm" id="finrep-close-btn" data-month="${pParsed.key.slice(6)}" data-label="${escHtml(pParsed.label)}">${emojiIcon('🔒',16)} Close ${pParsed.label}</button>`
           ):''}
-        <button class="btn-secondary btn-sm" onclick="window.exportFinReportCSV()" title="Export this period's ledger to CSV">${emojiIcon('⬇',16)} CSV</button>
+        <div class="chip-tabs" style="margin:0">
+          <button type="button" class="chip-tab${compareOn?' active':''}" id="finrep-compare-chip"
+            ${pParsed.type==='all'?'disabled style="opacity:.45;cursor:not-allowed" title="Compare needs a specific month/quarter/year, not All Time"':`title="${compareOn?'Turn off':'Turn on'} period comparison"`}>
+            ${emojiIcon('🔀',16)} Compare
+          </button>
+        </div>
+        <button class="btn-secondary btn-sm" onclick="window.exportFinReportCSV()" title="Export this period's ledger to CSV${compareOn?' (includes comparison columns)':''}">${emojiIcon('⬇',16)} CSV</button>
         <button class="btn-secondary btn-sm" onclick="window.print()">${emojiIcon('🖨',16)} Print</button>
       </div>
     </div>
@@ -4579,17 +4747,27 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
     </div>
 
     <div class="card" style="margin-bottom:14px">
-      <div class="card-header"><h3>${emojiIcon('📈',20)} Income Statement</h3></div>
+      <div class="card-header"><h3>${emojiIcon('📈',20)} Income Statement</h3>${cmpCols?`<span style="font-size:11px;color:var(--text-muted)">Click a category to view its entries</span>`:''}</div>
       <div class="card-body" style="padding:0"><div class="table-wrap"><table class="data-table">
-        <thead><tr><th>Account / Category</th><th style="text-align:right">Amount</th></tr></thead>
+        <thead><tr>
+          <th>Account / Category</th><th style="text-align:right">${escHtml(label)}</th>
+          ${cmpCols?`<th style="text-align:right">${escHtml(cmp.prevLabel)}</th><th style="text-align:right">${escHtml(cmp.yoyLabel)}</th><th style="text-align:right">Δ vs Previous</th>`:''}
+        </tr></thead>
         <tbody>
-          <tr><td colspan="2" style="font-weight:800;color:var(--success);background:rgba(48,209,88,0.06)">INCOME</td></tr>
-          ${incCats.length?incCats.map(([k,v])=>`<tr><td style="padding-left:24px">${escHtml(k)}</td><td style="text-align:right">₱${fmt(v)}</td></tr>`).join(''):'<tr><td style="padding-left:24px;color:var(--text-muted)">No income recorded</td><td style="text-align:right">₱0.00</td></tr>'}
-          <tr><td style="font-weight:700">Total Income</td><td style="text-align:right;font-weight:700;color:var(--success)">₱${fmt(totIncome)}</td></tr>
-          <tr><td colspan="2" style="font-weight:800;color:var(--danger);background:rgba(255,69,58,0.06)">EXPENSES</td></tr>
-          ${expCats.length?expCats.map(([k,v])=>`<tr><td style="padding-left:24px">${escHtml(k)}</td><td style="text-align:right">₱${fmt(v)}</td></tr>`).join(''):'<tr><td style="padding-left:24px;color:var(--text-muted)">No expenses recorded</td><td style="text-align:right">₱0.00</td></tr>'}
-          <tr><td style="font-weight:700">Total Expenses</td><td style="text-align:right;font-weight:700;color:var(--danger)">₱${fmt(totExpense)}</td></tr>
-          <tr style="border-top:2px solid var(--border)"><td style="font-weight:800;font-size:14px">NET INCOME</td><td style="text-align:right;font-weight:800;font-size:14px;color:${net>=0?'var(--success)':'var(--danger)'}">₱${fmt(net)}</td></tr>
+          <tr><td colspan="${cmpCols?5:2}" style="font-weight:800;color:var(--success);background:rgba(48,209,88,0.06)">INCOME</td></tr>
+          ${incCats.length?incCats.map(([k,v])=>catRow(k,v,'income')).join(''):emptyRow('No income recorded')}
+          ${totalRow('Total Income', totIncome, cmpCols?cmp.totIncomePrev:0, cmpCols?cmp.totIncomeYoy:0, true, 'var(--success)')}
+          <tr><td colspan="${cmpCols?5:2}" style="font-weight:800;color:var(--danger);background:rgba(255,69,58,0.06)">EXPENSES</td></tr>
+          ${expCats.length?expCats.map(([k,v])=>catRow(k,v,'expense')).join(''):emptyRow('No expenses recorded')}
+          ${totalRow('Total Expenses', totExpense, cmpCols?cmp.totExpensePrev:0, cmpCols?cmp.totExpenseYoy:0, false, 'var(--danger)')}
+          <tr style="border-top:2px solid var(--border)">
+            <td style="font-weight:800;font-size:14px">NET INCOME</td>
+            <td style="text-align:right;font-weight:800;font-size:14px;color:${net>=0?'var(--success)':'var(--danger)'}">₱${fmt(net)}</td>
+            ${cmpCols?(()=>{ const prevNet=cmp.totIncomePrev-cmp.totExpensePrev, yoyNet=cmp.totIncomeYoy-cmp.totExpenseYoy;
+              return `<td style="text-align:right;font-weight:800;color:var(--text-muted)">₱${fmt(prevNet)}</td>
+                <td style="text-align:right;font-weight:800;color:var(--text-muted)">₱${fmt(yoyNet)}</td>
+                <td style="text-align:right;font-weight:800">${window.momDelta?window.momDelta(net,prevNet,true):''}</td>`; })():''}
+          </tr>
         </tbody>
       </table></div></div>
     </div>
@@ -4610,19 +4788,102 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
     // periodPicker/Period use canonical keys; renderFinancialReports keeps its
     // legacy 'year' spelling for the YTD case so its own external callers
     // (and the CSV/print title) read naturally — everything else passes through.
-    renderFinancialReports(container, currentUser, currentRole, newKey === 'ytd' ? 'year' : newKey);
+    // Compare state carries across a period switch (auto-drops for 'all' via
+    // the compareOn guard at the top of the function).
+    renderFinancialReports(container, currentUser, currentRole, newKey === 'ytd' ? 'year' : newKey, compareOn);
   }, { activeKey: periodKey });
   document.getElementById('finrep-close-btn')?.addEventListener('click', async () => {
     const mk = document.getElementById('finrep-close-btn').dataset.month;
     if (!(await confirmDialog({message:`Close the books for ${document.getElementById('finrep-close-btn').dataset.label}?\n\nNo new entries can post to this month until it's reopened.`}))) return;
     await window.closeFinancePeriod(mk);
-    renderFinancialReports(container, currentUser, currentRole, range);
+    renderFinancialReports(container, currentUser, currentRole, range, compareOn);
   });
   document.getElementById('finrep-reopen-btn')?.addEventListener('click', async () => {
     const mk = document.getElementById('finrep-reopen-btn').dataset.month;
     if (!(await confirmDialog({message:`Reopen ${mk} for editing?`}))) return;
     await window.reopenFinancePeriod(mk);
-    renderFinancialReports(container, currentUser, currentRole, range);
+    renderFinancialReports(container, currentUser, currentRole, range, compareOn);
+  });
+  document.getElementById('finrep-compare-chip')?.addEventListener('click', () => {
+    renderFinancialReports(container, currentUser, currentRole, range, !compareOn);
+  });
+  // v14 Wave4 F3 — click-to-drill. `rows` is the exact per-category array
+  // element from byCatWithRows/catRowMap above (never refetched/refiltered),
+  // so the drill page's total is guaranteed to equal this row's ₱ figure.
+  container.querySelectorAll('.finrep-cat-row').forEach(tr => {
+    const openDrill = () => {
+      const rows = catRowMap[tr.dataset.kind + '::' + tr.dataset.cat] || [];
+      window.openFinCategoryDrill(tr.dataset.cat, tr.dataset.kind, rows, label);
+    };
+    tr.addEventListener('click', openDrill);
+    tr.addEventListener('keydown', (ev) => { if (ev.key==='Enter'||ev.key===' ') { ev.preventDefault(); openDrill(); } });
+  });
+};
+
+// v14 Wave4 F3 — Income Statement category drill-down. `rows` MUST be the
+// same period-bounded row subset renderFinancialReports already fetched and
+// grouped (catRowMap, built from byCatWithRows) — never re-queried here.
+// Invariant: sum(rows.map(r=>r.amount)) === the category total shown on the
+// Income Statement, because both numbers come from the identical array.
+window.openFinCategoryDrill = function(category, kind, rows, periodLabel) {
+  const sorted = (rows || []).slice().sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const total = sorted.reduce((s,e)=>s+(e.amount||0),0);
+  const vatFlag = e => e.vatTreatment==='exempt' ? 'Exempt' : (((e.vatAmount||0)>0 || (e.inputVat||0)>0) ? 'VATable' : '—');
+
+  // Same self-contained openPage-print pattern as openPayrollReconciliation
+  // (js/departments.js) — the .page-panel host sits outside #page-content, so
+  // it needs its own letterhead + A4 page rule rather than relying on the
+  // shared #page-content print block.
+  const _lh = window.buildLetterhead ? window.buildLetterhead({
+    docTitle: (kind==='income'?'INCOME':'EXPENSE') + ' DETAIL — ' + category.toUpperCase(),
+    dateLabel: periodLabel,
+    footerNote: ((window.BRAND && window.BRAND.fullName) || 'Barro Industries Operating System') + ' · Generated ' + new Date().toLocaleString('en-PH')
+  }) : null;
+  const printCss = _lh ? `<style>
+    .findrill-print-lh{display:none}
+    @media print{
+      body *{visibility:hidden!important}
+      .findrill-print-wrap,.findrill-print-wrap *{visibility:visible!important}
+      .findrill-print-wrap{position:absolute;left:0;top:0;width:100%;padding:8mm}
+      .findrill-print-lh{display:block!important}
+      @page{size:A4 portrait;margin:11mm 10mm 7mm}
+    }
+    ${_lh.printCSS}
+  </style>` : '';
+
+  window.openPage(`${emojiIcon(kind==='income'?'📈':'📉',16)} ${category} — ${periodLabel}`, `
+    ${printCss}
+    <div class="findrill-print-wrap">
+      <div class="findrill-print-lh">${_lh?_lh.headerHTML:''}</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${escHtml(category)} · ${kind==='income'?'Income':'Expense'} · ${escHtml(periodLabel)} · ${sorted.length} entr${sorted.length===1?'y':'ies'}</div>
+      <div class="card"><div class="card-body" style="padding:0">
+        ${!sorted.length ? `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📄',44)}</div><h4>No entries in this category for ${escHtml(periodLabel)}</h4></div>` :
+        `<div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Date</th><th>Reference</th><th>Description</th><th>VAT</th><th style="text-align:right">Amount</th></tr></thead>
+          <tbody>${sorted.map(e=>`<tr>
+            <td style="white-space:nowrap">${escHtml(e.date||'—')}</td>
+            <td><code>${escHtml(e.refNumber||'—')}</code></td>
+            <td>${escHtml(e.description||'—')}</td>
+            <td style="font-size:11px">${vatFlag(e)}</td>
+            <td style="text-align:right">₱${fmt(e.amount||0)}</td>
+          </tr>`).join('')}</tbody>
+          <tfoot><tr style="border-top:2px solid var(--border)"><td colspan="4" style="font-weight:800">Total — ${escHtml(category)}</td><td style="text-align:right;font-weight:800">₱${fmt(total)}</td></tr></tfoot>
+        </table></div>`}
+      </div></div>
+      <div class="findrill-print-lh">${_lh?_lh.footerHTML:''}</div>
+    </div>
+  `, `<button class="btn-secondary" id="findrill-csv-btn">${emojiIcon('⬇',16)} CSV</button><button class="btn-secondary" onclick="window.print()">${emojiIcon('🖨',16)} Print</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+
+  if (window.lucide) lucide.createIcons();
+  document.getElementById('findrill-csv-btn')?.addEventListener('click', () => {
+    const slug = (category + '-' + periodLabel).replace(/[^a-z0-9]+/gi,'-').toLowerCase();
+    window.exportCSV('income-statement-' + slug, sorted, [
+      { key:'date', label:'Date' },
+      { key:'refNumber', label:'Reference', get:r=>r.refNumber||'' },
+      { key:'description', label:'Description' },
+      { key:'vat', label:'VAT', get:r=>vatFlag(r) },
+      { key:'amount', label:'Amount', get:r=>r.amount||0 }
+    ]);
   });
 };
 
