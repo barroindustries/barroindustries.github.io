@@ -179,7 +179,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.149 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.150 · Barro Industries</div>
   </div>
 </div>
 
@@ -389,6 +389,12 @@
      Must load before departments.js, which calls these via window.*. -->
 <script defer src="js/money-core.js"></script>
 <script defer src="js/departments.js"></script>
+<!-- v14 Wave 2 Batch B — Design department screen, split verbatim out of
+     departments.js (extraction-protocol pilot). Must load after
+     departments.js: Design's functions call departments.js's shared
+     helpers (canEditDept, deptContainer, renderClientProfiles, etc.) by
+     window.*/bare-global name at runtime only, never at parse time. -->
+<script defer src="js/screens/design.js"></script>
 <!-- v13 Phase 37 — one-time/rare president maintenance tools, split out of
      departments.js for hot-file size. Plain deferred script (not the
      dynamic-import lazy-load V13-PLAN.md sketched) — simpler safe variant

@@ -77,3 +77,11 @@ jobs:
           node-version: '20'
       - name: Check UI wiring
         run: node scripts/check-ui-wiring.js
+
+  invariants:
+    name: Invariant guards (z-index stacking, sw.js PRECACHE completeness)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check stacking + PRECACHE invariants
+        run: bash scripts/ci-invariants.sh
