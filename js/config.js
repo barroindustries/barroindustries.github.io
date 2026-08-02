@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.153';
+window.APP_VERSION = '12.0.154';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -186,10 +186,10 @@ window.DEPARTMENTS = {
   },
   'Finance': {
     key: 'Finance', icon: '💰', lucideIcon: 'wallet', color: '#2F9E44',
-    // renderFinance's actual finTabs + hrTabs chip lists (departments.js:2789-2790).
-    subtabs: ['Overview', 'Reports', 'Sales Orders', 'Ledger', 'Bank Accounts', 'Cash Receipts',
-              'Cash Disbursements', 'Purchases', 'Inventory', 'Records', 'Taxes', 'BIR', 'SSS / Gov',
-              'Tasks', 'Payroll', 'HR Profiles', 'Cash Advances'], navOrder: 2
+    // v14 wave4 F1: the 7 user-visible groups (FINANCE_GROUPS in departments.js);
+    // every old flat key still resolves via FINANCE_KEY_TO_GROUP aliasing.
+    subtabs: ['Overview', 'Money In/Out', 'Reports', 'Payroll & HR',
+              'Purchases & Inventory', 'Taxes & BIR', 'Records'], navOrder: 2
   },
   'HR': {
     key: 'HR', icon: '👥', lucideIcon: 'users', color: '#E64980',

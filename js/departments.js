@@ -2783,30 +2783,101 @@ async function renderMktInsights(content, currentUser, currentRole) {
 // ══════════════════════════════════════════════════
 //  FINANCE DEPARTMENT
 // ══════════════════════════════════════════════════
+// v14 Wave4 Batch F1 — IA restructure: 18 flat chips → 7 groups, each with one
+// or more members. A "member" key is exactly the OLD flat chip key (unchanged),
+// so every existing deep link / notification / HR-hub card / back-button that
+// passes an old key straight into window.renderFinance(..., 'Ledger') etc. —
+// or into window.currentSubtab via the URL hash — keeps resolving with zero
+// call-site changes. FINANCE_KEY_TO_GROUP below IS the alias map: old key →
+// owning group. loadFinanceContent's switch (17 renderers) is untouched.
+const FINANCE_GROUPS = [
+  { key:'Overview',              label:'Overview',              members:['Overview'] },
+  { key:'Money In/Out',          label:'Money In/Out',          members:['Ledger','Cash Receipts','Cash Disbursements','Bank Accounts'] },
+  { key:'Reports',               label:'Reports',               members:['Reports'] },
+  { key:'Payroll & HR',          label:'Payroll & HR',          members:['Payroll','HR Profiles','Cash Advances','SSS / Gov'] },
+  { key:'Purchases & Inventory', label:'Purchases & Inventory', members:['Purchases','Inventory','Sales Orders'] },
+  { key:'Taxes & BIR',           label:'Taxes & BIR',           members:['Taxes','BIR'] },
+  { key:'Records',               label:'Records',               members:['Records','Tasks'] },
+];
+const FINANCE_KEY_TO_GROUP = {};
+FINANCE_GROUPS.forEach(g => g.members.forEach(m => { FINANCE_KEY_TO_GROUP[m] = g.key; }));
+
 window.renderFinance = async function(currentUser, currentRole, subtab = window.initialSubtab('Overview')) {
   const c = deptContainer();
-  // Finance tools vs HR tools — visually separated
-  const finTabs = ['Overview','Reports','Sales Orders','Ledger','Bank Accounts','Cash Receipts','Cash Disbursements','Purchases','Inventory','Records','Taxes','BIR','SSS / Gov','Tasks'];
-  const hrTabs  = ['Payroll','HR Profiles','Cash Advances'];
-  const allTabs = [...finTabs, ...hrTabs];
+  const isPres = (typeof isPresident==='function') && isPresident();
   c.innerHTML = `
     <div class="page-header"><h2>${emojiIcon('💰',20)} Finance & HR</h2></div>
     ${window.sopPanel('How Finance works', [
+      'Screens are grouped into 7 areas: Overview · Money In/Out (Ledger, Cash Receipts, Cash Disbursements, Bank Accounts) · Reports · Payroll & HR (Payroll, HR Profiles, Cash Advances, SSS/Gov) · Purchases & Inventory · Taxes & BIR · Records.',
       'The ledger is the single source of truth — approved expenses, cash journals and payroll all post into it automatically.',
-      'Record income/expense via the Accounting, Cash Receipts and Cash Disbursements tabs; Reports reads the ledger for the P&L and VAT.',
-      'Payroll runs through Compute → Verify → Disburse; HR Profiles handles weekly worker payslips.',
-      `Deleting any finance record needs President approval (the ${emojiIcon('🗑',16)} button files a request).`
-    ])}
-    <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--text-muted);padding:0 4px 4px;text-transform:uppercase">Finance</div>
-    ${window.chipTabs(finTabs.map(s=>({key:s,label:s})), subtab)}
-    <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--text-muted);padding:4px 4px;text-transform:uppercase">HR</div>
-    ${window.chipTabs(hrTabs.map(s=>({key:s,label:s})), subtab)}
+      'Record income/expense via Money In/Out; Reports reads the ledger for the P&L and VAT.',
+      'Payroll runs through Compute → Verify → Disburse; the same Payroll & HR group handles weekly worker payslips, cash advances and government contributions.',
+      `Deleting any finance record needs President approval (the ${emojiIcon('🗑',16)} button files a request).`,
+      isPres ? 'President-only maintenance & data-repair tools live behind the wrench button on Overview — out of the daily workflow.' : null
+    ].filter(Boolean))}
+    <div id="fin-tabs-wrap"></div>
     <div id="fin-content"><div class="loading-placeholder">Loading…</div></div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
-  loadFinanceContent(currentUser, currentRole, subtab);
-  window.bindChipTabs(c, (key) => { window.setSubroute(key); loadFinanceContent(currentUser, currentRole, key); });
+  renderFinanceNav(currentUser, currentRole, subtab);
 };
+
+// Renders the group-chip row + (if the active group has >1 member) a second
+// segmented sub-chip row, then loads the member's content. Re-run wholesale on
+// every chip click — cheap (a handful of buttons) and keeps the active state
+// of both rows trivially correct without hand-rolled DOM diffing.
+function renderFinanceNav(currentUser, currentRole, subtab) {
+  if (!FINANCE_KEY_TO_GROUP[subtab]) subtab = 'Overview'; // unknown key → safe default, never a dead end
+  const groupKey = FINANCE_KEY_TO_GROUP[subtab];
+  const group = FINANCE_GROUPS.find(g => g.key === groupKey) || FINANCE_GROUPS[0];
+  const wrap = document.getElementById('fin-tabs-wrap');
+  if (!wrap) return; // navigated away mid-render
+  wrap.innerHTML = `
+    ${window.chipTabs(FINANCE_GROUPS.map(g=>({key:g.key,label:g.label})), groupKey, {cls:'fin-group-tabs'})}
+    ${group.members.length > 1 ? window.chipTabs(group.members.map(m=>({key:m,label:m})), subtab, {cls:'fin-sub-tabs'}) : ''}
+  `;
+  if (window.lucide) lucide.createIcons({ nodes: [wrap] });
+  loadFinanceContent(currentUser, currentRole, subtab);
+
+  window.bindChipTabs(wrap.querySelector('.fin-group-tabs'), (gKey) => {
+    const g = FINANCE_GROUPS.find(x => x.key === gKey) || FINANCE_GROUPS[0];
+    const member = g.members[0];
+    window.setSubroute(member);
+    renderFinanceNav(currentUser, currentRole, member);
+  });
+  const subRow = wrap.querySelector('.fin-sub-tabs');
+  if (subRow) window.bindChipTabs(subRow, (mKey) => {
+    window.setSubroute(mKey);
+    renderFinanceNav(currentUser, currentRole, mKey);
+  });
+}
+
+// ── Finance Tools (v14 Wave4 F1) — president-only maintenance & data-repair ──
+// Hosts the 5 ledger-maintenance buttons that used to clutter the Reports
+// header, plus the Cash-Advance data-repair entry that used to sit in the
+// Cash Advances tab header. Handlers are moved verbatim (unchanged functions).
+function openFinanceToolsPage() {
+  openPage(`${emojiIcon('🔧',16)} Finance Tools`, `
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px">President-only maintenance &amp; data-repair utilities. Used occasionally — kept out of the daily Reports and Cash Advances workflow.</p>
+    <div class="card" style="margin-bottom:12px">
+      <div class="card-header"><h3>Ledger maintenance</h3></div>
+      <div class="card-body" style="display:flex;flex-direction:column;align-items:flex-start;gap:8px">
+        <button class="btn-secondary btn-sm" onclick="window.runLedgerBackfill()" title="Post approved expenses + cash journals into the ledger">${emojiIcon('🔄',16)} Sync to ledger</button>
+        <button class="btn-secondary btn-sm" onclick="window.runTagAccountTypes()" title="Backfill accountType on legacy ledger rows">${emojiIcon('🏷',16)} Tag account types</button>
+        <button class="btn-secondary btn-sm" onclick="window.runRestateMaterialCosts()" title="Fix the double material-expensing bug on historical rows">${emojiIcon('🧾',16)} Restate material costs</button>
+        <button class="btn-secondary btn-sm" onclick="window.runFixUndatedRows()" title="Repair ledger rows with a missing/malformed date">${emojiIcon('🩹',16)} Fix undated rows</button>
+        <button class="btn-secondary btn-sm" onclick="window.runMigrateLedgerIds(this)" title="Migrate legacy random-id ledger rows to deterministic ids (dry-run first)">${emojiIcon('🧭',16)} Migrate ledger ids</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header"><h3>Cash Advances</h3></div>
+      <div class="card-body">
+        <button class="btn-secondary btn-sm" id="fin-tools-ca-repair-btn" title="Scan every cash_advances record for legacy/inconsistent data (dry run first)">${emojiIcon('🔄',16)} CA Data Repair</button>
+      </div>
+    </div>
+  `, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  document.getElementById('fin-tools-ca-repair-btn')?.addEventListener('click', () => openCADataRepairModal());
+}
 
 async function loadFinanceContent(currentUser, currentRole, sub) {
   const content = document.getElementById('fin-content');
@@ -4426,11 +4497,6 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <div style="font-size:12px;color:var(--text-muted)">${label}${periodClosed?` &nbsp;<span class="badge badge-gray">${emojiIcon('🔒',16)} Closed</span>`:''}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${isFinancePriv()?`<button class="btn-secondary btn-sm" onclick="window.runLedgerBackfill()" title="Post approved expenses + cash journals into the ledger">${emojiIcon('🔄',16)} Sync to ledger</button>`:''}
-        ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runTagAccountTypes()" title="Backfill accountType on legacy ledger rows">${emojiIcon('🏷',16)} Tag account types</button>`:''}
-        ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runRestateMaterialCosts()" title="Fix the double material-expensing bug on historical rows">${emojiIcon('🧾',16)} Restate material costs</button>`:''}
-        ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runFixUndatedRows()" title="Repair ledger rows with a missing/malformed date">${emojiIcon('🩹',16)} Fix undated rows</button>`:''}
-        ${isPres?`<button class="btn-secondary btn-sm" onclick="window.runMigrateLedgerIds(this)" title="Migrate legacy random-id ledger rows to deterministic ids (dry-run first)">${emojiIcon('🧭',16)} Migrate ledger ids</button>`:''}
         ${isPres&&isClosableMonth?(periodClosed
             ? `<button class="btn-secondary btn-sm" id="finrep-reopen-btn" data-month="${pParsed.key.slice(6)}">${emojiIcon('🔓',16)} Reopen ${pParsed.label}</button>`
             : `<button class="btn-secondary btn-sm" id="finrep-close-btn" data-month="${pParsed.key.slice(6)}" data-label="${escHtml(pParsed.label)}">${emojiIcon('🔒',16)} Close ${pParsed.label}</button>`
@@ -5286,7 +5352,6 @@ async function renderFinanceCA(container, currentUser, currentRole) {
     </div>
     ${isPrivileged?`<div style="display:flex;gap:8px;margin-bottom:14px">
       <button class="btn-primary btn-sm" id="fin-ca-add-btn">+ Add CA Record</button>
-      ${isRealPresident()?`<button class="btn-secondary btn-sm" id="fin-ca-repair-btn">${emojiIcon('🔄',16)} Data Repair</button>`:''}
     </div>`:''}
     <div class="subtab-bar" id="fin-ca-tabs" style="margin-bottom:14px">
       <button class="subtab-btn active" data-sub="pending">Pending (${pending.length})</button>
@@ -5372,9 +5437,6 @@ async function renderFinanceCA(container, currentUser, currentRole) {
   if(isPrivileged){
     document.getElementById('fin-ca-add-btn')?.addEventListener('click',()=>{
       window.renderCashAdvancePage && window.openPresidentCashAdvanceModal ? window.openPresidentCashAdvanceModal() : navigateTo('cash-advance');
-    });
-    document.getElementById('fin-ca-repair-btn')?.addEventListener('click', () => {
-      openCADataRepairModal(() => renderFinanceCA(container, currentUser, currentRole));
     });
   }
 }
@@ -6496,11 +6558,15 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
   const expenses       = recentSnap.docs.map(d => ({id:d.id,...d.data()}));  // for the Recent Expenses card
   const ledger         = ledSnap.docs.map(d => d.data());
   const isPriv     = isFinancePriv();
+  const isPres     = (typeof isPresident==='function') && isPresident();
   const ledIncome  = ledger.filter(e => ledgerKind(e)==='income').reduce((s,e) => s + (e.amount||0), 0);
   const ledExpense = ledger.filter(e => ledgerKind(e)==='expense').reduce((s,e) => s + (e.amount||0), 0);
   const pendingExp = pendingExpDocs.reduce((s,e) => s + (e.amount||0), 0);
 
   container.innerHTML = `
+    ${isPres?`<div style="display:flex;justify-content:flex-end;margin-bottom:8px">
+      <button class="btn-secondary btn-sm" id="fin-tools-btn" title="President-only maintenance &amp; data-repair tools">${emojiIcon('🔧',16)} Finance Tools</button>
+    </div>`:''}
     <div class="kpi-row">
       <div class="kpi-card green"><div class="kpi-label">Total Income</div><div class="kpi-value">₱${fmt(ledIncome)}</div></div>
       <div class="kpi-card warn"><div class="kpi-label">Total Expenses</div><div class="kpi-value">₱${fmt(ledExpense)}</div></div>
@@ -6526,6 +6592,7 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
     </div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
+  document.getElementById('fin-tools-btn')?.addEventListener('click', () => openFinanceToolsPage());
   document.getElementById('exp-csv-btn')?.addEventListener('click', () => window.exportCSV('expenses', expenses, [
     {key:'date',label:'Date'},{key:'description',label:'Description'},{key:'category',label:'Category'},
     {key:'amount',label:'Amount',get:e=>e.amount||0},{key:'submittedByName',label:'By'},{key:'status',label:'Status',get:e=>e.status||'pending'},{key:'fileUrl',label:'Receipt'}]));
