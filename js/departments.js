@@ -3468,8 +3468,38 @@ window.reopenPayRun = async function(month) {
 // matching frozen line (the pre-lock era's Path-B fingerprint). No writes —
 // any fix routes through financeDelete / a manual ledger entry.
 async function openPayrollReconciliation() {
-  openPage(`${emojiIcon('🔍',16)} Payroll Reconciliation`, `<div id="recon-body" style="padding:20px;text-align:center;color:var(--text-muted)">Scanning payroll history…</div>`,
-    `<button class="btn-secondary" id="recon-csv-btn" disabled>Export CSV</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+  // Wave 3 E-CALLERS — this modal (openPage's .page-panel host) sits outside
+  // styles.css's print-visibility allowlist (#page-content/.payslip-print/
+  // .bir-print/.print-target only), so it previously printed bare/blank.
+  // This batch owns js/ only (not css/styles.css), so the fix is a
+  // self-contained inline <style>: force everything else hidden under print,
+  // show only .recon-print-wrap, and reveal the letterhead header/footer
+  // (otherwise display:none, so screen rendering is unchanged) around the
+  // live #recon-body table.
+  const _reconLh = window.buildLetterhead ? window.buildLetterhead({
+    docTitle: 'PAYROLL RECONCILIATION',
+    dateLabel: 'Generated ' + new Date().toLocaleString('en-PH'),
+    footerNote: ((window.BRAND && window.BRAND.fullName) || 'Barro Industries Operating System') + ' · Internal audit report'
+  }) : null;
+  const _reconPrintCss = _reconLh ? `<style>
+    .recon-print-lh{display:none}
+    @media print{
+      body *{visibility:hidden!important}
+      .recon-print-wrap,.recon-print-wrap *{visibility:visible!important}
+      .recon-print-wrap{position:absolute;left:0;top:0;width:100%;padding:8mm}
+      .recon-print-lh{display:block!important}
+      @page{size:A4 portrait;margin:11mm 10mm 7mm}
+    }
+    ${_reconLh.printCSS}
+  </style>` : '';
+  openPage(`${emojiIcon('🔍',16)} Payroll Reconciliation`,
+    `${_reconPrintCss}
+    <div class="recon-print-wrap">
+      <div class="recon-print-lh">${_reconLh ? _reconLh.headerHTML : ''}</div>
+      <div id="recon-body" style="padding:20px;text-align:center;color:var(--text-muted)">Scanning payroll history…</div>
+      <div class="recon-print-lh">${_reconLh ? _reconLh.footerHTML : ''}</div>
+    </div>`,
+    `<button class="btn-secondary" onclick="window.print()">${emojiIcon('🖨',16)} Print</button><button class="btn-secondary" id="recon-csv-btn" disabled>Export CSV</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
 
   const runsSnap = await db.collection('pay_runs').get().catch(()=>({docs:[]}));
   const runs = runsSnap.docs.map(d=>({ month:d.id, ...d.data() })).filter(r => r.lines && r.lines.length);
@@ -4376,7 +4406,22 @@ window.renderFinancialReports = async function(container, currentUser, currentRo
   let periodClosed = false;
   if (isClosableMonth) periodClosed = await window.isPeriodClosed(pParsed.start).catch(()=>false);
 
+  // Wave 3 E-CALLERS — this screen prints via same-document window.print()
+  // (#page-content is already the print-visible root, styles.css) but had no
+  // letterhead: Ctrl+P / the Print button below just dumped the bare KPI
+  // cards + tables. Inject the branded header into a print-only wrapper
+  // (hidden on screen, shown under @media print — self-contained here since
+  // this batch owns js/ only, not css/styles.css) so the filed report is
+  // branded without touching the on-screen layout.
+  const _finLh = window.buildLetterhead ? window.buildLetterhead({
+    docTitle: 'FINANCIAL REPORT — INCOME STATEMENT & VAT REFERENCE',
+    dateLabel: label,
+    footerNote: ((window.BRAND && window.BRAND.fullName) || 'Barro Industries Operating System') + ' · Generated ' + new Date().toLocaleString('en-PH')
+  }) : null;
+
   container.innerHTML = `
+    ${_finLh ? `<style>.finrep-print-lh{display:none}@media print{.finrep-print-lh{display:block!important;margin-bottom:10px}}</style>
+    <div class="finrep-print-lh">${_finLh.headerHTML}</div>` : ''}
     <div id="finrep-period">${window.periodPicker(periodKey, {})}</div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <div style="font-size:12px;color:var(--text-muted)">${label}${periodClosed?` &nbsp;<span class="badge badge-gray">${emojiIcon('🔒',16)} Closed</span>`:''}</div>
@@ -6328,7 +6373,7 @@ window.buildPayslipHTML = function(model) {
   // template has always printed, and WS14's own resolution for this doc type).
   const _lh = window.buildLetterhead ? window.buildLetterhead({
     docTitle: 'PAYSLIP', entity: window.brandEntity ? window.brandEntity('bir') : null,
-    accent: '#1a237e', docNumber: m.docNumber, dateLabel: m.periodLabel,
+    accent: '#1E3A5F', docNumber: m.docNumber, dateLabel: m.periodLabel,
     signatures: m.signatures,
     footerNote: 'System-generated payslip · ' + escHtml(m.docNumber) + ' · ' + escHtml(m.periodLabel)
   }) : null;
@@ -7474,7 +7519,7 @@ function buildBillingInvoiceHTML(p, inv) {
   const _lh = window.buildLetterhead ? window.buildLetterhead({
     docTitle,
     entity: window.brandEntity ? window.brandEntity('bir') : null,
-    accent: '#1a237e',
+    accent: '#1E3A5F',
     dateLabel: 'Invoice Date: ' + fmtD(inv.date),
     signatures: [
       { label: 'Issued by',   name: inv.issuedBy || '', title: (window.BRAND && window.BRAND.name) || 'Barro Industries' },
@@ -7486,38 +7531,20 @@ function buildBillingInvoiceHTML(p, inv) {
   const pageCss = `
   .page { width:210mm; min-height:297mm; margin:0 auto; background:#fff; padding:14mm; }
   td, th { border:1px solid #000; padding:5px 7px; vertical-align:middle; font-size:11px; }
-  .header-top { display:flex; align-items:center; gap:12px; margin-bottom:8px; }
-  .company-logo { width:64px; height:64px; object-fit:contain; border:2px solid #000; padding:2px; flex-shrink:0; }
-  .company-name { font-size:24px; font-weight:900; letter-spacing:1px; }
-  .company-sub { font-size:9px; line-height:1.6; }
-  .doc-title { background:#1a237e; color:#fff; text-align:center; font-size:18px; font-weight:800; letter-spacing:2px; padding:8px; margin:8px 0 12px; }
   .meta-grid { display:flex; gap:12px; margin-bottom:12px; }
   .meta-box { flex:1; border:1px solid #000; padding:8px 10px; font-size:11px; line-height:1.7; }
   .meta-box .lbl { font-weight:700; text-transform:uppercase; font-size:9px; color:#333; }
-  .section-header { background:#1a237e; color:#fff; font-weight:700; font-size:11px; padding:5px 7px; text-transform:uppercase; letter-spacing:.05em; }
+  .section-header { background:#1E3A5F; color:#fff; font-weight:700; font-size:11px; padding:5px 7px; text-transform:uppercase; letter-spacing:.05em; }
   .number-cell { text-align:right; }
   .muted-row td { background:#f5f5f5; }
   .due-row td { font-weight:900; font-size:15px; background:#ffeb3b; color:#000; }
   .notes-box { border:1px solid #000; border-top:none; padding:10px; font-size:10px; line-height:1.6; }
   @media print {
-    .page { padding:10mm; }
+    .page { width:auto; min-height:0; padding:10mm; }
   }
 ${_lh ? _lh.printCSS : ''}`;
   const bodyHtml = `
-  ${_lh ? _lh.headerHTML : `
-  <div class="header-top">
-    <img src="icons/barro-industries.png" class="company-logo" onerror="this.style.display='none'" alt=""/>
-    <div>
-      <div class="company-name">BARRO INDUSTRIES</div>
-      <div class="company-sub">
-        NEILBARRO STEEL &amp; METAL FABRICATION SERVICES<br/>
-        PUROK 6, CARLATAN, 2500, CITY OF SAN FERNANDO, LA UNION, PHILIPPINES<br/>
-        CONTACT: NEIL BARRO, 0927-683-6300<br/>
-        TIN: 951-145-613-000
-      </div>
-    </div>
-  </div>
-  <div class="doc-title">${docTitle}</div>`}
+  ${_lh ? _lh.headerHTML : ''}
 
   <div class="meta-grid">
     <div class="meta-box">
@@ -7606,7 +7633,7 @@ async function downloadJPEG() {
     extraButtons: `<button onclick="downloadJPEG()">${emojiIcon('📷',16)} Save as JPEG</button>`,
     extraScript,
     bodyHtml, pageCss,
-    accent: '#1a237e',
+    accent: '#1E3A5F',
     bgColor: '#f0f0f0',
     winFeatures: 'width=900,height=700'
   });
@@ -10754,14 +10781,14 @@ async function renderAECDirectory(container, currentUser, currentRole) {
 // Printable AEC contact sheet — landscape-A4 letterhead multi-row table,
 // mirroring openInventoryCountForm incl. the defensive `_lh ? … : fallback`
 // pattern. Prints the CURRENTLY-FILTERED rows. The free-text "potential" notes
-// are DELIBERATELY omitted (Decision 10). NOTE one deliberate deviation from
-// the inventory form: the local @page{A4 landscape} rule is placed AFTER
-// _lh.printCSS so it wins the cascade over the letterhead's default portrait
-// @page.
+// are DELIBERATELY omitted (Decision 10). Wave 3 E-CALLERS: now requests
+// orientation:'landscape' from buildLetterhead (the engine's single @page
+// authority) instead of relying on a local @page winning by CSS-order luck.
 function openAECPrintSheet(rows, scopeLabel){
   const e = s => escHtml(s);
   const todayStr = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10));
   const _lh = window.buildLetterhead ? window.buildLetterhead({
+    orientation: 'landscape',
     docTitle: 'AEC PARTNER CONTACT SHEET',
     dateLabel: 'As of ' + todayStr,
     extraMeta: [scopeLabel || 'All contacts', rows.length + ' contact' + (rows.length === 1 ? '' : 's')],
@@ -10789,7 +10816,6 @@ function openAECPrintSheet(rows, scopeLabel){
   th{background:#1E3A5F;color:#fff;font-size:8px;text-transform:uppercase;letter-spacing:.04em}
   .tchip{display:inline-block;width:14px;height:14px;line-height:14px;border-radius:50%;color:#fff;font-weight:800;font-size:9px;text-align:center}
 ${_lh ? _lh.printCSS : ''}
-  @page{size:A4 landscape;margin:8mm}
   @media print{ .page{padding:0;width:auto;min-height:0} .tchip,th{-webkit-print-color-adjust:exact;print-color-adjust:exact} }`;
   const bodyHtml = `
   ${_lh ? _lh.headerHTML : `<div style="border-bottom:3px solid #1E3A5F;padding-bottom:8px;margin-bottom:8px"><div style="font-size:20px;font-weight:900;color:#1E3A5F">BARRO INDUSTRIES</div><div style="font-size:10px;color:#555">AEC Partner Contact Sheet · ${e(todayStr)}</div></div>`}
@@ -12068,7 +12094,6 @@ function printDeliveryReceipt(order) {
   th{background:#1E3A5F;color:#fff;font-size:9px;text-transform:uppercase;letter-spacing:.04em}
   .note{font-size:10px;color:#444;margin:4px 0 10px;line-height:1.5}
   .note b{color:#1E3A5F}
-  @page{size:A4 portrait;margin:9mm}
   @media print{ .page{padding:0;width:auto;min-height:0} }
 ${_lh ? _lh.printCSS : ''}`;
   const bodyHtml = `
@@ -13300,6 +13325,7 @@ function openInventoryCountForm(items, draft, kindFilter){
   const kindLabel = kindFilter==='material'?'Raw Materials':kindFilter==='product'?'Finished Goods':'All Items';
   const varCell = (sys,phys)=>{ if(phys===''||phys==null||isNaN(parseFloat(phys))) return ''; const v=parseFloat(phys)-Number(sys||0); return (v>0?'+':'')+num(v); };
   const _lh = window.buildLetterhead ? window.buildLetterhead({
+    orientation: 'landscape',
     docTitle: 'INVENTORY COUNT FORM',
     docNumber: h.formNo || '',
     dateLabel: 'Count Date: ' + fmtDate(h.date),
@@ -13334,32 +13360,19 @@ function openInventoryCountForm(items, draft, kindFilter){
 
   const pageCss = `
   .page{width:297mm;min-height:210mm;margin:0 auto;background:#fff;padding:12mm}
-  .htop{display:flex;align-items:center;gap:12px;border-bottom:3px solid #1a237e;padding-bottom:10px;margin-bottom:10px}
-  .logo{width:58px;height:58px;object-fit:contain;flex-shrink:0}
-  .cname{font-size:22px;font-weight:900;letter-spacing:.5px;color:#1a237e}
-  .csub{font-size:10px;color:#555;margin-top:2px}
-  .title{margin-left:auto;text-align:right}
-  .title .t{display:inline-block;background:#1a237e;color:#fff;font-size:13px;font-weight:800;letter-spacing:1px;padding:5px 12px;border-radius:4px;text-transform:uppercase}
-  .title .scope{font-size:10px;color:#666;margin-top:5px}
   .meta{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
   .mbox{border:1px solid #999;border-radius:5px;padding:6px 9px}
   .mbox .l{font-size:8px;text-transform:uppercase;letter-spacing:.5px;color:#888;font-weight:700}
   .mbox .v{font-size:12px;font-weight:700;margin-top:2px;min-height:15px}
-  th{background:#1a237e;color:#fff;font-size:9px;text-transform:uppercase;letter-spacing:.04em}
+  th{background:#1E3A5F;color:#fff;font-size:9px;text-transform:uppercase;letter-spacing:.04em}
   td .sub{font-size:9px;color:#777}
   .sign{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;margin-top:34px}
   .sline{border-top:1px solid #000;padding-top:5px;text-align:center;font-size:10px;color:#444}
   .foot{margin-top:18px;border-top:1px solid #ddd;padding-top:8px;font-size:9px;color:#999;text-align:center}
-  @page{size:A4 landscape;margin:8mm}
   @media print{ .page{padding:0;width:auto;min-height:0} }
 ${_lh ? _lh.printCSS : ''}`;
   const bodyHtml = `
-  ${_lh ? _lh.headerHTML : `
-  <div class="htop">
-    <img src="${location.origin + location.pathname.replace(/[^/]*$/,'') + 'icons/barro-industries.png'}" class="logo" onerror="this.style.display='none'" alt=""/>
-    <div><div class="cname">BARRO INDUSTRIES</div><div class="csub">Physical Inventory Count Form</div></div>
-    <div class="title"><div class="t">Inventory Count</div><div class="scope">${e(kindLabel)}</div></div>
-  </div>`}
+  ${_lh ? _lh.headerHTML : ''}
   <div class="meta">
     <div class="mbox"><div class="l">Form No.</div><div class="v">${e(h.formNo||'')}</div></div>
     <div class="mbox"><div class="l">Count Date</div><div class="v">${e(fmtDate(h.date))}</div></div>
@@ -13386,7 +13399,7 @@ ${_lh ? _lh.printCSS : ''}`;
     title: `Inventory Count Form — ${h.formNo||''}`,
     barLabel: `${emojiIcon('📋',16)} Inventory Count Form — ${e(h.formNo||'')}`,
     bodyHtml, pageCss,
-    accent: '#1a237e',
+    accent: '#1E3A5F',
     winFeatures: 'width=1000,height=720'
   });
 }
@@ -14424,14 +14437,6 @@ function printPurchaseOrder(p) {
 
   const pageCss = `
   .page{width:210mm;min-height:297mm;margin:0 auto;background:#fff;padding:14mm}
-  .htop{display:flex;align-items:center;gap:12px;border-bottom:3px solid #1E3A5F;padding-bottom:10px;margin-bottom:12px}
-  .logo{width:58px;height:58px;object-fit:contain;flex-shrink:0}
-  .cname{font-size:22px;font-weight:900;letter-spacing:.5px;color:#1E3A5F}
-  .csub{font-size:9px;color:#555;margin-top:3px;line-height:1.5}
-  .title{margin-left:auto;text-align:right}
-  .title .t{display:inline-block;background:#1E3A5F;color:#fff;font-size:14px;font-weight:800;letter-spacing:1px;padding:6px 14px;border-radius:4px;text-transform:uppercase}
-  .title .no{font-size:12px;font-weight:800;color:#333;margin-top:6px}
-  .title .dt{font-size:10px;color:#666;margin-top:2px}
   .parties{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
   .pbox{border:1px solid #999;border-radius:6px;padding:8px 11px}
   .pbox .l{font-size:8px;text-transform:uppercase;letter-spacing:.6px;color:#1E3A5F;font-weight:800;margin-bottom:3px}
@@ -14449,23 +14454,10 @@ function printPurchaseOrder(p) {
   .sline{border-top:1px solid #000;padding-top:5px;text-align:center;font-size:10px;color:#444}
   .sline b{display:block;font-size:11px;color:#000}
   .foot{margin-top:18px;border-top:1px solid #ddd;padding-top:8px;font-size:9px;color:#999;text-align:center}
-  @page{size:A4 portrait;margin:9mm}
   @media print{ .page{padding:0;width:auto;min-height:0} }
 ${_lh ? _lh.printCSS : ''}`;
   const bodyHtml = `
-  ${_lh ? _lh.headerHTML : `
-  <div class="htop">
-    <img src="${location.origin + location.pathname.replace(/[^/]*$/, '') + 'icons/barro-industries.png'}" class="logo" onerror="this.style.display='none'" alt=""/>
-    <div>
-      <div class="cname">BARRO INDUSTRIES</div>
-      <div class="csub">Barro Industries OPC · DTI / BIR Registered<br>hello@barroindustries.com · 0927 683 6300 · La Union | Baguio | Manila</div>
-    </div>
-    <div class="title">
-      <div class="t">Purchase Order${isPending ? ' (PENDING APPROVAL)' : ''}</div>
-      <div class="no">${e(p.prNo || p.rfqNo || '')}</div>
-      <div class="dt">Date: ${e(issuedStr)}${p.neededBy ? `<br>Needed by: ${e(p.neededBy)}` : ''}</div>
-    </div>
-  </div>`}
+  ${_lh ? _lh.headerHTML : ''}
   <div class="parties">
     <div class="pbox">
       <div class="l">Supplier / Vendor</div>
@@ -14534,7 +14526,7 @@ function printReceivingReport(p) {
   const pageCss = `.page{width:210mm;min-height:297mm;margin:0 auto;background:#fff;padding:14mm}
 table{margin:12px 0}
 th{background:#1E3A5F;color:#fff;font-size:9px;text-transform:uppercase}
-@page{size:A4 portrait;margin:9mm}@media print{.page{padding:0;width:auto;min-height:0}}
+@media print{.page{padding:0;width:auto;min-height:0}}
 ${_lh ? _lh.printCSS : ''}`;
   const bodyHtml = `${_lh ? _lh.headerHTML : ''}
 <table><thead><tr><th style="width:32px">#</th><th>Item / Description</th><th style="width:60px">Qty</th><th style="width:64px">Unit</th><th style="width:170px">Stock Status</th></tr></thead>
