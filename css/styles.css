@@ -1130,6 +1130,19 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
   background: var(--s1); color: var(--text);
 }
 .nav-item:hover .nav-icon { animation: iconPop 0.3s var(--spring); }
+/* Wave5 M1 — sidebar (desktop) nav badge. Bottom-nav already has a working
+   .bottom-nav-item .bn-badge rule (positioned inside .bn-icon-wrap); the
+   sidebar had no badge slot at all, so this is new. Reuses the SAME .bn-badge
+   class chat.js creates on demand (see Chat._paintChatNavBadge) — kept clear
+   of .nav-item.active::after's right:0 indicator bar via right:10px. */
+.nav-item .bn-badge {
+  position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
+  background: var(--pink); color: #fff; font-size: 0.625rem;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--pill); font-weight: 700; line-height: 1;
+  box-shadow: 0 0 8px var(--pink-glow);
+}
 
 .nav-item.active { color: var(--text); font-weight: 600; background: var(--s2); }
 .nav-item.active::after {
@@ -4216,6 +4229,60 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 }
 .ms-time-sep { text-align: center; margin: 10px 0 4px; font-size: 0.6875rem; color: var(--text-muted); }
 
+/* ══════════════════════════════
+   Wave5 Batch M1 — messaging core feel
+   (optimistic send, drafts, unread divider/badges, scroll FAB, tombstones)
+══════════════════════════════ */
+
+/* "New messages" divider (J7) — same pill language as .ms-day-sep, distinct
+   accent color so it reads as a boundary marker rather than a date. */
+.ms-new-divider { text-align: center; margin: 14px 0 10px; display: flex; align-items: center; gap: 10px; }
+.ms-new-divider::before, .ms-new-divider::after {
+  content: ''; flex: 1; height: 1px; background: var(--primary-soft, var(--border));
+}
+.ms-new-divider span {
+  font-size: 0.6875rem; font-weight: 700; color: var(--primary);
+  background: var(--primary-soft); padding: 3px 12px; border-radius: var(--pill);
+  white-space: nowrap;
+}
+
+/* Optimistic send bubbles (J2) — pending (○ sending) / failed (⚠ tap-to-retry).
+   Rendered in their own tail container (#chat-pending-tail, see chat.js
+   _ensurePendingTailEl) — visually just another .ms-row-mine bubble. */
+.ms-bubble-pending { opacity: .6; }
+.ms-bubble-failed {
+  cursor: pointer;
+  background: color-mix(in srgb, var(--danger, #FF3B30) 14%, var(--bubble-out-bg));
+  border: 1px solid color-mix(in srgb, var(--danger, #FF3B30) 45%, transparent);
+}
+.ms-pending-status { font-size: 11px; line-height: 1; opacity: .85; }
+.ms-pending-retry-label { font-size: var(--fs-2xs); color: var(--danger, #FF3B30); font-weight: 600; }
+
+/* Unsend tombstone (J3) — italic placeholder, muted, no tap affordance. */
+.ms-bubble-tombstone { cursor: default; opacity: .75; }
+.ms-tombstone-text { font-style: italic; color: var(--text-muted); }
+
+/* Scroll-to-bottom FAB (J7) — a sibling of #chat-thread-scroll inside
+   #chat-thread-scroll-wrap (position:relative, non-scrolling), so it stays
+   visually fixed regardless of the message list's own scroll offset. Small
+   local z-index — scoped to that wrapper's own stacking context, not a new
+   top-of-app overlay layer. */
+.ms-scroll-fab {
+  position: absolute; right: 14px; bottom: 14px; z-index: 2;
+  width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text); box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: transform .12s, background .15s;
+}
+.ms-scroll-fab:hover { transform: scale(1.06); background: var(--surface-2); }
+.ms-scroll-fab-badge {
+  position: absolute; top: -4px; right: -4px;
+  background: var(--pink); color: #fff; font-size: 0.5625rem;
+  min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--pill);
+  display: flex; align-items: center; justify-content: center; font-weight: 700;
+  box-shadow: 0 0 6px var(--pink-glow);
+}
+
 /* Send pop-in micro-interaction (Phase 19) — transform/opacity only, and only
    applied to genuinely-new bubbles (see chat.js _lastMsgIds bookkeeping), so a
    snapshot re-render from an edit/reaction never replays it on old messages. */
@@ -4284,6 +4351,14 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 .ms-search-input:focus { box-shadow: 0 0 0 3px var(--primary-soft); }
 .chat-inbox-row { min-height: 56px; padding: 8px 10px; }
 .chat-inbox-row .ms-unread-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); flex-shrink: 0; }
+/* Wave5 M1 — numeric unread badge (replaces the plain dot: "1+" since exact
+   per-conversation unread MESSAGE counts aren't available until M4's reads map). */
+.chat-inbox-row .ms-unread-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; flex-shrink: 0;
+  border-radius: var(--pill); background: var(--primary); color: #fff;
+  font-size: 0.625rem; font-weight: 700;
+}
 .chat-inbox-row .ms-presence-dot {
   position: absolute; bottom: -1px; right: -1px; width: 10px; height: 10px;
   border-radius: 50%; border: 2px solid var(--surface);

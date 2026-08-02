@@ -44,6 +44,12 @@ window.Chat = (() => {
   // Phase 63 #5: inbox refresh cascade debounce (leading-immediate, 2s trailing coalesce)
   let _inboxDebTimer = null, _inboxDebPendingSnap = null, _inboxWindowStart = 0;
   const EARLIER_CAP = 300;                   // Phase 63 #3
+  // Wave5 Batch M1 — optimistic send / drafts / unread-divider / scroll-FAB state.
+  let _pending = [];                         // optimistic bubbles, keyed by clientKey — UI-only, never persisted
+  let _threadOpenReadAtMs = 0;               // my readAt CAPTURED AT OPEN, from _myReads (already-fetched inbox
+                                              // data, BEFORE _markRead() overwrites it) — drives the new-msg divider
+  let _threadInitialScrollDone = false;      // true once THIS thread-open's first populated render placed scroll
+  let _scrollFabUnseen = 0;                  // messages that arrived while scrolled up (scroll-to-bottom FAB badge)
 
   const _isAdminRole = () => ['president','manager','secretary'].includes(currentRole);
   const _myName = () => (window.userProfile?.displayName || currentUser.email);
@@ -89,6 +95,13 @@ window.Chat = (() => {
     _threadUnsubs = []; _openConvId = null; _openConv = null;
     _msgs = []; _earlier = []; _readers = []; _typing = []; _lastMsgIds = null;
     _lastRenderOrder = null; _earlierCapped = false; _isSending = false;
+    // Wave5 M1 — discard optimistic UI state (the underlying Firestore writes,
+    // if still in flight, complete in the background regardless — same
+    // fire-and-forget posture as the rest of this file's teardown).
+    _pending.forEach(p => { if (p.previewUrl) { try { URL.revokeObjectURL(p.previewUrl); } catch (_) {} } });
+    _pending = [];
+    _threadOpenReadAtMs = 0; _threadInitialScrollDone = false; _scrollFabUnseen = 0;
+    document.getElementById('chat-thread-scroll')?.removeEventListener('scroll', _onThreadScroll);
     if (_presenceTimer)     { clearInterval(_presenceTimer);     _presenceTimer = null; }
     if (_typingExpireTimer) { clearInterval(_typingExpireTimer); _typingExpireTimer = null; }
     if (_markReadTimer)     { clearTimeout(_markReadTimer);      _markReadTimer = null; }
@@ -169,6 +182,72 @@ window.Chat = (() => {
     const last = cv.lastMessageAt?.toMillis?.() || 0;
     return last > 0 && cv.lastMessageBy !== currentUser.uid && last > (_myReads[cv.id] || 0);
   }
+
+  // ── Wave5 M1 — Chat nav badge (count of unread CONVERSATIONS, not messages;
+  // per-message counts are M4's reads-map work). Drives the SAME visual
+  // mechanism app.js already ships for other nav items (bn-badge span inside
+  // .bottom-nav-item, positioned via the existing CSS rule) — but since no
+  // NAV_REGISTRY item currently sets badge:true for 'chat' (app.js/config.js
+  // are out of scope for this batch), the span is created here on demand
+  // rather than by buildBottomNav(). Sidebar (desktop) has no badge slot at
+  // all today, so a matching span + CSS rule is added for .nav-item too.
+  // Persisted per-uid to localStorage so a page reload paints the last-known
+  // count immediately, before the inbox listener (which only runs while the
+  // Chat page itself is open — see teardownInbox's contract) has a chance to
+  // recompute it live.
+  function _chatBadgeStorageKey() {
+    const uid = (window.currentUser && currentUser.uid) || '';
+    return uid ? ('bi-chat-unread-count-' + uid) : null;
+  }
+  function _updateChatNavBadge(count) {
+    const key = _chatBadgeStorageKey();
+    if (key) { try { localStorage.setItem(key, String(count)); } catch (_) {} }
+    _paintChatNavBadge(count);
+  }
+  function _paintChatNavBadge(count) {
+    const n = count > 99 ? '99+' : String(count);
+    const bnItem = document.querySelector('.bottom-nav-item[data-page="chat"]');
+    if (bnItem) {
+      const wrap = bnItem.querySelector('.bn-icon-wrap');
+      if (wrap) {
+        let b = wrap.querySelector('.bn-badge');
+        if (!b) { b = document.createElement('span'); b.className = 'bn-badge hidden'; wrap.appendChild(b); }
+        b.textContent = n;
+        b.classList.toggle('hidden', count <= 0);
+      }
+    }
+    const sbItem = document.querySelector('.nav-item[data-page="chat"]');
+    if (sbItem) {
+      let b = sbItem.querySelector('.bn-badge');
+      if (!b) { b = document.createElement('span'); b.className = 'bn-badge hidden'; sbItem.appendChild(b); }
+      b.textContent = n;
+      b.classList.toggle('hidden', count <= 0);
+    }
+  }
+  // Best-effort seed from the last count this uid saw, so the badge isn't
+  // blank on every fresh page load until the user opens Chat. Bounded retry —
+  // the nav DOM (built once at login by app.js's buildNav()) and currentUser
+  // both arrive asynchronously after this module parses.
+  (function _seedChatNavBadgeFromCache() {
+    let tries = 0;
+    const attempt = () => {
+      tries++;
+      const uid = (window.currentUser && currentUser.uid) || '';
+      const navReady = document.querySelector('.bottom-nav-item[data-page="chat"]') ||
+                        document.querySelector('.nav-item[data-page="chat"]');
+      if (uid && navReady) {
+        try {
+          const cached = localStorage.getItem('bi-chat-unread-count-' + uid);
+          if (cached != null) _paintChatNavBadge(parseInt(cached, 10) || 0);
+        } catch (_) {}
+        return;
+      }
+      if (tries > 40) return;   // ~10s of retrying, then give up — a real _renderInbox call will paint it
+      setTimeout(attempt, 250);
+    };
+    attempt();
+  })();
+
   function _timeAgo(ts) {
     if (!ts) return '';
     const d = ts.toDate ? ts.toDate() : new Date(ts);
@@ -201,6 +280,9 @@ window.Chat = (() => {
         lastMessageBy: null, lastMessageByName: null, _unprovisioned: true };
     });
     const all = [..._convs, ...deptRows];
+    // Wave5 M1 — total unread-CONVERSATION count over the FULL merged list
+    // (unfiltered by tab/search), feeding the Chat nav/bottom-nav badge.
+    _updateChatNavBadge(all.filter(_isUnread).length);
     const filtered = _filter === 'all' ? all : all.filter(cv => cv.type === _filter);
     const sorted = filtered.slice().sort((a, b) =>
       (b.lastMessageAt?.toMillis?.() || 0) - (a.lastMessageAt?.toMillis?.() || 0));
@@ -251,7 +333,7 @@ window.Chat = (() => {
         <div style="flex:1;min-width:0">
           <div style="display:flex;align-items:center;gap:6px">
             <span style="font-weight:${unread?'700':'500'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(title)}</span>
-            ${unread ? '<span class="ms-unread-dot"></span>' : ''}
+            ${unread ? '<span class="ms-unread-badge">1+</span>' : ''}
           </div>
           <div style="font-size:12px;font-weight:${unread?'700':'400'};color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${preview}</div>
         </div>
@@ -383,7 +465,13 @@ window.Chat = (() => {
         ${leaveBtnHtml}
         ${wallpaperMenuHtml}
       </div>
-      <div id="chat-thread-scroll" class="messenger-body" style="padding:12px 14px"></div>
+      <div id="chat-thread-scroll-wrap" style="position:relative;flex:1;min-height:0;display:flex;flex-direction:column">
+        <div id="chat-thread-scroll" class="messenger-body" style="padding:12px 14px"></div>
+        <button id="chat-scroll-fab" class="ms-scroll-fab hidden" type="button" title="Scroll to latest" aria-label="Scroll to latest messages">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          <span id="chat-scroll-fab-badge" class="ms-scroll-fab-badge hidden">0</span>
+        </button>
+      </div>
       <div id="chat-typing-row"></div>
       <div id="chat-file-preview" style="font-size:11px;color:var(--primary);padding:0 14px 4px;min-height:16px"></div>
       <div class="messenger-input-row">
@@ -468,6 +556,13 @@ window.Chat = (() => {
     const input = document.getElementById('chat-input');
     const sendBtn = document.getElementById('chat-send');
     const updateSendState = () => { sendBtn.disabled = !((input.value || '').trim() || pendingFile || pendingLink); };
+    // Wave5 M1 — per-conversation draft restore (localStorage `bi-chat-draft-{convId}`).
+    // Saved on input (debounced 300ms below), cleared on optimistic send,
+    // re-saved if that send fails and the text is restored to the composer.
+    const draft = _loadDraft(conv.id);
+    if (draft) { input.value = draft; _autoGrow(input); }
+    updateSendState();
+    let _draftSaveTimer = null;
     fileInp.addEventListener('change', e => {
       const f = e.target.files?.[0];
       if (f) pendingLink = null;   // a file replaces a pending link
@@ -494,6 +589,17 @@ window.Chat = (() => {
     // failure it's left exactly as the user typed it (no silent data loss),
     // the button re-enables, and one error toast is shown here (the only
     // place — sendMessage's own catches now just throw, no toast).
+    // Wave5 M1 (J2) — optimistic send. The composer/attachment state clears
+    // IMMEDIATELY (not on confirmed success like before) and a local pending
+    // bubble appears right away via _addPendingMessage; the real write still
+    // happens in the background. Success is confirmed when the messages
+    // snapshot echoes this clientKey (_reconcilePending, wired in
+    // openConversation's onSnapshot). On failure everything the user had is
+    // restored — composer text, attachment, and the per-conv draft — and the
+    // pending bubble flips to a failed, tap-to-retry state (same clientKey,
+    // handled by _retryPending). _isSending still serializes one send at a
+    // time (Phase 63 #1's guard, unchanged) — the optimistic bubble is what
+    // makes that feel instant, not a relaxation of the guard itself.
     const doSend = async () => {
       if (_isSending) return;
       const text = (input.value || '').trim();
@@ -501,26 +607,49 @@ window.Chat = (() => {
       if (!text && !file && !link) return;
       _isSending = true;
       sendBtn.disabled = true;
+      const clientKey = _newClientKey();
+      const savedText = input.value, savedFilePreview = filePreview.textContent;
+      input.value = ''; _autoGrow(input);
+      fileInp.value = ''; pendingFile = null; pendingLink = null;
+      filePreview.textContent = '';
+      clearTimeout(_draftSaveTimer); _clearDraft(conv.id);
+      updateSendState();
+      _addPendingMessage({ clientKey, text, file, link });
       try {
-        await window.Chat.sendMessage({ text, file, link });
-        // ONLY clear on confirmed success.
-        input.value = '';
-        _autoGrow(input);
-        fileInp.value = '';
-        pendingFile = null; pendingLink = null;
-        filePreview.textContent = '';
+        await window.Chat.sendMessage({ text, file, link, clientKey });
       } catch (e) {
+        input.value = savedText; _autoGrow(input);
+        if (file) { pendingFile = file; filePreview.textContent = savedFilePreview; }
+        else if (link) { pendingLink = link; filePreview.textContent = savedFilePreview; }
+        _saveDraft(conv.id, savedText);
+        _markPendingFailed(clientKey);
         Notifs.error((e && e.message) || 'Message not sent — retry.');
       } finally {
         _isSending = false;
         updateSendState();               // re-enables Send whenever there's still text/attachment to retry
       }
     };
-    input.addEventListener('input', () => { _autoGrow(input); updateSendState(); window.Chat.onComposerInput(); });
+    input.addEventListener('input', () => {
+      _autoGrow(input); updateSendState(); window.Chat.onComposerInput();
+      clearTimeout(_draftSaveTimer);
+      _draftSaveTimer = setTimeout(() => _saveDraft(conv.id, input.value), 300);
+    });
     input.addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
     });
     sendBtn.addEventListener('click', doSend);
+
+    // Wave5 M1 (J7) — scroll-to-bottom FAB: appears >300px up, badge tallies
+    // messages that arrived while scrolled up (_renderThread), tap smooth-
+    // scrolls to bottom and clears the tally.
+    document.getElementById('chat-thread-scroll')?.addEventListener('scroll', _onThreadScroll, { passive: true });
+    document.getElementById('chat-scroll-fab')?.addEventListener('click', () => {
+      const scrollEl = document.getElementById('chat-thread-scroll');
+      if (!scrollEl) return;
+      scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: 'smooth' });
+      _scrollFabUnseen = 0;
+      _updateScrollFab(scrollEl);
+    });
 
     // On-screen-keyboard handling (Phase 19): keep the composer + last message
     // visible without a layout jump when visualViewport resizes (keyboard open/close).
@@ -604,12 +733,25 @@ window.Chat = (() => {
     // right back to null for the conversation we're about to open.
     _buildThreadPanel(conv);
     _openConvId = convId; _openConv = conv;
+    // Wave5 M1 — capture "my readAt" from the readers-doc data the INBOX
+    // already fetched (_refreshMyReads, before opening) — this is the "already
+    // fetched" read the spec asks to reuse, not a new read. Must be captured
+    // BEFORE _markRead() below overwrites my own readAt to "now". Frozen for
+    // the whole time this thread stays open — it's a one-time "where was I"
+    // boundary, not a live-recomputed value (see _renderThread's initial-scroll
+    // gating and the divider note in _threadHtml).
+    _threadOpenReadAtMs = _myReads[convId] || 0;
+    _threadInitialScrollDone = false;
+    _scrollFabUnseen = 0;
+    _pending.forEach(p => { if (p.previewUrl) { try { URL.revokeObjectURL(p.previewUrl); } catch (_) {} } });
+    _pending = [];
     _refreshUsersCache().then(() => _renderThread());   // backfills avatar photos once cached
     const ref = db.collection('conversations').doc(convId);
     _threadUnsubs.push(ref.collection('messages')
       .orderBy('createdAt', 'desc').limit(PAGE_SIZE)
       .onSnapshot(s => {
         _msgs = s.docs.map(d => ({ id: d.id, ...d.data(), _snap: d })).reverse();
+        _reconcilePending();     // drop any optimistic bubble the snapshot just echoed back
         _renderThread(); _scheduleMarkRead();
       }, () => {}));
     _threadUnsubs.push(ref.collection('readers')
@@ -643,7 +785,7 @@ window.Chat = (() => {
   }
 
   // ── Send (message add → parent preview bump → own receipt → notify) ──
-  async function sendMessage({ text, file, link }) {
+  async function sendMessage({ text, file, link, clientKey }) {
     const conv = _openConv; if (!conv) return;
     const FV = firebase.firestore.FieldValue;
     let fileUrl = null, fileName = null, fileSource = null;
@@ -665,6 +807,7 @@ window.Chat = (() => {
     await db.collection('conversations').doc(conv.id).collection('messages').add({
       text: text || '', authorId: currentUser.uid, authorName: _myName(),
       fileUrl: fileUrl || null, fileName: fileName || null, fileSource: fileSource || null,
+      clientKey: clientKey || null,   // Wave5 M1 (J2) — lets _reconcilePending match this doc to its optimistic bubble
       createdAt: FV.serverTimestamp()
     });
     const preview = text ? (text.length > 80 ? text.slice(0, 80) + '…' : text)
@@ -900,10 +1043,38 @@ window.Chat = (() => {
 
     const isMine = m.authorId === currentUser.uid;
     const info = _authorInfo(m.authorId, m.authorName);
-    const canEdit = isMine;
-    const canDelete = isMine || _isAdminRole();
+    const isTombstone = !!m.deleted;                    // Wave5 M1 (J3)
+    const canEdit = isMine && !isTombstone;
+    const canDelete = (isMine || _isAdminRole()) && !isTombstone;
+    const canHardDelete = _isAdminRole();                // admin-only "Remove permanently", live or already-tombstoned
     const d = m.createdAt?.toDate ? m.createdAt.toDate() : null;
     const timeLabel = d ? d.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', timeZone: window.BIZ_TZ }) : '';
+    const rev = _msgRev(m);
+
+    // Wave5 M1 (J3) — tombstone: italic "Message removed", no reactions/
+    // picker/heart/copy-affordance (none of those classes are emitted below,
+    // so long-press/tap on this bubble is a no-op — _wireThreadDelegation's
+    // .closest('.chat-bubble-tap, .ms-heart-btn') simply finds nothing).
+    // Only an admin's "Remove permanently" action survives on a tombstone.
+    if (isTombstone) {
+      const row = `
+      <div class="ms-row ${isMine?'ms-row-mine':'ms-row-theirs'} ${grpClass}" data-mid="${escHtml(m.id)}" data-rev="${escHtml(rev)}">
+        ${!isMine ? (showAvatar
+            ? `<div class="ms-avatar" title="${escHtml(info.name)}">${info.photoUrl?`<img src="${escHtml(info.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:initials(info.name)}</div>`
+            : `<div class="ms-avatar-spacer"></div>`) : ''}
+        <div class="ms-bubble-wrap">
+          ${!isMine && showName ? `<div class="ms-name">${escHtml(info.name)}</div>` : ''}
+          <div class="ms-bubble-row">
+            <div class="ms-bubble ms-bubble-tombstone ${isMine?'ms-bubble-mine':'ms-bubble-theirs'} ${grpClass}" data-mid="${escHtml(m.id)}">
+              <div class="ms-text ms-tombstone-text">Message removed</div>
+              <div class="ms-meta" style="display:flex"><span class="ms-time">${timeLabel}</span></div>
+            </div>
+          </div>
+          ${canHardDelete ? `<div class="ms-actions" style="display:flex"><button class="ms-act-btn ms-del-btn chat-msg-harddel-btn" data-mid="${escHtml(m.id)}" title="Remove permanently">${emojiIcon('trash',14)}</button></div>` : ''}
+        </div>
+      </div>`;
+      return { sep, row };
+    }
 
     const reactions = m.reactions || {};
     const grouped = {};
@@ -916,9 +1087,12 @@ window.Chat = (() => {
           }).join('')
         }</div>`
       : '';
-    const pickerHtml = `<div class="chat-reaction-picker" data-mid="${escHtml(m.id)}" style="display:none;gap:4px;margin-top:4px">${
+    // Wave5 M1 (J3) — Copy joins the SAME long-press/context-menu picker as
+    // the reactions (opened by _openPickerFor via startPress/contextmenu on
+    // .chat-bubble-tap or .ms-heart-btn — unchanged), rather than a new menu.
+    const pickerHtml = `<div class="chat-reaction-picker" data-mid="${escHtml(m.id)}" style="display:none;gap:4px;margin-top:4px;align-items:center">${
       REACTIONS.map(e => `<button class="chat-pick-emoji" data-mid="${escHtml(m.id)}" data-emoji="${e}" style="font-size:16px;background:none;border:none;cursor:pointer;padding:2px 4px">${e}</button>`).join('')
-    }</div>`;
+    }<button class="chat-copy-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Copy" style="border-left:1px solid var(--border);padding-left:6px;margin-left:2px">${emojiIcon('copy',14)}</button></div>`;
     // Owner req #3 (Viber-style): a quick heart button beside the bubble —
     // tap = instant ❤️ toggle (via the SAME toggleReaction data model), while
     // long-press on the bubble OR the heart opens the full 6-emoji picker
@@ -927,6 +1101,7 @@ window.Chat = (() => {
     const heartHtml = `<button class="ms-heart-btn${heartedByMe?' ms-heart-active':''}" data-mid="${escHtml(m.id)}" title="React ❤️">${heartedByMe?'❤️':'🤍'}</button>`;
 
     const isLast = idx === list.length - 1;
+
     const seenBy = isLast ? _readers.filter(r => r.uid !== m.authorId && r.uid !== currentUser.uid
       && r.readAt?.toMillis && m.createdAt?.toMillis && r.readAt.toMillis() >= m.createdAt.toMillis()) : [];
     // Read receipts: reader avatars once the last message has been read;
@@ -938,7 +1113,6 @@ window.Chat = (() => {
         }${seenBy.length>5?`<span style="font-size:10px;color:var(--text-muted)">+${seenBy.length-5}</span>`:''}</div>`
       : (isLast && isMine ? `<div class="ms-status"><i data-lucide="check"></i></div>` : '');
 
-    const rev = _msgRev(m);
     const row = `
       <div class="ms-row ${isMine?'ms-row-mine':'ms-row-theirs'} ${grpClass}" data-mid="${escHtml(m.id)}" data-rev="${escHtml(rev)}">
         ${!isMine ? (showAvatar
@@ -963,9 +1137,10 @@ window.Chat = (() => {
           </div>
           ${reactionsHtml}
           ${pickerHtml}
-          ${canEdit||canDelete ? `<div class="ms-actions">
+          ${canEdit||canDelete||canHardDelete ? `<div class="ms-actions">
             ${canEdit?`<button class="ms-act-btn chat-msg-edit-btn" data-mid="${escHtml(m.id)}">${emojiIcon('✎',16)}</button>`:''}
-            ${canDelete?`<button class="ms-act-btn ms-del-btn chat-msg-del-btn" data-mid="${escHtml(m.id)}">${emojiIcon('trash-2',14)}</button>`:''}
+            ${canDelete?`<button class="ms-act-btn ms-del-btn chat-msg-del-btn" data-mid="${escHtml(m.id)}" title="Remove for everyone">${emojiIcon('trash-2',14)}</button>`:''}
+            ${canHardDelete?`<button class="ms-act-btn ms-del-btn chat-msg-harddel-btn" data-mid="${escHtml(m.id)}" title="Remove permanently">${emojiIcon('trash',14)}</button>`:''}
           </div>` : ''}
           ${seenHtml}
         </div>
@@ -982,6 +1157,13 @@ window.Chat = (() => {
     const showEarlierBtn = !_earlierCapped && (_earlier.length + _msgs.length) >= PAGE_SIZE;
     const isFirstRender = _lastMsgIds === null;
     const prevIds = _lastMsgIds || new Set();
+    // Wave5 M1 (J7) — "New messages" divider: first message strictly newer
+    // than _threadOpenReadAtMs (captured once, at open — see openConversation).
+    // myReadAtMs==0 means "never read before" (brand-new/never-opened convo),
+    // where a divider above message 0 would be meaningless — suppressed.
+    const dividerIdx = _threadOpenReadAtMs > 0
+      ? list.findIndex(m => m.createdAt?.toMillis && m.createdAt.toMillis() > _threadOpenReadAtMs)
+      : -1;
 
     let html = _earlierCapped
       ? `<div style="text-align:center;margin-bottom:10px;font-size:11px;color:var(--text-muted)">Older messages hidden — reopen this chat to reload from the start</div>`
@@ -990,6 +1172,9 @@ window.Chat = (() => {
         : '';
     list.forEach((m, idx) => {
       const isNew = !isFirstRender && !prevIds.has(m.id);
+      if (idx === dividerIdx) {
+        html += `<div class="ms-new-divider" id="chat-new-divider"><span>New messages</span></div>`;
+      }
       const { sep, row } = _renderMessagePart(list, idx, isNew);
       html += sep + row;
     });
@@ -1022,13 +1207,23 @@ window.Chat = (() => {
       }
     }
     // Append any new tail messages (with their leading day/gap separators).
+    // Wave5 M1 — _threadOpenReadAtMs is frozen at open time, so dividerIdx
+    // (if any) always falls within the shared PREFIX handled above, never in
+    // this appended range; nothing extra needed here for it.
     let appendHtml = '';
     for (let i = oldOrder.length; i < list.length; i++) {
       const isNew = !prevIds.has(list[i].id);
       const { sep, row } = _renderMessagePart(list, i, isNew);
       appendHtml += sep + row;
     }
-    if (appendHtml) el.insertAdjacentHTML('beforeend', appendHtml);
+    if (appendHtml) {
+      // Wave5 M1 — the pending-bubble tail container (if present) must stay
+      // the LAST child of #chat-thread-scroll; insert new real messages
+      // immediately before it instead of at the very end.
+      const tail = document.getElementById('chat-pending-tail');
+      if (tail && tail.parentElement === el) tail.insertAdjacentHTML('beforebegin', appendHtml);
+      else el.insertAdjacentHTML('beforeend', appendHtml);
+    }
     _lastRenderOrder = list.map(m => m.id);
     _lastMsgIds = new Set(_lastRenderOrder);
   }
@@ -1079,10 +1274,14 @@ window.Chat = (() => {
       if (e.target.closest('#chat-load-earlier-btn')) { loadEarlier(); return; }
       const chip = e.target.closest('.chat-reaction-chip, .chat-pick-emoji');
       if (chip) { e.stopPropagation(); toggleReaction(chip.dataset.mid, chip.dataset.emoji); return; }
+      const copyBtn = e.target.closest('.chat-copy-btn');
+      if (copyBtn) { e.stopPropagation(); _copyMessage(copyBtn.dataset.mid); return; }
       const editBtn = e.target.closest('.chat-msg-edit-btn');
       if (editBtn) { e.stopPropagation(); _onEditMessage(editBtn.dataset.mid); return; }
       const delBtn = e.target.closest('.chat-msg-del-btn');
       if (delBtn) { e.stopPropagation(); _onDeleteMessage(delBtn.dataset.mid); return; }
+      const hardDelBtn = e.target.closest('.chat-msg-harddel-btn');
+      if (hardDelBtn) { e.stopPropagation(); _onHardDeleteMessage(hardDelBtn.dataset.mid); return; }
       const heartBtn = e.target.closest('.ms-heart-btn');
       if (heartBtn) {
         e.stopPropagation();
@@ -1111,12 +1310,21 @@ window.Chat = (() => {
       .update({ text: newText.trim(), editedAt: firebase.firestore.FieldValue.serverTimestamp() })
       .catch(() => Notifs.showToast('Edit failed', 'error'));
   }
+  // Wave5 M1 (J3) — "delete" is now an unsend TOMBSTONE, not a hard delete.
+  // Same author-or-admin gate as before (canDelete in _renderMessagePart);
+  // rules already allow it — messages/update permits any field write when
+  // authorId==caller or isAdmin(), no shape restriction (the "tombstone =
+  // author-edit path" the batch brief points at). The renderer treats
+  // `deleted:true` as a terminal state: italic "Message removed", no
+  // reactions/picker/actions (see _renderMessagePart's early-return branch).
   async function _onDeleteMessage(mid) {
-    if (!(await confirmDialog({ message: 'Delete this message?', danger: true }))) return;
+    if (!(await confirmDialog({ message: 'Remove this message for everyone?', danger: true }))) return;
     const m = [..._earlier, ..._msgs].find(x => x.id === mid);
+    if (m && m.deleted) return;   // already a tombstone
     const conv = _openConv, convId = _openConvId;
     const createdAtMs = m?.createdAt?.toMillis?.();
-    await db.collection('conversations').doc(convId).collection('messages').doc(mid).delete()
+    await db.collection('conversations').doc(convId).collection('messages').doc(mid)
+      .update({ deleted: true, text: '', fileUrl: null, fileName: null, fileSource: null, media: null })
       .then(async () => {
         // owner req #4 — the notification(s) this message generated for
         // recipients must be removed along with it. Best-effort/fire-and-forget:
@@ -1127,6 +1335,178 @@ window.Chat = (() => {
         }
       })
       .catch(() => Notifs.showToast('Delete failed', 'error'));
+  }
+  // Wave5 M1 (J3) — the OLD hard-delete behavior, now a SEPARATE admin-only
+  // action ("Remove permanently" in the long-press picker / .ms-actions on a
+  // tombstone) rather than what the trash icon does by default.
+  async function _onHardDeleteMessage(mid) {
+    if (!_isAdminRole()) return;
+    if (!(await confirmDialog({ message: 'Permanently remove this message? This cannot be undone.', danger: true }))) return;
+    const m = [..._earlier, ..._msgs].find(x => x.id === mid);
+    const conv = _openConv, convId = _openConvId;
+    const createdAtMs = m?.createdAt?.toMillis?.();
+    await db.collection('conversations').doc(convId).collection('messages').doc(mid).delete()
+      .then(async () => {
+        if (conv && createdAtMs) {
+          const targets = await _targetsFor(conv);
+          window.Notifs?.deleteForMessage(convId, createdAtMs, targets).catch(() => {});
+        }
+      })
+      .catch(() => Notifs.showToast('Permanent delete failed', 'error'));
+  }
+
+  // ── Wave5 M1 (J2) — per-conversation drafts. localStorage only, plain text. ──
+  function _draftKey(convId) { return 'bi-chat-draft-' + convId; }
+  function _loadDraft(convId) { try { return localStorage.getItem(_draftKey(convId)) || ''; } catch (_) { return ''; } }
+  function _saveDraft(convId, text) {
+    try {
+      if (text) localStorage.setItem(_draftKey(convId), text);
+      else localStorage.removeItem(_draftKey(convId));
+    } catch (_) {}
+  }
+  function _clearDraft(convId) { try { localStorage.removeItem(_draftKey(convId)); } catch (_) {} }
+
+  // ── Wave5 M1 (J2) — optimistic send bubbles ──
+  // Rendered into a DEDICATED tail container (#chat-pending-tail), kept as the
+  // LAST child of #chat-thread-scroll by _ensurePendingTailEl — never as part
+  // of the keyed message list _threadHtml/_patchThread own. That's what lets
+  // pending bubbles coexist with _patchThread's prefix-diff logic: a full
+  // rebuild (el.innerHTML = _threadHtml(list)) recreates the tail container
+  // fresh at the end; the incremental patch path inserts newly-arrived REAL
+  // messages immediately BEFORE the tail (not after) so ordering stays
+  // correct, and never touches the tail's own contents. Neither path ever
+  // needs to know a pending bubble exists.
+  function _newClientKey() {
+    return (currentUser?.uid || 'u') + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  }
+  function _addPendingMessage({ clientKey, text, file, link }) {
+    let previewUrl = null;
+    if (file && /^image\//.test(file.type || '')) {
+      try { previewUrl = URL.createObjectURL(file); } catch (_) {}
+    }
+    _pending.push({ clientKey, text: text || '', file: file || null, link: link || null, previewUrl, status: 'sending' });
+    _renderThread();
+  }
+  function _markPendingFailed(clientKey) {
+    const p = _pending.find(x => x.clientKey === clientKey);
+    if (p) { p.status = 'failed'; _renderPendingTail(); }
+  }
+  // Matches confirmed message docs (by clientKey) against _pending and drops
+  // the ones the snapshot just echoed back — this is the "✓ when the snapshot
+  // echoes it" reconciliation, called right after every messages snapshot.
+  function _reconcilePending() {
+    if (!_pending.length) return;
+    const seen = new Set();
+    _msgs.forEach(m => { if (m.clientKey) seen.add(m.clientKey); });
+    _earlier.forEach(m => { if (m.clientKey) seen.add(m.clientKey); });
+    if (!seen.size) return;
+    _pending.filter(p => seen.has(p.clientKey))
+      .forEach(p => { if (p.previewUrl) { try { URL.revokeObjectURL(p.previewUrl); } catch (_) {} } });
+    _pending = _pending.filter(p => !seen.has(p.clientKey));
+  }
+  // Tap-to-retry — reuses the SAME clientKey, so whenever it eventually
+  // succeeds (first try or the Nth retry) reconciliation still matches it.
+  async function _retryPending(clientKey) {
+    const p = _pending.find(x => x.clientKey === clientKey);
+    if (!p || p.status === 'sending') return;
+    p.status = 'sending';
+    _renderPendingTail();
+    try {
+      await sendMessage({ text: p.text, file: p.file, link: p.link, clientKey });
+    } catch (e) {
+      p.status = 'failed';
+      _renderPendingTail();
+      Notifs.error((e && e.message) || 'Message not sent — retry.');
+    }
+  }
+  function _ensurePendingTailEl(el) {
+    let tail = document.getElementById('chat-pending-tail');
+    if (!tail || tail.parentElement !== el) {
+      tail = document.createElement('div');
+      tail.id = 'chat-pending-tail';
+      el.appendChild(tail);
+      _wirePendingTailDelegation(tail);
+    } else if (el.lastElementChild !== tail) {
+      el.appendChild(tail);   // re-append moves an already-wired node back to the end
+    }
+    return tail;
+  }
+  function _wirePendingTailDelegation(tail) {
+    if (tail.dataset.wired) return;
+    tail.dataset.wired = '1';
+    tail.addEventListener('click', e => {
+      const failed = e.target.closest('.ms-bubble-failed');
+      if (failed) _retryPending(failed.dataset.clientKey);
+    });
+  }
+  function _renderPendingTail() {
+    const tail = document.getElementById('chat-pending-tail');
+    if (!tail) return;
+    tail.innerHTML = _pending.map(_renderPendingBubble).join('');
+    if (window.lucide) lucide.createIcons({ nodes: [tail] });
+  }
+  function _renderPendingBubble(p) {
+    const failed = p.status === 'failed';
+    const statusHtml = failed
+      ? `<span class="ms-pending-status">${emojiIcon('⚠',12)}</span><span class="ms-pending-retry-label">Tap to retry</span>`
+      : `<span class="ms-pending-status">${emojiIcon('⏳',11)}</span>`;
+    const mediaHtml = p.previewUrl
+      ? `<div style="margin-top:${p.text?'6':'0'}px"><img src="${p.previewUrl}" alt="" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);opacity:.75"/></div>`
+      : (p.file ? `<div class="ms-file-chip">${emojiIcon('paperclip',14)}<span>${escHtml(p.file.name)}</span></div>` : '');
+    const linkHtml = (p.link && !p.file) ? `<div class="ms-file-chip">${emojiIcon('link',14)}<span>${escHtml(p.link)}</span></div>` : '';
+    return `
+      <div class="ms-row ms-row-mine ms-grp-single">
+        <div class="ms-bubble-wrap" style="align-items:flex-end">
+          <div class="ms-bubble-row">
+            <div class="ms-bubble ms-bubble-mine ms-grp-single ${failed?'ms-bubble-failed':'ms-bubble-pending'}" data-client-key="${escHtml(p.clientKey)}">
+              ${p.text ? `<div class="ms-text">${escHtml(p.text).replace(/\n/g,'<br/>')}</div>` : ''}
+              ${mediaHtml}${linkHtml}
+              <div class="ms-meta" style="display:flex">${statusHtml}</div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // ── Wave5 M1 (J7) — scroll-to-bottom FAB ──
+  function _updateScrollFab(el) {
+    const fab = document.getElementById('chat-scroll-fab');
+    if (!fab || !el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const scrolledUp = distanceFromBottom > 300;
+    fab.classList.toggle('hidden', !scrolledUp);
+    if (!scrolledUp) _scrollFabUnseen = 0;
+    const badge = document.getElementById('chat-scroll-fab-badge');
+    if (badge) {
+      badge.textContent = _scrollFabUnseen > 99 ? '99+' : String(_scrollFabUnseen);
+      badge.classList.toggle('hidden', _scrollFabUnseen <= 0);
+    }
+  }
+  function _onThreadScroll() {
+    const el = document.getElementById('chat-thread-scroll');
+    if (el) _updateScrollFab(el);
+  }
+
+  // ── Wave5 M1 (J3) — Copy message ──
+  async function _copyMessage(mid) {
+    const m = [..._earlier, ..._msgs].find(x => x.id === mid);
+    const text = m && !m.deleted ? (m.text || m.fileUrl || '') : '';
+    if (!text) { Notifs.showToast('Nothing to copy', 'error'); return; }
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('no clipboard api');
+      await navigator.clipboard.writeText(text);
+      Notifs.success('Copied');
+    } catch (_) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta);
+        Notifs.success('Copied');
+      } catch (e2) {
+        Notifs.showToast('Copy failed', 'error');
+      }
+    }
   }
 
   function _renderThread(opts) {
@@ -1147,18 +1527,43 @@ window.Chat = (() => {
     const canPatch = !opts.keepScrollAnchor && Array.isArray(oldOrder) && oldOrder.length > 0 &&
       newOrder.length >= oldOrder.length && oldOrder.every((id, i) => newOrder[i] === id);
 
+    // Wave5 M1 (J7) — scroll-FAB unseen tally: count ids newly appended by
+    // THIS render while the user is scrolled up, computed from the pre-patch
+    // id set (prevIds/newOrder), before the DOM mutates below.
+    if (canPatch && !atBottom) {
+      const prevIds = _lastMsgIds || new Set();
+      const arrived = newOrder.filter(id => !prevIds.has(id)).length;
+      if (arrived > 0) _scrollFabUnseen += arrived;
+    }
+
     if (canPatch) {
       _patchThread(el, list, oldOrder);
     } else {
       el.innerHTML = _threadHtml(list);
     }
+    // Wave5 M1 (J2) — the pending-bubble tail lives OUTSIDE the keyed message
+    // list entirely (see _patchThread's comment): ensure it exists as the
+    // last child (full rebuilds above wipe it, so it's recreated fresh every
+    // time) and repaint its contents from _pending[].
+    _ensurePendingTailEl(el);
+    _renderPendingTail();
     if (window.lucide) lucide.createIcons({ nodes: [el] });
 
     if (opts.keepScrollAnchor) {
       el.scrollTop = el.scrollHeight - prevScrollHeight + prevScrollTop;   // preserve visual anchor
+    } else if (!_threadInitialScrollDone && list.length > 0) {
+      // Wave5 M1 (J7) — one-time initial placement for this thread-open: land
+      // on the "New messages" divider if one was inserted, else the bottom
+      // (old behavior). Subsequent re-renders fall through to the normal
+      // atBottom-preserving branch below — they never re-snap to the divider.
+      const divider = document.getElementById('chat-new-divider');
+      if (divider) divider.scrollIntoView({ block: 'start' });
+      else el.scrollTop = el.scrollHeight;
+      _threadInitialScrollDone = true;
     } else if (atBottom) {
       el.scrollTop = el.scrollHeight;
     }
+    _updateScrollFab(el);
   }
 
   return { openDM, openConversation, openDeptChannel, sendMessage, toggleReaction,
