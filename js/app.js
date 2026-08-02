@@ -1532,10 +1532,29 @@ function renderQuoteBuilderIframe() {
     window.removeEventListener('resize', window._qbFit); window._qbFit = null;
   }
   if (reopenState) {
+    // Wave 3 Q2 — READY handshake replaces the old blind 450ms setTimeout race
+    // (the iframe's 'load' event fires before its own script has attached its
+    // message listener, so a fixed-delay guess could still lose the message).
+    // The builder posts {type:'QB_READY'} once its listener is live; send
+    // LOAD_QUOTE right then. Belt-and-braces: also send after 2s regardless,
+    // in case QB_READY is somehow missed (e.g. listener attached before this
+    // handler runs — the postMessage would be lost with no queue on our side).
     const frame = document.getElementById('qb-frame');
-    frame?.addEventListener('load', () => {
-      setTimeout(() => { try { frame.contentWindow.postMessage({ type:'LOAD_QUOTE', payload:{ editableState: reopenState, asRevision: reopenAsRevision } }, '*'); } catch(_){} }, 450);
-    });
+    let qbSent = false;
+    const sendLoadQuote = () => {
+      if (qbSent || !frame?.contentWindow) return;
+      qbSent = true;
+      try { frame.contentWindow.postMessage({ type:'LOAD_QUOTE', payload:{ editableState: reopenState, asRevision: reopenAsRevision } }, '*'); } catch(_){}
+    };
+    const onQbReady = (ev) => {
+      if (ev.origin !== window.location.origin) return;
+      if (!frame || ev.source !== frame.contentWindow) return;
+      if (!ev.data || ev.data.type !== 'QB_READY') return;
+      window.removeEventListener('message', onQbReady);
+      sendLoadQuote();
+    };
+    window.addEventListener('message', onQbReady);
+    setTimeout(() => { window.removeEventListener('message', onQbReady); sendLoadQuote(); }, 2000);
   }
   if (reviewCtx) {
     document.getElementById('qb-return-edit')?.addEventListener('click', () => saveReviewedPartnerQuote(reviewCtx, 'return'));
@@ -1612,7 +1631,11 @@ window.reopenQuoteFromDoc = async function(collection, id, navTarget, opts){
     const snap = await db.collection(collection).doc(id).get();
     const q = snap.data() || {};
     if (!q.editableState) { Notifs.showToast('No editable snapshot saved for this quote', 'error'); return; }
-    window._qbReopenState = q.editableState;
+    // Wave 3 Q4/Q5 — stamp the source doc + its place in the revision chain onto
+    // the editableState we hand the builder, so the File flow can offer
+    // "update original" (QUOTE_UPDATE) vs "file as new revision" (QUOTE_FILED),
+    // and so a new revision correctly inherits the chain's root id.
+    window._qbReopenState = { ...q.editableState, sourceDocId: id, sourceCollection: collection, rootQuoteId: q.rootQuoteId || id };
     window._qbReopenAsRevision = !!(opts && opts.asRevision);
     navigateTo(navTarget || (collection==='bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'));
   } catch (ex) { Notifs.showToast('Could not reopen: '+(ex.message||ex.code), 'error'); }
@@ -1649,7 +1672,8 @@ window.newRevisionFromDoc = async function(collection, id, navTarget){
     const latest = pool.find(q => q.editableState) || clicked;
 
     if (!latest.editableState) { Notifs.showToast('No editable snapshot saved for this quote', 'error'); return; }
-    window._qbReopenState = latest.editableState;
+    // Wave 3 Q5 — same chain-linking as reopenQuoteFromDoc above.
+    window._qbReopenState = { ...latest.editableState, sourceDocId: latest.id, sourceCollection: collection, rootQuoteId: latest.rootQuoteId || latest.id };
     window._qbReopenAsRevision = true;
     navigateTo(navTarget || (collection === 'bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'));
   } catch (ex) { Notifs.showToast('Could not start revision: ' + (ex.message || ex.code), 'error'); }
@@ -9249,8 +9273,89 @@ function renderHelpPartner() {
 // ── Quote Builder iframe → Firestore bridge ───────
 window.addEventListener('message', async (e) => {
   if (e.origin !== window.location.origin) return;  // only trust our own quote-builder iframe — never act on forged cross-origin messages
-  const { type, payload } = e.data || {};
+  const { type, payload, docId, collection } = e.data || {};
   if (!payload || !currentUser || !db) return;
+
+  // Wave 3 Q6 — cloud draft. Debounced (5s idle, builder-side) autosave into a
+  // single deterministic slot per user per collection, so a closed tab doesn't
+  // lose unfiled work. NOTE: requires firestore.rules to allow this user to
+  // create/update/delete their own draft_{uid} doc in bk_quotes/bs_quotes —
+  // that rule is deployed separately by the main session, so this whole branch
+  // is wrapped to fail silently (nothing else in the app breaks) until then.
+  if (type === 'QUOTE_DRAFT') {
+    try {
+      const coll = (payload.company === 'BK') ? 'bk_quotes' : 'bs_quotes';
+      await db.collection(coll).doc('draft_' + currentUser.uid).set({
+        ...payload,
+        status: 'draft',
+        draftBy: currentUser.uid,
+        draftAt: firebase.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      try { e.source && e.source.postMessage({ type: 'QUOTE_DRAFT_SAVED', at: Date.now() }, e.origin); } catch(_){}
+    } catch (err) {
+      console.warn('[QB bridge] QUOTE_DRAFT save failed (draft_{uid} firestore.rules likely not deployed yet)', err);
+    }
+    return;
+  }
+
+  // Wave 3 Q4 — edit-in-place. Builder-driven equivalent of the president's
+  // saveReviewedPartnerQuote() .update() path above: the user reopened an
+  // existing quote and chose "update original" at File time instead of filing
+  // a new copy. Only known quote collections are ever touched.
+  if (type === 'QUOTE_UPDATE') {
+    try {
+      if (!docId || (collection !== 'bk_quotes' && collection !== 'bs_quotes')) return;
+      const agentName = userProfile?.displayName || currentUser.email;
+      const update = {
+        quoteNumber:    payload.quoteNumber || '',
+        clientId:       payload.clientId || null,
+        clientName:     payload.clientName || '',
+        clientCompany:  payload.clientCompany || '',
+        clientAddress:  payload.clientAddress || '',
+        clientPhone:    payload.clientPhone || '',
+        clientEmail:    payload.clientEmail || '',
+        salesperson:    payload.salesperson || agentName,
+        purpose:        payload.purpose || '',
+        subject:        payload.subject || '',
+        location:       payload.location || '',
+        leadSource:     payload.leadSource || '',
+        quoteDate:      payload.quoteDate || '',
+        items:          payload.items || [],
+        photos:         payload.photos || [],
+        subtotal:       payload.subtotal || 0,
+        total:          payload.total || 0,
+        grandTotal:     payload.grandTotal || 0,
+        vatIncluded:    payload.vatIncluded || false,
+        vatAmount:      payload.vatAmount || 0,
+        discountPct:    payload.discountPct || 0,
+        discountAmount: payload.discountAmount || 0,
+        netAmount:      payload.netAmount || 0,
+        deliveryInstall:payload.deliveryInstall || null,
+        timeline:       payload.timeline || null,
+        remarks:        payload.remarks || '',
+        bankDetails:    payload.bankDetails || '',
+        validUntil:     payload.validUntil || '',
+        commissionPct:  payload.commissionPct || 0,
+        commissionAmount:payload.commissionAmount || 0,
+        payment:        payload.payment || null,
+        editableState:  payload.editableState || null,
+        // rootQuoteId/parentQuoteId are deliberately NOT touched here — this is
+        // the SAME doc being edited, its place in the revision chain doesn't change.
+        editedAt:       firebase.firestore.FieldValue.serverTimestamp(),
+        editedBy:       currentUser.uid,
+        editedByName:   agentName,
+      };
+      await db.collection(collection).doc(docId).update(update);
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('all-quotes');
+      window.logAudit && window.logAudit('update', 'quote', docId, { source: 'quote-builder-v2', inPlaceEdit: true });
+      if (typeof Notifs?.success === 'function') Notifs.success('Quote updated in place.');
+    } catch (err) {
+      console.error('[QB bridge] QUOTE_UPDATE failed', err);
+      Notifs?.showToast && Notifs.showToast('Update failed: ' + (err.message || err.code), 'error');
+    }
+    return;
+  }
+
   if (type !== 'QUOTE_FILED' && type !== 'QUOTE_APPROVAL_REQUESTED') return;
 
   try {
@@ -9271,6 +9376,7 @@ window.addEventListener('message', async (e) => {
       leadSource:     payload.leadSource || '',
       quoteDate:      payload.quoteDate || '',
       items:          payload.items || [],
+      photos:         payload.photos || [],
       subtotal:       payload.subtotal || 0,
       total:          payload.total || 0,
       grandTotal:     payload.grandTotal || 0,
@@ -9289,6 +9395,12 @@ window.addEventListener('message', async (e) => {
       payment:        payload.payment || null,
       // Full editable snapshot — lets the quote be re-opened and edited from the Quotations tab
       editableState:  payload.editableState || null,
+      // Wave 3 Q5 — revision-chain links. parentQuoteId is null for a
+      // from-scratch quote. rootQuoteId is patched to the new doc's own id
+      // below when this is the first-ever filing in its chain (payload didn't
+      // carry one from a reopened quote).
+      parentQuoteId:  payload.parentQuoteId || null,
+      rootQuoteId:    payload.rootQuoteId || null,
       source:         'quote-builder-v2',
       agentName,
       createdBy:      currentUser.uid,
@@ -9319,11 +9431,25 @@ window.addEventListener('message', async (e) => {
       return await window.Clients.upsertFromQuote(data);
     };
 
+    // Wave 3 Q5 — a fresh (never-reopened) quote has no rootQuoteId yet; once
+    // Firestore assigns the doc its id, that id becomes the chain's root.
+    // Reopened quotes already carried a resolved rootQuoteId in the payload
+    // (see reopenQuoteFromDoc/newRevisionFromDoc), so this only fires once
+    // per chain, on its very first filing.
+    const stampRoot = async (docRef) => {
+      if (!data.rootQuoteId) { try { await docRef.update({ rootQuoteId: docRef.id }); } catch(_){} }
+    };
+    // Wave 3 Q6 — filing (either path) replaces the need for the cloud draft
+    // slot; best-effort cleanup, never blocks the file itself.
+    const deleteDraftSlot = async () => { try { await db.collection(coll).doc('draft_' + currentUser.uid).delete(); } catch(_){} };
+
     if (type === 'QUOTE_FILED') {
       Object.assign(data, window.quoteStateFields('filed'));
       data.filedAt = firebase.firestore.FieldValue.serverTimestamp();
       data.clientId = await upsertClient();        // FK stamped BEFORE the quote is written
-      await db.collection(coll).add(data);
+      const docRef = await db.collection(coll).add(data);
+      await stampRoot(docRef);
+      await deleteDraftSlot();
       // Notify president so they're aware of filed quotes
       await Notifs.sendToOwner({
         title: '📋 Quote Filed',
@@ -9340,6 +9466,8 @@ window.addEventListener('message', async (e) => {
       data.reviewRequestedAt = firebase.firestore.FieldValue.serverTimestamp();
       data.clientId = await upsertClient();        // FK stamped BEFORE the quote is written
       const docRef = await db.collection(coll).add(data);
+      await stampRoot(docRef);
+      await deleteDraftSlot();
       await db.collection('approval_requests').add({
         type: 'bs_quote',            // legacy type value kept — readers filter on it
         quoteId: docRef.id,

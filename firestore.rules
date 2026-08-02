@@ -707,14 +707,23 @@ service cloud.firestore {
     // etc.) so they can coordinate; a partner only ever sees their OWN quotes.
     // (The reverse — partner reading internal bk_quotes — is denied below.)
     match /bs_quotes/{docId} {
+      // v14 wave3 Q6: autosaved draft slot — exactly one per user, doc id
+      // 'draft_{uid}'. Keyed on the ID (never on data fields — absent-field
+      // reads DENY the whole rule) so create/update/delete of one's own
+      // draft always works; drafts carry draftBy, not createdBy.
       allow read: if isAuth() && (
         resource.data.createdBy == request.auth.uid || !isPartner()
+        || docId == 'draft_' + request.auth.uid
       );
-      allow create: if isAuth() && request.resource.data.createdBy == request.auth.uid;
+      allow create: if isAuth() && (
+        request.resource.data.createdBy == request.auth.uid
+        || docId == 'draft_' + request.auth.uid
+      );
       allow update: if isAuth() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
+        || docId == 'draft_' + request.auth.uid
       );
-      allow delete: if isAuth() && isAdmin();
+      allow delete: if isAuth() && (isAdmin() || docId == 'draft_' + request.auth.uid);
     }
 
     // ── BK Quotes (Barro Kitchens / internal Sales) ────
@@ -724,17 +733,23 @@ service cloud.firestore {
     match /bk_quotes/{docId} {
       allow read: if isAuth() && !isPartner() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
+        || docId == 'draft_' + request.auth.uid
       );
       // Admins may also create with a DIFFERENT createdBy: required by the v12
       // WS31 stranded-quote migration, which moves misfiled BK docs out of
       // bs_quotes preserving the ORIGINAL creator for the audit trail. Partner
       // isolation is unchanged (partners still can never touch bk_quotes at all).
       allow create: if isAuth() && !isPartner() &&
-        (request.resource.data.createdBy == request.auth.uid || isAdmin());
+        (request.resource.data.createdBy == request.auth.uid || isAdmin()
+         || docId == 'draft_' + request.auth.uid);
       allow update: if isAuth() && !isPartner() && (
         resource.data.createdBy == request.auth.uid || isAdmin()
+        || docId == 'draft_' + request.auth.uid
       );
-      allow delete: if isAuth() && isAdmin();
+      // v14 wave3 Q6: own draft slot deletable (deleted on File); partner
+      // exclusion for bk_quotes stays absolute.
+      allow delete: if isAuth() && (isAdmin()
+        || (!isPartner() && docId == 'draft_' + request.auth.uid));
     }
 
     // ── Approval requests ──────────────────────────────
