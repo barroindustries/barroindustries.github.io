@@ -2181,14 +2181,19 @@ async function renderProductDatabase() {
   async function openBomModal(prefix, existingBom) {
     const target = document.getElementById(`${prefix}-capmat`);
     if (!target) return;
-    openModal(`${emojiIcon('🧮',16)} Materials from Inventory`, '<div class="loading-placeholder" style="padding:24px">Loading raw materials…</div>',
+    // v14 Batch5 A3 — substantial detail/edit content (dynamic inventory table
+    // + apply action), CONVERT openModal→openPage. This call site reads the
+    // body element back out after the async inventory fetch resolves, so it
+    // must use the panel openPage RETURNS instead of the old #modal-body
+    // singleton id (openPage creates a fresh per-call panel, no such id).
+    const panel = openPage(`${emojiIcon('🧮',16)} Materials from Inventory`, '<div class="loading-placeholder" style="padding:24px">Loading raw materials…</div>',
       '<button class="btn-primary" id="bom-apply">Apply to Materials Cost</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>');
     const snap = await db.collection('inventory_items').orderBy('name').get().catch(() => ({ docs: [] }));
     const mats = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(i => (i.kind || 'material') === 'material');
     const qtyById = {};
     (existingBom || []).forEach(l => { qtyById[l.itemId] = l.qty; });
 
-    const body = document.getElementById('modal-body') || document.querySelector('.modal-body');
+    const body = panel.querySelector('.page-panel-body');
     if (!mats.length) {
       if (body) body.innerHTML = `<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('📦',44)}</div><h4>No raw materials in Inventory</h4><p>Add raw materials (with unit cost) in the Inventory module first, then build a BOM here.</p></div>`;
       if (window.lucide) lucide.createIcons({ nodes: [body] });
@@ -3339,7 +3344,7 @@ async function renderFinanceDashboard() {
         <td style="text-align:center;color:${ageCol(g.oldest)};font-weight:600">${g.oldest}d</td>
         <td style="text-align:center">${g.count}</td>
       </tr>`).join('');
-      openModal(`${emojiIcon('📥',16)} Receivables by Client`, `
+      openPage(`${emojiIcon('📥',16)} Receivables by Client`, `
         <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Open project balances, oldest first — chase the top of the list. Total <strong>₱${formatNum(arTotal)}</strong> across ${arClients.length} client${arClients.length===1?'':'s'}.</div>
         <div class="table-wrap" style="max-height:52vh;overflow:auto"><table class="data-table">
           <thead><tr><th>Client</th><th style="text-align:right">Outstanding</th><th style="text-align:center">Oldest</th><th style="text-align:center">Projects</th></tr></thead>
@@ -5402,8 +5407,12 @@ async function getAttendanceScore(uid) {
 
 // ── Employee Standings Modal ───────────────────────
 async function openEmpStandingsModal(uid, name, preloaded) {
-  window.openModal(`${emojiIcon('📊',16)} ${name} — Standings`, '<div class="loading-placeholder" style="padding:30px;text-align:center">Loading standings…</div>');
-  const body = document.getElementById('modal-body');
+  // v14 Batch5 A3 — read-only detail report (KPI + salary breakdown + attendance
+  // grid), CONVERT openModal→openPage. Body is populated after async Firestore
+  // reads resolve, so capture the panel openPage returns and query its own
+  // body element instead of the old #modal-body singleton id.
+  const panel = window.openPage(`${emojiIcon('📊',16)} ${name} — Standings`, '<div class="loading-placeholder" style="padding:30px;text-align:center">Loading standings…</div>');
+  const body = panel.querySelector('.page-panel-body');
 
   try {
     // Manila business-calendar (attendance grid must match the employee's local day).
@@ -6496,7 +6505,11 @@ function openMemoDetailModal(m, onChange) {
       ${rows}`;
   }
 
-  openModal(m.title,`
+  // v14 Batch5 A3 — memo detail/conforme-tracker: detail+history content, CONVERT.
+  // All ids referenced below (memo-conforme-chk/-btn, del-memo-btn) are queried
+  // via document.getElementById, which is document-scoped — no dependency on
+  // the old #modal-body singleton, so this is a same-signature swap.
+  openPage(m.title,`
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">From: ${escHtml(m.from||'Management')} &nbsp;·&nbsp; ${d.toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'})}</div>
     <p style="font-size:14px;line-height:1.8;white-space:pre-wrap;color:var(--text-2)">${escHtml(m.content||'')}</p>
     ${memoFile?`<a href="${escHtml(memoFile)}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="display:inline-block;margin-top:14px">${emojiIcon('📎',16)} Open Attachment</a>`:''}
@@ -6600,7 +6613,9 @@ async function renderCompanyPolicies(ct, canAdd) {
       card.addEventListener('click',e=>{
         if(e.target.tagName==='A') return;
         const p=policies.find(x=>x.id===card.dataset.id);
-        openModal(p.title,`<p style="font-size:14px;line-height:1.7;white-space:pre-wrap;color:var(--text-2)">${escHtml(p.content||'No content.')}</p>${p.fileUrl?`<a href="${(typeof safeHttpUrl==='function')?safeHttpUrl(p.fileUrl):p.fileUrl}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="display:inline-block;margin-top:14px">${emojiIcon('📎',16)} Open File</a>`:''}${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-policy-btn" data-id="${p.id}">Delete</button>`:''}`);
+        // v14 Batch5 A3 — policy detail view: CONVERT (detail content). del-policy-btn
+        // is looked up via document.getElementById, unaffected by the container swap.
+        openPage(p.title,`<p style="font-size:14px;line-height:1.7;white-space:pre-wrap;color:var(--text-2)">${escHtml(p.content||'No content.')}</p>${p.fileUrl?`<a href="${(typeof safeHttpUrl==='function')?safeHttpUrl(p.fileUrl):p.fileUrl}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="display:inline-block;margin-top:14px">${emojiIcon('📎',16)} Open File</a>`:''}${canAdd?`<hr class="divider"/><button class="btn-danger" id="del-policy-btn" data-id="${p.id}">Delete</button>`:''}`);
         document.getElementById('del-policy-btn')?.addEventListener('click',async e2=>{if(await confirmDialog({message:'Delete this policy?', danger:true})){await db.collection('policies').doc(e2.currentTarget.dataset.id).delete();closeModal();renderCompanyPolicies(ct,canAdd);}});
       });
     });
@@ -7801,7 +7816,15 @@ function openCreateWorkerModal() {
 
       dbCacheInvalidate('users'); dbCacheInvalidate('users-presence');
 
-      // Show credentials to HR — only time the password is displayed in full
+      // Show credentials to HR — only time the password is displayed in full.
+      // v14 Batch5 A3 — KEEP as openModal: a one-time info alert (no form, one
+      // action), not detail/history content. This modal opens ON TOP OF the
+      // "Create Worker Account" openPage (which is still on the stack — Batch1
+      // 1c renders the modal above it correctly), so Done must close BOTH
+      // surfaces, not just this modal. A bare closeModal() would only pop the
+      // modal and reveal the stale, already-submitted form underneath. Use
+      // Overlay.clearAll() (same pattern as the departments.js task-edit save)
+      // to tear down both stacked entries in one shot, then refresh Team.
       openModal(`${emojiIcon('✅',16)} Worker Account Created`, `
         <p style="margin-bottom:12px">Hand these credentials to <strong>${escHtml(name)}</strong>:</p>
         <div style="background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:16px;font-family:monospace;font-size:15px;line-height:2">
@@ -7809,7 +7832,7 @@ function openCreateWorkerModal() {
           <div>Password: <strong style="color:var(--primary-light)">${escHtml(password)}</strong></div>
         </div>
         <p style="font-size:12px;color:var(--text-muted);margin-top:10px">${emojiIcon('⚠️',12)} Write this down now. The password won't be shown again in plain text.</p>
-      `, `<button class="btn-primary" onclick="closeModal();renderTeam()">Done</button>`);
+      `, `<button class="btn-primary" onclick="Overlay.clearAll();renderTeam()">Done</button>`);
     } catch(err) {
       btn.disabled = false; btn.textContent = 'Create Account';
       errEl.textContent = err.code === 'auth/email-already-in-use'
@@ -7865,6 +7888,14 @@ function openEditEmployeeModal(u) {
   });
 
   // Reset Password (worker accounts only)
+  // v14 Batch5 A3 — KEEP as openModal: a small single-field quick sheet nested
+  // over the Edit Employee openPage. Its follow-up "Password Reset" success
+  // screen below is also openModal, so Batch1 1b's modal-over-modal swap
+  // (Overlay.replaceTop) reuses this SAME Overlay entry for the success
+  // content — one closeModal() from either screen pops exactly one entry and
+  // reveals Edit Employee underneath. Converting either half to openPage
+  // would lose that free in-place swap and require opts.replace plumbing for
+  // no UX gain, so both stay modals.
   document.getElementById('eu-reset-pw-btn')?.addEventListener('click', () => {
     const newPw = generatePassword(u.displayName||'worker');
     openModal(`${emojiIcon('🔑',16)} Reset Password`, `
@@ -7919,6 +7950,9 @@ function openEditEmployeeModal(u) {
 }
 
 // ── Profile Drawer ────────────────────────────────
+// v14 Batch5 A3 — KEEP as openModal: a quick single-field boot-time prompt
+// (setTimeout-fired at login, app.js:128) opened over the base dashboard with
+// no other surface on the stack — not detail/history content.
 function _promptPhoneNumber() {
   openModal(`${emojiIcon('📞',16)} Add Your Phone Number`,
     `<p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Your phone number appears on your Digital ID and Calling Card so colleagues can reach you.</p>

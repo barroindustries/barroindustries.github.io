@@ -1434,7 +1434,7 @@ async function openSubDetail(subId, currentUser, currentRole) {
   const s = {id:snap.id,...snap.data()};
   const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager' || currentRole === 'finance';
 
-  openModal(escHtml(s.title||''), `
+  openPage(escHtml(s.title||''), `
     <div style="margin-bottom:10px">
       <span class="badge ${statusBadge(s.status)}">${s.status||'pending'}</span>
       <span class="badge badge-gray" style="margin-left:6px">${escHtml(s.type||'General')}</span>
@@ -2949,7 +2949,7 @@ async function openRaiseHistory(opts = {}) {
           </tr>`;
         }).join('')}</tbody>
       </table></div>`;
-  openModal(`${emojiIcon('💸',16)} Salary Raise History${opts.subjectName?` — ${escHtml(opts.subjectName)}`:''}`, rows,
+  openPage(`${emojiIcon('💸',16)} Salary Raise History${opts.subjectName?` — ${escHtml(opts.subjectName)}`:''}`, rows,
     `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
 }
 
@@ -3116,7 +3116,10 @@ window.openScheduledRaises = async function() {
             </td>
           </tr>`).join('')}</tbody>
         </table></div>`;
-    openModal(`${emojiIcon('💸',16)} Scheduled &amp; Pending Raises`, rows, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    // replace:true — this is a self-refresh (approve/reject re-invoke render()
+    // in place); openPage falls back to a normal push on the very first call
+    // (empty stack), then swaps itself in place on every re-render after.
+    openPage(`${emojiIcon('💸',16)} Scheduled &amp; Pending Raises`, rows, `<button class="btn-secondary" onclick="closeModal()">Close</button>`, {replace:true});
     document.querySelectorAll('.sr-approve-btn').forEach(btn=>btn.addEventListener('click', async ()=>{
       const r = await window.RaiseFlow.approve(btn.dataset.id);
       Notifs.showToast(r==='approved'?'Raise approved.':'Already resolved.');
@@ -3511,7 +3514,7 @@ window.reopenPayRun = async function(month) {
 // matching frozen line (the pre-lock era's Path-B fingerprint). No writes —
 // any fix routes through financeDelete / a manual ledger entry.
 async function openPayrollReconciliation() {
-  openModal(`${emojiIcon('🔍',16)} Payroll Reconciliation`, `<div id="recon-body" style="padding:20px;text-align:center;color:var(--text-muted)">Scanning payroll history…</div>`,
+  openPage(`${emojiIcon('🔍',16)} Payroll Reconciliation`, `<div id="recon-body" style="padding:20px;text-align:center;color:var(--text-muted)">Scanning payroll history…</div>`,
     `<button class="btn-secondary" id="recon-csv-btn" disabled>Export CSV</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
 
   const runsSnap = await db.collection('pay_runs').get().catch(()=>({docs:[]}));
@@ -4789,7 +4792,7 @@ function openBankAccountModal(a, onDone) {
   const isEdit = !!a;
   a = a || { nickname:'', type:'bank', bankName:'', accountName:'', accountNo:'', branch:'',
     openingBalance:0, openingDate:(window.bizDate?window.bizDate():today()), active:true, isDefault:false, sortOrder:0, notes:'' };
-  openModal(isEdit?'Edit Bank Account':'Add Bank Account', `
+  openPage(isEdit?'Edit Bank Account':'Add Bank Account', `
     <div class="form-row">
       <div class="form-group"><label>Nickname</label><input id="ba-nickname" value="${escHtml(a.nickname||'')}" placeholder="e.g. BDO Checking — Main"/></div>
       <div class="form-group"><label>Type</label><select id="ba-type" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
@@ -5240,7 +5243,7 @@ function openCADataRepairModal(onDone) {
     const listRows = (arr, cols) => arr.length
       ? arr.map(r => `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid var(--border)">${escHtml(r.userName)} — ${cols(r)}</div>`).join('')
       : `<div style="font-size:12px;color:var(--text-muted)">None found.</div>`;
-    openModal(`${emojiIcon('🔄',16)} Cash Advance Data Repair — Dry Run`, `
+    openPage(`${emojiIcon('🔄',16)} Cash Advance Data Repair — Dry Run`, `
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Scanned every cash_advances record. Nothing has been written yet.</p>
       <div style="margin-bottom:14px"><strong>Status 'active' → 'approved'</strong> (${report.normalizedActive.length})${listRows(report.normalizedActive, r=>`will be normalized`)}</div>
       <div style="margin-bottom:14px"><strong>Interest restored</strong> (${report.interestRestored.length})${listRows(report.interestRestored, r=>`₱${fmt(r.from)} → ₱${fmt(r.to)}`)}</div>
@@ -5426,7 +5429,7 @@ window.openWorkerIDModal = async function(profile, onDone) {
   const token = await ensureWorkerVerifyToken(profile).catch(()=>null);
   const url = (window.BRAND?.verifyBase || '/v/') + '?' + encodeURIComponent(token||'');
   const qr = (window.buildQRSVG && token) ? window.buildQRSVG(url, 120) : '';
-  openModal(`${emojiIcon('🪪',16)} Worker ID — ` + escHtml(profile.name||''), `
+  openPage(`${emojiIcon('🪪',16)} Worker ID — ` + escHtml(profile.name||''), `
     <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
       <div style="width:90px;height:110px;border:1px solid var(--border);border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--surface2);font-size:34px">
         ${profile.photoUrl?`<img src="${escHtml(profile.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:`${emojiIcon('👤',16)}`}</div>
@@ -5799,7 +5802,12 @@ async function openPayslipHistory(currentUser, currentRole) {
   const renderModal = () => {
     const totalNet = list.reduce((s,p)=>s+(p.netPay||0),0);
     const filedCount = list.filter(p=>['filed','submitted'].includes(p.status)).length;
-    openModal(`${emojiIcon('📄',16)} Payslip Summary`, `
+    // replace:true — self-refresh (advance/delete/override re-invoke renderModal()
+    // in place, same top-of-stack). The edit sub-page (ps-edit-btn) does NOT come
+    // back through here — see its own onSave callback below, which pops back via
+    // Overlay.clearAll() instead so the stale hidden copy of this page isn't left
+    // behind under the edit page.
+    const panel = openPage(`${emojiIcon('📄',16)} Payslip Summary`, `
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--text-muted)">
         <span><strong style="color:var(--text)">${list.length}</strong> payslips</span>
         <span><strong style="color:var(--text)">${filedCount}</strong> filed/submitted</span>
@@ -5811,8 +5819,8 @@ async function openPayslipHistory(currentUser, currentRole) {
           <tbody>${!list.length ? '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px">No payslips yet</td></tr>' : renderRows()}</tbody>
         </table>
       </div>
-    `);
-    if (window.lucide) lucide.createIcons({ nodes: [document.getElementById('modal-body')] });
+    `, '', {replace:true});
+    if (window.lucide) lucide.createIcons({ nodes: [panel] });
     bindRows();
   };
 
@@ -5866,7 +5874,12 @@ async function openPayslipHistory(currentUser, currentRole) {
     }));
     document.querySelectorAll('.ps-edit-btn').forEach(btn => onClickSafe(btn, () => {
         const ps = list.find(p=>p.id===btn.dataset.id);
-        if (ps) openPayslipEdit(ps, currentUser, () => renderModal());
+        // openPayslipEdit pushes ON TOP of this summary page (a real drill-in,
+        // not a self-refresh), so its onSave can't just call renderModal()
+        // {replace:true} — that would only pop the edit page and leave THIS
+        // page's now-stale earlier copy hidden underneath. clearAll() + a fresh
+        // open collapses both back to one entry, mirroring the task-edit pattern.
+        if (ps) openPayslipEdit(ps, currentUser, () => { window.Overlay.clearAll(); openPayslipHistory(currentUser, currentRole); });
     }));
     document.querySelectorAll('.ps-del-btn').forEach(btn => onClickSafe(btn, async () => {
         const ps = list.find(p=>p.id===btn.dataset.id);
@@ -7671,7 +7684,16 @@ function drawingCard(d){
 window.openProjectDetail = function(p, currentUser, currentRole, canBill, initialTab) {
   initialTab = initialTab || 'Overview';
   const tabs = ['Overview','Drawings','Files','Tasks','Financials','Activity'];
-  openModal(escHtml(p.name||'Project'), `
+  // v14 Batch5 A3 — every "reopen" caller inside this hub (Edit Project, New
+  // Drawing, Delegate Task, Record Payment/Invoice, drawing sub-flows) calls
+  // openProjectDetail()/openDrawingDetail() again directly to refresh, WITHOUT
+  // first closing the sub-page it was opened from (that pattern predates this
+  // conversion — see the "reopen" const below and the dw/pe/pt-cancel/save
+  // handlers). Those callers are responsible for calling window.Overlay.clearAll()
+  // themselves before reopening, so by the time THIS function runs the stack is
+  // always either empty (first drill-in) or was just cleared — a plain push is
+  // therefore always correct here; never opts.replace.
+  openPage(escHtml(p.name||'Project'), `
     <div class="item-meta" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <span class="badge ${statusBadge(p.status)}">${escHtml(p.status||'active')}</span>
       ${p.client?`<span>${emojiIcon('👤',16)} ${escHtml(p.client)}</span>`:''}
@@ -7730,7 +7752,10 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
   const balance  = contract - paid;
   const payments = (p.payments || []).slice().sort((a,b)=>(a.date||'').localeCompare(b.date||''));
   const invoices = (p.invoices || []).slice().reverse();
-  const reopen   = () => openProjectDetail(p, currentUser, currentRole, canBill, 'Financials');
+  // clearAll() first — Record Payment/Billing Invoice are pushed ON TOP of this
+  // hub's page (never nested deeper), so tearing the whole stack down and
+  // reopening fresh is a single clean swap, never an accumulating stack.
+  const reopen   = () => { window.Overlay.clearAll(); openProjectDetail(p, currentUser, currentRole, canBill, 'Financials'); };
 
   host.innerHTML = `
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
@@ -7968,7 +7993,7 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
     <div class="form-group"><label>Notes</label><textarea id="pe-notes" rows="3">${escHtml(p.notes||'')}</textarea></div>
   `, `<button class="btn-primary" id="pe-save-btn">Save</button><button class="btn-secondary" id="pe-cancel-btn">Cancel</button>`);
 
-  document.getElementById('pe-cancel-btn').addEventListener('click',()=>openProjectDetail(p, currentUser, currentRole, canBill, 'Overview'));
+  document.getElementById('pe-cancel-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(p, currentUser, currentRole, canBill, 'Overview'); });
 
   const renderChips = () => {
     const wrap = document.getElementById('pe-team-chips');
@@ -8038,7 +8063,7 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
       }
       Notifs.showToast('Project saved','success');
     } catch(e){ console.warn(e); Notifs.showToast('Could not save project','error'); return; }
-    openProjectDetail(p, currentUser, currentRole, canBill, 'Overview');
+    window.Overlay.clearAll(); openProjectDetail(p, currentUser, currentRole, canBill, 'Overview');
   });
 }
 
@@ -8141,7 +8166,7 @@ async function openDrawingCreateModal(project, currentUser, currentRole, canBill
   `, `<button class="btn-primary" id="dw-save-btn">Create Drawing</button><button class="btn-secondary" id="dw-cancel-btn">Cancel</button>`);
   let uploaded = null;
   Drive.renderUploadArea('dw-file', r=>{ uploaded=r; }, {label:'Upload DWG/PDF/drawing', dept:'Design', subfolder:'Drawings'});
-  document.getElementById('dw-cancel-btn').addEventListener('click',()=>openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings'));
+  document.getElementById('dw-cancel-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings'); });
   document.getElementById('dw-save-btn').addEventListener('click', async () => {
     const title = document.getElementById('dw-title').value.trim();
     if (!title){ Notifs.showToast('Enter a drawing title','error'); return; }
@@ -8172,7 +8197,7 @@ async function openDrawingCreateModal(project, currentUser, currentRole, canBill
       window.logAudit && window.logAudit('create','design_drawing',ref.id,{project:project.name, title});
       Notifs.showToast('Drawing created','success');
     } catch(e){ console.warn(e); Notifs.showToast('Could not create drawing','error'); return; }
-    openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings');
+    window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings');
   });
 }
 
@@ -8188,7 +8213,12 @@ function openDrawingDetail(d, project, currentUser, currentRole, canBill){
     : '<span style="font-size:12px;color:var(--text-muted)">No file attached</span>';
   const trans = (canManage || cap.isApprover) ? drawingTransitions(d.status).filter(t =>
     t.to === 'approved' ? cap.approve : t.to === 'released' ? cap.release : canManage) : [];
-  openModal(`${drawingTypeIcon(d.type)} ${escHtml(d.title||'Drawing')}`, `
+  // v14 Batch5 A3 — same rule as openProjectDetail above: callers that reopen
+  // this page after an in-place action (status change, revision, edit) go
+  // through reopenDrawing() below (clearAll + reconstruct both levels), never
+  // a bare call. A genuine drill-in (from the Drawings tab list or the
+  // cross-project dashboard) calls this directly — that's a real push.
+  openPage(`${drawingTypeIcon(d.type)} ${escHtml(d.title||'Drawing')}`, `
     <div class="item-meta" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <span class="badge badge-gray">Rev ${escHtml(d.currentRev||'A')}</span>
       <span class="badge ${st.badge}">${st.label}</span>
@@ -8215,10 +8245,23 @@ function openDrawingDetail(d, project, currentUser, currentRole, canBill){
     ${trans.map(t=>`<button class="${t.cls} btn-sm dwg-trans-btn" data-to="${t.to}">${t.label}</button>`).join('')}
     <button class="btn-secondary" id="dwg-back-btn">Back</button>
   `);
-  document.getElementById('dwg-back-btn').addEventListener('click',()=>openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings'));
+  document.getElementById('dwg-back-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings'); });
   document.getElementById('dwg-rev-btn')?.addEventListener('click',()=>openDrawingRevisionModal(d, project, currentUser, currentRole, canBill));
   document.getElementById('dwg-edit-btn')?.addEventListener('click',()=>openDrawingEditModal(d, project, currentUser, currentRole, canBill));
   document.querySelectorAll('.dwg-trans-btn').forEach(b=>b.addEventListener('click',()=>changeDrawingStatus(d, b.dataset.to, project, currentUser, currentRole, canBill)));
+}
+
+// Refresh drawing detail in place after a status change / revision / edit.
+// Those sub-flows sit ONE page on top of drawing detail, which itself sits on
+// top of project detail (2 levels deep) — opts.replace only swaps the
+// immediate top of the stack, so it can't collapse both levels at once and
+// would leave a stale hidden copy of drawing detail behind. clearAll() + a
+// fresh 2-level reconstruction (project detail, then drawing detail on top of
+// it) avoids that leak entirely, at the cost of a full re-fetch of both.
+function reopenDrawing(d, project, currentUser, currentRole, canBill){
+  window.Overlay.clearAll();
+  openProjectDetail(project, currentUser, currentRole, canBill, 'Drawings');
+  openDrawingDetail(d, project, currentUser, currentRole, canBill);
 }
 
 async function changeDrawingStatus(d, to, project, currentUser, currentRole, canBill){
@@ -8286,7 +8329,7 @@ async function changeDrawingStatus(d, to, project, currentUser, currentRole, can
     }
   } catch(e){ console.warn('drawing release side-effect failed', e); }
   Notifs.showToast(`Drawing → ${st.label}`,'success');
-  openDrawingDetail(d, project, currentUser, currentRole, canBill);
+  reopenDrawing(d, project, currentUser, currentRole, canBill);
 }
 
 function openDrawingRevisionModal(d, project, currentUser, currentRole, canBill){
@@ -8298,7 +8341,7 @@ function openDrawingRevisionModal(d, project, currentUser, currentRole, canBill)
   `, `<button class="btn-primary" id="rv-save-btn">Save Rev ${newRev}</button><button class="btn-secondary" id="rv-cancel-btn">Cancel</button>`);
   let uploaded = null;
   Drive.renderUploadArea('rv-file', r=>{ uploaded=r; }, {label:'Upload updated DWG/PDF', dept:'Design', subfolder:'Drawings'});
-  document.getElementById('rv-cancel-btn').addEventListener('click',()=>openDrawingDetail(d, project, currentUser, currentRole, canBill));
+  document.getElementById('rv-cancel-btn').addEventListener('click',()=>reopenDrawing(d, project, currentUser, currentRole, canBill));
   document.getElementById('rv-save-btn').addEventListener('click', async () => {
     const note = document.getElementById('rv-note').value.trim();
     const who = window.userProfile?.displayName || currentUser.email || '';
@@ -8323,7 +8366,7 @@ function openDrawingRevisionModal(d, project, currentUser, currentRole, canBill)
       d.activity  = [...(d.activity||[]), actEntry];
       Notifs.showToast(`Rev ${newRev} saved`,'success');
     } catch(e){ console.warn(e); Notifs.showToast('Could not save revision','error'); return; }
-    openDrawingDetail(d, project, currentUser, currentRole, canBill);
+    reopenDrawing(d, project, currentUser, currentRole, canBill);
   });
 }
 
@@ -8342,7 +8385,7 @@ async function openDrawingEditModal(d, project, currentUser, currentRole, canBil
       </select>
     </div>
   `, `<button class="btn-primary" id="de-save-btn">Save</button><button class="btn-secondary" id="de-cancel-btn">Cancel</button>`);
-  document.getElementById('de-cancel-btn').addEventListener('click',()=>openDrawingDetail(d, project, currentUser, currentRole, canBill));
+  document.getElementById('de-cancel-btn').addEventListener('click',()=>reopenDrawing(d, project, currentUser, currentRole, canBill));
   document.getElementById('de-save-btn').addEventListener('click', async () => {
     const asel = document.getElementById('de-assignee');
     const assignedTo = asel.value || null;
@@ -8364,7 +8407,7 @@ async function openDrawingEditModal(d, project, currentUser, currentRole, canBil
       }
       Notifs.showToast('Drawing saved','success');
     } catch(e){ console.warn(e); Notifs.showToast('Could not save','error'); return; }
-    openDrawingDetail(d, project, currentUser, currentRole, canBill);
+    reopenDrawing(d, project, currentUser, currentRole, canBill);
   });
 }
 
@@ -8384,7 +8427,7 @@ async function openAddProjectTaskModal(project, currentUser, currentRole, canBil
       <div id="pt-chips" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap"></div>
     </div>
   `, `<button class="btn-primary" id="pt-save-btn">Create Task</button><button class="btn-secondary" id="pt-cancel-btn">Cancel</button>`);
-  document.getElementById('pt-cancel-btn').addEventListener('click',()=>openProjectDetail(project, currentUser, currentRole, canBill, 'Tasks'));
+  document.getElementById('pt-cancel-btn').addEventListener('click',()=>{ window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Tasks'); });
   let picks = [];
   const renderPicks = () => {
     const wrap = document.getElementById('pt-chips');
@@ -8420,7 +8463,7 @@ async function openAddProjectTaskModal(project, currentUser, currentRole, canBil
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
       Notifs.showToast('Task created','success');
     } catch(e){ console.warn(e); Notifs.showToast('Could not create task','error'); return; }
-    openProjectDetail(project, currentUser, currentRole, canBill, 'Tasks');
+    window.Overlay.clearAll(); openProjectDetail(project, currentUser, currentRole, canBill, 'Tasks');
   });
 }
 
@@ -11628,7 +11671,7 @@ async function renderAECDirectory(container, currentUser, currentRole) {
 
   const openAECDetail = (c) => {
     const t = aecTypeMeta(c.type), st = aecStageMeta(aecStageOf(c));
-    openModal(`${t.letter} · ${escHtml(c.company || 'AEC Contact')}`, `
+    openPage(`${t.letter} · ${escHtml(c.company || 'AEC Contact')}`, `
       <div style="display:flex;flex-direction:column;gap:6px;font-size:13px">
         <div>#${c.itemNo || ''} · <span class="badge" style="background:${t.color};color:#fff;font-size:9px">${escHtml(t.label)}</span> <span class="badge" style="background:${st.color};color:#fff;font-size:9px">${st.icon} ${st.label}</span></div>
         ${c.contactPerson ? `<div>${emojiIcon('👤',16)} ${escHtml(c.contactPerson)}</div>` : ''}
@@ -12050,9 +12093,9 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
 // never reach this — decision 10), so no partner query-scoping is needed here.
 async function openClientHub(cl, opts) {
   opts = opts || {};
-  openModal(`${emojiIcon('👤',16)} ${escHtml(cl.name || 'Client')}`, '<div class="loading-placeholder">Loading client…</div>',
+  const panel = openPage(`${emojiIcon('👤',16)} ${escHtml(cl.name || 'Client')}`, '<div class="loading-placeholder">Loading client…</div>',
     `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
-  const body = document.getElementById('modal-body');
+  const body = panel.querySelector('.page-panel-body');
   const t = await window.Clients.timelineFor(cl);
   if (!body) return;
   const FV = firebase.firestore.FieldValue;
@@ -12988,7 +13031,7 @@ const QC_CHECKLIST = [
 function openQCModal(order, onSaved){
   const prev = order.qc || null;
   const stateOf = id => prev?.items?.find(i=>i.id===id)?.state || '';
-  openModal(`${emojiIcon('🔍',16)} Quality Checking — `+escHtml(order.orderNo||order.title||''), `
+  openPage(`${emojiIcon('🔍',16)} Quality Checking — `+escHtml(order.orderNo||order.title||''), `
     ${prev?`<div style="font-size:11px;margin-bottom:8px;color:${prev.result==='passed'?'var(--success)':'var(--danger)'}">Last inspection: <b>${prev.result}</b> · ${escHtml(prev.byName||'')} · ${prev.at?new Date(prev.at).toLocaleString('en-PH',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):''}</div>`:''}
     <div style="display:flex;flex-direction:column">
       ${QC_CHECKLIST.map(it=>`
@@ -13024,7 +13067,7 @@ function openQCModal(order, onSaved){
 function openDeliveryReceiptModal(order, onSaved){
   const dr = order.deliveryReceipt || null;
   if (dr) {   // view / reprint mode
-    openModal(`${emojiIcon('🧾',16)} Delivery Receipt — `+escHtml(dr.no||''), `
+    openPage(`${emojiIcon('🧾',16)} Delivery Receipt — `+escHtml(dr.no||''), `
       <div style="font-size:12px;display:grid;grid-template-columns:auto 1fr;gap:4px 12px">
         <span style="color:var(--text-muted)">Receipt #</span><b>${escHtml(dr.no||'')}</b>
         <span style="color:var(--text-muted)">Received by</span><span>${escHtml(dr.receivedBy||'')}</span>
@@ -13037,7 +13080,7 @@ function openDeliveryReceiptModal(order, onSaved){
     return;
   }
   const dayStr = window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10);
-  openModal(`${emojiIcon('🧾',16)} Record Delivery Receipt — `+escHtml(order.orderNo||order.title||''), `
+  openPage(`${emojiIcon('🧾',16)} Record Delivery Receipt — `+escHtml(order.orderNo||order.title||''), `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Required before this order can be marked <b>Delivered</b>. Fill it in with the client's receiving rep at handover.</div>
     <div class="form-row">
       <div class="form-group"><label>Received by (client rep)</label><input id="dr-name" placeholder="e.g. Maria Santos — Purchasing"/></div>
@@ -13261,7 +13304,7 @@ function openJobProjectDetail(p){
   const idx = JOB_STAGES.findIndex(s=>s.id===p.stage);
   const next = (p.stage==='paid'||p.stage==='cancelled') ? null : JOB_STAGES[Math.min(idx+1, JOB_STAGES.length-2)];
   const stepper = JOB_STAGES.filter(s=>s.id!=='cancelled').map(s=>{const i=JOB_STAGES.findIndex(x=>x.id===s.id);const dn=i<idx,cur=s.id===p.stage;return `<span style="font-size:10px;padding:3px 7px;border-radius:10px;white-space:nowrap;${cur?`background:${s.color};color:#fff;font-weight:700`:dn?'background:var(--success);color:#fff':'background:var(--surface2);color:var(--text-muted)'}">${s.icon} ${s.label}</span>`;}).join('<span style="color:var(--text-muted)">›</span>');
-  openModal(`${st.icon} ${escHtml(p.clientName||p.name||'Project')}`, `
+  const jpdPanel = openPage(`${st.icon} ${escHtml(p.clientName||p.name||'Project')}`, `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · Quote ${escHtml(p.quoteNumber||'')} · ${p.company||''}${p.split?.isShared?' · 50/50 split':''}</div>
     <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-bottom:12px">${stepper}</div>
     <div class="kpi-row" style="margin-bottom:12px">
@@ -13304,7 +13347,7 @@ function openJobProjectDetail(p){
   document.getElementById('proj-margin-btn')?.addEventListener('click',()=>openProjectMarginModal(p));
   document.getElementById('proj-job-btn')?.addEventListener('click',()=>{ closeModal(); prodOrderModal(null, currentUser, currentRole, ()=>window.renderProjectLifecycle&&window.renderProjectLifecycle(), p.id); });
   // Re-open a previously issued billing invoice (printable)
-  document.querySelectorAll('#modal-body .jinv-card').forEach(card=>card.addEventListener('click',()=>{
+  jpdPanel.querySelectorAll('.jinv-card').forEach(card=>card.addEventListener('click',()=>{
     const inv=(p.invoices||[]).find(i=>i.no===card.dataset.inv);
     if(inv) window.openBillingInvoice(p, inv);
   }));
@@ -13520,7 +13563,10 @@ async function openJobBillingInvoiceModal(p){
     <div class="form-group"><label>Notes / Payment Instructions</label><textarea id="jinv-notes" rows="3">Kindly settle the amount due on or before the due date. Payable to NEILBARRO STEEL & METAL FABRICATION SERVICES.</textarea></div>
     <div id="jinv-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="jinv-gen">Generate Invoice</button><button class="btn-secondary" id="jinv-back">Cancel</button>`);
-  document.getElementById('jinv-back').addEventListener('click', ()=>openJobProjectDetail(p));
+  // clearAll() first — Billing Invoice is pushed ON TOP of this hub's page
+  // (never nested deeper), so a bare reopen would leave a stale hidden copy
+  // behind; same rule as Design's openProjectDetail reopen sites above.
+  document.getElementById('jinv-back').addEventListener('click', ()=>{ window.Overlay.clearAll(); openJobProjectDetail(p); });
 
   // ── Kind toggle + live balance-schedule preview (v12 WS36) ──
   const kindSel=document.getElementById('jinv-kind'), dpWrap=document.getElementById('jinv-dp-wrap');

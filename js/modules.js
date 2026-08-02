@@ -744,7 +744,7 @@ async function computeEomStandings(users, monthStr) {
 // announcing is an explicit, one-tap action so the congrats fires when intended.
 function openEomStandingsModal(standings, month) {
   if (!standings || !standings.length) {
-    openModal(`${emojiIcon('📊',16)} Employee of the Month — Standings`,
+    openPage(`${emojiIcon('📊',16)} Employee of the Month — Standings`,
       `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('📊',44)}</div><p>No eligible team members have logged attendance yet this month.</p></div>`,
       `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
     return;
@@ -773,10 +773,10 @@ function openEomStandingsModal(standings, month) {
     ? `<button class="btn-secondary" disabled style="opacity:.6">${emojiIcon('✓',16)} Announced</button><button class="btn-secondary" onclick="closeModal()">Close</button>`
     : `<button class="btn-primary" id="eom-announce-btn">${emojiIcon('📣',16)} Announce ${escHtml(firstName)}</button><button class="btn-secondary" onclick="closeModal()">Close</button>`;
 
-  openModal(`${emojiIcon('📊',16)} Employee of the Month — Standings`, `
+  openPage(`${emojiIcon('📊',16)} Employee of the Month — Standings`, `
     <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Final standings for <strong>${escHtml(eomMonthLabel(month) || 'last month')}</strong> — ranked by task KPI (50%), attendance (40%) and performance grade (10%). Revealed &amp; awarded on the 5th.</p>
     <div>${rows}</div>
-  `, footer, {size:'wide'});
+  `, footer);
 
   document.getElementById('eom-announce-btn')?.addEventListener('click', async () => {
     try {
@@ -1232,7 +1232,7 @@ window.renderAttendancePage = async function() {
           const recKind = window.attRecKind ? window.attRecKind(cur) : null;
           const isLeaveDay = recKind === 'leave' || recKind === 'unpaid-leave';
           const curStatus = isLeaveDay ? 'leave' : (cur?.fullTime ? 'present' : cur?.loginTime ? 'half' : 'absent');
-          openModal(`${emojiIcon('✎',16)} Attendance — ${date}`, `
+          openPage(`${emojiIcon('✎',16)} Attendance — ${date}`, `
             <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Employee: <strong>${escHtml(targetName)}</strong></p>
             <div class="form-group"><label>Status</label>
               <div style="display:flex;gap:8px;margin-top:4px;flex-wrap:wrap">
@@ -1411,7 +1411,7 @@ window.renderHolidaysAdmin = async function(container) {
   }
 
   function openHolidayModal(date, existing) {
-    openModal(date ? `${emojiIcon('✏️',16)} Edit Holiday` : '＋ Add Holiday', `
+    openPage(date ? `${emojiIcon('✏️',16)} Edit Holiday` : '＋ Add Holiday', `
       <div class="form-group"><label>Date</label><input id="hol-date" type="date" value="${escHtml(date||`${year}-01-01`)}" ${date?'disabled':''}/></div>
       <div class="form-group"><label>Name</label><input id="hol-name" type="text" value="${escHtml(existing?.name||'')}" placeholder="e.g. Maundy Thursday"/></div>
       <div class="form-group"><label>Type</label>
@@ -1895,7 +1895,7 @@ async function renderPresidentMessageCard() {
         <blockquote style="font-size:14px;line-height:1.8;color:var(--text);border-left:3px solid var(--primary-light);padding-left:14px;margin:0;font-style:italic">${escHtml(msgText)}</blockquote>
       </div>`;
     document.getElementById('edit-msg-btn')?.addEventListener('click', () => {
-      openModal('Edit President Message', `
+      openPage('Edit President Message', `
         <div class="form-group"><label>Message</label>
           <textarea id="pres-msg-input" rows="6" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text);resize:vertical">${escHtml(msgText)}</textarea>
         </div>
@@ -2041,11 +2041,11 @@ async function renderPresidentMessageCard() {
   // Per-item movement history — equality query (no composite index), sorted client-side.
   async function itemHistoryModal(item){
     if(!item) return;
-    openModal(`${emojiIcon('📜',16)} `+(item.name||'Item')+' — Movement History', '<div class="loading-placeholder">Loading…</div>',
+    const panel = openPage(`${emojiIcon('📜',16)} `+(item.name||'Item')+' — Movement History', '<div class="loading-placeholder">Loading…</div>',
       `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
     const snap = await db.collection('stock_movements').where('itemId','==',item.id).get().catch(()=>({docs:[]}));
     const mv = snap.docs.map(d=>d.data()).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
-    const body = document.getElementById('modal-body');
+    const body = panel.querySelector('.page-panel-body');
     const html = !mv.length ? `<div class="empty-state" style="padding:18px"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No movements recorded</h4></div>` :
       `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">On-hand now: <strong>${num(item.qty||0)} ${escHtml(item.unit||'')}</strong></div>
        <div class="table-wrap"><table class="data-table"><thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Project / Note</th><th>By</th></tr></thead>
@@ -2416,7 +2416,7 @@ async function renderPresidentMessageCard() {
     const users = snap.docs.map(d=>({id:d.id,...d.data()}))
       .filter(u => u.role !== 'partner')
       .sort((a,b) => (a.displayName||a.email||'').localeCompare(b.displayName||b.email||''));
-    openModal('＋ Adjust Balance', `
+    openPage('＋ Adjust Balance', `
       <div class="form-group"><label>Employee</label>
         <select id="lv-grant-uid" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
           ${users.map(u=>`<option value="${u.id}">${esc(u.displayName||u.email||u.id)}</option>`).join('')}
