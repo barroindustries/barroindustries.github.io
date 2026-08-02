@@ -83,7 +83,7 @@ window.renderPosts = async function() {
 
 async function loadPosts(dept) {
   const container = document.getElementById('posts-content');
-  container.innerHTML = '<div class="loading-placeholder">Loading posts…</div>';
+  container.innerHTML = window.skeletonHtml('rows');
   try {
     let q = db.collection('posts').orderBy('createdAt','desc');
     if (dept === 'Pending') {
@@ -246,7 +246,7 @@ async function loadPosts(dept) {
       let uids = [];
       try { uids = JSON.parse(btn.dataset.hearts); } catch{}
       if (!uids.length) return;
-      openModal('❤️ Liked by', '<div class="loading-placeholder">Loading…</div>');
+      openModal('❤️ Liked by', window.skeletonHtml('rows'));
       const names = await Promise.all(uids.map(uid =>
         db.collection('users').doc(uid).get().then(s => s.exists ? (s.data().displayName || s.data().email) : uid).catch(()=>uid)
       ));
@@ -369,7 +369,7 @@ window.renderTeamTab = async function() {
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   const teamGrid = document.getElementById('team-grid');
-  teamGrid.innerHTML = '<div class="loading-placeholder">Loading team…</div>';
+  teamGrid.innerHTML = window.skeletonHtml('cards');
 
   let snap;
   try {
@@ -1126,7 +1126,7 @@ window.renderAttendancePage = async function() {
   async function renderAttMonth() {
     const calEl  = document.getElementById('att-calendar');
     const sumEl  = document.getElementById('att-summary');
-    calEl.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+    calEl.innerHTML = window.skeletonHtml('rows');
     const label = new Date(viewYear, viewMonth).toLocaleString('en-PH',{month:'long',year:'numeric'});
     document.getElementById('att-month-label').textContent = label;
 
@@ -1333,7 +1333,7 @@ window.renderHolidaysAdmin = async function(container) {
   async function renderYear(y) {
     year = y;
     window._holidaysAdminYear = y;
-    c.innerHTML = '<div class="loading-placeholder">Loading holidays…</div>';
+    c.innerHTML = window.skeletonHtml('rows');
     if (typeof window.loadHolidayOverrides === 'function') {
       await window.loadHolidayOverrides([y]);
     }
@@ -1446,7 +1446,7 @@ window.renderCashAdvancePage = async function() {
   // dashboard's cached pending CA count so it doesn't show stale items.
   if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ca-pending');
   const pres = currentRole === 'president' || currentRole === 'manager' || currentRole === 'finance';
-  c.innerHTML = '<div class="loading-placeholder">Loading cash advances…</div>';
+  c.innerHTML = window.skeletonHtml('rows');
 
   try {
     if (pres) {
@@ -1931,7 +1931,7 @@ async function renderPresidentMessageCard() {
     c.innerHTML = `
       <div class="page-header"><h2>${emojiIcon('📦',20)} Inventory</h2></div>
       ${window.chipTabs(tabs.map(s=>({key:s,label:s})), sub, {cls:'inv-tabs'})}
-      <div id="inv-content"><div class="loading-placeholder">Loading…</div></div>`;
+      <div id="inv-content">${window.skeletonHtml('rows')}</div>`;
     if (window.lucide) lucide.createIcons({ nodes: [c] });
     loadInv(sub);
     window.bindChipTabs(c.querySelector('.inv-tabs'), (key)=>loadInv(key));
@@ -1945,7 +1945,7 @@ async function renderPresidentMessageCard() {
   }
 
   async function renderStock(el){
-    el.innerHTML = '<div class="loading-placeholder">Loading stock…</div>';
+    el.innerHTML = window.skeletonHtml('table');
     const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
     const items = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
     const ce = canEditInv();
@@ -2048,7 +2048,7 @@ async function renderPresidentMessageCard() {
   // Per-item movement history — equality query (no composite index), sorted client-side.
   async function itemHistoryModal(item){
     if(!item) return;
-    const panel = openPage(`${emojiIcon('📜',16)} `+(item.name||'Item')+' — Movement History', '<div class="loading-placeholder">Loading…</div>',
+    const panel = openPage(`${emojiIcon('📜',16)} `+(item.name||'Item')+' — Movement History', window.skeletonHtml('table'),
       `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
     const snap = await db.collection('stock_movements').where('itemId','==',item.id).get().catch(()=>({docs:[]}));
     const mv = snap.docs.map(d=>d.data()).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
@@ -2149,7 +2149,7 @@ async function renderPresidentMessageCard() {
   }
 
   async function renderMovements(el){
-    el.innerHTML='<div class="loading-placeholder">Loading movements…</div>';
+    el.innerHTML=window.skeletonHtml('table');
     const snap=await db.collection('stock_movements').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]}));
     const mv=snap.docs.map(d=>d.data());
     const typeBadge = t => t==='in'?'<span class="badge badge-green">IN</span>':t==='adjust'?'<span class="badge badge-blue">ADJ</span>':'<span class="badge badge-orange">OUT</span>';
@@ -2198,7 +2198,7 @@ async function renderPresidentMessageCard() {
   }
 
   async function renderJobs(el){
-    el.innerHTML='<div class="loading-placeholder">Loading job costs…</div>';
+    el.innerHTML=window.skeletonHtml('table');
     const snap=await db.collection('job_costs').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]}));
     const jobs=snap.docs.map(d=>({id:d.id,...d.data()}));
     const ce=isFinAdmin();
@@ -2329,7 +2329,7 @@ async function renderPresidentMessageCard() {
   function leaveRow(r, showWho){
     const t=leaveType(r.type);
     return `<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border)">
-      <span style="font-size:20px">${t.icon}</span>
+      <span style="font-size:20px">${emojiIcon(t.icon,20)}</span>
       <div style="flex:1;min-width:0">
         <div style="font-size:13px;font-weight:600">${t.label} · ${r.days||0} day${(r.days||0)!==1?'s':''}${showWho?` — ${esc(r.userName||'')}`:''}</div>
         <div style="font-size:11px;color:var(--text-muted)">${esc(r.startDate||'')} → ${esc(r.endDate||'')}${r.reason?` · ${esc(r.reason)}`:''}</div>
@@ -2346,7 +2346,7 @@ async function renderPresidentMessageCard() {
   };
 
   async function renderLeaveEmployee(c){
-    c.innerHTML = '<div class="loading-placeholder">Loading leave…</div>';
+    c.innerHTML = window.skeletonHtml('rows');
     const [snap, bal] = await Promise.all([
       db.collection('leave_requests').where('userId','==',currentUser.uid).get().catch(()=>({docs:[]})),
       getBalance(currentUser.uid),
@@ -2369,7 +2369,7 @@ async function renderPresidentMessageCard() {
   }
 
   async function renderLeaveAdmin(c){
-    c.innerHTML = '<div class="loading-placeholder">Loading leave…</div>';
+    c.innerHTML = window.skeletonHtml('rows');
     const snap = await db.collection('leave_requests').orderBy('createdAt','desc').limit(200).get().catch(()=>({docs:[]}));
     const reqs = snap.docs.map(d=>({id:d.id,...d.data()}));
     const pending = reqs.filter(r=>r.status==='pending');
@@ -2387,7 +2387,7 @@ async function renderPresidentMessageCard() {
       </div>
       ${pending.length?`<div class="card" style="margin-bottom:14px;border:1.5px solid var(--warning)"><div class="card-header"><h3>${emojiIcon('⏳',20)} Pending Approval</h3></div><div class="card-body" style="padding:0">
         ${pending.map(r=>`<div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap">
-          <span style="font-size:20px">${leaveType(r.type).icon}</span>
+          <span style="font-size:20px">${emojiIcon(leaveType(r.type).icon,20)}</span>
           <div style="flex:1;min-width:160px">
             <div style="font-size:13px;font-weight:600">${esc(r.userName||'Employee')} — ${leaveType(r.type).label} · ${r.days||0}d</div>
             <div style="font-size:11px;color:var(--text-muted)">${esc(r.startDate||'')} → ${esc(r.endDate||'')}${r.reason?` · ${esc(r.reason)}`:''}</div>
@@ -2732,7 +2732,7 @@ window.renderFilesHub = function(){
   const loadScope = (key) => {
     const fc = document.getElementById('fh-hub-content');
     if (key === '__all__') {
-      fc.innerHTML = '<div class="loading-placeholder">Loading all files…</div>';
+      fc.innerHTML = window.skeletonHtml('rows');
       FilesHub.loadFiles(null).then(files => {
         allScopeFiles = files;
         renderAllScope();
@@ -2817,7 +2817,7 @@ async function loadMyProfileTab(key) {
   // pay-trend chart) before wiping the DOM — same convention as renderAnalytics'
   // subtab switch (app.js) and navigateTo's page-level Chart cleanup.
   if (window.Chart) host.querySelectorAll('canvas').forEach(cv => { const ex = Chart.getChart(cv); if (ex) ex.destroy(); });
-  host.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+  host.innerHTML = window.skeletonHtml('rows');
   const uid = currentUser.uid;
   if (key === 'id') {
     host.innerHTML = `<div id="mp-id-card-wrap" style="max-width:420px;margin:0 auto"></div>`;

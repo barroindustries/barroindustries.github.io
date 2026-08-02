@@ -36,22 +36,52 @@ window.renderEmptyState = function (opts) {
   );
 };
 
+// ── skeletonHtml(kind, n) → html string ──
+// Single source of truth for skeleton loading markup (v14 B6). Wraps the
+// CSS primitives in css/styles.css (.skl-text/.skl-row/.skl-card, Phase 128)
+// into ready-to-inject blocks so no call site hand-rolls skeleton HTML.
+// kind: 'rows' (default, list-item anatomy: leading avatar + 2 text lines,
+//   matches task feed / notif items / approval rows / file rows) |
+//   'cards' (KPI/dept/item card placeholders, wrapped in an auto-fill grid) |
+//   'table' (tabular async screens: a .skl-row reused as 4 equal-flex
+//   columns instead of avatar+lines — see .skl-row-cols in styles.css).
+// n: how many rows/cards to render (default 4 for rows/table, 3 for cards).
+// Pure string builder — safe to use in innerHTML sinks or via ${} inside
+// template literals; contains no user data so it never needs escHtml().
+window.skeletonHtml = function (kind, n) {
+  if (kind === 'cards') {
+    n = n || 3;
+    var card = '<div class="skl-card"><div class="skl-text"></div><div class="skl-text" style="width:80%"></div><div class="skl-text" style="width:60%"></div></div>';
+    return '<div class="skl-wrap skl-wrap-cards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">' + card.repeat(n) + '</div>';
+  }
+  if (kind === 'table') {
+    n = n || 4;
+    var trow = '<div class="skl-row skl-row-cols"><div class="skl-text"></div><div class="skl-text"></div><div class="skl-text"></div><div class="skl-text"></div></div>';
+    return '<div class="skl-wrap skl-wrap-table" style="display:flex;flex-direction:column;gap:8px">' + trow.repeat(n) + '</div>';
+  }
+  // default: 'rows'
+  n = n || 4;
+  var row = '<div class="skl-row"><div class="skl-row-avatar"></div><div class="skl-row-lines"><div class="skl-text" style="width:55%"></div><div class="skl-text skl-text-sm" style="width:30%"></div></div></div>';
+  return '<div class="skl-wrap skl-wrap-rows" style="display:flex;flex-direction:column;gap:8px">' + row.repeat(n) + '</div>';
+};
+
 // ── withLoadingAndError(container, fetcher, renderer, opts) ──
-// Standard fetch→render lifecycle: show loading placeholder, await
+// Standard fetch→render lifecycle: show a loading skeleton, await
 // fetcher(), route to renderEmptyState() when emptyCheck(data) is true,
 // otherwise call renderer(data); on any thrown/rejected error show an
 // error block with a Retry button that is bound INTERNALLY (no id
 // contract needed for retry — unlike renderEmptyState's action, this
 // wrapper owns the whole container so it wires its own listener) and
 // simply re-invokes withLoadingAndError with the exact same arguments.
-// opts: { loadingText='Loading…', emptyCheck(data)->bool, emptyState }
+// opts: { skeleton='rows'|'cards'|'table', skeletonCount, emptyCheck(data)->bool, emptyState }
+// (opts.loadingText is still accepted for back-compat but no longer shown —
+// the skeleton communicates "loading" without a text sink.)
 window.withLoadingAndError = async function (container, fetcher, renderer, opts) {
   opts = opts || {};
   if (!container) return;
   var esc = window.escHtml || function (s) { return String(s == null ? '' : s); };
-  var loadingText = opts.loadingText || 'Loading…';
 
-  container.innerHTML = '<div class="loading-placeholder">' + esc(loadingText) + '</div>';
+  container.innerHTML = window.skeletonHtml(opts.skeleton, opts.skeletonCount);
   if (window.lucide) lucide.createIcons({ nodes: [container] });
 
   try {

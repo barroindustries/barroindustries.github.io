@@ -2448,6 +2448,12 @@ html.theme-astral .loading-placeholder {
   animation: none; /* card shell is static; only its inner blocks pulse */
 }
 .skl-card .skl-text:first-child { width: 55%; height: 1em; margin-bottom: 12px; }
+/* Table-row variant (v14 B6, window.skeletonHtml('table', n)) — reuses the
+   .skl-row shell as N equal-width inline columns instead of avatar+lines,
+   for tabular async screens (orders, transactions, quotations, stock). */
+.skl-row.skl-row-cols { gap: 20px; }
+.skl-row.skl-row-cols .skl-text { flex: 1; margin-top: 0; }
+.skl-row.skl-row-cols .skl-text + .skl-text { margin-top: 0; }
 /* Astral-only shimmer variant — swaps the flat pulse for the sweep gradient used
    by .loading-placeholder, staying inside the "showpiece exception" carve-out. */
 html.theme-astral .skl-text,

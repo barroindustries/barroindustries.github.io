@@ -606,7 +606,7 @@ async function notifyTaskInvolved(task,notifData,skipUid) {
 // ── Dept Tasks subtab (shared) ────────────────────
 async function renderDeptTasks(container, deptName, currentUser, currentRole) {
   const isAdmin = canEditDept(deptName);
-  container.innerHTML = '<div class="loading-placeholder">Loading tasks…</div>';
+  container.innerHTML = window.skeletonHtml('rows');
   try {
     let snap = await db.collection('tasks').where('department','==',deptName).get()
       .catch(()=>({docs:[]}));
@@ -716,7 +716,7 @@ window.renderTasks = async function(currentUser, currentRole, currentDept) {
         <button class="btn-primary btn-sm" id="add-task-btn">+ New Task</button>
       </div>
     </div>
-    <div id="tasks-list" class="item-list"><div class="loading-placeholder">Loading…</div></div>
+    <div id="tasks-list" class="item-list">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadTasksList(currentUser,currentRole,currentDept);
@@ -729,7 +729,7 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
   if (!wrap) return;
 
   if (sub === 'overdue' || sub === 'neardue') {
-    wrap.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+    wrap.innerHTML = window.skeletonHtml('rows');
     const todayStr = today();
     const in3d = new Date(todayStr + 'T12:00:00Z'); in3d.setUTCDate(in3d.getUTCDate() + 3);
     const in3Str   = in3d.toISOString().slice(0, 10);
@@ -762,7 +762,7 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
           ${TASK_STATUSES.map(s=>`<option value="${s.value}">${s.label}</option>`).join('')}
         </select>
       </div>
-      <div id="pres-mine-list" class="item-list"><div class="loading-placeholder">Loading…</div></div>
+      <div id="pres-mine-list" class="item-list">${window.skeletonHtml('rows')}</div>
     `;
     const renderMine = async () => {
       const list   = document.getElementById('pres-mine-list');
@@ -781,7 +781,7 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
     return;
   }
 
-  wrap.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+  wrap.innerHTML = window.skeletonHtml('rows');
   try {
     const snap  = typeof dbCachedGet==='function'
       ? await dbCachedGet('tasks-all', ()=>db.collection('tasks').get(), 30000)
@@ -818,7 +818,7 @@ async function loadPresidentTasks(sub, currentUser, currentRole) {
 async function loadTasksList(currentUser, currentRole, currentDept) {
   const list   = document.getElementById('tasks-list');
   const filter = document.getElementById('task-filter')?.value||'mine';
-  list.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+  list.innerHTML = window.skeletonHtml('rows');
   const isPriv = currentRole==='president'||currentRole==='owner'||currentRole==='manager'||currentRole==='finance';
 
   const userDepts = window.currentDepts || [];
@@ -920,8 +920,8 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   // are now owned by openPage itself, so none of that is hand-rolled here).
   const headerRightHTML = `
     ${canSubmit?`<button class="btn-success btn-sm" id="submit-task-btn">${emojiIcon('📤',16)} Submit</button>`:''}
-    ${canEdit?`<button class="btn-secondary btn-sm" id="edit-task-btn">${emojiIcon('✎',16)}</button>`:''}
-    ${isAdmin||isCreator?`<button class="btn-danger btn-sm" id="del-task-btn">${emojiIcon('trash-2',14)}</button>`:''}
+    ${canEdit?`<button class="btn-secondary btn-sm" id="edit-task-btn" aria-label="Edit task">${emojiIcon('✎',16)}</button>`:''}
+    ${isAdmin||isCreator?`<button class="btn-danger btn-sm" id="del-task-btn" aria-label="Delete task">${emojiIcon('trash-2',14)}</button>`:''}
   `;
 
   // Priority/status/department chips used to sit under the title inside the
@@ -1415,7 +1415,7 @@ window.renderSubmissions = async function(currentUser, currentRole, currentDept)
       <h2>${emojiIcon('clipboard-list',20)} Submissions</h2>
       <button class="btn-primary btn-sm" id="add-sub-btn">+ New Submission</button>
     </div>
-    <div id="subs-list" class="item-list"><div class="loading-placeholder">Loading…</div></div>
+    <div id="subs-list" class="item-list">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadSubsList(currentUser, currentRole, currentDept);
@@ -1543,7 +1543,7 @@ window.renderCash = async function(currentUser, currentRole) {
         <button class="subtab-btn" data-sub="summary">Summary</button>
       </div>
     `:''}
-    <div id="cash-content"><div class="loading-placeholder">Loading…</div></div>
+    <div id="cash-content">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
 
@@ -1562,7 +1562,7 @@ window.renderCash = async function(currentUser, currentRole) {
 async function loadCashContent(currentUser, currentRole, sub) {
   const content = document.getElementById('cash-content');
   const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'finance';
-  content.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+  content.innerHTML = window.skeletonHtml('rows');
 
   if (sub === 'my-expenses' || !isPrivileged) {
     const snap = await db.collection('expenses').where('createdBy','==',currentUser.uid).get();
@@ -1610,7 +1610,7 @@ function expenseTable(expenses, showActions) {
                 <td>${escHtml(e.submittedByName||'—')}</td>
                 <td><span class="badge ${statusBadge(e.status)}">${e.status||'pending'}</span></td>
                 ${showActions?`<td>
-                  ${e.status==='pending'?`<button class="btn-icon approve-expense" data-id="${e.id}">${emojiIcon('check-circle',14)}</button><button class="btn-icon reject-expense" data-id="${e.id}">${emojiIcon('x-circle',14)}</button>`:''}
+                  ${e.status==='pending'?`<button class="btn-icon approve-expense" data-id="${e.id}" aria-label="Approve expense">${emojiIcon('check-circle',14)}</button><button class="btn-icon reject-expense" data-id="${e.id}" aria-label="Reject expense">${emojiIcon('x-circle',14)}</button>`:''}
                   ${e.fileUrl?`<a href="${safeHttpUrl(e.fileUrl)}" target="_blank" class="btn-icon">${emojiIcon('📎',16)}</a>`:''}
                 </td>`:''}
               </tr>
@@ -2054,8 +2054,8 @@ window.renderComments = async function(collection, docId, containerId, currentUs
                   </div>
                 </div>
                 ${canEdit||canDelete ? `<div class="ms-actions">
-                  ${canEdit?`<button class="ms-act-btn comment-edit-btn" data-id="${c.id}">${emojiIcon('✎',16)}</button>`:''}
-                  ${canDelete?`<button class="ms-act-btn ms-del-btn comment-del-btn" data-id="${c.id}">${emojiIcon('trash-2',14)}</button>`:''}
+                  ${canEdit?`<button class="ms-act-btn comment-edit-btn" data-id="${c.id}" aria-label="Edit comment">${emojiIcon('✎',16)}</button>`:''}
+                  ${canDelete?`<button class="ms-act-btn ms-del-btn comment-del-btn" data-id="${c.id}" aria-label="Delete comment">${emojiIcon('trash-2',14)}</button>`:''}
                 </div>` : ''}
                 ${isLast && seenBy.length ? `<div class="ms-seen">Seen by ${escHtml(seenBy.map(r=>r.name.split(' ')[0]).join(', '))}</div>` : ''}
               </div>
@@ -2236,7 +2236,7 @@ window.renderMarketing = async function(currentUser, currentRole, subtab = 'Camp
       'Plan, Strategy and Proposals store playbooks and pitches; Tasks is the department board.'
     ])}
     ${window.chipTabs(tabs.map(s => ({ key:s, label:s })), subtab)}
-    <div id="mkt-content"><div class="loading-placeholder">Loading…</div></div>
+    <div id="mkt-content">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadMarketingContent(currentUser, currentRole, subtab);
@@ -2691,8 +2691,8 @@ async function renderMktPromos(content, currentUser, currentRole) {
               </div>
             </div>
             ${canEdit ? `<span style="display:flex;gap:4px;flex-shrink:0">
-              <button class="btn-secondary btn-sm mkt-promo-edit" data-id="${p.id}">${emojiIcon('✏️',16)}</button>
-              <button class="btn-secondary btn-sm mkt-promo-del" data-id="${p.id}">${emojiIcon('🗑',16)}</button>
+              <button class="btn-secondary btn-sm mkt-promo-edit" data-id="${p.id}" aria-label="Edit promo">${emojiIcon('✏️',16)}</button>
+              <button class="btn-secondary btn-sm mkt-promo-del" data-id="${p.id}" aria-label="Delete promo">${emojiIcon('🗑',16)}</button>
             </span>` : ''}
           </div>
         </div>`).join('')}</div>`}
@@ -2882,7 +2882,7 @@ window.renderFinance = async function(currentUser, currentRole, subtab = window.
       isPres ? 'President-only maintenance & data-repair tools live behind the wrench button on Overview — out of the daily workflow.' : null
     ].filter(Boolean))}
     <div id="fin-tabs-wrap"></div>
-    <div id="fin-content"><div class="loading-placeholder">Loading…</div></div>
+    <div id="fin-content">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   renderFinanceNav(currentUser, currentRole, subtab);
@@ -3338,7 +3338,7 @@ window.renderHR = async function(currentUser, currentRole){
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">
       ${cards.map((card,i)=>`
         <button class="hr-card" data-i="${i}" style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:16px;background:var(--surface);border:1.5px solid var(--border);border-radius:14px;cursor:pointer;transition:border-color .15s,background .15s">
-          <span style="font-size:26px">${card.icon}</span>
+          <span style="font-size:26px">${emojiIcon(card.icon,26)}</span>
           <strong style="font-size:14px">${card.title}</strong>
           <span style="font-size:12px;color:var(--text-muted)">${card.desc}</span>
         </button>`).join('')}
@@ -3773,7 +3773,7 @@ async function openPayrollReconciliation() {
           <button class="btn-secondary btn-sm" id="recon3-csv-btn" disabled>${emojiIcon('📥',14)} Export CSV</button>
         </div>
       </div>
-      <div id="recon3-body" style="padding:20px;text-align:center;color:var(--text-muted)">Loading…</div>
+      <div id="recon3-body" style="padding:20px;text-align:center;color:var(--text-muted)">${window.skeletonHtml('table')}</div>
       <hr style="margin:22px 0;border-color:var(--border)"/>
       <h4 style="margin:0 0 10px">All-Time Flag Scan</h4>
       <div id="recon-body" style="padding:20px;text-align:center;color:var(--text-muted)">Scanning payroll history…</div>
@@ -3802,7 +3802,7 @@ async function openPayrollReconciliation() {
       if (csv3) csv3.disabled = true;
       return;
     }
-    if (body3) body3.innerHTML = '<div class="loading-placeholder">Comparing…</div>';
+    if (body3) body3.innerHTML = window.skeletonHtml('rows');
     recon3Rows = await buildThreeWayRecon(month, runDataByMonth[month]);
     if (body3) { body3.innerHTML = threeWayReconTableHTML(recon3Rows); if (window.lucide) lucide.createIcons({ nodes: [body3] }); }
     if (csv3) csv3.disabled = !recon3Rows.length;
@@ -4206,7 +4206,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
 
   async function loadPayrollTable(month) {
     const tbody = document.getElementById('payroll-tbody');
-    tbody.innerHTML = '<tr><td colspan="14" style="text-align:center;padding:20px">Loading…</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="14" style="padding:14px 20px"><div class="skl-text" style="width:92%"></div></td></tr>'.repeat(3);
 
     const statYear = window.bizYear ? window.bizYear() : new Date().getFullYear();
     const plans = await Promise.all(employees.map(u => window.CashAdvance
@@ -4807,7 +4807,7 @@ function finCompareKeys(pParsed) {
 // last-year columns; every category row is also now a drill-down link (see
 // window.openFinCategoryDrill below).
 window.renderFinancialReports = async function(container, currentUser, currentRole, range='month', compare=false) {
-  container.innerHTML = '<div class="loading-placeholder">Building report…</div>';
+  container.innerHTML = window.skeletonHtml('rows');
   // 'year' (legacy Reports spelling) is a Period alias for 'ytd' — same math.
   const periodKey = (range === 'year') ? 'ytd' : range;
   // v12 WS39 — period resolved FIRST, then date-range-bounded reads (WS16's
@@ -5191,8 +5191,8 @@ async function renderLedgerTab(container, currentUser, currentRole) {
               <td class="tc-detail" data-label="Ref #"><code>${escHtml(e.refNumber||'—')}</code></td>
               <td class="tc-detail" data-label="By" style="font-size:11px">${escHtml(e.addedByName||'—')}</td>
               ${canFin?`<td class="tc-actions" style="white-space:nowrap">
-                <button class="btn-secondary btn-sm led-edit-btn" data-id="${e.id}" data-src="${e._src}">${emojiIcon('✎',16)}</button>
-                <button class="btn-danger btn-sm led-del-btn" data-id="${e.id}" data-src="${e._src}" data-label="${escHtml((e.description||'entry')+' — ₱'+fmt(e.amount))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
+                <button class="btn-secondary btn-sm led-edit-btn" data-id="${e.id}" data-src="${e._src}" aria-label="Edit ledger entry">${emojiIcon('✎',16)}</button>
+                <button class="btn-danger btn-sm led-del-btn" data-id="${e.id}" data-src="${e._src}" data-label="${escHtml((e.description||'entry')+' — ₱'+fmt(e.amount))}" style="margin-left:4px" aria-label="Delete ledger entry">${emojiIcon('trash-2',14)}</button>
               </td>`:''}
             </tr>`).join('')}</tbody>
           </table></div>`}
@@ -5336,7 +5336,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
 // create/update isMoneyAdmin(), delete isPresident() via financeDelete).
 window.renderBankAccounts = async function(container) {
   const c = container || deptContainer();
-  c.innerHTML = '<div class="loading-placeholder">Loading bank accounts…</div>';
+  c.innerHTML = window.skeletonHtml('rows');
   const canWrite = ['president','manager','finance'].includes(window.currentRole);
   const [accounts, ledgerSnap] = await Promise.all([
     window.BankAccounts.list({ activeOnly:false }),
@@ -5374,8 +5374,8 @@ window.renderBankAccounts = async function(container) {
         <td class="tc-detail" data-label="Reconciled Balance">₱${fmt(rb)}</td>
         <td class="tc-detail" data-label="Status"><span class="badge ${a.active!==false?'badge-green':'badge-gray'}">${a.active!==false?'active':'closed'}</span></td>
         ${canWrite?`<td class="tc-actions" style="white-space:nowrap">
-          <button class="btn-secondary btn-sm ba-edit-btn" data-id="${escHtml(a.id)}">${emojiIcon('✎',16)}</button>
-          <button class="btn-danger btn-sm ba-del-btn" data-id="${escHtml(a.id)}" data-label="${escHtml(a.nickname||'bank account')}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
+          <button class="btn-secondary btn-sm ba-edit-btn" data-id="${escHtml(a.id)}" aria-label="Edit bank account">${emojiIcon('✎',16)}</button>
+          <button class="btn-danger btn-sm ba-del-btn" data-id="${escHtml(a.id)}" data-label="${escHtml(a.nickname||'bank account')}" style="margin-left:4px" aria-label="Delete bank account">${emojiIcon('trash-2',14)}</button>
         </td>`:''}
       </tr>`;}).join('')}</tbody>
     </table></div>`}
@@ -5488,7 +5488,7 @@ function openBankAccountModal(a, onDone) {
 async function renderBankAccountDrilldown(a) {
   const wrap = document.getElementById('ba-drilldown');
   if (!wrap) return;
-  wrap.innerHTML = '<div class="loading-placeholder">Loading transactions…</div>';
+  wrap.innerHTML = window.skeletonHtml('table');
   const [snap, bankOpts] = await Promise.all([ window.ledgerForPeriod('all'), window.BankAccounts.optionsHTML(a.id) ]);
   const rows = snap.docs.map(d => ({ id:d.id, ...d.data() }))
     .filter(r => r.bankAccountId === a.id && (!a.openingDate || (r.date||'') >= a.openingDate))
@@ -5880,7 +5880,7 @@ function openCADataRepairModal(onDone) {
 
 async function renderFinanceCA(container, currentUser, currentRole) {
   const isPrivileged = isFinancePriv();
-  container.innerHTML = '<div class="loading-placeholder">Loading cash advances…</div>';
+  container.innerHTML = window.skeletonHtml('rows');
 
   const snap = await db.collection('cash_advances').get().catch(()=>({docs:[]}));
   const all  = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
@@ -6071,7 +6071,7 @@ window.batchPrintWorkerIDs = async function(profiles) {
 
 async function renderFinanceHRProfiles(container, currentUser, currentRole) {
   const isPriv = isFinancePriv();
-  container.innerHTML = '<div class="loading-placeholder">Loading worker profiles…</div>';
+  container.innerHTML = window.skeletonHtml('cards');
   // v12 WS23 — same due-raise sweep as the monthly Payroll screen, for the
   // worker_profile subjectType (dailyRate/hourlyRate).
   await window.RaiseFlow.applyDueRaises('worker_profile').catch(()=>{});
@@ -6122,7 +6122,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-kiosk-btn" data-id="${p.id}" title="Record today's time in/out" style="margin-right:4px">${emojiIcon('⏱',16)} Clock</button>`:''}
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-raise-btn" data-id="${p.id}" title="Give raise" style="margin-right:4px">${emojiIcon('💸',16)} Raise</button>`:''}
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-edit-btn" data-id="${p.id}">${emojiIcon('✎',16)} Edit</button>`:''}
-                ${isPriv?`<button class="btn-danger btn-sm hrp-del-btn" data-id="${p.id}" data-label="${escHtml(p.name||p.id.slice(-5))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>`:''}
+                ${isPriv?`<button class="btn-danger btn-sm hrp-del-btn" data-id="${p.id}" data-label="${escHtml(p.name||p.id.slice(-5))}" style="margin-left:4px" aria-label="Delete worker profile">${emojiIcon('trash-2',14)}</button>`:''}
               </td>
             </tr>`).join('')}
           </tbody>
@@ -7213,7 +7213,7 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
                 <td class="tc-net">₱${fmt(e.amount)}</td>
                 <td class="tc-detail" data-label="By">${escHtml(e.submittedByName||'—')}</td>
                 <td class="tc-detail" data-label="Status"><span class="badge ${statusBadge(e.status)}">${e.status||'pending'}</span></td>
-                <td class="tc-actions" style="white-space:nowrap">${e.fileUrl?`<a href="${safeHttpUrl(e.fileUrl)}" target="_blank" class="btn-icon">${emojiIcon('📎',16)}</a>`:''}${isPriv?`<button class="btn-secondary btn-sm exp-edit-btn" data-id="${e.id}" style="margin-left:4px">${emojiIcon('✎',16)}</button><button class="btn-danger btn-sm exp-del-btn" data-id="${e.id}" data-label="${escHtml(e.description||e.id.slice(-5))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>`:''}</td>
+                <td class="tc-actions" style="white-space:nowrap">${e.fileUrl?`<a href="${safeHttpUrl(e.fileUrl)}" target="_blank" class="btn-icon">${emojiIcon('📎',16)}</a>`:''}${isPriv?`<button class="btn-secondary btn-sm exp-edit-btn" data-id="${e.id}" style="margin-left:4px" aria-label="Edit expense">${emojiIcon('✎',16)}</button><button class="btn-danger btn-sm exp-del-btn" data-id="${e.id}" data-label="${escHtml(e.description||e.id.slice(-5))}" style="margin-left:4px" aria-label="Delete expense">${emojiIcon('trash-2',14)}</button>`:''}</td>
               </tr>`).join('')}
             </tbody>
           </table>
@@ -7274,7 +7274,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
       </div>
     </div>
     ${window.chipTabs(salesTabs.map(s=>({key:s,label:s})), subtab)}
-    <div id="sales-content"><div class="loading-placeholder">Loading…</div></div>
+    <div id="sales-content">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadSalesContent(currentUser, currentRole, subtab);
@@ -7291,7 +7291,7 @@ function salesSubNav(content, keys, active, headerHtml, onSelect) {
   content.innerHTML = `
     ${headerHtml || ''}
     <div class="chip-tabs sales-subnav" style="margin-bottom:12px">${chips}</div>
-    <div id="sales-subview"><div class="loading-placeholder">Loading…</div></div>`;
+    <div id="sales-subview">${window.skeletonHtml('rows')}</div>`;
   const bar = content.querySelector('.sales-subnav');
   const view = content.querySelector('#sales-subview');
   bar.querySelectorAll('.chip-tab').forEach(btn => btn.addEventListener('click', () => {
@@ -7599,7 +7599,7 @@ function qeCreateFormalQuote() {
 }
 
 async function renderQuickEstimate(container, currentUser, currentRole) {
-  container.innerHTML = `<div class="loading-placeholder">Loading products…</div>`;
+  container.innerHTML = window.skeletonHtml('cards');
   const db = await qeLoadDB();
   const cats = db.categories || [];
   const products = (db.products || []).slice();
@@ -7777,7 +7777,7 @@ function sopFmtDate(ts){
 }
 
 async function renderSalesSOP(container) {
-  container.innerHTML = '<div class="loading-placeholder">Loading SOP…</div>';
+  container.innerHTML = window.skeletonHtml('rows');
   let data = null;
   try {
     const doc = await db.collection('settings').doc('sales_sop').get();
@@ -8015,7 +8015,7 @@ window.latestQuoteRevisions = function(quotes){
 async function renderBKQuotationsSummary(container, currentUser, currentRole) {
   const isPrivileged = ['president','manager','finance'].includes(currentRole);
   const isAdmin = ['president','manager','secretary'].includes(currentRole);
-  container.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+  container.innerHTML = window.skeletonHtml('rows');
   const q = isPrivileged
     ? db.collection('bk_quotes').orderBy('createdAt','desc')
     : db.collection('bk_quotes').where('createdBy','==',currentUser.uid).orderBy('createdAt','desc');
@@ -8168,7 +8168,7 @@ async function renderBKQuotationsSummary(container, currentUser, currentRole) {
 // One-way visibility: internal Sales can see partner quotes; partners never see
 // Barro Kitchens quotes. Backed by the bs_quotes read rule (non-partner staff).
 async function renderSalesPartnerQuotes(container, currentUser, currentRole) {
-  container.innerHTML = '<div class="loading-placeholder">Loading partner quotes…</div>';
+  container.innerHTML = window.skeletonHtml('table');
   const snap = await db.collection('bs_quotes').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
   const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
   const total = quotes.reduce((s,q)=>s+(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0),0);
@@ -8362,7 +8362,7 @@ window.renderIT = async function(currentUser, currentRole, subtab = 'Overview') 
       'Access Control and Network hold credentials/config — admin-only.'
     ])}
     ${window.chipTabs(subtabs.map(s=>({key:s,label:s})), subtab)}
-    <div id="it-content"><div class="loading-placeholder">Loading…</div></div>
+    <div id="it-content">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadITContent(currentUser, currentRole, subtab, canEdit);
@@ -8972,7 +8972,7 @@ window.renderBrilliantSteel = async function(currentUser, currentRole, subtab = 
     <div class="subtab-bar" style="flex-wrap:wrap">
       ${tabs.map(s => `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`).join('')}
     </div>
-    <div id="bs-content"><div class="loading-placeholder">Loading…</div></div>
+    <div id="bs-content">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadBSContent(currentUser, currentRole, subtab);
@@ -9062,7 +9062,7 @@ window.getBsQuotesOrdered = async function(currentUser, isPrivileged) {
 };
 
 async function renderBSQuotationFiles(container, currentUser, currentRole) {
-  container.innerHTML = '<div class="loading-placeholder">Loading quotation files…</div>';
+  container.innerHTML = window.skeletonHtml('rows');
   // H6 fix — a bare 'employee' role must NOT see every bs_quotes doc; only
   // Sales-dept employees may (mirrors renderBSQuotationsSummary's canSeeAll
   // below). The old unconditional `|| currentRole === 'employee'` exposed every
@@ -9160,7 +9160,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
   // wrap the whole body in try/catch so a read failure shows a friendly error
   // instead of leaving the container stuck (previously: no loading state, no
   // try/catch, and no .catch() on the reads at all).
-  container.innerHTML = '<div class="loading-placeholder">Loading quotations…</div>';
+  container.innerHTML = window.skeletonHtml('table');
   const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
   // Sales dept employees can see all quotes (including partner-filed); partners only see their own
   const canSeeAll = isPrivileged ||
@@ -9490,7 +9490,7 @@ window.renderSalesOrders = async function(container){
   // which is open to finance/admin roles OR Finance-DEPARTMENT staff (matching the
   // canFinance() Firestore rule), so a Finance-dept member can register the sale.
   const isFin = ['president','owner','manager','finance'].includes(currentRole) || (window.currentDepts||[]).includes('Finance');
-  c.innerHTML='<div class="loading-placeholder">Loading sales orders…</div>';
+  c.innerHTML=window.skeletonHtml('table');
   const snap = await db.collection('sales_orders').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
   const orders = snap.docs.map(d=>({id:d.id,...d.data()}));
   const pending = orders.filter(o=>o.status!=='recorded');
@@ -9876,7 +9876,7 @@ function bindQuoteActions(el, currentUser, currentRole, container) {
 
 // ── Brilliant Steel Client Data ────────────────────
 async function renderBSClientData(container, currentUser, currentRole) {
-  container.innerHTML = '<div class="loading-placeholder">Loading client data…</div>';
+  container.innerHTML = window.skeletonHtml('cards');
   // See-everyone's-clients requires admin or Sales-dept membership — a bare
   // 'employee' whose only dept is Brilliant Steel must NOT see every client's
   // PII (mirrors renderBSQuotationFiles/renderBSQuotationsSummary's gate).
@@ -10107,17 +10107,17 @@ window.renderApprovals = async function(currentUser) {
   }
 
   const approvalChips = [
-    { key:'all',              label:'All Requests',     icon:'📋', count: totalPending },
-    _showGrading ? { key:'grading', label:'Grading',    icon:'⭐', count: pendingGrading } : null,
+    { key:'all',              label:'All Requests',     icon:emojiIcon('📋',14), count: totalPending },
+    _showGrading ? { key:'grading', label:'Grading',    icon:emojiIcon('⭐',14), count: pendingGrading } : null,
     { key:'review-tasks',     label:'Tasks for Review',            count: pendingReview },
     { key:'signups',          label:'Sign-ups',                    count: pendingSignups },
     { key:'attendance',       label:'Attendance',                  count: pendingExt },
-    { key:'leave',            label:'Leave',            icon:'🌴', count: pendingLeave },
+    { key:'leave',            label:'Leave',            icon:emojiIcon('🌴',14), count: pendingLeave },
     { key:'ca',               label:'Cash Advances',               count: pendingCA },
     { key:'roa',              label:'Quote / ROA',                 count: pendingQApprovals },
-    { key:'quote-files',      label:'Quote Files',      icon:'📁' },
-    { key:'finance-requests', label:'Finance Requests', icon:'💼', count: pendingFinReqs },
-    { key:'history',          label:'History',          icon:'🗄️' },
+    { key:'quote-files',      label:'Quote Files',      icon:emojiIcon('📁',14) },
+    { key:'finance-requests', label:'Finance Requests', icon:emojiIcon('💼',14), count: pendingFinReqs },
+    { key:'history',          label:'History',          icon:emojiIcon('🗄️',14) },
   ].filter(Boolean);
 
   c.innerHTML = `
@@ -10130,9 +10130,9 @@ window.renderApprovals = async function(currentUser) {
     ])}
     ${_role==='secretary'?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Secretary oversight.</strong> You can approve everyday items (sign-ups, attendance, leave, submissions, task reviews); money-moving and deletion requests go to the President.</span></div>`
       :!canAct?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('👁',16)} <strong>Oversight view.</strong> You can review every request here, but only the President approves.</span></div>`
-      :!canDelete?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>ℹ️ Deletion of key records requires <strong>President</strong> approval.</span></div>`:''}
+      :!canDelete?`<div class="alert-banner" style="cursor:default;margin-bottom:10px"><span>${emojiIcon('ℹ️',16)} Deletion of key records requires <strong>President</strong> approval.</span></div>`:''}
     ${window.chipTabs(approvalChips, 'all')}
-    <div id="approvals-content"><div class="loading-placeholder">Loading…</div></div>
+    <div id="approvals-content">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
 
@@ -10144,7 +10144,7 @@ window.renderApprovals = async function(currentUser) {
     // and lists don't keep showing already-actioned items for up to the 30s TTL.
     if (typeof dbCacheInvalidate === 'function')
       ['signups-pending','att-ext-pending','ca-pending','approvals-pending'].forEach(k => dbCacheInvalidate(k));
-    wrap.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+    wrap.innerHTML = window.skeletonHtml('rows');
 
     if (sub === 'all') {
       // ── All Pending Requests aggregated view ──
@@ -11313,7 +11313,7 @@ async function renderAECDirectory(container, currentUser, currentRole) {
         <button class="btn-secondary btn-sm" id="aec-print-btn">${emojiIcon('🖨',16)} Print</button>
       </div>
     </div>
-    ${window.chipTabs([{key:'all',label:'All Stages'}, ...window.AEC_STAGES.map(s=>({key:s.key,label:s.label,icon:s.icon,count:stageCounts[s.key]}))], 'all', {cls:'aec-stage-tabs'})}
+    ${window.chipTabs([{key:'all',label:'All Stages'}, ...window.AEC_STAGES.map(s=>({key:s.key,label:s.label,icon:emojiIcon(s.icon,14),count:stageCounts[s.key]}))], 'all', {cls:'aec-stage-tabs'})}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px">
       <select id="aec-region-filter" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">
         <option value="all">All regions</option>
@@ -11355,7 +11355,7 @@ async function renderAECDirectory(container, currentUser, currentRole) {
       <td class="tc-detail" data-label="Follow-up" style="font-size:11px;color:${od ? 'var(--danger)' : 'var(--text-muted)'}">${c.followUpDate ? `${emojiIcon('⏰',16)} ${escHtml(c.followUpDate)}${od ? ' · due' : ''}` : ''}</td>
       <td class="c tc-actions" style="white-space:nowrap">
         ${canEdit ? `<button class="btn-secondary btn-sm aec-edit-btn" data-id="${c.id}" title="Edit">${emojiIcon('✎',16)}</button>` : ''}
-        ${canDeleteDirect ? `<button class="btn-secondary btn-sm aec-del-btn" data-id="${c.id}" data-company="${escHtml(c.company || '')}" style="color:var(--danger)">${emojiIcon('trash-2',13)}</button>` : ''}
+        ${canDeleteDirect ? `<button class="btn-secondary btn-sm aec-del-btn" data-id="${c.id}" data-company="${escHtml(c.company || '')}" style="color:var(--danger)" aria-label="Delete contact">${emojiIcon('trash-2',13)}</button>` : ''}
       </td></tr>`; };
 
   const openAECDetail = (c) => {
@@ -11611,7 +11611,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
   const dueFollowups = clients.filter(c=>c.followUpDate && c.followUpDate <= today && isOpen(c)).length;
   let stageFilter = 'all';
 
-  const chips = [{key:'all',label:'All',count:counts.all}, ...CRM_STAGES.map(s=>({key:s.key,label:s.label,icon:s.icon,count:counts[s.key]}))];
+  const chips = [{key:'all',label:'All',count:counts.all}, ...CRM_STAGES.map(s=>({key:s.key,label:s.label,icon:emojiIcon(s.icon,14),count:counts[s.key]}))];
 
   container.innerHTML = `
     ${legacyMode && ['president','manager'].includes(currentRole) ? `
@@ -11647,7 +11647,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
       <div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
         ${canAdd?`<button class="btn-secondary btn-sm cl-edit-btn" data-id="${cl.id}" title="Edit / set stage">${emojiIcon('✎',16)}</button>`:''}
         ${canDeleteDirect
-          ? `<button class="btn-secondary btn-sm cl-del-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="color:var(--danger)">${emojiIcon('trash-2',14)}</button>`
+          ? `<button class="btn-secondary btn-sm cl-del-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" style="color:var(--danger)" aria-label="Delete client">${emojiIcon('trash-2',14)}</button>`
           : `<button class="btn-secondary btn-sm cl-delreq-btn" data-id="${cl.id}" data-name="${escHtml(cl.name||'')}" ${cl.deleteRequested?'disabled':''}>${cl.deleteRequested?`${emojiIcon('⏳',16)}`:emojiIcon('trash-2',14)}</button>`}
       </div>
     </div>`;
@@ -11781,7 +11781,7 @@ async function renderClientProfiles(container, currentUser, currentRole, brand) 
 // never reach this — decision 10), so no partner query-scoping is needed here.
 async function openClientHub(cl, opts) {
   opts = opts || {};
-  const panel = openPage(`${emojiIcon('👤',16)} ${escHtml(cl.name || 'Client')}`, '<div class="loading-placeholder">Loading client…</div>',
+  const panel = openPage(`${emojiIcon('👤',16)} ${escHtml(cl.name || 'Client')}`, window.skeletonHtml('cards'),
     `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
   const body = panel.querySelector('.page-panel-body');
   const t = await window.Clients.timelineFor(cl);
@@ -11834,7 +11834,7 @@ async function openClientHub(cl, opts) {
     ${window.chipTabs ? window.chipTabs([{key:'timeline',label:`${emojiIcon('🕓',13)} Timeline`},{key:'details',label:`${emojiIcon('🗂',13)} Details`}], 'timeline', {cls:'ch-tabs'}) : ''}
     <div class="ch-tab-pane" id="ch-tab-timeline">
       ${t.events.length?`<div style="border-left:2px solid var(--border);margin:0 0 14px 6px;padding-left:12px;display:flex;flex-direction:column;gap:8px;max-height:420px;overflow-y:auto">
-        ${t.events.map(e=>`<div style="display:flex;gap:8px;align-items:baseline"><span style="flex-shrink:0">${e.icon}</span><span style="font-size:12px;flex:1">${escHtml(e.text)}</span><span style="font-size:11px;color:var(--text-muted);flex-shrink:0">${fmtD(e.ts)}</span></div>`).join('')}
+        ${t.events.map(e=>`<div style="display:flex;gap:8px;align-items:baseline"><span style="flex-shrink:0">${emojiIcon(e.icon,14)}</span><span style="font-size:12px;flex:1">${escHtml(e.text)}</span><span style="font-size:11px;color:var(--text-muted);flex-shrink:0">${fmtD(e.ts)}</span></div>`).join('')}
       </div>`:(window.renderEmptyState ? window.renderEmptyState({icon:'🕓', title:'No activity yet for this client', hint:'Quotes, orders, project events and payments will show up here.'}) : '<div class="empty-state" style="padding:18px"><p>No activity yet for this client.</p></div>')}
     </div>
     <div class="ch-tab-pane" id="ch-tab-details" style="display:none">
@@ -12147,7 +12147,7 @@ window.renderFileCollection = function(title, containerId, currentRole) {
         </div>
       </div>
       <div class="card-body" id="files-list-${containerId}">
-        <div class="loading-placeholder">Loading files…</div>
+        ${window.skeletonHtml('rows')}
       </div>
     </div>
   `;
@@ -12387,7 +12387,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
   };
 
   const loadFiles = async () => {
-    listEl.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+    listEl.innerHTML = window.skeletonHtml('rows');
     if (filterUid) {
       const snap = await db.collection(collection)
         .where('scope','==',scopeKey).where('deleted','==',false).where('uploadedBy','==',filterUid)
@@ -12561,13 +12561,13 @@ window.renderDocCollection = function(container, collection, title, currentUser,
       <div></div>
       ${canAdd?`<button class="btn-primary btn-sm" id="add-doc-btn-${collection}">+ Add</button>`:''}
     </div>
-    <div id="doc-list-${collection}"><div class="loading-placeholder">Loading…</div></div>
+    <div id="doc-list-${collection}">${window.skeletonHtml('rows')}</div>
   `;
   const loadDocs = async () => {
     const snap = await db.collection(collection).get().catch(() => ({ docs: [] }));
     const docs = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
     const list = document.getElementById(`doc-list-${collection}`);
-    if (!docs.length) { list.innerHTML=`<div class="empty-state" style="padding:20px"><div class="empty-icon">${cfg?.icon||`${emojiIcon('📄',44)}`}</div><h4>No ${title} yet</h4></div>`; return; }
+    if (!docs.length) { list.innerHTML=`<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon(cfg?.icon||'📄',44)}</div><h4>No ${title} yet</h4></div>`; if (window.lucide) lucide.createIcons({ nodes: [list] }); return; }
     if (window.lucide) lucide.createIcons({ nodes: [list] });
     list.innerHTML = `<div class="item-list">${docs.map(d=>`
       <div class="item-card"${isGov?` data-gov-id="${d.id}" style="cursor:pointer"`:''}>
@@ -12925,7 +12925,7 @@ async function createJobProject(d){
 
 window.renderProjectLifecycle = async function(){
   const c = deptContainer(); if(!c) return;
-  c.innerHTML='<div class="loading-placeholder">Loading projects…</div>';
+  c.innerHTML=window.skeletonHtml('cards');
   const isPartnerU = currentRole==='partner' || (currentDepts||[]).length===1 && currentDepts[0]==='Brilliant Steel';
   const snap = await db.collection('job_projects').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
   let projects = snap.docs.map(d=>({id:d.id,...d.data()}));
@@ -13375,7 +13375,7 @@ window.renderProductionDept = async function(currentUser, currentRole, subtab = 
       'Count Form records physical counts; Tasks and Files hold the department board and documents.'
     ])}
     ${window.chipTabs(subs.map(s=>({key:s,label:s})), subtab)}
-    <div id="prod-content"><div class="loading-placeholder">Loading…</div></div>`;
+    <div id="prod-content">${window.skeletonHtml('rows')}</div>`;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadProdContent(currentUser, currentRole, subtab);
   window.bindChipTabs(c, (key) => loadProdContent(currentUser, currentRole, key));
@@ -13394,7 +13394,7 @@ function loadProdContent(currentUser, currentRole, sub) {
 
 async function renderProdOrders(el, currentUser, currentRole) {
   const canEdit = canEditDept('Production');
-  el.innerHTML = '<div class="loading-placeholder">Loading orders…</div>';
+  el.innerHTML = window.skeletonHtml('table');
   const [snap, projSnap] = await Promise.all([
     dbCachedGet('production_orders', ()=>db.collection('production_orders').orderBy('createdAt','desc').get(), 45000).catch(()=>({docs:[]})),
     dbCachedGet('job_projects', ()=>db.collection('job_projects').orderBy('createdAt','desc').get(), 45000).catch(()=>({docs:[]}))
@@ -13769,7 +13769,7 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
     row.innerHTML = `
       <select class="pm-item" ${consumed?'disabled':''} style="flex:1;min-width:0;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">${matItemOpts(itemId)}</select>
       <input class="pm-qty" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Qty" value="${qty}" ${consumed?'disabled':''} style="flex:0 0 70px;width:70px"/>
-      ${consumed?'':`<button class="btn-danger btn-sm pm-del" type="button">${emojiIcon('✕',16)}</button>`}`;
+      ${consumed?'':`<button class="btn-danger btn-sm pm-del" type="button" aria-label="Remove material">${emojiIcon('✕',16)}</button>`}`;
     if (window.lucide) lucide.createIcons({ nodes: [row] });
     row.querySelector('.pm-del')?.addEventListener('click', ()=>row.remove());
     matsWrap.appendChild(row);
@@ -13909,7 +13909,7 @@ function loadCountDraft(){ try { return JSON.parse(localStorage.getItem(PROD_COU
 function saveCountDraft(d){ try { localStorage.setItem(PROD_COUNT_DRAFT_KEY, JSON.stringify(d)); } catch(e){} }
 
 async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
-  el.innerHTML = '<div class="loading-placeholder">Loading items…</div>';
+  el.innerHTML = window.skeletonHtml('rows');
   const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
   const items = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
   const shown = items.filter(i=> kindFilter==='all' || (i.kind||'material')===kindFilter);
@@ -14154,7 +14154,7 @@ ${_lh ? _lh.printCSS : ''}`;
 }
 
 async function renderProdMaterials(el, currentRole) {
-  el.innerHTML = '<div class="loading-placeholder">Loading materials…</div>';
+  el.innerHTML = window.skeletonHtml('rows');
   const snap = await dbCachedGet('inventory_items', () => db.collection('inventory_items').get().catch(()=>({docs:[]})), 45000);
   const mats = snap.docs.map(d=>({id:d.id,...d.data()})).filter(i=>(i.kind||'material')==='material').sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
   const low = mats.filter(i=>(i.reorderLevel||0)>0 && (i.qty||0) <= (i.reorderLevel||0));
@@ -14211,7 +14211,7 @@ window.renderPurchasing = async function(currentUser, currentRole, subtab = 'Req
       'Received materials auto-match to Inventory on receive.'
     ])}
     ${window.chipTabs(tabs.map(s=>({key:s,label:s})), subtab)}
-    <div id="purch-content"><div class="loading-placeholder">Loading…</div></div>
+    <div id="purch-content">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   loadPurchasingContent(currentUser, currentRole, subtab);
@@ -14280,7 +14280,7 @@ function purchRfqCard(r, canEdit) {
         <div style="font-size:12px;color:var(--text-muted)">Requesting: ${escHtml(r.requestingDept || '—')}${r.neededBy ? ` · Needed by ${escHtml(r.neededBy)}` : ''}</div>
         ${r.deliverTo ? `<div style="font-size:12px;color:var(--text-muted)">Deliver to: ${escHtml(r.deliverTo)}</div>` : ''}
       </div>
-      ${canEdit ? `<button class="btn-danger btn-sm rfq-del" data-id="${r.id}" data-label="${escHtml(r.title || 'RFQ')}">${emojiIcon('trash-2',14)}</button>` : ''}
+      ${canEdit ? `<button class="btn-danger btn-sm rfq-del" data-id="${r.id}" data-label="${escHtml(r.title || 'RFQ')}" aria-label="Delete RFQ">${emojiIcon('trash-2',14)}</button>` : ''}
     </div>
     ${r.notes ? `<div style="font-size:12px;margin-top:6px">${escHtml(r.notes)}</div>` : ''}
     <div class="table-wrap" style="margin-top:10px"><table class="data-table table-cards no-toggle">

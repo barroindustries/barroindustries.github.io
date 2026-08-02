@@ -264,7 +264,7 @@ const SYSTEM_HEALTH_JOBS = [
 async function renderSystemHealth() {
   if (!isPresident() && currentRole !== 'finance') return;
   const c = document.getElementById('page-content');
-  c.innerHTML = '<div class="loading-placeholder">Loading system health…</div>';
+  c.innerHTML = window.skeletonHtml('rows');
 
   const [healthDocs, errorRows] = await Promise.all([
     Promise.all(SYSTEM_HEALTH_JOBS.map(job =>
@@ -1497,7 +1497,7 @@ function renderQuoteBuilderIframe() {
   const reviewBanner = reviewCtx ? `
     <div id="qb-review-bar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:linear-gradient(135deg,rgba(255,159,10,.12),transparent);border:1.5px solid var(--warning,#ff9f0a);border-radius:12px;padding:10px 14px;margin-bottom:10px">
       <div style="flex:1;min-width:180px;font-size:12px"><strong>Reviewing ${escHtml(reviewCtx.quoteNumber||'partner quote')}</strong> for ${escHtml(reviewCtx.clientName||'')} — edit the line items, then save it back to the partner.</div>
-      <button class="btn-primary btn-sm" id="qb-return-edit">↩ Save edits &amp; Return to Partner</button>
+      <button class="btn-primary btn-sm" id="qb-return-edit">${emojiIcon('↩',16)} Save edits &amp; Return to Partner</button>
       <button class="btn-success btn-sm" id="qb-approve-edit">${emojiIcon('✅',16)} Save edits &amp; Approve</button>
     </div>` : '';
   // On phones, drop the redundant "Quote Builder" heading (the builder shows its own
@@ -1845,7 +1845,7 @@ window.runSecurityBackfill = async function() {
 async function renderAuditLog() {
   if (!isPresident()) return;
   const c = document.getElementById('page-content');
-  c.innerHTML = '<div class="loading-placeholder">Loading audit log…</div>';
+  c.innerHTML = window.skeletonHtml('rows');
   let entries = [];
   try {
     const snap = await db.collection('audit_log').orderBy('ts','desc').limit(500).get();
@@ -1916,7 +1916,7 @@ async function renderAuditLog() {
 async function renderProductDatabase() {
   if (!isPresident()) return;
   const c = document.getElementById('page-content');
-  c.innerHTML = '<div class="loading-placeholder">Loading products…</div>';
+  c.innerHTML = window.skeletonHtml('cards');
 
   let snap, metaSnap;
   try {
@@ -2163,7 +2163,7 @@ async function renderProductDatabase() {
     // body element back out after the async inventory fetch resolves, so it
     // must use the panel openPage RETURNS instead of the old #modal-body
     // singleton id (openPage creates a fresh per-call panel, no such id).
-    const panel = openPage(`${emojiIcon('🧮',16)} Materials from Inventory`, '<div class="loading-placeholder" style="padding:24px">Loading raw materials…</div>',
+    const panel = openPage(`${emojiIcon('🧮',16)} Materials from Inventory`, `<div style="padding:24px">${window.skeletonHtml('rows')}</div>`,
       '<button class="btn-primary" id="bom-apply">Apply to Materials Cost</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>');
     const snap = await db.collection('inventory_items').orderBy('name').get().catch(() => ({ docs: [] }));
     const mats = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(i => (i.kind || 'material') === 'material');
@@ -2358,7 +2358,7 @@ function navigateTo(page, opts) {
       if (existing) existing.destroy();
     });
   }
-  c.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+  c.innerHTML = window.skeletonHtml('rows');
 
   // dept: prefix for dual dept tabs
   if (page.startsWith('dept:')) {
@@ -2503,7 +2503,7 @@ async function renderPartnerProjects() {
   c.innerHTML = `
     <div class="page-header"><h2>${emojiIcon('💼',20)} My Projects</h2></div>
     <div style="font-size:12px;color:var(--text-muted);margin:-6px 0 12px;font-weight:600">Projects Barro Industries is running with ${escHtml(co)}</div>
-    <div id="partner-projects-body"><div class="loading-placeholder">Loading projects…</div></div>
+    <div id="partner-projects-body">${window.skeletonHtml('cards')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   try {
@@ -2712,7 +2712,7 @@ async function renderPartnerDashboard() {
     document.getElementById('partner-quotes-card').innerHTML = `
       ${needsRevision.length?`<div class="card" style="border:2px solid var(--warning);margin-bottom:10px">
         <div class="card-header" style="background:rgba(255,159,10,.08)">
-          <h3 style="color:var(--warning)">↩ Returned for Revision (${needsRevision.length})</h3>
+          <h3 style="color:var(--warning)">${emojiIcon('↩',18)} Returned for Revision (${needsRevision.length})</h3>
           <button class="btn-primary btn-sm" onclick="navigateTo('bs-quotations')">View All</button>
         </div>
         <div class="card-body" style="padding:0">
@@ -2734,7 +2734,7 @@ async function renderPartnerDashboard() {
               const ts  = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric'}):'';
               const st  = q.status||q.approvalStatus||'draft';
               const bc  = st==='filed'||st==='approved'?'badge-green':st==='needs_revision'?'badge-orange':st==='pending_approval'||st==='pending_review'||st==='sent'?'badge-blue':'badge-gray';
-              const ico = st==='filed'||st==='approved'?`${emojiIcon('✅',16)}`:st==='needs_revision'?'↩':st==='pending_approval'||st==='sent'?`${emojiIcon('⏳',16)}`:`${emojiIcon('📄',16)}`;
+              const ico = st==='filed'||st==='approved'?`${emojiIcon('✅',16)}`:st==='needs_revision'?`${emojiIcon('↩',16)}`:st==='pending_approval'||st==='sent'?`${emojiIcon('⏳',16)}`:`${emojiIcon('📄',16)}`;
               return `<div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border)">
                 <div style="font-size:20px">${ico}</div>
                 <div style="flex:1;min-width:0">
@@ -2773,7 +2773,7 @@ function liveDateTime(elId) {
 
 async function renderPresidentDashboard() {
   const c = document.getElementById('page-content');
-  c.innerHTML = '<div class="loading-placeholder">Loading dashboard…</div>';
+  c.innerHTML = window.skeletonHtml('cards');
   try {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
     const todayStr = bizDate();
@@ -2984,7 +2984,7 @@ async function renderPresidentDashboard() {
 // Department-scoped oversight: team attendance, dept task health, dept approvals.
 async function renderManagerDashboard() {
   const c = document.getElementById('page-content');
-  c.innerHTML = '<div class="loading-placeholder">Loading dashboard…</div>';
+  c.innerHTML = window.skeletonHtml('cards');
   try {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
     const todayStr = bizDate();
@@ -3098,7 +3098,7 @@ async function renderManagerDashboard() {
 // picture + governance shortcuts — and never any approve buttons.
 async function renderSecretaryDashboard() {
   const c = document.getElementById('page-content');
-  c.innerHTML = '<div class="loading-placeholder">Loading dashboard…</div>';
+  c.innerHTML = window.skeletonHtml('cards');
   try {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
     const todayStr = bizDate();
@@ -3187,7 +3187,7 @@ async function renderSecretaryDashboard() {
 // Money oversight: income/expense/net (selectable period), payroll, expense-by-category, pending payables.
 async function renderFinanceDashboard() {
   const c = document.getElementById('page-content');
-  c.innerHTML = '<div class="loading-placeholder">Loading dashboard…</div>';
+  c.innerHTML = window.skeletonHtml('cards');
   try {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return { docs:[], size:0 }; } };
     const todayStr = bizDate();
@@ -3338,7 +3338,7 @@ async function renderFinanceDashboard() {
 
 async function renderEmployeeDashboard() {
   const c = document.getElementById('page-content');
-  c.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+  c.innerHTML = window.skeletonHtml('rows');
   try {
     const now      = new Date();
     const todayStr = bizDate();
@@ -4083,13 +4083,13 @@ async function renderPartnersDept() {
     </div>
     ${window.chipTabs([
       {key:'overview',label:'Overview'},
-      {key:'deals',label:'Deals',icon:'💰'},
+      {key:'deals',label:'Deals',icon:emojiIcon('💰',14)},
       {key:'tasks',label:'Tasks'},
       {key:'quotes',label:'Quotes'},
       {key:'quote-builder',label:'Quote Builder'},
       {key:'activity',label:'Activity'},
     ], initSub, {cls:'partners-dept-tabs'})}
-    <div id="partners-dept-content"><div class="loading-placeholder">Loading…</div></div>
+    <div id="partners-dept-content">${window.skeletonHtml('rows')}</div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   window.bindChipTabs(c.querySelector('.partners-dept-tabs'), (key)=>{ window.setSubroute(key); loadPartnersDeptTab(key); });
@@ -4098,7 +4098,7 @@ async function renderPartnersDept() {
 
 async function loadPartnersDeptTab(sub) {
   const content = document.getElementById('partners-dept-content');
-  content.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+  content.innerHTML = window.skeletonHtml('rows');
 
   // Fetch partners + their tasks + quotes in parallel
   const [usersSnap, tasksSnap, quotesSnap] = await Promise.all([
@@ -4338,7 +4338,7 @@ function _showAddDealModal(partners, onSaved) {
   modal.className = 'modal-overlay active';
   modal.innerHTML = `
     <div class="modal" style="max-width:480px">
-      <div class="modal-header"><h3>${emojiIcon('🤝',20)} New Partner Deal</h3><button class="modal-close" id="deal-modal-close">${emojiIcon('✕',16)}</button></div>
+      <div class="modal-header"><h3>${emojiIcon('🤝',20)} New Partner Deal</h3><button class="modal-close" id="deal-modal-close" aria-label="Close">${emojiIcon('✕',16)}</button></div>
       <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
         <div><label class="form-label">Client Name *</label><input class="form-input" id="dl-client" placeholder="e.g. Gerry's Grill Bulacan"/></div>
         <div><label class="form-label">Project Description</label><input class="form-input" id="dl-desc" placeholder="e.g. Full kitchen setup with exhaust system"/></div>
@@ -4541,7 +4541,7 @@ async function renderSOPs() {
   ];
 
   const c = document.getElementById('page-content');
-  c.innerHTML = '<div class="loading-placeholder">Loading SOPs…</div>';
+  c.innerHTML = window.skeletonHtml('rows');
   const canEditSOPs = isPresident() || currentRole === 'manager';
 
   // SOPs live in Firestore so the president can edit them in-app without a code
@@ -4701,7 +4701,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
     // President sees all employees' finance
     c.innerHTML = `
       <div class="page-header"><h2>${emojiIcon('💳',20)} Personal Finance — Team</h2></div>
-      <div id="pf-content"><div class="loading-placeholder">Loading…</div></div>
+      <div id="pf-content">${window.skeletonHtml('rows')}</div>
     `;
     if (window.lucide) lucide.createIcons({ nodes: [c] });
     // Fetch users, all tasks, kpi_evals, and kpi_targets in parallel — single round trip
@@ -4774,7 +4774,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
     document.getElementById('pf-content').innerHTML = `
       <div class="card" style="margin-bottom:16px">
         <div class="card-header"><h3>Payroll — ${monthLabel}</h3></div>
-        <div id="pf-payrun-summary" style="padding:14px 16px"><div class="loading-placeholder">Loading…</div></div>
+        <div id="pf-payrun-summary" style="padding:14px 16px">${window.skeletonHtml('cards')}</div>
       </div>
       <div class="card" style="margin-bottom:16px">
         <div class="card-header"><h3>Performance &amp; Attendance — ${monthLabel}</h3></div>
@@ -5388,7 +5388,7 @@ async function openEmpStandingsModal(uid, name, preloaded) {
   // grid), CONVERT openModal→openPage. Body is populated after async Firestore
   // reads resolve, so capture the panel openPage returns and query its own
   // body element instead of the old #modal-body singleton id.
-  const panel = window.openPage(`${emojiIcon('📊',16)} ${name} — Standings`, '<div class="loading-placeholder" style="padding:30px;text-align:center">Loading standings…</div>');
+  const panel = window.openPage(`${emojiIcon('📊',16)} ${name} — Standings`, `<div style="padding:30px;text-align:center">${window.skeletonHtml('table')}</div>`);
   const body = panel.querySelector('.page-panel-body');
 
   try {
@@ -5514,7 +5514,7 @@ function openWorkerProfilePanel(uid, name, preloaded) {
       </div>
     </div>
     <div id="wp-tab-content" style="padding-top:16px">
-      <div class="loading-placeholder" style="text-align:center;padding:40px">Loading…</div>
+      <div style="text-align:center;padding:40px">${window.skeletonHtml('rows')}</div>
     </div>`;
   const headerRightHTML = `<button class="btn-secondary btn-sm" id="wp-payslip-btn">${emojiIcon('🖨️',16)} Payslip</button>`;
   // (name renders as the page title as plain text via openPage/_setPanelTitle
@@ -5561,7 +5561,7 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
   const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const content = panel.querySelector('#wp-tab-content');
   const subtitle = panel.querySelector('#wp-subtitle');
-  content.innerHTML = '<div class="loading-placeholder" style="text-align:center;padding:40px">Loading…</div>';
+  content.innerHTML = `<div style="text-align:center;padding:40px">${window.skeletonHtml('rows')}</div>`;
   try {
     if (tabName === 'overview') {
       subtitle.textContent = 'Overview';
@@ -5721,7 +5721,7 @@ async function renderProgressReports() {
     return;
   }
   const c = document.getElementById('page-content');
-  c.innerHTML = '<div class="loading-placeholder">Loading progress reports…</div>';
+  c.innerHTML = window.skeletonHtml('rows');
   try {
     const safeGet = async (q) => { try { return await q.get(); } catch(e) { return {docs:[],size:0}; } };
     const [usersSnap, tasksSnap, attSnap] = await Promise.all([
@@ -6226,7 +6226,7 @@ async function renderCompanyMemos(ct, canAdd) {
       <div style="font-size:13px;color:var(--text-muted)">Official memos from management</div>
       ${canAdd?`<button class="btn-primary btn-sm" id="add-memo-btn">+ New Memo</button>`:''}
     </div>
-    <div id="memos-list"><div class="loading-placeholder">Loading…</div></div>
+    <div id="memos-list">${window.skeletonHtml('rows')}</div>
   `;
   const me = currentUser?.uid;
   const snap = await db.collection('memos').orderBy('createdAt','desc').get().catch(()=>({docs:[],empty:true}));
@@ -6307,7 +6307,7 @@ async function renderCompanyMemos(ct, canAdd) {
           <span id="memo-recip-count" style="font-size:11px;color:var(--text-muted)">No one tagged</span>
           <button type="button" class="btn-link" id="memo-recip-toggle" style="font-size:11px;background:none;border:none;color:var(--primary,#0A84FF);cursor:pointer;padding:0">Select all</button>
         </div>
-        <div id="memo-recip-list" style="max-height:190px;overflow:auto;border:1.5px solid var(--border);border-radius:8px;padding:6px;background:var(--surface)"><div class="loading-placeholder" style="padding:10px">Loading people…</div></div>
+        <div id="memo-recip-list" style="max-height:190px;overflow:auto;border:1.5px solid var(--border);border-radius:8px;padding:6px;background:var(--surface)"><div style="padding:10px">${window.skeletonHtml('rows')}</div></div>
         <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Tagged people get a notification and must tick “I agree (Conforme)”. Leave empty for an information-only memo.</div>
       </div>
       <div id="memo-file-upload"></div>
@@ -6569,7 +6569,7 @@ async function renderCompanyPolicies(ct, canAdd) {
       <div style="font-size:13px;color:var(--text-muted)">Company rules, regulations, and official policies</div>
       ${canAdd?`<button class="btn-primary btn-sm" id="add-policy-btn">+ Add Policy</button>`:''}
     </div>
-    <div class="policy-grid" id="policy-grid"><div class="loading-placeholder">Loading…</div></div>
+    <div class="policy-grid" id="policy-grid">${window.skeletonHtml('cards')}</div>
   `;
   const snap = await db.collection('policies').orderBy('createdAt','desc').get().catch(()=>({docs:[],empty:true}));
   const policies = snap.docs.map(d=>({id:d.id,...d.data()}));
@@ -6622,7 +6622,7 @@ async function renderCompanyDownloads(ct, canAdd) {
       <div style="font-size:13px;color:var(--text-muted)">Forms, templates, and official documents for download</div>
       ${canAdd?`<button class="btn-primary btn-sm" id="add-dl-btn">+ Upload Resource</button>`:''}
     </div>
-    <div id="downloads-list"><div class="loading-placeholder">Loading…</div></div>
+    <div id="downloads-list">${window.skeletonHtml('rows')}</div>
   `;
   const snap = await db.collection('resources').orderBy('createdAt','desc').get().catch(()=>({docs:[],empty:true}));
   const docs = snap.docs.map(d=>({id:d.id,...d.data()}));
@@ -6818,7 +6818,7 @@ async function renderDepartments() {
 async function renderAnalytics() {
   if(!isPresident()&&currentRole!=='manager'&&currentRole!=='secretary'&&currentRole!=='finance'){document.getElementById('page-content').innerHTML=renderAccessDenied('Analytics');return;}
   const c=document.getElementById('page-content');
-  c.innerHTML='<div class="loading-placeholder">Loading analytics…</div>';
+  c.innerHTML=window.skeletonHtml('cards');
   const safeGet = async (q) => { try { return await q.get(); } catch(e) { return {docs:[],size:0}; } };
   // Analytics re-reads the same heavy collections on every visit — cache 60s, keyed by the
   // active period so switching "This Month" ↔ "YTD" ↔ "All Time" doesn't serve stale rows
@@ -7145,7 +7145,7 @@ async function renderAnalytics() {
         </div>
         <div class="card-body">
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px">
-            ${window.CRM_STAGES.map(s=>`<div style="background:var(--surface2);border-radius:10px;padding:10px 12px"><div style="font-size:11px;color:var(--text-muted)">${s.icon} ${s.label}</div><div style="font-size:18px;font-weight:800;color:${s.color}">${stageCount[s.key]}</div><div style="font-size:10px;color:var(--text-muted)">${clTotal?Math.round(stageCount[s.key]/clTotal*100):0}%</div></div>`).join('')}
+            ${window.CRM_STAGES.map(s=>`<div style="background:var(--surface2);border-radius:10px;padding:10px 12px"><div style="font-size:11px;color:var(--text-muted)">${emojiIcon(s.icon,14)} ${s.label}</div><div style="font-size:18px;font-weight:800;color:${s.color}">${stageCount[s.key]}</div><div style="font-size:10px;color:var(--text-muted)">${clTotal?Math.round(stageCount[s.key]/clTotal*100):0}%</div></div>`).join('')}
           </div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:10px;border-top:1px solid var(--border);padding-top:8px">
             Client conversion: <strong>${clConv==null?'—':clConv+'%'}</strong> (won vs lost clients) ·
@@ -7433,7 +7433,7 @@ async function renderAnalytics() {
   ];
   const renderStrategy = async () => {
     const wrap=document.getElementById('analytics-content');
-    wrap.innerHTML = `<div class="loading-placeholder">Loading strategy…</div>`;
+    wrap.innerHTML = window.skeletonHtml('rows');
     const notesSnap = await cg('strategy_notes', db.collection('strategy_notes'));
     const notesByDept = {};
     notesSnap.docs.forEach(d=>{ notesByDept[d.id] = d.data(); });
@@ -7560,7 +7560,7 @@ async function renderTeam() {
         ${(isPresident()||currentDepts.includes('IT'))?`<button class="btn-danger btn-sm" id="force-logout-all-btn">${emojiIcon('🔴',16)} Logout All</button>`:''}
       </div>
     </div>
-    <div id="team-table"><div class="loading-placeholder">Loading…</div></div>`;
+    <div id="team-table">${window.skeletonHtml('table')}</div>`;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   // Short TTL here so the online/offline presence dots reflect "now", not a
   // stale snapshot left by another screen. Uses a DISTINCT key from the shared
@@ -7881,7 +7881,7 @@ function openEditEmployeeModal(u) {
         <label>New Password</label>
         <div style="display:flex;gap:6px">
           <input id="rp-newpw" value="${escHtml(newPw)}" style="flex:1" autocomplete="off"/>
-          <button type="button" class="btn-secondary btn-sm" id="rp-regen">${emojiIcon('🔄',16)}</button>
+          <button type="button" class="btn-secondary btn-sm" id="rp-regen" aria-label="Regenerate">${emojiIcon('🔄',16)}</button>
         </div>
       </div>
       <div id="rp-error" class="error-msg hidden" style="margin-top:8px"></div>
@@ -8850,7 +8850,7 @@ async function renderSuggestionBox(wrap) {
         <div id="sug-msg" style="margin-top:10px;font-size:13px;text-align:center;display:none"></div>
       </div>
     </div>
-    ${pres ? `<div class="card"><div class="card-header"><h3>All Submissions</h3></div><div class="card-body" id="sug-list"><div class="loading-placeholder">Loading…</div></div></div>` : ''}
+    ${pres ? `<div class="card"><div class="card-header"><h3>All Submissions</h3></div><div class="card-body" id="sug-list">${window.skeletonHtml('rows')}</div></div>` : ''}
   `;
   if (window.lucide) lucide.createIcons({ nodes: [wrap] });
 
