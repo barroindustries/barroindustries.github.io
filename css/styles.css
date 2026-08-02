@@ -2007,6 +2007,57 @@ html.theme-astral .chip-tab.active {
 .data-table .row-actions .icon-btn {
   width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
 }
+/* 5. Responsive table→card pattern (v14 Wave 4 Batch F4 — reusable, Wave 6
+   reuses it). Opt-in via .table-cards on a <table class="data-table">.
+   APPROACH: same single <table> markup at every width — no parallel/duplicate
+   card render. At ≤700px each <tr> becomes a flex "card"; mark cells with a
+   role class so CSS (not JS) decides layout:
+     .tc-avatar / .tc-name / .tc-net  — always-visible header row of the card
+     .tc-detail                       — the rest of the breakdown, one per
+                                         line via data-label::before, hidden
+                                         until the row is tapped
+     .tc-actions                      — action buttons, always visible
+   Tapping the card toggles .tc-expanded on the <tr> (JS just flips a class —
+   the cell markup/values never change). A literal <details> element can't
+   validly wrap a subset of <td>s inside a <tr> (HTML5 table parsing foster-
+   parents anything that isn't td/th out of the row), so "tap to expand" is
+   done as a class toggle instead — same interaction, valid table markup,
+   zero duplicated data. Desktop (>700px) is completely unaffected: this
+   whole block is inside the max-width query. */
+@media (max-width: 700px) {
+  .table-cards thead { display: none; }
+  .table-cards, .table-cards tbody { display: block; width: 100%; }
+  .table-cards tr {
+    display: flex; flex-wrap: wrap; align-items: center;
+    background: var(--surface, var(--s1)); border: 1px solid var(--border);
+    border-radius: var(--r-sm); padding: 10px 12px; margin-bottom: 10px;
+    gap: 4px 10px;
+  }
+  .table-cards tr:last-child { margin-bottom: 0; }
+  .table-cards td { border: none; padding: 0; }
+  .table-cards td.tc-avatar { flex: 0 0 auto; order: 1; }
+  .table-cards td.tc-name   { flex: 1 1 120px; order: 1; min-width: 0; }
+  .table-cards td.tc-net    { flex: 0 0 auto; order: 1; text-align: right; }
+  .table-cards td.tc-detail {
+    flex: 1 1 100%; order: 2; display: none;
+    justify-content: space-between; align-items: center;
+    padding: 4px 0; border-top: 1px dashed var(--border); font-size: var(--fs-sm);
+  }
+  .table-cards tr.tc-expanded td.tc-detail { display: flex; }
+  .table-cards td.tc-detail[data-label]::before {
+    content: attr(data-label); font-weight: 700; font-size: var(--fs-2xs);
+    color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .table-cards td.tc-actions {
+    flex: 1 1 100%; order: 3; display: flex; justify-content: flex-end;
+    align-items: center; gap: 6px; padding-top: 6px; border-top: 1px solid var(--border);
+  }
+  .table-cards .tc-caret { transition: transform var(--t2); color: var(--text-muted); }
+  .table-cards tr.tc-expanded .tc-caret { transform: rotate(180deg); }
+}
+@media (min-width: 701px) {
+  .table-cards .tc-caret { display: none; }
+}
 
 /* ══════════════════════════════
    QUOTE BUILDER

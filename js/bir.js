@@ -586,21 +586,28 @@ window.birRenderAlphaBody = async function (bodyEl, state, currentUser) {
   }
   bodyEl.innerHTML = '<div class="loading-placeholder">Building…</div>';
   const year = pParsed.key.slice(5); // 'year:YYYY' -> 'YYYY'
-  const [shSnap, wpSnap, payrollSnap] = await Promise.all([
+  const [shSnap, wpSnap, payrollSnap, usersSnap] = await Promise.all([
     db.collection('salary_history').where('month', '>=', year + '-01').where('month', '<=', year + '-12').get().catch(() => ({ docs: [] })),
     db.collection('payslips').where('payPeriodStart', '>=', year + '-01-01').where('payPeriodStart', '<=', year + '-12-31').get().catch(() => ({ docs: [] })),
-    db.collection('payroll').get().catch(() => ({ docs: [] }))
+    db.collection('payroll').get().catch(() => ({ docs: [] })),
+    // v14 Wave 4 Batch F4 — hire dates for the 13th-month accrual guard below
+    // (shared window.thirteenthMonthFor helper); one batch read, not N.
+    (window.dbCachedGet ? window.dbCachedGet('users', () => db.collection('users').get(), 30000) : db.collection('users').get()).catch(() => ({ docs: [] }))
   ]);
   const payrollById = {}; payrollSnap.docs.forEach(d => { payrollById[d.id] = d.data(); });
-  // Group monthly salary_history rows by userId.
+  const usersByUid = {}; usersSnap.docs.forEach(d => { usersByUid[d.id] = d.data(); });
+  // Group monthly salary_history rows by userId (keep the raw rows too — the
+  // shared 13th-month helper needs them, not just the running sums).
   const byUid = {};
+  const rowsByUid = {};
   shSnap.docs.map(d => d.data()).forEach(r => {
     const uid = r.userId; if (!uid) return;
-    if (!byUid[uid]) byUid[uid] = { uid, name: r.userName || '—', weekly: false, gross: 0, sss: 0, philhealth: 0, pagibig: 0, tax: 0, baseSum: 0 };
+    if (!byUid[uid]) byUid[uid] = { uid, name: r.userName || '—', weekly: false, gross: 0, sss: 0, philhealth: 0, pagibig: 0, tax: 0 };
     const a = byUid[uid];
     a.gross += (r.base ?? r.salary ?? 0) + (r.allowance || 0);
     a.sss += r.sss || 0; a.philhealth += (r.philhealth ?? r.philHealth ?? 0); a.pagibig += (r.pagibig ?? r.pagIbig ?? 0);
-    a.tax += r.tax || 0; a.baseSum += (r.base ?? r.salary ?? 0);
+    a.tax += r.tax || 0;
+    (rowsByUid[uid] || (rowsByUid[uid] = [])).push(r);
   });
   // Group weekly payslips by workerId (IDs come from the payslip doc itself —
   // worker_profiles free-text, per §3 grounding).
@@ -614,18 +621,28 @@ window.birRenderAlphaBody = async function (bodyEl, state, currentUser) {
     a.tax += (p.deductions?.other?.taxes || 0);
     if (p.tinNum) a.tin = p.tinNum; if (p.ssNum) a.ssNum = p.ssNum; if (p.phNum) a.phNum = p.phNum; if (p.pagibigNum) a.pagibigNum = p.pagibigNum;
   });
+  // v14 Wave 4 Batch F4 — shared window.thirteenthMonthFor (defined in
+  // departments.js, near the payslip model builder): same hire-month-guarded
+  // formula as the payslip's YTD card, fed the pre-fetched users map so this
+  // doesn't cost one read per employee.
+  const monthlyRows = await Promise.all(Object.values(byUid).map(async a => {
+    const pay = payrollById[a.uid] || {};
+    const th = await window.thirteenthMonthFor(a.uid, year, rowsByUid[a.uid] || [], usersByUid);
+    return { ...a, tin: pay.tinNum || '', ssNum: pay.ssNum || '', phNum: pay.phNum || '', pagibigNum: pay.pagibigNum || '',
+      thirteenthAccrual: th.thirteenthAccrual, monthsWorked: th.monthsWorked, taxableComp: Math.max(0, a.gross - a.sss - a.philhealth - a.pagibig) };
+  }));
   const rows = [
-    ...Object.values(byUid).map(a => {
-      const pay = payrollById[a.uid] || {};
-      return { ...a, tin: pay.tinNum || '', ssNum: pay.ssNum || '', phNum: pay.phNum || '', pagibigNum: pay.pagibigNum || '',
-        thirteenthAccrual: Math.round((a.baseSum / 12) * 100) / 100, taxableComp: Math.max(0, a.gross - a.sss - a.philhealth - a.pagibig) };
-    }),
+    ...monthlyRows,
     ...Object.values(byWorker).map(a => ({ ...a, thirteenthAccrual: 0, taxableComp: Math.max(0, a.gross - a.sss - a.philhealth - a.pagibig) }))
   ].sort((a, b) => a.name.localeCompare(b.name));
   const missingCount = rows.filter(r => !r.tin).length;
   const missingBanner = missingCount
     ? `<div class="bir-banner">⚠ ${missingCount} employee${missingCount === 1 ? '' : 's'} missing TIN — not filing-ready. Fill via Finance → Payroll → Edit Payroll (regular employees) or the HR worker profile (weekly workers).</div>`
     : '';
+  // v14 Wave 4 Batch F4 — the 13th-month column is a computed estimate (basic
+  // salary actually earned this year / 12, guarded to months on/after hire);
+  // it is NOT a substitute for the accountant-prepared figure used in filing.
+  const thirteenthBanner = `<div class="bir-banner">⚠ 13th-Month Accrual is an ESTIMATE computed from recorded salary_history — verify with your accountant before filing.</div>`;
   const watermark = !!(window.STATUTORY && window.STATUTORY[year] && window.STATUTORY[year].verified === false);
   const wmBanner = window.birUnverifiedBanner(year);
   const bodyRows = rows.map(r => `<tr>
@@ -640,7 +657,7 @@ window.birRenderAlphaBody = async function (bodyEl, state, currentUser) {
   </tr>`).join('');
   const table = `<table class="bir-t"><thead><tr><th>Employee</th><th>TIN</th><th>Gross Comp.</th><th>SSS+PH+HDMF</th><th>13th-Month Accrual</th><th>Taxable Comp.</th><th>Tax Withheld</th><th class="no-print"></th></tr></thead>
     <tbody>${bodyRows || '<tr><td colspan="8" style="text-align:center;color:var(--text-muted)">No payroll for this year</td></tr>'}</tbody></table>`;
-  const printHTML = window.birBuildPrintHTML({ docTitle: 'ALPHALIST — ANNUAL COMPENSATION SUMMARY', dateLabel: 'Year ' + year, bodyHTML: wmBanner + missingBanner + table, watermark });
+  const printHTML = window.birBuildPrintHTML({ docTitle: 'ALPHALIST — ANNUAL COMPENSATION SUMMARY', dateLabel: 'Year ' + year, bodyHTML: wmBanner + missingBanner + thirteenthBanner + table, watermark });
   bodyEl.innerHTML = window.birToolbarHTML({ csvId: 'bir-alpha-csv' }) + printHTML;
   if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
   document.getElementById('bir-alpha-csv')?.addEventListener('click', () => window.exportCSV('alphalist-' + year, rows, [

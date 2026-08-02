@@ -1851,6 +1851,50 @@ async function promptBankAccount(title) {
   });
 }
 
+// v14 Wave 4 Batch F4 — ONE-SHEET expense approval. Previously the approve
+// click went straight into promptBankAccount as a bare "which account?" modal
+// with no context (no amount/description shown), then the status flip and
+// ledger post happened after THAT resolved — two hops, the second one blind.
+// This folds the bank-account <select> into the SAME confirmation surface as
+// the expense summary, so there's exactly one modal and one decision.
+// promptBankAccount itself is untouched — other callers still use it standalone.
+async function openApproveExpenseModal(id, e, currentUser, currentRole, sub, triggerBtn) {
+  const list = await window.BankAccounts.list().catch(()=>[]);
+  const opts = list.length ? await window.BankAccounts.optionsHTML() : '';
+  openModal('Approve expense', `
+    <div class="form-group" style="background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px">
+      <div style="font-weight:600">${escHtml(e?.description||'—')}</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${escHtml(e?.category||'General')} · ${escHtml(e?.date||'—')}${e?.submittedByName?` · ${escHtml(e.submittedByName)}`:''}</div>
+      <div style="font-size:20px;font-weight:700;margin-top:6px">₱${fmt(e?.amount||0)}</div>
+    </div>
+    ${list.length ? `
+    <div class="form-group"><label>Paid from (company account)</label>
+      <select id="ae-bank-sel" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${opts}</select>
+    </div>` : `<p style="font-size:12px;color:var(--text-muted)">No company accounts on file yet — this will post untagged.</p>`}
+  `, `<button class="btn-primary" id="ae-confirm-btn">${emojiIcon('check-circle',14)} Approve &amp; Post</button><button class="btn-secondary" id="ae-cancel-btn">Cancel</button>`);
+  if (window.lucide) lucide.createIcons();
+
+  document.getElementById('ae-cancel-btn').addEventListener('click', () => { closeModal(); if (triggerBtn) triggerBtn.disabled = false; });
+  document.getElementById('ae-confirm-btn').addEventListener('click', async () => {
+    const goBtn = document.getElementById('ae-confirm-btn');
+    goBtn.disabled = true;
+    try {
+      const acct = list.length
+        ? await window.BankAccounts.pick(document.getElementById('ae-bank-sel').value)
+        : { bankAccountId: null, bankAccountName: null };
+      await db.collection('expenses').doc(id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
+      if (e) await postExpenseToLedger(id, e, acct);
+      closeModal();
+      Notifs.success('Expense approved & posted to ledger ✓');
+      loadCashContent(currentUser, currentRole, sub);
+    } catch (err) {
+      Notifs.showToast('Approve failed: ' + (err.message||err), 'error');
+      goBtn.disabled = false;
+      if (triggerBtn) triggerBtn.disabled = false;
+    }
+  });
+}
+
 function bindExpenseActions(content, currentUser, currentRole, sub) {
   content.querySelectorAll('.approve-expense').forEach(btn => btn.addEventListener('click', async () => {
     btn.disabled = true;
@@ -1858,15 +1902,12 @@ function bindExpenseActions(content, currentUser, currentRole, sub) {
       const id = btn.dataset.id;
       const snap = await db.collection('expenses').doc(id).get();
       const e = snap.exists ? snap.data() : null;
-      if (e && e.status === 'approved') { Notifs.showToast('Already approved.'); return; }
-      // Check the period BEFORE flipping status — otherwise a closed month leaves
-      // the expense stuck 'approved' with no matching ledger row (v12 WS12).
+      if (e && e.status === 'approved') { Notifs.showToast('Already approved.'); btn.disabled = false; return; }
+      // Check the period BEFORE showing the approve sheet — otherwise a closed
+      // month leaves the expense stuck 'approved' with no matching ledger row
+      // (v12 WS12).
       if (e) await window.assertPeriodOpen(e.date || today());
-      const acct = await promptBankAccount('Expense paid from which account?');
-      await db.collection('expenses').doc(id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp() });
-      if (e) await postExpenseToLedger(id, e, acct);
-      Notifs.success('Expense approved & posted to ledger ✓');
-      loadCashContent(currentUser, currentRole, sub);
+      await openApproveExpenseModal(id, e, currentUser, currentRole, sub, btn);
     } catch (err) { Notifs.showToast('Approve failed: ' + (err.message||err), 'error'); btn.disabled = false; }
   }));
   content.querySelectorAll('.reject-expense').forEach(btn => btn.addEventListener('click', async () => {
@@ -3395,6 +3436,25 @@ window.disbursePayRun = async function(month, opts = {}) {
   if (typeof isRealPresident === 'function' && !isRealPresident()) {
     Notifs.showToast('Only the President can disburse payroll.','error'); return;
   }
+  // D10 hard block (v14 Wave 4 Batch F4) — disbursing actually moves money
+  // using SSS/PhilHealth/Pag-IBIG/withholding figures baked into the frozen
+  // run lines at Compute/Verify time. If those came from an unverified
+  // placeholder statutory table (js/statutory-tables.js — every number in
+  // there is marked PLACEHOLDER until an accountant signs off), every payslip
+  // this run produces is legally wrong. Compute and Verify stay allowed
+  // (they only produce numbers to review); this is the last gate before any
+  // write happens, and it's a blocking dialog — not a dismissable toast —
+  // because a toast is too easy to miss/ignore on a "disburse payroll" click.
+  const _payYear = String(month||'').slice(0,4);
+  const _statTable = window.STATUTORY && window.STATUTORY[_payYear];
+  if (!_statTable || _statTable.verified !== true) {
+    await window.confirmDialog({
+      title: 'Disbursement blocked',
+      message: 'Statutory tables are unverified placeholder rates. Disbursing is blocked until the accountant-verified tables are loaded.',
+      confirmLabel: 'Understood', cancelLabel: 'Understood', danger: true
+    });
+    return;
+  }
   const runRef = db.collection('pay_runs').doc(month);
   const currentUser0 = window.currentUser;
   // Transactional lock (Part E Phase 11): the transaction itself IS the lock —
@@ -3587,6 +3647,83 @@ window.reopenPayRun = async function(month) {
   Notifs.success(`${month} payroll reopened — Compute is available again.`);
 };
 
+// v14 Wave 4 Batch F4 — month-scoped THREE-WAY diff behind the same
+// reconciliation page: for one month, every employee who shows up in ANY of
+// (ledger PAY- rows / pay_runs/{month}.lines / salary_history mirror) gets a
+// row comparing all three amounts. Unlike the all-time flag scan below (which
+// only lists PROBLEMS it already knows how to name), this shows the full
+// picture for a month — including a clean OK row — so a reader can eyeball
+// completeness, not just chase flags. READ-ONLY: no writes anywhere in here.
+async function buildThreeWayRecon(month, runData) {
+  const run = runData || (await db.collection('pay_runs').doc(month).get().catch(()=>null))?.data() || {};
+  const linesByUid = {};
+  (run.lines||[]).forEach(l => { linesByUid[l.uid] = l; });
+
+  // Same PAY-{month}-* / excl. -ER employer-share-leg query as the flag scan.
+  const ledgerSnap = await db.collection('ledger')
+    .where('refNumber','>=',`PAY-${month}-`)
+    .where('refNumber','<', `PAY-${month}-` + String.fromCharCode(0xf8ff))
+    .get().catch(()=>({docs:[]}));
+  const ledgerByUid = {};
+  ledgerSnap.docs.forEach(d => {
+    const row = d.data();
+    const ref = row.refNumber || '';
+    const m = ref.match(new RegExp(`^PAY-${month}-(.+?)(?:-ER)?$`));
+    if (!m || ref.endsWith('-ER')) return;
+    const uid = m[1];
+    // Deterministic refs (upsertByRef) should keep this to one row per uid;
+    // sum defensively rather than silently drop a duplicate if that ever slips.
+    ledgerByUid[uid] = (ledgerByUid[uid] || 0) + (row.amount || 0);
+  });
+
+  const shSnap = await db.collection('salary_history').where('runMonth','==', month).get().catch(()=>({docs:[]}));
+  const historyByUid = {};
+  shSnap.docs.forEach(d => { const sh = d.data(); if (sh.userId) historyByUid[sh.userId] = sh; });
+
+  const uids = new Set([...Object.keys(linesByUid), ...Object.keys(ledgerByUid), ...Object.keys(historyByUid)]);
+  return [...uids].map(uid => {
+    const line = linesByUid[uid], hist = historyByUid[uid];
+    const name = line?.name || hist?.userName || uid;
+    const ledgerAmt  = Object.prototype.hasOwnProperty.call(ledgerByUid, uid) ? ledgerByUid[uid] : null;
+    const payrunNet  = line ? (line.finalPay ?? null) : null;
+    const historyNet = hist ? (hist.finalPay ?? hist.netPay ?? null) : null;
+
+    const missing = [];
+    if (ledgerAmt  == null) missing.push('LEDGER');
+    if (payrunNet  == null) missing.push('PAYRUN');
+    if (historyNet == null) missing.push('HISTORY');
+
+    let status, delta = null;
+    if (missing.length) {
+      status = 'MISSING-IN-' + missing.join('/');
+    } else {
+      const vals = [ledgerAmt, payrunNet, historyNet];
+      delta = Math.round((Math.max(...vals) - Math.min(...vals)) * 100) / 100;
+      status = delta > 0.01 ? 'MISMATCH' : 'OK';
+    }
+    return { month, uid, name, ledgerAmt, payrunNet, historyNet, status, delta };
+  }).sort((a,b) => a.name.localeCompare(b.name));
+}
+
+function threeWayReconTableHTML(rows) {
+  if (!rows.length) return `<div class="empty-state" style="padding:20px"><p style="color:var(--text-muted)">No payroll data found for this month in any of the three sources.</p></div>`;
+  const statusBadge = r => r.status === 'OK'
+    ? `<span class="badge badge-green">OK</span>`
+    : r.status === 'MISMATCH'
+      ? `<span class="badge badge-red">MISMATCH${r.delta!=null?` &nbsp;Δ ₱${fmt(r.delta)}`:''}</span>`
+      : `<span class="badge badge-orange">${escHtml(r.status)}</span>`;
+  return `<div class="table-wrap"><table class="data-table">
+    <thead><tr><th>Employee</th><th>Ledger Amt</th><th>Payrun Net</th><th>History Net</th><th>Status</th></tr></thead>
+    <tbody>${rows.map(r => `<tr>
+      <td style="font-weight:600">${escHtml(r.name)}</td>
+      <td style="white-space:nowrap;font-size:12px">${r.ledgerAmt!=null?`₱${fmt(r.ledgerAmt)}`:'<span style="color:var(--text-muted)">—</span>'}</td>
+      <td style="white-space:nowrap;font-size:12px">${r.payrunNet!=null?`₱${fmt(r.payrunNet)}`:'<span style="color:var(--text-muted)">—</span>'}</td>
+      <td style="white-space:nowrap;font-size:12px">${r.historyNet!=null?`₱${fmt(r.historyNet)}`:'<span style="color:var(--text-muted)">—</span>'}</td>
+      <td style="white-space:nowrap">${statusBadge(r)}</td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
 // ── Payroll reconciliation report (Part E Phase 20) — READ-ONLY. President-
 // only. For every pay_run month, diffs ledger PAY- rows against the frozen
 // run lines and salary_history mirror, flagging: (a) more than one PAY
@@ -3623,13 +3760,58 @@ async function openPayrollReconciliation() {
     `${_reconPrintCss}
     <div class="recon-print-wrap">
       <div class="recon-print-lh">${_reconLh ? _reconLh.headerHTML : ''}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+        <h4 style="margin:0">Three-Way Reconciliation — ledger vs pay run vs salary history</h4>
+        <div class="no-print" style="display:flex;gap:8px;align-items:center">
+          <select id="recon3-month-sel" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px"></select>
+          <button class="btn-secondary btn-sm" id="recon3-csv-btn" disabled>${emojiIcon('📥',14)} Export CSV</button>
+        </div>
+      </div>
+      <div id="recon3-body" style="padding:20px;text-align:center;color:var(--text-muted)">Loading…</div>
+      <hr style="margin:22px 0;border-color:var(--border)"/>
+      <h4 style="margin:0 0 10px">All-Time Flag Scan</h4>
       <div id="recon-body" style="padding:20px;text-align:center;color:var(--text-muted)">Scanning payroll history…</div>
       <div class="recon-print-lh">${_reconLh ? _reconLh.footerHTML : ''}</div>
     </div>`,
-    `<button class="btn-secondary" onclick="window.print()">${emojiIcon('🖨',16)} Print</button><button class="btn-secondary" id="recon-csv-btn" disabled>Export CSV</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    `<button class="btn-secondary" onclick="window.print()">${emojiIcon('🖨',16)} Print</button><button class="btn-secondary" id="recon-csv-btn" disabled>Export CSV (flags)</button><button class="btn-secondary" onclick="closeModal()">Close</button>`);
 
   const runsSnap = await db.collection('pay_runs').get().catch(()=>({docs:[]}));
+  const runDataByMonth = {}; runsSnap.docs.forEach(d => { runDataByMonth[d.id] = d.data(); });
   const runs = runsSnap.docs.map(d=>({ month:d.id, ...d.data() })).filter(r => r.lines && r.lines.length);
+
+  // ── Three-way section: month picker + diff table for the selected month ──
+  const allMonths = runsSnap.docs.map(d=>d.id).sort().reverse();
+  const monthSel = document.getElementById('recon3-month-sel');
+  if (monthSel) {
+    monthSel.innerHTML = allMonths.length
+      ? allMonths.map(m => `<option value="${m}">${escHtml(window.fmtMonthLabel ? window.fmtMonthLabel(m) : m)}</option>`).join('')
+      : `<option value="">No pay runs yet</option>`;
+  }
+  let recon3Rows = [];
+  const loadThreeWay = async (month) => {
+    const body3 = document.getElementById('recon3-body');
+    const csv3  = document.getElementById('recon3-csv-btn');
+    if (!month) {
+      if (body3) body3.innerHTML = `<div class="empty-state" style="padding:20px"><p style="color:var(--text-muted)">No pay runs recorded yet.</p></div>`;
+      if (csv3) csv3.disabled = true;
+      return;
+    }
+    if (body3) body3.innerHTML = '<div class="loading-placeholder">Comparing…</div>';
+    recon3Rows = await buildThreeWayRecon(month, runDataByMonth[month]);
+    if (body3) { body3.innerHTML = threeWayReconTableHTML(recon3Rows); if (window.lucide) lucide.createIcons({ nodes: [body3] }); }
+    if (csv3) csv3.disabled = !recon3Rows.length;
+  };
+  if (monthSel) {
+    monthSel.addEventListener('change', () => loadThreeWay(monthSel.value));
+    await loadThreeWay(monthSel.value || allMonths[0]);
+  }
+  document.getElementById('recon3-csv-btn')?.addEventListener('click', () => window.exportCSV('payroll-reconciliation-3way-' + (monthSel?.value||''), recon3Rows, [
+    { key:'month', label:'Month' }, { key:'name', label:'Employee' }, { key:'uid', label:'Employee UID' },
+    { key:'ledgerAmt', label:'Ledger Amount' }, { key:'payrunNet', label:'Payrun Net' }, { key:'historyNet', label:'History Net' },
+    { key:'status', label:'Status' }, { key:'delta', label:'Delta' }
+  ]));
+
+  // ── All-time flag scan (existing Part E Phase 20 behavior, unchanged) ──
   const flags = [];
 
   for (const run of runs) {
@@ -3763,7 +3945,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     <div class="card">
       <div class="card-body" style="padding:0">
         <div class="table-wrap">
-          <table class="data-table" id="payroll-table">
+          <table class="data-table table-cards" id="payroll-table">
             <thead><tr>
               <th>Photo</th><th>Employee</th><th>ID</th><th>Department</th>
               <th>Base</th><th>Allowance</th><th>Deductions</th>
@@ -4042,25 +4224,30 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         ? `<div style="color:var(--danger);white-space:nowrap">-₱${fmt(caAdv)}${modeTag?` <span style="font-size:10px;background:var(--primary-light);color:#fff;border-radius:4px;padding:1px 5px">${modeTag}</span>`:''}</div>
            <div style="font-size:10px;color:var(--text-muted)">bal ₱${fmt(caBalance)}</div>`
         : '<span style="color:var(--text-muted)">—</span>';
-      return `<tr>
-        <td style="text-align:center">
+      // v14 Wave 4 Batch F4 — card reflow (≤700px, via the shared .table-cards
+      // CSS pattern in styles.css). SAME <tr>/<td> markup at every width; only
+      // the tc-* classes + data-label attrs change how CSS lays it out below
+      // 700px. tc-avatar/tc-name/tc-net stay visible ("phone shows name/photo/
+      // net prominent"); tc-detail cells are the tap-to-expand breakdown.
+      return `<tr class="pr-row">
+        <td class="tc-avatar" style="text-align:center">
           <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:14px;margin:0 auto">
             ${u.photoUrl?`<img src="${u.photoUrl}" style="width:100%;height:100%;object-fit:cover"/>`:((u.displayName||'?')[0])}
           </div>
         </td>
-        <td><strong>${escHtml(u.displayName||u.email)}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(u.title||ROLES[u.role]?.label||u.role)}</div></td>
-        <td><code>${u.employeeId||'—'}</code></td>
-        <td>${depts}</td>
-        <td>₱${fmt(base)}</td>
-        <td style="color:var(--success)">+₱${fmt(allow)}</td>
-        <td style="color:var(--danger)">-₱${fmt(u.deductions||0)}</td>
-        <td style="color:var(--danger)">-₱${fmt(sss)}</td>
-        <td style="color:var(--danger)">-₱${fmt(ph)}</td>
-        <td style="color:var(--danger)">-₱${fmt(pagibig)}</td>
-        <td style="color:var(--danger)">-₱${fmt(tax)}</td>
-        <td>${caCell}</td>
-        <td><strong style="color:${net>=0?'var(--success)':'var(--danger)'}">₱${fmt(net)}</strong></td>
-        <td>
+        <td class="tc-name"><strong>${escHtml(u.displayName||u.email)}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(u.title||ROLES[u.role]?.label||u.role)} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></div></td>
+        <td class="tc-detail" data-label="ID"><code>${u.employeeId||'—'}</code></td>
+        <td class="tc-detail" data-label="Department">${depts}</td>
+        <td class="tc-detail" data-label="Base">₱${fmt(base)}</td>
+        <td class="tc-detail" data-label="Allowance" style="color:var(--success)">+₱${fmt(allow)}</td>
+        <td class="tc-detail" data-label="Deductions" style="color:var(--danger)">-₱${fmt(u.deductions||0)}</td>
+        <td class="tc-detail" data-label="SSS" style="color:var(--danger)">-₱${fmt(sss)}</td>
+        <td class="tc-detail" data-label="PhilHealth" style="color:var(--danger)">-₱${fmt(ph)}</td>
+        <td class="tc-detail" data-label="Pag-IBIG" style="color:var(--danger)">-₱${fmt(pagibig)}</td>
+        <td class="tc-detail" data-label="Tax" style="color:var(--danger)">-₱${fmt(tax)}</td>
+        <td class="tc-detail" data-label="Cash Adv">${caCell}</td>
+        <td class="tc-net"><strong style="color:${net>=0?'var(--success)':'var(--danger)'}">₱${fmt(net)}</strong></td>
+        <td class="tc-actions">
           <button class="btn-secondary btn-sm edit-emp-pay-btn" data-uid="${u.id}" title="Edit">${emojiIcon('✎',16)}</button>
           ${canFinance ? `<button class="btn-secondary btn-sm raise-emp-btn" data-uid="${u.id}" title="Give raise">${emojiIcon('banknote',14)}</button>` : ''}
           <button class="btn-secondary btn-sm print-slip-btn" data-uid="${u.id}" title="Payslip">${emojiIcon('🖨',16)}</button>
@@ -4068,6 +4255,18 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       </tr>`;
     }).join('');
     if (window.lucide) lucide.createIcons({ nodes: [tbody] });
+
+    // Card view (≤700px): tap the row (outside the action buttons) to reveal
+    // the full breakdown — toggles a class only, never touches the cell
+    // markup/values (see the .table-cards comment in styles.css). No-op at
+    // desktop widths since .tc-detail is only ever hidden inside that
+    // max-width:700px query.
+    tbody.querySelectorAll('tr.pr-row').forEach(tr => {
+      tr.addEventListener('click', (ev) => {
+        if (ev.target.closest('button, a')) return;
+        tr.classList.toggle('tc-expanded');
+      });
+    });
 
     tbody.querySelectorAll('.raise-emp-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -6731,18 +6930,73 @@ window.toPayslipModel = function(source, kind) {
   };
 };
 
+// ── Shared 13th-month accrual helper (v14 Wave 4 Batch F4) ─────────────────
+// PH law: 13th-month pay = TOTAL basic salary actually EARNED during the
+// calendar year, divided by the fixed statutory denominator of 12 — never by
+// months worked (a common miscalculation: a mid-year hire earning ₱20,000/mo
+// for 6 months earned ₱120,000 basic → accrual = 120,000/12 = ₱10,000, NOT
+// 120,000/6 = ₱20,000).
+//
+// The bug this replaces: baseSum previously summed EVERY salary_history row
+// found in the year-range query with no lower bound, so a stray/backfilled
+// row dated before the employee's actual hire month silently inflated
+// baseSum (e.g. a seeded row for a month never worked). That contamination
+// made the July-hire example above compute 240,000/12 = ₱20,000 instead of
+// the correct ₱10,000.
+//
+// Fix: guard baseSum to rows dated on/after the employee's hire month (from
+// users/{uid}.startDate; if that field is absent — e.g. legacy accounts
+// created before startDate was tracked — fall back to the EARLIEST month
+// actually present in `rows`, which is the best available signal). Rows
+// outside [year, year] are already excluded by the caller's query.
+// `monthsWorked` is returned for on-screen CONTEXT ONLY — it is never used
+// as a divisor.
+//
+// usersByUid (optional): {uid:{startDate}} — pass a prefetched map when
+// looping many employees (e.g. the BIR Alphalist) to avoid one users/{uid}
+// read per employee. Single-shot callers (a single payslip) omit it and we
+// do the one read ourselves.
+window.thirteenthMonthFor = async function(uid, year, rows, usersByUid) {
+  const yr = String(year);
+  const yearRows = (rows||[]).filter(r => (r.month||'').slice(0,4) === yr);
+  const monthsPresent = yearRows.map(r=>r.month).filter(Boolean).sort();
+  let hireMonth = '';
+  if (usersByUid) {
+    hireMonth = (usersByUid[uid] && usersByUid[uid].startDate || '').slice(0,7);
+  } else {
+    try {
+      const uDoc = await db.collection('users').doc(uid).get();
+      if (uDoc.exists) hireMonth = (uDoc.data().startDate||'').slice(0,7);
+    } catch(_){}
+  }
+  // Documented fallback: no usable startDate on file -> earliest month we
+  // actually have data for is the best guess at "when they started earning".
+  const effectiveHireMonth = (hireMonth && hireMonth >= `${yr}-01` && hireMonth <= `${yr}-12`)
+    ? hireMonth : (monthsPresent[0] || `${yr}-01`);
+  const worked = yearRows.filter(r => (r.month||'') >= effectiveHireMonth);
+  const baseSum = worked.reduce((s,r)=> s + (r.base ?? r.salary ?? 0), 0);
+  return {
+    thirteenthAccrual: Math.round((baseSum/12)*100)/100,   // ← denominator is ALWAYS 12 (PH law), never monthsWorked
+    monthsWorked: worked.length,                            // display context only
+    baseSum,
+    hireMonth: effectiveHireMonth
+  };
+};
+
 // YTD helpers — display-computed each render, never stored on the payslip.
 window.payslipYtdMonthly = async function(uid, year) {
   const snap = await db.collection('salary_history').where('userId','==',uid)
     .where('month','>=',`${year}-01`).where('month','<=',`${year}-12`).get().catch(()=>({docs:[]}));
-  let gross=0, net=0, baseSum=0, tax=0, sss=0, philhealth=0, pagibig=0;
-  snap.docs.forEach(d=>{ const r=d.data(); const b=r.base??r.salary??0;
-    baseSum+=b; gross+=b+(r.allowance||0); net+=(r.finalPay??r.netPay??0);
+  const rows = snap.docs.map(d=>d.data());
+  let gross=0, net=0, tax=0, sss=0, philhealth=0, pagibig=0;
+  rows.forEach(r=>{ const b=r.base??r.salary??0;
+    gross+=b+(r.allowance||0); net+=(r.finalPay??r.netPay??0);
     tax+=(r.tax||0); sss+=(r.sss||0); philhealth+=(r.philhealth??r.philHealth??0); pagibig+=(r.pagibig??r.pagIbig??0); });
+  const th = await window.thirteenthMonthFor(uid, year, rows);
   // v12 WS39 — additive: tax/sss/philhealth/pagibig YTD sums for the alphalist/
   // 2316 worksheets. Existing callers (payslip YTD card) only read gross/net/
   // thirteenthAccrual and are unaffected.
-  return { gross, net, thirteenthAccrual: Math.round((baseSum/12)*100)/100, tax, sss, philhealth, pagibig };   // WS21 D7
+  return { gross, net, thirteenthAccrual: th.thirteenthAccrual, monthsWorked: th.monthsWorked, tax, sss, philhealth, pagibig };   // WS21 D7
 };
 window.payslipYtdWeekly = async function(workerId, year) {
   const snap = await db.collection('payslips').where('workerId','==',workerId)
@@ -6828,7 +7082,7 @@ window.buildPayslipHTML = function(model) {
   <table class="ps-t">
     <tr><td>YTD Gross</td><td class="num">${f(m.ytd.gross)}</td></tr>
     <tr><td>YTD Net</td><td class="num">${f(m.ytd.net)}</td></tr>
-    <tr class="ps-sub"><td>13th-Month Accrual (est.)</td><td class="num">${f(m.ytd.thirteenthAccrual)}</td></tr>
+    <tr class="ps-sub"><td>13th-Month Accrual (est.)${m.ytd.monthsWorked?` <span style="font-weight:400;color:var(--text-muted)">— ${m.ytd.monthsWorked} mo. worked this year</span>`:''}</td><td class="num">${f(m.ytd.thirteenthAccrual)}</td></tr>
   </table>
 
   ${timelog}
