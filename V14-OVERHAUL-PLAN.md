@@ -155,6 +155,14 @@ Grounded in a full read of js/chat.js (1,226 lines). Already shipped and kept: D
 
 Out of scope (deliberate): stickers/GIF packs, E2E encryption, message translation — revisit post-v14 if wanted.
 
+## DECISIONS — RULED 2026-08-03 (N5 pending)
+
+- **N1 RULED:** Neil books the accountant session. Until it happens: placeholder rates stay labeled, payroll disburse stays hard-blocked on unverified rates (D10 ships). D11–D14 build after the session.
+- **N2 RULED:** Delete both dormant pricing mechanisms — markup coefficients removed from the coefficient editor/DB, depth-scaling fields stripped from products-database.json. Quotes keep today's prices exactly. (F10 → deletion, not activation.)
+- **N3 RULED:** Auto layout — first 4 tabs in today's order + a "More" sheet as tab 5, for President and Brilliant Steel portals. (C3 unblocked.)
+- **N4 RULED:** 7-group finance layout approved as proposed. (D1 unblocked.)
+- **N5 STILL PENDING:** president-console one-time runs (Phase-9 buttons + ledger-id migrate) — requires Neil logged in as president.
+
 ## DECISIONS NEEDED FROM NEIL (blocking only what's listed)
 
 | # | Decision | Blocks |

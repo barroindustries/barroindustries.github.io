@@ -8,6 +8,14 @@
       Until then, computeStatutory() console-warns on every call and the
       Edit Payroll pre-fill shows an "unverified rates" badge — nothing
       silently ships a wrong number into live payroll. */
+
+// UMD-ish shim (v14 Wave 2 Batch A, spec item I5): makes `window` exist under
+// plain Node so tests/money.test.mjs can require() this file directly. No-op
+// in the browser, where window already exists. No logic change.
+if (typeof window === 'undefined') {
+  globalThis.window = globalThis;
+}
+
 window.STATUTORY = {
   2026: {
     verified: false,   // compute() WARNS + refuses silent use until true
@@ -58,3 +66,7 @@ window.computeStatutory = function({ grossPay, year }) {
   const tax = round2(br.base + (taxable - br.over) * br.rate);
   return { ee:{sss:sssEE, philhealth:phEE, pagibig:piEE, tax}, er:{sss:sssER, philhealth:phER, pagibig:piER}, unverified: !T.verified };
 };
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { STATUTORY: window.STATUTORY, computeStatutory: window.computeStatutory, round2 };
+}

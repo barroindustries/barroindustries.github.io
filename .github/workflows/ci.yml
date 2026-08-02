@@ -25,6 +25,17 @@ jobs:
             exit 1
           fi
 
+  money-math-tests:
+    name: Money-math tests (vatSplit, computeStatutory, computePayLine)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: node --test tests/
+        run: node --test tests/
+
   node-version-pin:
     name: All workflow node-version entries must be '20'
     runs-on: ubuntu-latest
