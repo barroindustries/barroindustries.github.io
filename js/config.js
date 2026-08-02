@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.147';
+window.APP_VERSION = '12.0.148';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -171,57 +171,78 @@ window.AUTO_LOGOUT_MS = 10 * 24 * 60 * 60 * 1000;
 // v12 WS42 Phase 21 — harmonized modern color set (keeps each dept's hue identity
 // while normalizing saturation/lightness so the icon-tile gradients read as one
 // coherent system instead of the old ad-hoc material-design swatches).
+// v14 C2 — subtabs corrected to match what each render function ACTUALLY
+// shows today (verified against departments.js). navOrder collisions (Finance/HR
+// both 2, IT/Design both 6, Production/Brilliant Steel both 7, Purchasing/Partners
+// both 8) fixed by renumbering uniquely in the object's existing key order — the
+// only order any current consumer (Object.keys(DEPARTMENTS) in the dept
+// switcher/pickers) actually reads; navOrder itself has no reader yet.
 window.DEPARTMENTS = {
   'Admin': {
     key: 'Admin', icon: '🏢', lucideIcon: 'building-2', color: '#3B5BDB',
-    subtabs: ['Policies', 'HR Documents', 'Authorization'], navOrder: 1
+    // renderDeptModule has no 'Admin' case → falls to renderGenericDept, a static
+    // "Module coming soon" placeholder. No chip tabs are ever rendered for it.
+    subtabs: [], navOrder: 1
   },
   'Finance': {
     key: 'Finance', icon: '💰', lucideIcon: 'wallet', color: '#2F9E44',
-    subtabs: ['Overview', 'Accounting', 'Purchases', 'SSS / Gov'], navOrder: 2
+    // renderFinance's actual finTabs + hrTabs chip lists (departments.js:2789-2790).
+    subtabs: ['Overview', 'Reports', 'Sales Orders', 'Ledger', 'Bank Accounts', 'Cash Receipts',
+              'Cash Disbursements', 'Purchases', 'Inventory', 'Records', 'Taxes', 'BIR', 'SSS / Gov',
+              'Tasks', 'Payroll', 'HR Profiles', 'Cash Advances'], navOrder: 2
   },
   'HR': {
     key: 'HR', icon: '👥', lucideIcon: 'users', color: '#E64980',
-    subtabs: ['People & Roles', 'Payroll', 'Worker Payslips', 'Leave', 'Attendance'], navOrder: 2
+    // renderHR's card list (departments.js:3153-3159); 'Accounts & Logins' only
+    // shows for president/manager, kept in its real position for accuracy.
+    subtabs: ['People & Roles', 'Payroll', 'Worker Payslips', 'Accounts & Logins', 'Leave', 'Attendance'], navOrder: 3
   },
   'Sales': {
     key: 'Sales', icon: '🤝', lucideIcon: 'handshake', color: '#F76707',
-    subtabs: ['BK Quotes', 'Quotations', 'Clients', 'Work Plans', 'Proposals', 'SOP'], navOrder: 3
+    // renderSales's real salesTabs (departments.js:6563). 'BK Quotes'/'Quotations'/
+    // 'Quick Estimate' are dead aliases that resolve to 'Quotes' — removed here.
+    subtabs: ['Clients', 'AEC', 'Quotes', 'Partner', 'Files', 'SOP', 'Tasks'], navOrder: 4
   },
   'Marketing': {
     key: 'Marketing', icon: '📢', lucideIcon: 'megaphone', color: '#D6336C',
     subtabs: ['Campaigns', 'Leads', 'Promos', 'Insights', 'Advertising', 'Marketing Designs',
-              'Plan', 'Strategy', 'Budgeting', 'Proposals', 'Tasks'], navOrder: 4
+              'Plan', 'Strategy', 'Budgeting', 'Proposals', 'Tasks'], navOrder: 5
   },
   'Government Biddings': {
     key: 'Government Biddings', icon: '🏛️', lucideIcon: 'landmark', color: '#0CA678',
-    subtabs: ['PhilGEPS', 'Active Bids', 'Archive'], navOrder: 5
+    subtabs: ['PhilGEPS', 'Active Bids', 'Archive'], navOrder: 6
   },
   'IT': {
     key: 'IT', icon: '💻', lucideIcon: 'laptop', color: '#1C7ED6',
-    subtabs: ['Overview', 'IT Tickets', 'Assets', 'Software', 'Access Control', 'Network', 'Tasks'], navOrder: 6
+    subtabs: ['Overview', 'IT Tickets', 'Assets', 'Software', 'Access Control', 'Network', 'Tasks'], navOrder: 7
   },
   'Design': {
     key: 'Design', icon: '🎨', lucideIcon: 'palette', color: '#7048E8',
-    subtabs: ['Projects', 'Drawings', 'Clients', 'Product Designs', 'References', 'Tasks'], navOrder: 6
+    subtabs: ['Projects', 'Drawings', 'Clients', 'Product Designs', 'References', 'Tasks'], navOrder: 8
   },
   'Production': {
     key: 'Production', icon: '🏭', lucideIcon: 'factory', color: '#A05A2C',
-    subtabs: ['Orders', 'Materials', 'Tasks', 'Files'], navOrder: 7
+    // renderProductionDept's real subs (departments.js:13667) — Inventory and
+    // Count Form were missing, Files was there but out of place vs runtime order.
+    subtabs: ['Orders', 'Materials', 'Inventory', 'Count Form', 'Tasks', 'Files'], navOrder: 9
   },
   'Purchasing': {
     key: 'Purchasing', icon: '🛒', lucideIcon: 'shopping-cart', color: '#099268',
-    subtabs: ['Request for Quotation', 'Purchase Requests', 'Tasks'], navOrder: 8
+    subtabs: ['Request for Quotation', 'Purchase Requests', 'Tasks'], navOrder: 10
   },
   'Brilliant Steel': {
     key: 'Brilliant Steel', icon: '⚙️', lucideIcon: 'settings', color: '#495057',
-    subtabs: ['Dashboard', 'Quote Builder', 'Quotations Summary', 'Client Data'],
-    navOrder: 7, isSeparate: true
+    // renderBrilliantSteel's real tabs (departments.js:9287) — there is no
+    // 'Dashboard' tab; the default landing subtab is 'Quotations Summary'.
+    subtabs: ['Quote Builder', 'Quotations Summary', 'Client Data', 'Files'],
+    navOrder: 11, isSeparate: true
   },
   'Partners': {
     key: 'Partners', icon: '🤝', lucideIcon: 'handshake', color: '#1971C2',
-    subtabs: ['Overview', 'Tasks', 'Quotes', 'Activity'],
-    navOrder: 8, isPartnerDept: true
+    // renderPartnersDept's real chip tabs (app.js:4107-4113) — 'Deals' and
+    // 'Quote Builder' were missing from the old list.
+    subtabs: ['Overview', 'Deals', 'Tasks', 'Quotes', 'Quote Builder', 'Activity'],
+    navOrder: 12, isPartnerDept: true
   }
 };
 
@@ -387,59 +408,174 @@ window.LeaveAccrual = {
   }
 };
 
-// ── Bottom Nav — Employee ────────────────────────
-window.BOTTOM_NAV_ITEMS = [
-  { icon: 'home',         label: 'Home',    page: 'dashboard'        },
-  { icon: 'check-square', label: 'Tasks',   page: 'tasks'            },
-  { icon: 'megaphone',    label: 'Posts',   page: 'posts'            },
-  { icon: 'message-circle', label: 'Chat',  page: 'chat'             },
-  { icon: 'banknote',     label: 'Cash',    page: 'cash-advances'    },
-  { icon: 'circle-user',  label: 'Profile', page: 'my-profile'       }
-];
+// ── v14 C1 — ONE nav registry ─────────────────────────────────────────────
+// Single source of truth for the desktop sidebar (getSidebarItems, app.js) and
+// the mobile bottom nav (buildBottomNav/_primaryNavItems, app.js). Ported
+// mechanically from the pre-C1 getSidebarItems() branches and the 5 hand-rolled
+// *_BOTTOM_NAV arrays below — same items, same order, same per-role/per-variant
+// gating, just declared once instead of drifting in two places (the exact
+// failure mode that dropped Chat/Cash-Advance from the desktop sidebar before).
+//
+// Shape:
+//   predicates      — named boolean checks an item can reference via `when`
+//                      (kept as functions, evaluated live, so the registry
+//                      itself stays plain data — no runtime state baked in).
+//   sidebarUniversal— items every sidebar variant gets first (Dashboard, Chat).
+//   sidebar[variant]— ordered items after the universal prefix. `deptLoop:true`
+//                      is a placeholder the renderer expands into the signed-in
+//                      user's OWN department items (from window.DEPARTMENTS +
+//                      currentDepts) — that block is inherently per-user data,
+//                      not static nav config, so it stays generated in app.js
+//                      exactly as it always has; the registry only marks WHERE
+//                      it goes.
+//   bottom[variant] — the 5 mobile bottom-nav variants, each already complete
+//                      (unlike sidebar there was never a shared prefix to
+//                      factor out — every *_BOTTOM_NAV array today lists Home
+//                      itself, at a genuinely different relative spot each time).
+// variant is one of: 'admin' | 'genericPartner' | 'partnerBS' | 'bsOnly' | 'staff'
+// (mirrors the exact if/else-if order both getSidebarItems and the old
+// _primaryNavItems already checked in).
+window.NAV_REGISTRY = {
+  predicates: {
+    isPresident:        () => typeof isPresident === 'function' && isPresident(),
+    hasProductionDept:  () => (window.currentDepts||[]).includes('Production'),
+    hasProjectsDept:    () => (window.currentDepts||[]).some(d => ['Sales','Production','Finance'].includes(d)) || window.currentRole === 'finance',
+    hasSalesOrdersDept: () => (window.currentDepts||[]).includes('Finance') || window.currentRole === 'finance',
+    isFinanceRole:      () => window.currentRole === 'finance'
+  },
 
-// ── Bottom Nav — Admin / President ───────────────
-window.PRESIDENT_BOTTOM_NAV = [
-  { icon: 'home',         label: 'Home',    page: 'dashboard'      },
-  { icon: 'check-square', label: 'Tasks',   page: 'tasks'          },
-  { icon: 'megaphone',    label: 'Posts',   page: 'posts'          },
-  { icon: 'message-circle', label: 'Chat',  page: 'chat'           },
-  { icon: 'users',        label: 'Team',    page: 'team-directory' },
-  { icon: 'shield-check', label: 'Approve', page: 'approvals'      },
-  { icon: 'circle-user',  label: 'Profile', page: 'my-profile'     }
-];
+  sidebarUniversal: [
+    { key:'dashboard', icon:'home',            label:'Dashboard', page:'dashboard' },
+    { key:'chat',       icon:'message-circle', label:'Chat',      page:'chat'      }
+  ],
 
-// ── Bottom Nav — External Partner (Brilliant Steel) ─
-window.PARTNER_BOTTOM_NAV = [
-  { icon: 'home',         label: 'Home',     page: 'dashboard'        },
-  { icon: 'briefcase',    label: 'Projects', page: 'partner-projects' },
-  { icon: 'message-circle', label: 'Chat',   page: 'chat'             },
-  { icon: 'calculator',   label: 'Quotes',   page: 'bs-quote-builder' },
-  { icon: 'file-text',    label: 'Summary',  page: 'bs-quotations'    },
-  { icon: 'circle-user',  label: 'Profile',  page: 'my-profile'       }
-];
+  sidebar: {
+    // ── Admin / President Command Center (president, manager, secretary) ──
+    admin: [
+      { key:'analytics',    icon:'bar-chart-2',  label:'Analytics',        page:'analytics' },
+      { key:'tasks',        icon:'check-square', label:'Tasks',            page:'tasks' },
+      { key:'posts',        icon:'megaphone',    label:'Posts',            page:'posts' },
+      { key:'company',      icon:'building-2',   label:'Company',          page:'company' },
+      { key:'departments',  icon:'layout-grid',  label:'All Departments',  page:'departments' },
+      { key:'approvals',    icon:'shield-check', label:'Approvals',        page:'approvals', section:true },
+      { key:'progress',     icon:'trending-up',  label:'Progress Reports', page:'progress' },
+      { key:'team',         icon:'users',        label:'Team Directory',   page:'team-directory', section:true },
+      { key:'hr',           icon:'user-cog',     label:'HR',               page:'dept:HR' },
+      { key:'attendance',   icon:'calendar',     label:'Attendance',       page:'attendance' },
+      { key:'files-hub',    icon:'folder-open',  label:'Files',            page:'files-hub' },
+      { key:'inventory',    icon:'boxes',        label:'Inventory',        page:'inventory', section:true, sectionLabel:'Operations' },
+      { key:'projects',     icon:'trending-up',  label:'Projects',         page:'projects-lifecycle' },
+      { key:'sales-orders', icon:'receipt',      label:'Sales Orders',     page:'sales-orders' },
+      { key:'product-db',   icon:'package',      label:'Product Database', page:'product-database', section:true, sectionLabel:'Catalog', when:'isPresident' },
+      { key:'audit-log',    icon:'scroll-text',  label:'Audit Log',        page:'audit-log',       section:true, sectionLabel:'Security', when:'isPresident' },
+      { key:'sys-health',   icon:'activity',     label:'System Health',    page:'system-health', when:'isPresident' }
+    ],
+    // ── Generic external partner (any company) ──
+    genericPartner: [
+      { key:'projects', icon:'briefcase',    label:'My Projects',   page:'partner-projects' },
+      { key:'tasks',    icon:'check-square', label:'My Tasks',      page:'tasks' },
+      { key:'posts',    icon:'megaphone',    label:'Posts',         page:'posts' },
+      { key:'qb',       icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' },
+      { key:'quotes',   icon:'file-text',    label:'Quotations',    page:'bs-quotations' },
+      { key:'team',     icon:'users',        label:'Team',          page:'team-directory', section:true, sectionLabel:'Directory' },
+      { key:'files',    icon:'folder',       label:'Files',         page:'files' }
+    ],
+    // ── External Partner role (Brilliant Steel) ──
+    partnerBS: [
+      { key:'tasks',    icon:'check-square', label:'My Tasks',      page:'tasks' },
+      { key:'posts',    icon:'megaphone',    label:'Posts',         page:'posts' },
+      { key:'projects', icon:'briefcase',    label:'My Projects',   page:'partner-projects' },
+      { key:'qb',       icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' },
+      { key:'quotes',   icon:'file-text',    label:'Quotations',    page:'bs-quotations' },
+      { key:'clients',  icon:'book-open',    label:'Client Data',   page:'bs-clients' },
+      { key:'team',     icon:'users',        label:'Team',          page:'team-directory', section:true, sectionLabel:'Directory' },
+      { key:'files',    icon:'folder',       label:'Files',         page:'files' }
+    ],
+    // ── Partner — Brilliant Steel (ISOLATED, single-dept non-partner user) ──
+    bsOnly: [
+      { key:'projects', icon:'briefcase',  label:'My Projects',   page:'partner-projects' },
+      { key:'qb',       icon:'calculator', label:'Quote Builder', page:'bs-quote-builder' },
+      { key:'quotes',   icon:'file-text',  label:'Quotations',    page:'bs-quotations' },
+      { key:'clients',  icon:'book-open',  label:'Client Data',   page:'bs-clients' },
+      { key:'files',    icon:'folder',     label:'Files',         page:'bs-files' }
+    ],
+    // ── Employee / Agent / Finance ──
+    staff: [
+      { key:'tasks',    icon:'check-square', label:'My Tasks',      page:'tasks' },
+      { key:'posts',    icon:'megaphone',    label:'Posts',         page:'posts' },
+      { key:'cash',     icon:'banknote',     label:'Cash Advance',  page:'cash-advances' },
+      { key:'company',  icon:'building-2',   label:'Company',       page:'company' },
+      { deptLoop:true },
+      { key:'team',        icon:'users',       label:'Team',         page:'team-directory', section:true, sectionLabel:'Management' },
+      { key:'attendance',  icon:'calendar',    label:'Attendance',   page:'attendance' },
+      { key:'files',       icon:'folder',      label:'Files',        page:'files' },
+      { key:'inventory',   icon:'boxes',       label:'Inventory',    page:'inventory', when:'hasProductionDept' },
+      { key:'projects',    icon:'trending-up', label:'Projects',     page:'projects-lifecycle', when:'hasProjectsDept' },
+      { key:'sales-orders',icon:'receipt',     label:'Sales Orders', page:'sales-orders', when:'hasSalesOrdersDept' },
+      { key:'sys-health',  icon:'activity',    label:'System Health',page:'system-health', when:'isFinanceRole' }
+    ]
+  },
 
-// ── Bottom Nav — Generic Partner (any company) ──────
-// Company-branded partner doing projects with Barro Industries: their affiliated
-// projects + ability to generate quotes. No Brilliant-Steel client book.
-window.PARTNER_GENERIC_BOTTOM_NAV = [
-  { icon: 'home',         label: 'Home',     page: 'dashboard'        },
-  { icon: 'briefcase',    label: 'Projects', page: 'partner-projects' },
-  { icon: 'message-circle', label: 'Chat',   page: 'chat'             },
-  { icon: 'calculator',   label: 'Quotes',   page: 'bs-quote-builder' },
-  { icon: 'check-square', label: 'Tasks',    page: 'tasks'            },
-  { icon: 'circle-user',  label: 'Profile',  page: 'my-profile'       }
-];
+  bottom: {
+    // Bottom Nav — Admin / President
+    admin: [
+      { icon:'home',           label:'Home',    page:'dashboard'       },
+      { icon:'check-square',   label:'Tasks',   page:'tasks'           },
+      { icon:'megaphone',      label:'Posts',   page:'posts'           },
+      { icon:'message-circle', label:'Chat',    page:'chat'            },
+      { icon:'users',          label:'Team',    page:'team-directory'  },
+      { icon:'shield-check',   label:'Approve', page:'approvals'       },
+      { icon:'circle-user',    label:'Profile', page:'my-profile'      }
+    ],
+    // Bottom Nav — Generic Partner (any company)
+    genericPartner: [
+      { icon:'home',           label:'Home',     page:'dashboard'        },
+      { icon:'briefcase',      label:'Projects', page:'partner-projects' },
+      { icon:'message-circle', label:'Chat',     page:'chat'             },
+      { icon:'calculator',     label:'Quotes',   page:'bs-quote-builder' },
+      { icon:'check-square',   label:'Tasks',    page:'tasks'            },
+      { icon:'circle-user',    label:'Profile',  page:'my-profile'       }
+    ],
+    // Bottom Nav — External Partner (Brilliant Steel)
+    partnerBS: [
+      { icon:'home',           label:'Home',     page:'dashboard'        },
+      { icon:'briefcase',      label:'Projects', page:'partner-projects' },
+      { icon:'message-circle', label:'Chat',     page:'chat'             },
+      { icon:'calculator',     label:'Quotes',   page:'bs-quote-builder' },
+      { icon:'file-text',      label:'Summary',  page:'bs-quotations'    },
+      { icon:'circle-user',    label:'Profile',  page:'my-profile'       }
+    ],
+    // Bottom Nav — Partner (Brilliant Steel, isolated)
+    bsOnly: [
+      { icon:'home',           label:'Home',     page:'dashboard'        },
+      { icon:'briefcase',      label:'Projects', page:'partner-projects' },
+      { icon:'message-circle', label:'Chat',     page:'chat'             },
+      { icon:'calculator',     label:'Quotes',   page:'bs-quote-builder' },
+      { icon:'file-text',      label:'Summary',  page:'bs-quotations'    },
+      { icon:'book-open',      label:'Clients',  page:'bs-clients'       },
+      { icon:'circle-user',    label:'Profile',  page:'my-profile'       }
+    ],
+    // Bottom Nav — Employee
+    staff: [
+      { icon:'home',           label:'Home',    page:'dashboard'      },
+      { icon:'check-square',   label:'Tasks',   page:'tasks'          },
+      { icon:'megaphone',      label:'Posts',   page:'posts'          },
+      { icon:'message-circle', label:'Chat',    page:'chat'           },
+      { icon:'banknote',       label:'Cash',    page:'cash-advances'  },
+      { icon:'circle-user',    label:'Profile', page:'my-profile'     }
+    ]
+  }
+};
 
-// ── Bottom Nav — Partner (Brilliant Steel) ───────
-window.BRILLIANT_BOTTOM_NAV = [
-  { icon: 'home',       label: 'Home',     page: 'dashboard'        },
-  { icon: 'briefcase',  label: 'Projects', page: 'partner-projects' },
-  { icon: 'message-circle', label: 'Chat', page: 'chat'             },
-  { icon: 'calculator', label: 'Quotes',   page: 'bs-quote-builder' },
-  { icon: 'file-text',  label: 'Summary',  page: 'bs-quotations'    },
-  { icon: 'book-open',  label: 'Clients',  page: 'bs-clients'       },
-  { icon: 'circle-user', label: 'Profile', page: 'my-profile'       }
-];
+// Back-compat named globals, derived from NAV_REGISTRY.bottom — nothing in the
+// codebase reads these besides the old buildBottomNav (now registry-driven,
+// see app.js), but they're kept as real arrays (not aliases) in case any
+// future/dev code inspects them directly, same shape as before C1.
+window.BOTTOM_NAV_ITEMS          = window.NAV_REGISTRY.bottom.staff;
+window.PRESIDENT_BOTTOM_NAV      = window.NAV_REGISTRY.bottom.admin;
+window.PARTNER_BOTTOM_NAV        = window.NAV_REGISTRY.bottom.partnerBS;
+window.PARTNER_GENERIC_BOTTOM_NAV= window.NAV_REGISTRY.bottom.genericPartner;
+window.BRILLIANT_BOTTOM_NAV      = window.NAV_REGISTRY.bottom.bsOnly;
 
 // ── Users + payroll merge ─────────────────────────
 // Pay fields (salary/allowance/deductions) live in a PROTECTED payroll/{uid}
@@ -1501,8 +1637,12 @@ window.CashAdvance = {
     return ref.id;
   },
 
+  // v14 Batch6/5-leftover — openPage, not openModal: this is a substantial form
+  // (4 fields), matching the sibling openPresidentCashAdvanceModal (modules.js)
+  // which already made this switch. SAME signature/body/footer; openPage takes
+  // identical args and closeModal() (== Overlay.dismissTop()) still closes it.
   openRequestForm() {
-    openModal('Request Cash Advance', `
+    openPage('Request Cash Advance', `
       <div class="form-group"><label>Amount Needed (₱, max ₱50,000)</label>
         <input id="ca-req-amt" type="number" inputmode="decimal" min="100" max="50000" step="100" placeholder="0.00"/>
       </div>
@@ -1594,13 +1734,16 @@ window.CashAdvance = {
     return result;
   },
 
+  // v14 Batch6/5-leftover — openPage. Data (record + bank account options) is
+  // fully fetched BEFORE the panel opens (same as before), so there's no
+  // post-open async body-fill to retarget — a straight openModal→openPage swap.
   async openApproveModal(id, onDone) {
     const snap = await db.collection('cash_advances').doc(id).get();
     if (!snap.exists) { Notifs.showToast('Record no longer exists.','error'); if (onDone) onDone(); return; }
     const a = snap.data();
     const terms = a.terms || 1;
     const bankOpts = await window.BankAccounts.optionsHTML();
-    openModal(`Approve Cash Advance — ${escHtml(a.userName||'Employee')}`, `
+    openPage(`Approve Cash Advance — ${escHtml(a.userName||'Employee')}`, `
       <div class="ca-detail" style="margin-bottom:10px"><span>Principal</span><strong>₱${fmt(a.amount)}</strong></div>
       <div class="ca-detail" style="margin-bottom:10px"><span>Terms</span><span>${terms} month${terms>1?'s':''}</span></div>
       <div class="form-group"><label>Interest Rate (%/month)</label>
@@ -1679,11 +1822,14 @@ window.CashAdvance = {
     return result;
   },
 
+  // v14 Batch6/5-leftover — openPage. Same pattern as openApproveModal: the
+  // record fetch resolves BEFORE the panel opens, so the full body HTML is
+  // already known at open time — no post-open #modal-body targeting needed.
   openPaymentModal(id, onDone) {
     db.collection('cash_advances').doc(id).get().then(snap => {
       if (!snap.exists) { Notifs.showToast('Record no longer exists.','error'); if (onDone) onDone(); return; }
       const a = snap.data();
-      openModal(`Record Payment${a.userName?` — ${escHtml(a.userName)}`:''}`, `
+      openPage(`Record Payment${a.userName?` — ${escHtml(a.userName)}`:''}`, `
         <div class="ca-detail" style="margin-bottom:12px"><span>Balance:</span><strong>₱${fmt(a.balance||0)}</strong></div>
         <div class="form-group"><label>Amount Paid</label><input id="ca-pay-amt" type="number" inputmode="decimal" value="${a.monthlyPayment||a.balance||0}" min="0" max="${a.balance||0}"/></div>
         <div class="form-group"><label>Date</label><input id="ca-pay-date" type="date" value="${window.bizDate?window.bizDate():today()}"/></div>

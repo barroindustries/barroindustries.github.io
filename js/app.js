@@ -1140,109 +1140,58 @@ function partnerCompanyName() {
          (currentDepts.includes('Brilliant Steel') ? 'Brilliant Steel' : 'Partner');
 }
 
-function getSidebarItems() {
-  // Admin command-center portal: President, Manager, and Corporate Secretary all
-  // get the company-wide oversight nav. President-only items (Audit Log, Product
-  // Database) are gated separately below.
-  const pres   = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
-  const bsOnly = isBrilliantOnly();
+// v14 C1 — which NAV_REGISTRY variant bucket the signed-in user's chrome comes
+// from. SAME branch order as the pre-C1 getSidebarItems/_primaryNavItems
+// (admin → generic-partner → partner → brilliant-only → staff) so every
+// existing role/dept combination resolves to the identical bucket it did before.
+function _navVariant() {
+  const pres = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
+  if (pres) return 'admin';
   const partner = isPartner();
-  const items  = [];
-
-  items.push({ icon:'home', label:'Dashboard', page:'dashboard' });
-  // Chat is universal (every role's bottom-nav has it) but was never in the
-  // desktop sidebar — so after the nav-consolidation moved the primary tabs to
-  // the mobile-only bottom bar and removed the topbar chat button, Chat became
-  // unreachable on desktop for everyone. Restore it here for all roles.
-  items.push({ icon:'message-circle', label:'Chat', page:'chat' });
-
-  if (pres) {
-    // ── Admin / President Command Center ──
-    items.push({ icon:'bar-chart-2',   label:'Analytics',        page:'analytics',       section:false });
-    items.push({ icon:'check-square',  label:'Tasks',            page:'tasks'                          });
-    items.push({ icon:'megaphone',     label:'Posts',            page:'posts'                          });
-    items.push({ icon:'building-2',    label:'Company',          page:'company'                        });
-    // v12 WS42 nav-consolidation — replaces the removed topbar-depts-btn
-    // (grid icon) so the "All Departments" catalog page stays reachable.
-    items.push({ icon:'layout-grid',   label:'All Departments',  page:'departments'                    });
-    items.push({ icon:'shield-check',  label:'Approvals',        page:'approvals',       section:true  });
-    items.push({ icon:'trending-up',   label:'Progress Reports', page:'progress'                       });
-    items.push({ icon:'users',         label:'Team Directory',   page:'team-directory',  section:true  });
-    items.push({ icon:'user-cog',      label:'HR',               page:'dept:HR'                        });
-    items.push({ icon:'calendar',      label:'Attendance',       page:'attendance'                     });
-    // v12 WS38 — Files Hub: admins/managers/secretary had NO top-level Files door
-    // before this (only employees via page:'files' / partners via page:'files'
-    // /'bs-files', both pre-existing and left as-is — "N doors" per the DECIDED
-    // spec). This is the "admin sees everything, all scopes" door.
-    items.push({ icon:'folder-open',   label:'Files',            page:'files-hub'                      });
-    items.push({ icon:'boxes',         label:'Inventory',        page:'inventory',       section:true, sectionLabel:'Operations' });
-    items.push({ icon:'trending-up',   label:'Projects',         page:'projects-lifecycle'             });
-    items.push({ icon:'receipt',       label:'Sales Orders',     page:'sales-orders'                   });
-    // President-only — these pages access-deny non-presidents (see navigateTo),
-    // so don't show dead nav entries to managers / the corporate secretary.
-    if (isPresident()) {
-      items.push({ icon:'package',       label:'Product Database', page:'product-database', section:true, sectionLabel:'Catalog' });
-      items.push({ icon:'scroll-text',   label:'Audit Log',        page:'audit-log',       section:true, sectionLabel:'Security' });
-      items.push({ icon:'activity',      label:'System Health',    page:'system-health'                                          });
-    }
-    // (Leave, SOPs, Help moved into the profile drawer's "More" section)
-  } else if (partner && isGenericPartner()) {
-    // ── Generic external partner (any company) ──
-    items.push({ icon:'briefcase',    label:'My Projects',   page:'partner-projects' });
-    items.push({ icon:'check-square', label:'My Tasks',      page:'tasks'            });
-    items.push({ icon:'megaphone',    label:'Posts',         page:'posts'            });
-    items.push({ icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' });
-    items.push({ icon:'file-text',    label:'Quotations',    page:'bs-quotations'    });
-    items.push({ icon:'users',        label:'Team',          page:'team-directory',   section:true, sectionLabel:'Directory' });
-    items.push({ icon:'folder',       label:'Files',         page:'files'            });
-  } else if (partner) {
-    // ── External Partner role (Brilliant Steel) ──
-    items.push({ icon:'check-square', label:'My Tasks',      page:'tasks'            });
-    items.push({ icon:'megaphone',    label:'Posts',         page:'posts'            });
-    items.push({ icon:'briefcase',    label:'My Projects',   page:'partner-projects' });
-    items.push({ icon:'calculator',   label:'Quote Builder', page:'bs-quote-builder', section:true, sectionLabel:'Work Tools' });
-    items.push({ icon:'file-text',    label:'Quotations',    page:'bs-quotations'    });
-    items.push({ icon:'book-open',    label:'Client Data',   page:'bs-clients'       });
-    items.push({ icon:'users',        label:'Team',          page:'team-directory',   section:true, sectionLabel:'Directory' });
-    items.push({ icon:'folder',       label:'Files',         page:'files'            });
-  } else if (bsOnly) {
-    // ── Partner — Brilliant Steel (ISOLATED) ──
-    items.push({ icon:'briefcase',   label:'My Projects',   page:'partner-projects' });
-    items.push({ icon:'calculator',  label:'Quote Builder', page:'bs-quote-builder' });
-    items.push({ icon:'file-text',   label:'Quotations',    page:'bs-quotations'    });
-    items.push({ icon:'book-open',   label:'Client Data',   page:'bs-clients'       });
-    items.push({ icon:'folder',      label:'Files',         page:'bs-files'         });
-  } else {
-    // ── Employee / Agent / Finance ──
-    items.push({ icon:'check-square', label:'My Tasks', page:'tasks' });
-    items.push({ icon:'megaphone',    label:'Posts',    page:'posts' });
-    // Cash Advance is in the employee bottom-nav ("Cash") but was missing from
-    // the desktop sidebar — restore it so it's reachable without a phone.
-    items.push({ icon:'banknote',     label:'Cash Advance', page:'cash-advances' });
-    items.push({ icon:'building-2',   label:'Company',  page:'company' });
-    // Departments — appear ABOVE management section.
-    // The Accountant (finance role) always sees the Finance department even when she
-    // isn't explicitly assigned to it; Finance is her one department (Sales Orders,
-    // Payroll, Ledger, etc. all live inside the Finance hub as tabs).
-    const navDepts = (currentRole === 'finance' && !currentDepts.includes('Finance'))
-      ? ['Finance', ...currentDepts]
-      : currentDepts;
-    navDepts.forEach((dept, i) => {
-      const cfg = DEPARTMENTS[dept];
-      // v12 WS42 Phase 21 — dept nav items get their own harmonized color tile
-      // (inline background override beats the generic `dept:*` orange CSS rule).
-      if (cfg) items.push({ icon: cfg.icon, iconHtml: `<span class="nav-icon" style="background:${cfg.gradient}">${emojiIcon(cfg.lucideIcon||cfg.icon,18)}</span>`, label: dept, page: `dept:${dept}`, section: i === 0, sectionLabel: 'My Departments' });
-    });
-    // Management section below
-    items.push({ icon:'users',       label:'Team',             page:'team-directory',    section:true, sectionLabel:'Management' });
-    items.push({ icon:'calendar',    label:'Attendance',       page:'attendance'                       });
-    items.push({ icon:'folder',      label:'Files',            page:'files'                            });
-    if ((currentDepts||[]).includes('Production')) items.push({ icon:'boxes', label:'Inventory', page:'inventory' });
-    if ((currentDepts||[]).some(d=>['Sales','Production','Finance'].includes(d)) || currentRole==='finance') items.push({ icon:'trending-up', label:'Projects', page:'projects-lifecycle' });
-    if ((currentDepts||[]).includes('Finance') || currentRole==='finance') items.push({ icon:'receipt', label:'Sales Orders', page:'sales-orders' });
-    if (currentRole === 'finance') items.push({ icon:'activity', label:'System Health', page:'system-health' });
-    // (Leave, SOPs, Help moved into the profile drawer's "More" section)
-  }
+  if (partner && isGenericPartner()) return 'genericPartner';
+  if (partner) return 'partnerBS';
+  if (isBrilliantOnly()) return 'bsOnly';
+  return 'staff';
+}
+// Evaluate a NAV_REGISTRY predicate by name (live state, not baked into the
+// registry — see config.js NAV_REGISTRY comment).
+function _navPredicateOk(name) {
+  const fn = window.NAV_REGISTRY && window.NAV_REGISTRY.predicates && window.NAV_REGISTRY.predicates[name];
+  return typeof fn === 'function' ? !!fn() : false;
+}
+// Departments — appear ABOVE the Management section, in the 'staff' sidebar
+// variant only. The Accountant (finance role) always sees the Finance
+// department even when she isn't explicitly assigned to it; Finance is her one
+// department (Sales Orders, Payroll, Ledger, etc. all live inside the Finance
+// hub as tabs). Per-user data, not static nav config — NAV_REGISTRY's 'staff'
+// list marks WHERE this goes with a `{deptLoop:true}` placeholder; this is
+// that block, unchanged from the pre-C1 inline version.
+function _pushDeptNavItems(items) {
+  const navDepts = (currentRole === 'finance' && !currentDepts.includes('Finance'))
+    ? ['Finance', ...currentDepts]
+    : currentDepts;
+  navDepts.forEach((dept, i) => {
+    const cfg = DEPARTMENTS[dept];
+    // v12 WS42 Phase 21 — dept nav items get their own harmonized color tile
+    // (inline background override beats the generic `dept:*` orange CSS rule).
+    if (cfg) items.push({ icon: cfg.icon, iconHtml: `<span class="nav-icon" style="background:${cfg.gradient}">${emojiIcon(cfg.lucideIcon||cfg.icon,18)}</span>`, label: dept, page: `dept:${dept}`, section: i === 0, sectionLabel: 'My Departments' });
+  });
+}
+function getSidebarItems() {
+  const reg = window.NAV_REGISTRY;
+  const variant = _navVariant();
+  const items = [];
+  (reg.sidebarUniversal || []).forEach(e => {
+    items.push({ icon: e.icon, label: e.label, page: e.page });
+  });
+  (reg.sidebar[variant] || []).forEach(e => {
+    if (e.deptLoop) { _pushDeptNavItems(items); return; }
+    if (e.when && !_navPredicateOk(e.when)) return;
+    const item = { icon: e.icon, label: e.label, page: e.page };
+    if (e.section) item.section = true;
+    if (e.sectionLabel) item.sectionLabel = e.sectionLabel;
+    items.push(item);
+  });
   return items;
 }
 
@@ -1293,13 +1242,12 @@ function buildSidebarNav() {
 
 // Primary navigation items for the current role, minus Profile (Profile lives
 // on the top-bar avatar → 'my-profile', so a duplicate tab is redundant).
+// v14 C1 — reads NAV_REGISTRY.bottom[variant] directly (same variant resolution
+// as the sidebar via _navVariant()) instead of picking between the 5 hand-rolled
+// *_BOTTOM_NAV globals; those globals still exist (config.js), now derived FROM
+// the registry, kept only for back-compat.
 function _primaryNavItems() {
-  const isAdminRole = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
-  const items = isAdminRole ? window.PRESIDENT_BOTTOM_NAV
-    : isGenericPartner() ? (window.PARTNER_GENERIC_BOTTOM_NAV || window.BOTTOM_NAV_ITEMS)
-    : isPartner() ? (window.PARTNER_BOTTOM_NAV || window.BOTTOM_NAV_ITEMS)
-    : isBrilliantOnly() ? window.BRILLIANT_BOTTOM_NAV
-    : window.BOTTOM_NAV_ITEMS;
+  const items = (window.NAV_REGISTRY.bottom[_navVariant()] || []);
   return items.filter(item => item.page !== 'my-profile');
 }
 
