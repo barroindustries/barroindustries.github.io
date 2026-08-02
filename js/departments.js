@@ -3967,13 +3967,13 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     <div class="card" style="margin-top:14px;border:2px solid var(--danger)">
       <div class="card-header" style="background:rgba(220,53,69,0.08)"><h3 style="color:var(--danger)">${emojiIcon('⚠️',20)} Pending Payroll Delete Approvals (${delReqs.length})</h3></div>
       <div class="card-body" style="padding:0">
-        <div class="table-wrap"><table class="data-table" id="del-req-table">
+        <div class="table-wrap"><table class="data-table table-cards no-toggle" id="del-req-table">
           <thead><tr><th>Month</th><th>Employee</th><th>Requested By</th><th>Reason</th><th></th></tr></thead>
           <tbody>${delReqs.map(r=>`<tr>
-            <td>${r.month||'—'}</td>
-            <td>${escHtml(r.userName||'—')}</td>
-            <td style="font-size:11px">${escHtml(r.requestedByName||'—')}</td>
-            <td style="font-size:11px;color:var(--text-muted)">${escHtml(r.reason||'—')}</td>
+            <td data-label="Month">${r.month||'—'}</td>
+            <td data-label="Employee">${escHtml(r.userName||'—')}</td>
+            <td data-label="Requested By" style="font-size:11px">${escHtml(r.requestedByName||'—')}</td>
+            <td data-label="Reason" style="font-size:11px;color:var(--text-muted)">${escHtml(r.reason||'—')}</td>
             <td style="white-space:nowrap">
               <button class="btn-primary btn-sm del-req-approve" data-req-id="${r.id}" data-hist-id="${r.historyId}" title="Approve deletion">${emojiIcon('✓',16)} Approve</button>
               <button class="btn-secondary btn-sm del-req-deny" data-req-id="${r.id}" data-req-by="${r.requestedBy}" style="margin-left:4px" title="Deny">${emojiIcon('✕',16)} Deny</button>
@@ -4630,12 +4630,12 @@ async function renderTaxesTab(container, currentUser, currentRole) {
     addBtnLabel: '+ Add Tax Record',
     actionsMode: 'always',
     columns: [
-      { header: 'Period', cell: r => escHtml(r.period||'—') },
-      { header: 'Type', cell: r => `<span class="badge badge-blue">${escHtml(r.type||'BIR')}</span>` },
-      { header: 'Amount', cell: r => `<strong>₱${fmt(r.amount)}</strong>` },
-      { header: 'Status', cell: r => `<span class="badge ${r.status==='filed'?'badge-green':r.status==='paid'?'badge-blue':'badge-orange'}">${r.status||'pending'}</span>` },
-      { header: 'Due Date', cell: r => r.dueDate||'—' },
-      { header: 'Filed By', cell: r => escHtml(r.filedBy||'—') }
+      { header: 'Period', mobile: 'avatar', cell: r => escHtml(r.period||'—') },
+      { header: 'Type', mobile: 'name', cell: r => `<span class="badge badge-blue">${escHtml(r.type||'BIR')}</span>` },
+      { header: 'Amount', mobile: 'net', cell: r => `<strong>₱${fmt(r.amount)}</strong>` },
+      { header: 'Status', mobile: 'detail', cell: r => `<span class="badge ${r.status==='filed'?'badge-green':r.status==='paid'?'badge-blue':'badge-orange'}">${r.status||'pending'}</span>` },
+      { header: 'Due Date', mobile: 'detail', cell: r => r.dueDate||'—' },
+      { header: 'Filed By', mobile: 'detail', cell: r => escHtml(r.filedBy||'—') }
     ],
     actionsExtra: r => r.fileUrl ? `<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm" style="margin-left:4px">${emojiIcon('📎',16)}</a>` : '',
     editTitle: 'Tax Record',
@@ -5561,15 +5561,15 @@ async function renderCashReceiptJournal(container, currentUser, currentRole) {
       </div>`;
     },
     columns: [
-      { header: 'Reference', cell: e => `<code>${escHtml(e.reference||'—')}</code>` },
-      { header: 'Date', cell: e => e.date||'—' },
-      { header: 'Customer', cell: e => escHtml(e.customer||'—') },
-      { header: 'Debit Cash', style: 'color:var(--success)', cell: e => `₱${fmt(e.debitCash)}` },
-      { header: 'Debit Sales Discount', cell: e => e.debitSalesDiscount?'₱'+fmt(e.debitSalesDiscount):'—' },
-      { header: 'Credit A/R', cell: e => e.creditAR?'₱'+fmt(e.creditAR):'—' },
-      { header: 'Credit Sales Revenue', cell: e => e.creditSalesRevenue?'₱'+fmt(e.creditSalesRevenue):'—' },
-      { header: 'Credit Sundry (Acct)', cell: e => escHtml(e.creditSundryAcct||'—') },
-      { header: 'Credit Sundry (Amount)', cell: e => e.creditSundryAmount?'₱'+fmt(e.creditSundryAmount):'—' }
+      { header: 'Reference', mobile: 'detail', cell: e => `<code>${escHtml(e.reference||'—')}</code>` },
+      { header: 'Date', mobile: 'avatar', cell: e => e.date||'—' },
+      { header: 'Customer', mobile: 'name', cell: e => escHtml(e.customer||'—') },
+      { header: 'Debit Cash', mobile: 'net', style: 'color:var(--success)', cell: e => `₱${fmt(e.debitCash)}` },
+      { header: 'Debit Sales Discount', mobile: 'detail', cell: e => e.debitSalesDiscount?'₱'+fmt(e.debitSalesDiscount):'—' },
+      { header: 'Credit A/R', mobile: 'detail', cell: e => e.creditAR?'₱'+fmt(e.creditAR):'—' },
+      { header: 'Credit Sales Revenue', mobile: 'detail', cell: e => e.creditSalesRevenue?'₱'+fmt(e.creditSalesRevenue):'—' },
+      { header: 'Credit Sundry (Acct)', mobile: 'detail', cell: e => escHtml(e.creditSundryAcct||'—') },
+      { header: 'Credit Sundry (Amount)', mobile: 'detail', cell: e => e.creditSundryAmount?'₱'+fmt(e.creditSundryAmount):'—' }
     ],
     editTitle: 'Cash Receipt',
     deleteLabel: e => `cash receipt "${(e.customer||'receipt')+' — ₱'+fmt(e.debitCash)}"`,
@@ -5665,15 +5665,15 @@ async function renderCashDisbursementJournal(container, currentUser, currentRole
       </div>`;
     },
     columns: [
-      { header: 'Reference', cell: e => `<code>${escHtml(e.reference||'—')}</code>` },
-      { header: 'Date', cell: e => e.date||'—' },
-      { header: 'Payee', cell: e => escHtml(e.payee||'—') },
-      { header: 'Credit Cash', style: 'color:var(--danger)', cell: e => `₱${fmt(e.creditCash)}` },
-      { header: 'Debit COS–Direct Material', cell: e => e.debitMaterial?'₱'+fmt(e.debitMaterial):'—' },
-      { header: 'Debit Accounts Payable', cell: e => e.debitAP?'₱'+fmt(e.debitAP):'—' },
-      { header: 'Debit COS–Direct Labor', cell: e => e.debitLabor?'₱'+fmt(e.debitLabor):'—' },
-      { header: 'Debit Sundry (Acct)', cell: e => escHtml(e.debitSundryAcct||'—') },
-      { header: 'Debit Sundry (Amount)', cell: e => e.debitSundryAmount?'₱'+fmt(e.debitSundryAmount):'—' }
+      { header: 'Reference', mobile: 'detail', cell: e => `<code>${escHtml(e.reference||'—')}</code>` },
+      { header: 'Date', mobile: 'avatar', cell: e => e.date||'—' },
+      { header: 'Payee', mobile: 'name', cell: e => escHtml(e.payee||'—') },
+      { header: 'Credit Cash', mobile: 'net', style: 'color:var(--danger)', cell: e => `₱${fmt(e.creditCash)}` },
+      { header: 'Debit COS–Direct Material', mobile: 'detail', cell: e => e.debitMaterial?'₱'+fmt(e.debitMaterial):'—' },
+      { header: 'Debit Accounts Payable', mobile: 'detail', cell: e => e.debitAP?'₱'+fmt(e.debitAP):'—' },
+      { header: 'Debit COS–Direct Labor', mobile: 'detail', cell: e => e.debitLabor?'₱'+fmt(e.debitLabor):'—' },
+      { header: 'Debit Sundry (Acct)', mobile: 'detail', cell: e => escHtml(e.debitSundryAcct||'—') },
+      { header: 'Debit Sundry (Amount)', mobile: 'detail', cell: e => e.debitSundryAmount?'₱'+fmt(e.debitSundryAmount):'—' }
     ],
     editTitle: 'Cash Disbursement',
     deleteLabel: e => `cash disbursement "${(e.payee||'disbursement')+' — ₱'+fmt(e.creditCash)}"`,
@@ -5785,13 +5785,13 @@ async function renderRecordsTab(container, currentUser, currentRole) {
       </div>`,
     filter: { id: 'rec-filter', matches: (r, fv) => (r.type||'')===fv },
     columns: [
-      { header: 'Date', cell: r => r.date||'—' },
-      { header: 'Type', cell: r => `<span class="badge badge-blue">${escHtml(r.type||'—')}</span>` },
-      { header: 'Description', cell: r => escHtml(r.description||'—') },
-      { header: 'Amount', cell: r => `₱${fmt(r.amount)}` },
-      { header: 'From/To', cell: r => escHtml(r.party||'—') },
-      { header: 'File', cell: r => r.fileUrl?`<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm">${emojiIcon('📎',16)} View</a>`:'-' },
-      { header: 'By', style: 'font-size:11px', cell: r => escHtml(r.encodedByName||'—') }
+      { header: 'Date', mobile: 'avatar', cell: r => r.date||'—' },
+      { header: 'Type', mobile: 'detail', cell: r => `<span class="badge badge-blue">${escHtml(r.type||'—')}</span>` },
+      { header: 'Description', mobile: 'name', cell: r => escHtml(r.description||'—') },
+      { header: 'Amount', mobile: 'net', cell: r => `₱${fmt(r.amount)}` },
+      { header: 'From/To', mobile: 'detail', cell: r => escHtml(r.party||'—') },
+      { header: 'File', mobile: 'detail', cell: r => r.fileUrl?`<a href="${safeHttpUrl(r.fileUrl)}" target="_blank" class="btn-secondary btn-sm">${emojiIcon('📎',16)} View</a>`:'-' },
+      { header: 'By', mobile: 'detail', style: 'font-size:11px', cell: r => escHtml(r.encodedByName||'—') }
     ],
     editTitle: 'Record',
     deleteLabel: r => `record "${(r.type||'record')+' — '+(r.description||r.id.slice(-5))}"`,
@@ -7205,14 +7205,15 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
       <div class="card-header" style="display:flex;justify-content:space-between;align-items:center"><h3>Recent Expenses</h3>${expenses.length?`<button class="btn-secondary btn-sm" id="exp-csv-btn">${emojiIcon('⬇',16)} CSV</button>`:''}</div>
       <div class="card-body">
         <div class="table-wrap">
-          <table class="data-table">
+          <table class="data-table table-cards">
             <thead><tr><th>Description</th><th>Amount</th><th>By</th><th>Status</th><th></th></tr></thead>
             <tbody>
-              ${expenses.slice(0,10).map(e => `<tr>
-                <td>${escHtml(e.description)}</td><td>₱${fmt(e.amount)}</td>
-                <td>${escHtml(e.submittedByName||'—')}</td>
-                <td><span class="badge ${statusBadge(e.status)}">${e.status||'pending'}</span></td>
-                <td style="white-space:nowrap">${e.fileUrl?`<a href="${safeHttpUrl(e.fileUrl)}" target="_blank" class="btn-icon">${emojiIcon('📎',16)}</a>`:''}${isPriv?`<button class="btn-secondary btn-sm exp-edit-btn" data-id="${e.id}" style="margin-left:4px">${emojiIcon('✎',16)}</button><button class="btn-danger btn-sm exp-del-btn" data-id="${e.id}" data-label="${escHtml(e.description||e.id.slice(-5))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>`:''}</td>
+              ${expenses.slice(0,10).map(e => `<tr class="exp-row">
+                <td class="tc-name">${escHtml(e.description)} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+                <td class="tc-net">₱${fmt(e.amount)}</td>
+                <td class="tc-detail" data-label="By">${escHtml(e.submittedByName||'—')}</td>
+                <td class="tc-detail" data-label="Status"><span class="badge ${statusBadge(e.status)}">${e.status||'pending'}</span></td>
+                <td class="tc-actions" style="white-space:nowrap">${e.fileUrl?`<a href="${safeHttpUrl(e.fileUrl)}" target="_blank" class="btn-icon">${emojiIcon('📎',16)}</a>`:''}${isPriv?`<button class="btn-secondary btn-sm exp-edit-btn" data-id="${e.id}" style="margin-left:4px">${emojiIcon('✎',16)}</button><button class="btn-danger btn-sm exp-del-btn" data-id="${e.id}" data-label="${escHtml(e.description||e.id.slice(-5))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>`:''}</td>
               </tr>`).join('')}
             </tbody>
           </table>
@@ -7221,6 +7222,10 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
     </div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
+  container.querySelectorAll('tr.exp-row').forEach(tr => tr.addEventListener('click', (ev) => {
+    if (ev.target.closest('button, a')) return;
+    tr.classList.toggle('tc-expanded');
+  }));
   document.getElementById('fin-tools-btn')?.addEventListener('click', () => openFinanceToolsPage());
   document.getElementById('exp-csv-btn')?.addEventListener('click', () => window.exportCSV('expenses', expenses, [
     {key:'date',label:'Date'},{key:'description',label:'Description'},{key:'category',label:'Category'},
@@ -8503,6 +8508,24 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
   if (sub === 'Assets') {
     const snap = await db.collection('it_assets').orderBy('createdAt','desc').get().catch(()=>({docs:[]}));
     const assets = snap.docs.map(d=>({id:d.id,...d.data()}));
+    // v14 Wave 6 B2 — card reflow (≤700px, shared .table-cards CSS pattern).
+    // Same <tr>/<td> markup at every width; tc-avatar=Type, tc-name=Name,
+    // tc-net=Status stay visible on phone, the rest is the tap-to-expand
+    // breakdown. colspan/column COUNT must still match <thead> 1:1 (desktop
+    // is a plain table — the tc-* class just decides mobile layout).
+    const assetRowHtml = a => `<tr class="asset-row">
+              <td class="tc-avatar" style="font-size:11px;color:var(--text-muted)">${escHtml(a.type||'—')}</td>
+              <td class="tc-name">${escHtml(a.name||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+              <td class="tc-detail" data-label="Serial / ID"><code style="font-size:11px">${escHtml(a.serial||'—')}</code></td>
+              <td class="tc-detail" data-label="Assigned To">${escHtml(a.assignedTo||'—')}</td>
+              <td class="tc-net"><span class="badge ${window.statusBadgeClass('it_asset', a.status||'active')}">${window.statusLabel2('it_asset', a.status||'active')}</span></td>
+              <td class="tc-detail" data-label="Purchased">${a.purchasedDate||'—'}</td>
+              ${canEdit?`<td class="tc-actions"><button class="btn-icon edit-asset-btn" data-id="${a.id}"><i data-lucide="pencil" style="width:14px;height:14px"></i></button></td>`:''}
+            </tr>`;
+    const bindAssetRowToggle = (scopeEl) => scopeEl.querySelectorAll('tr.asset-row').forEach(tr => tr.addEventListener('click', (ev) => {
+      if (ev.target.closest('button, a')) return;
+      tr.classList.toggle('tc-expanded');
+    }));
     content.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <select id="it-asset-filter" class="select-sm">
@@ -8513,21 +8536,15 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         </select>
         ${canEdit?`<button class="btn-primary btn-sm" id="new-asset-btn">+ Add Asset</button>`:''}
       </div>
-      <div class="card"><div class="table-wrap"><table class="data-table">
+      <div class="card"><div class="table-wrap"><table class="data-table table-cards">
         <thead><tr><th>Name</th><th>Type</th><th>Serial / ID</th><th>Assigned To</th><th>Status</th><th>Purchased</th>${canEdit?'<th></th>':''}</tr></thead>
         <tbody id="it-asset-tbody">
           ${!assets.length?`<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px">No assets recorded</td></tr>`
-            :assets.map(a=>`<tr>
-              <td>${escHtml(a.name||'—')}</td>
-              <td>${escHtml(a.type||'—')}</td>
-              <td><code style="font-size:11px">${escHtml(a.serial||'—')}</code></td>
-              <td>${escHtml(a.assignedTo||'—')}</td>
-              <td><span class="badge ${window.statusBadgeClass('it_asset', a.status||'active')}">${window.statusLabel2('it_asset', a.status||'active')}</span></td>
-              <td>${a.purchasedDate||'—'}</td>
-              ${canEdit?`<td><button class="btn-icon edit-asset-btn" data-id="${a.id}"><i data-lucide="pencil" style="width:14px;height:14px"></i></button></td>`:''}
-            </tr>`).join('')}
+            :assets.map(assetRowHtml).join('')}
         </tbody>
       </table></div></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [content] });
+    bindAssetRowToggle(content);
     if (canEdit) {
       document.getElementById('new-asset-btn')?.addEventListener('click', () => {
         openPage('Add Asset', `
@@ -8602,16 +8619,9 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         const tbody = document.getElementById('it-asset-tbody');
         if (!tbody) return;
         tbody.innerHTML = !filtered.length ? `<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px">No assets recorded</td></tr>`
-          : filtered.map(a=>`<tr>
-              <td>${escHtml(a.name||'—')}</td>
-              <td>${escHtml(a.type||'—')}</td>
-              <td><code style="font-size:11px">${escHtml(a.serial||'—')}</code></td>
-              <td>${escHtml(a.assignedTo||'—')}</td>
-              <td><span class="badge ${window.statusBadgeClass('it_asset', a.status||'active')}">${window.statusLabel2('it_asset', a.status||'active')}</span></td>
-              <td>${a.purchasedDate||'—'}</td>
-              <td><button class="btn-icon edit-asset-btn" data-id="${a.id}"><i data-lucide="pencil" style="width:14px;height:14px"></i></button></td>
-            </tr>`).join('');
+          : filtered.map(assetRowHtml).join('');
         if (window.lucide) lucide.createIcons({ nodes: [tbody] });
+        bindAssetRowToggle(tbody);
         bindAssetEditBtns(tbody);
       });
     } else {
@@ -8621,14 +8631,9 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
         const tbody = document.getElementById('it-asset-tbody');
         if (!tbody) return;
         tbody.innerHTML = !filtered.length ? `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px">No assets recorded</td></tr>`
-          : filtered.map(a=>`<tr>
-              <td>${escHtml(a.name||'—')}</td>
-              <td>${escHtml(a.type||'—')}</td>
-              <td><code style="font-size:11px">${escHtml(a.serial||'—')}</code></td>
-              <td>${escHtml(a.assignedTo||'—')}</td>
-              <td><span class="badge ${window.statusBadgeClass('it_asset', a.status||'active')}">${window.statusLabel2('it_asset', a.status||'active')}</span></td>
-              <td>${a.purchasedDate||'—'}</td>
-            </tr>`).join('');
+          : filtered.map(assetRowHtml).join('');
+        if (window.lucide) lucide.createIcons({ nodes: [tbody] });
+        bindAssetRowToggle(tbody);
       });
     }
     return;
@@ -8642,7 +8647,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
       <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
         ${canEdit?`<button class="btn-primary btn-sm" id="new-sw-btn">+ Add Software</button>`:''}
       </div>
-      <div class="card"><div class="table-wrap"><table class="data-table">
+      <div class="card"><div class="table-wrap"><table class="data-table table-cards">
         <thead><tr><th>Software</th><th>Vendor</th><th>License Type</th><th>License Key / ID</th><th>Seats</th><th>Expiry</th><th>Status</th>${canEdit?'<th></th>':''}</tr></thead>
         <tbody>
           ${!items.length?`<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px">No software records</td></tr>`
@@ -8653,20 +8658,26 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
               const _in30 = new Date(today() + 'T12:00:00Z'); _in30.setUTCDate(_in30.getUTCDate() + 30);
               const isExp  = !!s.expiryDate && s.expiryDate < today();
               const isSoon = !!s.expiryDate && !isExp && s.expiryDate <= _in30.toISOString().slice(0,10);
-              return `<tr>
-                <td>${escHtml(s.name||'—')}</td>
-                <td>${escHtml(s.vendor||'—')}</td>
-                <td>${escHtml(s.licenseType||'—')}</td>
-                <td><code style="font-size:10px">${escHtml(s.licenseKey||'—')}</code></td>
-                <td>${s.seats||'—'}</td>
-                <td style="color:${isExp?'var(--danger)':isSoon?'#FF9F0A':'inherit'}">${s.expiryDate||'—'}${isExp?` ${emojiIcon('⚠️',16)}`:isSoon?` ${emojiIcon('🔔',16)}`:''}</td>
-                <td><span class="badge ${window.statusBadgeClass('it_software', s.status||'active')}">${window.statusLabel2('it_software', s.status||'active')}</span></td>
-                ${canEdit?`<td><button class="btn-icon edit-sw-btn" data-id="${s.id}"><i data-lucide="pencil" style="width:14px;height:14px"></i></button></td>`:''}
+              // v14 Wave 6 B2 — card reflow: avatar=Vendor, name=Software, net=Expiry
+              // (the field worth surfacing at a glance); rest is tap-to-expand detail.
+              return `<tr class="sw-row">
+                <td class="tc-avatar" style="font-size:11px;color:var(--text-muted)">${escHtml(s.vendor||'—')}</td>
+                <td class="tc-name">${escHtml(s.name||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+                <td class="tc-detail" data-label="License Type">${escHtml(s.licenseType||'—')}</td>
+                <td class="tc-detail" data-label="License Key / ID"><code style="font-size:10px">${escHtml(s.licenseKey||'—')}</code></td>
+                <td class="tc-detail" data-label="Seats">${s.seats||'—'}</td>
+                <td class="tc-net" style="color:${isExp?'var(--danger)':isSoon?'#FF9F0A':'inherit'}">${s.expiryDate||'—'}${isExp?` ${emojiIcon('⚠️',16)}`:isSoon?` ${emojiIcon('🔔',16)}`:''}</td>
+                <td class="tc-detail" data-label="Status"><span class="badge ${window.statusBadgeClass('it_software', s.status||'active')}">${window.statusLabel2('it_software', s.status||'active')}</span></td>
+                ${canEdit?`<td class="tc-actions"><button class="btn-icon edit-sw-btn" data-id="${s.id}"><i data-lucide="pencil" style="width:14px;height:14px"></i></button></td>`:''}
               </tr>`;
             }).join('')}
         </tbody>
       </table></div></div>`;
     if (window.lucide) lucide.createIcons({ nodes: [content] });
+    content.querySelectorAll('tr.sw-row').forEach(tr => tr.addEventListener('click', (ev) => {
+      if (ev.target.closest('button, a')) return;
+      tr.classList.toggle('tc-expanded');
+    }));
     document.getElementById('new-sw-btn')?.addEventListener('click', () => {
       openPage('Add Software / License', `
         <div class="form-row">
@@ -8769,21 +8780,26 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
       <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
         ${canEdit?`<button class="btn-primary btn-sm" id="new-access-btn">+ Add Record</button>`:''}
       </div>
-      <div class="card"><div class="table-wrap"><table class="data-table">
+      <div class="card"><div class="table-wrap"><table class="data-table table-cards">
         <thead><tr><th>Employee</th><th>System / App</th><th>Access Level</th><th>Status</th><th>Granted By</th><th>Date</th>${canEdit?'<th></th>':''}</tr></thead>
         <tbody>
           ${!records.length?`<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px">No access records</td></tr>`
-            :records.map(r=>`<tr>
-              <td>${escHtml(r.employee||'—')}</td>
-              <td>${escHtml(r.system||'—')}</td>
-              <td><span class="badge badge-blue">${escHtml(r.level||'Read')}</span></td>
-              <td><span class="badge ${r.status==='active'?'badge-green':'badge-gray'}">${r.status||'active'}</span></td>
-              <td>${escHtml(r.grantedBy||'—')}</td>
-              <td>${r.date||'—'}</td>
-              ${canEdit?`<td><button class="btn-sm btn-danger revoke-access-btn" data-id="${r.id}" data-emp="${escHtml(r.employee||'this user')}" style="font-size:11px;padding:3px 8px">Revoke</button></td>`:''}
+            :records.map(r=>`<tr class="access-row">
+              <td class="tc-name">${escHtml(r.employee||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+              <td class="tc-avatar" style="font-size:11px;color:var(--text-muted)">${escHtml(r.system||'—')}</td>
+              <td class="tc-detail" data-label="Access Level"><span class="badge badge-blue">${escHtml(r.level||'Read')}</span></td>
+              <td class="tc-net"><span class="badge ${r.status==='active'?'badge-green':'badge-gray'}">${r.status||'active'}</span></td>
+              <td class="tc-detail" data-label="Granted By">${escHtml(r.grantedBy||'—')}</td>
+              <td class="tc-detail" data-label="Date">${r.date||'—'}</td>
+              ${canEdit?`<td class="tc-actions"><button class="btn-sm btn-danger revoke-access-btn" data-id="${r.id}" data-emp="${escHtml(r.employee||'this user')}" style="font-size:11px;padding:3px 8px">Revoke</button></td>`:''}
             </tr>`).join('')}
         </tbody>
       </table></div></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [content] });
+    content.querySelectorAll('tr.access-row').forEach(tr => tr.addEventListener('click', (ev) => {
+      if (ev.target.closest('button, a')) return;
+      tr.classList.toggle('tc-expanded');
+    }));
     document.getElementById('new-access-btn')?.addEventListener('click', () => {
       openPage('Grant Access', `
         <div class="form-row">
@@ -9936,19 +9952,19 @@ async function renderBSClientData(container, currentUser, currentRole) {
               ${cl.tin?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">TIN</div><div style="font-size:13px;margin-top:2px">${escHtml(cl.tin)}</div></div>`:''}
             </div>
             <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px;margin-bottom:8px">Quotation History</div>
-            <div class="table-wrap"><table class="data-table">
+            <div class="table-wrap"><table class="data-table table-cards">
               <thead><tr><th>Quote #</th><th>Amount</th><th>Status</th><th>Date</th>${isPrivileged?'<th>By</th>':''}<th></th></tr></thead>
               <tbody>${cl.quotes.map(q=>{
                 const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
                 const status = q.status||q.approvalStatus||'draft';
                 const badge = window.statusBadgeClass('quote', status);
-                return `<tr>
-                  <td><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code></td>
-                  <td style="font-weight:600">₱${window.fmtN2(q.total||q.grandTotal||0)}</td>
-                  <td><span class="badge ${badge}">${window.statusLabel2('quote', status)}</span></td>
-                  <td style="color:var(--text-muted);font-size:11px">${ts}</td>
-                  ${isPrivileged?`<td style="font-size:12px;color:var(--text-muted)">${escHtml(q.agentName||q.createdByName||'—')}</td>`:''}
-                  <td style="white-space:nowrap">${q.editableState?`<button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.reopenQuoteFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen &amp; Edit</button> <button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.newRevisionFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Start a new revision (R2, R3…) with today's date">${emojiIcon('⎘',16)} New Revision</button>`:'<span style="font-size:10px;color:var(--text-muted)">no snapshot</span>'}</td>
+                return `<tr class="bsq-row">
+                  <td class="tc-name"><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code> <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+                  <td class="tc-net" style="font-weight:600">₱${window.fmtN2(q.total||q.grandTotal||0)}</td>
+                  <td class="tc-detail" data-label="Status"><span class="badge ${badge}">${window.statusLabel2('quote', status)}</span></td>
+                  <td class="tc-detail" data-label="Date" style="color:var(--text-muted);font-size:11px">${ts}</td>
+                  ${isPrivileged?`<td class="tc-detail" data-label="By" style="font-size:12px;color:var(--text-muted)">${escHtml(q.agentName||q.createdByName||'—')}</td>`:''}
+                  <td class="tc-actions" style="white-space:nowrap">${q.editableState?`<button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.reopenQuoteFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen &amp; Edit</button> <button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.newRevisionFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Start a new revision (R2, R3…) with today's date">${emojiIcon('⎘',16)} New Revision</button>`:'<span style="font-size:10px;color:var(--text-muted)">no snapshot</span>'}</td>
                 </tr>`;
               }).join('')}</tbody>
             </table></div>
@@ -9956,6 +9972,10 @@ async function renderBSClientData(container, currentUser, currentRole) {
         </div>
       `).join('');
       if (window.lucide) lucide.createIcons({ nodes: [wrap] });
+      wrap.querySelectorAll('tr.bsq-row').forEach(tr => tr.addEventListener('click', (ev) => {
+        if (ev.target.closest('button, a')) return;
+        tr.classList.toggle('tc-expanded');
+      }));
     };
 
     container.innerHTML = `
@@ -11273,9 +11293,15 @@ async function renderAECDirectory(container, currentUser, currentRole) {
 
   container.innerHTML = `
     <style>
-      #aec-tbl th,#aec-tbl td{border-bottom:1px solid var(--border);padding:7px 8px;text-align:left;vertical-align:top;font-size:12px}
-      #aec-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
-      #aec-tbl td.c,#aec-tbl th.c{text-align:center}
+      /* v14 Wave 6 B2 — scoped to ≥701px only: below that the shared .table-cards
+         CSS (styles.css) takes over row layout (flex card, padding:0, no border),
+         and these ID-selector rules would otherwise out-specificity it. */
+      @media (min-width: 701px) {
+        #aec-tbl{min-width:860px}
+        #aec-tbl th,#aec-tbl td{border-bottom:1px solid var(--border);padding:7px 8px;text-align:left;vertical-align:top;font-size:12px}
+        #aec-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+        #aec-tbl td.c,#aec-tbl th.c{text-align:center}
+      }
       #aec-tbl tbody tr{cursor:pointer}
     </style>
     ${dueCount ? `<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>${emojiIcon('⏰',16)} <strong>${dueCount}</strong> AEC follow-up${dueCount>1?'s':''} due</span></div>` : ''}
@@ -11311,18 +11337,23 @@ async function renderAECDirectory(container, currentUser, currentRole) {
   const typeChip = c => { const t = aecTypeMeta(c.type);
     return `<span title="${escHtml(t.label)}" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:${t.color};color:#fff;font-size:10px;font-weight:800">${t.letter}</span>`; };
 
+  // v14 Wave 6 B2 — card reflow (≤700px, shared .table-cards CSS pattern).
+  // Row already click-navigates to openAECDetail (bound in bindRows below) —
+  // the detail page IS the expansion, so tc-detail cells stay hidden on
+  // phone with no separate tap-to-expand toggle (no caret/JS added), same
+  // idiom as renderBankAccounts.
   const rowHtml = c => { const st = aecStageMeta(aecStageOf(c)); const od = isOverdue(c);
     return `<tr data-id="${c.id}">
-      <td class="c">${c.itemNo || ''}</td>
-      <td class="c">${typeChip(c)}</td>
-      <td><strong>${escHtml(c.company || '')}</strong>${c.address ? `<div style="font-size:10px;color:var(--text-muted)">${escHtml(c.address)}</div>` : ''}</td>
-      <td>${escHtml(c.contactPerson || '')}</td>
-      <td style="font-size:11px">${c.phone ? `${emojiIcon('📞',16)} ${escHtml(c.phone)}<br>` : ''}${c.email ? `${emojiIcon('✉️',16)} ${escHtml(c.email)}` : ''}</td>
-      <td style="font-size:11px">${escHtml((c.region || '').split(' — ')[0])}</td>
-      <td><span class="badge" style="font-size:9px;background:${st.color};color:#fff">${st.icon} ${st.label}</span></td>
-      <td class="c">${c.quoteSent ? `${emojiIcon('✅',16)}${c.quoteSentDate ? `<div style="font-size:9px;color:var(--text-muted)">${escHtml(c.quoteSentDate)}</div>` : ''}` : '—'}</td>
-      <td style="font-size:11px;color:${od ? 'var(--danger)' : 'var(--text-muted)'}">${c.followUpDate ? `${emojiIcon('⏰',16)} ${escHtml(c.followUpDate)}${od ? ' · due' : ''}` : ''}</td>
-      <td class="c" style="white-space:nowrap">
+      <td class="c tc-detail" data-label="#">${c.itemNo || ''}</td>
+      <td class="c tc-avatar">${typeChip(c)}</td>
+      <td class="tc-name"><strong>${escHtml(c.company || '')}</strong>${c.address ? `<div style="font-size:10px;color:var(--text-muted)">${escHtml(c.address)}</div>` : ''}</td>
+      <td class="tc-detail" data-label="Contact Person">${escHtml(c.contactPerson || '')}</td>
+      <td class="tc-detail" data-label="Contact Info" style="font-size:11px">${c.phone ? `${emojiIcon('📞',16)} ${escHtml(c.phone)}<br>` : ''}${c.email ? `${emojiIcon('✉️',16)} ${escHtml(c.email)}` : ''}</td>
+      <td class="tc-detail" data-label="Region" style="font-size:11px">${escHtml((c.region || '').split(' — ')[0])}</td>
+      <td class="tc-net"><span class="badge" style="font-size:9px;background:${st.color};color:#fff">${st.icon} ${st.label}</span></td>
+      <td class="c tc-detail" data-label="Quote">${c.quoteSent ? `${emojiIcon('✅',16)}${c.quoteSentDate ? `<div style="font-size:9px;color:var(--text-muted)">${escHtml(c.quoteSentDate)}</div>` : ''}` : '—'}</td>
+      <td class="tc-detail" data-label="Follow-up" style="font-size:11px;color:${od ? 'var(--danger)' : 'var(--text-muted)'}">${c.followUpDate ? `${emojiIcon('⏰',16)} ${escHtml(c.followUpDate)}${od ? ' · due' : ''}` : ''}</td>
+      <td class="c tc-actions" style="white-space:nowrap">
         ${canEdit ? `<button class="btn-secondary btn-sm aec-edit-btn" data-id="${c.id}" title="Edit">${emojiIcon('✎',16)}</button>` : ''}
         ${canDeleteDirect ? `<button class="btn-secondary btn-sm aec-del-btn" data-id="${c.id}" data-company="${escHtml(c.company || '')}" style="color:var(--danger)">${emojiIcon('trash-2',13)}</button>` : ''}
       </td></tr>`; };
@@ -11436,7 +11467,7 @@ async function renderAECDirectory(container, currentUser, currentRole) {
     const el = document.getElementById('aec-table'); if (!el) return;
     el.innerHTML = !rows.length
       ? `<div class="empty-state"><div class="empty-icon">${emojiIcon('📇',44)}</div><h4>No AEC contacts${contacts.length ? ' match the filters' : ' yet'}</h4>${canEdit && !contacts.length ? '<p style="font-size:12px;color:var(--text-muted)">Add architects, engineers and contractors to start the partnership pipeline.</p>' : ''}</div>`
-      : `<div style="overflow-x:auto"><table id="aec-tbl" style="width:100%;min-width:860px;border-collapse:collapse">
+      : `<div style="overflow-x:auto"><table id="aec-tbl" class="data-table table-cards" style="width:100%;border-collapse:collapse">
           <thead><tr>
             <th class="c" style="width:36px">#</th><th class="c" style="width:40px">Type</th><th>Company</th><th>Contact Person</th>
             <th>Contact Info</th><th style="width:80px">Region</th><th style="width:120px">Stage</th>
@@ -11933,18 +11964,18 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
       <div class="card-header"><h3>${emojiIcon('📊',20)} Budget Allocation</h3></div>
       <div class="card-body" style="padding:0">
         ${!items.length?`<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('📊',44)}</div><p>No budget lines yet.</p></div>`:
-          `<div class="table-wrap"><table class="data-table">
+          `<div class="table-wrap"><table class="data-table table-cards no-toggle">
             <thead><tr><th>Item</th><th>Allocated</th><th>Spent</th><th>Remaining</th><th>%</th></tr></thead>
             <tbody>
               ${items.map(i=>{
                 const pct = i.budget>0?Math.min(Math.round(i.spent/i.budget*100),100):0;
                 const rem = i.budget-i.spent;
                 return `<tr>
-                  <td style="font-weight:600">${escHtml(i.name)}</td>
-                  <td>₱${fmt(i.budget)}</td>
-                  <td style="color:var(--danger)">${canSeeSpend?'₱'+fmt(i.spent):'—'}</td>
-                  <td style="color:${rem<0?'var(--danger)':'var(--success)'}">${canSeeSpend?'₱'+fmt(rem):'—'}</td>
-                  <td>
+                  <td data-label="Item" style="font-weight:600">${escHtml(i.name)}</td>
+                  <td data-label="Allocated">₱${fmt(i.budget)}</td>
+                  <td data-label="Spent" style="color:var(--danger)">${canSeeSpend?'₱'+fmt(i.spent):'—'}</td>
+                  <td data-label="Remaining" style="color:${rem<0?'var(--danger)':'var(--success)'}">${canSeeSpend?'₱'+fmt(rem):'—'}</td>
+                  <td data-label="%">
                     ${canSeeSpend?`<div style="display:flex;align-items:center;gap:6px;min-width:80px">
                       <div style="flex:1;height:6px;background:var(--surface2);border-radius:3px">
                         <div style="width:${pct}%;height:100%;border-radius:3px;background:${pct>=90?'var(--danger)':pct>=70?'var(--warning,#ff9f0a)':'var(--primary-light)'}"></div>
@@ -11967,16 +11998,16 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
       </div>
       <div class="card-body" style="padding:0">
         ${!expenses.length?`<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('🧾',44)}</div><p>No expenses logged yet.</p></div>`:
-          `<div class="table-wrap"><table class="data-table">
+          `<div class="table-wrap"><table class="data-table table-cards">
             <thead><tr><th>Date</th><th>Description</th><th>Line Item</th><th>Type</th><th>Amount</th><th>By</th></tr></thead>
             <tbody>
-              ${expenses.map(e=>`<tr>
-                <td style="font-size:12px">${e.date||'—'}</td>
-                <td style="font-size:12px">${escHtml(e.description||'—')}</td>
-                <td style="font-size:11px;color:var(--text-muted)">${escHtml(e.budgetLineName||'—')}</td>
-                <td><span class="badge ${e.type==='credit'?'badge-green':'badge-red'}">${e.type==='credit'?'Income':'Expense'}</span></td>
-                <td style="color:${e.type==='credit'?'var(--success)':'var(--danger)'};font-weight:600">₱${fmt(e.amount)}</td>
-                <td style="font-size:11px;color:var(--text-muted)">${escHtml(e.addedByName||'—')}</td>
+              ${expenses.map(e=>`<tr class="bud-exp-row">
+                <td class="tc-avatar" style="font-size:12px">${e.date||'—'}</td>
+                <td class="tc-name" style="font-size:12px">${escHtml(e.description||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+                <td class="tc-detail" data-label="Line Item" style="font-size:11px;color:var(--text-muted)">${escHtml(e.budgetLineName||'—')}</td>
+                <td class="tc-detail" data-label="Type"><span class="badge ${e.type==='credit'?'badge-green':'badge-red'}">${e.type==='credit'?'Income':'Expense'}</span></td>
+                <td class="tc-net" style="color:${e.type==='credit'?'var(--success)':'var(--danger)'};font-weight:600">₱${fmt(e.amount)}</td>
+                <td class="tc-detail" data-label="By" style="font-size:11px;color:var(--text-muted)">${escHtml(e.addedByName||'—')}</td>
               </tr>`).join('')}
             </tbody>
           </table></div>`}
@@ -11984,6 +12015,10 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
     </div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
+  container.querySelectorAll('tr.bud-exp-row').forEach(tr => tr.addEventListener('click', (ev) => {
+    if (ev.target.closest('button, a')) return;
+    tr.classList.toggle('tc-expanded');
+  }));
 
   // Add budget line
   document.getElementById('add-budget-line-btn')?.addEventListener('click', () => {

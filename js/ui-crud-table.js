@@ -9,7 +9,16 @@
 //     emptyIcon, emptyLabel,               // empty-state icon + heading
 //     headerExtra(),                        // optional: html for extra controls left of Add button (e.g. a filter select)
 //     addBtnLabel,                          // "+ Add X"
-//     columns: [{ header, style?, cell(r) => html }],
+//     columns: [{ header, style?, cell(r) => html, mobile? }],
+//                                            // mobile (v14 Wave 6 B2) — optional role for the ≤700px .table-cards
+//                                            // layout (see the .table-cards comment in styles.css): 'name' | 'net' |
+//                                            // 'avatar' | 'detail' (default 'detail'). The component emits the
+//                                            // matching tc-* class + data-label + tap-to-expand wiring; callers never
+//                                            // touch markup. BACKWARD COMPATIBLE: if no column sets `mobile`, a
+//                                            // heuristic applies instead — first column becomes tc-name, the LAST
+//                                            // column whose header matches /amount|total|net|balance|debit|credit|
+//                                            // cash|pay|price|value/i becomes tc-net (falling back to the actual last
+//                                            // column if none match), everything else is tc-detail.
 //     actionsMode: 'always' | 'privOnly',   // 'always' = actions <td> always rendered (buttons conditional inside);
 //                                            // 'privOnly' = whole actions column only exists when isFinancePriv()
 //     actionsExtra(r),                      // optional extra html inside the actions cell (e.g. file link)
@@ -51,17 +60,43 @@ window.renderFinanceCrudTable = async function(container, cfg) {
 
   const redo = () => window.renderFinanceCrudTable(container, cfg);
 
+  // v14 Wave 6 B2 — resolve each column's ≤700px .table-cards role (see the
+  // cfg doc above + the .table-cards comment in styles.css). Explicit
+  // cfg.columns[i].mobile wins if ANY column sets one; otherwise fall back to
+  // the heuristic (first col = name, last money-ish-header col = net, rest =
+  // detail) so pre-existing callers render sensibly with zero changes.
+  const MONEY_HEADER_RE = /(amount|total|net|balance|debit|credit|cash|pay|price|value)/i;
+  function resolveMobileRoles(columns) {
+    if (columns.some(c => c.mobile)) return columns.map(c => c.mobile || 'detail');
+    const roles = columns.map(() => 'detail');
+    if (columns.length) roles[0] = 'name';
+    let netIdx = -1;
+    for (let i = columns.length - 1; i > 0; i--) {
+      if (MONEY_HEADER_RE.test(columns[i].header || '')) { netIdx = i; break; }
+    }
+    if (netIdx === -1 && columns.length > 1) netIdx = columns.length - 1;
+    if (netIdx > 0) roles[netIdx] = 'net';
+    return roles;
+  }
+  const mobileRoles = resolveMobileRoles(cfg.columns);
+
   function actionsCellHtml(r) {
     const editBtn = isPriv ? `<button class="btn-secondary btn-sm crud-edit-btn" data-id="${r.id}">${emojiIcon('✎',16)}</button>` : '';
     const delBtn = isPriv ? `<button class="btn-danger btn-sm crud-del-btn" data-id="${r.id}" data-label="${escHtml(cfg.deleteLabel(r))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>` : '';
     const extra = cfg.actionsExtra ? cfg.actionsExtra(r) : '';
-    return `<td style="white-space:nowrap">${editBtn}${delBtn}${extra}</td>`;
+    return `<td class="tc-actions" style="white-space:nowrap">${editBtn}${delBtn}${extra}</td>`;
   }
 
   function rowHtml(r) {
-    const tds = cfg.columns.map(c => `<td${c.style ? ` style="${c.style}"` : ''}>${c.cell(r)}</td>`).join('');
+    const tds = cfg.columns.map((c, i) => {
+      const role = mobileRoles[i];
+      const cls = role === 'detail' ? 'tc-detail' : `tc-${role}`;
+      const labelAttr = role === 'detail' ? ` data-label="${escHtml(c.header)}"` : '';
+      const caret = role === 'name' ? ` <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i>` : '';
+      return `<td class="${cls}"${c.style ? ` style="${c.style}"` : ''}${labelAttr}>${c.cell(r)}${caret}</td>`;
+    }).join('');
     const actionsTd = showActionsCol ? actionsCellHtml(r) : '';
-    return `<tr>${tds}${actionsTd}</tr>`;
+    return `<tr class="crud-row">${tds}${actionsTd}</tr>`;
   }
 
   const headerRow = `<tr>${cfg.columns.map(c => `<th>${c.header}</th>`).join('')}${showActionsCol ? '<th></th>' : ''}</tr>`;
@@ -76,7 +111,7 @@ window.renderFinanceCrudTable = async function(container, cfg) {
       <div class="card-body" style="padding:0">
         ${!records.length
           ? `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon(cfg.emptyIcon,44)}</div><h4>${cfg.emptyLabel}</h4></div>`
-          : `<div class="table-wrap"><table class="data-table">
+          : `<div class="table-wrap"><table class="data-table table-cards">
               <thead>${headerRow}</thead>
               <tbody id="crud-tbody">${records.map(rowHtml).join('')}</tbody>
             </table></div>`}
@@ -84,6 +119,20 @@ window.renderFinanceCrudTable = async function(container, cfg) {
     </div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
+
+  // Card view (≤700px) — tap a row (outside buttons/links) to reveal the
+  // tc-detail breakdown. Class toggle only, same markup/values at every
+  // width (see the .table-cards comment in styles.css). No-op at desktop
+  // widths since tc-detail is only ever hidden inside that max-width query.
+  function bindRowToggle(scopeEl) {
+    scopeEl.querySelectorAll('tr.crud-row').forEach(tr => {
+      tr.addEventListener('click', (ev) => {
+        if (ev.target.closest('button, a')) return;
+        tr.classList.toggle('tc-expanded');
+      });
+    });
+  }
+  bindRowToggle(container);
 
   function bindRowActions(scopeEl) {
     if (!isPriv) return;
@@ -112,6 +161,7 @@ window.renderFinanceCrudTable = async function(container, cfg) {
       if (!tbody) return;
       tbody.innerHTML = filtered.map(rowHtml).join('');
       if (window.lucide) lucide.createIcons({ nodes: [tbody] });
+      bindRowToggle(tbody);
       bindRowActions(tbody);
     });
   }

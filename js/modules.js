@@ -2210,17 +2210,24 @@ async function renderPresidentMessageCard() {
       </div>
       <div class="card"><div class="card-body" style="padding:0">
       ${!jobs.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🧮',44)}</div><h4>No job costs yet</h4></div>`:
-      `<div class="table-wrap"><table class="data-table">
+      `<div class="table-wrap"><table class="data-table table-cards">
         <thead><tr><th>Project</th><th>Revenue</th><th>Materials</th><th>Labor</th><th>Other</th><th>Cost</th><th>Margin</th>${ce?'<th></th>':''}</tr></thead>
-        <tbody>${jobs.map(j=>{const cost=(j.materialsCost||0)+(j.laborCost||0)+(j.otherCost||0);const margin=(j.revenue||0)-cost;const pct=j.revenue?Math.round(margin/j.revenue*100):0;return `<tr>
-          <td style="font-weight:600">${escHtml(j.project||'—')}${j.quoteRef?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(j.quoteRef)}</div>`:''}</td>
-          <td>${peso(j.revenue||0)}</td><td>${peso(j.materialsCost||0)}</td><td>${peso(j.laborCost||0)}</td><td>${peso(j.otherCost||0)}</td>
-          <td>${peso(cost)}</td>
-          <td style="font-weight:700;color:${margin>=0?'var(--success)':'var(--danger)'}">${peso(margin)}<div style="font-size:11px">${pct}%</div></td>
-          ${ce?`<td><button class="btn-secondary btn-sm job-edit-btn" data-id="${j.id}" title="Edit">${emojiIcon('✎',16)}</button></td>`:''}
+        <tbody>${jobs.map(j=>{const cost=(j.materialsCost||0)+(j.laborCost||0)+(j.otherCost||0);const margin=(j.revenue||0)-cost;const pct=j.revenue?Math.round(margin/j.revenue*100):0;return `<tr class="job-row">
+          <td class="tc-name" style="font-weight:600">${escHtml(j.project||'—')}${j.quoteRef?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(j.quoteRef)}</div>`:''} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+          <td class="tc-detail" data-label="Revenue">${peso(j.revenue||0)}</td>
+          <td class="tc-detail" data-label="Materials">${peso(j.materialsCost||0)}</td>
+          <td class="tc-detail" data-label="Labor">${peso(j.laborCost||0)}</td>
+          <td class="tc-detail" data-label="Other">${peso(j.otherCost||0)}</td>
+          <td class="tc-detail" data-label="Cost">${peso(cost)}</td>
+          <td class="tc-net" style="font-weight:700;color:${margin>=0?'var(--success)':'var(--danger)'}">${peso(margin)}<div style="font-size:11px">${pct}%</div></td>
+          ${ce?`<td class="tc-actions"><button class="btn-secondary btn-sm job-edit-btn" data-id="${j.id}" title="Edit">${emojiIcon('✎',16)}</button></td>`:''}
         </tr>`;}).join('')}</tbody></table></div>`}
       </div></div>`;
     if (window.lucide) lucide.createIcons({ nodes: [el] });
+    el.querySelectorAll('tr.job-row').forEach(tr => tr.addEventListener('click', (ev) => {
+      if (ev.target.closest('button, a')) return;
+      tr.classList.toggle('tc-expanded');
+    }));
     document.getElementById('jobs-csv')?.addEventListener('click',()=>window.exportCSV('job-costing', jobs, [
       {key:'project',label:'Project'},{key:'quoteRef',label:'Quote Ref'},{key:'revenue',label:'Revenue',get:j=>j.revenue||0},
       {key:'materialsCost',label:'Materials',get:j=>j.materialsCost||0},{key:'laborCost',label:'Labor',get:j=>j.laborCost||0},{key:'otherCost',label:'Other',get:j=>j.otherCost||0},
