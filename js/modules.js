@@ -1995,19 +1995,19 @@ async function renderPresidentMessageCard() {
       const tbl = document.getElementById('inv-table');
       if (!tbl) return;
       tbl.innerHTML = !shown.length ? `<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📦',44)}</div><h4>No items match</h4></div>` :
-        `<div class="table-wrap"><table class="data-table">
+        `<div class="table-wrap"><table class="data-table table-cards">
           <thead><tr><th>Item</th><th>Type</th><th>On Hand</th><th>Reorder</th><th>Unit Cost</th><th>Value</th><th>Supplier</th><th></th></tr></thead>
           <tbody>${shown.map(i=>{
             const lowItem=(i.reorderLevel||0)>0 && (i.qty||0)<=(i.reorderLevel||0);
-            return `<tr>
-              <td style="font-weight:600">${escHtml(i.name||'—')}${i.category?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(i.category)}</div>`:''}</td>
-              <td><span class="badge ${(i.kind||'material')==='product'?'badge-blue':'badge-gray'}">${(i.kind||'material')==='product'?'Finished':'Material'}</span></td>
-              <td style="font-weight:700;color:${lowItem?'var(--danger)':'inherit'}">${num(i.qty||0)} ${escHtml(i.unit||'')}${lowItem?` ${emojiIcon('⚠️',16)}`:''}</td>
-              <td style="font-size:12px;color:var(--text-muted)">${num(i.reorderLevel||0)}</td>
-              <td>${peso(i.unitCost||0)}</td>
-              <td>${peso((i.qty||0)*(i.unitCost||0))}</td>
-              <td style="font-size:12px">${escHtml(i.supplier||'—')}</td>
-              <td style="white-space:nowrap">
+            return `<tr class="inv-row">
+              <td class="tc-name" style="font-weight:600">${escHtml(i.name||'—')}${i.category?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(i.category)}</div>`:''} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+              <td class="tc-detail" data-label="Type"><span class="badge ${(i.kind||'material')==='product'?'badge-blue':'badge-gray'}">${(i.kind||'material')==='product'?'Finished':'Material'}</span></td>
+              <td class="tc-net" style="font-weight:700;color:${lowItem?'var(--danger)':'inherit'}">${num(i.qty||0)} ${escHtml(i.unit||'')}${lowItem?` ${emojiIcon('⚠️',16)}`:''}</td>
+              <td class="tc-detail" data-label="Reorder" style="font-size:12px;color:var(--text-muted)">${num(i.reorderLevel||0)}</td>
+              <td class="tc-detail" data-label="Unit Cost">${peso(i.unitCost||0)}</td>
+              <td class="tc-detail" data-label="Value">${peso((i.qty||0)*(i.unitCost||0))}</td>
+              <td class="tc-detail" data-label="Supplier" style="font-size:12px">${escHtml(i.supplier||'—')}</td>
+              <td class="tc-actions" style="white-space:nowrap">
                 <button class="btn-secondary btn-sm inv-hist-btn" data-id="${i.id}" title="Movement history">${emojiIcon('📜',16)}</button>
                 ${ce?`<button class="btn-success btn-sm inv-in-btn" data-id="${i.id}" title="Stock In">＋</button>
                 <button class="btn-secondary btn-sm inv-out-btn" data-id="${i.id}" title="Stock Out">−</button>
@@ -2017,6 +2017,13 @@ async function renderPresidentMessageCard() {
           <tfoot><tr><td colspan="5" style="text-align:right;font-weight:700;color:var(--text-muted)">Shown value</td><td style="font-weight:700">${peso(shownValue)}</td><td colspan="2"></td></tr></tfoot>
         </table></div>`;
       if (window.lucide) lucide.createIcons({ nodes: [tbl] });
+      // Card view (≤700px) — tap a row to reveal the full breakdown.
+      tbl.querySelectorAll('tr.inv-row').forEach(tr => {
+        tr.addEventListener('click', (ev) => {
+          if (ev.target.closest('button, a')) return;
+          tr.classList.toggle('tc-expanded');
+        });
+      });
       // Row actions
       tbl.querySelectorAll('.inv-hist-btn').forEach(b=>b.addEventListener('click',()=>itemHistoryModal(items.find(i=>i.id===b.dataset.id))));
       if(ce){
@@ -2163,19 +2170,20 @@ async function renderPresidentMessageCard() {
     const renderRows = () => {
       const rows = filtered(); const tbl=document.getElementById('mv-table'); if(!tbl) return;
       tbl.innerHTML = !rows.length ? `<div class="empty-state" style="padding:18px"><div class="empty-icon">${emojiIcon('🔎',44)}</div><h4>No movements match</h4></div>` :
-        `<div class="table-wrap"><table class="data-table">
+        `<div class="table-wrap"><table class="data-table table-cards">
           <thead><tr><th>Date</th><th>Item</th><th>Type</th><th>Source</th><th>Qty</th><th>Project</th><th>Note</th><th>By</th></tr></thead>
-          <tbody>${rows.map(m=>`<tr>
-            <td style="font-size:12px">${escHtml(m.date||'—')}</td>
-            <td style="font-weight:600">${escHtml(m.itemName||'—')}</td>
-            <td>${typeBadge(m.type)}</td>
-            <td style="font-size:11px;color:var(--text-muted)">${escHtml(m.source||'manual')}${m.refNumber?`<div>${escHtml(m.refNumber)}</div>`:''}</td>
-            <td>${num(m.qty||0)}</td>
-            <td style="font-size:12px">${escHtml(m.project||'—')}</td>
-            <td style="font-size:12px">${escHtml(m.note||'—')}</td>
-            <td style="font-size:11px">${escHtml(m.byName||'—')}</td>
+          <tbody>${rows.map(m=>`<tr class="mv-row">
+            <td class="tc-avatar" style="font-size:12px;white-space:nowrap">${escHtml(m.date||'—')}</td>
+            <td class="tc-name" style="font-weight:600">${escHtml(m.itemName||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+            <td class="tc-detail" data-label="Type">${typeBadge(m.type)}</td>
+            <td class="tc-detail" data-label="Source" style="font-size:11px;color:var(--text-muted)">${escHtml(m.source||'manual')}${m.refNumber?`<div>${escHtml(m.refNumber)}</div>`:''}</td>
+            <td class="tc-net">${num(m.qty||0)}</td>
+            <td class="tc-detail" data-label="Project" style="font-size:12px">${escHtml(m.project||'—')}</td>
+            <td class="tc-detail" data-label="Note" style="font-size:12px">${escHtml(m.note||'—')}</td>
+            <td class="tc-detail" data-label="By" style="font-size:11px">${escHtml(m.byName||'—')}</td>
           </tr>`).join('')}</tbody></table></div>`;
       if (window.lucide) lucide.createIcons({ nodes: [tbl] });
+      tbl.querySelectorAll('tr.mv-row').forEach(tr => tr.addEventListener('click', () => tr.classList.toggle('tc-expanded')));
     };
     if (mv.length){
       window.bindChipTabs(el.querySelector('.mv-type'), (key)=>{ typeFilter=key; renderRows(); });
@@ -2735,15 +2743,15 @@ window.renderFilesHub = function(){
     const showing = q ? allScopeFiles.filter(f=>hit(q,f.name,f.description,f.scope,f.department)) : allScopeFiles;
     if (!showing.length) { fc.innerHTML = window.renderEmptyState({icon:'📁', title:'No files found', hint:'Try a different scope, or upload the first file here.'}); if (window.lucide) lucide.createIcons({ nodes: [fc] }); return; }
     _gsFilesStashHub = {}; showing.forEach(f=>{ _gsFilesStashHub[f.id]=f; });
-    fc.innerHTML = `<div class="table-wrap"><table class="data-table">
+    fc.innerHTML = `<div class="table-wrap"><table class="data-table table-cards">
       <thead><tr><th>Name</th><th>Scope</th><th>Dept</th><th>Uploader</th><th>Date</th><th></th></tr></thead>
       <tbody>${showing.map(f=>`<tr>
-        <td><a href="#" class="fh-hub-open" data-id="${f.id}" style="color:var(--primary);font-weight:600">${f.kind==='link'?`${emojiIcon('🔗',16)} `:`${emojiIcon('📄',16)} `}${escHtml(f.name||'File')}</a></td>
-        <td><span class="badge badge-gray">${escHtml(f.scope||'—')}</span></td>
-        <td style="font-size:12px">${escHtml(f.department||'—')}</td>
-        <td style="font-size:12px">${escHtml(f.uploaderName||'—')}</td>
-        <td style="font-size:11px;color:var(--text-muted)">${f.createdAt?new Date(f.createdAt.toDate()).toLocaleDateString('en-PH'):''}</td>
-        <td><a href="${safeHttpUrl(f.url)}" target="_blank" class="btn-secondary btn-sm">${emojiIcon('⬇',16)}</a></td>
+        <td class="tc-name"><a href="#" class="fh-hub-open" data-id="${f.id}" style="color:var(--primary);font-weight:600">${f.kind==='link'?`${emojiIcon('🔗',16)} `:`${emojiIcon('📄',16)} `}${escHtml(f.name||'File')}</a></td>
+        <td class="tc-detail" data-label="Scope"><span class="badge badge-gray">${escHtml(f.scope||'—')}</span></td>
+        <td class="tc-detail" data-label="Dept" style="font-size:12px">${escHtml(f.department||'—')}</td>
+        <td class="tc-detail" data-label="Uploader" style="font-size:12px">${escHtml(f.uploaderName||'—')}</td>
+        <td class="tc-net" style="font-size:11px;color:var(--text-muted)">${f.createdAt?new Date(f.createdAt.toDate()).toLocaleDateString('en-PH'):''}</td>
+        <td class="tc-actions"><a href="${safeHttpUrl(f.url)}" target="_blank" class="btn-secondary btn-sm">${emojiIcon('⬇',16)}</a></td>
       </tr>`).join('')}</tbody></table></div>`;
     if (window.lucide) lucide.createIcons({ nodes: [fc] });
     fc.querySelectorAll('.fh-hub-open').forEach(el=>el.addEventListener('click', e=>{

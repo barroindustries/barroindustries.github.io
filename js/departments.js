@@ -2820,21 +2820,21 @@ async function renderMktInsights(content, currentUser, currentRole) {
     </div>
     ${!camps.length ? `<div class="empty-state" style="padding:20px"><div class="empty-icon">${emojiIcon('📈',44)}</div><p>No campaigns yet.</p></div>` : `
     <div class="table-wrap" style="overflow-x:auto">
-      <table class="data-table">
+      <table class="data-table table-cards">
         <thead><tr><th>Campaign</th><th>Status</th><th>Spend</th><th>Leads</th><th>CPL</th><th>Quotes</th><th>Quoted ₱</th><th>Wins</th><th>Won ₱</th></tr></thead>
         <tbody>
           ${rows.map(r => { const [bc,bl] = stBadge(r.camp.status);
             const overBudget = (r.spend!=null && (r.camp.budget||0)>0 && r.spend > r.camp.budget);
-            return `<tr>
-              <td style="font-weight:600">${escHtml(r.camp.name||'')}</td>
-              <td><span class="badge ${bc}" style="font-size:9px">${bl}</span></td>
-              <td style="${overBudget?'color:var(--danger)':''}">${r.spend!=null?'₱'+fmt(r.spend):`<span title="finance-visible">${emojiIcon('🔒',16)} —</span>`}</td>
-              <td>${r.leads}</td>
-              <td>${r.cpl!=null?'₱'+fmt(r.cpl):`<span title="finance-visible">${emojiIcon('🔒',16)} —</span>`}</td>
-              <td>${r.quotes}</td>
-              <td>₱${fmt(r.quoted)}</td>
-              <td>${r.wins}</td>
-              <td>₱${fmt(r.wonVal)}</td>
+            return `<tr class="mi-row">
+              <td class="tc-name" style="font-weight:600">${escHtml(r.camp.name||'')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+              <td class="tc-detail" data-label="Status"><span class="badge ${bc}" style="font-size:9px">${bl}</span></td>
+              <td class="tc-detail" data-label="Spend" style="${overBudget?'color:var(--danger)':''}">${r.spend!=null?'₱'+fmt(r.spend):`<span title="finance-visible">${emojiIcon('🔒',16)} —</span>`}</td>
+              <td class="tc-detail" data-label="Leads">${r.leads}</td>
+              <td class="tc-detail" data-label="CPL">${r.cpl!=null?'₱'+fmt(r.cpl):`<span title="finance-visible">${emojiIcon('🔒',16)} —</span>`}</td>
+              <td class="tc-detail" data-label="Quotes">${r.quotes}</td>
+              <td class="tc-detail" data-label="Quoted ₱">₱${fmt(r.quoted)}</td>
+              <td class="tc-detail" data-label="Wins">${r.wins}</td>
+              <td class="tc-net">₱${fmt(r.wonVal)}</td>
             </tr>`; }).join('')}
         </tbody>
       </table>
@@ -2842,6 +2842,7 @@ async function renderMktInsights(content, currentUser, currentRole) {
     ${unattributed > 0 ? `<div style="font-size:11px;color:var(--text-muted);margin-top:10px">${emojiIcon('💡',11)} ${unattributed} marketing lead${unattributed>1?'s have':' has'} no campaign tag.</div>` : ''}
   `;
   if (window.lucide) lucide.createIcons({ nodes: [content] });
+  content.querySelectorAll('tr.mi-row').forEach(tr => tr.addEventListener('click', () => tr.classList.toggle('tc-expanded')));
 }
 
 // ══════════════════════════════════════════════════
@@ -3985,18 +3986,18 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       <div class="card-header"><h3>Payroll History</h3></div>
       <div class="card-body" style="padding:0">
         ${!history.length?'<div class="empty-state" style="padding:20px"><p>No payroll records yet.</p></div>':
-          `<div class="table-wrap"><table class="data-table" id="payroll-history-table">
+          `<div class="table-wrap"><table class="data-table table-cards" id="payroll-history-table">
             <thead><tr><th>Month</th><th>Employee</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net Pay</th><th>Final Pay</th><th>Ledger</th>${canFinance?'<th></th>':''}</tr></thead>
-            <tbody>${history.slice(0,50).map(h=>`<tr>
-              <td>${h.month||'—'}</td>
-              <td>${escHtml(h.userName||'—')}</td>
-              <td>₱${fmt(h.salary)}</td>
-              <td style="color:var(--success)">+₱${fmt(h.allowance)}</td>
-              <td style="color:var(--danger)">-₱${fmt(h.deductions)}</td>
-              <td>₱${fmt(h.netPay)}</td>
-              <td><strong>₱${fmt(h.finalPay)}</strong></td>
-              <td><span class="badge badge-blue" style="font-size:10px">Expense</span></td>
-              ${canFinance?`<td style="white-space:nowrap">
+            <tbody>${history.slice(0,50).map(h=>`<tr class="ph-row">
+              <td class="tc-avatar" style="white-space:nowrap">${h.month||'—'}</td>
+              <td class="tc-name">${escHtml(h.userName||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+              <td class="tc-detail" data-label="Base">₱${fmt(h.salary)}</td>
+              <td class="tc-detail" data-label="Allowance" style="color:var(--success)">+₱${fmt(h.allowance)}</td>
+              <td class="tc-detail" data-label="Deductions" style="color:var(--danger)">-₱${fmt(h.deductions)}</td>
+              <td class="tc-detail" data-label="Net Pay">₱${fmt(h.netPay)}</td>
+              <td class="tc-net"><strong>₱${fmt(h.finalPay)}</strong></td>
+              <td class="tc-detail" data-label="Ledger"><span class="badge badge-blue" style="font-size:10px">Expense</span></td>
+              ${canFinance?`<td class="tc-actions" style="white-space:nowrap">
                 <button class="btn-secondary btn-sm hist-edit-btn" data-id="${h.id}" title="Edit">${emojiIcon('✎',16)}</button>
                 ${pendingDelIds.has(h.id)
                   ? `<button class="btn-secondary btn-sm" style="margin-left:4px;opacity:0.6;cursor:default" disabled title="Awaiting president approval">${emojiIcon('⏳',16)}</button>`
@@ -4009,6 +4010,13 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     </div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
+  // Card view (≤700px) — tap a payroll-history row to reveal the full breakdown.
+  container.querySelectorAll('tr.ph-row').forEach(tr => {
+    tr.addEventListener('click', (ev) => {
+      if (ev.target.closest('button, a')) return;
+      tr.classList.toggle('tc-expanded');
+    });
+  });
 
   // ── History edit (Finance & above) ──────────────
   if (canFinance) {
@@ -5171,18 +5179,18 @@ async function renderLedgerTab(container, currentUser, currentRole) {
     <div class="card">
       <div class="card-body" style="padding:0">
         ${!entries.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('📒',44)}</div><h4>No ledger entries yet</h4></div>`:
-          `<div class="table-wrap"><table class="data-table">
+          `<div class="table-wrap"><table class="data-table table-cards">
             <thead><tr><th>Date</th><th>Description / Account</th><th>Category</th><th>Source</th><th>Debit</th><th>Credit</th><th>Ref #</th><th>By</th>${canFin?'<th></th>':''}</tr></thead>
-            <tbody>${entries.map(e=>`<tr>
-              <td>${e.date||'—'}</td>
-              <td>${escHtml(e.description||'—')}</td>
-              <td><span class="badge badge-blue">${escHtml(e.category||'General')}</span></td>
-              <td style="font-size:11px">${e.source&&e.source!=='Finance'?`<span class="badge badge-gray">${escHtml(e.source)}</span>`:'<span style="color:var(--text-muted)">Finance</span>'}</td>
-              <td style="color:var(--danger)">${e.type==='debit'?'₱'+fmt(e.amount):'-'}</td>
-              <td style="color:var(--success)">${e.type==='credit'?'₱'+fmt(e.amount):'-'}</td>
-              <td><code>${escHtml(e.refNumber||'—')}</code></td>
-              <td style="font-size:11px">${escHtml(e.addedByName||'—')}</td>
-              ${canFin?`<td style="white-space:nowrap">
+            <tbody>${entries.map(e=>`<tr class="ledger-row">
+              <td class="tc-avatar" style="white-space:nowrap">${e.date||'—'}</td>
+              <td class="tc-name">${escHtml(e.description||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+              <td class="tc-detail" data-label="Category"><span class="badge badge-blue">${escHtml(e.category||'General')}</span></td>
+              <td class="tc-detail" data-label="Source" style="font-size:11px">${e.source&&e.source!=='Finance'?`<span class="badge badge-gray">${escHtml(e.source)}</span>`:'<span style="color:var(--text-muted)">Finance</span>'}</td>
+              <td class="${e.type==='debit'?'tc-net':'tc-detail'}" ${e.type==='debit'?'':'data-label="Debit"'} style="color:var(--danger)">${e.type==='debit'?'₱'+fmt(e.amount):'-'}</td>
+              <td class="${e.type==='credit'?'tc-net':'tc-detail'}" ${e.type==='credit'?'':'data-label="Credit"'} style="color:var(--success)">${e.type==='credit'?'₱'+fmt(e.amount):'-'}</td>
+              <td class="tc-detail" data-label="Ref #"><code>${escHtml(e.refNumber||'—')}</code></td>
+              <td class="tc-detail" data-label="By" style="font-size:11px">${escHtml(e.addedByName||'—')}</td>
+              ${canFin?`<td class="tc-actions" style="white-space:nowrap">
                 <button class="btn-secondary btn-sm led-edit-btn" data-id="${e.id}" data-src="${e._src}">${emojiIcon('✎',16)}</button>
                 <button class="btn-danger btn-sm led-del-btn" data-id="${e.id}" data-src="${e._src}" data-label="${escHtml((e.description||'entry')+' — ₱'+fmt(e.amount))}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
               </td>`:''}
@@ -5192,6 +5200,14 @@ async function renderLedgerTab(container, currentUser, currentRole) {
     </div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
+  // Card view (≤700px) — tap a row to reveal the full breakdown (see the
+  // .table-cards comment in styles.css). No-op at desktop widths.
+  container.querySelectorAll('tr.ledger-row').forEach(tr => {
+    tr.addEventListener('click', (ev) => {
+      if (ev.target.closest('button, a')) return;
+      tr.classList.toggle('tc-expanded');
+    });
+  });
   document.getElementById('ledger-csv-btn')?.addEventListener('click', () => window.exportCSV('ledger', entries, [
     {key:'date',label:'Date'},{key:'description',label:'Description'},{key:'category',label:'Category'},
     {key:'source',label:'Source',get:e=>e.source||'Finance'},
@@ -5343,18 +5359,21 @@ window.renderBankAccounts = async function(container) {
     ${canWrite?`<div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn-primary btn-sm" id="ba-add-btn">+ Add Account</button></div>`:''}
     <div class="card"><div class="card-body" style="padding:0">
     ${!accounts.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🏦',44)}</div><h4>No bank accounts registered</h4><p>Add every real company account (bank / e-wallet / petty cash) to start tracking balances.</p></div>`:
-    `<div class="table-wrap"><table class="data-table">
+    `<div class="table-wrap"><table class="data-table table-cards">
       <thead><tr><th></th><th>Account</th><th>Opening</th><th>Book Balance</th><th>Reconciled Balance</th><th>Status</th>${canWrite?'<th></th>':''}</tr></thead>
       <tbody>${accounts.map(a=>{
         const bb = bookBal[a.id]?bookBal[a.id].balance:0, rb = recBal[a.id]?recBal[a.id].balance:0;
+        // Row already navigates to the drilldown (.ba-row-link below) — the
+        // detail page IS the expansion, so tc-detail cells stay hidden on
+        // phone with no separate tap-to-expand toggle (no caret/JS added).
         return `<tr>
-        <td>${typeIcon(a.type)}</td>
-        <td class="ba-row-link" data-id="${escHtml(a.id)}" style="cursor:pointer"><strong>${escHtml(a.nickname||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(window.BankAccounts.label(a))}${a.isDefault?' · <span class="badge badge-blue" style="font-size:9px">default</span>':''}</div></td>
-        <td style="font-size:12px">₱${fmt(a.openingBalance||0)}<div style="font-size:10px;color:var(--text-muted)">@ ${escHtml(a.openingDate||'—')}</div></td>
-        <td style="font-weight:700">₱${fmt(bb)}</td>
-        <td>₱${fmt(rb)}</td>
-        <td><span class="badge ${a.active!==false?'badge-green':'badge-gray'}">${a.active!==false?'active':'closed'}</span></td>
-        ${canWrite?`<td style="white-space:nowrap">
+        <td class="tc-avatar">${typeIcon(a.type)}</td>
+        <td class="tc-name ba-row-link" data-id="${escHtml(a.id)}" style="cursor:pointer"><strong>${escHtml(a.nickname||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(window.BankAccounts.label(a))}${a.isDefault?' · <span class="badge badge-blue" style="font-size:9px">default</span>':''}</div></td>
+        <td class="tc-detail" data-label="Opening" style="font-size:12px">₱${fmt(a.openingBalance||0)}<div style="font-size:10px;color:var(--text-muted)">@ ${escHtml(a.openingDate||'—')}</div></td>
+        <td class="tc-net" style="font-weight:700">₱${fmt(bb)}</td>
+        <td class="tc-detail" data-label="Reconciled Balance">₱${fmt(rb)}</td>
+        <td class="tc-detail" data-label="Status"><span class="badge ${a.active!==false?'badge-green':'badge-gray'}">${a.active!==false?'active':'closed'}</span></td>
+        ${canWrite?`<td class="tc-actions" style="white-space:nowrap">
           <button class="btn-secondary btn-sm ba-edit-btn" data-id="${escHtml(a.id)}">${emojiIcon('✎',16)}</button>
           <button class="btn-danger btn-sm ba-del-btn" data-id="${escHtml(a.id)}" data-label="${escHtml(a.nickname||'bank account')}" style="margin-left:4px">${emojiIcon('trash-2',14)}</button>
         </td>`:''}
@@ -5482,18 +5501,18 @@ async function renderBankAccountDrilldown(a) {
         <button class="btn-secondary btn-sm" id="ba-dd-close">${emojiIcon('✕',16)} Close</button>
       </div>
       ${!rows.length?`<div class="empty-state" style="padding:16px"><div class="empty-icon">${emojiIcon('📭',44)}</div><h4>No tagged transactions yet</h4></div>`:
-      `<div class="table-wrap"><table class="data-table">
+      `<div class="table-wrap"><table class="data-table table-cards no-toggle">
         <thead><tr><th>Date</th><th>Description</th><th>Ref #</th><th>Amount</th><th>Running Balance</th><th>Reconciled</th><th>Re-tag to</th></tr></thead>
         <tbody>${rows.map(r=>{
           running += (r.bankFlow==='in'?1:-1) * (+r.amount||0);
           return `<tr>
-          <td style="font-size:11px">${r.date||'—'}</td>
-          <td style="font-size:12px">${escHtml(r.description||'—')}</td>
-          <td><code>${escHtml(r.refNumber||'—')}</code></td>
-          <td style="color:${r.bankFlow==='in'?'var(--success)':'var(--danger)'}">${r.bankFlow==='in'?'+':'-'}₱${fmt(r.amount||0)}</td>
-          <td style="font-weight:700">₱${fmt(running)}</td>
-          <td><input type="checkbox" class="ba-recon-chk" data-id="${escHtml(r.id)}" ${r.reconciled?'checked':''}/></td>
-          <td><select class="ba-retag-sel" data-id="${escHtml(r.id)}" style="font-size:11px;padding:3px 6px">${bankOpts}</select></td>
+          <td data-label="Date" style="font-size:11px">${r.date||'—'}</td>
+          <td data-label="Description" style="font-size:12px">${escHtml(r.description||'—')}</td>
+          <td data-label="Ref #"><code>${escHtml(r.refNumber||'—')}</code></td>
+          <td data-label="Amount" style="color:${r.bankFlow==='in'?'var(--success)':'var(--danger)'}">${r.bankFlow==='in'?'+':'-'}₱${fmt(r.amount||0)}</td>
+          <td data-label="Running Balance" style="font-weight:700">₱${fmt(running)}</td>
+          <td data-label="Reconciled"><input type="checkbox" class="ba-recon-chk" data-id="${escHtml(r.id)}" ${r.reconciled?'checked':''}/></td>
+          <td data-label="Re-tag to"><select class="ba-retag-sel" data-id="${escHtml(r.id)}" style="font-size:11px;padding:3px 6px;max-width:60%">${bankOpts}</select></td>
         </tr>`; }).join('')}</tbody>
       </table></div>`}
     </div></div>
@@ -6085,19 +6104,19 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
       <div class="card-header"><h3>${emojiIcon('👷',20)} Worker Profiles</h3></div>
       <div class="card-body" style="padding:0">
         ${!profiles.length ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('👷',44)}</div><p>No worker profiles yet. Add one to start generating payslips.</p></div>` :
-        `<div class="table-wrap"><table class="data-table">
+        `<div class="table-wrap"><table class="data-table table-cards">
           <thead><tr><th>Name</th><th>Job Title</th><th>Dept</th><th>Type</th><th>Daily Rate</th><th>CA Balance</th><th>Payroll</th><th>Status</th><th></th></tr></thead>
           <tbody>
-            ${profiles.map(p=>`<tr>
-              <td style="font-weight:600">${escHtml(p.name||'—')}</td>
-              <td>${escHtml(p.jobTitle||'—')}</td>
-              <td><span class="badge badge-blue">${escHtml(p.department||'—')}</span></td>
-              <td><span class="badge badge-purple">${escHtml(p.employmentType||'—')}</span></td>
-              <td>₱${fmt(p.dailyRate||0)}</td>
-              <td>${p.caBalance>0?`<span style="color:var(--danger)">₱${fmt(p.caBalance)}</span>`:'<span style="color:var(--text-muted)">—</span>'}</td>
-              <td><span class="badge ${p.includeInPayroll!==false?'badge-green':'badge-gray'}">${p.includeInPayroll!==false?'Included':'Excluded'}</span></td>
-              <td><span class="badge ${p.status==='active'?'badge-green':'badge-gray'}">${p.status||'active'}</span></td>
-              <td style="white-space:nowrap">
+            ${profiles.map(p=>`<tr class="hrp-row">
+              <td class="tc-name" style="font-weight:600">${escHtml(p.name||'—')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
+              <td class="tc-detail" data-label="Job Title">${escHtml(p.jobTitle||'—')}</td>
+              <td class="tc-detail" data-label="Dept"><span class="badge badge-blue">${escHtml(p.department||'—')}</span></td>
+              <td class="tc-detail" data-label="Type"><span class="badge badge-purple">${escHtml(p.employmentType||'—')}</span></td>
+              <td class="tc-net">₱${fmt(p.dailyRate||0)}</td>
+              <td class="tc-detail" data-label="CA Balance">${p.caBalance>0?`<span style="color:var(--danger)">₱${fmt(p.caBalance)}</span>`:'<span style="color:var(--text-muted)">—</span>'}</td>
+              <td class="tc-detail" data-label="Payroll"><span class="badge ${p.includeInPayroll!==false?'badge-green':'badge-gray'}">${p.includeInPayroll!==false?'Included':'Excluded'}</span></td>
+              <td class="tc-detail" data-label="Status"><span class="badge ${p.status==='active'?'badge-green':'badge-gray'}">${p.status||'active'}</span></td>
+              <td class="tc-actions" style="white-space:nowrap">
                 <button class="btn-primary btn-sm hrp-gen-btn" data-id="${p.id}" style="margin-right:4px">${emojiIcon('📄',16)} Payslip</button>
                 <button class="btn-secondary btn-sm hrp-id-btn" data-id="${p.id}" style="margin-right:4px">${emojiIcon('🪪',16)} ID</button>
                 ${isPriv?`<button class="btn-secondary btn-sm hrp-kiosk-btn" data-id="${p.id}" title="Record today's time in/out" style="margin-right:4px">${emojiIcon('⏱',16)} Clock</button>`:''}
@@ -6112,6 +6131,13 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
     </div>
   `;
   if (window.lucide) lucide.createIcons({ nodes: [container] });
+  // Card view (≤700px) — tap a worker row to reveal the full breakdown.
+  container.querySelectorAll('tr.hrp-row').forEach(tr => {
+    tr.addEventListener('click', (ev) => {
+      if (ev.target.closest('button, a')) return;
+      tr.classList.toggle('tc-expanded');
+    });
+  });
 
   // Add profile
   if (isPriv) {
@@ -9151,7 +9177,7 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
 
     const renderList = (quotes) => !quotes.length
       ? `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('📋',44)}</div><h4>No quotations here</h4></div>`
-      : `<div class="card"><div class="table-wrap"><table class="data-table">
+      : `<div class="card"><div class="table-wrap"><table class="data-table table-cards">
           <thead><tr><th>Quote #</th><th>Client</th><th>Total</th><th>Agent</th><th>Status</th><th>Action</th></tr></thead>
           <tbody>${quotes.map(q=>{
             const status = q.status||q.approvalStatus||'draft';
@@ -9159,18 +9185,18 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
             const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
             const canDeleteDirect = currentRole==='president'||currentRole==='owner'||currentRole==='manager';
             const staleDays = staleDaysOf(q);
-            return `<tr>
-              <td><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code></td>
-              <td><strong>${escHtml(q.clientName||'—')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(q.clientCompany||'')}</div></td>
-              <td>₱${fmt(q.total||q.grandTotal||0)}</td>
-              <td>${escHtml(q.agentName||q.createdByName||'—')}</td>
-              <td>
+            return `<tr class="bsq-row">
+              <td class="tc-avatar"><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code></td>
+              <td class="tc-name"><strong>${escHtml(q.clientName||'—')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(q.clientCompany||'')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></div></td>
+              <td class="tc-net">₱${fmt(q.total||q.grandTotal||0)}</td>
+              <td class="tc-detail" data-label="Agent">${escHtml(q.agentName||q.createdByName||'—')}</td>
+              <td class="tc-detail" data-label="Status">
                 <span class="badge ${badge}">${window.statusLabel2('quote', status)}</span>
                 ${q.deleteRequested?`<span class="badge badge-red" style="font-size:9px;margin-left:4px">${emojiIcon('🗑',9)} del req</span>`:''}
                 ${staleDays > window.QUOTE_STALE_DAYS ? `<span class="badge badge-orange" style="font-size:9px;margin-left:4px" title="Filed but no Sales Order yet">${emojiIcon('⚠',9)} ${staleDays}d no SO</span>` : ''}
                 <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${ts}</div>
               </td>
-              <td style="white-space:nowrap;display:flex;gap:6px;flex-wrap:wrap">
+              <td class="tc-actions" style="white-space:nowrap;display:flex;gap:6px;flex-wrap:wrap">
                 ${isPrivileged&&(status==='pending_approval'||status==='pending_review'||status==='sent')?`
                   <button class="btn-primary btn-sm bs-approve-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">${emojiIcon('✅',16)} Approve</button>
                   <button class="btn-danger btn-sm bs-reject-btn" data-id="${q.id}" data-by="${q.createdBy}" data-name="${escHtml(q.clientName||'')}" data-qno="${escHtml(q.quoteNumber||'')}">${emojiIcon('❌',16)} Reject</button>
@@ -9464,22 +9490,29 @@ window.renderSalesOrders = async function(container){
     </div>
     <div class="card"><div class="card-body" style="padding:0">
     ${!orders.length?`<div class="empty-state" style="padding:24px"><div class="empty-icon">${emojiIcon('🧾',44)}</div><h4>No sales orders yet</h4><p>They appear here when a won quote is converted to a sales order.</p></div>`:
-    `<div class="table-wrap"><table class="data-table">
+    `<div class="table-wrap"><table class="data-table table-cards">
       <thead><tr><th>Date</th><th>Client / Project</th><th>Contract</th><th>Received</th><th>Method</th><th>Receipt</th><th>By</th><th>Status</th><th></th></tr></thead>
-      <tbody>${orders.map(o=>`<tr>
-        <td>${o.createdAt?.toDate?o.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''}</td>
-        <td><strong>${escHtml(o.clientName||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(o.project||'')}${o.quoteNumber?' · '+escHtml(o.quoteNumber):''}</div></td>
-        <td>₱${fmt(o.contractAmount||0)}</td>
-        <td>₱${fmt(o.recordedAmount||o.paymentReceived||0)}</td>
-        <td style="font-size:12px">${escHtml(o.paymentMethod||'')}</td>
-        <td>${o.receiptUrl?`<a href="${escHtml(o.receiptUrl)}" target="_blank" class="btn-icon">${emojiIcon('📎',16)}</a>`:'—'}</td>
-        <td style="font-size:11px">${escHtml(o.createdByName||'')}</td>
-        <td><span class="badge ${o.status==='recorded'?'badge-green':'badge-orange'}">${escHtml(o.status||'pending')}</span>${o.sentToProduction?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px">${emojiIcon('🏭',9)} in production</span>`:''}</td>
-        <td style="white-space:nowrap"><button class="btn-secondary btn-sm so-link-btn" data-id="${o.id}" title="Copy the client order-tracking link">${emojiIcon('🔗',16)} Link</button>${isFin?` ${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}">Record Sale</button>`:(!o.sentToProduction?`<button class="btn-secondary btn-sm so-prod-btn" data-id="${o.id}">${emojiIcon('🏭',16)} To Production</button>`:`${emojiIcon('✓',16)}`)}`:''}</td>
+      <tbody>${orders.map(o=>`<tr class="so-row">
+        <td class="tc-avatar" style="white-space:nowrap">${o.createdAt?.toDate?o.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''}</td>
+        <td class="tc-name"><strong>${escHtml(o.clientName||'')}</strong><div style="font-size:11px;color:var(--text-muted)">${escHtml(o.project||'')}${o.quoteNumber?' · '+escHtml(o.quoteNumber):''} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></div></td>
+        <td class="tc-detail" data-label="Contract">₱${fmt(o.contractAmount||0)}</td>
+        <td class="tc-detail" data-label="Received">₱${fmt(o.recordedAmount||o.paymentReceived||0)}</td>
+        <td class="tc-detail" data-label="Method" style="font-size:12px">${escHtml(o.paymentMethod||'')}</td>
+        <td class="tc-detail" data-label="Receipt">${o.receiptUrl?`<a href="${escHtml(o.receiptUrl)}" target="_blank" class="btn-icon">${emojiIcon('📎',16)}</a>`:'—'}</td>
+        <td class="tc-detail" data-label="By" style="font-size:11px">${escHtml(o.createdByName||'')}</td>
+        <td class="tc-net"><span class="badge ${o.status==='recorded'?'badge-green':'badge-orange'}">${escHtml(o.status||'pending')}</span>${o.sentToProduction?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px">${emojiIcon('🏭',9)} in production</span>`:''}</td>
+        <td class="tc-actions" style="white-space:nowrap"><button class="btn-secondary btn-sm so-link-btn" data-id="${o.id}" title="Copy the client order-tracking link">${emojiIcon('🔗',16)} Link</button>${isFin?` ${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}">Record Sale</button>`:(!o.sentToProduction?`<button class="btn-secondary btn-sm so-prod-btn" data-id="${o.id}">${emojiIcon('🏭',16)} To Production</button>`:`${emojiIcon('✓',16)}`)}`:''}</td>
       </tr>`).join('')}</tbody>
     </table></div>`}
     </div></div>`;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
+  // Card view (≤700px) — tap a row to reveal the full breakdown.
+  c.querySelectorAll('tr.so-row').forEach(tr => {
+    tr.addEventListener('click', (ev) => {
+      if (ev.target.closest('button, a')) return;
+      tr.classList.toggle('tc-expanded');
+    });
+  });
   // Tracking link is available to every viewer of this list (non-partner).
   c.querySelectorAll('.so-link-btn').forEach(b=>b.addEventListener('click', async ()=>{
     const o = orders.find(x=>x.id===b.dataset.id); if(!o) return;
@@ -9664,6 +9697,13 @@ async function transferOrderToProduction(o){
 }
 
 function bindQuoteActions(el, currentUser, currentRole, container) {
+  // Card view (≤700px) — tap a row to reveal the full breakdown.
+  el.querySelectorAll('tr.bsq-row').forEach(tr => {
+    tr.addEventListener('click', (ev) => {
+      if (ev.target.closest('button, a')) return;
+      tr.classList.toggle('tc-expanded');
+    });
+  });
   // Direct delete (president/manager only — Firestore rules enforce isAdmin)
   el.querySelectorAll('.bs-del-btn').forEach(btn => {
     btn.addEventListener('click', async e => {
@@ -12147,14 +12187,14 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
       const mirrored = f.driveUrl ? `<i data-lucide="${Drive.sourceIcon(f)}" title="Mirrored to Drive" style="width:12px;height:12px;stroke:var(--text-muted);vertical-align:-2px"></i>` : '';
       const verBadge = (f.versions && f.versions.length > 1) ? `<span class="badge badge-gray" style="margin-left:6px;font-size:10px">v${f.currentV||1}</span>` : '';
       return `<tr draggable="${(!isBin && canEdit)?'true':'false'}" data-file-row="${f.id}">
-        <td>
+        <td class="tc-name">
           <a href="#" class="fh-preview-link" data-id="${f.id}" style="color:var(--primary);font-weight:600">${isLink?`${emojiIcon('🔗',16)} `:`${emojiIcon('📄',16)} `}${escHtml(f.name||'File')}</a>${mirrored}${verBadge}
           ${f.description?`<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(f.description)}</div>`:''}
         </td>
-        <td><span class="badge badge-gray">${escHtml(folderName(f.folderId))}</span></td>
-        <td>${escHtml(f.uploaderName||'—')}</td>
-        <td style="font-size:11px;color:var(--text-muted)">${f.createdAt?new Date(f.createdAt.toDate()).toLocaleDateString('en-PH'):''}</td>
-        <td style="white-space:nowrap">${isBin ? `
+        <td class="tc-detail" data-label="Folder"><span class="badge badge-gray">${escHtml(folderName(f.folderId))}</span></td>
+        <td class="tc-detail" data-label="Added By">${escHtml(f.uploaderName||'—')}</td>
+        <td class="tc-net" style="font-size:11px;color:var(--text-muted)">${f.createdAt?new Date(f.createdAt.toDate()).toLocaleDateString('en-PH'):''}</td>
+        <td class="tc-actions" style="white-space:nowrap">${isBin ? `
           ${canEdit?`<button class="btn-secondary btn-sm fh-restore" data-id="${f.id}">${emojiIcon('♻️',16)} Restore</button>`:''}
           ${window.currentRole==='president'?`<button class="btn-danger btn-sm fh-purge" data-id="${f.id}" data-name="${escHtml(f.name||'File')}">${emojiIcon('🗑',16)} Delete forever</button>`:''}
         ` : `
@@ -12172,7 +12212,7 @@ window.bindFileCollection = function(containerId, currentUser, dept, scope, filt
       ? `<div class="fh-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px">${
           showing.length ? showing.map(f=>cardHtml(f,isBin)).join('') : `<div class="empty-state" style="grid-column:1/-1;padding:18px"><div class="empty-icon">${emojiIcon('📁',44)}</div><h4>${emptyMsg}</h4></div>`
         }</div>`
-      : `<div class="table-wrap"><table class="data-table">
+      : `<div class="table-wrap"><table class="data-table table-cards">
           <thead><tr><th>Name</th><th>Folder</th><th>Added By</th><th>Date</th><th></th></tr></thead>
           <tbody>${rows}</tbody></table></div>`;
 
@@ -14208,17 +14248,17 @@ function purchRfqCard(r, canEdit) {
       ${canEdit ? `<button class="btn-danger btn-sm rfq-del" data-id="${r.id}" data-label="${escHtml(r.title || 'RFQ')}">${emojiIcon('trash-2',14)}</button>` : ''}
     </div>
     ${r.notes ? `<div style="font-size:12px;margin-top:6px">${escHtml(r.notes)}</div>` : ''}
-    <div class="table-wrap" style="margin-top:10px"><table class="data-table">
+    <div class="table-wrap" style="margin-top:10px"><table class="data-table table-cards no-toggle">
       <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th style="width:120px">Unit Price ₱</th><th style="text-align:right">Line Total</th></tr></thead>
       <tbody>
         ${items.map((it, i) => `<tr>
-          <td>${escHtml(it.desc || '—')}</td>
-          <td>${Number(it.qty || 0)}</td>
-          <td>${escHtml(it.unit || '')}</td>
-          <td>${canEdit
-            ? `<input type="number" inputmode="decimal" step="0.01" min="0" class="rfq-price" data-i="${i}" value="${it.unitPrice != null ? it.unitPrice : ''}" style="width:100%" placeholder="—"/>`
+          <td data-label="Item">${escHtml(it.desc || '—')}</td>
+          <td data-label="Qty">${Number(it.qty || 0)}</td>
+          <td data-label="Unit">${escHtml(it.unit || '')}</td>
+          <td data-label="Unit Price ₱">${canEdit
+            ? `<input type="number" inputmode="decimal" step="0.01" min="0" class="rfq-price" data-i="${i}" value="${it.unitPrice != null ? it.unitPrice : ''}" style="width:100%;max-width:120px" placeholder="—"/>`
             : (it.unitPrice != null ? fmt(it.unitPrice) : '—')}</td>
-          <td style="text-align:right" class="rfq-line" data-i="${i}">${it.unitPrice != null ? '₱' + fmt((it.unitPrice || 0) * (it.qty || 0)) : '—'}</td>
+          <td data-label="Line Total" style="text-align:right" class="rfq-line" data-i="${i}">${it.unitPrice != null ? '₱' + fmt((it.unitPrice || 0) * (it.qty || 0)) : '—'}</td>
         </tr>`).join('')}
       </tbody>
       <tfoot><tr><td colspan="4" style="text-align:right;font-weight:700">Total</td><td style="text-align:right;font-weight:700" class="rfq-total">₱${fmt(purchTotal(items))}</td></tr></tfoot>
@@ -14495,14 +14535,14 @@ async function renderPurchaseRequests(content, currentUser, currentRole, opts = 
               ${p.status==='received' && !p.recordedToFinance ? `<span class="badge badge-orange" style="font-size:9px">${emojiIcon('⏳',9)} Awaiting Finance record</span>` : ''}
             </div>
           </div>
-          <div class="table-wrap" style="margin-top:10px"><table class="data-table">
+          <div class="table-wrap" style="margin-top:10px"><table class="data-table table-cards no-toggle">
             <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Line Total</th></tr></thead>
             <tbody>${(p.items || []).map(it => `<tr>
-              <td>${escHtml(it.desc || '—')}</td>
-              <td>${Number(it.qty || 0)}</td>
-              <td>${escHtml(it.unit || '')}</td>
-              <td style="text-align:right">₱${fmt(it.unitPrice || 0)}</td>
-              <td style="text-align:right">₱${fmt((it.unitPrice || 0) * (it.qty || 0))}</td>
+              <td data-label="Item">${escHtml(it.desc || '—')}</td>
+              <td data-label="Qty">${Number(it.qty || 0)}</td>
+              <td data-label="Unit">${escHtml(it.unit || '')}</td>
+              <td data-label="Unit Price" style="text-align:right">₱${fmt(it.unitPrice || 0)}</td>
+              <td data-label="Line Total" style="text-align:right">₱${fmt((it.unitPrice || 0) * (it.qty || 0))}</td>
             </tr>`).join('')}</tbody>
             <tfoot><tr><td colspan="4" style="text-align:right;font-weight:700">Total</td><td style="text-align:right;font-weight:700">₱${fmt(p.total != null ? p.total : purchTotal(p.items))}</td></tr></tfoot>
           </table></div>

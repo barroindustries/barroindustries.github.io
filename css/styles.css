@@ -2067,6 +2067,32 @@ html.theme-astral .chip-tab.active {
   }
   .table-cards .tc-caret { transition: transform var(--t2); color: var(--text-muted); }
   .table-cards tr.tc-expanded .tc-caret { transform: rotate(180deg); }
+  /* 5b. tfoot support (Wave 6) — line-item tables (RFQ/PR) carry a Totals row
+     below tbody. Without this the tfoot keeps its table-footer-group display
+     with a display:block ancestor, which renders inconsistently across
+     browsers. Render it as one flex row: label (colspan cell) left, total
+     right — same visual weight regardless of how many <td>s the row has. */
+  .table-cards tfoot { display: block; }
+  .table-cards tfoot tr {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 12px; margin-top: 4px; border-top: 2px solid var(--border);
+    font-weight: 700;
+  }
+  .table-cards tfoot td { border: none; padding: 0; }
+  /* 5c. No-toggle variant (Wave 6) — for short line-item tables where every
+     cell matters at a glance and hiding data would break inline editing/
+     reading (e.g. RFQ/PR item rows: qty+unit+price+total need to stay
+     together). Opt-in via .table-cards.no-toggle — every <td> becomes an
+     always-visible label:value line (data-label required), no tap/caret/JS. */
+  .table-cards.no-toggle td {
+    flex: 1 1 100%; display: flex; justify-content: space-between; align-items: center;
+    padding: 4px 0; border-top: 1px dashed var(--border); gap: 10px;
+  }
+  .table-cards.no-toggle tr td:first-child { border-top: none; }
+  .table-cards.no-toggle td[data-label]::before {
+    content: attr(data-label); font-weight: 700; font-size: var(--fs-2xs);
+    color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;
+  }
 }
 @media (min-width: 701px) {
   .table-cards .tc-caret { display: none; }
