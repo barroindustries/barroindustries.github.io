@@ -1,0 +1,221 @@
+/* ═══════════════════════════════════════════════════════════
+   BARRO INDUSTRIES — Operations System
+   Design tokens — extracted verbatim from css/styles.css (Batch 2,
+   V14 Wave-1 foundation, spec item 2a). This is the base :root token
+   block only (palette, gradients, surfaces, semantic colors, shadows,
+   radii, spacing, layout dims, type scale, motion, z-scale). The
+   html.light / html.theme-dark / html.theme-astral override blocks
+   stay in styles.css (moving them would reorder the cascade — Wave 2).
+   Link this file BEFORE styles.css.
+═══════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Core palette ── */
+  --black:    #070710;
+  --black-2:  #0D0D1A;
+  --black-3:  #131325;
+  --pink:     #FF2D78;
+  --pink-2:   #FF6B9D;
+  --pink-glow:rgba(255,45,120,0.35);
+  --blue:     #0A84FF;
+  --blue-2:   #40A9FF;
+  --blue-glow:rgba(10,132,255,0.30);
+  --gold:     #FFD60A;
+  --gold-2:   #F5C842;
+  --gold-3:   #FFAA00;
+  --gold-glow:rgba(255,214,10,0.30);
+  --white:    #FFFFFF;
+
+  /* ── Gradient presets ── */
+  --grad-pk-bl: linear-gradient(135deg, #FF2D78 0%, #0A84FF 100%);
+  --grad-gold:  linear-gradient(135deg, #FFD60A 0%, #FF9F0A 100%);
+  --grad-dark:  linear-gradient(135deg, #131325 0%, #0D0D1A 100%);
+  --grad-card:  linear-gradient(160deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
+  --grad-pink:  linear-gradient(135deg, #FF2D78 0%, #FF6B9D 100%);
+  --grad-blue:  linear-gradient(135deg, #0A84FF 0%, #40A9FF 100%);
+  --grad-purple:linear-gradient(135deg, #8B5CF6 0%, #0A84FF 100%);
+  --grad-teal:  linear-gradient(135deg, #00D4AA 0%, #0A84FF 100%);
+  --grad-green: linear-gradient(135deg, #30D158 0%, #00D4AA 100%);
+  --grad-amber: linear-gradient(135deg, #FFD60A 0%, #FF9F0A 100%);
+  --grad-red:   linear-gradient(135deg, #FF453A 0%, #FF2D78 100%);
+
+  /* ── Surfaces (dark glass) ── */
+  --bg:       var(--black);
+  --s0:       rgba(255,255,255,0.03);   /* deepest card */
+  --s1:       rgba(255,255,255,0.05);   /* card */
+  --s2:       rgba(255,255,255,0.08);   /* hover */
+  --s3:       rgba(255,255,255,0.11);   /* active / pressed */
+  --glass:    rgba(13,13,26,0.82);
+  --glass-lt: rgba(255,255,255,0.06);
+
+  /* ── Aliases used by inline JS styles ── */
+  --surface:  rgba(255,255,255,0.05);
+  --surface2: rgba(255,255,255,0.08);
+  --primary:       #9BA8FF;   /* bright lavender — readable on dark */
+  --primary-light: #818CF8;
+  --primary-dark:  #1a237e;
+  --accent:        var(--gold);
+  --accent-light:  var(--gold-2);
+  --success:  #30D158;
+  --warning:  var(--gold-3);
+  --danger:   #FF453A;
+  --info:     var(--blue);
+
+  /* ── Borders ── */
+  --border:      rgba(255,255,255,0.09);
+  --border-glow: rgba(255,45,120,0.25);
+  --border-gold: rgba(255,214,10,0.25);
+
+  /* ── Text ── */
+  --text:       #F0F0FA;
+  --text-2:     rgba(240,240,250,0.80);
+  --text-muted: rgba(240,240,250,0.45);
+  --text-light: rgba(240,240,250,0.28);
+  --text-inv:   #070710;
+
+  /* ── Shadows ── */
+  --sh-xs:  0 1px 4px rgba(0,0,0,0.4);
+  --sh-sm:  0 2px 12px rgba(0,0,0,0.5);
+  --sh:     0 4px 20px rgba(0,0,0,0.55);
+  --sh-md:  0 8px 32px rgba(0,0,0,0.60);
+  --sh-lg:  0 16px 56px rgba(0,0,0,0.70);
+  --sh-pink:0 4px 24px rgba(255,45,120,0.30);
+  --sh-blue:0 4px 24px rgba(10,132,255,0.25);
+  --sh-gold:0 4px 24px rgba(255,214,10,0.25);
+
+  /* ── Radius ── */
+  --r-xs:  6px;
+  --r-sm:  12px;
+  --r:     16px;
+  --r-lg:  20px;
+  --r-xl:  26px;
+  --r-2xl: 32px;
+  --pill:  999px;
+
+  /* ── Spacing (WS43 phone-breathability pass — used inside ≤640/768px
+     media queries only; desktop keeps its existing literal values) ── */
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* ── Layout ── */
+  --topbar-h:     56px;
+  --sidebar-w:    264px;
+  --bottom-nav-h: 56px;
+  --top-nav-h:    50px;
+  --content-max:  1680px;
+
+  /* ── Z-index scale — WS-Phase 58: designed stacking system, replaces ad-hoc literals.
+     Order (low→high): scrim < shell (sidebar/bottom-nav) < topbar < panel (notif) < ptr < drawer < modal < page-panel < dialog < splash.
+     Two deliberate fixes vs. the old inventory: ptr-indicator 300→180 (now under modal/drawer),
+     page-panel 4000→210 (now just above modal, so a modal opened over a page-panel still wins). ── */
+  --z-scrim:      85;   /* sidebar-overlay backdrop */
+  --z-shell:      90;   /* sidebar, bottom-nav base */
+  --z-shell-2:    94;   /* top-nav-strip */
+  --z-bottom-nav: 95;   /* bottom-nav */
+  --z-shell-open: 96;   /* sidebar.open (above top-nav-strip) */
+  --z-topbar:     100;  /* .topbar */
+  --z-topbar-2:   101;  /* top-nav desktop (above .topbar) */
+  --z-panel:      150;  /* notif-panel */
+  --z-panel-scrim:140;  /* notif-backdrop */
+  --z-ptr:        180;  /* pull-to-refresh indicator (below drawer/modal) */
+  --z-drawer-scrim:190; /* drawer-overlay backdrop */
+  --z-drawer:     195;  /* drawer panel */
+  --z-drawer-2:   198;  /* drawer content above its own overlay (190) */
+  --z-modal:      200;  /* modal-overlay */
+  --z-page-panel: 210;  /* full-screen page-panel — just above modal, was 4000 */
+  --z-dialog:     5000; /* dialog-overlay — always on top short of splash */
+  --z-splash:     9999; /* splash screen */
+
+  /* ── Type ── */
+  --font: 'Inter', -apple-system, 'SF Pro Text', system-ui, sans-serif;
+  --font-display: 'Inter', -apple-system, 'SF Pro Display', system-ui, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Mono', 'Cascadia Code', monospace;
+
+  /* ── Motion ── */
+  --ease: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --t1: 120ms; --t2: 220ms; --t3: 340ms;
+  /* v13 Phase 123 — single press-scale used by every button variant's :active
+     state; unifies the previously contradictory 0.97 (inline) vs 0.96 (!important
+     haptic block) values into one token. Set to .96 — the value the !important
+     block was already winning with — so unification causes zero rendered change. */
+  --press-scale: .96;
+  --ios-spring:     cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ios-spring-out: cubic-bezier(0.34, 1.28, 0.64, 1);
+  --ios-enter:      cubic-bezier(0.36, 0.66, 0.04, 1);
+
+  /* ── Component backgrounds (swap for light mode) ── */
+  --topbar-bg:     rgba(7,7,16,0.88);
+  --sidebar-bg:    rgba(7,7,16,0.94);
+  --notif-bg:      rgba(13,13,26,0.92);
+  --login-card-bg: rgba(13,13,26,0.88);
+  --bottom-nav-bg: rgba(7,7,16,0.90);
+  --modal-bg:      rgba(13,13,26,0.92);
+  --drawer-bg:     rgba(10,10,20,0.94);
+
+  /* ── Toast theming (consumed by notifications.js) — WS42 Phase 10:
+     pill = --surface + border + --sh-lg; --toast-success/-error/-info are now the
+     STATUS-ICON color (not the whole-pill background), --toast-text is the message
+     ink color, --toast-bg/-border are the pill surface. ── */
+  --toast-success: #30D158;
+  --toast-error:   #FF453A;
+  --toast-info:    #0A84FF;
+  --toast-text:    var(--text);
+  --toast-bg:      var(--surface);
+  --toast-border:  var(--border);
+
+  /* ── Typography scale (values == today's most-used px literals; no visual change on swap) ── */
+  --fs-2xs: 0.625rem;   /* micro labels, badges */
+  --fs-xs:  0.6875rem;   /* captions, meta, timestamps */
+  --fs-sm:  0.75rem;   /* secondary text, chips */
+  --fs-md:  0.8125rem;   /* dense body */
+  --fs-base:0.875rem;   /* DEFAULT body */
+  --fs-lg:  1rem;   /* emphasized body, inputs */
+  --fs-xl:  1.125rem;   /* card titles */
+  --fs-2xl: 1.25rem;   /* section headers */
+  --fs-3xl: 1.5rem;   /* page sub-headers */
+  --fs-4xl: 1.75rem;   /* page titles */
+  --fs-5xl: 2.125rem;   /* large numeric displays */
+  --fs-6xl: 2.75rem;   /* hero */
+  /* line-heights (unitless) */
+  --lh-tight: 1.2;
+  --lh-snug:  1.35;
+  --lh-base:  1.5;
+  /* ── Brand-role aliases (decouple 'accent role' from the literal --pink) ── */
+  --brand-primary:      var(--pink);   /* the app's primary accent ROLE — reassign here per theme, not by overloading --pink */
+  --brand-primary-2:    var(--pink-2);
+  --brand-on-primary:   var(--white);
+  /* ── Status-bar / theme-color (read by setTheme() to sync <meta name=theme-color>) ── */
+  --theme-color: var(--bg);
+
+  /* ══════════════════════════════════════════════════
+     SEMANTIC TOKEN CONTRACT — WS42 Phase 1
+     One complete set every theme (html.light / html.theme-dark / html.theme-astral)
+     redefines. Components should read THESE names, not raw palette vars below.
+     Legacy names (--s0..--s3, --surface2, --primary, --accent, etc.) remain as
+     aliases so nothing currently referencing them breaks — do NOT delete them.
+     :root itself is the Astral-ish fallback (today's cosmic look); Light/Dark
+     override every var in this block explicitly.
+  ══════════════════════════════════════════════════ */
+  --bg-2:            var(--s0);
+  --surface-2:       var(--s2);
+  --surface-3:       var(--s3);
+  --border-strong:   rgba(255,255,255,0.16);
+  --primary-soft:    rgba(155,168,255,0.12);
+  --on-primary:      #FFFFFF;
+  --success-soft:    rgba(48,209,88,0.14);
+  --warning-soft:    rgba(255,170,0,0.14);
+  --danger-soft:     rgba(255,69,58,0.14);
+  --info-soft:       rgba(10,132,255,0.14);
+  --lh-base:         1.5;
+  /* Chat (Messenger-style bubbles, wired up ahead of Batch D) */
+  --chat-bg:         var(--bg);
+  --bubble-in-bg:    var(--s2);
+  --bubble-in-text:  var(--text);
+  --bubble-out-bg:   var(--grad-pk-bl);
+  --bubble-out-text: #FFFFFF;
+}
+

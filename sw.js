@@ -8,7 +8,7 @@
 //    • HTML / API → Network-first, cache as offline fallback
 // ═══════════════════════════════════════════════════════
 
-const CACHE_VER   = 'bi-ops-v12.0.144';
+const CACHE_VER   = 'bi-ops-v12.0.145';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -19,6 +19,7 @@ const PRECACHE = [
   '/track.html',
   '/t/',
   '/t/index.html',
+  '/css/tokens.css',
   '/css/styles.css',
   '/manifest.json',
   '/quote-builder-v2.html',

@@ -55,7 +55,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link rel="dns-prefetch" href="https://unpkg.com"/>
 
-  <!-- Stylesheet — browser downloads in parallel with scripts below -->
+  <!-- Stylesheets — browser downloads in parallel with scripts below.
+       tokens.css MUST load before styles.css: it defines the :root design
+       tokens (Batch 2 / spec 2a) that styles.css consumes throughout. -->
+  <link rel="stylesheet" href="css/tokens.css"/>
   <link rel="stylesheet" href="css/styles.css"/>
 </head>
 <body>
@@ -176,7 +179,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.144 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.145 · Barro Industries</div>
   </div>
 </div>
 

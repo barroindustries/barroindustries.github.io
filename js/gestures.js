@@ -228,10 +228,115 @@
     document.removeEventListener('touchcancel', sheetTouchCancel, { passive: true });
   }
 
+  // ── Full-surface swipe-back on pushed pages (v14 Batch1 1d) ───────────────
+  // The 24px edge strip above only shows a decorative pill and defers to
+  // history.back()/doBack() generically. A page opened via openPage (Overlay
+  // kind 'page') additionally arms a horizontal pan starting ANYWHERE on its
+  // panel — not modals, which stay dismissed via backdrop/Esc/Back only.
+  // Starts inside the edge zone are left to edgeTouchStart above (untouched)
+  // so the two gestures never race the same touch into two dismissals.
+  const PAGE_DX_ARM          = 12;   // px before we commit to "this is horizontal"
+  const PAGE_SLOPE           = 1.6;  // |dx| must exceed this multiple of |dy| to arm
+  const PAGE_VELOCITY_THRESH = 0.5;  // px/ms flick velocity that also commits
+
+  let pageSwipe = null; // { el, startX, startY, lastX, lastY, armed, startTime }
+
+  function hasHOverflow(el) {
+    let node = el;
+    while (node && node !== document.body && node.nodeType === 1) {
+      if (node.scrollWidth > node.clientWidth) {
+        const cs = getComputedStyle(node);
+        if (cs.overflowX === 'auto' || cs.overflowX === 'scroll') return true;
+      }
+      node = node.parentElement;
+    }
+    return false;
+  }
+  function pageSwipeExcluded(target) {
+    if (insideHScroll(target)) return true;
+    if (target && target.closest && target.closest('input, textarea, select, [contenteditable]')) return true;
+    return hasHOverflow(target);
+  }
+
+  function pageTouchStart(e) {
+    if (!enabled || pointerIsFine()) return;
+    if (e.touches.length !== 1) return;
+    if (!window.Overlay || window.Overlay.topKind() !== 'page') return;
+    const el = window.Overlay.topEl && window.Overlay.topEl();
+    if (!el) return;
+    const t = e.touches[0];
+    if (t.clientX <= EDGE_ZONE) return; // edge-zone starts stay edgeTouchStart's job
+    if (!el.contains(e.target)) return;
+    if (pageSwipeExcluded(e.target)) return;
+    pageSwipe = { el, startX: t.clientX, startY: t.clientY, lastX: t.clientX, lastY: t.clientY, armed: false, startTime: Date.now() };
+    document.addEventListener('touchmove', pageTouchMove, { passive: false });
+    document.addEventListener('touchend', pageTouchEnd, { passive: true });
+    document.addEventListener('touchcancel', pageTouchCancel, { passive: true });
+  }
+  function pageTouchMove(e) {
+    if (!pageSwipe) return;
+    const t = e.touches[0];
+    const dx = t.clientX - pageSwipe.startX;
+    const dy = t.clientY - pageSwipe.startY;
+    pageSwipe.lastX = t.clientX; pageSwipe.lastY = t.clientY;
+    if (!pageSwipe.armed) {
+      if (Math.abs(dx) < PAGE_DX_ARM) return;                    // not enough travel to decide yet
+      if (dx <= 0 || Math.abs(dx) < PAGE_SLOPE * Math.abs(dy)) {  // leftward, or vertical drift wins — it's a scroll
+        pageTouchCancel();
+        return;
+      }
+      pageSwipe.armed = true;
+    }
+    e.preventDefault(); // scoped to this active page-drag only
+    if (!reducedMotion()) {
+      pageSwipe.el.style.transition = 'none';
+      pageSwipe.el.style.transform = 'translate3d(' + Math.max(0, dx) + 'px,0,0)';
+    }
+  }
+  function pageTouchEnd() {
+    cleanupPageListeners();
+    if (!pageSwipe) return;
+    const { el, armed } = pageSwipe;
+    const dx = pageSwipe.lastX - pageSwipe.startX;
+    const dt = Math.max(1, Date.now() - pageSwipe.startTime);
+    const velocity = dx / dt;
+    const vw = window.innerWidth || document.documentElement.clientWidth || 1;
+    const commit = armed && dx > 0 && (dx > vw * 0.35 || velocity > PAGE_VELOCITY_THRESH);
+    if (commit) {
+      // Hand off to the normal close path — its own teardown animation takes
+      // over, so just drop our live-drag inline styles rather than layering
+      // a second exit animation on top.
+      el.style.transition = '';
+      el.style.transform = '';
+      if (window.Overlay) window.Overlay.dismissTop();
+    } else if (armed) {
+      el.style.transition = reducedMotion() ? 'none' : 'transform 200ms cubic-bezier(.34,1.56,.64,1)';
+      el.style.transform = 'translate3d(0,0,0)';
+      setTimeout(() => { el.style.transition = ''; el.style.transform = ''; }, reducedMotion() ? 0 : 200);
+    }
+    pageSwipe = null;
+  }
+  function pageTouchCancel() {
+    cleanupPageListeners();
+    if (pageSwipe && pageSwipe.armed) {
+      const el = pageSwipe.el;
+      el.style.transition = reducedMotion() ? 'none' : 'transform 200ms ease';
+      el.style.transform = 'translate3d(0,0,0)';
+      setTimeout(() => { el.style.transition = ''; el.style.transform = ''; }, reducedMotion() ? 0 : 200);
+    }
+    pageSwipe = null;
+  }
+  function cleanupPageListeners() {
+    document.removeEventListener('touchmove', pageTouchMove, { passive: false });
+    document.removeEventListener('touchend', pageTouchEnd, { passive: true });
+    document.removeEventListener('touchcancel', pageTouchCancel, { passive: true });
+  }
+
   // ── Root listeners (always attached; each gesture gates itself internally
   //    on `enabled` + pointer:fine so enable()/disable() need no re-wiring) ──
   document.addEventListener('touchstart', edgeTouchStart, { passive: true });
   document.addEventListener('touchstart', sheetTouchStart, { passive: true });
+  document.addEventListener('touchstart', pageTouchStart, { passive: true });
 
   window.Gestures = {
     enable() { enabled = true; },

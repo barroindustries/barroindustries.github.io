@@ -2383,6 +2383,7 @@ function navigateTo(page, opts) {
     const dept = page.slice(5);
     renderDeptModule(dept);
     _devCheckIconIntegrity(page);
+    if (typeof window.devCheckStacking === 'function') window.devCheckStacking();
     return;
   }
 
@@ -2432,6 +2433,7 @@ function navigateTo(page, opts) {
     if (window.lucide) lucide.createIcons({ nodes: [c] });
   }
   _devCheckIconIntegrity(page);
+  if (typeof window.devCheckStacking === 'function') window.devCheckStacking();
 }
 
 // ── Phase 129: icon integrity dev-check ──────────
@@ -8284,24 +8286,77 @@ window.openModal=function(title,bodyHTML,footerHTML='',opts){
   // Reset _cheatSheetOpen in the teardown itself (not just closeModal) so it clears
   // on EVERY dismissal path — Escape, backdrop click, and Overlay.clearAll() all
   // tear a modal down via this callback without necessarily going through closeModal().
-  window.Overlay.push('modal', () => {
+  const teardown = () => {
     ov.classList.add('hidden'); ov.classList.remove('active'); window._cheatSheetOpen = false;
     _focusTrapDetach(box); _focusReturn(_trigger);
-  });
+  };
+  // v14 Batch1 1b — modal-over-modal: swap content in place instead of pushing
+  // a second history entry, so one Back always closes the (top) modal. The
+  // single static #modal-overlay DOM is reused either way; only the Overlay
+  // bookkeeping differs. 1c gives the modal its stacking-order z here too, so
+  // a modal opened from a pushed page (openPage) renders above it.
+  if (window.Overlay.topKind() === 'modal') {
+    window.Overlay.replaceTop('modal', teardown, ov);
+  } else {
+    window.Overlay.push('modal', teardown, ov);
+  }
 };
+// ── v14 Batch1 1a — true page stack ─────────────────────────────────────────
+// _pageStack holds every currently-open page panel, bottom to top. Opening a
+// new page over an existing one hides the old one (page-under: visibility
+// hidden, stays in the DOM — scroll position/form state preserved) instead of
+// destroying it, and pushes ONE new Overlay entry. Back therefore pops pages
+// one at a time, Apple push/pop style, instead of destroying+recreating.
+//
+// NOTE for the Batch 2 (CSS) agent: `.page-under` should become a real CSS
+// class (`visibility:hidden`) — this batch can only edit JS files, so the
+// hide is applied as an inline style (el.style.visibility) below. The class
+// name is still added for a future selector hook; it carries no rule yet.
+window._pageStack = window._pageStack || [];
+let _pageSeq = 0;
 // Full-screen routed panel — SAME signature as openModal. Forms swap openModal→openPage.
+// New (all optional, backward-compatible) opts:
+//   headerRightHTML — string rendered right of the title (caller wires listeners
+//     on the RETURNED element); replace='' (default) → the header keeps its old
+//     40px spacer so existing callers render identically.
+//   onClose — called at teardown start, before DOM/focus teardown, for callers
+//     that own listeners/timers scoped to the page's lifetime.
+//   replace — swap the CURRENT top page in place (same history depth) instead
+//     of pushing a new one; used by multi-step flows. No-op (falls back to a
+//     normal push) if there is no page currently on top.
+// Returns the panel element (previously returned undefined).
 window.openPage = function(title, bodyHTML, footerHTML='', opts){
   opts = opts || {};
   const _trigger = document.activeElement;
-  document.getElementById('page-panel')?.remove();
+  const stack = window._pageStack;
+  const doReplace = opts.replace === true && stack.length > 0;
+
+  let prevTop = null;
+  if (doReplace) {
+    // Tear down the CURRENT top panel's DOM directly — NOT via history.back()
+    // (that would consume a history entry; replace keeps depth unchanged).
+    prevTop = stack.pop() || null;
+    if (prevTop) {
+      try { if (typeof prevTop._onClose === 'function') prevTop._onClose(); } catch(_){}
+      _focusTrapDetach(prevTop);
+      if (prevTop.isConnected) prevTop.remove();
+    }
+  } else {
+    prevTop = stack[stack.length - 1] || null;
+  }
+
+  const seq = ++_pageSeq;
+  const titleId = 'page-panel-title-' + seq;
   const p = document.createElement('div');
-  p.id = 'page-panel'; p.className = 'page-panel overlay-active';
+  p.id = 'page-panel-' + seq; p.className = 'page-panel overlay-active';
   p.setAttribute('role','dialog'); p.setAttribute('aria-modal','true');
-  p.setAttribute('aria-labelledby','page-panel-title');
+  p.setAttribute('aria-labelledby', titleId);
+  const headerRight = opts.headerRightHTML || '';
   p.innerHTML = `
     <div class="page-panel-head">
       <button class="page-panel-back" aria-label="Back"><i data-lucide="arrow-left"></i></button>
-      <h3 class="page-panel-title" id="page-panel-title"></h3><div style="width:40px"></div>
+      <h3 class="page-panel-title" id="${titleId}"></h3>
+      <div class="page-panel-head-right" style="min-width:40px;display:flex;align-items:center;justify-content:flex-end;gap:8px">${headerRight}</div>
     </div>
     <div class="page-panel-body"></div>
     <div class="page-panel-foot"></div>`;
@@ -8309,15 +8364,44 @@ window.openPage = function(title, bodyHTML, footerHTML='', opts){
   p.querySelector('.page-panel-body').innerHTML = bodyHTML;
   const foot = p.querySelector('.page-panel-foot');
   foot.innerHTML = footerHTML; foot.classList.toggle('hidden', !footerHTML);
+  p._onClose = (typeof opts.onClose === 'function') ? opts.onClose : null;
+
+  // Hide (not destroy) the page we're stacking over — skipped on `replace`,
+  // since that path already tore the old top down above.
+  if (!doReplace && prevTop && prevTop.isConnected) {
+    prevTop.classList.add('page-under');
+    prevTop.style.visibility = 'hidden';
+  }
+  stack.push(p);
+
   document.body.appendChild(p);
   p.querySelector('.page-panel-back').addEventListener('click', () => window.Overlay.dismissTop());
   window.lucide?.createIcons();
   requestAnimationFrame(() => { p.classList.add('open'); _focusEnter(p); });
   _focusTrapAttach(p);
-  window.Overlay.push('page', () => {
+
+  const teardown = () => {
     p.classList.remove('open'); _focusTrapDetach(p); _focusReturn(_trigger);
-    setTimeout(()=>p.remove(), 300);
-  });
+    if (p._onClose) { try { p._onClose(); } catch(_){} }
+    const idx = stack.indexOf(p);
+    if (idx !== -1) stack.splice(idx, 1);
+    setTimeout(() => { if (p.isConnected) p.remove(); }, 300);
+    // Reveal whatever's now on top of the page stack, if anything (guarded —
+    // clearAll() can invoke every teardown back-to-back while elements are
+    // mid-removal, so isConnected is checked before touching style/class).
+    const newTop = stack[stack.length - 1];
+    if (newTop && newTop.isConnected) {
+      newTop.classList.remove('page-under');
+      newTop.style.visibility = '';
+    }
+  };
+
+  if (doReplace) {
+    window.Overlay.replaceTop('page', teardown, p);
+  } else {
+    window.Overlay.push('page', teardown, p);
+  }
+  return p;
 };
 // Generic dismiss — closes whatever overlay is on top (dialog | modal | page | panel).
 window.closeModal=function(){ window.Overlay.dismissTop(); };
@@ -8325,6 +8409,41 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('modal-close')?.addEventListener('click',() => window.Overlay.dismissTop());
   document.getElementById('modal-overlay')?.addEventListener('click',e=>{if(e.target===document.getElementById('modal-overlay')) window.Overlay.dismissTop();});
 });
+
+// ── v14 Batch1 1e — dev-only z-index stacking lint ──────────────────────────
+// Cheap by design (must stay <5ms): every dynamically-mounted overlay/panel in
+// this app (#modal-overlay, #dialog-overlay, #drawer-overlay, openPage panels,
+// the task/worker-profile/toast/offline-banner surfaces, the gesture pill…) is
+// appended directly to document.body, so scanning body's direct children finds
+// them all without a full-tree querySelectorAll. Flags any `position:fixed`
+// child whose computed z-index isn't one of: a --z-* token value, the dynamic
+// 300–398 tier (1c), 5000 (--z-dialog), or >=9000 (toast/splash/push tier).
+// Logged once per element via a WeakSet so a re-render doesn't spam the console.
+const _Z_TOKEN_VALUES = [85,90,94,95,96,100,101,140,150,180,190,195,198,200,210,5000,9999];
+const _zLintFlagged = new WeakSet();
+window.devCheckStacking = function () {
+  let isDev = false;
+  try {
+    isDev = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ||
+      new URLSearchParams(location.search).has('dev');
+  } catch(_) { return; }
+  if (!isDev || !document.body) return;
+  const kids = document.body.children;
+  for (let i = 0; i < kids.length; i++) {
+    const el = kids[i];
+    if (_zLintFlagged.has(el)) continue;
+    let cs;
+    try { cs = getComputedStyle(el); } catch(_) { continue; }
+    if (cs.position !== 'fixed') continue;
+    const z = parseInt(cs.zIndex, 10);
+    if (!Number.isFinite(z)) continue; // 'auto' — not participating in explicit stacking
+    const ok = _Z_TOKEN_VALUES.indexOf(z) !== -1 || (z >= 300 && z <= 398) || z === 5000 || z >= 9000;
+    if (!ok) {
+      _zLintFlagged.add(el);
+      console.error('[stacking] off-scale z-index', el);
+    }
+  }
+};
 
 // ── v12 WS10 — router wiring (Back/Forward/hash edits/Esc) ───────────────
 window.addEventListener('popstate', (e) => {

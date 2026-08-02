@@ -693,7 +693,7 @@ window.Notifs = (() => {
     overlay.id = 'push-prompt-overlay';
     overlay.style.cssText = `
       position:fixed;inset:0;background:rgba(0,0,0,0.35);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
-      z-index:9100;display:flex;align-items:flex-end;justify-content:center;
+      z-index:var(--z-dialog, 5000);display:flex;align-items:flex-end;justify-content:center;
       padding-bottom:calc(env(safe-area-inset-bottom,0px) + 16px);
       animation:fadeIn .22s ease;
     `;
@@ -752,20 +752,51 @@ window.Notifs = (() => {
 
     document.body.appendChild(overlay);
 
+    // Overlay-stack registration (v14 Batch 3): this card is a dismissable
+    // surface like any modal/dialog — Back/Esc must close it, and the
+    // teardown (registered once) is the ONLY place that actually removes the
+    // DOM. All dismiss paths below route through Overlay.dismissTop() so the
+    // history entry and the on-screen card always go away together — never
+    // hide the card directly while leaving its entry on the stack (that
+    // would eat the user's next Back press).
+    let torn = false;
+    let autoTimer = null;
+    const teardown = () => {
+      if (torn) return;
+      torn = true;
+      if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+      if (overlay.parentNode) overlay.remove();
+    };
+
+    const hasOverlayStack = !!(window.Overlay &&
+      typeof window.Overlay.push === 'function' &&
+      typeof window.Overlay.dismissTop === 'function');
+    if (hasOverlayStack) window.Overlay.push('push-prompt', teardown);
+
+    // Single choke point for closing the card: routes through the stack when
+    // available (teardown does the hide on popstate); falls back to a direct
+    // teardown() if Overlay is somehow unavailable, so the prompt can never
+    // get stuck open.
+    const closePrompt = () => {
+      if (torn) return;
+      if (hasOverlayStack) window.Overlay.dismissTop();
+      else teardown();
+    };
+
     document.getElementById('push-allow-btn').onclick = async () => {
-      overlay.remove();
+      closePrompt();
       const permission = await Notification.requestPermission();
       if (permission === 'granted') { _clearPushSnooze(); await _registerPush(uid, vapidKey); }
       else { _snoozePush(); }   // 'denied' or 'default' (iOS quirk) — don't re-ask next launch
     };
-    // An EXPLICIT dismissal (Not now / backdrop) snoozes the prompt so it
-    // doesn't reappear on every open. The 60s auto-timeout is NOT user intent —
-    // it just removes the card, so the user gets asked again next launch
-    // instead of silently losing push for 3 days.
-    const dismiss = () => { _snoozePush(); overlay.remove(); };
+    // An EXPLICIT dismissal (Not now / backdrop / Back / Esc) snoozes the
+    // prompt so it doesn't reappear on every open. The 60s auto-timeout is
+    // NOT user intent — it just closes the card, so the user gets asked
+    // again next launch instead of silently losing push for 3 days.
+    const dismiss = () => { _snoozePush(); closePrompt(); };
     document.getElementById('push-deny-btn').onclick = dismiss;
     overlay.addEventListener('click', e => { if (e.target === overlay) dismiss(); });
-    setTimeout(() => { if (document.body.contains(overlay)) overlay.remove(); }, 60000);
+    autoTimer = setTimeout(() => { if (document.body.contains(overlay)) closePrompt(); }, 60000);
   }
 
   async function _registerPush(uid, vapidKey) {

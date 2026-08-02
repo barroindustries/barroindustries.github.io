@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.144';
+window.APP_VERSION = '12.0.145';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -983,16 +983,41 @@ window.bindChipTabs = function(scope, onSelect) {
 // Every modal/page-panel/task-panel/confirm-dialog pushes exactly one entry;
 // popstate is the ONLY teardown trigger — every UI-close path (X button,
 // backdrop click, closeModal()) delegates to history.back() via dismissTop().
+//
+// v14 Batch1 1c — optional 3rd param `el`: the surface's own root element.
+// When passed, push()/replaceTop() give it a dynamic inline z-index so open
+// order determines stacking (a modal opened from a pushed page renders above
+// it, etc.) instead of the static CSS --z-modal/--z-page-panel tokens racing
+// each other. Reserved range for this dynamic tier: 300–398 (see the --z-*
+// scale comment in styles.css for the full token list; that file is Batch 2's
+// — this comment is the interim reference). Dialogs stay on --z-dialog (5000)
+// and are NOT part of this dynamic tier — always pass no `el` for 'dialog'.
 window.Overlay = {
   _stack: [], _seq: 0, _closing: false,
   isOpen(){ return this._stack.length > 0; },
-  push(kind, teardown){
+  push(kind, teardown, el){
     const id = ++this._seq;
-    this._stack.push({ id, kind, teardown });
+    this._stack.push({ id, kind, teardown, el: el || null });
+    if (el) { try { el.style.zIndex = String(300 + this._stack.length * 2); } catch(_){} }
     const base = { page: window.currentPage || 'dashboard', subtab: window.currentSubtab || null };
     try { history.pushState({ t:'overlay', kind, oid:id, base, d:(window._navDepth||0) }, '', location.hash); } catch(_){}
+    if (typeof window.devCheckStacking === 'function') { try { window.devCheckStacking(); } catch(_){} }
     return id;
   },
+  // Swap the top entry's kind/teardown/el WITHOUT touching history — used by
+  // modal-over-modal (openModal) and opts.replace (openPage) so "one Back"
+  // still closes the (now-different) surface. Re-applies the same z the top
+  // slot already had (stack depth is unchanged by a swap).
+  replaceTop(kind, teardown, el){
+    if (!this._stack.length) return this.push(kind, teardown, el);
+    const top = this._stack[this._stack.length - 1];
+    top.kind = kind; top.teardown = teardown; top.el = el || null;
+    if (el) { try { el.style.zIndex = String(300 + this._stack.length * 2); } catch(_){} }
+    if (typeof window.devCheckStacking === 'function') { try { window.devCheckStacking(); } catch(_){} }
+    return top.id;
+  },
+  topEl(){ const top = this._stack[this._stack.length - 1]; return top ? top.el : null; },
+  topKind(){ const top = this._stack[this._stack.length - 1]; return top ? top.kind : null; },
   dismissTop(){ if (this._stack.length) history.back(); },   // → popstate → _popOne
   _popOne(){
     const top = this._stack.pop(); if (!top) return;

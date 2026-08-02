@@ -9,216 +9,8 @@
 
 /* ══════════════════════════════
    DESIGN TOKENS
+   Moved to css/tokens.css (Batch 2 / spec 2a) — linked before this file.
 ══════════════════════════════ */
-:root {
-  /* ── Core palette ── */
-  --black:    #070710;
-  --black-2:  #0D0D1A;
-  --black-3:  #131325;
-  --pink:     #FF2D78;
-  --pink-2:   #FF6B9D;
-  --pink-glow:rgba(255,45,120,0.35);
-  --blue:     #0A84FF;
-  --blue-2:   #40A9FF;
-  --blue-glow:rgba(10,132,255,0.30);
-  --gold:     #FFD60A;
-  --gold-2:   #F5C842;
-  --gold-3:   #FFAA00;
-  --gold-glow:rgba(255,214,10,0.30);
-  --white:    #FFFFFF;
-
-  /* ── Gradient presets ── */
-  --grad-pk-bl: linear-gradient(135deg, #FF2D78 0%, #0A84FF 100%);
-  --grad-gold:  linear-gradient(135deg, #FFD60A 0%, #FF9F0A 100%);
-  --grad-dark:  linear-gradient(135deg, #131325 0%, #0D0D1A 100%);
-  --grad-card:  linear-gradient(160deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
-  --grad-pink:  linear-gradient(135deg, #FF2D78 0%, #FF6B9D 100%);
-  --grad-blue:  linear-gradient(135deg, #0A84FF 0%, #40A9FF 100%);
-  --grad-purple:linear-gradient(135deg, #8B5CF6 0%, #0A84FF 100%);
-  --grad-teal:  linear-gradient(135deg, #00D4AA 0%, #0A84FF 100%);
-  --grad-green: linear-gradient(135deg, #30D158 0%, #00D4AA 100%);
-  --grad-amber: linear-gradient(135deg, #FFD60A 0%, #FF9F0A 100%);
-  --grad-red:   linear-gradient(135deg, #FF453A 0%, #FF2D78 100%);
-
-  /* ── Surfaces (dark glass) ── */
-  --bg:       var(--black);
-  --s0:       rgba(255,255,255,0.03);   /* deepest card */
-  --s1:       rgba(255,255,255,0.05);   /* card */
-  --s2:       rgba(255,255,255,0.08);   /* hover */
-  --s3:       rgba(255,255,255,0.11);   /* active / pressed */
-  --glass:    rgba(13,13,26,0.82);
-  --glass-lt: rgba(255,255,255,0.06);
-
-  /* ── Aliases used by inline JS styles ── */
-  --surface:  rgba(255,255,255,0.05);
-  --surface2: rgba(255,255,255,0.08);
-  --primary:       #9BA8FF;   /* bright lavender — readable on dark */
-  --primary-light: #818CF8;
-  --primary-dark:  #1a237e;
-  --accent:        var(--gold);
-  --accent-light:  var(--gold-2);
-  --success:  #30D158;
-  --warning:  var(--gold-3);
-  --danger:   #FF453A;
-  --info:     var(--blue);
-
-  /* ── Borders ── */
-  --border:      rgba(255,255,255,0.09);
-  --border-glow: rgba(255,45,120,0.25);
-  --border-gold: rgba(255,214,10,0.25);
-
-  /* ── Text ── */
-  --text:       #F0F0FA;
-  --text-2:     rgba(240,240,250,0.80);
-  --text-muted: rgba(240,240,250,0.45);
-  --text-light: rgba(240,240,250,0.28);
-  --text-inv:   #070710;
-
-  /* ── Shadows ── */
-  --sh-xs:  0 1px 4px rgba(0,0,0,0.4);
-  --sh-sm:  0 2px 12px rgba(0,0,0,0.5);
-  --sh:     0 4px 20px rgba(0,0,0,0.55);
-  --sh-md:  0 8px 32px rgba(0,0,0,0.60);
-  --sh-lg:  0 16px 56px rgba(0,0,0,0.70);
-  --sh-pink:0 4px 24px rgba(255,45,120,0.30);
-  --sh-blue:0 4px 24px rgba(10,132,255,0.25);
-  --sh-gold:0 4px 24px rgba(255,214,10,0.25);
-
-  /* ── Radius ── */
-  --r-xs:  6px;
-  --r-sm:  12px;
-  --r:     16px;
-  --r-lg:  20px;
-  --r-xl:  26px;
-  --r-2xl: 32px;
-  --pill:  999px;
-
-  /* ── Spacing (WS43 phone-breathability pass — used inside ≤640/768px
-     media queries only; desktop keeps its existing literal values) ── */
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 20px;
-  --space-6: 24px;
-
-  /* ── Layout ── */
-  --topbar-h:     56px;
-  --sidebar-w:    264px;
-  --bottom-nav-h: 56px;
-  --top-nav-h:    50px;
-  --content-max:  1680px;
-
-  /* ── Z-index scale — WS-Phase 58: designed stacking system, replaces ad-hoc literals.
-     Order (low→high): scrim < shell (sidebar/bottom-nav) < topbar < panel (notif) < ptr < drawer < modal < page-panel < dialog < splash.
-     Two deliberate fixes vs. the old inventory: ptr-indicator 300→180 (now under modal/drawer),
-     page-panel 4000→210 (now just above modal, so a modal opened over a page-panel still wins). ── */
-  --z-scrim:      85;   /* sidebar-overlay backdrop */
-  --z-shell:      90;   /* sidebar, bottom-nav base */
-  --z-shell-2:    94;   /* top-nav-strip */
-  --z-bottom-nav: 95;   /* bottom-nav */
-  --z-shell-open: 96;   /* sidebar.open (above top-nav-strip) */
-  --z-topbar:     100;  /* .topbar */
-  --z-topbar-2:   101;  /* top-nav desktop (above .topbar) */
-  --z-panel:      150;  /* notif-panel */
-  --z-panel-scrim:140;  /* notif-backdrop */
-  --z-ptr:        180;  /* pull-to-refresh indicator (below drawer/modal) */
-  --z-drawer-scrim:190; /* drawer-overlay backdrop */
-  --z-drawer:     195;  /* drawer panel */
-  --z-drawer-2:   198;  /* drawer content above its own overlay (190) */
-  --z-modal:      200;  /* modal-overlay */
-  --z-page-panel: 210;  /* full-screen page-panel — just above modal, was 4000 */
-  --z-dialog:     5000; /* dialog-overlay — always on top short of splash */
-  --z-splash:     9999; /* splash screen */
-
-  /* ── Type ── */
-  --font: 'Inter', -apple-system, 'SF Pro Text', system-ui, sans-serif;
-  --font-display: 'Inter', -apple-system, 'SF Pro Display', system-ui, sans-serif;
-  --font-mono: 'SF Mono', 'Fira Mono', 'Cascadia Code', monospace;
-
-  /* ── Motion ── */
-  --ease: cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --t1: 120ms; --t2: 220ms; --t3: 340ms;
-  /* v13 Phase 123 — single press-scale used by every button variant's :active
-     state; unifies the previously contradictory 0.97 (inline) vs 0.96 (!important
-     haptic block) values into one token. Set to .96 — the value the !important
-     block was already winning with — so unification causes zero rendered change. */
-  --press-scale: .96;
-  --ios-spring:     cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  --ios-spring-out: cubic-bezier(0.34, 1.28, 0.64, 1);
-  --ios-enter:      cubic-bezier(0.36, 0.66, 0.04, 1);
-
-  /* ── Component backgrounds (swap for light mode) ── */
-  --topbar-bg:     rgba(7,7,16,0.88);
-  --sidebar-bg:    rgba(7,7,16,0.94);
-  --notif-bg:      rgba(13,13,26,0.92);
-  --login-card-bg: rgba(13,13,26,0.88);
-  --bottom-nav-bg: rgba(7,7,16,0.90);
-  --modal-bg:      rgba(13,13,26,0.92);
-  --drawer-bg:     rgba(10,10,20,0.94);
-
-  /* ── Toast theming (consumed by notifications.js) — WS42 Phase 10:
-     pill = --surface + border + --sh-lg; --toast-success/-error/-info are now the
-     STATUS-ICON color (not the whole-pill background), --toast-text is the message
-     ink color, --toast-bg/-border are the pill surface. ── */
-  --toast-success: #30D158;
-  --toast-error:   #FF453A;
-  --toast-info:    #0A84FF;
-  --toast-text:    var(--text);
-  --toast-bg:      var(--surface);
-  --toast-border:  var(--border);
-
-  /* ── Typography scale (values == today's most-used px literals; no visual change on swap) ── */
-  --fs-2xs: 0.625rem;   /* micro labels, badges */
-  --fs-xs:  0.6875rem;   /* captions, meta, timestamps */
-  --fs-sm:  0.75rem;   /* secondary text, chips */
-  --fs-md:  0.8125rem;   /* dense body */
-  --fs-base:0.875rem;   /* DEFAULT body */
-  --fs-lg:  1rem;   /* emphasized body, inputs */
-  --fs-xl:  1.125rem;   /* card titles */
-  --fs-2xl: 1.25rem;   /* section headers */
-  --fs-3xl: 1.5rem;   /* page sub-headers */
-  --fs-4xl: 1.75rem;   /* page titles */
-  --fs-5xl: 2.125rem;   /* large numeric displays */
-  --fs-6xl: 2.75rem;   /* hero */
-  /* line-heights (unitless) */
-  --lh-tight: 1.2;
-  --lh-snug:  1.35;
-  --lh-base:  1.5;
-  /* ── Brand-role aliases (decouple 'accent role' from the literal --pink) ── */
-  --brand-primary:      var(--pink);   /* the app's primary accent ROLE — reassign here per theme, not by overloading --pink */
-  --brand-primary-2:    var(--pink-2);
-  --brand-on-primary:   var(--white);
-  /* ── Status-bar / theme-color (read by setTheme() to sync <meta name=theme-color>) ── */
-  --theme-color: var(--bg);
-
-  /* ══════════════════════════════════════════════════
-     SEMANTIC TOKEN CONTRACT — WS42 Phase 1
-     One complete set every theme (html.light / html.theme-dark / html.theme-astral)
-     redefines. Components should read THESE names, not raw palette vars below.
-     Legacy names (--s0..--s3, --surface2, --primary, --accent, etc.) remain as
-     aliases so nothing currently referencing them breaks — do NOT delete them.
-     :root itself is the Astral-ish fallback (today's cosmic look); Light/Dark
-     override every var in this block explicitly.
-  ══════════════════════════════════════════════════ */
-  --bg-2:            var(--s0);
-  --surface-2:       var(--s2);
-  --surface-3:       var(--s3);
-  --border-strong:   rgba(255,255,255,0.16);
-  --primary-soft:    rgba(155,168,255,0.12);
-  --on-primary:      #FFFFFF;
-  --success-soft:    rgba(48,209,88,0.14);
-  --warning-soft:    rgba(255,170,0,0.14);
-  --danger-soft:     rgba(255,69,58,0.14);
-  --info-soft:       rgba(10,132,255,0.14);
-  --lh-base:         1.5;
-  /* Chat (Messenger-style bubbles, wired up ahead of Batch D) */
-  --chat-bg:         var(--bg);
-  --bubble-in-bg:    var(--s2);
-  --bubble-in-text:  var(--text);
-  --bubble-out-bg:   var(--grad-pk-bl);
-  --bubble-out-text: #FFFFFF;
-}
 
 /* ══════════════════════════════
    ANIMATIONS
@@ -2381,6 +2173,12 @@ html.theme-astral .quote-sheet { backdrop-filter: blur(20px); -webkit-backdrop-f
   padding:12px max(16px, env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(16px, env(safe-area-inset-left,0px));
   display:flex; gap:8px; justify-content:flex-end; background:var(--surface); }
 .page-panel-foot.hidden{ display:none; }
+/* Batch 1 (V14 Wave 1, page-stack primitives): a page-panel pushed under a
+   newer one gets this class instead of being removed — stays in the DOM
+   (scroll position + form state preserved) but invisible until it's back on
+   top. Real home for what Batch 1's JS currently does via an inline style
+   stopgap; a later pass switches it to use this class. */
+.page-under{ visibility:hidden; }
 
 /* ── Confirm / prompt dialog (v12 WS11 — confirmDialog/promptDialog) ── */
 .dialog-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.4);
@@ -2417,12 +2215,21 @@ html.theme-astral .dialog-overlay { backdrop-filter: blur(14px) saturate(120%); 
   flex-shrink: 0; background: rgba(255,255,255,0.01);
 }
 
-/* ── Drawer ── */
+/* ── Drawer (consolidated — Batch 2 / spec 2d: the four `.drawer{}` base-rule
+   definitions that used to live at ~2213/~3623/~4417/~4608 are grouped here,
+   in their original relative order, with exact-duplicate declarations
+   (background/border-left, both `var(--drawer-bg)` / `1px solid var(--border)`
+   in the first two) merged into one. Companion selectors — .drawer.open,
+   .drawer::before, .drawer-header, .drawer-body — are unchanged and stay at
+   their original locations; only the bare `.drawer` rule moved. No computed-
+   style change: equal-specificity cascade only depends on relative document
+   order, which is preserved. ── */
 .drawer {
   position: fixed; top: 0; right: 0; bottom: 0;
   width: min(400px, 100vw);
   background: var(--drawer-bg);
   border-left: 1px solid var(--border);
+  box-shadow: var(--sh-lg);
   z-index: var(--z-drawer); display: flex; flex-direction: column;
   transform: translateX(100%);
   transition: transform var(--t3) var(--ease);
@@ -2434,6 +2241,34 @@ html.theme-astral .dialog-overlay { backdrop-filter: blur(14px) saturate(120%); 
    scoped above the 639px bottom-sheet breakpoint so it never touches the mobile sheet. */
 @media (min-width: 640px) {
   .drawer { padding-right: env(safe-area-inset-right, 0px); }
+}
+/* WS42 Phase 10 — mobile bottom sheet breakpoint (≤639px). See the
+   ≤768px full-screen override directly below, which decisively wins at
+   ≤639px too since both media queries match on a phone and it comes later
+   in source order (unchanged from before consolidation). */
+@media (max-width: 639px) {
+  .drawer {
+    top: auto; bottom: 0; left: 0; right: 0; width: 100%;
+    height: auto; max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 24px);
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+    border-left: none; border-top: 1px solid var(--border);
+    transform: translateY(100%);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+/* Drawer — full-screen slide-up on mobile (≤768px). Decisively overrides the
+   639px bottom-sheet block above (both media queries match on a phone): the
+   sheet's capped max-height left a gap at the bottom where the bottom nav
+   peeked through, and its flat header padding clipped the title under the
+   notch. Make it a true full-screen panel instead. */
+@media (max-width: 768px) {
+  .drawer {
+    top: 0; bottom: 0; left: 0; right: 0;
+    width: 100%; height: auto; max-height: none;
+    border-left: none; border-radius: 0;
+    transform: translateY(100%);
+    z-index: var(--z-drawer-2); /* above sidebar overlay + bottom nav */
+  }
 }
 .drawer-header {
   padding: 12px 16px; border-bottom: 1px solid var(--border);
@@ -3827,12 +3662,11 @@ html.theme-astral .modal-footer { background: rgba(255,255,255,0.015); border-to
 html.theme-astral .modal-close { background: rgba(255,255,255,0.07); border: 1px solid var(--glass-border-sm); }
 html.theme-astral .modal-close:hover { background: rgba(255,255,255,0.13); }
 
-/* ══════ DRAWER ══════ WS42 Phase 10 — token-driven, no blur (perf budget) */
-.drawer {
-  background: var(--drawer-bg);
-  border-left: 1px solid var(--border);
-  box-shadow: var(--sh-lg);
-}
+/* ══════ DRAWER ══════ WS42 Phase 10 — token-driven, no blur (perf budget).
+   The base .drawer{} rule (background/border-left/box-shadow) was merged into
+   the consolidated Drawer section near its first definition (Batch 2 / spec
+   2d) — background and border-left were exact duplicates of that rule's
+   values, box-shadow was folded in there. */
 .drawer-header {
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
@@ -4609,27 +4443,27 @@ html.theme-astral .top-nav-item.active .bn-icon { filter: drop-shadow(0 0 5px rg
   }
 }
 
-/* ── WS42 Phase 10 — mobile bottom sheet refinement (spec breakpoint: 639px) ── */
+/* ── WS42 Phase 10 — mobile bottom sheet refinement, ≤639px DELTA over the
+   ≤768px baseline above (Batch 2 / spec 2c merge). This used to be a full
+   duplicate @media(max-width:639px) block; since ≤639 ⊆ ≤768 both blocks
+   always matched together and the later (this) one won per-property in the
+   cascade. Only the properties that actually differ from the baseline are
+   kept here — everything identical to the ≤768px block was dropped (it
+   already applies unchanged) and every kept !important is required to beat
+   the competing !important declaration of the same property above. Verified
+   computed-equivalent at 375px/700px/800px — see Batch 2 report. ── */
 @media (max-width: 639px) {
-  .modal-overlay { align-items: flex-end !important; padding: 0 !important; }
   .modal-box {
-    width: 100% !important; max-width: 100% !important;
     max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 24px) !important;
     border-radius: var(--r-xl) var(--r-xl) 0 0 !important;
-    margin: 0 !important; align-self: flex-end !important;
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   .modal-box::after { background: var(--border-strong); }
   .modal-body { padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
-  /* Drawers (notifications, dept switcher): same sheet treatment on mobile */
-  .drawer {
-    top: auto; bottom: 0; left: 0; right: 0; width: 100%;
-    height: auto; max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 24px);
-    border-radius: var(--r-xl) var(--r-xl) 0 0;
-    border-left: none; border-top: 1px solid var(--border);
-    transform: translateY(100%);
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-  }
+  /* Drawers (notifications, dept switcher): same sheet treatment on mobile.
+     (base .drawer{} rule for this breakpoint consolidated into the grouped
+     Drawer section near its first definition — Batch 2 / spec 2d; these
+     companion selectors are unchanged.) */
   .drawer.open { transform: translateY(0); }
   .drawer::before {
     content: ''; position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
@@ -4820,18 +4654,9 @@ html.theme-astral .subtab-btn.active {
 }
 
 /* ── Drawer — full-screen slide-up on mobile ──
-   Decisively overrides the 639px bottom-sheet block above (both media queries
-   match on a phone): the sheet's capped max-height left a gap at the bottom
-   where the bottom nav peeked through, and its flat header padding clipped the
-   title under the notch. Make it a true full-screen panel instead. */
+   (base .drawer rule for this breakpoint consolidated into the grouped
+   Drawer section near its first definition — Batch 2 / spec 2d) */
 @media (max-width: 768px) {
-  .drawer {
-    top: 0; bottom: 0; left: 0; right: 0;
-    width: 100%; height: auto; max-height: none;
-    border-left: none; border-radius: 0;
-    transform: translateY(100%);
-    z-index: var(--z-drawer-2); /* above sidebar overlay + bottom nav */
-  }
   .drawer.open { transform: translateY(0); }
   .drawer::before { display: none; } /* no drag handle on a full-screen panel */
   .drawer-header { padding-top: calc(14px + env(safe-area-inset-top, 0px)); }
