@@ -62,6 +62,20 @@ window.Chat = (() => {
 
   const _isAdminRole = () => ['president','manager','secretary'].includes(currentRole);
   const _myName = () => (window.userProfile?.displayName || currentUser.email);
+  // Wave5 M3 — shared image-URL sniff, hoisted out of _renderMessagePart (was
+  // a local const there) so _collectAllImages/_mediaGridHtml/_openMediaTab can
+  // all use the exact same rule for "is this attachment an image".
+  const _isImageUrl = url => !!url && /\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(url);
+  // Wave5 M3 — a pending bubble can hold a SINGLE preview object URL
+  // (previewUrl, legacy single-file path) and/or an ARRAY of them
+  // (previewUrls, multi-photo path) — revoke whichever this bubble actually
+  // has. Shared by every "discard optimistic state" site (teardownThread,
+  // openConversation's pre-open reset, _reconcilePending) so the revoke logic
+  // can't drift between them.
+  function _revokePendingPreviews(p) {
+    if (p.previewUrl) { try { URL.revokeObjectURL(p.previewUrl); } catch (_) {} }
+    (p.previewUrls || []).forEach(u => { try { URL.revokeObjectURL(u); } catch (_) {} });
+  }
   function dmIdFor(a, b) { return 'dm_' + [a, b].sort().join('_'); }
   function deptChannelKeys() {
     return Object.keys(window.DEPARTMENTS || {})
@@ -107,7 +121,7 @@ window.Chat = (() => {
     // Wave5 M1 — discard optimistic UI state (the underlying Firestore writes,
     // if still in flight, complete in the background regardless — same
     // fire-and-forget posture as the rest of this file's teardown).
-    _pending.forEach(p => { if (p.previewUrl) { try { URL.revokeObjectURL(p.previewUrl); } catch (_) {} } });
+    _pending.forEach(_revokePendingPreviews);
     _pending = [];
     _threadOpenReadAtMs = 0; _threadInitialScrollDone = false; _scrollFabUnseen = 0;
     _replyTarget = null; _swipe = null;      // Wave5 M2 — reply-arm + in-flight swipe never survive a thread close
@@ -453,6 +467,9 @@ window.Chat = (() => {
     // a small, self-contained addition, not an architecture call.
     const leaveBtnHtml = conv.type === 'group'
       ? `<button id="chat-leave-group-btn" class="btn-secondary btn-sm" style="flex-shrink:0">Leave</button>` : '';
+    // Wave5 M3 (J4) — ⓘ opens the Shared Media/Files/Links info page
+    // (_openMediaTab). Same small-round-button chrome as the wallpaper ⋮.
+    const infoBtnHtml = `<button id="chat-info-btn" class="ms-thread-menu-btn" title="Shared media, files &amp; links" aria-label="Shared media, files and links">${emojiIcon('info', 18)}</button>`;
     // WS42 Phase 18 — ⋮ wallpaper menu (participants can already update the
     // conv doc for lastMessage*; if a rules edge case denies it, the write
     // below is wrapped in .catch() and localStorage carries the preference).
@@ -478,6 +495,7 @@ window.Chat = (() => {
           <div class="ms-thread-subtitle">${subtitleHtml}</div>
         </div>
         ${leaveBtnHtml}
+        ${infoBtnHtml}
         ${wallpaperMenuHtml}
       </div>
       <div id="chat-thread-scroll-wrap" style="position:relative;flex:1;min-height:0;display:flex;flex-direction:column">
@@ -495,8 +513,10 @@ window.Chat = (() => {
         <div id="chat-emoji-grid" class="ms-emoji-grid hidden" role="menu">${
           EMOJI_GRID.map(e => `<button type="button" class="ms-emoji-opt" data-emoji="${e}">${e}</button>`).join('')
         }</div>
-        <label for="chat-file" class="ms-attach-btn" title="Attach file">${emojiIcon('paperclip', 18)}</label>
-        <input type="file" id="chat-file" style="display:none" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"/>
+        <label for="chat-file" class="ms-attach-btn" title="Attach file(s)">${emojiIcon('paperclip', 18)}</label>
+        <input type="file" id="chat-file" multiple style="display:none" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.zip"/>
+        <label for="chat-camera" class="ms-attach-btn" title="Camera">${emojiIcon('camera', 18)}</label>
+        <input type="file" id="chat-camera" accept="image/*" capture="environment" style="display:none"/>
         <button type="button" class="ms-attach-btn" id="chat-link" title="Attach link">${emojiIcon('link',18)}</button>
         <button type="button" class="ms-attach-btn" id="chat-emoji-btn" title="Emoji">${emojiIcon('smile',18)}</button>
         <textarea id="chat-input" class="ms-input" rows="1" placeholder="Type a message…"></textarea>
@@ -569,14 +589,21 @@ window.Chat = (() => {
       btn.addEventListener('click', () => { _setWallpaper(btn.dataset.wp); _closeWallpaperMenu(); });
     });
 
-    // composer wiring: send → Chat.sendMessage({text, file, link}) then clear
-    // input/file/preview (NO re-render call — the messages listener repaints)
-    let pendingFile = null, pendingLink = null;
+    // Wave5 M3 (J4) — ⓘ Shared Media/Files/Links info page.
+    document.getElementById('chat-info-btn')?.addEventListener('click', () => _openMediaTab(conv));
+
+    // composer wiring: send → Chat.sendMessage({text, file, images, link}) then
+    // clear input/attachment/preview (NO re-render call — the messages
+    // listener repaints). pendingImages/pendingFile/pendingLink are mutually
+    // exclusive "what's currently attached" slots, same as the pre-M3
+    // file/link exclusivity — attaching one clears the other two.
+    let pendingFile = null, pendingLink = null, pendingImages = [];
     const fileInp = document.getElementById('chat-file');
+    const cameraInp = document.getElementById('chat-camera');
     const filePreview = document.getElementById('chat-file-preview');
     const input = document.getElementById('chat-input');
     const sendBtn = document.getElementById('chat-send');
-    const updateSendState = () => { sendBtn.disabled = !((input.value || '').trim() || pendingFile || pendingLink); };
+    const updateSendState = () => { sendBtn.disabled = !((input.value || '').trim() || pendingFile || pendingImages.length || pendingLink); };
     // Wave5 M1 — per-conversation draft restore (localStorage `bi-chat-draft-{convId}`).
     // Saved on input (debounced 300ms below), cleared on optimistic send,
     // re-saved if that send fails and the text is restored to the composer.
@@ -584,21 +611,92 @@ window.Chat = (() => {
     if (draft) { input.value = draft; _autoGrow(input); }
     updateSendState();
     let _draftSaveTimer = null;
+    // Wave5 M3 (J4) — shared by the multi-select file input's image branch,
+    // the camera input, paste, and drag-drop: appends up to the 6/message cap
+    // (toasting once if the selection had to be trimmed), and clears any
+    // pending doc/link attachment (an image attachment replaces those, same
+    // "one attachment kind at a time" rule the pre-M3 file/link toggle had).
+    function _addPendingImages(files) {
+      if (!files || !files.length) return;
+      pendingFile = null; pendingLink = null;
+      const room = 6 - pendingImages.length;
+      if (room <= 0) { Notifs.showToast('Up to 6 photos per message', 'error'); return; }
+      const add = files.slice(0, room);
+      if (files.length > add.length) Notifs.showToast('Up to 6 photos per message — extra photos skipped', 'error');
+      pendingImages.push(...add);
+      filePreview.textContent = `📷 ${pendingImages.length} photo${pendingImages.length > 1 ? 's' : ''} selected`;
+      updateSendState();
+    }
     fileInp.addEventListener('change', e => {
-      const f = e.target.files?.[0];
-      if (f) pendingLink = null;   // a file replaces a pending link
+      const files = Array.from(e.target.files || []);
+      e.target.value = '';   // allow re-selecting the same file(s) later
+      if (!files.length) return;
+      const imgFiles = files.filter(f => /^image\//.test(f.type || ''));
+      if (imgFiles.length) {
+        _addPendingImages(imgFiles);
+        // A mixed selection (photos + a doc in the same pick) isn't a shape
+        // this batch's message doc can carry (media[] OR a single fileUrl,
+        // never both) — the doc(s) are dropped, but never silently: same
+        // "always tell the user, never lose data quietly" rule Phase 63 #1
+        // established for upload failures.
+        if (imgFiles.length < files.length) Notifs.showToast('Only photos support multi-select — other file(s) skipped', 'error');
+        return;
+      }
+      // Non-image selection: unchanged single-doc pipeline (Non-image files
+      // unchanged, per spec) — a doc attachment replaces images/link too.
+      const f = files[0];
+      pendingImages = []; pendingLink = null;
       pendingFile = f || null;
       filePreview.textContent = f ? `📎 ${f.name}` : '';
       updateSendState();
+    });
+    cameraInp?.addEventListener('change', e => {
+      const f = e.target.files?.[0];
+      e.target.value = '';
+      if (f) _addPendingImages([f]);
     });
     document.getElementById('chat-link').addEventListener('click', async () => {
       let url = ((await promptDialog({ message: 'Paste a link to attach:' })) || '').trim();
       if (!url) return;
       if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-      pendingLink = url; pendingFile = null;   // a link replaces a pending file
+      pendingLink = url; pendingFile = null; pendingImages = [];   // a link replaces a pending file/images
       fileInp.value = '';
       filePreview.textContent = `🔗 ${url}`;
       updateSendState();
+    });
+
+    // Wave5 M3 (J4) — paste an image from the clipboard directly into the
+    // composer (desktop). Only preventDefault when an image was actually
+    // found, so normal text paste is never intercepted.
+    input.addEventListener('paste', e => {
+      const items = e.clipboardData && e.clipboardData.items; if (!items) return;
+      const imgFiles = [];
+      for (const it of items) {
+        if (it.kind === 'file' && /^image\//.test(it.type || '')) {
+          const f = it.getAsFile(); if (f) imgFiles.push(f);
+        }
+      }
+      if (imgFiles.length) { e.preventDefault(); _addPendingImages(imgFiles); }
+    });
+    // Wave5 M3 (J4) — drag-over highlight + drop-to-attach on the whole
+    // thread panel (desktop). dragenter/dragleave use a depth counter because
+    // both fire repeatedly as the pointer crosses child elements.
+    let _dragDepth = 0;
+    const _dragHasFiles = e => !!(e.dataTransfer && Array.prototype.includes.call(e.dataTransfer.types || [], 'Files'));
+    p.addEventListener('dragenter', e => {
+      if (!_dragHasFiles(e)) return;
+      e.preventDefault(); _dragDepth++;
+      p.classList.add('ms-drop-active');
+    });
+    p.addEventListener('dragover', e => { if (_dragHasFiles(e)) e.preventDefault(); });
+    p.addEventListener('dragleave', () => {
+      _dragDepth = Math.max(0, _dragDepth - 1);
+      if (_dragDepth === 0) p.classList.remove('ms-drop-active');
+    });
+    p.addEventListener('drop', e => {
+      _dragDepth = 0; p.classList.remove('ms-drop-active');
+      const files = Array.from(e.dataTransfer?.files || []).filter(f => /^image\//.test(f.type || ''));
+      if (files.length) { e.preventDefault(); _addPendingImages(files); }
     });
 
     // Wave5 M2 (J6) — composer emoji picker: toggle + outside-click-to-close
@@ -663,27 +761,28 @@ window.Chat = (() => {
     const doSend = async () => {
       if (_isSending) return;
       const text = (input.value || '').trim();
-      const file = pendingFile, link = pendingLink;
+      const file = pendingFile, link = pendingLink, images = pendingImages.slice();   // Wave5 M3 — snapshot before clearing
       const replyTo = _replyTarget;                        // Wave5 M2 — captured BEFORE clearing below
       const mentions = _computeMentions(text, conv);        // Wave5 M2
-      if (!text && !file && !link) return;
+      if (!text && !file && !link && !images.length) return;
       _isSending = true;
       sendBtn.disabled = true;
       const clientKey = _newClientKey();
       const savedText = input.value, savedFilePreview = filePreview.textContent;
       input.value = ''; _autoGrow(input);
-      fileInp.value = ''; pendingFile = null; pendingLink = null;
+      fileInp.value = ''; pendingFile = null; pendingLink = null; pendingImages = [];
       filePreview.textContent = '';
       _replyTarget = null; _renderReplyChip();               // Wave5 M2 — clears on optimistic send, like the composer text
       document.getElementById('chat-mention-dd')?.classList.add('hidden');
       clearTimeout(_draftSaveTimer); _clearDraft(conv.id);
       updateSendState();
-      _addPendingMessage({ clientKey, text, file, link, replyTo });
+      _addPendingMessage({ clientKey, text, file, images, link, replyTo });
       try {
-        await window.Chat.sendMessage({ text, file, link, clientKey, replyTo, mentions });
+        await window.Chat.sendMessage({ text, file, images, link, clientKey, replyTo, mentions });
       } catch (e) {
         input.value = savedText; _autoGrow(input);
         if (file) { pendingFile = file; filePreview.textContent = savedFilePreview; }
+        else if (images.length) { pendingImages = images; filePreview.textContent = savedFilePreview; }
         else if (link) { pendingLink = link; filePreview.textContent = savedFilePreview; }
         if (replyTo) { _replyTarget = replyTo; _renderReplyChip(); }   // Wave5 M2 — restore reply-arm on failure too
         _saveDraft(conv.id, savedText);
@@ -809,7 +908,7 @@ window.Chat = (() => {
     _threadOpenReadAtMs = _myReads[convId] || 0;
     _threadInitialScrollDone = false;
     _scrollFabUnseen = 0;
-    _pending.forEach(p => { if (p.previewUrl) { try { URL.revokeObjectURL(p.previewUrl); } catch (_) {} } });
+    _pending.forEach(_revokePendingPreviews);
     _pending = [];
     _replyTarget = null;   // Wave5 M2 — a reply armed in a PREVIOUS thread never leaks into this one
     _refreshUsersCache().then(() => _renderThread());   // backfills avatar photos once cached
@@ -851,6 +950,46 @@ window.Chat = (() => {
     } catch (_) {}
   }
 
+  // ── Wave5 M3 (J4) — client-side image compression. Ported from
+  // quote-builder-v2.html's compressPhoto (~line 2668; that file is NOT
+  // touched by this batch — this is an independent copy) with THIS batch's
+  // own params per spec: 1600px long edge / JPEG q=0.85 (the reference uses
+  // 1400px/0.82 for its own use case). Resolves { blob, width, height } —
+  // width/height are the POST-compression pixel dimensions, stored on the
+  // media doc (media[].w/.h) for grid-aspect rendering. Mirrors the
+  // reference's own skip rule (non-images, and images already under 300KB,
+  // pass through untouched with null w/h) and its failure fallback (an
+  // undecodable image, e.g. some HEIC the browser can't draw, still resolves
+  // with the ORIGINAL file rather than rejecting — the upload proceeds with
+  // the uncompressed original instead of losing the attachment entirely).
+  function _compressImage(file) {
+    return new Promise(resolve => {
+      if (!file || !/^image\//.test(file.type || '') || file.size < 300 * 1024) {
+        resolve({ blob: file, width: null, height: null }); return;
+      }
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = new Image();
+        img.onload = () => {
+          let { width, height } = img;
+          const maxDim = 1600;
+          if (width > maxDim || height > maxDim) {
+            const scale = maxDim / Math.max(width, height);
+            width = Math.round(width * scale); height = Math.round(height * scale);
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width; canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+          canvas.toBlob(blob => resolve({ blob: blob || file, width, height }), 'image/jpeg', 0.85);
+        };
+        img.onerror = () => resolve({ blob: file, width: null, height: null });
+        img.src = e.target.result;
+      };
+      reader.onerror = () => resolve({ blob: file, width: null, height: null });
+      reader.readAsDataURL(file);
+    });
+  }
+
   // ── Send (message add → parent preview bump → own receipt → notify) ──
   // Wave5 M2 — factored to accept an EXPLICIT `conv` (used by Forward to write
   // into a conversation that may not be the one currently open) instead of
@@ -864,12 +1003,34 @@ window.Chat = (() => {
   // writing into the wrong conversation's subcollections. For every M1 caller
   // conv.id === _openConvId is always true (conv came from _openConv itself),
   // so nothing changes for them.
-  async function sendMessage({ text, file, link, clientKey, replyTo, forwardedFrom, mentions,
-                                conv: convParam, fileUrl: preFileUrl, fileName: preFileName, fileSource: preFileSource }) {
+  async function sendMessage({ text, file, images, link, clientKey, replyTo, forwardedFrom, mentions,
+                                conv: convParam, fileUrl: preFileUrl, fileName: preFileName, fileSource: preFileSource,
+                                media: preMedia }) {
     const conv = convParam || _openConv; if (!conv) return;
     const FV = firebase.firestore.FieldValue;
-    let fileUrl = null, fileName = null, fileSource = null;
-    if (file) {
+    let fileUrl = null, fileName = null, fileSource = null, media = null;
+    if (images && images.length) {
+      // Wave5 M3 (J4) — multi-photo: compress EACH image (1600px/0.85, see
+      // _compressImage), upload in parallel, and write ONE message carrying
+      // media:[{url,name,w,h}] — never fileUrl. Cap (6/message) is already
+      // enforced by the composer (_addPendingImages); re-sliced here too as a
+      // defensive floor in case a future caller (e.g. a retry path) doesn't.
+      // A failure on ANY photo throws so the WHOLE optimistic bubble
+      // fails/retries as one unit — same "throw, don't silently drop" rule
+      // Phase 63 #1 established for the single-file path below.
+      try {
+        media = await Promise.all(images.slice(0, 6).map(async (f, i) => {
+          const { blob, width, height } = await _compressImage(f);
+          const safeName = (f.name || 'photo').replace(/\.[^./\\]+$/, '');
+          const sref = storage.ref(`chat-files/${conv.id}/${Date.now()}_${i}_${safeName}.jpg`);
+          await sref.put(blob, { customMetadata: { uploadedBy: (window.currentUser && currentUser.uid) || '' } });
+          const url = await sref.getDownloadURL();
+          return { url, name: f.name || 'photo', w: width || null, h: height || null };
+        }));
+      } catch (_) {
+        throw new Error('Photo upload failed — message not sent.');
+      }
+    } else if (file) {
       try {
         const sref = storage.ref(`chat-files/${conv.id}/${Date.now()}_${file.name}`);
         await sref.put(file, { customMetadata: { uploadedBy: (window.currentUser && currentUser.uid) || '' } }); fileUrl = await sref.getDownloadURL(); fileName = file.name;
@@ -883,6 +1044,11 @@ window.Chat = (() => {
     } else if (link) {
       fileUrl = link; fileSource = 'link';
       try { fileName = new URL(link).hostname.replace(/^www\./, ''); } catch (_) { fileName = link; }
+    } else if (preMedia && preMedia.length) {
+      // Wave5 M3 (Forward of a media message) — reuse the ALREADY-uploaded
+      // photo URLs by reference, mirroring preFileUrl's reuse below. No
+      // re-upload, no duplicate Storage objects.
+      media = preMedia;
     } else if (preFileUrl) {
       // Wave5 M2 (Forward) — reuse an ALREADY-uploaded/-linked attachment by
       // reference (the forwarded message's own fileUrl/fileName/fileSource);
@@ -895,19 +1061,33 @@ window.Chat = (() => {
       clientKey: clientKey || null,   // Wave5 M1 (J2) — lets _reconcilePending match this doc to its optimistic bubble
       createdAt: FV.serverTimestamp()
     };
-    // Wave5 M2 — new fields are OMITTED entirely (not even written as null)
+    // Wave5 M2/M3 — new fields are OMITTED entirely (not even written as null)
     // when absent, so every doc written before this batch, and every doc
-    // written by this batch without a reply/forward/mention, is byte-for-byte
-    // the same shape as before. The renderer's `m.replyTo &&` / `m.forwardedFrom &&`
-    // / `(m.mentions||[]).length` guards (see _renderMessagePart) are what
-    // make that safe to render identically either way — this is the
-    // backward-compat contract, not just an optimization.
+    // written by this batch without a reply/forward/mention/media, is
+    // byte-for-byte the same shape as before. The renderer's `m.replyTo &&` /
+    // `m.forwardedFrom &&` / `(m.mentions||[]).length` / `m.media &&` guards
+    // (see _renderMessagePart) are what make that safe to render identically
+    // either way — this is the backward-compat contract, not just an
+    // optimization.
     if (replyTo) msgDoc.replyTo = { mid: replyTo.mid, author: replyTo.author, snippet: replyTo.snippet };
     if (forwardedFrom) msgDoc.forwardedFrom = { convId: forwardedFrom.convId, authorName: forwardedFrom.authorName };
     if (mentions && mentions.length) msgDoc.mentions = mentions;
+    if (media && media.length) msgDoc.media = media;
     await db.collection('conversations').doc(conv.id).collection('messages').add(msgDoc);
+    // Notif/preview text sink — PLAIN emoji only, never emojiIcon() (which
+    // returns `<i data-lucide>` HTML markup): this string lands in
+    // conv.lastMessageText (rendered via escHtml, a plain-text sink — see
+    // _renderInbox) AND in the push-notification body (Notifs.send below),
+    // neither of which interprets HTML. Wave5 M3 also fixes the pre-existing
+    // link/file branches here to match (they previously called emojiIcon(),
+    // which would have shown literal "<i data-lucide...>" text — see the
+    // MEMORY.md "emojiIcon plain-text sinks" note this batch was told to
+    // respect for its OWN new media branch; the adjacent branches are the
+    // same line, so fixed alongside rather than left inconsistent).
     const preview = text ? (text.length > 80 ? text.slice(0, 80) + '…' : text)
-                         : (fileSource === 'link' ? `${emojiIcon('🔗',16)} Link` : `${emojiIcon('📎',16)} ${fileName || 'File'}`);
+                         : media && media.length ? `📷 ${media.length > 1 ? media.length + ' photos' : 'Photo'}`
+                         : fileSource === 'link' ? '🔗 Link'
+                         : `📎 ${fileName || 'File'}`;
     // Second write — passes the affectedKeys([lastMessage*]) member branch.
     await db.collection('conversations').doc(conv.id).update({
       lastMessageAt: FV.serverTimestamp(), lastMessageText: preview,
@@ -1116,10 +1296,14 @@ window.Chat = (() => {
   // are therefore stable for any row already in the DOM — see _patchThread).
   function _msgRev(m) {
     return JSON.stringify(m.reactions || {}) + '|' + (m.text || '') + '|' +
-      (m.deleted ? 1 : 0) + '|' + (m.editedAt ? 1 : 0) + '|' + (m.fileUrl || '');
+      (m.deleted ? 1 : 0) + '|' + (m.editedAt ? 1 : 0) + '|' + (m.fileUrl || '') + '|' +
+      JSON.stringify(m.media || []);
     // replyTo/forwardedFrom/mentions deliberately excluded — like createdAt/
     // authorId, they're set once at message CREATE and never mutated by any
     // update() in this file, so they can never change for an existing id.
+    // media is included alongside fileUrl (Wave5 M3) — both DO mutate once,
+    // on unsend (_onDeleteMessage sets both to null), so both need to be in
+    // the hash for that one transition to be detected by _patchThread.
   }
 
   // Wave5 M2 (J3) — shared by both the real-message renderer (_renderMessagePart)
@@ -1157,6 +1341,30 @@ window.Chat = (() => {
     return out;
   }
 
+  // Wave5 M3 (J4) — Messenger-style grid bubble for m.media[] (1=full-width,
+  // 2=split, 3+=uniform grid; a "+N" overlay on the LAST shown tile when the
+  // array exceeds the 6-tile display cap — the send-time cap already keeps
+  // this at ≤6 for anything sent by this batch, but the render is defensive
+  // regardless). Each tile is `.chat-img-tap` (data-mid + data-idx) — the
+  // SAME class/attribute contract a legacy single fileUrl image uses (see the
+  // caller below), so one delegated click handler (_wireThreadDelegation)
+  // opens the lightbox for either shape.
+  function _mediaGridHtml(m) {
+    const media = m.media || [];
+    if (!media.length) return '';
+    const shown = media.slice(0, 6);
+    const extra = media.length - shown.length;
+    const cls = shown.length === 1 ? 'ms-media-1' : shown.length === 2 ? 'ms-media-2' : 'ms-media-grid3';
+    const tiles = shown.map((item, i) => {
+      const overlay = (i === shown.length - 1 && extra > 0) ? `<div class="ms-media-more">+${extra}</div>` : '';
+      return `<div class="ms-media-tile">
+        <img class="chat-img-tap" data-mid="${escHtml(m.id)}" data-idx="${i}" src="${safeHttpUrl(item.url)}" alt="${escHtml(item.name || 'photo')}" loading="lazy"/>
+        ${overlay}
+      </div>`;
+    }).join('');
+    return `<div class="ms-media-grid ${cls}" style="margin-top:${m.text ? '6' : '0'}px">${tiles}</div>`;
+  }
+
   // Renders ONE message: { sep, row }. `sep` is any day-divider/time-gap
   // divider that belongs immediately before this message (context-derived
   // from list[idx-1]/list[idx+1] only — no running "lastDay" state needed,
@@ -1167,7 +1375,6 @@ window.Chat = (() => {
   function _renderMessagePart(list, idx, isNew) {
     const m = list[idx];
     const initials = name => escHtml((name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2));
-    const isImage = url => url && /\.(png|jpg|jpeg|gif|webp)(\?|$)/i.test(url);
     const day = _manilaDay(m.createdAt);
     const prevM = idx > 0 ? list[idx - 1] : null;
     const nextM = idx < list.length - 1 ? list[idx + 1] : null;
@@ -1294,10 +1501,18 @@ window.Chat = (() => {
           <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'} ${grpClass} chat-bubble-tap ${isNew?'ms-pop-in':''}" data-mid="${escHtml(m.id)}">
             ${replyQuoteHtml}
             ${m.text ? `<div class="ms-text">${_highlightMentions(escHtml(m.text).replace(/\n/g,'<br/>'), m.mentions)}</div>` : ''}
-            ${m.fileUrl ? (m.fileSource!=='link' && isImage(m.fileUrl)
-              ? `<div style="margin-top:${m.text?'6':'0'}px"><img src="${safeHttpUrl(m.fileUrl)}" alt="${escHtml(m.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);cursor:pointer" onclick="window.open('${safeHttpUrl(m.fileUrl)}','_blank')"/></div>`
-              : `<a href="${safeHttpUrl(m.fileUrl)}" target="_blank" rel="noopener" class="ms-file-chip">${emojiIcon(m.fileSource==='link'?'link':'paperclip',14)}<span>${escHtml(m.fileName||'Attachment')}</span></a>`
-            ) : ''}
+            ${m.media && m.media.length ? _mediaGridHtml(m)
+              : m.fileUrl ? (m.fileSource!=='link' && _isImageUrl(m.fileUrl)
+                // Wave5 M3 (J1) — legacy single-image docs (fileUrl, no media[])
+                // render IDENTICALLY to before (same size/radius), except the
+                // click target: the old inline onclick="window.open(...)" is
+                // replaced by the SAME .chat-img-tap delegated-click contract
+                // the new media grid uses (data-mid + data-idx="0"), so one
+                // image tap — old doc shape or new — opens the SAME in-app
+                // lightbox instead of a new browser tab.
+                ? `<div style="margin-top:${m.text?'6':'0'}px"><img class="chat-img-tap" data-mid="${escHtml(m.id)}" data-idx="0" src="${safeHttpUrl(m.fileUrl)}" alt="${escHtml(m.fileName||'img')}" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);cursor:pointer"/></div>`
+                : `<a href="${safeHttpUrl(m.fileUrl)}" target="_blank" rel="noopener" class="ms-file-chip">${emojiIcon(m.fileSource==='link'?'link':'paperclip',14)}<span>${escHtml(m.fileName||'Attachment')}</span></a>`
+              ) : ''}
             <div class="ms-meta">
               <span class="ms-time">${timeLabel}</span>
               ${m.editedAt?'<span class="ms-edited">(edited)</span>':''}
@@ -1478,6 +1693,18 @@ window.Chat = (() => {
         toggleReaction(heartBtn.dataset.mid, '❤️');
         return;
       }
+      // Wave5 M3 (J1) — any message image (legacy single fileUrl OR a new
+      // media-grid tile) opens the in-app lightbox instead of the old
+      // window.open(). Checked BEFORE the generic bubble-tap-toggle below so
+      // a long-press that already opened the reaction picker doesn't ALSO
+      // pop the lightbox (longPressed guard, same pattern as heartBtn above).
+      const imgTap = e.target.closest('.chat-img-tap');
+      if (imgTap) {
+        e.stopPropagation();
+        if (longPressed) { longPressed = false; return; }
+        _openLightboxFor(imgTap.dataset.mid, parseInt(imgTap.dataset.idx || '0', 10));
+        return;
+      }
       // Tapping a bubble toggles its timestamp/status line. A short tap no
       // longer opens the picker (that's now long-press-only, req #3) — but a
       // long-press that just fired should also suppress the tap-toggle.
@@ -1607,15 +1834,20 @@ window.Chat = (() => {
   function _newClientKey() {
     return (currentUser?.uid || 'u') + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
   }
-  function _addPendingMessage({ clientKey, text, file, link, replyTo }) {
+  function _addPendingMessage({ clientKey, text, file, images, link, replyTo }) {
     let previewUrl = null;
     if (file && /^image\//.test(file.type || '')) {
       try { previewUrl = URL.createObjectURL(file); } catch (_) {}
     }
+    // Wave5 M3 (J4) — multi-photo local previews: one object URL per selected
+    // image, shown (dimmed, same as the legacy single-preview treatment)
+    // while the real compress+upload happens in the background.
+    const previewUrls = (images || []).map(f => { try { return URL.createObjectURL(f); } catch (_) { return null; } }).filter(Boolean);
     // Wave5 M2 — replyTo rides the pending bubble too (spec requirement):
     // stored verbatim so _renderPendingBubble can show the SAME quote block
     // the confirmed message will render once the snapshot echoes it back.
-    _pending.push({ clientKey, text: text || '', file: file || null, link: link || null, previewUrl, status: 'sending', replyTo: replyTo || null });
+    _pending.push({ clientKey, text: text || '', file: file || null, images: images || [], previewUrl, previewUrls,
+      link: link || null, status: 'sending', replyTo: replyTo || null });
     _renderThread();
   }
   function _markPendingFailed(clientKey) {
@@ -1631,8 +1863,7 @@ window.Chat = (() => {
     _msgs.forEach(m => { if (m.clientKey) seen.add(m.clientKey); });
     _earlier.forEach(m => { if (m.clientKey) seen.add(m.clientKey); });
     if (!seen.size) return;
-    _pending.filter(p => seen.has(p.clientKey))
-      .forEach(p => { if (p.previewUrl) { try { URL.revokeObjectURL(p.previewUrl); } catch (_) {} } });
+    _pending.filter(p => seen.has(p.clientKey)).forEach(_revokePendingPreviews);
     _pending = _pending.filter(p => !seen.has(p.clientKey));
   }
   // Tap-to-retry — reuses the SAME clientKey, so whenever it eventually
@@ -1647,7 +1878,7 @@ window.Chat = (() => {
       // from the stored text (the retry always targets the currently open
       // thread, same as the original send, so _openConv is the right conv).
       const mentions = _computeMentions(p.text, _openConv);
-      await sendMessage({ text: p.text, file: p.file, link: p.link, clientKey, replyTo: p.replyTo, mentions });
+      await sendMessage({ text: p.text, file: p.file, images: p.images, link: p.link, clientKey, replyTo: p.replyTo, mentions });
     } catch (e) {
       p.status = 'failed';
       _renderPendingTail();
@@ -1688,9 +1919,21 @@ window.Chat = (() => {
     const statusHtml = failed
       ? `<span class="ms-pending-status">${emojiIcon('⚠',12)}</span><span class="ms-pending-retry-label">Tap to retry</span>`
       : `<span class="ms-pending-status">${emojiIcon('⏳',11)}</span>`;
-    const mediaHtml = p.previewUrl
-      ? `<div style="margin-top:${p.text?'6':'0'}px"><img src="${p.previewUrl}" alt="" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);opacity:.75"/></div>`
-      : (p.file ? `<div class="ms-file-chip">${emojiIcon('paperclip',14)}<span>${escHtml(p.file.name)}</span></div>` : '');
+    // Wave5 M3 (J4) — multi-photo local previews render through the SAME
+    // .ms-media-grid layout the confirmed message will use, just dimmed
+    // (opacity, mirroring the legacy single-preview treatment) and with no
+    // click handler (the tail's delegated click only wires .ms-reply-quote/
+    // .ms-bubble-failed — see _wirePendingTailDelegation — a still-uploading
+    // preview has no lightbox-navigable identity yet).
+    const previewCount = (p.previewUrls || []).length;
+    const gridCls = previewCount === 1 ? 'ms-media-1' : previewCount === 2 ? 'ms-media-2' : 'ms-media-grid3';
+    const mediaHtml = previewCount
+      ? `<div class="ms-media-grid ${gridCls}" style="margin-top:${p.text?'6':'0'}px;opacity:.75">${
+          p.previewUrls.slice(0, 6).map(u => `<div class="ms-media-tile"><img src="${u}" alt=""/></div>`).join('')
+        }</div>`
+      : p.previewUrl
+        ? `<div style="margin-top:${p.text?'6':'0'}px"><img src="${p.previewUrl}" alt="" style="max-width:200px;max-height:160px;border-radius:var(--r-sm,10px);opacity:.75"/></div>`
+        : (p.file ? `<div class="ms-file-chip">${emojiIcon('paperclip',14)}<span>${escHtml(p.file.name)}</span></div>` : '');
     const linkHtml = (p.link && !p.file) ? `<div class="ms-file-chip">${emojiIcon('link',14)}<span>${escHtml(p.link)}</span></div>` : '';
     return `
       <div class="ms-row ms-row-mine ms-grp-single">
@@ -1908,7 +2151,8 @@ window.Chat = (() => {
           const forwardedFrom = { convId: sourceConvId, authorName: _authorInfo(m.authorId, m.authorName).name };
           await sendMessage({
             text: m.text || '', clientKey: _newClientKey(), conv: target, forwardedFrom,
-            fileUrl: m.fileUrl || null, fileName: m.fileName || null, fileSource: m.fileSource || null
+            fileUrl: m.fileUrl || null, fileName: m.fileName || null, fileSource: m.fileSource || null,
+            media: m.media || null   // Wave5 M3 — forwarding a media message reuses its uploaded photo URLs, no re-upload
           });
           Notifs.success('Forwarded');
         } catch (_) {
@@ -1940,6 +2184,272 @@ window.Chat = (() => {
     const newPos = start + emoji.length;
     input.setSelectionRange(newPos, newPos);
     input.focus();
+  }
+
+  // ══════════════════════════════
+  // Wave5 Batch M3 — media + lightbox
+  // ══════════════════════════════
+
+  // ── Wave5 M3 (J1) — lightbox image list ──
+  // Flat, chronological list of every image across the CURRENTLY LOADED
+  // thread window (_earlier + _msgs — "earlier+live windows" per spec;
+  // an image that's back further than the loaded window only joins the list
+  // once "Load earlier" pulls it in, the same constraint _scrollToMessage
+  // already has for replies). Tombstoned messages are skipped (their
+  // media/fileUrl are nulled on unsend anyway). Covers BOTH shapes: a
+  // media[] grid (each item is one entry) and a legacy single fileUrl image
+  // (one entry) — so navigating next/prev in the lightbox moves seamlessly
+  // across old and new message shapes with no special-casing at the tap site.
+  function _collectAllImages() {
+    const out = [];
+    [..._earlier, ..._msgs].forEach(m => {
+      if (m.deleted) return;
+      if (Array.isArray(m.media) && m.media.length) {
+        m.media.forEach(mi => out.push({ url: mi.url, name: mi.name, mid: m.id }));
+      } else if (m.fileUrl && m.fileSource !== 'link' && _isImageUrl(m.fileUrl)) {
+        out.push({ url: m.fileUrl, name: m.fileName, mid: m.id });
+      }
+    });
+    return out;
+  }
+  // Maps a tap on the Nth tile of message `mid` (data-idx, 0-based within
+  // THAT message's own media) to its position in the flat conversation-wide
+  // list built above, then opens the lightbox there.
+  function _openLightboxFor(mid, localIdx) {
+    const all = _collectAllImages();
+    let seen = -1, flatIdx = 0;
+    for (let i = 0; i < all.length; i++) {
+      if (all[i].mid !== mid) continue;
+      seen++;
+      if (seen === localIdx) { flatIdx = i; break; }
+    }
+    _openLightbox(all, flatIdx);
+  }
+  // ── Wave5 M3 (J1) — the lightbox itself. ONE Overlay entry (Back/Esc
+  // dismiss come free: js/app.js's popstate handler calls Overlay._popOne()
+  // and Keymap.closeTopOverlay() calls Overlay.dismissTop() whenever the
+  // stack is non-empty — both already exist, nothing extra needed here for
+  // those two paths). z-index is entirely Overlay's own dynamic tier
+  // (push(kind, teardown, el) inline-sets el.style.zIndex) — no z-index
+  // literal in this file or in the .ms-lightbox CSS. Swipe left/right moves
+  // between every image _collectAllImages found; swipe down dismisses;
+  // pinch (2-touch) and double-tap zoom via a hand-rolled transform (no
+  // gesture library) — touch-action:none on the image hands full gesture
+  // control to this code instead of fighting native browser panning/zoom.
+  function _openLightbox(images, startIdx) {
+    if (!images || !images.length) return;
+    let idx = Math.max(0, Math.min(startIdx || 0, images.length - 1));
+    let scale = 1, tx = 0, ty = 0;                    // current image's zoom/pan
+    let pinchStartDist = 0, pinchStartScale = 1;
+    let panStartX = 0, panStartY = 0, panStartTx = 0, panStartTy = 0;
+    let swipe = null;                                 // 1-finger, scale===1 drag (nav or dismiss)
+    let lastTapAt = 0, lastTapX = 0, lastTapY = 0;     // double-tap-to-zoom detection
+
+    const el = document.createElement('div');
+    el.className = 'ms-lightbox';
+    el.setAttribute('role', 'dialog'); el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-label', 'Photo viewer');
+    el.innerHTML = `
+      <div class="ms-lightbox-top">
+        <button type="button" class="ms-lightbox-close" title="Close" aria-label="Close">✕</button>
+        <div class="ms-lightbox-count"></div>
+        <a class="ms-lightbox-download" target="_blank" rel="noopener" title="Open in a new tab">${emojiIcon('download', 18)}</a>
+      </div>
+      <div class="ms-lightbox-stage">
+        <img class="ms-lightbox-img" alt=""/>
+        <button type="button" class="ms-lightbox-nav ms-lightbox-prev" aria-label="Previous photo">‹</button>
+        <button type="button" class="ms-lightbox-nav ms-lightbox-next" aria-label="Next photo">›</button>
+      </div>`;
+    document.body.appendChild(el);
+    if (window.lucide) lucide.createIcons({ nodes: [el] });
+
+    const img = el.querySelector('.ms-lightbox-img');
+    const stage = el.querySelector('.ms-lightbox-stage');
+    const countEl = el.querySelector('.ms-lightbox-count');
+    const dlEl = el.querySelector('.ms-lightbox-download');
+    const prevBtn = el.querySelector('.ms-lightbox-prev');
+    const nextBtn = el.querySelector('.ms-lightbox-next');
+    const multi = images.length > 1;
+    prevBtn.classList.toggle('ms-lightbox-multi', multi);
+    nextBtn.classList.toggle('ms-lightbox-multi', multi);
+
+    function resetZoom() {
+      scale = 1; tx = 0; ty = 0;
+      img.classList.remove('ms-lightbox-dragging');
+      img.style.transform = ''; img.style.opacity = '';
+    }
+    function applyTransform() { img.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`; }
+    function render() {
+      const it = images[idx];
+      const u = safeHttpUrl(it.url);
+      img.src = u; img.alt = it.name || '';
+      dlEl.href = u; dlEl.setAttribute('download', it.name || '');
+      countEl.textContent = multi ? `${idx + 1} / ${images.length}` : '';
+      resetZoom();
+    }
+    function go(delta) { idx = (idx + delta + images.length) % images.length; render(); }
+
+    el.querySelector('.ms-lightbox-close').addEventListener('click', () => window.Overlay.dismissTop());
+    prevBtn.addEventListener('click', () => go(-1));
+    nextBtn.addEventListener('click', () => go(1));
+    el.addEventListener('click', e => { if (e.target === el || e.target === stage) window.Overlay.dismissTop(); });
+
+    function onKey(e) {
+      if (e.key === 'ArrowLeft') go(-1);
+      else if (e.key === 'ArrowRight') go(1);
+      // Escape is handled globally by Keymap/Overlay already — not duplicated here.
+    }
+    document.addEventListener('keydown', onKey);
+
+    function dist(t0, t1) { return Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY); }
+    function onTouchStart(e) {
+      if (e.touches.length === 2) {
+        pinchStartDist = dist(e.touches[0], e.touches[1]);
+        pinchStartScale = scale;
+        swipe = null;
+        return;
+      }
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const now = Date.now();
+      const isDoubleTap = (now - lastTapAt < 300) &&
+        Math.abs(t.clientX - lastTapX) < 30 && Math.abs(t.clientY - lastTapY) < 30;
+      lastTapAt = isDoubleTap ? 0 : now; lastTapX = t.clientX; lastTapY = t.clientY;
+      if (isDoubleTap) {
+        if (scale > 1) resetZoom(); else { scale = 2; tx = 0; ty = 0; applyTransform(); }
+      }
+      if (scale > 1) {
+        panStartX = t.clientX; panStartY = t.clientY; panStartTx = tx; panStartTy = ty;
+        swipe = null;
+      } else {
+        swipe = { startX: t.clientX, startY: t.clientY, dx: 0, dy: 0, committed: false, axis: null };
+      }
+    }
+    function onTouchMove(e) {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const d = dist(e.touches[0], e.touches[1]);
+        scale = Math.max(1, Math.min(4, pinchStartScale * (d / (pinchStartDist || d))));
+        img.classList.add('ms-lightbox-dragging');
+        applyTransform();
+        return;
+      }
+      if (e.touches.length === 1 && scale > 1) {
+        e.preventDefault();
+        const t = e.touches[0];
+        tx = panStartTx + (t.clientX - panStartX);
+        ty = panStartTy + (t.clientY - panStartY);
+        img.classList.add('ms-lightbox-dragging');
+        applyTransform();
+        return;
+      }
+      if (!swipe) return;
+      const t = e.touches[0]; if (!t) return;
+      const dx = t.clientX - swipe.startX, dy = t.clientY - swipe.startY;
+      if (!swipe.committed) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;   // noise floor
+        swipe.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+        swipe.committed = true;
+      }
+      if (swipe.axis === 'x') {
+        e.preventDefault();
+        swipe.dx = dx;
+        img.classList.add('ms-lightbox-dragging');
+        img.style.transform = `translateX(${dx}px)`;
+        img.style.opacity = String(Math.max(0.4, 1 - Math.abs(dx) / 400));
+      } else if (dy > 0) {   // swipe DOWN only — dismiss gesture; an upward drag is a no-op (no content to reveal)
+        e.preventDefault();
+        swipe.dy = dy;
+        img.classList.add('ms-lightbox-dragging');
+        img.style.transform = `translateY(${dy}px)`;
+        img.style.opacity = String(Math.max(0.3, 1 - dy / 300));
+      }
+    }
+    function onTouchEnd() {
+      if (swipe && swipe.committed) {
+        if (swipe.axis === 'x' && Math.abs(swipe.dx) > 70) {
+          go(swipe.dx > 0 ? -1 : 1);
+        } else if (swipe.axis === 'y' && swipe.dy > 100) {
+          swipe = null;
+          window.Overlay.dismissTop();
+          return;
+        } else {
+          img.classList.remove('ms-lightbox-dragging');
+          img.style.opacity = '';
+          applyTransform();
+        }
+      }
+      swipe = null;
+    }
+    stage.addEventListener('touchstart', onTouchStart, { passive: true });
+    stage.addEventListener('touchmove', onTouchMove, { passive: false });
+    stage.addEventListener('touchend', onTouchEnd);
+    stage.addEventListener('touchcancel', onTouchEnd);
+
+    window.Overlay.push('lightbox', () => { document.removeEventListener('keydown', onKey); el.remove(); }, el);
+    render();
+  }
+
+  // ── Wave5 M3 (J4) — Shared Media/Files/Links (thread-info page). A ONE-SHOT
+  // query (not a live listener — no new listener-lifecycle contract for this
+  // module to own), client-filtered per spec ("fine at current volumes").
+  // Reached via the ⓘ button _buildThreadPanel wires next to the wallpaper
+  // menu.
+  async function _openMediaTab(conv) {
+    const snap = await db.collection('conversations').doc(conv.id).collection('messages')
+      .orderBy('createdAt', 'desc').limit(500).get().catch(() => ({ docs: [] }));
+    const msgs = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(m => !m.deleted);
+    const mediaItems = [], fileItems = [], linkItems = [];
+    msgs.forEach(m => {
+      if (Array.isArray(m.media) && m.media.length) {
+        m.media.forEach(mi => mediaItems.push({ url: mi.url, name: mi.name }));
+      } else if (m.fileUrl && m.fileSource === 'link') {
+        linkItems.push({ url: m.fileUrl, name: m.fileName, date: m.createdAt });
+      } else if (m.fileUrl) {
+        if (_isImageUrl(m.fileUrl)) mediaItems.push({ url: m.fileUrl, name: m.fileName });
+        else fileItems.push({ url: m.fileUrl, name: m.fileName, date: m.createdAt });
+      }
+    });
+    const fmtDate = ts => {
+      const d = ts?.toDate ? ts.toDate() : null;
+      return d ? d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', timeZone: window.BIZ_TZ }) : '';
+    };
+    const fileRowHtml = (it, icon) => `<a class="chat-mediatab-file-row" href="${safeHttpUrl(it.url)}" target="_blank" rel="noopener">
+        ${emojiIcon(icon, 16)}<span class="chat-mediatab-file-name">${escHtml(it.name || it.url || 'File')}</span>
+        <span class="chat-mediatab-file-date">${escHtml(fmtDate(it.date))}</span>
+      </a>`;
+    const mediaHtml = mediaItems.length
+      ? `<div class="chat-mediatab-grid">${mediaItems.map((it, i) =>
+          `<div class="chat-mediatab-thumb" data-idx="${i}"><img src="${safeHttpUrl(it.url)}" loading="lazy" alt="${escHtml(it.name||'photo')}"/></div>`).join('')}</div>`
+      : `<div class="empty-state" style="padding:16px"><p>No photos yet.</p></div>`;
+    const filesHtml = fileItems.length
+      ? fileItems.map(it => fileRowHtml(it, 'paperclip')).join('')
+      : `<div class="empty-state" style="padding:16px"><p>No files yet.</p></div>`;
+    const linksHtml = linkItems.length
+      ? linkItems.map(it => fileRowHtml(it, 'link')).join('')
+      : `<div class="empty-state" style="padding:16px"><p>No links yet.</p></div>`;
+
+    const body = `
+      <div id="chat-mediatab-chips"></div>
+      <div id="chat-mediatab-media">${mediaHtml}</div>
+      <div id="chat-mediatab-files" class="hidden">${filesHtml}</div>
+      <div id="chat-mediatab-links" class="hidden">${linksHtml}</div>`;
+    window.openPage('Shared Media', body);
+    const chipsEl = document.getElementById('chat-mediatab-chips');
+    if (chipsEl) {
+      chipsEl.innerHTML = window.chipTabs([
+        { key: 'media', label: 'Media', count: mediaItems.length || null },
+        { key: 'files', label: 'Files', count: fileItems.length || null },
+        { key: 'links', label: 'Links', count: linkItems.length || null }
+      ], 'media');
+      window.bindChipTabs(chipsEl, key => {
+        ['media', 'files', 'links'].forEach(k =>
+          document.getElementById('chat-mediatab-' + k)?.classList.toggle('hidden', k !== key));
+      });
+    }
+    document.getElementById('chat-mediatab-media')?.querySelectorAll('.chat-mediatab-thumb').forEach(t => {
+      t.addEventListener('click', () => _openLightbox(mediaItems, parseInt(t.dataset.idx, 10)));
+    });
   }
 
   function _renderThread(opts) {

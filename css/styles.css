@@ -4473,6 +4473,114 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 }
 .ms-emoji-opt:hover { background: var(--surface-2); }
 
+/* ══════════════════════════════
+   Wave5 Batch M3 — media + lightbox
+══════════════════════════════ */
+
+/* Messenger-style multi-photo grid bubble (J4) — 1=full-width, 2=split,
+   3+=uniform grid with a "+N" overlay on the last shown tile past the
+   6-photo/message cap. Shared by BOTH the confirmed-message renderer
+   (_mediaGridHtml) and the optimistic pending-bubble preview
+   (_renderPendingBubble), and by the Shared Media tab's thumbnail grid
+   (.chat-mediatab-grid, its own layout below — same tile look, different
+   grid shape since it's not "one message's photos" but "every photo"). */
+.ms-media-grid {
+  display: grid; gap: 2px; border-radius: var(--r-sm, 10px); overflow: hidden;
+  max-width: 260px;
+}
+.ms-media-1 { grid-template-columns: 1fr; }
+/* Single-photo tile: aspect-ratio:auto alone would leave the tile with no
+   definite height for the img's height:100% (below) to resolve against —
+   give the tile an intrinsic size via its own img (object-fit:contain,
+   natural size up to the cap) instead of the cover/aspect-ratio:1 grid tiles use. */
+.ms-media-1 .ms-media-tile { aspect-ratio: auto; height: auto; max-height: 260px; }
+.ms-media-1 .ms-media-tile img { width: auto; height: auto; max-width: 100%; max-height: 260px; object-fit: contain; }
+.ms-media-2 { grid-template-columns: 1fr 1fr; }
+.ms-media-grid3 { grid-template-columns: 1fr 1fr; }
+.ms-media-tile { position: relative; overflow: hidden; aspect-ratio: 1; background: var(--surface-2); }
+.ms-media-tile img { width: 100%; height: 100%; object-fit: cover; display: block; cursor: pointer; }
+.ms-media-more {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.55); color: #fff; font-size: var(--fs-lg); font-weight: 700;
+  pointer-events: none;
+}
+
+/* Drag-and-drop highlight (J4, desktop) — chat.js toggles .ms-drop-active on
+   the thread panel (#chat-thread-panel) while a file is dragged over it. */
+#chat-thread-panel.ms-drop-active #chat-thread-scroll-wrap {
+  outline: 2px dashed var(--primary); outline-offset: -2px;
+  position: relative;
+}
+#chat-thread-panel.ms-drop-active #chat-thread-scroll-wrap::after {
+  content: 'Drop photo to attach';
+  position: absolute; inset: 0; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary); font-weight: 700; font-size: var(--fs-md);
+  pointer-events: none;
+}
+
+/* ── Lightbox (J1) — full-window overlay riding the Overlay stack; its
+   z-index is set dynamically by Overlay.push(kind, teardown, el) in chat.js
+   _openLightbox — never a literal in this file. */
+.ms-lightbox {
+  position: fixed; inset: 0; background: rgba(6,6,10,0.94);
+  display: flex; flex-direction: column;
+  animation: msLightboxIn .15s ease;
+}
+@keyframes msLightboxIn { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .ms-lightbox { animation: none; } }
+.ms-lightbox-top {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: calc(10px + env(safe-area-inset-top,0px)) 14px 10px;
+  flex-shrink: 0;
+}
+.ms-lightbox-close, .ms-lightbox-download {
+  width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.12); color: #fff; border: none; cursor: pointer;
+  text-decoration: none;
+}
+.ms-lightbox-close:hover, .ms-lightbox-download:hover { background: rgba(255,255,255,0.22); }
+.ms-lightbox-count { color: rgba(255,255,255,0.85); font-size: var(--fs-sm); font-weight: 600; }
+.ms-lightbox-stage {
+  flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center;
+  overflow: hidden; position: relative; touch-action: none;
+}
+.ms-lightbox-img {
+  max-width: 100%; max-height: 100%; object-fit: contain;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+  transition: transform .08s linear, opacity .08s linear;
+  will-change: transform;
+}
+.ms-lightbox-img.ms-lightbox-dragging { transition: none; }
+.ms-lightbox-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 40px; height: 40px; border-radius: 50%;
+  background: rgba(255,255,255,0.12); color: #fff; border: none; cursor: pointer;
+  display: none; align-items: center; justify-content: center; font-size: 22px; line-height: 1;
+}
+.ms-lightbox-nav:hover { background: rgba(255,255,255,0.22); }
+.ms-lightbox-prev { left: 12px; }
+.ms-lightbox-next { right: 12px; }
+@media (hover: hover) { .ms-lightbox-nav.ms-lightbox-multi { display: flex; } }
+
+/* ── Shared Media/Files/Links tab (J4) — thread-info page opened from the
+   ⓘ button; body built once from a one-shot query (_openMediaTab), chip-
+   switched between the three panes. ── */
+.chat-mediatab-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px;
+}
+.chat-mediatab-thumb { aspect-ratio: 1; overflow: hidden; border-radius: var(--r-sm, 8px); cursor: pointer; background: var(--surface-2); }
+.chat-mediatab-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chat-mediatab-file-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px 4px;
+  border-bottom: 1px solid var(--border); text-decoration: none; color: var(--text);
+}
+.chat-mediatab-file-row:last-child { border-bottom: none; }
+.chat-mediatab-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.chat-mediatab-file-date { font-size: var(--fs-2xs); color: var(--text-muted); flex-shrink: 0; }
+
 /* ── Chat inbox rows (Phase 16) ── */
 .ms-search-wrap { margin: 10px 0; }
 .ms-search-input {
