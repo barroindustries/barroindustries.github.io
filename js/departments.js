@@ -274,6 +274,25 @@ window.Clients = (function () {
 //  from the client. All finance delete buttons route through financeDelete().
 // ════════════════════════════════════════════════════════════════
 
+// Delete a ledger row by refNumber AND keep finance_rollup in sync (v14 Wave 4
+// Batch F2). Every cascade delete below — plus the ledger-row-itself delete in
+// financeExecuteDelete — funnels through here, which is the actual universal
+// "remove a ledger row" choke point in this app (Ledger.remove() in
+// finance-ledger.js is unused; every UI path calls window.financeDelete, which
+// lands in financeDeleteCascade/financeExecuteDelete either directly or, for a
+// non-president request, later via the Approvals screen). Reads the row BEFORE
+// deleting so its pre-delete contribution can be subtracted from finance_rollup
+// — best-effort, never blocks/throws (Ledger._syncRollup self-catches; a miss
+// here is reconciled by Ledger.rebuildRollups()).
+async function _deleteLedgerRowByRef(ref) {
+  const ls = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
+  if (!ls.docs.length) return false;
+  const data = ls.docs[0].data();
+  await ls.docs[0].ref.delete().catch(()=>{});
+  if (window.Ledger && typeof window.Ledger._syncRollup === 'function') await window.Ledger._syncRollup(data, -1);
+  return true;
+}
+
 // Cascade cleanup that must accompany the ACTUAL delete of certain finance
 // docs (their linked ledger entries / CA balances). Runs in the deleter's
 // context — always the President — so these ledger writes are permitted.
@@ -283,8 +302,7 @@ async function financeDeleteCascade(collection, docId) {
   if (!d) return;
   if (collection === 'salary_history') {
     const ref = `PAY-${d.month}-${d.userId||''}`;
-    const ls = await db.collection('ledger').where('refNumber','==',ref).limit(1).get().catch(()=>({docs:[]}));
-    if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
+    await _deleteLedgerRowByRef(ref);
     // v12 WS20/21: the employer-share debit leg this employee's line posted
     // (gross-with-liability-legs booking). NOTE: the aggregate SSSPAY-/PHPAY-/
     // HDMFPAY-/WHTPAY-/NETPAY-{month} credit legs (shared across the WHOLE
@@ -292,8 +310,7 @@ async function financeDeleteCascade(collection, docId) {
     // from every other still-standing line for that month. Known gap, left
     // for whoever builds WS39 (BIR/remittance reports, the eventual owner of
     // these legs) since a wrong partial fix is worse than an honest one.
-    const lsEr = await db.collection('ledger').where('refNumber','==',ref+'-ER').limit(1).get().catch(()=>({docs:[]}));
-    if (lsEr.docs.length) await lsEr.docs[0].ref.delete().catch(()=>{});
+    await _deleteLedgerRowByRef(ref+'-ER');
     // Restore any cash-advance balances this payroll run deducted, so deleting the
     // run doesn't leave an employee's loan wrongly marked paid.
     if (Array.isArray(d.caDeductions)) {
@@ -312,23 +329,18 @@ async function financeDeleteCascade(collection, docId) {
   } else if (collection === 'payslips') {
     const ca = d.deductions?.other?.cashAdvance || 0;
     if (ca > 0 && d.workerId) await db.collection('worker_profiles').doc(d.workerId).update({ caBalance: firebase.firestore.FieldValue.increment(ca) }).catch(()=>{});
-    const ls = await db.collection('ledger').where('refNumber','==',`WPAY-${docId}`).limit(1).get().catch(()=>({docs:[]}));
-    if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
+    await _deleteLedgerRowByRef(`WPAY-${docId}`);
   } else if (collection === 'cash_receipt_journal' || collection === 'cash_disbursement_journal' || collection === 'expenses') {
     // Remove the mirrored ledger row(s) (CRJ-/CDJ-/EXP-<id>, plus the v12 WS36
     // A/R-/A/P-settlement legs CRJ-/CDJ-<id>-AR/-AP) so deleting the source
     // entry doesn't leave the books overstated.
     const prefix = collection === 'cash_receipt_journal' ? 'CRJ' : collection === 'cash_disbursement_journal' ? 'CDJ' : 'EXP';
     const refs = [`${prefix}-${docId}`, `${prefix}-${docId}-AR`, `${prefix}-${docId}-AP`];
-    for (const r of refs) {
-      const ls = await db.collection('ledger').where('refNumber','==',r).limit(1).get().catch(()=>({docs:[]}));
-      if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
-    }
+    for (const r of refs) await _deleteLedgerRowByRef(r);
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
   } else if (collection === 'cash_advances') {
     // v12 WS36 — remove the mirrored cash-release ledger row (CA-<id>).
-    const ls = await db.collection('ledger').where('refNumber','==',`CA-${docId}`).limit(1).get().catch(()=>({docs:[]}));
-    if (ls.docs.length) await ls.docs[0].ref.delete().catch(()=>{});
+    await _deleteLedgerRowByRef(`CA-${docId}`);
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
   }
 }
@@ -337,7 +349,18 @@ async function financeDeleteCascade(collection, docId) {
 // direct delete AND by the Approvals screen when a request is approved.
 window.financeExecuteDelete = async function(collection, docId) {
   await financeDeleteCascade(collection, docId);
+  // v14 Wave 4 Batch F2 — a DIRECT delete of a ledger row itself (as opposed to
+  // a cascade delete above, triggered by deleting the SOURCE doc) also needs
+  // its finance_rollup contribution subtracted. Read before delete since the
+  // row is gone after; best-effort, mirrors _deleteLedgerRowByRef above.
+  let _ledgerRowBeforeDelete = null;
+  if (collection === 'ledger') {
+    try { const s = await db.collection('ledger').doc(docId).get(); if (s.exists) _ledgerRowBeforeDelete = s.data(); } catch(_) {}
+  }
   await db.collection(collection).doc(docId).delete();
+  if (_ledgerRowBeforeDelete && window.Ledger && typeof window.Ledger._syncRollup === 'function') {
+    await window.Ledger._syncRollup(_ledgerRowBeforeDelete, -1);
+  }
 };
 
 // President → delete now (with confirm). Anyone else → file a delete request for
@@ -2867,6 +2890,7 @@ function openFinanceToolsPage() {
         <button class="btn-secondary btn-sm" onclick="window.runRestateMaterialCosts()" title="Fix the double material-expensing bug on historical rows">${emojiIcon('🧾',16)} Restate material costs</button>
         <button class="btn-secondary btn-sm" onclick="window.runFixUndatedRows()" title="Repair ledger rows with a missing/malformed date">${emojiIcon('🩹',16)} Fix undated rows</button>
         <button class="btn-secondary btn-sm" onclick="window.runMigrateLedgerIds(this)" title="Migrate legacy random-id ledger rows to deterministic ids (dry-run first)">${emojiIcon('🧭',16)} Migrate ledger ids</button>
+        <button class="btn-secondary btn-sm" onclick="window.runRebuildRollups(this)" title="Recompute finance_rollup monthly aggregates from a full ledger scan — the fix for any Overview-totals drift">${emojiIcon('🔁',16)} Rebuild rollups</button>
       </div>
     </div>
     <div class="card">
@@ -2878,6 +2902,32 @@ function openFinanceToolsPage() {
   `, `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
   document.getElementById('fin-tools-ca-repair-btn')?.addEventListener('click', () => openCADataRepairModal());
 }
+
+// ── v14 Wave 4 Batch F2: Rebuild rollups (president, Finance Tools) ────────
+// Full ledger rescan → recompute every finance_rollup/{yyyymm} doc from
+// scratch (window.Ledger.rebuildRollups, js/finance-ledger.js). Idempotent —
+// safe to run repeatedly — and the ONLY reconciliation path for the drift
+// risk that _syncRollup's best-effort separate-write design accepts (a rules
+// deploy not landed yet, a network blip on a post-commit sync, a raw ledger
+// write that bypassed the Ledger service). Overview shows a one-line notice
+// pointing here whenever finance_rollup is empty but the ledger isn't.
+window.runRebuildRollups = async function(btn) {
+  if (!window.Ledger || typeof window.Ledger.rebuildRollups !== 'function') {
+    Notifs.showToast('Rollup tool not loaded', 'error'); return;
+  }
+  if (!(await confirmDialog({message:'Rebuild finance_rollup from a full ledger scan?\n\nThis recomputes every month\'s income/expense/VAT totals from scratch and overwrites the existing rollup docs. Safe to run repeatedly — this is the reconciliation tool for any Overview-totals drift.'}))) return;
+  await window.busy(btn, async () => {
+    Notifs.showToast('Rebuilding rollups… scanning the full ledger, please wait.');
+    try {
+      const r = await window.Ledger.rebuildRollups();
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('finance_rollup');
+      window.logAudit && window.logAudit('rebuild-rollups','finance_rollup',null,r);
+      Notifs.success(`Rebuilt ${r.months} month${r.months===1?'':'s'} of rollups from ${r.scanned} ledger row${r.scanned===1?'':'s'} ✓`);
+    } catch (e) {
+      Notifs.showToast('Rebuild failed: '+(e.message||e),'error');
+    }
+  });
+};
 
 async function loadFinanceContent(currentUser, currentRole, sub) {
   const content = document.getElementById('fin-content');
@@ -3465,7 +3515,13 @@ window.disbursePayRun = async function(month, opts = {}) {
   // own atomic run, not a user-initiated finance delete (contrast with the
   // user-facing _deleteLedgerByRef, which now routes through financeDelete).
   const _oldAgg = await db.collection('ledger').where('refNumber','==',`PAY-${month}`).limit(1).get().catch(()=>({docs:[]}));
-  if (_oldAgg.docs.length) await _oldAgg.docs[0].ref.delete().catch(()=>{});
+  if (_oldAgg.docs.length) {
+    const _oldAggData = _oldAgg.docs[0].data();
+    await _oldAgg.docs[0].ref.delete().catch(()=>{});
+    // v14 Wave 4 Batch F2 — this is a raw delete outside Ledger.remove(), same
+    // as every other cascade above; keep finance_rollup in sync (best-effort).
+    if (window.Ledger && typeof window.Ledger._syncRollup === 'function') await window.Ledger._syncRollup(_oldAggData, -1);
+  }
 
   const aggLeg = async (ref, account, amount) => {
     if (amount <= 0) return;
@@ -3816,11 +3872,13 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           // Keep ledger entry in sync
           const ledgerRef = `PAY-${rec.month}-${rec.userId}`;
           const ledgerSnap = await db.collection('ledger').where('refNumber','==',ledgerRef).limit(1).get().catch(()=>({docs:[]}));
+          const _rollupSync = window.Ledger && typeof window.Ledger._syncRollup === 'function' ? window.Ledger._syncRollup : null;
           if (!ledgerSnap.docs.length && rec.userId) {
             // Individual entry didn't exist yet — create it
-            await db.collection('ledger').add({
+            const _newLedgerRow = {
               date: rec.month + '-01',
               type: 'debit',
+              accountType: 'expense',
               description: `Payslip — ${rec.userName||'?'} (${window.fmtMonthLabel(rec.month)})`,
               amount: effectiveGross,
               category: 'Payroll Expense',
@@ -3829,9 +3887,18 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               addedBy: currentUser.uid,
               addedByName: window.userProfile?.displayName || currentUser.email,
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            });
+            };
+            await db.collection('ledger').add(_newLedgerRow);
+            // v14 Wave 4 Batch F2 — this poster writes .add() directly (not
+            // through Ledger.post), so keep finance_rollup in sync here too.
+            if (_rollupSync) await _rollupSync(_newLedgerRow, +1);
           } else if (ledgerSnap.docs.length) {
+            const _oldLedgerRow = ledgerSnap.docs[0].data();
             await ledgerSnap.docs[0].ref.update({ amount: effectiveGross });
+            if (_rollupSync) {
+              await _rollupSync(_oldLedgerRow, -1);
+              await _rollupSync({ ..._oldLedgerRow, amount: effectiveGross }, +1);
+            }
           }
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
           closeModal();
@@ -6546,30 +6613,46 @@ async function renderFinanceOverview(container, currentUser, currentRole) {
   // These collection-wide reads are only permitted for finance/admin by the
   // Firestore rules. A non-finance user who merely belongs to the Finance dept
   // can open this tab, so degrade gracefully instead of crashing the screen.
-  // Totals come from the LEDGER (single source of truth). The expenses collection
-  // is still read for the pending-approval queue + the recent-expenses list, but it
-  // no longer feeds the headline totals (approved expenses are posted to the ledger).
-  const [pendSnap, recentSnap, ledSnap] = await Promise.all([
+  // Totals come from finance_rollup (v14 Wave 4 Batch F2) — one doc per month,
+  // client-maintained by window.Ledger's post/postMulti/upsertByRef/delete
+  // hooks (js/finance-ledger.js) — instead of a full ledger collection scan.
+  // The expenses collection is still read for the pending-approval queue +
+  // the recent-expenses list (unaffected by this batch).
+  const [pendSnap, recentSnap, rollupSnap] = await Promise.all([
     dbCachedGet('expenses-pending', () => db.collection('expenses').where('status','==','pending').get().catch(()=>({docs:[]})), 45000),
     dbCachedGet('expenses-recent',  () => db.collection('expenses').orderBy('date','desc').limit(50).get().catch(()=>({docs:[]})), 45000),
-    dbCachedGet('ledger',           () => db.collection('ledger').get().catch(()=>({docs:[]})), 45000),  // ALL-TIME totals — shared TTL; WS13 replaces with finance_rollup
+    dbCachedGet('finance_rollup',   () => db.collection('finance_rollup').get().catch(()=>({docs:[]})), 45000),
   ]);
   const pendingExpDocs = pendSnap.docs.map(d => ({id:d.id,...d.data()}));
   const expenses       = recentSnap.docs.map(d => ({id:d.id,...d.data()}));  // for the Recent Expenses card
-  const ledger         = ledSnap.docs.map(d => d.data());
+  const rollups        = rollupSnap.docs.map(d => d.data());
   const isPriv     = isFinancePriv();
   const isPres     = (typeof isPresident==='function') && isPresident();
-  const ledIncome  = ledger.filter(e => ledgerKind(e)==='income').reduce((s,e) => s + (e.amount||0), 0);
-  const ledExpense = ledger.filter(e => ledgerKind(e)==='expense').reduce((s,e) => s + (e.amount||0), 0);
+  const ledIncome  = rollups.reduce((s,r) => s + (r.income||0), 0);
+  const ledExpense = rollups.reduce((s,r) => s + (r.expense||0), 0);
   const pendingExp = pendingExpDocs.reduce((s,e) => s + (e.amount||0), 0);
+  // finance_rollup is empty before the very first Rebuild rollups run (or if
+  // it's ever wiped mid-rebuild) — the cheap existence check the spec calls
+  // for: don't scan the whole ledger, just confirm it isn't ALSO empty before
+  // showing a zero total as if it were real.
+  let needsRollupRebuild = false;
+  if (!rollups.length) {
+    const anyLedgerSnap = await db.collection('ledger').limit(1).get().catch(()=>({docs:[]}));
+    needsRollupRebuild = anyLedgerSnap.docs.length > 0;
+  }
 
   container.innerHTML = `
     ${isPres?`<div style="display:flex;justify-content:flex-end;margin-bottom:8px">
       <button class="btn-secondary btn-sm" id="fin-tools-btn" title="President-only maintenance &amp; data-repair tools">${emojiIcon('🔧',16)} Finance Tools</button>
     </div>`:''}
+    ${needsRollupRebuild?`<div class="card" style="margin-bottom:12px;border-color:var(--warn,#FF9F0A)">
+      <div class="card-body" style="display:flex;align-items:center;gap:8px;font-size:13px">
+        ${emojiIcon('⚠️',16)} <span>Totals need a rebuild — ${isPres?'Finance Tools → Rebuild rollups.':'ask the President to run Finance Tools → Rebuild rollups.'}</span>
+      </div>
+    </div>`:''}
     <div class="kpi-row">
-      <div class="kpi-card green"><div class="kpi-label">Total Income</div><div class="kpi-value">₱${fmt(ledIncome)}</div></div>
-      <div class="kpi-card warn"><div class="kpi-label">Total Expenses</div><div class="kpi-value">₱${fmt(ledExpense)}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Total Income</div><div class="kpi-value">${needsRollupRebuild?'—':'₱'+fmt(ledIncome)}</div></div>
+      <div class="kpi-card warn"><div class="kpi-label">Total Expenses</div><div class="kpi-value">${needsRollupRebuild?'—':'₱'+fmt(ledExpense)}</div></div>
       <div class="kpi-card accent"><div class="kpi-label">Pending Expenses</div><div class="kpi-value">₱${fmt(pendingExp)}</div></div>
     </div>
     <div class="card">
@@ -11414,7 +11497,7 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
       const category = dept + (type==='credit'?' Income':' Expense');
 
       // Write to shared Finance ledger with dept tag
-      await db.collection('ledger').add({
+      const _deptExpRow = {
         date:          expDate,
         type,
         accountType:   type==='credit' ? 'income' : 'expense', account: category,
@@ -11431,7 +11514,11 @@ async function renderBudgeting(container, currentUser, currentRole, dept) {
         addedByName:   uName,
         source:        dept, // Finance can see which dept this came from
         createdAt:     firebase.firestore.FieldValue.serverTimestamp()
-      });
+      };
+      await db.collection('ledger').add(_deptExpRow);
+      // v14 Wave 4 Batch F2 — this poster writes .add() directly (not through
+      // Ledger.post), so keep finance_rollup in sync here too (best-effort).
+      if (window.Ledger && typeof window.Ledger._syncRollup === 'function') await window.Ledger._syncRollup(_deptExpRow, +1);
 
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
 

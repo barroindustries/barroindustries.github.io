@@ -69,6 +69,51 @@
 //   transactional dedupe path (that needs the emulator — out of scope for a
 //   pure client-side self-test); the header above documents that limitation.
 //
+// ── v14 Wave 4 Batch F2: finance_rollup aggregates ─────────────────────────
+// `finance_rollup/{yyyymm}` (+ the special 'undated' doc) holds monthly
+// {month, income, expense, vatOutput, vatInput, byCategory:{cat:{income,expense}},
+// count, updatedAt} so Overview/all-time cards can sum ≤N month-docs instead of
+// scanning the whole ledger collection. Month is derived from the ROW's own
+// `date` field (already Manila-discipline ISO, per CLAUDE.md) via .slice(0,7);
+// a missing/malformed date buckets into 'undated'.
+//
+// CONSTRAINT (deliberate, not an oversight): rollup writes are NEVER inside
+// the ledger's own post/postMulti/upsertByRef transaction. A rules-denied
+// rollup write must not abort the money posting it's attached to — so every
+// _syncRollup() call below fires as a SEPARATE best-effort write AFTER the
+// ledger transaction has already committed, wrapped in try/catch that only
+// console.warns on failure. The resulting drift-until-reconciled window is
+// accepted risk; window.Ledger.rebuildRollups() (a full ledger rescan that
+// overwrites every rollup doc from scratch) is the reconciliation tool —
+// wired to a president-only button in Finance Tools (departments.js).
+//
+// Per-row math (income/expense/vatOutput/vatInput/category) is NOT
+// reimplemented here — window.ledgerKind(row) and window.computeVatSummary([row])
+// (js/config.js + js/bir.js, both loaded before this file's callers ever run)
+// are called on a single-row array so a rollup can never compute a different
+// number than Reports/the 2550 worksheet for the same row. Zero-drift by
+// construction, not by convention.
+//
+// Coverage — every mutation path that changes a ledger row's money fields:
+//   post/postMulti (new rows)        -> _syncRollup(newRow, +1) after commit,
+//                                        only for legs actually written (not
+//                                        `existed` dedupe hits — no double-count).
+//   upsertByRef (recompute+overwrite) -> _syncRollup(oldRow, -1) then
+//                                        _syncRollup(newRow, +1), using the SAME
+//                                        pre-overwrite read (legacySnap/snap)
+//                                        the transaction already does for its
+//                                        merge logic — see upsertByRef below.
+//   remove (any ledger-row delete)    -> Ledger.remove() itself is currently
+//                                        UNCALLED (deletes route through
+//                                        window.financeDelete -> financeExecuteDelete,
+//                                        departments.js) — that choke point is
+//                                        hooked directly in departments.js instead,
+//                                        covering every delete entry point at once.
+//   rebuildRollups()                  -> full rescan, delete-and-rewrite every
+//                                        rollup doc from the current ledger
+//                                        state. Idempotent; the reconciliation
+//                                        authority for any drift above.
+//
 // ── KEY DESIGN DECISIONS ────────────────────────────────────────────────────
 // 1. Deterministic doc id (`ledger/{sanitize(ref)}`) replaces the six posters'
 //    `.where('refNumber','==',ref).limit(1).get().catch(()=>({empty:true}))`
@@ -183,6 +228,85 @@
     return snap.docs.length ? snap.docs[0].ref : null;
   }
 
+  // ── finance_rollup helpers (v14 Wave 4 Batch F2) ──────────────────────────
+  // Pure: given a ledger row, which month bucket does it belong to? Accepts
+  // 'YYYY-MM' or 'YYYY-MM-DD' (matches firestore.rules' ledgerDateOk() regex —
+  // anything that wouldn't pass that regex is exactly what we want in 'undated').
+  function _rollupMonth(dateStr) {
+    var m = /^(\d{4}-\d{2})(-\d{2})?$/.exec(String(dateStr == null ? '' : dateStr));
+    return m ? m[1] : 'undated';
+  }
+
+  // Pure: the {month, category, income, expense, vatOutput, vatInput}
+  // contribution of ONE ledger row. Reuses window.ledgerKind (config.js) and
+  // window.computeVatSummary (bir.js) — called with a single-row array — so
+  // this can never disagree with Reports/the 2550 worksheet's math for the
+  // same row. Both are guarded with typeof checks (defensive only; by the time
+  // any caller below actually runs, script load order guarantees both exist).
+  function _rollupDelta(row) {
+    row = row || {};
+    var kind = (typeof window.ledgerKind === 'function')
+      ? window.ledgerKind(row)
+      : (row.type === 'credit' ? 'income' : 'expense');
+    var vat = (typeof window.computeVatSummary === 'function')
+      ? window.computeVatSummary([row])
+      : { outputVat: 0, inputVat: 0 };
+    var amount = row.amount || 0;
+    return {
+      month: _rollupMonth(row.date),
+      category: row.category || 'Other',
+      income: kind === 'income' ? amount : 0,
+      expense: kind === 'expense' ? amount : 0,
+      vatOutput: vat.outputVat || 0,
+      vatInput: vat.inputVat || 0
+    };
+  }
+
+  // Best-effort, SEPARATE write (never inside the caller's ledger transaction —
+  // see the CONSTRAINT note in the file header). sign=+1 adds a row's
+  // contribution, sign=-1 removes it (delete, or the "old" half of an edit).
+  // Transactional read-modify-write on the rollup doc itself (its own small
+  // transaction, distinct from whatever ledger transaction just committed) so
+  // concurrent posts in the same month never race each other. NEVER throws —
+  // a failure (e.g. rules not yet deployed) is a console.warn pointing at
+  // rebuildRollups() as the fix, and the caller's ledger write already
+  // succeeded regardless.
+  async function _syncRollup(row, sign) {
+    try {
+      var delta = _rollupDelta(row);
+      var docRef = db.collection('finance_rollup').doc(delta.month);
+      await db.runTransaction(async function (tx) {
+        var snap = await tx.get(docRef);
+        var data = snap.exists ? (snap.data() || {}) : {};
+        var byCategory = Object.assign({}, data.byCategory || {});
+        var bc = Object.assign({ income: 0, expense: 0 }, byCategory[delta.category] || {});
+        bc.income = (bc.income || 0) + sign * delta.income;
+        bc.expense = (bc.expense || 0) + sign * delta.expense;
+        byCategory[delta.category] = bc;
+        tx.set(docRef, {
+          month: delta.month,
+          income: (data.income || 0) + sign * delta.income,
+          expense: (data.expense || 0) + sign * delta.expense,
+          vatOutput: (data.vatOutput || 0) + sign * delta.vatOutput,
+          vatInput: (data.vatInput || 0) + sign * delta.vatInput,
+          byCategory: byCategory,
+          count: (data.count || 0) + sign,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('finance_rollup');
+    } catch (e) {
+      console.warn('[Ledger] finance_rollup sync failed for month ' +
+        _rollupMonth(row && row.date) + ' — totals will drift until ' +
+        'Ledger.rebuildRollups() runs. (' + (e && e.message || e) + ')');
+    }
+  }
+
+  // Sequential best-effort sync for a batch of newly-written rows (postMulti).
+  async function _syncRollupMany(rows, sign) {
+    for (var i = 0; i < rows.length; i++) await _syncRollup(rows[i], sign);
+  }
+
   async function post(entry) {
     if (!entry || !entry.ref) throw new Error('Ledger.post: entry.ref is required');
     if (!entry.date) throw new Error('Ledger.post: entry.date is required');
@@ -208,6 +332,9 @@
     });
 
     if (!result.existed && typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+    // Rollup sync ONLY for a freshly-posted row — a dedupe hit (existed:true,
+    // legacy or deterministic) wrote nothing, so syncing it would double-count.
+    if (!result.existed) await _syncRollup(row, +1);
     return result;
   }
 
@@ -215,17 +342,32 @@
     if (!ref) throw new Error('Ledger.upsertByRef: ref is required');
     var legacyRef = await _findLegacyRef(ref); // throws propagate
 
+    // Retry-safe capture: db.runTransaction may re-invoke its callback on
+    // contention, so these are reset at the top of every attempt and only the
+    // FINAL (committed) attempt's values survive for the post-commit rollup
+    // sync below. oldRow is exactly the pre-overwrite read the transaction
+    // already does for its own merge logic (legacySnap/snap) — reused here,
+    // not re-read, per the assignment's instruction.
+    var oldRow = null, newRow = null;
+
     var result = await db.runTransaction(async function (tx) {
+      oldRow = null; newRow = null;
       if (legacyRef) {
         var legacySnap = await tx.get(legacyRef);
-        var built = _mapEntry(buildEntry(legacySnap.exists ? legacySnap.data() : null));
+        var existingData = legacySnap.exists ? legacySnap.data() : null;
+        oldRow = existingData;
+        var built = _mapEntry(buildEntry(existingData));
+        newRow = built;
         tx.set(legacyRef, built, { merge: true });
         return { id: legacyRef.id, created: false };
       }
       var docId = sanitize(ref);
       var docRef = ledgerRef(docId);
       var snap = await tx.get(docRef);
-      var built2 = _mapEntry(buildEntry(snap.exists ? snap.data() : null));
+      var existingData2 = snap.exists ? snap.data() : null;
+      oldRow = existingData2;
+      var built2 = _mapEntry(buildEntry(existingData2));
+      newRow = built2;
       if (snap.exists) {
         tx.set(docRef, built2, { merge: true });
         return { id: docId, created: false };
@@ -236,6 +378,13 @@
     });
 
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+    // "remove/edit = subtract old + add new" (spec). oldRow is null on a true
+    // first-post (nothing to subtract); newRow is always set — buildEntry's
+    // documented contract is a FULL row shape, so newRow's income/expense/vat/
+    // category reflect the row's post-write state even though the actual
+    // Firestore write used {merge:true}.
+    if (oldRow) await _syncRollup(oldRow, -1);
+    if (newRow) await _syncRollup(newRow, +1);
     return result;
   }
 
@@ -258,7 +407,11 @@
     }
 
     var projectSync = opts.projectSync;
+    // Retry-safe capture (see upsertByRef's comment) — only the newly-written
+    // rows from the FINAL committed attempt are synced to rollups below.
+    var writtenRows = [];
     var result = await db.runTransaction(async function (tx) {
+      writtenRows.length = 0;
       var results = [];
       var reads = [];
       for (var k = 0; k < refInfo.length; k++) {
@@ -276,6 +429,7 @@
         row.createdAt = firebase.firestore.FieldValue.serverTimestamp();
         tx.set(r.ref, row);
         results.push({ ref: r.info.entry.ref, existed: false, id: r.ref.id });
+        writtenRows.push(row);
       });
       if (projectSync && projectSync.collection && projectSync.docId) {
         tx.update(db.collection(projectSync.collection).doc(projectSync.docId), projectSync.fields || {});
@@ -285,6 +439,10 @@
 
     var existedAll = result.every(function (r) { return r.existed; });
     if (!existedAll && typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+    // Only legs actually written this call — existing (deduped) legs are
+    // skipped so a partial re-post of a multi-leg entry never double-counts
+    // the leg(s) that were already there.
+    if (writtenRows.length) await _syncRollupMany(writtenRows, +1);
     return { results: result, existedAll: existedAll };
   }
 
@@ -437,9 +595,76 @@
     };
   }
 
+  // ── v14 Wave 4 Batch F2: window.Ledger.rebuildRollups() ───────────────────
+  // President-only. Full ledger scan → recompute EVERY finance_rollup doc from
+  // scratch (delete every existing rollup doc, then rewrite one doc per month
+  // that has at least one ledger row, from that scan alone). Idempotent —
+  // running it twice in a row produces the same totals both times — and it's
+  // the ONLY reconciliation path for the drift risk _syncRollup's best-effort
+  // separate writes accept (see file header CONSTRAINT note): a missed rollup
+  // write (rules not deployed yet, a raw write that bypassed post/postMulti/
+  // upsertByRef, a network blip on a best-effort call) is invisible until this
+  // runs. Wired to a "🔁 Rebuild rollups" button in Finance Tools
+  // (departments.js openFinanceToolsPage).
+  //
+  // Delete-then-rewrite (not a targeted patch) so a month whose LAST row was
+  // deleted correctly loses its rollup doc too, instead of leaving a stale
+  // nonzero total behind.
+  async function rebuildRollups() {
+    if (typeof isRealPresident !== 'function' || !isRealPresident()) {
+      throw new Error('Ledger.rebuildRollups: president-only');
+    }
+
+    var snap = await db.collection('ledger').get();
+    var buckets = {}; // month -> {income,expense,vatOutput,vatInput,byCategory,count}
+    snap.docs.forEach(function (d) {
+      var delta = _rollupDelta(d.data());
+      var b = buckets[delta.month] || (buckets[delta.month] = {
+        income: 0, expense: 0, vatOutput: 0, vatInput: 0, byCategory: {}, count: 0
+      });
+      b.income += delta.income;
+      b.expense += delta.expense;
+      b.vatOutput += delta.vatOutput;
+      b.vatInput += delta.vatInput;
+      b.count += 1;
+      var bc = b.byCategory[delta.category] || (b.byCategory[delta.category] = { income: 0, expense: 0 });
+      bc.income += delta.income;
+      bc.expense += delta.expense;
+    });
+
+    var BATCH_SIZE = 400;
+    var existingRollups = await db.collection('finance_rollup').get();
+    for (var i = 0; i < existingRollups.docs.length; i += BATCH_SIZE) {
+      var delChunk = existingRollups.docs.slice(i, i + BATCH_SIZE);
+      var delBatch = db.batch();
+      delChunk.forEach(function (d) { delBatch.delete(d.ref); });
+      await delBatch.commit();
+    }
+
+    var months = Object.keys(buckets);
+    for (var j = 0; j < months.length; j += BATCH_SIZE) {
+      var wChunk = months.slice(j, j + BATCH_SIZE);
+      var writeBatch = db.batch();
+      wChunk.forEach(function (m) {
+        var b = buckets[m];
+        writeBatch.set(db.collection('finance_rollup').doc(m), {
+          month: m, income: b.income, expense: b.expense,
+          vatOutput: b.vatOutput, vatInput: b.vatInput,
+          byCategory: b.byCategory, count: b.count,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      });
+      await writeBatch.commit();
+    }
+
+    if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('finance_rollup');
+    return { scanned: snap.docs.length, months: months.length, rollupDocsCleared: existingRollups.docs.length };
+  }
+
   window.Ledger = {
     post: post, upsertByRef: upsertByRef, postMulti: postMulti, remove: remove,
-    migrateLegacyRows: migrateLegacyRows,
-    _selfTest: _selfTest, _mapEntry: _mapEntry, _sanitize: sanitize
+    migrateLegacyRows: migrateLegacyRows, rebuildRollups: rebuildRollups,
+    _selfTest: _selfTest, _mapEntry: _mapEntry, _sanitize: sanitize,
+    _rollupDelta: _rollupDelta, _syncRollup: _syncRollup
   };
 })();
