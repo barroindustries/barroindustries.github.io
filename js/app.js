@@ -602,9 +602,9 @@ function initPullToRefresh() {
   const ind = document.getElementById('ptr-indicator');
   if (!mc || !ind) return;
 
-  const DEAD_ZONE    = 70;   // px ignored at the start of the drag
-  const THRESHOLD    = 220;  // px past dead zone → soft refresh (navigateTo)
-  const HARD_THRESH  = 400;  // px past dead zone → hard refresh (location.reload)
+  const DEAD_ZONE    = 50;   // px ignored at the start of the drag (v14 G4 retune: 70→50)
+  const THRESHOLD    = 100;  // px past dead zone → soft refresh (navigateTo) (v14 G4 retune: 220→100)
+  const HARD_THRESH  = 200;  // px past dead zone → hard refresh (location.reload) (v14 G4 retune: 400→200)
   const MAX_PULL     = 450;  // visual cap
 
   // SVG ring: circumference of r=14 circle = 2π×14 ≈ 87.96
@@ -613,7 +613,7 @@ function initPullToRefresh() {
   const icon = ind.querySelector('.ptr-ring-icon');
   const lbl  = ind.querySelector('.ptr-label');
 
-  let startY = 0, startTime = 0, pulling = false, refreshing = false, lastDy = 0;
+  let startY = 0, startTime = 0, pulling = false, refreshing = false, lastDy = 0, wasReady = false, wasHard = false;
 
   function setArc(pct) {
     if (!arc) return;
@@ -625,6 +625,10 @@ function initPullToRefresh() {
     const softPct = Math.min(dist / THRESHOLD, 1);
     const hard    = dist >= HARD_THRESH;
     const ready   = dist >= THRESHOLD;
+
+    if (ready && !wasReady) window.haptic && window.haptic('light');   // v14 G2 — crossed soft (refresh) threshold
+    if (hard && !wasHard) window.haptic && window.haptic('medium');    // v14 G2 — crossed hard (full reload) threshold
+    wasReady = ready; wasHard = hard;
 
     // Slide in — travels further the more you pull
     const travel = Math.min(dist * 0.48, 52);
@@ -658,6 +662,7 @@ function initPullToRefresh() {
     startTime = Date.now();
     lastDy    = 0;
     pulling   = true;
+    wasReady = false; wasHard = false;
   }, { passive: true });
 
   mc.addEventListener('touchmove', e => {
@@ -1268,7 +1273,7 @@ function buildBottomNav() {
      </button>`
   ).join('');
   nav.querySelectorAll('[data-page]').forEach(btn => {
-    btn.addEventListener('click', () => navigateTo(btn.dataset.page));
+    btn.addEventListener('click', () => { window.haptic && window.haptic('light'); navigateTo(btn.dataset.page); }); // v14 G2 — bottom-nav tap
   });
   if (window.lucide) lucide.createIcons({ nodes: [nav] });
 }
@@ -4813,11 +4818,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
             <input id="pres-grade-input" type="number" inputmode="numeric" min="1" max="10" step="1" value="${presgrade||''}" placeholder="e.g. 8"/>
           </div>
           <div class="form-group"><label>General Notes (internal only)</label>
-            <textarea id="pres-grade-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Internal remarks…">${escHtml(presnotes||'')}</textarea>
+            <textarea id="pres-grade-notes" rows="2" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Internal remarks…">${escHtml(presnotes||'')}</textarea>
           </div>
           <div class="form-group">
             <label>${emojiIcon('📝',16)} Development Areas <span style="font-size:11px;color:var(--primary-light)">(shown to employee)</span></label>
-            <textarea id="pres-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:2px solid var(--primary-light);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="What should this employee focus on improving? They will see this.">${escHtml(presimprove||'')}</textarea>
+            <textarea id="pres-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:2px solid var(--primary-light);border-radius:8px;background:var(--surface);color:var(--text);resize:vertical" placeholder="What should this employee focus on improving? They will see this.">${escHtml(presimprove||'')}</textarea>
           </div>
         `, `<button class="btn-primary" id="save-pres-grade-btn">Save Grade</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
         document.getElementById('save-pres-grade-btn')?.addEventListener('click', async () => {
@@ -5189,11 +5194,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
       </div>
       <div class="form-group">
         <label>What did you accomplish this month? <span style="color:var(--danger)">*</span></label>
-        <textarea id="self-notes-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="List your key accomplishments and contributions…">${escHtml(selfNotes)}</textarea>
+        <textarea id="self-notes-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);resize:vertical" placeholder="List your key accomplishments and contributions…">${escHtml(selfNotes)}</textarea>
       </div>
       <div class="form-group">
         <label>What can you improve? <span style="color:var(--danger)">*</span></label>
-        <textarea id="self-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Be specific about areas you want to work on…">${escHtml(evalData.selfImprovements||'')}</textarea>
+        <textarea id="self-improve-input" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);resize:vertical" placeholder="Be specific about areas you want to work on…">${escHtml(evalData.selfImprovements||'')}</textarea>
       </div>
     `, `<button class="btn-primary" id="save-self-eval-btn">Submit Assessment</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     document.getElementById('save-self-eval-btn')?.addEventListener('click', async () => {
@@ -8133,7 +8138,7 @@ function openProfileDrawer() {
   if (editPhoneBtn) {
     editPhoneBtn.addEventListener('click', () => {
       const wrap = editPhoneBtn.closest('div[style]');
-      if (wrap) wrap.innerHTML = `<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">${emojiIcon('📞',13)} Phone Number</div><div style="display:flex;gap:8px"><input id="profile-phone" type="tel" value="${escHtml(userProfile.phone||'')}" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px"/><button class="btn-primary btn-sm" id="save-phone-btn2">Save</button></div>`;
+      if (wrap) wrap.innerHTML = `<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">${emojiIcon('📞',13)} Phone Number</div><div style="display:flex;gap:8px"><input id="profile-phone" type="tel" value="${escHtml(userProfile.phone||'')}" style="flex:1;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px"/><button class="btn-primary btn-sm" id="save-phone-btn2">Save</button></div>`;
       if (window.lucide) lucide.createIcons({ nodes: [wrap] });
       document.getElementById('save-phone-btn2')?.addEventListener('click', async () => {
         const phone = (document.getElementById('profile-phone')?.value || '').trim();
@@ -8828,7 +8833,7 @@ async function renderSuggestionBox(wrap) {
       <div class="card-body">
         <div class="form-group" style="margin-bottom:10px">
           <label style="font-size:12px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.4px">Category</label>
-          <select id="sug-category" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text);font-size:14px">
+          <select id="sug-category" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
             <option value="General">General</option>
             <option value="Operations">Operations</option>
             <option value="Payroll & Benefits">Payroll & Benefits</option>
@@ -8839,7 +8844,7 @@ async function renderSuggestionBox(wrap) {
         </div>
         <div class="form-group" style="margin-bottom:14px">
           <label style="font-size:12px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.4px">Your Suggestion</label>
-          <textarea id="sug-text" rows="4" placeholder="Type your suggestion or feedback here…" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text);resize:vertical;box-sizing:border-box"></textarea>
+          <textarea id="sug-text" rows="4" placeholder="Type your suggestion or feedback here…" style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);resize:vertical;box-sizing:border-box"></textarea>
         </div>
         <button class="btn-primary" id="sug-submit-btn" style="width:100%">Submit Anonymously</button>
         <div id="sug-msg" style="margin-top:10px;font-size:13px;text-align:center;display:none"></div>

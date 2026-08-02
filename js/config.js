@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '12.0.164';
+window.APP_VERSION = '12.0.165';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -39,6 +39,20 @@ window.bizDow = function(date) {
   return { Sun:0, Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6 }[wd];
 };
 window.bizYear = function() { return parseInt(window.bizDate().slice(0, 4), 10); };
+
+// ── Haptics (v14 G2) ──────────────────────────────────────────────
+// Thin, feature-detected wrapper over navigator.vibrate — desktop/iOS Safari
+// (no Vibration API) silently no-ops. Named patterns keep call sites terse:
+//   light   — 10ms  tick   (nav taps, sheet/dialog dismiss, PTR soft threshold)
+//   medium  — 20ms  tick   (PTR hard threshold)
+//   success — 10-30-10ms   (destructive-confirm completion)
+window.haptic = function(pattern) {
+  try {
+    if (!navigator.vibrate) return;
+    const P = { light: 10, medium: 20, success: [10, 30, 10] };
+    navigator.vibrate(P[pattern] || P.light);
+  } catch (_) { /* no-op */ }
+};
 
 // Manila wall-clock display for ISO-string/Timestamp instants (v12 WS35). Storage
 // stays ISO (arrayUnion can't hold serverTimestamp — same pattern as WS38's
@@ -1157,6 +1171,7 @@ window.Overlay = {
   dismissTop(){ if (this._stack.length) history.back(); },   // → popstate → _popOne
   _popOne(){
     const top = this._stack.pop(); if (!top) return;
+    if (navigator.maxTouchPoints > 0) window.haptic && window.haptic('light'); // v14 G2 — swipe/back dismiss, touch only
     this._closing = true; try { top.teardown(); } catch(_){} this._closing = false;
   },
   clearAll(){
@@ -1189,7 +1204,7 @@ window.confirmDialog = function(opts){
     const done = (val) => { if (settled) return; settled = true;
       ov.classList.add('hidden'); ov.classList.remove('active'); ov.innerHTML=''; resolve(val); };
     window.Overlay.push('dialog', () => done(false));           // Back/Esc/backdrop → false
-    ov.querySelector('[data-act=ok]').onclick     = () => { window.Overlay.dismissTop(); done(true); };
+    ov.querySelector('[data-act=ok]').onclick     = () => { if (opts.danger) window.haptic && window.haptic('success'); window.Overlay.dismissTop(); done(true); }; // v14 G2 — danger-confirm tap
     ov.querySelector('[data-act=cancel]').onclick = () => window.Overlay.dismissTop();
     ov.onclick = (e) => { if (e.target === ov) window.Overlay.dismissTop(); };
   });
@@ -1420,13 +1435,13 @@ window.periodPicker = function(activeKey, opts) {
   var customVal = (p.type === 'month') ? p.key.slice(7) : '';
   var custom =
     '<div class="period-custom-row" style="display:' + (isQuickKey ? 'none' : 'flex') + ';gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px">' +
-      '<input type="month" class="pc-month" max="' + curMonth + '" value="' + customVal + '" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px"/>' +
+      '<input type="month" class="pc-month" max="' + curMonth + '" value="' + customVal + '" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)"/>' +
       '<span style="font-size:11px;color:var(--text-muted)">or</span>' +
-      '<select class="pc-quarter" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">' +
+      '<select class="pc-quarter" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">' +
         '<option value="">Quarter…</option>' +
         [1,2,3,4].map(function(q){ return '<option value="' + q + '">Q' + q + '</option>'; }).join('') +
       '</select>' +
-      '<select class="pc-year" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px">' +
+      '<select class="pc-year" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">' +
         years.map(function(y){ return '<option value="' + y + '">' + y + '</option>'; }).join('') +
       '</select>' +
       '<button type="button" class="btn-secondary btn-sm pc-apply">Apply</button>' +
@@ -1657,7 +1672,7 @@ window.CashAdvance = {
       </div>
       <div class="form-group"><label>Date Needed</label><input id="ca-req-date" type="date" value="${window.bizDate?window.bizDate():today()}"/></div>
       <div class="form-group"><label>Reason / Purpose</label>
-        <textarea id="ca-req-reason" rows="3" placeholder="e.g., Medical emergency, school fees…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text);resize:vertical"></textarea>
+        <textarea id="ca-req-reason" rows="3" placeholder="e.g., Medical emergency, school fees…" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);resize:vertical"></textarea>
       </div>
       <p style="font-size:11px;color:var(--text-muted);margin-top:2px">Interest (if any) and the exact repayment schedule are set by Finance when your request is approved.</p>
     `, `<button class="btn-primary" id="ca-req-submit-btn">Submit Request</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
