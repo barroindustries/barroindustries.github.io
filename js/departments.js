@@ -2857,7 +2857,8 @@ async function renderMktInsights(content, currentUser, currentRole) {
 const FINANCE_GROUPS = [
   { key:'Overview',              label:'Overview',              members:['Overview'] },
   { key:'Money In/Out',          label:'Money In/Out',          members:['Ledger','Cash Receipts','Cash Disbursements','Bank Accounts'] },
-  { key:'Reports',               label:'Reports',               members:['Reports'] },
+  // v14 Wave4 F5 — Balance Sheet / Cash Flow / Bank Rec land here as sub-chips.
+  { key:'Reports',               label:'Reports',               members:['Reports','Balance Sheet','Cash Flow','Bank Rec'] },
   { key:'Payroll & HR',          label:'Payroll & HR',          members:['Payroll','HR Profiles','Cash Advances','SSS / Gov'] },
   { key:'Purchases & Inventory', label:'Purchases & Inventory', members:['Purchases','Inventory','Sales Orders'] },
   { key:'Taxes & BIR',           label:'Taxes & BIR',           members:['Taxes','BIR'] },
@@ -2874,7 +2875,7 @@ window.renderFinance = async function(currentUser, currentRole, subtab = window.
     ${window.sopPanel('How Finance works', [
       'Screens are grouped into 7 areas: Overview · Money In/Out (Ledger, Cash Receipts, Cash Disbursements, Bank Accounts) · Reports · Payroll & HR (Payroll, HR Profiles, Cash Advances, SSS/Gov) · Purchases & Inventory · Taxes & BIR · Records.',
       'The ledger is the single source of truth — approved expenses, cash journals and payroll all post into it automatically.',
-      'Record income/expense via Money In/Out; Reports reads the ledger for the P&L and VAT.',
+      'Record income/expense via Money In/Out; Reports reads the ledger for the P&L, VAT, Balance Sheet, Cash Flow and Bank Reconciliation.',
       'Payroll runs through Compute → Verify → Disburse; the same Payroll & HR group handles weekly worker payslips, cash advances and government contributions.',
       `Deleting any finance record needs President approval (the ${emojiIcon('🗑',16)} button files a request).`,
       isPres ? 'President-only maintenance & data-repair tools live behind the wrench button on Overview — out of the daily workflow.' : null
@@ -2975,6 +2976,10 @@ async function loadFinanceContent(currentUser, currentRole, sub) {
   switch(sub) {
     case 'Overview':     await renderFinanceOverview(content, currentUser, currentRole); break;
     case 'Reports':      await renderFinancialReports(content, currentUser, currentRole); break;
+    // v14 Wave4 F5 — Balance Sheet / Cash Flow / Bank Rec (renderers in js/bir.js)
+    case 'Balance Sheet': await window.renderBalanceSheet(content, currentUser, currentRole); break;
+    case 'Cash Flow':     await window.renderCashFlowReport(content, currentUser, currentRole); break;
+    case 'Bank Rec':      await window.renderBankRec(content, currentUser, currentRole); break;
     case 'Payroll':      await renderPayrollManagement(content, currentUser, currentRole); break;
     case 'Taxes':        await renderTaxesTab(content, currentUser, currentRole); break;
     case 'BIR':          await window.renderBIRTab(content, currentUser, currentRole); break;

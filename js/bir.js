@@ -807,3 +807,404 @@ window.birRenderFSBody = async function (bodyEl, state) {
   bodyEl.innerHTML = window.birToolbarHTML({}) + printHTML;
   if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
 };
+
+// ═══════════════════════════════════════════════════════════
+//  v14 Wave 4 Batch F5 — Balance Sheet · Cash Flow · Bank Reconciliation
+//  Finance → Reports sub-chips (wired in departments.js's FINANCE_GROUPS +
+//  loadFinanceContent switch). Working-paper style like the FS above —
+//  figures for the accountant, not a filed statement.
+// ═══════════════════════════════════════════════════════════
+
+// ── Shared cash-as-of computation — the ONE codepath the Balance Sheet's Cash
+//    section AND the Cash Flow report's start/end totals both call, so the
+//    two screens can never silently disagree (same rows, same math — only the
+//    asOf date differs). "Unassigned" = income/expense rows never tagged to a
+//    bank account (legacy rows, or an entry made without picking one — bankFlow
+//    is only ever set alongside bankAccountId, via BankAccounts.tag). That cash
+//    is real; it's surfaced as its own line rather than silently dropped.
+window.finCashAsOf = async function (asOfDate) {
+  const [accounts, snap] = await Promise.all([
+    window.BankAccounts.list({ activeOnly: false }),
+    window.ledgerForPeriod('all')
+  ]);
+  const rows = snap.docs.map(d => d.data());
+  const per = window.BankAccounts.computeBalances(accounts, rows, { asOf: asOfDate });
+  const taggedTotal = Object.values(per).reduce((s, x) => s + x.balance, 0);
+  const unassigned = rows
+    .filter(r => !r.bankAccountId && r.date && r.date <= asOfDate)
+    .reduce((s, r) => {
+      const k = window.ledgerKind(r);
+      if (k === 'income') return s + (r.amount || 0);
+      if (k === 'expense') return s - (r.amount || 0);
+      return s;
+    }, 0);
+  return { accounts, per, taggedTotal, unassigned, total: taggedTotal + unassigned };
+};
+
+// ── AR — the SAME derived figure (contract − collected, or the stored
+//    arBalance for job_projects when present) used by the AR Aging KPI
+//    (window.arAging) and every project-lifecycle card. A "billing invoice"
+//    is a printed snapshot of a project's contract (see openBillingInvoice in
+//    departments.js) — it carries no independent paid/unpaid flag of its own.
+//    The project's own collected-vs-contract balance is the one place paid
+//    status is actually maintained, so that's the source of truth here.
+window.finArReceivable = async function () {
+  const projects = await window.Projects.listAll().catch(() => []);
+  return projects.reduce((s, p) => s + (+p.arBalance || 0), 0);
+};
+
+// ── Cash-advance receivable — READ ONLY (per spec). Same status/balance
+//    filter renderFinanceCA already uses for its "Outstanding" KPI (status
+//    'approved' + balance>0) — reused, not re-derived, so this can never
+//    disagree with the Cash Advances tab's own number.
+window.finCaReceivable = async function () {
+  const snap = await db.collection('cash_advances').get().catch(() => ({ docs: [] }));
+  return snap.docs.map(d => d.data())
+    .filter(a => a.status === 'approved' && (a.balance || 0) > 0)
+    .reduce((s, a) => s + (a.balance || 0), 0);
+};
+
+// ── Inventory valuation — same qty×unitCost formula as the Inventory tab's
+//    own "Stock Value" KPI (js/modules.js renderStock). Deliberately NOT the
+//    ledger's own 'Inventory' account: per the finance-reporting-open-items
+//    audit, production consumption isn't fully wired to finance yet, so the
+//    ledger's mirror can drift from physical stock — inventory_items is the
+//    more reliable figure.
+window.finInventoryValue = async function () {
+  const snap = await db.collection('inventory_items').get().catch(() => ({ docs: [] }));
+  return snap.docs.map(d => d.data()).reduce((s, i) => s + ((i.qty || 0) * (i.unitCost || 0)), 0);
+};
+
+// ═══════════════════════════════════════════════════════════
+//  BALANCE SHEET — as-of-date working paper
+// ═══════════════════════════════════════════════════════════
+window.renderBalanceSheet = async function (container, currentUser, currentRole) {
+  const state = window._finBsState || (window._finBsState = { asOf: window.bizDate ? window.bizDate() : today() });
+  container.innerHTML = `
+    <div class="no-print" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+      <div class="form-group" style="margin:0"><label style="font-size:11px">As of date</label>
+        <input id="bs-asof" type="date" value="${state.asOf}" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)"/></div>
+      <button class="btn-secondary btn-sm" id="bs-today-btn">Today</button>
+    </div>
+    <div id="bs-body"><div class="loading-placeholder">Building…</div></div>
+  `;
+  const redo = () => window.birRenderBSBody(document.getElementById('bs-body'), state.asOf);
+  document.getElementById('bs-asof').addEventListener('change', (e) => {
+    state.asOf = e.target.value || (window.bizDate ? window.bizDate() : today()); redo();
+  });
+  document.getElementById('bs-today-btn').addEventListener('click', () => {
+    state.asOf = window.bizDate ? window.bizDate() : today();
+    document.getElementById('bs-asof').value = state.asOf;
+    redo();
+  });
+  await redo();
+};
+
+window.birRenderBSBody = async function (bodyEl, asOf) {
+  if (!bodyEl) return;
+  bodyEl.innerHTML = '<div class="loading-placeholder">Building…</div>';
+  const year = asOf.slice(0, 4);
+  const watermark = !!(window.STATUTORY && window.STATUTORY[year] && window.STATUTORY[year].verified === false);
+  const wmBanner = window.birUnverifiedBanner(year);
+
+  const [cash, arTotal, caTotal, invTotal, cumSnap] = await Promise.all([
+    window.finCashAsOf(asOf),
+    window.finArReceivable(),
+    window.finCaReceivable(),
+    window.finInventoryValue(),
+    window.dbCachedGet('ledger<=' + asOf, () => db.collection('ledger').where('date', '<=', asOf).get().catch(() => ({ docs: [] })), 60000)
+  ]);
+
+  // Liabilities — cumulative-to-date perAccount derivation (same shape as the
+  // FS's own provisional Balance Sheet above), restricted to accountType
+  // 'liability'. 'Accounts Payable' is EXCLUDED and reported as an omission:
+  // every AP posting in this ledger is a settlement (debit, reducing AP) —
+  // see postCDJToLedger/cdjLedgerExpense in departments.js — there is no leg
+  // anywhere that CREDITS (incurs) AP when a purchase is made on credit, so
+  // the account's running balance is structurally meaningless in isolation
+  // (drifts negative forever). purchase_requisitions has no paid/unpaid or
+  // amount-owed field either — there is no reliable AP source today.
+  const liabNet = {};
+  cumSnap.docs.forEach(d => {
+    const r = d.data();
+    if (window.ledgerKind(r) !== 'liability') return;
+    const acct = r.account || r.category || 'Uncategorized';
+    if (acct === 'Accounts Payable') return;
+    liabNet[acct] = (liabNet[acct] || 0) + (r.type === 'debit' ? (r.amount || 0) : -(r.amount || 0));
+  });
+  const liabRows = Object.entries(liabNet)
+    .map(([acct, net]) => ({ acct, value: -net }))            // liabilities are credit-normal
+    .filter(r => Math.abs(r.value) > 0.005);
+  const totalLiabilities = liabRows.reduce((s, a) => s + a.value, 0);
+
+  const totalAssets = cash.total + arTotal + caTotal + invTotal;
+  const totalEquity = totalAssets - totalLiabilities;          // spec: plug, labeled computed
+
+  const acctRows = cash.accounts.map(a => {
+    const bal = cash.per[a.id] ? cash.per[a.id].balance : 0;
+    return `<tr><td style="padding-left:24px">${escHtml(window.BankAccounts.label(a))}${a.active === false ? ' <span class="badge badge-gray" style="font-size:9px">closed</span>' : ''}</td><td class="num">₱${fmt(bal)}</td></tr>`;
+  }).join('');
+
+  const body = `
+    <div class="bir-sec-h">ASSETS</div>
+    <table class="bir-t"><tbody>
+      <tr class="bir-total-row"><td>Cash</td><td></td></tr>
+      ${acctRows || '<tr><td style="padding-left:24px;color:var(--text-muted)">No bank accounts registered</td><td class="num">₱0.00</td></tr>'}
+      <tr><td style="padding-left:24px">Unassigned / untagged cash movements</td><td class="num">₱${fmt(cash.unassigned)}</td></tr>
+      <tr class="bir-total-row"><td style="padding-left:12px">Total Cash</td><td class="num">₱${fmt(cash.total)}</td></tr>
+      <tr><td>Accounts Receivable <span style="font-size:9px;color:var(--text-muted)">(job/design projects, current balance)</span></td><td class="num">₱${fmt(arTotal)}</td></tr>
+      <tr><td>Cash Advances Receivable <span style="font-size:9px;color:var(--text-muted)">(active employee balances)</span></td><td class="num">₱${fmt(caTotal)}</td></tr>
+      <tr><td>Inventory <span style="font-size:9px;color:var(--text-muted)">(stock valuation, qty × unit cost)</span></td><td class="num">₱${fmt(invTotal)}</td></tr>
+      <tr class="bir-total-row"><td>TOTAL ASSETS</td><td class="num">₱${fmt(totalAssets)}</td></tr>
+    </tbody></table>
+
+    <div class="bir-sec-h">LIABILITIES</div>
+    <table class="bir-t"><tbody>
+      ${liabRows.length ? liabRows.map(a => `<tr><td style="padding-left:24px">${escHtml(a.acct)}</td><td class="num">₱${fmt(a.value)}</td></tr>`).join('')
+        : '<tr><td style="padding-left:24px;color:var(--text-muted)">—</td><td class="num">₱0.00</td></tr>'}
+      <tr class="bir-total-row"><td>TOTAL LIABILITIES</td><td class="num">₱${fmt(totalLiabilities)}</td></tr>
+    </tbody></table>
+    <div style="font-size:9pt;color:#666;margin:4px 0 8px">Accounts Payable omitted — not reliably tracked (only settlement/debit legs exist in the ledger; no leg incurs/credits it, and purchase_requisitions has no paid/unpaid or amount-owed field). Statutory payables above accrue at payroll disbursement; a remittance only reduces them here if manually posted as a matching debit via the General Ledger.</div>
+
+    <div class="bir-sec-h">EQUITY</div>
+    <table class="bir-t"><tbody>
+      <tr class="bir-total-row"><td>Total Equity <span style="font-weight:400;font-size:9px">(computed — working paper: Total Assets − Total Liabilities)</span></td><td class="num">₱${fmt(totalEquity)}</td></tr>
+    </tbody></table>
+    <div style="font-size:9pt;color:#666;margin:4px 0 8px">Provisional statement — Accounts Receivable and Cash Advances Receivable are the CURRENT outstanding balance (not reconstructed for ${escHtml(asOf)} specifically; job/design projects and cash advances don't carry a per-date balance history). Inventory is today's stock valuation for the same reason. Cash and Liabilities are genuinely as-of ${escHtml(asOf)} from dated ledger rows.</div>`;
+
+  const printHTML = window.birBuildPrintHTML({
+    docTitle: 'BALANCE SHEET (WORKING PAPER)', dateLabel: 'As of ' + asOf, watermark, bodyHTML: wmBanner + body
+  });
+  bodyEl.innerHTML = window.birToolbarHTML({}) + printHTML;
+  if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
+};
+
+// ═══════════════════════════════════════════════════════════
+//  CASH FLOW — month-range working paper. Uses window.finCashAsOf for its
+//  start/end totals — the EXACT same function the Balance Sheet's Cash
+//  section calls — so "Cash at end of period" here and the Balance Sheet's
+//  Total Cash for the same as-of date can never silently disagree.
+// ═══════════════════════════════════════════════════════════
+window.renderCashFlowReport = async function (container, currentUser, currentRole) {
+  const curYm = window.bizDate ? window.bizDate().slice(0, 7) : today().slice(0, 7);
+  const state = window._finCfState || (window._finCfState = { from: curYm, to: curYm });
+  container.innerHTML = `
+    <div class="no-print" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+      <div class="form-group" style="margin:0"><label style="font-size:11px">From</label>
+        <input id="cf-from" type="month" value="${state.from}" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)"/></div>
+      <div class="form-group" style="margin:0"><label style="font-size:11px">To</label>
+        <input id="cf-to" type="month" value="${state.to}" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)"/></div>
+    </div>
+    <div id="cf-body"><div class="loading-placeholder">Building…</div></div>
+  `;
+  const redo = () => window.birRenderCFBody(document.getElementById('cf-body'), state);
+  document.getElementById('cf-from').addEventListener('change', e => { state.from = e.target.value || state.from; redo(); });
+  document.getElementById('cf-to').addEventListener('change', e => { state.to = e.target.value || state.to; redo(); });
+  await redo();
+};
+
+window.birRenderCFBody = async function (bodyEl, state) {
+  if (!bodyEl) return;
+  bodyEl.innerHTML = '<div class="loading-placeholder">Building…</div>';
+  let { from, to } = state;
+  if (from > to) { const t = from; from = to; to = t; }
+  const start = from + '-01', end = to + '-31';
+  const rangeKey = 'ledger:range:' + start + '..' + end;   // 'ledger:' prefix ⇒ swept by dbCacheInvalidate('ledger')
+  const [rangeSnap, cashStart, cashEnd] = await Promise.all([
+    window.dbCachedGet(rangeKey, () => db.collection('ledger').where('date', '>=', start).where('date', '<=', end).get().catch(() => ({ docs: [] })), 45000),
+    window.finCashAsOf(window.ymAddMonths(from, -1) + '-31'),
+    window.finCashAsOf(end)
+  ]);
+  const rangeRows = rangeSnap.docs.map(d => d.data());
+  const tagged = rangeRows.filter(r => r.bankFlow === 'in' || r.bankFlow === 'out');
+  const byCat = {};
+  tagged.forEach(r => {
+    const cat = r.category || r.account || 'Other';
+    if (!byCat[cat]) byCat[cat] = { in: 0, out: 0 };
+    byCat[cat][r.bankFlow] += (r.amount || 0);
+  });
+  const catRows = Object.entries(byCat).sort((a, b) => (b[1].in + b[1].out) - (a[1].in + a[1].out));
+  const totalIn = tagged.filter(r => r.bankFlow === 'in').reduce((s, r) => s + (r.amount || 0), 0);
+  const totalOut = tagged.filter(r => r.bankFlow === 'out').reduce((s, r) => s + (r.amount || 0), 0);
+  const untaggedNet = rangeRows.filter(r => !r.bankAccountId).reduce((s, r) => {
+    const k = window.ledgerKind(r);
+    if (k === 'income') return s + (r.amount || 0);
+    if (k === 'expense') return s - (r.amount || 0);
+    return s;
+  }, 0);
+
+  const rangeStartEnd = window.ymAddMonths(from, -1) + '-31';
+  const label = (from === to) ? window.Period.parse('month:' + from).label
+    : (window.Period.parse('month:' + from).label + ' — ' + window.Period.parse('month:' + to).label);
+
+  const catRowsHtml = catRows.map(([cat, v]) => `<tr>
+      <td style="padding-left:24px">${escHtml(cat)}</td>
+      <td class="num" style="color:var(--success)">${v.in ? '₱' + fmt(v.in) : '—'}</td>
+      <td class="num" style="color:var(--danger)">${v.out ? '₱' + fmt(v.out) : '—'}</td>
+    </tr>`).join('');
+
+  const perBankRows = cashEnd.accounts.map(a => {
+    const bal = cashEnd.per[a.id] ? cashEnd.per[a.id].balance : 0;
+    return `<tr><td style="padding-left:24px">${escHtml(window.BankAccounts.label(a))}</td><td class="num">₱${fmt(bal)}</td></tr>`;
+  }).join('');
+
+  const body = `
+    <div class="bir-sec-h">1. Operating Cash In/Out by Category — ${escHtml(label)}</div>
+    <table class="bir-t"><thead><tr><th>Category</th><th>Cash In</th><th>Cash Out</th></tr></thead><tbody>
+      ${catRowsHtml || '<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">No bank-tagged cash movement this range</td></tr>'}
+      <tr class="bir-total-row"><td>Total</td><td class="num" style="color:var(--success)">₱${fmt(totalIn)}</td><td class="num" style="color:var(--danger)">₱${fmt(totalOut)}</td></tr>
+    </tbody></table>
+
+    <div class="bir-sec-h">2. Reconciliation to Cash Position</div>
+    <table class="bir-t"><tbody>
+      <tr><td>Cash at start of period (${escHtml(rangeStartEnd)})</td><td class="num">₱${fmt(cashStart.total)}</td></tr>
+      <tr><td style="padding-left:24px">+ Cash In (operating, tagged)</td><td class="num">₱${fmt(totalIn)}</td></tr>
+      <tr><td style="padding-left:24px">− Cash Out (operating, tagged)</td><td class="num">−₱${fmt(totalOut)}</td></tr>
+      ${untaggedNet ? `<tr><td style="padding-left:24px">± Untagged movement (unassigned)</td><td class="num">₱${fmt(untaggedNet)}</td></tr>` : ''}
+      <tr class="bir-total-row"><td>Cash at end of period (${escHtml(end)})</td><td class="num">₱${fmt(cashEnd.total)}</td></tr>
+    </tbody></table>
+    <div style="font-size:9pt;color:#666;margin:4px 0 8px">"Cash at end of period" is computed by the exact same function the Balance Sheet's Cash section calls (window.finCashAsOf) — set the Balance Sheet's as-of date to ${escHtml(end)} and its Total Cash figure will match this one exactly.</div>
+
+    <div class="bir-sec-h">3. Per-Bank Ending Balance — as of ${escHtml(end)}</div>
+    <table class="bir-t"><tbody>
+      ${perBankRows || '<tr><td style="padding-left:24px;color:var(--text-muted)">No bank accounts registered</td><td class="num">₱0.00</td></tr>'}
+      <tr><td style="padding-left:24px">Unassigned / untagged</td><td class="num">₱${fmt(cashEnd.unassigned)}</td></tr>
+      <tr class="bir-total-row"><td>Total Cash</td><td class="num">₱${fmt(cashEnd.total)}</td></tr>
+    </tbody></table>`;
+
+  const printHTML = window.birBuildPrintHTML({ docTitle: 'CASH FLOW STATEMENT (WORKING PAPER)', dateLabel: label, bodyHTML: body });
+  bodyEl.innerHTML = window.birToolbarHTML({ csvId: 'cf-csv' }) + printHTML;
+  if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
+  document.getElementById('cf-csv')?.addEventListener('click', () => window.exportCSV('cash-flow-' + from + '_' + to,
+    catRows.map(([cat, v]) => ({ category: cat, in: v.in, out: v.out, net: v.in - v.out })),
+    [{ key: 'category', label: 'Category' }, { key: 'in', label: 'Cash In' }, { key: 'out', label: 'Cash Out' }, { key: 'net', label: 'Net' }]
+  ));
+};
+
+// ═══════════════════════════════════════════════════════════
+//  BANK RECONCILIATION — per account + month. `cleared` is a NEW, separate
+//  field from the existing `reconciled` flag used by the Bank Accounts
+//  drilldown (js/departments.js renderBankAccountDrilldown) — that screen's
+//  quick per-row toggle predates this batch and stays untouched; this is a
+//  dedicated month-scoped reconciliation workflow with a statement-balance
+//  input, per spec. Both fields can coexist on the same ledger row.
+// ═══════════════════════════════════════════════════════════
+window.renderBankRec = async function (container, currentUser, currentRole) {
+  const accounts = await window.BankAccounts.list({ activeOnly: false }).catch(() => []);
+  if (!accounts.length) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🏦', 44)}</div><h4>No bank accounts registered</h4><p>Add one in Money In/Out → Bank Accounts before reconciling.</p></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [container] });
+    return;
+  }
+  const state = window._finBrecState || (window._finBrecState = {
+    acctId: (accounts.find(a => a.isDefault) || accounts[0]).id,
+    month: window.bizDate ? window.bizDate().slice(0, 7) : today().slice(0, 7)
+  });
+  if (!accounts.find(a => a.id === state.acctId)) state.acctId = accounts[0].id;
+  const acctOpts = accounts.map(a => `<option value="${escHtml(a.id)}" ${a.id === state.acctId ? 'selected' : ''}>${escHtml(window.BankAccounts.label(a))}</option>`).join('');
+  container.innerHTML = `
+    <div class="no-print" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+      <div class="form-group" style="margin:0"><label style="font-size:11px">Account</label>
+        <select id="brec-acct" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)">${acctOpts}</select></div>
+      <div class="form-group" style="margin:0"><label style="font-size:11px">Month</label>
+        <input id="brec-month" type="month" value="${state.month}" style="padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)"/></div>
+    </div>
+    <div id="brec-body"><div class="loading-placeholder">Loading…</div></div>
+  `;
+  const redo = () => window.birRenderBankRecBody(document.getElementById('brec-body'), accounts, state, currentUser, currentRole);
+  document.getElementById('brec-acct').addEventListener('change', e => { state.acctId = e.target.value; redo(); });
+  document.getElementById('brec-month').addEventListener('change', e => { state.month = e.target.value || state.month; redo(); });
+  await redo();
+};
+
+window.birRenderBankRecBody = async function (bodyEl, accounts, state, currentUser, currentRole) {
+  if (!bodyEl) return;
+  bodyEl.innerHTML = '<div class="loading-placeholder">Building…</div>';
+  const acct = accounts.find(a => a.id === state.acctId);
+  if (!acct) { bodyEl.innerHTML = '<div class="empty-state">Account not found.</div>'; return; }
+  const monthStart = state.month + '-01', monthEnd = state.month + '-31';
+  const ymKey = state.month.replace('-', '');
+  const canClear = !!(window.isFinancePriv && window.isFinancePriv());
+  const canStmt = ['president', 'manager', 'finance'].includes(currentRole);   // matches bank_accounts rules' isMoneyAdmin(), narrower than canFinance()
+
+  const snap = await window.ledgerForPeriod('all');
+  const allRows = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => r.bankAccountId === acct.id);
+  const monthRows = allRows.filter(r => (r.date || '') >= monthStart && (r.date || '') <= monthEnd)
+    .sort((x, y) => (x.date || '').localeCompare(y.date || ''));
+  const clearedRows = allRows.filter(r => r.cleared === true);
+  const per = window.BankAccounts.computeBalances([acct], clearedRows, { asOf: monthEnd });
+  const clearedBalance = per[acct.id] ? per[acct.id].balance : +(acct.openingBalance || 0);
+
+  const stmtBalances = acct.stmtBalances || {};
+  const savedStmt = stmtBalances[ymKey];
+  const difference = (savedStmt != null) ? (savedStmt - clearedBalance) : null;
+  const inBalance = difference != null && Math.abs(difference) < 0.005;
+  const uncleared = monthRows.filter(r => r.cleared !== true);
+
+  const rowsHtml = monthRows.map(r => `<tr>
+      <td style="font-size:11px">${r.date || '—'}</td>
+      <td style="font-size:12px">${escHtml(r.description || '—')}</td>
+      <td><code>${escHtml(r.refNumber || '—')}</code></td>
+      <td style="color:${r.bankFlow === 'in' ? 'var(--success)' : 'var(--danger)'}">${r.bankFlow === 'in' ? '+' : '-'}₱${fmt(r.amount || 0)}</td>
+      <td style="text-align:center"><input type="checkbox" class="brec-clear-chk" data-id="${escHtml(r.id)}" ${r.cleared ? 'checked' : ''} ${canClear ? '' : 'disabled'}/></td>
+    </tr>`).join('');
+
+  const unclearedHtml = uncleared.map(r => `<li>${r.date || '—'} — ${escHtml(r.description || '—')} — ${r.bankFlow === 'in' ? '+' : '-'}₱${fmt(r.amount || 0)}</li>`).join('');
+
+  const body = `
+    <div class="kpi-row">
+      <div class="kpi-card"><div class="kpi-label">Cleared Balance (thru ${escHtml(monthEnd)})</div><div class="kpi-value" style="font-size:15px">₱${fmt(clearedBalance)}</div></div>
+      <div class="kpi-card"><div class="kpi-label">Statement Ending Balance</div>
+        <div class="no-print" style="display:flex;gap:6px;align-items:center;margin-top:2px">
+          <input id="brec-stmt" type="number" step="0.01" inputmode="decimal" placeholder="Enter amount" value="${savedStmt != null ? savedStmt : ''}"
+            style="width:120px;padding:6px 8px;border:1.5px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)" ${canStmt ? '' : 'disabled'}/>
+          ${canStmt ? `<button class="btn-secondary btn-sm" id="brec-stmt-save">Save</button>` : ''}
+        </div>
+        <div style="font-size:14px;font-weight:700">${savedStmt != null ? '₱' + fmt(savedStmt) : '—'}</div>
+      </div>
+      <div class="kpi-card ${difference == null ? '' : (inBalance ? 'green' : 'red')}">
+        <div class="kpi-label">Difference (Statement − Cleared)</div>
+        <div class="kpi-value" style="font-size:15px">${difference == null ? '—' : '₱' + fmt(difference)}</div>
+      </div>
+    </div>
+    ${difference == null ? `<div style="font-size:12px;color:var(--text-muted);margin:8px 0">Enter the bank statement's ending balance for ${escHtml(state.month)} above to compute the difference.</div>`
+      : inBalance ? `<div style="font-size:12px;color:var(--success);margin:8px 0">${emojiIcon('✓', 14)} Reconciled — statement matches cleared transactions.</div>`
+      : `<div style="font-size:12px;color:var(--danger);margin:8px 0">${emojiIcon('⚠', 14)} Out of balance by ₱${fmt(Math.abs(difference))}.</div>`}
+
+    <div class="bir-sec-h">${escHtml(window.BankAccounts.label(acct))} — ${escHtml(state.month)}</div>
+    <table class="bir-t"><thead><tr><th>Date</th><th>Description</th><th>Ref #</th><th>Amount</th><th>Cleared</th></tr></thead>
+    <tbody>${rowsHtml || '<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">No transactions this month</td></tr>'}</tbody></table>
+
+    <div class="bir-sec-h">Uncleared Items (${uncleared.length})</div>
+    ${uncleared.length ? `<ul style="font-size:12px;margin:4px 0 0 18px">${unclearedHtml}</ul>` : '<div style="font-size:12px;color:var(--text-muted)">None — every row this month is cleared.</div>'}
+  `;
+
+  const printHTML = window.birBuildPrintHTML({ docTitle: 'BANK RECONCILIATION', dateLabel: window.BankAccounts.label(acct) + ' — ' + state.month, bodyHTML: body });
+  bodyEl.innerHTML = window.birToolbarHTML({}) + printHTML;
+  if (window.lucide) lucide.createIcons({ nodes: [bodyEl] });
+
+  bodyEl.querySelectorAll('.brec-clear-chk').forEach(chk => chk.addEventListener('change', async () => {
+    const prev = !chk.checked;
+    try {
+      await db.collection('ledger').doc(chk.dataset.id).update({
+        cleared: chk.checked,
+        clearedBy: currentUser ? currentUser.uid : null,
+        clearedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+      Notifs.success(chk.checked ? 'Marked cleared' : 'Marked uncleared');
+      window.birRenderBankRecBody(bodyEl, accounts, state, currentUser, currentRole);
+    } catch (ex) { Notifs.showToast('Could not update: ' + (ex.message || ex), 'error'); chk.checked = prev; }
+  }));
+  document.getElementById('brec-stmt-save')?.addEventListener('click', async () => {
+    const val = parseFloat(document.getElementById('brec-stmt').value);
+    if (!Number.isFinite(val)) { Notifs.showToast('Enter a valid amount', 'error'); return; }
+    try {
+      await db.collection('bank_accounts').doc(acct.id).update({ ['stmtBalances.' + ymKey]: val });
+      window.BankAccounts.invalidate();
+      Notifs.success('Statement balance saved');
+      const fresh = await window.BankAccounts.list({ activeOnly: false });
+      window.birRenderBankRecBody(bodyEl, fresh, state, currentUser, currentRole);
+    } catch (ex) { Notifs.showToast('Could not save: ' + (ex.message || ex), 'error'); }
+  });
+};
