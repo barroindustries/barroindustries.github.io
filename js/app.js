@@ -5507,42 +5507,33 @@ async function openEmpStandingsModal(uid, name, preloaded) {
 }
 
 // ── Worker Profile Panel ──────────────────────────
-async function openWorkerProfilePanel(uid, name, preloaded) {
-  document.getElementById('worker-profile-panel')?.remove();
-  // v13 Phase 105 — guard against double-registration: if a worker-profile
-  // overlay entry is already on top (panel re-opened for another worker
-  // without closing first), drop the stale stack entry instead of stacking
-  // a second one on top of it (its DOM node was just removed above).
-  if (window.Overlay && window.Overlay._stack.length &&
-      window.Overlay._stack[window.Overlay._stack.length - 1].kind === 'worker-profile') {
-    window.Overlay._stack.pop();
-  }
-  const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const panel = document.createElement('div');
-  panel.id = 'worker-profile-panel';
-  panel.style.cssText = 'position:fixed;inset:0;z-index:4000;background:var(--bg);overflow:hidden;transform:translateY(100%);transition:transform 0.3s cubic-bezier(0.32,0.72,0,1);display:flex;flex-direction:column';
-  panel.innerHTML = `
-    <div style="position:relative;background:var(--bg);border-bottom:1px solid var(--border);padding:14px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0">
-      <button id="wp-back-btn" style="background:none;border:none;cursor:pointer;color:var(--text);font-size:22px;padding:2px 8px;line-height:1;font-weight:300">‹</button>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:16px;font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(name)}</div>
-        <div style="font-size:11px;color:var(--text-muted)" id="wp-subtitle">Worker Profile</div>
+// v14 Phase 2c — rebuilt on window.openPage (the real page-stack primitive,
+// see openPage above). The panel is now one Overlay 'page' entry like any
+// other pushed page: Back always returns to whatever was open before it
+// (list view or another page) with its scroll/tab state intact, and a modal
+// opened while this panel is on top stacks visibly above it (Batch 1 1c
+// dynamic z-order) instead of rendering behind. Deleted: the hand-rolled
+// fixed z-4000 shell + its own translateY slide animation, its own
+// #wp-back-btn wiring (openPage's built-in .page-panel-back already calls
+// Overlay.dismissTop()), its direct Overlay.push('worker-profile', ...), and
+// the defensive stale-entry pop that used to guard against double-registration
+// (a symptom of the old destroy-without-popping fragility — the real stack
+// just pushes a second panel cleanly, so the guard is unnecessary now).
+function openWorkerProfilePanel(uid, name, preloaded) {
+  const bodyHTML = `
+    <div style="position:sticky;top:-16px;z-index:1;background:var(--bg);margin:-16px -16px 0;padding:16px 16px 0">
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px" id="wp-subtitle">Worker Profile</div>
+      <div style="display:flex;border-bottom:1px solid var(--border)">
+        ${['Overview','Salary','Tasks','Attendance'].map((t,i)=>`<button class="wp-tab" data-tab="${t.toLowerCase()}" style="flex:1;padding:11px 4px;border:none;background:none;font-size:12px;font-weight:600;cursor:pointer;color:${i===0?'var(--primary-light)':'var(--text-muted)'};border-bottom:${i===0?'2px solid var(--primary-light)':'2px solid transparent'};transition:color .15s,border-color .15s">${t}</button>`).join('')}
       </div>
-      <button class="btn-secondary btn-sm" id="wp-payslip-btn">${emojiIcon('🖨️',16)} Payslip</button>
     </div>
-    <div style="display:flex;border-bottom:1px solid var(--border);background:var(--bg);flex-shrink:0">
-      ${['Overview','Salary','Tasks','Attendance'].map((t,i)=>`<button class="wp-tab" data-tab="${t.toLowerCase()}" style="flex:1;padding:11px 4px;border:none;background:none;font-size:12px;font-weight:600;cursor:pointer;color:${i===0?'var(--primary-light)':'var(--text-muted)'};border-bottom:${i===0?'2px solid var(--primary-light)':'2px solid transparent'};transition:color .15s,border-color .15s">${t}</button>`).join('')}
-    </div>
-    <div id="wp-tab-content" style="flex:1;overflow-y:auto;padding:16px">
+    <div id="wp-tab-content" style="padding-top:16px">
       <div class="loading-placeholder" style="text-align:center;padding:40px">Loading…</div>
     </div>`;
-  if (window.lucide) lucide.createIcons({ nodes: [panel] });
-  document.body.appendChild(panel);
-  requestAnimationFrame(() => { panel.style.transform = 'translateY(0)'; });
-  // v13 Phase 105 — register with the Overlay stack so device/browser Back
-  // closes this panel exactly once, mirroring openTaskDetail (departments.js).
-  const _wpClose = () => { panel.style.transform = 'translateY(100%)'; setTimeout(() => panel.remove(), 300); };
-  if (window.Overlay) window.Overlay.push('worker-profile', _wpClose);
+  const headerRightHTML = `<button class="btn-secondary btn-sm" id="wp-payslip-btn">${emojiIcon('🖨️',16)} Payslip</button>`;
+  // (name renders as the page title as plain text via openPage/_setPanelTitle
+  // — no manual escaping needed, same contract as every other openPage call.)
+  const panel = window.openPage(name, bodyHTML, '', { headerRightHTML });
 
   function activateTab(tabName) {
     panel.querySelectorAll('.wp-tab').forEach(t => {
@@ -5553,9 +5544,6 @@ async function openWorkerProfilePanel(uid, name, preloaded) {
     renderWorkerProfileTab(uid, name, preloaded, tabName, panel);
   }
   panel.querySelectorAll('.wp-tab').forEach(tab => { tab.addEventListener('click', () => activateTab(tab.dataset.tab)); });
-  panel.querySelector('#wp-back-btn')?.addEventListener('click', () => {
-    if (window.Overlay && window.Overlay.dismissTop) window.Overlay.dismissTop(); else _wpClose();
-  });
   panel.querySelector('#wp-payslip-btn')?.addEventListener('click', async () => {
     const month = bizDate().slice(0,7);
     const year = (window.bizYear?bizYear():new Date().getFullYear());
@@ -5569,16 +5557,18 @@ async function openWorkerProfilePanel(uid, name, preloaded) {
       model.official = false;
     }
     model.ytd = await window.payslipYtdMonthly(uid, year);
-    // v13 Phase 105 — pop this panel's Overlay/history entry before swapping
-    // #page-content underneath, so the stack stays in sync with what's on screen.
-    if (window.Overlay && window.Overlay._stack.length &&
-        window.Overlay._stack[window.Overlay._stack.length - 1].kind === 'worker-profile') {
-      window.Overlay._stack.pop();
-    }
-    panel.remove(); // dismiss the slide-up panel before replacing #page-content underneath
+    // renderPayslipPage (departments.js) swaps #page-content directly — it
+    // predates the page-stack and isn't Overlay-registered, so unlike a real
+    // openPage surface it can't simply stack above this panel. Dismiss this
+    // page through the real primitive (Overlay.dismissTop → popstate → the
+    // panel's own teardown) instead of the old manual stack-splice; the swap
+    // below runs synchronously so #page-content already shows the payslip by
+    // the time the panel's close animation finishes revealing it.
+    window.Overlay.dismissTop();
     window.renderPayslipPage(model, ()=>renderPersonalFinance(currentUser, currentRole));
   });
   activateTab('overview');
+  return panel;
 }
 
 async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {

@@ -28,6 +28,8 @@ window.Chat = (() => {
   let _inboxUnsub = null;                    // (1) conversations array-contains
   let _threadUnsubs = [];                    // (2-4) messages/readers/typing for the ONE open thread
   let _openConvId = null, _openConv = null;
+  let _threadPanelEl = null;                 // v14 Phase2b — the openPage-returned panel element
+                                              // (visualViewport handler targets THIS, not an id lookup)
   let _convs = [], _deptConvs = [], _myReads = {};   // inbox state
   let _msgs = [], _earlier = [], _readers = [], _typing = [];  // thread state
   let _presenceTimer = null, _typingExpireTimer = null, _markReadTimer = null;
@@ -72,7 +74,16 @@ window.Chat = (() => {
     if (_inboxDebTimer) { clearTimeout(_inboxDebTimer); _inboxDebTimer = null; }
     _inboxDebPendingSnap = null; _inboxWindowStart = 0;
   }
-  function teardownThread() {                // Overlay teardown callback — NEVER calls dismissTop
+  // v14 Phase2b — wired as openPage's opts.onClose, so this now fires FROM
+  // openPage/Overlay's own teardown (Back, Esc, swipe-back, navigateTo's
+  // Overlay.clearAll(), and opts.replace's direct-swap path all call it that
+  // way). It no longer owns the panel DOM: openPage created the panel, so
+  // openPage's teardown owns removing it (with its own close animation /
+  // instant removal on replace). This fn is ONLY module-state cleanup, and
+  // stays idempotent — openConversation still calls it defensively before
+  // opening, AND opts.replace's swap can invoke it a second time synchronously
+  // (see openConversation) — every branch below is a no-op on a second call.
+  function teardownThread() {                // NEVER calls dismissTop/history.back()
     if (_openConvId) _clearOwnTyping();      // Decision 8: beacon cleared on panel-close too
     _threadUnsubs.forEach(u => { try { u(); } catch(_){} });
     _threadUnsubs = []; _openConvId = null; _openConv = null;
@@ -85,9 +96,7 @@ window.Chat = (() => {
     if (_wpMenuOpen) document.removeEventListener('click', _wpOutsideClick, true);
     _wpMenuOpen = false;
     _exitFullscreen();                       // owner req #2: restore app chrome on close
-    const p = document.getElementById('chat-thread-panel');
-    if (p) { p.style.transform = 'translateY(100%)'; p.style.opacity = '0'; p.style.bottom = '0';
-             setTimeout(() => p.remove(), 320); }          // mirrors closeTaskPanel
+    _threadPanelEl = null;
   }
 
   // ── Inbox ──
@@ -313,8 +322,27 @@ window.Chat = (() => {
     return { title, avatarHtml };
   }
 
+  // v14 Wave1 Phase2b — rebuilt on window.openPage (Batch1 page-stack
+  // primitive) instead of a hand-rolled position:fixed z-4000 shell.
+  //
+  // HEADER CHOICE: the full .ms-thread-header block (avatar + title +
+  // presence subtitle + Leave button + wallpaper ⋮ menu) is injected as the
+  // FIRST element of the page BODY, verbatim, minus the old #chat-panel-back
+  // button — openPage's own back chevron (in its native .page-panel-head)
+  // replaces that. opts.headerRightHTML was NOT used: a DM's avatar image
+  // and the presence subtitle line don't fit openPage's plain-text
+  // .page-panel-title slot, and splitting the wallpaper trigger button into
+  // headerRightHTML while its (CSS `position:relative`-parented) popover
+  // menu stayed in the body would separate them across two DOM locations —
+  // the popover is positioned relative to .ms-thread-header, so it needs to
+  // stay together with its button. Net effect: openPage's native header bar
+  // (back chevron + title text, title passed through for a11y/aria-labelledby)
+  // now renders ABOVE .ms-thread-header — an extra slim bar that didn't exist
+  // before, most visible in phone full-screen mode where the CSS previously
+  // intended .ms-thread-header to be the ONLY chrome. Fixing that fully needs
+  // a CSS change (hiding .page-panel-head under body.chat-fullscreen), which
+  // is out of scope for a js/chat.js-only batch — flagged for the CSS owner.
   function _buildThreadPanel(conv) {
-    document.getElementById('chat-thread-panel')?.remove();
     const { title, avatarHtml } = _headerTitleAndAvatar(conv);
     const memberCount = (conv.participants || []).length;
     const subtitleHtml = conv.type === 'dm'
@@ -339,20 +367,12 @@ window.Chat = (() => {
             <span class="ms-wallpaper-swatch wp-${w.key}"></span>${escHtml(w.label)}
           </button>`).join('')}
       </div>`;
-    const p = document.createElement('div');
-    p.id = 'chat-thread-panel';
-    p.style.cssText = `
-      position:fixed;
-      top:calc(var(--topbar-h) + env(safe-area-inset-top,0px));
-      left:0;right:0;bottom:0;
-      background:var(--bg); z-index:4000;
-      display:flex;flex-direction:column;
-      transform:translateY(100%); opacity:0;
-      transition:transform 0.32s cubic-bezier(.4,0,.2,1),opacity 0.32s;
-      overflow:hidden;`;                       // verbatim task-panel shell (departments.js:729-740)
-    p.innerHTML = `
+    // Messenger body/typing row/composer markup below is byte-identical to
+    // the old shell's innerHTML — only the outer wrapper (now openPage's
+    // .page-panel) and the header (now injected, back-button-less) changed.
+    const bodyHtml = `
       <div class="ms-thread-header">
-        <button id="chat-panel-back" class="ms-thread-back" title="Back">
+        <button id="chat-panel-back" class="ms-thread-back" title="Back" aria-label="Back">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
         </button>
         ${avatarHtml}
@@ -375,14 +395,47 @@ window.Chat = (() => {
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
         </button>
       </div>`;
-    document.body.appendChild(p);
-    if (window.lucide) lucide.createIcons({ nodes: [p] });
-    requestAnimationFrame(() => { p.style.transform = 'translateY(0)'; p.style.opacity = '1'; });
+
+    // v14 Wave1 spec Phase2b #4 — if a chat thread page is ALREADY the top of
+    // the page stack (switching conversations without leaving the chat page:
+    // a different inbox row tapped, or a push-notif deep-link that calls
+    // openConversation directly while a thread is open), swap it in place via
+    // opts.replace so history depth doesn't grow per conversation switch. If
+    // the top of the stack is something else (or the stack is empty) this is
+    // a normal push — e.g. opening a thread from the "New Message" page.
+    const stack = window._pageStack || [];
+    const alreadyOpen = stack.length > 0 && stack[stack.length - 1].id === 'chat-thread-panel';
+
+    const p = window.openPage(title, bodyHtml, '', {
+      replace: alreadyOpen,
+      onClose: () => window.Chat.teardownThread()
+    });
+    p.id = 'chat-thread-panel';   // preserve the id: styles.css keys the phone
+                                  // chat-fullscreen top/z overrides AND the
+                                  // .messenger-body max-height:none override
+                                  // off this exact "#chat-thread-panel" id.
+    _threadPanelEl = p;           // visualViewport handler targets this, not a lookup
+
+    // openPage's generic .page-panel-body is padded + its own overflow:auto
+    // scroll container; the messenger layout owns its OWN internal scroll
+    // region (#chat-thread-scroll/.messenger-body) and needs to fill the
+    // full available height edge-to-edge like the old fixed shell did.
+    // Neutralize the two conflicting properties via inline style (no CSS
+    // file in scope) while keeping the flex:1 sizing that makes it fill
+    // the panel.
+    const bodyEl = p.querySelector('.page-panel-body');
+    if (bodyEl) bodyEl.style.cssText = 'flex:1;min-height:0;overflow:hidden;padding:0;display:flex;flex-direction:column;';
+
+    // Chat renders its own messenger header (avatar/presence/wallpaper), so
+    // the generic .page-panel-head would be a duplicate bar — hide it and
+    // route the messenger header's own back chevron through the stack.
+    const genericHead = p.querySelector('.page-panel-head');
+    if (genericHead) genericHead.style.display = 'none';
+    document.getElementById('chat-panel-back')
+      ?.addEventListener('click', () => window.Overlay.dismissTop());
+
     _applyWallpaper(conv);
     _enterFullscreenIfPhone();               // owner req #2: Messenger-style full-screen on phone
-    window.Overlay.push('chat', () => window.Chat.teardownThread());   // ONE history entry
-    document.getElementById('chat-panel-back')
-      .addEventListener('click', () => window.Overlay.dismissTop());   // Back = history.back()
     document.getElementById('chat-leave-group-btn')?.addEventListener('click', async () => {
       if (!(await confirmDialog({ message: 'Leave this group?', danger: true }))) return;
       await db.collection('conversations').doc(conv.id)
@@ -495,7 +548,7 @@ window.Chat = (() => {
   }
   function _onViewportResize() {
     const vv = window.visualViewport; if (!vv) return;
-    const panel = document.getElementById('chat-thread-panel'); if (!panel) return;
+    const panel = _threadPanelEl; if (!panel || !panel.isConnected) return;   // openPage-returned panel (Phase2b #3)
     const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
     panel.style.bottom = offset + 'px';
     const scroll = document.getElementById('chat-thread-scroll');
@@ -541,8 +594,16 @@ window.Chat = (() => {
       conv = { id: snap.id, ...snap.data() };
     }
     teardownThread();                       // defensive idempotent reset
+    // v14 Phase2b — _buildThreadPanel (via openPage's opts.replace path, when
+    // switching straight from one open thread to another) can synchronously
+    // re-invoke teardownThread() a second time from INSIDE this call (see
+    // openPage's doReplace branch, which calls the outgoing panel's onClose
+    // before this function returns). teardownThread() unconditionally nulls
+    // _openConvId/_openConv, so they're assigned AFTER _buildThreadPanel
+    // returns — assigning before would let that nested call clobber them
+    // right back to null for the conversation we're about to open.
+    _buildThreadPanel(conv);
     _openConvId = convId; _openConv = conv;
-    _buildThreadPanel(conv);                // Spec 5 — Overlay.push('chat', teardownThread)
     _refreshUsersCache().then(() => _renderThread());   // backfills avatar photos once cached
     const ref = db.collection('conversations').doc(convId);
     _threadUnsubs.push(ref.collection('messages')

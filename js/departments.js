@@ -854,12 +854,19 @@ async function loadTasksList(currentUser, currentRole, currentDept) {
   list.querySelectorAll('.item-card').forEach(card=>card.addEventListener('click',()=>openTaskDetail(card.dataset.id,currentUser,currentRole)));
 }
 
+// v14 Phase 2a: the task detail panel is now a real window.openPage() page (see
+// openTaskDetail below) — it owns its own Overlay entry/teardown/animation, so
+// there's no DOM to tear down here anymore. _activeTaskPanelEl tracks whichever
+// panel element openTaskDetail last pushed, purely so this shim can tell whether
+// the task page is actually the thing on top before touching the stack.
+let _activeTaskPanelEl = null;
 function closeTaskPanel() {
-  const panel = document.getElementById('task-fullscreen-panel');
-  if (!panel) return;
-  panel.style.transform = 'translateY(100%)';
-  panel.style.opacity = '0';
-  setTimeout(() => panel.remove(), 320);
+  // Kept only for the still-live external caller in app.js (navigateTo's
+  // defensive "close task panel on nav" line) — do NOT remove. Safe to call
+  // any time: a no-op unless the task page is currently the top of the stack.
+  if (window.Overlay && window.Overlay.topEl && window.Overlay.topEl() === _activeTaskPanelEl) {
+    window.Overlay.dismissTop();
+  }
 }
 window.closeTaskPanel = closeTaskPanel;
 window.openTaskDetail = openTaskDetail;
@@ -885,133 +892,114 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
   const fuFlags = { isAdmin, isAssignee, isCreator };
   const followUpSectionHtml = `<div id="fu-section">${followUpCardInner(t, fuFlags)}</div>`;
 
-  // Remove existing panel
-  document.getElementById('task-fullscreen-panel')?.remove();
-
-  const panel = document.createElement('div');
-  panel.id = 'task-fullscreen-panel';
-  panel.style.cssText = `
-    position:fixed;
-    top:calc(var(--topbar-h) + env(safe-area-inset-top,0px));
-    left:0;right:0;bottom:0;
-    background:var(--bg);
-    z-index:4000;
-    display:flex;flex-direction:column;
-    transform:translateY(100%);
-    opacity:0;
-    transition:transform 0.32s cubic-bezier(.4,0,.2,1),opacity 0.32s;
-    overflow:hidden;
+  // v14 Phase 2a — header action buttons move to openPage's opts.headerRightHTML
+  // (the title slot only takes plain text; back-button + Overlay push/teardown
+  // are now owned by openPage itself, so none of that is hand-rolled here).
+  const headerRightHTML = `
+    ${canSubmit?`<button class="btn-success btn-sm" id="submit-task-btn">${emojiIcon('📤',16)} Submit</button>`:''}
+    ${canEdit?`<button class="btn-secondary btn-sm" id="edit-task-btn">${emojiIcon('✎',16)}</button>`:''}
+    ${isAdmin||isCreator?`<button class="btn-danger btn-sm" id="del-task-btn">${emojiIcon('trash-2',14)}</button>`:''}
   `;
 
-  panel.innerHTML = `
-    <!-- Top bar inside panel -->
-    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0">
-      <button id="task-panel-back" style="background:none;border:none;color:var(--primary-light);font-size:22px;cursor:pointer;padding:0 4px;line-height:1">‹</button>
-      <div style="flex:1;min-width:0">
-        <div style="font-size:15px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(t.title)}</div>
-        <div style="display:flex;gap:6px;margin-top:3px;flex-wrap:wrap">
-          <span class="badge ${priorityBadge(t.priority)}" style="font-size:10px">${t.priority||'medium'}</span>
-          <span class="badge ${statusBadge(t.status)}" style="font-size:10px">${statusLabel(t.status)}</span>
-          ${t.department?`<span class="badge badge-gray" style="font-size:10px">${emojiIcon('🗂',10)} ${t.department}</span>`:''}
+  // Priority/status/department chips used to sit under the title inside the
+  // panel's own header; openPage's title slot is plain text only, so they move
+  // to the top of the scrollable info section instead — same info, same markup.
+  const bodyHTML = `
+    <div style="flex:0 0 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;max-height:42%;padding:16px;border-bottom:1px solid var(--border)" id="task-info-scroll">
+
+      <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
+        <span class="badge ${priorityBadge(t.priority)}" style="font-size:10px">${t.priority||'medium'}</span>
+        <span class="badge ${statusBadge(t.status)}" style="font-size:10px">${statusLabel(t.status)}</span>
+        ${t.department?`<span class="badge badge-gray" style="font-size:10px">${emojiIcon('🗂',10)} ${t.department}</span>`:''}
+      </div>
+
+      <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap">
+        ${t.assignedToNames?.length?`<span>${emojiIcon('👥',16)} <strong>${escHtml(t.assignedToNames.join(', '))}</strong></span>`:''}
+        ${t.dueDate?`<span>${emojiIcon('📅',16)} Due: <strong style="color:${t.dueDate<today()?'var(--danger)':'inherit'}">${t.dueDate}</strong></span>`:''}
+        ${t.createdByName?`<span>${emojiIcon('🖊',16)} By: ${escHtml(t.createdByName)}</span>`:''}
+      </div>
+
+      ${t.description?`<p style="font-size:14px;line-height:1.6;margin-bottom:12px;white-space:pre-wrap;color:var(--text)">${escHtml(t.description)}</p>`:''}
+
+      ${Array.isArray(t.attachments)&&t.attachments.length?`
+      <div style="margin-bottom:12px">
+        <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);margin-bottom:6px">${emojiIcon('📎',16)} Attachments</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${t.attachments.map(a=>{const isLink=a&&(a.source==='link'||a.kind==='link');const url=a&&(a.url||a.driveUrl)||'';return url?`<a href="${escHtml(url)}" target="_blank" rel="noopener" class="file-chip">${isLink?`${emojiIcon('🔗',16)}`:`${emojiIcon('📎',16)}`} <span>${escHtml(a.name||(isLink?'Link':'File'))}</span></a>`:'';}).join('')}
         </div>
+      </div>`:''}
+
+      <!-- Current Standing -->
+      <div style="background:rgba(255,159,10,0.08);border:1.5px solid rgba(255,159,10,0.28);border-radius:10px;padding:12px 14px;margin-bottom:12px">
+        <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,159,10,0.9);margin-bottom:6px">${emojiIcon('📍',16)} Current Standing</div>
+        ${t.currentStanding
+          ? `<p style="font-size:13px;line-height:1.5;margin:0 0 ${canEdit?'10px':'0'};color:var(--text)">${escHtml(t.currentStanding)}</p>`
+          : `<p style="font-size:12px;color:var(--text-muted);margin:0 0 ${canEdit?'10px':'0'}">No standing set yet.</p>`}
+        ${canEdit?`<div style="display:flex;gap:6px">
+          <input id="cs-input" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"
+            placeholder="e.g. Awaiting materials from supplier…"
+            value="${(t.currentStanding||'').replace(/"/g,'&quot;')}"/>
+          <button class="btn-primary btn-sm" id="cs-save-btn">Set</button>
+        </div>`:''}
       </div>
-      <div style="display:flex;gap:6px;flex-shrink:0">
-        ${canSubmit?`<button class="btn-success btn-sm" id="submit-task-btn">${emojiIcon('📤',16)} Submit</button>`:''}
-        ${canEdit?`<button class="btn-secondary btn-sm" id="edit-task-btn">${emojiIcon('✎',16)}</button>`:''}
-        ${isAdmin||isCreator?`<button class="btn-danger btn-sm" id="del-task-btn">${emojiIcon('trash-2',14)}</button>`:''}
-      </div>
+
+      ${canEdit?`<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:8px">Change Status</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="status-sel" style="flex:1;min-width:160px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)">
+            ${allowedStatuses.map(s=>`<option value="${s.value}"${t.status===s.value?' selected':''}>${s.label}</option>`).join('')}
+          </select>
+          <button class="btn-primary btn-sm" id="update-status-btn">Update</button>
+        </div>
+      </div>`:''}
+
+      ${isAdmin?`<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:10px">${emojiIcon('👥',16)} Add Assignee</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select id="reassign-sel" style="flex:1;min-width:180px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)">
+            <option value="">— Loading… —</option>
+          </select>
+          <button class="btn-primary btn-sm" id="designate-btn">+ Add</button>
+        </div>
+        <input id="task-instruction" placeholder="Note for assignee (optional)…" style="width:100%;margin-top:8px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"/>
+      </div>`:''}
+
+      ${followUpSectionHtml}
+
+      ${currentRole==='president'&&SCORE_STATUSES.includes(t.status)?`<div style="background:var(--surface2);border:1.5px solid var(--primary-light);border-radius:10px;padding:12px;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--primary-light);margin-bottom:8px">${emojiIcon('🔒',16)} President Score</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input id="pres-score" type="number" min="1" max="10" step="0.5" value="${t.presidentScore||''}" placeholder="1–10" style="width:80px;padding:8px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text)" inputmode="decimal"/>
+          <span style="font-size:12px;color:var(--text-muted)">/ 10</span>
+          <button class="btn-primary btn-sm" id="save-score-btn">Save</button>
+        </div>
+        ${t.presidentScore?`<div style="margin-top:6px;font-size:12px;color:var(--text-muted)">Current: <strong>${t.presidentScore}/10</strong></div>`:''}
+      </div>`:''}
     </div>
 
-    <!-- Scrollable content + messaging below -->
-    <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
-      <!-- Task info section (scrollable) -->
-      <div style="flex:0 0 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;max-height:42%;padding:16px;border-bottom:1px solid var(--border)" id="task-info-scroll">
-
-        <div style="font-size:13px;color:var(--text-muted);margin-bottom:12px;display:flex;gap:12px;flex-wrap:wrap">
-          ${t.assignedToNames?.length?`<span>${emojiIcon('👥',16)} <strong>${escHtml(t.assignedToNames.join(', '))}</strong></span>`:''}
-          ${t.dueDate?`<span>${emojiIcon('📅',16)} Due: <strong style="color:${t.dueDate<today()?'var(--danger)':'inherit'}">${t.dueDate}</strong></span>`:''}
-          ${t.createdByName?`<span>${emojiIcon('🖊',16)} By: ${escHtml(t.createdByName)}</span>`:''}
-        </div>
-
-        ${t.description?`<p style="font-size:14px;line-height:1.6;margin-bottom:12px;white-space:pre-wrap;color:var(--text)">${escHtml(t.description)}</p>`:''}
-
-        ${Array.isArray(t.attachments)&&t.attachments.length?`
-        <div style="margin-bottom:12px">
-          <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--text-muted);margin-bottom:6px">${emojiIcon('📎',16)} Attachments</div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px">
-            ${t.attachments.map(a=>{const isLink=a&&(a.source==='link'||a.kind==='link');const url=a&&(a.url||a.driveUrl)||'';return url?`<a href="${escHtml(url)}" target="_blank" rel="noopener" class="file-chip">${isLink?`${emojiIcon('🔗',16)}`:`${emojiIcon('📎',16)}`} <span>${escHtml(a.name||(isLink?'Link':'File'))}</span></a>`:'';}).join('')}
-          </div>
-        </div>`:''}
-
-        <!-- Current Standing -->
-        <div style="background:rgba(255,159,10,0.08);border:1.5px solid rgba(255,159,10,0.28);border-radius:10px;padding:12px 14px;margin-bottom:12px">
-          <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:rgba(255,159,10,0.9);margin-bottom:6px">${emojiIcon('📍',16)} Current Standing</div>
-          ${t.currentStanding
-            ? `<p style="font-size:13px;line-height:1.5;margin:0 0 ${canEdit?'10px':'0'};color:var(--text)">${escHtml(t.currentStanding)}</p>`
-            : `<p style="font-size:12px;color:var(--text-muted);margin:0 0 ${canEdit?'10px':'0'}">No standing set yet.</p>`}
-          ${canEdit?`<div style="display:flex;gap:6px">
-            <input id="cs-input" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"
-              placeholder="e.g. Awaiting materials from supplier…"
-              value="${(t.currentStanding||'').replace(/"/g,'&quot;')}"/>
-            <button class="btn-primary btn-sm" id="cs-save-btn">Set</button>
-          </div>`:''}
-        </div>
-
-        ${canEdit?`<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:8px">Change Status</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <select id="status-sel" style="flex:1;min-width:160px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)">
-              ${allowedStatuses.map(s=>`<option value="${s.value}"${t.status===s.value?' selected':''}>${s.label}</option>`).join('')}
-            </select>
-            <button class="btn-primary btn-sm" id="update-status-btn">Update</button>
-          </div>
-        </div>`:''}
-
-        ${isAdmin?`<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-muted);margin-bottom:10px">${emojiIcon('👥',16)} Add Assignee</div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <select id="reassign-sel" style="flex:1;min-width:180px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)">
-              <option value="">— Loading… —</option>
-            </select>
-            <button class="btn-primary btn-sm" id="designate-btn">+ Add</button>
-          </div>
-          <input id="task-instruction" placeholder="Note for assignee (optional)…" style="width:100%;margin-top:8px;padding:8px 10px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--surface);color:var(--text)"/>
-        </div>`:''}
-
-        ${followUpSectionHtml}
-
-        ${currentRole==='president'&&SCORE_STATUSES.includes(t.status)?`<div style="background:var(--surface2);border:1.5px solid var(--primary-light);border-radius:10px;padding:12px;margin-bottom:10px">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--primary-light);margin-bottom:8px">${emojiIcon('🔒',16)} President Score</div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-            <input id="pres-score" type="number" min="1" max="10" step="0.5" value="${t.presidentScore||''}" placeholder="1–10" style="width:80px;padding:8px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text)" inputmode="decimal"/>
-            <span style="font-size:12px;color:var(--text-muted)">/ 10</span>
-            <button class="btn-primary btn-sm" id="save-score-btn">Save</button>
-          </div>
-          ${t.presidentScore?`<div style="margin-top:6px;font-size:12px;color:var(--text-muted)">Current: <strong>${t.presidentScore}/10</strong></div>`:''}
-        </div>`:''}
-      </div>
-
-      <!-- Messaging section fills remaining space -->
-      <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
-        <div id="task-comments-wrap" style="height:100%;display:flex;flex-direction:column"></div>
-      </div>
+    <!-- Messaging section fills remaining space -->
+    <div style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+      <div id="task-comments-wrap" style="height:100%;display:flex;flex-direction:column"></div>
     </div>
   `;
 
-  document.body.appendChild(panel);
-  if (window.lucide) lucide.createIcons({ nodes: [panel] });
-  // Trigger animation
-  requestAnimationFrame(() => {
-    panel.style.transform = 'translateY(0)';
-    panel.style.opacity = '1';
+  // onClose clears our top-of-stack bookkeeping (used by the closeTaskPanel
+  // shim) whenever this panel tears down — real Back, replaced-away, or
+  // Overlay.clearAll(). `panel` is assigned right below; by the time this
+  // fires (always later, on teardown) the const has long since initialized.
+  const panel = window.openPage(escHtml(t.title), bodyHTML, '', {
+    headerRightHTML,
+    onClose: () => { if (_activeTaskPanelEl === panel) _activeTaskPanelEl = null; }
   });
-  // v12 WS10 — a real history entry so device/browser Back closes this panel
-  // (drill-in detail view) instead of leaving the app or changing pages.
-  window.Overlay.push('task', () => window.closeTaskPanel());
+  _activeTaskPanelEl = panel;
+  // page-panel-body is styled overflow-y:auto/padded by default (single scroll
+  // region); this panel needs the old split layout instead — a short 42%-max
+  // scrollable info region above a flex-fill comments region, each scrolling
+  // independently. Override just for this panel instance.
+  const bodyEl = panel.querySelector('.page-panel-body');
+  if (bodyEl) bodyEl.style.cssText = 'flex:1;display:flex;flex-direction:column;overflow:hidden;padding:0';
 
   renderComments('tasks',taskId,'task-comments-wrap',currentUser);
-
-  document.getElementById('task-panel-back').addEventListener('click', () => window.Overlay.dismissTop());
 
   // Current Standing save
   document.getElementById('cs-save-btn')?.addEventListener('click', async () => {
@@ -1030,7 +1018,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
       icon: '📍', type: 'task_standing', taskId: taskId
     }, currentUser.uid);
     Notifs.success('Standing updated!');
-    window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser, currentRole, t.department);
+    window.Overlay.dismissTop(); renderTasks(currentUser, currentRole, t.department);
   });
 
   // Load employees for designate
@@ -1051,7 +1039,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     await notifyTaskInvolved(t,{title:'📋 Task Status Updated',body:`"${t.title}" → ${statusLabel(newStatus)} (${actorName})`,icon:'📋',type:'task_status',taskId},currentUser.uid);
     Notifs.success(`Status → ${statusLabel(newStatus)}`);
-    window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
+    window.Overlay.dismissTop(); renderTasks(currentUser,currentRole,t.department);
   });
 
   document.getElementById('submit-task-btn')?.addEventListener('click', async()=>{
@@ -1061,28 +1049,23 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     await notifyTaskInvolved(t,{title:'📤 Task Submitted for Review',body:`"${t.title}" submitted by ${actorName}`,icon:'📤',type:'task_submitted',taskId},currentUser.uid);
     Notifs.success('Submitted for review!');
-    window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
+    window.Overlay.dismissTop(); renderTasks(currentUser,currentRole,t.department);
   });
 
+  // v14 Phase 2a — Edit now opens directly ON TOP of the task detail page
+  // instead of closing it first: openPage() pushes a real stack entry (no
+  // history.back() involved), so there's no dismissTop()/popstate race to dodge
+  // any more (see the deleted v13 Phase 105 workaround). Back from Edit reveals
+  // this task detail exactly as the user left it.
   document.getElementById('edit-task-btn')?.addEventListener('click',()=>{
-    // v13 Phase 105 -- dismissTop()'s history.back() is async (popstate fires
-    // later); openEditTaskModal's openPage() does a synchronous pushState, so
-    // firing it immediately would race the pending back-traversal and could
-    // land on / immediately pop the Edit Task page we just pushed. Defer the
-    // modal open until this dismissal's popstate has actually been processed.
-    if (window.Overlay && window.Overlay.dismissTop) {
-      window.addEventListener('popstate', () => openEditTaskModal(taskId,t,currentUser,currentRole), { once: true });
-      window.Overlay.dismissTop();
-    } else {
-      closeTaskPanel(); openEditTaskModal(taskId,t,currentUser,currentRole);
-    }
+    openEditTaskModal(taskId,t,currentUser,currentRole);
   });
 
   document.getElementById('del-task-btn')?.addEventListener('click', async()=>{
     if (!(await confirmDialog({message:'Delete this task?', danger:true}))) return;
     await db.collection('tasks').doc(taskId).delete();
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
-    window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
+    window.Overlay.dismissTop(); renderTasks(currentUser,currentRole,t.department);
   });
 
   document.getElementById('designate-btn')?.addEventListener('click', async()=>{
@@ -1099,7 +1082,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     await Notifs.send(newUid,{title:'🎯 Task Assigned to You',body:`"${t.title}" assigned by ${actorName}${note?' — '+note:''}`,icon:'🎯',type:'task_designated',taskId});
     await Notifs.sendToOwner({title:'👥 Task Assignee Added',body:`${actorName} added ${newName} to "${t.title}"`,icon:'👥',type:'task_modified',taskId});
     Notifs.success(`${newName} added`);
-    window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
+    window.Overlay.dismissTop(); renderTasks(currentUser,currentRole,t.department);
   });
 
   // Follow-up requests — re-render the #fu-section in place after each action
@@ -1191,7 +1174,7 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     for (const uid of t.assignedTo) await recomputePresidentTaskScore(uid);
     Notifs.success('Score saved & KPI updated!');
-    window.Overlay && window.Overlay.dismissTop ? window.Overlay.dismissTop() : closeTaskPanel(); renderTasks(currentUser,currentRole,t.department);
+    window.Overlay.dismissTop(); renderTasks(currentUser,currentRole,t.department);
   });
 }
 
@@ -1301,7 +1284,14 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
     const summary = changes.length ? changes.join(', ') : 'edited';
     await notifyTaskInvolved(updatedTask,{title:'✏️ Task Updated',body:`"${title}" — ${summary} (by ${actorName})`,icon:'✏️',type:'task_edited',taskId},currentUser.uid);
     Notifs.success('Task updated!');
-    closeModal(); renderTasks(currentUser,currentRole,update.department||t.department);
+    // v14 Phase 2a — this page now opens ON TOP of the task detail page (which
+    // is no longer closed before Edit opens), so a single closeModal() would
+    // only pop Edit and reveal the now-stale task detail underneath. The
+    // pre-stack behavior was "Save exits all the way back to the board,
+    // refreshed" — preserve that intended refresh with clearAll() (tears down
+    // both stacked pages via their teardowns, one history.go, no dismissTop()
+    // race) instead of teaching task detail how to refresh itself in place.
+    window.Overlay.clearAll(); renderTasks(currentUser,currentRole,update.department||t.department);
   });
 }
 
