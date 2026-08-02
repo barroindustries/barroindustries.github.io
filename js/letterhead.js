@@ -23,7 +23,8 @@
     const o = opts || {};
     const B = window.BRAND || {};
     const ent = o.entity || (window.brandEntity ? window.brandEntity('corporate') : {});
-    const accent = o.accent || '#1E3A5F';
+    const accent = o.accent || '#1E3A5F'; // == --brand-navy (css/tokens.css); JS can't read CSS vars, kept in sync by hand
+    const orientation = o.orientation === 'landscape' ? 'landscape' : 'portrait';
     const showLogo = o.showLogo !== false;
     const logoUrl = absLogo(o.logo || (B.logo && B.logo.print) || 'icons/barro-industries.png');
 
@@ -94,7 +95,7 @@
 .lh-sig span{font-size:10px;color:#444;}
 .lh-footer{margin-top:18px;border-top:1px solid #ddd;padding-top:8px;font-size:9px;color:#999;text-align:center;}
 @media print{
-  @page{size:A4 portrait;margin:11mm 10mm 7mm;}
+  @page{size:A4 ${orientation};margin:11mm 10mm 7mm;}
   body{background:#fff!important;}
   .lh-noprint{display:none!important;}
   /* two-tier page-break strategy (quote fix aab024a): sections FLOW, headers repeat, rows stay whole */

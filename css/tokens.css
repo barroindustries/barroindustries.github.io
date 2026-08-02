@@ -188,6 +188,7 @@
   --brand-primary:      var(--pink);   /* the app's primary accent ROLE — reassign here per theme, not by overloading --pink */
   --brand-primary-2:    var(--pink-2);
   --brand-on-primary:   var(--white);
+  --brand-navy:         #1E3A5F;   /* print/document accent — mirrored by hand as the JS default in js/letterhead.js (o.accent) */
   /* ── Status-bar / theme-color (read by setTheme() to sync <meta name=theme-color>) ── */
   --theme-color: var(--bg);
 

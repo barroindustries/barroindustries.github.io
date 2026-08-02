@@ -58,6 +58,10 @@ tr.blank td{height:22px}
     font-size:64px;font-weight:900;letter-spacing:6px;color:rgba(192,57,43,.13);
     z-index:5;pointer-events:none}
 @media print{
+  /* fallback A4 page box for letterhead-less docs; caller pageCss (and any
+     letterhead.js printCSS a caller concatenates after BASE_CSS) is injected
+     later in the cascade, so a later @page rule there wins over this one */
+  @page{size:A4 portrait;margin:11mm 10mm 7mm}
   .bar,.barpad{display:none!important}
   body{background:#fff!important}
   .wm{color:rgba(192,57,43,.16)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}

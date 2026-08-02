@@ -5267,7 +5267,7 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   #page-content .data-table thead{display:table-header-group;}
   #page-content .data-table tr{page-break-inside:avoid;break-inside:avoid;}
   #page-content .card{box-shadow:none!important;border:1px solid #ccc!important;}
-  @page{margin:12mm;}
+  @page{size:A4 portrait;margin:12mm;}
 }
 @media print{
   .payslip-print{position:absolute;left:0;top:0;width:100%;padding:8mm;}
@@ -5275,7 +5275,7 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   .payslip-print table.ps-t{page-break-inside:auto;break-inside:auto;}
   .payslip-print thead{display:table-header-group;}
   .payslip-print tr,.payslip-print .ps-sigs,.payslip-print .lh-sig-row{page-break-inside:avoid;break-inside:avoid;}
-  @page{margin:11mm 10mm 7mm;}
+  @page{size:A4 portrait;margin:11mm 10mm 7mm;}
 }
 
 /* ── BIR suite prints — books/worksheets/FS (v12 WS39) ───────────────────
@@ -5297,7 +5297,7 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
   .bir-print table.bir-t{page-break-inside:auto;break-inside:auto;}
   .bir-print thead{display:table-header-group;}
   .bir-print tr,.bir-print .lh-sig-row{page-break-inside:avoid;break-inside:avoid;}
-  @page{margin:11mm 10mm 7mm;}
+  @page{size:A4 portrait;margin:11mm 10mm 7mm;}
 }
 
 /* ── v12 WS18 — keyboard-shortcuts cheat sheet (? modal) ── */
