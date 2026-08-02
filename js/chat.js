@@ -8,7 +8,7 @@
 window.Chat = (() => {
   // ── Tunables ──
   const PAGE_SIZE         = 50;      // live window + "Load earlier" page size
-  const TYPING_WRITE_MS   = 4000;    // min gap between own typing beacons
+  const TYPING_WRITE_MS   = 1500;    // Wave5 M4 (J9): tightened from 4000 — min gap between own typing beacons
   const TYPING_TTL_MS     = 6000;    // beacon age still shown as "typing…"
   const READ_FRESH_MS     = 45000;   // recipient read this recently → skip notif
   const NOTIF_THROTTLE_MS = 60000;   // per (conversation, recipient) notif spacing
@@ -59,6 +59,13 @@ window.Chat = (() => {
   // Composer emoji grid (J6): REACTIONS + ~26 more common emoji, static list, no library.
   const EMOJI_GRID = [...REACTIONS, '😀','😁','😅','😊','🙂','😉','😍','🤔','😴','😎','🥳','😭',
     '😡','👏','🙌','🔥','🎉','✅','❌','💯','🤗','🤝','👀','💪','⭐','🚀'];
+  // Wave5 M4 — inbox row swipe-to-reveal (Pin/Mute/Archive) state, a local
+  // re-implementation of the SAME slope-guard principle as _onSwipeStart/Move/
+  // End above (touch-only; desktop uses the hover ⋯ menu instead). One active
+  // drag at a time; reveal width matches .ms-inbox-swipe-actions' CSS width.
+  let _inboxSwipe = null;
+  const INBOX_SWIPE_REVEAL = 132;
+  let _inboxMenuOutsideWired = false;   // document click-away listener, wired once
 
   const _isAdminRole = () => ['president','manager','secretary'].includes(currentRole);
   const _myName = () => (window.userProfile?.displayName || currentUser.email);
@@ -156,7 +163,6 @@ window.Chat = (() => {
   async function _runInboxRefresh(snap) {
     _convs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     await _refreshDeptChannels();            // deterministic-ID direct gets
-    await _refreshMyReads();                 // one own-reader-doc get per conversation
     await _refreshPresence();                // DM row presence dots (users-presence cache)
     _renderInbox();
   }
@@ -187,13 +193,16 @@ window.Chat = (() => {
         .catch(() => null)             // read on missing doc is rules-denied? No: denied ≠ missing; drop it
     ))).filter(Boolean);
   }
-  async function _refreshMyReads() {
-    const all = [..._convs, ..._deptConvs];
-    await Promise.all(all.map(cv =>
-      db.collection('conversations').doc(cv.id).collection('readers').doc(currentUser.uid).get()
-        .then(s => { _myReads[cv.id] = s.exists ? (s.data().readAt?.toMillis?.() || 0) : 0; })
-        .catch(() => { _myReads[cv.id] = 0; })));
-  }
+  // Wave5 M4 (J9) — the old per-conversation "N readers-doc gets on every
+  // inbox refresh" loop (_refreshMyReads) is GONE: unread state now reads the
+  // denormalized `conv.reads.{uid}` map that rides in on the SAME
+  // conversations listener snapshot that already feeds _convs (zero extra
+  // reads). `_myReads` is kept only as the migration-safe fallback _isUnread
+  // falls back to when a conv doc predates this batch and doesn't carry
+  // `reads` yet — nothing populates it anymore, so that fallback is 0 until
+  // the user opens the conversation once (which self-heals it via _markRead's
+  // new conv-doc merge below). The one place a SINGLE own-reader-doc get still
+  // happens is thread-open (_myReadAtForOpen), for the "New messages" divider.
   // DM inbox-row presence dots read the SAME 8s-TTL users-presence cache the
   // Team tab uses (Decision 7) — no new listener, just a local uid→doc map.
   async function _refreshPresence() {
@@ -204,10 +213,30 @@ window.Chat = (() => {
       _presenceByUid = map;
     } catch (_) { /* keep the previous snapshot on a transient failure */ }
   }
+  // Wave5 M4 (J9) — my readAt for THIS conversation, preferring the
+  // denormalized `conv.reads.{uid}` (Firestore Timestamp, arrives for free on
+  // the conversations snapshot) and falling back to the legacy `_myReads`
+  // value (see the comment above _refreshPresence — that map is no longer
+  // populated by a loop, so this fallback is 0 for any conv that predates
+  // this batch and hasn't been opened since) — migration-safe: never throws,
+  // never crashes on an absent field, and self-heals the first time the
+  // conversation is opened (_markRead's new conv-doc merge).
+  function _myReadAtMs(cv) {
+    const r = cv.reads && cv.reads[currentUser.uid];
+    if (r && typeof r.toMillis === 'function') return r.toMillis();
+    return _myReads[cv.id] || 0;
+  }
   function _isUnread(cv) {
     const last = cv.lastMessageAt?.toMillis?.() || 0;
-    return last > 0 && cv.lastMessageBy !== currentUser.uid && last > (_myReads[cv.id] || 0);
+    return last > 0 && cv.lastMessageBy !== currentUser.uid && last > _myReadAtMs(cv);
   }
+  // Wave5 M4 (J7) — per-user pin/mute/archive maps on the conv doc. Absent
+  // map or absent own key both read as "not set" — every conv doc written
+  // before this batch renders identically to today (no pin rail, no mute
+  // glyph, nothing hidden behind Archived).
+  function _isPinned(cv)   { return !!(cv.pinnedBy   && cv.pinnedBy[currentUser.uid]); }
+  function _isMuted(cv)    { return !!(cv.mutedBy    && cv.mutedBy[currentUser.uid]); }
+  function _isArchived(cv) { return !!(cv.archivedBy && cv.archivedBy[currentUser.uid]); }
 
   // ── Wave5 M1 — Chat nav badge (count of unread CONVERSATIONS, not messages;
   // per-message counts are M4's reads-map work). Drives the SAME visual
@@ -229,6 +258,19 @@ window.Chat = (() => {
     const key = _chatBadgeStorageKey();
     if (key) { try { localStorage.setItem(key, String(count)); } catch (_) {} }
     _paintChatNavBadge(count);
+    _updateAppBadge(count);
+  }
+  // Wave5 M4 (J7) — OS-level app badge (the little number on the PWA's home-
+  // screen/taskbar icon). Feature-detected — Safari/older Chrome/Firefox
+  // simply don't have `navigator.setAppBadge`, and this is a no-op there, not
+  // an error. Fed the SAME unread-conversation count as the in-app nav badge
+  // (same call site, per spec) — no separate computation, no extra reads.
+  function _updateAppBadge(count) {
+    if (!('setAppBadge' in navigator)) return;
+    try {
+      if (count > 0) navigator.setAppBadge(count).catch(() => {});
+      else (navigator.clearAppBadge ? navigator.clearAppBadge() : navigator.setAppBadge(0)).catch(() => {});
+    } catch (_) {}
   }
   function _paintChatNavBadge(count) {
     const n = count > 99 ? '99+' : String(count);
@@ -312,6 +354,7 @@ window.Chat = (() => {
   function _renderInbox() {
     const el = document.getElementById('chat-inbox');
     if (!el) return;
+    const myUid = currentUser.uid;
     const deptRows = myDeptChannels().map(d => {
       const existing = _deptConvs.find(cv => cv.department === d);
       return existing || { id: 'dept_' + d, type: 'dept', department: d, name: d,
@@ -319,18 +362,25 @@ window.Chat = (() => {
         lastMessageBy: null, lastMessageByName: null, _unprovisioned: true };
     });
     const all = [..._convs, ...deptRows];
-    // Wave5 M1 — total unread-CONVERSATION count over the FULL merged list
-    // (unfiltered by tab/search), feeding the Chat nav/bottom-nav badge.
-    _updateChatNavBadge(all.filter(_isUnread).length);
-    const filtered = _filter === 'all' ? all : all.filter(cv => cv.type === _filter);
+    // Wave5 M4 (J7) — archived-by-me conversations are hidden from every list
+    // EXCEPT the 'Archived' filter chip itself (Messenger-style); the total
+    // unread badge (nav + M4's OS app badge) is likewise computed over the
+    // non-archived set so an archived-and-forgotten thread doesn't keep the
+    // badge lit.
+    const nonArchived = all.filter(cv => !_isArchived(cv));
+    _updateChatNavBadge(nonArchived.filter(_isUnread).length);
+    const filtered = _filter === 'archived' ? all.filter(_isArchived)
+      : _filter === 'all' ? nonArchived
+      : nonArchived.filter(cv => cv.type === _filter);
     const sorted = filtered.slice().sort((a, b) =>
       (b.lastMessageAt?.toMillis?.() || 0) - (a.lastMessageAt?.toMillis?.() || 0));
 
     if (!sorted.length) {
-      el.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('💬',44)}</div><h4>No conversations yet</h4><p>Tap "+ New Message" to start one.</p></div>`;
+      el.innerHTML = _filter === 'archived'
+        ? `<div class="empty-state"><div class="empty-icon">${emojiIcon('archive',44)}</div><h4>No archived chats</h4></div>`
+        : `<div class="empty-state"><div class="empty-icon">${emojiIcon('💬',44)}</div><h4>No conversations yet</h4><p>Tap "+ New Message" to start one.</p></div>`;
       return;
     }
-    const myUid = currentUser.uid;
     const initials = s => escHtml((s || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2));
     // WS42 Phase 16 — resolve title first (search needs it before the row markup exists).
     const rows = sorted.map(cv => ({ cv, title: _convTitle(cv) }))
@@ -340,8 +390,15 @@ window.Chat = (() => {
       el.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔎',44)}</div><h4>No matches</h4></div>`;
       return;
     }
-    el.innerHTML = '<div class="item-list">' + rows.map(({ cv, title }) => {
-      const unread = _isUnread(cv);
+    // Wave5 M4 (J7) — pinned rail: pinned rows float to the top of whatever
+    // list is currently showing (respects the active filter/search), each
+    // tagged with a pin glyph; a small "Pinned" label separates the two
+    // groups whenever both are non-empty.
+    const pinnedRows = rows.filter(r => _isPinned(r.cv));
+    const restRows = rows.filter(r => !_isPinned(r.cv));
+
+    const rowHtml = ({ cv, title }) => {
+      const unread = _isUnread(cv), pinned = _isPinned(cv), muted = _isMuted(cv), archived = _isArchived(cv);
       let avatarHtml;
       if (cv.type === 'dm') {
         const otherUid = (cv.participants || []).find(u => u !== myUid);
@@ -349,35 +406,208 @@ window.Chat = (() => {
         const dotColor = { green: '#30D158', orange: '#FF9F0A', gray: '#8E8E93' }[pres.dot] || '#8E8E93';
         avatarHtml = `<div class="ms-avatar ms-avatar-lg" style="position:relative;flex-shrink:0">${initials(title)}<span class="ms-presence-dot" style="background:${dotColor}"></span></div>`;
       } else if (cv.type === 'group') {
-        avatarHtml = `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0">${initials(title)}</div>`;
+        // Wave5 M4 — group avatar renders conv.photoUrl (set via the info
+        // page's About section, creator/admin only) with initials fallback.
+        avatarHtml = cv.photoUrl
+          ? `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0;padding:0"><img src="${escHtml(cv.photoUrl)}" alt="${escHtml(title)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/></div>`
+          : `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0">${initials(title)}</div>`;
       } else {
         const cfg = (window.DEPARTMENTS || {})[cv.department] || {};
         avatarHtml = `<div class="ms-avatar ms-avatar-lg" style="flex-shrink:0;background:${cfg.color || 'var(--primary)'}">${cfg.icon || `${emojiIcon('💬',16)}`}</div>`;
       }
       const preview = cv.lastMessageText ? escHtml(cv.lastMessageText) : 'No messages yet';
       const ago = cv.lastMessageAt ? _timeAgo(cv.lastMessageAt) : '';
+      const cid = escHtml(cv.id);
+      // Dept channels: pin/mute work, archive is disabled (membership is
+      // derived from department, not owned by the user — nothing to "put
+      // away" independently of leaving the department itself).
+      const canArchive = cv.type !== 'dept';
       return `
-      <div class="item-card chat-inbox-row pressable" data-cid="${escHtml(cv.id)}" data-unprov="${cv._unprovisioned?'1':''}" data-dept="${escHtml(cv.department||'')}" style="display:flex;align-items:center;gap:10px;cursor:pointer">
-        ${avatarHtml}
-        <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:6px">
-            <span style="font-weight:${unread?'700':'500'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(title)}</span>
-            ${unread ? '<span class="ms-unread-badge">1+</span>' : ''}
-          </div>
-          <div style="font-size:12px;font-weight:${unread?'700':'400'};color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${preview}</div>
+      <div class="ms-inbox-row-wrap${pinned?' ms-inbox-pinned':''}" data-cid="${cid}">
+        <div class="ms-inbox-swipe-actions" data-cid="${cid}">
+          <button type="button" class="ms-inbox-act ms-inbox-act-pin" data-act="pin" data-cid="${cid}" title="${pinned?'Unpin':'Pin'}">${emojiIcon('pin',16)}</button>
+          <button type="button" class="ms-inbox-act ms-inbox-act-mute" data-act="mute" data-cid="${cid}" title="${muted?'Unmute':'Mute'}">${emojiIcon(muted?'bell':'bell-off',16)}</button>
+          ${canArchive?`<button type="button" class="ms-inbox-act ms-inbox-act-archive" data-act="archive" data-cid="${cid}" title="${archived?'Unarchive':'Archive'}">${emojiIcon('archive',16)}</button>`:''}
         </div>
-        <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">${ago}</div>
+        <div class="item-card chat-inbox-row pressable" data-cid="${cid}" data-unprov="${cv._unprovisioned?'1':''}" data-dept="${escHtml(cv.department||'')}" style="display:flex;align-items:center;gap:10px;cursor:pointer">
+          ${avatarHtml}
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:6px">
+              ${pinned?`<i data-lucide="pin" class="ms-inbox-pin-glyph"></i>`:''}
+              <span style="font-weight:${unread?'700':'500'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(title)}</span>
+              ${muted?`<i data-lucide="bell-off" class="ms-inbox-mute-glyph"></i>`:''}
+              ${unread ? '<span class="ms-unread-badge">1+</span>' : ''}
+            </div>
+            <div style="font-size:12px;font-weight:${unread?'700':'400'};color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${preview}</div>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);flex-shrink:0">${ago}</div>
+          <button type="button" class="ms-row-more-btn" data-cid="${cid}" title="More options" aria-haspopup="menu">${emojiIcon('more-vertical',16)}</button>
+        </div>
+        <div class="ms-row-menu hidden" data-cid="${cid}" role="menu">
+          <button type="button" class="ms-row-menu-item" data-act="pin" data-cid="${cid}">${pinned?'Unpin':'Pin'}</button>
+          <button type="button" class="ms-row-menu-item" data-act="mute" data-cid="${cid}">${muted?'Unmute':'Mute'}</button>
+          ${canArchive
+            ? `<button type="button" class="ms-row-menu-item" data-act="archive" data-cid="${cid}">${archived?'Unarchive':'Archive'}</button>`
+            : `<div class="ms-row-menu-note">Archive isn't available for department channels.</div>`}
+        </div>
       </div>`;
-    }).join('') + '</div>';
+    };
+
+    const pinnedHtml = pinnedRows.length
+      ? `<div class="ms-inbox-pinned-label">${emojiIcon('pin',12)} Pinned</div>` + pinnedRows.map(rowHtml).join('')
+      : '';
+    el.innerHTML = '<div class="item-list">' + pinnedHtml + restRows.map(rowHtml).join('') + '</div>';
+
+    // Row tap → open conversation (guarded off the ⋯ button; a row mid-swipe
+    // closes instead of navigating, matching common swipe-action UX).
     el.querySelectorAll('.chat-inbox-row').forEach(row => {
-      row.addEventListener('click', () => {
+      row.addEventListener('click', e => {
+        if (e.target.closest('.ms-row-more-btn')) return;
+        const wrap = row.closest('.ms-inbox-row-wrap');
+        if (wrap && wrap.classList.contains('ms-inbox-swiped')) {
+          wrap.classList.remove('ms-inbox-swiped'); row.style.transform = ''; return;
+        }
         const cid = row.dataset.cid;
         if (row.dataset.unprov) { openDeptChannel(row.dataset.dept); return; }
         const cv = sorted.find(x => x.id === cid);
         openConversation(cid, cv);
       });
     });
+    // Desktop hover ⋯ menu — toggle THIS row's menu, close any other open one.
+    el.querySelectorAll('.ms-row-more-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const cid = btn.dataset.cid;
+        el.querySelectorAll('.ms-row-menu').forEach(m => { if (m.dataset.cid !== cid) m.classList.add('hidden'); });
+        el.querySelector(`.ms-row-menu[data-cid="${CSS.escape(cid)}"]`)?.classList.toggle('hidden');
+      });
+    });
+    // Pin/Mute/Archive — same handler for both the swipe-revealed buttons and
+    // the ⋯ dropdown items (identical data-act/data-cid contract).
+    el.querySelectorAll('.ms-row-menu-item, .ms-inbox-act').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const { act, cid } = btn.dataset;
+        el.querySelectorAll('.ms-row-menu').forEach(m => m.classList.add('hidden'));
+        const wrap = btn.closest('.ms-inbox-row-wrap');
+        if (wrap) {
+          wrap.classList.remove('ms-inbox-swiped');
+          const content = wrap.querySelector('.chat-inbox-row');
+          if (content) content.style.transform = '';
+        }
+        if (act === 'pin') _toggleConvFlag(cid, 'pinnedBy');
+        else if (act === 'mute') _toggleConvFlag(cid, 'mutedBy');
+        else if (act === 'archive') _toggleConvFlag(cid, 'archivedBy');
+      });
+    });
+    // Mobile swipe-left row actions (Wave5 M4) — slope-guarded exactly like
+    // the in-thread swipe-to-reply gesture (_onSwipeStart/Move/End above).
+    el.querySelectorAll('.ms-inbox-row-wrap').forEach(wrap => {
+      const content = wrap.querySelector('.chat-inbox-row');
+      if (!content) return;
+      content.addEventListener('touchstart', _onInboxSwipeStart, { passive: true });
+      content.addEventListener('touchmove', _onInboxSwipeMove, { passive: false });
+      content.addEventListener('touchend', _onInboxSwipeEnd);
+      content.addEventListener('touchcancel', _onInboxSwipeEnd);
+    });
+    // Outside-tap closes any open ⋯ menu AND any swiped-open row (wired once —
+    // _renderInbox rebuilds #chat-inbox wholesale on every refresh, so a
+    // per-render listener would leak; this one lives on `document` forever
+    // and re-queries #chat-inbox fresh on every click).
+    if (!_inboxMenuOutsideWired) {
+      document.addEventListener('click', e => {
+        const inboxEl = document.getElementById('chat-inbox'); if (!inboxEl) return;
+        if (!inboxEl.contains(e.target) || (!e.target.closest('.ms-row-more-btn') && !e.target.closest('.ms-row-menu'))) {
+          inboxEl.querySelectorAll('.ms-row-menu').forEach(m => m.classList.add('hidden'));
+        }
+        if (!inboxEl.contains(e.target)) {
+          inboxEl.querySelectorAll('.ms-inbox-row-wrap.ms-inbox-swiped').forEach(w => {
+            w.classList.remove('ms-inbox-swiped');
+            const c = w.querySelector('.chat-inbox-row'); if (c) c.style.transform = '';
+          });
+        }
+      });
+      _inboxMenuOutsideWired = true;
+    }
     if (window.lucide) lucide.createIcons({ nodes: [el] });
+  }
+  // Wave5 M4 (J7) — swipe-left-to-reveal Pin/Mute/Archive on an inbox row.
+  function _onInboxSwipeStart(e) {
+    const wrap = e.currentTarget.closest('.ms-inbox-row-wrap'); if (!wrap) return;
+    const t = e.touches && e.touches[0]; if (!t) return;
+    document.querySelectorAll('.ms-inbox-row-wrap.ms-inbox-swiped').forEach(w => {
+      if (w !== wrap) { w.classList.remove('ms-inbox-swiped'); const c = w.querySelector('.chat-inbox-row'); if (c) c.style.transform = ''; }
+    });
+    const already = wrap.classList.contains('ms-inbox-swiped');
+    _inboxSwipe = { wrap, startX: t.clientX, startY: t.clientY, dx: 0, committed: false, aborted: false,
+                    baseOffset: already ? -INBOX_SWIPE_REVEAL : 0 };
+  }
+  function _onInboxSwipeMove(e) {
+    if (!_inboxSwipe || _inboxSwipe.aborted) return;
+    const t = e.touches && e.touches[0]; if (!t) return;
+    const dx = t.clientX - _inboxSwipe.startX, dy = t.clientY - _inboxSwipe.startY;
+    if (!_inboxSwipe.committed) {
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;             // noise floor
+      if (dx >= 0 || Math.abs(dy) > Math.abs(dx) * 0.6) { _inboxSwipe.aborted = true; return; }   // leftward+horizontal only
+      _inboxSwipe.committed = true;
+    }
+    e.preventDefault();
+    const raw = Math.min(0, Math.max(-INBOX_SWIPE_REVEAL, _inboxSwipe.baseOffset + dx));
+    _inboxSwipe.dx = raw;
+    const content = _inboxSwipe.wrap.querySelector('.chat-inbox-row');
+    if (content) content.style.transform = `translateX(${raw}px)`;
+  }
+  function _onInboxSwipeEnd() {
+    if (!_inboxSwipe) return;
+    const { wrap, dx, committed } = _inboxSwipe;
+    if (committed) {
+      const open = dx <= -INBOX_SWIPE_REVEAL / 2;
+      wrap.classList.toggle('ms-inbox-swiped', open);
+      const content = wrap.querySelector('.chat-inbox-row');
+      if (content) content.style.transform = open ? `translateX(-${INBOX_SWIPE_REVEAL}px)` : '';
+    }
+    _inboxSwipe = null;
+  }
+  // Wave5 M4 (J7) — toggle MY OWN key inside pinnedBy/mutedBy/archivedBy.
+  // Optimistic local flip (both cv objects the inbox currently holds a
+  // reference to are mutated in place, same pattern as _setWallpaper) so the
+  // row updates before the write round-trips; reverted + toasted on failure.
+  // Dot-path update ([`${field}.${uid}`]) — the ONLY shape the deployed rule
+  // allows: top-level affectedKeys must be a subset of
+  // {pinnedBy,mutedBy,archivedBy}, and each map's own diff must touch only
+  // the caller's uid (firestore.rules ~line 421-431).
+  async function _toggleConvFlag(cid, field) {
+    const cv = [..._convs, ..._deptConvs].find(c => c.id === cid);
+    if (!cv) return;
+    if (cv.type === 'dept' && cv._unprovisioned) { await _ensureDeptDocExists(cv.department); cv._unprovisioned = false; }
+    const uid = currentUser.uid;
+    const isSet = !!(cv[field] && cv[field][uid]);
+    cv[field] = { ...(cv[field] || {}) };
+    if (isSet) delete cv[field][uid]; else cv[field][uid] = true;
+    _renderInbox();
+    const FV = firebase.firestore.FieldValue;
+    await db.collection('conversations').doc(cid)
+      .update({ [`${field}.${uid}`]: isSet ? FV.delete() : true })
+      .catch(() => {
+        if (isSet) cv[field][uid] = true; else delete cv[field][uid];
+        _renderInbox();
+        Notifs.showToast('Could not update conversation', 'error');
+      });
+  }
+  // Wave5 M4 — shared by openDeptChannel (opening) and _toggleConvFlag
+  // (pin/mute on a channel nobody has opened yet): lazily provisions the
+  // dept_<department> conv doc if it doesn't exist, same shape either way.
+  async function _ensureDeptDocExists(dept) {
+    const id = 'dept_' + dept, ref = db.collection('conversations').doc(id);
+    const snap = await ref.get().catch(() => null);
+    if (!snap || !snap.exists) {
+      await ref.set({ type: 'dept', department: dept, name: dept, participants: [],
+        participantNames: {}, createdBy: currentUser.uid, createdByName: _myName(),
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        lastMessageAt: null, lastMessageText: null, lastMessageBy: null, lastMessageByName: null
+      }).catch(() => {});
+    }
+    return id;
   }
 
   // ── Open / create ──
@@ -401,16 +631,7 @@ window.Chat = (() => {
     openConversation(id);
   }
   async function openDeptChannel(dept) {
-    const id = 'dept_' + dept, ref = db.collection('conversations').doc(id);
-    const snap = await ref.get().catch(() => null);
-    if (!snap || !snap.exists) {
-      await ref.set({ type: 'dept', department: dept, name: dept, participants: [],
-        participantNames: {},
-        createdBy: currentUser.uid, createdByName: _myName(),
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        lastMessageAt: null, lastMessageText: null, lastMessageBy: null, lastMessageByName: null
-      }).catch(() => {});
-    }
+    const id = await _ensureDeptDocExists(dept);   // Wave5 M4 — shared with _toggleConvFlag's dept lazy-provision
     openConversation(id);
   }
 
@@ -424,7 +645,12 @@ window.Chat = (() => {
       avatarHtml = `<div class="ms-avatar ms-avatar-md">${initials(title)}</div>`;
     } else if (conv.type === 'group') {
       title = conv.name || 'Group';
-      avatarHtml = `<div class="ms-avatar ms-avatar-md">${initials(title)}</div>`;
+      // Wave5 M4 — group avatar renders conv.photoUrl with initials fallback;
+      // id lets the About-section photo-upload handler (_openMediaTab) patch
+      // this exact node live, without waiting for the next thread-open.
+      avatarHtml = conv.photoUrl
+        ? `<div class="ms-avatar ms-avatar-md" id="chat-thread-avatar"><img src="${escHtml(conv.photoUrl)}" alt="${escHtml(title)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/></div>`
+        : `<div class="ms-avatar ms-avatar-md" id="chat-thread-avatar">${initials(title)}</div>`;
     } else {
       const cfg = (window.DEPARTMENTS || {})[conv.department] || {};
       title = conv.name || conv.department || 'Channel';
@@ -880,6 +1106,18 @@ window.Chat = (() => {
     _wpMenuOpen = false;
   }
 
+  // Wave5 M4 (J9) — single-conversation readAt resolution for the "New
+  // messages" divider on thread-open. Prefers the denormalized field already
+  // on `conv`; only reaches for the readers subcollection (ONE get, not a
+  // loop) when that's absent.
+  async function _myReadAtForOpen(convId, conv) {
+    const own = conv && conv.reads && conv.reads[currentUser.uid];
+    if (own && typeof own.toMillis === 'function') return own.toMillis();
+    try {
+      const s = await db.collection('conversations').doc(convId).collection('readers').doc(currentUser.uid).get();
+      return s.exists ? (s.data().readAt?.toMillis?.() || 0) : 0;
+    } catch (_) { return 0; }
+  }
   async function openConversation(convId, preloaded) {
     let conv = preloaded || null;
     if (!conv) {
@@ -898,14 +1136,19 @@ window.Chat = (() => {
     // right back to null for the conversation we're about to open.
     _buildThreadPanel(conv);
     _openConvId = convId; _openConv = conv;
-    // Wave5 M1 — capture "my readAt" from the readers-doc data the INBOX
-    // already fetched (_refreshMyReads, before opening) — this is the "already
-    // fetched" read the spec asks to reuse, not a new read. Must be captured
-    // BEFORE _markRead() below overwrites my own readAt to "now". Frozen for
-    // the whole time this thread stays open — it's a one-time "where was I"
-    // boundary, not a live-recomputed value (see _renderThread's initial-scroll
-    // gating and the divider note in _threadHtml).
-    _threadOpenReadAtMs = _myReads[convId] || 0;
+    // Wave5 M4 (J9) — capture "my readAt" preferring the denormalized
+    // conv.reads.{uid} (zero extra reads — it rode in on `conv` itself,
+    // whether that came from the inbox's live listener or the direct get()
+    // above). Only when THAT'S absent (a conv doc that predates this batch,
+    // or one this uid has genuinely never opened) does this fall back to a
+    // SINGLE own-reader-doc get — not the old per-conversation-in-the-INBOX
+    // loop (_refreshMyReads, deleted this batch), just one read for the ONE
+    // conversation actually being opened. Must be captured BEFORE _markRead()
+    // below overwrites my own readAt to "now". Frozen for the whole time this
+    // thread stays open — it's a one-time "where was I" boundary, not a
+    // live-recomputed value (see _renderThread's initial-scroll gating and
+    // the divider note in _threadHtml).
+    _threadOpenReadAtMs = await _myReadAtForOpen(convId, conv);
     _threadInitialScrollDone = false;
     _scrollFabUnseen = 0;
     _pending.forEach(_revokePendingPreviews);
@@ -936,6 +1179,23 @@ window.Chat = (() => {
       .doc(currentUser.uid).set({ uid: currentUser.uid, name: _myName(),
         readAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
       .catch(() => {});
+    // Wave5 M4 (J9) — ALSO denormalize onto the conv doc itself (reads.{uid}),
+    // so the inbox's unread state/counts never need a per-conversation
+    // readers-doc get. Own-key dot-path write — matches the deployed rule's
+    // "reads alone" disjunct (firestore.rules ~line 413-418) exactly.
+    if (_openConv) {
+      // Optimistic local echo so the inbox (visible simultaneously in the
+      // desktop two-pane layout) reflects "read" immediately, not just once
+      // the snapshot round-trips — same pattern _setWallpaper uses for
+      // conv.wallpaper. A plain object with .toMillis() mimics enough of the
+      // Firestore Timestamp interface for _myReadAtMs to consume it.
+      _openConv.reads = _openConv.reads || {};
+      _openConv.reads[currentUser.uid] = { toMillis: () => Date.now() };
+    }
+    db.collection('conversations').doc(_openConvId)
+      .update({ [`reads.${currentUser.uid}`]: firebase.firestore.FieldValue.serverTimestamp() })
+      .catch(() => {});
+    _renderInbox();
   }
   function _scheduleMarkRead() {            // debounce: at most one receipt per 2s of arrivals
     if (_markReadTimer) return;
@@ -1088,10 +1348,17 @@ window.Chat = (() => {
                          : media && media.length ? `📷 ${media.length > 1 ? media.length + ' photos' : 'Photo'}`
                          : fileSource === 'link' ? '🔗 Link'
                          : `📎 ${fileName || 'File'}`;
-    // Second write — passes the affectedKeys([lastMessage*]) member branch.
+    // Second write — passes the affectedKeys([lastMessage*,reads]) member
+    // branch. Wave5 M4 (J9): the sender's own reads.{uid} rides in the SAME
+    // write as the preview bump — the deployed rule requires exactly that
+    // pairing (or reads alone), never reads alongside anything else
+    // (firestore.rules ~line 413-418). Sending a message implies you've read
+    // up to your own message, so this keeps the sender's own row from ever
+    // showing as unread to themself.
     await db.collection('conversations').doc(conv.id).update({
       lastMessageAt: FV.serverTimestamp(), lastMessageText: preview,
-      lastMessageBy: currentUser.uid, lastMessageByName: _myName()
+      lastMessageBy: currentUser.uid, lastMessageByName: _myName(),
+      [`reads.${currentUser.uid}`]: FV.serverTimestamp()
     }).catch(() => {});
     if (conv.id === _openConvId) { _markRead(); _clearOwnTyping(); }
     _notifyRecipients(conv, preview, mentions);       // fire-and-forget
@@ -1130,6 +1397,13 @@ window.Chat = (() => {
     const label = conv.type === 'dm' ? _myName() : (conv.name || conv.department || 'Chat');
     for (const uid of targets) {
       if (uid === currentUser.uid) continue;
+      // Wave5 M4 (J7) — a recipient who has muted THIS conversation (own-key
+      // mutedBy.{uid}, see _toggleConvFlag) gets no in-app notification at
+      // all, checked BEFORE the mention/throttle logic — muting is an
+      // explicit "don't tell me" a mention shouldn't override. Once
+      // functions/index.js consults the same mutedBy map (main session, this
+      // batch), this exact suppression carries through to push too.
+      if (conv.mutedBy && conv.mutedBy[uid]) continue;
       const isMentioned = mentionSet.has(uid);
       if (!isMentioned) {
         const r = _readers.find(x => x.uid === uid);        // live snapshot — zero extra reads
@@ -2395,6 +2669,88 @@ window.Chat = (() => {
   // module to own), client-filtered per spec ("fine at current volumes").
   // Reached via the ⓘ button _buildThreadPanel wires next to the wallpaper
   // menu.
+  // Wave5 M4 (J7) — Group admin. Rename/photo/add-members are gated to
+  // creator-or-admin, matching the deployed conv-doc update rule's ONLY
+  // unrestricted branch (resource.data.createdBy==uid || isAdmin() —
+  // firestore.rules ~line 432-433, which has no affectedKeys shape
+  // restriction at all, unlike every other update disjunct). dm/dept convs
+  // never show these controls — dept membership is derived from department,
+  // not owned by a creator, and a dm has no "group" identity to manage.
+  function _isGroupAdmin(conv) {
+    return conv.type === 'group' && (conv.createdBy === currentUser.uid || _isAdminRole());
+  }
+  // Wave5 M4 — internal-users picker for "Add members" (creator/admin only).
+  // Reuses dmCandidates for the same eligibility scoping "New Message"/
+  // "New Group" already use (a partner sees only same-company partners +
+  // president/manager), minus whoever's already a participant.
+  async function _openAddMembersPicker(conv) {
+    const snap = await dbCachedGet('users', () => db.collection('users').get(), 60000).catch(() => ({ docs: [] }));
+    const users = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const existing = new Set(conv.participants || []);
+    const candidates = dmCandidates(users).filter(u => !existing.has(u.id));
+    const rowHtml = u => {
+      const ini = (u.displayName || u.email || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+      return `<label class="item-card" style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px">
+        <input type="checkbox" class="chat-addmember-cb" value="${escHtml(u.id)}"/>
+        <div class="ms-avatar ms-avatar-md">${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:escHtml(ini)}</div>
+        <div style="flex:1;min-width:0;font-weight:600">${escHtml(u.displayName||u.email)}</div>
+      </label>`;
+    };
+    const body = `
+      <div id="chat-addmember-list" class="item-list">${
+        candidates.map(rowHtml).join('') || '<div class="empty-state" style="padding:16px"><p>Everyone is already in this group.</p></div>'
+      }</div>
+      ${candidates.length ? `<button class="btn-primary btn-sm" id="chat-addmember-btn" style="margin-top:12px" disabled>Add selected</button>
+      <div id="chat-addmember-err" class="error-msg hidden" style="margin-top:6px"></div>` : ''}`;
+    window.openPage('Add members', body);
+    const listEl = document.getElementById('chat-addmember-list');
+    const btn = document.getElementById('chat-addmember-btn');
+    listEl?.addEventListener('change', () => {
+      if (btn) btn.disabled = !listEl.querySelectorAll('.chat-addmember-cb:checked').length;
+    });
+    btn?.addEventListener('click', async () => {
+      const err = document.getElementById('chat-addmember-err');
+      const picked = Array.from(document.querySelectorAll('.chat-addmember-cb:checked')).map(cb => cb.value);
+      if (!picked.length) return;
+      btn.disabled = true; btn.textContent = 'Adding…';
+      const nameUpdates = {};
+      picked.forEach(uid => {
+        const u = candidates.find(x => x.id === uid);
+        nameUpdates[`participantNames.${uid}`] = u?.displayName || u?.email || 'User';
+      });
+      try {
+        await db.collection('conversations').doc(conv.id).update({
+          participants: firebase.firestore.FieldValue.arrayUnion(...picked),
+          ...nameUpdates
+        });
+        conv.participants = Array.from(new Set([...(conv.participants||[]), ...picked]));
+        conv.participantNames = conv.participantNames || {};
+        picked.forEach(uid => { conv.participantNames[uid] = nameUpdates[`participantNames.${uid}`]; });
+        // Patch the "Shared Media" page's member list in place — it's the
+        // page UNDER this picker (openPage hides, doesn't destroy, so it's
+        // still in the DOM), and it won't otherwise refresh until reopened.
+        const membersEl = document.querySelector('.chat-about-members');
+        if (membersEl) {
+          const ini = s => escHtml((s || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2));
+          membersEl.innerHTML = conv.participants.map(uid => {
+            const nm = conv.participantNames[uid] || 'User';
+            return `<div class="chat-about-member-row">
+              <div class="ms-avatar ms-avatar-md">${ini(nm)}</div>
+              <span class="chat-about-member-name">${escHtml(nm)}</span>
+              ${uid === conv.createdBy ? `<span class="chat-about-admin-tag">Admin</span>` : ''}
+            </div>`;
+          }).join('');
+        }
+        const subtitleEl = document.querySelector('.chat-about-subtitle');
+        if (subtitleEl) subtitleEl.textContent = `${conv.participants.length} member${conv.participants.length!==1?'s':''}`;
+        Notifs.success('Members added');
+        window.Overlay.dismissTop();
+      } catch (_) {
+        if (err) { err.textContent = 'Could not add members.'; err.classList.remove('hidden'); }
+        btn.disabled = false; btn.textContent = 'Add selected';
+      }
+    });
+  }
   async function _openMediaTab(conv) {
     const snap = await db.collection('conversations').doc(conv.id).collection('messages')
       .orderBy('createdAt', 'desc').limit(500).get().catch(() => ({ docs: [] }));
@@ -2429,7 +2785,50 @@ window.Chat = (() => {
       ? linkItems.map(it => fileRowHtml(it, 'link')).join('')
       : `<div class="empty-state" style="padding:16px"><p>No links yet.</p></div>`;
 
+    // Wave5 M4 (J7) — About section, placed ABOVE the Media/Files/Links chips
+    // on this SAME page (choice: one info screen, no extra navigation hop —
+    // the chips already scroll independently below it). Group: avatar/name
+    // editable creator-or-admin-only, full member list, "Add members". dm/
+    // dept: a plain read-only header so the info page still makes sense there
+    // (no admin concept for either type).
+    const isGroupAdmin = _isGroupAdmin(conv);
+    const title = _convTitle(conv);
+    const aboutInitials = s => escHtml((s || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2));
+    const memberCount = (conv.participants || []).length;
+    const avatarInner = conv.photoUrl
+      ? `<img src="${escHtml(conv.photoUrl)}" alt="${escHtml(title)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`
+      : aboutInitials(title);
+    const aboutHtml = `
+      <div class="chat-about">
+        <div class="chat-about-avatar-wrap">
+          <div class="ms-avatar chat-about-avatar" id="chat-about-avatar"${isGroupAdmin ? ' title="Tap to change group photo"' : ''}>${avatarInner}</div>
+          ${isGroupAdmin ? `<span class="chat-about-avatar-edit">${emojiIcon('camera',13)}</span><input type="file" id="chat-about-photo-input" accept="image/*" style="display:none"/>` : ''}
+        </div>
+        <div class="chat-about-title-row">
+          <div class="chat-about-title">${escHtml(title)}</div>
+          ${isGroupAdmin ? `<button type="button" id="chat-about-rename-btn" class="ms-thread-menu-btn" title="Rename group">${emojiIcon('pencil',15)}</button>` : ''}
+        </div>
+        <div class="chat-about-subtitle">${
+          conv.type === 'group' ? `${memberCount} member${memberCount!==1?'s':''}`
+          : conv.type === 'dept' ? 'Department channel'
+          : 'Direct message'
+        }</div>
+        ${conv.type === 'group' ? `
+        <div class="chat-about-members">${(conv.participants||[]).map(uid => {
+          const nm = (conv.participantNames && conv.participantNames[uid]) || 'User';
+          return `<div class="chat-about-member-row">
+            <div class="ms-avatar ms-avatar-md">${aboutInitials(nm)}</div>
+            <span class="chat-about-member-name">${escHtml(nm)}</span>
+            ${uid === conv.createdBy ? `<span class="chat-about-admin-tag">Admin</span>` : ''}
+          </div>`;
+        }).join('')}</div>
+        ${isGroupAdmin ? `<button type="button" id="chat-about-addmember-btn" class="btn-secondary btn-sm" style="width:100%">${emojiIcon('users',14)} Add members</button>` : ''}
+        ` : ''}
+      </div>
+      <div class="chat-about-divider"></div>`;
+
     const body = `
+      ${aboutHtml}
       <div id="chat-mediatab-chips"></div>
       <div id="chat-mediatab-media">${mediaHtml}</div>
       <div id="chat-mediatab-files" class="hidden">${filesHtml}</div>
@@ -2450,6 +2849,52 @@ window.Chat = (() => {
     document.getElementById('chat-mediatab-media')?.querySelectorAll('.chat-mediatab-thumb').forEach(t => {
       t.addEventListener('click', () => _openLightbox(mediaItems, parseInt(t.dataset.idx, 10)));
     });
+
+    // Wave5 M4 — About section wiring (group creator/admin only; the markup
+    // above omits these controls entirely for everyone else, so nothing here
+    // has anything to bind to on a non-admin's page).
+    if (isGroupAdmin) {
+      document.getElementById('chat-about-rename-btn')?.addEventListener('click', async () => {
+        const newName = await promptDialog({ message: 'Group name:', value: conv.name || '' });
+        if (newName === null) return;
+        const trimmed = newName.trim();
+        if (!trimmed || trimmed === conv.name) return;
+        try {
+          await db.collection('conversations').doc(conv.id).update({ name: trimmed });
+          conv.name = trimmed;
+          const aboutTitleEl = document.querySelector('.chat-about-title');
+          if (aboutTitleEl) aboutTitleEl.textContent = trimmed;
+          const threadTitleEl = document.querySelector('.ms-thread-title');
+          if (threadTitleEl) threadTitleEl.textContent = trimmed;
+          Notifs.success('Group renamed');
+        } catch (_) { Notifs.showToast('Rename failed', 'error'); }
+      });
+      document.getElementById('chat-about-avatar')?.addEventListener('click', () => {
+        document.getElementById('chat-about-photo-input')?.click();
+      });
+      document.getElementById('chat-about-photo-input')?.addEventListener('change', async e => {
+        const f = e.target.files?.[0]; e.target.value = '';
+        if (!f || !/^image\//.test(f.type || '')) return;
+        try {
+          const { blob } = await _compressImage(f);
+          const sref = storage.ref(`chat-files/${conv.id}/group_photo_${Date.now()}.jpg`);
+          await sref.put(blob, { customMetadata: { uploadedBy: currentUser.uid } });
+          const url = await sref.getDownloadURL();
+          await db.collection('conversations').doc(conv.id).update({ photoUrl: url });
+          conv.photoUrl = url;
+          const imgHtml = `<img src="${escHtml(url)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`;
+          const aboutAvatarEl = document.getElementById('chat-about-avatar');
+          if (aboutAvatarEl) aboutAvatarEl.innerHTML = imgHtml;
+          // Wave5 M4 — patch the thread header's own avatar live too ("avatar
+          // renders photoUrl everywhere" — the inbox row picks it up on its
+          // own next refresh, once the conversations snapshot echoes back).
+          const threadAvatarEl = document.getElementById('chat-thread-avatar');
+          if (threadAvatarEl) threadAvatarEl.innerHTML = imgHtml;
+          Notifs.success('Group photo updated');
+        } catch (_) { Notifs.showToast('Photo upload failed', 'error'); }
+      });
+      document.getElementById('chat-about-addmember-btn')?.addEventListener('click', () => _openAddMembersPicker(conv));
+    }
   }
 
   function _renderThread(opts) {
@@ -2536,6 +2981,7 @@ window.renderChatPage = async function() {
   const chips = [{ key: 'all', label: 'All' }, { key: 'dm', label: 'DMs' },
                  { key: 'group', label: 'Groups' }];
   if (window.Chat.myDeptChannels().length) chips.push({ key: 'dept', label: 'Channels' });
+  chips.push({ key: 'archived', label: 'Archived' });   // Wave5 M4 (J7)
   document.getElementById('chat-filter').innerHTML = window.chipTabs(chips, 'all');
   window.bindChipTabs(document.getElementById('chat-filter'),
     k => window.Chat?.setFilter(k));

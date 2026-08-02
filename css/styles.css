@@ -4604,6 +4604,96 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   border-radius: 50%; border: 2px solid var(--surface);
 }
 
+/* ══════════════════════════════
+   Wave5 Batch M4 — conversation management + cost
+   (pin/mute/archive, group admin About section, ⋯ menu)
+══════════════════════════════ */
+
+/* Inbox row shell — .ms-inbox-row-wrap holds the swipe-actions row UNDER the
+   real .chat-inbox-row content (which slides left via inline transform, see
+   chat.js _onInboxSwipeMove/_toggleConvFlag). position:relative + overflow
+   hidden is what lets the actions row hide off the right edge at rest. */
+.ms-inbox-row-wrap { position: relative; overflow: hidden; border-radius: var(--r-sm, 10px); }
+.ms-inbox-row-wrap .chat-inbox-row { position: relative; z-index: 1; background: var(--surface); transition: transform .18s ease; }
+.ms-inbox-swipe-actions {
+  position: absolute; top: 0; right: 0; bottom: 0; width: 132px;
+  display: flex; align-items: stretch; z-index: 0;
+}
+.ms-inbox-act {
+  flex: 1; border: none; cursor: pointer; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--text-muted);
+}
+.ms-inbox-act-pin { background: var(--primary); }
+.ms-inbox-act-mute { background: var(--gold-3, #FF9F0A); }
+.ms-inbox-act-archive { background: var(--danger, #FF3B30); }
+
+/* Pinned rail — pinned rows float to the top of the list (chat.js sorts them
+   there); a subtle tint + the pin glyph next to the title are the only visual
+   cue beyond position, so they don't compete with the unread badge. */
+.ms-inbox-pinned-label {
+  display: flex; align-items: center; gap: 4px; padding: 6px 10px 2px;
+  font-size: var(--fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--text-muted);
+}
+.ms-inbox-pinned-label i, .ms-inbox-pinned-label svg { width: 11px; height: 11px; }
+.ms-inbox-row-wrap.ms-inbox-pinned .chat-inbox-row { background: color-mix(in srgb, var(--primary) 5%, var(--surface)); }
+.ms-inbox-pin-glyph, .ms-inbox-mute-glyph { width: 12px; height: 12px; color: var(--text-muted); flex-shrink: 0; }
+
+/* Desktop hover ⋯ menu (touch devices use the swipe row instead — the button
+   still renders there but stays out of the way at opacity:0 until tapped). */
+.ms-row-more-btn {
+  width: 30px; height: 30px; flex-shrink: 0; border-radius: 50%;
+  background: none; border: none; cursor: pointer; color: var(--text-muted);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .15s, background .15s, color .15s;
+}
+@media (hover: hover) {
+  .ms-inbox-row-wrap:hover .ms-row-more-btn { opacity: .7; }
+  .ms-row-more-btn:hover { opacity: 1; background: var(--surface-2); color: var(--text); }
+}
+@media (hover: none) { .ms-row-more-btn { opacity: .55; } }
+.ms-row-menu {
+  position: absolute; top: 44px; right: 10px; z-index: 20;
+  background: var(--modal-bg); border: 1px solid var(--border);
+  border-radius: var(--r, 14px); box-shadow: var(--sh-lg);
+  padding: 6px; min-width: 170px;
+}
+.ms-row-menu.hidden { display: none; }
+.ms-row-menu-item {
+  display: block; width: 100%; text-align: left;
+  padding: 8px 10px; border-radius: var(--r-sm, 10px); border: none;
+  background: none; color: var(--text); font-size: var(--fs-base); cursor: pointer;
+}
+.ms-row-menu-item:hover { background: var(--surface-2); }
+.ms-row-menu-note { padding: 8px 10px; font-size: var(--fs-2xs); color: var(--text-muted); max-width: 200px; }
+
+/* About section (thread info page, above the Media/Files/Links chips) —
+   group photo/name/members; creator-or-admin sees the edit affordances,
+   everyone else (incl. dm/dept) sees a plain read-only header. */
+.chat-about { text-align: center; padding: 6px 8px 14px; }
+.chat-about-avatar-wrap { position: relative; display: inline-block; margin-bottom: 8px; }
+.chat-about-avatar { width: 72px; height: 72px; font-size: var(--fs-lg); margin: 0 auto; }
+.chat-about-avatar[title] { cursor: pointer; }
+.chat-about-avatar-edit {
+  position: absolute; bottom: -2px; right: -2px; width: 24px; height: 24px;
+  border-radius: 50%; background: var(--primary); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid var(--surface); pointer-events: none;
+}
+.chat-about-title-row { display: flex; align-items: center; justify-content: center; gap: 4px; }
+.chat-about-title { font-size: var(--fs-lg); font-weight: 700; color: var(--text); }
+.chat-about-subtitle { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 2px; }
+.chat-about-members { text-align: left; margin-top: 14px; max-height: 220px; overflow-y: auto; }
+.chat-about-member-row { display: flex; align-items: center; gap: 10px; padding: 6px 2px; }
+.chat-about-member-name { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-about-admin-tag {
+  font-size: var(--fs-2xs); font-weight: 700; color: var(--primary);
+  background: var(--primary-soft); padding: 2px 8px; border-radius: var(--pill); flex-shrink: 0;
+}
+.chat-about-divider { height: 1px; background: var(--border); margin: 4px 0 10px; }
+#chat-about-addmember-btn { margin-top: 10px; }
+
 /* ── Thread panel mobile shell (Phase 20) — true fullscreen, 56px header,
    44px back-button hit-area (edge swipe-back also reaches this via Gestures). ── */
 .ms-thread-header {

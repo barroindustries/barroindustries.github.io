@@ -38,6 +38,19 @@ exports.sendPushOnNotification = functions
     // present. The SW (firebase-messaging-sw.js) uses data.tag verbatim.
     const tag = chatId ? `chat-${chatId}` : (type.trim() || 'general');
 
+    // v14 wave5 M4: per-conversation mute — a chat push is skipped when the
+    // recipient has muted that conversation (conversations/{chatId}.mutedBy[uid]).
+    // Best-effort: a failed/missing conv read never blocks the push.
+    if (chatId && type === 'chat_message') {
+      try {
+        const conv = await admin.firestore().collection('conversations').doc(chatId).get();
+        if (conv.exists && conv.data().mutedBy && conv.data().mutedBy[uid] === true) {
+          console.log('[FCM] Skipping muted-conversation push for', uid, 'conv', chatId);
+          return null;
+        }
+      } catch (e) { /* fall through — deliver rather than silently drop */ }
+    }
+
     const userDoc = await admin.firestore().collection('users').doc(uid).get();
     if (!userDoc.exists) return null;
     const fcmToken = userDoc.data().fcmToken;
