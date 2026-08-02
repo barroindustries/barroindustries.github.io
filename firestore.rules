@@ -407,10 +407,28 @@ service cloud.firestore {
       // Creator/admin manage the doc (rename, members).
       // A participant may remove exactly themself ("leave group").
       allow update: if isAuth() && (
+        // v14 wave5: the send's preview bump may now also carry the sender's
+        // own key in the denormalized reads map (J9) — and a bare read-marker
+        // update touches reads alone. Both fenced to the caller's own uid.
         ( memberOfDoc() && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['lastMessageAt','lastMessageText','lastMessageBy','lastMessageByName']) )
+            .hasOnly(['lastMessageAt','lastMessageText','lastMessageBy','lastMessageByName','reads'])
+          && ( !request.resource.data.diff(resource.data).affectedKeys().hasAny(['reads'])
+               || request.resource.data.get('reads', {})
+                    .diff(resource.data.get('reads', {})).affectedKeys()
+                    .hasOnly([request.auth.uid]) ) )
         || ( memberOfDoc() && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['wallpaper']) )
+        // v14 wave5 (J7): per-user pin/mute/archive — a member may toggle ONLY
+        // their own key inside these maps, nothing else in the same write.
+        || ( memberOfDoc()
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['pinnedBy','mutedBy','archivedBy'])
+          && request.resource.data.get('pinnedBy', {})
+              .diff(resource.data.get('pinnedBy', {})).affectedKeys().hasOnly([request.auth.uid])
+          && request.resource.data.get('mutedBy', {})
+              .diff(resource.data.get('mutedBy', {})).affectedKeys().hasOnly([request.auth.uid])
+          && request.resource.data.get('archivedBy', {})
+              .diff(resource.data.get('archivedBy', {})).affectedKeys().hasOnly([request.auth.uid]) )
         || resource.data.get('createdBy','') == request.auth.uid
         || isAdmin()
         || ( request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants'])
