@@ -1072,6 +1072,16 @@ service cloud.firestore {
       allow create, update: if isAuth() && isPresident();
       allow delete: if false;
     }
+    // ── Finance rollups (v14 wave4 F2) ─────────────────
+    // Client-maintained monthly aggregates (finance_rollup/{yyyymm} + 'undated').
+    // Best-effort writes fired after every Ledger mutation; Rebuild-rollups in
+    // Finance Tools is the reconciliation authority. Writers = anyone who can
+    // post ledger rows (finance + the fenced Production COS path).
+    match /finance_rollup/{docId} {
+      allow read: if isAuth() && canFinance();
+      allow write: if isAuth() && (canFinance() || canProduction());
+    }
+
     match /ledger/{docId} {
       allow read: if isAuth() && canFinance();
       // Finance/admin post anything (subject to the date + period-close gate
