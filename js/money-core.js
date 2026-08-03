@@ -58,8 +58,20 @@ window.computePayLine = function(emp, ctx) {
   // Statutory: a hand-typed non-zero value on payroll/{uid} always wins over the
   // WS21 table suggestion (Finance can override real edge cases); er (employer
   // share) is never hand-typed — always computed and frozen.
+  // Payroll recall spec §A4 — the ONLY permitted edit inside this frozen
+  // function: statutory year keys off the RUN MONTH being paid (ctx.month),
+  // not "whatever year it happens to be when Compute is clicked". Before this,
+  // recomputing a delayed 2025-12 run in 2026 silently applied 2026 brackets —
+  // inconsistent with the D10 disburse gate, which already checks the run
+  // month's own year (departments.js's _payYear). Falls back to bizYear()
+  // exactly as before when ctx.month is absent/malformed, so every existing
+  // same-year call site (and every pinned test that omits ctx.month) is
+  // byte-identical to pre-spec behavior.
+  const statYear = (ctx.month && /^\d{4}-\d{2}/.test(ctx.month))
+    ? parseInt(ctx.month.slice(0,4), 10)
+    : (window.bizYear ? window.bizYear() : new Date().getFullYear());
   const stat = window.computeStatutory
-    ? window.computeStatutory({ grossPay: gross, year: window.bizYear ? window.bizYear() : new Date().getFullYear() })
+    ? window.computeStatutory({ grossPay: gross, year: statYear })
     : null;
   const sss        = emp.sss        || (stat ? stat.ee.sss : 0);
   const philhealth = emp.philhealth || (stat ? stat.ee.philhealth : 0);
@@ -237,10 +249,121 @@ window.computeBreakeven = function(input) {
   };
 };
 
+// ---- payroll recall spec (2026-08-04) — month-scoped inputs + overrides ----
+// Private rounding helper, scoped to this file only (statutory-tables.js has
+// its own identically-shaped `round2` — deliberately NOT imported/shared per
+// spec §C2: these are independent files, no cross-file coupling needed for
+// two lines of arithmetic).
+function _round2(n) { return Math.round((n + Number.EPSILON) * 100) / 100; }
+
+// window.monthBounds(month, todayStr) — §A1. Pure string/integer date math,
+// NO Date object, NO Intl (money-core's contract: no DOM, no Firebase, no
+// wall-clock — see file header). `month` is 'YYYY-MM', `todayStr` is
+// 'YYYY-MM-DD' (callers pass window.bizDate(); tests pass fixtures).
+window.monthBounds = function(month, todayStr) {
+  const y  = parseInt(month.slice(0,4), 10);
+  const mo = parseInt(month.slice(5,7), 10); // 1-12
+  const isLeap = (y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0));
+  const DAYS_IN_MONTH = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const daysInMonth = DAYS_IN_MONTH[mo - 1];
+  const startDate  = `${month}-01`;
+  const todayMonth = todayStr.slice(0, 7);
+  const isCurrent  = month === todayMonth;
+  const isFuture   = month > todayMonth; // safe string compare on 'YYYY-MM'
+
+  let endDate, upToDay;
+  if (isFuture) {
+    // A future month has no data yet — callers must treat this as "no data"
+    // (see §A2's getAttendanceScore, which returns 1 for a future month).
+    // endDate/upToDay carry no real meaning here; upToDay:0 is the signal.
+    endDate = startDate;
+    upToDay = 0;
+  } else if (isCurrent) {
+    endDate = todayStr;
+    upToDay = parseInt(todayStr.slice(8, 10), 10);
+  } else {
+    endDate = `${month}-${String(daysInMonth).padStart(2, '0')}`;
+    upToDay = daysInMonth;
+  }
+  return { startDate, endDate, upToDay, daysInMonth, isCurrent, isFuture };
+};
+
+// window.computeKpiForMonth — §A3.3. Pure; mirrors the exact 0.7/0.3 formula
+// departments.js's computePayRun used to inline (task-completion ratio +
+// deliverable score), scoped to a single calendar month instead of "the
+// employee's entire task history as it exists today". resolveDoneMonth/
+// resolveCreatedMonth are injected (production callers pass window.
+// taskDoneMonth/window.taskCreatedMonth) so this stays Firestore/Date-free
+// and testable with plain stub functions.
+//
+// Scope rules for a task t against month M (string compares on 'YYYY-MM';
+// '' compares <= everything — the intended "legacy task, counts" semantics):
+//   dm = resolveDoneMonth(t)    -> null (not done) | '' (done, undatable) | 'YYYY-MM'
+//   cm = resolveCreatedMonth(t) -> '' (no createdAt — existed since forever) | 'YYYY-MM'
+// A task whose cm > M didn't exist yet during M — always out of scope,
+// checked first (takes priority over every other rule, including the
+// done-but-undatable conservative-count below).
+window.computeKpiForMonth = function(userTasks, month, delivScore, resolveDoneMonth, resolveCreatedMonth) {
+  const tasks = Array.isArray(userTasks) ? userTasks : [];
+  let doneInM = 0, inScopeCount = 0;
+  for (const t of tasks) {
+    const dm = resolveDoneMonth(t);
+    const cm = resolveCreatedMonth(t) || '';
+    if (cm > month) continue; // didn't exist yet -> out of scope entirely
+    if (dm === month || dm === '') {
+      // Completed in M, OR done-but-undatable (no completedAt/approvedAt/
+      // lastModifiedAt to resolve a month from). We already know cm <= M
+      // here, so the undatable case counts conservatively as done-in-scope —
+      // an old finished task should never zero out a later month's KPI.
+      inScopeCount++; doneInM++;
+    } else if (dm === null) {
+      inScopeCount++; // open during M, not (yet) done -> denominator only
+    } else if (dm > month) {
+      inScopeCount++; // finished AFTER M -> was open/unfinished during M -> denominator only
+    }
+    // else: dm !== null && dm < month -> finished before M -> out of scope (no-op)
+  }
+  if (inScopeCount === 0) return 1; // WS20 D2 floor: no in-scope work ≠ bad KPI
+  const taskScore = Math.min(1, doneInM / inScopeCount);
+  const deliv = (typeof delivScore === 'number') ? Math.min(1, delivScore / 100) : 1;
+  return taskScore * 0.7 + deliv * 0.3;
+};
+
+// window.applyPayLineOverride — §C2. Applies an OverrideEntry's OUTPUT
+// override (finalPay) on top of an already-computed line. Input overrides
+// (kpiScore/attScore/allowance/otherDeductions) are applied BEFORE
+// computePayLine runs (see departments.js's computePayRun §C3 — empEff/
+// kpiEff/attEff) — this function only shifts finalPay/netBeforeCA/
+// effectiveGross by the same delta, which is what keeps disbursePayRun's
+// ledger identity balanced (debits == credits) even when a manual finalPay
+// override is in effect. Never mutates its `line` argument.
+window.applyPayLineOverride = function(line, ovr) {
+  const out = { ...line };
+  if (!ovr) return out; // no entry passed -> plain copy, no overridden flag at all
+  const fields = ['kpiScore','attScore','allowance','otherDeductions','finalPay']
+    .filter(k => typeof ovr[k] === 'number' && Number.isFinite(ovr[k]));
+  if (typeof ovr.finalPay === 'number' && Number.isFinite(ovr.finalPay) && ovr.finalPay !== line.finalPay) {
+    const delta = _round2(ovr.finalPay - line.finalPay);
+    out.finalPay       = _round2(line.finalPay + delta);       // == ovr.finalPay
+    out.netBeforeCA    = _round2(line.netBeforeCA + delta);
+    out.effectiveGross = _round2(line.effectiveGross + delta); // keeps effectiveGross = netBeforeCA + statutoryTotal + otherDeductions
+  }
+  out.overridden = true;
+  out.overrideMeta = {
+    fields, note: ovr.note, setBy: ovr.setBy, setByName: ovr.setByName,
+    setAt: (ovr.setAt && typeof ovr.setAt.toMillis === 'function') ? ovr.setAt.toMillis() : (ovr.setAt || null),
+    original: ovr.original
+  };
+  return out;
+};
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     vatSplit: window.vatSplit,
     computePayLine: window.computePayLine,
-    computeBreakeven: window.computeBreakeven
+    computeBreakeven: window.computeBreakeven,
+    monthBounds: window.monthBounds,
+    computeKpiForMonth: window.computeKpiForMonth,
+    applyPayLineOverride: window.applyPayLineOverride
   };
 }

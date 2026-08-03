@@ -543,10 +543,15 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   // v12 WS23 — apply any due-dated raise BEFORE the base salary is read, so
   // Compute/the table preview always see the current base. Safe to re-run.
   await window.RaiseFlow.applyDueRaises('payroll').catch(()=>{});
-  const [usersSnap, histSnap, delReqSnap] = await Promise.all([
+  const [usersSnap, histSnap, delReqSnap, payRunsSnap, earliestHistSnap] = await Promise.all([
     fetchUsersWithPayroll(),
     db.collection('salary_history').orderBy('month','desc').limit(200).get().catch(()=>({docs:[]})),
-    db.collection('payroll_delete_requests').where('status','==','pending').get().catch(()=>({docs:[]}))
+    db.collection('payroll_delete_requests').where('status','==','pending').get().catch(()=>({docs:[]})),
+    // Payroll recall spec §B1/§B2 — one full pay_runs read (small collection,
+    // one doc per month) drives both the month-dropdown union and the
+    // unpaid-months card below; fetched once here, not per-render.
+    db.collection('pay_runs').get().catch(()=>({docs:[]})),
+    db.collection('salary_history').orderBy('month').limit(1).get().catch(()=>({docs:[]}))
   ]);
   // Exclude ALL external partners from the monthly run — they are not Barro
   // payroll. A partner can present as role 'partner', a Brilliant-Steel-only
@@ -573,6 +578,41 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   const months    = [...new Set(history.map(h=>h.month))].sort().reverse();
   const thisMonth = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10)).slice(0,7); // Manila YYYY-MM
 
+  // ── Unpaid-months recall (payroll recall spec §B1/§B2) ──────────────────
+  // Fixes G1: the month dropdown used to only list salary_history months +
+  // "current" — a month that was never disbursed has no salary_history rows,
+  // so it wasn't even selectable. Build the full PAYROLL_EPOCH..thisMonth
+  // range instead (plain string arithmetic on 'YYYY-MM', never Date, so this
+  // is TZ-proof and matches money-core's own date-math convention).
+  function _prNextMonth(m) {
+    let y = parseInt(m.slice(0,4),10), mo = parseInt(m.slice(5,7),10);
+    mo++; if (mo > 12) { mo = 1; y++; }
+    return `${y}-${String(mo).padStart(2,'0')}`;
+  }
+  function _prEnumerateMonths(start, end) {
+    const out = []; let cur = start, guard = 0;
+    while (cur <= end && guard < 3000) { out.push(cur); cur = _prNextMonth(cur); guard++; }
+    return out;
+  }
+  const stateByMonth = {};
+  payRunsSnap.docs.forEach(d => {
+    const dd = d.data();
+    stateByMonth[d.id] = { state: dd.state || 'draft', employeeCount: dd.employeeCount, totalNet: dd.totalNet };
+  });
+  const payRunMonths     = payRunsSnap.docs.map(d=>d.id).filter(id=>/^\d{4}-\d{2}$/.test(id));
+  const earliestPayRunMo = payRunMonths.length ? payRunMonths.slice().sort()[0] : null;
+  const earliestHistMo   = earliestHistSnap.docs[0] ? (earliestHistSnap.docs[0].data().month || null) : null;
+  const PAYROLL_EPOCH    = [earliestPayRunMo, earliestHistMo, thisMonth].filter(Boolean).sort()[0] || thisMonth;
+  const allMonths        = _prEnumerateMonths(PAYROLL_EPOCH, thisMonth); // ascending, PAYROLL_EPOCH..thisMonth inclusive
+  const monthsDesc        = allMonths.slice().sort().reverse();
+  const monthOptionsHtml = monthsDesc.map(m => {
+    const label = window.fmtMonthLabel(m);
+    const st    = stateByMonth[m]?.state;
+    const isPast = m < thisMonth;
+    const suffix = m===thisMonth ? ' (Current)' : (isPast && st !== 'disbursed' ? ' — ⚠ not disbursed' : '');
+    return `<option value="${m}"${m===thisMonth?' selected':''}>${label}${suffix}</option>`;
+  }).join('');
+
   // v12 WS23 — scheduled/pending raise counts for the banner below.
   const _prSnap = await db.collection('pending_raises').where('status','in',['scheduled','pending_approval']).get().catch(()=>({docs:[]}));
   const _nm = thisMonth;
@@ -585,8 +625,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   container.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
       <select id="pr-month-sel" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px">
-        <option value="${thisMonth}">${window.fmtMonthLabel(thisMonth)} (Current)</option>
-        ${months.filter(m=>m!==thisMonth).map(m=>`<option value="${m}">${window.fmtMonthLabel(m)}</option>`).join('')}
+        ${monthOptionsHtml}
       </select>
       <div style="display:flex;gap:8px">
         <button class="btn-primary btn-sm" id="gen-payroll-btn">Compute Payroll</button>
@@ -596,10 +635,12 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       </div>
     </div>
     ${raiseBanner}
+    <div id="pr-unpaid-card" style="margin-bottom:14px"></div>
     <div id="pay-run-strip" style="margin-bottom:14px"></div>
     ${productionStaff.length?`<div style="font-size:12px;color:var(--text-2);background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:8px 12px;margin-bottom:12px">${emojiIcon('🏭',16)} <strong>${productionStaff.length}</strong> production-class worker${productionStaff.length!==1?'s are':' is'} paid <strong>weekly</strong> via Worker Payslips (HR → Payslips) and ${productionStaff.length!==1?'are':'is'} excluded from this monthly run to avoid double payment.</div>`:''}
     <div class="card">
       <div class="card-body" style="padding:0">
+        <div id="payroll-table-caption" style="padding:8px 16px;font-size:12px;color:var(--text-muted);border-bottom:1px solid var(--border)"></div>
         <div class="table-wrap">
           <table class="data-table table-cards" id="payroll-table">
             <thead><tr>
@@ -850,6 +891,58 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     }
   }
 
+  // ── Unpaid-months recall card (payroll recall spec §B2) ─────────────────
+  // Every month from PAYROLL_EPOCH through thisMonth that isn't 'disbursed'
+  // yet, oldest first — "recall all records ... for each month that has not
+  // been disbursed" (owner's verbatim ask). Open just switches the existing
+  // #pr-month-sel + fires its change handler — no money action is duplicated
+  // here, the Compute/Verify/Disburse buttons stay on the pay-run strip below.
+  async function loadUnpaidStrip() {
+    const card = document.getElementById('pr-unpaid-card');
+    if (!card) return;
+    const unpaidMonths = allMonths.filter(m => (stateByMonth[m]?.state) !== 'disbursed').sort();
+    if (!unpaidMonths.length) {
+      card.innerHTML = `<div class="info-banner">${emojiIcon('✓',16)} All months through ${window.fmtMonthLabel(thisMonth)} are disbursed.</div>`;
+      return;
+    }
+    const BADGE_MAP = {
+      'never-run': ['Never run','badge-gray'], computed:['Computed','badge-blue'],
+      verified:['Verified','badge-green'], disbursing:['Disbursing (locked)','badge-amber']
+    };
+    const _statVerified = (m) => {
+      const y = m.slice(0,4);
+      return !!(window.STATUTORY && window.STATUTORY[y] && window.STATUTORY[y].verified === true);
+    };
+    const rows = await Promise.all(unpaidMonths.map(async m => {
+      const st = stateByMonth[m]?.state || 'never-run';
+      const [label, badgeCls] = BADGE_MAP[st] || ['Unknown','badge-gray'];
+      const info = stateByMonth[m];
+      const countNet = (info && info.employeeCount != null)
+        ? `<div style="font-size:11px;color:var(--text-muted)">${info.employeeCount} staff · ₱${fmt(info.totalNet||0)}</div>` : '';
+      let closed = false;
+      try { closed = await window.isPeriodClosed(m + '-01'); } catch (_) { /* unknown — best-effort */ }
+      const lockNote = closed ? `<div style="font-size:11px;color:var(--danger)">${emojiIcon('🔒',10)} Period closed — ask the President to reopen it first</div>` : '';
+      const statNote = _statVerified(m) ? '' : `<div style="font-size:11px;color:var(--warning)">${emojiIcon('⚠',10)} Disburse blocked: statutory rates unverified</div>`;
+      return `<div class="pr-unpaid-row" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="flex:1;min-width:0">
+          <strong>${window.fmtMonthLabel(m)}</strong>
+          <span class="badge ${badgeCls}" style="font-size:10px;margin-left:6px">${label}</span>
+          ${countNet}${lockNote}${statNote}
+        </div>
+        <button class="btn-secondary btn-sm pr-unpaid-open" data-month="${m}">Open</button>
+      </div>`;
+    }));
+    card.innerHTML = `<div class="card"><div class="card-header"><h3>${unpaidMonths.length} month(s) not yet disbursed</h3></div><div class="card-body">${rows.join('')}</div></div>`;
+    card.querySelectorAll('.pr-unpaid-open').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const sel = document.getElementById('pr-month-sel');
+        if (!sel) return;
+        sel.value = btn.dataset.month;
+        sel.dispatchEvent(new Event('change'));
+      });
+    });
+  }
+
   // Per-employee CA plan (WS22's CashAdvance.planFor), read by both the table
   // preview and the Edit Payroll modal — one shared computation, not two.
   let _planByUser = {};
@@ -857,8 +950,69 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
   async function loadPayrollTable(month) {
     const tbody = document.getElementById('payroll-tbody');
     tbody.innerHTML = '<tr><td colspan="14" style="padding:14px 20px"><div class="skl-text" style="width:92%"></div></td></tr>'.repeat(3);
+    const captionEl = document.getElementById('payroll-table-caption');
 
-    const statYear = window.bizYear ? window.bizYear() : new Date().getFullYear();
+    // ── Frozen-run mode (payroll recall spec §B3 — kills G2) ───────────────
+    // Once a month has been Computed, ITS frozen lines[] are the single
+    // source of truth for that month — not "today's live pay settings"
+    // re-evaluated retroactively (the bug that made "viewing July" show
+    // today's salaries). Falls through to the live-preview branch below only
+    // when no run doc exists yet for this month.
+    const runDoc  = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+    const runData = (runDoc && runDoc.exists) ? runDoc.data() : null;
+    if (runData && Array.isArray(runData.lines) && runData.lines.length) {
+      const computedAtLabel = (runData.computedAt && typeof runData.computedAt.toDate === 'function')
+        ? window.fmtManila(runData.computedAt) : '';
+      if (captionEl) captionEl.innerHTML =
+        `Showing the computed run (state: <strong>${escHtml(runData.state||'computed')}</strong>${runData.computedByName?`, computed by ${escHtml(runData.computedByName)}`:''}${computedAtLabel?` at ${computedAtLabel}`:''})`;
+      const canAdjust = runData.state === 'computed' && canFinance;
+      tbody.innerHTML = runData.lines.map(line => {
+        const u = employees.find(e=>e.id===line.uid) || null;
+        const depts = u ? ((Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—') : '—';
+        const editedBadge = line.overridden
+          ? ` <span class="badge badge-orange" title="${escHtml(line.overrideMeta?.note||'')}" style="font-size:10px">edited</span>` : '';
+        const caCell = (line.caPlanned||0) > 0
+          ? `<div style="color:var(--danger);white-space:nowrap">-₱${fmt(line.caPlanned)}</div><div style="font-size:10px;color:var(--text-muted)">bal ₱${fmt(line.caBalance)}</div>`
+          : '<span style="color:var(--text-muted)">—</span>';
+        return `<tr class="pr-row">
+          <td class="tc-avatar" style="text-align:center">
+            <div style="width:36px;height:36px;border-radius:50%;overflow:hidden;background:var(--primary-light);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--on-primary);font-size:14px;margin:0 auto">
+              ${u&&u.photoUrl?`<img src="${u.photoUrl}" style="width:100%;height:100%;object-fit:cover"/>`:((line.name||'?')[0])}
+            </div>
+          </td>
+          <td class="tc-name"><strong>${escHtml(line.name||'')}</strong>${editedBadge}<div style="font-size:11px;color:var(--text-muted)">${escHtml(u?(u.title||ROLES[u.role]?.label||u.role||''):'')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></div></td>
+          <td class="tc-detail" data-label="ID"><code>${u?(u.employeeId||'—'):'—'}</code></td>
+          <td class="tc-detail" data-label="Department">${depts}</td>
+          <td class="tc-detail" data-label="Base">₱${fmt(line.base)}</td>
+          <td class="tc-detail" data-label="Allowance" style="color:var(--success)">+₱${fmt(line.allowance)}</td>
+          <td class="tc-detail" data-label="Deductions" style="color:var(--danger)">-₱${fmt(line.otherDeductions)}</td>
+          <td class="tc-detail" data-label="SSS" style="color:var(--danger)">-₱${fmt(line.sss)}</td>
+          <td class="tc-detail" data-label="PhilHealth" style="color:var(--danger)">-₱${fmt(line.philhealth)}</td>
+          <td class="tc-detail" data-label="Pag-IBIG" style="color:var(--danger)">-₱${fmt(line.pagibig)}</td>
+          <td class="tc-detail" data-label="Tax" style="color:var(--danger)">-₱${fmt(line.tax)}</td>
+          <td class="tc-detail" data-label="Cash Adv">${caCell}</td>
+          <td class="tc-net"><strong style="color:${line.finalPay>=0?'var(--success)':'var(--danger)'}">₱${fmt(line.finalPay)}</strong></td>
+          <td class="tc-actions">
+            ${canAdjust?`<button class="btn-secondary btn-sm pr-adjust-btn" data-uid="${line.uid}" title="Adjust" aria-label="Adjust pay line">${emojiIcon('✎',16)}</button>`:''}
+            <button class="btn-secondary btn-sm print-slip-btn" data-uid="${line.uid}" title="Payslip" aria-label="Print payslip">${emojiIcon('🖨',16)}</button>
+          </td>
+        </tr>`;
+      }).join('');
+      if (window.lucide) lucide.createIcons({ nodes: [tbody] });
+      tbody.querySelectorAll('tr.pr-row').forEach(tr => {
+        tr.addEventListener('click', (ev) => { if (ev.target.closest('button, a')) return; tr.classList.toggle('tc-expanded'); });
+      });
+      tbody.querySelectorAll('.pr-adjust-btn').forEach(btn => {
+        btn.addEventListener('click', () => openAdjustModal(month, btn.dataset.uid));
+      });
+      return; // frozen-run mode — skip the live-preview branch below entirely
+    }
+    if (captionEl) captionEl.innerHTML = `Live preview from current pay settings — press <strong>Compute Payroll</strong> to freeze this month.`;
+
+    // §A4 — statutory year keys off the MONTH BEING VIEWED, not "whatever
+    // year it happens to be" (consistent with money-core.js's computePayLine
+    // and the D10 disburse gate, which both already key off the run month).
+    const statYear = /^\d{4}-\d{2}/.test(month) ? parseInt(month.slice(0,4),10) : (window.bizYear ? window.bizYear() : new Date().getFullYear());
     const plans = await Promise.all(employees.map(u => window.CashAdvance
       ? window.CashAdvance.planFor(u.id, month)
       : Promise.resolve({ caBalance:0, mode:'full', caPlanned:0, plan:[] })));
@@ -954,7 +1108,8 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         const caBalance = plan.caBalance;
         if (!emp) return;
 
-        const statYear = window.bizYear ? window.bizYear() : new Date().getFullYear();
+        // §A4 — same run-month-keyed statutory year as loadPayrollTable's preview above.
+        const statYear = /^\d{4}-\d{2}/.test(month) ? parseInt(month.slice(0,4),10) : (window.bizYear ? window.bizYear() : new Date().getFullYear());
         const sug = window.computeStatutory ? window.computeStatutory({ grossPay: (emp.salary||0)+(emp.allowance||0), year: statYear }) : null;
         const unverifiedBadge = sug && sug.unverified ? ` <span style="font-size:10px;color:var(--warning)">${emojiIcon('⚠',10)} unverified rates</span>` : '';
         const inst = plan.plan[0]; // first CA in the plan, for the "installment N of M" label
@@ -1090,6 +1245,116 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     });
   }
 
+  // ── Adjust / Reset — per-line overrides (payroll recall spec §C4) ──────
+  // Only reachable from the frozen-run table (§B3) when state==='computed'.
+  // Overrides are stored on pay_runs/{month}.overrides[uid] (§C1) and applied
+  // by computePayRun itself (§C3/§C2) — Save/Reset both just write the
+  // override map then re-run computePayRun so the frozen lines[] stay the
+  // single source of truth (no separate client-side money math to drift).
+  async function openAdjustModal(month, uid) {
+    const runSnap = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+    const runData = (runSnap && runSnap.exists) ? runSnap.data() : null;
+    if (!runData) { Notifs.showToast('Could not load this run.','error'); return; }
+    const line = (runData.lines||[]).find(l=>l.uid===uid);
+    if (!line) { Notifs.showToast('No computed line for this employee.','error'); return; }
+    const existing = (runData.overrides||{})[uid];
+    // "Computed" reference column: if already overridden, show the TRUE
+    // original computed values captured when the override was first saved
+    // (line.overrideMeta.original) — not the post-override numbers now
+    // sitting on the line — so re-opening Adjust never treats an override
+    // as if it were freshly computed.
+    const base = (line.overridden && line.overrideMeta && line.overrideMeta.original) ? line.overrideMeta.original : {
+      kpiScore: line.kpiScore, attScore: line.attScore, allowance: line.allowance,
+      otherDeductions: line.otherDeductions, finalPay: line.finalPay
+    };
+    const emp = employees.find(e=>e.id===uid);
+
+    const FIELD_DEFS = [
+      ['kpiScore','KPI Score (0–1)',0.01,'',0,1],
+      ['attScore','Attendance Score (0–1)',0.01,'',0,1],
+      ['allowance','Allowance',0.01,'₱',0,null],
+      ['otherDeductions','Other Deductions',0.01,'₱',0,null],
+      ['finalPay','Final Pay / Take-home',0.01,'₱',null,null],
+    ];
+    const fieldHtml = FIELD_DEFS.map(([key,label,step,prefix,min,max]) => `
+      <div class="form-row">
+        <div class="form-group"><label>${label} — Computed</label>
+          <div style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface2,var(--surface));color:var(--text-muted)">${typeof base[key]==='number'?(prefix+fmt(base[key])):'—'}</div>
+        </div>
+        <div class="form-group"><label>${label} — Override</label>
+          <input id="adj-${key}" type="number" step="${step}" ${min!=null?`min="${min}"`:''} ${max!=null?`max="${max}"`:''} value="${existing && typeof existing[key]==='number' ? existing[key] : ''}" placeholder="blank = no override"/>
+        </div>
+      </div>`).join('');
+
+    openPage(`Adjust — ${escHtml(line.name||'')} (${window.fmtMonthLabel(month)})`, `
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Overrides apply on top of this frozen computed run and are fully reversible before Verify. Leave a field blank to keep it as computed.</div>
+      ${fieldHtml}
+      <div id="adj-negative-warn" style="display:none;color:var(--danger);font-size:12px;margin:4px 0"></div>
+      <div class="form-group"><label>Reason (required)</label><input id="adj-note" placeholder="Why is this override needed?" value="${escHtml((existing&&existing.note)||'')}"/></div>
+      <div style="font-size:13px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">Preview net pay: <strong id="adj-preview-final">₱${fmt(line.finalPay)}</strong></div>
+    `, `<button class="btn-primary" id="adj-save-btn">Save</button>${existing?`<button class="btn-danger" id="adj-reset-btn">Reset to computed</button>`:''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+    const numVal = (key) => {
+      const v = document.getElementById(`adj-${key}`)?.value;
+      return (v === '' || v == null) ? undefined : parseFloat(v);
+    };
+    const updatePreview = () => {
+      const kpiScore = numVal('kpiScore'), attScore = numVal('attScore');
+      const allowance = numVal('allowance'), otherDeductions = numVal('otherDeductions'), finalPayOvr = numVal('finalPay');
+      const empEff = emp
+        ? { ...emp, allowance: allowance!=null?allowance:emp.allowance, deductions: otherDeductions!=null?otherDeductions:emp.deductions }
+        : { id: line.uid, displayName: line.name, salary: line.base, allowance: allowance!=null?allowance:line.allowance, deductions: otherDeductions!=null?otherDeductions:line.otherDeductions };
+      let preview = window.computePayLine(empEff, {
+        month, policy: line.policy,
+        kpiScore: kpiScore!=null?kpiScore:line.kpiScore, attScore: attScore!=null?attScore:line.attScore,
+        caPlan: line.caPlan, caBalance: line.caBalance
+      });
+      if (finalPayOvr != null) preview = window.applyPayLineOverride(preview, { finalPay: finalPayOvr, note:'preview' });
+      const warnEl = document.getElementById('adj-negative-warn');
+      if (warnEl) {
+        if (preview.finalPay < 0) { warnEl.style.display='block'; warnEl.textContent = `Warning: preview take-home is negative (₱${fmt(preview.finalPay)}).`; }
+        else { warnEl.style.display='none'; }
+      }
+      const prevEl = document.getElementById('adj-preview-final');
+      if (prevEl) prevEl.textContent = `₱${fmt(preview.finalPay)}`;
+    };
+    FIELD_DEFS.forEach(([key]) => document.getElementById(`adj-${key}`)?.addEventListener('input', updatePreview));
+
+    document.getElementById('adj-save-btn')?.addEventListener('click', () => window.busy(document.getElementById('adj-save-btn'), async () => {
+      const note = document.getElementById('adj-note').value.trim();
+      if (!note) { Notifs.showToast('Reason is required.','error'); return; }
+      // Stale-page guard — mirrors the Verify handler's re-check pattern below.
+      const chk = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+      if (!chk || !chk.exists || chk.data().state !== 'computed') {
+        Notifs.showToast('Run must be in Computed state to adjust — it may have been Verified already.','error');
+        closeModal(); loadPayRunStrip(month); loadPayrollTable(month); return;
+      }
+      const entry = {
+        note, setBy: currentUser.uid, setByName: window.userProfile?.displayName||currentUser.email,
+        setAt: firebase.firestore.FieldValue.serverTimestamp(),
+        original: { kpiScore: base.kpiScore, attScore: base.attScore, allowance: base.allowance, otherDeductions: base.otherDeductions, finalPay: base.finalPay }
+      };
+      const fieldsSet = [];
+      FIELD_DEFS.forEach(([key]) => { const v = numVal(key); if (v != null) { entry[key] = v; fieldsSet.push(key); } });
+      await db.collection('pay_runs').doc(month).update({ ['overrides.'+uid]: entry });
+      await window.computePayRun(month);
+      window.logAudit && window.logAudit('payroll-override','pay_run',month,{ uid, fields: fieldsSet, note, before: entry.original });
+      closeModal();
+      Notifs.success('Override saved — run recomputed.');
+      loadPayRunStrip(month); loadPayrollTable(month); loadUnpaidStrip();
+    }));
+
+    document.getElementById('adj-reset-btn')?.addEventListener('click', () => window.busy(document.getElementById('adj-reset-btn'), async () => {
+      if (!(await confirmDialog({message:`Reset ${escHtml(line.name||'')}'s ${window.fmtMonthLabel(month)} pay to the computed values? This clears the override.`}))) return;
+      await db.collection('pay_runs').doc(month).update({ ['overrides.'+uid]: firebase.firestore.FieldValue.delete() });
+      await window.computePayRun(month);
+      window.logAudit && window.logAudit('payroll-override-reset','pay_run',month,{ uid });
+      closeModal();
+      Notifs.success('Override cleared — run recomputed.');
+      loadPayRunStrip(month); loadPayrollTable(month); loadUnpaidStrip();
+    }));
+  }
+
   // ── Pay-run workflow: Compute → Verify → Disburse (per month) ──────────
   // Explicit, auditable states wrapping the existing salary computation (which
   // is unchanged). A pay_runs/{YYYY-MM} doc tracks the state + who/when. Compute
@@ -1133,19 +1398,23 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     document.getElementById('pr-verify-btn')?.addEventListener('click', async ()=>{
       const chk = await db.collection('pay_runs').doc(month).get().catch(()=>null);
       if (!chk || !chk.exists || chk.data().state !== 'computed') { Notifs.showToast('Run must be Computed before Verify.','error'); loadPayRunStrip(month); return; }
-      if(!(await confirmDialog({message:`Mark ${month} payroll as VERIFIED? This confirms the computed amounts have been checked.`}))) return;
+      const chkData = chk.data();
+      const overrideCount = (chkData.lines||[]).filter(l=>l.overridden).length;
+      const overrideNote = overrideCount ? ` — includes ${overrideCount} manual override(s)` : '';
+      if(!(await confirmDialog({message:`Mark ${month} payroll as VERIFIED? This confirms the computed amounts have been checked.${overrideNote}`}))) return;
       await db.collection('pay_runs').doc(month).set({ state:'verified', verifiedBy:currentUser.uid, verifiedByName:window.userProfile?.displayName||currentUser.email, verifiedAt:firebase.firestore.FieldValue.serverTimestamp() },{merge:true});
       window.logAudit && window.logAudit('update','pay_run',month,{state:'verified'});
-      Notifs.success('Payroll marked verified.'); loadPayRunStrip(month);
+      Notifs.success('Payroll marked verified.'); loadPayRunStrip(month); loadUnpaidStrip();
     });
     // Disburse — v12 WS20 D6: THE single mutating step (CA deducted, ledger
     // posted, salary_history frozen, employees notified). Terminal afterward.
     document.getElementById('pr-disburse-btn')?.addEventListener('click', async ()=>{
       const chk = await db.collection('pay_runs').doc(month).get().catch(()=>null);
       const data2 = (chk && chk.exists) ? chk.data() : {};
+      const overrideCount2 = (data2.lines||[]).filter(l=>l.overridden).length;
       const bankOpts = await window.BankAccounts.optionsHTML();
       openModal(`Disburse ${month} payroll`, `
-        <p style="font-size:13px;margin-bottom:10px">₱${fmt(data2.totalNet||0)} to ${data2.employeeCount||0} staff. This deducts cash advances, posts the ledger, and notifies employees. <strong>This cannot be undone.</strong></p>
+        <p style="font-size:13px;margin-bottom:10px">₱${fmt(data2.totalNet||0)} to ${data2.employeeCount||0} staff${overrideCount2?` — includes ${overrideCount2} manual override(s)`:''}. This deducts cash advances, posts the ledger, and notifies employees. <strong>This cannot be undone.</strong></p>
         <div class="form-group"><label>Paid from (company account)</label>
           <select id="pr-bankacct" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">${bankOpts}</select></div>
       `, `<button class="btn-danger" id="pr-disburse-go">Disburse</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -1160,7 +1429,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         if (dbtn) { dbtn.disabled = true; dbtn.textContent = 'Disbursing…'; }
         try { await window.disbursePayRun(month, { bankAccount: acct }); Notifs.success('Payroll disbursed!'); }
         catch (err) { Notifs.showToast(err.message || 'Could not disburse payroll.', 'error'); }
-        loadPayRunStrip(month);
+        loadPayRunStrip(month); loadUnpaidStrip();
         loadFinanceContent(currentUser, currentRole, 'Payroll');
       });
     });
@@ -1168,16 +1437,16 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     document.getElementById('pr-reopen-btn')?.addEventListener('click', async ()=>{
       if(!(await confirmDialog({message:`Reopen ${month} payroll for editing? This returns it to Computed — Verify again before Disburse.`}))) return;
       await window.reopenPayRun(month);
-      loadPayRunStrip(month);
+      loadPayRunStrip(month); loadUnpaidStrip();
     });
     // Resume a stuck 'disbursing' run — idempotent re-run of disbursePayRun
     // via the deterministic PAY-{month}-{uid} refs (Part E Phase 11).
     document.getElementById('pr-resume-btn')?.addEventListener('click', async ()=>{
-      if(!(await confirmDialog({message:`Resume disbursing ${month} payroll? This safely re-runs the disburse step — already-posted rows are updated in place, not duplicated.`}))) return;
+      if(!(await confirmDialog({message:`Resume disbursing ${month} payroll? This safely re-runs the disburse step — already-posted rows are updated in place, not duplicated. Cash-advance deductions already taken for this month are skipped automatically.`}))) return;
       const acct = await window.BankAccounts.pick(null).catch(()=>({ bankAccountId:null, bankAccountName:null }));
       try { await window.disbursePayRun(month, { bankAccount: acct }); Notifs.success('Payroll disbursed!'); }
       catch (err) { Notifs.showToast(err.message || 'Could not resume disbursement.', 'error'); }
-      loadPayRunStrip(month);
+      loadPayRunStrip(month); loadUnpaidStrip();
       loadFinanceContent(currentUser, currentRole, 'Payroll');
     });
     // Manual unlock of a stuck 'disbursing' run — president-only, routes
@@ -1185,12 +1454,13 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     document.getElementById('pr-unlock-btn')?.addEventListener('click', async ()=>{
       if(!(await confirmDialog({message:`Unlock ${month} payroll? Only do this after confirming the disburse step actually failed/stalled — this returns the run to Computed.`, danger:true}))) return;
       await window.reopenPayRun(month);
-      loadPayRunStrip(month);
+      loadPayRunStrip(month); loadUnpaidStrip();
     });
   }
 
   loadPayrollTable(thisMonth);
   loadPayRunStrip(thisMonth);
+  loadUnpaidStrip();
   document.getElementById('pr-month-sel').addEventListener('change', e => { loadPayrollTable(e.target.value); loadPayRunStrip(e.target.value); });
   document.getElementById('raise-history-btn')?.addEventListener('click', () => openRaiseHistory());
   document.getElementById('payroll-recon-btn')?.addEventListener('click', () => openPayrollReconciliation());

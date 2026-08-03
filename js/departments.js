@@ -1560,6 +1560,22 @@ window.RaiseFlow = (function () {
 // calls it — no behavior change.
 
 window.computePayRun = async function(month, { policy } = {}) {
+  // Payroll recall spec §C3 — read any existing run doc FIRST, before any
+  // other work. Two jobs: (1) fail fast if this month is past the editable
+  // window (verified/disbursing/disbursed) — the UI already pre-checks this
+  // (hr.js's Compute handler), but the engine itself must refuse a direct
+  // call too; (2) carry forward this month's saved per-line overrides and
+  // previously chosen pay policy so BOTH survive every recompute (a
+  // recompute replaces lines[] wholesale, but overrides/payPolicy must not
+  // silently reset).
+  const prevSnap = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+  const prev = (prevSnap && prevSnap.exists) ? prevSnap.data() : {};
+  if (prev.state === 'verified' || prev.state === 'disbursing' || prev.state === 'disbursed') {
+    throw new Error('Run is ' + prev.state + ' — President must Reopen first.');
+  }
+  const overrides = prev.overrides || {};
+  const runPolicy = policy || prev.payPolicy || 'flat';
+
   const usersSnap = await fetchUsersWithPayroll();
   const isExternalPartner = (u) => {
     if (u.role === 'partner') return true;
@@ -1593,20 +1609,19 @@ window.computePayRun = async function(month, { policy } = {}) {
   ]);
   const allTasks = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
   const kpiTargetsMap = Object.fromEntries(kpiTargetsSnap.docs.map(d=>[d.id, d.data()]));
-  const DONE_ST = ['done','approved','archived'];
-  const runPolicy = policy || 'flat';
 
   const lines = await Promise.all(employees.map(async (emp) => {
     const userTasks = allTasks.filter(t => Array.isArray(t.assignedTo) ? t.assignedTo.includes(emp.id) : t.assignedTo === emp.id);
-    // KPI floor fix (v12 WS20 D2): zero assigned tasks ⇒ kpi = 1.0. Path B's old
-    // 0.5 floor punished people for not being assigned work — wrong.
-    let kpiScore = 1;
-    if (userTasks.length) {
-      const taskScore  = Math.min(1, userTasks.filter(t=>DONE_ST.includes(t.status)).length/userTasks.length);
-      const kpiTargetD = kpiTargetsMap[emp.id] || {};
-      const delivScore = typeof kpiTargetD.deliverableScore === 'number' ? Math.min(1, kpiTargetD.deliverableScore/100) : 1;
-      kpiScore = taskScore*0.7 + delivScore*0.3;
-    }
+    // Payroll recall spec §A3.4 — month-scoped KPI. Replaces the old inline
+    // "entire task history as it exists today" scoring (recomputing June in
+    // August used to silently score August's live task state onto June's
+    // pay). kpi_targets.deliverableScore has no history of its own — a
+    // recomputed old month still uses TODAY's deliverable score; use a §C
+    // Adjust override on a specific employee/month if that's materially
+    // wrong for a delayed run.
+    const kpiTargetD = kpiTargetsMap[emp.id] || {};
+    const kpiScore = window.computeKpiForMonth(userTasks, month,
+        kpiTargetD.deliverableScore, window.taskDoneMonth, window.taskCreatedMonth);
     // v14 perf fix: these two reads are independent of each other (neither's
     // input depends on the other's output) — was two SEQUENTIAL awaits per
     // employee (on top of the whole employee list already running
@@ -1615,10 +1630,21 @@ window.computePayRun = async function(month, { policy } = {}) {
     // bigger redesign, flagged separately), but halves this line's own
     // per-employee latency.
     const [attScore, planResult] = await Promise.all([
-      window.getAttendanceScore ? window.getAttendanceScore(emp.id) : Promise.resolve(1),
+      // §A2 — month-scoped attendance (same "recomputing an old month scored
+      // today's attendance" bug, now fixed the same way as KPI above).
+      window.getAttendanceScore ? window.getAttendanceScore(emp.id, month) : Promise.resolve(1),
       window.CashAdvance ? window.CashAdvance.planFor(emp.id, month) : Promise.resolve({ plan: [] })
     ]);
-    const line = window.computePayLine(emp, { month, policy: runPolicy, kpiScore, attScore, caPlan: planResult.plan, caBalance: planResult.caBalance });
+    // §C3 — per-line overrides. Real month-scoped kpiScore/attScore are
+    // always computed above FIRST, regardless of any override — they feed
+    // the override's audit-trail `original` snapshot (hr.js's Adjust modal)
+    // and are exactly what "Reset to computed" restores.
+    const ovr = overrides[emp.id];
+    const empEff = ovr ? { ...emp, allowance: (ovr.allowance ?? emp.allowance), deductions: (ovr.otherDeductions ?? emp.deductions) } : emp;
+    const kpiEff = ovr?.kpiScore ?? kpiScore;
+    const attEff = ovr?.attScore ?? attScore;
+    let line = window.computePayLine(empEff, { month, policy: runPolicy, kpiScore: kpiEff, attScore: attEff, caPlan: planResult.plan, caBalance: planResult.caBalance });
+    if (ovr) line = window.applyPayLineOverride(line, ovr);
     // v12 WS39 — freeze statutory IDs onto the computed line (do NOT touch
     // computePayLine itself, WS20's frozen math). Read live from payroll/{uid}.
     line.tinNum = emp.tinNum || ''; line.ssNum = emp.ssNum || '';
@@ -1718,6 +1744,12 @@ window.disbursePayRun = async function(month, opts = {}) {
       // doc (payslip reprint) still carries the TIN/SSS/PhilHealth/Pag-IBIG that
       // were on file at disburse time.
       tinNum: line.tinNum || '', ssNum: line.ssNum || '', phNum: line.phNum || '', pagibigNum: line.pagibigNum || '',
+      // Payroll recall spec §C5 — flag an overridden line on the
+      // employee-visible payslip record. Every downstream figure (this
+      // mirror, the PAY- ledger debit, netCashAgg below) already reads
+      // line.finalPay/effectiveGross/etc., which §C3/§C2 already shifted
+      // coherently — this is purely an additive audit flag, no money-math change.
+      ...(line.overridden ? { overridden: true, overrideNote: line.overrideMeta?.note || '' } : {}),
       recordedBy: currentUser?.uid, recordedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge:true });
   }

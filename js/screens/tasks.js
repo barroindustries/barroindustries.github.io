@@ -659,7 +659,15 @@ async function openTaskDetail(taskId, currentUser, currentRole) {
     if (newStatus===t.status) { Notifs.showToast('Status unchanged','error'); return; }
     const uSnap=await db.collection('users').doc(currentUser.uid).get();
     const actorName=uSnap.exists?uSnap.data().displayName:currentUser.email;
-    await db.collection('tasks').doc(taskId).update({status:newStatus,lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()});
+    const _statusUpd={status:newStatus,lastModifiedBy:currentUser.uid,lastModifiedByName:actorName,lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()};
+    // Payroll recall spec §A3.1 — stamp/clear completedAt so month-scoped KPI
+    // (window.computeKpiForMonth via taskDoneMonth) can resolve which calendar
+    // month this task actually finished in, instead of only "however its
+    // status stands today" (the bug that made recomputing an old payroll
+    // month silently score TODAY's task state).
+    if (DONE_STATUSES.includes(newStatus)) _statusUpd.completedAt=firebase.firestore.FieldValue.serverTimestamp();
+    else if (DONE_STATUSES.includes(t.status)) _statusUpd.completedAt=firebase.firestore.FieldValue.delete();
+    await db.collection('tasks').doc(taskId).update(_statusUpd);
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     await notifyTaskInvolved(t,{title:'📋 Task Status Updated',body:`"${t.title}" → ${statusLabel(newStatus)} (${actorName})`,icon:'📋',type:'task_status',taskId},currentUser.uid);
     Notifs.success(`Status → ${statusLabel(newStatus)}`);
@@ -890,6 +898,11 @@ async function openEditTaskModal(taskId, t, currentUser, currentRole) {
       lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp()
     };
     if (isAdmin){update.assignedTo=curAssignees.map(a=>a.uid);update.assignedToNames=curAssignees.map(a=>a.name);}
+    // Payroll recall spec §A3.1 — same completedAt stamp/clear rule as the
+    // status-select handler above; this edit path can also move a task
+    // across the DONE_STATUSES boundary via the Status dropdown.
+    if (DONE_STATUSES.includes(update.status)) update.completedAt=firebase.firestore.FieldValue.serverTimestamp();
+    else if (DONE_STATUSES.includes(t.status)) update.completedAt=firebase.firestore.FieldValue.delete();
     await db.collection('tasks').doc(taskId).update(update);
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
     const updatedTask={...t,assignedTo:update.assignedTo||t.assignedTo};

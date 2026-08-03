@@ -49,7 +49,7 @@ window.bizYear = () => 2026;
 
 const statutory = require('../js/statutory-tables.js');
 const money = require('../js/money-core.js');
-const { vatSplit, computePayLine, computeBreakeven } = money;
+const { vatSplit, computePayLine, computeBreakeven, monthBounds, computeKpiForMonth, applyPayLineOverride } = money;
 const { computeStatutory } = statutory;
 
 // window.ledgerKind lives in js/config.js (the ONE place P&L income/expense
@@ -755,5 +755,187 @@ describe('finance-ledger.js pure helpers (sanitize/_mapEntry/_rollupDelta)', () 
     const row = { date: '2026-08-01', type: 'credit', category: 'Sales Revenue', amount: 1120, vatAmount: 120 };
     const d = _rollupDelta(row);
     assert.equal(d.vatOutput, computeVatSummary([row]).outputVat);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// Payroll recall spec (2026-08-04) — month-scoped inputs + editable overrides.
+// §A1 monthBounds, §A3.3 computeKpiForMonth, §C2 applyPayLineOverride, plus a
+// dedicated computePayLine describe for §A4 (statutory year keyed off
+// ctx.month instead of always "whatever year it is right now").
+// ═══════════════════════════════════════════════════════════
+describe('computePayLine — §A4 statutory year from ctx.month (the only permitted edit to this frozen function)', () => {
+  it('same-year run (ctx.month in 2026): output is byte-identical to the existing pinned same-input expectation — regression guard', () => {
+    const line = computePayLine(
+      { id: 'u1', displayName: 'Juan', salary: 20000, allowance: 2000, deductions: 500 },
+      { policy: 'flat', month: '2026-06' }
+    );
+    assert.deepEqual(line, {
+      uid: 'u1', name: 'Juan', payClass: 'regular',
+      base: 20000, allowance: 2000, otherDeductions: 500,
+      sss: 1100, philhealth: 550, pagibig: 200, tax: 0,
+      er: { sss: 2200, philhealth: 550, pagibig: 200 },
+      kpiScore: 1, attScore: 1, perfFactor: 1, policy: 'flat',
+      caBalance: 0, caPlanned: 0, caPlan: [],
+      gross: 22000, effectiveGross: 22000, statutoryTotal: 1850,
+      netBeforeCA: 19650, finalPay: 19650,
+    });
+  });
+
+  it('ctx.month absent: falls back to window.bizYear() exactly as before (the pinned 2026 stub) — every existing call site that omits month is unaffected', () => {
+    const line = computePayLine(
+      { id: 'u1', displayName: 'Juan', salary: 20000, allowance: 2000, deductions: 500 },
+      { policy: 'flat' } // no month at all
+    );
+    assert.equal(line.statutoryTotal, 1850); // identical to the ctx.month:'2026-06' case above
+    assert.equal(line.finalPay, 19650);
+  });
+
+  it('cross-year run (ctx.month in 2025, a year with no STATUTORY table entry): statutory zeros out via the missing-year path, NOT 2026 brackets', () => {
+    const line = computePayLine(
+      { id: 'u1td', displayName: 'TestDec', salary: 20000, allowance: 2000, deductions: 500 },
+      { policy: 'flat', month: '2025-12' }
+    );
+    assert.deepEqual(line, {
+      uid: 'u1td', name: 'TestDec', payClass: 'regular',
+      base: 20000, allowance: 2000, otherDeductions: 500,
+      sss: 0, philhealth: 0, pagibig: 0, tax: 0,
+      er: { sss: 0, philhealth: 0, pagibig: 0 },
+      kpiScore: 1, attScore: 1, perfFactor: 1, policy: 'flat',
+      caBalance: 0, caPlanned: 0, caPlan: [],
+      gross: 22000, effectiveGross: 22000, statutoryTotal: 0,
+      netBeforeCA: 21500, finalPay: 21500,
+    });
+  });
+});
+
+describe('monthBounds — js/money-core.js §A1 (pure string/integer date math, no Date object)', () => {
+  it('past month: endDate is the last calendar day, upToDay is the full month', () => {
+    assert.deepEqual(monthBounds('2026-06', '2026-08-04'), {
+      startDate: '2026-06-01', endDate: '2026-06-30', upToDay: 30, daysInMonth: 30,
+      isCurrent: false, isFuture: false,
+    });
+  });
+
+  it('current month: endDate is today, upToDay is today\'s day-of-month', () => {
+    assert.deepEqual(monthBounds('2026-08', '2026-08-04'), {
+      startDate: '2026-08-01', endDate: '2026-08-04', upToDay: 4, daysInMonth: 31,
+      isCurrent: true, isFuture: false,
+    });
+  });
+
+  it('future month: isFuture true, upToDay 0 — callers must treat this as "no data"', () => {
+    const b = monthBounds('2026-09', '2026-08-04');
+    assert.equal(b.isFuture, true);
+    assert.equal(b.upToDay, 0);
+  });
+
+  it('leap year February (2028, divisible by 4, not by 100): daysInMonth 29', () => {
+    assert.equal(monthBounds('2028-02', '2028-03-01').daysInMonth, 29);
+  });
+
+  it('non-leap year February (2027): daysInMonth 28', () => {
+    assert.equal(monthBounds('2027-02', '2027-03-01').daysInMonth, 28);
+  });
+
+  it('century-year exception (2100, divisible by 100 but NOT by 400): daysInMonth 28, not 29', () => {
+    assert.equal(monthBounds('2100-02', '2100-03-01').daysInMonth, 28);
+  });
+});
+
+describe('computeKpiForMonth — js/money-core.js §A3.3 (month-scoped KPI, pure — resolver stubs read plain _dm/_cm fields)', () => {
+  const resolveDone    = t => t._dm; // null | '' | 'YYYY-MM'
+  const resolveCreated = t => t._cm; // '' | 'YYYY-MM'
+
+  it('zero in-scope tasks (empty list, or every task created after M) ⇒ KPI floor of 1 — no assigned/in-scope work ≠ bad KPI', () => {
+    assert.equal(computeKpiForMonth([], '2026-06', undefined, resolveDone, resolveCreated), 1);
+    assert.equal(computeKpiForMonth([{ _dm: null, _cm: '2026-07' }], '2026-06', undefined, resolveDone, resolveCreated), 1);
+  });
+
+  it('scope matrix: done-in-M, done-after-M, done-before-M, open (never done), created-after-M', () => {
+    const tasks = [
+      { _dm: '2026-06', _cm: '2026-01' }, // done IN M -> numerator + denominator
+      { _dm: '2026-07', _cm: '2026-01' }, // done AFTER M -> denominator only (was open/unfinished during M)
+      { _dm: '2026-05', _cm: '2026-01' }, // done BEFORE M -> out of scope entirely
+      { _dm: null,      _cm: '2026-01' }, // never done, existed during M -> denominator only
+      { _dm: null,      _cm: '2026-07' }, // created AFTER M -> out of scope entirely (didn't exist yet)
+    ];
+    // in-scope = the 3 non-"out" tasks; doneInM = 1 -> taskScore = 1/3
+    // deliv defaults to 1 (no deliverableScore) -> (1/3)*0.7 + 1*0.3
+    assert.equal(computeKpiForMonth(tasks, '2026-06', undefined, resolveDone, resolveCreated), (1/3)*0.7 + 1*0.3);
+  });
+
+  it('done-but-undatable (_dm==="") counts as done-in-scope ONLY when created at-or-before M — never punishes a later month for an old finished task', () => {
+    // cm <= M -> counts as done-in-scope -> sole in-scope task, all done -> KPI 1
+    assert.equal(computeKpiForMonth([{ _dm: '', _cm: '2026-01' }], '2026-06', undefined, resolveDone, resolveCreated), 1);
+    // cm > M -> "didn't exist yet" wins even over the undatable-done rule -> out of scope entirely -> floor of 1 (zero in-scope)
+    assert.equal(computeKpiForMonth([{ _dm: '', _cm: '2026-07' }], '2026-06', undefined, resolveDone, resolveCreated), 1);
+  });
+
+  it('deliverableScore present + exact 0.7/0.3 weighting pinned on a 2-of-3 case', () => {
+    const tasks = [
+      { _dm: '2026-06', _cm: '2026-01' },
+      { _dm: '2026-06', _cm: '2026-01' },
+      { _dm: null,      _cm: '2026-01' },
+    ];
+    // inScope=3, doneInM=2 -> taskScore=2/3; deliverableScore=80 -> deliv=0.8
+    assert.equal(computeKpiForMonth(tasks, '2026-06', 80, resolveDone, resolveCreated), (2/3)*0.7 + 0.8*0.3);
+  });
+});
+
+describe('applyPayLineOverride — js/money-core.js §C2 (output override, layered on top of a computePayLine result)', () => {
+  // Reuses the pinned 'performance' policy line (nonzero caPlanned:1500,
+  // otherDeductions:0) from the computePayLine describe above so the netCash
+  // identity check below is grounded in a real frozen line, not a fixture.
+  const baseLine = computePayLine(
+    { id: 'u2', displayName: 'Maria', salary: 30000, allowance: 5000, deductions: 0 },
+    { policy: 'performance', kpiScore: 0.8, attScore: 0.9, caPlan: [{ amount: 1000 }, { amount: 500 }], caBalance: 2500 }
+  );
+
+  function assertIdentitiesHold(line) {
+    // (b) the netCash identity: effectiveGross - statutoryTotal - caPlanned === finalPay + otherDeductions
+    assert.equal(
+      +(line.effectiveGross - line.statutoryTotal - line.caPlanned).toFixed(2),
+      +(line.finalPay + line.otherDeductions).toFixed(2)
+    );
+    // (c) effectiveGross === netBeforeCA + statutoryTotal + otherDeductions
+    assert.equal(
+      +line.effectiveGross.toFixed(2),
+      +(line.netBeforeCA + line.statutoryTotal + line.otherDeductions).toFixed(2)
+    );
+  }
+
+  it('override finalPay UPWARD: finalPay equals the override, both money identities still hold, input line untouched', () => {
+    const out = applyPayLineOverride(baseLine, { finalPay: 30000, note: 'raise', setBy: 'p1', setByName: 'Pres', setAt: 1700000000000, original: { a: 1 } });
+    assert.equal(out.finalPay, 30000);
+    assert.equal(out.netBeforeCA, 31500);
+    assert.equal(out.effectiveGross, 36026.3);
+    assertIdentitiesHold(out);
+    assert.equal(baseLine.finalPay, 28123.7); // (d) input line never mutated
+  });
+
+  it('override finalPay DOWNWARD: same identities hold, input line still untouched', () => {
+    const out = applyPayLineOverride(baseLine, { finalPay: 20000, note: 'cut', setBy: 'p1', setByName: 'Pres', setAt: 1700000000000, original: { a: 1 } });
+    assert.equal(out.finalPay, 20000);
+    assert.equal(out.netBeforeCA, 21500);
+    assert.equal(out.effectiveGross, 26026.3);
+    assertIdentitiesHold(out);
+    assert.equal(baseLine.finalPay, 28123.7);
+  });
+
+  it('no OverrideEntry passed at all: plain copy, values unchanged, and NO overridden/overrideMeta fields added', () => {
+    const out = applyPayLineOverride(baseLine, undefined);
+    assert.equal(out.finalPay, baseLine.finalPay);
+    assert.equal('overridden' in out, false);
+    assert.equal('overrideMeta' in out, false);
+    assert.notEqual(out, baseLine); // still a new object, never the same reference
+  });
+
+  it('an OverrideEntry with no numeric override fields (just a note): overridden:true + overrideMeta present, but no values change', () => {
+    const out = applyPayLineOverride(baseLine, { note: 'just a note' });
+    assert.equal(out.overridden, true);
+    assert.deepEqual(out.overrideMeta.fields, []);
+    assert.equal(out.finalPay, baseLine.finalPay);
+    assert.equal(out.effectiveGross, baseLine.effectiveGross);
   });
 });

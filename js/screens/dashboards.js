@@ -2668,18 +2668,30 @@ function _attRecScore(r) {
   return window.attRecScore(r);
 }
 
-async function getAttendanceScore(uid) {
+// getAttendanceScore(uid, month?) — payroll recall spec §A2. `month` is an
+// optional 'YYYY-MM'; every pre-existing caller passes only `uid` (this file
+// at :1375/:2015/:2165/:2709/:2872, js/screens/people.js:2557) and gets
+// BYTE-IDENTICAL current-month behavior via the `month || todayStr.slice(0,7)`
+// fallback below — this is the backward-compat contract the spec requires.
+// The new second arg lets computePayRun (departments.js) score a DELAYED
+// month's actual attendance instead of always scoring "today-to-date",
+// fixing the bug where recomputing June in August scored August's
+// attendance-to-date onto June's payroll.
+async function getAttendanceScore(uid, month) {
   try {
     const todayStr = bizDate();                            // YYYY-MM-DD Manila
-    const y = parseInt(todayStr.slice(0,4),10);
-    const m = parseInt(todayStr.slice(5,7),10) - 1;
-    const d = parseInt(todayStr.slice(8,10),10);
-    const monthStart = `${todayStr.slice(0,7)}-01`;
-    // Denominator = workdays elapsed this month (Mon–Sat, holidays excluded)
-    const workDaysElapsed = countWorkDays(y, m, d);
+    const m = month || todayStr.slice(0,7);
+    const b = window.monthBounds(m, todayStr);
+    if (b.isFuture) return 1; // no month has happened yet — neutral, matches computePayRun's "no data" philosophy
+    const y    = parseInt(m.slice(0,4),10);
+    const mIdx = parseInt(m.slice(5,7),10) - 1;
+    // Denominator = workdays in-scope for this month (Mon–Sat, holidays
+    // excluded) up through b.upToDay — the full month for a past month, or
+    // elapsed-to-today for the current month (countWorkDays itself unchanged).
+    const workDaysElapsed = countWorkDays(y, mIdx, b.upToDay);
     const snap = await db.collection('attendance').doc(uid).collection('records')
-      .where(firebase.firestore.FieldPath.documentId(), '>=', monthStart)
-      .where(firebase.firestore.FieldPath.documentId(), '<=', todayStr).get();
+      .where(firebase.firestore.FieldPath.documentId(), '>=', b.startDate)
+      .where(firebase.firestore.FieldPath.documentId(), '<=', b.endDate).get();
     const totalScore = snap.docs.reduce((sum, doc) => sum + _attRecScore(doc.data()), 0);
     return Math.min(1, totalScore / workDaysElapsed);
   } catch { return 0.5; }

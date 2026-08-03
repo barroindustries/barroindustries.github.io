@@ -493,7 +493,10 @@ window.renderApprovals = async function(currentUser) {
         btn.addEventListener('click', () => openTaskDetail(btn.dataset.id, currentUser, currentRole));
       });
       wrap.querySelectorAll('.rt-approve-btn').forEach(btn => onClickSafe(btn, async () => {
-          await db.collection('tasks').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          // Payroll recall spec §A3.1 — completedAt alongside approvedAt so
+          // month-scoped KPI (computeKpiForMonth via taskDoneMonth) can
+          // resolve which month this task was actually approved/finished in.
+          await db.collection('tasks').doc(btn.dataset.id).update({ status:'approved', approvedBy:currentUser.uid, approvedAt:firebase.firestore.FieldValue.serverTimestamp(), completedAt:firebase.firestore.FieldValue.serverTimestamp(), lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
           const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
           if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'✅ Task Approved',body:`"${btn.dataset.name}" has been approved!`,icon:'✅',type:'task_status'},currentUser.uid));}
@@ -501,7 +504,11 @@ window.renderApprovals = async function(currentUser) {
           loadApprovalsSub('all');
       }));
       wrap.querySelectorAll('.rt-reject-btn').forEach(btn => onClickSafe(btn, async () => {
-          await db.collection('tasks').doc(btn.dataset.id).update({ status:'in-progress', lastModifiedBy:currentUser.uid, lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
+          // Payroll recall spec §A3.1 — clear completedAt on send-back (this
+          // review queue only ever acts on 'review'-status tasks, so this is
+          // normally a no-op delete of an absent field; kept for safety if a
+          // task somehow reaches here already carrying one).
+          await db.collection('tasks').doc(btn.dataset.id).update({ status:'in-progress', completedAt:firebase.firestore.FieldValue.delete(), lastModifiedBy:currentUser.uid, lastModifiedAt:firebase.firestore.FieldValue.serverTimestamp() });
           if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
           const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
           if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'🔁 Task Sent Back',body:`"${btn.dataset.name}" was sent back for revision.`,icon:'🔁',type:'task_status'},currentUser.uid));}
@@ -962,7 +969,9 @@ window.renderApprovals = async function(currentUser) {
       // assignee hears back depended on which Approvals tab was used. Now matches.
       wrap.querySelectorAll('.rt-approve-btn').forEach(btn=>btn.addEventListener('click',async()=>{
         if (!(await confirmDialog({message:`Approve "${escHtml(btn.dataset.name)}"?`, html:true}))) return;
-        await db.collection('tasks').doc(btn.dataset.id).update({status:'approved',approvedAt:firebase.firestore.FieldValue.serverTimestamp(),approvedBy:currentUser.uid});
+        // Payroll recall spec §A3.1 — completedAt alongside approvedAt (see
+        // the aggregated "All Requests" .rt-approve-btn handler above).
+        await db.collection('tasks').doc(btn.dataset.id).update({status:'approved',approvedAt:firebase.firestore.FieldValue.serverTimestamp(),completedAt:firebase.firestore.FieldValue.serverTimestamp(),approvedBy:currentUser.uid});
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
         const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
         if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'✅ Task Approved',body:`"${btn.dataset.name}" has been approved!`,icon:'✅',type:'task_status'},currentUser.uid));}
@@ -971,7 +980,9 @@ window.renderApprovals = async function(currentUser) {
       }));
       wrap.querySelectorAll('.rt-reject-btn').forEach(btn=>btn.addEventListener('click',async()=>{
         if (!(await confirmDialog({message:`Send "${escHtml(btn.dataset.name)}" back for revision?`, html:true}))) return;
-        await db.collection('tasks').doc(btn.dataset.id).update({status:'in-progress',sentBackAt:firebase.firestore.FieldValue.serverTimestamp(),sentBackBy:currentUser.uid});
+        // Payroll recall spec §A3.1 — clear completedAt on send-back (see
+        // the aggregated "All Requests" .rt-reject-btn handler above).
+        await db.collection('tasks').doc(btn.dataset.id).update({status:'in-progress',sentBackAt:firebase.firestore.FieldValue.serverTimestamp(),completedAt:firebase.firestore.FieldValue.delete(),sentBackBy:currentUser.uid});
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('tasks-all');
         const snap2=await db.collection('tasks').doc(btn.dataset.id).get();
         if(snap2.exists){const t2=normTask(snap2.data(),snap2.id);await safeNotify(() => notifyTaskInvolved(t2,{title:'🔁 Task Sent Back',body:`"${btn.dataset.name}" was sent back for revision.`,icon:'🔁',type:'task_status'},currentUser.uid));}
