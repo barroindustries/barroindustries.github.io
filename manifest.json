@@ -1,7 +1,7 @@
 {
   "name": "Barro Industries Operating System",
   "short_name": "Barro Ops",
-  "description": "Barro Industries Operating System — the company's central system",
+  "description": "Barro Industries Operating System \u2014 the company's central system",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#F7F8FA",
@@ -19,6 +19,18 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "shortcuts": [
@@ -26,22 +38,43 @@
       "name": "Tasks",
       "short_name": "Tasks",
       "url": "/#/tasks",
-      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     },
     {
       "name": "Chat",
       "short_name": "Chat",
       "url": "/#/chat",
-      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     },
     {
       "name": "New Quote",
       "short_name": "New Quote",
       "url": "/#/bs-quote-builder",
-      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     }
   ],
-  "categories": ["business", "productivity"],
+  "categories": [
+    "business",
+    "productivity"
+  ],
   "lang": "en",
   "scope": "/"
 }
