@@ -1813,7 +1813,10 @@ window.newRevisionFromDoc = async function(collection, id, navTarget){
     } catch(_) {}
 
     const revOf = q => {
-      const m = String(q.quoteNumber || q.editableState?.quoteNo || '').match(/-R(\d+)\s*$/i);
+      // v14 fix — the number format is dash-free before R (…013R1, owner ruling),
+      // so a dash-REQUIRED regex never matched a real filed number and revision
+      // sort silently fell back to createdAt order (wrong 'latest'). Dash optional.
+      const m = String(q.quoteNumber || q.editableState?.quoteNo || '').match(/-?R(\d+)\s*$/i);
       return m ? parseInt(m[1], 10) : 1;
     };
     // Latest = highest revision number, tie-broken by most recent filing time.

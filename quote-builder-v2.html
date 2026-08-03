@@ -2176,13 +2176,23 @@ function syncDateIntoQuoteNo(){
   if(m){ qEl.value=`${m[1]}-${dt}-${m[3]}${m[4]||''}`; }
 }
 
-// Bump the -Rn revision suffix (R1→R2…). Numbers without a suffix are treated
-// as the original (implicitly R1) so the first revision becomes -R2.
+// Bump the Rn revision suffix (R1→R2…). Numbers without a suffix are treated
+// as the original (implicitly R1) so the first revision becomes R2.
+// BUG FIX (beta sweep #2): match() below used to require a dash before R
+// ("-R1"), but the v14 compact quote-number format built by buildQuoteNo()
+// (`${seq}R${rev}`, see its comment above) never writes that dash — a real
+// filed number ends in e.g. "...013R1", not "...013-R1". So match() always
+// failed on a real quote number, the `if(m)` guard fell through to the
+// "no existing suffix" fallback, and bumpRevisionNo appended a BRAND-NEW
+// "-R2" onto the already-R1-suffixed string instead of incrementing it —
+// producing doubled numbers like "BKLUFB260803-013R1-R2". match() now
+// accepts the dash as optional, same as replace() below already did, and the
+// fallback no longer introduces a dash the rest of the number never uses.
 function bumpRevisionNo(no){
   if(!no) return no;
-  const m=String(no).match(/-R(\d+)\s*$/i);
+  const m=String(no).match(/-?R(\d+)\s*$/i);
   if(m) return no.replace(/-?R\d+\s*$/i, 'R'+(parseInt(m[1],10)+1));
-  return no+'-R2';
+  return no+'R2';
 }
 
 // Auto customer# (Nth distinct customer today) + revision# (existing quotes for
@@ -2523,18 +2533,49 @@ function onMeasureUnitChange(){
   recomputePrice();
 }
 
+// BUG FIX (beta sweep #1): the calc panel's Width(D)/Height(H) inputs for
+// per_length products were dead — computePrice() below only ever read
+// dimsMm.W (the Length field), so typing a custom Width/Height changed the
+// on-screen dims string but never the price, undercharging any custom-sized
+// item priced above its product's default D/H. Product data carries
+// formula.rateD100 / formula.rateH100 (peso per 100mm over the product's own
+// defaultDimensions.D / .H) for exactly this; computePrice() now wires them
+// in. A rate of 0 is a legitimate "this dimension doesn't affect price" data
+// point (many products define it that way); a MISSING rate for a dimension
+// the user actually changed is surfaced via calcPriceWarning (read by
+// recomputePrice()) instead of being silently treated as free.
+let calcPriceWarning='';
+
 function computePrice(p){
   if(!p) return 0;
   let price = p.basePrice||0;
   const consts = DB.constants||{};
   const matMult = consts.materialPriceIndexMultiplier||1.0;
+  calcPriceWarning='';
 
   if(p.formulaType==='per_length' && p.formula){
-    const W = dimsMm.W ?? p.defaultDimensions.W ?? 900;
+    const dd = p.defaultDimensions||{};
+    const W = dimsMm.W ?? dd.W ?? 900;
     const base = p.formula.baseLengthMm||900;
     const ppm = p.formula.pricePerExtraMm||0;
     const extra = Math.max(0, W-base);
     price = p.basePrice + extra*ppm;
+
+    // Width (D) / Height (H) surcharge — only when the user actually moved
+    // the dimension above the product's own default (mirrors the Length
+    // Math.max(0, W-base) behavior: shrinking below default never discounts).
+    const missingRates=[];
+    [['D','Width'],['H','Height']].forEach(([dim,label])=>{
+      if(!(dim in dimsMm)) return;              // no such input for this product
+      const val=dimsMm[dim], defVal=dd[dim];
+      if(defVal==null || val<=defVal) return;   // unchanged or shrunk — no surcharge
+      const rate=p.formula['rate'+dim+'100'];
+      if(rate==null){ missingRates.push(label); return; }
+      price += ((val-defVal)/100)*rate;
+    });
+    if(missingRates.length){
+      calcPriceWarning=`No rate on file for custom ${missingRates.join(' / ')} — priced at default size for ${missingRates.join('/')}.`;
+    }
   } else if(p.formulaType==='per_area' && p.formula){
     const W = dimsMm.W ?? p.defaultDimensions.W ?? 1000;
     const H = dimsMm.H ?? p.defaultDimensions.H ?? 1000;
@@ -2583,7 +2624,11 @@ function recomputePrice(){
     const runs=runsVal||1;
     hint=`${runs} run(s) × ₱${(p.formula.pricePerRun||p.basePrice).toLocaleString()} per run`;
   }
-  document.getElementById('calcHint').textContent=hint;
+  // calcPriceWarning is set by computePrice() above when the user customized
+  // a per_length Width/Height beyond the product's default but the product
+  // data has no rateD100/rateH100 to price it with — surface it here rather
+  // than letting the change silently price as if it were free.
+  document.getElementById('calcHint').textContent=hint+(calcPriceWarning?'  ⚠ '+calcPriceWarning:'');
 }
 
 function dismissCalc(){
