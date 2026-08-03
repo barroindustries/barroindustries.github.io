@@ -1297,6 +1297,19 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 /* Lock scroll on body when sidebar is open on mobile */
 body.sidebar-open { overflow: hidden; }
 body.sidebar-open .main-content { pointer-events: none; user-select: none; }
+/* v14 owner report ("looks bad" — drawer had NO scrim, so the page behind
+   stayed fully lit and read as two side-by-side panels). A real dimming
+   backdrop sits between the content and the open drawer (z just under
+   --z-shell-open 96) so the drawer clearly floats over a receded page. */
+body.sidebar-open::after {
+  content: ''; position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.48);
+  z-index: 95;
+  pointer-events: auto;
+  animation: scrimFade 0.22s ease both;
+}
+@keyframes scrimFade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { body.sidebar-open::after { animation: none; } }
 /* Hide top nav strip when sidebar is open — sidebar is the nav */
 body.sidebar-open .top-nav-strip { display: none !important; }
 /* Sidebar covers only the left column — hide the bottom nav so it doesn't peek
