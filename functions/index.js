@@ -333,6 +333,95 @@ exports.adminResetPassword = functions.https.onCall(async (data, context) => {
   return { ok: true };
 });
 
+/**
+ * setUserDisabled — AUTHORITATIVE offboarding / reinstatement.
+ *
+ * The client "removed" gate (js/app.js showRemovedUserScreen) only flips a
+ * Firestore flag. But a removed user's EXISTING session keeps a valid ID token
+ * (auth persistence is LOCAL / 10-day), so they could bypass the client screen
+ * by hitting Firestore directly or disabling the page JS — for up to 10 days.
+ * The only authoritative lock is DISABLING the Firebase Auth account (blocks
+ * token refresh + re-login) plus revoking refresh tokens (kills any live
+ * session within ~1h). This callable performs BOTH the auth disable/enable AND
+ * the users/{uid} flag write in one server-side admin-SDK action, so offboarding
+ * can never land half-applied (flag set but account still usable, or vice-versa).
+ */
+exports.setUserDisabled = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'You must be signed in.');
+  }
+  // Caller role verified server-side (never trusted from the client).
+  const callerSnap = await admin.firestore().collection('users').doc(context.auth.uid).get();
+  const callerRole = callerSnap.exists ? callerSnap.data().role : null;
+  if (!['president', 'manager'].includes(callerRole)) {
+    throw new functions.https.HttpsError('permission-denied', 'Not authorized to offboard accounts.');
+  }
+
+  const targetUid = (data && typeof data.targetUid === 'string') ? data.targetUid.trim() : '';
+  const disabled  = !!(data && data.disabled);
+  if (!targetUid) {
+    throw new functions.https.HttpsError('invalid-argument', 'targetUid is required.');
+  }
+  if (targetUid === context.auth.uid) {
+    throw new functions.https.HttpsError('failed-precondition', 'You cannot offboard your own account.');
+  }
+
+  const targetSnap = await admin.firestore().collection('users').doc(targetUid).get();
+  if (!targetSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'User not found.');
+  }
+  const targetRole = targetSnap.data().role;
+  // The President account can never be locked out.
+  if (targetRole === 'president') {
+    throw new functions.https.HttpsError('permission-denied', 'The President account cannot be offboarded.');
+  }
+  // A manager can offboard regular employees but NOT lateral admin/finance
+  // peers — only the President may offboard an admin/finance-tier account.
+  if (callerRole !== 'president' && ['manager', 'secretary', 'finance'].includes(targetRole)) {
+    throw new functions.https.HttpsError('permission-denied', 'Only the President can offboard admin/finance-tier accounts.');
+  }
+
+  // 1. Authoritative auth lock (idempotent). Tolerate a user doc with no
+  //    matching Auth account (placeholder/imported record) — the Firestore
+  //    flag below is still the app-visible gate.
+  let authNote = null;
+  try {
+    await admin.auth().updateUser(targetUid, { disabled });
+    if (disabled) await admin.auth().revokeRefreshTokens(targetUid);
+  } catch (e) {
+    if (e && e.code === 'auth/user-not-found') {
+      authNote = 'no-auth-account';
+    } else {
+      throw new functions.https.HttpsError('internal', 'Could not update the auth account: ' + (e.message || e.code));
+    }
+  }
+
+  // 2. App-visible flag (admin SDK — bypasses rules), so the client gate and
+  //    Firestore rules see the same state the auth lock enforces.
+  const flag = disabled
+    ? { removed: true,  removedAt: admin.firestore.FieldValue.serverTimestamp(), removedBy: context.auth.uid }
+    : { removed: false, reinstatedAt: admin.firestore.FieldValue.serverTimestamp(), reinstatedBy: context.auth.uid };
+  await admin.firestore().collection('users').doc(targetUid).set(flag, { merge: true });
+
+  // 3. Audit (best-effort — never undo a completed offboarding over a log write).
+  try {
+    await admin.firestore().collection('audit_log').add({
+      ts: admin.firestore.FieldValue.serverTimestamp(),
+      action: disabled ? 'offboard-user' : 'reinstate-user',
+      entity: 'user',
+      entityId: targetUid,
+      details: { targetRole: targetRole || null, targetEmail: targetSnap.data().email || null, authNote },
+      actorUid: context.auth.uid,
+      actorName: callerSnap.exists ? (callerSnap.data().displayName || callerSnap.data().email || 'unknown') : 'unknown',
+      actorRole: callerRole,
+    });
+  } catch (e) {
+    console.error('[setUserDisabled] audit log write failed:', e.message);
+  }
+
+  return { ok: true, authNote };
+});
+
 // ──────────────────────────────────────────────────────────────────────────
 //  CUSTOM CLAIMS — carry role + departments onto the Firebase Auth token
 //

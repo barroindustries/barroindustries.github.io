@@ -1031,18 +1031,20 @@ function renderTeamCards(users, currentUser) {
       if (!ok) return;
       btn.disabled = true;
       try {
-        await db.collection('users').doc(uid).update(isRemoved ? {
-          removed: false,
-          reinstatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          reinstatedBy: currentUser.uid
-        } : {
-          removed: true,
-          removedAt: firebase.firestore.FieldValue.serverTimestamp(),
-          removedBy: currentUser.uid
+        // Route through the setUserDisabled Cloud Function (admin SDK) rather
+        // than a direct users-doc write: it AUTHORITATIVELY disables/enables the
+        // Firebase Auth account (+ revokes refresh tokens on remove) so a removed
+        // employee's still-valid 10-day session can't bypass the client gate,
+        // AND sets the removed flag server-side in the same action. The old
+        // direct flag write only did the (bypassable) client half.
+        const res = await firebase.functions().httpsCallable('setUserDisabled')({
+          targetUid: uid, disabled: !isRemoved
         });
         if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users');
-        window.logAudit && window.logAudit(isRemoved ? 'reinstate-user' : 'remove-user', 'users', uid, { name });
-        Notifs.success(isRemoved ? `${name} reinstated.` : `${name} removed from the system.`);
+        const noAuth = res && res.data && res.data.authNote === 'no-auth-account';
+        Notifs.success(isRemoved
+          ? `${name} reinstated${noAuth ? '' : ' — they can sign in again'}.`
+          : `${name} removed and signed out${noAuth ? ' (no linked sign-in account)' : ''}.`);
         window.renderTeamTab();
       } catch (err) {
         btn.disabled = false;
