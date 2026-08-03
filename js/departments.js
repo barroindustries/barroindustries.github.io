@@ -2344,8 +2344,13 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
   // v12 WS36 — the quote's payment terms can't ride the dataset bag (nested object);
   // fetch the quote doc directly to prefill the DP%. Best-effort — never blocks the modal.
   let quotePay = null;
+  // v14 sales-pipeline gap fix — carry the quote's line items forward onto the
+  // sales_order AND job_project (below) so Production sees WHAT to build without
+  // dereferencing back to a possibly-stale/re-revised quote doc. Reuses the SAME
+  // quote fetch already done for quotePay — no extra read.
+  let quoteItems = [];
   try { const qs = await db.collection(d.co==='BK'?'bk_quotes':'bs_quotes').doc(d.id).get();
-        if (qs.exists) quotePay = qs.data().payment || null; } catch(_) {}
+        if (qs.exists) { quotePay = qs.data().payment || null; quoteItems = Array.isArray(qs.data().items) ? qs.data().items : []; } } catch(_) {}
   const dpPrefill = quotePay
     ? (quotePay.downPaymentMode === 'custom'
         ? (total > 0 ? +(100*(quotePay.downPayment||0)/total).toFixed(1) : '')
@@ -2365,6 +2370,14 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
     <div class="form-group"><label>Payment Method</label>
       <select id="so-method" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)"><option>Bank Transfer</option><option>GCash</option><option>Cash</option><option>Cheque</option><option>Other</option></select>
     </div>
+    <div class="form-group"><label>VAT treatment (amount received)</label>
+      <select id="so-vat" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+        <option value="inclusive" selected>VAT-inclusive — 12% already in the amount</option>
+        <option value="exclusive">VAT-exclusive — add 12% on top</option>
+        <option value="exempt">VAT-exempt / Zero-rated — no VAT</option>
+      </select>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Only used if this order can be auto-recorded to Finance below (same treatment Finance's own Record Sale uses).</div>
+    </div>
     <div class="form-group"><label>Notes</label><textarea id="so-notes" rows="2" placeholder="Payment ref #, schedule, etc."></textarea></div>
     <div class="form-group"><label>Receipt / Proof of Payment</label><div id="so-receipt-upload"></div></div>
     <div id="so-err" class="error-msg hidden"></div>
@@ -2380,12 +2393,12 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
     const dpPercent = Math.max(0, Math.min(100, parseFloat(document.getElementById('so-dp-pct').value)||0)) || null;
     try{
       // 1) create the master project (the spine that ties the whole job together)
-      const proj = await createJobProject({ ...d, total:contract, dpPercent });
+      const proj = await createJobProject({ ...d, total:contract, dpPercent, items: quoteItems });
       // 2) sales order, linked to the project
       const ref=await db.collection('sales_orders').add({
         projectId:proj.id, quoteId:d.id, quoteNumber:d.qno||'', clientName:d.client||'', company:d.co||'BS',
         clientId: d.clientId || null,
-        project, contractAmount:contract, paymentReceived:paid,
+        project, contractAmount:contract, paymentReceived:paid, items:quoteItems,
         paymentMethod:document.getElementById('so-method').value,
         notes:document.getElementById('so-notes').value.trim(),
         receiptUrl:receipt?.url||null, receiptName:receipt?.name||null,
@@ -2428,12 +2441,65 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
         await db.collection('job_projects').doc(proj.id).update({ trackingToken:tRef.id }).catch(()=>{});
         trackUrl = window.orderTrackUrl(tRef.id);
       }catch(_){ /* tracking is best-effort — never block the order */ }
-      window.logAudit&&window.logAudit('create','sales_order',ref.id,{client:d.client, contract, paid, projectNo:proj.projectNo});
       const who=userProfile?.displayName||currentUser.email;
-      try{ await Notifs.sendToDept('Finance',{ title:'🧾 New Sales Order', body:`${who}: ${d.client} — ₱${window.fmtN2(contract)} (₱${window.fmtN2(paid)} received). Project ${proj.projectNo}. Record income + verify receipt.`, icon:'🧾', type:'sales_order', link:'sales-orders' }); }catch(_){}
+      // 5b) FINANCE AUTO-RECORD — closes the "Finance re-enters it" gap. Post ONLY
+      // what was actually collected (never the full contract — the balance stays
+      // AR on the project; never invented revenue), via the SAME deterministic ref
+      // ('SO-<salesOrderId>') openRecordSaleModal's manual "Record Sale" path
+      // already posts to (see its `ledgerRef` a few functions below) — Ledger's
+      // deterministic-id read-then-write means a re-run can never double-post.
+      // Deliberately gated to callers who already hold Finance/admin rights
+      // (mirrors firestore.rules' canFinance()): the ledger's OWN rules gate both
+      // its read (the service's legacy-ref dedupe guard) and its create to
+      // canFinance()/isAdmin() only, and widening that so every Sales-staff or
+      // partner order-creator could write straight to the books — self-reported
+      // amount, no verification — is exactly the kind of money-safety regression
+      // "be conservative" rules out. So this is pure best-effort: it silently
+      // succeeds when the creator IS Finance/admin (a common real case — a
+      // manager or Finance-dept staffer converting the quote themselves), and
+      // is a no-op (rules deny it) for everyone else, who fall through to the
+      // EXACT unchanged manual "Record Sale" queue that existed before this
+      // change — zero regression risk either way.
+      let autoPosted = false;
+      const canAutoPostLedger = ['president','owner','manager','finance'].includes(currentRole) || (window.currentDepts||[]).includes('Finance');
+      if (canAutoPostLedger && paid > 0 && paid <= contract + 0.01) {
+        try {
+          const vatTreatment = document.getElementById('so-vat').value;
+          const { recorded, net, vat:vatAmount } = window.vatSplit(paid, vatTreatment);
+          await window.Ledger.upsertByRef(`SO-${ref.id}`, () => ({
+            ref: `SO-${ref.id}`, date: today(), kind: 'credit',
+            accountType: 'income', account: 'Sales Revenue', category: 'Sales Revenue',
+            description: `Sales order — ${d.client}${d.qno?' ('+d.qno+')':''}`,
+            amount: recorded, source: 'Sales', projectId: proj.id,
+            extra: { net, vatAmount, vatTreatment, autoPosted: true }
+          }));
+          await db.collection('sales_orders').doc(ref.id).update({
+            status:'recorded', recordedAmount:recorded, recordedAt:firebase.firestore.FieldValue.serverTimestamp(),
+            recordedBy:who, autoRecorded:true
+          });
+          // Sync the project's collected/AR the same way openRecordSaleModal does —
+          // read-then-increment (not a blind set) even though this is the project's
+          // very first payment, so this stays correct if that ever isn't true.
+          const pSnap = await db.collection('job_projects').doc(proj.id).get();
+          const curCollected = pSnap.exists ? (pSnap.data().amountCollected||0) : 0;
+          const newCollected = curCollected + recorded;
+          const newAR = Math.max(0, contract - newCollected);
+          await db.collection('job_projects').doc(proj.id).update({
+            amountCollected:newCollected, arBalance:newAR, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+            payments:firebase.firestore.FieldValue.arrayUnion({ type:'Sales Order Payment', amount:recorded, vatAmount, net, method:document.getElementById('so-method').value, orRef:'', date:today(), by:who, ledgerId:window.Ledger._sanitize(`SO-${ref.id}`), auto:true }),
+            timeline:firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:`Sale auto-recorded ₱${window.fmtN2(recorded)} at order creation`, by:who })
+          });
+          autoPosted = true;
+        } catch(_){ /* rules deny it for a non-Finance creator — falls back to the unchanged manual Record Sale queue */ }
+      }
+      window.logAudit&&window.logAudit('create','sales_order',ref.id,{client:d.client, contract, paid, projectNo:proj.projectNo, autoPosted});
+      try{ await Notifs.sendToDept('Finance',{ title:'🧾 New Sales Order', body: autoPosted
+          ? `${who}: ${d.client} — ₱${window.fmtN2(contract)} (₱${window.fmtN2(paid)} auto-recorded to the ledger). Project ${proj.projectNo}. Verify the receipt.`
+          : `${who}: ${d.client} — ₱${window.fmtN2(contract)} (₱${window.fmtN2(paid)} received). Project ${proj.projectNo}. Record income + verify receipt.`,
+        icon:'🧾', type:'sales_order', link:'sales-orders' }); }catch(_){}
       try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${d.client} (${proj.projectNo}) won — create the production order when ready.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
       try{ await Notifs.sendToOwner({ title:'🤝 Quote won → Project '+proj.projectNo, body:`${d.client} — ₱${window.fmtN2(contract)} closed by ${who}.`, icon:'🤝', type:'sales_order' }); }catch(_){}
-      Notifs.success('Sales order + project '+proj.projectNo+' created');
+      Notifs.success('Sales order + project '+proj.projectNo+' created'+(autoPosted?' + sale recorded':''));
       if (typeof container!=='undefined' && container) {
         if (d.co==='BK') renderBKQuotationsSummary(container, currentUser, currentRole);
         else renderBSQuotationsSummary(container, currentUser, currentRole);
@@ -2478,7 +2544,7 @@ window.renderSalesOrders = async function(container){
         <td class="tc-detail" data-label="Method" style="font-size:12px">${escHtml(o.paymentMethod||'')}</td>
         <td class="tc-detail" data-label="Receipt">${o.receiptUrl?`<a href="${escHtml(o.receiptUrl)}" target="_blank" class="btn-icon">${emojiIcon('📎',16)}</a>`:'—'}</td>
         <td class="tc-detail" data-label="By" style="font-size:11px">${escHtml(o.createdByName||'')}</td>
-        <td class="tc-net"><span class="badge ${o.status==='recorded'?'badge-green':'badge-orange'}">${escHtml(o.status||'pending')}</span>${o.sentToProduction?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px">${emojiIcon('🏭',9)} in production</span>`:''}</td>
+        <td class="tc-net"><span class="badge ${o.status==='recorded'?'badge-green':'badge-orange'}">${escHtml(o.status||'pending')}</span>${o.autoRecorded?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px" title="Posted to the ledger automatically when the order was created">${emojiIcon('⚡',9)} auto</span>`:''}${o.sentToProduction?`<span class="badge badge-blue" style="font-size:9px;margin-left:4px">${emojiIcon('🏭',9)} in production</span>`:''}</td>
         <td class="tc-actions" style="white-space:nowrap"><button class="btn-secondary btn-sm so-link-btn" data-id="${o.id}" title="Copy the client order-tracking link">${emojiIcon('🔗',16)} Link</button>${isFin?` ${o.status!=='recorded'?`<button class="btn-success btn-sm so-record-btn" data-id="${o.id}">Record Sale</button>`:(!o.sentToProduction?`<button class="btn-secondary btn-sm so-prod-btn" data-id="${o.id}">${emojiIcon('🏭',16)} To Production</button>`:`${emojiIcon('✓',16)}`)}`:''}</td>
       </tr>`).join('')}</tbody>
     </table></div>`}

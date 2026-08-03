@@ -392,6 +392,10 @@ async function createJobProject(d){
     quoteId:d.id||null, quoteNumber:d.qno||'', quoteCollection: company==='BK'?'bk_quotes':'bs_quotes',
     contractAmount:contract, amountCollected:0, arBalance:contract, vatRate:12, capital:0,
     dpPercent: d.dpPercent || null, balanceSchedule: null,
+    // v14 sales-pipeline gap fix — the quote's line items carried forward from
+    // openSalesOrderModal (js/departments.js), so Production can see WHAT to
+    // build here without dereferencing back to a possibly-stale quote revision.
+    items: Array.isArray(d.items) ? d.items : [],
     partnerUid,
     split:{ isShared: company==='BS', barroPct:50, partnerPct:50 },
     documents:[{ type:'Quotation', ref:d.qno||'', at:new Date().toISOString(), by:who }],
@@ -505,6 +509,18 @@ function openJobProjectDetail(p){
       <div class="kpi-card green"><div class="kpi-label">Collected</div><div class="kpi-value" style="font-size:14px">₱${fmt(p.amountCollected||0)}</div></div>
       <div class="kpi-card ${Math.max(0,(p.contractAmount||0)-(p.amountCollected||0))>0?'warn':''}"><div class="kpi-label">Balance (AR)</div><div class="kpi-value" style="font-size:14px">₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}</div></div>
     </div>
+    ${(p.items&&p.items.length)?`
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('📦',16)} Order Items — what to build</div>
+    <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:0">
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr></thead><tbody>
+      ${p.items.map(it=>`<tr>
+        <td style="font-size:12px">${escHtml(it.name||'')}${it.dims?` <span style="color:var(--text-muted)">(${escHtml(it.dims)})</span>`:''}${it.specStr?`<div style="font-size:10px;color:var(--text-muted)">${escHtml(it.specStr)}</div>`:''}</td>
+        <td style="font-size:12px">${Number(it.qty)||0} ${escHtml(it.unit||'')}</td>
+        <td style="font-size:12px">₱${fmt(it.unitPrice||0)}</td>
+        <td style="font-size:12px;font-weight:600">₱${fmt(it.amount||0)}</td>
+      </tr>`).join('')}
+      </tbody></table></div>
+    </div></div>`:''}
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:10px 14px">
       <div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:12px">${emojiIcon('💰',12)} Margin &amp; Split</strong>${(!isPartnerU && (canEditDept('Sales')||_isFinAdmin()))?`<button class="btn-secondary btn-sm" id="proj-margin-btn">Edit factors</button>`:''}</div>
       <div style="font-size:12px;margin-top:6px;display:grid;grid-template-columns:1fr auto;gap:3px 12px">

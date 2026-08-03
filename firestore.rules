@@ -1695,10 +1695,27 @@ service cloud.firestore {
     // DENIED so nobody can enumerate all orders. Only client-SAFE fields live here
     // (status, dates, amounts the client already knows) — never internal cost/margin.
     // Internal non-partner staff create/update it; admins may delete.
+    // v14 sales-pipeline gap fix — a partner converting THEIR OWN won quote into a
+    // Sales Order (js/departments.js openSalesOrderModal / window.ensureOrderTracking)
+    // already succeeds at creating the sales_orders + job_projects docs (both allow
+    // create for any authenticated creator, no partner exclusion), but this doc's
+    // create used to be a blanket !isPartner() — silently denied (best-effort
+    // try/catch swallows it) for every partner-originated order, so those clients
+    // NEVER got a tracking link. Narrow fix: a partner may create a tracking doc
+    // ONLY when it points (via `orderId`) at a sales_orders doc THEY THEMSELVES
+    // created — never for any other order. `.get(field, default)` throughout so a
+    // malformed/missing orderId denies (fails closed) instead of throwing.
     match /order_tracking/{token} {
       allow get:    if true;
       allow list:   if false;
-      allow create: if isAuth() && !isPartner();
+      allow create: if isAuth() && (
+        !isPartner()
+        || (
+          request.resource.data.get('orderId', '') != ''
+          && exists(/databases/$(database)/documents/sales_orders/$(request.resource.data.get('orderId', '')))
+          && get(/databases/$(database)/documents/sales_orders/$(request.resource.data.get('orderId', ''))).data.get('createdBy', '') == request.auth.uid
+        )
+      );
       allow update: if isAuth() && !isPartner();
       allow delete: if isAuth() && isAdmin();
     }
