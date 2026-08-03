@@ -906,6 +906,12 @@ function renderTeamCards(users, currentUser) {
     return;
   }
   const now = Date.now();
+  // Offboarding (owner feature) — "guarded to president/manager/HR": the two
+  // senior-admin roles, OR membership in the HR department specifically (NOT
+  // canEditDept()'s broader secretary/finance-department admin grants — this
+  // is a per-person account action, kept narrower on purpose).
+  const canManageAccounts = ['president','manager'].includes(currentRole) ||
+    (Array.isArray(currentDepts) && currentDepts.includes('HR'));
 
   grid.innerHTML = `<div class="team-masonry">${users.map(u => {
     const depts = (Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(' · ') || 'Unassigned';
@@ -952,14 +958,19 @@ function renderTeamCards(users, currentUser) {
       <div class="team-member-name">${escHtml(u.displayName||u.email)}</div>
       <div class="team-member-role" style="color:${badgeColor}">${roleLabel}${isMe?' · You':''}</div>
       <div class="team-member-dept">${escHtml(depts)}</div>
-      ${isOnline
-        ? `<div class="team-status-pill team-status-pill--on">● Online</div>`
-        : lastSeenMs ? `<div class="team-status-pill">${lastActiveStr}</div>` : ''}
+      ${u.removed
+        ? `<div class="team-status-pill" style="background:var(--danger,#ff4444);color:#fff">Removed</div>`
+        : isOnline
+          ? `<div class="team-status-pill team-status-pill--on">● Online</div>`
+          : lastSeenMs ? `<div class="team-status-pill">${lastActiveStr}</div>` : ''}
       <div class="team-card-actions">
         <button class="team-card-btn view-card-btn" data-uid="${u.id}" title="View calling card" aria-label="View calling card">${emojiIcon('📇',16)}</button>
         ${!isMe && (!(typeof isPartner==='function'&&isPartner()) || (u.role==='partner'&&(u.company||'').trim()===(window.userProfile?.company||'').trim()) || ['president','manager'].includes(u.role))
           ? `<button class="team-card-btn chat-dm-btn" data-uid="${u.id}" title="Message ${escHtml(u.displayName||u.email)}" aria-label="Message ${escHtml(u.displayName||u.email)}">${emojiIcon('💬',16)}</button>` : ''}
         ${!isMe ? `<button class="team-card-btn nudge-btn" data-uid="${u.id}" data-name="${(u.displayName||u.email).replace(/"/g,'&quot;')}" title="Nudge ${escHtml(u.displayName||u.email)}" aria-label="Nudge ${escHtml(u.displayName||u.email)}">${emojiIcon('👋',16)}</button>` : ''}
+        ${canManageAccounts && !isMe && u.role!=='president'
+          ? `<button class="team-card-btn remove-user-btn" data-uid="${u.id}" data-name="${(u.displayName||u.email||'').replace(/"/g,'&quot;')}" data-removed="${u.removed?'1':'0'}" title="${u.removed?'Reinstate account':'Remove from system'}" aria-label="${u.removed?'Reinstate':'Remove'} ${escHtml(u.displayName||u.email||'')}">${u.removed?emojiIcon('user-check',16):emojiIcon('user-x',16)}</button>`
+          : ''}
       </div>
     </div>`;
   }).join('')}</div>`;
@@ -993,6 +1004,50 @@ function renderTeamCards(users, currentUser) {
       btn.textContent = '✅'; btn.title = 'Nudge sent!';
       Notifs.success(`Nudge sent to ${name}!`);
       setTimeout(() => { btn.disabled = false; btn.textContent = '👋'; btn.title = `Nudge ${name}`; }, 3000);
+    });
+  });
+
+  // Remove / Reinstate from system (owner feature — offboarding). Sets
+  // users/{uid}.removed:true (+removedAt/removedBy), which js/app.js's
+  // auth.onAuthStateChanged checks right after loadUserProfile() and blocks
+  // them into a full-screen "you no longer work here" screen before any
+  // nav/routing runs (see js/app.js's showRemovedUserScreen). This button
+  // only flips the flag — it never deletes the user doc or any of their
+  // data, and un-removing (Reinstate) is the same action in reverse.
+  grid.querySelectorAll('.remove-user-btn').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const { uid, name } = btn.dataset;
+      const isRemoved = btn.dataset.removed === '1';
+      const ok = await confirmDialog({
+        title: isRemoved ? 'Reinstate account' : 'Remove from system',
+        message: isRemoved
+          ? `Reinstate ${escHtml(name)}? They will be able to sign in again immediately.`
+          : `Remove ${escHtml(name)} from the system? They will be signed out and blocked from signing back in — the app will tell them they no longer work with Barro Industries. This does NOT delete their account or any of their data, and can be undone from this same card at any time (Reinstate).`,
+        html: true,
+        confirmLabel: isRemoved ? 'Reinstate' : 'Remove',
+        danger: !isRemoved
+      });
+      if (!ok) return;
+      btn.disabled = true;
+      try {
+        await db.collection('users').doc(uid).update(isRemoved ? {
+          removed: false,
+          reinstatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          reinstatedBy: currentUser.uid
+        } : {
+          removed: true,
+          removedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          removedBy: currentUser.uid
+        });
+        if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('users');
+        window.logAudit && window.logAudit(isRemoved ? 'reinstate-user' : 'remove-user', 'users', uid, { name });
+        Notifs.success(isRemoved ? `${name} reinstated.` : `${name} removed from the system.`);
+        window.renderTeamTab();
+      } catch (err) {
+        btn.disabled = false;
+        Notifs.showToast('Error: ' + (err.message || err), 'error');
+      }
     });
   });
 

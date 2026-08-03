@@ -533,6 +533,33 @@ async function openPayrollReconciliation() {
   }
 }
 
+// ── KPI month breakdown for display (Edit Payroll screen) ──────────────────
+// money-core.js's window.computeKpiForMonth returns only the FINAL blended
+// score (taskScore*0.7 + delivScore*0.3) — it doesn't hand back the raw
+// "X of Y tasks" numerator/denominator the owner wants shown on the Edit
+// Payroll screen. This mirrors computeKpiForMonth's exact in/out-of-scope
+// loop (same t.assignedTo / taskDoneMonth / taskCreatedMonth rules — see
+// money-core.js's header comment for the scope table) purely so that
+// breakdown can be displayed; it is NEVER called by any pay computation.
+// computeKpiForMonth itself remains the one and only source of the kpiScore
+// that ever reaches computePayLine/pay, so this can't drift the two numbers
+// apart from what's shown — the loop bodies are kept byte-identical on
+// purpose.
+function _kpiMonthBreakdown(userTasks, month) {
+  const tasks = Array.isArray(userTasks) ? userTasks : [];
+  let doneInM = 0, inScopeCount = 0;
+  for (const t of tasks) {
+    const dm = window.taskDoneMonth ? window.taskDoneMonth(t) : null;
+    const cm = (window.taskCreatedMonth ? window.taskCreatedMonth(t) : '') || '';
+    if (cm > month) continue; // didn't exist yet -> out of scope entirely
+    if (dm === month || dm === '') { inScopeCount++; doneInM++; }
+    else if (dm === null) { inScopeCount++; }
+    else if (dm > month) { inScopeCount++; }
+    // else: dm !== null && dm < month -> finished before M -> out of scope
+  }
+  return { doneInM, inScopeCount };
+}
+
 async function renderPayrollManagement(container, currentUser, currentRole) {
   // 8-point #3 (Wave 7 Pass 3) — this screen had no loading state at all
   // before this pass: the container sat on whatever the previous Finance
@@ -1139,6 +1166,54 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         const unverifiedBadge = sug && sug.unverified ? ` <span style="font-size:10px;color:var(--warning)">${emojiIcon('⚠',10)} unverified rates</span>` : '';
         const inst = plan.plan[0]; // first CA in the plan, for the "installment N of M" label
 
+        // ── KPI computation (owner feature — read-only section below).
+        // Reuses money-core.js's window.computeKpiForMonth + dashboards.js's
+        // window.getAttendanceScore(uid, month) — the EXACT same
+        // functions/inputs computePayRun (departments.js) feeds into
+        // computePayLine, so the number shown here always matches what an
+        // actual Compute Payroll run would use for this uid/month. Never
+        // writes anything; never changes payroll/{uid} or any pay math.
+        const [kpiTasksSnap, kpiTargetSnap, attScore] = await Promise.all([
+          // Same dual-shape assignedTo filter as computePayRun (departments.js) —
+          // deliberately NOT getKpiScore's array-contains query (dashboards.js),
+          // which misses a scalar (non-array) assignedTo value.
+          db.collection('tasks').get().catch(()=>({docs:[]})),
+          db.collection('kpi_targets').doc(uid).get().catch(()=>null),
+          window.getAttendanceScore ? window.getAttendanceScore(uid, month) : Promise.resolve(1)
+        ]);
+        const kpiUserTasks = kpiTasksSnap.docs.map(d=>d.data())
+          .filter(t => Array.isArray(t.assignedTo) ? t.assignedTo.includes(uid) : t.assignedTo === uid);
+        const kpiDeliverableRaw = (kpiTargetSnap && kpiTargetSnap.exists) ? kpiTargetSnap.data().deliverableScore : undefined;
+        const kpiScore = window.computeKpiForMonth
+          ? window.computeKpiForMonth(kpiUserTasks, month, kpiDeliverableRaw, window.taskDoneMonth, window.taskCreatedMonth)
+          : 1;
+        const { doneInM, inScopeCount } = _kpiMonthBreakdown(kpiUserTasks, month);
+        const taskPct = inScopeCount > 0 ? Math.round(doneInM/inScopeCount*100) : 100; // D2 floor — no in-scope work ≠ bad KPI
+        const attScoreNum = typeof attScore === 'number' ? attScore : 1;
+        const perfFactor = Math.min(1, Math.max(0, kpiScore*0.7 + attScoreNum*0.3)); // same formula as computePayLine
+        // No pay_runs doc has been Computed for THIS month in this branch
+        // (that's exactly when the frozen-run early-return at the top of
+        // loadPayrollTable takes over instead), so there is no committed
+        // payPolicy yet — `runData` (already read once at the top of
+        // loadPayrollTable, in closure here) is the best available signal
+        // of which policy would apply if Compute ran right now.
+        const payPolicyNow = (runData && runData.payPolicy) ? runData.payPolicy : 'flat';
+
+        // ── Existing cash advance (owner feature — read-only section below).
+        // Type-A (this uid's own cash_advances docs) is already `plan`/
+        // `caBalance` above (window.CashAdvance.planFor). Type-B tracks CA on
+        // a linked worker_profiles doc's OWN caBalance field instead — an
+        // entirely separate ledger from the cash_advances collection (hr.js's
+        // Worker Payslip generator, openPayslipGenerator's deductWorker, is
+        // the only writer of worker_profiles.caBalance). A worker_profiles
+        // doc can point linkedUid at this uid even while payClass here is
+        // still 'regular' (computePayRun treats "linked" and "payClass:
+        // production" as two independent skip reasons — see its
+        // `linkedUids` set), so this is checked unconditionally, not only
+        // when _payClass below is 'production'.
+        const linkedWpSnap = await db.collection('worker_profiles').where('linkedUid','==',uid).limit(1).get().catch(()=>({docs:[]}));
+        const linkedWp = linkedWpSnap.docs.length ? { id: linkedWpSnap.docs[0].id, ...linkedWpSnap.docs[0].data() } : null;
+
         const _payClass = emp.payClass==='production' ? 'production' : 'regular';
         openPage(`Edit Payroll — ${escHtml(emp.displayName||'')}`, `
           <div class="form-group"><label>Employee Type</label>
@@ -1147,6 +1222,20 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               <option value="production" ${_payClass==='production'?'selected':''}>Type B — Production, weekly (hourly attendance, 8-hr day)</option>
             </select>
             <div style="font-size:11px;color:var(--text-muted);margin-top:4px">Type A staff are paid monthly here. Type B (Production) workers are paid weekly via the Payslip generator, excluded from this monthly run, and — if their Worker Profile's "Linked Login Account" is set to this uid (HR → Worker Payslips → the profile's edit form) — can self-service Time In/Out with geofencing from their own phone (HR → Work Sites).</div>
+          </div>
+          <div style="margin-top:4px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface2,var(--surface))">
+            <label style="font-weight:600">${emojiIcon('bar-chart-2',16)} KPI Computation — ${window.fmtMonthLabel ? window.fmtMonthLabel(month) : month}</label>
+            <div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px">Read-only — shown for reference, never edits pay. ${payPolicyNow==='performance'
+              ? `This month's pay policy is <strong>Performance</strong>: the perfFactor below <em>scales the allowance</em> (base wage is never docked).`
+              : `This month's pay policy is <strong>Flat</strong> (the default): KPI and attendance are informational only here — they do <strong>not</strong> change this employee's pay unless a Compute Payroll run is switched to the Performance policy.`}
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px;font-size:12px">
+              <div>Task completion: <strong>${doneInM} of ${inScopeCount}</strong> in-scope task${inScopeCount===1?'':'s'} done${inScopeCount>0?` <span style="color:var(--text-muted)">(${taskPct}%)</span>`:` <span style="color:var(--text-muted)">(no in-scope tasks — floors at 100%)</span>`}</div>
+              <div>Deliverable score: <strong>${typeof kpiDeliverableRaw==='number' ? kpiDeliverableRaw+'/100' : 'not set'}</strong>${typeof kpiDeliverableRaw!=='number'?' <span style="color:var(--text-muted)">(defaults to 100%)</span>':''}</div>
+              <div>Attendance score: <strong>${Math.round(attScoreNum*100)}%</strong></div>
+              <div>KPI score (70% task + 30% deliverable): <strong>${Math.round(kpiScore*100)}%</strong></div>
+            </div>
+            <div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);font-size:12px">perfFactor = 0.7×KPI + 0.3×attendance = <strong>${(perfFactor*100).toFixed(1)}%</strong></div>
           </div>
           <div class="form-row">
             <div class="form-group"><label>${_payClass==='production'?'Weekly Rate':'Base Salary'}</label>
@@ -1174,6 +1263,14 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
             <div class="form-row">
               <div class="form-group"><label>PhilHealth No.</label><input id="ep-phnum" value="${escHtml(emp.phNum||'')}"/></div>
               <div class="form-group"><label>Pag-IBIG MID</label><input id="ep-pagnum" value="${escHtml(emp.pagibigNum||'')}"/></div>
+            </div>
+          </div>
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+            <label style="font-weight:600">${emojiIcon('💳',16)} Existing Cash Advance</label>
+            <div style="font-size:11px;color:var(--text-muted);margin:4px 0 8px">Read-only — current outstanding balance(s) on record. Choosing how much to deduct FROM this payroll run (if any) is the actionable section below.</div>
+            <div style="font-size:12px;display:flex;flex-direction:column;gap:4px">
+              <div>Type A — Payroll Cash Advance <span style="color:var(--text-muted)">(installment plan)</span>: <strong>${caBalance>0?'₱'+fmt(caBalance):'—'}</strong></div>
+              ${linkedWp ? `<div>Type B — Worker Profile CA balance <span style="color:var(--text-muted)">(linked profile: ${escHtml(linkedWp.name||linkedWp.id)})</span>: <strong>₱${fmt(linkedWp.caBalance||0)}</strong></div>` : ''}
             </div>
           </div>
           ${caBalance > 0 ? `

@@ -58,6 +58,23 @@ document.addEventListener('DOMContentLoaded', () => {
       currentUser = user;
       await loadUserProfile(user);
 
+      // ── Removed-user gate (owner feature — employee offboarding) ────────
+      // A president/manager/HR admin can flip users/{uid}.removed = true
+      // (see js/screens/people.js's renderTeamCards "Remove from system"
+      // action). Checked immediately after the profile loads and BEFORE the
+      // idempotency guard below (on purpose — this must run on EVERY auth
+      // state change, not just a fresh login, so a user removed mid-session
+      // is also caught the next time their token silently refreshes, not
+      // only on their next sign-in attempt). Un-bypassable: this returns
+      // before showApp()/buildNav()/navigateTo() or any other bootstrap
+      // step below ever runs, and before the idempotency guard could
+      // short-circuit past it on a later refresh.
+      if (userProfile && userProfile.removed === true) {
+        showRemovedUserScreen();
+        auth.signOut().catch(()=>{});
+        return;
+      }
+
       // ── Idempotency guard ─────────────────────────
       // Same signed-in user that is already bootstrapped (e.g. token refresh):
       // refresh auth state but SKIP the disruptive re-bootstrap.
@@ -503,6 +520,40 @@ function showLogin() {
   hideSplash();
   document.getElementById('login-screen').classList.remove('hidden');
   document.getElementById('app-shell').classList.add('hidden');
+}
+
+// ── Removed-user block screen (owner feature — employee offboarding) ─────
+// Shown when users/{uid}.removed === true (see the auth.onAuthStateChanged
+// gate above, and js/screens/people.js's renderTeamCards "Remove from
+// system" action that sets the flag). Deliberately NOT routed through
+// openPage/navigateTo/the app shell — those all assume an active signed-in
+// user; this must render even though we're signing this user straight back
+// out. A dedicated overlay appended directly to <body> (highest z-index in
+// the app) so it covers the login screen AND the app shell regardless of
+// which one was showing, with no close/back affordance other than its own
+// Sign Out button — nothing else on the page is reachable underneath it.
+function showRemovedUserScreen() {
+  hideSplash();
+  document.getElementById('login-screen')?.classList.add('hidden');
+  document.getElementById('app-shell')?.classList.add('hidden');
+  let el = document.getElementById('removed-user-screen');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'removed-user-screen';
+    document.body.appendChild(el);
+  }
+  el.style.cssText = 'position:fixed;inset:0;z-index:999999;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg,#0F1114);color:var(--text,#fff);text-align:center';
+  el.innerHTML = `
+    <div style="max-width:420px;display:flex;flex-direction:column;align-items:center;gap:14px">
+      <div style="font-size:44px" aria-hidden="true">🚫</div>
+      <h2 style="margin:0;font-size:20px">You have been removed from the system</h2>
+      <p style="margin:0;color:var(--text-muted,#9a9aa5);font-size:14px;line-height:1.5">You no longer work with Barro Industries. If you believe this is a mistake, contact your administrator.</p>
+      <button id="removed-signout-btn" class="btn-primary" style="margin-top:6px">Sign Out</button>
+    </div>`;
+  document.getElementById('removed-signout-btn').addEventListener('click', () => {
+    auth.signOut().catch(()=>{});
+    window.location.reload();
+  });
 }
 let _ptrInit = false;
 function showApp() {

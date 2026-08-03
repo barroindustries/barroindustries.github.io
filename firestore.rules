@@ -105,7 +105,16 @@ service cloud.firestore {
           // callable (functions/index.js) — whose only server-side precondition
           // on the target was that same flag — to silently reset that account's
           // password and take it over.
-          && n.get('hrManagedAccount', null) == o.get('hrManagedAccount', null);
+          && n.get('hrManagedAccount', null) == o.get('hrManagedAccount', null)
+          // v14 offboarding — removed/reinstated flags are privileged: a user
+          // must never flip their OWN removed flag (self-reinstate) via a raw
+          // client write. President/manager (isSeniorAdmin) and the HR
+          // offboarding branch below are the only legitimate writers.
+          && n.get('removed', null)      == o.get('removed', null)
+          && n.get('removedAt', null)    == o.get('removedAt', null)
+          && n.get('removedBy', null)    == o.get('removedBy', null)
+          && n.get('reinstatedAt', null) == o.get('reinstatedAt', null)
+          && n.get('reinstatedBy', null) == o.get('reinstatedBy', null);
     }
 
     // ── Shape validators (Phase 92) ─────────────────────
@@ -178,6 +187,13 @@ service cloud.firestore {
       function hrFlagUnchanged() {
         return request.resource.data.get('hrManagedAccount', null) == resource.data.get('hrManagedAccount', null);
       }
+      // v14 offboarding — an HR-dept member of any role may toggle ONLY the
+      // removed/reinstated fields on ANOTHER user's doc (matches people.js's
+      // Remove/Reinstate UI gate); restricted to those 5 keys, never president.
+      function onlyOffboardingFieldsChanged() {
+        return request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['removed','removedAt','removedBy','reinstatedAt','reinstatedBy']);
+      }
       allow update: if isAuth() && (
         isPresident() ||
         (isSeniorAdmin() && !isOwner(uid)
@@ -185,7 +201,10 @@ service cloud.firestore {
           && fcmTokenUnchangedForOthers()
           && hrFlagUnchanged()) ||
         (isOwner(uid) && userPrivilegedFieldsUnchanged()) ||
-        (isAdmin() && userPrivilegedFieldsUnchanged() && fcmTokenUnchangedForOthers())
+        (isAdmin() && userPrivilegedFieldsUnchanged() && fcmTokenUnchangedForOthers()) ||
+        (inDept('HR') && !isOwner(uid)
+          && resource.data.get('role', 'employee') != 'president'
+          && onlyOffboardingFieldsChanged())
       );
       allow delete: if isAuth() && isPresident();
     }
