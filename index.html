@@ -179,7 +179,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.183 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.184 · Barro Industries</div>
   </div>
 </div>
 
@@ -502,6 +502,20 @@
      Inventory (renderInventory/renderStock/renderMovements) stayed behind
      in modules.js; see js/screens/people.js's header for why. -->
 <script defer src="js/screens/people.js"></script>
+<!-- v14 Wave 7 Pass 9 — Dashboard + core-page screens (the 6 role dashboards,
+     System Health, Audit Log, Product Database, SOPs, Personal Finance +
+     the KPI/attendance-score cluster, Progress Reports, Company, Departments,
+     Analytics, Team accounts-admin, Help), split verbatim out of js/app.js.
+     Loads LAST of every js/screens/*.js file (after people.js): the screens
+     below call almost every other screen's shared globals at runtime
+     (fetchUsersWithPayroll, renderClientProfiles, window.Projects,
+     window.Ledger, window.CashAdvance, ledgerForPeriod, Period.parse, etc.)
+     by bare-global/window.* name at runtime only, never at parse time — same
+     convention as every other Wave 7 pass. app.js's navigateTo switch and
+     the bottom-nav route tables (config.js) reach forward into this file's
+     window.render()/bare render() entry points the same way; notifications.js's
+     openMemoById deep-link does too. -->
+<script defer src="js/screens/dashboards.js"></script>
 <script defer src="js/chat.js"></script>
 <script>
   window.addEventListener('load', () => { if (window._applyBrandVersion) window._applyBrandVersion(); });
