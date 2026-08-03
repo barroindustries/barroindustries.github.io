@@ -5550,15 +5550,11 @@ function openWorkerProfilePanel(uid, name, preloaded) {
       model.official = false;
     }
     model.ytd = await window.payslipYtdMonthly(uid, year);
-    // renderPayslipPage (departments.js) swaps #page-content directly — it
-    // predates the page-stack and isn't Overlay-registered, so unlike a real
-    // openPage surface it can't simply stack above this panel. Dismiss this
-    // page through the real primitive (Overlay.dismissTop → popstate → the
-    // panel's own teardown) instead of the old manual stack-splice; the swap
-    // below runs synchronously so #page-content already shows the payslip by
-    // the time the panel's close animation finishes revealing it.
-    window.Overlay.dismissTop();
-    window.renderPayslipPage(model, ()=>renderPersonalFinance(currentUser, currentRole));
+    // v14 wave7 pass3: renderPayslipPage is a real openPage now — it stacks
+    // above this panel and Back returns here. The old dismiss-first
+    // workaround is gone; onClose falls back to Personal Finance only when
+    // the profile panel itself is no longer open.
+    window.renderPayslipPage(model, ()=>{ if (!window.Overlay.isOpen()) renderPersonalFinance(currentUser, currentRole); });
   });
   activateTab('overview');
   return panel;

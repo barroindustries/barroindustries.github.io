@@ -179,7 +179,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.172 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.173 · Barro Industries</div>
   </div>
 </div>
 
@@ -410,6 +410,17 @@
      time; departments.js's renderBrilliantSteel/loadBSContent (still there)
      reaches forward into this file's renderBSQuotationsSummary the same way. -->
 <script defer src="js/screens/sales.js"></script>
+<!-- v14 Wave 7 Pass 3 — HR + Payroll screens (HR hub, payroll management +
+     reconciliation, HR profiles, worker payslips), split verbatim out of
+     departments.js. Must load after departments.js: calls its shared
+     helpers (canEditDept, deptContainer, isFinancePriv, fetchUsersWithPayroll,
+     etc.) and money SERVICES that stayed behind (window.computePayRun/
+     disbursePayRun/reopenPayRun, window.RaiseFlow, window.CashAdvance/Ledger/
+     BankAccounts) by window.*/bare-global name at runtime only, never at
+     parse time; departments.js's loadFinanceContent (Payroll/HR Profiles
+     tabs) reaches forward into this file's renderPayrollManagement/
+     renderFinanceHRProfiles the same way. -->
+<script defer src="js/screens/hr.js"></script>
 <!-- v13 Phase 37 — one-time/rare president maintenance tools, split out of
      departments.js for hot-file size. Plain deferred script (not the
      dynamic-import lazy-load V13-PLAN.md sketched) — simpler safe variant
