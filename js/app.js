@@ -1320,10 +1320,21 @@ function buildBottomNav() {
 // The mobile top strip is now just a brand wordmark (left) + the relocated
 // action icons (#tn-actions: search/notif/menu/avatar, moved in by
 // placeTopbarActions). No page tabs here anymore — those are the bottom bar.
+// Root-cause note (owner report — "Operating System" sub-label missing on
+// mobile): #topbar (with its real .topbar-wordmark-stack, which DOES carry
+// the "Operating System" sub-label) is `display:none` on mobile (css
+// @media max-width:768px) — the top-nav-strip built here is the ONLY brand
+// row phones ever see, and it used to render just "Barro Industries" with
+// no subtitle at all. Fixed by stacking the same BRAND.systemName under it.
 function buildTopNavStrip() {
   const tabs = document.getElementById('tn-tabs');
   if (!tabs) return;
-  tabs.innerHTML = `<span class="tn-brand">Barro Industries</span>`;
+  const esc = window.escHtml || (s => (s == null ? '' : String(s)));
+  const sub = (window.BRAND && window.BRAND.systemName) ? esc(window.BRAND.systemName) : '';
+  tabs.innerHTML = `<div class="tn-brand-stack">
+    <span class="tn-brand">Barro Industries</span>
+    ${sub ? `<span class="tn-brand-sub">${sub}</span>` : ''}
+  </div>`;
 }
 
 // v12 WS42 nav-consolidation — the mobile top strip absorbs the standalone

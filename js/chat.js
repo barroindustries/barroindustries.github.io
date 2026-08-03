@@ -608,6 +608,7 @@ window.Chat = (() => {
     const rowHtml = ({ cv, title }) => {
       const unread = _isUnread(cv), pinned = _isPinned(cv), muted = _isMuted(cv), archived = _isArchived(cv);
       let avatarHtml;
+      let dmSubtitle = '';   // owner request — DM rows show the other person's role/dept under their name
       if (cv.type === 'dm') {
         const otherUid = (cv.participants || []).find(u => u !== myUid);
         const otherUser = _presenceByUid[otherUid];   // Wave5-cache users doc (photoUrl) — no extra read
@@ -616,6 +617,15 @@ window.Chat = (() => {
         avatarHtml = otherUser?.photoUrl
           ? `<div class="ms-avatar ms-avatar-lg" style="position:relative;flex-shrink:0;padding:0"><img src="${escHtml(otherUser.photoUrl)}" alt="${escHtml(title)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/><span class="ms-presence-dot" style="background:${dotColor}"></span></div>`
           : `<div class="ms-avatar ms-avatar-lg" style="position:relative;flex-shrink:0;background:${_avatarColorFor(otherUid||title)}">${initials(title)}<span class="ms-presence-dot" style="background:${dotColor}"></span></div>`;
+        // Same role/dept resolution the Team directory + New Message picker
+        // already use (window.ROLES[u.role].label, departments[] || department).
+        if (otherUser) {
+          const roleLabel = window.ROLES?.[otherUser.role]?.label || otherUser.role || '';
+          const depts = Array.isArray(otherUser.departments) && otherUser.departments.length
+            ? otherUser.departments
+            : (otherUser.department ? [otherUser.department] : []);
+          dmSubtitle = [roleLabel, depts.join(' · ')].filter(Boolean).join(' · ');
+        }
       } else if (cv.type === 'group' || cv.type === 'announcement') {
         // Wave5 M4 — group avatar renders conv.photoUrl (set via the info
         // page's About section, creator/admin only) with initials fallback.
@@ -651,6 +661,7 @@ window.Chat = (() => {
               <span class="chat-inbox-row-name-text">${escHtml(title)}</span>
               ${muted?`<i data-lucide="bell-off" class="ms-inbox-mute-glyph"></i>`:''}
             </div>
+            ${dmSubtitle ? `<div class="chat-inbox-row-title">${escHtml(dmSubtitle)}</div>` : ''}
             <div class="chat-inbox-row-preview">${previewLine}</div>
           </div>
           ${unread ? '<span class="ms-unread-dot" aria-label="Unread"></span>' : ''}

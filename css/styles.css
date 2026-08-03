@@ -2172,11 +2172,18 @@ html.theme-astral .chip-tab.active {
 .modal-box.modal-wide { max-width: min(920px, calc(100vw - 48px)); }
 .modal-box.modal-full { max-width: min(1200px, 96vw); max-height: 94dvh; }
 
-/* ── Full-screen page panel (v12 WS10 — openPage) ── */
+/* ── Full-screen page panel (v12 WS10 — openPage) ──
+   Owner report: a pushed page (task detail, etc.) "feels like a popup" —
+   it used to slide UP from the bottom with a fade, which reads as a modal/
+   bottom-sheet presentation rather than a page navigated INTO. Native
+   iOS-style push instead: slides in from the RIGHT, full width, no fade —
+   the page underneath is already hidden (`.page-under{visibility:hidden}`,
+   set by openPage()) so there's nothing to cross-fade against. */
 .page-panel{ position:fixed; top:calc(var(--topbar-h) + env(safe-area-inset-top,0px));
   left:0; right:0; bottom:0; background:var(--bg); z-index:var(--z-page-panel); display:flex; flex-direction:column;
-  transform:translateY(100%); opacity:0; transition:transform .3s cubic-bezier(.4,0,.2,1),opacity .3s; overflow:hidden; }
-.page-panel.open{ transform:translateY(0); opacity:1; }
+  transform:translateX(100%); transition:transform .3s cubic-bezier(.4,0,.2,1); overflow:hidden; }
+.page-panel.open{ transform:translateX(0); }
+@media (prefers-reduced-motion: reduce) { .page-panel { transition: none; } }
 .page-panel-head{ display:flex; align-items:center; gap:12px;
   /* WS42 Phase 11: landscape left/right notch clearance */
   padding:12px max(16px, env(safe-area-inset-right,0px)) 12px max(16px, env(safe-area-inset-left,0px));
@@ -2489,10 +2496,23 @@ html.theme-astral #mini-cal td.today {
   .top-nav-strip { display: flex; }
   /* Brand wordmark fills the top strip's center zone (left-aligned). */
   .tn-tabs { justify-content: flex-start; overflow: hidden; }
+  /* Owner report — "Operating System" sub-label never shows on mobile: this
+     stack (name + BRAND.systemName, built by buildTopNavStrip()) is the
+     mobile replacement for .topbar-wordmark-stack, which is display:none'd
+     on phones along with the rest of #topbar. */
+  .tn-brand-stack {
+    display: flex; flex-direction: column; justify-content: center;
+    line-height: 1.15; min-width: 0; overflow: hidden; padding-left: 4px;
+  }
   .tn-brand {
     font-size: var(--fs-lg); font-weight: 800; letter-spacing: -0.02em;
     color: var(--text); white-space: nowrap; overflow: hidden;
-    text-overflow: ellipsis; padding-left: 4px;
+    text-overflow: ellipsis;
+  }
+  .tn-brand-sub {
+    font-size: var(--fs-2xs); font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--text-muted); opacity: 0.72;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   /* Full-screen page panel (openPage) — was pinned below the old #topbar;
      now covers from the very top, same as it used to cover the old
@@ -3902,6 +3922,16 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 }
 #task-fullscreen-panel .messenger-body,
 #chat-thread-panel .messenger-body { max-height: none; }
+/* Owner request — a thread with only a few messages showed them stuck at the
+   TOP with a big empty gap above the composer. Bottom-align the real chat
+   thread's message column so short threads hug the composer like a normal
+   chat; a long thread still just scrolls (overflow-y:auto above, unchanged)
+   — flex-end only redistributes leftover space when content is SHORTER than
+   the viewport. Scoped to the #chat-thread-scroll id (js/chat.js's own DM/
+   group/dept thread), not the base .messenger-body class, which the
+   department doc-comments widget (js/departments.js #msbody-*) also uses and
+   isn't part of this request. */
+#chat-thread-scroll { justify-content: flex-end; }
 .messenger-empty {
   text-align: center; font-size: var(--fs-md); color: var(--text-muted);
   padding: 32px 16px;
@@ -4196,6 +4226,14 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
      popovers (both anchor bottom:100% off THIS row, not the scroll container). */
   position: relative;
 }
+/* Owner request — the DM/group chat thread (js/chat.js, always rendered
+   inside the #chat-thread-panel pushed page) showed a visible gray divider
+   directly above "Type a message", reading as a seam between the messages
+   area and the composer instead of one seamless surface. Scoped to that
+   page id only — the task/quote/bidding doc-comments composer
+   (js/departments.js) shares this same .messenger-input-row class and keeps
+   its border (a real "own section" of a page, not this request). */
+#chat-thread-panel .messenger-input-row { border-top: none; }
 .ms-attach-btn {
   width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
@@ -4484,6 +4522,12 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 .chat-inbox-row-name { display: flex; align-items: center; gap: 6px; }
 .chat-inbox-row-name-text {
   font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Owner request — DM inbox rows: the other person's role/dept, small and
+   muted, between their name and the last-message preview. */
+.chat-inbox-row-title {
+  font-size: var(--fs-xs); font-weight: 500; color: var(--text-muted); opacity: 0.8;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .chat-inbox-row-preview {
@@ -6138,7 +6182,20 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
     padding: 12px max(12px, env(safe-area-inset-right,0px))
       calc(12px + env(safe-area-inset-bottom,0px)) max(12px, env(safe-area-inset-left,0px));
   }
-  .modal-header { padding: 12px 14px; }
+  /* v14 hotfix (owner-reported, repeat #3): this density-pass shorthand used
+     to reset ALL FOUR sides flat, silently wiping the safe-area-inset-top
+     clearance the ≤639px "full-cover sheet" rule above had set on
+     .modal-header — since ≤640px matches every real phone width and sits
+     LATER in the cascade, its flat `padding: 12px 14px` always won, so
+     sheet titles (e.g. the 'More' bottom sheet, which covers top:0 on
+     mobile) rendered directly under the iPhone status bar/notch, unreadable
+     and unclickable. Restore top clearance as its own declaration so the
+     compact 12px/14px sides are kept but the top pads out past the notch
+     on every device (env() resolves to 0 on non-notched screens, so this is
+     still a flat 12px there — no regression for those). Scoped to mobile
+     only (this whole block is ≤640px) — centered desktop modals are
+     untouched. */
+  .modal-header { padding: 12px 14px; padding-top: calc(12px + env(safe-area-inset-top, 0px)); }
   .modal-body { padding: 14px; }
   .modal-footer { padding: 10px 14px; }
   .dialog-box { padding: 14px; }
