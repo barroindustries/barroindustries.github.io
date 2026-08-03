@@ -91,8 +91,20 @@ function projectPaid(p) {
 }
 
 async function renderProjects(container, currentUser, currentRole) {
-  const snap = await db.collection('projects').orderBy('createdAt','desc').get().catch(()=>({docs:[],empty:true}));
-  const projects = snap.docs.map(d => ({id:d.id,...d.data()}));
+  // v14 prod-fixlist — this was a blanket .catch(()=>({docs:[],empty:true})), so
+  // a genuine permission error on `projects` rendered identically to "no
+  // projects yet" with no way to tell the difference. Surface it as a retry
+  // block instead (same idiom production.js/govit.js already use).
+  let projects;
+  try {
+    const snap = await db.collection('projects').orderBy('createdAt','desc').get();
+    projects = snap.docs.map(d => ({id:d.id,...d.data()}));
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load projects</h4><p>${escHtml(err.message||String(err))}</p><button type="button" class="btn-secondary btn-sm design-proj-retry-btn" style="margin-top:14px">Retry</button></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [container] });
+    container.querySelector('.design-proj-retry-btn')?.addEventListener('click', ()=>renderProjects(container, currentUser, currentRole));
+    return;
+  }
   const canAdd = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager';
   const canBill = ['president','owner','manager','finance'].includes(currentRole) || canEditDept('Finance');
 
@@ -344,7 +356,14 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
     document.getElementById('save-pay-btn').addEventListener('click', async () => {
       const amt = parseFloat(document.getElementById('pay-amt').value) || 0;
       if (amt <= 0) { Notifs.showToast('Enter a valid amount','error'); return; }
-      const acct = await window.BankAccounts.pick(document.getElementById('pay-bank').value);
+      // v14 prod-fixlist — mirror production.js's openProjectBillingModal gate:
+      // don't let a payment land with zero bank-account attribution when the
+      // registry is populated (pay-bank previously had no validation at all).
+      const bankSel = document.getElementById('pay-bank').value;
+      if (!bankSel && (await window.BankAccounts.list()).length) {
+        Notifs.showToast('Select the company account that received this payment.','error'); return;
+      }
+      const acct = await window.BankAccounts.pick(bankSel);
       const payment = {
         amount: amt,
         date:   document.getElementById('pay-date').value || today(),
@@ -401,9 +420,7 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
       if (amt <= 0) { Notifs.showToast('Enter a valid amount','error'); return; }
       const contractC = Number(p.contractAmount) || 0;
       const paidC     = projectPaid(p);
-      const seq = ((p.invoices || []).length + 1);
       const inv = {
-        no:             'INV-' + today().replace(/-/g,'') + '-' + String(seq).padStart(3,'0'),
         date:           document.getElementById('inv-date').value || today(),
         due:            document.getElementById('inv-due').value || '',
         billTo:         document.getElementById('inv-billto').value.trim(),
@@ -417,10 +434,20 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
         issuedBy:       currentUser.displayName || currentUser.email || '',
         createdAt:      today()
       };
-      if (!(await confirmDialog({message:`Generate billing invoice ${inv.no} for ₱${fmt(amt)} (${escHtml(p.name||'')})?`, html:true}))) return;
+      if (!(await confirmDialog({message:`Generate billing invoice for ₱${fmt(amt)} (${escHtml(p.name||'')})?`, html:true}))) return;
       const invBtn = document.getElementById('gen-inv-btn');
       if (invBtn) invBtn.disabled = true; // guard against double-click double-posting
       try {
+        // v14 prod-fixlist — was minting 'INV-' + today().replace(/-/g,'') + '-' +
+        // seq, a per-project daily counter that can collide with the parallel
+        // job_projects billing-invoice flow (production.js's
+        // openJobBillingInvoiceModal), which already mints via the atomic,
+        // _counters-backed window.nextSerial('billing_invoice','INV'). Both flows
+        // now share the SAME counter/series, so an INV-# can never collide across
+        // a Design project and a Job Project invoice issued in the same instant.
+        // Minted AFTER confirm (same rule production.js documents) so a cancelled
+        // dialog burns no serial.
+        inv.no = await window.nextSerial('billing_invoice', 'INV');
         const ref = db.collection('projects').doc(p.id);
         const saved = await db.runTransaction(async tx => {
           const doc  = await tx.get(ref);
@@ -446,11 +473,19 @@ function renderProjFinancials(host, p, currentUser, currentRole, canBill){
 async function renderProjectTasks(host, p, currentUser, currentRole, canBill){
   host.innerHTML = '<div class="loading-placeholder">Loading tasks…</div>';
   const canManage = canEditDept('Design');
-  let tasks = [];
+  let tasks;
   try {
     const snap = await db.collection('tasks').where('projectId','==',p.id).get();
     tasks = snap.docs.map(d=>({id:d.id,...d.data()}));
-  } catch(e){ console.warn('project tasks load failed', e); }
+  } catch(e){
+    // v14 prod-fixlist — was console.warn-only with tasks left [], so a genuine
+    // permission error rendered identically to "no tasks for this project".
+    console.warn('project tasks load failed', e);
+    host.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load tasks</h4><p>${escHtml(e.message||String(e))}</p><button type="button" class="btn-secondary btn-sm pt-retry-btn" style="margin-top:14px">Retry</button></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [host] });
+    host.querySelector('.pt-retry-btn')?.addEventListener('click', ()=>renderProjectTasks(host, p, currentUser, currentRole, canBill));
+    return;
+  }
   tasks.sort((a,b)=>(b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
   host.innerHTML = `
     <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
@@ -563,6 +598,17 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
     const jobSel    = document.getElementById('pe-job');
     const clientId  = clientSel.value || null;
     const clientNameSel = clientSel.options[clientSel.selectedIndex]?.dataset.name || '';
+    const newContractAmount = parseFloat(document.getElementById('pe-contract').value) || 0;
+    // v14 prod-fixlist — renderProjFinancials/renderProjects treat balance<=0.005
+    // as "Fully Paid" purely from (contract - collected). Letting the contract be
+    // edited below what's already been collected silently flipped a project to
+    // "Fully Paid" with no record that an over-collection now needs a refund or
+    // contract amendment — so floor it at the amount already on file.
+    const alreadyPaid = projectPaid(p);
+    if (newContractAmount < alreadyPaid - 0.005) {
+      Notifs.showToast(`Contract amount (₱${fmt(newContractAmount)}) can't be set below the ₱${fmt(alreadyPaid)} already collected — record a refund/contract amendment first, or correct the collected payments instead.`, 'error');
+      return;
+    }
     const update = {
       name:           document.getElementById('pe-name').value.trim() || p.name || 'Project',
       client:         document.getElementById('pe-clientname').value.trim() || clientNameSel || '',
@@ -570,7 +616,7 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
       startDate:      document.getElementById('pe-start').value,
       dueDate:        document.getElementById('pe-due').value,
       status:         document.getElementById('pe-status').value,
-      contractAmount: parseFloat(document.getElementById('pe-contract').value) || 0,
+      contractAmount: newContractAmount,
       notes:          document.getElementById('pe-notes').value.trim(),
       designLead:     leadSel.value || null,
       designLeadName: leadSel.value ? (leadSel.options[leadSel.selectedIndex]?.dataset.name || null) : null,
@@ -612,11 +658,19 @@ async function openProjectEditModal(p, currentUser, currentRole, canBill){
 async function renderProjectDrawings(host, p, currentUser, currentRole, canBill){
   host.innerHTML = '<div class="loading-placeholder">Loading drawings…</div>';
   const canManage = canEditDept('Design');
-  let drawings = [];
+  let drawings;
   try {
     const snap = await db.collection('design_drawings').where('projectId','==',p.id).get();
     drawings = snap.docs.map(d=>({id:d.id,...d.data()}));
-  } catch(e){ console.warn('drawings load failed', e); }
+  } catch(e){
+    // v14 prod-fixlist — was console.warn-only with drawings left [], so a
+    // genuine permission error rendered identically to "no drawings yet".
+    console.warn('drawings load failed', e);
+    host.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load drawings</h4><p>${escHtml(e.message||String(e))}</p><button type="button" class="btn-secondary btn-sm pd-retry-btn" style="margin-top:14px">Retry</button></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [host] });
+    host.querySelector('.pd-retry-btn')?.addEventListener('click', ()=>renderProjectDrawings(host, p, currentUser, currentRole, canBill));
+    return;
+  }
   const order = DRAWING_STATUSES.map(s=>s.id);
   drawings.sort((a,b)=>(order.indexOf(a.status)-order.indexOf(b.status)) || (''+(a.title||'')).localeCompare(''+(b.title||'')));
   host.innerHTML = `
@@ -1011,11 +1065,24 @@ async function openAddProjectTaskModal(project, currentUser, currentRole, canBil
 // ── Cross-project Drawings dashboard (Design subtab) ──
 async function renderDrawingsDashboard(container, currentUser, currentRole){
   container.innerHTML = '<div class="loading-placeholder">Loading drawings…</div>';
-  let drawings = [];
+  // v14 prod-fixlist — the PRIMARY read (design_drawings) was console.warn-only
+  // with drawings left [], so a genuine permission error rendered identically to
+  // "no drawings match". Surfaced as a retry block. The secondary `projects`
+  // read just below (projMap, used only to resolve project name/lead for the
+  // per-drawing approval check) stays a soft-fail on purpose — same
+  // primary-hard/secondary-soft split production.js's header documents for its
+  // own design-board read.
+  let drawings;
   try {
     const snap = await db.collection('design_drawings').orderBy('createdAt','desc').get();
     drawings = snap.docs.map(d=>({id:d.id,...d.data()}));
-  } catch(e){ console.warn('drawings dashboard load failed', e); }
+  } catch(e){
+    console.warn('drawings dashboard load failed', e);
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load drawings</h4><p>${escHtml(e.message||String(e))}</p><button type="button" class="btn-secondary btn-sm dwg-dash-retry-btn" style="margin-top:14px">Retry</button></div>`;
+    if (window.lucide) lucide.createIcons({ nodes: [container] });
+    container.querySelector('.dwg-dash-retry-btn')?.addEventListener('click', ()=>renderDrawingsDashboard(container, currentUser, currentRole));
+    return;
+  }
   const projMap = {};
   try { const ps = await db.collection('projects').get(); ps.docs.forEach(d=>projMap[d.id]={id:d.id,...d.data()}); } catch(_){}
   const counts = {}; DRAWING_STATUSES.forEach(s=>counts[s.id]=0);

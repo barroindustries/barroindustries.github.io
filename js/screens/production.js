@@ -144,14 +144,15 @@
        are plain top-level `const`s (script-scoped, NOT window properties
        in a browser — same caveat design.js/tasks.js/hr.js document for
        their own top-level consts) and must stay in THIS file alongside
-       their only readers. NOTE: js/ui-status-meta.js reads
+       their only readers. CORRECTION (v14 prod-fixlist audit — the note
+       that used to live here was wrong): js/ui-status-meta.js reads
        `window.PROD_STAGES` / `window.PURCH_STAT` (for its generic
-       statusBadge2() lookup) — neither name was ever assigned onto
-       `window` anywhere in the codebase (unlike CRM_STAGES, which gets an
-       explicit `window.CRM_STAGES = CRM_STAGES`), so those two lookups
-       silently return `[]`/`{}` today. Pre-existing behavior, unchanged by
-       this verbatim move — flagged separately, not fixed here (out of
-       this pass's scope: no behavior change).
+       statusBadge2() lookup), and BOTH names ARE assigned onto `window`
+       right at their declaration (`const PROD_STAGES = window.PROD_STAGES
+       = [...]` below, and `const PURCH_STAT = window.PURCH_STAT = {...}`
+       further down) — those lookups resolve correctly today. The old
+       claim that neither was ever window-assigned was simply incorrect;
+       don't "fix" this as a bug based on it.
    ═══════════════════════════════════════════════════ */
 
 // ═══════════════════════════════════════════════════
@@ -489,10 +490,15 @@ function openJobProjectDetail(p){
   const ownerDept = st.dept;
   const canAdvance = !isPartnerU && (canEditDept(ownerDept) || canEditDept('Sales'));
   const idx = JOB_STAGES.findIndex(s=>s.id===p.stage);
-  const next = (p.stage==='paid'||p.stage==='cancelled') ? null : JOB_STAGES[Math.min(idx+1, JOB_STAGES.length-2)];
+  // v14 prod-fixlist — idx===-1 (a stage string matching no JOB_STAGES id — a
+  // corrupted/legacy value) used to fall through Math.min(idx+1,...) to index 0
+  // ('won'), silently offering "Advance → Won" instead of surfacing the problem.
+  const stageUnknown = idx === -1;
+  const next = (stageUnknown || p.stage==='paid'||p.stage==='cancelled') ? null : JOB_STAGES[Math.min(idx+1, JOB_STAGES.length-2)];
   const stepper = JOB_STAGES.filter(s=>s.id!=='cancelled').map(s=>{const i=JOB_STAGES.findIndex(x=>x.id===s.id);const dn=i<idx,cur=s.id===p.stage;return `<span style="font-size:10px;padding:3px 7px;border-radius:10px;white-space:nowrap;${cur?`background:${s.color};color:var(--on-primary);font-weight:700`:dn?'background:var(--success);color:var(--on-primary)':'background:var(--surface2);color:var(--text-muted)'}">${s.icon} ${s.label}</span>`;}).join('<span style="color:var(--text-muted)">›</span>');
   const jpdPanel = openPage(`${st.icon} ${escHtml(p.clientName||p.name||'Project')}`, `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · Quote ${escHtml(p.quoteNumber||'')} · ${p.company||''}${p.split?.isShared?' · 50/50 split':''}</div>
+    ${stageUnknown?`<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>${emojiIcon('⚠️',16)} This project's stage ("${escHtml(p.stage||'')}") doesn't match any known lifecycle stage — data may be corrupted. An admin should fix it directly before advancing.</span></div>`:''}
     <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-bottom:12px">${stepper}</div>
     <div class="kpi-row" style="margin-bottom:12px">
       <div class="kpi-card"><div class="kpi-label">Contract</div><div class="kpi-value" style="font-size:14px">₱${fmt(p.contractAmount||0)}</div></div>
@@ -528,7 +534,10 @@ function openJobProjectDetail(p){
     ${!isPartnerU && (canEditDept('Production')||canEditDept('Sales')) && ['won','in_production'].includes(p.stage)?`<button class="btn-secondary" id="proj-job-btn">${emojiIcon('🏭',16)} Job Order</button>`:''}
     ${canAdvance&&next?`<button class="btn-success" id="proj-advance-btn">Advance → ${next.label}</button>`:''}
     <button class="btn-secondary" onclick="closeModal()">Close</button>`);
-  document.getElementById('proj-advance-btn')?.addEventListener('click',()=>advanceProjectStage(p, next.id));
+  document.getElementById('proj-advance-btn')?.addEventListener('click', async (e)=>{
+    const btn = e.currentTarget; btn.disabled = true; // guard against double-click double-posting
+    try { await advanceProjectStage(p, next.id); } finally { if (btn) btn.disabled = false; }
+  });
   document.getElementById('proj-bill-btn')?.addEventListener('click',()=>openProjectBillingModal(p));
   document.getElementById('proj-invoice-btn')?.addEventListener('click',()=>openJobBillingInvoiceModal(p));
   document.getElementById('proj-margin-btn')?.addEventListener('click',()=>openProjectMarginModal(p));
@@ -581,13 +590,14 @@ function openProjectMarginModal(p){
       let pp=Math.max(0,Math.min(100,parseFloat(document.getElementById('pm-pct').value)||0));
       update['split.partnerPct']=pp; update['split.barroPct']=100-pp;
     }
+    const saveBtn=document.getElementById('pm-save'); saveBtn.disabled=true; // guard against double-click double-posting
     try{
       await db.collection('job_projects').doc(p.id).update(update);
       window.logAudit && window.logAudit('update','project',p.id,{ capital:cap, partnerPct:update['split.partnerPct'] });
       // reflect locally so the reopened detail shows fresh numbers
       p.capital=cap; if(isShared){ p.split=p.split||{}; p.split.partnerPct=update['split.partnerPct']; p.split.barroPct=update['split.barroPct']; }
       closeModal(); Notifs.success('Profit factors saved'); window.renderProjectLifecycle&&window.renderProjectLifecycle();
-    }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+    }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); saveBtn.disabled=false; }
   });
 }
 
@@ -1342,6 +1352,22 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
       err.textContent='QC must pass first — run the 🔍 QC inspection before Out for Delivery.'; err.classList.remove('hidden'); return; }
     if (data.stage==='delivered' && _prevStage!=='delivered' && !e.deliveryReceipt){
       err.textContent='Record the 🧾 Delivery Receipt before marking Delivered.'; err.classList.remove('hidden'); return; }
+    // v14 prod-fixlist — a manual REGRESSION (moving the stage backward via this
+    // Edit select, e.g. delivered → layouting) used to leave e.qc/e.deliveryReceipt
+    // untouched, so re-advancing the same order a second time silently reused the
+    // OLD passed QC result / old delivery receipt instead of requiring a fresh
+    // inspection — undermining the QC gate above. Clear whichever gate data no
+    // longer applies to the new (earlier) stage.
+    if (order) {
+      const _prevIdx = PROD_STAGES.findIndex(s=>s.id===_prevStage);
+      const _newIdx  = PROD_STAGES.findIndex(s=>s.id===data.stage);
+      const _qcIdx   = PROD_STAGES.findIndex(s=>s.id==='qc');
+      const _ofdIdx  = PROD_STAGES.findIndex(s=>s.id==='out_for_delivery');
+      if (_newIdx > -1 && _prevIdx > -1 && _newIdx < _prevIdx) {
+        if (_newIdx <= _qcIdx && e.qc) data.qc = firebase.firestore.FieldValue.delete();
+        if (_newIdx <= _ofdIdx && e.deliveryReceipt) data.deliveryReceipt = firebase.firestore.FieldValue.delete();
+      }
+    }
     if (workers.length) {
       const asg = Object.assign({}, e.assignments||{});
       if (asgSel.length) asg[data.stage] = { workerIds: asgSel.map(x=>x.id), workerNames: asgSel.map(x=>x.name) };
@@ -1408,8 +1434,18 @@ async function prodOrderModal(order, currentUser, currentRole, onSaved, prefillP
 // (president/manager/finance only) corrects on-hand qty to the physical count
 // and logs an 'adjust'/'count' stock movement per corrected item.
 const PROD_COUNT_DRAFT_KEY = 'bi-prod-count-draft';
-function loadCountDraft(){ try { return JSON.parse(localStorage.getItem(PROD_COUNT_DRAFT_KEY) || '{}') || {}; } catch(e){ return {}; } }
-function saveCountDraft(d){ try { localStorage.setItem(PROD_COUNT_DRAFT_KEY, JSON.stringify(d)); } catch(e){} }
+// v14 prod-fixlist — namespaced per signed-in user. The key used to be one
+// fixed global string, so a shared shop-floor device/kiosk used by more than
+// one person during the same count cycle had one person's in-progress counts
+// silently overwritten by the next person opening the Count Form. Falls back
+// to a shared 'anon' bucket if no user is signed in yet (shouldn't happen —
+// this form is behind auth).
+function prodCountDraftKey(){
+  const uid = (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) || 'anon';
+  return PROD_COUNT_DRAFT_KEY + '-' + uid;
+}
+function loadCountDraft(){ try { return JSON.parse(localStorage.getItem(prodCountDraftKey()) || '{}') || {}; } catch(e){ return {}; } }
+function saveCountDraft(d){ try { localStorage.setItem(prodCountDraftKey(), JSON.stringify(d)); } catch(e){} }
 
 async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
   el.innerHTML = window.skeletonHtml('rows');
@@ -1519,13 +1555,17 @@ async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
   document.getElementById('cf-addrow')?.addEventListener('click',()=>{ draft.extras.push({}); persist(); renderProdInventoryForm(el,currentRole,kindFilter); });
   document.getElementById('cf-clear')?.addEventListener('click', async ()=>{
     if(!(await confirmDialog({message:'Clear all counts, remarks and header fields on this form?', danger:true}))) return;
-    localStorage.removeItem(PROD_COUNT_DRAFT_KEY); Notifs.success('Form cleared'); renderProdInventoryForm(el,currentRole,kindFilter);
+    localStorage.removeItem(prodCountDraftKey()); Notifs.success('Form cleared'); renderProdInventoryForm(el,currentRole,kindFilter);
   });
   document.getElementById('cf-print')?.addEventListener('click',()=>openInventoryCountForm(shown, loadCountDraft(), kindFilter));
 
   document.getElementById('cf-post')?.addEventListener('click', async () => {
     const d = loadCountDraft();
-    const lines = shown.map(i => {
+    // v14 prod-fixlist — post against the FULL item list, not `shown` (which is
+    // scoped to whichever kind-filter tab happens to be active). Posting used to
+    // silently skip any Finished-Goods variance while viewing the Raw Materials
+    // tab (or vice versa) with no on-screen indication anything was excluded.
+    const lines = items.map(i => {
       const c = (d.counts || {})[i.id] || {};
       const phys = parseFloat(c.physical);
       return { item: i, phys, remarks: c.remarks || '', v: varOf(i.qty, c.physical) };
@@ -1535,18 +1575,18 @@ async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
     if (!(await confirmDialog({ message:
       `Post ${lines.length} variance correction${lines.length>1?'s':''}? On-hand quantities will be set to the physical count and each correction logged in the movement history. Write-in blank rows are not posted — add those items in Inventory first.`,
       danger: true }))) return;
-    let posted = 0; const failed = [];
+    let posted = 0, dupCount = 0, noChangeCount = 0; const failed = [];
     for (const l of lines) {
       const itemRef = db.collection('inventory_items').doc(l.item.id);
       const movRef  = db.collection('stock_movements').doc(`CNT_${formNo}_${l.item.id}`);
       try {
-        await db.runTransaction(async tx => {
+        const outcome = await db.runTransaction(async tx => {
           const mov = await tx.get(movRef);
-          if (mov.exists) return;                        // this form already posted this item
+          if (mov.exists) return 'dup';                  // this Form No already posted this item
           const cur = await tx.get(itemRef);
-          if (!cur.exists) return;
+          if (!cur.exists) return 'gone';
           const sysNow = Number(cur.data().qty) || 0;    // recompute vs LIVE qty, not render-time
-          if (Math.abs(l.phys - sysNow) < 1e-9) return;  // someone already fixed it
+          if (Math.abs(l.phys - sysNow) < 1e-9) return 'nochange'; // someone already fixed it
           tx.update(itemRef, { qty: l.phys, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
           tx.set(movRef, window.buildStockMovement({
             itemId: l.item.id, itemName: l.item.name || '', type: 'adjust',
@@ -1555,15 +1595,25 @@ async function renderProdInventoryForm(el, currentRole, kindFilter='all'){
             note: `Count ${d.header?.date || ''}: system ${sysNow} → physical ${l.phys}${l.remarks ? ' — ' + l.remarks : ''}`,
             unitCost: Number(cur.data().unitCost) || null, qtyAfter: l.phys
           }));
+          return 'posted';
         });
-        posted++;
+        if (outcome === 'posted') posted++;
+        else if (outcome === 'dup') dupCount++;
+        else if (outcome === 'nochange') noChangeCount++;
       } catch (ex) { failed.push(l.item.name || l.item.id); }
     }
     if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('inventory_items');
     window.logAudit && window.logAudit('adjust', 'inventory_count', formNo, { posted, failed: failed.length });
-    Notifs.showToast(failed.length
-      ? `Posted ${posted}; failed: ${failed.join(', ')}` : `Posted ${posted} variance correction${posted===1?'':'s'} ✓`,
-      failed.length ? 'error' : 'success');
+    // v14 prod-fixlist — distinguish a genuine same-day re-count blocked by this
+    // Form No's idempotency guard (CNT_<formNo>_<itemId>) from an ordinary
+    // "nothing changed" skip, instead of both silently vanishing into a lower
+    // `posted` count with no explanation of what happened to the rest.
+    const parts = [];
+    if (posted) parts.push(`Posted ${posted} variance correction${posted===1?'':'s'}`);
+    if (dupCount) parts.push(`${dupCount} already recorded under Form No. "${formNo}" — change the Form No. above (e.g. add "-2") to post a same-day re-count`);
+    if (noChangeCount) parts.push(`${noChangeCount} already matched system qty`);
+    if (failed.length) parts.push(`failed: ${failed.join(', ')}`);
+    Notifs.showToast(parts.join(' · ') || 'Nothing to post.', failed.length ? 'error' : (posted ? 'success' : undefined));
     renderProdInventoryForm(el, currentRole, kindFilter);
   });
 }
@@ -1853,7 +1903,11 @@ function bindRfqCard(r, currentUser, currentRole, content) {
     }
     const btn = e.currentTarget; btn.disabled = true;
     try {
-      const prNo = (r.rfqNo || '').replace(/^RFQ/, 'PR') || ('PR-' + today());
+      // v14 prod-fixlist — atomic serial (same _counters-backed minter this file
+      // already uses for delivery receipts/billing invoices) instead of deriving
+      // the PR number from rfqNo via regex-replace, which inherited rfqNo's old
+      // Date.now()-suffix collision risk. Independent counter, always unique.
+      const prNo = await window.nextSerial('pr', 'PR');
       await db.collection('purchase_requisitions').doc(r.id).update({
         items, total: purchTotal(items), stage: 'pr', status: 'pending', prNo,
         approvalStatus: 'pending',            // v12 WS30 — enters the PO approval gate
@@ -1949,8 +2003,12 @@ async function openRfqModal(currentUser, onDone, prefill) {
     if (!items.length) { Notifs.showToast('Add at least one item.', 'error'); return; }
     const btn = document.getElementById('rfq-save'); btn.disabled = true;
     try {
-      const yr = window.bizYear ? window.bizYear() : new Date().getFullYear();
-      const rfqNo = `RFQ-${yr}-${String(Date.now()).slice(-4)}`;
+      // v14 prod-fixlist — atomic serial instead of `RFQ-${yr}-${Date.now().slice(-4)}`,
+      // which repeats every 10s and can collide on a busy procurement day (or via
+      // the bulk "From low stock" generator) — the collision used to propagate
+      // into the derived PR number and the CDJ reference used for duplicate
+      // detection in recordPurchaseDisbursement.
+      const rfqNo = await window.nextSerial('rfq', 'RFQ');
       await db.collection('purchase_requisitions').add({
         rfqNo, title,
         supplier: document.getElementById('rfq-supplier').value.trim(),

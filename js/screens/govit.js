@@ -122,6 +122,7 @@ function renderGovBiddings() {
       'Move a live one to Active Bids while you prepare and submit the documents.',
       'Won or closed bids move to Archive for the record.'
     ])}
+    <div id="gov-kpis">${window.skeletonHtml('rows')}</div>
     ${window.chipTabs(window.GOV_BUCKETS.map(b=>({key:b.label,label:b.label})), 'PhilGEPS', {cls:'gov-tabs'})}
     <div id="gov-content"></div>
   `;
@@ -129,6 +130,41 @@ function renderGovBiddings() {
   const loadGov = sub => renderDocCollection(document.getElementById('gov-content'), window.GOV_BUCKETS.find(b=>b.label===sub).collection, sub, currentUser, currentRole, {icon:'🏛️', dept:'Government Biddings'});
   loadGov('PhilGEPS');
   window.bindChipTabs(c.querySelector('.gov-tabs'), (key)=>loadGov(key));
+  loadGovKpis();
+}
+
+// v14 prod-fixlist — every sibling department screen (Production, Purchasing,
+// Projects) leads with a kpi-row; Gov Biddings had none despite tracking
+// potentially large contract values, and the 3-bucket model (PhilGEPS/Active
+// Bids/Archive) gave no at-a-glance win/loss read. The underlying doc already
+// carries an explicit outcome — GOV_STATUSES (departments.js openGovBidDetail)
+// includes 'won'/'lost' as real status values set from the bid-detail edit —
+// so a win-rate KPI is derivable today with no schema change. A "filter
+// Archive by outcome" control would live inside window.renderDocCollection
+// (departments.js, out of scope for this file); this KPI strip is read-only
+// and additive, no cross-file dependency.
+async function loadGovKpis(){
+  const el = document.getElementById('gov-kpis');
+  if (!el) return;
+  try {
+    const snaps = await Promise.all(window.GOV_BUCKETS.map(b => db.collection(b.collection).get()));
+    const all = snaps.flatMap(s => s.docs.map(d => d.data()));
+    const won  = all.filter(d => d.status === 'won').length;
+    const lost = all.filter(d => d.status === 'lost').length;
+    const decided = won + lost;
+    const winRate = decided ? Math.round((won / decided) * 100) : null;
+    const active = all.filter(d => !['won','lost','cancelled'].includes(d.status || 'active')).length;
+    el.innerHTML = `
+      <div class="kpi-row" style="margin-bottom:14px">
+        <div class="kpi-card"><div class="kpi-label">Total Bids</div><div class="kpi-value">${all.length}</div></div>
+        <div class="kpi-card accent"><div class="kpi-label">Active</div><div class="kpi-value">${active}</div></div>
+        <div class="kpi-card green"><div class="kpi-label">Won</div><div class="kpi-value">${won}</div></div>
+        <div class="kpi-card ${lost?'red':''}"><div class="kpi-label">Lost</div><div class="kpi-value">${lost}</div></div>
+        <div class="kpi-card"><div class="kpi-label">Win Rate</div><div class="kpi-value">${winRate==null?'—':winRate+'%'}</div></div>
+      </div>`;
+  } catch(_) {
+    el.innerHTML = ''; // non-critical summary strip — fail quiet, the bucket tabs below still work
+  }
 }
 
 // ══════════════════════════════════════════════════
@@ -216,7 +252,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
             <div class="item-card">
               <div class="item-top">
                 <div class="item-title">${escHtml(t.title||'Untitled')}</div>
-                <span class="badge ${t.priority==='high'?'badge-red':t.priority==='medium'?'badge-orange':'badge-gray'}">${t.priority||'low'}</span>
+                <span class="badge ${(t.priority==='high'||t.priority==='urgent')?'badge-red':t.priority==='medium'?'badge-orange':'badge-gray'}">${t.priority||'low'}</span>
               </div>
               <div class="item-meta">
                 <span>${escHtml(t.category||'General')}</span>
@@ -267,7 +303,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
           </div>
           <div class="item-meta">
             <span class="badge badge-blue" style="font-size:10px">${escHtml(t.category||'General')}</span>
-            <span class="badge ${t.priority==='high'?'badge-red':t.priority==='medium'?'badge-orange':'badge-gray'}" style="font-size:10px">${t.priority||'low'} priority</span>
+            <span class="badge ${(t.priority==='high'||t.priority==='urgent')?'badge-red':t.priority==='medium'?'badge-orange':'badge-gray'}" style="font-size:10px">${t.priority||'low'} priority</span>
             ${t.requestedBy?`<span>${emojiIcon('👤',16)} ${escHtml(t.requestedBy)}</span>`:''}
             ${t.assignedTo?`<span>${emojiIcon('🔧',16)} ${escHtml(t.assignedTo)}</span>`:''}
           </div>
@@ -290,7 +326,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
             <select id="it-t-cat"><option>Hardware</option><option>Software</option><option>Network</option><option>Access / Accounts</option><option>Printer</option><option>Other</option></select>
           </div>
           <div class="form-group"><label>Priority</label>
-            <select id="it-t-pri"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
+            <select id="it-t-pri"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="urgent">Urgent</option></select>
           </div>
         </div>
         <div class="form-group"><label>Description</label><textarea id="it-t-desc" rows="4" placeholder="What's happening? Include any error messages."></textarea></div>
@@ -356,7 +392,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
       <div class="card"><div class="table-wrap"><table class="data-table table-cards">
         <thead><tr><th>Name</th><th>Type</th><th>Serial / ID</th><th>Assigned To</th><th>Status</th><th>Purchased</th>${canEdit?'<th></th>':''}</tr></thead>
         <tbody id="it-asset-tbody">
-          ${!assets.length?`<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px">No assets recorded</td></tr>`
+          ${!assets.length?`<tr><td colspan="${canEdit?7:6}" style="text-align:center;color:var(--text-muted);padding:20px">No assets recorded</td></tr>`
             :assets.map(assetRowHtml).join('')}
         </tbody>
       </table></div></div>`;
@@ -475,7 +511,7 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
       <div class="card"><div class="table-wrap"><table class="data-table table-cards">
         <thead><tr><th>Software</th><th>Vendor</th><th>License Type</th><th>License Key / ID</th><th>Seats</th><th>Expiry</th><th>Status</th>${canEdit?'<th></th>':''}</tr></thead>
         <tbody>
-          ${!items.length?`<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:20px">No software records</td></tr>`
+          ${!items.length?`<tr><td colspan="${canEdit?8:7}" style="text-align:center;color:var(--text-muted);padding:20px">No software records</td></tr>`
             :items.map(s=>{
               // Compare date strings against today() (Manila-anchored) instead of raw
               // new Date() math, which drifts a day when the device TZ isn't Manila
@@ -624,7 +660,9 @@ async function loadITContent(currentUser, currentRole, sub, canEdit) {
               <td class="tc-net"><span class="badge ${r.status==='active'?'badge-green':'badge-gray'}">${r.status||'active'}</span></td>
               <td class="tc-detail" data-label="Granted By">${escHtml(r.grantedBy||'—')}</td>
               <td class="tc-detail" data-label="Date">${r.date||'—'}</td>
-              ${canEdit?`<td class="tc-actions"><button class="btn-sm btn-danger revoke-access-btn" data-id="${r.id}" data-emp="${escHtml(r.employee||'this user')}" style="font-size:11px;padding:3px 8px">Revoke</button></td>`:''}
+              ${canEdit?`<td class="tc-actions">${r.status==='revoked'
+                ? `<span style="font-size:11px;color:var(--text-muted)">Revoked</span>`
+                : `<button class="btn-sm btn-danger revoke-access-btn" data-id="${r.id}" data-emp="${escHtml(r.employee||'this user')}" style="font-size:11px;padding:3px 8px">Revoke</button>`}</td>`:''}
             </tr>`).join('')}
         </tbody>
       </table></div></div>`;
@@ -758,7 +796,7 @@ function openITTicketModal(ticket, currentUser, canEdit, onRefresh) {
     <div style="margin-bottom:12px">
       <div class="item-meta" style="gap:8px;margin-bottom:8px">
         <span class="badge ${window.statusBadgeClass('it_ticket', ticket.status||'open')}">${window.statusLabel2('it_ticket', ticket.status||'open')}</span>
-        <span class="badge ${ticket.priority==='high'?'badge-red':ticket.priority==='medium'?'badge-orange':'badge-gray'}">${ticket.priority||'low'} priority</span>
+        <span class="badge ${(ticket.priority==='high'||ticket.priority==='urgent')?'badge-red':ticket.priority==='medium'?'badge-orange':'badge-gray'}">${ticket.priority||'low'} priority</span>
         <span class="badge badge-blue" style="font-size:10px">${escHtml(ticket.category||'General')}</span>
       </div>
       ${ticket.description?`<p style="font-size:13px;margin-bottom:12px;white-space:pre-wrap">${escHtml(ticket.description)}</p>`:''}
