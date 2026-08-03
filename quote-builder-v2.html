@@ -3091,7 +3091,10 @@ function loadFromStorage(){
   // ran) is a real unfiled draft, ask instead of discarding it silently.
   renderItems();
   updatePrintHeader();
-  checkDraftResume();
+  // reopen=1 → the parent is about to LOAD_QUOTE an existing revision, which
+  // is authoritative — never offer a stale local draft over it (owner report:
+  // "new revision keeps opening first draft").
+  if (!new URLSearchParams(location.search).has('reopen')) checkDraftResume();
 }
 
 // ═══════════════════════════════════════════════════════════════════

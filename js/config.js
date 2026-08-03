@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.5';
+window.APP_VERSION = '14.0.6';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1566,7 +1566,7 @@ window.BRAND = {
 
   logo: {
     wordmark:  'icons/bi-logo.svg',          // in-app splash/login/topbar
-    print:     'icons/barro-industries.png', // print-document header logo (WS14)
+    print:     'icons/barro-kitchens.png',   // print-document header logo — BK cube logo (owner-supplied 2026-08-03)
     pwaIcon:   'icons/icon-192.png',         // PWA/apple-touch
     pushBadge: 'icons/icon-192.png'          // FCM badge (retires icons/barro-logo.png)
   },

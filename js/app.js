@@ -1443,6 +1443,11 @@ function renderQuoteBuilderIframe() {
   // A "Reopen" action from the Quotations list stashes the quote's editable
   // snapshot here — load it into the builder once the iframe is ready.
   const reopenState = window._qbReopenState; window._qbReopenState = null;
+  // Owner report 2026-08-03: a stale localStorage draft's Resume banner could
+  // override the loaded revision ("new revision opens the first draft").
+  // Reopen/revision loads are AUTHORITATIVE: flag them in the URL so the
+  // builder suppresses the draft-resume banner entirely for this boot.
+  if (reopenState) qbSrc += (qbSrc.includes('?') ? '&' : '?') + 'reopen=1';
   const reopenAsRevision = window._qbReopenAsRevision; window._qbReopenAsRevision = false;
   // President-review mode: editing a partner's quote to hand it back. The edits
   // are saved to the SAME (partner-owned) quote doc, not a new president copy.
