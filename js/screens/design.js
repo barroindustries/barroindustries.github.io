@@ -246,7 +246,10 @@ window.openProjectDetail = function(p, currentUser, currentRole, canBill, initia
   // themselves before reopening, so by the time THIS function runs the stack is
   // always either empty (first drill-in) or was just cleared — a plain push is
   // therefore always correct here; never opts.replace.
-  openPage(escHtml(p.name||'Project'), `
+  // openPage's _setPanelTitle renders the title via textContent (already
+  // XSS-safe); escHtml here DOUBLE-encoded it, so an apostrophe showed as
+  // '&#39;' literally in the title (owner screenshot). Pass the raw name.
+  openPage((p.name||'Project'), `
     <div class="item-meta" style="margin-bottom:10px;flex-wrap:wrap;gap:8px">
       <span class="badge ${statusBadge(p.status)}">${escHtml(p.status||'active')}</span>
       ${p.client?`<span>${emojiIcon('👤',16)} ${escHtml(p.client)}</span>`:''}
