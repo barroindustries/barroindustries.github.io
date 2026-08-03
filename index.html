@@ -179,7 +179,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.175 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.176 · Barro Industries</div>
   </div>
 </div>
 
@@ -407,8 +407,9 @@
      after departments.js: calls its shared helpers (canEditDept,
      deptContainer, dbCachedGet, openSalesOrderModal, renderClientProfiles,
      etc.) by window.*/bare-global name at runtime only, never at parse
-     time; departments.js's renderBrilliantSteel/loadBSContent (still there)
-     reaches forward into this file's renderBSQuotationsSummary the same way. -->
+     time; js/screens/partners.js's renderBrilliantSteel/loadBSContent (moved
+     there in Wave 7 Pass 6, loads after this file) reaches forward into this
+     file's renderBSQuotationsSummary the same way. -->
 <script defer src="js/screens/sales.js"></script>
 <!-- v14 Wave 7 Pass 3 — HR + Payroll screens (HR hub, payroll management +
      reconciliation, HR profiles, worker payslips), split verbatim out of
@@ -443,6 +444,19 @@
      at parse time; departments.js's renderDocCollection reaches forward into
      this file's window.GOV_BUCKETS the same way. -->
 <script defer src="js/screens/govit.js"></script>
+<!-- v14 Wave 7 Pass 6 — Brilliant Steel + Partners screens, split verbatim
+     out of js/departments.js (Brilliant Steel: renderBrilliantSteel,
+     loadBSContent, renderBSFiles, renderBSClientData) and js/app.js
+     (Partners dept + partner portal: renderPartnersDept, loadPartnersDeptTab,
+     _showAddDealModal, renderPartnerDashboard, renderPartnerProjects,
+     PARTNER_STAGE). Must load after departments.js: calls its shared helpers
+     (deptContainer, dbCachedGet, renderClientProfiles, renderFileCollection/
+     bindFileCollection, statusBadgeClass/statusLabel2, window.getBsQuotesOrdered,
+     etc.) by window.*/bare-global name at runtime only, never at parse time;
+     departments.js's renderApprovals ('quote-files' chip) and sales.js's
+     bindQuoteActions reach forward into this file's renderBrilliantSteel/
+     loadBSContent/renderBSQuotationsSummary caller the same way. -->
+<script defer src="js/screens/partners.js"></script>
 <!-- v13 Phase 37 — one-time/rare president maintenance tools, split out of
      departments.js for hot-file size. Plain deferred script (not the
      dynamic-import lazy-load V13-PLAN.md sketched) — simpler safe variant

@@ -2532,11 +2532,22 @@ html.theme-astral #mini-cal td.today {
      hamburger (#topbar-menu-btn → profile drawer) is redundant now that tapping
      the avatar opens that same drawer — hide it to declutter the top. */
   #topbar-menu-btn { display: none !important; }
-  #sidebar { transform: translateX(-100%); top: env(safe-area-inset-top, 0px); }
+  /* v14 hotfix: the drawer + top strip must OWN the notch band — anchoring
+     them below env(safe-area-inset-top) left a transparent strip where page
+     content visibly scrolled through (iPhone report 2026-08-03). Anchor at 0
+     and pad the inset instead. */
+  #sidebar { transform: translateX(-100%); top: 0; padding-top: env(safe-area-inset-top, 0px); }
   /* z-index 96 = above top-nav-strip (94) so user info is fully visible */
   #sidebar.open { transform: translateX(0); box-shadow: 4px 0 48px rgba(0,0,0,0.60); z-index: var(--z-shell-open); }
   .menu-toggle { display: block; }
-  .top-nav-strip { top: env(safe-area-inset-top, 0px); }
+  .top-nav-strip {
+    top: 0;
+    height: calc(var(--top-nav-h) + env(safe-area-inset-top, 0px));
+    padding-top: env(safe-area-inset-top, 0px);
+    /* opaque underlay: --topbar-bg may be translucent (glass themes); content
+       must never show through the fixed shell */
+    background: linear-gradient(var(--topbar-bg), var(--topbar-bg)), var(--bg);
+  }
   .main-content {
     margin-left: 0;
     margin-top: calc(var(--top-nav-h) + env(safe-area-inset-top, 0px));
@@ -5073,7 +5084,10 @@ html.theme-astral .nav-item.active { background: rgba(255,45,120,0.12); color: v
   padding-bottom: env(safe-area-inset-bottom, 0px);
   padding-left: max(4px, env(safe-area-inset-left, 0px));
   padding-right: max(4px, env(safe-area-inset-right, 0px));
-  background: var(--bottom-nav-bg);
+  /* v14 hotfix: opaque underlay — --bottom-nav-bg can be translucent (glass
+     themes) and page content was visibly bleeding through the bar + the
+     home-indicator band on iPhone (2026-08-03 report). */
+  background: linear-gradient(var(--bottom-nav-bg), var(--bottom-nav-bg)), var(--bg);
   border-radius: 0;
   border: none;
   border-top: 1px solid var(--border);

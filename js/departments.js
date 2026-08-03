@@ -4093,87 +4093,16 @@ async function downloadJPEG() {
 // #FF9F0A -> var(--warning,#FF9F0A) token swaps), and what deliberately
 // stayed here.
 
-// ══════════════════════════════════════════════════
-//  BRILLIANT STEEL
-// ══════════════════════════════════════════════════
-// ══════════════════════════════════════════════════
-//  BRILLIANT STEEL — Main Module (v3)
-// ══════════════════════════════════════════════════
-
-window.renderBrilliantSteel = async function(currentUser, currentRole, subtab = 'Quotations Summary') {
-  const c = deptContainer();
-  const tabs = ['Quote Builder','Quotations Summary','Client Data','Files'];
-  c.innerHTML = `
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
-      <span style="font-size:22px">${emojiIcon('⚙️',22)}</span>
-      <div>
-        <h2 style="font-size:18px;font-weight:800;color:#37474f">Brilliant Steel</h2>
-        <p style="font-size:11px;color:var(--text-muted)">Partner Company Operations</p>
-      </div>
-    </div>
-    <div class="subtab-bar" style="flex-wrap:wrap">
-      ${tabs.map(s => `<button class="subtab-btn ${s===subtab?'active':''}" data-sub="${s}">${s}</button>`).join('')}
-    </div>
-    <div id="bs-content">${window.skeletonHtml('rows')}</div>
-  `;
-  if (window.lucide) lucide.createIcons({ nodes: [c] });
-  loadBSContent(currentUser, currentRole, subtab);
-  c.querySelectorAll('.subtab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      c.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      loadBSContent(currentUser, currentRole, btn.dataset.sub);
-    });
-  });
-};
-
-async function loadBSContent(currentUser, currentRole, sub) {
-  const content = document.getElementById('bs-content');
-  switch(sub) {
-    case 'Quote Builder':      navigateTo('bs-quote-builder'); break;
-    case 'Quotations Summary': await renderBSQuotationsSummary(content, currentUser, currentRole); break;
-    // Partners keep the quote-derived accordion (already scoped by bs_quotes
-    // rules); internal staff get the unified CRM hub with stages/follow-ups/timeline.
-    case 'Client Data': {
-      const partnerView = currentRole === 'partner' ||
-        ((window.currentDepts || []).length === 1 && (window.currentDepts || [])[0] === 'Brilliant Steel');
-      if (partnerView) await renderBSClientData(content, currentUser, currentRole);
-      else await renderClientProfiles(content, currentUser, currentRole, 'brilliant-steel');
-      break;
-    }
-    case 'Files':              renderBSFiles(content, currentUser, currentRole); break;
-  }
-}
-
-function renderBSFiles(container, currentUser, currentRole) {
-  container.innerHTML = `
-    <div class="subtab-bar" id="bs-files-tabs" style="margin-bottom:14px">
-      <button class="subtab-btn active" data-sub="Quotations">${emojiIcon('📋',16)} Quotations</button>
-      <button class="subtab-btn" data-sub="Images">${emojiIcon('🖼',16)} Images</button>
-      <button class="subtab-btn" data-sub="Drawings">${emojiIcon('📐',16)} Drawings</button>
-      <button class="subtab-btn" data-sub="Documents">${emojiIcon('📄',16)} Documents</button>
-    </div>
-    <div id="bs-files-content"></div>
-  `;
-  if (window.lucide) lucide.createIcons({ nodes: [container] });
-  const load = async sub => {
-    const fc = document.getElementById('bs-files-content');
-    if (sub === 'Quotations') {
-      await renderBSQuotationFiles(fc, currentUser, currentRole);
-    } else {
-      fc.innerHTML = renderFileCollection(`${sub}`, `bs-${sub.toLowerCase()}`, currentRole);
-      bindFileCollection(`bs-${sub.toLowerCase()}`, currentUser, 'Brilliant Steel', sub);
-    }
-  };
-  load('Quotations');
-  container.querySelectorAll('#bs-files-tabs .subtab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      container.querySelectorAll('#bs-files-tabs .subtab-btn').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      load(btn.dataset.sub);
-    });
-  });
-}
+// BRILLIANT STEEL (main tabs) — moved verbatim to js/screens/partners.js
+// (Wave 7 Pass 6, 2026-08-03): window.renderBrilliantSteel, loadBSContent,
+// renderBSFiles, renderBSClientData. renderBSQuotationFiles/
+// getBsQuotesOrdered/invalidateBsQuotesCache stay here (see their own
+// comments below) — genuinely shared with Approvals' 'quote-files' chip and
+// with sales.js's bindQuoteActions, called as bare globals from partners.js
+// the same cross-file, runtime-only way every other pass documents. See
+// partners.js's header for the full contents list and the 8-point changes
+// made (hand-rolled .subtab-bar → chipTabs on both the top-level 4-tab bar
+// and the Files sub-bar).
 
 // Shared cached bs_quotes read (createdAt-desc, ordered) for the two BS tabs
 // that use the identical isPrivileged/query shape (Files + Client Data).
@@ -4291,7 +4220,12 @@ async function renderBSQuotationFiles(container, currentUser, currentRole) {
       ) : folders);
     });
   } catch(err) {
-    container.innerHTML = `<div class="empty-state"><p>Error: ${err.message}</p></div>`;
+    // 8-point #3 (Wave 7 Pass 6) — was a bare "Error: {message}" with no way
+    // to recover short of re-navigating; matches the retry idiom every other
+    // pass's screens use (govit.js/production.js/sales.js).
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('⚠️',44)}</div><h4>Couldn't load quotation files</h4><p>${escHtml(err.message||String(err))}</p><button type="button" class="btn-secondary btn-sm bsqf-retry-btn" style="margin-top:14px">Retry</button></div>`;
+    container.querySelector('.bsqf-retry-btn')?.addEventListener('click', () => renderBSQuotationFiles(container, currentUser, currentRole));
+    if (window.lucide) lucide.createIcons({ nodes: [container] });
   }
 }
 
@@ -4717,132 +4651,11 @@ async function transferOrderToProduction(o){
 
 // bindQuoteActions — moved verbatim to js/screens/sales.js (Wave 7 Pass 2, 2026-08-03), next to renderBSQuotationsSummary which it serves.
 
-// ── Brilliant Steel Client Data ────────────────────
-async function renderBSClientData(container, currentUser, currentRole) {
-  container.innerHTML = window.skeletonHtml('cards');
-  // See-everyone's-clients requires admin or Sales-dept membership — a bare
-  // 'employee' whose only dept is Brilliant Steel must NOT see every client's
-  // PII (mirrors renderBSQuotationFiles/renderBSQuotationsSummary's gate).
-  const isPrivileged = currentRole === 'president' || currentRole === 'owner' || currentRole === 'manager'
-    || (currentRole === 'employee' && (window.currentDepts || []).includes('Sales'));
-  try {
-    const snap = await window.getBsQuotesOrdered(currentUser, isPrivileged);
-    const quotes = snap.docs.map(d=>({id:d.id,...d.data()}));
-
-    // Build unique client map
-    const clientMap = {};
-    quotes.forEach(q => {
-      const key = (q.clientName||'').trim().toLowerCase() || q.id;
-      if (!clientMap[key]) {
-        clientMap[key] = {
-          name: q.clientName||'Unnamed',
-          company: q.clientCompany||'',
-          address: q.clientAddress||'',
-          contact: q.clientContact||q.clientPhone||'',
-          email: q.clientEmail||'',
-          tin: q.clientTin||'',
-          quotes: [],
-          totalValue: 0,
-          lastActivity: q.createdAt?.seconds||0
-        };
-      }
-      clientMap[key].quotes.push(q);
-      clientMap[key].totalValue += (q.total||q.grandTotal||0);
-      if ((q.createdAt?.seconds||0) > clientMap[key].lastActivity) {
-        clientMap[key].lastActivity = q.createdAt?.seconds||0;
-        clientMap[key].email = q.clientEmail || clientMap[key].email;
-        clientMap[key].contact = q.clientContact||q.clientPhone || clientMap[key].contact;
-        clientMap[key].company = q.clientCompany || clientMap[key].company;
-        clientMap[key].address = q.clientAddress || clientMap[key].address;
-        clientMap[key].tin = q.clientTin || clientMap[key].tin;
-      }
-    });
-
-    const clients = Object.values(clientMap).sort((a,b) => b.lastActivity - a.lastActivity);
-
-    if (!clients.length) {
-      container.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('👤',44)}</div><h4>No client data yet</h4><p style="color:var(--text-muted);font-size:13px">Clients will appear here once quotations are filed.</p></div>`;
-      if (window.lucide) lucide.createIcons({ nodes: [container] });
-      return;
-    }
-
-    let searchVal = '';
-    const render = (list) => {
-      const wrap = container.querySelector('#bs-client-list');
-      if (!wrap) return;
-      if (!list.length) { wrap.innerHTML = '<div class="empty-state"><p>No clients match your search.</p></div>'; return; }
-      wrap.innerHTML = list.map((cl,i) => `
-        <div class="card" style="margin-bottom:10px">
-          <div class="card-header" style="cursor:pointer;user-select:none" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
-            <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0">
-              <div style="width:38px;height:38px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-weight:800;color:white;font-size:15px;flex-shrink:0">${(cl.name[0]||'?').toUpperCase()}</div>
-              <div style="min-width:0">
-                <div style="font-weight:700;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(cl.name)}</div>
-                ${cl.company?`<div style="font-size:11px;color:var(--text-muted)">${escHtml(cl.company)}</div>`:''}
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
-              <span class="badge badge-blue">${cl.quotes.length} quote${cl.quotes.length!==1?'s':''}</span>
-              <span style="font-size:13px;font-weight:700;color:var(--success)">₱${window.fmtN2(cl.totalValue)}</span>
-              <span style="color:var(--text-muted);font-size:16px">›</span>
-            </div>
-          </div>
-          <div class="card-body" style="display:none;padding-top:0">
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-bottom:12px;padding-top:10px;border-top:1px solid var(--border)">
-              ${cl.address?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">Address</div><div style="font-size:13px;margin-top:2px">${escHtml(cl.address)}</div></div>`:''}
-              ${cl.contact?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">Contact</div><div style="font-size:13px;margin-top:2px">${escHtml(cl.contact)}</div></div>`:''}
-              ${cl.email?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">Email</div><div style="font-size:13px;margin-top:2px">${escHtml(cl.email)}</div></div>`:''}
-              ${cl.tin?`<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px">TIN</div><div style="font-size:13px;margin-top:2px">${escHtml(cl.tin)}</div></div>`:''}
-            </div>
-            <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);letter-spacing:.4px;margin-bottom:8px">Quotation History</div>
-            <div class="table-wrap"><table class="data-table table-cards">
-              <thead><tr><th>Quote #</th><th>Amount</th><th>Status</th><th>Date</th>${isPrivileged?'<th>By</th>':''}<th></th></tr></thead>
-              <tbody>${cl.quotes.map(q=>{
-                const ts = q.createdAt?.toDate?q.createdAt.toDate().toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}):'';
-                const status = q.status||q.approvalStatus||'draft';
-                const badge = window.statusBadgeClass('quote', status);
-                return `<tr class="bsq-row">
-                  <td class="tc-name"><code>${escHtml(q.quoteNumber||q.id.slice(-8))}</code> <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
-                  <td class="tc-net" style="font-weight:600">₱${window.fmtN2(q.total||q.grandTotal||0)}</td>
-                  <td class="tc-detail" data-label="Status"><span class="badge ${badge}">${window.statusLabel2('quote', status)}</span></td>
-                  <td class="tc-detail" data-label="Date" style="color:var(--text-muted);font-size:11px">${ts}</td>
-                  ${isPrivileged?`<td class="tc-detail" data-label="By" style="font-size:12px;color:var(--text-muted)">${escHtml(q.agentName||q.createdByName||'—')}</td>`:''}
-                  <td class="tc-actions" style="white-space:nowrap">${q.editableState?`<button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.reopenQuoteFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Open this quote in the builder to edit — re-filing saves a new copy">↻ Reopen &amp; Edit</button> <button class="btn-secondary btn-sm" onclick="event.stopPropagation();window.newRevisionFromDoc('bs_quotes','${q.id}','bs-quote-builder')" title="Start a new revision (R2, R3…) with today's date">${emojiIcon('⎘',16)} New Revision</button>`:'<span style="font-size:10px;color:var(--text-muted)">no snapshot</span>'}</td>
-                </tr>`;
-              }).join('')}</tbody>
-            </table></div>
-          </div>
-        </div>
-      `).join('');
-      if (window.lucide) lucide.createIcons({ nodes: [wrap] });
-      wrap.querySelectorAll('tr.bsq-row').forEach(tr => tr.addEventListener('click', (ev) => {
-        if (ev.target.closest('button, a')) return;
-        tr.classList.toggle('tc-expanded');
-      }));
-    };
-
-    container.innerHTML = `
-      <div class="page-header" style="margin-bottom:14px">
-        <h3 style="font-size:15px;font-weight:700">${emojiIcon('👤',15)} Client Data <span style="font-size:12px;font-weight:400;color:var(--text-muted)">${clients.length} client${clients.length!==1?'s':''}</span></h3>
-        <input id="bs-client-search" placeholder="Search clients…" class="ms-input" style="max-width:260px"/>
-      </div>
-      <div id="bs-client-list"></div>
-    `;
-    if (window.lucide) lucide.createIcons({ nodes: [container] });
-    render(clients);
-
-    container.querySelector('#bs-client-search').addEventListener('input', e => {
-      const q = e.target.value.toLowerCase();
-      render(q ? clients.filter(cl =>
-        cl.name.toLowerCase().includes(q) ||
-        (cl.company||'').toLowerCase().includes(q) ||
-        (cl.address||'').toLowerCase().includes(q)
-      ) : clients);
-    });
-  } catch(err) {
-    container.innerHTML = `<div class="empty-state"><p>Error loading clients: ${err.message}</p></div>`;
-  }
-}
+// Brilliant Steel Client Data — moved verbatim to js/screens/partners.js
+// (Wave 7 Pass 6, 2026-08-03): async function renderBSClientData. Called
+// from partners.js's own loadBSContent (bare-global, same file) and reads
+// window.getBsQuotesOrdered, which stays here (see its comment above) —
+// same cross-file, runtime-only resolution every other pass documents.
 
 // ══════════════════════════════════════════════════
 //  OWNER — APPROVAL REQUESTS
