@@ -371,6 +371,19 @@ const JOB_STAGES = [
 function jobStage(id){ return JOB_STAGES.find(s=>s.id===id) || JOB_STAGES[0]; }
 const _isFinAdmin = () => ['president','owner','manager','finance'].includes(window.currentRole) || (window.currentDepts||[]).includes('Finance');
 
+// Sales→Production handoff (owner's rule, 2026-08) — Production staff see WHAT to
+// build (items, target date, priority, notes) and stage/status, never the deal's
+// money (contract/AR/collected/margin/split/invoices). There is no dedicated
+// 'production' system role (window.ROLES has none — see js/config.js) so this is
+// keyed off department membership, same "role OR sole-department" shape isPartnerU
+// uses elsewhere in this file: true only for genuine Production-dept staff who
+// aren't ALSO Finance/Sales/admin/president (those keep the full money view).
+function isProductionOnlyViewer(){
+  if (_isFinAdmin()) return false;         // president/owner/manager/finance role, or Finance dept
+  if (canEditDept('Sales')) return false;  // Sales dept members (or admin roles) keep the money view
+  return canEditDept('Production');        // true only for Production-dept members
+}
+
 // Create the master project when a quote is won (called from the Sales Order flow).
 async function createJobProject(d){
   const ym=(window.bizDate?window.bizDate():new Date().toISOString().slice(0,10)).slice(2,7).replace('-','');
@@ -396,6 +409,13 @@ async function createJobProject(d){
     // openSalesOrderModal (js/departments.js), so Production can see WHAT to
     // build here without dereferencing back to a possibly-stale quote revision.
     items: Array.isArray(d.items) ? d.items : [],
+    // Sales→Production handoff (owner's rule, 2026-08) — carried forward from
+    // openSalesOrderModal the same way `items` is above. May still be blank at
+    // creation time (Sales doesn't always know these yet); the actual gate is
+    // enforced later at the "To Production" handoff (js/departments.js
+    // transferOrderToProduction / ensureProdHandoffFields).
+    targetDate: d.targetDate || null, priority: d.priority || null, notes: d.notes || '',
+    acknowledgedAt: null, acknowledgedBy: null,
     partnerUid,
     split:{ isShared: company==='BS', barroPct:50, partnerPct:50 },
     documents:[{ type:'Quotation', ref:d.qno||'', at:new Date().toISOString(), by:who }],
@@ -412,6 +432,9 @@ window.renderProjectLifecycle = async function(){
   const c = deptContainer(); if(!c) return;
   c.innerHTML=window.skeletonHtml('cards');
   const isPartnerU = currentRole==='partner' || (currentDepts||[]).length===1 && currentDepts[0]==='Brilliant Steel';
+  // Sales→Production handoff (owner's rule) — Production-only viewers get WHAT to
+  // build + target date/priority/stage, never contract/AR/collected figures.
+  const showMoney = !isProductionOnlyViewer();
   // Primary data (job_projects) errors surface as a retry block — a permission
   // failure used to render identically to "no projects" via the old blanket
   // .catch(()=>({docs:[]})). The design-board read below stays a soft-fail
@@ -450,7 +473,9 @@ window.renderProjectLifecycle = async function(){
       <div style="flex:1;min-width:0">
         <div style="font-weight:700;font-size:13px">${escHtml(p.clientName||p.name||'Project')}</div>
         <div style="font-size:11px;color:var(--text-muted);margin-top:2px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · ${escHtml(p.quoteNumber||'')} · <span class="badge ${p.company==='BK'?'badge-orange':'badge-gray'}" style="font-size:9px">${p.company||''}</span>${p.split?.isShared?' <span class="badge badge-blue" style="font-size:9px">50/50</span>':''}</div>
-        <div style="font-size:11px;margin-top:3px">Contract ₱${fmt(p.contractAmount||0)} · <span style="color:${Math.max(0,(p.contractAmount||0)-(p.amountCollected||0))>0?'var(--warning)':'var(--success)'}">AR ₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}</span></div>
+        ${showMoney
+          ? `<div style="font-size:11px;margin-top:3px">Contract ₱${fmt(p.contractAmount||0)} · <span style="color:${Math.max(0,(p.contractAmount||0)-(p.amountCollected||0))>0?'var(--warning)':'var(--success)'}">AR ₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}</span></div>`
+          : (p.targetDate||p.priority) ? `<div style="font-size:11px;margin-top:3px;color:var(--text-muted)">${p.targetDate?`${emojiIcon('📅',16)} Target ${escHtml(p.targetDate)}`:''}${p.targetDate&&p.priority?' · ':''}${p.priority?escHtml(p.priority)+' priority':''}</div>` : ''}
       </div>
       <span class="badge" style="background:${st.color};color:var(--on-primary);flex-shrink:0">${st.icon} ${st.label}</span>
     </div></div>`; };
@@ -461,8 +486,9 @@ window.renderProjectLifecycle = async function(){
       <div class="kpi-card"><div class="kpi-label">Active</div><div class="kpi-value">${active.length}</div></div>
       <div class="kpi-card accent"><div class="kpi-label">In Production</div><div class="kpi-value">${inProd}</div></div>
       <div class="kpi-card"><div class="kpi-label">For Delivery</div><div class="kpi-value">${forDel}</div></div>
+      ${showMoney ? `
       <div class="kpi-card ${arTotal>0?'warn':''}"><div class="kpi-label">Receivables ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(arTotal)}</div></div>
-      <div class="kpi-card green"><div class="kpi-label">Collected ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(collected)}</div></div>
+      <div class="kpi-card green"><div class="kpi-label">Collected ₱</div><div class="kpi-value" style="font-size:15px">₱${fmt(collected)}</div></div>` : ''}
     </div>
     ${!projects.length?window.renderEmptyState({icon:'📈',title:'No projects yet',hint:'A project is created when a quote is converted to a Sales Order.'}):''}
     ${JOB_STAGES.filter(s=>!['paid','cancelled'].includes(s.id) && (byStage[s.id]||[]).length).map(s=>`
@@ -476,7 +502,7 @@ window.renderProjectLifecycle = async function(){
           <div style="flex:1;min-width:0">
             <div style="font-weight:700;font-size:13px">${escHtml(d.name||'Design project')}</div>
             <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escHtml(d.clientName||'—')}${d.stage?` · ${escHtml(d.stage)}`:''}</div>
-            <div style="font-size:11px;margin-top:3px">Contract ₱${fmt(d.contractAmount)} · Collected ₱${fmt(d.collected)} · <span style="color:${d.arBalance>0?'var(--warning)':'var(--success)'}">AR ₱${fmt(d.arBalance)}</span></div>
+            ${showMoney ? `<div style="font-size:11px;margin-top:3px">Contract ₱${fmt(d.contractAmount)} · Collected ₱${fmt(d.collected)} · <span style="color:${d.arBalance>0?'var(--warning)':'var(--success)'}">AR ₱${fmt(d.arBalance)}</span></div>` : ''}
           </div>
           <span class="badge badge-purple" style="font-size:9px;flex-shrink:0">DESIGN</span>
         </div></div>`).join('')}</div></details>`:''}`;
@@ -493,6 +519,16 @@ function openJobProjectDetail(p){
   const isPartnerU = currentRole==='partner' || (currentDepts||[]).length===1 && currentDepts[0]==='Brilliant Steel';
   const ownerDept = st.dept;
   const canAdvance = !isPartnerU && (canEditDept(ownerDept) || canEditDept('Sales'));
+  // Sales→Production handoff (owner's rule) — this viewer never sees the deal's
+  // money (contract/AR/collected/margin/split/invoices); they get WHAT to build,
+  // target date, priority, notes, and stage/status only.
+  const showMoney = !isProductionOnlyViewer();
+  // Production must acknowledge receipt of a job before they can advance its
+  // stage/status. Only gates Production-only viewers — Sales/Finance/admin can
+  // always advance, exactly as before. Stays gated across ALL Production-owned
+  // stages (in_production/for_delivery/delivered), not just the first one, since
+  // acknowledgedAt is set once and never cleared.
+  const needsAck = isProductionOnlyViewer() && ownerDept==='Production' && !p.acknowledgedAt;
   const idx = JOB_STAGES.findIndex(s=>s.id===p.stage);
   // v14 prod-fixlist — idx===-1 (a stage string matching no JOB_STAGES id — a
   // corrupted/legacy value) used to fall through Math.min(idx+1,...) to index 0
@@ -503,24 +539,33 @@ function openJobProjectDetail(p){
   const jpdPanel = openPage(`${st.icon} ${escHtml(p.clientName||p.name||'Project')}`, `
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span> · Quote ${escHtml(p.quoteNumber||'')} · ${p.company||''}${p.split?.isShared?' · 50/50 split':''}</div>
     ${stageUnknown?`<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>${emojiIcon('⚠️',16)} This project's stage ("${escHtml(p.stage||'')}") doesn't match any known lifecycle stage — data may be corrupted. An admin should fix it directly before advancing.</span></div>`:''}
+    ${needsAck?`<div class="alert-banner alert-warn" style="margin-bottom:10px"><span>${emojiIcon('⚠️',16)} Acknowledge receipt of this job before you can update its status.</span></div>`:''}
     <div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-bottom:12px">${stepper}</div>
+    ${(p.targetDate||p.priority||p.notes)?`
+    <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:10px 14px;font-size:12px">
+      ${p.targetDate?`<div style="margin-bottom:3px"><span style="color:var(--text-muted)">${emojiIcon('📅',16)} Target Date</span> <strong>${escHtml(p.targetDate)}</strong></div>`:''}
+      ${p.priority?`<div style="margin-bottom:3px"><span style="color:var(--text-muted)">Priority</span> <span class="badge ${p.priority==='Urgent'||p.priority==='High'?'badge-red':p.priority==='Low'?'badge-green':'badge-orange'}" style="font-size:9px">${escHtml(p.priority)}</span></div>`:''}
+      ${p.notes?`<div><span style="color:var(--text-muted)">Notes</span><div style="margin-top:2px">${escHtml(p.notes)}</div></div>`:''}
+    </div></div>`:''}
+    ${showMoney?`
     <div class="kpi-row" style="margin-bottom:12px">
       <div class="kpi-card"><div class="kpi-label">Contract</div><div class="kpi-value" style="font-size:14px">₱${fmt(p.contractAmount||0)}</div></div>
       <div class="kpi-card green"><div class="kpi-label">Collected</div><div class="kpi-value" style="font-size:14px">₱${fmt(p.amountCollected||0)}</div></div>
       <div class="kpi-card ${Math.max(0,(p.contractAmount||0)-(p.amountCollected||0))>0?'warn':''}"><div class="kpi-label">Balance (AR)</div><div class="kpi-value" style="font-size:14px">₱${fmt(Math.max(0,(p.contractAmount||0)-(p.amountCollected||0)))}</div></div>
-    </div>
+    </div>`:''}
     ${(p.items&&p.items.length)?`
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('📦',16)} Order Items — what to build</div>
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:0">
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>Item</th><th>Qty</th><th>Unit Price</th><th>Amount</th></tr></thead><tbody>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Item</th><th>Qty</th>${showMoney?'<th>Unit Price</th><th>Amount</th>':''}</tr></thead><tbody>
       ${p.items.map(it=>`<tr>
         <td style="font-size:12px">${escHtml(it.name||'')}${it.dims?` <span style="color:var(--text-muted)">(${escHtml(it.dims)})</span>`:''}${it.specStr?`<div style="font-size:10px;color:var(--text-muted)">${escHtml(it.specStr)}</div>`:''}</td>
         <td style="font-size:12px">${Number(it.qty)||0} ${escHtml(it.unit||'')}</td>
-        <td style="font-size:12px">₱${fmt(it.unitPrice||0)}</td>
-        <td style="font-size:12px;font-weight:600">₱${fmt(it.amount||0)}</td>
+        ${showMoney?`<td style="font-size:12px">₱${fmt(it.unitPrice||0)}</td>
+        <td style="font-size:12px;font-weight:600">₱${fmt(it.amount||0)}</td>`:''}
       </tr>`).join('')}
       </tbody></table></div>
     </div></div>`:''}
+    ${showMoney?`
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:10px 14px">
       <div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-size:12px">${emojiIcon('💰',12)} Margin &amp; Split</strong>${(!isPartnerU && (canEditDept('Sales')||_isFinAdmin()))?`<button class="btn-secondary btn-sm" id="proj-margin-btn">Edit factors</button>`:''}</div>
       <div style="font-size:12px;margin-top:6px;display:grid;grid-template-columns:1fr auto;gap:3px 12px">
@@ -529,12 +574,12 @@ function openJobProjectDetail(p){
         <span style="color:var(--text-muted)">Margin</span><span style="text-align:right;font-weight:700">₱${fmt((p.contractAmount||0)-(p.capital||0))}</span>
         ${p.split?.isShared?`<span style="color:var(--text-muted)">Partner share (${p.split?.partnerPct||50}%)</span><span style="text-align:right;font-weight:700;color:var(--success)">₱${fmt(((p.contractAmount||0)-(p.capital||0))*((p.split?.partnerPct||50)/100))}</span>`:''}
       </div>
-    </div></div>
+    </div></div>`:''}
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('📄',16)} Document Register</div>
     <div class="card" style="margin-bottom:10px"><div class="card-body" style="padding:0">
       ${(p.documents||[]).length?`<div class="table-wrap"><table class="data-table"><tbody>${(p.documents||[]).map(dc=>`<tr><td style="font-weight:600;font-size:12px">${escHtml(dc.type||'')}</td><td style="font-size:11px">${escHtml(dc.ref||'')}</td><td style="font-size:11px;color:var(--text-muted)">${dc.at?new Date(dc.at).toLocaleDateString('en-PH',{month:'short',day:'numeric'}):''} · ${escHtml(dc.by||'')}</td></tr>`).join('')}</tbody></table></div>`:'<div style="padding:12px;font-size:12px;color:var(--text-muted)">No documents yet.</div>'}
     </div></div>
-    ${(p.invoices||[]).length?`
+    ${(showMoney && (p.invoices||[]).length)?`
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin:8px 0 4px">${emojiIcon('🧾',16)} Billing Invoices</div>
     <div class="item-list" style="margin-bottom:10px">${(p.invoices||[]).slice().reverse().map(inv=>`
       <div class="item-card jinv-card" style="cursor:pointer" data-inv="${escHtml(inv.no)}">
@@ -548,11 +593,27 @@ function openJobProjectDetail(p){
     ${_isFinAdmin()&&!isPartnerU?`<button class="btn-primary" id="proj-bill-btn">${emojiIcon('💵',16)} Record Payment</button>`:''}
     ${_isFinAdmin()&&!isPartnerU&&(Number(p.contractAmount)||0)>0?`<button class="btn-secondary" id="proj-invoice-btn">${emojiIcon('🧾',16)} Billing Invoice</button>`:''}
     ${!isPartnerU && (canEditDept('Production')||canEditDept('Sales')) && ['won','in_production'].includes(p.stage)?`<button class="btn-secondary" id="proj-job-btn">${emojiIcon('🏭',16)} Job Order</button>`:''}
-    ${canAdvance&&next?`<button class="btn-success" id="proj-advance-btn">Advance → ${next.label}</button>`:''}
+    ${needsAck?`<button class="btn-success" id="proj-ack-btn">${emojiIcon('✅',16)} Acknowledge receipt</button>`:(canAdvance&&next?`<button class="btn-success" id="proj-advance-btn">Advance → ${next.label}</button>`:'')}
     <button class="btn-secondary" onclick="closeModal()">Close</button>`);
   document.getElementById('proj-advance-btn')?.addEventListener('click', async (e)=>{
     const btn = e.currentTarget; btn.disabled = true; // guard against double-click double-posting
     try { await advanceProjectStage(p, next.id); } finally { if (btn) btn.disabled = false; }
+  });
+  document.getElementById('proj-ack-btn')?.addEventListener('click', async (e)=>{
+    const btn = e.currentTarget; btn.disabled = true; // guard against double-click double-posting
+    const who = userProfile?.displayName||currentUser.email;
+    try {
+      await db.collection('job_projects').doc(p.id).update({
+        acknowledgedAt: firebase.firestore.FieldValue.serverTimestamp(), acknowledgedBy: who,
+        timeline: firebase.firestore.FieldValue.arrayUnion({ at:new Date().toISOString(), event:'Production acknowledged receipt', by:who })
+      });
+      window.logAudit && window.logAudit('update','project',p.id,{ acknowledged:true });
+      Notifs.success('Receipt acknowledged — you can now update the job\'s status.');
+      closeModal();
+      // Re-open with fresh data so the Advance control now shows.
+      const fresh = await db.collection('job_projects').doc(p.id).get();
+      if (fresh.exists) openJobProjectDetail({ id:p.id, ...fresh.data() });
+    } catch(ex){ Notifs.showToast('Failed: '+(ex.message||ex.code),'error'); if (btn) btn.disabled = false; }
   });
   document.getElementById('proj-bill-btn')?.addEventListener('click',()=>openProjectBillingModal(p));
   document.getElementById('proj-invoice-btn')?.addEventListener('click',()=>openJobBillingInvoiceModal(p));
@@ -919,6 +980,7 @@ async function loadProdContent(currentUser, currentRole, sub) {
 
 async function renderProdOrders(el, currentUser, currentRole) {
   const canEdit = canEditDept('Production');
+  const showMoney = !isProductionOnlyViewer();   // Sales→Production handoff — no contract ₱ for Production-only viewers
   el.innerHTML = window.skeletonHtml('table');
   // production_orders is this screen's PRIMARY data — a failure here now
   // propagates to loadProdContent's error-with-retry instead of silently
@@ -1001,7 +1063,9 @@ async function renderProdOrders(el, currentUser, currentRole) {
               <div style="flex:1;min-width:0">
                 <div style="font-weight:700;font-size:13px">${escHtml(p.clientName||p.name||'Project')}</div>
                 <div style="font-size:11px;color:var(--text-muted);margin-top:2px"><span style="font-family:monospace">${escHtml(p.projectNo||'')}</span>${p.quoteNumber?` · ${escHtml(p.quoteNumber)}`:''} · <span class="badge ${p.stage==='in_production'?'badge-blue':'badge-green'}" style="font-size:9px">${escHtml(jobStage(p.stage).label)}</span></div>
-                <div style="font-size:11px;margin-top:3px;color:var(--text-muted)">Contract ₱${fmt(p.contractAmount||0)}</div>
+                ${showMoney
+                  ? `<div style="font-size:11px;margin-top:3px;color:var(--text-muted)">Contract ₱${fmt(p.contractAmount||0)}</div>`
+                  : (p.targetDate||p.priority) ? `<div style="font-size:11px;margin-top:3px;color:var(--text-muted)">${p.targetDate?`${emojiIcon('📅',16)} Target ${escHtml(p.targetDate)}`:''}${p.targetDate&&p.priority?' · ':''}${p.priority?escHtml(p.priority)+' priority':''}</div>` : ''}
               </div>
               ${canEdit?`<button class="btn-primary btn-sm prod-start" data-id="${p.id}" style="flex-shrink:0;white-space:nowrap">＋ Start work order</button>`:''}
             </div>

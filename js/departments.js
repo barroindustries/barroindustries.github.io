@@ -2420,7 +2420,20 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
       </select>
       <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Only used if this order can be auto-recorded to Finance below (same treatment Finance's own Record Sale uses).</div>
     </div>
-    <div class="form-group"><label>Notes</label><textarea id="so-notes" rows="2" placeholder="Payment ref #, schedule, etc."></textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label>Target Date (for Production)</label><input id="so-target-date" type="date"/></div>
+      <div class="form-group"><label>Priority (for Production)</label>
+        <select id="so-priority" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+          <option value="">Not set yet</option>
+          <option value="Urgent">Urgent</option>
+          <option value="High">High</option>
+          <option value="Normal">Normal</option>
+          <option value="Low">Low</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="so-notes" rows="2" placeholder="Payment ref #, schedule + what/how to build, etc."></textarea></div>
+    <div style="font-size:11px;color:var(--text-muted);margin:-6px 0 8px">Target date, priority and notes must be filled in before this job can be sent to Production — set them now if you already know them, or you'll be asked for them at hand-off.</div>
     <div class="form-group"><label>Receipt / Proof of Payment</label><div id="so-receipt-upload"></div></div>
     <div id="so-err" class="error-msg hidden"></div>
   `, `<button class="btn-primary" id="so-save">Create &amp; Send to Finance</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
@@ -2433,16 +2446,22 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
     const project=document.getElementById('so-project').value.trim();
     if(!project){ err.textContent='Project is required.'; err.classList.remove('hidden'); return; }
     const dpPercent = Math.max(0, Math.min(100, parseFloat(document.getElementById('so-dp-pct').value)||0)) || null;
+    // Sales→Production handoff fields (owner's rule) — optional here (Sales may not
+    // know the target date yet), but REQUIRED before this order can actually be sent
+    // to Production; see ensureProdHandoffFields/transferOrderToProduction below.
+    const targetDate = document.getElementById('so-target-date').value || '';
+    const priority = document.getElementById('so-priority').value || '';
+    const notes = document.getElementById('so-notes').value.trim();
     try{
       // 1) create the master project (the spine that ties the whole job together)
-      const proj = await createJobProject({ ...d, total:contract, dpPercent, items: quoteItems });
+      const proj = await createJobProject({ ...d, total:contract, dpPercent, items: quoteItems, targetDate, priority, notes });
       // 2) sales order, linked to the project
       const ref=await db.collection('sales_orders').add({
         projectId:proj.id, quoteId:d.id, quoteNumber:d.qno||'', clientName:d.client||'', company:d.co||'BS',
         clientId: d.clientId || null,
         project, contractAmount:contract, paymentReceived:paid, items:quoteItems,
         paymentMethod:document.getElementById('so-method').value,
-        notes:document.getElementById('so-notes').value.trim(),
+        notes, targetDate, priority,
         receiptUrl:receipt?.url||null, receiptName:receipt?.name||null,
         status:'pending', createdBy:currentUser.uid, createdByName:userProfile?.displayName||currentUser.email,
         createdAt:firebase.firestore.FieldValue.serverTimestamp()
@@ -2756,15 +2775,66 @@ async function openRecordSaleModal(o, container){
       // 2) mark the sales order recorded
       await db.collection('sales_orders').doc(o.id).update({ status:'recorded', recordedAmount:amount, recordedAt:firebase.firestore.FieldValue.serverTimestamp(), recordedBy:who, bankAccountId: acct.bankAccountId||null, bankAccountName: acct.bankAccountName||null });
       window.logAudit&&window.logAudit('create','ledger',ledgerId,{source:'sales_order', amount, client:o.clientName});
-      // 4) optional handoff to Production
-      if(toProd) await transferOrderToProduction({ ...o, status:'recorded' });
-      closeModal(); Notifs.success(toProd?'Sale recorded + sent to Production':'Sale recorded to ledger'); window.renderSalesOrders(container);
+      // 4) optional handoff to Production — gated on the Sales→Production handoff
+      // fields (target date/priority/notes); transferOrderToProduction prompts for
+      // them inline if missing and returns false if the user cancels that prompt.
+      const sentToProd = toProd ? await transferOrderToProduction({ ...o, status:'recorded' }) : false;
+      closeModal();
+      Notifs.success(sentToProd ? 'Sale recorded + sent to Production'
+        : (toProd ? 'Sale recorded to ledger — production hand-off was not completed; use "To Production" to finish it.' : 'Sale recorded to ledger'));
+      window.renderSalesOrders(container);
     }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); saveBtn.disabled=false; }
   });
 }
 
+// Sales→Production handoff gate (owner's rule, 2026-08): "Target date + Notes +
+// Priority must ALREADY be entered by Sales" before a job can be sent to
+// Production. If any is missing on the order, blocks with an inline "fill it in
+// now" page (same fields Sales could have set on openSalesOrderModal) instead of
+// transferring silently incomplete — Production would otherwise have to chase
+// Sales for this. Returns a Promise<boolean>: true once all three are present
+// (immediately, or right after the user saves them here), false if cancelled.
+function ensureProdHandoffFields(o){
+  return new Promise(resolve=>{
+    const hasAll = !!((o.targetDate||'').trim() && (o.notes||'').trim() && (o.priority||'').trim());
+    if (hasAll) { resolve(true); return; }
+    openPage(`${emojiIcon('🏭',16)} Before sending to Production`, `
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Target date, priority and notes weren't all set on this order yet — Production needs them before the job can start.</div>
+      <div class="form-row">
+        <div class="form-group"><label>Target Date</label><input id="ph-date" type="date" value="${escHtml(o.targetDate||'')}"/></div>
+        <div class="form-group"><label>Priority</label>
+          <select id="ph-priority" style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;width:100%;background:var(--surface);color:var(--text)">
+            <option value="">Select…</option>
+            ${['Urgent','High','Normal','Low'].map(pr=>`<option value="${pr}" ${o.priority===pr?'selected':''}>${pr}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-group"><label>Notes for Production</label><textarea id="ph-notes" rows="3" placeholder="What to build, special instructions…">${escHtml(o.notes||'')}</textarea></div>
+      <div id="ph-err" class="error-msg hidden"></div>
+    `, `<button class="btn-primary" id="ph-save">Save &amp; Send to Production</button><button class="btn-secondary" id="ph-cancel">Cancel</button>`);
+    document.getElementById('ph-cancel').addEventListener('click', ()=>{ closeModal(); resolve(false); });
+    document.getElementById('ph-save').addEventListener('click', () => window.busy(document.getElementById('ph-save'), async ()=>{
+      const err=document.getElementById('ph-err');
+      const targetDate=document.getElementById('ph-date').value;
+      const priority=document.getElementById('ph-priority').value;
+      const notes=document.getElementById('ph-notes').value.trim();
+      if(!targetDate || !priority || !notes){ err.textContent='Target date, priority and notes are all required before sending to Production.'; err.classList.remove('hidden'); return; }
+      try{
+        await db.collection('sales_orders').doc(o.id).update({ targetDate, priority, notes });
+        if (o.projectId) await db.collection('job_projects').doc(o.projectId).update({ targetDate, priority, notes });
+        o.targetDate=targetDate; o.priority=priority; o.notes=notes;
+        closeModal(); resolve(true);
+      }catch(ex){ err.textContent='Save failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+    }));
+  });
+}
+
 // Advance the linked project to In Production and notify the Production team.
+// Returns false (no-op) if the Sales→Production handoff fields are missing and
+// the user cancels the fill-in prompt; true on a completed transfer.
 async function transferOrderToProduction(o){
+  const ok = await ensureProdHandoffFields(o);
+  if (!ok) return false;
   const who=userProfile?.displayName||currentUser.email;
   try{
     if(o.projectId){
@@ -2779,7 +2849,8 @@ async function transferOrderToProduction(o){
     if(o.trackingToken) window.syncOrderTracking(o.trackingToken, { status:'production' });
     try{ await Notifs.sendToDept('Production',{ title:'🏭 New job to produce', body:`${o.clientName} — sale recorded by Finance. Create the production order.`, icon:'🏭', type:'project_stage', link:'projects-lifecycle' }, { fallbackToOwner:true }); }catch(_){}
     window.logAudit&&window.logAudit('update','sales_order',o.id,{ sentToProduction:true });
-  }catch(ex){ Notifs.showToast('Transfer failed: '+(ex.message||ex.code),'error'); }
+    return true;
+  }catch(ex){ Notifs.showToast('Transfer failed: '+(ex.message||ex.code),'error'); return false; }
 }
 
 // bindQuoteActions — moved verbatim to js/screens/sales.js (Wave 7 Pass 2, 2026-08-03), next to renderBSQuotationsSummary which it serves.
