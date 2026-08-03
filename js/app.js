@@ -502,9 +502,12 @@ function initPullToRefresh() {
   const ind = document.getElementById('ptr-indicator');
   if (!mc || !ind) return;
 
-  const DEAD_ZONE    = 50;   // px ignored at the start of the drag (v14 G4 retune: 70→50)
-  const THRESHOLD    = 100;  // px past dead zone → soft refresh (navigateTo) (v14 G4 retune: 220→100)
-  const HARD_THRESH  = 200;  // px past dead zone → hard refresh (location.reload) (v14 G4 retune: 400→200)
+  // v14 accidental-touch retune (owner report): the G4 values were too easy
+  // to trip while scrolling. Bigger dead zone + higher commits + momentum
+  // guard + vertical axis-lock below = only a deliberate pull refreshes.
+  const DEAD_ZONE    = 80;   // px ignored at the start of the drag
+  const THRESHOLD    = 150;  // px past dead zone → soft refresh (navigateTo)
+  const HARD_THRESH  = 280;  // px past dead zone → hard refresh (location.reload)
   const MAX_PULL     = 450;  // visual cap
 
   // SVG ring: circumference of r=14 circle = 2π×14 ≈ 87.96
@@ -556,8 +559,13 @@ function initPullToRefresh() {
     }, 320);
   }
 
+  let _lastMcScrollAt = 0;
+  mc.addEventListener('scroll', () => { _lastMcScrollAt = Date.now(); }, { passive: true });
   mc.addEventListener('touchstart', e => {
     if (refreshing || mc.scrollTop > 2) return;
+    // momentum guard: a touch landing during/just after scroll momentum is a
+    // scroll-stop, never the start of a deliberate pull
+    if (Date.now() - _lastMcScrollAt < 200) return;
     startY    = e.touches[0].clientY;
     startTime = Date.now();
     lastDy    = 0;

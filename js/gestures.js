@@ -17,8 +17,8 @@
   'use strict';
 
   const EDGE_ZONE   = 24;   // px from the left edge that arms edge swipe-back
-  const EDGE_DX_ARM = 16;   // px of horizontal travel before we decide this is a swipe, not a scroll (v14 mobile-shell batch — was un-gated, see edgeTouchMove)
-  const EDGE_SLOPE  = 1.8;  // |dx| must exceed this multiple of |dy| to arm (v14 mobile-shell batch — raised from an implicit ~1.75 floor)
+  const EDGE_DX_ARM = 24;  // v14 accidental-touch retune: 16→24   // px of horizontal travel before we decide this is a swipe, not a scroll (v14 mobile-shell batch — was un-gated, see edgeTouchMove)
+  const EDGE_SLOPE  = 2.2; // v14 accidental-touch retune: 1.8→2.2  // |dx| must exceed this multiple of |dy| to arm (v14 mobile-shell batch — raised from an implicit ~1.75 floor)
   const DX_THRESH   = 70;   // px horizontal drag to commit to "back" / "open drawer"
   const DY_ABORT    = 40;   // px vertical drift, measured at release, that still cancels a commit
   const SHEET_DX_MQ = '(max-width: 639px)'; // matches the WS42 Phase 10 bottom-sheet breakpoint
@@ -244,9 +244,9 @@
   // panel — not modals, which stay dismissed via backdrop/Esc/Back only.
   // Starts inside the edge zone are left to edgeTouchStart above (untouched)
   // so the two gestures never race the same touch into two dismissals.
-  const PAGE_DX_ARM          = 16;   // px before we commit to "this is horizontal" (v14 mobile-shell batch — raised from 12 so vertical scrolls never feel hijacked)
-  const PAGE_SLOPE           = 1.8;  // |dx| must exceed this multiple of |dy| to arm (v14 mobile-shell batch — raised from 1.6)
-  const PAGE_VELOCITY_THRESH = 0.5;  // px/ms flick velocity that also commits
+  const PAGE_DX_ARM          = 22;  // v14 accidental-touch retune: 16→22   // px before we commit to "this is horizontal" (v14 mobile-shell batch — raised from 12 so vertical scrolls never feel hijacked)
+  const PAGE_SLOPE           = 2.2; // v14 accidental-touch retune: 1.8→2.2  // |dx| must exceed this multiple of |dy| to arm (v14 mobile-shell batch — raised from 1.6)
+  const PAGE_VELOCITY_THRESH = 0.8; // v14 accidental-touch retune: 0.5→0.8  // px/ms flick velocity that also commits
 
   let pageSwipe = null; // { el, startX, startY, lastX, lastY, armed, startTime }
 
@@ -319,7 +319,7 @@
     const dt = Math.max(1, Date.now() - pageSwipe.startTime);
     const velocity = dx / dt;
     const vw = window.innerWidth || document.documentElement.clientWidth || 1;
-    const commit = armed && dx > 0 && (dx > vw * 0.35 || velocity > PAGE_VELOCITY_THRESH);
+    const commit = armed && dx > 0 && (dx > vw * 0.42 || velocity > PAGE_VELOCITY_THRESH);  // v14 retune: 0.35→0.42vw
     if (commit) {
       // Hand off to the normal close path — its own teardown animation takes
       // over, so just drop our live-drag inline styles rather than layering
