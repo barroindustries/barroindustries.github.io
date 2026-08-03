@@ -179,7 +179,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.170 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.171 · Barro Industries</div>
   </div>
 </div>
 
@@ -395,6 +395,13 @@
      helpers (canEditDept, deptContainer, renderClientProfiles, etc.) by
      window.*/bare-global name at runtime only, never at parse time. -->
 <script defer src="js/screens/design.js"></script>
+<!-- v14 Wave 7 Pass 1 — Tasks + Submissions screens, split verbatim out of
+     departments.js. Must load after departments.js: calls departments.js's
+     shared helpers (statusBadge, canEditDept, deptContainer, etc.) by
+     window.*/bare-global name at runtime only, never at parse time; renderApprovals
+     (still in departments.js) reaches forward into this file's globals
+     (normTask, notifyTaskInvolved, openTaskDetail, renderDeptTasks) the same way. -->
+<script defer src="js/screens/tasks.js"></script>
 <!-- v13 Phase 37 — one-time/rare president maintenance tools, split out of
      departments.js for hot-file size. Plain deferred script (not the
      dynamic-import lazy-load V13-PLAN.md sketched) — simpler safe variant
