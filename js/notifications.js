@@ -644,6 +644,21 @@ window.Notifs = (() => {
   const PUSH_SNOOZE_KEY   = 'bi_push_snooze_until';   // ms epoch; don't re-ask before this
   const PUSH_SNOOZE_MS    = 3 * 24 * 3600 * 1000;     // 3 days after a dismissal
   const PUSH_IOS_HINT_KEY = 'bi_push_ios_hint_shown'; // '1' once the install hint was shown
+  // Dedicated scope for the messaging-only service worker. js/app.js ALSO
+  // registers 'sw.js' at the default scope ('/') for offline shell caching.
+  // A ServiceWorkerRegistration is keyed by SCOPE, not script URL — two
+  // register() calls at the same scope with different scripts don't coexist
+  // as two active workers, they fight over which one is "active" for that
+  // scope (each register() runs the install/activate lifecycle and can
+  // displace whichever worker currently holds it). Since a push event is only
+  // ever delivered to whichever worker is CURRENTLY active for the
+  // registration's scope, a collision here silently swallows every push the
+  // moment sw.js happens to win that race — matching the reported "does not
+  // notify" symptom exactly. Firebase's own SDK sidesteps this by
+  // auto-registering firebase-messaging-sw.js at this exact scope whenever no
+  // explicit registration is passed to getToken(); this file passes its own
+  // registration, so it must set the same dedicated scope by hand.
+  const FCM_SW_SCOPE = '/firebase-cloud-messaging-push-scope';
 
   // Web push needs all three. iOS Safari exposes Notification but push only
   // actually works from an installed (Home Screen) PWA — see _isIOS/_isStandalone.
@@ -826,6 +841,49 @@ window.Notifs = (() => {
     autoTimer = setTimeout(() => { if (document.body.contains(overlay)) closePrompt(); }, 60000);
   }
 
+  // Resolve once the given registration has an ACTIVE worker. getToken()
+  // against a registration that's still 'installing'/'waiting' is a common
+  // cause of an empty token result. Falls through after a timeout rather than
+  // hanging forever — better to attempt getToken with whatever state exists
+  // than to never call it.
+  function _waitForActiveWorker(reg, timeoutMs = 8000) {
+    if (reg.active) return Promise.resolve(reg.active);
+    const candidate = reg.installing || reg.waiting;
+    if (!candidate) return Promise.resolve(reg.active || null);
+    return new Promise(resolve => {
+      let done = false;
+      const finish = (worker) => { if (done) return; done = true; resolve(worker); };
+      const onState = () => {
+        if (candidate.state === 'activated') {
+          candidate.removeEventListener('statechange', onState);
+          finish(candidate);
+        }
+      };
+      candidate.addEventListener('statechange', onState);
+      setTimeout(() => { candidate.removeEventListener('statechange', onState); finish(reg.active || candidate); }, timeoutMs);
+    });
+  }
+
+  // One-time (per page load) best-effort cleanup of a stale messaging-SW
+  // registration left over at the OLD default scope ('/') from before
+  // FCM_SW_SCOPE existed. Only ever touches a registration whose worker
+  // script is literally firebase-messaging-sw.js — never sw.js — so this
+  // cannot evict the offline-shell service worker.
+  let _fcmScopeCleanupDone = false;
+  async function _cleanupStaleMessagingSwScope() {
+    if (_fcmScopeCleanupDone) return;
+    _fcmScopeCleanupDone = true;
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const r of regs) {
+        const scriptURL = r.active?.scriptURL || r.installing?.scriptURL || r.waiting?.scriptURL || '';
+        if (/\/firebase-messaging-sw\.js$/.test(scriptURL) && !r.scope.endsWith(FCM_SW_SCOPE)) {
+          await r.unregister().catch(() => {});
+        }
+      }
+    } catch (_) { /* best-effort */ }
+  }
+
   async function _registerPush(uid, vapidKey) {
     try {
       // Service workers require HTTPS — skip on file://
@@ -849,22 +907,56 @@ window.Notifs = (() => {
         await _fcmLoadingPromise;
       }
 
-      const swReg = await navigator.serviceWorker.register('firebase-messaging-sw.js')
+      await _cleanupStaleMessagingSwScope();
+
+      // Dedicated scope — see FCM_SW_SCOPE comment above for why this must
+      // NOT be the default ('/') scope that sw.js already owns.
+      const swReg = await navigator.serviceWorker.register('firebase-messaging-sw.js', { scope: FCM_SW_SCOPE })
         .catch(err => { console.warn('[FCM] SW register failed:', err); return null; });
       if (!swReg) return;
 
+      // Don't request a token against a still-installing worker.
+      await _waitForActiveWorker(swReg);
+
       const messaging = firebase.messaging();
-      const token = await messaging.getToken({ vapidKey, serviceWorkerRegistration: swReg });
+      const getTokenOnce = () => messaging.getToken({ vapidKey, serviceWorkerRegistration: swReg });
+
+      let token = null;
+      try {
+        token = await getTokenOnce();
+      } catch (err) {
+        console.warn('[FCM] getToken failed, will retry once:', err);
+      }
+      if (!token) {
+        // Retry once after a short delay — transient SW-activation timing is
+        // the most common cause of a first-try empty/failed result.
+        await new Promise(r => setTimeout(r, 1500));
+        try { token = await getTokenOnce(); } catch (err) { console.warn('[FCM] getToken retry failed:', err); }
+      }
+
       if (token) {
-        window._fcmTokenIssued = true;
-        await db.collection('users').doc(uid).update({ fcmToken: token });
-        console.log('[FCM] Push token registered for', uid);
+        try {
+          await db.collection('users').doc(uid).update({
+            fcmToken: token,
+            fcmTokenUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          window._fcmTokenIssued = true;
+          console.log('[FCM] Push token registered for', uid);
+        } catch (err) {
+          // Token was issued by FCM but we couldn't persist it — the relay
+          // (functions/index.js) reads users/{uid}.fcmToken, so an unsaved
+          // token is functionally identical to no token at all. Don't claim
+          // success in that case.
+          window._fcmTokenIssued = false;
+          console.warn('[FCM] Got a push token but failed to save it to Firestore:', err);
+        }
       } else {
         window._fcmTokenIssued = false;
         // Permission granted but no token — usually a VAPID-key mismatch or the
         // messaging SW failing to activate. Surface it so it's not a silent no-op.
-        console.warn('[FCM] getToken returned empty — no push token issued (check VAPID key / SW activation).');
+        console.warn('[FCM] getToken returned empty after retry — no push token issued (check VAPID key / SW activation).');
       }
+
       // Show in-app toast for foreground messages. Messages are data-only now
       // (see functions/index.js), so read title/body from payload.data — and
       // attach the handler only once so re-registration doesn't stack toasts.
@@ -887,6 +979,22 @@ window.Notifs = (() => {
           try { _navigateFromNotif(m.notifType, m.taskId, m.chatId); }
           catch (e) { if (m.link && typeof navigateTo === 'function') navigateTo(m.link); }
         });
+      }
+
+      // Long-lived sessions (10-day LOCAL auth persistence — see
+      // firebase-config.js) can outlast a token rotation. The compat SDK's
+      // old onTokenRefresh hook is long gone from the FCM web SDK; re-calling
+      // getToken periodically is Firebase's documented replacement. Bound
+      // once regardless of how many times _registerPush itself re-runs.
+      if (!window._fcmRefreshIntervalBound) {
+        window._fcmRefreshIntervalBound = true;
+        setInterval(() => {
+          try {
+            if (Notification.permission === 'granted' && window.currentUser?.uid) {
+              _registerPush(window.currentUser.uid, vapidKey);
+            }
+          } catch (_) {}
+        }, 6 * 3600 * 1000); // every 6 hours while the tab stays open
       }
     } catch (err) {
       console.warn('[FCM] Push registration failed:', err);
