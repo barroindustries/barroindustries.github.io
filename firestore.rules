@@ -1090,6 +1090,13 @@ service cloud.firestore {
       allow create, update: if isAuth() && isPresident();
       allow delete: if false;
     }
+    // ── Finance config (v14 post-release: break-even classification etc.) ──
+    // Small finance-owned settings docs (fixed/variable category mapping,
+    // manual fixed-cost entries). Finance tier read+write.
+    match /finance_config/{docId} {
+      allow read, write: if isAuth() && canFinance();
+    }
+
     // ── Finance rollups (v14 wave4 F2) ─────────────────
     // Client-maintained monthly aggregates (finance_rollup/{yyyymm} + 'undated').
     // Best-effort writes fired after every Ledger mutation; Rebuild-rollups in
