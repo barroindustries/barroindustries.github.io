@@ -6100,3 +6100,101 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
     min-height: 36px;
   }
 }
+
+/* ══════════════════════════════════════════
+   V14 MOBILE DENSITY PASS (owner directive 2026-08-03: "Mobile: maximize
+   space, fix layout etc for every page." iPhone screenshots showed
+   desktop-scaled padding everywhere on phone: huge page titles ("Command
+   Center" ~44px + a loose date line), tall KPI tiles with dead air, thick
+   card padding, wide grid/flex gaps, roomy banner padding.
+   Scope: ≤640px only. Appended AFTER the WS43 "phone breathability" pass
+   above (which had gone the OPPOSITE direction — bigger min-heights/gaps for
+   a "calmer" feel) so this block wins the cascade on every shared selector
+   at equal specificity (later rule wins, source order). Desktop (>640px) and
+   @media print are untouched by this block.
+   Guardrails respected:
+   - .kpi-value's clamp(15px, 4.6vw, var(--fs-5xl)) is NOT touched — it's an
+     explicitly protected rule (see WS43 comment above, ~line 6065) that
+     window.fitKpiValues depends on, and it already renders ~17px at 375px
+     wide, well below the 24px ceiling this pass would otherwise ask for.
+   - Input/select/textarea font-size is NOT touched — the existing
+     @media (pointer:coarse) rule (~line 346) forces 16px there to block iOS
+     auto-zoom-on-focus; only height/padding are tightened here.
+   - No tap target drops below 44px effective (buttons/nav already enforce
+     44px min-height elsewhere; this pass only tightens surrounding padding).
+   - .sop-panel is built with inline styles in js/config.js (window.sopPanel),
+     so its rules here need !important to win over the inline attribute —
+     the one deliberate, scoped use of !important in this block.
+══════════════════════════════════════════ */
+@media (max-width: 640px) {
+
+  /* 1 — TYPE: page titles, dashboard subline, section headers */
+  .page-header h2 {
+    font-size: clamp(1.375rem, 5.5vw, 1.625rem); /* ~22-26px, was 2rem/32px at ≤768 */
+    font-weight: 800;
+    letter-spacing: -0.4px;
+    line-height: 1.15;
+  }
+  .page-header { margin-bottom: 12px; padding: 4px 0 2px; }
+  /* Dashboard date/time subline (.live-clock-line) — smaller, tighter */
+  .live-clock-line { font-size: 12px; margin: -8px 0 10px; }
+  /* Section headers (card headers) — already 0.9375rem (~15px); just tighten
+     the surrounding chrome so the label doesn't float in empty padding. */
+  .card-header { padding: 10px 12px; }
+  .card-header h3 { font-size: 15px; font-weight: 600; }
+
+  /* 2 — CONTENT PADDING: shell, cards, kpi tiles, gaps */
+  .main-content {
+    padding: 10px;
+    padding-bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom, 0px) + 18px);
+  }
+  .card, .kpi-row { margin-bottom: 12px; }
+  .card { padding: 12px; }
+  .card-body { padding: 12px; }
+  .item-card { padding: 10px 12px; }
+  .item-list { gap: 8px; }
+  .kpi-row { gap: 8px; }
+  /* Kill the WS43 72px kpi-card floor — let content set height, tighten padding */
+  .kpi-card { min-height: 0; padding: 12px; }
+  .dashboard-grid { gap: 10px; }
+  .dept-grid { gap: 10px; }
+  .form-row { gap: 8px; }
+
+  /* 3 — CHROME: chip-tabs, sop-panel, alert/banner */
+  .chip-tabs { margin-bottom: 10px; }
+  /* sopPanel() (js/config.js) is inline-styled — !important needed to win */
+  .sop-panel { padding: 8px 12px !important; margin-bottom: 10px !important; }
+  .sop-panel summary { font-size: 12px !important; }
+  .sop-panel ol { font-size: 12px !important; margin: 6px 0 0 !important; }
+  .alert-banner { padding: 10px 12px; margin-bottom: 10px; }
+
+  /* 4 — FORMS: tighter margins, ~40px input height, 11px labels.
+     Font-size is deliberately left alone — the pointer:coarse rule (~line
+     346) forces 16px there to stop iOS auto-zoom-on-focus. */
+  .form-group { margin-bottom: 10px; }
+  .form-group label { font-size: 11px; margin-bottom: 3px; }
+  .form-group input,
+  .form-group select {
+    min-height: 40px;
+    padding: 8px 10px;
+  }
+  .form-group textarea { padding: 8px 10px; min-height: 64px; }
+
+  /* 5 — SURFACES: page-panel body, modal/dialog body.
+     .page-panel-head keeps its height — it's a touch target (back button/title). */
+  .page-panel-body {
+    padding: 12px max(12px, env(safe-area-inset-right,0px))
+      calc(12px + env(safe-area-inset-bottom,0px)) max(12px, env(safe-area-inset-left,0px));
+  }
+  .modal-header { padding: 12px 14px; }
+  .modal-body { padding: 14px; }
+  .modal-footer { padding: 10px 14px; }
+  .dialog-box { padding: 14px; }
+
+  /* 6 — LISTS/TABLES: table-cards rows, plain data-table cells (mostly
+     card-mode already via .table-cards at ≤700px, but non-card tables and
+     the always-visible tc-* cells still carry desktop-scaled padding). */
+  .table-cards tr { padding: 8px 10px; margin-bottom: 8px; }
+  .data-table th { padding: 8px 10px; }
+  .data-table td { padding: 8px 10px; }
+}
