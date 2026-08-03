@@ -747,7 +747,7 @@ async function openJobBillingInvoiceModal(p){
     </div>
     <div class="form-group"><label>Particulars</label><input id="jinv-desc" value="Collection of outstanding balance"/></div>
     <div class="form-group"><label>Amount to Collect (₱)</label><input id="jinv-amt" type="number" inputmode="decimal" step="0.01" min="0" value="${bal>0?bal.toFixed(2):'0.00'}"/></div>
-    <div class="form-group"><label>Notes / Payment Instructions</label><textarea id="jinv-notes" rows="3">Kindly settle the amount due on or before the due date. Payable to NEILBARRO STEEL & METAL FABRICATION SERVICES.</textarea></div>
+    <div class="form-group"><label>Notes / Payment Instructions</label><textarea id="jinv-notes" rows="3">Kindly settle the amount due on or before the due date. Payable to Barro Industries OPC.</textarea></div>
     <div id="jinv-err" class="error-msg hidden" style="margin-top:8px"></div>
   `, `<button class="btn-primary" id="jinv-gen">Generate Invoice</button><button class="btn-secondary" id="jinv-back">Cancel</button>`);
   // clearAll() first — Billing Invoice is pushed ON TOP of this hub's page

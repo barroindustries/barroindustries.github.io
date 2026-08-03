@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.4';
+window.APP_VERSION = '14.0.5';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1550,14 +1550,17 @@ window.BRAND = {
     opcName:         'Barro Industries OPC',
     opcRegistration: 'SEC-registered One Person Corporation',
     opcTin:          '',   // ‼️ FLAG FOR NEIL — OPC TIN not present anywhere in code
-    // DTI sole-proprietorship trade name — the registered BIR taxpayer today
-    // (currently printed on payslips + billing invoices)
-    dtiName:         'NEILBARRO STEEL & METAL FABRICATION SERVICES',
-    dtiTin:          '951-145-613-000',
-    address:         'PUROK 6, CARLATAN, 2500, CITY OF SAN FERNANDO, LA UNION, PHILIPPINES',
-    addressShort:    'La Union | Baguio City | Manila',
-    phone:           '0927 683 6300',        // canonical spaced form
-    email:           'hello@barroindustries.com',
+    // 2026-08-03 owner ruling: the NEILBARRO STEEL & METAL sole prop DOES NOT
+    // EXIST — every document identity is now Barro Kitchens / Barro Industries
+    // OPC. dtiName kept as an alias of the doc name for legacy readers; the
+    // old TIN belonged to the dead entity and MUST NOT print under the new
+    // name — blank until the accountant supplies the OPC TIN (D6).
+    dtiName:         'BARRO KITCHENS — By Barro Industries OPC',
+    dtiTin:          '',
+    address:         'Metro Manila',
+    addressShort:    'Metro Manila',
+    phone:           '09276836300',
+    email:           'barroindustries@gmail.com',
     signatory:       { name: 'NEIL BARRO', title: 'President, Barro Industries OPC' }
   },
 
@@ -1574,11 +1577,11 @@ window.BRAND = {
   // and is NOT mirrored here.
   companies: {
     BK: { name:'BARRO KITCHENS',
-      sub:'Commercial Kitchen One-Stop-Shop  •  Design · Fabricate · Install  •  by Barro Industries OPC',
-      addr:'La Union  |  Baguio City  |  Manila', contact:'09276836300  |  hello@barroindustries.com',
+      sub:'By Barro Industries OPC',
+      addr:'Metro Manila', contact:'09276836300  |  barroindustries@gmail.com',
       sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'}, code:'BK',
       thanks:'Thank you for considering Barro Kitchens. We look forward to building a kitchen you can rely on for years.',
-      creds:'Barro Industries OPC  •  DTI / BIR Registered  •  hello@barroindustries.com  •  0927 683 6300  •  La Union | Baguio | Manila' },
+      creds:'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila' },
     BS: { name:'BRILLIANT STEEL CORPORATION', sub:'', addr:'Pasig City, Metro Manila', contact:'09276836300',
       sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'}, code:'BS',
       thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
@@ -1593,7 +1596,7 @@ window.BRAND = {
 window.brandEntity = function(kind){
   var L = window.BRAND.legal;
   if (kind === 'bir') return {
-    name: L.dtiName, registration: 'DTI-registered · BIR-registered',
+    name: L.dtiName, registration: 'BIR registration pending accountant confirmation (D6)',
     tin: L.dtiTin, address: L.address, phone: L.phone, email: L.email };
   return {  // 'corporate' (default)
     name: L.opcName, registration: L.opcRegistration,

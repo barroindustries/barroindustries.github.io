@@ -1439,7 +1439,7 @@ function openBankAccountModal(a, onDone) {
       <div class="form-group"><label>Bank / Provider Name</label><input id="ba-bankname" value="${escHtml(a.bankName||'')}" placeholder="e.g. BDO, GCash"/></div>
       <div class="form-group"><label>Branch (optional)</label><input id="ba-branch" value="${escHtml(a.branch||'')}"/></div>
     </div>
-    <div class="form-group"><label>Account Name (registered holder)</label><input id="ba-acctname" value="${escHtml(a.accountName||'')}" placeholder="e.g. NEILBARRO STEEL & METAL FABRICATION SERVICES"/></div>
+    <div class="form-group"><label>Account Name (registered holder)</label><input id="ba-acctname" value="${escHtml(a.accountName||'')}" placeholder="e.g. BARRO INDUSTRIES OPC"/></div>
     <div class="form-group"><label>Account No. (full — prints on invoices; lists show masked)</label><input id="ba-acctno" value="${escHtml(a.accountNo||'')}"/></div>
     <div class="form-row">
       <div class="form-group"><label>Opening Balance (₱)</label><input id="ba-opening" type="number" step="0.01" inputmode="decimal" value="${a.openingBalance||0}"/></div>
