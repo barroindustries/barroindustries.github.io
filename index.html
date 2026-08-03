@@ -179,7 +179,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.180 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.181 · Barro Industries</div>
   </div>
 </div>
 
@@ -433,6 +433,35 @@
      loadFinanceContent (Finance → Purchases tab) reaches forward into this
      file's renderPurchaseRequests the same way. -->
 <script defer src="js/screens/production.js"></script>
+<!-- v14 Wave 7 Pass 8 — Finance screens (Overview/Ledger/Journals/Bank
+     Accounts/Reports/Taxes/Records/Cash Advances + Finance Tools + the
+     generic financeEditModal), split verbatim out of js/departments.js.
+     Must load after departments.js: calls its shared helpers
+     (canEditDept, deptContainer, isFinancePriv, statusBadge, etc.) and
+     money SERVICES that stayed behind (window.financeDelete/
+     financeExecuteDelete, postExpenseToLedger/postCRJToLedger/
+     postCDJToLedger, resyncLedgerForSource, window.closeFinancePeriod/
+     reopenFinancePeriod, window.Ledger/BankAccounts/CashAdvance,
+     window.assertPeriodOpen in js/config.js) by window.*/bare-global
+     name at runtime only, never at parse time; departments.js's
+     loadFinanceContent (Sales Orders/Purchases/HR Profiles/Payroll/Tasks
+     cases) reaches forward into hr.js/production.js/tasks.js the same
+     way, and js/screens/hr.js/js/app.js reach forward into this file's
+     window.renderFinance/financeEditModal identically. -->
+<script defer src="js/screens/finance.js"></script>
+<!-- v14 Wave 7 Pass 8 — Approvals screen (owner/oversight approval
+     queue), split verbatim out of js/departments.js. Re-checked for
+     clean extraction now that js/svc-approvals.js (v13 Phase 35) already
+     owns every approval type's write path — this file is UI only. Must
+     load after departments.js: calls its shared helpers (canEditDept,
+     deptContainer, statusBadge, nextCounterId, etc.) and services that
+     stayed behind (Approvals.dispatch in js/svc-approvals.js,
+     window.CashAdvance/RaiseFlow, window.approvePurchaseOrder/
+     rejectPurchaseOrder in production.js) by window.*/bare-global name
+     at runtime only, never at parse time; js/app.js's navigateTo
+     ('approvals' case) reaches forward into this file's
+     window.renderApprovals the same way. -->
+<script defer src="js/screens/approvals.js"></script>
 <!-- v14 Wave 7 Pass 5 — Government Biddings + IT screens, split verbatim out
      of js/app.js (renderGovBiddings) and js/departments.js (renderIT +
      loadITContent + openITTicketModal), plus the canonical window.GOV_BUCKETS

@@ -8,7 +8,7 @@
 //    • HTML / API → Network-first, cache as offline fallback
 // ═══════════════════════════════════════════════════════
 
-const CACHE_VER   = 'bi-ops-v12.0.180';
+const CACHE_VER   = 'bi-ops-v12.0.181';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -47,6 +47,8 @@ const PRECACHE = [
   '/js/screens/sales.js',
   '/js/screens/hr.js',
   '/js/screens/production.js',
+  '/js/screens/finance.js',
+  '/js/screens/approvals.js',
   '/js/screens/govit.js',
   '/js/screens/partners.js',
   '/js/migrations.js',
