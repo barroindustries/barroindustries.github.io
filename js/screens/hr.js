@@ -1372,6 +1372,7 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
       <div class="kpi-card green"><div class="kpi-label">Payslips This Month</div><div class="kpi-value">${payslips.length}</div></div>
       <div class="kpi-card accent"><div class="kpi-label">Disbursed (${now.toLocaleString('en-PH',{month:'short'})})</div><div class="kpi-value" style="font-size:16px">₱${fmt(totalDisbursed)}</div></div>
     </div>
+    <div id="hrp-trouble-panel"></div>
     ${isPriv?`<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
       <button class="btn-primary btn-sm" id="hrp-add-btn">+ Add Worker Profile</button>
       <button class="btn-secondary btn-sm" id="hrp-payslip-history-btn">${emojiIcon('📄',16)} All Payslips</button>
@@ -1463,6 +1464,12 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
       const profile = profiles.find(p=>p.id===btn.dataset.id);
       btn.addEventListener('click', () => { if (profile) openWorkerKioskModal(profile, currentUser); });
     });
+
+    // v14 HR remediation P1 — surface pending "trouble timing in" / attendance
+    // override requests right here in the worker-attendance area (not just the
+    // main Approvals tab), since HR reviewing worker_profiles is exactly who
+    // needs to act on these. Best-effort/non-blocking.
+    _loadHrTroublePanel(container, currentUser);
   }
 
   // Generate payslip
@@ -1470,6 +1477,77 @@ async function renderFinanceHRProfiles(container, currentUser, currentRole) {
     const profile = profiles.find(p=>p.id===btn.dataset.id);
     btn.addEventListener('click', () => openPayslipGenerator(profile, currentUser, currentRole));
   });
+}
+
+// ── v14 HR remediation P1 — supervisor-override / "trouble timing in" intake.
+// `attendance_extensions` (grepped) already exists and is written by the
+// Type-A regular-employee flow with the confirmed shape
+// {uid, userName, date, status:'pending', requestedAt} — keyed
+// `${uid}_${date}` (see js/app.js's tryUpgradeAttendanceOnNotifRead/
+// approveAttendanceExtension/denyAttendanceExtension, and
+// js/screens/dashboards.js's req-ext-btn handler). The worker-side agent's
+// Type-B "trouble timing in" requests are ASSUMED to land in this SAME
+// collection (no dedicated collection found anywhere in the codebase), so
+// this renders every pending doc generically and works whether the row is a
+// Type-A employee (uid) or a Type-B worker_profile (assumed workerId field —
+// unconfirmed; reconcile with the worker-side agent's actual field name).
+// Approve/Deny reuse the existing global window.approveAttendanceExtension/
+// denyAttendanceExtension (js/app.js) so no approval logic is duplicated;
+// they fall back to a raw status update if those globals are ever absent.
+async function _loadHrTroublePanel(container, currentUser) {
+  const panelEl = document.getElementById('hrp-trouble-panel');
+  if (!panelEl) return;
+  let snap;
+  try {
+    snap = await db.collection('attendance_extensions').where('status','==','pending').get();
+  } catch (_) { panelEl.innerHTML = ''; return; }
+  const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  if (!rows.length) { panelEl.innerHTML = ''; return; }
+  panelEl.innerHTML = `
+    <div class="card" style="margin-bottom:16px;border:1.5px solid var(--warning,#d97706)">
+      <div class="card-header"><h3>${emojiIcon('🚧',20)} Trouble Timing In — Pending (${rows.length})</h3></div>
+      <div class="card-body" style="padding:0">
+        <div style="font-size:11px;color:var(--text-muted);padding:10px 12px 0">Includes both regular-employee attendance-extension requests and (once the worker-side flow ships) Type-B worker "trouble timing in" reports — same collection, unconfirmed field-name overlap. See code comment for the assumption.</div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Requester</th><th>Date</th><th>Reason / Note</th><th>Requested</th><th></th></tr></thead>
+          <tbody>${rows.map(r => `<tr>
+            <td style="font-weight:600">${escHtml(r.userName || r.workerName || r.workerId || r.uid || r.id || '—')}</td>
+            <td>${escHtml(r.date || '—')}</td>
+            <td style="font-size:12px">${escHtml(r.reason || r.note || '—')}</td>
+            <td style="font-size:11px;color:var(--text-muted)">${r.requestedAt?.toDate ? escHtml(r.requestedAt.toDate().toLocaleString('en-PH')) : '—'}</td>
+            <td style="white-space:nowrap">
+              <button class="btn-primary btn-sm hrp-trbl-approve" data-id="${escHtml(r.id)}" data-uid="${escHtml(r.uid||'')}" data-name="${escHtml(r.userName||r.workerName||'')}">Approve</button>
+              <button class="btn-secondary btn-sm hrp-trbl-deny" data-id="${escHtml(r.id)}" data-uid="${escHtml(r.uid||'')}" data-name="${escHtml(r.userName||r.workerName||'')}" style="margin-left:4px">Deny</button>
+            </td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>
+    </div>`;
+  if (window.lucide) lucide.createIcons({ nodes: [panelEl] });
+  panelEl.querySelectorAll('.hrp-trbl-approve').forEach(btn => btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      if (typeof window.approveAttendanceExtension === 'function') {
+        await window.approveAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
+      } else {
+        await db.collection('attendance_extensions').doc(btn.dataset.id).update({ status:'approved', approvedBy: currentUser.uid, approvedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      }
+      Notifs.success('Request approved.');
+    } catch(e) { Notifs.showToast('Could not approve: '+(e.message||e),'error'); }
+    _loadHrTroublePanel(container, currentUser);
+  }));
+  panelEl.querySelectorAll('.hrp-trbl-deny').forEach(btn => btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      if (typeof window.denyAttendanceExtension === 'function') {
+        await window.denyAttendanceExtension(btn.dataset.id, btn.dataset.uid, btn.dataset.name);
+      } else {
+        await db.collection('attendance_extensions').doc(btn.dataset.id).update({ status:'denied', deniedBy: currentUser.uid, deniedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      }
+      Notifs.success('Request denied.');
+    } catch(e) { Notifs.showToast('Could not deny: '+(e.message||e),'error'); }
+    _loadHrTroublePanel(container, currentUser);
+  }));
 }
 
 function openHRProfileForm(profile, currentUser, currentRole, onSave) {
@@ -1688,6 +1766,54 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
   });
 }
 
+// ── v14 HR attendance-remediation helpers (buddy-punch deterrent) ──────────
+// Shared by openWorkerKioskModal (single-day view) and openPayslipGenerator's
+// "Load Kiosk Hours" review list. Field names mirror what js/screens/worker.js
+// (Type-B self-service Time In/Out) actually writes to attendance_worker/
+// {workerId}/records/{date}: inSelfieUrl/outSelfieUrl, inDistanceM/outDistanceM,
+// inValid/outValid, timeIn/timeOut, hoursWorked. `inAccuracyM`/`outAccuracyM`
+// and `needsReview` are read defensively (per the sibling worker-side agent's
+// contract) — they may not exist on every record, or yet at all.
+//
+// "Server-verified" marker: reconciled — the recordAttendancePunch Cloud
+// Function (functions/index.js) stamps `serverVerified: true` on every record
+// it writes (a geofence+selfie server-verified self-service punch). HR-kiosk
+// hand-entries (openWorkerKioskModal) never set it, so they show no verified
+// badge — accurate, since those are manually entered, not location-proven.
+function _hrAttSelfieThumb(url, label) {
+  if (!url) return `<div style="width:44px;height:44px;border-radius:8px;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--text-muted);text-align:center;flex-shrink:0">no photo</div>`;
+  return `<img src="${escHtml(url)}" alt="${escHtml(label)}" title="${escHtml(label)} — click to enlarge" class="hr-att-thumb" data-url="${escHtml(url)}" style="width:44px;height:44px;border-radius:8px;object-fit:cover;border:1px solid var(--border);cursor:pointer;flex-shrink:0"/>`;
+}
+// Bind click-to-enlarge on every .hr-att-thumb under root — opens the
+// full-resolution selfie in a new tab (safer than stacking a modal-over-modal,
+// which would replace rather than layer on this app's single-overlay design).
+function _hrBindAttThumbs(root) {
+  (root || document).querySelectorAll('.hr-att-thumb').forEach(img => {
+    img.addEventListener('click', () => { const u = img.dataset.url; if (u) window.open(u, '_blank', 'noopener'); });
+  });
+}
+function _hrVerifiedBadge(rec) {
+  if (rec.serverVerified === true)  return `<span class="badge badge-green" title="Confirmed server-side">${emojiIcon('✅',12)} Server-verified</span>`;
+  if (rec.serverVerified === false) return `<span class="badge badge-orange" title="Flagged unverified server-side">${emojiIcon('⚠️',12)} Unverified</span>`;
+  return `<span class="badge badge-gray" title="No server-verification field found on this record (TODO: reconcile field name)">Verification: n/a</span>`;
+}
+// One in/out punch's detail — selfie thumbnail + distance + GPS accuracy.
+function _hrPunchDetail(rec, kind) {
+  const time  = kind === 'in' ? rec.timeIn : rec.timeOut;
+  const selfie= kind === 'in' ? rec.inSelfieUrl : rec.outSelfieUrl;
+  const dist  = kind === 'in' ? rec.inDistanceM : rec.outDistanceM;
+  const acc   = kind === 'in' ? rec.inAccuracyM : rec.outAccuracyM;
+  const valid = kind === 'in' ? rec.inValid : rec.outValid;
+  return `<div style="display:flex;gap:8px;align-items:center">
+    ${_hrAttSelfieThumb(selfie, `Time ${kind==='in'?'In':'Out'} selfie`)}
+    <div style="font-size:11px;line-height:1.5">
+      <div style="font-weight:600">${kind==='in'?'In':'Out'} ${escHtml(time || '—')}${valid===false?` <span style="color:var(--danger)">(invalid)</span>`:''}</div>
+      <div style="color:var(--text-muted)">${dist!=null ? `${escHtml(String(dist))}m from site` : 'no distance on file'}</div>
+      ${acc!=null ? `<div style="color:var(--text-muted)">±${escHtml(String(acc))}m GPS accuracy</div>` : ''}
+    </div>
+  </div>`;
+}
+
 // v12 WS26 — HR-operated kiosk: record a worker_profile's time in/out for today.
 // Writes attendance_worker/{profileId}/records/{bizDate()} (NOT attendance/{uid} —
 // factory worker_profiles have no Firebase Auth login yet). Reuses the existing
@@ -1696,12 +1822,43 @@ function openHRProfileForm(profile, currentUser, currentRole, onSave) {
 function openWorkerKioskModal(profile, currentUser) {
   const label = escHtml(profile.name || 'Worker');
   openModal(`${emojiIcon('⏱',16)} Clock — ${label}`, `
+    <div id="kiosk-existing-rec"></div>
     <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Recording time for <strong>${label}</strong> on ${bizDate()}.</div>
     <div class="form-row">
       <div class="form-group"><label>Time In</label><input id="kiosk-time-in" type="time" value="07:00"/></div>
       <div class="form-group"><label>Time Out</label><input id="kiosk-time-out" type="time" value="16:00"/></div>
     </div>
   `, `<button class="btn-primary" id="kiosk-save-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+  // P1 buddy-punch deterrent — if a record already exists for today (e.g. the
+  // worker already self-clocked via the Type-B geofenced flow, or a previous
+  // HR entry), show its selfie/distance/accuracy BEFORE HR blindly clicks
+  // Save below (which would silently overwrite it). Best-effort/read-only —
+  // never blocks the entry form from working.
+  (async () => {
+    const el = document.getElementById('kiosk-existing-rec');
+    if (!el) return;
+    try {
+      const snap = await db.collection('attendance_worker').doc(profile.id).collection('records').doc(bizDate()).get();
+      if (!snap.exists) return;
+      const rec = snap.data();
+      if (!rec.timeIn && !rec.timeOut) return;
+      el.innerHTML = `
+        <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--surface2);margin-bottom:12px">
+          <div style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Today's Record on File</div>
+          ${rec.needsReview===true ? `<div style="font-size:11px;color:var(--danger);margin-bottom:6px">${emojiIcon('⚠️',12)} Flagged for review — confirm actual hours with the worker before overwriting.</div>` : ''}
+          <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:8px">
+            ${_hrPunchDetail(rec, 'in')}
+            ${rec.timeOut ? _hrPunchDetail(rec, 'out') : ''}
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            ${typeof rec.hoursWorked === 'number' ? `<span style="font-size:11px;color:var(--text-muted)">${rec.hoursWorked.toFixed(2)}h logged</span>` : ''}
+            ${_hrVerifiedBadge(rec)}
+          </div>
+        </div>`;
+      _hrBindAttThumbs(el);
+    } catch (_) { /* best-effort — modal still works for a fresh entry */ }
+  })();
 
   document.getElementById('kiosk-save-btn').addEventListener('click', async () => {
     const timeIn  = document.getElementById('kiosk-time-in').value;
@@ -2107,20 +2264,23 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
       </div>
       <table style="width:100%;font-size:11px;border-collapse:collapse">
         <thead><tr>
-          <th style="text-align:left;padding:4px">Day</th><th style="padding:4px">Time In</th><th style="padding:4px">Time Out</th><th style="padding:4px">Hours</th>
+          <th style="text-align:left;padding:4px">Day</th><th style="padding:4px">Time In</th><th style="padding:4px">Time Out</th><th style="padding:4px">Hours</th><th style="padding:4px" title="How this day's time was recorded: kiosk/self-service (location-backed) vs hand-keyed">Src</th>
         </tr></thead>
         <tbody>
           ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>`<tr>
             <td style="padding:4px">${d}</td>
-            <td style="padding:4px"><input id="ps-tin-${i}" type="time" class="ps-time-input" value="${d==='Sun'?'':'07:00'}" style="width:100%;padding:4px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text)"/></td>
-            <td style="padding:4px"><input id="ps-tout-${i}" type="time" class="ps-time-input" value="${d==='Sun'?'':(d==='Sat'?'18:00':'16:00')}" style="width:100%;padding:4px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text)"/></td>
+            <td style="padding:4px"><input id="ps-tin-${i}" type="time" class="ps-time-input" data-source="manual" value="${d==='Sun'?'':'07:00'}" style="width:100%;padding:4px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text)"/></td>
+            <td style="padding:4px"><input id="ps-tout-${i}" type="time" class="ps-time-input" data-source="manual" value="${d==='Sun'?'':(d==='Sat'?'18:00':'16:00')}" style="width:100%;padding:4px;border:1px solid var(--border);border-radius:5px;background:var(--surface);color:var(--text)"/></td>
             <td style="padding:4px;text-align:center;font-weight:600" id="ps-dayhrs-${i}">0.00</td>
+            <td style="padding:4px;text-align:center" id="ps-src-${i}">✏️</td>
           </tr>`).join('')}
         </tbody>
       </table>
       <div style="display:flex;justify-content:flex-end;margin-top:8px;font-size:12px">
         Computed Total: <strong style="margin-left:6px" id="ps-computed-total">0.00</strong>&nbsp;hrs
       </div>
+      <div id="ps-kiosk-review-area"></div>
+      <div id="ps-kiosk-audit-area"></div>
     </div>
 
     <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
@@ -2194,6 +2354,27 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
   // it. Only OT HOURS are auto-filled here — the OT RATE input (a pay policy
   // value) is left exactly as before, still manual/editable.
   document.getElementById('ps-ot-hrs')?.addEventListener('input', () => { otHrsEdited = true; });
+  // v14 HR remediation P2 — payslip provenance. Each ps-tin-{i} input carries a
+  // data-source attribute: 'manual' (hand-keyed, the default), 'kiosk-manual'
+  // (HR clocked it via openWorkerKioskModal — no GPS/selfie), or 'kiosk-verified'
+  // (Type-B self-service, location + selfie backed). "Load Kiosk Hours" below
+  // sets it programmatically (no 'input' event fires); a genuine user edit of
+  // the field fires 'input' and resets it back to 'manual' via the listener
+  // registered alongside recomputeHours, below — so the badge never lies about
+  // a row HR has since hand-adjusted.
+  const _srcLabel = (src) => src==='kiosk-verified'
+      ? `<span title="Kiosk — self-service, location + selfie verified">${emojiIcon('📍',12)}</span>`
+    : src==='kiosk-manual'
+      ? `<span title="Kiosk — HR-entered, no GPS/selfie">${emojiIcon('🏷',12)}</span>`
+      : `<span title="Hand-keyed by HR">✏️</span>`;
+  const updateSourceBadges = () => {
+    for (let i = 0; i < 7; i++) {
+      const cell = document.getElementById(`ps-src-${i}`);
+      const inp = document.getElementById(`ps-tin-${i}`);
+      if (cell && inp) cell.innerHTML = _srcLabel(inp.dataset.source || 'manual');
+    }
+    if (window.lucide) lucide.createIcons();
+  };
   const recomputeHours = () => {
     let total = 0, daysOver4 = 0, otHrsTotal = 0;
     for (let i = 0; i < 7; i++) {
@@ -2217,27 +2398,81 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     // OT hours: sum of (hrs − 8) across days exceeding 8 hrs (unless manually overridden)
     const otHrsInput = document.getElementById('ps-ot-hrs');
     if (otHrsInput && !otHrsEdited) otHrsInput.value = otHrsTotal.toFixed(2);
+    updateSourceBadges();
   };
-  document.querySelectorAll('.ps-time-input').forEach(inp => inp.addEventListener('input', recomputeHours));
+  document.querySelectorAll('.ps-time-input').forEach(inp => {
+    inp.addEventListener('input', recomputeHours);
+    inp.addEventListener('input', () => { inp.dataset.source = 'manual'; });
+  });
   recomputeHours();
 
-  // ── v12 WS26: pull HR-kiosk-recorded worker attendance (attendance_worker/{profile.id}/records)
-  // into this SAME time-log table so HR doesn't re-key hours already clocked at the kiosk.
-  // This ONLY prefills ps-tin-{i}/ps-tout-{i} then calls the existing recomputeHours() — rows
-  // stay editable, and collectPayslipData/the WPAY- ledger post on Submit are untouched.
+  // ── v12 WS26 / v14 HR remediation P0 — pull HR-kiosk-recorded worker
+  // attendance (attendance_worker/{profile.id}/records) into this SAME time-
+  // log table so HR doesn't re-key hours already clocked at the kiosk.
+  //
+  // P0 fix #1 (pay-period length): the table has exactly 7 rows. The OLD code
+  // bucketed every fetched record by its OWN weekday (bizDow), so a pay
+  // period spanning more than 7 calendar days silently overwrote earlier
+  // same-weekday rows with later ones — dropping days from pay with zero
+  // warning (under-paying). Fixed by (a) refusing to auto-load when the
+  // period exceeds 7 days, and (b) keying every record by its ACTUAL OFFSET
+  // from the period start (never by weekday), so same-weekday collisions are
+  // structurally impossible within a ≤7-day period.
+  //
+  // P0 fix #2 (CRITICAL #4 — forgotten clock-out): a record with
+  // needsReview===true (worker-side contract: set when a forgotten clock-out
+  // was closed the next day, or a shift exceeded the max) OR an implausible
+  // hoursWorked (>16h — a phantom ~22-24h shift from an unclosed punch) is
+  // EXCLUDED from the silent auto-sum and surfaced in a "Needs review before
+  // paying" list instead, with the raw in/out times/selfies, so HR confirms
+  // real hours instead of paying a phantom shift. Normal-record hours MATH
+  // (computeDayHours) is completely untouched.
   document.getElementById('ps-load-kiosk-btn')?.addEventListener('click', async () => {
     const start = document.getElementById('ps-start').value, end = document.getElementById('ps-end').value;
     if (!start || !end) { Notifs.showToast('Set pay period dates first','error'); return; }
+
+    const oneDay = 24*60*60*1000;
+    const startMs = new Date(start+'T12:00:00Z').getTime();
+    const endMs   = new Date(end+'T12:00:00Z').getTime();
+    const spanDays = Math.round((endMs - startMs)/oneDay) + 1;
+    if (!(spanDays >= 1 && spanDays <= 7)) {
+      Notifs.showToast(`Pay period is ${spanDays} days — the time log only has 7 rows (one per day). Shorten the period to 7 days or fewer, or enter hours manually.`, 'error');
+      return;
+    }
+
     const snap = await db.collection('attendance_worker').doc(profile.id).collection('records')
       .where(firebase.firestore.FieldPath.documentId(), '>=', start)
       .where(firebase.firestore.FieldPath.documentId(), '<=', end).get().catch(()=>({docs:[]}));
-    const byDow = {}; // Mon..Sun index 0..6
-    snap.docs.forEach(d => { const r = d.data(); const dow = window.bizDow(new Date(`${r.date}T12:00:00`)); byDow[(dow+6)%7] = r; });
-    for (let i=0;i<7;i++){ const r=byDow[i]; if(!r) continue;
-      const tin=document.getElementById(`ps-tin-${i}`), tout=document.getElementById(`ps-tout-${i}`);
-      if(tin) tin.value=r.timeIn||''; if(tout) tout.value=r.timeOut||''; }
+
+    const byOffset = {}; // row index 0..6, keyed by the record's ACTUAL DATE offset from ps-start — never by weekday
+    snap.docs.forEach(d => {
+      const r = d.data();
+      const recMs = new Date(`${r.date}T12:00:00Z`).getTime();
+      const offset = Math.round((recMs - startMs)/oneDay);
+      if (offset >= 0 && offset <= 6) byOffset[offset] = r;
+    });
+
+    const flagged = [];   // excluded from auto-load — HR must confirm before these feed pay
+    const loaded  = [];   // successfully auto-filled — shown in the audit panel too
+    for (let i = 0; i < 7; i++) {
+      const r = byOffset[i]; if (!r) continue;
+      const rowLabel = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][i];
+      const implausible = typeof r.hoursWorked === 'number' && r.hoursWorked > 16;
+      if (r.needsReview === true || implausible) {
+        flagged.push({ ...r, _rowLabel: rowLabel, _implausible: implausible });
+        continue;
+      }
+      const tin = document.getElementById(`ps-tin-${i}`), tout = document.getElementById(`ps-tout-${i}`);
+      if (tin)  { tin.value  = r.timeIn  || ''; tin.dataset.source  = (r.inSelfieUrl || r.inDistanceM  != null) ? 'kiosk-verified' : 'kiosk-manual'; }
+      if (tout) { tout.value = r.timeOut || ''; tout.dataset.source = (r.outSelfieUrl || r.outDistanceM != null) ? 'kiosk-verified' : 'kiosk-manual'; }
+      loaded.push({ ...r, _rowLabel: rowLabel });
+    }
     recomputeHours();
-    Notifs.showToast('Loaded kiosk hours — review & adjust before saving.');
+    renderKioskReviewList(flagged);
+    renderKioskAuditPanel(loaded, flagged);
+    Notifs.showToast(flagged.length
+      ? `Loaded kiosk hours — ${flagged.length} day(s) need review before paying (see list below).`
+      : 'Loaded kiosk hours — review & adjust before saving.');
   });
 
   // ── Live CA remaining-balance preview ──
@@ -2279,6 +2514,73 @@ function openPayslipGenerator(profile, currentUser, currentRole) {
     model.ytd = await window.payslipYtdWeekly(profile.id, (d.payPeriodStart||'').slice(0,4) || (window.bizYear?window.bizYear():new Date().getFullYear()));
     setTimeout(() => window.renderPayslipPage(model, () => renderFinanceHRProfiles(deptContainer(), currentUser, currentRole)), 400);
   });
+}
+
+// ── v14 HR remediation P0/P1 — "Load Kiosk Hours" review + audit panels ────
+// renderKioskReviewList: days EXCLUDED from the auto-sum (needsReview or an
+// implausible >16h shift). HR must confirm the real hours and hand-key them
+// into the table above before this pay period is saved — nothing here feeds
+// pay automatically.
+function renderKioskReviewList(flagged) {
+  const area = document.getElementById('ps-kiosk-review-area');
+  if (!area) return;
+  if (!flagged || !flagged.length) { area.innerHTML = ''; return; }
+  area.innerHTML = `
+    <div style="margin-top:10px;border:1.5px solid var(--danger,#dc2626);border-radius:8px;padding:10px;background:var(--surface)">
+      <div style="font-size:11px;font-weight:700;color:var(--danger,#dc2626);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">
+        ${emojiIcon('⚠️',14)} Needs review before paying (${flagged.length})
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">These day(s) were <strong>excluded</strong> from the hours loaded above — confirm the real time in/out with the worker (see selfies/distance below), then hand-key the correct value into the table if it should be paid.</div>
+      ${flagged.map(r => `
+        <div style="border:1px solid var(--border);border-radius:8px;padding:8px;margin-bottom:6px;background:var(--surface2)">
+          <div style="font-size:11px;font-weight:700;margin-bottom:6px">${escHtml(r._rowLabel||'')} · ${escHtml(r.date||'')}
+            ${r.needsReview===true?` <span class="badge badge-orange">Flagged for review</span>`:''}
+            ${r._implausible?` <span class="badge badge-orange">Implausible hours (&gt;16h)</span>`:''}
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:6px">
+            ${_hrPunchDetail(r, 'in')}
+            ${r.timeOut ? _hrPunchDetail(r, 'out') : ''}
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            ${typeof r.hoursWorked === 'number' ? `<span style="font-size:11px;color:var(--text-muted)">Raw logged: ${r.hoursWorked.toFixed(2)}h</span>` : ''}
+            ${_hrVerifiedBadge(r)}
+          </div>
+        </div>`).join('')}
+    </div>`;
+  _hrBindAttThumbs(area);
+  if (window.lucide) lucide.createIcons({ nodes: [area] });
+}
+
+// renderKioskAuditPanel: P1 buddy-punch deterrent — a compact, always-visible
+// audit view of every day actually loaded from the kiosk (selfies/distance/
+// accuracy/verified marker), so HR can spot-check ANY day, not just flagged
+// ones, without leaving the payslip screen. Collapsed by default (details/
+// summary — no new CSS/JS dependency) since most weeks need no scrutiny.
+function renderKioskAuditPanel(loaded, flagged) {
+  const area = document.getElementById('ps-kiosk-audit-area');
+  if (!area) return;
+  const all = [...(loaded||[]), ...(flagged||[])].sort((a,b) => (a.date||'').localeCompare(b.date||''));
+  if (!all.length) { area.innerHTML = ''; return; }
+  area.innerHTML = `
+    <details style="margin-top:10px;border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--surface2)">
+      <summary style="font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;cursor:pointer">Kiosk record audit (${all.length} day${all.length>1?'s':''} — selfie/distance/accuracy spot-check)</summary>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+        ${all.map(r => `
+          <div style="border:1px solid var(--border);border-radius:8px;padding:8px;background:var(--surface)">
+            <div style="font-size:11px;font-weight:700;margin-bottom:6px">${escHtml(r._rowLabel||'')} · ${escHtml(r.date||'')}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:6px">
+              ${_hrPunchDetail(r, 'in')}
+              ${r.timeOut ? _hrPunchDetail(r, 'out') : ''}
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              ${typeof r.hoursWorked === 'number' ? `<span style="font-size:11px;color:var(--text-muted)">${r.hoursWorked.toFixed(2)}h logged</span>` : ''}
+              ${_hrVerifiedBadge(r)}
+            </div>
+          </div>`).join('')}
+      </div>
+    </details>`;
+  _hrBindAttThumbs(area);
+  if (window.lucide) lucide.createIcons({ nodes: [area] });
 }
 
 // Hours between two "HH:MM" time strings, minus a flat 1hr lunch deduction
@@ -2328,11 +2630,18 @@ function collectPayslipData(profile, currentUser) {
   const caBalanceBefore = profile.caBalance || 0;
   const caBalanceAfter  = Math.max(0, caBalanceBefore - ca);
 
+  // v14 HR remediation P2 — payslip provenance (display-only, non-destructive):
+  // carry each day's data-source (manual/kiosk-manual/kiosk-verified, set by
+  // the "Load Kiosk Hours" flow and reset to 'manual' on any hand-edit — see
+  // openPayslipGenerator) onto the saved payslip so HR can later tell a
+  // location-verified punch from a hand-entered row. Never affects the hours
+  // MATH below — same computeDayHours call as before.
   const timeLog = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d,i)=>({
     day: d,
     timeIn:  document.getElementById(`ps-tin-${i}`)?.value || '',
     timeOut: document.getElementById(`ps-tout-${i}`)?.value || '',
-    hours: computeDayHours(document.getElementById(`ps-tin-${i}`)?.value, document.getElementById(`ps-tout-${i}`)?.value)
+    hours: computeDayHours(document.getElementById(`ps-tin-${i}`)?.value, document.getElementById(`ps-tout-${i}`)?.value),
+    source: document.getElementById(`ps-tin-${i}`)?.dataset.source || 'manual'
   }));
 
   return {
@@ -2537,10 +2846,17 @@ window.buildPayslipHTML = function(model) {
       <tr><td>Attendance (30%)</td><td class="num">${Math.round(m.performance.att*100)}%</td></tr>
       <tr class="ps-sub"><td>Performance factor (policy: ${escHtml(m.performance.policy)})</td><td class="num">${m.performance.perfFactor.toFixed(2)}×</td></tr>
     </table>` : '';
+  // v14 HR remediation P2 — provenance column (source: kiosk-verified/kiosk-
+  // manual/manual, set by openPayslipGenerator's Load Kiosk Hours flow).
+  // Display-only and additive: older saved payslips have no r.source at all,
+  // so the column is only shown when at least one row actually carries it —
+  // pre-existing payslips render exactly as before.
+  const _hasSrc = m.timeLog && m.timeLog.some(r => r.source);
+  const _srcCell = (src) => src==='kiosk-verified' ? 'Kiosk (verified)' : src==='kiosk-manual' ? 'Kiosk (HR)' : src ? 'Hand-keyed' : '';
   const timelog = (m.timeLog && m.timeLog.length) ? `
     <div class="ps-sec-h">Daily Time Log</div>
-    <table class="ps-t"><thead><tr><th>Day</th><th>Time In</th><th>Time Out</th><th class="num">Hours</th></tr></thead>
-    <tbody>${m.timeLog.map(r=>`<tr><td>${escHtml(r.day)}</td><td>${escHtml(r.timeIn||'—')}</td><td>${escHtml(r.timeOut||'—')}</td><td class="num">${(r.hours||0).toFixed(2)}</td></tr>`).join('')}</tbody></table>` : '';
+    <table class="ps-t"><thead><tr><th>Day</th><th>Time In</th><th>Time Out</th><th class="num">Hours</th>${_hasSrc?'<th>Source</th>':''}</tr></thead>
+    <tbody>${m.timeLog.map(r=>`<tr><td>${escHtml(r.day)}</td><td>${escHtml(r.timeIn||'—')}</td><td>${escHtml(r.timeOut||'—')}</td><td class="num">${(r.hours||0).toFixed(2)}</td>${_hasSrc?`<td style="font-size:10px">${escHtml(_srcCell(r.source))}</td>`:''}</tr>`).join('')}</tbody></table>` : '';
   return `
   ${_lh ? `<style>${_lh.printCSS}</style>` : ''}
   ${_lh ? _lh.headerHTML : `<div class="lh-head"><div class="lh-name">${escHtml((window.BRAND&&window.BRAND.legal.dtiName)||'')}</div><div class="lh-doc"><div class="lh-title">PAYSLIP</div><div class="lh-no">${escHtml(m.docNumber)}</div><div class="lh-date">${escHtml(m.periodLabel)}</div></div></div>`}

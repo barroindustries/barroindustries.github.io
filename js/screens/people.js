@@ -1249,7 +1249,7 @@ window.renderAttendancePage = async function() {
     const records = {};
     snap.docs.forEach(d => { records[d.id] = d.data(); });
 
-    const firstDay    = window.bizDow(new Date(`${monthStart}T12:00:00`));
+    const firstDay    = window.bizDow(monthStart);
     const todayStr    = window.bizDate();
     const canEdit     = pres;
     const phHolidays  = getPHHolidays(viewYear);
@@ -1265,7 +1265,7 @@ window.renderAttendancePage = async function() {
       const dateStr  = `${viewYear}-${mm}-${String(day).padStart(2,'0')}`;
       // Anchor to noon Manila so the weekday is correct regardless of device TZ
       // (new Date('YYYY-MM-DD') parses as UTC and shifted the day-of-week).
-      const dow      = window.bizDow(new Date(`${dateStr}T12:00:00`));
+      const dow      = window.bizDow(dateStr);
       const isSunday  = dow===0;
       const holiday   = phHolidays[dateStr];
       const isNoWork  = isSunday || !!holiday;
@@ -1961,7 +1961,7 @@ async function openPresidentCashAdvanceModal(users) {
     let n=0; const d=new Date(s);
     while(d<=e){
       const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      if(window.bizDow(new Date(ds+'T12:00:00'))!==0 && !hol[ds] && !holNext[ds]) n++;
+      if(window.bizDow(ds)!==0 && !hol[ds] && !holNext[ds]) n++;
       d.setDate(d.getDate()+1); if(n>366) break;
     }
     return n;
@@ -2204,7 +2204,7 @@ async function openPresidentCashAdvanceModal(users) {
     while(d<=e && guard++<366){
       const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
       const hol=(typeof getPHHolidays==='function')?getPHHolidays(d.getFullYear()):{};
-      if(window.bizDow(new Date(ds+'T12:00:00'))!==0 && !hol[ds]){
+      if(window.bizDow(ds)!==0 && !hol[ds]){
         await db.collection('attendance').doc(r.userId).collection('records').doc(ds).set(
           paid
             ? { date:ds, uid:r.userId, attendanceScore:1.0, fullTime:true,  status:'leave',        leaveType:r.type, leaveReqId:r.id, editedBy:currentUser.uid, editedAt:FV.serverTimestamp() }

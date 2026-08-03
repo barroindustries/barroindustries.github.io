@@ -24,6 +24,19 @@ const auth = firebase.auth();
 const db   = firebase.firestore();
 const storage = firebase.storage();
 
+// v14 P1 reliability fix — the SDK default upload retry window is ~10 minutes,
+// which on a flaky Wi-Fi/cellular connection left the attendance selfie
+// upload silently retrying with no feedback: the kiosk just sat on
+// "Uploading selfie…" for minutes with no way to tell whether it was working
+// or stuck. Cut to 45s so a genuinely dead connection fails fast enough for
+// the Cancel control / offline-queue fallback (js/screens/worker.js
+// _uploadSelfieAndGetUrl, _handleClock) to kick in and give the worker a
+// clear next step, while still tolerating an ordinary slow-but-working
+// upload. Feature-detected — older SDKs without this method just skip it.
+if (typeof storage.setMaxUploadRetryTime === 'function') {
+  storage.setMaxUploadRetryTime(45000);
+}
+
 // LOCAL persistence — session survives tab close/app restart for up to 10 days.
 // Background push notifications stay active without re-login.
 auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(err => {

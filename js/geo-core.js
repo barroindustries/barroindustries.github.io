@@ -12,7 +12,10 @@
 //  window.siteMatch(pos, sites) — given the worker's current position and
 //    the list of admin-defined Work Sites, decide whether Time In is valid.
 //
-//    pos:   { lat, lng }
+//    pos:   { lat, lng, accuracy? }  — accuracy in meters (GPS 1-sigma radius
+//           of uncertainty), optional for backward compatibility (older
+//           callers / tests that don't pass it get accuracy treated as 0,
+//           i.e. today's exact behavior).
 //    sites: [{ id, name, lat, lng, radiusM, active }, ...]
 //    returns: { inRange: boolean, nearest: { siteId, name, distanceM } | null }
 //
@@ -20,15 +23,29 @@
 //  Only `active` sites are considered; inactive sites are invisible to the
 //  matcher entirely (never chosen as "nearest", never gate a Time In).
 //    1. Compute distance to every active site.
-//    2. If the worker is inside the radius of ONE OR MORE sites, `inRange`
-//       is true and `nearest` is the CLOSEST of those in-range sites (this
-//       is the "multiple sites — nearest wins" rule: if two site geofences
-//       overlap, the tighter/closer one is reported, not an arbitrary one).
+//    2. If the worker is inside the radius of ONE OR MORE sites (accounting
+//       for GPS accuracy — see below), `inRange` is true and `nearest` is the
+//       CLOSEST of those in-range sites (this is the "multiple sites —
+//       nearest wins" rule: if two site geofences overlap, the tighter/closer
+//       one is reported, not an arbitrary one).
 //    3. If the worker is inside NO site's radius, `inRange` is false and
 //       `nearest` is still populated with the globally closest active site
 //       (by raw distance, ignoring its radius) — this is what powers the
 //       blocking UI ("You are 412m from Carlatan Site — move within 150m").
 //    4. Zero active sites → { inRange:false, nearest:null }.
+//
+//  ACCURACY MARGIN (v14 P1 reliability fix) — read before changing:
+//  A GPS fix's `accuracy` is a radius of uncertainty, not a bonus: the true
+//  position could be anywhere up to `accuracy` meters AWAY from the reported
+//  coordinate. So the margin is applied in the ANTI-FRAUD-SAFE direction —
+//  it makes the gate STRICTER, not more lenient, as the fix gets coarser:
+//  `distanceM + accuracy <= radiusM` (worst case must still clear the fence),
+//  never `distanceM - accuracy <= radiusM` (best case clearing it). A sloppy
+//  or low-confidence fix can no longer "just barely" pass a tight geofence.
+//  Pair this with a hard floor on `accuracy` itself before ever calling this
+//  (see GEO_ACCURACY_FLOOR_M below) — a fix so coarse that `accuracy` alone
+//  exceeds a site's radius will always fail `inRange` for that site here too,
+//  as a second line of defense.
 // ═══════════════════════════════════════════════════════════
 
 if (typeof window === 'undefined') {
@@ -38,6 +55,14 @@ if (typeof window === 'undefined') {
 // Mean Earth radius (meters) — same constant convention as most consumer geo
 // libraries (WGS-84 authalic mean radius, ~6371km).
 var GEO_EARTH_RADIUS_M = 6371000;
+
+// v14 P1 reliability fix — a GPS fix coarser than this is too unreliable to
+// gate ANY geofence on, regardless of the site's own radius or the computed
+// distance. Shared constant so worker.js's client-side pre-check and
+// functions/index.js's server-side re-check (which can't require() this file
+// — Cloud Functions deploy only bundles the functions/ directory — keeps its
+// own hand-synced copy of this same value, see that file's comment) agree.
+window.GEO_ACCURACY_FLOOR_M = 100;
 
 window.haversineMeters = function haversineMeters(lat1, lng1, lat2, lng2) {
   lat1 = Number(lat1); lng1 = Number(lng1); lat2 = Number(lat2); lng2 = Number(lng2);
@@ -60,6 +85,9 @@ window.siteMatch = function siteMatch(pos, sites) {
   var active = (Array.isArray(sites) ? sites : []).filter(function (s) { return s && s.active; });
   if (!pos || !active.length) return { inRange: false, nearest: null };
 
+  var accuracyM = Number(pos.accuracy);
+  if (!Number.isFinite(accuracyM) || accuracyM < 0) accuracyM = 0;
+
   var withDistance = active.map(function (s) {
     return {
       siteId: s.id,
@@ -71,7 +99,10 @@ window.siteMatch = function siteMatch(pos, sites) {
 
   if (!withDistance.length) return { inRange: false, nearest: null };
 
-  var inRangeSites = withDistance.filter(function (s) { return s.distanceM <= s.radiusM; });
+  // Anti-fraud-safe accuracy margin — see file header. Worst-case distance
+  // (reported distance + the fix's own uncertainty radius) must clear the
+  // fence, not just the raw reported distance.
+  var inRangeSites = withDistance.filter(function (s) { return (s.distanceM + accuracyM) <= s.radiusM; });
   var pool = inRangeSites.length ? inRangeSites : withDistance;
   var nearest = pool.reduce(function (best, s) { return (!best || s.distanceM < best.distanceM) ? s : best; }, null);
 

@@ -121,8 +121,11 @@ function _compressSelfie(file) {
 }
 
 // ── Geolocation, wrapped as a Promise with HONEST, specific error messages
-// per failure mode (never a fake success — see the file header's rule). ──
-function _getPosition() {
+// per failure mode (never a fake success — see the file header's rule).
+// Accepts an options override (v14 P1 reliability fix — see
+// _getPositionWithRetry below) so a first strict attempt can fall back to a
+// relaxed one instead of failing outright on a cheap phone/weak signal. ──
+function _getPosition(options) {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
       reject({ code: 'unsupported', message: 'This device/browser does not support location services.' });
@@ -138,9 +141,26 @@ function _getPosition() {
         };
         reject({ code: err.code, message: messages[err.code] || (err.message || 'Location failed.') });
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+      options || { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   });
+}
+
+// ── One relaxed retry on POSITION_UNAVAILABLE (2) / TIMEOUT (3) — a cheap
+// phone or a weak-signal spot can fail a strict high-accuracy request that a
+// looser one (accept a slightly stale/coarser fix, wait longer) succeeds at.
+// Never retries PERMISSION_DENIED (1) — that needs a settings change, not
+// different GPS options, so retrying would just burn time before showing the
+// same honest error. ──
+async function _getPositionWithRetry() {
+  try {
+    return await _getPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+  } catch (err) {
+    if (err && (err.code === 2 || err.code === 3)) {
+      return await _getPosition({ enableHighAccuracy: false, timeout: 20000, maximumAge: 30000 });
+    }
+    throw err;
+  }
 }
 
 // ── Selfie capture — a fresh <input type=file accept=image/* capture=user>
@@ -168,6 +188,14 @@ function _captureSelfie() {
     let settled = false;
     let graceTimer = null;
     const CANCEL_GRACE_MS = 2000;
+    // v14 P1 reliability fix — a hard outer ceiling so this Promise can NEVER
+    // hang forever (button stuck disabled) even in the pathological case
+    // where neither 'change' nor a single focus/visibility signal ever fires
+    // again (some in-app webviews / odd Android camera apps don't reliably
+    // refocus the page). This is a backstop, not the normal path — the
+    // focus/visibility grace timer above almost always resolves first.
+    const HARD_TIMEOUT_MS = 3 * 60 * 1000;
+    const hardTimer = setTimeout(() => finish(null), HARD_TIMEOUT_MS);
     const cleanupListeners = () => {
       window.removeEventListener('focus', onSignal);
       document.removeEventListener('visibilitychange', onSignal);
@@ -176,6 +204,7 @@ function _captureSelfie() {
       if (settled) return;
       settled = true;
       if (graceTimer) clearTimeout(graceTimer);
+      clearTimeout(hardTimer);
       cleanupListeners();
       input.remove();
       resolve(file);
@@ -188,7 +217,18 @@ function _captureSelfie() {
     // just restarts the clock instead of instantly declaring a cancel.
     function onSignal() {
       if (settled) return;
-      if (document && 'visibilityState' in document && document.visibilityState !== 'visible') return;
+      if (document && 'visibilityState' in document && document.visibilityState !== 'visible') {
+        // v14 P1 fix — going hidden AGAIN (re-entering an intermediate
+        // camera/gallery chooser, or the camera app itself regaining focus)
+        // must CLEAR any grace timer a prior premature focus blip already
+        // armed. Without this, that stale timer keeps ticking in the
+        // background and can fire finish(null) — a false "cancel" — while
+        // the worker is legitimately still in the camera taking the photo.
+        // We only start counting toward "cancelled" once we're back AND stay
+        // visible.
+        if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
+        return;
+      }
       if (graceTimer) clearTimeout(graceTimer);
       graceTimer = setTimeout(() => finish(null), CANCEL_GRACE_MS);
     }
@@ -271,9 +311,21 @@ async function _loadClockCard(profile) {
   const hasOut = !!(rec.timeOut && rec.outValid);
   const attempts = Array.isArray(rec.attempts) ? rec.attempts : [];
   const lastInvalid = !hasIn && attempts.length ? attempts[attempts.length - 1] : null;
+  // v14 P1 offline-queue fix — a punch that cleared geofence+selfie but is
+  // sitting in the local IndexedDB queue (see _queuePunch/_pqReplayAll) has an
+  // advisory `pendingPunch` marker on this doc but has NOT yet set
+  // timeIn/timeOut (that's function-only, applied when the queue replays).
+  // Without this, the clock card would show the plain "not timed in"/"timed
+  // in" state and its normal action button WHILE a punch of that exact kind
+  // is already in flight — inviting a duplicate Time In/Out tap. ──
+  const pendingKind = rec.pendingPunch && rec.pendingPunch.kind;
+  const pendingQueuedIn = pendingKind === 'in' && !hasIn;
+  const pendingQueuedOut = pendingKind === 'out' && hasIn && !hasOut;
 
   const badge = hasOut ? `<span class="badge badge-green">Timed Out</span>`
+    : pendingQueuedOut ? `<span class="badge badge-orange">Syncing…</span>`
     : hasIn ? `<span class="badge badge-orange">Timed In</span>`
+    : pendingQueuedIn ? `<span class="badge badge-gray">Syncing…</span>`
     : `<span class="badge badge-gray">Not Timed In</span>`;
 
   el.innerHTML = `
@@ -297,6 +349,14 @@ async function _loadClockCard(profile) {
               <div style="font-size:12px;color:var(--text-muted)">In ${escHtml(rec.timeIn || '—')} · Out ${escHtml(rec.timeOut || '—')} · ${(rec.hoursWorked || 0).toFixed(1)}h logged</div>
             </div>
           </div>`
+        : pendingQueuedOut ? `
+          <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px">
+            ${_selfieThumb(rec.inSelfieUrl, 'Time In selfie')}
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--warning)">Timed in at ${escHtml(rec.timeIn || '—')}</div>
+              <div style="font-size:11px;color:var(--text-muted)">${emojiIcon('🔄', 12)} Time Out queued — will submit automatically once you're back online.</div>
+            </div>
+          </div>`
         : hasIn ? `
           <div style="display:flex;gap:12px;align-items:center;margin-bottom:14px">
             ${_selfieThumb(rec.inSelfieUrl, 'Time In selfie')}
@@ -308,6 +368,8 @@ async function _loadClockCard(profile) {
           <button class="btn-primary" id="wb-timeout-btn" style="width:100%;font-size:16px;padding:16px">
             <i data-lucide="log-out" style="width:16px;margin-right:8px;vertical-align:-3px"></i>TIME OUT
           </button>`
+        : pendingQueuedIn ? `
+          <p style="font-size:13px;color:var(--text-muted)">${emojiIcon('🔄', 14)} Time In queued — will submit automatically once you're back online.</p>`
         : `
           <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Tap Time In — we'll check you're on-site, then open the camera for a quick selfie.</p>
           <button class="btn-primary" id="wb-timein-btn" style="width:100%;font-size:16px;padding:16px">
@@ -321,8 +383,158 @@ async function _loadClockCard(profile) {
   document.getElementById('wb-timeout-btn')?.addEventListener('click', () => _handleClock('out', profile));
 }
 
+// ── Config (v14 P0/P1 attendance remediation) ───────────────────────────────
+// > this many hours on an unclosed shift → confirm before Time Out (never
+// auto-stamp "now"), and the server independently flags needsReview too (see
+// functions/index.js recordAttendancePunch — this is a UX nicety on top of a
+// server-enforced guarantee, not the safety mechanism itself).
+const WB_MAX_SHIFT_HOURS = 16;
+
+// ── Offline punch queue (v14 P1 reliability fix) ────────────────────────────
+// A punch that clears the geofence + selfie steps but then can't reach the
+// network (selfie upload or the recordAttendancePunch callable, see below)
+// must never just be LOST — the worker already stood on-site and took the
+// photo; the app owes them a durable "this still counts" receipt. Stored as a
+// raw IndexedDB record — a captured selfie Blob can't round-trip through
+// localStorage/JSON — keyed by an auto id, and replayed (upload if needed,
+// then call the callable) on the next 'online' event or the next time this
+// screen loads. Deliberately simple: replay always re-attempts the callable
+// from scratch; it never trusts a maybe-partial prior attempt.
+//
+// PENDING-PUNCH SHAPE (IndexedDB, db 'bi-attendance-queue', store
+// 'pending-punches', keyPath 'id' autoIncrement) — kept here so a future
+// change to this shape has one obvious place to update both writer+reader:
+//   { id, profileId, kind:'in'|'out', recordDateStr:'YYYY-MM-DD',
+//     lat, lng, accuracy,
+//     selfieBlob: Blob|null,   // set when the selfie was never uploaded
+//     selfieUrl: string|null,  // set when upload succeeded but the callable
+//                              // call itself then failed (don't re-upload)
+//     queuedAt: <Date.now() ms> }
+const WB_PQ_DB_NAME = 'bi-attendance-queue';
+const WB_PQ_STORE = 'pending-punches';
+
+function _pqOpenDb() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) { reject(new Error('IndexedDB not supported')); return; }
+    const req = indexedDB.open(WB_PQ_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const dbc = req.result;
+      if (!dbc.objectStoreNames.contains(WB_PQ_STORE)) {
+        dbc.createObjectStore(WB_PQ_STORE, { keyPath: 'id', autoIncrement: true });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
+  });
+}
+function _pqAdd(record) {
+  return _pqOpenDb().then(dbc => new Promise((resolve, reject) => {
+    const tx = dbc.transaction(WB_PQ_STORE, 'readwrite');
+    tx.objectStore(WB_PQ_STORE).add(record);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  }));
+}
+function _pqGetAll() {
+  return _pqOpenDb().then(dbc => new Promise((resolve, reject) => {
+    const tx = dbc.transaction(WB_PQ_STORE, 'readonly');
+    const req = tx.objectStore(WB_PQ_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => reject(req.error);
+  }));
+}
+function _pqDelete(id) {
+  return _pqOpenDb().then(dbc => new Promise((resolve, reject) => {
+    const tx = dbc.transaction(WB_PQ_STORE, 'readwrite');
+    tx.objectStore(WB_PQ_STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  }));
+}
+
+// Persist a punch the network couldn't take right now. Also best-effort
+// stamps an advisory `pendingPunch` marker on the day-doc (never inValid/
+// outValid/timeIn/timeOut/hoursWorked — those stay function-only per the
+// tightened firestore.rules this ships alongside) purely so the worker/HR see
+// "queued, not yet synced" if they look at the record before it replays.
+async function _queuePunch({ profile, kind, recordDateStr, pos, blob, selfieUrl }) {
+  const record = {
+    profileId: profile.id, kind, recordDateStr,
+    lat: pos.lat, lng: pos.lng, accuracy: pos.accuracy,
+    selfieBlob: blob || null, selfieUrl: selfieUrl || null,
+    queuedAt: Date.now()
+  };
+  await _pqAdd(record);
+  db.collection('attendance_worker').doc(profile.id).collection('records').doc(recordDateStr)
+    .set({
+      workerId: profile.id, date: recordDateStr, recordedBy: currentUser.uid,
+      pendingPunch: { kind, queuedAt: record.queuedAt }
+    }, { merge: true }).catch(() => {});
+}
+
+// Does this error look like a connectivity problem worth queueing for later,
+// rather than a real rejection (bad input, permission, invalid geofence,
+// etc.)? Queueing THOSE would just silently fail forever on every replay, so
+// this is a conservative allowlist, not a catch-all. ──
+function _isNetworkish(err) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  const code = String((err && err.code) || '');
+  const msg = String((err && err.message) || '');
+  return /unavailable|deadline-exceeded|retry-limit-exceeded|network/i.test(code)
+    || /network|offline|failed to fetch/i.test(msg);
+}
+
+let _wbLastProfile = null; // refreshed on every _loadClockCard call — lets the
+// 'online' reconnect handler repaint the clock card without needing a profile
+// argument threaded through a global event listener.
+let _wbOnlineListenerAttached = false;
+
+// Replay every queued punch once we're back online: re-upload the selfie if
+// it wasn't already, call the SAME callable a live punch would, and drop the
+// queue entry only once the server has actually accepted it. A punch that
+// fails again (still offline, or a transient server error) is simply left in
+// the queue for the next 'online' event — never dropped on a failed attempt.
+async function _pqReplayAll() {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  let items = [];
+  try { items = await _pqGetAll(); } catch (err) { return; }
+  if (!items.length) return;
+  let anyDone = false;
+  for (const item of items) {
+    try {
+      let selfieUrl = item.selfieUrl;
+      if (!selfieUrl) {
+        const path = `attendance-selfies/${currentUser.uid}/${item.recordDateStr}-${item.kind}-${item.queuedAt}.jpg`;
+        const sref = storage.ref(path);
+        await sref.put(item.selfieBlob, { contentType: 'image/jpeg', customMetadata: { uploadedBy: currentUser.uid, queued: 'true' } });
+        selfieUrl = await sref.getDownloadURL();
+      }
+      await firebase.functions().httpsCallable('recordAttendancePunch')({
+        kind: item.kind, lat: item.lat, lng: item.lng, accuracy: item.accuracy,
+        selfieUrl, recordDate: item.recordDateStr
+      });
+      await _pqDelete(item.id);
+      anyDone = true;
+      Notifs.showToast(`Queued Time ${item.kind === 'in' ? 'In' : 'Out'} from ${item.recordDateStr} submitted.`, 'success');
+    } catch (err) {
+      console.warn('[worker] queued punch replay failed, will retry later:', err && err.message);
+      // Left in the queue — retried on the next 'online' event / page load.
+    }
+  }
+  if (anyDone && _wbLastProfile) _loadClockCard(_wbLastProfile);
+}
+
+function _wbAttachOnlineListener() {
+  if (_wbOnlineListenerAttached) return;
+  _wbOnlineListenerAttached = true;
+  window.addEventListener('online', () => _pqReplayAll());
+}
+
 // ── The Time In / Time Out flow: geolocation → geofence check → (blocking
-// OUTSIDE result, OR selfie capture → compress → upload → write record). ──
+// OUTSIDE result, OR selfie capture → compress → upload → server-verified
+// write). See functions/index.js recordAttendancePunch — that callable, not
+// this file, is now the sole writer of inValid/outValid/timeIn/timeOut/
+// hoursWorked (P0 fix: those were previously entirely client-asserted). ──
 async function _handleClock(kind, profile) {
   const btn = document.getElementById(kind === 'in' ? 'wb-timein-btn' : 'wb-timeout-btn');
   const statusEl = document.getElementById('wb-clock-status');
@@ -332,8 +544,22 @@ async function _handleClock(kind, profile) {
     statusEl.style.color = isErr ? 'var(--danger)' : 'var(--text-muted)';
   };
   if (btn) btn.disabled = true;
+  _wbLastProfile = profile;
+  _wbAttachOnlineListener();
 
-  // ── 0. Resolve which day-doc this action targets. Time In always starts a
+  // ── 0. Kick off the selfie picker SYNCHRONOUSLY, in the SAME tap that
+  // triggered this handler — before ANY `await` (geolocation, Firestore
+  // reads, …) burns the browser's brief "recent user activation" window. On
+  // some mobile browsers, opening a native camera/file picker after that
+  // window lapses silently fails, which used to leave _captureSelfie()
+  // hanging with the button stuck disabled (see file header). Accepted
+  // tradeoff: the picker can appear before we know the worker is even inside
+  // a geofence — harmless, since the captured file is simply discarded if the
+  // geofence check below fails first (never uploaded, never written). ──
+  const selfiePromise = _captureSelfie();
+  selfiePromise.catch(() => {}); // _captureSelfie never rejects; guard anyway.
+
+  // ── 0b. Resolve which day-doc this action targets. Time In always starts a
   // fresh shift dated today. Time Out must close whichever shift is still
   // OPEN — today's, or (a shift that crossed midnight) yesterday's — via
   // _resolveActiveRecord, or the Manila-day boundary silently splits one
@@ -350,7 +576,7 @@ async function _handleClock(kind, profile) {
       curData = active.data;
     } catch (err) {
       // Best-effort — fall back to today's doc rather than crashing the
-      // whole Time Out flow; the read-modify-write in step 5 re-checks anyway.
+      // whole Time Out flow; the server call re-resolves this itself anyway.
     }
     // ── Minimum-shift-length guard — an accidental double-tap of Time Out
     // seconds after Time In shouldn't silently record a near-zero-hour shift
@@ -364,17 +590,48 @@ async function _handleClock(kind, profile) {
           confirmLabel: 'Time Out anyway', cancelLabel: 'Not yet'
         });
         if (!proceed) { if (btn) btn.disabled = false; setStatus(''); return; }
+      } else if (elapsedMin != null && elapsedMin >= WB_MAX_SHIFT_HOURS * 60) {
+        // ── v14 P0 fix (CRITICAL #4) — a shift left open this long is very
+        // likely a forgotten clock-out (see file header: this used to
+        // silently auto-stamp "now" under a misleadingly-normal "Today"
+        // header, booking ~22-24h). NEVER auto-stamp — force an explicit
+        // confirm, and let the server (which independently re-derives
+        // hoursWorked from its own immutable timestamps and applies this same
+        // threshold) stamp needsReview:true so HR's kiosk hours view surfaces
+        // it before it reaches payroll un-checked. ──
+        const hoursAgo = (elapsedMin / 60).toFixed(1);
+        const proceed = await window.confirmDialog({
+          title: 'Very long shift — confirm Time Out',
+          message: `You timed in at ${curData.timeIn} (${recordDateStr}) — that's about ${hoursAgo} hours ago.\n\nIf that's not right, DON'T tap Time Out — leave this open and ask HR/Finance to correct your record directly.\n\nTiming out now will record this as an unusually long shift and flag it for HR review before it's paid.`,
+          confirmLabel: 'Time Out now (flag for review)', cancelLabel: "Don't time out"
+        });
+        if (!proceed) {
+          setStatus("Left open — ask HR/Finance to correct this shift's times.", true);
+          if (btn) btn.disabled = false;
+          return;
+        }
       }
     }
   }
 
-  // ── 1. Location ──
+  // ── 1. Location (one relaxed retry on POSITION_UNAVAILABLE/TIMEOUT) ──
   setStatus('Getting your location…');
   let pos;
-  try { pos = await _getPosition(); }
+  try { pos = await _getPositionWithRetry(); }
   catch (err) {
     setStatus(err.message, true);
     Notifs.showToast(err.message, 'error');
+    if (btn) btn.disabled = false;
+    return;
+  }
+
+  // ── 1b. GPS accuracy floor (v14 P1 fix) — a fix this coarse is too
+  // unreliable to gate a geofence on at all, regardless of distance. ──
+  const accuracyFloor = window.GEO_ACCURACY_FLOOR_M || 100;
+  if (!Number.isFinite(pos.accuracy) || pos.accuracy > accuracyFloor) {
+    const msg = `GPS reading too weak (±${Math.round(pos.accuracy || 0)}m) — move to open air (away from buildings/roofing) and try again.`;
+    setStatus(msg, true);
+    Notifs.showToast(msg, 'error');
     if (btn) btn.disabled = false;
     return;
   }
@@ -405,7 +662,10 @@ async function _handleClock(kind, profile) {
     return;
   }
 
-  // ── 3. Geofence check (js/geo-core.js) ──
+  // ── 3. Geofence check (js/geo-core.js — now accuracy-aware, see that
+  // file's header). This is a fast client-side UX gate only; the server call
+  // in step 5 independently RECOMPUTES this exact check and is the one that
+  // actually decides validity — see functions/index.js recordAttendancePunch. ──
   const match = window.siteMatch(pos, sites);
 
   if (!match.inRange) {
@@ -417,7 +677,9 @@ async function _handleClock(kind, profile) {
     Notifs.showToast(msg, 'error');
     // Audit trail only — best-effort (a denied/offline write here must never
     // block the worker from retrying; it just means this one attempt isn't
-    // logged). Never writes timeIn/timeOut/inValid on an invalid attempt.
+    // logged). Never writes timeIn/timeOut/inValid/outValid/hoursWorked —
+    // those are function-only fields per the tightened firestore.rules this
+    // ships alongside (see report).
     ref.set({
       workerId: profile.id, date: recordDateStr,
       // v14 attendance fix — own the day-doc from the FIRST tap, even when this
@@ -429,6 +691,7 @@ async function _handleClock(kind, profile) {
       recordedBy: currentUser.uid,
       attempts: firebase.firestore.FieldValue.arrayUnion({
         kind, lat: pos.lat, lng: pos.lng,
+        accuracyM: Math.round(pos.accuracy || 0),
         distanceM: nearest ? Math.round(nearest.distanceM) : null,
         siteId: nearest ? nearest.siteId : null,
         valid: false, atClient: new Date().toISOString()
@@ -438,74 +701,193 @@ async function _handleClock(kind, profile) {
     return;
   }
 
-  // ── 4. Selfie ──
-  setStatus('Location verified — opening camera…');
-  const file = await _captureSelfie();
+  // ── 4. Selfie — await the picker we already opened back in step 0. ──
+  setStatus('Location verified — finishing selfie…');
+  const file = await selfiePromise;
   if (!file) {
     setStatus(`Selfie was cancelled — Time ${kind === 'in' ? 'In' : 'Out'} was NOT recorded.`, true);
     if (btn) btn.disabled = false;
     return;
   }
 
-  setStatus('Uploading selfie…');
+  await _finishClockSubmission({ kind, profile, ref, recordDateStr, pos, match, file, btn, statusEl, setStatus });
+}
+
+// ── Compress → upload (with progress + Cancel) → call the server-verified
+// recordAttendancePunch callable (js/functions/index.js) → success, OR queue
+// for later on a network-flavored failure, OR offer a same-position "Retake
+// selfie" retry on any other upload failure. Split out from _handleClock so a
+// retake can re-enter here directly with a freshly-captured file WITHOUT
+// re-running geolocation/geofence — reuses ctx.pos/ctx.match as-is. ──
+async function _finishClockSubmission(ctx) {
+  const { kind, profile, ref, recordDateStr, pos, match, file, btn, statusEl, setStatus } = ctx;
+
+  setStatus('Compressing photo…');
+  const blob = await _compressSelfie(file);
+
+  // Already known offline — skip the network attempt entirely and queue
+  // straight away rather than waiting out a doomed upload first.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    try {
+      await _queuePunch({ profile, kind, recordDateStr, pos, blob });
+      setStatus("Saved — you're offline. Will submit automatically once you're back online.", false);
+      Notifs.showToast(`Time ${kind === 'in' ? 'In' : 'Out'} saved — will submit automatically once you're back online.`, 'info');
+    } catch (err) {
+      setStatus('Could not save this punch — try again once you have a connection.', true);
+      Notifs.showToast('Could not queue this punch: ' + (err.message || err), 'error');
+    }
+    if (btn) btn.disabled = false;
+    return;
+  }
+
+  // v14 attendance fix — unique filename per attempt (Date.now() suffix only,
+  // never day-keying). Workers have create-only (admin-only update) on this
+  // Storage path; a fixed name meant a partial retry after an upload landed
+  // but the later write failed turned every retry into a denied UPDATE.
+  const path = `attendance-selfies/${currentUser.uid}/${recordDateStr}-${kind}-${Date.now()}.jpg`;
   let selfieUrl;
   try {
-    const blob = await _compressSelfie(file);
-    // v14 attendance fix — unique filename per attempt. Workers have create-only
-    // (admin-only update) on this path; a fixed name meant that if the upload
-    // landed but the record write then failed (flaky Wi-Fi / tab killed after
-    // put() resolved), the orphan file turned every retry into a denied UPDATE —
-    // locking the worker out of that day/kind until an admin deleted it. The
-    // Date.now() is a filename suffix only (uniqueness, never day-keying).
-    const path = `attendance-selfies/${currentUser.uid}/${recordDateStr}-${kind}-${Date.now()}.jpg`;
-    const sref = storage.ref(path);
-    await sref.put(blob, { customMetadata: { uploadedBy: currentUser.uid } });
-    selfieUrl = await sref.getDownloadURL();
+    selfieUrl = await _uploadSelfieAndGetUrl(path, blob, statusEl);
   } catch (err) {
-    setStatus(`Selfie upload failed — Time ${kind === 'in' ? 'In' : 'Out'} was NOT recorded: ${err.message || err}`, true);
-    Notifs.showToast('Selfie upload failed: ' + (err.message || err), 'error');
+    if (err && err.cancelledByUser) {
+      setStatus('Upload cancelled.', true);
+      _offerRetake(ctx);
+      if (btn) btn.disabled = false;
+      return;
+    }
+    if (_isNetworkish(err)) {
+      try {
+        await _queuePunch({ profile, kind, recordDateStr, pos, blob });
+        setStatus("Saved — you're offline. Will submit automatically once you're back online.", false);
+        Notifs.showToast(`Time ${kind === 'in' ? 'In' : 'Out'} saved — will submit automatically once you're back online.`, 'info');
+      } catch (qErr) {
+        setStatus('Could not save this punch — try again once you have a connection.', true);
+        Notifs.showToast('Could not queue this punch: ' + (qErr.message || qErr), 'error');
+      }
+      if (btn) btn.disabled = false;
+      return;
+    }
+    const msg = _friendlyStorageError(err);
+    setStatus(`Selfie upload failed — Time ${kind === 'in' ? 'In' : 'Out'} was NOT recorded: ${msg}`, true);
+    Notifs.showToast('Selfie upload failed: ' + msg, 'error');
+    _offerRetake(ctx);
     if (btn) btn.disabled = false;
     return;
   }
 
-  // ── 5. Write the record (own-uid write of a doc keyed by worker_profiles
-  // docId — see the Storage/Firestore rule requirements in the final report;
-  // this write is EXPECTED to be denied until those rules ship). ──
-  const timeStr = _workerBizTimeHM();
-  const distanceM = Math.round(match.nearest.distanceM);
+  // ── 5. Server-verified write. recordAttendancePunch (functions/index.js)
+  // recomputes the geofence, re-checks GPS accuracy, bounds the record to the
+  // server's own Manila-day, derives hoursWorked from immutable server
+  // timestamps, and is the SOLE writer of inValid/outValid/timeIn/timeOut/
+  // hoursWorked. This replaces the old direct client `ref.set(...)` write
+  // entirely — see file header and the P0 report for why. ──
   setStatus('Saving…');
   try {
-    // Time Out needs timeIn (already on the doc) to compute hoursWorked —
-    // read-modify-write, same computeDayHours the kiosk/payslip paths use.
-    // Re-fetch (rather than trusting step 0's curData) since GPS + selfie
-    // capture + upload can take a while and this must reflect the latest state.
-    const cur = await ref.get();
-    const freshData = cur.exists ? cur.data() : {};
-    const fields = kind === 'in'
-      ? { timeIn: timeStr, inLat: pos.lat, inLng: pos.lng, inDistanceM: distanceM, inSiteId: match.nearest.siteId, inSelfieUrl: selfieUrl, inValid: true, inAt: firebase.firestore.FieldValue.serverTimestamp() }
-      : { timeOut: timeStr, outLat: pos.lat, outLng: pos.lng, outDistanceM: distanceM, outSiteId: match.nearest.siteId, outSelfieUrl: selfieUrl, outValid: true, outAt: firebase.firestore.FieldValue.serverTimestamp() };
-    if (kind === 'out') {
-      const calcFn = (typeof computeDayHours === 'function') ? computeDayHours : null;
-      fields.hoursWorked = calcFn ? calcFn(freshData.timeIn, timeStr) : 0;
-    }
-    await ref.set({
-      workerId: profile.id, date: recordDateStr,
-      recordedBy: currentUser.uid,
-      recordedByName: (window.userProfile && userProfile.displayName) || currentUser.email,
-      recordedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      ...fields
-    }, { merge: true });
+    const res = await firebase.functions().httpsCallable('recordAttendancePunch')({
+      kind, lat: pos.lat, lng: pos.lng, accuracy: pos.accuracy,
+      selfieUrl, recordDate: recordDateStr
+    });
+    const timeStr = (res && res.data && res.data.timeStr) || _workerBizTimeHM();
+    Notifs.success((kind === 'in' ? '✅ ' : '👋 ') + ((res && res.data && res.data.message) ||
+      (kind === 'in' ? `Timed in at ${timeStr} — ${match.nearest.name}` : `Timed out at ${timeStr}`)));
+    _loadClockCard(profile);
   } catch (err) {
-    setStatus(`Could not save Time ${kind === 'in' ? 'In' : 'Out'}: ${err.message || err}`, true);
-    Notifs.showToast(`Time ${kind === 'in' ? 'In' : 'Out'} failed to save: ` + (err.message || err), 'error');
+    if (_isNetworkish(err)) {
+      // Selfie already uploaded — queue with the URL we already have so
+      // replay never re-uploads a duplicate image.
+      try {
+        await _queuePunch({ profile, kind, recordDateStr, pos, selfieUrl });
+        setStatus("Saved — you're offline. Will submit automatically once you're back online.", false);
+        Notifs.showToast(`Time ${kind === 'in' ? 'In' : 'Out'} saved — will submit automatically once you're back online.`, 'info');
+      } catch (qErr) {
+        setStatus('Could not save this punch — try again once you have a connection.', true);
+        Notifs.showToast('Could not queue this punch: ' + (qErr.message || qErr), 'error');
+      }
+      if (btn) btn.disabled = false;
+      return;
+    }
+    const msg = (err && err.message) || 'Could not save this punch — try again.';
+    setStatus(`Could not save Time ${kind === 'in' ? 'In' : 'Out'}: ${msg}`, true);
+    Notifs.showToast(`Time ${kind === 'in' ? 'In' : 'Out'} failed to save: ` + msg, 'error');
     if (btn) btn.disabled = false;
     return;
   }
+}
 
-  Notifs.success(kind === 'in'
-    ? `✅ Timed in at ${timeStr} — ${match.nearest.name}`
-    : `👋 Timed out at ${timeStr}`);
-  _loadClockCard(profile);
+// Upload with visible progress + a Cancel control (v14 P1 fix — the old
+// `await sref.put(...)` had no timeout override and no way to tell if it was
+// working or stuck; the Storage default retry window is ~10 minutes). Resolves
+// the download URL, or rejects with `.cancelledByUser` set if the worker
+// tapped Cancel (distinct from a real failure — see _finishClockSubmission). ──
+function _uploadSelfieAndGetUrl(path, blob, statusEl) {
+  return new Promise((resolve, reject) => {
+    const sref = storage.ref(path);
+    // Force image/jpeg regardless of the source blob's own reported type —
+    // _compressSelfie's undecodable-image fallback can resolve with the
+    // original captured file, whose MIME can come back empty/
+    // application/octet-stream on some odd Android capture paths. Without an
+    // explicit contentType override here, storage.rules' isValidImage()
+    // (`contentType.matches('image/.*')`) would deny that upload outright.
+    const task = sref.put(blob, { contentType: 'image/jpeg', customMetadata: { uploadedBy: currentUser.uid } });
+    if (statusEl) {
+      statusEl.innerHTML = `<span id="wb-upload-pct">Uploading selfie…</span> <button type="button" id="wb-upload-cancel" class="btn-secondary btn-sm" style="margin-left:8px;padding:2px 8px;font-size:11px">Cancel</button>`;
+      const cancelBtn = document.getElementById('wb-upload-cancel');
+      if (cancelBtn) cancelBtn.addEventListener('click', () => task.cancel());
+    }
+    task.on('state_changed', snap => {
+      const pctEl = document.getElementById('wb-upload-pct');
+      if (pctEl && snap.totalBytes) {
+        pctEl.textContent = `Uploading selfie… ${Math.round((snap.bytesTransferred / snap.totalBytes) * 100)}%`;
+      }
+    }, err => {
+      if (err && err.code === 'storage/canceled') {
+        reject(Object.assign(new Error('Upload cancelled.'), { code: 'storage/canceled', cancelledByUser: true }));
+      } else {
+        reject(err);
+      }
+    }, () => {
+      task.snapshot.ref.getDownloadURL().then(resolve, reject);
+    });
+  });
+}
+
+// Plain-English mapping for the raw Storage error codes a worker might
+// actually hit — network-flavored ones are handled separately (queued) before
+// this is ever called; this only needs to cover real, non-retryable failures.
+function _friendlyStorageError(err) {
+  const code = (err && err.code) || '';
+  if (code === 'storage/unauthorized') return "You don't have permission to upload this selfie — contact HR/Admin.";
+  if (code === 'storage/quota-exceeded') return 'Storage is full — contact Admin.';
+  if (code === 'storage/retry-limit-exceeded') return 'Upload timed out repeatedly — check your connection and try again.';
+  return (err && err.message) || 'Selfie upload failed.';
+}
+
+// A "Retake selfie" affordance for when the upload genuinely fails (not
+// queued) — re-opens the camera and re-enters _finishClockSubmission with the
+// SAME already-verified ctx.pos/ctx.match, so a retake never re-runs the
+// geolocation/geofence round trip (v14 P1 fix). ──
+function _offerRetake(ctx) {
+  if (!ctx.statusEl) return;
+  let retakeBtn = document.getElementById('wb-retake-btn');
+  if (retakeBtn) retakeBtn.remove();
+  retakeBtn = document.createElement('button');
+  retakeBtn.type = 'button';
+  retakeBtn.id = 'wb-retake-btn';
+  retakeBtn.className = 'btn-secondary btn-sm';
+  retakeBtn.style.marginTop = '8px';
+  retakeBtn.textContent = 'Retake selfie';
+  ctx.statusEl.insertAdjacentElement('afterend', retakeBtn);
+  retakeBtn.addEventListener('click', async () => {
+    retakeBtn.remove();
+    if (ctx.btn) ctx.btn.disabled = true;
+    const file = await _captureSelfie();
+    if (!file) {
+      ctx.setStatus(`Selfie was cancelled — Time ${ctx.kind === 'in' ? 'In' : 'Out'} was NOT recorded.`, true);
+      if (ctx.btn) ctx.btn.disabled = false;
+      return;
+    }
+    await _finishClockSubmission({ ...ctx, file });
+  });
 }
 
 // ── Attendance calendar (adapted from js/screens/people.js
@@ -543,7 +925,7 @@ async function _loadWorkerCalendar(profile, viewYear, viewMonth) {
   const records = {};
   snap.docs.forEach(d => { records[d.id] = d.data(); });
 
-  const firstDay = window.bizDow(new Date(`${monthStart}T12:00:00`));
+  const firstDay = window.bizDow(monthStart);
   const todayStr = window.bizDate();
   const phHolidays = (typeof getPHHolidays === 'function') ? getPHHolidays(viewYear) : {};
   // Never fabricate an "Absent" mark for a day before the worker's own
@@ -557,7 +939,7 @@ async function _loadWorkerCalendar(profile, viewYear, viewMonth) {
   let presentCount = 0, absentCount = 0, hoursTotal = 0;
   for (let day = 1; day <= daysInMonth; day++) {
     const dateStr = `${viewYear}-${mm}-${String(day).padStart(2, '0')}`;
-    const dow = window.bizDow(new Date(`${dateStr}T12:00:00`));
+    const dow = window.bizDow(dateStr);
     const isSunday = dow === 0;
     const holiday = phHolidays[dateStr];
     const isNoWork = isSunday || !!holiday;
@@ -718,6 +1100,13 @@ window.renderWorkerHome = async function () {
     if (window.lucide) lucide.createIcons({ nodes: [c] });
     return;
   }
+
+  _wbLastProfile = profile;
+  _wbAttachOnlineListener();
+  // Opportunistic replay — pick up any punch that got queued last session
+  // (offline, or the tab was killed mid-upload) if we're online now. Never
+  // awaited: this page must render immediately either way.
+  _pqReplayAll();
 
   const bizToday = window.bizDate();
   let viewYear = parseInt(bizToday.slice(0, 4), 10);

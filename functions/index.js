@@ -1104,3 +1104,354 @@ exports.onBsQuoteWon = functions
   .firestore
   .document('bs_quotes/{id}')
   .onUpdate(makeOnQuoteWonHandler('bs_quotes'));
+
+// ──────────────────────────────────────────────────────────────────────────
+//  recordAttendancePunch (v14 P0 attendance-integrity fix)
+//
+//  THE PROBLEM THIS CLOSES: js/screens/worker.js's Type-B self-service
+//  Time In/Out used to write inValid/outValid/timeIn/timeOut/hoursWorked
+//  DIRECTLY from the client after doing its own geofence check in the
+//  browser. firestore.rules' old self-service write rule trusted that
+//  client-computed verdict outright (defaulting inValid/outValid to true with
+//  no independent check) and had no server-side bound on which calendar date
+//  a record could be written to. A worker with devtools (or a Fake-GPS app)
+//  could therefore assert an on-site, valid-looking, or even BACKDATED shift
+//  from anywhere — this is real pay, so that trust boundary was the actual
+//  bug. This callable moves EVERY decision that determines whether a shift
+//  gets paid onto the server, using the Admin SDK (which bypasses
+//  firestore.rules entirely, so it works correctly regardless of what the
+//  client-side rules currently allow — see the deploy-order note in the
+//  accompanying report):
+//    • Re-resolves the caller's worker_profiles doc server-side (linkedUid ==
+//      auth uid), rejecting if none exists or the profile is inactive — the
+//      client's own uid/profile pairing is never trusted as-is.
+//    • RECOMPUTES the haversine geofence against geo_sites (active==true)
+//      itself (see serverSiteMatch below — a hand-synced mirror of
+//      js/geo-core.js's siteMatch/haversineMeters; Cloud Functions deploy
+//      only bundles the functions/ directory per firebase.json, so this file
+//      can't require() that sibling file directly).
+//    • Rejects a GPS accuracy that's missing, non-positive, or coarser than
+//      GEO_ACCURACY_FLOOR_M — a fix this unreliable can't be trusted to prove
+//      anything about a geofence, no matter what distance it implies.
+//    • Verifies the selfie: the URL must parse as this exact worker's own
+//      attendance-selfies/{uid}/ Storage path, AND the object must actually
+//      exist in the bucket (not just a well-formed URL) — fails CLOSED (an
+//      unverifiable selfie is treated as invalid, not waved through) since
+//      this is the core anti-fraud check, unlike the lower-stakes
+//      fail-open quota checks elsewhere in this file.
+//    • Bounds the record to a SERVER-computed Manila calendar day: Time In
+//      always targets today; Time Out targets whichever shift the server
+//      itself finds still open (today's, or an unclosed prior day's — see
+//      resolveActiveRecordServer, a server-side twin of worker.js's
+//      _resolveActiveRecord). The device clock is never consulted for either.
+//    • Derives hoursWorked for Time Out from its OWN immutable server
+//      timestamps (inAt/outAt, both admin.firestore.Timestamp.now() at the
+//      moment each call runs) — never the device clock — and stamps
+//      needsReview:true whenever the result exceeds MAX_SHIFT_HOURS (a
+//      forgotten-clockout style shift is still recorded, but flagged before
+//      it can reach payroll unchecked; the sibling HR "Load Kiosk Hours" view
+//      surfaces this exact field).
+//    • Is the SOLE writer of inValid/outValid/timeIn/timeOut/hoursWorked —
+//      js/screens/worker.js's direct client write of these fields has been
+//      REMOVED (not kept as a fallback); the only client-direct writes left
+//      on this doc are the pre-punch audit `attempts` array and an advisory
+//      `pendingPunch` marker for the offline queue UI (see report for the
+//      accompanying firestore.rules tightening that makes this enforced,
+//      not just voluntary).
+//
+//  Client call site: js/screens/worker.js _finishClockSubmission, via
+//  firebase.functions().httpsCallable('recordAttendancePunch')({kind, lat,
+//  lng, accuracy, selfieUrl, recordDate}). No .region() is set here (default
+//  us-central1), matching this file's other onCall exports (adminResetPassword,
+//  backfillUserClaims) and the client's own un-regioned httpsCallable() calls.
+// ──────────────────────────────────────────────────────────────────────────
+
+// Mirrors js/geo-core.js's GEO_ACCURACY_FLOOR_M — kept in sync by hand (see
+// that file's own comment on why this can't be a shared import across the
+// functions/ deploy boundary).
+const GEO_ACCURACY_FLOOR_M = 100;
+
+// A shift still open past this many hours is almost certainly a forgotten
+// clock-out, not a real 16+ hour shift — recorded, but flagged for HR review
+// rather than silently trusted for pay. Mirrors js/screens/worker.js's
+// WB_MAX_SHIFT_HOURS (that copy only gates a client-side confirm dialog; THIS
+// copy is what actually determines needsReview on the paid record).
+const MAX_SHIFT_HOURS = 16;
+
+// Same great-circle formula as js/geo-core.js's window.haversineMeters,
+// hand-copied — see the comment block above on why this file can't
+// require() that sibling module.
+function haversineMetersServer(lat1, lng1, lat2, lng2) {
+  lat1 = Number(lat1); lng1 = Number(lng1); lat2 = Number(lat2); lng2 = Number(lng2);
+  if ([lat1, lng1, lat2, lng2].some((n) => !Number.isFinite(n))) return NaN;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return 6371000 * c; // WGS-84 mean Earth radius, meters
+}
+
+// Same "nearest-site-wins, accuracy is an anti-fraud-safe margin" semantics
+// as js/geo-core.js's window.siteMatch (see that file's header) — hand-synced
+// server twin, not a shared import (see comment block above).
+function serverSiteMatch(lat, lng, accuracy, sites) {
+  const active = (Array.isArray(sites) ? sites : []).filter((s) => s && s.active);
+  const withDistance = active.map((s) => ({
+    siteId: s.id,
+    name: s.name || '',
+    distanceM: haversineMetersServer(lat, lng, s.lat, s.lng),
+    radiusM: Number(s.radiusM) || 0
+  })).filter((s) => Number.isFinite(s.distanceM));
+  if (!withDistance.length) return { inRange: false, nearest: null };
+  const inRangeSites = withDistance.filter((s) => (s.distanceM + accuracy) <= s.radiusM);
+  const pool = inRangeSites.length ? inRangeSites : withDistance;
+  const nearest = pool.reduce((best, s) => (!best || s.distanceM < best.distanceM) ? s : best, null);
+  return { inRange: inRangeSites.length > 0, nearest };
+}
+
+// Manila "HH:MM" — same UTC+8 shift-then-read trick as manilaDate() above
+// (Asia/Manila has no DST, so a fixed offset never drifts). Mirrors
+// js/screens/worker.js's _workerBizTimeHM.
+function manilaTimeHM(date) {
+  const shifted = new Date((date || new Date()).getTime() + 8 * 60 * 60 * 1000);
+  const hh = String(shifted.getUTCHours()).padStart(2, '0');
+  const mm = String(shifted.getUTCMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+// Extract the attendance-selfies object path from a Storage download URL and
+// confirm it belongs to THIS uid's own folder — never trust a client-supplied
+// selfieUrl string at face value. Returns the decoded object path, or null if
+// the URL doesn't parse as a Firebase Storage download URL under
+// attendance-selfies/{uid}/.
+function parseOwnSelfiePath(url, uid) {
+  try {
+    const u = new URL(url);
+    if (!/(^|\.)firebasestorage\.googleapis\.com$/i.test(u.hostname)
+      && !/(^|\.)storage\.googleapis\.com$/i.test(u.hostname)) {
+      return null;
+    }
+    const m = u.pathname.match(/\/o\/([^/?]+(?:%2F[^/?]+)*)/i) || u.pathname.match(/\/o\/(.+)$/);
+    if (!m) return null;
+    const objectPath = decodeURIComponent(m[1]);
+    const expectedPrefix = `attendance-selfies/${uid}/`;
+    return objectPath.startsWith(expectedPrefix) ? objectPath : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Server-side twin of js/screens/worker.js's _resolveActiveRecord — same
+// cross-midnight semantics, same reasoning (see that function's header):
+// Time Out must close whichever shift is still open, today's or an unclosed
+// prior day's, or the Manila-day boundary silently splits one shift into two
+// broken records.
+async function resolveActiveRecordServer(base, todayStr) {
+  const todayRef = base.doc(todayStr);
+  const todaySnap = await todayRef.get();
+  const todayData = todaySnap.exists ? todaySnap.data() : null;
+  if (todayData && todayData.timeIn && !todayData.timeOut) {
+    return { dateStr: todayStr, ref: todayRef, data: todayData };
+  }
+  if (!todayData || !todayData.timeIn) {
+    const yestStr = manilaDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
+    const yestRef = base.doc(yestStr);
+    const yestSnap = await yestRef.get();
+    const yestData = yestSnap.exists ? yestSnap.data() : null;
+    if (yestData && yestData.timeIn && !yestData.timeOut) {
+      return { dateStr: yestStr, ref: yestRef, data: yestData };
+    }
+  }
+  return { dateStr: todayStr, ref: todayRef, data: todayData || {} };
+}
+
+exports.recordAttendancePunch = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'You must be signed in.');
+  }
+  const uid = context.auth.uid;
+  const db = admin.firestore();
+
+  const kind = data && data.kind;
+  if (kind !== 'in' && kind !== 'out') {
+    throw new functions.https.HttpsError('invalid-argument', 'kind must be "in" or "out".');
+  }
+  const lat = Number(data && data.lat);
+  const lng = Number(data && data.lng);
+  const accuracy = Number(data && data.accuracy);
+  const selfieUrl = (data && typeof data.selfieUrl === 'string') ? data.selfieUrl.trim() : '';
+  // NOTE: the client also sends `data.recordDate` (a UX hint matching what its
+  // own clock card is showing) — deliberately never read here. The whole
+  // point of this function is that the record's date is a SERVER-derived
+  // value (see resolveActiveRecordServer/manilaDate below), never a
+  // client-supplied one; trusting it would reopen the exact backdating hole
+  // this callable exists to close.
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+    throw new functions.https.HttpsError('invalid-argument', 'A valid position is required.');
+  }
+  if (!Number.isFinite(accuracy) || accuracy <= 0 || accuracy > GEO_ACCURACY_FLOOR_M) {
+    throw new functions.https.HttpsError('failed-precondition', 'GPS accuracy too weak to verify — move to open air and try again.');
+  }
+  if (!selfieUrl) {
+    throw new functions.https.HttpsError('invalid-argument', 'A selfie is required.');
+  }
+
+  // Selfie must be this worker's OWN attendance-selfies object, and must
+  // actually exist in the bucket — fails CLOSED on any doubt (see header).
+  const objectPath = parseOwnSelfiePath(selfieUrl, uid);
+  if (!objectPath) {
+    throw new functions.https.HttpsError('invalid-argument', 'Selfie is missing or not recognized as yours.');
+  }
+  try {
+    const [exists] = await admin.storage().bucket().file(objectPath).exists();
+    if (!exists) {
+      throw new functions.https.HttpsError('invalid-argument', 'Selfie upload could not be verified — try again.');
+    }
+  } catch (e) {
+    if (e instanceof functions.https.HttpsError) throw e;
+    console.error('[recordAttendancePunch] storage existence check failed:', e.message);
+    throw new functions.https.HttpsError('internal', 'Could not verify the selfie upload — try again.');
+  }
+
+  // Resolve the caller's linked, active worker_profiles doc — the
+  // linkedUid bridge documented in js/screens/worker.js's file header.
+  const profSnap = await db.collection('worker_profiles').where('linkedUid', '==', uid).limit(1).get();
+  if (profSnap.empty) {
+    throw new functions.https.HttpsError('failed-precondition', 'Your account is not linked to a Worker Profile. Ask HR to link it.');
+  }
+  const profileDoc = profSnap.docs[0];
+  const profileId = profileDoc.id;
+  const profile = profileDoc.data();
+  if (profile.status === 'inactive') {
+    throw new functions.https.HttpsError('permission-denied', 'Your worker profile is inactive.');
+  }
+
+  // RECOMPUTE the geofence server-side — the client's own verdict (which ran
+  // this same check first, for fast UI feedback) is never trusted as final.
+  const sitesSnap = await db.collection('geo_sites').where('active', '==', true).get();
+  const sites = sitesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  if (!sites.length) {
+    throw new functions.https.HttpsError('failed-precondition', 'No active work sites are configured.');
+  }
+  const match = serverSiteMatch(lat, lng, accuracy, sites);
+  if (!match.inRange) {
+    const msg = match.nearest
+      ? `You are ${Math.round(match.nearest.distanceM)}m from ${match.nearest.name} — outside the allowed radius.`
+      : 'Not within range of any active work site.';
+    throw new functions.https.HttpsError('failed-precondition', msg);
+  }
+
+  const base = db.collection('attendance_worker').doc(profileId).collection('records');
+  const todayStr = manilaDate();
+
+  let targetDateStr, targetRef, existingData;
+  if (kind === 'in') {
+    // Block a second concurrent Time In while a shift — today's, or an
+    // unclosed prior day's — is already open.
+    const active = await resolveActiveRecordServer(base, todayStr);
+    if (active.data && active.data.timeIn && !active.data.timeOut) {
+      throw new functions.https.HttpsError('failed-precondition',
+        `You already have an open shift from ${active.dateStr} (timed in ${active.data.timeIn}) — time out first.`);
+    }
+    targetDateStr = todayStr;
+    targetRef = base.doc(todayStr);
+    const freshSnap = await targetRef.get();
+    existingData = freshSnap.exists ? freshSnap.data() : {};
+  } else {
+    const active = await resolveActiveRecordServer(base, todayStr);
+    if (!active.data || !active.data.timeIn || active.data.timeOut) {
+      throw new functions.https.HttpsError('failed-precondition', 'No open shift found to time out.');
+    }
+    targetDateStr = active.dateStr;
+    targetRef = active.ref;
+    existingData = active.data;
+  }
+
+  // A single concrete server timestamp used for BOTH the stored inAt/outAt
+  // and the hoursWorked math below — Timestamp.now() (not the
+  // FieldValue.serverTimestamp() sentinel) because we need its actual value
+  // immediately, in this same invocation, not just once Firestore resolves
+  // the write.
+  const nowTs = admin.firestore.Timestamp.now();
+  const timeStr = manilaTimeHM(nowTs.toDate());
+  const distanceM = Math.round(match.nearest.distanceM);
+  const accuracyRounded = Math.round(accuracy);
+
+  const fields = { pendingPunch: admin.firestore.FieldValue.delete() };
+  let needsReview = false;
+  let hoursWorked = null;
+
+  if (kind === 'in') {
+    fields.timeIn = timeStr;
+    fields.inLat = lat;
+    fields.inLng = lng;
+    fields.inDistanceM = distanceM;
+    fields.inAccuracyM = accuracyRounded;
+    fields.inSiteId = match.nearest.siteId;
+    fields.inSelfieUrl = selfieUrl;
+    fields.inValid = true;
+    fields.inAt = nowTs;
+  } else {
+    fields.timeOut = timeStr;
+    fields.outLat = lat;
+    fields.outLng = lng;
+    fields.outDistanceM = distanceM;
+    fields.outAccuracyM = accuracyRounded;
+    fields.outSiteId = match.nearest.siteId;
+    fields.outSelfieUrl = selfieUrl;
+    fields.outValid = true;
+    fields.outAt = nowTs;
+
+    // hoursWorked from IMMUTABLE SERVER timestamps — never the device clock.
+    let inMs = null;
+    if (existingData.inAt && typeof existingData.inAt.toMillis === 'function') {
+      inMs = existingData.inAt.toMillis();
+    } else if (existingData.timeIn) {
+      // Legacy/pre-fix open shift with no server inAt (predates this
+      // deploy) — fall back to the device-clock HH:MM the old client wrote,
+      // anchored to the shift's own date. Lower-trust input, so always
+      // flagged for review regardless of the resulting duration.
+      const fallback = new Date(`${targetDateStr}T${existingData.timeIn}:00+08:00`);
+      if (!isNaN(fallback.getTime())) { inMs = fallback.getTime(); needsReview = true; }
+    }
+    if (inMs != null) {
+      hoursWorked = Math.max(0, (nowTs.toMillis() - inMs) / 3600000);
+    } else {
+      hoursWorked = 0;
+      needsReview = true; // couldn't derive a trustworthy in-time at all
+    }
+    if (hoursWorked > MAX_SHIFT_HOURS) needsReview = true;
+    fields.hoursWorked = Math.round(hoursWorked * 100) / 100;
+    if (needsReview) fields.needsReview = true;
+  }
+
+  await targetRef.set({
+    workerId: profileId,
+    date: targetDateStr,
+    recordedBy: uid,
+    recordedByName: profile.name || '',
+    recordedAt: admin.firestore.FieldValue.serverTimestamp(),
+    // v14 attendance — explicit provenance: a record written by THIS callable is
+    // geofence+selfie server-verified (js/screens/hr.js _hrVerifiedBadge reads it).
+    // HR-kiosk hand-entries never set it, so they correctly show no verified badge.
+    serverVerified: true,
+    ...fields
+  }, { merge: true });
+
+  const message = kind === 'in'
+    ? `Timed in at ${timeStr} — ${match.nearest.name}`
+    : `Timed out at ${timeStr}`;
+
+  return {
+    ok: true,
+    message,
+    timeStr,
+    siteName: match.nearest.name,
+    hoursWorked: kind === 'out' ? fields.hoursWorked : null,
+    needsReview
+  };
+});
