@@ -737,10 +737,12 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 
 /* ── Topbar ── (merged into single rule at the LIQUID GLASS copy, see below) */
 .menu-toggle {
-  /* Owner req — seamless top-bar hamburger/back: no box border/fill at rest. */
+  /* Owner req — seamless top-bar hamburger/back (no box border/fill at rest),
+     and LARGER + more visible: bumped from var(--fs-xl) and full-strength text
+     colour so it reads clearly beside the wordmark on every page. */
   background: transparent; border: none;
-  border-radius: var(--r-xs); color: var(--text-muted);
-  font-size: var(--fs-xl); cursor: pointer; padding: 6px 7px;
+  border-radius: var(--r-xs); color: var(--text);
+  font-size: 1.6rem; line-height: 1; cursor: pointer; padding: 4px 8px;
   display: none; transition: background var(--t1), color var(--t1);
 }
 .menu-toggle:hover { background: var(--s2); color: var(--text); }

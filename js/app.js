@@ -1980,14 +1980,14 @@ function parseHash(h) {
 function updateNavBackBtn() {
   const b = document.getElementById('nav-back-btn');
   const m = document.getElementById('menu-toggle');
-  // Swipe-back is gone (see js/gestures.js) — the top-left button IS the back
-  // affordance now. Show BACK once we've navigated past the dashboard root;
-  // otherwise the hamburger. They swap (never both), so the top-left is a
-  // single predictable control: menu at the root, back everywhere deeper.
-  // (On desktop .menu-toggle is display:none via CSS, so '' keeps it hidden.)
+  // The hamburger (opens the nav drawer) stays visible on EVERY page (owner) so
+  // navigation is always one tap away. The back button appears ADDITIONALLY once
+  // we've navigated past the dashboard root (swipe-back is gone — see
+  // js/gestures.js). On desktop .menu-toggle is display:none via CSS, so '' keeps
+  // it hidden there (desktop uses the persistent sidebar).
   const showBack = ((window._navDepth||0) > 0 && window.currentPage !== 'dashboard');
   if (b) b.style.display = showBack ? '' : 'none';
-  if (m) m.style.display = showBack ? 'none' : '';
+  if (m) m.style.display = '';
 }
 window.navBack = function() { history.back(); };   // the top-bar chevron === device Back
 
