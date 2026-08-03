@@ -544,8 +544,9 @@ function initPullToRefresh() {
   // v14 accidental-touch retune (owner report): the G4 values were too easy
   // to trip while scrolling. Bigger dead zone + higher commits + momentum
   // guard + vertical axis-lock below = only a deliberate pull refreshes.
-  const DEAD_ZONE    = 80;   // px ignored at the start of the drag
+  const DEAD_ZONE    = 100;  // px ignored at the start of the drag (deliberate pulls only)
   const THRESHOLD    = 150;  // px past dead zone → soft refresh (navigateTo)
+  const MIN_PULL_MS  = 320;  // a real pull is HELD this long; a fast scroll-flick is quicker → ignored
   const HARD_THRESH  = 280;  // px past dead zone → hard refresh (location.reload)
   const MAX_PULL     = 450;  // visual cap
 
@@ -609,8 +610,22 @@ function initPullToRefresh() {
 
   let _lastMcScrollAt = 0;
   mc.addEventListener('scroll', () => { _lastMcScrollAt = Date.now(); }, { passive: true });
+  // Owner: "pull-down should only work when forced to scroll higher than the
+  // top-most part." #main-content isn't always the real scroller (many pages
+  // scroll inside a nested element), so mc.scrollTop alone read 0 mid-page and
+  // let a fast scroll-flick trip a refresh. Walk the ACTUAL scroll chain under
+  // the finger — if ANYTHING between the touch target and mc is scrolled even a
+  // pixel from its own top, we're not at the top-most part, so never arm.
+  function _scrolledAncestor(el) {
+    let n = el;
+    while (n && n !== document.body && n !== document.documentElement) {
+      if (n.scrollHeight - n.clientHeight > 2 && n.scrollTop > 0) return true;
+      n = n.parentElement;
+    }
+    return false;
+  }
   mc.addEventListener('touchstart', e => {
-    if (refreshing || mc.scrollTop > 0) return;   // must be resting at the EXACT top
+    if (refreshing || _scrolledAncestor(e.target)) return;   // must be at the TRUE top of every scroller under the finger
     // momentum guard: a touch landing during/just after scroll momentum is a
     // scroll-stop, never the start of a deliberate pull
     if (Date.now() - _lastMcScrollAt < 400) return;   // let momentum fully settle first
@@ -623,6 +638,7 @@ function initPullToRefresh() {
 
   mc.addEventListener('touchmove', e => {
     if (!pulling || refreshing) return;
+    if (_scrolledAncestor(e.target)) { pulling = false; hideInd(); return; }  // drag actually scrolled → not a top-pull
     const raw = e.touches[0].clientY - startY;
     if (raw <= 0) { pulling = false; hideInd(); return; }
     const dy = Math.max(0, raw - DEAD_ZONE);
@@ -636,7 +652,9 @@ function initPullToRefresh() {
   mc.addEventListener('touchend', async () => {
     if (!pulling) return;
     pulling = false;
-    if (lastDy < THRESHOLD) { hideInd(); return; }
+    // Require a HELD, deliberate pull past the threshold — a fast scroll-flick
+    // (short duration) never refreshes, even if it travelled far. (owner)
+    if (lastDy < THRESHOLD || (Date.now() - startTime) < MIN_PULL_MS) { hideInd(); return; }
 
     const doHardReload = lastDy >= HARD_THRESH;
     refreshing = true;
