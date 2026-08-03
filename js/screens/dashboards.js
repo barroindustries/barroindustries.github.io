@@ -2366,6 +2366,11 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         <div class="payslip-row" style="font-size:16px;font-weight:800;margin-top:8px;padding-top:8px;border-top:2px solid var(--border)">
           <span>Take-Home So Far</span><span style="color:var(--success)">₱${formatNum(Math.max(0,earnedSoFar-totalAdvance))}</span>
         </div>
+        ${isFinalMonth && frozenThisMonth.hrNote && frozenThisMonth.hrNote.text ? `
+        <div style="margin-top:10px;padding:10px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);margin-bottom:4px">${emojiIcon('📝',14)} Note from HR</div>
+          <div style="font-size:13px;color:var(--text);white-space:pre-wrap">${escHtml(frozenThisMonth.hrNote.text)}</div>
+        </div>` : ''}
         <button class="btn-secondary" style="margin-top:14px;width:100%" id="my-payslip-btn">Generate Payslip PDF</button>
       </div>
     </div>
@@ -2377,7 +2382,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
         ${!salaryHistory.length
           ? '<div class="empty-state" style="padding:20px"><p style="font-size:13px;color:var(--text-muted)">No history yet. Records are added monthly by admin.</p></div>'
           : `<div class="table-wrap"><table class="data-table table-cards">
-              <thead><tr><th>Month</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net</th><th>KPI</th><th>Att</th><th>Final</th><th></th></tr></thead>
+              <thead><tr><th>Month</th><th>Base</th><th>Allowance</th><th>Deductions</th><th>Net</th><th>KPI</th><th>Att</th><th>Final</th><th>Note</th><th></th></tr></thead>
               <tbody>${salaryHistory.map(h=>`<tr data-hist-id="${h.id}" class="sal-hist-row">
                 <td class="tc-name">${h.month||'—'} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></td>
                 <td class="tc-detail" data-label="Base">₱${formatNum(h.salary)}</td>
@@ -2387,6 +2392,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
                 <td class="tc-detail" data-label="KPI">${h.kpiScore?Math.round(h.kpiScore*100)+'%':'—'}</td>
                 <td class="tc-detail" data-label="Att">${h.attScore?Math.round(h.attScore*100)+'%':'—'}</td>
                 <td class="tc-net"><strong>₱${formatNum(h.finalPay)}</strong></td>
+                <td class="tc-detail" data-label="Note" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${h.hrNote&&h.hrNote.text?escHtml(h.hrNote.text):''}">${h.hrNote&&h.hrNote.text?escHtml(h.hrNote.text):'—'}</td>
                 <td class="tc-actions">${currentRole==='president'||currentRole==='owner'
                   ? `<button class="btn-danger btn-sm ph-delete-btn" data-id="${h.id}" data-month="${h.month||''}">Delete</button>`
                   : currentRole==='finance'

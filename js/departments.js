@@ -1750,6 +1750,16 @@ window.disbursePayRun = async function(month, opts = {}) {
       // line.finalPay/effectiveGross/etc., which §C3/§C2 already shifted
       // coherently — this is purely an additive audit flag, no money-math change.
       ...(line.overridden ? { overridden: true, overrideNote: line.overrideMeta?.note || '' } : {}),
+      // "Note to employee" feature — mirror whatever HR left on
+      // pay_runs/{month}.employeeNotes[line.uid] onto this OWNER-READABLE doc
+      // so the employee can actually see it (pay_runs itself is finance/admin-
+      // only per firestore.rules). Purely additive/display-only: never read by
+      // computePayLine/computePayRun, never touches finalPay or any ledger
+      // figure above/below. After this point pay_runs is rules-immutable, so a
+      // post-disburse correction edits THIS field directly (hr.js's
+      // openEmployeeNoteModal) — salary_history's own update rule has no
+      // state gate, unlike pay_runs.
+      ...(run.employeeNotes && run.employeeNotes[line.uid] ? { hrNote: run.employeeNotes[line.uid] } : {}),
       recordedBy: currentUser?.uid, recordedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge:true });
   }

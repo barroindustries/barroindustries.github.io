@@ -979,6 +979,13 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         const depts = u ? ((Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—') : '—';
         const editedBadge = line.overridden
           ? ` <span class="badge badge-orange" title="${escHtml(line.overrideMeta?.note||'')}" style="font-size:10px">edited</span>` : '';
+        // Money-adjacent, display-only "note to employee" (see openEmployeeNoteModal
+        // below) — this badge only reflects the pre-disburse pay_runs.employeeNotes
+        // map; a post-disburse correction lives on the salary_history mirror
+        // instead (immutable pay_runs can't be touched after disburse) and won't
+        // move this at-a-glance badge, only the payslip/employee view.
+        const noteBadge = (runData.employeeNotes && runData.employeeNotes[line.uid] && runData.employeeNotes[line.uid].text)
+          ? ` <span class="badge badge-blue" title="${escHtml(runData.employeeNotes[line.uid].text)}" style="font-size:10px">note</span>` : '';
         const caCell = (line.caPlanned||0) > 0
           ? `<div style="color:var(--danger);white-space:nowrap">-₱${fmt(line.caPlanned)}</div><div style="font-size:10px;color:var(--text-muted)">bal ₱${fmt(line.caBalance)}</div>`
           : '<span style="color:var(--text-muted)">—</span>';
@@ -988,7 +995,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
               ${u&&u.photoUrl?`<img src="${u.photoUrl}" style="width:100%;height:100%;object-fit:cover"/>`:((line.name||'?')[0])}
             </div>
           </td>
-          <td class="tc-name"><strong>${escHtml(line.name||'')}</strong>${editedBadge}<div style="font-size:11px;color:var(--text-muted)">${escHtml(u?(u.title||ROLES[u.role]?.label||u.role||''):'')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></div></td>
+          <td class="tc-name"><strong>${escHtml(line.name||'')}</strong>${editedBadge}${noteBadge}<div style="font-size:11px;color:var(--text-muted)">${escHtml(u?(u.title||ROLES[u.role]?.label||u.role||''):'')} <i data-lucide="chevron-down" class="tc-caret" style="width:12px;height:12px;vertical-align:-2px"></i></div></td>
           <td class="tc-detail" data-label="ID"><code>${u?(u.employeeId||'—'):'—'}</code></td>
           <td class="tc-detail" data-label="Department">${depts}</td>
           <td class="tc-detail" data-label="Base">₱${fmt(line.base)}</td>
@@ -1002,6 +1009,7 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
           <td class="tc-net"><strong style="color:${line.finalPay>=0?'var(--success)':'var(--danger)'}">₱${fmt(line.finalPay)}</strong></td>
           <td class="tc-actions">
             ${canAdjust?`<button class="btn-secondary btn-sm pr-adjust-btn" data-uid="${line.uid}" title="Adjust" aria-label="Adjust pay line">${emojiIcon('✎',16)}</button>`:''}
+            ${canFinance?`<button class="btn-secondary btn-sm pr-note-btn" data-uid="${line.uid}" data-name="${escHtml(line.name||'')}" title="Note to employee" aria-label="Note to employee">${emojiIcon('📝',16)}</button>`:''}
             <button class="btn-secondary btn-sm print-slip-btn" data-uid="${line.uid}" title="Payslip" aria-label="Print payslip">${emojiIcon('🖨',16)}</button>
           </td>
         </tr>`;
@@ -1012,6 +1020,15 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
       });
       tbody.querySelectorAll('.pr-adjust-btn').forEach(btn => {
         btn.addEventListener('click', () => openAdjustModal(month, btn.dataset.uid));
+      });
+      // Note to employee — available regardless of state (computed/verified/
+      // disbursing/disbursed); openEmployeeNoteModal itself decides which doc
+      // is writable for the run's current state and blocks with a clear
+      // message when neither is (the verified/disbursing window — see its
+      // header comment and the pass report for the firestore.rules text that
+      // would close that gap).
+      tbody.querySelectorAll('.pr-note-btn').forEach(btn => {
+        btn.addEventListener('click', () => openEmployeeNoteModal(month, btn.dataset.uid, btn.dataset.name));
       });
       return; // frozen-run mode — skip the live-preview branch below entirely
     }
@@ -1251,6 +1268,103 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
         }));
       });
     });
+  }
+
+  // ── Note to employee (money-adjacent, DISPLAY-ONLY) ─────────────────────
+  // HR/finance leaves a note on a specific employee's pay for a specific
+  // month; the employee sees it on their payslip and in Personal Finance.
+  // Deliberately kept OUT of lines[]/overrides — it lives in its own
+  // pay_runs/{month}.employeeNotes[uid] = {text,setBy,setByName,setAt} map,
+  // never read by computePayRun/computePayLine, so it can never move
+  // finalPay/the ledger/any total no matter when it's added or cleared.
+  //
+  // Storage target depends on run state, because it must be readable by the
+  // EMPLOYEE (pay_runs is finance/admin-only per firestore.rules — an
+  // employee reading pay_runs directly is not possible without a rules
+  // change) and, per the spec, editable/clearable before AND after disburse:
+  //   - state 'computed': written directly on pay_runs/{month}.employeeNotes
+  //     (isMoneyAdmin() may update pay_runs while its `state` field doesn't
+  //     change — the update rule keys off resource/request state, and a
+  //     dot-path update of just employeeNotes.<uid> leaves `state` alone).
+  //   - state 'disbursed': the pay_runs doc is rules-immutable from this
+  //     point ("no clause below permits updating a disbursed doc" — see
+  //     firestore.rules' pay_runs match block) so notes read/write against
+  //     the OWNER-READABLE salary_history/{uid}_{month} mirror instead
+  //     (`hrNote` field, mirrored once at disburse by disbursePayRun, then
+  //     freely editable after — salary_history's own rule has no state gate:
+  //     `allow create, update: if isAuth() && isMoneyAdmin();`). This is
+  //     exactly the "post-pay correction note" case the spec calls out.
+  //   - state 'verified'/'disbursing': genuinely blocked under CURRENT
+  //     firestore.rules — the pay_runs update rule has no clause that lets
+  //     ANY field change while `state` stays 'verified' (or 'disbursing'),
+  //     and salary_history doesn't exist yet (it's only created at
+  //     Disburse). Rather than let a write silently fail, this modal
+  //     refuses to open and tells HR why. Closing this narrow window would
+  //     need a firestore.rules change (out of scope for this pass — see the
+  //     pass report for the exact clause).
+  async function openEmployeeNoteModal(month, uid, name) {
+    const runSnap = await db.collection('pay_runs').doc(month).get().catch(()=>null);
+    const runData = (runSnap && runSnap.exists) ? runSnap.data() : null;
+    const state   = runData ? (runData.state || 'draft') : 'draft';
+
+    if (state === 'verified' || state === 'disbursing') {
+      Notifs.showToast(`Notes can't be edited while this run is ${state==='disbursing'?'disbursing':'Verified but not yet Disbursed'} — wait for Disburse, or ask the President to Reopen the run.`, 'error');
+      return;
+    }
+
+    const onDisbursed = state === 'disbursed';
+    let existing = null;
+    if (onDisbursed) {
+      const shSnap = await db.collection('salary_history').doc(`${uid}_${month}`).get().catch(()=>null);
+      existing = (shSnap && shSnap.exists) ? (shSnap.data().hrNote || null) : null;
+    } else {
+      existing = (runData && runData.employeeNotes) ? (runData.employeeNotes[uid] || null) : null;
+    }
+    const lastSetLabel = (existing && existing.setAt && typeof existing.setAt.toDate === 'function')
+      ? `Last set by ${escHtml(existing.setByName||'—')} · ${window.fmtManila(existing.setAt)}` : '';
+
+    openPage(`Note to ${escHtml(name||'employee')} — ${window.fmtMonthLabel(month)}`, `
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">${emojiIcon('💬',14)} Shown to the employee on their payslip and Personal Finance pay view. Display-only — never affects any pay calculation.</div>
+      <div class="form-group"><label>Note to employee</label><textarea id="emp-note-text" rows="4" placeholder="e.g. Includes prorated 13th month; SSS contribution corrected this month.">${escHtml((existing&&existing.text)||'')}</textarea></div>
+      ${lastSetLabel?`<div style="font-size:11px;color:var(--text-muted)">${lastSetLabel}</div>`:''}
+    `, `<button class="btn-primary" id="emp-note-save-btn">Save</button>${existing&&existing.text?`<button class="btn-danger" id="emp-note-clear-btn">Clear Note</button>`:''}<button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
+
+    const persist = async (text) => {
+      const entry = text ? {
+        text,
+        setBy: currentUser.uid,
+        setByName: window.userProfile?.displayName || currentUser.email,
+        setAt: firebase.firestore.FieldValue.serverTimestamp()
+      } : firebase.firestore.FieldValue.delete();
+      if (onDisbursed) {
+        await db.collection('salary_history').doc(`${uid}_${month}`).update({ hrNote: entry });
+      } else {
+        await db.collection('pay_runs').doc(month).update({ ['employeeNotes.'+uid]: entry });
+      }
+      window.logAudit && window.logAudit(
+        text ? 'employee-note-set' : 'employee-note-clear',
+        onDisbursed ? 'salary_history' : 'pay_run',
+        onDisbursed ? `${uid}_${month}` : month,
+        { uid, month }
+      );
+    };
+
+    document.getElementById('emp-note-save-btn').addEventListener('click', () => window.busy(document.getElementById('emp-note-save-btn'), async () => {
+      const text = document.getElementById('emp-note-text').value.trim();
+      if (!text) { Notifs.showToast('Enter a note, or use Clear Note to remove an existing one.','error'); return; }
+      await persist(text);
+      closeModal();
+      Notifs.success('Note saved.');
+      loadPayrollTable(month);
+    }));
+
+    document.getElementById('emp-note-clear-btn')?.addEventListener('click', () => window.busy(document.getElementById('emp-note-clear-btn'), async () => {
+      if (!(await confirmDialog({message:`Clear the note for ${escHtml(name||'')}?`}))) return;
+      await persist(null);
+      closeModal();
+      Notifs.success('Note cleared.');
+      loadPayrollTable(month);
+    }));
   }
 
   // ── Adjust / Reset — per-line overrides (payroll recall spec §C4) ──────
@@ -1511,7 +1625,15 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     const line = runDoc?.exists ? (runDoc.data().lines||[]).find(l=>l.uid===b.dataset.uid) : null;
     let model;
     if (line) {
-      model = window.toPayslipModel({...line, month}, 'monthly');
+      // Note to employee (display-only) — prefer the post-disburse
+      // salary_history mirror (correctable anytime after disburse) over the
+      // pre-disburse pay_runs.employeeNotes map, which freezes once disbursed.
+      let hrNote = (runDoc.data().employeeNotes||{})[b.dataset.uid] || null;
+      if (runDoc.data().state === 'disbursed') {
+        const shSnap = await db.collection('salary_history').doc(`${b.dataset.uid}_${month}`).get().catch(()=>null);
+        if (shSnap?.exists) hrNote = shSnap.data().hrNote || null;
+      }
+      model = window.toPayslipModel({...line, month, hrNote}, 'monthly');
       model.official = runDoc.data().state === 'disbursed';
       model.payDateLabel = runDoc.data().disbursedAt ? new Date(runDoc.data().disbursedAt.toDate()).toLocaleDateString('en-PH',{month:'long',day:'numeric',year:'numeric'}) : '';
     } else {
@@ -1531,8 +1653,17 @@ async function renderPayrollManagement(container, currentUser, currentRole) {
     if (!lines.length) { Notifs.showToast('No computed pay run for this month yet.','error'); return; }
     const year = window.bizYear ? window.bizYear() : new Date().getFullYear();
     const official = runDoc.data().state === 'disbursed';
+    const employeeNotes = runDoc.data().employeeNotes || {};
+    // Same disbursed-mirror preference as the single-print handler above, but
+    // as ONE query for the whole month instead of N per-employee reads.
+    let shNoteByUid = {};
+    if (official) {
+      const shSnap = await db.collection('salary_history').where('month','==',month).get().catch(()=>({docs:[]}));
+      shSnap.docs.forEach(d => { const dd = d.data(); if (dd.hrNote) shNoteByUid[dd.userId] = dd.hrNote; });
+    }
     const models = await Promise.all(lines.map(async l => {
-      const mdl = window.toPayslipModel({...l, month}, 'monthly');
+      const hrNote = official ? (shNoteByUid[l.uid] || null) : (employeeNotes[l.uid] || null);
+      const mdl = window.toPayslipModel({...l, month, hrNote}, 'monthly');
       mdl.official = official;
       mdl.ytd = await window.payslipYtdMonthly(l.uid, year);
       return mdl;
@@ -2994,6 +3125,12 @@ window.toPayslipModel = function(source, kind) {
       ca:{ before:caBefore, installment:caInst, after:Math.max(0, caBefore-caInst) },
       net: source.finalPay ?? (gross - eeTotal - other - caInst),
       ytd:{ gross:0, net:0, thirteenthAccrual:0 },   // filled by caller (needs the year query)
+      // Note to employee — display-only passthrough of whatever the caller put
+      // on `source.hrNote` ({text,setBy,setByName,setAt}); never fed into any
+      // figure above. Callers source this from pay_runs.employeeNotes[uid]
+      // pre-disburse or the salary_history mirror's own hrNote field post-
+      // disburse — see openEmployeeNoteModal / disbursePayRun.
+      hrNote: source.hrNote || null,
       performance: (source.kpiScore!=null||source.perfFactor!=null)
         ? { kpi:source.kpiScore||0, att:source.attScore||0, perfFactor:source.perfFactor??1, policy:source.policy||'flat' } : null,
       timeLog:null,
@@ -3174,6 +3311,10 @@ window.buildPayslipHTML = function(model) {
     <tr><td>Installment this period</td><td class="num">${f(m.ca.installment)}</td></tr>
     <tr class="ps-sub"><td>Balance (after)</td><td class="num">${f(m.ca.after)}</td></tr>
   </table>
+
+  ${m.hrNote && m.hrNote.text ? `
+  <div class="ps-sec-h">Note from HR</div>
+  <div style="padding:8px 10px;background:var(--surface2,#f4f4f4);border:1px solid var(--border,#ddd);border-radius:6px;font-size:12px;color:var(--text,#222);white-space:pre-wrap">${escHtml(m.hrNote.text)}</div>` : ''}
 
   ${perf}
 
