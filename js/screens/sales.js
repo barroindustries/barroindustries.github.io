@@ -899,6 +899,26 @@ window.latestQuoteRevisions = function(quotes){
   return { latest, supersededIds };
 };
 
+// ── Canonical quote PIPELINE value (30-agent beta sweep fix) ─────────────
+// Three screens computed "pipeline value" three different ways off the same
+// quotes: this BS Quote Analytics card summed ALL active quotes including
+// rejected ones (no exclusion at all); the Analytics screen's "Pipeline
+// Value" KPI used window.quoteWinStats().pipelineVal, which only counts OPEN
+// (undecided) quotes and silently drops won ones; the Command Center's Quote
+// Pipeline card used yet a third inline calc. Command Center's rule — latest
+// revision per lineage (window.latestQuoteRevisions), excluding
+// rejected/lost — is the one kept correct in the audit, so it becomes THE
+// single definition here; the Command Center card, this screen's Pipeline ₱,
+// and the Analytics screen's Pipeline Value KPI all now call this one
+// function instead of three separate inline formulas. `quotes` may be raw
+// (undeduped) or already deduped — the dedup below is a no-op on an
+// already-deduped array (one doc per lineage either way).
+window.quotePipelineValue = function(quotes){
+  const latest = window.latestQuoteRevisions ? window.latestQuoteRevisions(quotes||[]).latest : (quotes||[]);
+  const active = latest.filter(q => !['rejected','lost'].includes(q.status));
+  return active.reduce((s,q)=>s+(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0),0);
+};
+
 // ── Wave 7 Pass 2 — revision-chain UI (the one net-new feature this pass) ──
 // Groups a flat, already createdAt-desc-sorted quote array into per-lineage
 // chains keyed by Wave 3 Q5's rootQuoteId. Fallback: a doc with no
@@ -1750,17 +1770,24 @@ async function renderBSQuotationsSummary(container, currentUser, currentRole) {
         </table></div></div>`;
 
     // ── Quote analytics ──
-    // Successful = quotes that became SALES ORDERS (have salesOrderId). Pipeline =
-    // overall amount of ALL quotes produced. Won = total of those converted to orders.
-    // Count only the LATEST revision of each quote so R1+R2… don't inflate the
-    // pipeline value / quote count (same dedup as the BK summary).
+    // 30-agent beta sweep fix — this card used to define "won" as salesOrderId-only
+    // and divide by ALL quotes (drafts/pending/rejected included in the
+    // denominator), while the Command Center and Analytics screen used two more
+    // divergent formulas again — same underlying quotes, up to 3 different numbers.
+    // Now shares ONE definition with both other screens: window.quoteWinStats
+    // (config.js — THE canonical won/lost/win-rate formula, won = salesOrderId OR
+    // status 'won'/'accepted', rate = won/(won+lost)) for Win Rate/Successful/Won ₱,
+    // and window.quotePipelineValue (above — the same "latest revision, excluding
+    // rejected/lost" rule the Command Center's Quote Pipeline card uses) for
+    // Pipeline ₱. Count only the LATEST revision of each quote so R1+R2… don't
+    // inflate the pipeline value / quote count (same dedup as the BK summary).
     const { latest: bsActive } = window.latestQuoteRevisions(all);
+    const qStats      = window.quoteWinStats(bsActive);
     const totalMade   = bsActive.length;
-    const wonQuotes   = bsActive.filter(q=>q.salesOrderId);
-    const successful  = wonQuotes.length;
-    const winRate     = totalMade ? Math.round(successful/totalMade*100) : 0;
-    const wonValue    = wonQuotes.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
-    const pipelineVal = bsActive.reduce((s,q)=>s+(q.total||q.grandTotal||0),0);
+    const successful  = qStats.wonCount;
+    const winRate     = qStats.winRate==null ? 0 : qStats.winRate;
+    const wonValue    = qStats.wonVal;
+    const pipelineVal = window.quotePipelineValue(bsActive);
     const analytics = `
       <div class="card" style="margin-bottom:14px;border:1.5px solid var(--primary)">
         <div class="card-header"><h3>${emojiIcon('📊',20)} Quote Analytics</h3></div>

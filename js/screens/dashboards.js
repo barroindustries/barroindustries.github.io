@@ -815,10 +815,14 @@ async function renderPresidentDashboard() {
     // v14 accuracy fix — dedupe revision chains: R1/R2/R3 of the same quote were
     // ALL summed, triple-counting the pipeline. window.latestQuoteRevisions keeps
     // only the newest revision per lineage (same dedup the Sales summary uses).
+    // 30-agent beta sweep fix — this card's rule (dedupe, exclude rejected/lost) was
+    // the one kept correct in the audit, so it's now the shared canonical pipeline
+    // formula (window.quotePipelineValue, sales.js) instead of an inline one-off —
+    // the Sales tab's Pipeline ₱ and the Analytics screen's Pipeline Value KPI were
+    // rewritten to call the same function, so this number can no longer drift from
+    // theirs. Output is byte-identical to the previous inline calc.
     const _rawQuotes = quotesSnap.docs.map(d=>d.data());
-    const _latestQuotes = window.latestQuoteRevisions ? window.latestQuoteRevisions(_rawQuotes).latest : _rawQuotes;
-    const activeQuotes = _latestQuotes.filter(q=>!['rejected','lost'].includes(q.status));
-    const totalQuotes = activeQuotes.reduce((s,q)=>s+(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0),0);
+    const totalQuotes = window.quotePipelineValue ? window.quotePipelineValue(_rawQuotes) : 0;
     const pendingApprovals = approvalsSnap.size;
     const pendingCA   = caSnap.size;
     const pendingExtensions = extSnap.size || 0;
@@ -4448,9 +4452,16 @@ async function renderAnalytics() {
     // chain-deduped set instead of raw docs.
     const q = window.quoteWinStats(chainQuotes);
     const wonQ = q.won, lostQ = q.lost, openQ = q.open;
-    const won2     = q.wonVal, pipeline = q.pipelineVal;
     const wonCount = q.wonCount, lostCount = q.lostCount;
     const winRate  = q.winRate==null ? 0 : q.winRate;    // KPI keeps its 0-when-empty default
+    // 30-agent beta sweep fix — this KPI used to read q.pipelineVal (quoteWinStats'
+    // OPEN-only total, which drops won-but-not-yet-superseded quotes), so it showed
+    // a smaller number than the Command Center's Quote Pipeline card for the same
+    // underlying quotes. Now calls the same window.quotePipelineValue (sales.js) the
+    // Command Center and the Sales tab's Pipeline ₱ use: latest revision per
+    // lineage, excluding rejected/lost — won quotes ARE included.
+    const won2     = q.wonVal;
+    const pipeline = window.quotePipelineValue ? window.quotePipelineValue(chainQuotes) : q.pipelineVal;
     const salesSubs=subs.filter(s=>s.department==='Sales'||s.type?.includes('sales'));
     const salesTasks=tasks.filter(t=>t.department==='Sales'||t.category==='Sales');
     const doneSalesTasks=salesTasks.filter(t=>['done','approved','archived'].includes(t.status));
