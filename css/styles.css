@@ -2536,17 +2536,29 @@ html.theme-astral #mini-cal td.today {
      them below env(safe-area-inset-top) left a transparent strip where page
      content visibly scrolled through (iPhone report 2026-08-03). Anchor at 0
      and pad the inset instead. */
-  #sidebar { transform: translateX(-100%); top: 0; padding-top: env(safe-area-inset-top, 0px); }
+  /* v14 hotfix 2: keep the PROVEN geometry (bar below the notch — padding-top
+     +top:0 misbehaved on-device, iOS env() quirk) and cap the notch band with
+     an opaque ::before extension so content can never show through above. */
+  #sidebar { transform: translateX(-100%); top: env(safe-area-inset-top, 0px); }
   /* z-index 96 = above top-nav-strip (94) so user info is fully visible */
   #sidebar.open { transform: translateX(0); box-shadow: 4px 0 48px rgba(0,0,0,0.60); z-index: var(--z-shell-open); }
   .menu-toggle { display: block; }
   .top-nav-strip {
-    top: 0;
-    height: calc(var(--top-nav-h) + env(safe-area-inset-top, 0px));
-    padding-top: env(safe-area-inset-top, 0px);
-    /* opaque underlay: --topbar-bg may be translucent (glass themes); content
-       must never show through the fixed shell */
+    top: env(safe-area-inset-top, 0px);
+    /* opaque underlay: --topbar-bg may be translucent (glass themes) */
     background: linear-gradient(var(--topbar-bg), var(--topbar-bg)), var(--bg);
+  }
+  /* v14 hotfix 2: one fixed opaque cap over the notch band. The strip/sidebar
+     keep the PROVEN below-the-notch geometry (top:0+padding misbehaved
+     on-device — iOS env() quirk); this cap sits above shell chrome (z 100 <
+     stacked surfaces at 300+, and full-bleed panels cover it) so page content
+     can never scroll visibly through the status-bar band again. */
+  body::after {
+    content: ''; position: fixed; top: 0; left: 0; right: 0;
+    height: env(safe-area-inset-top, 0px);
+    background: linear-gradient(var(--topbar-bg), var(--topbar-bg)), var(--bg);
+    z-index: var(--z-topbar);
+    pointer-events: none;
   }
   .main-content {
     margin-left: 0;
