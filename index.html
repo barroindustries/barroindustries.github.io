@@ -179,7 +179,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.174 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.175 · Barro Industries</div>
   </div>
 </div>
 
@@ -432,6 +432,17 @@
      loadFinanceContent (Finance → Purchases tab) reaches forward into this
      file's renderPurchaseRequests the same way. -->
 <script defer src="js/screens/production.js"></script>
+<!-- v14 Wave 7 Pass 5 — Government Biddings + IT screens, split verbatim out
+     of js/app.js (renderGovBiddings) and js/departments.js (renderIT +
+     loadITContent + openITTicketModal), plus the canonical window.GOV_BUCKETS
+     bucket list (was declared twice — once in app.js's renderGovBiddings,
+     once inside departments.js's renderDocCollection — now ONE definition
+     here that both consume). Must load after departments.js: calls its
+     shared helpers (canEditDept, deptContainer, renderDocCollection,
+     confirmDialog, etc.) by window.*/bare-global name at runtime only, never
+     at parse time; departments.js's renderDocCollection reaches forward into
+     this file's window.GOV_BUCKETS the same way. -->
+<script defer src="js/screens/govit.js"></script>
 <!-- v13 Phase 37 — one-time/rare president maintenance tools, split out of
      departments.js for hot-file size. Plain deferred script (not the
      dynamic-import lazy-load V13-PLAN.md sketched) — simpler safe variant

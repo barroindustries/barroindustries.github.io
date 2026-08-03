@@ -4642,23 +4642,14 @@ function openSOPEditor(id, sop) {
   });
 }
 
-function renderGovBiddings() {
-  const c = document.getElementById('page-content');
-  c.innerHTML = `
-    <div class="page-header"><h2>${emojiIcon('🏛️',20)} Government Biddings</h2></div>
-    ${window.sopPanel('How Government Biddings works', [
-      'PhilGEPS holds the posted opportunities you are tracking.',
-      'Move a live one to Active Bids while you prepare and submit the documents.',
-      'Won or closed bids move to Archive for the record.'
-    ])}
-    ${window.chipTabs(['PhilGEPS','Active Bids','Archive'].map(s=>({key:s,label:s})), 'PhilGEPS', {cls:'gov-tabs'})}
-    <div id="gov-content"></div>
-  `;
-  if (window.lucide) lucide.createIcons({ nodes: [c] });
-  const loadGov = sub => renderDocCollection(document.getElementById('gov-content'), `gov_${sub.toLowerCase().replace(/\s+/g,'_')}`, sub, currentUser, currentRole, {icon:'🏛️', dept:'Government Biddings'});
-  loadGov('PhilGEPS');
-  window.bindChipTabs(c.querySelector('.gov-tabs'), (key)=>loadGov(key));
-}
+// renderGovBiddings — moved verbatim to js/screens/govit.js (Wave 7 Pass 5,
+// 2026-08-03), along with the canonical window.GOV_BUCKETS bucket list (it
+// used to be re-derived here AND separately hardcoded inside departments.js's
+// window.renderDocCollection — see that file's stub comment + govit.js's
+// header for the dedupe). Still a bare top-level `function` (not window.*),
+// so the 'Government Biddings' case below keeps calling it unqualified —
+// resolves fine as a global regardless of which script defines it, same as
+// every other bare-global forward-reference this wave's passes document.
 
 function renderGenericDept(dept) {
   const cfg = DEPARTMENTS[dept];
