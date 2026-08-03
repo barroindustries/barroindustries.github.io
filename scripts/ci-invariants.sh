@@ -35,9 +35,9 @@ echo "=== [1/2] STACKING: checking for new 4-digit z-index literals in js/*.js a
 # existing z-index scale in css/tokens.css instead, or — if that's genuinely
 # not possible — bump the ALLOWED_COUNT below with a comment explaining why.
 STACKING_WHITELIST='
-js/notifications.js:1  # toast host, z-index:9999 (~line 918)
-js/gestures.js:1       # edge swipe-back pill, z-index:9998 (~line 48)
-js/app.js:3            # backup-health-banner z-index:9999 (~241); req-photo-overlay z-index:100000 (~808); photo-prompt-banner z-index:9999 (~847)
+# (v14 wave6 D1: notifications/gestures/app z-chrome now tokenized — zero raw literals remain)
+
+
 '
 
 # grep -E interval pattern for a bare 4-digit z-index literal in either CSS-text

@@ -61,6 +61,16 @@
   --danger:   #FF453A;
   --info:     var(--blue);
 
+  /* ── Presence dots — Wave 6 D1: theme-invariant (NOT redefined by
+     html.light/theme-dark) because online/away/offline are real-world states,
+     not app-theme-relative colors. Exact values pulled from the pre-existing
+     literals in app.js (team roster / presence dot) and js/chat.js (chat
+     header dot) — chat.js still hardcodes its own copy, follow-up to swap it
+     to these tokens too. ── */
+  --presence-online: #30D158;
+  --presence-away:   #FF9F0A;
+  --presence-off:    #8E8E93;
+
   /* ── Borders ── */
   --border:      rgba(255,255,255,0.09);
   --border-glow: rgba(255,45,120,0.25);
@@ -127,7 +137,9 @@
   --z-modal:      200;  /* modal-overlay */
   --z-page-panel: 210;  /* full-screen page-panel — just above modal, was 4000 */
   --z-dialog:     5000; /* dialog-overlay — always on top short of splash */
-  --z-splash:     9999; /* splash screen */
+  --z-toast:      9990; /* Wave 6 D1 — toast host (notifications.js) + gesture pill (gestures.js), ephemeral floating chrome */
+  --z-system-banner: 9995; /* Wave 6 D1 — persistent system banners (app.js backup-health-banner, photo-prompt-banner) — above toasts, below splash */
+  --z-splash:     9999; /* splash screen — also reused by app.js req-photo-overlay (mandatory blocking gate that must outrank dialogs/toasts/banners; see Wave 6 D1 notes) */
 
   /* ── Type ── */
   --font: 'Inter', -apple-system, 'SF Pro Text', system-ui, sans-serif;

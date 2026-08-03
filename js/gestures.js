@@ -45,7 +45,7 @@
     pillEl.id = 'gesture-back-pill';
     pillEl.setAttribute('aria-hidden', 'true');
     pillEl.style.cssText = [
-      'position:fixed', 'top:0', 'left:0', 'z-index:9998',
+      'position:fixed', 'top:0', 'left:0', 'z-index:var(--z-toast, 9990)',
       'width:34px', 'height:34px', 'border-radius:50%',
       'background:var(--surface,#1a1d21)', 'border:1px solid var(--border,rgba(255,255,255,.12))',
       'box-shadow:var(--sh-lg,0 8px 24px rgba(0,0,0,.35))',

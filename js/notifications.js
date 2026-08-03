@@ -728,7 +728,7 @@ window.Notifs = (() => {
           </div>
         </div>
         <button id="push-allow-btn" style="
-          width:100%;padding:14px;background:var(--primary-light,#3d5afe);color:#fff;
+          width:100%;padding:14px;background:var(--primary-light,#3d5afe);color:var(--white,#fff);
           border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;
           margin-bottom:10px;letter-spacing:.02em;
         ">${emojiIcon('🔔',16)} Allow Notifications</button>
@@ -915,7 +915,7 @@ window.Notifs = (() => {
       display:flex; align-items:center; gap:9px;
       background:${bg}; border:1px solid ${border};
       color:${fg}; padding:10px 18px; border-radius:999px;
-      font-size:13px; font-weight:600; z-index:9999;
+      font-size:13px; font-weight:600; z-index:var(--z-toast, 9990);
       box-shadow:${shadow};
       animation:toastIn 0.3s ease; white-space:nowrap; max-width:90vw; overflow:hidden; text-overflow:ellipsis;
     `;

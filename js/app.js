@@ -238,9 +238,9 @@ function renderBackupHealthBanner(problems) {
   if (document.getElementById('backup-health-banner')) return;
   const div = document.createElement('div');
   div.id = 'backup-health-banner';
-  div.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#b91c1c;color:#fff;padding:calc(10px + env(safe-area-inset-top,0px)) calc(44px + env(safe-area-inset-right,0px)) 10px calc(14px + env(safe-area-inset-left,0px));font-size:13px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.3)';
+  div.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:var(--z-system-banner, 9995);background:#b91c1c;color:var(--white,#fff);padding:calc(10px + env(safe-area-inset-top,0px)) calc(44px + env(safe-area-inset-right,0px)) 10px calc(14px + env(safe-area-inset-left,0px));font-size:13px;line-height:1.5;box-shadow:0 2px 8px rgba(0,0,0,.3)';
   div.innerHTML = `${emojiIcon('🗄️',16)} <strong>Records durability alert.</strong> ${problems.map(p => escHtml(p)).join(' ')}`
-    + `<button aria-label="Dismiss" style="position:absolute;right:calc(10px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px));background:none;border:none;color:#fff;font-size:18px;cursor:pointer">×</button>`;
+    + `<button aria-label="Dismiss" style="position:absolute;right:calc(10px + env(safe-area-inset-right,0px));top:calc(8px + env(safe-area-inset-top,0px));background:none;border:none;color:var(--white,#fff);font-size:18px;cursor:pointer">×</button>`;
   if (window.lucide) lucide.createIcons({ nodes: [div] });
   div.querySelector('button').onclick = () => div.remove();
   document.body.appendChild(div);
@@ -810,7 +810,14 @@ function requireProfilePhoto() {
   if (document.getElementById('req-photo-overlay')) return;
   const ov = document.createElement('div');
   ov.id = 'req-photo-overlay';
-  ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(8,11,20,0.92);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:20px';
+  // Wave 6 D1: mandatory blocking gate — must outrank dialogs (var(--z-dialog)
+  // is only 5000) AND the new toast/system-banner tiers, so it reuses the
+  // highest existing token (--z-splash) rather than var(--z-dialog). This
+  // preserves the pre-existing "always on top of literally everything"
+  // behavior (was a raw 100000 literal) instead of letting a dialog, toast,
+  // or system banner render over a screen the user cannot dismiss without
+  // uploading a required photo.
+  ov.style.cssText = 'position:fixed;inset:0;z-index:var(--z-splash, 9999);background:rgba(8,11,20,0.92);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:20px';
   ov.innerHTML = `
     <div style="max-width:380px;width:100%;background:var(--surface,#1e2433);border:1px solid var(--border);border-radius:18px;padding:26px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.5)">
       <div style="width:84px;height:84px;border-radius:50%;background:var(--surface2,#252b3b);display:flex;align-items:center;justify-content:center;font-size:40px;margin:0 auto 14px">${emojiIcon('📷',40)}</div>
@@ -849,7 +856,7 @@ function showPhotoPrompt() {
   const banner = document.createElement('div');
   banner.id = 'photo-prompt-banner';
   banner.style.cssText = `
-    position:fixed;bottom:calc(24px + env(safe-area-inset-bottom,0px));right:calc(24px + env(safe-area-inset-right,0px));z-index:9999;
+    position:fixed;bottom:calc(24px + env(safe-area-inset-bottom,0px));right:calc(24px + env(safe-area-inset-right,0px));z-index:var(--z-system-banner, 9995);
     background:var(--bg,#1e2433);border:1px solid var(--border,#2a3147);
     border-radius:16px;padding:18px 20px;width:290px;
     box-shadow:0 8px 32px rgba(0,0,0,0.35);
@@ -869,7 +876,7 @@ function showPhotoPrompt() {
       <button id="photo-prompt-close" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--text-muted,#8b9ab5);font-size:18px;line-height:1;padding:0;flex-shrink:0">×</button>
     </div>
     <div style="display:flex;gap:8px">
-      <button id="photo-prompt-upload" style="flex:1;padding:8px;border-radius:10px;border:none;background:var(--accent,#4f80ff);color:#fff;font-size:13px;font-weight:600;cursor:pointer">Upload Photo</button>
+      <button id="photo-prompt-upload" style="flex:1;padding:8px;border-radius:10px;border:none;background:var(--accent,#4f80ff);color:var(--white,#fff);font-size:13px;font-weight:600;cursor:pointer">Upload Photo</button>
       <button id="photo-prompt-later" style="flex:1;padding:8px;border-radius:10px;border:1px solid var(--border,#2a3147);background:transparent;color:var(--text-muted,#8b9ab5);font-size:13px;cursor:pointer">Later</button>
     </div>
   `;
@@ -3268,7 +3275,7 @@ async function renderFinanceDashboard() {
         <div class="card-body">
           ${arTotal===0?`<div class="empty-state" style="padding:16px"><p>No open receivables ${emojiIcon('🎉',16)}</p></div>`:`
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px">
-            ${[['Current ≤30d',aging.cur,'var(--success)'],['31–60d',aging.d3160,'#FFAA00'],['61–90d',aging.d6190,'#FF9500'],['90+ d',aging.d90,'var(--danger)']].map(([lbl,val,col])=>`
+            ${[['Current ≤30d',aging.cur,'var(--success)'],['31–60d',aging.d3160,'var(--warning)'],['61–90d',aging.d6190,'#FF9500'],['90+ d',aging.d90,'var(--danger)']].map(([lbl,val,col])=>`
               <div style="background:var(--surface2);border-radius:10px;padding:10px 12px">
                 <div style="font-size:11px;color:var(--text-muted)">${lbl}</div>
                 <div style="font-size:15px;font-weight:800;color:${col}">₱${formatNum(val)}</div>
@@ -3314,7 +3321,7 @@ async function renderFinanceDashboard() {
     }, { closedBadge:true, activeKey: period });
     // Receivables drill-down — clients sorted by oldest debt (chase the top first).
     document.getElementById('ar-drill-btn')?.addEventListener('click', () => {
-      const ageCol = d => d>90?'var(--danger)':d>60?'#FF9500':d>30?'#FFAA00':'var(--text-muted)';
+      const ageCol = d => d>90?'var(--danger)':d>60?'#FF9500':d>30?'var(--warning)':'var(--text-muted)';
       const rows = arClients.map(g=>`<tr>
         <td style="font-weight:600">${escHtml(g.client)}</td>
         <td style="text-align:right;font-weight:700">₱${formatNum(g.total)}</td>
@@ -4190,10 +4197,10 @@ async function loadPartnersDeptTab(sub) {
                 const pPct   = pTasks.length ? Math.round(pDone/pTasks.length*100) : 0;
                 const lastSeen = p.lastSeen?.toDate ? p.lastSeen.toDate() : null;
                 const minsAgo  = lastSeen ? Math.floor((Date.now()-lastSeen)/60000) : null;
-                const onlineDot = minsAgo!==null&&minsAgo<5 ? '#30d158' : '#8e8e93';
+                const onlineDot = minsAgo!==null&&minsAgo<5 ? 'var(--presence-online)' : 'var(--presence-off)';
                 return `<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border)">
                   <div style="position:relative">
-                    <div style="width:38px;height:38px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff">
+                    <div style="width:38px;height:38px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:var(--white,#fff)">
                       ${p.photoUrl?`<img src="${escHtml(p.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:(p.displayName||'?')[0].toUpperCase()}
                     </div>
                     <div style="position:absolute;bottom:0;right:0;width:10px;height:10px;border-radius:50%;background:${onlineDot};border:2px solid var(--surface)"></div>
@@ -4955,7 +4962,7 @@ window.renderPersonalFinance = async function(currentUser, currentRole, opts) {
     </div>
 
     ${isPayrollWindow && !selfDoneThisMonth ? `
-    <div style="background:linear-gradient(135deg,#b71c1c,#c62828);color:#fff;border-radius:12px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+    <div style="background:linear-gradient(135deg,#b71c1c,#c62828);color:var(--white,#fff);border-radius:12px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
       <span style="font-size:24px">${emojiIcon('⚠️',24)}</span>
       <div style="flex:1">
         <div style="font-weight:800;font-size:14px;margin-bottom:2px">Self-Assessment Required for ${monthLabel}</div>
@@ -5475,7 +5482,7 @@ async function openEmpStandingsModal(uid, name, preloaded) {
           <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:.05em">Attendance This Month</div>
           <div style="display:flex;flex-wrap:wrap;gap:4px">${dayBoxes.join('')}</div>
           <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--text-muted);flex-wrap:wrap">
-            <span><span style="color:#30d158;font-weight:700">${emojiIcon('✓',16)}</span> Full</span>
+            <span><span style="color:var(--success);font-weight:700">${emojiIcon('✓',16)}</span> Full</span>
             <span><span style="color:#ffa040;font-weight:700">½</span> Half</span>
             <span><span style="color:#ff6b6b;font-weight:700">${emojiIcon('✗',16)}</span> Absent</span>
             <span>${emojiIcon('🌴',16)} Leave</span>
@@ -5590,7 +5597,7 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
       const selfGrade = evalD.selfGrade??null, presGrade = evalD.presidentGrade??evalD.presidentGradeFromTasks??null;
       content.innerHTML = `
         <div style="background:var(--surface2);border-radius:14px;padding:16px;margin-bottom:14px;display:flex;align-items:center;gap:14px">
-          <div style="width:50px;height:50px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--primary-light));display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:#fff;flex-shrink:0">${(name||'?')[0].toUpperCase()}</div>
+          <div style="width:50px;height:50px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--primary-light));display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:var(--white,#fff);flex-shrink:0">${(name||'?')[0].toUpperCase()}</div>
           <div style="flex:1;min-width:0">
             <div style="font-size:15px;font-weight:800;color:var(--text);margin-bottom:2px">${esc(name)}</div>
             <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">${esc(dept)}</div>
@@ -5654,7 +5661,7 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
           <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800;color:var(--primary-light)">${tasks.length-done}</div><div style="font-size:10px;color:var(--text-muted)">Active</div></div>
           <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center"><div style="font-size:20px;font-weight:800">${tasks.length}</div><div style="font-size:10px;color:var(--text-muted)">Total</div></div>
         </div>
-        ${tasks.length ? tasks.map(t=>`<div style="background:var(--surface2);border-radius:10px;padding:11px 13px;margin-bottom:7px;border-left:3px solid ${SC[t.status]||'var(--border)'}"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div style="font-size:13px;font-weight:600;color:var(--text);flex:1">${esc(t.title||'Untitled')}</div><span class="badge" style="background:${SC[t.status]||'var(--surface2)'};color:#fff;font-size:10px;white-space:nowrap;flex-shrink:0">${t.status||'pending'}</span></div>${t.department?`<div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(t.department)}</div>`:''}</div>`).join('')
+        ${tasks.length ? tasks.map(t=>`<div style="background:var(--surface2);border-radius:10px;padding:11px 13px;margin-bottom:7px;border-left:3px solid ${SC[t.status]||'var(--border)'}"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div style="font-size:13px;font-weight:600;color:var(--text);flex:1">${esc(t.title||'Untitled')}</div><span class="badge" style="background:${SC[t.status]||'var(--surface2)'};color:var(--white,#fff);font-size:10px;white-space:nowrap;flex-shrink:0">${t.status||'pending'}</span></div>${t.department?`<div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(t.department)}</div>`:''}</div>`).join('')
           : `<div class="empty-state" style="padding:30px"><div class="empty-icon">${emojiIcon('✅',44)}</div><p>No tasks assigned.</p></div>`}`;
       if (window.lucide) lucide.createIcons({ nodes: [content] });
 
@@ -5689,13 +5696,13 @@ async function renderWorkerProfileTab(uid, name, preloaded, tabName, panel) {
       content.innerHTML = `
         <div style="font-size:13px;font-weight:700;margin-bottom:12px">${monthLabel}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
-          <div style="background:rgba(48,209,88,0.1);border:1px solid rgba(48,209,88,0.3);border-radius:10px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#30d158">${full}</div><div style="font-size:10px;color:var(--text-muted)">Full Days</div></div>
+          <div style="background:rgba(48,209,88,0.1);border:1px solid rgba(48,209,88,0.3);border-radius:10px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:800;color:var(--success)">${full}</div><div style="font-size:10px;color:var(--text-muted)">Full Days</div></div>
           <div style="background:rgba(255,160,64,0.1);border:1px solid rgba(255,160,64,0.3);border-radius:10px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#ffa040">${half}</div><div style="font-size:10px;color:var(--text-muted)">Half Days</div></div>
           <div style="background:rgba(255,68,68,0.1);border:1px solid rgba(255,68,68,0.25);border-radius:10px;padding:10px;text-align:center"><div style="font-size:22px;font-weight:800;color:#ff6b6b">${absent}</div><div style="font-size:10px;color:var(--text-muted)">Absences</div></div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:4px">${boxes.join('')}</div>
         <div style="display:flex;gap:12px;margin-top:10px;font-size:11px;color:var(--text-muted);flex-wrap:wrap">
-          <span><span style="color:#30d158;font-weight:700">${emojiIcon('✓',16)}</span> Full</span>
+          <span><span style="color:var(--success);font-weight:700">${emojiIcon('✓',16)}</span> Full</span>
           <span><span style="color:#ffa040;font-weight:700">½</span> Half</span>
           <span><span style="color:#ff6b6b;font-weight:700">${emojiIcon('✗',16)}</span> Absent</span>
           <span>${emojiIcon('🌴',16)} Leave</span>
@@ -5786,7 +5793,7 @@ async function renderProgressReports() {
                   return `<tr>
                     <td>
                       <div style="display:flex;align-items:center;gap:8px">
-                        <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0">
+                        <div style="width:32px;height:32px;border-radius:50%;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--white,#fff);flex-shrink:0">
                           ${u.photoUrl?`<img src="${escHtml(u.photoUrl)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`:(u.displayName||'?')[0].toUpperCase()}
                         </div>
                         <div>
@@ -5961,7 +5968,7 @@ function renderCompanyBiOps(ct) {
         <img src="icons/barro-industries.png" alt="Barro Industries" style="width:72px;height:72px;border-radius:14px;flex-shrink:0;object-fit:contain"/>
         <div>
           <div style="font-size:11px;font-weight:600;letter-spacing:2.5px;color:#B8860B;margin-bottom:4px">${escHtml((window.BRAND&&window.BRAND.fullName)||'Barro Industries Operating System')}</div>
-          <div style="font-size:20px;font-weight:700;color:#fff;line-height:1.2">Barro Industries</div>
+          <div style="font-size:20px;font-weight:700;color:var(--white,#fff);line-height:1.2">Barro Industries</div>
           <!-- ‼️ FLAG FOR NEIL (v12 WS09) — this positioning copy ("Business Intelligence
                Operations Platform") is now false vs. the v12 vision (a full business-operating
                system, not a narrow BI/analytics tool). Needs new prose, not a string swap;
@@ -6928,7 +6935,7 @@ async function renderAnalytics() {
     const dir=cur>prev?1:cur<prev?-1:0;
     const pct=prev===0?100:Math.round((cur-prev)/Math.abs(prev)*100);
     const good=dir===0?null:((dir>0)===goodUp);
-    const col=good===null?'#8e8e93':good?'#30D158':'#FF453A';
+    const col=good===null?'#8e8e93':good?'var(--success)':'var(--danger)';
     const arrow=dir>0?'▲':dir<0?'▼':'—';
     return `<span style="font-size:11px;font-weight:600;color:${col}">${arrow} ${Math.abs(pct)}%</span> <span style="font-size:11px;color:var(--text-muted)">vs last mo</span>`;
   };
@@ -7162,7 +7169,7 @@ async function renderAnalytics() {
         <thead><tr><th>Client</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
         <tbody>${salesQuotes.slice(0,20).map(q=>{
           const d=q.createdAt?.toDate?q.createdAt.toDate():new Date(q.createdAt||0);
-          const statusColor = window.isQuoteWon(q)?'#30D158':window.isQuoteLost(q)?'#FF453A':'#0A84FF';
+          const statusColor = window.isQuoteWon(q)?'var(--success)':window.isQuoteLost(q)?'var(--danger)':'var(--info)';
           return `<tr><td>${escHtml(q.clientName||q.client||'—')}</td><td>₱${fmt(q.total||q.amount||0)}</td><td><span style="color:${statusColor};font-weight:600">${q.status||'draft'}</span></td><td>${d.toLocaleDateString('en-PH')}</td></tr>`;
         }).join('')}</tbody>
       </table></div></div></div>
@@ -7285,7 +7292,7 @@ async function renderAnalytics() {
         <div class="card-body">
           ${M.aging.total===0?`<div class="empty-state" style="padding:16px"><p>No open receivables ${emojiIcon('🎉',16)}</p></div>`:`
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px">
-            ${[['0–30d',M.aging.cur,'var(--success)'],['31–60d',M.aging.d3160,'#FFAA00'],['61–90d',M.aging.d6190,'#FF9500'],['90+ d',M.aging.d90,'var(--danger)']].map(([lbl,val,col])=>`
+            ${[['0–30d',M.aging.cur,'var(--success)'],['31–60d',M.aging.d3160,'var(--warning)'],['61–90d',M.aging.d6190,'#FF9500'],['90+ d',M.aging.d90,'var(--danger)']].map(([lbl,val,col])=>`
               <div style="background:var(--surface2);border-radius:10px;padding:10px 12px">
                 <div style="font-size:11px;color:var(--text-muted)">${lbl}</div>
                 <div style="font-size:15px;font-weight:800;color:${col}">₱${fmt(val)}</div>
@@ -7346,7 +7353,7 @@ async function renderAnalytics() {
         <thead><tr><th>Task</th><th>Status</th><th>Assigned</th><th>Priority</th></tr></thead>
         <tbody>${prodTasks.slice(0,20).map(t=>{
           const assignedNames=(Array.isArray(t.assignedTo)?t.assignedTo:[t.assignedTo]).map(uid=>users.find(u=>u.id===uid)?.displayName||'?').join(', ');
-          const sc={todo:'#636366','in-progress':'#0A84FF',review:'#FF9F0A',done:'#30D158',approved:'#30D158',archived:'#636366'}[t.status]||'#636366';
+          const sc={todo:'#636366','in-progress':'var(--info)',review:'#FF9F0A',done:'var(--success)',approved:'var(--success)',archived:'#636366'}[t.status]||'#636366';
           return `<tr><td>${escHtml(t.title||'—')}</td><td><span style="color:${sc};font-weight:600">${t.status||'—'}</span></td><td>${escHtml(assignedNames||'—')}</td><td>${t.priority||'—'}</td></tr>`;
         }).join('')}</tbody>
       </table></div></div></div>
@@ -7393,7 +7400,7 @@ async function renderAnalytics() {
         <thead><tr><th>Project</th><th>Agency</th><th>Bid Amount</th><th>Status</th><th>Date</th></tr></thead>
         <tbody>${govBids.slice(0,20).map(b=>{
           const d=b.createdAt?.toDate?b.createdAt.toDate():new Date(b.createdAt||0);
-          const sc={won:'#30D158',lost:'#FF453A',pending:'#FF9F0A',submitted:'#0A84FF'}[b.status]||'#636366';
+          const sc={won:'var(--success)',lost:'var(--danger)',pending:'#FF9F0A',submitted:'var(--info)'}[b.status]||'#636366';
           return `<tr><td>${escHtml(b.projectName||b.title||'—')}</td><td>${escHtml(b.agency||'—')}</td><td>₱${fmt(b.bidAmount||b.contractAmount||0)}</td><td><span style="color:${sc};font-weight:600">${b.status||'pending'}</span></td><td>${d.toLocaleDateString('en-PH')}</td></tr>`;
         }).join('')}</tbody>
       </table></div>`:`<p style="color:var(--text-muted);padding:16px;text-align:center">No bidding records found. Add records to the <code>gov_biddings</code> collection in Firestore.</p>`}</div></div>
@@ -7588,7 +7595,7 @@ async function renderTeam() {
     <thead><tr><th>Employee</th><th>Status</th><th>Username</th><th>ID</th><th>Role</th><th>Departments</th><th>Base</th><th>Net</th><th></th></tr></thead>
     <tbody>${users.map(u=>{const net=(u.salary||0)+(u.allowance||0)-(u.deductions||0);const depts=(Array.isArray(u.departments)&&u.departments.length?u.departments:u.department?[u.department]:[]).join(', ')||'—';const pres=getPresence(u);return `<tr>
       <td>${escHtml(u.displayName||u.email)}</td>
-      <td><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)"><span style="width:8px;height:8px;border-radius:50%;background:${pres.dot==='green'?'#30D158':pres.dot==='orange'?'#FF9F0A':'#636366'};flex-shrink:0${pres.dot==='green'?';box-shadow:0 0 0 2px rgba(48,209,88,0.3)':''};display:inline-block"></span>${pres.label}</span></td>
+      <td><span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted)"><span style="width:8px;height:8px;border-radius:50%;background:${pres.dot==='green'?'var(--presence-online)':pres.dot==='orange'?'var(--presence-away)':'#636366'};flex-shrink:0${pres.dot==='green'?';box-shadow:0 0 0 2px rgba(48,209,88,0.3)':''};display:inline-block"></span>${pres.label}</span></td>
       <td>${u.username?`<code style="font-size:11px">${escHtml(u.username)}</code>`:'<span style="color:var(--text-muted);font-size:11px">email login</span>'}</td>
       <td><code style="font-size:11px">${escHtml(u.employeeId||'—')}</code></td>
       <td><span class="badge badge-blue">${escHtml(ROLES[u.role]?.label||u.role)}</span></td>
@@ -8798,7 +8805,7 @@ async function renderMiniCal() {
       ${['Su','Mo','Tu','We','Th','Fr','Sa'].map(d=>`<div style="font-size:10px;font-weight:700;color:var(--text-muted);padding:4px">${d}</div>`).join('')}
       ${Array(firstDay).fill('<div></div>').join('')}
       ${Array.from({length:days},(_,i)=>{const day=i+1;const ds=`${ym}-${pad(day)}`;const isToday=ds===todayStr;const cnt=(byDay[day]||[]).length;
-        return `<div class="cal-day" data-date="${ds}" style="position:relative;padding:6px 2px;border-radius:10px;font-size:12px;cursor:${cnt?'pointer':'default'};${isToday?'background:var(--primary);color:#fff;font-weight:700':cnt?'background:var(--surface2)':''}">${day}${cnt?`<span style="position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:${isToday?'#fff':'var(--danger)'}"></span>`:''}</div>`;}).join('')}
+        return `<div class="cal-day" data-date="${ds}" style="position:relative;padding:6px 2px;border-radius:10px;font-size:12px;cursor:${cnt?'pointer':'default'};${isToday?'background:var(--primary);color:var(--white,#fff);font-weight:700':cnt?'background:var(--surface2)':''}">${day}${cnt?`<span style="position:absolute;bottom:3px;left:50%;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:${isToday?'var(--white,#fff)':'var(--danger)'}"></span>`:''}</div>`;}).join('')}
     </div>
     <div id="cal-day-detail" style="margin-top:10px;font-size:12px;color:var(--text-muted);min-height:16px"></div>`;
   el.querySelectorAll('.cal-nav').forEach(b=>b.addEventListener('click',()=>{ _calMonthOffset+=parseInt(b.dataset.dir,10); renderMiniCal(); }));
