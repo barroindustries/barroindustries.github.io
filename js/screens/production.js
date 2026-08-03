@@ -386,6 +386,36 @@ function isProductionOnlyViewer(){
 
 // Create the master project when a quote is won (called from the Sales Order flow).
 async function createJobProject(d){
+  // Money-critical fix — this is the single choke point every "convert quote
+  // to Sales Order" path calls. Without a guard, converting the SAME won
+  // quote twice (double-click past openSalesOrderModal's own window.busy()
+  // disable, a stale/cached quote list whose "Ordered" badge hasn't
+  // refreshed yet, two tabs open on the same quote) created TWO job_projects
+  // + sales_orders for one deal — double-counting revenue everywhere
+  // (Projects KPIs, the SO- ledger ref sums fine per-order since each SO id
+  // is unique, but Sales Revenue itself is now booked twice for one sale).
+  // Check for an existing job_project OR sales_order already tied to this
+  // quoteId BEFORE writing anything, and refuse with a message the caller
+  // (openSalesOrderModal) can turn into an "open the existing one" link.
+  // NOT a Firestore transaction (job_projects ids are auto-generated, not
+  // deterministic, so there's no single doc to lock on) — this is a
+  // read-then-write guard, same class of fix as the UI-level disabled
+  // button it backs up, not a full race-proof redesign.
+  if (d && d.id) {
+    const [existingProj, existingSO] = await Promise.all([
+      db.collection('job_projects').where('quoteId','==', d.id).limit(1).get().catch(()=>({docs:[]})),
+      db.collection('sales_orders').where('quoteId','==', d.id).limit(1).get().catch(()=>({docs:[]}))
+    ]);
+    if (existingProj.docs.length || existingSO.docs.length) {
+      const existingProjectId = existingProj.docs.length
+        ? existingProj.docs[0].id
+        : (existingSO.docs[0].data().projectId || null);
+      const err = new Error('This quote has already been converted to a Sales Order — refresh the list and open the existing project instead of creating a new one.');
+      err.code = 'already-converted';
+      err.existingProjectId = existingProjectId;
+      throw err;
+    }
+  }
   const ym=(window.bizDate?window.bizDate():new Date().toISOString().slice(0,10)).slice(2,7).replace('-','');
   let projectNo;
   try {
@@ -767,10 +797,22 @@ async function openProjectBillingModal(p){
       // update now commit in ONE transaction via projectSync (previously two
       // separate awaits that could leave the ledger posted with no matching
       // project update, or vice versa, if the second write threw).
-      // Deterministic ref (project id + payment index) so a retry/backfill can't duplicate it.
-      const projLedgerRef=`PROJ-${p.id}-${(p.payments?.length||0)}`;
+      // Money-critical fix — was `PROJ-${p.id}-${p.payments.length}`, a
+      // POSITIONAL index keyed off the in-memory `p` snapshot's payment count
+      // at the time the panel opened. Two payments recorded close together
+      // (stale `p`, two tabs/sessions on the same project, a slow first save
+      // that lets a second one start) could compute the SAME index — the
+      // second write then hits Ledger.post's dedupe as "already posted" and
+      // is dropped entirely (no ledger row, no job_projects update: the
+      // projectSync arrayUnion only runs inside the SAME transaction as a
+      // genuinely new row) even though it was a real, distinct payment.
+      // Fixed by minting a fresh Firestore auto-id per actual payment
+      // ATTEMPT and keying the ref on that instead of a count, so two
+      // distinct payments can never collide regardless of ordering/staleness.
+      const paymentId = db.collection('ledger').doc().id;
+      const projLedgerRef=`PROJ-${p.id}-${paymentId}`;
       const precomputedLedgerId = window.Ledger._sanitize(projLedgerRef);
-      const payment={ type, amount, vatAmount, net, method, orRef, receiptUrl:receipt?.url||null, date:today(), by:who, ledgerId:precomputedLedgerId, bankAccountId: acct.bankAccountId||null, bankAccountName: acct.bankAccountName||null };
+      const payment={ type, amount, vatAmount, net, method, orRef, receiptUrl:receipt?.url||null, date:today(), by:who, ledgerId:precomputedLedgerId, paymentId, bankAccountId: acct.bankAccountId||null, bankAccountName: acct.bankAccountName||null };
       const update={ amountCollected:newCollected, arBalance:newAR, updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
         payments:firebase.firestore.FieldValue.arrayUnion(payment),
         documents:firebase.firestore.FieldValue.arrayUnion({ type:'Official Receipt', ref:orRef||('₱'+window.fmtN2(amount)), at:new Date().toISOString(), by:who }),

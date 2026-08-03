@@ -1775,6 +1775,13 @@ window.computePayRun = async function(month, { policy } = {}) {
   const skipped = [];
   const employees = [];
   for (const u of allStaff) {
+    // Money-critical fix — a fired/offboarded user (users/{uid}.removed===true,
+    // set by People → Remove; js/app.js's own auth gate already blocks THEIR
+    // login on this flag) was still iterated here and computed/disbursed like
+    // an active employee. Skip before any other check, mirroring the existing
+    // payClass/linked-worker-profile skips below (same shape: reason recorded
+    // in `skipped`, never silently dropped).
+    if (u.removed === true)           { skipped.push({ uid:u.id, name:u.displayName||u.email, reason:'removed' }); continue; }
     if (u.payClass === 'production')  { skipped.push({ uid:u.id, name:u.displayName||u.email, reason:'production' }); continue; }
     if (linkedUids.has(u.id))         { skipped.push({ uid:u.id, name:u.displayName||u.email, reason:'linked-worker-profile' }); continue; }
     employees.push(u);
@@ -1952,9 +1959,22 @@ window.disbursePayRun = async function(month, opts = {}) {
   // shared-document contention across employees. Was a plain sequential
   // for-loop (one Firestore read+batch per employee, one at a time); now
   // concurrent, same as computePayRun's own per-employee Promise.all above.
+  // Money-critical fix (multi-month payroll recall) — CashAdvance.deduct
+  // CLAMPS every installment to the CA's CURRENT balance
+  // (`Math.min(cur.balance, p.amount)`, js/config.js), which can be LESS than
+  // the FROZEN `line.caPlanned`/`line.caPlan` computePayRun locked in at
+  // Compute time if the CA's balance moved between Compute and Disburse — a
+  // manual "Record Payment", a different payroll run touching the same CA, or
+  // recalling/re-disbursing an old month after a later month already reduced
+  // it. Capture what was ACTUALLY deducted per employee (actualCaByUid) here
+  // so the ledger legs below post the real number instead of the stale
+  // frozen plan — see the aggregation loop for the reconciliation + the
+  // needsReview flag left on salary_history when the two disagree.
+  const actualCaByUid = {};
   await Promise.all(lines.map(async (line) => {
     if (line.caPlan && line.caPlan.length) {
       const res = await window.CashAdvance.deduct(line.uid, month, line.caPlan, currentUser?.uid);
+      actualCaByUid[line.uid] = res.reduce((s,r)=>s+(r.amount||0), 0);
       if (res.length) await db.collection('salary_history').doc(`${line.uid}_${month}`)
         .set({ caDeductions: res }, { merge:true }).catch(()=>{});
     }
@@ -1999,13 +2019,44 @@ window.disbursePayRun = async function(month, opts = {}) {
   // an accountant — see the v14 finance re-audit report) and inventing one
   // here would be an unproven money-math change.
   let sssAgg=0, phAgg=0, piAgg=0, taxAgg=0, netCashAgg=0, caPlannedAgg=0;
+  const caReconcileFlags = []; // {uid, name, shortfall} — surfaced to Finance/President below
   for (const line of lines) {
     sssAgg += (line.sss||0) + (line.er?.sss||0);
     phAgg  += (line.philhealth||0) + (line.er?.philhealth||0);
     piAgg  += (line.pagibig||0) + (line.er?.pagibig||0);
     taxAgg += (line.tax||0);
-    caPlannedAgg += (line.caPlanned||0);
-    netCashAgg += (line.effectiveGross||0) - (line.statutoryTotal||0) - (line.caPlanned||0);
+    // v14 money-critical fix — use what CashAdvance.deduct ACTUALLY posted
+    // (actualCaByUid, captured above), not the frozen line.caPlanned, for
+    // every ledger money leg below. actualCa <= plannedCa always (deduct()
+    // only ever clamps DOWN to the CA's live balance, never up) — no line
+    // with a plan can end up posting MORE than money-core.js's frozen figure.
+    const plannedCa = line.caPlanned||0;
+    const actualCa  = (line.caPlan && line.caPlan.length) ? (actualCaByUid[line.uid]||0) : plannedCa;
+    const caShortfall = +((plannedCa - actualCa).toFixed(2));
+    caPlannedAgg += actualCa;
+    netCashAgg += (line.effectiveGross||0) - (line.statutoryTotal||0) - actualCa;
+
+    if (caShortfall > 0.01) {
+      // The frozen plan (money-core.js's computePayLine — off-limits, not
+      // touched) assumed more CA repayment than the CA balance could
+      // actually absorb this run. netCashAgg above already reflects the
+      // smaller ACTUAL deduction (so the aggregate bank-cash figure is
+      // correct), but the employee-visible salary_history row (caDeducted:
+      // line.caPlanned, finalPay: line.finalPay) still mirrors the ORIGINAL
+      // frozen numbers, since finalPay is money-core's frozen output and
+      // isn't recomputed here. Rather than guess whether/how to top up a
+      // frozen finalPay figure, flag it for Finance/President to reconcile
+      // by hand — the shortfall amount + a plain-language note, not a
+      // silent money-math change.
+      await db.collection('salary_history').doc(`${line.uid}_${month}`).set({
+        caReconcileNeedsReview: true,
+        caReconcileNote: `Frozen plan assumed ₱${plannedCa.toFixed(2)} cash-advance deduction this run, but only ₱${actualCa.toFixed(2)} could actually be collected (the CA balance moved between Compute and Disburse — e.g. a manual payment or another payroll run touched it first). The ₱${caShortfall.toFixed(2)} difference is correctly excluded from this run's ledger/cash totals, but the payslip's caDeducted/finalPay still show the original frozen plan — Finance should confirm ${line.name||line.uid} received the extra ₱${caShortfall.toFixed(2)}.`,
+        caReconcilePlanned: plannedCa, caReconcileActual: actualCa, caReconcileShortfall: caShortfall,
+        caReconcileMonth: month, caReconcileFlaggedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge:true }).catch(()=>{});
+      window.logAudit && window.logAudit('ca-reconcile-flag','pay_run', month, { uid: line.uid, plannedCa, actualCa, caShortfall });
+      caReconcileFlags.push({ uid: line.uid, name: line.name||line.uid, shortfall: caShortfall });
+    }
 
     await upsertLedger(`PAY-${month}-${line.uid}`, {
       date: month+'-01', type:'debit', accountType:'expense', account:'Payroll Expense',
@@ -2082,6 +2133,21 @@ window.disbursePayRun = async function(month, opts = {}) {
   });
 
   if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('ledger');
+
+  // v14 money-critical fix — surface the CA reconcile flags set above (frozen
+  // plan vs. actually-collectible CA deduction disagreed for these lines) as
+  // an actionable Finance/President notification, not just a buried
+  // salary_history field nobody happens to look at.
+  if (caReconcileFlags.length) {
+    const totalShort = caReconcileFlags.reduce((s,f)=>s+f.shortfall, 0);
+    try {
+      await Notifs.sendToDept('Finance', {
+        title: '⚠️ Cash-advance deduction needs review',
+        body: `${monthLabel} payroll: ${caReconcileFlags.length} employee(s) had a frozen CA installment clamped below plan (total ₱${window.fmtN2(totalShort)}) — ${caReconcileFlags.map(f=>f.name).join(', ')}. Check salary_history for details before confirming payout amounts.`,
+        icon: '⚠️', type: 'payroll'
+      }, { fallbackToOwner: true });
+    } catch(_){ /* best-effort — never block disbursement over a notification */ }
+  }
 
   // ── 4. Notify ────────────────────────────────────────────────────────
   await Promise.all(lines.map(line => Notifs.send(line.uid, {
@@ -2747,7 +2813,29 @@ async function openSalesOrderModal(d, currentUser, currentRole, container){
       // Surface the shareable client tracking link (falls back to just closing).
       if (trackUrl) window.showOrderTrackModal(trackUrl, proj.projectNo);
       else closeModal();
-    }catch(ex){ err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden'); }
+    }catch(ex){
+      // Money-critical fix — createJobProject's pre-write guard (production.js)
+      // throws this specific code when the quote was already converted (double
+      // conversion would double-count revenue). Surface it clearly instead of
+      // the generic "Failed:" message, and offer a one-click way to open the
+      // existing project instead of retrying the create.
+      if (ex && ex.code === 'already-converted') {
+        err.innerHTML = escHtml(ex.message) + (ex.existingProjectId
+          ? ' <button type="button" class="btn-link" id="so-open-existing-btn" style="text-decoration:underline;color:var(--accent);background:none;border:none;padding:0;cursor:pointer;font:inherit">Open the existing project</button>'
+          : '');
+        err.classList.remove('hidden');
+        if (ex.existingProjectId) {
+          document.getElementById('so-open-existing-btn')?.addEventListener('click', async () => {
+            try {
+              const exSnap = await db.collection('job_projects').doc(ex.existingProjectId).get();
+              if (exSnap.exists && typeof openJobProjectDetail === 'function') { closeModal(); openJobProjectDetail({ id: exSnap.id, ...exSnap.data() }); }
+            } catch(_){}
+          });
+        }
+        return;
+      }
+      err.textContent='Failed: '+(ex.message||ex.code); err.classList.remove('hidden');
+    }
   }));
 }
 

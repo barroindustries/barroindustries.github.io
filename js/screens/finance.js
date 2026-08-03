@@ -1314,7 +1314,7 @@ async function renderLedgerTab(container, currentUser, currentRole) {
       // v13 Phase 13 — first caller to hand assertPeriodOpen's job fully to the
       // service; Ledger.post checks the period itself, no separate pre-check here.
       try {
-      await window.Ledger.post({
+      const result = await window.Ledger.post({
         ref, date, kind: typeSel.value,
         accountType: acctTypeSel.value, account: acctSel.value, category: acctSel.value,
         description: document.getElementById('led-desc').value.trim(),
@@ -1326,6 +1326,18 @@ async function renderLedgerTab(container, currentUser, currentRole) {
                ? window.readVatField('led-vat', amount) : {} )
         }
       });
+      // Money-critical fix — Ledger.post's dedupe guard means a ref that
+      // collides with an EXISTING row (a typo re-using a prior OR #/JE #, or
+      // this exact save retried) silently posts nothing and returns
+      // {existed:true}. The result was never checked here, so the modal
+      // closed and told the user "Ledger entry saved!" even though nothing
+      // new was written — a genuinely new entry with a colliding ref just
+      // vanished. Surface the collision instead of a false success, and keep
+      // the modal open so the user can pick a different reference number.
+      if (result && result.existed) {
+        Notifs.showToast(`A ledger entry with reference "${ref}" already exists — nothing new was posted. Use a different reference number.`, 'error');
+        return;
+      }
       closeModal(); Notifs.success('Ledger entry saved!');
       renderLedgerTab(container, currentUser, currentRole);
       } catch (err) {
