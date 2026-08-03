@@ -179,7 +179,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.186 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.187 · Barro Industries</div>
   </div>
 </div>
 
@@ -243,12 +243,11 @@
   </div>
   <div id="notif-backdrop" class="notif-backdrop hidden"></div>
 
-  <!-- Departments switcher panel (desktop/iPad; forked from notif-panel) -->
-  <div id="depts-panel" class="notif-panel hidden" style="max-width:300px">
-    <div class="notif-panel-header"><span>Departments</span></div>
-    <div id="depts-list" class="notif-list"></div>
-  </div>
-  <div id="depts-backdrop" class="notif-backdrop hidden"></div>
+  <!-- #depts-panel/#depts-list/#depts-backdrop (departments switcher panel,
+       forked from notif-panel) — DELETED, Wave 7 Pass 10 cleanup
+       (2026-08-03), alongside js/app.js's deptsForSwitcher()/
+       buildDeptsPanel(): both were dead, their only caller (the
+       topbar-depts-btn grid icon) having been removed in v12 WS42. -->
 
   <!-- Sidebar (desktop) -->
   <aside id="sidebar">
@@ -335,7 +334,22 @@
 <div id="dialog-overlay" class="dialog-overlay hidden"></div>
 
 <!-- All scripts deferred — download in parallel, execute in order after HTML parse.
-     Firebase messaging loaded lazily in notifications.js when FCM is configured. -->
+     Firebase messaging loaded lazily in notifications.js when FCM is configured.
+
+     v14 Wave 7 (2026-08-03, Passes 1-10) split most of the old monolithic
+     js/departments.js and js/app.js/modules.js screen renderers out into
+     js/screens/*.js (design, tasks, sales, hr, production, finance,
+     approvals, govit, partners, people, dashboards) — one file per
+     domain, each window.*-attached with no bundler/ESM, same convention
+     as everything else in this app. Every js/screens/*.js file loads
+     AFTER the departments.js/app.js/modules.js host it was extracted
+     from and calls that host's shared helpers/services by bare
+     window.*/global name at runtime only, never at parse time; see each
+     script's own load-order comment below (and that file's own header
+     comment) for its specific forward/backward call graph. What remains
+     in departments.js/app.js/modules.js after Pass 10's cleanup is
+     shared services, shared renderers, and app shell/router — not
+     screens. -->
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js" integrity="sha384-AQ3POAMqIhwS81FrUH95ekxqBZHeP5tG2JfEL3+7GuTtfRLWnrRh32UxwzM+//A9" crossorigin="anonymous"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js" integrity="sha384-TnlRYaR4JYz/lpaGuaiU61PjNberSA4vjLjtF+oRC/IkohkJqnWxw5EmDSOt1vA1" crossorigin="anonymous"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js" integrity="sha384-qn4Jh88HhJA8dplNQyGjOh9OGI4izVhrfj/qIFgaKcdgOE06pXqIKGlsCILZcLAC" crossorigin="anonymous"></script>

@@ -751,50 +751,11 @@ function requireProfilePhoto() {
   };
 }
 
-function showPhotoPrompt() {
-  if (document.getElementById('photo-prompt-banner')) return;
-  const banner = document.createElement('div');
-  banner.id = 'photo-prompt-banner';
-  banner.style.cssText = `
-    position:fixed;bottom:calc(24px + env(safe-area-inset-bottom,0px));right:calc(24px + env(safe-area-inset-right,0px));z-index:var(--z-system-banner, 9995);
-    background:var(--bg,#1e2433);border:1px solid var(--border,#2a3147);
-    border-radius:16px;padding:18px 20px;width:290px;
-    box-shadow:0 8px 32px rgba(0,0,0,0.35);
-    display:flex;flex-direction:column;gap:12px;
-    animation:slideUpIn .3s ease;
-  `;
-  banner.innerHTML = `
-    <style>
-      @keyframes slideUpIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
-    </style>
-    <div style="display:flex;align-items:center;gap:12px">
-      <div style="width:44px;height:44px;border-radius:50%;background:var(--surface3,#252b3b);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">${emojiIcon('📷',22)}</div>
-      <div>
-        <div style="font-weight:600;font-size:14px;color:var(--text,#e2e8f0)">Add a profile photo</div>
-        <div style="font-size:12px;color:var(--text-muted,#8b9ab5);margin-top:2px">Help your teammates recognize you</div>
-      </div>
-      <button id="photo-prompt-close" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--text-muted,#8b9ab5);font-size:18px;line-height:1;padding:0;flex-shrink:0">×</button>
-    </div>
-    <div style="display:flex;gap:8px">
-      <button id="photo-prompt-upload" style="flex:1;padding:8px;border-radius:10px;border:none;background:var(--accent,#4f80ff);color:var(--white,#fff);font-size:13px;font-weight:600;cursor:pointer">Upload Photo</button>
-      <button id="photo-prompt-later" style="flex:1;padding:8px;border-radius:10px;border:1px solid var(--border,#2a3147);background:transparent;color:var(--text-muted,#8b9ab5);font-size:13px;cursor:pointer">Later</button>
-    </div>
-  `;
-  if (window.lucide) lucide.createIcons({ nodes: [banner] });
-  document.body.appendChild(banner);
-
-  document.getElementById('photo-prompt-close').onclick = () => banner.remove();
-  document.getElementById('photo-prompt-later').onclick = () => banner.remove();
-  document.getElementById('photo-prompt-upload').onclick = () => {
-    banner.remove();
-    openProfileDrawer();
-    // Trigger the photo picker after drawer opens
-    setTimeout(() => {
-      const wrap = document.getElementById('profile-photo-wrap');
-      if (wrap) wrap.click();
-    }, 400);
-  };
-}
+// showPhotoPrompt (non-blocking "Add a profile photo" corner banner) —
+// DELETED, Wave 7 Pass 10 cleanup (2026-08-03). Verified zero callers
+// (grepped clean; only match anywhere was its own definition line):
+// superseded by requireProfilePhoto() above, the actual blocking gate wired
+// to applyUserUI() via setTimeout(requireProfilePhoto, 800).
 
 // ── Login ─────────────────────────────────────────
 function initLogin() {
@@ -1031,8 +992,11 @@ function buildNav() {
   // and topbar-chat-btn were removed: Chat is already a center top-nav-strip
   // tab, and departments stay reachable via the persistent sidebar (each of
   // currentDepts is listed there; admins get an explicit "All Departments"
-  // entry in getSidebarItems). deptsForSwitcher()/buildDeptsPanel() are kept
-  // defined but unused (dead-safe: buildDeptsPanel no-ops without its button).
+  // entry in getSidebarItems). deptsForSwitcher()/buildDeptsPanel() and the
+  // #depts-panel/#depts-list/#depts-backdrop markup they drove were DELETED,
+  // Wave 7 Pass 10 cleanup (2026-08-03) — verified zero callers (their only
+  // caller was the removed topbar-depts-btn, which no longer exists in
+  // index.html either).
   // a11y: label icon-only topbar nav controls.
   document.getElementById('menu-toggle')?.setAttribute('aria-label', 'Open menu');
   placeTopbarActions();
@@ -1291,45 +1255,11 @@ if (TOPBAR_MOBILE_MQ) {
 }
 document.addEventListener('DOMContentLoaded', placeTopbarActions);
 
-// v12 WS41 — which departments the signed-in user can open from the topbar.
-// Mirrors getSidebarItems' derivation exactly (incl. the finance-role Finance
-// prepend, app.js:997-999). Partners/bsOnly: none (no dept pages exist for them).
-function deptsForSwitcher() {
-  if (isPartner() || isBrilliantOnly()) return [];
-  const admin = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
-  const internal = Object.keys(DEPARTMENTS)
-    .filter(d => !DEPARTMENTS[d].isSeparate && !DEPARTMENTS[d].isPartnerDept);
-  if (admin) return internal;
-  const mine = (currentRole === 'finance' && !currentDepts.includes('Finance'))
-    ? ['Finance', ...currentDepts] : currentDepts;
-  return mine.filter(d => DEPARTMENTS[d]);
-}
-function buildDeptsPanel(depts) {
-  const list  = document.getElementById('depts-list');
-  const panel = document.getElementById('depts-panel');
-  const back  = document.getElementById('depts-backdrop');
-  const btn   = document.getElementById('topbar-depts-btn');
-  if (!list || !btn) return;
-  const admin = isPresident() || currentRole === 'manager' || currentRole === 'secretary';
-  list.innerHTML = depts.map(d => {
-    const cfg = DEPARTMENTS[d];
-    return `<button class="depts-item pressable" data-page="dept:${escHtml(d)}">
-      ${window.deptIconTile(cfg, 28)}<span>${escHtml(d)}</span></button>`;
-  }).join('') + (admin
-    ? `<button class="depts-item pressable" data-page="departments" style="color:var(--primary-light)">
-         ${window.iconTile('layout-grid','var(--text-muted)',null,28)}<span>All departments →</span></button>` : '');
-  if (window.lucide) lucide.createIcons({ nodes: [list] });
-  const close = () => { panel.classList.add('hidden'); back.classList.add('hidden'); };
-  list.querySelectorAll('.depts-item').forEach(b =>
-    b.addEventListener('click', () => { close(); navigateTo(b.dataset.page); }));
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    if (depts.length === 1 && !admin) { navigateTo('dept:' + depts[0]); return; }   // single-dept: no dropdown
-    const open = !panel.classList.contains('hidden');
-    if (open) close(); else { panel.classList.remove('hidden'); back.classList.remove('hidden'); }
-  };
-  back.onclick = close;
-}
+// deptsForSwitcher/buildDeptsPanel (topbar department-switcher dropdown,
+// driven by the now-removed topbar-depts-btn grid icon) — DELETED, Wave 7
+// Pass 10 cleanup (2026-08-03). Verified zero callers (grepped clean across
+// the whole tree for both names as call sites). See buildNav()'s comment
+// above for the v12 WS42 nav-consolidation context.
 
 function closeSidebar() {
   const sidebar = document.getElementById('sidebar');
@@ -1933,7 +1863,11 @@ function navigateTo(page, opts) {
     case 'submissions':      renderSubmissions(currentUser, currentRole, currentDepts[0]||''); break;
     case 'files':            renderFiles(currentUser, currentRole); break;
     case 'files-hub':        window.renderFilesHub?.(); break;
-    case 'cash':             renderCash(currentUser, currentRole); break;
+    // case 'cash' (legacy renderCash screen) — DELETED, Wave 7 Pass 10 cleanup
+    // (2026-08-03). Verified zero callers into this case: no nav item, bottom-nav
+    // entry, deep link, or notification payload ever set page:'cash' (grepped
+    // clean, including seeds). Falls through to the switch's default branch like
+    // any other unmatched page string — unaffected by this removal.
     case 'personal-finance': renderPersonalFinance(currentUser, currentRole); break;
     case 'my-dept':          renderMyDepartment(); break;
     case 'departments':      renderDepartments(); break;

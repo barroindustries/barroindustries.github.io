@@ -28,14 +28,12 @@
      openPresidentCashAdvanceModal. (The CashAdvance SERVICE — the
      Firestore read/write layer these call into — lives in config.js
      and stays there; only the screen/render layer moved.)
-   - Company Overview: renderCompanyOverviewNew, renderPresidentMessageCard.
-     NOTE (Wave 7 Pass 7 finding, not touched): renderCompanyOverviewNew
-     has no live caller anywhere in the app — the 'company' nav case in
-     app.js's navigateTo routes to a DIFFERENT, same-purpose function
-     (app.js's own renderCompany/renderCompanyOverview). Confirmed dead
-     both before and after this move (grepped the full tree); moved
-     verbatim rather than deleted since dead-code removal is Wave 7
-     Pass 10 (Cleanup)'s job, not this pass's.
+   - Company Overview: renderCompanyOverviewNew, renderPresidentMessageCard —
+     DELETED in Wave 7 Pass 10 (Cleanup), 2026-08-03. Had no live caller
+     anywhere in the app — the 'company' nav case in app.js's navigateTo
+     routes to a DIFFERENT, same-purpose function (js/screens/dashboards.js's
+     renderCompany/renderCompanyOverview). See the deletion-site comment
+     further down this file for the full grep evidence.
    - Leave: the LEAVE MANAGEMENT IIFE (requests, approval, balances —
      leave_requests + leave_balances/{uid}).
    - Global Search: the GLOBAL SEARCH IIFE (tasks/clients/inventory/
@@ -1841,113 +1839,13 @@ async function openPresidentCashAdvanceModal(users) {
   }));
 }
 
-// ══════════════════════════════════════════════════
-//  COMPANY TAB — About Barro Industries OPC
-// ══════════════════════════════════════════════════
-
-window.renderCompanyOverviewNew = function(ct, canAdd) {
-  ct.innerHTML = `
-    <div class="company-hero">
-      <div class="company-logo-wrap">
-        <img src="icons/icon-192.png" alt="Barro Industries" class="company-hero-logo" onerror="this.style.display='none'"/>
-      </div>
-      <h1 class="company-hero-name">Barro Industries OPC</h1>
-      <p class="company-hero-tagline">One Person Corporation · SEC Registered</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:10px">
-        <span class="badge badge-blue">Manufacturing</span>
-        <span class="badge badge-purple">Design & Build</span>
-        <span class="badge badge-green">R&D (Coming Soon)</span>
-      </div>
-    </div>
-
-    <div class="card" style="margin-bottom:14px">
-      <div class="card-header"><h3>${emojiIcon('🏢',20)} About the Company</h3></div>
-      <div class="card-body">
-        <p style="font-size:14px;line-height:1.7;color:var(--text)">
-          <strong>Barro Industries OPC</strong> is a SEC-registered One Person Corporation in the Philippines. The company's current active trademark is <strong>Barro Kitchens</strong> — a one-stop shop for kitchen design and build, covering the manufacturing industry from fabrication to full installation.
-        </p>
-        <p style="font-size:14px;line-height:1.7;color:var(--text);margin-top:10px">
-          Barro Kitchens will soon expand into research and development. Barro Industries OPC continues to grow its trademark portfolio, with more brands coming in the future.
-        </p>
-      </div>
-    </div>
-
-    <div class="card" style="margin-bottom:14px">
-      <div class="card-header"><h3>™ Trademarks & Brands</h3></div>
-      <div class="card-body">
-        <div class="trademark-card">
-          <div class="trademark-icon">${emojiIcon('🍳',16)}</div>
-          <div>
-            <div class="trademark-name">Barro Kitchens</div>
-            <div class="trademark-desc">One-stop shop for kitchen design and build · Manufacturing industry · Full fabrication and installation services. R&D coming soon.</div>
-            <span class="badge badge-green" style="margin-top:6px;display:inline-block">Active — Only Current Trademark</span>
-          </div>
-        </div>
-        <div class="trademark-card" style="opacity:0.6;margin-top:10px">
-          <div class="trademark-icon">${emojiIcon('🔬',16)}</div>
-          <div>
-            <div class="trademark-name">More trademarks coming soon</div>
-            <div class="trademark-desc">Barro Industries OPC is SEC registered and will expand its brand portfolio under different trademarks.</div>
-            <span class="badge badge-gray" style="margin-top:6px;display:inline-block">Upcoming</span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-bottom:14px" id="president-message-card"></div>
-  `;
-  if (window.lucide) lucide.createIcons({ nodes: [ct] });
-  renderPresidentMessageCard();
-};
-
-async function renderPresidentMessageCard() {
-  const card = document.getElementById('president-message-card');
-  if (!card) return;
-  // Only show to employees and admin — not partners
-  if (typeof isBrilliantOnly === 'function' && isBrilliantOnly()) { card.style.display='none'; return; }
-  try {
-    const snap = await db.collection('users').where('role','==','president').limit(1).get();
-    if (snap.empty) { card.style.display='none'; return; }
-    const pres = snap.docs[0].data();
-    // The president-role query above is the authority; show the card for whoever
-    // holds the president role (no hardcoded email gate).
-    const msg = await db.collection('president_message').doc('current').get();
-    const msgText = msg.exists ? msg.data().message : 'Welcome to Barro Industries. Together, we build something great.';
-    const presName = pres.displayName || 'Neil Barro';
-    card.innerHTML = `
-      <div class="card-header">
-        <h3>Message from the President</h3>
-        ${isRealPresident() ? '<button class="btn-secondary btn-sm" id="edit-msg-btn">Edit</button>' : ''}
-      </div>
-      <div class="card-body">
-        <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
-          <div style="width:54px;height:54px;border-radius:50%;overflow:hidden;background:var(--primary-light);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:var(--on-primary)">
-            ${safeHttpUrl(pres.photoUrl)?`<img src="${escHtml(pres.photoUrl)}" style="width:100%;height:100%;object-fit:cover"/>`:escHtml(presName[0]||'')}
-          </div>
-          <div>
-            <div style="font-weight:700;font-size:15px">${escHtml(presName)}</div>
-            <div style="font-size:12px;color:var(--text-muted)">President, Barro Industries OPC</div>
-          </div>
-        </div>
-        <blockquote style="font-size:14px;line-height:1.8;color:var(--text);border-left:3px solid var(--primary-light);padding-left:14px;margin:0;font-style:italic">${escHtml(msgText)}</blockquote>
-      </div>`;
-    document.getElementById('edit-msg-btn')?.addEventListener('click', () => {
-      openPage('Edit President Message', `
-        <div class="form-group"><label>Message</label>
-          <textarea id="pres-msg-input" rows="6" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:14px;background:var(--surface);color:var(--text);resize:vertical">${escHtml(msgText)}</textarea>
-        </div>
-      `, `<button class="btn-primary" id="save-pres-msg">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
-      document.getElementById('save-pres-msg').addEventListener('click', async () => {
-        await db.collection('president_message').doc('current').set({
-          message: document.getElementById('pres-msg-input').value.trim(),
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        closeModal(); Notifs.success('Message updated!');
-        renderPresidentMessageCard();
-      });
-    });
-  } catch(e) { card.style.display='none'; }
-}
+// Company Overview screens — renderCompanyOverviewNew/renderPresidentMessageCard
+// DELETED, Wave 7 Pass 10 cleanup (2026-08-03). Verified zero callers (grepped
+// clean across the whole tree): the 'company' nav case in app.js's navigateTo
+// routes to a DIFFERENT, same-purpose live screen (js/screens/dashboards.js's
+// renderCompany/renderCompanyOverview). This pair was already flagged dead by
+// this file's own header (Wave 7 Pass 7) and by modules.js's header before
+// that — confirmed still dead, both before and after those moves.
 
 
 // ═══════════════════════════════════════════════════

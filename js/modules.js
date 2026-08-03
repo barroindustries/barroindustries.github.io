@@ -52,9 +52,10 @@ function isRealPresident() {
 //  (getPHHolidays/loadHolidayOverrides/renderAttendancePage/
 //  renderHolidaysAdmin), Cash Advance UI (renderCashAdvancePage and friends
 //  — the CashAdvance SERVICE stays in config.js), and Company Overview
-//  (renderCompanyOverviewNew/renderPresidentMessageCard — confirmed dead,
-//  see that file's header) all moved together. See js/screens/people.js's
-//  header for the load-order contract and the full contents list.
+//  (renderCompanyOverviewNew/renderPresidentMessageCard — later DELETED,
+//  Wave 7 Pass 10 cleanup, see that file's header) all moved together.
+//  See js/screens/people.js's header for the load-order contract and the
+//  full contents list.
 //
 //  Inventory, directly below, deliberately did NOT move — see the note in
 //  js/screens/people.js's header for why.
