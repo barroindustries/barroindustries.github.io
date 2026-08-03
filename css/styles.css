@@ -4101,6 +4101,57 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   }
 }
 
+/* ── Owner req (2026-08-03 mobile-shell batch) — Quote Builder fullscreen on
+   phone/tablet, mirroring body.chat-fullscreen directly above. app.js's
+   renderQuoteBuilderIframe()/enterQbFullscreen()/exitQbFullscreen() toggle
+   `body.qb-fullscreen` when the iframe page mounts/unmounts on a ≤768px
+   viewport — the SAME breakpoint the rest of the mobile shell uses
+   (top-nav-strip/bottom-nav/sidebar), unlike chat's own one-off 640px. Desktop
+   (>768px) is untouched — the iframe keeps its old inline-sized layout there. */
+@media (max-width: 768px) {
+  body.qb-fullscreen #topbar,
+  body.qb-fullscreen #top-nav-strip,
+  body.qb-fullscreen #bottom-nav {
+    display: none !important;
+  }
+  /* Full-bleed cover (edge to edge), same reasoning as chat's thread panel —
+     the iframe is a separate document and pads its OWN safe areas internally;
+     this shell rule only needs to keep #page-content from peeking through at
+     the notch/home-indicator bands. */
+  body.qb-fullscreen #qb-frame {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100vw; height: 100dvh;
+    min-height: 0;
+    border-radius: 0;
+    z-index: var(--z-dialog, 5000);
+    background: #f5f6fa;
+  }
+}
+/* Floating exit pill (top-left, safe-area aware) — built/torn down by
+   js/app.js alongside the body class, so its presence in the DOM already
+   gates its visibility; no body.qb-fullscreen scoping needed here. Tapping it
+   routes through window.Overlay.dismissTop() (same as device Back, since
+   entering fullscreen pushes an Overlay entry — see enterQbFullscreen). */
+.qb-exit-pill {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  left: calc(12px + env(safe-area-inset-left, 0px));
+  /* --z-toast (9990) is the token already documented for exactly this kind of
+     ephemeral floating chrome ("toast host + gesture pill" — see tokens.css);
+     z-dialog+1 (5001) isn't on the app's allowed stacking scale and trips the
+     dev-only devCheckStacking lint (js/app.js _Z_TOKEN_VALUES / off-scale
+     z-index check) the first time an Overlay entry pushes after this mounts. */
+  z-index: var(--z-toast, 9990);
+  width: 38px; height: 38px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface, #1a1d21); color: var(--text, #fff);
+  border: 1px solid var(--border, rgba(255,255,255,.14));
+  box-shadow: var(--sh-lg, 0 8px 24px rgba(0,0,0,.35));
+  cursor: pointer;
+}
+.qb-exit-pill svg { width: 18px; height: 18px; }
+
 /* ── Messenger-style chat UI — WS42 Batch D (Phases 16–20) ──────────────────
    Shared by chat.js (#chat-thread-panel) AND the task-chat comment thread
    (departments.js renderComments, ~2098) — both consumers get this look for
@@ -5136,6 +5187,49 @@ html.theme-astral .bottom-nav {
 html.theme-astral .bottom-nav-item.active::after { display: none; }
 html.theme-astral .bottom-nav-item.active .bn-icon { transform: scale(1.15); filter: drop-shadow(0 0 6px var(--pink-glow)); }
 
+/* ── 'More' tab + sheet (v14 mobile-shell batch, ruled decision N3) ──────────
+   Any NAV_REGISTRY.bottom variant with more than 5 items (post-Profile-strip)
+   collapses to its first 4 + this 5th tab (js/app.js buildBottomNav /
+   _bottomNavSplit) so every column stays roomy at 375px instead of cramming
+   6-7 icons in. #bottom-nav-more IS a .bottom-nav-item — it gets the same
+   active-state/underline/icon-color rules above for free, no extra CSS. The
+   sheet itself is just openModal() (a bottom sheet on mobile already), so no
+   new sheet chrome is needed — only the row list inside it. */
+.more-nav-sheet { display: flex; flex-direction: column; }
+.more-nav-row {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 11px 4px; background: none; border: none; cursor: pointer;
+  color: var(--text); font-size: var(--fs-base); font-weight: 600; text-align: left;
+  border-bottom: 1px solid var(--border); min-height: 44px; box-sizing: border-box;
+}
+.more-nav-row:last-child { border-bottom: none; }
+.more-nav-row:hover, .more-nav-row:active { background: var(--s1); }
+.more-nav-row.active { color: var(--primary); }
+/* Own icon tile (NOT the sidebar's .nav-icon — that hardcodes stroke:#fff for
+   its colored gradient tiles and renders invisible on this row's plain
+   var(--s1) surface). currentColor here tracks the row's own text color, so
+   it's automatically visible in light/dark AND tints to --primary on .active,
+   matching .bn-icon's pattern instead. */
+.more-nav-row-icon {
+  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--s1);
+}
+.more-nav-row-icon svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; display: block; }
+.more-nav-row-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.more-nav-row-chevron { width: 18px; height: 18px; color: var(--text-light); flex-shrink: 0; }
+.more-nav-row-badge {
+  background: var(--pink); color: #fff; font-size: 0.6875rem; font-weight: 700;
+  padding: 1px 6px; border-radius: var(--pill); line-height: 1.4; flex-shrink: 0;
+  box-shadow: 0 0 8px var(--pink-glow);
+}
+/* Safety margin on the narrowest phones (iPhone SE-class, 375px) so an
+   8-char label like "Projects" never ellipsizes with 5 comfortably-spaced
+   tabs (first 4 + More) sharing the bar. */
+@media (max-width: 380px) {
+  .bottom-nav-item { padding: 0 8px; }
+}
+
 /* ── Subtab bar — iOS segmented control (token-driven) ── */
 .subtab-bar {
   border-radius: 12px;
@@ -5177,17 +5271,20 @@ html.theme-astral .subtab-btn.active {
   .drawer-body { padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
 }
 
-/* ── Sidebar — full height on mobile, starts at top ── */
-@media (max-width: 768px) {
-  #sidebar {
-    top: 0;
-    padding-top: env(safe-area-inset-top, 0px);
-  }
-  /* Sidebar top section gets extra padding so avatar clears notch */
-  #sidebar .sidebar-top {
-    padding-top: calc(18px + env(safe-area-inset-top, 0px));
-  }
-}
+/* ── Sidebar mobile top-offset — REMOVED (v14 mobile-shell batch, 2026-08-03) ──
+   This block predated "hotfix 2" (984afc7) and duplicated/overrode the
+   #sidebar rule near the Sidebar section above (top: env(safe-area-inset-top)
+   — the PROVEN below-the-notch geometry hotfix 2 restored after top:0+padding
+   misbehaved on-device). Because this rule came LATER in the cascade with the
+   same #sidebar specificity, it silently won and re-applied top:0 +
+   padding-top: env(inset) on #sidebar — stacked with .sidebar-top's OWN
+   padding-top below, that double-counted the inset into ~2× its height of
+   dead space above the user card (the "giant dead band" from the owner's
+   screenshot) and quietly undid hotfix 2 for the sidebar specifically (the
+   top-nav-strip had no such leftover duplicate, so only the drawer regressed).
+   #sidebar's own `top` position already clears the notch — .sidebar-top needs
+   no extra inset padding on top of that; its base rule (18px 14px 14px, see
+   the Sidebar section above) is enough. */
 
 /* ── Item cards — rounded on mobile ── */
 @media (max-width: 768px) {

@@ -1263,14 +1263,69 @@ function _primaryNavItems() {
   return items.filter(item => item.page !== 'my-profile');
 }
 
+// v14 mobile-shell batch (ruled decision N3, never implemented until now) —
+// cap the bar at 5 tabs: the first 4 items in today's order + a 'More' tab
+// whenever a variant has more than 5 (today that's 'admin' and 'bsOnly';
+// 'genericPartner'/'partnerBS'/'staff' already sit at exactly 5 after
+// _primaryNavItems() strips Profile, so they render unchanged — no More tab,
+// nothing collapses, and every item keeps its own roomy column).
+function _bottomNavSplit(items) {
+  if (items.length <= 5) return { visible: items, more: [] };
+  return { visible: items.slice(0, 4), more: items.slice(4) };
+}
+// The only known nav-badge source today is Chat's unread-conversation count
+// (chat.js paints `.bottom-nav-item[data-page="chat"] .bn-badge` directly and
+// caches the same number in localStorage — see chat.js _updateChatNavBadge /
+// _chatBadgeStorageKey). Chat sits in the visible 4 for every current
+// NAV_REGISTRY.bottom variant, so this is normally a no-op; it exists so the
+// badge doesn't silently vanish if a future variant/layout ever pushes 'chat'
+// into the collapsed "More" set — the count follows the item onto the More
+// tab (and into its sheet row) instead.
+function _moreNavBadgeCount(morePages) {
+  if (!morePages.includes('chat')) return 0;
+  try {
+    const uid = (window.currentUser && currentUser.uid) || '';
+    const raw = uid && localStorage.getItem('bi-chat-unread-count-' + uid);
+    return raw ? (parseInt(raw, 10) || 0) : 0;
+  } catch (_) { return 0; }
+}
+// The 'More' tab's bottom sheet — tappable rows (icon + label + chevron).
+// Deliberately NOT the sidebar's _navIcon() tile: that hardcodes stroke:#fff
+// for its colored gradient backgrounds and renders invisible on this row's
+// plain surface — .more-nav-row-icon (styles.css) uses currentColor instead.
+// openModal() IS a bottom sheet on mobile (.modal-box mobile CSS:
+// align-self:flex-end, top corners rounded, swipe-to-dismiss via gestures.js
+// sheetHandleEl) — no separate sheet implementation needed.
+function openMoreNavSheet(items) {
+  const rows = items.map(item => {
+    const badge = item.page === 'chat' ? _moreNavBadgeCount(['chat']) : 0;
+    return `<button class="more-nav-row pressable${item.page === window.currentPage ? ' active' : ''}" data-page="${item.page}">
+      <span class="more-nav-row-icon"><i data-lucide="${item.icon}"></i></span>
+      <span class="more-nav-row-label">${item.label}</span>
+      ${badge > 0 ? `<span class="more-nav-row-badge">${badge > 99 ? '99+' : badge}</span>` : ''}
+      <i data-lucide="chevron-right" class="more-nav-row-chevron"></i>
+    </button>`;
+  }).join('');
+  window.openModal('More', `<div class="more-nav-sheet">${rows}</div>`, '', {});
+  document.querySelectorAll('#modal-body .more-nav-row').forEach(btn => {
+    btn.addEventListener('click', () => {
+      window.haptic && window.haptic('light');
+      window.Overlay.dismissTop();
+      navigateTo(btn.dataset.page);
+    });
+  });
+}
+
 // Messenger/Facebook-style: primary tabs live in a full-width BOTTOM bar on
 // mobile (owner request 2026-07-12 — the crammed top tab strip was replaced by
 // this + a clean top bar). setActiveNav() highlights .bottom-nav-item by page.
 function buildBottomNav() {
   const nav = document.getElementById('bottom-nav');
   if (!nav) return;
-  const items = _primaryNavItems();
-  nav.innerHTML = items.map(item =>
+  const { visible, more } = _bottomNavSplit(_primaryNavItems());
+  const morePages = more.map(m => m.page);
+  const moreBadge = _moreNavBadgeCount(morePages);
+  nav.innerHTML = visible.map(item =>
     `<button class="bottom-nav-item pressable" data-page="${item.page}">
        <span class="bn-icon-wrap" style="position:relative;display:inline-flex">
          ${_bnIcon(item.icon)}
@@ -1278,8 +1333,16 @@ function buildBottomNav() {
        </span>
        <span class="bn-label">${item.label}</span>
      </button>`
-  ).join('');
+  ).join('') + (more.length ? `
+    <button class="bottom-nav-item pressable" id="bottom-nav-more" data-page="__more__" data-more-pages="${morePages.join(',')}">
+       <span class="bn-icon-wrap" style="position:relative;display:inline-flex">
+         ${_bnIcon('menu')}
+         ${moreBadge > 0 ? `<span class="bn-badge">${moreBadge > 99 ? '99+' : moreBadge}</span>` : ''}
+       </span>
+       <span class="bn-label">More</span>
+     </button>` : '');
   nav.querySelectorAll('[data-page]').forEach(btn => {
+    if (btn.id === 'bottom-nav-more') { btn.addEventListener('click', () => { window.haptic && window.haptic('light'); openMoreNavSheet(more); }); return; }
     btn.addEventListener('click', () => { window.haptic && window.haptic('light'); navigateTo(btn.dataset.page); }); // v14 G2 — bottom-nav tap
   });
   if (window.lucide) lucide.createIcons({ nodes: [nav] });
@@ -1472,6 +1535,46 @@ function renderNotificationsPage() {
   window.Notifs?.renderPage?.();
 }
 
+// ── Quote Builder fullscreen (mobile) ────────────
+// Mirrors chat.js's chat-fullscreen mechanism (owner req #2): a body class
+// hides the app chrome (top strip + bottom nav) and the iframe covers the
+// viewport edge-to-edge; safe-area clearance is handled entirely by CSS
+// (see body.qb-fullscreen in styles.css) — no getBoundingClientRect
+// measuring needed, unlike the old per-resize fitFrame() hack this replaces.
+// Same ≤768px breakpoint the rest of the mobile shell uses (top-nav-strip /
+// bottom-nav / sidebar), not the old one-off 700px check.
+const QB_FULLSCREEN_MQ = '(max-width: 768px)';
+function _qbIsMobile() { return !!(window.matchMedia && window.matchMedia(QB_FULLSCREEN_MQ).matches); }
+let _qbExitPill = null;
+function _qbBuildExitPill() {
+  if (_qbExitPill && _qbExitPill.isConnected) return _qbExitPill;
+  const btn = document.createElement('button');
+  btn.id = 'qb-fullscreen-exit';
+  btn.className = 'qb-exit-pill';
+  btn.setAttribute('aria-label', 'Exit Quote Builder fullscreen');
+  btn.innerHTML = '<i data-lucide="x"></i>';
+  btn.addEventListener('click', () => { window.haptic && window.haptic('light'); window.Overlay ? window.Overlay.dismissTop() : exitQbFullscreen(); });
+  document.body.appendChild(btn);
+  if (window.lucide) lucide.createIcons({ nodes: [btn] });
+  _qbExitPill = btn;
+  return btn;
+}
+// Overlay-registered so device Back exits fullscreen (staying on the Quote
+// Builder page) instead of leaving the app or navigating away — same
+// lightweight "push a teardown, no visible panel" pattern notifications.js
+// uses for its push-permission prompt card.
+function enterQbFullscreen() {
+  if (!_qbIsMobile()) return;
+  if (document.body.classList.contains('qb-fullscreen')) return; // already entered — idempotent
+  document.body.classList.add('qb-fullscreen');
+  _qbBuildExitPill();
+  if (window.Overlay) window.Overlay.push('qb-fullscreen', () => exitQbFullscreen());
+}
+function exitQbFullscreen() {
+  document.body.classList.remove('qb-fullscreen');
+  if (_qbExitPill) { _qbExitPill.remove(); _qbExitPill = null; }
+}
+
 // ── Quote Builder iframe ─────────────────────────
 function renderQuoteBuilderIframe() {
   // Render the builder INSIDE the normal content area so the app's top bar and
@@ -1507,42 +1610,25 @@ function renderQuoteBuilderIframe() {
       <button class="btn-primary btn-sm" id="qb-return-edit">${emojiIcon('↩',16)} Save edits &amp; Return to Partner</button>
       <button class="btn-success btn-sm" id="qb-approve-edit">${emojiIcon('✅',16)} Save edits &amp; Approve</button>
     </div>` : '';
-  // On phones, drop the redundant "Quote Builder" heading (the builder shows its own
-  // header) and give the iframe nearly the full viewport between the app's top bar and
-  // bottom nav — without overlapping either. Desktop keeps the heading + roomier chrome.
-  const isMobile = !!(window.matchMedia && window.matchMedia('(max-width:700px)').matches);
-  const chrome = (reviewCtx ? (isMobile ? 70 : 60) : 0) + (isMobile ? 130 : 200);
+  // On phones/tablets (≤768px), drop the redundant "Quote Builder" heading (the
+  // builder shows its own header) and go fullscreen via body.qb-fullscreen —
+  // no inline sizing needed there, styles.css covers the viewport edge-to-edge.
+  // Desktop keeps the heading + the old inline-sized layout.
+  const isMobile = _qbIsMobile();
+  const chrome = (reviewCtx ? 60 : 0) + 200;
   c.innerHTML = `
     ${reviewBanner}
     ${isMobile ? '' : `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
       <h2 style="font-size:16px;font-weight:800;color:var(--text)">${emojiIcon('🧮',16)} Quote Builder${reviewCtx?' <span style="font-size:12px;font-weight:600;color:var(--warning,#ff9f0a)">(reviewing a partner quote)</span>':reopenState?` <span style="font-size:12px;font-weight:600;color:var(--text-muted)">(${reopenAsRevision?'new revision':'editing a copy'})</span>`:''}</h2>
     </div>`}
     <iframe id="qb-frame" src="${qbSrc}" allow="print"
-      style="width:100%;height:calc(100dvh - ${chrome}px);min-height:${isMobile?'420':'460'}px;border:none;border-radius:${isMobile?'10':'12'}px;background:#f5f6fa"></iframe>`;
+      style="${isMobile ? '' : `width:100%;height:calc(100dvh - ${chrome}px);min-height:460px;border:none;border-radius:12px;background:#f5f6fa`}"></iframe>`;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
-  // On phones, PIN the iframe (position:fixed) to fill from just below the app's top
-  // chrome to the bottom of the screen, edge-to-edge. The outer page no longer scrolls
-  // the builder out of view — only the builder's own content scrolls inside it.
-  if (isMobile) {
-    const fitFrame = () => {
-      const f = document.getElementById('qb-frame'); if (!f || !f.isConnected) return;
-      // collapse to measure the top of its slot (page is at scroll 0 while pinned)
-      f.style.position = 'static'; f.style.height = '1px';
-      const top = Math.round(f.getBoundingClientRect().top + (window.scrollY||0));
-      // iframes are replaced elements — top/bottom:auto won't stretch them, so set an
-      // explicit height to fill from `top` to the bottom of the screen.
-      f.style.position = 'fixed'; f.style.top = top + 'px';
-      f.style.left = '0'; f.style.right = '0';
-      f.style.width = '100%'; f.style.height = (window.innerHeight - top) + 'px';
-      f.style.minHeight = '0'; f.style.borderRadius = '0'; f.style.zIndex = '5';
-    };
-    if (window._qbFit) window.removeEventListener('resize', window._qbFit);
-    window._qbFit = fitFrame;
-    window.addEventListener('resize', fitFrame);
-    requestAnimationFrame(fitFrame); setTimeout(fitFrame, 250);
-  } else if (window._qbFit) {
-    window.removeEventListener('resize', window._qbFit); window._qbFit = null;
-  }
+  // Enter/exit fullscreen fresh on every render — navigateTo() always tears
+  // down any previous Overlay entry (Overlay.clearAll()) before this runs, so
+  // there's never a stale 'qb-fullscreen' entry left on the stack to double up.
+  exitQbFullscreen();
+  if (isMobile) enterQbFullscreen();
   if (reopenState) {
     // Wave 3 Q2 — READY handshake replaces the old blind 450ms setTimeout race
     // (the iframe's 'load' event fires before its own script has attached its
@@ -2357,6 +2443,11 @@ function navigateTo(page, opts) {
   // detach it whenever any page other than chat renders. (The THREAD listeners
   // are Overlay-scoped and already torn down by Overlay.clearAll() above.)
   if (page !== 'chat' && window.Chat?.teardownInbox) window.Chat.teardownInbox();
+  // Quote Builder fullscreen (mobile): Overlay.clearAll() above already tears
+  // this down whenever it was pushed, but guard explicitly too (same pattern
+  // as the Chat teardown line above) in case a future path ever reaches here
+  // without going through the Overlay stack.
+  if (page !== 'bs-quote-builder' && page !== 'bk-quote-builder') exitQbFullscreen();
   const c = document.getElementById('page-content');
   // Destroy any Chart.js instances before wiping the DOM to prevent memory leaks
   if (window.Chart) {
@@ -2451,6 +2542,17 @@ function setActiveNav(page) {
     if (isActive) el.setAttribute('aria-current', 'page');
     else el.removeAttribute('aria-current');
   });
+  // The 'More' tab (v14 mobile-shell batch) collapses several pages into a
+  // sheet, so its own data-page is a non-navigable "__more__" sentinel that
+  // never matches the loop above. Show it active when the current page lives
+  // inside its collapsed set instead (data-more-pages, set by buildBottomNav).
+  const moreBtn = document.getElementById('bottom-nav-more');
+  if (moreBtn) {
+    const isMoreActive = (moreBtn.dataset.morePages || '').split(',').includes(page);
+    moreBtn.classList.toggle('active', isMoreActive);
+    if (isMoreActive) moreBtn.setAttribute('aria-current', 'page');
+    else moreBtn.removeAttribute('aria-current');
+  }
 }
 
 // Merge the real quote collections (Barro Kitchens + Brilliant Steel) plus the

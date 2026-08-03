@@ -17,8 +17,10 @@
   'use strict';
 
   const EDGE_ZONE   = 24;   // px from the left edge that arms edge swipe-back
-  const DX_THRESH   = 70;   // px horizontal drag to commit to "back"
-  const DY_ABORT    = 40;   // px vertical drift that aborts (treat as a scroll instead)
+  const EDGE_DX_ARM = 16;   // px of horizontal travel before we decide this is a swipe, not a scroll (v14 mobile-shell batch — was un-gated, see edgeTouchMove)
+  const EDGE_SLOPE  = 1.8;  // |dx| must exceed this multiple of |dy| to arm (v14 mobile-shell batch — raised from an implicit ~1.75 floor)
+  const DX_THRESH   = 70;   // px horizontal drag to commit to "back" / "open drawer"
+  const DY_ABORT    = 40;   // px vertical drift, measured at release, that still cancels a commit
   const SHEET_DX_MQ = '(max-width: 639px)'; // matches the WS42 Phase 10 bottom-sheet breakpoint
   const SHEET_DY_THRESH = 120; // px downward drag to commit to dismiss
   const SHEET_VELOCITY_THRESH = 0.6; // px/ms flick velocity that also commits
@@ -76,13 +78,17 @@
   // v13 Phase 64 — sole owner of the left-edge swipe gesture (the old
   // app.js initSidebarSwipe open-tracker was removed to stop two listeners
   // racing on the same gesture). Decision order at commit time:
-  //   (a) an overlay/sheet/sidebar is on top of the Overlay stack → dismiss it
-  //       (this also covers closing an already-open mobile sidebar, since
-  //       openSidebar() pushes a 'sidebar' entry onto the stack)
-  //   (b) otherwise, on a mobile-sidebar viewport with the sidebar closed and
-  //       we're at a root page → open the sidebar (this is the "open" affordance
-  //       the old handler provided)
-  //   (c) otherwise → history.back()
+  //   (a) an overlay/sheet/sidebar/pushed page is on top of the Overlay stack
+  //       → dismiss it (this also covers closing an already-open mobile
+  //       sidebar, since openSidebar() pushes a 'sidebar' entry onto the stack)
+  //   (b) otherwise we're on the BASE page (Overlay stack empty) — on a
+  //       mobile-sidebar viewport with the drawer closed, OPEN it (FB-style;
+  //       owner decision 2026-08-03). Previously gated to
+  //       window.currentPage==='dashboard' only, so the gesture fell through
+  //       to history.back() on every other base page — removed, this now
+  //       applies uniformly regardless of which page is showing.
+  //   (c) otherwise (no off-canvas drawer at this viewport, e.g. the tablet
+  //       rail tier) → history.back()
   function isMobileSidebarViewport() {
     return !!(window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
   }
@@ -90,22 +96,18 @@
     const sidebar = document.getElementById('sidebar');
     return !!(sidebar && sidebar.classList.contains('open'));
   }
-  function isRootPage() {
-    // "Root" = the dashboard landing page; anywhere else, an edge swipe means "back".
-    return window.currentPage === 'dashboard';
-  }
   function doBack() {
     if (window.Overlay && window.Overlay.isOpen()) {
       window.Overlay.dismissTop();
-    } else if (isMobileSidebarViewport() && !sidebarIsOpen() && isRootPage()) {
+    } else if (isMobileSidebarViewport() && !sidebarIsOpen()) {
       if (typeof window.openSidebar === 'function') window.openSidebar();
     } else {
       history.back();
     }
   }
 
-  // ── Edge swipe-back ─────────────────────────────────────────────────────
-  let edge = null; // { startX, startY, startTime, tracking }
+  // ── Edge swipe-back / swipe-open-drawer ─────────────────────────────────
+  let edge = null; // { startX, startY, startTime, tracking, armed, lastX, lastY }
 
   function edgeTouchStart(e) {
     if (!enabled || pointerIsFine()) return;
@@ -113,26 +115,33 @@
     const t = e.touches[0];
     if (t.clientX > EDGE_ZONE) return;
     if (insideHScroll(e.target)) return;
-    edge = { startX: t.clientX, startY: t.clientY, startTime: Date.now(), tracking: true, lastX: t.clientX, lastY: t.clientY };
+    edge = { startX: t.clientX, startY: t.clientY, startTime: Date.now(), tracking: true, armed: false, lastX: t.clientX, lastY: t.clientY };
     document.addEventListener('touchmove', edgeTouchMove, { passive: false });
     document.addEventListener('touchend', edgeTouchEnd, { passive: true });
     document.addEventListener('touchcancel', edgeTouchCancel, { passive: true });
   }
+  // v14 mobile-shell batch — armed the same way pageTouchMove is below: wait
+  // for EDGE_DX_ARM px of travel before deciding, then require the drag to
+  // clear EDGE_SLOPE×|dy| to call it horizontal. Previously this called
+  // e.preventDefault() on the very first rightward pixel with no minimum
+  // travel or slope check, which could clip the start of a vertical scroll
+  // that happened to begin inside the 24px edge strip.
   function edgeTouchMove(e) {
     if (!edge || !edge.tracking) return;
     const t = e.touches[0];
     const dx = t.clientX - edge.startX;
     const dy = t.clientY - edge.startY;
-    if (Math.abs(dy) > DY_ABORT && dx < DX_THRESH) {
-      // Vertical drift dominates — this is a scroll, not a back-swipe. Bail out
-      // silently and let the page scroll normally from here on.
-      edge.tracking = false;
-      retractPill(false);
-      return;
-    }
-    if (dx <= 0) return;
-    e.preventDefault(); // scoped to this active edge-drag only
     edge.lastX = t.clientX; edge.lastY = t.clientY;
+    if (!edge.armed) {
+      if (Math.abs(dx) < EDGE_DX_ARM) return;                        // not enough travel to decide yet
+      if (dx <= 0 || Math.abs(dx) < EDGE_SLOPE * Math.abs(dy)) {      // leftward, or vertical drift wins — it's a scroll
+        edge.tracking = false;
+        retractPill(false);
+        return;
+      }
+      edge.armed = true;
+    }
+    e.preventDefault(); // scoped to this active edge-drag only, and only once armed
     const followX = Math.min(dx * 0.6, 90);
     movePill(followX, t.clientY, Math.min(dx / DX_THRESH, 1));
   }
@@ -141,7 +150,7 @@
     if (!edge) return;
     const dx = edge.lastX - edge.startX;
     const dy = edge.lastY - edge.startY;
-    const committed = edge.tracking && dx > DX_THRESH && Math.abs(dy) < DY_ABORT;
+    const committed = edge.armed && dx > DX_THRESH && Math.abs(dy) < DY_ABORT;
     retractPill(committed);
     if (committed) doBack();
     edge = null;
@@ -235,8 +244,8 @@
   // panel — not modals, which stay dismissed via backdrop/Esc/Back only.
   // Starts inside the edge zone are left to edgeTouchStart above (untouched)
   // so the two gestures never race the same touch into two dismissals.
-  const PAGE_DX_ARM          = 12;   // px before we commit to "this is horizontal"
-  const PAGE_SLOPE           = 1.6;  // |dx| must exceed this multiple of |dy| to arm
+  const PAGE_DX_ARM          = 16;   // px before we commit to "this is horizontal" (v14 mobile-shell batch — raised from 12 so vertical scrolls never feel hijacked)
+  const PAGE_SLOPE           = 1.8;  // |dx| must exceed this multiple of |dy| to arm (v14 mobile-shell batch — raised from 1.6)
   const PAGE_VELOCITY_THRESH = 0.5;  // px/ms flick velocity that also commits
 
   let pageSwipe = null; // { el, startX, startY, lastX, lastY, armed, startTime }
