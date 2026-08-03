@@ -5203,7 +5203,10 @@ html.theme-astral .top-nav-item.active .bn-icon { filter: drop-shadow(0 0 5px rg
     z-index: 10; pointer-events: none;
   }
   .modal-header {
-    padding-top: 26px;
+    /* v14: the no-popup fix made the mobile modal cover top:0 (over the
+       notch), so its header must clear the status bar — a flat 26px let
+       'More' + the X collide with the clock/battery (owner screenshot). */
+    padding-top: calc(14px + env(safe-area-inset-top, 0px));
   }
 }
 
