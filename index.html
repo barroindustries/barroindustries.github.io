@@ -179,7 +179,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v12.0.173 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v12.0.174 · Barro Industries</div>
   </div>
 </div>
 
@@ -421,6 +421,17 @@
      tabs) reaches forward into this file's renderPayrollManagement/
      renderFinanceHRProfiles the same way. -->
 <script defer src="js/screens/hr.js"></script>
+<!-- v14 Wave 7 Pass 4 — Production + Purchasing + Projects (job_projects
+     lifecycle) screens, split verbatim out of departments.js (a single
+     contiguous tail cut — PROD_STAGES/QC/Delivery Receipt through
+     printReceivingReport at EOF). Must load after departments.js: calls its
+     shared services (window.Projects, openBillingInvoice/
+     buildBillingInvoiceHTML, nextCounterId, window.Ledger, BankAccounts,
+     canEditDept, deptContainer, dbCachedGet, etc.) by window.*/bare-global
+     name at runtime only, never at parse time; departments.js's
+     loadFinanceContent (Finance → Purchases tab) reaches forward into this
+     file's renderPurchaseRequests the same way. -->
+<script defer src="js/screens/production.js"></script>
 <!-- v13 Phase 37 — one-time/rare president maintenance tools, split out of
      departments.js for hot-file size. Plain deferred script (not the
      dynamic-import lazy-load V13-PLAN.md sketched) — simpler safe variant
