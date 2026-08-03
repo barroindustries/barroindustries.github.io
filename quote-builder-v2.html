@@ -19,7 +19,9 @@ body{font-family:var(--font);background:var(--gray-light);color:var(--text);font
 
 /* ── TOP BAR ── */
 .topbar{background:var(--dark-blue);color:white;display:flex;align-items:center;
-  justify-content:space-between;padding:0 18px;height:52px;position:sticky;top:0;z-index:300;
+  /* v14 owner report: height:52px + flex-wrap:wrap CLIPPED the wrapped
+     second row of buttons on desktop. min-height lets the bar grow. */
+  justify-content:space-between;padding:6px 18px;min-height:52px;position:sticky;top:0;z-index:300;
   box-shadow:0 2px 8px rgba(0,0,0,.3);gap:10px;flex-wrap:wrap;}
 .topbar-logo{font-size:16px;font-weight:700;}
 .topbar-logo span{color:var(--accent);}
@@ -121,14 +123,13 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--mid-blue
 table{width:100%;border-collapse:collapse;}
 .items-table{table-layout:fixed;width:100%;}
 .items-table th:nth-child(1){width:4%;}
-.items-table th:nth-child(2){width:30%;}
-.items-table th:nth-child(3){width:12%;}
-.items-table th:nth-child(4){width:5%;}
-.items-table th:nth-child(5){width:9%;}
+.items-table th:nth-child(2){width:42%;}
+.items-table th:nth-child(3){width:5%;}
+.items-table th:nth-child(4){width:9%;}
+.items-table th:nth-child(5){width:12%;}
 .items-table th:nth-child(6){width:12%;}
 .items-table th:nth-child(7){width:12%;}
-.items-table th:nth-child(8){width:12%;}
-.items-table th:nth-child(9){width:4%;}
+.items-table th:nth-child(8){width:4%;}
 th{background:var(--dark-blue);color:white;text-align:left;padding:7px 8px;
   font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
 td{padding:8px 8px;border-bottom:1px solid var(--gray-mid);font-size:13px;vertical-align:middle;}
@@ -155,6 +156,7 @@ tr:hover td{background:#fafbff;}
 .spec-tag{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--mid-blue);
   background:var(--light-blue);padding:1px 5px;border-radius:3px;flex-shrink:0;margin-top:1px;}
 .spec-edit{font-size:11px;color:var(--text);flex:1;line-height:1.4;}
+.dims-edit{font-size:11px;color:var(--text);flex:1;line-height:1.4;}
 .price-print{display:none;}
 .lead-in{width:90px!important;text-align:center;}
 [contenteditable][data-ph]:empty:before{content:attr(data-ph);color:#bbb;font-style:italic;}
@@ -283,6 +285,7 @@ tr:hover td{background:#fafbff;}
   .pc-row{flex-wrap:wrap;}
   .pc-check{min-height:44px;}
   .pricing-controls select{flex:1;min-width:0;min-height:40px;}
+  .pricing-controls input[type="number"]{flex:1;min-width:0;min-height:40px;width:auto!important;}
   .pay-tbl td,.pay-tbl th{font-size:12px;padding:6px 7px;}
   .lead-in{width:100%!important;}
   /* 16px floor (not the old 14px) — anything smaller triggers iOS Safari's
@@ -414,8 +417,7 @@ tr:hover td{background:#fafbff;}
     border-bottom:1px solid #e3e7ef;page-break-inside:auto;break-inside:auto;}
   .sec-title{font-size:8.5pt;color:#1E3A5F;border-bottom:1.5px solid #1E3A5F;margin-bottom:5px;padding-bottom:2px;letter-spacing:.6px;}
   .main{padding:0;max-width:100%;}
-  .print-header{display:flex!important;justify-content:space-between;align-items:flex-start;
-    margin-bottom:8px;padding-bottom:7px;border-bottom:2.5px solid #1E3A5F;}
+  .print-header{display:none!important;}
   th{padding:3px 6px;font-size:8pt;background:#1E3A5F!important;color:#fff!important;}
   td{padding:2.5px 6px;font-size:8.5pt;}
   .items-table{table-layout:fixed!important;width:100%!important;}
@@ -432,6 +434,7 @@ tr:hover td{background:#fafbff;}
   .spec-tag{display:none!important;}
   .spec-line{display:block;margin-top:1px;}
   .spec-edit{font-size:8pt;color:#333;}
+  .dims-edit{font-size:8pt;color:#333;}
   .notes-cell{font-size:8pt;color:#333;}
   .totals-tbl{min-width:0;width:48%;margin-left:auto;page-break-inside:avoid;break-inside:avoid;}
   .totals-tbl td{font-size:9pt;padding:2.5px 8px;}
@@ -847,6 +850,7 @@ tr:hover td{background:#fafbff;}
   <!-- Calculator panel (shown after selecting product) -->
   <div class="calc-panel" id="calcPanel">
     <div class="calc-title" id="calcTitle">⚙ Configure Item</div>
+    <div id="specGroups"></div>
     <div class="fg" id="measureUnitRow" style="max-width:200px;margin-bottom:8px;display:none;">
       <label>Measurement unit</label>
       <select id="measureUnit" onchange="onMeasureUnitChange()">
@@ -858,7 +862,6 @@ tr:hover td{background:#fafbff;}
       </select>
     </div>
     <div class="calc-grid" id="calcInputs"></div>
-    <div id="specGroups"></div>
     <div class="calc-price-row">
       <div>
         <div class="calc-price-label">Computed Unit Price</div>
@@ -887,6 +890,7 @@ tr:hover td{background:#fafbff;}
 <div class="section" id="itemsSection">
   <div class="sec-title">
     <span>Quote Items</span>
+    <span id="itemSavedTag" class="no-print" style="display:none;font-size:11px;font-weight:700;color:var(--green);text-transform:none;letter-spacing:normal;">✓ Saved</span>
   </div>
 
   <div id="tableWrap" style="overflow-x:auto;">
@@ -895,7 +899,6 @@ tr:hover td{background:#fafbff;}
         <tr>
           <th>#</th>
           <th>Description</th>
-          <th>Dimensions</th>
           <th>Qty</th>
           <th>Unit</th>
           <th>Unit Price</th>
@@ -905,7 +908,7 @@ tr:hover td{background:#fafbff;}
         </tr>
       </thead>
       <tbody id="itemsTbody">
-        <tr><td colspan="9" class="empty-state">No items yet. Use the search above to add products.</td></tr>
+        <tr><td colspan="8" class="empty-state">No items yet. Use the search above to add products.</td></tr>
       </tbody>
     </table>
   </div>
@@ -917,6 +920,10 @@ tr:hover td{background:#fafbff;}
     </div>
     <div class="pc-row">
       <label class="pc-lbl">Discount</label>
+      <select id="discountMode" onchange="onDiscountModeChange()" style="max-width:110px;">
+        <option value="pct">Percent %</option>
+        <option value="amount">Amount ₱</option>
+      </select>
       <select id="discountPct" onchange="renderTotals()">
         <option value="0">No discount</option>
         <option value="10">10%</option><option value="15">15%</option>
@@ -925,15 +932,21 @@ tr:hover td{background:#fafbff;}
         <option value="40">40%</option><option value="45">45%</option>
         <option value="50">50%</option>
       </select>
+      <input type="number" id="discountAmtCustom" min="0" step="100" placeholder="0" style="display:none;width:130px;" oninput="renderTotals()">
     </div>
     <div class="pc-row">
       <label class="pc-lbl">Referral / Agent commission</label>
+      <select id="commissionMode" onchange="onCommissionModeChange()" style="max-width:110px;">
+        <option value="pct">Percent %</option>
+        <option value="amount">Amount ₱</option>
+      </select>
       <select id="commissionPct" onchange="renderTotals()">
         <option value="0">None</option>
         <option value="3">3%</option>
         <option value="5">5%</option>
         <option value="10">10%</option>
       </select>
+      <input type="number" id="commissionAmtCustom" min="0" step="100" placeholder="0" style="display:none;width:130px;" oninput="renderTotals()">
       <span class="pc-hint">computed from grand total</span>
     </div>
   </div>
@@ -1185,12 +1198,21 @@ tr:hover td{background:#fafbff;}
 //  ?pcoName/?pcoContact/?pcoSig for generic (non-Brilliant-Steel) partners.
 // ═══════════════════════════════════════════════════════════════════
 const CO = {
+  // logo: per-company mark for the printed/on-screen letterhead (applyLetterheadHeader()
+  // reads #phLogo.src, which setCompany() below now populates from this field, instead of
+  // silently falling through to whatever js/letterhead.js's shared BRAND.logo.print default
+  // happens to be — that default is app-wide and not this builder's to assume).
   BK:{name:'BARRO KITCHENS',sub:'By Barro Industries OPC',
     addr:'Metro Manila',contact:'09276836300  |  barroindustries@gmail.com',
     sig:{name:'NEIL BARRO',title:'President, Barro Industries OPC'},nav:'BARRO <span>KITCHENS</span>',code:'BK',
     thanks:'Thank you for considering Barro Kitchens. We look forward to building a kitchen you can rely on for years.',
-    creds:'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila'},
-  BS:{name:'BRILLIANT STEEL CORPORATION',sub:'',addr:'Pasig City, Metro Manila',contact:'09276836300',
+    creds:'Barro Industries OPC  •  SEC Registered  •  barroindustries@gmail.com  •  09276836300  •  Metro Manila',
+    logo:'icons/barro-kitchens.png'},
+  // logo:'' — Brilliant Steel has no logo asset here; an EMPTY value must
+  // suppress the mark entirely (showLogo:false below) rather than falling
+  // through to js/letterhead.js's app-wide BRAND.logo.print (the BK cube),
+  // which would print Barro Kitchens branding on a PARTNER's quote.
+  BS:{name:'BRILLIANT STEEL CORPORATION',sub:'',logo:'',addr:'Pasig City, Metro Manila',contact:'09276836300',
     sig:{name:'GERALD CHAN',title:'President, Brilliant Steel Corporation'},nav:'<span>BRILLIANT</span> STEEL',code:'BS',
     thanks:'Thank you for considering Brilliant Steel Corporation. We are committed to quality steelworks delivered on time.',
     creds:'Brilliant Steel Corporation  •  SEC / BIR Registered  •  Pasig City, Metro Manila  •  0927 683 6300'},
@@ -1497,6 +1519,8 @@ function setCompany(co){
   document.getElementById('phSub').textContent=c.sub;
   document.getElementById('phAddr').textContent=c.addr;
   document.getElementById('phContact').textContent=c.contact;
+  const phLogoEl=document.getElementById('phLogo');
+  if(phLogoEl){ if(c.logo){ phLogoEl.src=c.logo; } else { phLogoEl.removeAttribute('src'); } }
   document.getElementById('sigContact').textContent=c.sig.name;
   document.getElementById('sigTitle').textContent=c.sig.title;
   const pft=document.getElementById('pfThanks'); if(pft) pft.textContent=c.thanks||'';
@@ -1521,7 +1545,11 @@ function applyLetterheadHeader(){
     docNumber: document.getElementById('quoteNo')?.value || '',
     dateLabel: new Date().toLocaleDateString('en-PH',{year:'numeric',month:'long',day:'numeric'}),
     accent: currentCo==='BS' ? '#37474F' : '#1E3A5F',
-    logo: (document.getElementById('phLogo')?.src) || undefined,   // reuse the per-company logo the legacy header already resolves
+    // v14: resolve the PER-COMPANY mark; an empty one means this company has
+    // no logo, so suppress it (showLogo:false) instead of inheriting the
+    // app-wide default and stamping BK branding on a partner document.
+    logo: (c.logo !== undefined ? c.logo : (document.getElementById('phLogo')?.src || '')) || undefined,
+    showLogo: !!(c.logo !== undefined ? c.logo : (document.getElementById('phLogo')?.src || '')),
   });
   let lhBox = document.getElementById('lhPrintHeader');
   if (!lhBox) {
@@ -1799,7 +1827,9 @@ function buildQuoteNo(){
   const dt=d.replace(/-/g,'').slice(2);
   const seq=String(document.getElementById('qnoSeq').value||1).padStart(3,'0');
   const rev=(typeof _autoRev==='number' && _autoRev>0)?_autoRev:1;   // revision/copy for this client
-  const no=`${co}-${loc}-${mth}-${dt}-${seq}-R${rev}`;
+  // v14 owner ruling 2026-08-03: strip every dash EXCEPT the one after the
+  // date segment -> BKLUFB260803-013R1 (was BK-LU-FB-260803-013-R1).
+  const no=`${co}${loc}${mth}${dt}-${seq}R${rev}`;
   document.getElementById('qnoPreview').textContent=no;
   document.getElementById('quoteNo').value=no;
   updatePrintHeader();
@@ -1821,7 +1851,9 @@ function syncDateIntoQuoteNo(){
   const qEl=document.getElementById('quoteNo'); if(!qEl) return;
   const d=document.getElementById('quoteDate').value; if(!d) return;
   const dt=d.replace(/-/g,'').slice(2);
-  const m=qEl.value.match(/^([A-Za-z]{2}-[A-Za-z]{2}-[A-Za-z]{2})-(\d{6})-(\d{3})(-R\d+)?$/);
+  // accepts BOTH the v14 compact shape (BKLUFB260803-013R1) and the legacy
+  // fully-dashed one (BK-LU-FB-260803-013-R1) so old quotes still sync.
+  const m=qEl.value.match(/^([A-Za-z]{2}-?[A-Za-z]{2}-?[A-Za-z]{2})-?(\d{6})-(\d{3})(-?R\d+)?$/);
   if(m){ qEl.value=`${m[1]}-${dt}-${m[3]}${m[4]||''}`; }
 }
 
@@ -1830,7 +1862,7 @@ function syncDateIntoQuoteNo(){
 function bumpRevisionNo(no){
   if(!no) return no;
   const m=String(no).match(/-R(\d+)\s*$/i);
-  if(m) return no.replace(/-R\d+\s*$/i, '-R'+(parseInt(m[1],10)+1));
+  if(m) return no.replace(/-?R\d+\s*$/i, 'R'+(parseInt(m[1],10)+1));
   return no+'-R2';
 }
 
@@ -2243,7 +2275,7 @@ function addCustomItem(){
 function renderItems(){
   const tbody=document.getElementById('itemsTbody');
   if(!items.length){
-    tbody.innerHTML='<tr><td colspan="9" class="empty-state">No items yet. Use the search above to add products.</td></tr>';
+    tbody.innerHTML='<tr><td colspan="8" class="empty-state">No items yet. Use the search above to add products.</td></tr>';
     renderTotals(); renderQuotePhotos(); return;
   }
 
@@ -2258,7 +2290,7 @@ function renderItems(){
   catKeys.forEach(catId=>{
     if(!catMap[catId]) return;
     const catObj=DB.categories?DB.categories.find(c=>c.id===catId)||{label:catId}:{label:catId};
-    html+=`<tr class="cat-row"><td colspan="9">${catObj.icon||''} ${catObj.label}</td></tr>`;
+    html+=`<tr class="cat-row"><td colspan="8">${catObj.icon||''} ${catObj.label}</td></tr>`;
     let subtotal=0;
     catMap[catId].forEach(({item,idx})=>{
       subtotal+=item.amount;
@@ -2269,9 +2301,9 @@ function renderItems(){
         <td>
           <div class="name-cell cell-edit" contenteditable="true" onblur="editName(${idx},this)">${txtEsc(item.name)}</div>
           <div class="spec-line"><span class="spec-tag no-print">Specs</span><span class="spec-edit cell-edit" contenteditable="true" data-ph="Click to add specifications…" onblur="editSpecs(${idx},this)">${txtEsc(specText)}</span></div>
+          <div class="spec-line"><span class="spec-tag no-print">Dims</span><span class="dims-edit cell-edit" contenteditable="true" data-ph="Dimensions…" onblur="editDims(${idx},this)">${txtEsc(item.dims||'')}</span></div>
           <div class="notes-cell cell-edit" contenteditable="true" onblur="editNotes(${idx},this)" data-ph="Notes…" style="font-size:11px;color:var(--gray-dark);margin-top:2px;">${txtEsc(item.notes||'')}</div>
         </td>
-        <td style="font-size:11px;">${item.dims||'—'}</td>
         <td style="text-align:center;"><input class="cell-num" type="number" min="1" value="${item.qty}" onchange="updateQty(${idx},this)" style="width:50px;"></td>
         <td style="text-align:center;"><input class="cell-unit" type="text" value="${item.unit}" onchange="updateUnit(${idx},this)" style="width:55px;"></td>
         <td style="text-align:right;"><input class="edit-price" type="number" value="${item.unitPrice}" onchange="updatePrice(${idx},this)"><span class="price-print">${formatPeso(item.unitPrice)}</span></td>
@@ -2280,7 +2312,7 @@ function renderItems(){
         <td class="no-print" style="text-align:center;"><button class="del-btn" onclick="deleteItem(${idx})" title="Remove">✕</button></td>
       </tr>`;
     });
-    html+=`<tr class="subtotal-row"><td colspan="8" style="text-align:right;">Subtotal — ${catObj.label}: ${formatPeso(subtotal)}</td><td class="no-print"></td></tr>`;
+    html+=`<tr class="subtotal-row"><td colspan="7" style="text-align:right;">Subtotal — ${catObj.label}: ${formatPeso(subtotal)}</td><td class="no-print"></td></tr>`;
   });
 
   tbody.innerHTML=html;
@@ -2296,19 +2328,26 @@ function computeTotals(){
   const showVat=document.getElementById('showVat')?.checked;
   const discPct=parseFloat(document.getElementById('discountPct')?.value||0);
   const commPct=parseFloat(document.getElementById('commissionPct')?.value||0);
+  // #4/#5 — percent (default) or a custom flat peso amount, per mode toggle.
+  const discMode=document.getElementById('discountMode')?.value||'pct';
+  const commMode=document.getElementById('commissionMode')?.value||'pct';
+  const discAmtCustom=parseFloat(document.getElementById('discountAmtCustom')?.value||0);
+  const commAmtCustom=parseFloat(document.getElementById('commissionAmtCustom')?.value||0);
   const diFree=document.getElementById('diFree')?.checked;
   const diAmount=diFree?0:parseFloat(document.getElementById('diAmount')?.value||0);
   const diInclude=(document.getElementById('diInclude')?.value||'yes')==='yes';
 
   const diAdded=diInclude?diAmount:0;
   const preDiscount=subtotal+diAdded;
-  const discountAmt=preDiscount*(discPct/100);
-  const net=preDiscount-discountAmt;          // discount applied BELOW items, before VAT
+  // Discount applied BELOW items, before VAT — same position for both modes.
+  const discountAmt=discMode==='amount' ? Math.max(0,Math.min(discAmtCustom,preDiscount)) : preDiscount*(discPct/100);
+  const net=preDiscount-discountAmt;
   const vatAmt=showVat?net*vatRate:0;
   const grand=net+vatAmt;
-  const commissionAmt=grand*(commPct/100);
+  // Commission computed on the grand total — same position for both modes.
+  const commissionAmt=commMode==='amount' ? Math.max(0,commAmtCustom) : grand*(commPct/100);
 
-  return {subtotal,diAmount,diAdded,diInclude,discPct,discountAmt,net,showVat,vatAmt,grand,commPct,commissionAmt};
+  return {subtotal,diAmount,diAdded,diInclude,discMode,discPct,discountAmt,net,showVat,vatAmt,grand,commMode,commPct,commissionAmt};
 }
 
 function renderTotals(){
@@ -2316,12 +2355,14 @@ function renderTotals(){
   let html='';
   html+=`<tr><td>Subtotal</td><td>${formatPeso(t.subtotal)}</td></tr>`;
   if(t.diAdded>0) html+=`<tr><td>Delivery &amp; Installation</td><td>${formatPeso(t.diAdded)}</td></tr>`;
-  if(t.discPct>0) html+=`<tr class="discount"><td>Discount (${t.discPct}%)</td><td>−${formatPeso(t.discountAmt)}</td></tr>`;
-  if(t.discPct>0||t.diAdded>0) html+=`<tr><td>Net Amount</td><td>${formatPeso(t.net)}</td></tr>`;
+  const discLabel=t.discMode==='amount' ? 'Discount (flat)' : `Discount (${t.discPct}%)`;
+  if(t.discountAmt>0) html+=`<tr class="discount"><td>${discLabel}</td><td>−${formatPeso(t.discountAmt)}</td></tr>`;
+  if(t.discountAmt>0||t.diAdded>0) html+=`<tr><td>Net Amount</td><td>${formatPeso(t.net)}</td></tr>`;
   if(t.showVat) html+=`<tr><td>VAT (12%)</td><td>${formatPeso(t.vatAmt)}</td></tr>`;
   html+=`<tr class="grand"><td>GRAND TOTAL</td><td>${formatPeso(t.grand)}</td></tr>`;
   html+=`<tr class="cur-note"><td colspan="2" style="font-size:10px;color:var(--gray-dark);font-weight:400;text-align:right;">All amounts in Philippine Peso (₱), VAT ${t.showVat?'included':'exclusive'}.</td></tr>`;
-  if(t.commPct>0) html+=`<tr class="commission agent-only"><td>Referral/Agent Commission (${t.commPct}%)</td><td>${formatPeso(t.commissionAmt)}</td></tr>`;
+  const commLabel=t.commMode==='amount' ? 'Referral/Agent Commission (flat)' : `Referral/Agent Commission (${t.commPct}%)`;
+  if(t.commissionAmt>0) html+=`<tr class="commission agent-only"><td>${commLabel}</td><td>${formatPeso(t.commissionAmt)}</td></tr>`;
   document.getElementById('totalsTbl').innerHTML=html;
   renderTimeline();
   renderPaymentSchedule(t.grand);
@@ -2407,6 +2448,27 @@ function renderPaymentSchedule(grand){
   box.innerHTML=html;
 }
 
+// #4 — Discount: percent (existing) vs a custom flat peso amount. Whichever
+// mode is active, computeTotals() applies the resulting discountAmt in the
+// SAME position in the pipeline (subtracted from preDiscount, before VAT).
+function onDiscountModeChange(){
+  const mode=document.getElementById('discountMode')?.value||'pct';
+  const pctEl=document.getElementById('discountPct');
+  const amtEl=document.getElementById('discountAmtCustom');
+  if(pctEl) pctEl.style.display=mode==='amount'?'none':'';
+  if(amtEl) amtEl.style.display=mode==='amount'?'':'none';
+  renderTotals();
+}
+// #5 — Agent commission: percent (existing) vs a custom flat peso amount,
+// still computed/shown on the grand total basis, same position as today.
+function onCommissionModeChange(){
+  const mode=document.getElementById('commissionMode')?.value||'pct';
+  const pctEl=document.getElementById('commissionPct');
+  const amtEl=document.getElementById('commissionAmtCustom');
+  if(pctEl) pctEl.style.display=mode==='amount'?'none':'';
+  if(amtEl) amtEl.style.display=mode==='amount'?'':'none';
+  renderTotals();
+}
 function onFreeDeliveryChange(){
   const free=document.getElementById('diFree')?.checked;
   const amt=document.getElementById('diAmount');
@@ -2495,13 +2557,30 @@ function renderTimeline(){
 }
 
 // ── Item edits ──
-function editName(idx,el){items[idx].name=el.innerText.trim();saveToStorage();}
-function editSpecs(idx,el){items[idx].specEdit=el.innerText.trim();saveToStorage();}
-function updateLead(idx,el){items[idx].leadTime=el.value.trim();saveToStorage();}
-function editNotes(idx,el){items[idx].notes=el.innerText.trim();saveToStorage();}
-function updateQty(idx,el){items[idx].qty=parseInt(el.value)||1;items[idx].amount=items[idx].unitPrice*items[idx].qty;saveToStorage();renderItems();}
-function updateUnit(idx,el){items[idx].unit=el.value;saveToStorage();}
-function updatePrice(idx,el){items[idx].unitPrice=parseFloat(el.value)||0;items[idx].amount=items[idx].unitPrice*items[idx].qty;saveToStorage();renderItems();}
+// flashItemSaved(): a small visible "Saved" affirmation for inline row edits
+// (dims/price/qty/etc). Lives in the Quote Items section header, outside
+// #itemsTbody, so it survives the full tbody.innerHTML re-render that
+// updateQty()/updatePrice() trigger (recomputing the row + grand totals).
+let _itemSavedTimer=null;
+function flashItemSaved(){
+  const tag=document.getElementById('itemSavedTag');
+  if(!tag) return;
+  tag.style.display='inline';
+  if(_itemSavedTimer) clearTimeout(_itemSavedTimer);
+  _itemSavedTimer=setTimeout(()=>{ tag.style.display='none'; },900);
+}
+function editName(idx,el){items[idx].name=el.innerText.trim();saveToStorage();flashItemSaved();}
+function editSpecs(idx,el){items[idx].specEdit=el.innerText.trim();saveToStorage();flashItemSaved();}
+// #2 — Dimensions are now a free-text contenteditable line (same pattern as
+// name/specs/notes), rendered directly below Specs (#3). No amount recompute
+// happens from dims text, matching the existing qty/price fields which are
+// independent manual overrides already decoupled from the original formula.
+function editDims(idx,el){items[idx].dims=el.innerText.trim();saveToStorage();flashItemSaved();}
+function updateLead(idx,el){items[idx].leadTime=el.value.trim();saveToStorage();flashItemSaved();}
+function editNotes(idx,el){items[idx].notes=el.innerText.trim();saveToStorage();flashItemSaved();}
+function updateQty(idx,el){items[idx].qty=parseInt(el.value)||1;items[idx].amount=items[idx].unitPrice*items[idx].qty;saveToStorage();renderItems();flashItemSaved();}
+function updateUnit(idx,el){items[idx].unit=el.value;saveToStorage();flashItemSaved();}
+function updatePrice(idx,el){items[idx].unitPrice=parseFloat(el.value)||0;items[idx].amount=items[idx].unitPrice*items[idx].qty;saveToStorage();renderItems();flashItemSaved();}
 function deleteItem(idx){items.splice(idx,1);saveToStorage();renderItems();}
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3031,7 +3110,7 @@ function saveToStorage(){
 }
 
 // Pricing / payment / delivery fields — single source for save, load, payload
-const PRICING_IDS=['showVat','discountPct','commissionPct','diMethod','diFree','diNotes','diAmount','diInclude',
+const PRICING_IDS=['showVat','discountMode','discountPct','discountAmtCustom','commissionMode','commissionPct','commissionAmtCustom','diMethod','diFree','diNotes','diAmount','diInclude',
   'projStart','overallLead','dpMode','dpCustom','balMode','interestRate','remarks','bankDetails'];
 function getPricingFields(){
   const o={};
@@ -3049,6 +3128,8 @@ function applyPricingFields(o){
     if(!el||o[id]===undefined) return;
     if(el.type==='checkbox') el.checked=!!o[id]; else el.value=o[id];
   });
+  if(document.getElementById('discountMode')) onDiscountModeChange();
+  if(document.getElementById('commissionMode')) onCommissionModeChange();
   if(document.getElementById('diFree')) onFreeDeliveryChange();
   if(document.getElementById('dpMode')) onDpModeChange();
   if(document.getElementById('balMode')) onBalModeChange();
@@ -3199,7 +3280,8 @@ function clearForm(){
   });
   const today=new Date().toISOString().split('T')[0];
   // Reset pricing / payment / delivery fields to defaults
-  applyPricingFields({showVat:false,discountPct:'0',commissionPct:'0',diMethod:'',diFree:false,diNotes:'',
+  applyPricingFields({showVat:false,discountMode:'pct',discountPct:'0',discountAmtCustom:'',
+    commissionMode:'pct',commissionPct:'0',commissionAmtCustom:'',diMethod:'',diFree:false,diNotes:'',
     diAmount:'',diInclude:'yes',projStart:today,overallLead:'',dpMode:'50',dpCustom:'',balMode:'lump',
     interestRate:'0',remarks:'',bankDetails:''});
   document.getElementById('quoteDate').value=today;
@@ -3483,8 +3565,12 @@ function loadEditableState(state, opts){
       const today=new Date().toISOString().split('T')[0];
       const dEl=document.getElementById('quoteDate'); if(dEl) dEl.value=today;
       const qEl=document.getElementById('quoteNo');
+      // Bump ONLY the -Rn suffix. Do NOT call syncDateIntoQuoteNo() here — that
+      // function rewrites the embedded YYMMDD date segment of the quote number
+      // to match #quoteDate, which we just reset to today two lines above. The
+      // base quote number (and its original filing-date segment) must stay
+      // frozen across a New Revision; only the display Date field advances.
       if(qEl){ qEl.value=bumpRevisionNo(qEl.value); }
-      syncDateIntoQuoteNo();
       const fb=document.getElementById('filedBadge'); if(fb){ fb.classList.remove('show'); fb.textContent='✓ FILED'; fb.style.background=''; }
       updateFiledSig();
       setStatus('online','🆕 New revision '+(qEl?qEl.value:'')+' — date set to today. Adjust as needed, then File.');
@@ -3543,16 +3629,17 @@ function buildAgentBox(){
   const box=document.getElementById('agentBox'); if(!box) return;
   const t=computeTotals();
   const agent=document.getElementById('salesperson')?.value?.trim()||'—';
-  if(!t.commPct){
+  if(!t.commissionAmt){
     box.innerHTML=`<div style="font-weight:800;color:#8E44AD;letter-spacing:.5px;">AGENT / SALES COPY</div>
       <div style="font-size:9pt;margin-top:3px;">Agent: <strong>${agent}</strong> — no referral commission was set on this quotation.</div>`;
     return;
   }
+  const commLabel=t.commMode==='amount' ? 'Referral / Agent Commission (flat)' : `Referral / Agent Commission (${t.commPct}%)`;
   box.innerHTML=`<div style="font-weight:800;color:#8E44AD;letter-spacing:.5px;">AGENT / SALES COPY — COMMISSION</div>
     <table class="pay-tbl" style="margin-top:5px;"><tbody>
       <tr><td>Agent / Salesperson</td><td>${agent}</td></tr>
       <tr><td>Grand Total (basis)</td><td>${formatPeso(t.grand)}</td></tr>
-      <tr class="pay-head"><td>Referral / Agent Commission (${t.commPct}%)</td><td>${formatPeso(t.commissionAmt)}</td></tr>
+      <tr class="pay-head"><td>${commLabel}</td><td>${formatPeso(t.commissionAmt)}</td></tr>
     </tbody></table>
     <div class="pay-note">Commission is computed on the grand total and payable upon full client settlement. CONFIDENTIAL — for the agent only; do not give this copy to the client.</div>`;
 }

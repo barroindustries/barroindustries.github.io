@@ -8,7 +8,7 @@
 //    • HTML / API → Network-first, cache as offline fallback
 // ═══════════════════════════════════════════════════════
 
-const CACHE_VER = 'bi-ops-v14.0.11';
+const CACHE_VER = 'bi-ops-v14.0.12';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 

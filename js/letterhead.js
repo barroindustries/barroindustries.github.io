@@ -26,7 +26,7 @@
     const accent = o.accent || '#1E3A5F'; // == --brand-navy (css/tokens.css); JS can't read CSS vars, kept in sync by hand
     const orientation = o.orientation === 'landscape' ? 'landscape' : 'portrait';
     const showLogo = o.showLogo !== false;
-    const logoUrl = absLogo(o.logo || (B.logo && B.logo.print) || 'icons/barro-industries.png');
+    const logoUrl = absLogo(o.logo || (B.logo && B.logo.print) || 'icons/barro-kitchens.png');
 
     // ── Entity identity lines (left column) ──
     const idLines = [];

@@ -1589,7 +1589,16 @@ window.reopenQuoteFromDoc = async function(collection, id, navTarget, opts){
     // the editableState we hand the builder, so the File flow can offer
     // "update original" (QUOTE_UPDATE) vs "file as new revision" (QUOTE_FILED),
     // and so a new revision correctly inherits the chain's root id.
-    window._qbReopenState = { ...q.editableState, sourceDocId: id, sourceCollection: collection, rootQuoteId: q.rootQuoteId || id };
+    // Bridge-side safeguard: always hand the builder a real base quote number.
+    // editableState.quoteNo is normally present (buildQuotePayload always sets
+    // it), but older/partial snapshots could lack it — if we passed that
+    // through blank, loadEditableState()'s `if(state.quoteNo){...}` guard
+    // would skip setting #quoteNo, leaving the builder in auto-number mode,
+    // which regenerates a FRESH (today-dated) number instead of preserving the
+    // original. Fall back to the doc's own top-level quoteNumber field so the
+    // base number is always frozen/correct, never builder-regenerated.
+    const qNo = q.editableState.quoteNo || q.quoteNumber || '';
+    window._qbReopenState = { ...q.editableState, quoteNo: qNo, sourceDocId: id, sourceCollection: collection, rootQuoteId: q.rootQuoteId || id };
     window._qbReopenAsRevision = !!(opts && opts.asRevision);
     navigateTo(navTarget || (collection==='bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'));
   } catch (ex) { Notifs.showToast('Could not reopen: '+(ex.message||ex.code), 'error'); }
@@ -1627,7 +1636,15 @@ window.newRevisionFromDoc = async function(collection, id, navTarget){
 
     if (!latest.editableState) { Notifs.showToast('No editable snapshot saved for this quote', 'error'); return; }
     // Wave 3 Q5 — same chain-linking as reopenQuoteFromDoc above.
-    window._qbReopenState = { ...latest.editableState, sourceDocId: latest.id, sourceCollection: collection, rootQuoteId: latest.rootQuoteId || latest.id };
+    // Same bridge-side safeguard as reopenQuoteFromDoc: guarantee a real base
+    // quote number is passed through so loadEditableState's asRevision branch
+    // has something to bump (-Rn only) instead of the builder falling back to
+    // auto-generating a fresh, today-dated number. The builder itself (see
+    // quote-builder-v2.html loadEditableState) now bumps only the -Rn suffix
+    // and no longer re-syncs the date into the number — this just ensures the
+    // base number it bumps is never blank/stale.
+    const qNo = latest.editableState.quoteNo || latest.quoteNumber || '';
+    window._qbReopenState = { ...latest.editableState, quoteNo: qNo, sourceDocId: latest.id, sourceCollection: collection, rootQuoteId: latest.rootQuoteId || latest.id };
     window._qbReopenAsRevision = true;
     navigateTo(navTarget || (collection === 'bk_quotes' ? 'bk-quote-builder' : 'bs-quote-builder'));
   } catch (ex) { Notifs.showToast('Could not start revision: ' + (ex.message || ex.code), 'error'); }
@@ -2111,7 +2128,7 @@ function renderIDCard(containerId, u) {
   const idHTML = `
     <div class="id-card id-card--digital">
       <div class="id-card-top">
-        <img src="icons/barro-industries.png" alt="Barro Industries" class="id-card-logo" onerror="this.style.display='none'"/>
+        <img src="${(window.BRAND && window.BRAND.logo && window.BRAND.logo.print) || 'icons/barro-kitchens.png'}" alt="Barro Industries" class="id-card-logo" onerror="this.style.display='none'"/>
         <div>
           <div class="id-card-company">BARRO INDUSTRIES</div>
           <div class="id-card-company-sub">DIGITAL COMPANY ID</div>
@@ -2220,7 +2237,7 @@ function renderIDCard(containerId, u) {
 window.printIDCards = function(data, tokens) {
   const B = window.BRAND || {};
   const esc = s => String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const logoAbs = (location.origin||'') + '/' + ((B.logo && B.logo.print) || 'icons/barro-industries.png');
+  const logoAbs = (location.origin||'') + '/' + ((B.logo && B.logo.print) || 'icons/barro-kitchens.png');
   const navy = B.navy || '#1E3A5F';
 
   const cardFront = (d, tok) => {

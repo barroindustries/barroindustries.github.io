@@ -5,7 +5,7 @@
 
 // ── App Version ──────────────────────────────────
 // Auto-incremented by git pre-commit hook (.git/hooks/pre-commit)
-window.APP_VERSION = '14.0.11';
+window.APP_VERSION = '14.0.12';
 
 // ── Business timezone helpers (Philippines, UTC+8) ──────────────────
 // IMPORTANT: use these wherever a calendar "day" or local hour matters
@@ -1565,7 +1565,14 @@ window.BRAND = {
   },
 
   logo: {
-    wordmark:  'icons/bi-logo.svg',          // in-app splash/login/topbar
+    // 2026-08-03 owner ruling (BK-cube rollout): in-app splash/login/topbar
+    // chrome should show the same BK cube as everything else. NOTE — nothing
+    // in the codebase currently reads BRAND.logo.wordmark (index.html's
+    // splash/login/topbar <img> tags hardcode their own src and are NOT owned
+    // by this file); this value is kept as the documented intent for whoever
+    // next edits those three <img> tags, not a live wire-up. ‼️ FLAG — index.html
+    // is out of this pass's edit scope; the actual <img src> swap is pending.
+    wordmark:  'icons/barro-kitchens.png',
     print:     'icons/barro-kitchens.png',   // print-document header logo — BK cube logo (owner-supplied 2026-08-03)
     pwaIcon:   'icons/icon-192.png',         // PWA/apple-touch
     pushBadge: 'icons/icon-192.png'          // FCM badge (retires icons/barro-logo.png)
