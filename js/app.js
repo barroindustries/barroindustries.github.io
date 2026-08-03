@@ -524,6 +524,16 @@ function showApp() {
 
 // ── Pull-to-Refresh ───────────────────────────────
 function initPullToRefresh() {
+  // v14 (owner: "it keeps refreshing when I quickly scroll back up") —
+  // pull-to-refresh DISABLED. A fast upward flick that overshoots the top
+  // kept arming a refresh, and after two retunes it still misfired. The app
+  // is real-time (Firestore listeners), so manual refresh is redundant; the
+  // gesture is removed entirely rather than tuned again. The #ptr-indicator
+  // is hidden below. To re-enable, delete this early return.
+  const _ind = document.getElementById('ptr-indicator');
+  if (_ind) _ind.style.display = 'none';
+  return;
+  /* eslint-disable no-unreachable */
   const mc  = document.getElementById('main-content');
   const ind = document.getElementById('ptr-indicator');
   if (!mc || !ind) return;
