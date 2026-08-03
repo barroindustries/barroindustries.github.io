@@ -264,6 +264,15 @@
   function pageSwipeExcluded(target) {
     if (insideHScroll(target)) return true;
     if (target && target.closest && target.closest('input, textarea, select, [contenteditable]')) return true;
+    // gesture-conflict fix 2026-08 — the chat thread panel (openPage, kind
+    // 'page') already stacks its own swipe-right-to-reply on message rows
+    // AND native vertical scroll inside .messenger-body; letting this
+    // full-surface page-swipe-back arm too meant a single rightward drag
+    // could double-arm both gestures. Excluding the scroller and composer
+    // here is what stops that race (the 24px edge-zone escape hatch in
+    // edgeTouchStart is untouched and still works everywhere, including
+    // over the chat thread).
+    if (target && target.closest && target.closest('.messenger-body, .messenger-input-row')) return true;
     return hasHOverflow(target);
   }
 

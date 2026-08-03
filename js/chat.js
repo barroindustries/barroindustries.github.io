@@ -55,6 +55,16 @@ window.Chat = (() => {
   let _swipe = null;                         // active swipe-to-reply touch-drag (see _onSwipeStart/Move/End)
   let _emojiMenuOpen = false;                // composer emoji-grid popover open state (outside-click cleanup, mirrors _wpMenuOpen)
   const SWIPE_REPLY_ARM = 56, SWIPE_REPLY_CAP = 64;   // px thresholds for the reply-swipe gesture
+  // gesture-conflict fix 2026-08 — replaces the old 8px noise-floor + 0.6
+  // slope guard, which let moderately-diagonal drags (e.g. a scroll that
+  // starts slightly rightward) commit to the reply-swipe and race
+  // gestures.js's page-swipe-back + native scroll for the same touch. These
+  // gate ONLY axis detection (which way did the finger move) — they are
+  // unrelated to SWIPE_REPLY_ARM/CAP above, which gate the visual drag
+  // amount and the commit-to-reply amount once already on the horizontal axis.
+  const SWIPE_AXIS_THRESH = 24;   // px combined travel before we decide the axis at all
+  const SWIPE_SLOPE = 1.8;        // |dx| must exceed this multiple of |dy| to latch "horizontal"
+  let _lastThreadScrollAt = 0;    // set by _onThreadScroll — momentum-scroll guard for _onSwipeStart
   // Composer emoji grid (J6): REACTIONS + ~26 more common emoji, static list, no library.
   const EMOJI_GRID = [...REACTIONS, '😀','😁','😅','😊','🙂','😉','😍','🤔','😴','😎','🥳','😭',
     '😡','👏','🙌','🔥','🎉','✅','❌','💯','🤗','🤝','👀','💪','⭐','🚀'];
@@ -570,8 +580,13 @@ window.Chat = (() => {
     const t = e.touches && e.touches[0]; if (!t) return;
     const dx = t.clientX - _inboxSwipe.startX, dy = t.clientY - _inboxSwipe.startY;
     if (!_inboxSwipe.committed) {
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;             // noise floor
-      if (dx >= 0 || Math.abs(dy) > Math.abs(dx) * 0.6) { _inboxSwipe.aborted = true; return; }   // leftward+horizontal only
+      // gesture-conflict fix 2026-08 — same true axis-lock as _onSwipeMove
+      // (reuses SWIPE_AXIS_THRESH/SWIPE_SLOPE), mirrored for LEFTWARD motion
+      // since this gesture reveals on a leftward drag instead of rightward.
+      // Stops vertical inbox-list scrolling from ever accidentally revealing
+      // the Pin/Mute/Archive actions.
+      if (Math.abs(dx) < SWIPE_AXIS_THRESH && Math.abs(dy) < SWIPE_AXIS_THRESH) return;   // undecided — keep waiting
+      if (!(dx < 0 && Math.abs(dx) > SWIPE_SLOPE * Math.abs(dy))) { _inboxSwipe.aborted = true; return; }  // vertical-dominant or rightward — permanently abort
       _inboxSwipe.committed = true;
     }
     e.preventDefault();
@@ -1689,6 +1704,25 @@ window.Chat = (() => {
     const canEdit = isMine && !isTombstone;
     const canDelete = (isMine || _isAdminRole()) && !isTombstone;
     const canHardDelete = _isAdminRole();                // admin-only "Remove permanently", live or already-tombstoned
+    // gesture-conflict fix 2026-08 — .ms-actions below is CSS hover-revealed
+    // (desktop only, see styles.css .ms-actions/.ms-row:hover .ms-actions).
+    // Touchscreens have no real :hover — mobile Safari/Chrome "stick" the
+    // hover state after a tap until the user taps elsewhere, so this row
+    // appeared as permanent clutter under every bubble. On touch UIs these
+    // buttons move into the long-press picker instead (touchActionsHtml
+    // below, folded into pickerHtml) — same classes, so the existing
+    // class-based click delegation in _wireThreadDelegation wires them for
+    // free with no new handlers.
+    const isTouchUI = !!(window.matchMedia && window.matchMedia('(hover: none)').matches);
+    const touchActionsHtml = isTouchUI && (canEdit || canDelete || canHardDelete)
+      ? `<span style="display:inline-flex;gap:4px;border-left:1px solid var(--border);padding-left:6px;margin-left:2px">${
+          canEdit ? `<button class="ms-act-btn chat-msg-edit-btn" data-mid="${escHtml(m.id)}">${emojiIcon('✎',16)}</button>` : ''
+        }${
+          canDelete ? `<button class="ms-act-btn ms-del-btn chat-msg-del-btn" data-mid="${escHtml(m.id)}" title="Remove for everyone">${emojiIcon('trash-2',14)}</button>` : ''
+        }${
+          canHardDelete ? `<button class="ms-act-btn ms-del-btn chat-msg-harddel-btn" data-mid="${escHtml(m.id)}" title="Remove permanently">${emojiIcon('trash',14)}</button>` : ''
+        }</span>`
+      : '';
     const d = m.createdAt?.toDate ? m.createdAt.toDate() : null;
     const timeLabel = d ? d.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', timeZone: window.BIZ_TZ }) : '';
     const rev = _msgRev(m);
@@ -1737,7 +1771,7 @@ window.Chat = (() => {
     // reach, desktop AND mobile, so no separate hover-only affordance needed).
     const pickerHtml = `<div class="chat-reaction-picker" data-mid="${escHtml(m.id)}" style="display:none;gap:4px;margin-top:4px;align-items:center">${
       REACTIONS.map(e => `<button class="chat-pick-emoji" data-mid="${escHtml(m.id)}" data-emoji="${e}" style="font-size:16px;background:none;border:none;cursor:pointer;padding:2px 4px">${e}</button>`).join('')
-    }<button class="chat-copy-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Copy" style="border-left:1px solid var(--border);padding-left:6px;margin-left:2px">${emojiIcon('copy',14)}</button><button class="chat-forward-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Forward">${emojiIcon('forward',14)}</button></div>`;
+    }<button class="chat-copy-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Copy" style="border-left:1px solid var(--border);padding-left:6px;margin-left:2px">${emojiIcon('copy',14)}</button><button class="chat-forward-btn ms-act-btn" data-mid="${escHtml(m.id)}" title="Forward">${emojiIcon('forward',14)}</button>${touchActionsHtml}</div>`;
     // Messenger restyle Fix 3 — the always-visible quick-heart button beside
     // every bubble is GONE (owner: single biggest clutter item). Reacting is
     // now DOUBLE-TAP the bubble = toggle ❤️ (same toggleReaction data model,
@@ -1807,7 +1841,7 @@ window.Chat = (() => {
           </div>
           ${reactionsHtml}
           ${pickerHtml}
-          ${canEdit||canDelete||canHardDelete ? `<div class="ms-actions">
+          ${!isTouchUI && (canEdit||canDelete||canHardDelete) ? `<div class="ms-actions">
             ${canEdit?`<button class="ms-act-btn chat-msg-edit-btn" data-mid="${escHtml(m.id)}">${emojiIcon('✎',16)}</button>`:''}
             ${canDelete?`<button class="ms-act-btn ms-del-btn chat-msg-del-btn" data-mid="${escHtml(m.id)}" title="Remove for everyone">${emojiIcon('trash-2',14)}</button>`:''}
             ${canHardDelete?`<button class="ms-act-btn ms-del-btn chat-msg-harddel-btn" data-mid="${escHtml(m.id)}" title="Remove permanently">${emojiIcon('trash',14)}</button>`:''}
@@ -2051,17 +2085,26 @@ window.Chat = (() => {
     if (!row) return;                                    // rows have no data-mid — excluded by construction
     const t = e.touches && e.touches[0]; if (!t) return;
     _swipe = { row, mid: row.dataset.mid, startX: t.clientX, startY: t.clientY, dx: 0, committed: false, aborted: false };
+    // gesture-conflict fix 2026-08 — a touchstart landing within 150ms of the
+    // thread scroller's last scroll event is the user's tap to STOP momentum
+    // scrolling, not a deliberate swipe. Still create the record (so
+    // move/end don't need extra null-checks) but abort it immediately so it
+    // can never commit to a reply-swipe.
+    if (Date.now() - _lastThreadScrollAt < 150) _swipe.aborted = true;
   }
   function _onSwipeMove(e) {
     if (!_swipe || _swipe.aborted) return;
     const t = e.touches && e.touches[0]; if (!t) return;
     const dx = t.clientX - _swipe.startX, dy = t.clientY - _swipe.startY;
     if (!_swipe.committed) {
-      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;         // noise floor — not enough movement to judge intent yet
-      // Slope guard: rightward AND horizontally-dominant, or this is a
-      // vertical scroll — abort permanently and never preventDefault again
-      // for the rest of this gesture (native scroll proceeds untouched).
-      if (dx <= 0 || Math.abs(dy) > Math.abs(dx) * 0.6) { _swipe.aborted = true; return; }
+      // gesture-conflict fix 2026-08 — true axis-lock (replaces the old 8px
+      // noise-floor + 0.6 slope guard). Wait for real combined travel before
+      // deciding anything; once decided at the SWIPE_AXIS_THRESH point, the
+      // axis is latched for the rest of the touch — a drag that reads
+      // vertical-dominant here can never later commit to a reply-swipe even
+      // if the finger straightens out horizontally, and vice versa.
+      if (Math.abs(dx) < SWIPE_AXIS_THRESH && Math.abs(dy) < SWIPE_AXIS_THRESH) return;   // undecided — keep waiting
+      if (!(dx > 0 && Math.abs(dx) > SWIPE_SLOPE * Math.abs(dy))) { _swipe.aborted = true; return; }  // vertical-dominant or leftward — permanently abort
       _swipe.committed = true;
       _swipe.row.classList.add('ms-row-swiping');
     }
@@ -2289,6 +2332,7 @@ window.Chat = (() => {
     }
   }
   function _onThreadScroll() {
+    _lastThreadScrollAt = Date.now();   // gesture-conflict fix 2026-08 — feeds _onSwipeStart's momentum-scroll guard
     const el = document.getElementById('chat-thread-scroll');
     if (el) _updateScrollFab(el);
   }
