@@ -544,12 +544,34 @@ service cloud.firestore {
         // v14 wave5: the send's preview bump may now also carry the sender's
         // own key in the denormalized reads map (J9) — and a bare read-marker
         // update touches reads alone. Both fenced to the caller's own uid.
+        //
+        // v14 Wave1 P1 fix #5 — a bare affectedKeys() check let ANY member
+        // set lastMessageBy/lastMessageAt/lastMessageText to ANY value at
+        // all (inbox-preview forgery — only WHICH fields changed was ever
+        // checked, never their actual values). A genuine preview bump must
+        // now carry the CALLER's own uid as lastMessageBy and the server
+        // clock as lastMessageAt. The one other shape this disjunct still
+        // allows: a lastMessageText-ONLY rewrite (the unsend tombstone note,
+        // or a same-author edit refresh — chat.js's _onDeleteMessage/
+        // _onHardDeleteMessage/_onEditMessage), gated to whoever is ALREADY
+        // attributed as lastMessageBy (unchanged by this write) or an admin
+        // — never an unrelated member.
         ( memberOfDoc() && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['lastMessageAt','lastMessageText','lastMessageBy','lastMessageByName','reads'])
-          && ( !request.resource.data.diff(resource.data).affectedKeys().hasAny(['reads'])
-               || request.resource.data.get('reads', {})
-                    .diff(resource.data.get('reads', {})).affectedKeys()
-                    .hasOnly([request.auth.uid]) ) )
+          && (
+               ( request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reads'])
+                 && request.resource.data.get('reads', {})
+                      .diff(resource.data.get('reads', {})).affectedKeys()
+                      .hasOnly([request.auth.uid]) )
+            || ( request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessageText'])
+                 && (resource.data.get('lastMessageBy','') == request.auth.uid || isAdmin()) )
+            || ( request.resource.data.get('lastMessageBy','') == request.auth.uid
+                 && request.resource.data.lastMessageAt == request.time
+                 && ( !request.resource.data.diff(resource.data).affectedKeys().hasAny(['reads'])
+                      || request.resource.data.get('reads', {})
+                           .diff(resource.data.get('reads', {})).affectedKeys()
+                           .hasOnly([request.auth.uid]) ) )
+             ) )
         || ( memberOfDoc() && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['wallpaper']) )
         // v14 wave5 (J7): per-user pin/mute/archive — a member may toggle ONLY
@@ -563,8 +585,19 @@ service cloud.firestore {
               .diff(resource.data.get('mutedBy', {})).affectedKeys().hasOnly([request.auth.uid])
           && request.resource.data.get('archivedBy', {})
               .diff(resource.data.get('archivedBy', {})).affectedKeys().hasOnly([request.auth.uid]) )
-        || resource.data.get('createdBy','') == request.auth.uid
-        || isAdmin()
+        // v14 Wave1 P0 fix #4 — the creator/admin branch used to be a blanket
+        // allow-any-field-any-value disjunct (`|| createdBy==uid || isAdmin()`
+        // with no shape restriction at all): a group creator/admin could
+        // tamper with ANOTHER member's own reads/pinnedBy/mutedBy/archivedBy
+        // entry (e.g. silently mark a message read on someone else's behalf,
+        // or unmute/unpin a conversation for them). Fenced to only the
+        // fields group management actually needs; reads/pinnedBy/mutedBy/
+        // archivedBy for EVERY caller — INCLUDING the creator/admin
+        // themself — now go exclusively through the own-uid-only branches
+        // above.
+        || ( (resource.data.get('createdBy','') == request.auth.uid || isAdmin())
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['name','photoUrl','participants','participantNames','wallpaper']) )
         || ( request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants'])
              && request.resource.data.get('participants', [])
                 == resource.data.get('participants', []).removeAll([request.auth.uid]) )
@@ -578,9 +611,39 @@ service cloud.firestore {
           && request.resource.data.get('authorId','') == request.auth.uid;
         // Author edits own message; admin moderates; any member may toggle
         // their OWN key inside the reactions map — and nothing else.
+        //
+        // v14 Wave1 P1 fix #10 — the author/admin branches used to be a
+        // blanket allow-any-field-any-value disjunct each: authorId/createdAt
+        // could be reassigned after the fact, a tombstone (deleted:true)
+        // could be silently un-set back to false (reversing an unsend), and
+        // "admin moderation" extended to rewriting anyone's message TEXT
+        // outright, not just tombstoning it. Author edits now keep
+        // authorId/createdAt frozen, can never resurrect a tombstone, and
+        // must stamp editedAt==now whenever the text field changes — except
+        // the tombstone-CREATION transition itself (deleted false→true,
+        // chat.js _onDeleteMessage's unsend, which clears text without an
+        // edit stamp). Note this is narrower than merely "deleted is true
+        // afterward": an ALREADY-tombstoned doc (deleted stays true) whose
+        // text is touched again still requires editedAt — a live text swap
+        // can't be smuggled into an already-removed doc that the renderer no
+        // longer even displays the text field of. Admin moderation is
+        // narrowed to ONLY setting the tombstone shape (deleted:true, text
+        // cleared) — never an arbitrary text rewrite.
         allow update: if isAuth() && (
-          resource.data.get('authorId','') == request.auth.uid
-          || isAdmin()
+          ( resource.data.get('authorId','') == request.auth.uid
+            && request.resource.data.get('authorId','') == resource.data.get('authorId','')
+            && request.resource.data.get('createdAt', null) == resource.data.get('createdAt', null)
+            && !(resource.data.get('deleted', false) == true
+                 && request.resource.data.get('deleted', false) == false)
+            && ( !request.resource.data.diff(resource.data).affectedKeys().hasAny(['text'])
+                 || (resource.data.get('deleted', false) == false
+                     && request.resource.data.get('deleted', false) == true)
+                 || request.resource.data.get('editedAt', null) == request.time ) )
+          || ( isAdmin()
+               && request.resource.data.get('authorId','') == resource.data.get('authorId','')
+               && request.resource.data.get('createdAt', null) == resource.data.get('createdAt', null)
+               && request.resource.data.get('deleted', false) == true
+               && request.resource.data.get('text','') == '' )
           || ( convMember()
                && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
                && request.resource.data.get('reactions', {})

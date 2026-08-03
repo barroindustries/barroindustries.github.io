@@ -3752,6 +3752,10 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
    Below 1024px: unchanged single-pane behavior (thread overlays full-screen). */
 .chat-page { display: flex; flex-direction: column; height: 100%; }
 .chat-page-inbox { display: flex; flex-direction: column; min-width: 0; }
+/* Wave1 P2 fix #15 — the reserved second column (below) was pure empty space
+   until a thread was opened; hidden by default (mobile has no room/need for
+   it — the inbox is the whole single-pane view there). */
+.chat-page-empty-pane { display: none; }
 @media (min-width: 1024px) {
   /* Row layout so a future second pane (Batch D moving the thread panel into
      the DOM as an actual sibling) lays out side-by-side automatically. */
@@ -3770,6 +3774,16 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
   #chat-thread-panel {
     left: calc(var(--sidebar-w) + 20px + 320px + 16px) !important;
     border-left: 1px solid var(--border);
+  }
+  /* Wave1 P2 fix #15 — static "Select a conversation" placeholder for the
+     empty desktop reading pane (completes the two-pane scaffolding comment
+     above: "a future second pane... lays out side-by-side automatically").
+     #chat-thread-panel is position:fixed and covers exactly this region once
+     a thread IS open, so this simply shows through whenever nothing is. */
+  .chat-page-empty-pane {
+    display: flex; align-items: center; justify-content: center;
+    flex: 1; min-width: 0;
+    min-height: calc(100dvh - var(--topbar-h) - 40px);
   }
 }
 
@@ -3795,7 +3809,15 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
      pad themselves for the safe areas. */
   body.chat-fullscreen #chat-thread-panel {
     top: 0 !important;
-    bottom: 0 !important;
+    /* Wave1 P0 fix #1 — soft-keyboard offset. A plain `bottom:0!important`
+       here permanently pinned the panel to the viewport's ORIGINAL bottom
+       edge, hiding the composer behind the on-screen keyboard on every
+       phone: chat.js's visualViewport 'resize' handler (_onViewportResize)
+       used to write a plain inline `bottom` style, which this !important
+       rule always won over. --kb-offset is set by that same handler (and
+       reset to 0 on blur/keyboard-close) — this rule is now the actual
+       source of truth for the panel's bottom offset on phone. */
+    bottom: var(--kb-offset, 0) !important;
     left: 0 !important;
     right: 0 !important;
     /* v14 CSS/a11y audit: was a raw 4-digit literal (5000) — same numeric
@@ -4013,6 +4035,13 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
    it (desktop pointer:fine). Phase 17. */
 .ms-meta { display: none; gap: 5px; align-items: center; margin-top: 4px; }
 .ms-bubble.ms-time-shown .ms-meta { display: flex; }
+/* Wave1 P2 fix #11 — resting timestamp: the LAST bubble of a cluster
+   (chat.js sets this on ms-grp-last/ms-grp-single) always shows its
+   timestamp; mid-cluster bubbles (ms-grp-first/ms-grp-mid) stay tap-to-
+   reveal via .ms-time-shown above, untouched. Independent selector (not a
+   swap-in for .ms-time-shown) so a tap toggling THAT class on a
+   resting-timestamp bubble can never hide it — the two simply OR together. */
+.ms-bubble.ms-time-rest .ms-meta { display: flex; }
 @media (hover: hover) { .ms-bubble:hover .ms-meta { display: flex; } }
 .ms-time { font-size: var(--fs-2xs); opacity: .7; }
 .ms-edited { font-size: var(--fs-2xs); opacity: .6; font-style: italic; }
@@ -4086,7 +4115,8 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 .ms-seen::before { content: '✓✓'; font-size: var(--fs-xs); color: var(--primary); }
 .ms-status { display: flex; align-items: center; margin-top: 2px; color: var(--text-muted); }
 .ms-status svg { width: 13px; height: 13px; }
-.ms-status-read svg { color: var(--primary); }
+/* Wave1 P2 fix #16 — .ms-status-read (dead CSS, confirmed unused: no element
+   in js/chat.js or js/departments.js ever sets this class) removed. */
 
 /* Day / time-gap separators (Phase 17) */
 .ms-day-sep { text-align: center; margin: 14px 0 8px; }

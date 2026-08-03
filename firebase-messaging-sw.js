@@ -30,6 +30,16 @@ const messaging = firebase.messaging();
 // milliseconds), so this reliably collapses the "same notif up to 5x" case.
 const _shownNotifIds = new Set();
 
+// Wave1 P0 fix #3 — nudges the OS app badge on a chat push while the app is
+// backgrounded/closed (badges otherwise only ever updated while a chat.js
+// listener was alive in a foregrounded tab). This is a SW-local, best-effort
+// counter, not a real unread count — it resets on the next notificationclick
+// and js/chat.js's own login-scoped listener (js/notifications.js's
+// startListener → Chat._attachGlobalBadgeListener) recomputes the EXACT
+// count the moment the app is foregrounded again, so this only needs to be
+// directionally right (badge is lit / grows) in the meantime.
+let _bgChatBadgeCount = 0;
+
 // Handle background messages. Messages are now DATA-ONLY (see functions/index.js),
 // so this handler is the single place a notification is rendered — the FCM SDK
 // no longer auto-displays a second copy.
@@ -46,6 +56,14 @@ messaging.onBackgroundMessage(payload => {
     if (_shownNotifIds.has(notifId)) return;
     _shownNotifIds.add(notifId);
     setTimeout(() => _shownNotifIds.delete(notifId), 60000);
+  }
+
+  // Wave1 P0 fix #3 — best-effort OS badge nudge for a chat push (see
+  // _bgChatBadgeCount above). Feature-detected — not every browser/engine
+  // implements the Badging API inside a service worker.
+  if ((data.type || '') === 'chat_message' && self.navigator && 'setAppBadge' in self.navigator) {
+    _bgChatBadgeCount++;
+    self.navigator.setAppBadge(_bgChatBadgeCount).catch(() => {});
   }
 
   // Collapse tag: the relay (functions/index.js sendPushOnNotification) now
@@ -91,6 +109,14 @@ self.addEventListener('notificationclick', event => {
   const data = event.notification.data || {};
   const link = data.link || '';
   event.notification.close();
+  // Wave1 P0 fix #3 — opening the app resyncs the badge for real almost
+  // immediately (js/chat.js's login-scoped listener is already running);
+  // clear this SW-local best-effort counter so it doesn't keep compounding
+  // across background sessions.
+  if (self.navigator && 'setAppBadge' in self.navigator) {
+    _bgChatBadgeCount = 0;
+    (self.navigator.clearAppBadge ? self.navigator.clearAppBadge() : self.navigator.setAppBadge(0)).catch(() => {});
+  }
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
       for (const client of windowClients) {

@@ -32,6 +32,16 @@ window.Notifs = (() => {
         // triggers one extra read.
         _scheduleUnreadRefresh(uid);
       });
+    // Wave1 P0 fix #3 — the chat unread-conversation badge (nav item + OS
+    // app badge) used to only update while the Chat PAGE itself was open
+    // (js/chat.js's _inboxUnsub is page-scoped by design — see
+    // teardownInbox). This module is already invoked at exactly the two
+    // moments a session-wide listener needs (right here, right after login/
+    // profile-load, and on every sign-out path via stopListener below) —
+    // js/chat.js has no auth-state hook of its own (Firebase auth wiring
+    // lives in app.js, out of scope for this batch) — so forward into its
+    // own login-scoped listener instead.
+    window.Chat?._attachGlobalBadgeListener?.(uid);
   }
 
   // ── True unread count (not window-limited) ─────
@@ -65,6 +75,7 @@ window.Notifs = (() => {
   function stopListener() {
     if (unsubscribe) { unsubscribe(); unsubscribe = null; }
     if (_unreadDebounceTimer) { clearTimeout(_unreadDebounceTimer); _unreadDebounceTimer = null; }
+    window.Chat?._detachGlobalBadgeListener?.();   // Wave1 P0 fix #3
   }
 
   // ── Badge ─────────────────────────────────────

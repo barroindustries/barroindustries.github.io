@@ -43,6 +43,22 @@ window.Chat = (() => {
   let _presenceTimer = null, _typingExpireTimer = null, _markReadTimer = null;
   let _lastTypingWrite = 0, _filter = 'all', _searchQ = '';
   let _presenceByUid = {}, _usersByUid = {};  // small local caches (NOT extra listeners)
+  // Wave1 P2 fix #16 — debounced idle-stop for the OWN typing beacon: reset on
+  // every keystroke (see onComposerInput), fires _clearOwnTyping if the user
+  // simply stops typing without sending/blurring/closing the panel.
+  let _typingIdleTimer = null;
+  // Wave1 P0 fix #3 — login-scoped (NOT page-scoped) conversations listener
+  // that keeps the chat nav/OS badge correct regardless of which page is
+  // currently open. Attached/detached by notifications.js's own
+  // startListener/stopListener (see _attachGlobalBadgeListener below) —
+  // js/chat.js has no auth-state hook of its own (that's app.js, out of
+  // scope for this batch).
+  let _globalBadgeUnsub = null, _globalBadgeConvs = [];
+  // Wave1 P1 fix #7 — set once the FIRST messages snapshot for a thread-open
+  // has painted; gates the one-time _markRead()/_clearChatNotifs() so merely
+  // calling openConversation() and backing out before anything renders no
+  // longer marks the thread read (see openConversation/the messages listener).
+  let _initialMarkReadPending = false;
   const _notifLastSent = {};                 // `${convId}_${uid}` → ms epoch
   // v14 chat re-audit fix — clientKeys explicitly canceled out of a stuck
   // 'sending' pending bubble (see _cancelPendingMessage). The real send may
@@ -185,6 +201,11 @@ window.Chat = (() => {
     if (window.visualViewport) window.visualViewport.removeEventListener('resize', _onViewportResize);
     if (_emojiMenuOpen) document.removeEventListener('click', _emojiOutsideClick, true);   // Wave5 M2
     _emojiMenuOpen = false;
+    // Wave1 P0 fix #1 — don't leak the keyboard-offset var onto <html> past
+    // this thread's own lifetime (harmless elsewhere today, but it's a
+    // document-level custom property, not scoped to this panel).
+    document.documentElement.style.removeProperty('--kb-offset');
+    _initialMarkReadPending = false;          // Wave1 P1 fix #7 — never carries into the next thread-open
     _exitFullscreen();                       // owner req #2: restore app chrome on close
     _threadPanelEl = null;
   }
@@ -368,6 +389,50 @@ window.Chat = (() => {
       b.classList.toggle('hidden', count <= 0);
     }
   }
+  // ── Wave1 P0 fix #3 — login-scoped unread-conversation badge ──────────────
+  // _attachInbox's own _inboxUnsub (above) only lives while the Chat PAGE
+  // itself is open (teardownInbox's documented contract — see its own
+  // comment), so the nav/OS badge used to go stale the instant the user
+  // navigated anywhere else and a new message arrived. This listener runs for
+  // the WHOLE SESSION instead, independent of _convs/_deptConvs/_myReads
+  // (those stay page-scoped inbox state). js/chat.js has no auth-state hook
+  // of its own — Firebase auth wiring lives in app.js, out of scope for this
+  // batch — so notifications.js (already invoked at exactly the right two
+  // moments: right after login/profile-load, and on every sign-out path)
+  // forwards into these two functions instead.
+  function _attachGlobalBadgeListener(uid) {
+    _detachGlobalBadgeListener();
+    if (!uid) return;
+    _globalBadgeUnsub = db.collection('conversations')
+      .where('participants', 'array-contains', uid)
+      .onSnapshot(snap => {
+        _globalBadgeConvs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        _recomputeGlobalBadge();
+      }, () => {});
+  }
+  function _detachGlobalBadgeListener() {
+    if (_globalBadgeUnsub) { try { _globalBadgeUnsub(); } catch (_) {} _globalBadgeUnsub = null; }
+    _globalBadgeConvs = [];
+  }
+  async function _recomputeGlobalBadge() {
+    // The Chat page's own _renderInbox already owns the badge while it's the
+    // current page (richer computation: search/filter state, presence, dept-
+    // channel merge) — skip here so the two never race to paint the same
+    // span with two independently-timed counts ("reconcile so they don't
+    // fight" per the batch brief).
+    if (window.currentPage === 'chat') return;
+    let deptRows = [];
+    try {
+      deptRows = (await Promise.all(myDeptChannels().map(d =>
+        dbCachedGet('dept-conv-' + d, () => db.collection('conversations').doc('dept_' + d).get(), 5000)
+          .then(s => s.exists ? { id: s.id, ...s.data() } : null)
+          .catch(() => null)
+      ))).filter(Boolean);
+    } catch (_) { /* best-effort — a DM/group-only count still beats a stale badge */ }
+    const all = [..._globalBadgeConvs, ...deptRows];
+    const nonArchived = all.filter(cv => !_isArchived(cv));
+    _updateChatNavBadge(nonArchived.filter(_isUnread).length);
+  }
   // Best-effort seed from the last count this uid saw, so the badge isn't
   // blank on every fresh page load until the user opens Chat. Bounded retry —
   // the nav DOM (built once at login by app.js's buildNav()) and currentUser
@@ -459,8 +524,12 @@ window.Chat = (() => {
     }
     const initials = s => escHtml((s || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2));
     // WS42 Phase 16 — resolve title first (search needs it before the row markup exists).
+    // Wave1 P2 fix #12 — also match the inbox preview text (lastMessageText),
+    // not just the conversation title, so searching for something someone
+    // actually SAID finds the thread.
     const rows = sorted.map(cv => ({ cv, title: _convTitle(cv) }))
-      .filter(r => !_searchQ || r.title.toLowerCase().includes(_searchQ));
+      .filter(r => !_searchQ || r.title.toLowerCase().includes(_searchQ) ||
+        (r.cv.lastMessageText || '').toLowerCase().includes(_searchQ));
 
     if (!rows.length) {
       el.innerHTML = `<div class="empty-state"><div class="empty-icon">${emojiIcon('🔎',44)}</div><h4>No matches</h4></div>`;
@@ -596,6 +665,31 @@ window.Chat = (() => {
       content.addEventListener('touchmove', _onInboxSwipeMove, { passive: false });
       content.addEventListener('touchend', _onInboxSwipeEnd);
       content.addEventListener('touchcancel', _onInboxSwipeEnd);
+      // Wave1 P2 fix #18 — swipe-to-reveal is the ONLY path to Pin/Mute/
+      // Archive on touch (the ⋯ button is CSS-hidden there — see
+      // .ms-row-more-btn's @media(hover:none) rule) and it's completely
+      // unhinted. Add a long-press fallback (same 500ms threshold the
+      // message-bubble reaction picker already uses — see LONG_PRESS_MS)
+      // that opens the SAME .ms-row-menu dropdown the desktop ⋯ button
+      // toggles — identical data-act/data-cid contract, so no new action
+      // wiring is needed. Any movement cancels the press timer, same as the
+      // bubble long-press pattern, so it never fights the swipe gesture
+      // (which takes over the instant the drag axis commits horizontal).
+      let lpTimer = null;
+      const clearLp = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
+      content.addEventListener('touchstart', () => {
+        clearLp();
+        lpTimer = setTimeout(() => {
+          lpTimer = null;
+          const cid = content.dataset.cid;
+          el.querySelectorAll('.ms-row-menu').forEach(m => { if (m.dataset.cid !== cid) m.classList.add('hidden'); });
+          el.querySelector(`.ms-row-menu[data-cid="${CSS.escape(cid)}"]`)?.classList.toggle('hidden');
+          if (navigator.vibrate) { try { navigator.vibrate(15); } catch (_) {} }
+        }, LONG_PRESS_MS);
+      }, { passive: true });
+      content.addEventListener('touchend', clearLp);
+      content.addEventListener('touchcancel', clearLp);
+      content.addEventListener('touchmove', clearLp);
     });
     // Outside-tap closes any open ⋯ menu AND any swiped-open row (wired once —
     // _renderInbox rebuilds #chat-inbox wholesale on every refresh, so a
@@ -734,7 +828,17 @@ window.Chat = (() => {
     if (conv.type === 'dm') {
       const otherUid = (conv.participants || []).find(u => u !== currentUser.uid);
       title = (conv.participantNames && conv.participantNames[otherUid]) || 'User';
-      avatarHtml = `<div class="ms-avatar ms-avatar-md">${initials(title)}</div>`;
+      // Wave1 P2 fix #14 — the DM thread header used to always render a flat,
+      // colorless generic avatar even though the SAME contact already gets a
+      // photo (or a stable per-contact colored-initials fallback) on their
+      // inbox row — see _renderInbox's otherUser/_avatarColorFor lookup.
+      // Reuses the exact same _usersByUid cache (_authorInfo) here; id lets
+      // openConversation's post-_refreshUsersCache patch (below) update this
+      // node live if the cache was still cold at build time.
+      const otherInfo = _authorInfo(otherUid, title);
+      avatarHtml = otherInfo.photoUrl
+        ? `<div class="ms-avatar ms-avatar-md" id="chat-thread-avatar"><img src="${escHtml(otherInfo.photoUrl)}" alt="${escHtml(title)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/></div>`
+        : `<div class="ms-avatar ms-avatar-md" id="chat-thread-avatar" style="background:${_avatarColorFor(otherUid||title)}">${initials(title)}</div>`;
     } else if (conv.type === 'group') {
       title = conv.name || 'Group';
       // Wave5 M4 — group avatar renders conv.photoUrl with initials fallback;
@@ -1094,6 +1198,17 @@ window.Chat = (() => {
       clearTimeout(_draftSaveTimer); _clearDraft(conv.id);
       updateSendState();
       _addPendingMessage({ clientKey, text, file, images, link, replyTo });
+      // Wave1 P1 fix #6 — the optimistic bubble above IS the UI-complete
+      // signal; the guard used to stay held until the underlying network
+      // write resolved, which offline (or on a stalled upload — put() has no
+      // explicit timeout here) can simply never happen, permanently freezing
+      // the composer after exactly one queued message. Clearing it here lets
+      // the user queue further sends immediately; clientKey dedupe
+      // (_reconcilePending) still protects against any duplicate once the
+      // real writes land, so this is a pure availability fix, not a
+      // relaxation of what prevents double-sends.
+      _isSending = false;
+      updateSendState();
       try {
         await window.Chat.sendMessage({ text, file, images, link, clientKey, replyTo, mentions });
       } catch (e) {
@@ -1111,9 +1226,7 @@ window.Chat = (() => {
         _saveDraft(conv.id, savedText);
         _markPendingFailed(clientKey);
         Notifs.error((e && e.message) || 'Message not sent — retry.');
-      } finally {
-        _isSending = false;
-        updateSendState();               // re-enables Send whenever there's still text/attachment to retry
+        updateSendState();   // re-enables Send whenever there's still text/attachment to retry
       }
     };
     input.addEventListener('input', () => {
@@ -1124,9 +1237,32 @@ window.Chat = (() => {
       _draftSaveTimer = setTimeout(() => _saveDraft(conv.id, input.value), 300);
     });
     input.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
+      if (e.key !== 'Enter') return;
+      // Wave1 P0 fix #2 — an IME candidate-confirm Enter (composing CJK/etc.)
+      // must never fire a send — keyCode 229 is the historical fallback for
+      // browsers/input methods that don't set isComposing on this event.
+      if (e.isComposing || e.keyCode === 229) return;
+      // Desktop (a real pointing device present) keeps Enter-to-send, Shift+
+      // Enter for a newline — unchanged. Touch-only devices (no fine
+      // pointer) get Return-inserts-newline like every native messaging app;
+      // Send is the only way to commit there — Enter used to both block
+      // multi-line composing AND, on some phone keyboards/IMEs, fire a send
+      // mid-composition.
+      const isDesktop = !!(window.matchMedia && window.matchMedia('(pointer:fine)').matches);
+      if (!isDesktop || e.shiftKey) return;   // let Enter insert a newline
+      e.preventDefault();
+      doSend();
     });
     sendBtn.addEventListener('click', doSend);
+
+    // Wave1 P0 fix #1 — force the keyboard-offset CSS var back to 0 on blur
+    // too (not just the visualViewport 'resize' the keyboard's own close
+    // normally fires), so a blur that races ahead of — or instead of — that
+    // resize event never leaves the composer permanently lifted.
+    input.addEventListener('blur', () => {
+      document.documentElement.style.setProperty('--kb-offset', '0px');
+      if (_threadPanelEl) _threadPanelEl.style.bottom = '0px';
+    });
 
     // Wave5 M1 (J7) — scroll-to-bottom FAB: appears >300px up, badge tallies
     // messages that arrived while scrolled up (_renderThread), tap smooth-
@@ -1164,13 +1300,32 @@ window.Chat = (() => {
   function _exitFullscreen() {
     document.body.classList.remove('chat-fullscreen');
   }
+  // Wave1 P1 fix #7 / P2 fix #17 — shared "is the reader at/near the bottom
+  // of the thread" check (same 60px threshold _renderThread's own atBottom
+  // calc uses), reused by the read-receipt gate, the image-decode re-snap,
+  // and the keyboard/viewport re-snap below.
+  function _isNearBottomEl(el) {
+    return !!el && (el.scrollHeight - el.scrollTop - el.clientHeight < 60);
+  }
   function _onViewportResize() {
     const vv = window.visualViewport; if (!vv) return;
     const panel = _threadPanelEl; if (!panel || !panel.isConnected) return;   // openPage-returned panel (Phase2b #3)
     const offset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    // Wave1 P0 fix #1 — CSS var instead of a plain inline `bottom` write: the
+    // phone chat-fullscreen rule (styles.css) used to pin `bottom:0!important`
+    // unconditionally, which a plain inline style write can't reliably beat
+    // on every engine, hiding the composer behind the open keyboard. The CSS
+    // rule now reads `bottom:var(--kb-offset,0)!important`, so this var is
+    // the real source of truth on phone; the direct inline write right after
+    // still covers desktop/tablet, where that !important rule never applies.
+    document.documentElement.style.setProperty('--kb-offset', offset + 'px');
     panel.style.bottom = offset + 'px';
     const scroll = document.getElementById('chat-thread-scroll');
-    if (scroll) scroll.scrollTop = scroll.scrollHeight;
+    // Wave1 P2 fix #17 — only re-pin to the bottom if the reader was ALREADY
+    // there before the keyboard/viewport change; otherwise this silently
+    // yanked anyone scrolled up reading older history back down every time
+    // the soft keyboard opened or closed.
+    if (scroll && _isNearBottomEl(scroll)) scroll.scrollTop = scroll.scrollHeight;
   }
 
   // ── Wallpaper (Phase 18) — conv-doc field first, localStorage fallback;
@@ -1248,20 +1403,55 @@ window.Chat = (() => {
     _pending.forEach(_revokePendingPreviews);
     _pending = [];
     _replyTarget = null;   // Wave5 M2 — a reply armed in a PREVIOUS thread never leaks into this one
-    _refreshUsersCache().then(() => _renderThread());   // backfills avatar photos once cached
+    _initialMarkReadPending = true;   // Wave1 P1 fix #7 — see the messages listener below
+    _refreshUsersCache().then(() => {
+      _renderThread();   // backfills avatar photos once cached
+      // Wave1 P2 fix #14 — the header avatar is built once, synchronously, in
+      // _buildThreadPanel (before this cache resolves); if it was cold at
+      // that moment the DM header still showed plain initials with no photo/
+      // color. Patch it live now that the cache is warm, same convId guard
+      // every other post-await touch in this function uses.
+      if (conv.type === 'dm' && _openConvId === convId) {
+        const otherUid = (conv.participants || []).find(u => u !== currentUser.uid);
+        const info = _authorInfo(otherUid, (conv.participantNames && conv.participantNames[otherUid]) || 'User');
+        const avatarEl = document.getElementById('chat-thread-avatar');
+        if (avatarEl && info.photoUrl && !avatarEl.querySelector('img')) {
+          avatarEl.innerHTML = `<img src="${escHtml(info.photoUrl)}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover"/>`;
+        }
+      }
+    });
     const ref = db.collection('conversations').doc(convId);
     _threadUnsubs.push(ref.collection('messages')
       .orderBy('createdAt', 'desc').limit(PAGE_SIZE)
       .onSnapshot(s => {
         _msgs = s.docs.map(d => ({ id: d.id, ...d.data(), _snap: d })).reverse();
         _reconcilePending();     // drop any optimistic bubble the snapshot just echoed back
-        _renderThread(); _scheduleMarkRead();
-      }, () => {}));
+        _renderThread();
+        // Wave1 P1 fix #7 — the old unconditional _markRead()/_clearChatNotifs()
+        // right after wiring these listeners (below, now removed) fired the
+        // instant openConversation() was called, even if the user backed out
+        // before anything ever painted. Defer that ONE-TIME initial mark-read
+        // to the thread's actual first paint (this callback); every snapshot
+        // after that goes through the normal atBottom-gated _scheduleMarkRead.
+        if (_initialMarkReadPending && _openConvId === convId) {
+          _initialMarkReadPending = false;
+          _markRead(); _clearChatNotifs(convId);
+        } else {
+          _scheduleMarkRead();
+        }
+      }, err => {
+        // Wave1 P2 fix #16 — this was a silent no-op: a terminal listener
+        // error (rules change mid-session, corrupted offline cache, etc.)
+        // used to leave the thread frozen on stale data with no signal at all.
+        console.error('[chat] messages listener error', err);
+        Notifs.showToast('Lost connection to this chat — reopen it to retry.', 'error');
+      }));
     _threadUnsubs.push(ref.collection('readers')
-      .onSnapshot(s => { _readers = s.docs.map(d => d.data()); _renderThread(); }, () => {}));
+      .onSnapshot(s => { _readers = s.docs.map(d => d.data()); _renderThread(); },
+        err => console.error('[chat] readers listener error', err)));
     _threadUnsubs.push(ref.collection('typing')
-      .onSnapshot(s => { _typing = s.docs.map(d => d.data()); _renderTypingRow(); }, () => {}));
-    _markRead(); _clearChatNotifs(convId);
+      .onSnapshot(s => { _typing = s.docs.map(d => d.data()); _renderTypingRow(); },
+        err => console.error('[chat] typing listener error', err)));
     if (conv.type === 'dm') _startPresenceHeader(conv);
     _typingExpireTimer = setInterval(_renderTypingRow, 2000);
   }
@@ -1293,7 +1483,16 @@ window.Chat = (() => {
   }
   function _scheduleMarkRead() {            // debounce: at most one receipt per 2s of arrivals
     if (_markReadTimer) return;
-    _markReadTimer = setTimeout(() => { _markReadTimer = null; _markRead(); }, 2000);
+    _markReadTimer = setTimeout(() => {
+      _markReadTimer = null;
+      // Wave1 P1 fix #7 — only mark-read while the reader is actually AT the
+      // bottom of the thread (same threshold _renderThread's own atBottom
+      // calc uses). A message that arrives while the reader is scrolled UP
+      // into older history must not be silently marked seen just because a
+      // snapshot happened to fire — _onThreadScroll (below) re-schedules
+      // this once they actually scroll back down to it.
+      if (_isNearBottomEl(document.getElementById('chat-thread-scroll'))) _markRead();
+    }, 2000);
   }
   async function _clearChatNotifs(convId) { // mark (not delete) my pending chat notifs read
     try {
@@ -1531,7 +1730,12 @@ window.Chat = (() => {
   // read-fresh/throttle) and the throttle-stamp timing (all read the SAME
   // `now` captured once, same as before) are unchanged.
   async function _notifyRecipients(conv, preview, mentions) {
-    const targets = await _targetsFor(conv);
+    const byMembership = await _targetsFor(conv);
+    // Wave1 P1 fix #9 — @mention must be AUTHORITATIVE for delivery: someone
+    // explicitly tagged (e.g. the president mentioned in a dept channel they
+    // don't belong to per _targetsFor's membership rule) still gets notified,
+    // even though they'd otherwise never be in the by-membership target set.
+    const targets = Array.from(new Set([...byMembership, ...(mentions || [])]));
     const mentionSet = new Set(mentions || []);
     const now = Date.now();
     const label = conv.type === 'dm' ? _myName() : (conv.name || conv.department || 'Chat');
@@ -1572,6 +1776,15 @@ window.Chat = (() => {
   // ── Typing (Decision 8) ──
   function onComposerInput() {
     const now = Date.now();
+    // Wave1 P2 fix #16 — debounced idle-stop: every keystroke re-arms a timer
+    // that clears the beacon once the user simply STOPS typing (matches
+    // TYPING_TTL_MS, the same window readers already use to consider a
+    // beacon stale for display) instead of leaving the Firestore doc to rot
+    // until some OTHER trigger (send/blur/panel-close/tab-hide) clears it.
+    if (_openConvId) {
+      clearTimeout(_typingIdleTimer);
+      _typingIdleTimer = setTimeout(_clearOwnTyping, TYPING_TTL_MS);
+    }
     if (!_openConvId || now - _lastTypingWrite < TYPING_WRITE_MS) return;
     _lastTypingWrite = now;
     db.collection('conversations').doc(_openConvId).collection('typing').doc(currentUser.uid)
@@ -1579,6 +1792,7 @@ window.Chat = (() => {
              at: firebase.firestore.FieldValue.serverTimestamp() }).catch(() => {});
   }
   function _clearOwnTyping() {
+    if (_typingIdleTimer) { clearTimeout(_typingIdleTimer); _typingIdleTimer = null; }
     if (!_openConvId) return;
     _lastTypingWrite = 0;
     db.collection('conversations').doc(_openConvId).collection('typing')
@@ -1718,17 +1932,48 @@ window.Chat = (() => {
   // for an existing doc, so they're deliberately excluded (day/gap/grouping
   // are therefore stable for any row already in the DOM — see _patchThread).
   function _msgRev(m) {
+    // Wave1 P1 fix #8 — a message that quotes another (m.replyTo) must be
+    // re-rendered whenever the QUOTED ORIGINAL's own live state changes
+    // (edited text, or tombstoned by unsend) — otherwise _patchThread's own
+    // diff (based purely on THIS message's own fields, none of which changed)
+    // would leave a stale quote in the DOM even though _replyQuoteHtml would
+    // compute a fresh one if it actually re-ran. Folding the original's
+    // current text/tombstone state into THIS row's rev hash forces exactly
+    // that re-render the moment it changes.
+    let q = '';
+    if (m.replyTo) {
+      const orig = _earlier.find(x => x.id === m.replyTo.mid) || _msgs.find(x => x.id === m.replyTo.mid);
+      if (orig) q = '|q:' + (orig.deleted ? 'x' : (orig.text || '').slice(0, 80));
+    }
     return JSON.stringify(m.reactions || {}) + '|' + (m.text || '') + '|' +
       (m.deleted ? 1 : 0) + '|' + (m.editedAt ? 1 : 0) + '|' + (m.fileUrl || '') + '|' +
-      JSON.stringify(m.media || []);
-    // replyTo/forwardedFrom/mentions deliberately excluded — like createdAt/
-    // authorId, they're set once at message CREATE and never mutated by any
-    // update() in this file, so they can never change for an existing id.
+      JSON.stringify(m.media || []) + q;
+    // replyTo/forwardedFrom/mentions THEMSELVES deliberately excluded — like
+    // createdAt/authorId, they're set once at message CREATE and never
+    // mutated by any update() in this file, so they can never change for an
+    // existing id (only the message they POINT AT can change — handled above).
     // media is included alongside fileUrl (Wave5 M3) — both DO mutate once,
     // on unsend (_onDeleteMessage sets both to null), so both need to be in
     // the hash for that one transition to be detected by _patchThread.
   }
 
+  // Wave1 P1 fix #8 — a reply quote used to freeze the ORIGINAL message's
+  // snippet forever at reply-send-time (replyTo.snippet, stored once on the
+  // NEW message doc): editing or unsending the original afterward left every
+  // quote of it showing the stale/deleted content forever — defeating unsend
+  // outright (an "unsent" message's text kept living on in anyone's reply
+  // quote of it). Re-resolves the original's LIVE state on every render:
+  // current text if it's still in the loaded _earlier/_msgs window, "Original
+  // message removed" if it's been tombstoned, or the frozen snapshot as a
+  // last resort if the original has scrolled out of the loaded window
+  // entirely (same constraint _scrollToMessage already has for jumping to it).
+  function _resolveReplyQuote(replyTo) {
+    const orig = _earlier.find(x => x.id === replyTo.mid) || _msgs.find(x => x.id === replyTo.mid);
+    if (!orig) return { author: replyTo.author, snippet: replyTo.snippet, removed: false };
+    if (orig.deleted) return { author: replyTo.author, snippet: '', removed: true };
+    const live = orig.text || orig.fileName || ((orig.media && orig.media.length) ? 'Photo' : 'Attachment');
+    return { author: replyTo.author, snippet: (live || '').slice(0, 80), removed: false };
+  }
   // Wave5 M2 (J3) — shared by both the real-message renderer (_renderMessagePart)
   // and the optimistic pending bubble (_renderPendingBubble), so a reply rides
   // the SAME quote markup whether the doc has landed yet or not. `replyTo` is
@@ -1737,9 +1982,10 @@ window.Chat = (() => {
   // docs, and non-reply new docs, are unaffected).
   function _replyQuoteHtml(replyTo) {
     if (!replyTo) return '';
+    const r = _resolveReplyQuote(replyTo);
     return `<div class="ms-reply-quote" data-target-mid="${escHtml(replyTo.mid || '')}">
-      <div class="ms-reply-quote-author">${escHtml(replyTo.author || '')}</div>
-      <div class="ms-reply-quote-snippet">${escHtml(replyTo.snippet || '')}</div>
+      <div class="ms-reply-quote-author">${escHtml(r.author || '')}</div>
+      <div class="ms-reply-quote-snippet${r.removed ? ' ms-reply-quote-removed' : ''}">${r.removed ? 'Original message removed' : escHtml(r.snippet || '')}</div>
     </div>`;
   }
   // Wave5 M2 (J6) — highlights @mentions in an ALREADY-escHtml'd string. Takes
@@ -1780,7 +2026,19 @@ window.Chat = (() => {
     const cls = shown.length === 1 ? 'ms-media-1' : shown.length === 2 ? 'ms-media-2' : 'ms-media-grid3';
     const tiles = shown.map((item, i) => {
       const overlay = (i === shown.length - 1 && extra > 0) ? `<div class="ms-media-more">+${extra}</div>` : '';
-      return `<div class="ms-media-tile">
+      // Wave1 P2 fix #17 — reserve the tile's box from the STORED w/h
+      // (captured at upload time by _compressImage) before the image itself
+      // decodes, so a slow-loading photo doesn't jump the bubble/thread
+      // layout once it finally paints. Only meaningful for the single-photo
+      // (ms-media-1) layout — the 2+/3+ grid tiles are already a fixed
+      // aspect-ratio:1 square crop in CSS regardless of source dimensions.
+      // Number.isFinite guard (not just truthiness) — these values ride in
+      // on a Firestore doc written by whoever authored the message, so a
+      // non-numeric w/h must never be interpolated straight into an inline
+      // style attribute unescaped.
+      const hasWH = Number.isFinite(item.w) && Number.isFinite(item.h) && item.w > 0 && item.h > 0;
+      const ratioStyle = (shown.length === 1 && hasWH) ? ` style="aspect-ratio:${item.w}/${item.h}"` : '';
+      return `<div class="ms-media-tile"${ratioStyle}>
         <img class="chat-img-tap" data-mid="${escHtml(m.id)}" data-idx="${i}" src="${safeHttpUrl(item.url)}" alt="${escHtml(item.name || 'photo')}" loading="lazy"/>
         ${overlay}
       </div>`;
@@ -1822,6 +2080,14 @@ window.Chat = (() => {
       : brokenBefore ? 'ms-grp-first' : brokenAfter ? 'ms-grp-last' : 'ms-grp-mid';
     const showAvatar = grpClass === 'ms-grp-last' || grpClass === 'ms-grp-single';
     const showName = grpClass === 'ms-grp-first' || grpClass === 'ms-grp-single';
+    // Wave1 P2 fix #11 — the LAST bubble of a cluster (ms-grp-last/-single)
+    // always shows a resting timestamp instead of relying purely on tap-to-
+    // reveal/hover; mid-cluster bubbles (ms-grp-first/-mid) stay tap-to-
+    // reveal, unchanged. A separate class from the tap-toggled `ms-time-shown`
+    // (see _wireThreadDelegation) — both simply OR together in CSS — so a tap
+    // on a resting-timestamp bubble still toggles its OWN state independently
+    // without ever hiding the resting one.
+    const isClusterLast = grpClass === 'ms-grp-last' || grpClass === 'ms-grp-single';
 
     const isMine = m.authorId === currentUser.uid;
     const info = _authorInfo(m.authorId, m.authorName);
@@ -1942,7 +2208,7 @@ window.Chat = (() => {
           ${!isMine && showName ? `<div class="ms-name">${escHtml(info.name)}</div>` : ''}
           <div class="ms-bubble-row">
           ${isMine ? replyBtnHtml : ''}
-          <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'} ${grpClass} chat-bubble-tap ${isNew?'ms-pop-in':''}" data-mid="${escHtml(m.id)}">
+          <div class="ms-bubble ${isMine?'ms-bubble-mine':'ms-bubble-theirs'} ${grpClass}${isClusterLast?' ms-time-rest':''} chat-bubble-tap ${isNew?'ms-pop-in':''}" data-mid="${escHtml(m.id)}">
             ${replyQuoteHtml}
             ${m.text ? `<div class="ms-text">${_highlightMentions(escHtml(m.text).replace(/\n/g,'<br/>'), m.mentions)}</div>` : ''}
             ${m.media && m.media.length ? _mediaGridHtml(m)
@@ -1981,7 +2247,11 @@ window.Chat = (() => {
   function _threadHtml(list) {
     if (!list.length) {
       _lastMsgIds = new Set(); _lastRenderOrder = [];
-      return '<div class="messenger-empty">No messages yet. Say hello!</div>';
+      // Wave1 P2 fix #15 — reuse the same .empty-state markup every other
+      // empty list in the app uses (inbox/notifications/tasks/etc.) instead
+      // of this one-off .messenger-empty div, so a brand-new thread reads as
+      // consistent chrome rather than a bespoke placeholder.
+      return `<div class="empty-state"><div class="empty-icon">${emojiIcon('💬',44)}</div><h4>No messages yet</h4><p>Say hello!</p></div>`;
     }
     const showEarlierBtn = !_earlierCapped && (_earlier.length + _msgs.length) >= PAGE_SIZE;
     const isFirstRender = _lastMsgIds === null;
@@ -2087,6 +2357,18 @@ window.Chat = (() => {
   function _wireThreadDelegation(el) {
     if (el.dataset.wired) return;
     el.dataset.wired = '1';
+    // Wave1 P2 fix #17 — a photo that finishes decoding AFTER the initial
+    // render/scroll-snap can grow the thread's scrollHeight and silently push
+    // the view away from the bottom even though the reader WAS pinned there.
+    // Re-snap only if they still are — never yanks someone scrolled up
+    // reading history to make room for a newly-decoded image below. 'load'
+    // doesn't bubble on <img>, hence the capture-phase listener here instead
+    // of a plain delegated 'click'-style bind.
+    el.addEventListener('load', e => {
+      const img = e.target;
+      if (!(img instanceof HTMLImageElement) || !img.classList.contains('chat-img-tap')) return;
+      if (_isNearBottomEl(el)) el.scrollTop = el.scrollHeight;
+    }, true);
     let pressTimer = null, longPressed = false, pressMid = null;
     let bubbleTapTimer = null, lastBubbleTap = { mid: null, at: 0 };   // double-tap-to-heart state
     const clearPress = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
@@ -2252,9 +2534,29 @@ window.Chat = (() => {
   async function _onEditMessage(mid) {
     const m = [..._earlier, ..._msgs].find(x => x.id === mid);
     const newText = await promptDialog({ message: 'Edit message:', value: m?.text || '', multiline: true });
-    if (newText === null || newText === (m?.text || '')) return;
-    await db.collection('conversations').doc(_openConvId).collection('messages').doc(mid)
-      .update({ text: newText.trim(), editedAt: firebase.firestore.FieldValue.serverTimestamp() })
+    if (newText === null) return;
+    const trimmed = newText.trim();
+    // Wave1 P2 fix #13 — an all-whitespace "edit" used to silently write a
+    // blank/space-only text (indistinguishable from a real message once
+    // trimmed for display) instead of routing through the dedicated unsend
+    // flow; reject it instead.
+    if (!trimmed) { Notifs.showToast("Message can't be empty — use Remove instead", 'error'); return; }
+    if (trimmed === (m?.text || '')) return;
+    const conv = _openConv, convId = _openConvId;
+    const createdAtMs = m?.createdAt?.toMillis?.();
+    await db.collection('conversations').doc(convId).collection('messages').doc(mid)
+      .update({ text: trimmed, editedAt: firebase.firestore.FieldValue.serverTimestamp() })
+      .then(() => {
+        // Wave1 P2 fix #13 — keep the inbox preview in sync with an edit to
+        // the conversation's CURRENT latest message (mirrors the tombstone
+        // rewrite _onDeleteMessage already does below for the same reason —
+        // conv.lastMessageText is a frozen snapshot, not live-derived).
+        const lastMs = conv?.lastMessageAt?.toMillis?.();
+        if (conv && createdAtMs && lastMs && createdAtMs >= lastMs) {
+          const preview = trimmed.length > 80 ? trimmed.slice(0, 80) + '…' : trimmed;
+          db.collection('conversations').doc(convId).update({ lastMessageText: preview }).catch(() => {});
+        }
+      })
       .catch(() => Notifs.showToast('Edit failed', 'error'));
   }
   // Wave5 M1 (J3) — "delete" is now an unsend TOMBSTONE, not a hard delete.
@@ -2276,8 +2578,12 @@ window.Chat = (() => {
         // owner req #4 — the notification(s) this message generated for
         // recipients must be removed along with it. Best-effort/fire-and-forget:
         // never blocks the delete UX on notif cleanup.
+        // Wave1 P1 fix #9 — a mention notified someone OUTSIDE the by-
+        // membership target set too (see _notifyRecipients); merge the
+        // message's own m.mentions in here so their notif gets found/removed
+        // along with everyone else's.
         if (conv && createdAtMs) {
-          const targets = await _targetsFor(conv);
+          const targets = Array.from(new Set([...(await _targetsFor(conv)), ...(m?.mentions || [])]));
           window.Notifs?.deleteForMessage(convId, createdAtMs, targets).catch(() => {});
         }
         // Owner report 2026-08-03: the unsent TEXT stayed visible in the
@@ -2303,8 +2609,10 @@ window.Chat = (() => {
     const createdAtMs = m?.createdAt?.toMillis?.();
     await db.collection('conversations').doc(convId).collection('messages').doc(mid).delete()
       .then(async () => {
+        // Wave1 P1 fix #9 — see the tombstone path above: merge m.mentions
+        // too, so a mention-only recipient's notif is still found/removed.
         if (conv && createdAtMs) {
-          const targets = await _targetsFor(conv);
+          const targets = Array.from(new Set([...(await _targetsFor(conv)), ...(m?.mentions || [])]));
           window.Notifs?.deleteForMessage(convId, createdAtMs, targets).catch(() => {});
         }
         // Same inbox-preview rewrite as the tombstone path.
@@ -2536,7 +2844,11 @@ window.Chat = (() => {
   function _onThreadScroll() {
     _lastThreadScrollAt = Date.now();   // gesture-conflict fix 2026-08 — feeds _onSwipeStart's momentum-scroll guard
     const el = document.getElementById('chat-thread-scroll');
-    if (el) _updateScrollFab(el);
+    if (!el) return;
+    _updateScrollFab(el);
+    // Wave1 P1 fix #7 — catch up the read receipt once the reader scrolls
+    // back down to the messages a prior (atBottom-gated) snapshot skipped.
+    if (_isNearBottomEl(el)) _scheduleMarkRead();
   }
 
   // ── Wave5 M1 (J3) — Copy message ──
@@ -2625,10 +2937,18 @@ window.Chat = (() => {
     // dept — membership mirrors _targetsFor's dept branch (department OR
     // departments[] match), resolved from the SAME _usersByUid cache
     // _refreshUsersCache already keeps warm for avatar/author-name lookups.
+    // Wave1 P1 fix #9 — a dept channel's admins (president/manager/
+    // secretary) couldn't be @mentioned at all unless they ALSO happened to
+    // be a member of that department — the same admins who can already read/
+    // moderate every dept channel per firestore.rules. Included here even
+    // when not a department match; _notifyRecipients' own merge (below) is
+    // what actually lets the notification reach them despite not being a
+    // by-membership target.
     return Object.keys(_usersByUid).filter(uid => uid !== currentUser.uid).map(uid => {
       const u = _usersByUid[uid];
       const inDept = u.department === conv.department || (Array.isArray(u.departments) && u.departments.includes(conv.department));
-      return inDept ? { uid, name: u.displayName || u.email || 'User' } : null;
+      const isChannelAdmin = ['president', 'manager', 'secretary'].includes(u.role);
+      return (inDept || isChannelAdmin) ? { uid, name: u.displayName || u.email || 'User' } : null;
     }).filter(Boolean);
   }
   // Scans the RAW (unescaped) composer text for literal "@Name" occurrences
@@ -2639,12 +2959,41 @@ window.Chat = (() => {
   // matches here (no false-positive mention), matching Messenger's own
   // "mention = a real selected token" semantics without needing separate
   // insertion-position bookkeeping that free-form text edits could invalidate.
+  //
+  // Wave1 P1 fix #9 — a plain substring `indexOf` let a SHORTER candidate
+  // name false-positive match inside a LONGER one that happens to share the
+  // same prefix (e.g. "@Ana" matching inside "@Ananya", or inside "@Ana
+  // Reyes" when BOTH "Ana" and "Ana Reyes" are real candidates), double- or
+  // wrongly-mentioning someone the sender never actually tagged. Fixed with
+  // two changes: (1) a word-boundary check — the character right after the
+  // matched name must not continue a word — so "Ana" inside "Ananya" is
+  // rejected outright; (2) longest-name-first + a claimed-position set — so
+  // once "Ana Reyes" claims an "@" occurrence, "Ana" can't ALSO claim that
+  // same occurrence (it can still match a genuinely separate "@Ana" written
+  // elsewhere in the same message).
   function _computeMentions(text, conv) {
     if (!text) return [];
-    const candidates = _mentionCandidatesFor(conv);
+    const candidates = _mentionCandidatesFor(conv).filter(c => c.name);
     if (!candidates.length) return [];
+    const sorted = candidates.slice().sort((a, b) => b.name.length - a.name.length);
+    const claimedAt = new Set();
     const out = [];
-    candidates.forEach(c => { if (c.name && text.indexOf('@' + c.name) !== -1) out.push(c.uid); });
+    sorted.forEach(c => {
+      const token = '@' + c.name;
+      let from = 0, matched = false;
+      for (;;) {
+        const at = text.indexOf(token, from);
+        if (at === -1) break;
+        from = at + 1;
+        if (claimedAt.has(at)) continue;                 // already attributed to a longer name here
+        const after = text[at + token.length];
+        if (after !== undefined && /\w/.test(after)) continue;   // mid-word — not a real mention boundary
+        claimedAt.add(at);
+        matched = true;
+        break;   // one valid occurrence is enough to count this candidate as mentioned
+      }
+      if (matched) out.push(c.uid);
+    });
     return out;
   }
   // Composer input handler (wired in _buildThreadPanel, which owns `input`/
@@ -3393,7 +3742,8 @@ window.Chat = (() => {
 
   return { openDM, openConversation, openDeptChannel, sendMessage, toggleReaction,
            loadEarlier, onComposerInput, teardownInbox, teardownThread,
-           dmIdFor, myDeptChannels, dmCandidates, setFilter, setSearch, _attachInbox };
+           dmIdFor, myDeptChannels, dmCandidates, setFilter, setSearch, _attachInbox,
+           _attachGlobalBadgeListener, _detachGlobalBadgeListener };
 })();
 
 // ── Inbox page (router target: case 'chat') ──
@@ -3419,6 +3769,13 @@ window.renderChatPage = async function() {
         <div id="chat-filter"></div>
         <div id="chat-inbox"><div class="loading-placeholder">Loading…</div></div>
       </div>
+      <div class="chat-page-empty-pane">
+        <div class="empty-state">
+          <div class="empty-icon">${emojiIcon('💬',44)}</div>
+          <h4>Select a conversation</h4>
+          <p>Pick a chat from the list to start messaging.</p>
+        </div>
+      </div>
     </div>`;
   if (window.lucide) lucide.createIcons({ nodes: [c] });
   const chips = [{ key: 'all', label: 'All' }, { key: 'dm', label: 'DMs' },
@@ -3428,7 +3785,14 @@ window.renderChatPage = async function() {
   document.getElementById('chat-filter').innerHTML = window.chipTabs(chips, 'all');
   window.bindChipTabs(document.getElementById('chat-filter'),
     k => window.Chat?.setFilter(k));
-  document.getElementById('chat-search-input')?.addEventListener('input', e => window.Chat?.setSearch(e.target.value));
+  // Wave1 P2 fix #12 — debounce the search input ~150ms before rebuilding the
+  // whole inbox list, instead of a full rebuild on every single keystroke.
+  let _chatSearchDebTimer = null;
+  document.getElementById('chat-search-input')?.addEventListener('input', e => {
+    const v = e.target.value;
+    clearTimeout(_chatSearchDebTimer);
+    _chatSearchDebTimer = setTimeout(() => window.Chat?.setSearch(v), 150);
+  });
   document.getElementById('chat-new-btn').addEventListener('click', async () => {
     const snap = await dbCachedGet('users', () => db.collection('users').get(), 60000)
       .catch(() => ({ docs: [] }));
