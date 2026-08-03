@@ -1173,6 +1173,10 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .nav-item[data-page="cash"] .nav-icon       { background: linear-gradient(135deg,#30D158,#34C759); box-shadow: 0 2px 8px rgba(48,209,88,0.30); }
 .nav-item[data-page="personal-finance"] .nav-icon { background: linear-gradient(135deg,#FFD60A,#FF9F0A); box-shadow: 0 2px 8px rgba(255,214,10,0.30); }
 .nav-item[data-page="files"] .nav-icon      { background: linear-gradient(135deg,#32ADE6,#5856D6); box-shadow: 0 2px 8px rgba(50,173,230,0.25); }
+/* v14 hotfix (owner screenshot): chat + files-hub had NO gradient rule — the
+   rgba fallback tile + hardcoded white stroke was invisible on light theme. */
+.nav-item[data-page="chat"] .nav-icon       { background: linear-gradient(135deg,#0A84FF,#8B5CF6); box-shadow: 0 2px 8px rgba(10,132,255,0.32); }
+.nav-item[data-page="files-hub"] .nav-icon  { background: linear-gradient(135deg,#32ADE6,#5856D6); box-shadow: 0 2px 8px rgba(50,173,230,0.25); }
 .nav-item[data-page="bs-quote-builder"] .nav-icon { background: linear-gradient(135deg,#0A84FF,#32ADE6); box-shadow: 0 2px 8px rgba(10,132,255,0.35); }
 .nav-item[data-page="bs-quotations"] .nav-icon    { background: linear-gradient(135deg,#32ADE6,#5856D6); box-shadow: 0 2px 8px rgba(88,86,214,0.30); }
 .nav-item[data-page="bs-clients"] .nav-icon       { background: linear-gradient(135deg,#30D158,#0A84FF); box-shadow: 0 2px 8px rgba(48,209,88,0.30); }

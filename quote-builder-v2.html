@@ -297,6 +297,70 @@ tr:hover td{background:#fafbff;}
   .topbar-right .btn{font-size:11px;padding:7px 4px;}
 }
 
+/* ── MOBILE COMPACT HEADER (owner request: "top options in a hamburger for
+   mobile") ── ≤768px collapses the topbar to ONE row: [☰][mode·co pill]
+   [saved chip][filed badge][Verify & File]. Everything else (New, Print/PDF,
+   Agent Copy, Share, company toggle, mode toggle, Quick Quote) moves into the
+   #mtbOverlay sheet, whose rows call the exact same functions as the
+   desktop buttons — see the HTML comment above #mtbOverlay. This block is
+   placed AFTER the two mobile blocks above so it wins the cascade at every
+   width ≤768px (including ≤700/≤420) without editing their rules; above
+   768px `.mtb-burger`/`.mtb-pill`/`.mtb-overlay` stay display:none, so
+   desktop rendering is untouched. */
+.mtb-burger,.mtb-pill{display:none;}
+.mtb-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:2000;display:none;}
+.mtb-overlay.show{display:block;}
+@media(max-width:768px){
+  .topbar{flex-direction:row!important;align-items:center!important;flex-wrap:nowrap!important;
+    height:auto;min-height:46px;padding:6px 8px!important;gap:6px!important;}
+  /* hide the desktop chrome: company toggle, mode toggle, Quick Quote button */
+  #topbarDesktopControls{display:none!important;}
+  /* collapse topbar-right back to a single row holding only the chip/badge/CTA */
+  .topbar-right{display:flex!important;flex-wrap:nowrap;align-items:center;gap:5px;
+    margin-left:auto;width:auto;}
+  .topbar-right .btn{display:none!important;}
+  .topbar-right #btnVerify{display:inline-flex!important;padding:6px 9px!important;
+    font-size:11px!important;min-height:0;white-space:nowrap;}
+  .topbar-right .filed-badge{grid-column:auto;}
+  .draft-save-chip{font-size:9.5px;padding:3px 6px;}
+  .filed-badge{font-size:9.5px;padding:3px 7px;}
+
+  .mtb-burger{display:inline-flex;align-items:center;justify-content:center;
+    width:34px;height:34px;flex-shrink:0;background:rgba(255,255,255,.12);
+    border:1.5px solid rgba(255,255,255,.35);border-radius:7px;color:white;
+    font-size:16px;cursor:pointer;padding:0;}
+  .mtb-burger:hover{background:rgba(255,255,255,.2);}
+  .mtb-pill{display:inline-flex;align-items:center;gap:4px;flex-shrink:1;min-width:0;
+    background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.35);
+    border-radius:7px;color:white;font-size:11px;font-weight:700;padding:6px 9px;
+    cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .mtb-pill:hover{background:rgba(255,255,255,.2);}
+  .mtb-pill-sep{opacity:.55;margin:0 1px;}
+
+  .mtb-overlay.show{display:flex;align-items:flex-end;justify-content:center;}
+  .mtb-sheet{background:white;width:100%;max-width:520px;max-height:82vh;overflow-y:auto;
+    border-radius:14px 14px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,.3);
+    padding:6px 6px calc(10px + env(safe-area-inset-bottom,0px));}
+  .mtb-sheet-hdr{display:flex;align-items:center;justify-content:space-between;
+    padding:10px 12px 8px;font-size:12px;font-weight:700;text-transform:uppercase;
+    letter-spacing:.5px;color:var(--gray-dark);}
+  .mtb-sheet-x{background:none;border:none;font-size:18px;line-height:1;color:var(--gray-dark);
+    cursor:pointer;padding:4px 6px;}
+  .mtb-row{display:block;width:100%;text-align:left;background:none;border:none;
+    padding:13px 12px;font-size:14.5px;font-weight:600;color:var(--text);
+    border-radius:8px;cursor:pointer;min-height:44px;}
+  .mtb-row:active,.mtb-row:hover{background:var(--gray-light);}
+  .mtb-row.mtb-row-active{color:var(--dark-blue);background:var(--light-blue);}
+  .mtb-divider{height:1px;background:var(--gray-mid);margin:8px 6px;}
+  .mtb-seg-group{padding:2px 12px 8px;}
+  .mtb-seg-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+    color:var(--gray-dark);margin-bottom:6px;}
+  .mtb-seg{display:flex;background:var(--gray-light);border-radius:8px;padding:3px;gap:3px;}
+  .mtb-seg-btn{flex:1;background:none;border:none;border-radius:6px;padding:9px 6px;
+    font-size:12.5px;font-weight:700;color:var(--gray-dark);cursor:pointer;min-height:40px;}
+  .mtb-seg-btn.active{background:var(--dark-blue);color:white;}
+}
+
 /* ── VERIFY / FILE MODAL ── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;
   display:flex;align-items:center;justify-content:center;padding:16px;}
@@ -480,7 +544,13 @@ tr:hover td{background:#fafbff;}
 
 <!-- ── TOP BAR ── -->
 <div class="topbar no-print">
-  <div style="display:flex;align-items:center;gap:10px;">
+  <!-- Mobile-only compact controls (≤768px): hamburger + mode/company pill.
+       Hidden on desktop; see the "MOBILE COMPACT HEADER" media query. -->
+  <button class="mtb-burger no-print" id="mtbBurger" onclick="toggleMobileSheet()" aria-label="Menu" aria-haspopup="true" aria-expanded="false">☰</button>
+  <button class="mtb-pill no-print" id="mtbPill" onclick="toggleMobileSheet()" aria-haspopup="true">
+    <span id="mtbPillMode">Client</span><span class="mtb-pill-sep">·</span><span id="mtbPillCo">BK</span>
+  </button>
+  <div id="topbarDesktopControls" style="display:flex;align-items:center;gap:10px;">
     <div class="topbar-logo" id="navLogo">BARRO <span>KITCHENS</span></div>
     <div class="toggle-pills">
       <button id="coBK" class="active" onclick="setCompany('BK')">🍳 Barro Kitchens</button>
@@ -496,11 +566,49 @@ tr:hover td{background:#fafbff;}
   <div class="topbar-right">
     <span class="draft-save-chip no-print" id="draftSaveChip"></span>
     <span class="filed-badge" id="filedBadge">✓ FILED</span>
-    <button class="btn btn-outline" onclick="clearForm()">🗑 New</button>
+    <button class="btn btn-outline" id="btnNew" onclick="clearForm()">🗑 New</button>
     <button class="btn btn-outline" id="btnVerify" onclick="doVerifyAndFile()" style="border-color:var(--accent);color:var(--accent);">📋 Verify &amp; File</button>
     <button class="btn btn-outline" id="btnPrint" onclick="doPrint()">🖨 Print/PDF</button>
     <button class="btn btn-outline" id="btnAgentPrint" onclick="doPrintAgent()" style="border-color:var(--purple);color:#d9b3ff;">🧾 Agent Copy</button>
     <button class="btn btn-accent" id="btnShare" onclick="doShare()">🔗 Share</button>
+  </div>
+</div>
+
+<!-- Mobile hamburger sheet (≤768px only). Self-contained: every row below
+     calls the SAME global function the desktop button above calls — no
+     pricing/filing/print logic is duplicated, this is just an alternate
+     trigger surface. Visibility of Internal/Admin/company rows is synced
+     live off the real #btnInternal/#btnAdmin/#coBK DOM state in mtbSync()
+     (called from openMobileSheet(), and from setCompany/setView/
+     toggleQuickMode/applyPartnerMode), so it always matches whatever the
+     desktop header currently allows for this role/portal. -->
+<div class="mtb-overlay no-print" id="mtbOverlay" onclick="if(event.target===this) closeMobileSheet();">
+  <div class="mtb-sheet" id="mtbSheet" role="menu" aria-label="Quote builder menu">
+    <div class="mtb-sheet-hdr">
+      <span>Menu</span>
+      <button class="mtb-sheet-x" onclick="closeMobileSheet()" aria-label="Close menu">✕</button>
+    </div>
+    <button class="mtb-row" id="mtbQuick" onclick="mtbRun('toggleQuickMode')">⚡ Quick Quote</button>
+    <button class="mtb-row" onclick="mtbRun('clearForm')">🗑 New</button>
+    <button class="mtb-row" onclick="mtbRun('doPrint')">🖨 Print / PDF</button>
+    <button class="mtb-row" id="mtbAgentPrint" onclick="mtbRun('doPrintAgent')" style="color:var(--purple);">🧾 Agent Copy</button>
+    <button class="mtb-row" onclick="mtbRun('doShare')">🔗 Share</button>
+    <div class="mtb-divider"></div>
+    <div class="mtb-seg-group" id="mtbCoGroup">
+      <div class="mtb-seg-label">Company</div>
+      <div class="mtb-seg">
+        <button class="mtb-seg-btn" id="mtbCoBK" onclick="mtbSetCompany('BK')">🍳 Barro Kitchens</button>
+        <button class="mtb-seg-btn" id="mtbCoBS" onclick="mtbSetCompany('BS')">⚙ Brilliant Steel</button>
+      </div>
+    </div>
+    <div class="mtb-seg-group">
+      <div class="mtb-seg-label">Mode</div>
+      <div class="mtb-seg">
+        <button class="mtb-seg-btn" id="mtbViewClient" onclick="mtbSetView('client')">📄 Client</button>
+        <button class="mtb-seg-btn" id="mtbViewInternal" onclick="mtbSetView('internal')">🔒 Internal</button>
+        <button class="mtb-seg-btn" id="mtbViewAdmin" onclick="mtbSetView('admin')">⚙ Admin</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1317,6 +1425,7 @@ function applyPartnerMode(){
   // If the Admin panel was open, fall back to client view
   if(typeof currentView!=='undefined' && currentView==='admin') setView('client');
   applyLetterheadHeader();
+  if(typeof mtbSync==='function') mtbSync();   // re-sync the mobile sheet after DOM removals above
 }
 
 document.addEventListener('DOMContentLoaded', ()=>{
@@ -1349,6 +1458,11 @@ document.addEventListener('DOMContentLoaded', ()=>{
   loadDatabase();
   document.addEventListener('click', e=>{
     if(!e.target.closest('.search-wrap')) closeDropdown();
+  });
+  // Mobile hamburger sheet — Escape closes it (outside-tap is handled by the
+  // #mtbOverlay onclick in the HTML).
+  document.addEventListener('keydown', e=>{
+    if(e.key==='Escape' && document.getElementById('mtbOverlay')?.classList.contains('show')) closeMobileSheet();
   });
   document.getElementById('searchInput').addEventListener('keydown', e=>{
     if(e.key==='ArrowDown'){e.preventDefault();moveFocus(1);}
@@ -1389,6 +1503,7 @@ function setCompany(co){
   const pfc=document.getElementById('pfCreds'); if(pfc) pfc.textContent=c.creds||'';
   buildQuoteNo();
   applyLetterheadHeader();
+  mtbSync();   // mobile hamburger sheet — keep the pill/segmented rows in sync
 }
 
 // v12 WS31 Spec 7 — shared letterhead engine for the printed quote. Renders
@@ -1431,6 +1546,7 @@ function setView(v){
   const ip=document.getElementById('internalPanel'); if(ip) ip.style.display=(v==='internal')?'block':'none';
   document.getElementById('adminPanel')?.classList.toggle('open',v==='admin');
   if(v==='internal') buildLaborTable();
+  mtbSync();   // mobile hamburger sheet — keep the pill/segmented rows in sync
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1444,6 +1560,78 @@ function toggleQuickMode(){
   document.getElementById('btnQuick')?.classList.toggle('active',quickMode);
   document.body.classList.toggle('body-quick',quickMode);
   qqRender();
+  mtbSync();   // mobile hamburger sheet — keep the pill/segmented rows in sync
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  MOBILE COMPACT HEADER (≤768px) — hamburger sheet
+//  Every row/segmented button below calls the SAME global function the
+//  desktop topbar buttons call (clearForm/doPrint/doPrintAgent/doShare/
+//  toggleQuickMode/setCompany/setView) — no business logic is duplicated
+//  here, this is purely an alternate trigger + a compact summary pill.
+//  mtbSync() never decides gating on its own; it mirrors the live DOM
+//  state of the desktop buttons (existence/visibility/active class),
+//  which applyPartnerMode()/setCompany()/setView() already control, so the
+//  sheet can never offer something the desktop header wouldn't for this
+//  role/portal, and never hides something the desktop header would show.
+// ═══════════════════════════════════════════════════════════════════
+function toggleMobileSheet(){
+  const ov=document.getElementById('mtbOverlay');
+  if(!ov) return;
+  if(ov.classList.contains('show')) closeMobileSheet(); else openMobileSheet();
+}
+function openMobileSheet(){
+  mtbSync();
+  document.getElementById('mtbOverlay')?.classList.add('show');
+  document.getElementById('mtbBurger')?.setAttribute('aria-expanded','true');
+}
+function closeMobileSheet(){
+  document.getElementById('mtbOverlay')?.classList.remove('show');
+  document.getElementById('mtbBurger')?.setAttribute('aria-expanded','false');
+}
+// Runs a sheet row's action then closes — the row itself never contains the
+// handler logic, it just names the same function the old button called.
+function mtbRun(fnName){
+  closeMobileSheet();
+  if(typeof window[fnName]==='function') window[fnName]();
+}
+function mtbSetCompany(co){ setCompany(co); closeMobileSheet(); }
+function mtbSetView(v){ setView(v); closeMobileSheet(); }
+
+function mtbSync(){
+  const pillMode=document.getElementById('mtbPillMode');
+  const pillCo=document.getElementById('mtbPillCo');
+  if(pillMode) pillMode.textContent = {client:'Client',internal:'Internal',admin:'Admin'}[currentView] || 'Client';
+  if(pillCo) pillCo.textContent = currentCo || 'BK';
+
+  // Quick Quote row mirrors #btnQuick's active state
+  const q=document.getElementById('btnQuick'), mq=document.getElementById('mtbQuick');
+  if(q && mq) mq.classList.toggle('mtb-row-active', q.classList.contains('active'));
+
+  // Company segmented row — mirrors #coBK/#coBS existence/visibility/active.
+  // In BS-partner lock mode applyPartnerMode() hides the ENTIRE company
+  // toggle-pills wrapper (coBK.parentElement.style.display='none'); mirror
+  // that by hiding the whole #mtbCoGroup, not just the BK button.
+  const coBK=document.getElementById('coBK'), coBS=document.getElementById('coBS');
+  const coGroup=document.getElementById('mtbCoGroup'), mCoBK=document.getElementById('mtbCoBK'), mCoBS=document.getElementById('mtbCoBS');
+  const coLocked = !!(coBK && coBK.parentElement && coBK.parentElement.style.display==='none');
+  if(coGroup) coGroup.style.display = coLocked ? 'none' : '';
+  if(coBK && mCoBK) mCoBK.classList.toggle('active', coBK.classList.contains('active'));
+  if(coBS && mCoBS){
+    mCoBS.textContent = coBS.textContent;   // partner branding (e.g. "🏢 CompanyName") flows through
+    mCoBS.classList.toggle('active', coBS.classList.contains('active'));
+  }
+
+  // Mode segmented rows — mirror #btnClient/#btnInternal/#btnAdmin one-for-one;
+  // a removed button (partner mode) hides its sheet row the same way.
+  ['Client','Internal','Admin'].forEach(x=>{
+    const orig=document.getElementById('btn'+x);
+    const proxy=document.getElementById('mtbView'+x);
+    if(!proxy) return;
+    if(!orig){ proxy.style.display='none'; return; }
+    proxy.style.display='';
+    proxy.classList.toggle('active', orig.classList.contains('active'));
+  });
 }
 
 function qqRender(){
