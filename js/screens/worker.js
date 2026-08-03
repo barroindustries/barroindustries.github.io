@@ -390,6 +390,17 @@ async function _loadClockCard(profile) {
 // server-enforced guarantee, not the safety mechanism itself).
 const WB_MAX_SHIFT_HOURS = 16;
 
+// v14 P1.x offline-punch-time fix — a queued punch that doesn't finish
+// replaying (see _pqReplayAll below) until this many minutes (or more) after
+// the worker actually stood on-site is being PAID at the wrong time: the
+// server (functions/index.js recordAttendancePunch) has no parameter for a
+// queued replay's true on-site instant and always stamps its own "now" at
+// the moment the callable runs (see the long comment above _pqReplayAll for
+// why this file can only flag that, not fix it outright). Below this
+// threshold, ordinary reconnect/upload latency is assumed and nothing is
+// flagged — only a materially late sync (a real offline stretch) is.
+const WB_QUEUE_LATE_SYNC_MIN = 2;
+
 // ── Offline punch queue (v14 P1 reliability fix) ────────────────────────────
 // A punch that clears the geofence + selfie steps but then can't reach the
 // network (selfie upload or the recordAttendancePunch callable, see below)
@@ -409,7 +420,11 @@ const WB_MAX_SHIFT_HOURS = 16;
 //     selfieBlob: Blob|null,   // set when the selfie was never uploaded
 //     selfieUrl: string|null,  // set when upload succeeded but the callable
 //                              // call itself then failed (don't re-upload)
-//     queuedAt: <Date.now() ms> }
+//     queuedAt: <Date.now() ms> }  // the REAL on-site punch instant — captured
+//     the moment this item is queued (right after geofence+selfie cleared),
+//     NOT when it later replays. _pqReplayAll below is the only reader that
+//     matters for pay accuracy: it must treat this as the punch's true time,
+//     never let the replay's own "now" stand in for it silently.
 const WB_PQ_DB_NAME = 'bi-attendance-queue';
 const WB_PQ_STORE = 'pending-punches';
 
@@ -494,6 +509,39 @@ let _wbOnlineListenerAttached = false;
 // queue entry only once the server has actually accepted it. A punch that
 // fails again (still offline, or a transient server error) is simply left in
 // the queue for the next 'online' event — never dropped on a failed attempt.
+//
+// v14 P1.x offline-punch-TIME fix (money-affecting — 30-agent beta sweep) —
+// THE BUG: recordAttendancePunch (functions/index.js) is the SOLE writer of
+// timeIn/timeOut/hoursWorked and always stamps admin.firestore.Timestamp.now()
+// — i.e. the instant the callable RUNS. For a live (online) punch that's the
+// same instant as the on-site tap, so it's correct. But for a QUEUED punch
+// replayed from here, "the instant the callable runs" is the instant
+// connectivity came back and this loop got to it — which can be minutes or
+// hours after the worker actually stood on-site (item.queuedAt, captured in
+// _queuePunch at punch time — see the PENDING-PUNCH SHAPE comment above).
+// Result: a 7:00 AM offline Time In that doesn't sync until 9:30 AM gets
+// timeIn:"09:30" — silently wrong hours and pay, with nothing in the UI ever
+// telling anyone the record's clock time isn't the real on-site time.
+//
+// THE FIX, split by what this file can and can't do:
+//   1. item.queuedAt IS the correct on-site instant and is now sent through
+//      as `queuedPunchAt` below — today the callable ignores unknown fields,
+//      so this alone changes nothing server-side (see the functions/index.js
+//      note in the fix report; that file is out of scope for this change).
+//      It exists so a coordinated server update can start trusting it
+//      without another client deploy.
+//   2. Since timeIn/timeOut/hoursWorked are function-only (firestore.rules
+//      denies a self-service write touching them — see
+//      attendance_worker/{workerId}/records/{date}), THIS FILE CANNOT
+//      correct the paid record itself. What it CAN still do, client-side
+//      only, once a replay lands materially late (>= WB_QUEUE_LATE_SYNC_MIN
+//      minutes after item.queuedAt): (a) tell the worker plainly, instead of
+//      the falsely-reassuring generic "submitted" toast, and (b) leave a
+//      durable, HR-visible note on the record via `attempts` — a field
+//      self-service writes ARE still allowed to touch and that
+//      recordAttendancePunch never overwrites — naming the true on-site time
+//      vs. the time that actually got recorded, so HR/Finance can manually
+//      correct hours before this reaches payroll.
 async function _pqReplayAll() {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
   let items = [];
@@ -511,11 +559,50 @@ async function _pqReplayAll() {
       }
       await firebase.functions().httpsCallable('recordAttendancePunch')({
         kind: item.kind, lat: item.lat, lng: item.lng, accuracy: item.accuracy,
-        selfieUrl, recordDate: item.recordDateStr
+        selfieUrl, recordDate: item.recordDateStr,
+        // The REAL on-site punch instant (see PENDING-PUNCH SHAPE above) —
+        // forward-compatible only; the current callable does not read this
+        // field yet (see the long comment above this function / fix report).
+        queuedPunchAt: item.queuedAt
       });
+      const replayedAtMs = Date.now();
       await _pqDelete(item.id);
       anyDone = true;
-      Notifs.showToast(`Queued Time ${item.kind === 'in' ? 'In' : 'Out'} from ${item.recordDateStr} submitted.`, 'success');
+
+      const delayMin = Math.round((replayedAtMs - item.queuedAt) / 60000);
+      const kindLabel = item.kind === 'in' ? 'In' : 'Out';
+      if (delayMin >= WB_QUEUE_LATE_SYNC_MIN) {
+        // Late sync — the server just stamped `replayedAtMs`'s clock time as
+        // this punch's official timeIn/timeOut, NOT the real on-site time
+        // below. Say so plainly (never the generic "submitted" toast for
+        // this case) and leave a durable note HR can act on.
+        const onSiteTimeStr = _workerBizTimeHM(new Date(item.queuedAt));
+        const syncedTimeStr = _workerBizTimeHM(new Date(replayedAtMs));
+        Notifs.showToast(
+          `Time ${kindLabel} from ${item.recordDateStr}: captured on-site at ${onSiteTimeStr}, but only synced at ${syncedTimeStr} (~${delayMin} min offline) — the recorded time reflects the sync, not your real punch time. Flagged for HR review.`,
+          'info'
+        );
+        try {
+          await db.collection('attendance_worker').doc(item.profileId).collection('records').doc(item.recordDateStr)
+            .set({
+              workerId: item.profileId, date: item.recordDateStr, recordedBy: currentUser.uid,
+              // Self-service-writable audit trail only (see firestore.rules)
+              // — never touches timeIn/timeOut/hoursWorked/needsReview, which
+              // stay function-only. This is the paper trail, not the fix.
+              attempts: firebase.firestore.FieldValue.arrayUnion({
+                kind: item.kind, valid: true, queuedReplay: true,
+                onSitePunchTime: onSiteTimeStr, syncedRecordedTime: syncedTimeStr,
+                syncDelayMin: delayMin,
+                note: 'Offline queue: recorded time above reflects when this synced, not when the worker actually punched on-site. Needs HR/Finance review before payroll.',
+                atClient: new Date().toISOString()
+              })
+            }, { merge: true }).catch(() => {});
+        } catch (auditErr) {
+          console.warn('[worker] could not write late-sync audit note:', auditErr && auditErr.message);
+        }
+      } else {
+        Notifs.showToast(`Queued Time ${kindLabel} from ${item.recordDateStr} submitted.`, 'success');
+      }
     } catch (err) {
       console.warn('[worker] queued punch replay failed, will retry later:', err && err.message);
       // Left in the queue — retried on the next 'online' event / page load.
