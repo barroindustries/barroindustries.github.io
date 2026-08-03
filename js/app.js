@@ -1979,9 +1979,15 @@ function parseHash(h) {
 
 function updateNavBackBtn() {
   const b = document.getElementById('nav-back-btn');
-  // Real history now backs this: show the button whenever we've navigated at
-  // least once within the app (depth>0) and we're not sitting on the dashboard root.
-  if (b) b.style.display = ((window._navDepth||0) > 0 && window.currentPage !== 'dashboard') ? '' : 'none';
+  const m = document.getElementById('menu-toggle');
+  // Swipe-back is gone (see js/gestures.js) — the top-left button IS the back
+  // affordance now. Show BACK once we've navigated past the dashboard root;
+  // otherwise the hamburger. They swap (never both), so the top-left is a
+  // single predictable control: menu at the root, back everywhere deeper.
+  // (On desktop .menu-toggle is display:none via CSS, so '' keeps it hidden.)
+  const showBack = ((window._navDepth||0) > 0 && window.currentPage !== 'dashboard');
+  if (b) b.style.display = showBack ? '' : 'none';
+  if (m) m.style.display = showBack ? 'none' : '';
 }
 window.navBack = function() { history.back(); };   // the top-bar chevron === device Back
 

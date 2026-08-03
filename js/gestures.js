@@ -341,8 +341,16 @@
 
   // ── Root listeners (always attached; each gesture gates itself internally
   //    on `enabled` + pointer:fine so enable()/disable() need no re-wiring) ──
-  document.addEventListener('touchstart', edgeTouchStart, { passive: true });
-  document.addEventListener('touchstart', sheetTouchStart, { passive: true });
+  // Owner decision (2026-08-04): ALL swipe navigation removed. The edge
+  // swipe-back / swipe-open-drawer fought iOS's own edge gestures (iOS 16.4+
+  // installed PWAs own the screen edges for back/forward), and the sheet
+  // swipe-dismiss is redundant with every sheet's close button. Navigation is
+  // now BUTTON-ONLY: the top-left back button (#nav-back-btn), each pushed
+  // page's own back arrow (.page-panel-back), and modal/sheet close buttons.
+  // Listeners intentionally NOT attached (window.Gestures.enable/disable kept
+  // for API stability). Was: edgeTouchStart + sheetTouchStart on touchstart.
+  // document.addEventListener('touchstart', edgeTouchStart, { passive: true });
+  // document.addEventListener('touchstart', sheetTouchStart, { passive: true });
 
   window.Gestures = {
     enable() { enabled = true; },
