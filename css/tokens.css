@@ -61,6 +61,21 @@
   --danger:   #FF453A;
   --info:     var(--blue);
 
+  /* ── v14 CSS/a11y audit — count-badge backgrounds. Plain --pink (#FF2D78)
+     with white text at 9-11px (bn-badge/tn-badge/notif-badge/ms-scroll-fab-
+     badge/more-nav-row-badge) computes to only ~3.5:1, under the 4.5:1 AA
+     floor for small text, in every theme (--pink is never re-themed). These
+     are fixed, theme-invariant darkened variants — same "real-world alarm
+     indicator, not theme-relative" rationale as --presence-* below — used
+     ONLY by count-badge backgrounds, never by --pink itself (glows/borders/
+     brand identity elsewhere are untouched). --danger-badge-bg defaults to
+     each theme's own --danger (Light already clears AA at ~4.8:1); Dark/
+     Astral override it in their theme blocks (styles.css) since their raw
+     --danger only hits ~4.1:1 / ~3.4:1 with white. ── */
+  --pink-badge-bg:      #C2185B;
+  --grad-pk-bl-badge:   linear-gradient(135deg, #C2185B 0%, #0056B3 100%);
+  --danger-badge-bg:    var(--danger);
+
   /* ── Presence dots — Wave 6 D1: theme-invariant (NOT redefined by
      html.light/theme-dark) because online/away/offline are real-world states,
      not app-theme-relative colors. Exact values pulled from the pre-existing

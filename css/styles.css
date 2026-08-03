@@ -107,8 +107,9 @@ html {
   background: var(--bg);
   overscroll-behavior: none;
 }
-/* Universal keyboard-focus ring — WS42 Phase 5 */
-:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* Universal keyboard-focus ring — WS42 Phase 5. (The actual live rule is the
+   ACCESSIBILITY section further down — this one was a dead duplicate,
+   removed in the v14 CSS/a11y audit; see that section for the rationale.) */
 
 /* WS42 Phase 13 — touch ergonomics: kill the ~300ms tap delay / double-tap-zoom
    on anything interactive. [onclick] catches the many legacy inline-handler
@@ -182,6 +183,19 @@ body::after { content: none; }
 .hidden { display: none !important; }
 .text-muted  { color: var(--text-muted); font-size: var(--fs-sm); }
 .text-center { text-align: center; }
+/* v14 CSS/a11y audit — standard clip-based visually-hidden-but-focusable
+   utility. js/*.js uses aria-label 89x with no CSS-supported way to also
+   ship a real, focusable, visually-hidden text node (e.g. status changes,
+   "3 new messages" live-region text) — this is that utility. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 /* ── Badges ── */
 .badge {
@@ -870,7 +884,15 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 }
 .topbar-right { display: flex; align-items: center; gap: 6px; }
 
-/* ── Top Nav Strip (mobile nav below topbar) ── */
+/* ── Top Nav Strip (mobile nav below topbar) ──
+   v14 CSS audit note: .top-nav-strip is a base rule here and again at
+   ~line 5096 and ~line 5697; .top-nav-item likewise here (~906), ~5107, and
+   ~5704 — each later block adds/overrides a handful of properties without
+   fighting the earlier ones (additive refinement, not dead duplication —
+   verified manually for this family). Flagged as a follow-up hygiene item:
+   a scripted duplicate-selector scan (`grep -oE '^\.[a-zA-Z0-9_-]+' css/styles.css | sort | uniq -c`)
+   would confirm whether other 3x-declared selectors elsewhere are similarly
+   additive or actually dead cruft. */
 .top-nav-strip {
   display: none; /* shown on mobile only */
   position: fixed;
@@ -919,12 +941,17 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .top-nav-item .bn-icon { font-size: var(--fs-xl); line-height: 1; transition: transform var(--t2); }
 .top-nav-item .bn-icon svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; display: block; }
 .top-nav-item .tn-label { font-size: var(--fs-xs); font-weight: 600; }
-.top-nav-item.active { color: var(--pink); }
-.top-nav-item.active .bn-icon { transform: scale(1.12); filter: drop-shadow(0 0 4px var(--pink-glow)); }
+/* v14 CSS/a11y audit: dead duplicate .top-nav-item.active (pink, unthemed)
+   removed here — fully overridden by the later token-driven block further
+   down (var(--primary), with its own Astral-only pink variant), same
+   specificity, later in source. Never rendered; see that block for the live
+   active-state rule. */
 .top-nav-item .bn-badge,
 .top-nav-item .tn-badge {
   position: absolute; top: -2px; right: -4px;
-  background: var(--pink); color: #fff; font-size: 0.5625rem;
+  /* v14 a11y fix: --pink-badge-bg (not --pink) — white text on plain --pink
+     at this font-size computes to ~3.5:1, under the 4.5:1 AA floor. */
+  background: var(--pink-badge-bg); color: #fff; font-size: 0.5625rem;
   min-width: 14px; height: 14px; display: none;
   align-items: center; justify-content: center;
   padding: 0 3px; border-radius: var(--pill); font-weight: 700;
@@ -941,7 +968,10 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
 .notif-btn:hover { background: var(--s2); color: var(--text); box-shadow: var(--sh-pink); }
 .notif-badge {
   position: absolute; top: 1px; right: 1px;
-  background: var(--grad-pk-bl);
+  /* v14 a11y fix: --grad-pk-bl-badge (darkened pink→blue) not --grad-pk-bl —
+     white text over the plain gradient's pink end computes to ~3.5:1 (blue
+     end ~3.6:1), both under the 4.5:1 AA floor at this font-size. */
+  background: var(--grad-pk-bl-badge);
   color: #fff; font-size: 0.5625rem; font-weight: 700;
   border-radius: var(--pill); padding: 1px 5px;
   min-width: 16px; text-align: center;
@@ -1137,19 +1167,20 @@ html.light .handbook-text { color: rgba(29,29,31,0.75); }
    of .nav-item.active::after's right:0 indicator bar via right:10px. */
 .nav-item .bn-badge {
   position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
-  background: var(--pink); color: #fff; font-size: 0.625rem;
+  /* v14 a11y fix: --pink-badge-bg (not --pink) — see notif-badge above for
+     the contrast rationale. */
+  background: var(--pink-badge-bg); color: #fff; font-size: 0.625rem;
   min-width: 16px; height: 16px; padding: 0 4px;
   display: flex; align-items: center; justify-content: center;
   border-radius: var(--pill); font-weight: 700; line-height: 1;
   box-shadow: 0 0 8px var(--pink-glow);
 }
 
-.nav-item.active { color: var(--text); font-weight: 600; background: var(--s2); }
-.nav-item.active::after {
-  content: '';
-  position: absolute; right: 0; top: 6px; bottom: 6px; width: 3px;
-  background: var(--grad-pk-bl); border-radius: 2px 0 0 2px;
-}
+/* v14 CSS/a11y audit: dead duplicate .nav-item.active (+ its ::after right-
+   edge bar) removed here — fully overridden by the later token-driven pill
+   block further down (::after gets display:none there, .active gets
+   var(--primary-soft)/var(--primary) instead of var(--s2)/var(--grad-pk-bl)),
+   same specificity, later in source. Never rendered; see that block. */
 
 /* ── iOS-style 3D nav icons ── */
 .nav-icon {
@@ -1302,7 +1333,9 @@ html.theme-astral .bottom-nav-item.active { color: var(--brand-primary); }
 html.theme-astral .bottom-nav-item.active .bn-icon { transform: scale(1.15); filter: drop-shadow(0 0 6px var(--pink-glow)); }
 .bottom-nav-item .bn-badge {
   position: absolute; top: 4px; right: 6px;
-  background: var(--pink); color: #fff; font-size: 0.5625rem;
+  /* v14 a11y fix: --pink-badge-bg (not --pink) — see notif-badge above for
+     the contrast rationale. */
+  background: var(--pink-badge-bg); color: #fff; font-size: 0.5625rem;
   padding: 1px 4px; border-radius: var(--pill); font-weight: 700;
   box-shadow: 0 0 8px var(--pink-glow);
 }
@@ -1854,15 +1887,24 @@ html.theme-astral .id-flip-hint span { animation: ptr-bounce 1.8s ease-in-out in
 }
 .subtab-bar::-webkit-scrollbar { display: none; }
 /* .subtab-btn base rule merged into iOS-layer copy below */
-.subtab-btn.active {
-  background: var(--grad-pk-bl);
-  background-size: 200% 200%;
-  color: #fff; font-weight: 600;
-  box-shadow: 0 2px 12px rgba(155,168,255,0.35);
-}
+/* v14 CSS/a11y audit: dead .subtab-btn.active gradient-pill treatment (+ its
+   Astral gradRun animation) removed here — fully overridden by the later
+   token-driven block further down (background: var(--primary-soft), plain
+   solid color, no background-position for gradRun to animate), same
+   specificity, later in source. Never painted in any theme; see that block
+   for the live active-subtab style. */
 .subtab-btn:hover:not(.active) { background: rgba(255,255,255,0.06); color: var(--text); }
-/* Continuous gradient run is Astral-only (perf budget: no infinite animation outside Astral). */
-html.theme-astral .subtab-btn.active { animation: gradRun 5s ease infinite; }
+/* v14 CSS/a11y audit — desktop-mouse users have no visual cue that this row
+   (and #tn-tabs) scrolls once the native scrollbar is hidden below (touch
+   users already have the swipe affordance). Edge-fade mask restores a "there
+   is more" cue without bringing back a visible scrollbar. Scoped to
+   hover:hover+pointer:fine so touch/mobile is untouched. */
+@media (hover: hover) and (pointer: fine) {
+  #tn-tabs, .subtab-bar {
+    mask-image: linear-gradient(to right, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
+  }
+}
 
 /* ── Chip-style subtabs (declutter pattern) ──────────────
    Wraps to multiple rows instead of horizontal-scrolling, with an
@@ -1890,8 +1932,12 @@ html.theme-astral .subtab-btn.active { animation: gradRun 5s ease infinite; }
   background: var(--surface-3); color: var(--text-muted);
 }
 .chip-tab.active .chip-count { background: var(--primary-fill, var(--primary)); color: var(--on-primary); }
-.chip-count.on { background: var(--danger, #e5484d); color: #fff; }
-.chip-tab.active .chip-count.on { background: var(--danger, #e5484d); color: #fff; }
+/* v14 a11y fix: --danger-badge-bg (not --danger) — white text on plain
+   --danger at this font-size fails AA in Dark (~4.1:1) and Astral (~3.4:1);
+   Light already cleared AA so --danger-badge-bg just aliases --danger there
+   (see tokens.css / the Dark+Astral theme blocks for the per-theme override). */
+.chip-count.on { background: var(--danger-badge-bg, #e5484d); color: #fff; }
+.chip-tab.active .chip-count.on { background: var(--danger-badge-bg, #e5484d); color: #fff; }
 @media (pointer:coarse){ .chip-tab { min-height: 38px; } }
 html.theme-astral .chip-tab.active {
   background: var(--grad-pk-bl); background-size: 200% 200%;
@@ -2817,6 +2863,9 @@ html.theme-dark {
   --warning-soft:    rgba(247,185,40,0.16);
   --danger:          #F0284A;
   --danger-soft:     rgba(240,40,74,0.16);
+  /* v14 a11y fix: raw --danger only clears ~4.1:1 with white count-badge
+     text (below 4.5:1 AA) — darkened, same-family red for badge use only. */
+  --danger-badge-bg: #D91F42;
   --info:            #4599FF;
   --info-soft:       rgba(69,153,255,0.14);
   --sh-sm:           0 1px 3px rgba(0,0,0,0.30);
@@ -2884,6 +2933,9 @@ html.theme-astral {
   --success: #30D158; --success-soft: rgba(48,209,88,0.16);
   --warning: #FFAA00; --warning-soft: rgba(255,170,0,0.16);
   --danger:  #FF453A; --danger-soft:  rgba(255,69,58,0.16);
+  /* v14 a11y fix: raw --danger only clears ~3.4:1 with white count-badge
+     text (below 4.5:1 AA) — darkened, same-family red for badge use only. */
+  --danger-badge-bg: #C42B22;
   --info:    #0A84FF; --info-soft:    rgba(10,132,255,0.16);
   --topbar-bg:     rgba(7,7,16,0.88);
   --sidebar-bg:    rgba(7,7,16,0.94);
@@ -2991,6 +3043,7 @@ html.light .badge-green { color: #1A8838; }
 html.light .badge-orange { color: #BA5D00; }
 html.light .badge-red { color: #C42B22; }
 html.light .badge-purple { color: #5C34B0; }
+html.light .badge-teal   { color: #00695C; } /* v14 a11y fix: badge-teal was skipped in the Phase 187 AA pass — raw #00DDB8 on white is ~1.7:1 */
 
 /* scrollbar */
 html.light ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.14); }
@@ -3404,6 +3457,11 @@ html.theme-astral .eom-banner {
 }
 .att-day-num { font-size:var(--fs-sm); font-weight:600; color:var(--text); }
 .att-mark { font-size:var(--fs-base); font-weight:800; }
+/* v14 CSS/a11y audit: att-mark/present/half/absent colors below are
+   deliberately raw hex, not var(--success)/(--warning)/(--danger) — same
+   "real-world state, not theme-relative" rationale documented for
+   --presence-* in tokens.css. Do not "fix" these into the theme tokens; that
+   would shift the color at these rgba() opacities differently per theme. */
 .att-present { background:rgba(48,209,88,.12); border-color:rgba(48,209,88,.3); }
 .att-present .att-mark { color:#30d158; }
 .att-half { background:rgba(255,170,0,.12); border-color:rgba(255,170,0,.3); }
@@ -3422,6 +3480,13 @@ html.theme-astral .eom-banner {
   background:var(--s2); border-radius:4px; padding:1px 4px;
 }
 .att-cal-day:hover .att-edit-btn { display:block; }
+/* v14 a11y fix: this hover-only variant had no way for a keyboard user to
+   ever reveal/reach the button (display:none until :hover). The button in
+   current markup always also carries .att-edit-visible (always display:block
+   — see that rule below), so this specific variant isn't hit today, but a
+   :focus-within companion costs nothing and makes this variant correct too
+   if it's ever used on its own. */
+.att-cal-day:focus-within .att-edit-btn { display:block; }
 .att-dot {
   display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px;
 }
@@ -4100,7 +4165,9 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
     bottom: 0 !important;
     left: 0 !important;
     right: 0 !important;
-    z-index: 5000;
+    /* v14 CSS/a11y audit: was a raw 4-digit literal (5000) — same numeric
+       value as --z-dialog, so this is a zero-visual-change token swap. */
+    z-index: var(--z-dialog);
   }
   /* Header clears the notch; composer already pads for the home indicator via
      .messenger-input-row's own safe-area-bottom padding. */
@@ -4444,7 +4511,9 @@ html.light .btn-danger:hover { background: rgba(200,32,26,0.16); }
 .ms-scroll-fab:hover { transform: scale(1.06); background: var(--surface-2); }
 .ms-scroll-fab-badge {
   position: absolute; top: -4px; right: -4px;
-  background: var(--pink); color: #fff; font-size: 0.5625rem;
+  /* v14 a11y fix: --pink-badge-bg (not --pink) — see notif-badge above for
+     the contrast rationale. */
+  background: var(--pink-badge-bg); color: #fff; font-size: 0.5625rem;
   min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--pill);
   display: flex; align-items: center; justify-content: center; font-weight: 700;
   box-shadow: 0 0 6px var(--pink-glow);
@@ -5135,13 +5204,59 @@ html.theme-astral .top-nav-item.active .bn-icon { filter: drop-shadow(0 0 5px rg
    the competing !important declaration of the same property above. Verified
    computed-equivalent at 375px/700px/800px — see Batch 2 report. ── */
 @media (max-width: 639px) {
-  .modal-box {
-    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 24px) !important;
-    border-radius: var(--r-xl) var(--r-xl) 0 0 !important;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+  /* v14 Wave 6 — "parallel window" fix (owner report 2026-08-03): openModal
+     surfaces on phone rendered as a translucent-scrim bottom sheet with a
+     visible gap at the top, reading as a popup floating in front of the
+     previous page rather than a pushed screen. ≤639px ONLY (641-768px
+     tablet keeps the ≤768px bottom-sheet baseline above, unchanged; desktop
+     is untouched) the modal becomes a full-cover opaque page, visually
+     identical to .page-panel: .modal-box takes itself out of the overlay's
+     flex layout via position:fixed so a translucent scrim can no longer let
+     the page behind show through the top gap, and the scrim itself goes
+     fully opaque so there's zero background bleed even mid-transition.
+     Pull-handle / glass-shimmer decorations are dropped — they're "sheet"
+     affordances that no longer make sense on a full page. Enter animation
+     stays the existing transform/opacity-only sheetRise (untouched). */
+  .modal-overlay {
+    background: var(--bg) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
-  .modal-box::after { background: var(--border-strong); }
+  .modal-box {
+    position: fixed !important;
+    top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+    width: 100% !important; max-width: 100% !important;
+    height: 100dvh !important; min-height: 100dvh !important; max-height: 100dvh !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    align-self: stretch !important;
+    background: var(--bg) !important;
+    /* Astral's glass .modal-box sets its own backdrop-filter; opaque bg
+       above already makes it invisible, but drop it too so mobile doesn't
+       pay for a blur compositing layer with nothing translucent left to blur. */
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .modal-box::after { display: none; }
+  html.theme-astral .modal-box::before { content: none; }
+  .modal-header {
+    padding-top: max(16px, env(safe-area-inset-top, 0px));
+    padding-left: max(20px, env(safe-area-inset-left, 0px));
+    padding-right: max(20px, env(safe-area-inset-right, 0px));
+  }
+  .modal-footer {
+    padding-bottom: max(14px, env(safe-area-inset-bottom, 0px));
+    padding-left: max(20px, env(safe-area-inset-left, 0px));
+    padding-right: max(20px, env(safe-area-inset-right, 0px));
+  }
   .modal-body { padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
+  /* Confirm/prompt dialogs: the box itself stays centered (unlike openModal)
+     — only the scrim goes opaque, so no previous page shows behind it either. */
+  .dialog-overlay {
+    background: var(--bg) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
   /* Drawers (notifications, dept switcher): same sheet treatment on mobile.
      (base .drawer{} rule for this breakpoint consolidated into the grouped
      Drawer section near its first definition — Batch 2 / spec 2d; these
@@ -5339,7 +5454,9 @@ html.theme-astral .bottom-nav-item.active .bn-icon { transform: scale(1.15); fil
 .more-nav-row-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .more-nav-row-chevron { width: 18px; height: 18px; color: var(--text-light); flex-shrink: 0; }
 .more-nav-row-badge {
-  background: var(--pink); color: #fff; font-size: 0.6875rem; font-weight: 700;
+  /* v14 a11y fix: --pink-badge-bg (not --pink) — see notif-badge above for
+     the contrast rationale. */
+  background: var(--pink-badge-bg); color: #fff; font-size: 0.6875rem; font-weight: 700;
   padding: 1px 6px; border-radius: var(--pill); line-height: 1.4; flex-shrink: 0;
   box-shadow: 0 0 8px var(--pink-glow);
 }
@@ -5897,9 +6014,22 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
    future-proof, no new component ever ships without a focus ring.
 ══════════════════════════════════════════════════ */
 :focus-visible {
-  outline: 2px solid var(--brand-primary);
+  /* v14 CSS/a11y audit: was var(--brand-primary) (== --pink, #FF2D78, never
+     re-themed) — every other active/selected indicator in the app
+     (nav-item/top-nav-item/subtab-btn/chip-tab) uses var(--primary) (blue in
+     Light/Dark), so tabbing flashed a mismatched hot-pink ring that also
+     only computed to ~3.5:1 on Light's white surfaces (at the WCAG 1.4.11
+     floor for non-text UI components). var(--primary) matches everywhere
+     else and clears contrast in all 3 themes. */
+  outline: 2px solid var(--primary);
   outline-offset: 2px;
   border-radius: var(--r-xs);
+}
+/* Pill-shaped controls (border-radius: var(--pill)) would show a squared-off
+   ring corner poking out past their own rounded edge at the r-xs default —
+   match the ring's radius to the control's for these. */
+.chip-tab:focus-visible, .badge:focus-visible {
+  border-radius: var(--pill);
 }
 /* Programmatically-focused scroll/containers must not show a ring */
 [tabindex="-1"]:focus-visible { outline: none; }
@@ -5942,6 +6072,59 @@ html.light .profile-hero-id { background: rgba(0,0,0,0.05); }
        press-scale) becomes a snap instead of an animated move. */
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   FORCED COLORS (Windows High Contrast Mode)
+   Gradient/-webkit-background-clip:text sites render invisible text under
+   forced-colors — the UA suppresses background images/gradients but
+   -webkit-text-fill-color:transparent stays, leaving nothing to paint the
+   glyphs with. Force a solid system-color fallback for all 8 sites in the
+   app that use this technique (login-title, sidebar-user-dept incl. its
+   Light variant, the 3 id-card gradient-text fields, comment-author, the
+   Astral loading-placeholder shimmer). !important is deliberate here — this
+   is the standard, expected way to win forced-colors overrides regardless
+   of each site's own specificity/theme-scoping. ── */
+@media (forced-colors: active) {
+  .login-title,
+  .sidebar-user-dept,
+  .id-card-company,
+  .id-card-name,
+  .id-card-id,
+  .comment-author,
+  html.theme-astral .loading-placeholder {
+    background: none !important;
+    -webkit-background-clip: initial !important;
+    background-clip: initial !important;
+    -webkit-text-fill-color: CanvasText !important;
+    color: CanvasText !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════
+   PREFERS-CONTRAST: MORE
+   Token system already centralizes border/muted-text values, so bumping
+   them here covers every themed component that reads var(--border) /
+   var(--border-strong) / var(--text-muted) without touching per-component
+   CSS. Same specificity as each theme's own block above, later in source,
+   so these win only for the 3 properties actually listed here — everything
+   else in the theme block is untouched. ── */
+@media (prefers-contrast: more) {
+  html.light {
+    --border:        rgba(16,24,40,0.28);
+    --border-strong: rgba(16,24,40,0.40);
+    --text-muted:    rgba(28,30,33,0.68);
+  }
+  html.theme-dark {
+    --border:        rgba(255,255,255,0.22);
+    --border-strong: rgba(255,255,255,0.34);
+    --text-muted:    rgba(228,230,235,0.68);
+  }
+  html.theme-astral, :root {
+    --border:        rgba(255,255,255,0.22);
+    --border-strong: rgba(255,255,255,0.34);
+    --text-muted:    rgba(240,240,250,0.68);
   }
 }
 
