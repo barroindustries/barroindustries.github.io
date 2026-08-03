@@ -8,7 +8,7 @@
 //    • HTML / API → Network-first, cache as offline fallback
 // ═══════════════════════════════════════════════════════
 
-const CACHE_VER   = 'bi-ops-v12.0.179';
+const CACHE_VER   = 'bi-ops-v12.0.180';
 const STATIC      = `${CACHE_VER}-static`;
 const RUNTIME     = `${CACHE_VER}-runtime`;
 
@@ -52,6 +52,7 @@ const PRECACHE = [
   '/js/migrations.js',
   '/js/app.js',
   '/js/modules.js',
+  '/js/screens/people.js',
   '/js/chat.js',
   '/icons/bi-logo.svg',
   '/icons/icon-192.png',
