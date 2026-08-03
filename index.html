@@ -182,7 +182,7 @@
       <div id="reset-sent" class="success-msg hidden">Password reset email sent. Check your inbox.</div>
     </div>
 
-    <div class="login-version" id="login-version-str">v14.0.18 · Barro Industries</div>
+    <div class="login-version" id="login-version-str">v14.0.19 · Barro Industries</div>
   </div>
 </div>
 
@@ -439,6 +439,15 @@
      there in Wave 7 Pass 6, loads after this file) reaches forward into this
      file's renderBSQuotationsSummary the same way. -->
 <script defer src="js/screens/sales.js"></script>
+<!-- CRM department (added 2026-08-04) — Dashboard/AEC Leads/ROC Leads/Pipeline,
+     js/screens/crm.js. Must load after sales.js: its AEC Leads tab calls
+     window.renderAECDirectory directly, and after departments.js (canEditDept,
+     deptContainer, chipTabs/bindChipTabs, etc.) by window.*/bare-global name
+     at runtime only, never at parse time — same convention as every other
+     js/screens/*.js file. js/app.js's renderDeptModule ('CRM' case, loads
+     after this file) reaches forward into this file's window.renderCRM the
+     same way. -->
+<script defer src="js/screens/crm.js"></script>
 <!-- v14 Wave 7 Pass 3 — HR + Payroll screens (HR hub, payroll management +
      reconciliation, HR profiles, worker payslips), split verbatim out of
      departments.js. Must load after departments.js: calls its shared

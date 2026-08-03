@@ -172,6 +172,15 @@ const OVERRIDES = {
                 'address','stage','quoteSent','quoteSentDate','quoteRef','potential',
                 'followUpDate','lastContact'],
   },
+  roc_leads: {
+    // CRM department (added 2026-08-04). Root collection is auto-discovered/
+    // backed-up regardless (see the header comment above) — this override
+    // only adds a friendly CSV alongside the always-complete JSON snapshot,
+    // mirroring aec_contacts' column list.
+    csvFields: ['id','itemNo','restaurantName','chainType','contactPerson','cuisine',
+                'kitchenSize','cityProvince','phone','email','status','nextFollowUp',
+                'remarks'],
+  },
 };
 
 // Size guard (v13 Phase 89): any single collection's FULL export exceeding

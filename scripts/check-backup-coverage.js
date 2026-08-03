@@ -57,7 +57,7 @@ const BASELINE = [
   'payroll_ca_overrides', 'payroll_delete_requests', 'payslips',
   'pending_raises', 'policies', 'posts', 'productMeta',
   'production_orders', 'products', 'projects', 'promotions',
-  'purchase_requisitions', 'quotes', 'resources', 'salary_history',
+  'purchase_requisitions', 'quotes', 'resources', 'roc_leads', 'salary_history',
   'salary_raises', 'sales_clients', 'sales_orders', 'settings',
   'settings_holidays', 'signup_requests', 'sops', 'stock_movements',
   'strategy_notes', 'submissions', 'suggestions', 'system_health', 'tasks',

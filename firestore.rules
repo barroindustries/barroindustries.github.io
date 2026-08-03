@@ -1238,14 +1238,32 @@ service cloud.firestore {
       allow write: if isAuth() && canDept('Government Biddings');
     }
 
-    // ── AEC Partner Directory (Sales prospecting: architects/engineers/contractors,
-    // v12 WS33). Internal pipeline — partner excluded, matching work_plans. Writes
-    // follow the TIGHTENED canDept pattern — deliberately stricter than the legacy
+    // ── AEC Partner Directory (Sales/CRM prospecting: architects/engineers/
+    // contractors, v12 WS33; moved from a Sales sub-tab into its own CRM
+    // department 2026-08-04 — js/screens/crm.js's "AEC Leads" tab). Internal
+    // pipeline — partner excluded, matching work_plans. Writes follow the
+    // TIGHTENED canDept pattern — deliberately stricter than the legacy
     // bare-isAuth() sales_clients block (~1121); that looseness is pre-existing,
-    // not the template. Delete admin-only (no delete-request flow: low-stakes list).
+    // not the template. Widened 2026-08-04 to ALSO allow canDept('CRM') —
+    // Sales-only members keep working exactly as before, this only ADDS
+    // capability for CRM dept members (mirrors the client-side canEdit
+    // widening in js/screens/sales.js's renderAECDirectory). Delete
+    // admin-only (no delete-request flow: low-stakes list).
     match /aec_contacts/{docId} {
       allow read: if isAuth() && !isPartner();
-      allow create, update: if isAuth() && canDept('Sales');
+      allow create, update: if isAuth() && (canDept('Sales') || canDept('CRM') || isAdmin());
+      allow delete: if isAuth() && isAdmin();
+    }
+
+    // ── ROC (restaurant) Lead Directory — CRM department (added 2026-08-04
+    // alongside the CRM department; js/screens/crm.js's renderROCDirectory).
+    // Net-new collection mirroring aec_contacts' exact rule shape: internal
+    // pipeline (partner excluded), writes gated to Sales/CRM dept members or
+    // admin, delete admin-only (no delete-request flow — same low-stakes-list
+    // rationale as aec_contacts, not a finance/money collection).
+    match /roc_leads/{id} {
+      allow read: if isAuth() && !isPartner();
+      allow create, update: if isAuth() && (canDept('CRM') || canDept('Sales') || isAdmin());
       allow delete: if isAuth() && isAdmin();
     }
 

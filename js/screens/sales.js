@@ -103,7 +103,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
   window._bkCurrentUser = currentUser;
   window._bkCurrentRole = currentRole;
   const c = deptContainer();
-  const salesTabs = ['Clients','AEC','Quotes','Partner','Files','SOP','Tasks'];
+  const salesTabs = ['Clients','Quotes','Partner','Files','SOP','Tasks'];
   // Legacy deep-link keys → new consolidated tab.
   const alias = { 'BK Quotes':'Quotes', 'Quotations':'Quotes', 'Quick Estimate':'Quotes',
                   'Partner Quotes':'Partner', 'Partner Files':'Partner',
@@ -117,7 +117,7 @@ window.renderSales = async function(currentUser, currentRole, subtab = window.in
       </div>
     </div>
     ${window.sopPanel('How Sales works', [
-      'Clients is the CRM book; AEC tracks the architect/engineer/contractor prospecting pipeline separately.',
+      'Clients is the CRM book here; the AEC architect/engineer/contractor prospecting directory moved to the CRM department.',
       'Quotes has ＋New Quotation (full builder) and Quick Estimate (fast price check); everything filed lands in Records, where revisions chain together.',
       'Partner is a read-only window into Brilliant Steel\'s quotes and files for coordination.',
       'Files holds Work Plans and Proposals; Tasks is the department board.'
@@ -158,10 +158,6 @@ async function loadSalesContent(currentUser, currentRole, sub) {
   switch(sub) {
     case 'Clients':
       await renderClientProfiles(content, currentUser, currentRole, 'barro');
-      break;
-
-    case 'AEC':
-      await renderAECDirectory(content, currentUser, currentRole);
       break;
 
     case 'Quotes': {
@@ -1332,6 +1328,12 @@ async function nextAECNumber(){
   });
 }
 
+// window-exposed explicitly (was already reachable as a bare global function
+// declaration in this classic, non-module script, but the CRM screen — a
+// different file — calls it as window.renderAECDirectory, so this makes the
+// contract explicit rather than relying on that implicit hoisting behavior).
+window.renderAECDirectory = renderAECDirectory;
+
 async function renderAECDirectory(container, currentUser, currentRole) {
   // 8-point #3 — this screen had no loading state at all before this pass
   // (straight to a blank container while the read was in flight), and a
@@ -1348,7 +1350,12 @@ async function renderAECDirectory(container, currentUser, currentRole) {
     return;
   }
   const contacts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  const canEdit = canEditDept('Sales');
+  // Widened 2026-08-04 (AEC moved into the CRM department): a user assigned
+  // to CRM but not Sales must still be able to manage this directory — same
+  // additive widening as the aec_contacts firestore.rules create/update rule.
+  // Sales-only members keep working exactly as before; this only ADDS
+  // capability for CRM members, never removes any.
+  const canEdit = canEditDept('Sales') || canEditDept('CRM');
   const canDeleteDirect = ['president','owner','manager'].includes(currentRole);
   const today = (window.bizDate ? window.bizDate() : new Date().toISOString().slice(0,10));
 

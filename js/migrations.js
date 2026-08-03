@@ -460,3 +460,157 @@ window.runProductCostsMigration = async function () {
     Notifs.success(`Done ✓ ${r.migrated} product${r.migrated===1?'':'s'} migrated, ${r.skipped} already clean.`);
   } catch (e) { Notifs.showToast('Migration failed: ' + (e.message || e), 'error'); }
 };
+
+// ── CRM seed import (added 2026-08-04, president-run, idempotent) ──────────
+// Imports Neil's real CRM.xlsx lead data (specs/crm-seed-data.json — fetched
+// at runtime via fetch(), never inlined into this file) into the live
+// aec_contacts + roc_leads collections. No dedicated button exists yet (the
+// CRM screen lives in js/screens/crm.js, out of this pass's plain-migration
+// convention of a president console call); run from the browser console
+// while signed in as president:
+//   await window.importCrmSeed()
+//
+// Idempotent: EVERY row is deduped against docs already in Firestore (not
+// just docs a previous run of this importer created) by a stable key —
+// company/firm name + phone for AEC, restaurant name + phone for ROC (both
+// lowercased/trimmed) — so re-running after a partial failure, or after Neil
+// hand-adds a few contacts through the UI first, never creates a duplicate.
+// A seed row missing its own name field (company / restaurant name) is
+// skipped outright — there is nothing to key or display.
+//
+// AEC import-shape decision: every write matches EXACTLY what
+// renderAECDirectory's own "Add Contact" flow produces (sales.js) — same
+// fields, same itemNo mint via the shared nextAECNumber() counter
+// transaction (never a hand-rolled bulk-safe counter of its own —
+// correctness over speed for a one-time ~330-doc import; nextAECNumber()/
+// nextROCNumber() are each their own tiny transaction per row, exactly like
+// a human clicking "Add Contact" 129/202 times). The seed's Role/
+// Specialization/Status vocabulary does not line up 1:1 with aec_contacts'
+// live type/stage vocabulary (only architect/engineer/contractor + new/
+// contacted/prospect/partner/dormant exist there — see js/screens/sales.js's
+// AEC_TYPES/AEC_STAGES) — ROLE_TO_AEC_TYPE / STATUS_TO_AEC_STAGE below are
+// the exact translation:
+//   Role 'Consultant' (or anything unrecognized) has no matching AEC_TYPES
+//   key today → falls back to 'contractor'. Flagged to Neil: confirm this
+//   fallback, or add a 4th AEC_TYPES entry later if Consultant firms are a
+//   distinct enough bucket to warrant one.
+//   Status 'Meeting Set' and 'Quotation' both collapse onto AEC's single
+//   'prospect' stage (there is no separate "meeting" stage in the live
+//   vocabulary) — 'Quotation' additionally sets quoteSent:true so
+//   js/screens/crm.js's aecFunnelStatus() can tell the two apart again on
+//   read (quoteSent seed rows report back as 'Quotation', not 'Meeting Set').
+// The seed's free-text Specialization column has nowhere else to live in
+// the unchanged live schema, so it's folded into aec_contacts' own
+// 'potential' field (rendered as "Feedback / partnership potential" in the
+// directory's detail view) alongside any Remarks — this pass deliberately
+// did not touch renderAECDirectory's UI/fields to make room for a dedicated
+// specialization column.
+const ROLE_TO_AEC_TYPE = { 'Architect':'architect', 'Engineer':'engineer', 'Contractor':'contractor' };
+const STATUS_TO_AEC_STAGE = { 'New':'new', 'Contacted':'contacted', 'Meeting Set':'prospect', 'Quotation':'prospect', 'Won':'partner', 'Lost':'dormant' };
+const CRM_IMPORT_ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+window.importCrmSeed = async function () {
+  if (!isPresident()) { Notifs.showToast('President only', 'error'); return; }
+  if (!(await confirmDialog({message:"Import Neil's CRM seed data (specs/crm-seed-data.json) into aec_contacts + roc_leads?\n\nSafe to run repeatedly — records already present (matched by company/restaurant name + phone) are skipped."}))) return;
+  Notifs.info('Importing CRM seed data…');
+  try {
+    const r = await window._importCrmSeedRun();
+    window.logAudit && window.logAudit('import', 'crm_seed', null, r);
+    Notifs.success(`CRM import done ✓ AEC: ${r.aecCreated} added, ${r.aecSkipped} skipped (of ${r.aecScanned}). ROC: ${r.rocCreated} added, ${r.rocSkipped} skipped (of ${r.rocScanned}).`);
+    console.table([r]);
+  } catch (e) { Notifs.showToast('CRM import failed: ' + (e.message || e), 'error'); }
+};
+
+// Split out from importCrmSeed (the confirm/toast wrapper) so it can also be
+// called directly/re-run from the console without re-confirming, same
+// convention as e.g. migrateProductCostsOut vs. runProductCostsMigration above.
+window._importCrmSeedRun = async function () {
+  const res = await fetch('/specs/crm-seed-data.json');
+  if (!res.ok) throw new Error('Could not fetch specs/crm-seed-data.json (HTTP ' + res.status + ')');
+  const seed = await res.json();
+  const norm = s => (s || '').trim().toLowerCase();
+  const FV = firebase.firestore.FieldValue;
+
+  // ── AEC ──────────────────────────────────────────────────────────────
+  const aecRecords = (seed['AEC Leads'] && seed['AEC Leads'].records) || [];
+  const existingAecSnap = await db.collection('aec_contacts').get().catch(() => ({ docs: [] }));
+  const aecKeys = new Set(existingAecSnap.docs.map(d => { const x = d.data(); return norm(x.company) + '|' + norm(x.phone); }));
+  let aecCreated = 0, aecSkipped = 0;
+  for (const rec of aecRecords) {
+    const company = (rec['Company / Firm'] || '').trim();
+    if (!company) { aecSkipped++; continue; }
+    const phone = (rec['Phone'] || '').trim();
+    const key = norm(company) + '|' + norm(phone);
+    if (aecKeys.has(key)) { aecSkipped++; continue; }
+    aecKeys.add(key); // guard against the seed file itself containing a duplicate row
+
+    const status = (rec['Status'] || '').trim();
+    const stage = STATUS_TO_AEC_STAGE[status] || 'new';
+    const noteBits = [];
+    if ((rec['Specialization']||'').trim()) noteBits.push('Specialization: ' + rec['Specialization'].trim());
+    if ((rec['Remarks']||'').trim()) noteBits.push('Remarks: ' + rec['Remarks'].trim());
+    const followUp = (rec['Next Follow Up'] || '').trim();
+
+    const data = {
+      type: ROLE_TO_AEC_TYPE[(rec['Role'] || '').trim()] || 'contractor',
+      stage,
+      company,
+      contactPerson: (rec['Contact Person'] || '').trim(),
+      phone,
+      email: (rec['Email'] || '').trim(),
+      region: '',
+      address: (rec['City/Province'] || '').trim(),
+      quoteSent: status === 'Quotation',
+      quoteSentDate: '',
+      quoteRef: '',
+      potential: noteBits.join('\n'),
+      followUpDate: CRM_IMPORT_ISO_DATE_RE.test(followUp) ? followUp : '',
+      itemNo: await nextAECNumber(),
+      addedBy: currentUser.uid,
+      importedFrom: 'crm-seed-data.json',
+      createdAt: FV.serverTimestamp(),
+    };
+    await db.collection('aec_contacts').add(data);
+    aecCreated++;
+  }
+
+  // ── ROC ──────────────────────────────────────────────────────────────
+  const rocRecords = (seed['ROC Leads'] && seed['ROC Leads'].records) || [];
+  const existingRocSnap = await db.collection('roc_leads').get().catch(() => ({ docs: [] }));
+  const rocKeys = new Set(existingRocSnap.docs.map(d => { const x = d.data(); return norm(x.restaurantName) + '|' + norm(x.phone); }));
+  const rocStatusKeys = (window.ROC_STATUSES || []).map(s => s.key);
+  let rocCreated = 0, rocSkipped = 0;
+  for (const rec of rocRecords) {
+    const restaurantName = (rec['Restaurant Name'] || '').trim();
+    if (!restaurantName) { rocSkipped++; continue; }
+    const phone = (rec['Phone'] || '').trim();
+    const key = norm(restaurantName) + '|' + norm(phone);
+    if (rocKeys.has(key)) { rocSkipped++; continue; }
+    rocKeys.add(key);
+
+    const status = (rec['Status'] || '').trim();
+    const followUp = (rec['Next Follow Up'] || '').trim();
+    const data = {
+      restaurantName,
+      chainType: (rec['Chain Type'] || '').trim(),
+      contactPerson: (rec['Contact Person'] || '').trim(),
+      cuisine: (rec['Cuisine'] || '').trim(),
+      kitchenSize: (rec['Kitchen Size'] || '').trim(),
+      cityProvince: (rec['City/Province'] || '').trim(),
+      phone,
+      email: (rec['Email'] || '').trim(),
+      status: rocStatusKeys.includes(status) ? status : 'New',
+      nextFollowUp: CRM_IMPORT_ISO_DATE_RE.test(followUp) ? followUp : '',
+      remarks: (rec['Remarks'] || '').trim(),
+      itemNo: await nextROCNumber(),
+      createdBy: currentUser.uid,
+      importedFrom: 'crm-seed-data.json',
+      createdAt: FV.serverTimestamp(),
+    };
+    await db.collection('roc_leads').add(data);
+    rocCreated++;
+  }
+
+  if (typeof dbCacheInvalidate === 'function') { dbCacheInvalidate('aec_contacts'); dbCacheInvalidate('roc_leads'); }
+  return { aecCreated, aecSkipped, aecScanned: aecRecords.length, rocCreated, rocSkipped, rocScanned: rocRecords.length };
+};
