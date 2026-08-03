@@ -786,7 +786,7 @@ async function renderPresidentDashboard() {
   try {
     const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
     const todayStr = bizDate();
-    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap, ledgerSnap, prevLedSnap, invSnap, projList] = await Promise.all([
+    const [usersSnap, tasksSnap, subsSnap, quotesSnap, approvalsSnap, caSnap, extSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap, ledgerSnap, prevLedSnap, invSnap, projList] = await Promise.all([
       dbCachedGet('users',         () => db.collection('users').get(),                                    30000),
       dbCachedGet('tasks-all',     () => db.collection('tasks').get(),                                    30000),
       dbCachedGet('submissions',   () => db.collection('submissions').get(),                              30000),
@@ -795,6 +795,19 @@ async function renderPresidentDashboard() {
       dbCachedGet('ca-pending',          () => safeGet(db.collection('cash_advances').where('status','==','pending'), 'cash_advances'),         30000),
       dbCachedGet('att-ext-pending',     () => safeGet(db.collection('attendance_extensions').where('status','==','pending'), 'attendance_extensions'), 30000),
       dbCachedGet('signups-pending',     () => safeGet(db.collection('signup_requests').where('status','==','pending'), 'signup_requests'),       30000),
+      // v14 fix — mirror the Approvals page's full 14-source fetch (approvals.js:140-155)
+      // so the Command Center's pending total/badge never disagrees with the queue it
+      // links to (navigateTo('approvals')). Previously only 5 of 14 sources were counted.
+      // The President is the ONLY approver for these six sources (APPROVAL_CAPS,
+      // approvals.js:112-116), so omitting them hid exactly what only they can clear.
+      dbCachedGet('leave-pending',       () => safeGet(db.collection('leave_requests').where('status','==','pending'), 'leave_requests'),         30000),
+      dbCachedGet('findel-pending',      () => safeGet(db.collection('finance_delete_requests').where('status','==','pending'), 'finance_delete_requests'), 30000),
+      dbCachedGet('paydel-pending',      () => safeGet(db.collection('payroll_delete_requests').where('status','==','pending'), 'payroll_delete_requests'), 30000),
+      dbCachedGet('bsdel-pending',       () => safeGet(db.collection('bs_quotes').where('deleteRequested','==',true), 'bs_quotes'),               30000),
+      dbCachedGet('bkdel-pending',       () => safeGet(db.collection('bk_quotes').where('deleteRequested','==',true), 'bk_quotes'),               30000),
+      dbCachedGet('clientdel-pending',   () => safeGet(db.collection('clients').where('deleteRequested','==',true), 'clients'),                   30000),
+      dbCachedGet('po-pending',          () => safeGet(db.collection('purchase_requisitions').where('approvalStatus','==','pending'), 'purchase_requisitions'), 30000),
+      dbCachedGet('raises-pending',      () => safeGet(db.collection('pending_raises').where('status','==','pending_approval'), 'pending_raises'), 30000),
       ledgerForPeriod('month'),
       ledgerForPeriod('prev'),
       dbCachedGet('inventory_items',     () => safeGet(db.collection('inventory_items'), 'inventory_items'),                                       45000),
@@ -827,7 +840,20 @@ async function renderPresidentDashboard() {
     const pendingCA   = caSnap.size;
     const pendingExtensions = extSnap.size || 0;
     const pendingSignups = signupSnap.size || 0;
-    const totalPending = pendingApprovals + pendingCA + pendingExtensions + pendingSubs + pendingSignups;
+    // v14 fix — the remaining 9 Approvals-page sources (approvals.js:145-154).
+    // tasksSnap/allTasks is already loaded above, so the review-task count is
+    // free (no extra fetch); the rest come from the Promise.all above.
+    const pendingReview  = allTasks.filter(t=>t.status==='review').length;
+    const pendingLeave   = leaveSnap.size || 0;
+    const pendingFinDel  = finDelSnap.size || 0;
+    const pendingPayDel  = payDelSnap.size || 0;
+    const pendingBsDel   = bsDelSnap.size || 0;
+    const pendingBkDel   = bkDelSnap.size || 0;
+    const pendingClientDel = clientDelSnap.size || 0;
+    const pendingPO      = poSnap.size || 0;
+    const pendingRaises  = raiseSnap.size || 0;
+    const totalPending = pendingApprovals + pendingCA + pendingExtensions + pendingSubs + pendingSignups
+      + pendingReview + pendingLeave + pendingFinDel + pendingPayDel + pendingBsDel + pendingBkDel + pendingClientDel + pendingPO + pendingRaises;
 
     // Total payroll burn (sum of net pay of all employees)
     const payrollBurn = users.reduce((s,u)=>(s+(u.salary||0)+(u.allowance||0)-(u.deductions||0)),0);
@@ -886,7 +912,7 @@ async function renderPresidentDashboard() {
 
       ${totalPending>0?`
       <div class="alert-banner alert-warn" onclick="navigateTo('approvals')">
-        <span>${emojiIcon('📋',16)} <strong>${totalPending} pending</strong> — ${[pendingSignups>0?pendingSignups+' signup'+(pendingSignups!==1?'s':''):'', pendingApprovals>0?pendingApprovals+' approval'+(pendingApprovals!==1?'s':''):'', pendingCA>0?pendingCA+' CA'+(pendingCA!==1?'s':''):'', pendingExtensions>0?pendingExtensions+' extension'+(pendingExtensions!==1?'s':''):'', pendingSubs>0?pendingSubs+' submission'+(pendingSubs!==1?'s':''):''].filter(Boolean).join(' · ')}</span>
+        <span>${emojiIcon('📋',16)} <strong>${totalPending} pending</strong> — ${[pendingSignups>0?pendingSignups+' signup'+(pendingSignups!==1?'s':''):'', pendingApprovals>0?pendingApprovals+' approval'+(pendingApprovals!==1?'s':''):'', pendingCA>0?pendingCA+' CA'+(pendingCA!==1?'s':''):'', pendingExtensions>0?pendingExtensions+' extension'+(pendingExtensions!==1?'s':''):'', pendingSubs>0?pendingSubs+' submission'+(pendingSubs!==1?'s':''):'', pendingReview>0?pendingReview+' review'+(pendingReview!==1?'s':''):'', pendingLeave>0?pendingLeave+' leave'+(pendingLeave!==1?'s':''):'', (pendingFinDel+pendingPayDel)>0?(pendingFinDel+pendingPayDel)+' delete req'+((pendingFinDel+pendingPayDel)!==1?'s':''):'', (pendingBsDel+pendingBkDel+pendingClientDel)>0?(pendingBsDel+pendingBkDel+pendingClientDel)+' record delete'+((pendingBsDel+pendingBkDel+pendingClientDel)!==1?'s':''):'', pendingPO>0?pendingPO+' PO'+(pendingPO!==1?'s':''):'', pendingRaises>0?pendingRaises+' raise'+(pendingRaises!==1?'s':''):''].filter(Boolean).join(' · ')}</span>
         <span class="alert-chevron">›</span>
       </div>`:''}
 
@@ -977,7 +1003,7 @@ async function renderPresidentDashboard() {
               </button>
               <button class="quick-action-btn" onclick="navigateTo('approvals')">
                 <i data-lucide="shield-check"></i> Review Approvals
-                ${pendingApprovals>0?`<span class="badge badge-red" style="margin-left:auto">${pendingApprovals}</span>`:''}
+                ${totalPending>0?`<span class="badge badge-red" style="margin-left:auto">${totalPending}</span>`:''}
               </button>
               <button class="quick-action-btn" onclick="navigateTo('progress')">
                 <i data-lucide="trending-up"></i> Progress Reports
@@ -1007,7 +1033,7 @@ async function renderManagerDashboard() {
     const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
     const todayStr = bizDate();
     const depts = currentDepts || [];
-    const [usersSnap, tasksSnap, subsSnap, approvalsSnap, caSnap, attExtSnap] = await Promise.all([
+    const [usersSnap, tasksSnap, subsSnap, approvalsSnap, caSnap, attExtSnap, leaveSnap, poSnap] = await Promise.all([
       dbCachedGet('users',     () => db.collection('users').get(), 30000),
       dbCachedGet('tasks-all', () => db.collection('tasks').get(), 30000),
       dbCachedGet('submissions', () => db.collection('submissions').get(), 30000),
@@ -1019,6 +1045,13 @@ async function renderManagerDashboard() {
       // fold it into their totals — a manager saw no alert/badge for a team
       // member's pending Time-In extension.
       dbCachedGet('att-ext-pending', () => safeGet(db.collection('attendance_extensions').where('status','==','pending'), 'attendance_extensions'), 30000),
+      // v14 fix — APPROVAL_CAPS (approvals.js:105,106,111) also authorizes a
+      // manager on 'leave' and 'po-approval'; 'review-task' is covered for free
+      // below via deptTasks (tasksSnap is already fetched, no extra query needed).
+      // Both new sources are dept/team-scoped the same way submissions/attendance
+      // extensions already are, below.
+      dbCachedGet('leave-pending', () => safeGet(db.collection('leave_requests').where('status','==','pending'), 'leave_requests'), 30000),
+      dbCachedGet('po-pending',    () => safeGet(db.collection('purchase_requisitions').where('approvalStatus','==','pending'), 'purchase_requisitions'), 30000),
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const inDept = (u) => { const ud = Array.isArray(u.departments)?u.departments:(u.department?[u.department]:[]); return depts.some(d=>ud.includes(d)); };
@@ -1033,8 +1066,14 @@ async function renderManagerDashboard() {
     const overdueT = openT.filter(t=>t.dueDate && t.dueDate < todayStr);
     const subs = subsSnap.docs.map(d=>({id:d.id,...d.data()}));
     const attExtPending = attExtSnap.docs.filter(d=>teamIds.has(d.data().uid)).length;
+    // v14 fix — review-task count is free via deptTasks (same dept/assignedTo
+    // scoping as "Department Tasks" below); leave and PO are dept/team-scoped
+    // the same way submissions is scoped above (createdBy/uid resp. requestingDept/createdBy).
+    const reviewPending = deptTasks.filter(t=>t.status==='review').length;
+    const leavePending  = leaveSnap.docs.filter(d=>teamIds.has(d.data().userId)).length;
+    const poPending     = poSnap.docs.filter(d=>{ const p=d.data(); return depts.includes(p.requestingDept) || teamIds.has(p.createdBy); }).length;
     const deptPending = subs.filter(s=>s.status==='pending' && (depts.includes(s.department)||teamIds.has(s.createdBy)||teamIds.has(s.uid))).length
-      + (approvalsSnap.size||0) + (caSnap.size||0) + attExtPending;
+      + (approvalsSnap.size||0) + (caSnap.size||0) + attExtPending + reviewPending + leavePending + poPending;
 
     // Today's attendance for the team (admin can read attendance/{uid}/records/{date})
     // Attendance status is derived via the shared window.attRecKind reader (config.js),
@@ -1133,7 +1172,7 @@ async function renderSecretaryDashboard() {
   try {
     const safeGet = async (q, label) => { try { return await q.get(); } catch(e) { _dashWarnOnce(label || 'query', e); return { docs:[], size:0 }; } };
     const todayStr = bizDate();
-    const [usersSnap, tasksSnap, subsSnap, apprSnap, caSnap, extSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, reviewSnap] = await Promise.all([
+    const [usersSnap, tasksSnap, subsSnap, apprSnap, caSnap, extSnap, signupSnap, leaveSnap, finDelSnap, payDelSnap, reviewSnap, bsDelSnap, bkDelSnap, clientDelSnap, poSnap, raiseSnap] = await Promise.all([
       dbCachedGet('users',       () => db.collection('users').get(), 30000),
       dbCachedGet('tasks-all',   () => db.collection('tasks').get(), 30000),
       dbCachedGet('submissions', () => db.collection('submissions').get(), 30000),
@@ -1145,6 +1184,13 @@ async function renderSecretaryDashboard() {
       safeGet(db.collection('finance_delete_requests').where('status','==','pending'), 'finance_delete_requests'),
       safeGet(db.collection('payroll_delete_requests').where('status','==','pending'), 'payroll_delete_requests'),
       safeGet(db.collection('tasks').where('status','==','review'), 'tasks'),
+      // v14 fix — the remaining Approvals-page sources (approvals.js:149-154) the
+      // Secretary's oversight badge/KPI/breakdown were missing.
+      safeGet(db.collection('bs_quotes').where('deleteRequested','==',true), 'bs_quotes'),
+      safeGet(db.collection('bk_quotes').where('deleteRequested','==',true), 'bk_quotes'),
+      safeGet(db.collection('clients').where('deleteRequested','==',true), 'clients'),
+      safeGet(db.collection('purchase_requisitions').where('approvalStatus','==','pending'), 'purchase_requisitions'),
+      safeGet(db.collection('pending_raises').where('status','==','pending_approval'), 'pending_raises'),
     ]);
     const users = usersSnap.docs.map(d=>({id:d.id,...d.data()}));
     const allTasks = tasksSnap.docs.map(d=>({id:d.id,...d.data()}));
@@ -1152,8 +1198,13 @@ async function renderSecretaryDashboard() {
     const openT = allTasks.filter(t=>!CLOSED.includes(t.status));
     const overdueT = openT.filter(t=>t.dueDate && t.dueDate < todayStr);
     const pendingSubs = subsSnap.docs.filter(d=>d.data().status==='pending').length;
-    const pendingDeletes = (finDelSnap.size||0) + (payDelSnap.size||0);
-    const totalPending = (apprSnap.size||0)+(caSnap.size||0)+(extSnap.size||0)+(signupSnap.size||0)+(leaveSnap.size||0)+(reviewSnap.size||0)+pendingSubs+pendingDeletes;
+    // v14 fix — quote/client deletes fold into the existing "Deletion Requests"
+    // bucket (same grouping the finance/payroll deletes already used); PO and
+    // raises are distinct request types, tracked separately.
+    const pendingDeletes = (finDelSnap.size||0) + (payDelSnap.size||0) + (bsDelSnap.size||0) + (bkDelSnap.size||0) + (clientDelSnap.size||0);
+    const pendingPO = poSnap.size||0;
+    const pendingRaises = raiseSnap.size||0;
+    const totalPending = (apprSnap.size||0)+(caSnap.size||0)+(extSnap.size||0)+(signupSnap.size||0)+(leaveSnap.size||0)+(reviewSnap.size||0)+pendingSubs+pendingDeletes+pendingPO+pendingRaises;
     const activeStaff = users.filter(u=>u.role!=='partner').length;
     const rows = [
       ['Sign-ups', signupSnap.size||0, `${emojiIcon('👤',16)}`],
@@ -1163,6 +1214,8 @@ async function renderSecretaryDashboard() {
       ['Work Submissions', pendingSubs, `${emojiIcon('📤',16)}`],
       ['Tasks for Review', reviewSnap.size||0, `${emojiIcon('📋',16)}`],
       ['Quote Approvals', apprSnap.size||0, `${emojiIcon('📝',16)}`],
+      ['Purchase Requisitions', pendingPO, `${emojiIcon('🧾',16)}`],
+      ['Raise Requests', pendingRaises, `${emojiIcon('📈',16)}`],
       ['Deletion Requests', pendingDeletes, `${emojiIcon('🗑',16)}`],
     ].filter(r=>r[1]>0);
 

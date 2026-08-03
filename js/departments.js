@@ -1270,7 +1270,7 @@ async function renderMktLeads(content, currentUser, currentRole) {
       await Notifs.sendToDept('Sales', {
         title: '📥 New lead from Marketing',
         body: `${cl.name}${cl.company ? ' · ' + cl.company : ''} — ${window.leadSourceLabel(cl.source)}${cl.campaignId ? ' · ' + ((camps.find(c0=>c0.id===cl.campaignId)||{}).name || '') : ''}. Open the Sales CRM to follow up.`,
-        icon: '📥', type: 'lead_handoff', link: 'Sales',
+        icon: '📥', type: 'lead_handoff', link: 'dept:Sales',
         dedupKey: `lead_handoff_${cl.id}`
       }, { fallbackToOwner: true });
       if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('clients');
@@ -4153,7 +4153,9 @@ window.renderDocCollection = function(container, collection, title, currentUser,
           ${window.statusBadge2 ? statusBadge2('gov', d.status||'active') : `<span class="badge ${statusBadge(d.status)}">${d.status||'active'}</span>`}
         </div>
         <div class="item-meta">
+          ${d.agency?`<span>${emojiIcon('🏢',11)} ${escHtml(d.agency)}</span>`:''}
           ${d.description?`<span>${escHtml(d.description)}</span>`:''}
+          ${d.deadline?`<span style="font-size:11px;color:var(--text-muted)">${emojiIcon('⏰',11)} Due ${new Date(d.deadline).toLocaleDateString('en-PH')}</span>`:''}
           ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:11px" onclick="event.stopPropagation()">${emojiIcon('📎',11)} View File</a>`:''}
           ${d.createdAt?`<span style="font-size:11px;color:var(--text-muted)">${new Date(d.createdAt.toDate()).toLocaleDateString('en-PH')}</span>`:''}
         </div>
@@ -4175,6 +4177,8 @@ window.renderDocCollection = function(container, collection, title, currentUser,
 window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
     const body = canManageGov ? `
       <div class="form-group"><label>Title</label><input id="gb-title" value="${escHtml(d.title||d.name||'')}"/></div>
+      <div class="form-row"><div class="form-group"><label>Procuring Entity / Agency</label><input id="gb-agency" value="${escHtml(d.agency||'')}"/></div><div class="form-group"><label>Reference / Bid No.</label><input id="gb-refno" value="${escHtml(d.refNo||'')}"/></div></div>
+      <div class="form-row"><div class="form-group"><label>Submission Deadline</label><input id="gb-deadline" type="date" value="${escHtml(d.deadline||'')}"/></div><div class="form-group"><label>ABC (₱)</label><input id="gb-abc" type="number" inputmode="decimal" value="${d.abc!=null?d.abc:''}"/></div></div>
       <div class="form-group"><label>Description</label><textarea id="gb-desc" rows="3">${escHtml(d.description||'')}</textarea></div>
       <div class="form-row">
         <div class="form-group"><label>Status</label>
@@ -4185,6 +4189,7 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
         </div>
       </div>
       ${d.fileUrl?`<a href="${safeHttpUrl(d.fileUrl)}" target="_blank" class="btn-link" style="font-size:12px;display:block;margin-bottom:8px">${emojiIcon('📎',12)} View File</a>`:''}
+      <div id="gb-file-area"></div>
     ` : `
       <div style="margin-bottom:10px">${window.statusBadge2 ? statusBadge2('gov', d.status||'active') : `<span class="badge ${statusBadge(d.status)}">${d.status||'active'}</span>`}</div>
       <p style="font-size:14px;line-height:1.6;margin-bottom:10px">${escHtml(d.description||'No details.')}</p>
@@ -4194,6 +4199,8 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
       canManageGov
         ? `<button class="btn-primary" id="gb-save">Save</button><button class="btn-danger" id="gb-del">Delete</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`
         : `<button class="btn-secondary" onclick="closeModal()">Close</button>`);
+    let gbFile = null;
+    Drive.renderUploadArea('gb-file-area', r => { gbFile = r; }, { label: d.fileUrl ? 'Replace file' : 'Attach file', dept: 'Government Biddings', subfolder: collection });
 
     document.getElementById('gb-save')?.addEventListener('click', async () => {
       const title = document.getElementById('gb-title').value.trim();
@@ -4202,8 +4209,12 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
       const payload = {
         title,
         description: document.getElementById('gb-desc').value.trim(),
+        agency: document.getElementById('gb-agency').value.trim(),
+        refNo: document.getElementById('gb-refno').value.trim(),
+        deadline: document.getElementById('gb-deadline').value || null,
+        abc: parseFloat(document.getElementById('gb-abc').value) || null,
         status: document.getElementById('gb-status').value,
-        fileUrl: d.fileUrl||null,
+        fileUrl: gbFile?.url || d.fileUrl || null,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp(), updatedBy: currentUser.uid
       };
       if (targetCol !== collection) {
@@ -4233,15 +4244,28 @@ window.GOV_STATUSES = GOV_STATUSES; // v13: STATUS_META 'gov' passthrough
   document.getElementById(`add-doc-btn-${collection}`)?.addEventListener('click', () => {
     openPage(`Add ${title}`, `
       <div class="form-group"><label>Title</label><input id="gd-title"/></div>
+      ${isGov?`<div class="form-row"><div class="form-group"><label>Procuring Entity / Agency</label><input id="gd-agency"/></div><div class="form-group"><label>Reference / Bid No.</label><input id="gd-refno"/></div></div>
+      <div class="form-row"><div class="form-group"><label>Submission Deadline</label><input id="gd-deadline" type="date"/></div><div class="form-group"><label>ABC (₱)</label><input id="gd-abc" type="number" inputmode="decimal"/></div></div>`:''}
       <div class="form-group"><label>Description</label><textarea id="gd-desc" rows="3"></textarea></div>
       <div id="gd-file-area"></div>
     `, `<button class="btn-primary" id="save-gd-btn">Save</button><button class="btn-secondary" onclick="closeModal()">Cancel</button>`);
     let uploadedFile = null;
     Drive.renderUploadArea('gd-file-area', r => { uploadedFile = r; }, { label: 'Attach file', dept: title, subfolder: collection });
     document.getElementById('save-gd-btn').addEventListener('click', async () => {
+      const title = document.getElementById('gd-title').value.trim();
+      if (!title) { Notifs.showToast('Enter a title.','error'); return; }
       await db.collection(collection).add({
-        title: document.getElementById('gd-title').value.trim(),
+        title,
         description: document.getElementById('gd-desc').value.trim(),
+        // Gov-bidding fields exist only in the isGov add form above — reading
+        // them unconditionally would throw on the Marketing/Sales collections
+        // that share this renderer (their inputs don't exist).
+        ...(isGov ? {
+          agency: document.getElementById('gd-agency').value.trim(),
+          refNo: document.getElementById('gd-refno').value.trim(),
+          deadline: document.getElementById('gd-deadline').value || null,
+          abc: parseFloat(document.getElementById('gd-abc').value) || null,
+        } : {}),
         fileUrl: uploadedFile?.url || null,
         status: 'active',
         addedBy: currentUser.uid,
