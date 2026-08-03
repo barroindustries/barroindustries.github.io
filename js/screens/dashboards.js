@@ -812,7 +812,12 @@ async function renderPresidentDashboard() {
     // Active pipeline = value of all non-rejected quotes (BK + BS), not the legacy `quotes` collection.
     // v13 fix: sum total||grandTotal||amount (many BS/BK quotes store the value under grandTotal,
     // not total) — the old `q.total||0` counted those as zero, so the pipeline under-reflected reality.
-    const activeQuotes = quotesSnap.docs.map(d=>d.data()).filter(q=>q.status!=='rejected');
+    // v14 accuracy fix — dedupe revision chains: R1/R2/R3 of the same quote were
+    // ALL summed, triple-counting the pipeline. window.latestQuoteRevisions keeps
+    // only the newest revision per lineage (same dedup the Sales summary uses).
+    const _rawQuotes = quotesSnap.docs.map(d=>d.data());
+    const _latestQuotes = window.latestQuoteRevisions ? window.latestQuoteRevisions(_rawQuotes).latest : _rawQuotes;
+    const activeQuotes = _latestQuotes.filter(q=>!['rejected','lost'].includes(q.status));
     const totalQuotes = activeQuotes.reduce((s,q)=>s+(Number(q.total)||Number(q.grandTotal)||Number(q.amount)||0),0);
     const pendingApprovals = approvalsSnap.size;
     const pendingCA   = caSnap.size;
