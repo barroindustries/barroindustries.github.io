@@ -283,6 +283,185 @@ async function _findLedgerRowByRef(ref) {
   return ls.docs.length ? { ref: ls.docs[0].ref, data: ls.docs[0].data() } : null;
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// v14 REGRESSION FIX — the four ledger-poster functions below were deleted by
+// commit de4f5bd ('dead-code deletion') but are still called live via afterSave/
+// onSaved callbacks (js/screens/finance.js, production.js, migrations.js), so
+// every Cash Receipt / Cash Disbursement / Expense / production purchase saved
+// to its source collection but threw ReferenceError before reaching the Ledger
+// (the single source of truth) — income/expenses/VAT silently understated.
+// Restored verbatim from a566391 (they route through window.Ledger). Caught by
+// the 30-agent beta sweep, 2026-08-04.
+// ─────────────────────────────────────────────────────────────────────────
+async function postExpenseToLedger(expId, e, acct) {
+  // M10 fix — a zero/NaN amount must never post a ₱0 EXP- entry; abort with a
+  // clear error instead (callers already surface it: the approve-expense click
+  // handler's try/catch toasts it, migrations.js's backfill catches it silently).
+  const amount = Number(e.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('Expense amount must be greater than ₱0 — refusing to post a ₱0/invalid EXP- entry.');
+  }
+  const ref = `EXP-${expId}`;
+  const date = e.date || today();
+  const category = e.category || 'General Expense';
+  const result = await window.Ledger.post({
+    ref, date, kind: 'debit',
+    accountType: 'expense', account: category, category,
+    description: `Expense — ${e.description||''}${e.submittedByName?` (${e.submittedByName})`:''}`,
+    amount,
+    source: 'Expense',
+    // v12 WS39 — reclaimable input VAT (Add-Expense flow); legacy expenses with
+    // no inputVat field fall back to 0, matching today's behavior exactly.
+    extra: { inputVat: e.inputVat || 0, ...window.BankAccounts.tag(acct, 'out') }
+  });
+  if (!result.existed) { if (typeof dbCacheInvalidate === 'function') dbCacheInvalidate('expenses'); return true; }
+  return false;
+}
+
+// New income from a cash receipt = Sales Revenue + Sundry income. AR collections
+// are EXCLUDED — that money was already booked as income when the sale was recorded.
+function crjLedgerIncome(e) { return (e.creditSalesRevenue||0) + (e.creditSundryAmount||0); }
+// v12 WS36 — also mints the A/R-collection leg (asset credit, non-P&L; real cash that
+// previously posted NO ledger row at all, invisible to cash position) when e.creditAR>0.
+// The CRJ doc's own bankAccountId/bankAccountName (set at entry time) tags both legs.
+async function postCRJToLedger(crjId, e) {
+  const date = e.date || today();
+  const income = crjLedgerIncome(e);
+  const ar = e.creditAR || 0;
+  if (income <= 0 && ar <= 0) return false;
+  const tag = e.bankAccountId ? { bankAccountId: e.bankAccountId, bankAccountName: e.bankAccountName || null, bankFlow: 'in' } : {};
+  const entries = [];
+  if (income > 0) {                                       // new income — unchanged logic, now tagged
+    const category = (e.creditSalesRevenue||0) >= (e.creditSundryAmount||0) ? 'Sales Revenue' : (e.creditSundryAcct||'Other Income');
+    entries.push({ ref:`CRJ-${crjId}`, date, kind:'credit', accountType:'income', account:category, category,
+      description:`Cash receipt — ${e.customer||''}${e.reference?` (${e.reference})`:''}`,
+      amount:income, source:'Cash Receipt', extra: { ...tag } });
+  }
+  if (ar > 0) {                                           // v12 WS36 — A/R-collection leg (asset credit, non-P&L)
+    entries.push({ ref:`CRJ-${crjId}-AR`, date, kind:'credit', accountType:'asset', account:'Accounts Receivable', category:'A/R Collection',
+      description:`A/R collection — ${e.customer||''}${e.reference?` (${e.reference})`:''}`,
+      amount:ar, source:'Cash Receipt', extra: { ...tag } });
+  }
+  const { existedAll } = await window.Ledger.postMulti(entries);
+  return !existedAll;
+}
+
+// New expense from a disbursement = Material + Labor + Sundry. A/P settlements are
+// EXCLUDED — that cost was already expensed when the payable was incurred.
+// debitAccount (v12 WS13): 'inventory' (stock materials — posts as an ASSET, not
+// an expense, until Production consumes it) vs 'material'/'sundry' (still direct
+// expense, e.g. a purchase that never touches stock). This is the fix for the
+// double-material-expensing bug — see consumeProductionMaterials for the other half.
+function cdjLedgerExpense(e) { return (e.debitMaterial||0) + (e.debitLabor||0) + (e.debitSundryAmount||0); }
+// v12 WS36 — also mints the A/P-settlement leg (liability debit, non-P&L; real cash
+// that previously posted NO ledger row at all, invisible to cash position) when
+// e.debitAP>0. The CDJ doc's own bankAccountId/bankAccountName tags both legs.
+async function postCDJToLedger(cdjId, e) {
+  const date = e.date || today();
+  const expense = cdjLedgerExpense(e);
+  if (expense <= 0 && !(e.debitAP > 0)) return false;
+  const tag = e.bankAccountId ? { bankAccountId: e.bankAccountId, bankAccountName: e.bankAccountName || null, bankFlow: 'out' } : {};
+  const entries = [];
+  if (expense > 0) {
+    let category;
+    const mat = e.debitMaterial||0, lab = e.debitLabor||0, sun = e.debitSundryAmount||0;
+    if (mat >= lab && mat >= sun) category = 'COS – Direct Material';
+    else if (lab >= sun) category = 'COS – Direct Labor';
+    else category = e.debitSundryAcct || 'Other Expense';
+    const isInventory = e.debitAccount === 'inventory';
+    const accountType = isInventory ? 'asset' : 'expense';
+    const account = isInventory ? 'Inventory' : category;
+    if (isInventory) category = 'Inventory – Materials';
+    entries.push({ ref:`CDJ-${cdjId}`, date, kind:'debit', accountType, account, category,
+      description: `Disbursement — ${e.payee||''}${e.reference?` (${e.reference})`:''}`,
+      amount: expense, source: 'Cash Disbursement',
+      // input VAT (reclaimable) carried through for the Net VAT Payable computation
+      extra: { inputVat: e.vatAmount || 0, ...tag } });
+  }
+  if (e.debitAP > 0) {                                    // v12 WS36 — A/P-settlement leg (liability debit, non-P&L)
+    entries.push({ ref:`CDJ-${cdjId}-AP`, date, kind:'debit', accountType:'liability', account:'Accounts Payable', category:'A/P Settlement',
+      description:`A/P settlement — ${e.payee||''}${e.reference?` (${e.reference})`:''}`,
+      amount:e.debitAP, source:'Cash Disbursement', extra: { ...tag } });
+  }
+  const { existedAll } = await window.Ledger.postMulti(entries);
+  return !existedAll;
+}
+
+// Re-sync the mirrored ledger row after a source doc (expense / CRJ / CDJ) is
+// EDITED, so the ledger never drifts from the journal. Updates the amount/type/
+// category in place, creates the row if it should now exist, or deletes it if the
+// entry no longer qualifies (e.g. expense un-approved, or income/expense → 0).
+async function resyncLedgerForSource(collection, docId) {
+  try {
+    const snap = await db.collection(collection).doc(docId).get();
+    if (!snap.exists) return;
+    const e = snap.data();
+    let ref, type, amount, category, description, inputVat = null, accountType, account;
+    if (collection === 'expenses') {
+      ref = `EXP-${docId}`;
+      if (e.status !== 'approved') { await _deleteLedgerByRef(ref); return; }
+      type = 'debit'; amount = e.amount || 0; category = e.category || 'General Expense';
+      description = `Expense — ${e.description || ''}${e.submittedByName ? ` (${e.submittedByName})` : ''}`;
+      accountType = 'expense'; account = category;
+      // v12 WS39 — carry input VAT through on an EDITED expense too (previously
+      // left null here, so an edit never patched/gained inputVat on the mirrored
+      // ledger row). `patch.inputVat` below picks this up automatically.
+      inputVat = e.inputVat || 0;
+    } else if (collection === 'cash_receipt_journal') {
+      ref = `CRJ-${docId}`; type = 'credit'; amount = crjLedgerIncome(e);
+      category = (e.creditSalesRevenue || 0) >= (e.creditSundryAmount || 0) ? 'Sales Revenue' : (e.creditSundryAcct || 'Other Income');
+      description = `Cash receipt — ${e.customer || ''}${e.reference ? ` (${e.reference})` : ''}`;
+      accountType = 'income'; account = category;
+    } else if (collection === 'cash_disbursement_journal') {
+      ref = `CDJ-${docId}`; type = 'debit'; amount = cdjLedgerExpense(e);
+      const mat = e.debitMaterial || 0, lab = e.debitLabor || 0, sun = e.debitSundryAmount || 0;
+      category = (mat >= lab && mat >= sun) ? 'COS – Direct Material' : (lab >= sun ? 'COS – Direct Labor' : (e.debitSundryAcct || 'Other Expense'));
+      description = `Disbursement — ${e.payee || ''}${e.reference ? ` (${e.reference})` : ''}`;
+      inputVat = e.vatAmount || 0;
+      // Carries the debitAccount choice through on edit (v12 WS13) — an edited
+      // disbursement must keep its asset/Inventory tag, not silently drift back
+      // to expense-tagged.
+      const isInventory = e.debitAccount === 'inventory';
+      accountType = isInventory ? 'asset' : 'expense';
+      account = isInventory ? 'Inventory' : category;
+      if (isInventory) category = 'Inventory – Materials';
+    } else return;
+    // v12 WS36: a CRJ/CDJ main row can legitimately be zero (a pure A/R-collection
+    // or A/P-settlement entry) — that must still fall through to the leg sync below,
+    // not early-return past it, or an edit would silently stop keeping the -AR/-AP
+    // leg in step with the source doc.
+    if (amount > 0) {
+      const src = (collection === 'expenses') ? 'Expense' : (collection === 'cash_receipt_journal') ? 'Cash Receipt' : 'Cash Disbursement';
+      await window.Ledger.upsertByRef(ref, () => {
+        const built = { ref, date: e.date || today(), kind: type, accountType, account, category, description, amount, source: src, extra: {} };
+        if (inputVat != null) built.extra.inputVat = inputVat;
+        if (e.bankAccountId) { built.extra.bankAccountId = e.bankAccountId; built.extra.bankAccountName = e.bankAccountName || null;
+          built.extra.bankFlow = (collection === 'cash_receipt_journal') ? 'in' : 'out'; }
+        return built;
+      });
+    } else {
+      await _deleteLedgerByRef(ref);
+    }
+    // v12 WS36 — keep the A/R-/A/P-settlement legs in step with the source doc.
+    if (collection === 'cash_receipt_journal') {
+      const arTag = e.bankAccountId ? { bankAccountId: e.bankAccountId, bankAccountName: e.bankAccountName || null, bankFlow: 'in' } : {};
+      await _syncLedgerLegViaUpsert(`CRJ-${docId}-AR`, e.creditAR || 0, () => ({
+        ref: `CRJ-${docId}-AR`, date: e.date || today(), kind: 'credit', accountType: 'asset', account: 'Accounts Receivable',
+        category: 'A/R Collection', description: `A/R collection — ${e.customer || ''}${e.reference ? ` (${e.reference})` : ''}`,
+        amount: e.creditAR || 0, source: 'Cash Receipt', extra: { ...arTag }
+      }));
+    }
+    if (collection === 'cash_disbursement_journal') {
+      const apTag = e.bankAccountId ? { bankAccountId: e.bankAccountId, bankAccountName: e.bankAccountName || null, bankFlow: 'out' } : {};
+      await _syncLedgerLegViaUpsert(`CDJ-${docId}-AP`, e.debitAP || 0, () => ({
+        ref: `CDJ-${docId}-AP`, date: e.date || today(), kind: 'debit', accountType: 'liability', account: 'Accounts Payable',
+        category: 'A/P Settlement', description: `A/P settlement — ${e.payee || ''}${e.reference ? ` (${e.reference})` : ''}`,
+        amount: e.debitAP || 0, source: 'Cash Disbursement', extra: { ...apTag }
+      }));
+    }
+  } catch (err) { console.warn('[ledger resync]', err?.message || err); }
+}
+
 // Cascade cleanup that must accompany the ACTUAL delete of certain finance
 // docs (their linked ledger entries / CA balances). Runs in the deleter's
 // context — always the President — so these ledger writes are permitted.

@@ -262,7 +262,7 @@ function openFinanceToolsPage() {
     <div class="card" style="margin-bottom:12px">
       <div class="card-header"><h3>Ledger maintenance</h3></div>
       <div class="card-body" style="display:flex;flex-direction:column;align-items:flex-start;gap:8px">
-        <button class="btn-secondary btn-sm" onclick="window.runLedgerBackfill()" title="Post approved expenses + cash journals into the ledger">${emojiIcon('🔄',16)} Sync to ledger</button>
+        <button class="btn-secondary btn-sm" onclick="window.backfillLedgerFromJournals()" title="Post approved expenses + cash journals into the ledger">${emojiIcon('🔄',16)} Sync to ledger</button>
         <button class="btn-secondary btn-sm" onclick="window.runTagAccountTypes()" title="Backfill accountType on legacy ledger rows">${emojiIcon('🏷',16)} Tag account types</button>
         <button class="btn-secondary btn-sm" onclick="window.runRestateMaterialCosts()" title="Fix the double material-expensing bug on historical rows">${emojiIcon('🧾',16)} Restate material costs</button>
         <button class="btn-secondary btn-sm" onclick="window.runFixUndatedRows()" title="Repair ledger rows with a missing/malformed date">${emojiIcon('🩹',16)} Fix undated rows</button>

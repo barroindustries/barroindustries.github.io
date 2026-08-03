@@ -168,6 +168,26 @@ if [ "$cachever_fail" -ne 0 ]; then
   overall_fail=1
 fi
 
+# ═══════════════════════════════════════════════════════════════════════
+# CHECK 4 — LEDGER POSTERS defined (guards the de4f5bd 'dead-code' regression:
+# a sweep deleted postCRJ/CDJ/Expense/resync while 6+ live afterSave/onSaved
+# call sites still invoked them, silently severing cash-in/out/expenses/
+# purchases from the ledger — the single source of truth).
+# ═══════════════════════════════════════════════════════════════════════
+echo "=== [4/4] LEDGER POSTERS: postCRJ/CDJ/Expense/resync are defined ==="
+posters_fail=0
+for fn in postExpenseToLedger postCRJToLedger postCDJToLedger resyncLedgerForSource; do
+  if ! grep -rqE "^(async )?function $fn|window\\.$fn[[:space:]]*=" js/*.js js/screens/*.js 2>/dev/null; then
+    echo "FAIL: ledger poster '$fn' is CALLED live but not DEFINED in any loaded js file (the de4f5bd regression)"
+    posters_fail=1
+  fi
+done
+if [ "$posters_fail" -eq 0 ]; then
+  echo "PASS: all four ledger posters are defined"
+else
+  overall_fail=1
+fi
+
 echo
 if [ "$overall_fail" -ne 0 ]; then
   echo "=== invariants: FAILED ==="

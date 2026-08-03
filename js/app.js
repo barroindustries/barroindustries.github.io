@@ -542,7 +542,7 @@ function showRemovedUserScreen() {
     el.id = 'removed-user-screen';
     document.body.appendChild(el);
   }
-  el.style.cssText = 'position:fixed;inset:0;z-index:999999;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg,#0F1114);color:var(--text,#fff);text-align:center';
+  el.style.cssText = 'position:fixed;inset:0;z-index:var(--z-splash);display:flex;align-items:center;justify-content:center;padding:24px;background:var(--bg,#0F1114);color:var(--text,#fff);text-align:center';
   el.innerHTML = `
     <div style="max-width:420px;display:flex;flex-direction:column;align-items:center;gap:14px">
       <div style="font-size:44px" aria-hidden="true">🚫</div>
