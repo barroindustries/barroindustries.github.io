@@ -3676,30 +3676,9 @@ function _atLoginScreen() {
 // dismissible pill for that case: tap to apply+reload now, or ignore and it
 // still applies silently next time the login screen IS reached. Never
 // auto-reloads on its own — same "never interrupt a mid-task user" intent the
-// original silent-apply design already committed to, just with an opt-in path
-// for sessions that would otherwise wait for days.
-function _showSwUpdatePill(applyFn) {
-  if (document.getElementById('sw-update-pill')) return;
-  const pill = document.createElement('div');
-  pill.id = 'sw-update-pill';
-  pill.style.cssText = `
-    position:fixed;left:50%;transform:translateX(-50%);
-    bottom:calc(env(safe-area-inset-bottom,0px) + 78px);
-    z-index:var(--z-toast, 9990);display:flex;align-items:center;gap:8px;
-    background:var(--surface-2);color:var(--text);border:1px solid var(--border);
-    border-radius:999px;padding:8px 8px 8px 14px;font-size:12.5px;font-weight:600;
-    box-shadow:var(--sh-lg, 0 8px 24px rgba(0,0,0,0.3));cursor:pointer;
-    animation:fadeIn .2s ease;max-width:92vw;
-  `;
-  pill.innerHTML = `<span>${emojiIcon('⬆️',14)} Update available — tap to refresh</span>
-    <button aria-label="Dismiss" style="background:none;border:none;color:var(--text-muted);font-size:16px;line-height:1;cursor:pointer;padding:2px 4px">×</button>`;
-  pill.addEventListener('click', (e) => {
-    if (e.target.tagName === 'BUTTON') { pill.remove(); return; }
-    _swReloading = true;
-    applyFn();
-  });
-  document.body.appendChild(pill);
-}
+// v14: mid-session SW-update PILL removed (owner: no update banner —
+// silent updates, standing preference from commit c554c09). Updates apply
+// silently on the next login-screen visit / reload; no mid-session prompt.
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then(reg => {
     // A new SW that finished installing before this page loaded is already waiting.
@@ -3707,9 +3686,9 @@ if ('serviceWorker' in navigator) {
       if (_atLoginScreen()) {
         _swReloading = true;
         reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-      } else {
-        _showSwUpdatePill(() => reg.waiting && reg.waiting.postMessage({ type: 'SKIP_WAITING' }));
       }
+      // else mid-session: do nothing — the update applies silently at the next
+      // login-screen visit / reload (owner preference: no update banner).
     }
     reg.addEventListener('updatefound', () => {
       const newWorker = reg.installing;
@@ -3720,10 +3699,8 @@ if ('serviceWorker' in navigator) {
           if (_atLoginScreen()) {
             _swReloading = true;
             newWorker.postMessage({ type: 'SKIP_WAITING' }); // silent apply, login only
-          } else {
-            // Mid-session: offer the non-blocking pill instead of doing nothing.
-            _showSwUpdatePill(() => reg.waiting && reg.waiting.postMessage({ type: 'SKIP_WAITING' }));
           }
+          // else mid-session: silent — applies at next login/reload (no banner).
         }
       });
     });
